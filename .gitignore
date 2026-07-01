@@ -1,0 +1,43 @@
+# Runtime data
+datasets/
+output/
+desktop_app/
+setup_3dgs_editor.log
+*.log
+
+# Release artifacts
+*.zip
+*.zip.bak-*
+*.exe
+*.pak
+*.dll
+*.bin
+*.dat
+release/
+
+# Downloaded third-party binaries/caches at repository root
+/third_party/
+!/third_party/.gitkeep
+
+# Node/Python generated files
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.jobs/
+
+# Local conda/cache directories that can appear under gaussian-splatting
+.cache/
+.conda_envs/
+.conda_pkgs/
+.home/
+.localappdata/
+.tmp/
+
+# Build intermediates
+build/
+dist/
+*.obj
+*.exp
+*.lib
+*.pdb

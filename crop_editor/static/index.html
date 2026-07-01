@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3DGS Crop Editor</title>
+  <link rel="stylesheet" href="styles.css?v=20260625_gs2mesh_collapsible">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js",
+        "three/addons/": "./vendor/",
+        "gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="toolbar">
+    <div class="toolbar-top">
+      <div class="brand-block">
+        <strong class="brand">3DGS Editor</strong>
+        <span class="brand-subtitle" data-i18n="app.subtitle">Gaussian model workspace</span>
+      </div>
+      <div class="toolbar-section scene-section">
+        <span class="section-title" data-i18n="section.scene">Scene</span>
+        <label class="field"><span data-i18n="label.scene">Scene</span><select id="scene"></select></label>
+        <label class="field compact"><span data-i18n="label.iter">Iter</span><input id="iteration" type="number" step="1"></label>
+        <button id="load" data-i18n="button.load">Load</button>
+        <button id="resetView" data-i18n="button.reset">Reset</button>
+      </div>
+      <div class="toolbar-section view-section">
+        <span class="section-title" data-i18n="section.view">View</span>
+        <label class="check"><input id="showPoints" type="checkbox" checked> <span data-i18n="toggle.points">Points</span></label>
+        <label class="check"><input id="showSplats" type="checkbox"> <span data-i18n="toggle.soft">Soft</span></label>
+        <label class="check"><input id="showRealSplats" type="checkbox"> <span data-i18n="toggle.real">Real</span></label>
+        <button id="previewReal" data-i18n="button.previewReal">Preview Real</button>
+        <label class="check"><input id="showCameras" type="checkbox"> <span data-i18n="toggle.cameras">Cameras</span></label>
+        <label class="check"><input id="showPivot" type="checkbox" checked> <span data-i18n="toggle.pivot">Pivot</span></label>
+        <label class="field compact"><span data-i18n="label.size">Size</span><input id="pointSize" type="number" min="0.5" max="12" step="0.5" value="1"></label>
+      </div>
+      <div class="toolbar-section language-section">
+        <span class="section-title" data-i18n="section.language">Language</span>
+        <label class="field"><span data-i18n="label.language">UI</span>
+          <select id="languageSelect">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+            <option value="ja">日本語</option>
+          </select>
+        </label>
+        <span class="connection-port"><span data-i18n="label.port">Port</span> <strong id="serverPort">--</strong></span>
+        <button id="openJobCenter" type="button" data-i18n="button.jobCenter">Job Center</button>
+      </div>
+    </div>
+    <div class="ribbon-tabs" aria-label="Tool panels">
+      <button type="button" class="ribbon-tab" data-panel-target="selection" data-i18n="section.selection">Selection</button>
+      <button type="button" class="ribbon-tab" data-panel-target="output" data-i18n="section.output">Output</button>
+      <button type="button" class="ribbon-tab" data-panel-target="mesh" data-i18n="section.mesh">Mesh</button>
+      <button type="button" class="ribbon-tab" data-panel-target="analysis" data-i18n="section.analysis">Analysis</button>
+      <button type="button" class="ribbon-tab" data-panel-target="train" data-i18n="section.train">Train</button>
+    </div>
+    <div class="toolbar-grid">
+      <div class="toolbar-section selection-section ribbon-panel" data-panel="selection">
+        <span class="section-title" data-i18n="section.selection">Selection</span>
+        <div class="segmented">
+          <button id="navigate" class="active" data-i18n="button.navigate">Navigate</button>
+          <button id="rect" data-i18n="button.rect">Rect</button>
+          <button id="lasso" data-i18n="button.lasso">Lasso</button>
+          <button id="brush" data-i18n="button.brush">Brush</button>
+        </div>
+        <label class="field compact"><span data-i18n="label.brush">Brush</span><input id="brushSize" type="number" min="6" max="240" step="2" value="44"></label>
+        <label class="check"><input id="visibleSelection" type="checkbox"> <span data-i18n="toggle.visibleOnly">Visible</span></label>
+        <button id="clear" data-i18n="button.clear">Clear</button>
+        <button id="invert" data-i18n="button.invert">Invert</button>
+        <button id="delete" data-i18n="button.delete">Delete</button>
+        <button id="undo" data-i18n="button.undo">Undo</button>
+      </div>
+      <div class="toolbar-section output-section ribbon-panel" data-panel="output">
+        <span class="section-title" data-i18n="section.output">Output</span>
+        <label class="field output"><span data-i18n="label.output">Output</span><input id="outputScene" placeholder="test1_crop"></label>
+        <label class="check"><input id="overwriteOutput" type="checkbox"> <span data-i18n="toggle.overwrite">Overwrite</span></label>
+        <button id="save" data-i18n="button.save">Save</button>
+        <label class="file-button"><span data-i18n="button.importSplat">Import Splat</span><input id="splatImportFile" type="file" accept=".ply,.spz,.sog"></label>
+        <button id="openAssetManager" disabled data-i18n="button.assetManager">Assets</button>
+        <button id="downloadSpz" disabled data-i18n="button.downloadSpz">Download SPZ</button>
+        <button id="downloadSog" disabled data-i18n="button.downloadSog">Download SOG</button>
+      </div>
+      <div class="toolbar-section mesh-section ribbon-panel" data-panel="mesh">
+        <span class="section-title" data-i18n="section.mesh">Mesh</span>
+        <label class="field"><span data-i18n="label.meshMode">Mode</span>
+          <select id="meshMode">
+            <option value="bounded" data-i18n="option.bounded">Bounded</option>
+            <option value="unbounded" data-i18n="option.unbounded">Unbounded</option>
+            <option value="sugar" data-i18n="option.sugar">SuGaR</option>
+            <option value="gs2mesh" data-i18n="option.gs2mesh">GS2Mesh</option>
+          </select>
+        </label>
+        <details class="toolbar-details mesh-advanced">
+          <summary data-i18n="summary.meshAdvanced">Mesh Parameters</summary>
+        <label class="field compact"><span data-i18n="label.res">Res</span><input id="meshRes" type="number" min="64" max="4096" step="64" value="512"></label>
+        <label class="field compact"><span data-i18n="label.tex">Tex</span><input id="meshTextureRes" type="number" min="256" max="8192" step="256" value="8192"></label>
+        <label class="field"><span data-i18n="label.texQuality">Tex Quality</span>
+          <select id="meshTextureQuality">
+            <option value="fast" data-i18n="option.fast">Fast 30k</option>
+            <option value="balanced" data-i18n="option.balanced">Balanced 100k</option>
+            <option value="smooth" selected data-i18n="option.smooth">Smooth 8192</option>
+            <option value="original" data-i18n="option.original">Original</option>
+            <option value="ultra" data-i18n="option.ultra">Original 8192</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="label.bake">Bake</span>
+          <select id="meshTextureBackend">
+            <option value="colmap" selected>COLMAP</option>
+            <option value="openmvs">OpenMVS</option>
+          </select>
+        </label>
+        <label class="field sugar-control" hidden><span data-i18n="label.sugarQuality">SuGaR Quality</span>
+          <select id="sugarQuality">
+            <option value="preview" selected data-i18n="option.sugarPreview">Preview</option>
+            <option value="balanced" data-i18n="option.sugarBalanced">Balanced</option>
+            <option value="high" data-i18n="option.sugarHigh">High</option>
+            <option value="ultra" data-i18n="option.sugarUltra">Ultra</option>
+          </select>
+        </label>
+        <label class="field sugar-control" hidden><span data-i18n="label.sugarPoly">Poly</span>
+          <select id="sugarPoly">
+            <option value="low" data-i18n="option.lowPoly">Low</option>
+            <option value="high" data-i18n="option.highPoly">High</option>
+          </select>
+        </label>
+        <label class="field sugar-control" hidden><span data-i18n="label.sugarRefine">Refine</span>
+          <select id="sugarRefinement">
+            <option value="short" data-i18n="option.refineShort">Short</option>
+            <option value="medium" data-i18n="option.refineMedium">Medium</option>
+            <option value="long" data-i18n="option.refineLong">Long</option>
+          </select>
+        </label>
+        <label class="field sugar-control" hidden><span data-i18n="label.sugarReg">Reg</span>
+          <select id="sugarRegularization">
+            <option value="dn_consistency" data-i18n="option.regDn">DN consistency</option>
+            <option value="density" data-i18n="option.regDensity">Density</option>
+            <option value="sdf" data-i18n="option.regSdf">SDF</option>
+          </select>
+        </label>
+        <label class="field compact sugar-control" hidden><span data-i18n="label.sugarLevel">Level</span><input id="sugarSurfaceLevel" type="number" min="0.05" max="1" step="0.05" value="0.3"></label>
+        <label class="field compact sugar-control" hidden><span data-i18n="label.sugarUv">UV</span><input id="sugarSquareSize" type="number" min="4" max="32" step="1" value="8"></label>
+        <label class="field compact sugar-control" hidden><span data-i18n="label.sugarImages">Images</span><input id="sugarMaxImages" type="number" min="0" max="2000" step="1" value="96"></label>
+        <label class="field compact sugar-control" hidden><span data-i18n="label.sugarImgSize">Img Max</span><input id="sugarMaxImageSize" type="number" min="256" max="4096" step="64" value="960"></label>
+        <label class="check sugar-control" hidden><input id="sugarPostprocess" type="checkbox"> <span data-i18n="toggle.sugarPost">Postprocess</span></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshDownsample">Down</span><input id="gs2meshDownsample" type="number" min="1" max="8" step="1" value="2"></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshBaseline">Base %</span><input id="gs2meshBaseline" type="number" min="0.1" max="50" step="0.5" value="7"></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshVoxel">Voxel</span><input id="gs2meshTsdfVoxel" type="number" min="1" max="8" step="1" value="2"></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshDepth">Depth</span><input id="gs2meshTsdfMin" type="number" min="1" max="100" step="1" value="4"><input id="gs2meshTsdfMax" type="number" min="1" max="200" step="1" value="20"></label>
+        <label class="check gs2mesh-control" hidden><input id="gs2meshScene360" type="checkbox" checked> <span data-i18n="toggle.gs2mesh360">360 Scene</span></label>
+        </details>
+        <div class="action-strip">
+          <button id="exportMesh" data-i18n="button.exportMesh">Export Mesh</button>
+          <button id="loadMesh" data-i18n="button.loadMesh">Load Mesh</button>
+          <button id="bakeTexture" data-i18n="button.bakeTexture">Bake Photo Texture</button>
+          <button id="loadTexture" data-i18n="button.loadTexture">Load Texture</button>
+        </div>
+        <label class="check"><input id="showMesh" type="checkbox" checked> <span data-i18n="toggle.showMesh">Show Mesh</span></label>
+        <label class="check"><input id="meshTexture" type="checkbox" checked disabled> <span id="meshTextureLabel" data-i18n="toggle.vertexColor">Vertex Color</span></label>
+        <label class="check"><input id="meshTrim" type="checkbox"> <span data-i18n="toggle.meshTrim">Mesh Trim</span></label>
+        <div class="action-strip">
+          <button id="downloadMesh" disabled data-i18n="button.downloadMesh">Download Mesh</button>
+          <button id="downloadTexture" disabled data-i18n="button.downloadTexture">Download Texture</button>
+          <button id="downloadGlb" disabled data-i18n="button.downloadGlb">Download GLB</button>
+        </div>
+      </div>
+      <div class="toolbar-section train-section ribbon-panel" data-panel="train">
+        <span class="section-title" data-i18n="section.train">Train</span>
+        <label class="field compact"><span data-i18n="label.name">Name</span><input id="trainScene" placeholder="new_scene"></label>
+        <label class="field"><span data-i18n="label.alignedSource">Aligned</span>
+          <select id="alignedSource">
+            <option value="" data-i18n="option.noAlignedSource">No aligned source</option>
+          </select>
+        </label>
+        <label class="file-button"><span data-i18n="button.photosVideo">Photos/Video</span><input id="trainFiles" type="file" multiple accept="image/*,video/*"></label>
+        <label class="file-button"><span data-i18n="button.folder">Folder</span><input id="trainFolder" type="file" multiple webkitdirectory></label>
+        <label class="file-button"><span data-i18n="button.masks">Masks</span><input id="trainMasks" type="file" multiple accept="image/*"></label>
+        <button id="clearTrainInput" disabled data-i18n="button.clearInput">Clear Input</button>
+        <label class="field"><span data-i18n="label.backend">Backend</span>
+          <select id="trainBackend">
+            <option value="3dgs">3DGS</option>
+            <option value="2dgs">2DGS</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="label.mode">Mode</span>
+          <select id="trainQuality">
+            <option value="quick" data-i18n="option.quick">Quick 7000</option>
+            <option value="full" data-i18n="option.full">Full 30000</option>
+            <option value="quality" data-i18n="option.quality">Quality r4 30000</option>
+            <option value="max_quality" data-i18n="option.maxQuality">Max r2 30000</option>
+          </select>
+        </label>
+        <details class="toolbar-details train-advanced-group">
+          <summary data-i18n="summary.trainAdvanced">Training Parameters</summary>
+        <label class="field compact train-advanced"><span data-i18n="label.trainIter">Iter</span><input id="trainIterations" class="train-control" type="number" min="1000" max="200000" step="1000" value="7000"></label>
+        <label class="field compact train-advanced"><span data-i18n="label.trainRes">Train r</span><input id="trainResolution" class="train-control" type="number" min="1" max="16" step="1" value="8"></label>
+        <label class="field train-advanced train-3dgs"><span data-i18n="label.optimizer">Opt</span>
+          <select id="trainOptimizer" class="train-control">
+            <option value="default">Adam</option>
+            <option value="sparse_adam">SparseAdam</option>
+          </select>
+        </label>
+        <label class="field compact train-advanced train-2dgs"><span data-i18n="label.depthRatio">Depth</span><input id="trainDepthRatio" class="train-control" type="number" min="0" max="1" step="0.05" value="0"></label>
+        <label class="field compact train-advanced train-3dgs"><span data-i18n="label.densifyGrad">Dens Grad</span><input id="trainDensifyGrad" class="train-control" type="number" min="0.00001" max="0.01" step="0.00001" value="0.0002"></label>
+        <label class="field compact train-advanced train-3dgs"><span data-i18n="label.densifyInterval">Dens Int</span><input id="trainDensifyInterval" class="train-control" type="number" min="10" max="1000" step="10" value="100"></label>
+        <label class="field compact train-advanced train-3dgs"><span data-i18n="label.densifyUntil">Dens Until</span><input id="trainDensifyUntil" class="train-control" type="number" min="0" max="200000" step="1000" value="7000"></label>
+        <label class="check train-advanced train-3dgs"><input id="trainAntialiasing" class="train-control" type="checkbox"> <span data-i18n="toggle.aa">AA</span></label>
+        <label class="check train-advanced train-3dgs"><input id="trainExposure" class="train-control" type="checkbox"> <span data-i18n="toggle.exposure">Exposure</span></label>
+        <label class="field"><span data-i18n="label.colmapPreset">COLMAP</span>
+          <select id="colmapPreset" class="colmap-control">
+            <option value="default" data-i18n="option.colmapDefault">Default</option>
+            <option value="robust" data-i18n="option.colmapRobust">Robust</option>
+            <option value="sequential" data-i18n="option.colmapSequential">Sequential</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="label.matching">Match</span>
+          <select id="colmapMatching" class="colmap-control">
+            <option value="exhaustive" data-i18n="option.exhaustive">Exhaustive</option>
+            <option value="sequential" data-i18n="option.sequential">Sequential</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="label.camera">Camera</span>
+          <select id="colmapCamera" class="colmap-control">
+            <option value="OPENCV">OPENCV</option>
+            <option value="PINHOLE">PINHOLE</option>
+            <option value="SIMPLE_RADIAL">SIMPLE_RADIAL</option>
+            <option value="OPENCV_FISHEYE">OPENCV_FISHEYE</option>
+          </select>
+        </label>
+        <label class="field compact"><span data-i18n="label.maxImg">Max Img</span><input id="colmapMaxImageSize" class="colmap-control" type="number" min="-1" max="12000" step="100" value="-1"></label>
+        <label class="field compact"><span data-i18n="label.features">Features</span><input id="colmapMaxFeatures" class="colmap-control" type="number" min="512" max="50000" step="512" value="8192"></label>
+        <label class="field compact"><span data-i18n="label.baIter">BA Iter</span><input id="colmapBaIterations" class="colmap-control" type="number" min="1" max="200" step="1" value="50"></label>
+        <label class="field compact"><span data-i18n="label.baFreq">BA Freq</span><input id="colmapBaFreq" class="colmap-control" type="number" min="10" max="10000" step="10" value="500"></label>
+        <label class="field compact"><span data-i18n="label.minMatches">Min Match</span><input id="colmapMinMatches" class="colmap-control" type="number" min="4" max="100" step="1" value="15"></label>
+        <label class="field compact"><span data-i18n="label.overlap">Overlap</span><input id="colmapOverlap" class="colmap-control" type="number" min="2" max="100" step="1" value="10"></label>
+        <label class="check"><input id="colmapReset" class="colmap-control" type="checkbox" checked> <span data-i18n="toggle.resetColmap">Reset COLMAP</span></label>
+        <label class="check"><input id="colmapGpu" class="colmap-control" type="checkbox" checked> <span data-i18n="toggle.colmapGpu">COLMAP GPU</span></label>
+        <label class="check"><input id="colmapGuided" class="colmap-control" type="checkbox"> <span data-i18n="toggle.guided">Guided</span></label>
+        </details>
+        <label class="field compact"><span data-i18n="label.fps">FPS</span><input id="videoFps" type="number" min="0.2" max="10" step="0.2" value="2"></label>
+        <label class="check"><input id="overwriteTrain" type="checkbox"> <span data-i18n="toggle.overwrite">Overwrite</span></label>
+        <button id="importOnly" data-i18n="button.importOnly">Import Only</button>
+        <button id="startTrain" data-i18n="button.importTrain">Import + Train</button>
+        <button id="trainExisting" data-i18n="button.trainExisting">Train Existing</button>
+        <button id="cancelTrain" disabled data-i18n="button.cancel">Cancel</button>
+        <span id="trainSelection" class="muted" data-i18n="status.noInput">No input selected</span>
+      </div>
+      <div class="toolbar-section analysis-section ribbon-panel" data-panel="analysis">
+        <span class="section-title" data-i18n="section.analysis">Analysis</span>
+        <label class="field"><span data-i18n="label.psnrBackend">Backend</span>
+          <select id="psnrBackend">
+            <option value="3dgs">3DGS</option>
+            <option value="2dgs">2DGS</option>
+          </select>
+        </label>
+        <label class="field compact"><span data-i18n="label.psnrCount">Views</span><input id="psnrCount" type="number" min="1" max="500" step="1" value="20"></label>
+        <label class="field compact"><span data-i18n="label.psnrEvalWidth">Eval W</span><input id="psnrEvalWidth" type="number" min="0" max="12000" step="100" value="0"></label>
+        <button id="runPsnr" data-i18n="button.runPsnr">Render PSNR</button>
+        <button id="openPsnrOutput" disabled data-i18n="button.openPsnrOutput">Open PSNR Output</button>
+      </div>
+    </div>
+  </div>
+  <div id="mediaPanel" hidden>
+    <div id="mediaPanelHeader">
+      <strong data-i18n="panel.inputPreview">Input Preview</strong>
+      <button id="closeMediaPreview" data-i18n="button.close">Close</button>
+    </div>
+    <div id="mediaSummary"></div>
+    <div id="mediaPreview"></div>
+  </div>
+  <div id="trainPanel" hidden>
+    <div id="trainPanelHeader">
+      <strong data-i18n="panel.trainingLog">Training Log</strong>
+      <div class="panel-actions">
+        <button id="checkTrainEnv" data-i18n="button.checkEnv">Check Env</button>
+        <button id="closeTrainLog" data-i18n="button.close">Close</button>
+      </div>
+    </div>
+    <pre id="trainLog"></pre>
+  </div>
+  <div id="jobCenterPanel" hidden>
+    <div id="jobCenterHeader">
+      <strong data-i18n="panel.jobCenter">Job Center</strong>
+      <div class="panel-actions">
+        <button id="refreshJobCenter" data-i18n="button.refresh">Refresh</button>
+        <button id="closeJobCenter" data-i18n="button.close">Close</button>
+      </div>
+    </div>
+    <div id="jobCenterList"></div>
+  </div>
+  <div id="assetManagerPanel" hidden>
+    <div id="assetManagerHeader">
+      <strong data-i18n="panel.assetManager">Asset Manager</strong>
+      <div class="panel-actions">
+        <button id="refreshAssetManager" data-i18n="button.refresh">Refresh</button>
+        <button id="closeAssetManager" data-i18n="button.close">Close</button>
+      </div>
+    </div>
+    <div id="assetManagerSummary"></div>
+    <div id="assetManagerList"></div>
+  </div>
+  <div id="importProgressPanel" hidden>
+    <div id="importProgressHeader">
+      <strong data-i18n="panel.importProgress">Import Progress</strong>
+      <button id="closeImportProgress" data-i18n="button.close">Close</button>
+    </div>
+    <div id="importProgressBody">
+      <div class="progress-line">
+        <span id="importProgressStage">Waiting</span>
+        <span id="importProgressPercent">0%</span>
+      </div>
+      <div class="progress-track"><div id="importProgressFill"></div></div>
+      <div id="importProgressDetails"></div>
+      <div id="importProgressRecent"></div>
+    </div>
+  </div>
+  <div id="viewport">
+    <canvas id="three"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="fpsMeter" aria-live="off">FPS --</div>
+    <div id="status">Loading scenes...</div>
+  </div>
+  <script type="module" src="app.js?v=20260630_psnr_eval_width"></script>
+</body>
+</html>

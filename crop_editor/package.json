@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "@playcanvas/splat-transform": "^2.6.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}

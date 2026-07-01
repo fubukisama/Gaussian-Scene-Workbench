@@ -1,0 +1,16 @@
+{
+  "name": "3dgs-editor-desktop",
+  "version": "0.1.0",
+  "description": "Desktop wrapper for the local 3DGS Crop Editor",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "package:win": "electron-packager . \"3DGS Editor\" --platform=win32 --arch=x64 --overwrite --out=dist",
+    "release:win": "powershell -ExecutionPolicy Bypass -File ..\\scripts\\package_editor_release.ps1"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.4.4",
+    "electron": "^36.4.0"
+  }
+}
