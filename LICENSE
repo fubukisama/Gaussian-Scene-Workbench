@@ -1,12 +1,21 @@
 3DGS Editor License Notice
 ==========================
 
+Language / 语言 / 言語: [English](#english) | [中文](#中文) | [日本語](#日本語)
+
+Important: The English license text is the authoritative version. The Chinese
+and Japanese sections are non-authoritative translations and explanations for
+reader convenience.
+
+English
+-------
+
 This repository contains original 3DGS Editor code and bundled third-party
 components. It is published for open-source research, learning, and evaluation
 use.
 
 Original 3DGS Editor Code
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Unless a file or directory states otherwise, original code written for this
 3DGS Editor project is licensed under the MIT License:
@@ -34,7 +43,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Third-Party Components
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 Third-party code, models, tools, libraries, and assets keep their original
 licenses. The MIT License above does not relicense those components.
@@ -52,3 +61,71 @@ Important included components:
 
 See `THIRD_PARTY_LICENSES.md` and the license files inside each third-party
 directory for details.
+
+中文
+----
+
+重要说明：本节是为了方便中文读者理解的非正式翻译和说明。正式授权文本以英文部分为准。
+
+本仓库包含 3DGS Editor 的原创代码，也包含第三方组件。本仓库用于开源研究、学习和评估用途。
+
+3DGS Editor 原创代码
+~~~~~~~~~~~~~~~~~~~~
+
+除非具体文件或目录另有说明，3DGS Editor 项目的原创代码采用 MIT 许可证：
+
+MIT License
+
+Copyright (c) 2026 fubukisama
+
+在保留版权声明和许可证声明的前提下，任何获得本项目原创 3DGS Editor 软件及相关文档副本的人，可以免费使用、复制、修改、合并、发布、分发、再授权和销售该原创软件的副本，并允许获得该软件的人这样做。
+
+该原创软件按“原样”提供，不提供任何明示或暗示的担保，包括但不限于适销性、特定用途适用性和不侵权担保。作者或版权持有人不对因该软件或其使用而产生的任何索赔、损害或其他责任负责。
+
+第三方组件
+~~~~~~~~~~
+
+第三方代码、模型、工具、库和资源保留其原始许可证。上面的 MIT 许可证不会把这些第三方组件重新授权为 MIT。
+
+重要的内置组件包括：
+
+- `gaussian-splatting/` 及相关 3DGS CUDA 模块受 Gaussian-Splatting License 约束。除非另行获得原始权利方授权，否则仅限非商业研究和评估用途。
+- `gaussian-splatting/SIBR_viewers/` 受 Apache License 2.0 约束，但其中另行声明许可证的子目录除外。
+- `gaussian-splatting/submodules/fused-ssim/` 受 MIT License 约束。
+- 其他内置或下载的依赖项保留各自原许可证。
+
+详情请查看 `THIRD_PARTY_LICENSES.md` 以及各第三方目录中的许可证文件。
+
+日本語
+------
+
+重要: このセクションは日本語読者向けの非公式な翻訳および説明です。正式なライセンス本文は英語セクションに従います。
+
+このリポジトリには、3DGS Editor の独自コードと第三者コンポーネントが含まれています。オープンソースの研究、学習、評価用途向けに公開されています。
+
+3DGS Editor 独自コード
+~~~~~~~~~~~~~~~~~~~~~~
+
+ファイルまたはディレクトリで別途明記されていない限り、この 3DGS Editor プロジェクトの独自コードは MIT License の下で提供されます。
+
+MIT License
+
+Copyright (c) 2026 fubukisama
+
+著作権表示およびライセンス表示を保持することを条件として、本プロジェクトの独自 3DGS Editor ソフトウェアおよび関連文書のコピーを取得した人は、無償で使用、複製、変更、結合、公開、配布、サブライセンス、販売することができます。また、そのソフトウェアを受け取った人にも同じことを許可できます。
+
+この独自ソフトウェアは「現状のまま」提供され、商品性、特定目的への適合性、非侵害性を含むいかなる明示または黙示の保証もありません。作者または著作権者は、このソフトウェアまたはその使用に関連して生じるいかなる請求、損害、その他の責任も負いません。
+
+第三者コンポーネント
+~~~~~~~~~~~~~~~~~~~~
+
+第三者のコード、モデル、ツール、ライブラリ、アセットは、それぞれの元ライセンスに従います。上記の MIT License は、それらの第三者コンポーネントを MIT として再ライセンスするものではありません。
+
+主な同梱コンポーネント:
+
+- `gaussian-splatting/` および関連する 3DGS CUDA モジュールは Gaussian-Splatting License の対象です。原権利者から別途許可を得ない限り、非商用の研究および評価用途に制限されます。
+- `gaussian-splatting/SIBR_viewers/` は Apache License 2.0 の対象です。ただし、別ライセンスが明記されたサブディレクトリは除きます。
+- `gaussian-splatting/submodules/fused-ssim/` は MIT License の対象です。
+- その他の同梱またはダウンロードされる依存関係は、それぞれの元ライセンスに従います。
+
+詳細は `THIRD_PARTY_LICENSES.md` および各第三者ディレクトリ内のライセンスファイルを確認してください。
