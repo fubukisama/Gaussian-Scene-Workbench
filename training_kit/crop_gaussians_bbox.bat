@@ -38,8 +38,9 @@ if exist "%SRC_MODEL%\cfg_args" copy /Y "%SRC_MODEL%\cfg_args" "%DST_MODEL%\cfg_
 if exist "%SRC_MODEL%\cameras.json" copy /Y "%SRC_MODEL%\cameras.json" "%DST_MODEL%\cameras.json" >nul
 if exist "%SRC_MODEL%\input.ply" copy /Y "%SRC_MODEL%\input.ply" "%DST_MODEL%\input.ply" >nul
 
-call "%USERPROFILE%\miniforge3\condabin\conda.bat" activate gaussian_splatting
-python "%~dp0crop_gaussians_bbox.py" --input "%SRC_PLY%" --output "%DST_PLY%" --min-x %MIN_X% --max-x %MAX_X% --min-y %MIN_Y% --max-y %MAX_Y% --min-z %MIN_Z% --max-z %MAX_Z%
+call "%~dp0activate_3dgs_env.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
+"%GAUSSIAN_SPLATTING_CONDA_PREFIX%\python.exe" "%~dp0crop_gaussians_bbox.py" --input "%SRC_PLY%" --output "%DST_PLY%" --min-x %MIN_X% --max-x %MAX_X% --min-y %MIN_Y% --max-y %MAX_Y% --min-z %MIN_Z% --max-z %MAX_Z%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 echo.

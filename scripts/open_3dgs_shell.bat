@@ -2,13 +2,11 @@
 setlocal
 
 set "ROOT=%~dp0.."
-set "MINIFORGE=%USERPROFILE%\miniforge3"
 set "COLMAP_BIN=%USERPROFILE%\Downloads\colmap-x64-windows-cuda\bin"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 
-if exist "%MINIFORGE%" (
-  set "PATH=%MINIFORGE%;%MINIFORGE%\Scripts;%MINIFORGE%\condabin;%PATH%"
-)
+call "%ROOT%\training_kit\activate_3dgs_env.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
 
 if exist "%COLMAP_BIN%\colmap.exe" (
   set "PATH=%COLMAP_BIN%;%PATH%"

@@ -7,9 +7,9 @@ set "VS2022=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Commo
 
 set "PATH=%COLMAP_BIN%;%PATH%"
 call "%VS2022%" -arch=x64 -host_arch=x64
-call "%USERPROFILE%\miniforge3\condabin\conda.bat" activate gaussian_splatting
+call "%~dp0activate_3dgs_env.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
 
 cd /d "%ROOT%"
 echo 3DGS shell ready.
 cmd /k
-

@@ -12,8 +12,8 @@ This package is intended for open-source research, learning, and evaluation use.
 
 ### First Run On A New Windows PC
 
-1. Extract the zip to a normal writable folder, for example `C:\3DGS-Editor`.
-2. Double-click `Setup 3DGS Editor.cmd`.
+1. Extract the zip to a normal writable folder, for example `E:\3DGS-Editor`.
+2. Double-click `Setup 3DGS Editor.cmd` and choose a runtime install folder. Press Enter to use the default on the same drive as the package, for example `E:\3DGS-Editor-Runtime`.
 3. After setup finishes, double-click `3DGS Editor.exe`.
 
 If the runtime is incomplete, the app shows a setup dialog before opening the editor.
@@ -24,8 +24,8 @@ To check the local environment without installing anything, double-click `Check 
 
 `Setup 3DGS Editor.cmd` automatically checks and installs or repairs:
 
-- Miniforge in `%USERPROFILE%\miniforge3`
-- Conda environment `gaussian_splatting`
+- Miniforge in the selected runtime folder, for example `E:\3DGS-Editor-Runtime\miniforge3`
+- Conda environment `gaussian_splatting` under the selected runtime or an existing same-drive Conda/Miniforge location
 - Visual Studio 2022 C++ Build Tools
 - Git
 - COLMAP, downloaded into `third_party\colmap`
@@ -55,8 +55,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1 -Inc
 
 ### 新 Windows 电脑首次运行
 
-1. 把 zip 解压到普通可写目录，例如 `C:\3DGS-Editor`。
-2. 双击 `Setup 3DGS Editor.cmd`。
+1. 把 zip 解压到普通可写目录，例如 `E:\3DGS-Editor`。
+2. 双击 `Setup 3DGS Editor.cmd`，选择运行时安装目录。直接回车会使用与安装包同盘的默认目录，例如 `E:\3DGS-Editor-Runtime`。
 3. 安装完成后，双击 `3DGS Editor.exe`。
 
 如果运行环境不完整，软件会先显示环境安装窗口，而不是直接报错或黑屏。
@@ -67,8 +67,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1 -Inc
 
 `Setup 3DGS Editor.cmd` 会自动检查、安装或修复：
 
-- `%USERPROFILE%\miniforge3` 下的 Miniforge
-- Conda 环境 `gaussian_splatting`
+- 你选择的运行时目录下的 Miniforge，例如 `E:\3DGS-Editor-Runtime\miniforge3`
+- 运行时目录内或同盘已有 Conda/Miniforge 位置中的 `gaussian_splatting` 环境
 - Visual Studio 2022 C++ Build Tools
 - Git
 - COLMAP，自动下载到 `third_party\colmap`
@@ -98,8 +98,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1 -Inc
 
 ### 新しい Windows PC での初回起動
 
-1. zip を通常の書き込み可能なフォルダに展開します。例: `C:\3DGS-Editor`
-2. `Setup 3DGS Editor.cmd` をダブルクリックします。
+1. zip を通常の書き込み可能なフォルダに展開します。例: `E:\3DGS-Editor`
+2. `Setup 3DGS Editor.cmd` をダブルクリックし、ランタイムのインストール先を選択します。Enter を押すと、パッケージと同じドライブの既定フォルダ、例: `E:\3DGS-Editor-Runtime` が使われます。
 3. セットアップ完了後、`3DGS Editor.exe` をダブルクリックします。
 
 実行環境が不足している場合、エディタを開く前にセットアップ画面が表示されます。
@@ -110,8 +110,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1 -Inc
 
 `Setup 3DGS Editor.cmd` は以下を自動で確認、インストール、修復します。
 
-- `%USERPROFILE%\miniforge3` の Miniforge
-- Conda 環境 `gaussian_splatting`
+- 選択したランタイムフォルダ内の Miniforge。例: `E:\3DGS-Editor-Runtime\miniforge3`
+- 選択したランタイム、または同じドライブ上の既存 Conda/Miniforge にある `gaussian_splatting` 環境
 - Visual Studio 2022 C++ Build Tools
 - Git
 - COLMAP。`third_party\colmap` に自動ダウンロードされます

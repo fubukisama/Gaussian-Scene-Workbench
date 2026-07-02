@@ -1,9 +1,35 @@
 $ErrorActionPreference = "Continue"
 
-$Miniforge = Join-Path $env:USERPROFILE "miniforge3"
+$InstallDrive = Split-Path -Qualifier (Resolve-Path (Join-Path $PSScriptRoot ".."))
+$InstallRoot = "$InstallDrive\"
+$GaussianEnv = $env:GAUSSIAN_SPLATTING_CONDA_PREFIX
+if (-not $GaussianEnv) {
+    $Candidates = @(
+        (Join-Path $InstallRoot "miniforge3\envs\gaussian_splatting"),
+        (Join-Path $InstallRoot "conda\envs\gaussian_splatting"),
+        (Join-Path $InstallRoot "anaconda\envs\gaussian_splatting"),
+        (Join-Path $env:USERPROFILE "miniforge3\envs\gaussian_splatting")
+    )
+    $GaussianEnv = $Candidates | Where-Object { Test-Path (Join-Path $_ "python.exe") } | Select-Object -First 1
+}
+$CondaRoot = $env:CONDA_ROOT
+if (-not $CondaRoot) {
+    $CondaRootCandidates = @(
+        (Join-Path $InstallRoot "miniforge3"),
+        (Join-Path $InstallRoot "anaconda"),
+        (Join-Path $InstallRoot "conda"),
+        (Join-Path $env:USERPROFILE "miniforge3")
+    )
+    $CondaRoot = $CondaRootCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
 $ColmapBin = Join-Path $env:USERPROFILE "Downloads\colmap-x64-windows-cuda\bin"
-if (Test-Path $Miniforge) {
-    $env:Path = "$Miniforge;$Miniforge\Scripts;$Miniforge\condabin;$env:Path"
+if ($GaussianEnv -and (Test-Path $GaussianEnv)) {
+    $env:GAUSSIAN_SPLATTING_CONDA_PREFIX = $GaussianEnv
+    $env:CONDA_PREFIX = $GaussianEnv
+    $env:Path = "$GaussianEnv;$GaussianEnv\Library\bin;$GaussianEnv\Library\usr\bin;$GaussianEnv\Scripts;$env:Path"
+}
+if ($CondaRoot -and (Test-Path $CondaRoot)) {
+    $env:Path = "$CondaRoot;$CondaRoot\Scripts;$CondaRoot\condabin;$env:Path"
 }
 if (Test-Path $ColmapBin) {
     $env:Path = "$ColmapBin;$env:Path"

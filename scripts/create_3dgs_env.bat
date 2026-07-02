@@ -3,7 +3,15 @@ setlocal
 
 set "ROOT=%~dp0.."
 set "SRC=%ROOT%\gaussian-splatting"
-set "MINIFORGE=%USERPROFILE%\miniforge3"
+if defined MINIFORGE_ROOT (
+  set "MINIFORGE=%MINIFORGE_ROOT%"
+) else if defined CONDA_ROOT (
+  set "MINIFORGE=%CONDA_ROOT%"
+) else if exist "%~d0\miniforge3\condabin\conda.bat" (
+  set "MINIFORGE=%~d0\miniforge3"
+) else (
+  set "MINIFORGE=%USERPROFILE%\miniforge3"
+)
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 
 if not exist "%SRC%\environment.yml" (

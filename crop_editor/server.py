@@ -58,6 +58,66 @@ MESH_PREVIEW_MAX_FACES = 300000
 MESH_CHUNK_MAX_FACES = 250000
 
 
+def install_drive_root():
+    return Path(ROOT.anchor) if ROOT.anchor else None
+
+
+def conda_root_candidates():
+    drive = install_drive_root()
+    candidates = [
+        os.environ.get("CONDA_ROOT"),
+        os.environ.get("MINIFORGE_ROOT"),
+        os.environ.get("MAMBA_ROOT_PREFIX"),
+        Path(os.environ["CONDA_PREFIX"]).parents[1] if os.environ.get("CONDA_PREFIX") else None,
+        drive / "miniforge3" if drive else None,
+        drive / "conda" if drive else None,
+        drive / "anaconda" if drive else None,
+        Path.home() / "miniforge3",
+    ]
+    return [Path(candidate) for candidate in candidates if candidate]
+
+
+def first_existing_path(candidates):
+    for candidate in candidates:
+        path = Path(candidate)
+        if path.exists():
+            return path
+    return None
+
+
+def gaussian_env_root():
+    configured = [
+        os.environ.get("GAUSSIAN_SPLATTING_CONDA_PREFIX"),
+        os.environ.get("GS_CONDA_PREFIX"),
+    ]
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix and Path(conda_prefix).name.lower() == "gaussian_splatting":
+        configured.append(conda_prefix)
+    for candidate in configured:
+        if candidate and (Path(candidate) / "python.exe").exists():
+            return Path(candidate)
+    drive = install_drive_root()
+    candidates = [
+        drive / "miniforge3" / "envs" / "gaussian_splatting" if drive else None,
+        drive / "conda" / "envs" / "gaussian_splatting" if drive else None,
+        drive / "anaconda" / "envs" / "gaussian_splatting" if drive else None,
+        Path.home() / "miniforge3" / "envs" / "gaussian_splatting",
+        *[root / "envs" / "gaussian_splatting" for root in conda_root_candidates()],
+    ]
+    for candidate in [item for item in candidates if item]:
+        if (candidate / "python.exe").exists():
+            return candidate
+    return next(item for item in candidates if item)
+
+
+def conda_bat_path():
+    candidates = [
+        os.environ.get("CONDA_BAT"),
+        *[root / "condabin" / "conda.bat" for root in conda_root_candidates()],
+    ]
+    return first_existing_path([item for item in candidates if item])
+
+
 def mesh_like_job_kind(job):
     return job.get("kind") in {"mesh", "texture", "psnr"}
 
@@ -3448,8 +3508,7 @@ def training_env(backend="3dgs"):
     backend = safe_training_backend(backend)
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
-    userprofile = env.get("USERPROFILE", str(Path.home()))
-    env_root = Path(userprofile) / "miniforge3" / "envs" / "gaussian_splatting"
+    env_root = gaussian_env_root()
     colmap_bin = colmap_executable().parent
     path_parts = [
         str(colmap_bin),
@@ -3472,6 +3531,8 @@ def training_env(backend="3dgs"):
         env["TORCH_CUDA_ARCH_LIST"] = env.get("TORCH_CUDA_ARCH_LIST", "8.6")
     env["PATH"] = os.pathsep.join(path_parts)
     env["CONDA_PREFIX"] = str(env_root)
+    env["GAUSSIAN_SPLATTING_CONDA_PREFIX"] = str(env_root)
+    env["GS_CONDA_PREFIX"] = str(env_root)
     return env
 
 
@@ -3533,7 +3594,7 @@ def training_python(backend="3dgs"):
     backend = safe_training_backend(backend)
     if backend == "2dgs":
         return TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe"
-    gaussian_python = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "miniforge3" / "envs" / "gaussian_splatting" / "python.exe"
+    gaussian_python = gaussian_env_root() / "python.exe"
     if gaussian_python.exists():
         return gaussian_python
     return Path(sys.executable)
@@ -3593,15 +3654,14 @@ def python_probe(python_path, env, code, timeout=20):
 def training_environment_report(backend="3dgs"):
     backend = safe_training_backend(backend)
     env = training_env(backend)
-    userprofile = env.get("USERPROFILE", str(Path.home()))
-    miniforge_root = Path(userprofile) / "miniforge3"
-    conda_bat = miniforge_root / "condabin" / "conda.bat"
-    env_root = Path(userprofile) / "miniforge3" / "envs" / "gaussian_splatting"
+    env_root = gaussian_env_root()
+    conda_bat = conda_bat_path()
+    miniforge_root = conda_bat.parents[1] if conda_bat else env_root.parents[1]
     python_path = training_python(backend)
     colmap_path = colmap_executable()
     if colmap_path is None:
         colmap_path = ROOT / "third_party" / "colmap" / "bin" / "colmap.exe"
-    ffmpeg_path = Path(userprofile) / "miniforge3" / "envs" / "gaussian_splatting" / "Library" / "bin" / "ffmpeg.exe"
+    ffmpeg_path = env_root / "Library" / "bin" / "ffmpeg.exe"
     git_path = command_path("git")
     npm_path = command_path("npm")
     vs_install = vs_build_tools_installation()
@@ -3626,8 +3686,8 @@ def training_environment_report(backend="3dgs"):
         "root": str(ROOT),
         "miniforge": str(miniforge_root),
         "miniforge_exists": miniforge_root.exists(),
-        "conda": str(conda_bat),
-        "conda_exists": conda_bat.exists(),
+        "conda": str(conda_bat or ""),
+        "conda_exists": bool(conda_bat and conda_bat.exists()),
         "python": str(python_path),
         "python_exists": python_path.exists(),
         "env_root": str(env_root),
@@ -5317,9 +5377,10 @@ def extract_video_frames_with_cv2(video_path, images_dir, fps):
 
 
 def conda_executable():
-    bundled = Path.home() / "miniforge3" / "Scripts" / "conda.exe"
-    if bundled.exists():
-        return bundled
+    for root in conda_root_candidates():
+        for candidate in (root / "Scripts" / "conda.exe", root / "condabin" / "conda.bat"):
+            if candidate.exists():
+                return candidate
     found = shutil.which("conda")
     return Path(found) if found else None
 
@@ -5328,8 +5389,8 @@ def ffmpeg_executable():
     candidates = [
         os.environ.get("FFMPEG_PATH"),
         shutil.which("ffmpeg"),
-        Path.home() / "miniforge3" / "envs" / "gaussian_splatting" / "Library" / "bin" / "ffmpeg.exe",
-        Path.home() / "miniforge3" / "Library" / "bin" / "ffmpeg.exe",
+        gaussian_env_root() / "Library" / "bin" / "ffmpeg.exe",
+        *[root / "Library" / "bin" / "ffmpeg.exe" for root in conda_root_candidates()],
     ]
     for candidate in candidates:
         if not candidate:

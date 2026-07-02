@@ -24,18 +24,48 @@ function firstExisting(candidates) {
   return candidates[0];
 }
 
+function installDriveRoot(root) {
+  return path.parse(root || process.cwd()).root;
+}
+
+function condaRootCandidates(root) {
+  const driveRoot = installDriveRoot(root);
+  return [
+    process.env.MINIFORGE_ROOT,
+    process.env.CONDA_ROOT,
+    process.env.MAMBA_ROOT_PREFIX,
+    path.join(driveRoot, "miniforge3"),
+    path.join(driveRoot, "conda"),
+    path.join(driveRoot, "anaconda"),
+    path.join(process.env.USERPROFILE || "", "miniforge3")
+  ].filter(Boolean);
+}
+
+function gaussianEnvCandidates(root) {
+  const driveRoot = installDriveRoot(root);
+  return [
+    process.env.GAUSSIAN_SPLATTING_CONDA_PREFIX,
+    process.env.GS_CONDA_PREFIX,
+    path.join(driveRoot, "miniforge3", "envs", "gaussian_splatting"),
+    path.join(driveRoot, "conda", "envs", "gaussian_splatting"),
+    path.join(driveRoot, "anaconda", "envs", "gaussian_splatting"),
+    path.join(process.env.USERPROFILE || "", "miniforge3", "envs", "gaussian_splatting")
+  ].filter(Boolean);
+}
+
 function diagnoseEnvironment(root, startupError) {
   const userProfile = process.env.USERPROFILE || "";
-  const miniforge = path.join(userProfile, "miniforge3");
+  const miniforge = firstExisting(condaRootCandidates(root));
   const condaBat = path.join(miniforge, "condabin", "conda.bat");
-  const envPython = path.join(miniforge, "envs", "gaussian_splatting", "python.exe");
+  const gaussianEnv = firstExisting(gaussianEnvCandidates(root));
+  const envPython = path.join(gaussianEnv, "python.exe");
   const colmapExe = process.env.COLMAP_EXE || firstExisting([
     path.join(root || "", "third_party", "colmap", "bin", "colmap.exe"),
     path.join(root || "", "tools", "colmap", "bin", "colmap.exe"),
     path.join(root || "", "colmap", "bin", "colmap.exe"),
     path.join(userProfile, "Downloads", "colmap-x64-windows-cuda", "bin", "colmap.exe"),
   ]);
-  const ffmpegExe = path.join(miniforge, "envs", "gaussian_splatting", "Library", "bin", "ffmpeg.exe");
+  const ffmpegExe = path.join(gaussianEnv, "Library", "bin", "ffmpeg.exe");
   const report = {
     root,
     setupPath: defaultSetupPath(root),

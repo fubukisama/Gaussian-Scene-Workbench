@@ -1,4 +1,5 @@
 param(
+  [string]$InstallRoot = "",
   [switch]$NonInteractive,
   [switch]$Interactive,
   [switch]$CheckOnly
@@ -76,8 +77,75 @@ function Add-SetupPath($path) {
   }
 }
 
+function Get-InstallDriveRoot {
+  return ([IO.Path]::GetPathRoot($Root)).TrimEnd("\")
+}
+
+function Get-DefaultInstallRoot {
+  return Join-Path (Get-InstallDriveRoot) "3DGS-Editor-Runtime"
+}
+
+function Resolve-RuntimeRoot {
+  if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
+    return [IO.Path]::GetFullPath($InstallRoot)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:GS_EDITOR_RUNTIME_ROOT)) {
+    return [IO.Path]::GetFullPath($env:GS_EDITOR_RUNTIME_ROOT)
+  }
+  return Get-DefaultInstallRoot
+}
+
+function Get-CondaRootCandidates {
+  $drive = Get-InstallDriveRoot
+  $items = @(
+    $env:MINIFORGE_ROOT,
+    $env:CONDA_ROOT,
+    $env:MAMBA_ROOT_PREFIX,
+    (Join-Path $script:RuntimeRoot "miniforge3"),
+    (Join-Path $drive "miniforge3"),
+    (Join-Path $drive "conda"),
+    (Join-Path $drive "anaconda"),
+    (Join-Path $env:USERPROFILE "miniforge3")
+  )
+  return @($items | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Find-CondaBat {
+  foreach ($rootCandidate in Get-CondaRootCandidates) {
+    $candidate = Join-Path $rootCandidate "condabin\conda.bat"
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return Join-Path $script:MiniforgeRoot "condabin\conda.bat"
+}
+
+function Find-CondaExe {
+  foreach ($rootCandidate in Get-CondaRootCandidates) {
+    $candidate = Join-Path $rootCandidate "Scripts\conda.exe"
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return Join-Path $script:MiniforgeRoot "Scripts\conda.exe"
+}
+
+function Find-GaussianEnvPython {
+  $drive = Get-InstallDriveRoot
+  $candidates = @(
+    $env:GAUSSIAN_SPLATTING_CONDA_PREFIX,
+    $env:GS_CONDA_PREFIX,
+    (Join-Path $script:MiniforgeRoot "envs\gaussian_splatting"),
+    (Join-Path $drive "miniforge3\envs\gaussian_splatting"),
+    (Join-Path $drive "conda\envs\gaussian_splatting"),
+    (Join-Path $drive "anaconda\envs\gaussian_splatting"),
+    (Join-Path $env:USERPROFILE "miniforge3\envs\gaussian_splatting")
+  )
+  foreach ($candidateRoot in @($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+    $candidate = Join-Path $candidateRoot "python.exe"
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return Join-Path $script:MiniforgeRoot "envs\gaussian_splatting\python.exe"
+}
+
 function Install-Miniforge {
-  $condaBat = Join-Path $env:USERPROFILE "miniforge3\condabin\conda.bat"
+  $condaBat = Find-CondaBat
   if (Test-Path -LiteralPath $condaBat) {
     Write-Step "SKIP: Miniforge already installed -> $condaBat"
     return $condaBat
@@ -87,7 +155,7 @@ function Install-Miniforge {
   if (-not (Confirm-Step "Install Miniforge automatically now?")) { return $null }
   $installer = Join-Path $Root "third_party\downloads\Miniforge3-Windows-x86_64.exe"
   Invoke-Download "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe" $installer
-  $target = Join-Path $env:USERPROFILE "miniforge3"
+  $target = $script:MiniforgeRoot
   Write-Step "Installing Miniforge to $target"
   $proc = Start-Process -FilePath $installer -ArgumentList @("/InstallationType=JustMe", "/RegisterPython=0", "/S", "/D=$target") -Wait -PassThru -WindowStyle Hidden
   if ($proc.ExitCode -ne 0) { throw "Miniforge installer failed with exit code $($proc.ExitCode)." }
@@ -269,7 +337,7 @@ function Install-Colmap {
 }
 
 function Invoke-CondaRun($arguments) {
-  $condaExe = Join-Path $env:USERPROFILE "miniforge3\Scripts\conda.exe"
+  $condaExe = Find-CondaExe
   if (Test-Path -LiteralPath $condaExe) {
     & $condaExe @arguments
     return $LASTEXITCODE
@@ -462,10 +530,18 @@ function Ensure-3DGSSubmodulePaths {
 
 Write-Step "3DGS Editor setup started."
 Write-Step "Root: $Root"
+$script:RuntimeRoot = Resolve-RuntimeRoot
+$script:MiniforgeRoot = Join-Path $script:RuntimeRoot "miniforge3"
+New-Item -ItemType Directory -Force -Path $script:RuntimeRoot | Out-Null
+Write-Step "Runtime install root: $script:RuntimeRoot"
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "desktop_app") | Out-Null
 
-$MiniforgeConda = Join-Path $env:USERPROFILE "miniforge3\condabin\conda.bat"
-$EnvPython = Join-Path $env:USERPROFILE "miniforge3\envs\gaussian_splatting\python.exe"
+$MiniforgeConda = Find-CondaBat
+$EnvPython = Find-GaussianEnvPython
+$env:MINIFORGE_ROOT = Split-Path -Parent (Split-Path -Parent $MiniforgeConda)
+$env:CONDA_ROOT = $env:MINIFORGE_ROOT
+$env:GAUSSIAN_SPLATTING_CONDA_PREFIX = Split-Path -Parent $EnvPython
+$env:GS_CONDA_PREFIX = $env:GAUSSIAN_SPLATTING_CONDA_PREFIX
 $ColmapExe = if ($env:COLMAP_EXE) { $env:COLMAP_EXE } else { Get-LocalColmapExe }
 
 if (-not (Test-PathReport $MiniforgeConda "Miniforge conda")) {
@@ -508,7 +584,12 @@ if (-not (Test-Path -LiteralPath $EnvPython)) {
     Write-Step "CHECK ONLY: skipping conda environment creation."
   } elseif (Confirm-Step "Create/update the gaussian_splatting conda environment now?") {
     Write-Step "Running $CreateEnv"
+    $env:MINIFORGE_ROOT = Split-Path -Parent (Split-Path -Parent $MiniforgeConda)
+    $env:CONDA_ROOT = $env:MINIFORGE_ROOT
     & cmd.exe /d /s /c "`"$CreateEnv`""
+    $EnvPython = Find-GaussianEnvPython
+    $env:GAUSSIAN_SPLATTING_CONDA_PREFIX = Split-Path -Parent $EnvPython
+    $env:GS_CONDA_PREFIX = $env:GAUSSIAN_SPLATTING_CONDA_PREFIX
   }
 }
 

@@ -3,7 +3,15 @@ setlocal
 
 set "ROOT=%~dp0.."
 set "SRC=%ROOT%\gaussian-splatting"
-set "MINIFORGE=%USERPROFILE%\miniforge3"
+if defined MINIFORGE_ROOT (
+  set "MINIFORGE=%MINIFORGE_ROOT%"
+) else if defined CONDA_ROOT (
+  set "MINIFORGE=%CONDA_ROOT%"
+) else if exist "%~d0\miniforge3\condabin\conda.bat" (
+  set "MINIFORGE=%~d0\miniforge3"
+) else (
+  set "MINIFORGE=%USERPROFILE%\miniforge3"
+)
 set "VS2022=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 
 if not exist "%SRC%\environment.yml" (
@@ -34,4 +42,3 @@ if exist "%MINIFORGE%\envs\gaussian_splatting\Library\bin\deflate.dll" (
 )
 
 python -c "import torch, cv2; from PIL import Image; import diff_gaussian_rasterization, simple_knn, fused_ssim; print('3DGS environment OK')"
-

@@ -23,6 +23,7 @@ call "%~dp0apply_local_fixes.bat"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 cd /d "%SRC%"
-call "%USERPROFILE%\miniforge3\condabin\conda.bat" activate gaussian_splatting
-python train.py -s "%ROOT%\datasets\%SCENE%" -m "%ROOT%\output\%SCENE%" -r 8 --data_device cpu --iterations %TO_ITER% --load_iteration %FROM_ITER% --test_iterations %TO_ITER% --save_iterations %TO_ITER% --checkpoint_iterations %TO_ITER%
+call "%~dp0activate_3dgs_env.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
+"%GAUSSIAN_SPLATTING_CONDA_PREFIX%\python.exe" train.py -s "%ROOT%\datasets\%SCENE%" -m "%ROOT%\output\%SCENE%" -r 8 --data_device cpu --iterations %TO_ITER% --load_iteration %FROM_ITER% --test_iterations %TO_ITER% --save_iterations %TO_ITER% --checkpoint_iterations %TO_ITER%
 exit /b %ERRORLEVEL%

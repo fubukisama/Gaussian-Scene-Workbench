@@ -251,6 +251,65 @@ async function waitForServer(port, timeoutMs = 30000) {
   return false;
 }
 
+function firstExistingPath(candidates) {
+  for (const candidate of candidates.filter(Boolean)) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function installDriveRoot() {
+  return ROOT ? path.parse(ROOT).root : null;
+}
+
+function condaRootCandidates() {
+  const driveRoot = installDriveRoot();
+  return [
+    process.env.CONDA_ROOT,
+    process.env.MINIFORGE_ROOT,
+    process.env.MAMBA_ROOT_PREFIX,
+    process.env.CONDA_PREFIX ? path.resolve(process.env.CONDA_PREFIX, "..", "..") : null,
+    driveRoot ? path.join(driveRoot, "miniforge3") : null,
+    driveRoot ? path.join(driveRoot, "conda") : null,
+    driveRoot ? path.join(driveRoot, "anaconda") : null,
+    path.join(process.env.USERPROFILE || "", "miniforge3")
+  ];
+}
+
+function findCondaRoot() {
+  return firstExistingPath(condaRootCandidates());
+}
+
+function findCondaBat() {
+  return firstExistingPath([
+    process.env.CONDA_BAT,
+    ...condaRootCandidates().map((root) => root ? path.join(root, "condabin", "conda.bat") : null)
+  ]);
+}
+
+function findCondaEnvRoot(envName) {
+  const configured = firstExistingPath([
+    process.env.GAUSSIAN_SPLATTING_CONDA_PREFIX,
+    process.env.GS_CONDA_PREFIX,
+    process.env.CONDA_PREFIX && path.basename(process.env.CONDA_PREFIX).toLowerCase() === envName.toLowerCase()
+      ? process.env.CONDA_PREFIX
+      : null
+  ]);
+  if (configured && fs.existsSync(path.join(configured, "python.exe"))) return configured;
+  const driveRoot = installDriveRoot();
+  const candidates = [
+    driveRoot ? path.join(driveRoot, "miniforge3", "envs", envName) : null,
+    driveRoot ? path.join(driveRoot, "conda", "envs", envName) : null,
+    driveRoot ? path.join(driveRoot, "anaconda", "envs", envName) : null,
+    path.join(process.env.USERPROFILE || "", "miniforge3", "envs", envName),
+    ...condaRootCandidates().map((root) => root ? path.join(root, "envs", envName) : null)
+  ];
+  for (const candidate of candidates.filter(Boolean)) {
+    if (fs.existsSync(path.join(candidate, "python.exe"))) return candidate;
+  }
+  return candidates.filter(Boolean)[0];
+}
+
 async function startPythonServer() {
   if (!fs.existsSync(SERVER_PATH)) {
     throw new Error(`server.py not found: ${SERVER_PATH}`);
@@ -267,9 +326,10 @@ async function startPythonServer() {
     return;
   }
   log(`Selected fixed ${app.isPackaged ? "packaged" : "development"} port ${serverPort}`);
-  const condaBat = path.join(process.env.USERPROFILE || "", "miniforge3", "condabin", "conda.bat");
-  const envPython = path.join(process.env.USERPROFILE || "", "miniforge3", "envs", "gaussian_splatting", "python.exe");
-  const envRoot = path.dirname(envPython);
+  const envRoot = findCondaEnvRoot("gaussian_splatting");
+  const envPython = path.join(envRoot, "python.exe");
+  const condaBat = findCondaBat();
+  const condaRoot = findCondaRoot();
   const envPath = [
     envRoot,
     path.join(envRoot, "Library", "bin"),
@@ -277,6 +337,15 @@ async function startPythonServer() {
     path.join(envRoot, "Scripts"),
     process.env.PATH || ""
   ].join(path.delimiter);
+  const serverEnv = {
+    ...process.env,
+    PATH: envPath,
+    PYTHONUTF8: "1",
+    CONDA_PREFIX: envRoot,
+    GAUSSIAN_SPLATTING_CONDA_PREFIX: envRoot,
+    GS_CONDA_PREFIX: envRoot,
+    ...(condaRoot ? { CONDA_ROOT: condaRoot } : {})
+  };
 
   if (fs.existsSync(envPython)) {
     log(`Starting server with env python: ${envPython}`);
@@ -284,11 +353,11 @@ async function startPythonServer() {
       cwd: ROOT,
       windowsHide: true,
       stdio: "pipe",
-      env: { ...process.env, PATH: envPath, PYTHONUTF8: "1", CONDA_PREFIX: envRoot }
+      env: serverEnv
     });
   } else {
-    if (!fs.existsSync(condaBat)) {
-      throw new Error(`Neither env python nor conda.bat was found. Tried: ${envPython} and ${condaBat}`);
+    if (!condaBat || !fs.existsSync(condaBat)) {
+      throw new Error(`Neither env python nor conda.bat was found. Tried: ${envPython} and ${condaBat || "conda.bat"}`);
     }
 
     log(`Starting server through conda.bat: ${condaBat}`);
@@ -301,7 +370,7 @@ async function startPythonServer() {
       cwd: ROOT,
       windowsHide: true,
       stdio: "pipe",
-      env: { ...process.env, PYTHONUTF8: "1" }
+      env: serverEnv
     });
   }
 
@@ -332,7 +401,7 @@ async function preflightRuntimeEnvironment() {
   if (!report.gaussian_dir_exists) missing.push(`3DGS source: ${report.gaussian_dir}`);
   if (!report.colmap_exists) missing.push(`COLMAP executable: ${report.colmap}`);
   if (!report.opencv_ok) missing.push(`OpenCV Python module: ${report.opencv_error || "cv2 import failed"}`);
-  const ffmpeg = path.join(process.env.USERPROFILE || "", "miniforge3", "envs", "gaussian_splatting", "Library", "bin", "ffmpeg.exe");
+  const ffmpeg = path.join(findCondaEnvRoot("gaussian_splatting"), "Library", "bin", "ffmpeg.exe");
   if (!fs.existsSync(ffmpeg)) warnings.push(`ffmpeg executable was not found: ${ffmpeg}`);
   if (!missing.length) return true;
   log(`Runtime preflight failed: ${missing.join("; ")}`);
