@@ -1,6 +1,6 @@
 {
   "name": "3dgs-editor-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Desktop wrapper for the local 3DGS Crop Editor",
   "main": "main.js",
   "private": true,

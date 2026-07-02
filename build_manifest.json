@@ -1,14 +1,14 @@
 {
     "appName":  "3DGS Editor",
-    "sourceVersion":  "36.9.6",
-    "packageVersion":  "0.1.1",
-    "releaseTag":  "v0.1.1",
-    "packageName":  "3DGS-Editor-0.1.1-win-x64.zip",
-    "updatedAt":  "2026-07-02T12:02:43+09:00",
+    "sourceVersion":  "36.9.7",
+    "packageVersion":  "0.1.2",
+    "releaseTag":  "v0.1.2",
+    "packageName":  "3DGS-Editor-0.1.2-win-x64.zip",
+    "updatedAt":  "2026-07-02T12:32:03+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "02afae9",
+    "gitCommit":  "54dde96",
     "gitDirty":  true,
-    "note":  "Add version manifest and update timestamp workflow"
+    "note":  "Launch editor automatically after successful setup"
 }

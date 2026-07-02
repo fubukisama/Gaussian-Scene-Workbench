@@ -10,5 +10,14 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 echo.
-echo Setup finished. You can now run 3DGS Editor.exe.
-pause
+echo Setup finished. Starting 3DGS Editor...
+if not exist "%ROOT%3DGS Editor.exe" (
+  echo.
+  echo 3DGS Editor.exe was not found in this folder:
+  echo %ROOT%
+  pause
+  exit /b 1
+)
+start "" "%ROOT%3DGS Editor.exe"
+timeout /t 2 /nobreak >nul
+exit /b 0
