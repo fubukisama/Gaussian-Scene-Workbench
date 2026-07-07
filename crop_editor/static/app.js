@@ -725,7 +725,7 @@ let currentLanguage = localStorage.getItem("cropEditorLanguage") || "en";
 let uiScaleMode = normalizeUiScaleMode(localStorage.getItem(UI_SCALE_STORAGE_KEY) || "auto");
 let currentUiScale = 1;
 
-let renderer, scene, camera, controls, pointCloud, splatCloud, cameraGroup, selectionPoints, meshObject, meshSelectionPoints, centerGizmo;
+let renderer, scene, centerGizmoScene, camera, controls, pointCloud, splatCloud, cameraGroup, selectionPoints, meshObject, meshSelectionPoints, centerGizmo;
 let focusRaycaster = null;
 let realSplatViewer = null;
 let realSplatSceneIndex = null;
@@ -1099,6 +1099,7 @@ function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   scene = new THREE.Scene();
+  centerGizmoScene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
   camera = new THREE.PerspectiveCamera(60, 1, 0.01, 10000);
   camera.position.set(0, -4, 2);
@@ -1122,8 +1123,12 @@ function initThree() {
   const rimLight = new THREE.DirectionalLight(0xffffff, 0.75);
   rimLight.position.set(-4.0, 4.0, 3.0);
   scene.add(rimLight);
+  centerGizmoScene.add(new THREE.AmbientLight(0xffffff, 0.45));
+  const centerGizmoKeyLight = new THREE.DirectionalLight(0xffffff, 1.45);
+  centerGizmoKeyLight.position.set(2.0, -3.0, 4.0);
+  centerGizmoScene.add(centerGizmoKeyLight);
   centerGizmo = createCenterGizmo();
-  scene.add(centerGizmo);
+  centerGizmoScene.add(centerGizmo);
   window.addEventListener("resize", resize);
   resize();
   animate();
@@ -4341,10 +4346,21 @@ function animate(nowMs) {
     realSplatViewer.update();
     if (document.getElementById("showRealSplats")?.checked && realSplatReady) {
       realSplatViewer.render();
+      renderCenterGizmoOverlay();
       return;
     }
   }
   renderer.render(scene, camera);
+  renderCenterGizmoOverlay();
+}
+
+function renderCenterGizmoOverlay() {
+  if (!renderer || !camera || !centerGizmoScene || !centerGizmo || !centerGizmo.visible) return;
+  const previousAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+  renderer.clearDepth();
+  renderer.render(centerGizmoScene, camera);
+  renderer.autoClear = previousAutoClear;
 }
 
 function focusOnDoubleClick(e) {
