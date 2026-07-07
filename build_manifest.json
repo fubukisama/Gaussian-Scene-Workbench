@@ -1,14 +1,14 @@
 {
     "appName":  "3DGS Editor",
-    "sourceVersion":  "36.9.16",
-    "packageVersion":  "0.1.8",
-    "releaseTag":  "v0.1.8",
-    "packageName":  "3DGS-Editor-0.1.8-win-x64.zip",
-    "updatedAt":  "2026-07-07T16:18:30+09:00",
+    "sourceVersion":  "36.9.17",
+    "packageVersion":  "0.1.9",
+    "releaseTag":  "v0.1.9",
+    "packageName":  "3DGS-Editor-0.1.9-win-x64.zip",
+    "updatedAt":  "2026-07-07T16:52:00+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
     "gitCommit":  "pending",
     "gitDirty":  true,
-    "note":  "Block zoom updates and wheel events during pan gestures"
+    "note":  "Use app-level OrbitControls-style right and middle mouse pan"
 }

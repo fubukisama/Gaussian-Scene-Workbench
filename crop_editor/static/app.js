@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { TrackballControls } from "./vendor/controls/TrackballControls.js?v=20260707_pan_zoom_gate";
+import { TrackballControls } from "./vendor/controls/TrackballControls.js?v=20260707_app_pan";
 import * as GaussianSplats3D from "gaussian-splats-3d";
 import {
   isEditableShortcutTarget,
@@ -741,6 +741,7 @@ let mode = "navigate";
 let dragStart = null;
 let dragCurrent = null;
 let brushSubtract = false;
+let viewPanDrag = null;
 let pivotPickMode = false;
 let autoPickPivotAtCenter = false;
 let lasso = [];
@@ -1252,6 +1253,10 @@ function initUi() {
   for (const id of ["navigate", "rect", "lasso", "brush"]) {
     document.getElementById(id).onclick = () => setMode(id);
   }
+  canvas.addEventListener("pointerdown", viewPanPointerDown, true);
+  canvas.addEventListener("pointermove", viewPanPointerMove, true);
+  canvas.addEventListener("pointerup", viewPanPointerUp, true);
+  canvas.addEventListener("pointercancel", viewPanPointerCancel, true);
   canvas.addEventListener("pointerdown", pointerDown, true);
   canvas.addEventListener("pointermove", pointerMove, true);
   canvas.addEventListener("pointerup", pointerUp, true);
@@ -1528,6 +1533,7 @@ function setPivotPickMode(enabled, announce = true) {
 
 function resetInteractionState() {
   isSpaceDown = false;
+  if (viewPanDrag) finishViewPan(viewPanDrag.pointerId);
   if (dragStart) cancelSelectionDrag();
   if (controls) controls.enabled = true;
   updateInteractionCursor();
@@ -4433,6 +4439,93 @@ function shouldStartSelection(e) {
     ctrlKey: e.ctrlKey,
     metaKey: e.metaKey,
   });
+}
+
+function shouldStartViewPan(e) {
+  if (!camera || !controls) return false;
+  if (pivotPickMode || dragStart || viewPanDrag) return false;
+  if (e.pointerType === "touch") return false;
+  return e.button === 2 || e.button === 1;
+}
+
+function viewPanPointerDown(e) {
+  if (!shouldStartViewPan(e)) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  viewPanDrag = {
+    pointerId: e.pointerId,
+    lastX: e.clientX,
+    lastY: e.clientY,
+    controlsEnabled: controls.enabled,
+  };
+  controls.enabled = false;
+  canvas.setPointerCapture(e.pointerId);
+}
+
+function viewPanPointerMove(e) {
+  if (!viewPanDrag || e.pointerId !== viewPanDrag.pointerId) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const dx = e.clientX - viewPanDrag.lastX;
+  const dy = e.clientY - viewPanDrag.lastY;
+  viewPanDrag.lastX = e.clientX;
+  viewPanDrag.lastY = e.clientY;
+  panViewByPixels(dx, dy);
+}
+
+function viewPanPointerUp(e) {
+  if (!viewPanDrag || e.pointerId !== viewPanDrag.pointerId) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  finishViewPan(e.pointerId);
+}
+
+function viewPanPointerCancel(e) {
+  if (!viewPanDrag || e.pointerId !== viewPanDrag.pointerId) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  finishViewPan(e.pointerId);
+}
+
+function finishViewPan(pointerId = null) {
+  if (!viewPanDrag) return;
+  const restoreControls = viewPanDrag.controlsEnabled;
+  viewPanDrag = null;
+  controls.enabled = restoreControls;
+  if (pointerId !== null && canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+}
+
+function panViewByPixels(deltaX, deltaY) {
+  if (!camera || !controls || (!deltaX && !deltaY)) return;
+  camera.updateMatrix();
+
+  const panOffset = new THREE.Vector3();
+  const axis = new THREE.Vector3();
+
+  if (camera.isPerspectiveCamera) {
+    const offset = camera.position.clone().sub(controls.target);
+    const targetDistance = offset.length() * Math.tan((camera.fov / 2) * Math.PI / 180);
+    const distanceX = 2 * deltaX * targetDistance / Math.max(1, canvas.clientHeight);
+    const distanceY = 2 * deltaY * targetDistance / Math.max(1, canvas.clientHeight);
+    axis.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-distanceX);
+    panOffset.add(axis);
+    axis.setFromMatrixColumn(camera.matrix, 1).multiplyScalar(distanceY);
+    panOffset.add(axis);
+  } else if (camera.isOrthographicCamera) {
+    const distanceX = deltaX * (camera.right - camera.left) / camera.zoom / Math.max(1, canvas.clientWidth);
+    const distanceY = deltaY * (camera.top - camera.bottom) / camera.zoom / Math.max(1, canvas.clientHeight);
+    axis.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-distanceX);
+    panOffset.add(axis);
+    axis.setFromMatrixColumn(camera.matrix, 1).multiplyScalar(distanceY);
+    panOffset.add(axis);
+  } else {
+    return;
+  }
+
+  camera.position.add(panOffset);
+  controls.target.add(panOffset);
+  controls.update();
+  syncCenterGizmoToTarget();
 }
 
 function pointerDown(e) {
