@@ -65,9 +65,17 @@ def psnr_from_mse(mse):
 def tensor_psnr(rendered, gt):
     import torch
 
+    if not torch.isfinite(rendered).all():
+        bad = int((~torch.isfinite(rendered)).sum().item())
+        raise RuntimeError(f"Rendered image contains {bad} non-finite value(s).")
+    if not torch.isfinite(gt).all():
+        bad = int((~torch.isfinite(gt)).sum().item())
+        raise RuntimeError(f"Ground-truth image contains {bad} non-finite value(s).")
     rendered = rendered.detach().clamp(0.0, 1.0)
     gt = gt.detach().to(rendered.device).clamp(0.0, 1.0)
     mse = torch.mean((rendered - gt) ** 2).item()
+    if not math.isfinite(mse):
+        raise RuntimeError(f"PSNR MSE is not finite: {mse}")
     return psnr_from_mse(mse), mse
 
 
@@ -75,6 +83,8 @@ def save_tensor_image(tensor, path):
     import numpy as np
     from PIL import Image
 
+    if not tensor.isfinite().all():
+        raise RuntimeError(f"Cannot save non-finite image tensor: {path}")
     tensor = tensor.detach().clamp(0.0, 1.0).cpu()
     if tensor.ndim == 3 and tensor.shape[0] in (1, 3, 4):
         tensor = tensor.permute(1, 2, 0)
@@ -205,6 +215,10 @@ def render_selected_views(args):
     from gaussian_renderer import GaussianModel, render
 
     dataset, pipeline, iteration = load_backend_args(backend_dir, source, model, args.iteration, args.eval_width)
+    if args.backend == "3dgs" and args.python_sh:
+        # Keep PSNR on the official renderer path while avoiding unstable SH
+        # evaluation inside the Windows CUDA rasterizer for large/cropped scenes.
+        pipeline.convert_SHs_python = True
     with torch.no_grad():
         if args.backend == "3dgs":
             gaussians = GaussianModel(dataset.sh_degree, getattr(dataset, "optimizer_type", "default"))
@@ -271,6 +285,10 @@ def render_selected_views(args):
         "rendered_count": len(rows),
         "eval_width": int(args.eval_width or 0),
         "analysis_filter": filter_info,
+        "render_pipeline": {
+            "python_sh": bool(args.python_sh),
+            "python_covariance": bool(getattr(pipeline, "compute_cov3D_python", False)),
+        },
         "average_psnr": average_psnr,
         "missing_images": missing,
         "output_dir": str(output_dir),
@@ -321,6 +339,8 @@ def safe_worker_command(args, view_index, output_dir):
         "--view-index",
         str(view_index),
     ]
+    if not args.python_sh:
+        command.append("--no-python-sh")
     if args.two_dgs_dir:
         command.extend(["--two-dgs-dir", args.two_dgs_dir])
     return command
@@ -401,6 +421,9 @@ def run_safe_mode(args):
             "max_scale": float(args.max_scale),
             "max_gaussians": int(args.max_gaussians),
         },
+        "render_pipeline": {
+            "python_sh": bool(args.python_sh),
+        },
         "average_psnr": average_psnr,
         "failures": failures,
         "output_dir": str(output_dir),
@@ -435,6 +458,8 @@ def parse_args():
     parser.add_argument("--prune-opacity", type=float, default=0.0, help="Analysis-only 3DGS opacity pruning threshold after sigmoid.")
     parser.add_argument("--max-scale", type=float, default=0.0, help="Analysis-only 3DGS max activated scale threshold.")
     parser.add_argument("--max-gaussians", type=int, default=0, help="Analysis-only 3DGS cap by highest opacity.")
+    parser.add_argument("--no-python-sh", dest="python_sh", action="store_false", help=argparse.SUPPRESS)
+    parser.set_defaults(python_sh=True)
     parser.add_argument("--view-index", type=int, default=None, help=argparse.SUPPRESS)
     return parser.parse_args()
 

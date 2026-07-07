@@ -1,14 +1,14 @@
 {
     "appName":  "3DGS Editor",
-    "sourceVersion":  "36.9.9",
+    "sourceVersion":  "36.9.12",
     "packageVersion":  "0.1.4",
     "releaseTag":  "v0.1.4",
     "packageName":  "3DGS-Editor-0.1.4-win-x64.zip",
-    "updatedAt":  "2026-07-02T19:28:43+09:00",
-    "updatedBy":  "ztx",
-    "machine":  "LAPTOP-QS64PJGJ",
+    "updatedAt":  "2026-07-07T14:35:42+09:00",
+    "updatedBy":  "Ishida_Lab",
+    "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "91b2a33",
+    "gitCommit":  "pending",
     "gitDirty":  true,
-    "note":  "Selectable runtime install path and E-drive environment detection"
+    "note":  "Keep selectable runtime install path and fix stale PSNR/training job cleanup"
 }

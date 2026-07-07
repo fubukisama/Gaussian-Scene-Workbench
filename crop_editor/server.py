@@ -3411,6 +3411,13 @@ def load_persisted_train_jobs():
             job["process"] = None
             job.setdefault("log", [])
             job.setdefault("cancel_requested", False)
+            if job.get("status") in {"queued", "running", "cancelling"}:
+                job["cancel_requested"] = True
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+                job["error"] = job.get("error") or "Server restarted before this training job finished."
+                job["updated_at"] = time.time()
+                persist_train_job(job)
             jobs[job["id"]] = job
         except Exception:
             continue
@@ -4581,9 +4588,14 @@ def cancel_training(job_id):
         if not job:
             raise ValueError("Training job not found")
         job["cancel_requested"] = True
-        job["status"] = "cancelling"
-        job["updated_at"] = time.time()
         process = job.get("process")
+        if process is None or process.poll() is not None:
+            job["status"] = "cancelled"
+            job["stage"] = "cancelled"
+            job["error"] = job.get("error") or "Training cancelled by user"
+        else:
+            job["status"] = "cancelling"
+        job["updated_at"] = time.time()
         persist_train_job(job)
     terminate_process(process)
     add_job_log(job, "Cancel requested.")
@@ -4701,6 +4713,7 @@ def unified_job_snapshot(kind, job):
 
 
 def list_all_jobs(limit=50):
+    limit = max(1, int(limit or 50))
     jobs = []
     with TRAIN_LOCK:
         jobs.extend(unified_job_snapshot("training", job) for job in TRAIN_JOBS.values())
@@ -4709,7 +4722,14 @@ def list_all_jobs(limit=50):
     with SPLAT_LOCK:
         jobs.extend(unified_job_snapshot("splat", job) for job in SPLAT_JOBS.values())
     jobs.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or 0, reverse=True)
-    return jobs[: max(1, int(limit or 50))]
+    active = [job for job in jobs if job.get("status") in {"queued", "running", "cancelling"}]
+    history = [
+        job
+        for job in jobs
+        if job.get("status") not in {"queued", "running", "cancelling"}
+        and not (job.get("kind") == "training" and job.get("status") == "cancelled")
+    ]
+    return (active + history)[:limit]
 
 
 def find_unified_job(job_id):
@@ -4817,7 +4837,13 @@ def shutdown_active_jobs(reason="server shutdown"):
             if job.get("status") in {"done", "failed", "cancelled"}:
                 continue
             job["cancel_requested"] = True
-            job["status"] = "cancelling"
+            process = job.get("process")
+            if process is None or process.poll() is not None:
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+                job["error"] = job.get("error") or f"Training cancelled: {reason}"
+            else:
+                job["status"] = "cancelling"
             job["updated_at"] = time.time()
             persist_train_job(job)
     for job in training_jobs:
@@ -5001,6 +5027,8 @@ def is_retryable_3dgs_rasterizer_error(log_lines):
         "out of memory",
         "cublas_status_alloc_failed",
         "cudnn_status_alloc_failed",
+        "non-finite value",
+        "psnr mse is not finite",
     )
     return any(marker in text for marker in retryable_markers)
 
@@ -5079,8 +5107,6 @@ def run_psnr_job(job):
             ]
             if backend == "2dgs":
                 command.extend(["--two-dgs-dir", TWO_DGS_DIR])
-            if backend == "3dgs":
-                command.append("--safe-mode")
             return command
 
         last_error = None
