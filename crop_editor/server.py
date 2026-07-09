@@ -119,7 +119,7 @@ def conda_bat_path():
 
 
 def mesh_like_job_kind(job):
-    return job.get("kind") in {"mesh", "texture", "psnr"}
+    return job.get("kind") in {"mesh", "texture", "psnr", "glb", "colmap", "experiment_clone"}
 
 
 def safe_name(name):
@@ -314,19 +314,49 @@ def splat_transform_executable():
     raise FileNotFoundError("Missing splat-transform. Run npm install in crop_editor.")
 
 
-def run_splat_transform(input_path, output_path):
+def run_splat_transform(input_path, output_path, job=None):
     input_path = Path(input_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = [splat_transform_executable(), "-w", input_path, output_path]
-    result = subprocess.run(command, cwd=Path(__file__).resolve().parent, capture_output=True, text=True)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+    process = subprocess.Popen(
+        [str(part) for part in command],
+        cwd=str(Path(__file__).resolve().parent),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if job is not None:
+        with SPLAT_LOCK:
+            job["process"] = process
+            persist_splat_job(job)
+    stdout = ""
+    stderr = ""
+    try:
+        while True:
+            if job is not None and job.get("cancel_requested"):
+                terminate_process(process)
+                raise RuntimeError("Splat export cancelled by user")
+            try:
+                stdout, stderr = process.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        if job is not None:
+            with SPLAT_LOCK:
+                if job.get("process") is process:
+                    job["process"] = None
+                    persist_splat_job(job)
+    if process.returncode != 0:
+        detail = (stderr or stdout or "").strip()
         raise RuntimeError(f"splat-transform failed: {detail}")
     return output_path
 
 
-def export_splat_format(scene, iteration, fmt):
+def export_splat_format(scene, iteration, fmt, job=None):
     fmt = (fmt or "ply").lower()
     if fmt not in SPLAT_FORMATS:
         raise ValueError("Unsupported splat format")
@@ -336,7 +366,7 @@ def export_splat_format(scene, iteration, fmt):
     output = source.with_name(f"point_cloud.{fmt}")
     if output.exists() and output.stat().st_mtime >= source.stat().st_mtime:
         return output
-    return run_splat_transform(source, output)
+    return run_splat_transform(source, output, job=job)
 
 
 def import_splat_scene(upload_item, scene, overwrite=False):
@@ -652,6 +682,594 @@ def scene_related_jobs(scene):
                 jobs.append(unified_job_snapshot("splat", job))
     jobs.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or 0, reverse=True)
     return jobs[:20]
+
+
+def read_json_file(path, default=None):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return default if default is not None else {}
+
+
+def json_safe_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return [json_safe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): json_safe_value(item) for key, item in value.items()}
+    return str(value)
+
+
+def cfg_args_payload(scene):
+    try:
+        cfg = load_cfg_args(model_dir(scene))
+    except Exception:
+        return {}
+    return {key: json_safe_value(value) for key, value in vars(cfg).items() if not key.startswith("_")}
+
+
+def checkpoint_iteration_from_name(path):
+    matches = re.findall(r"(\d+)", Path(path).stem)
+    return int(matches[-1]) if matches else None
+
+
+def checkpoint_metadata_path(scene):
+    return model_dir(scene) / "experiment_checkpoints.json"
+
+
+def checkpoint_metadata(scene):
+    data = read_json_file(checkpoint_metadata_path(scene), {})
+    if not isinstance(data, dict):
+        data = {}
+    pinned = data.get("pinned")
+    if not isinstance(pinned, list):
+        pinned = []
+    return {
+        "best": data.get("best"),
+        "pinned": sorted({int(item) for item in pinned if str(item).isdigit()}),
+    }
+
+
+def write_checkpoint_metadata(scene, metadata):
+    payload = {
+        "best": metadata.get("best"),
+        "pinned": sorted({int(item) for item in metadata.get("pinned", [])}),
+        "updated_at": time.time(),
+    }
+    if payload["best"] is None:
+        payload.pop("best")
+    path = checkpoint_metadata_path(scene)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    return payload
+
+
+def mark_experiment_checkpoint(scene, iteration, mark, enabled=True):
+    scene = safe_name(scene)
+    iteration = int(iteration)
+    if mark not in {"best", "pinned"}:
+        raise ValueError("Unsupported checkpoint mark")
+    metadata = checkpoint_metadata(scene)
+    if mark == "best":
+        metadata["best"] = iteration if enabled else (None if metadata.get("best") == iteration else metadata.get("best"))
+    else:
+        pinned = set(metadata.get("pinned", []))
+        if enabled:
+            pinned.add(iteration)
+        else:
+            pinned.discard(iteration)
+        metadata["pinned"] = sorted(pinned)
+    write_checkpoint_metadata(scene, metadata)
+    return experiment_payload(scene)
+
+
+def delete_experiment_checkpoint(scene, iteration):
+    scene = safe_name(scene)
+    iteration = int(iteration)
+    deleted = []
+    for item in scene_checkpoints(scene):
+        if item["iteration"] != iteration or not item.get("checkpoint_path"):
+            continue
+        path = Path(item["checkpoint_path"])
+        if path.exists():
+            path.unlink()
+            deleted.append(str(path))
+    metadata = checkpoint_metadata(scene)
+    if metadata.get("best") == iteration:
+        metadata["best"] = None
+    pinned = set(metadata.get("pinned", []))
+    pinned.discard(iteration)
+    metadata["pinned"] = sorted(pinned)
+    write_checkpoint_metadata(scene, metadata)
+    return {"scene": scene, "iteration": iteration, "deleted": deleted, "payload": experiment_payload(scene)}
+
+
+def scene_checkpoints(scene):
+    scene = safe_name(scene)
+    model = model_dir(scene)
+    by_iteration = {}
+    marks = checkpoint_metadata(scene)
+    pinned = set(marks.get("pinned") or [])
+    best = marks.get("best")
+    pc_root = model / "point_cloud"
+    if pc_root.exists():
+        for child in pc_root.iterdir():
+            if not child.is_dir() or not child.name.startswith("iteration_"):
+                continue
+            try:
+                iteration = int(child.name.split("_", 1)[1])
+            except ValueError:
+                continue
+            point_cloud = child / "point_cloud.ply"
+            item = by_iteration.setdefault(iteration, {"iteration": iteration})
+            item["point_cloud_path"] = str(point_cloud)
+            item["point_cloud_exists"] = point_cloud.exists()
+            if point_cloud.exists():
+                item["point_cloud_size"] = point_cloud.stat().st_size
+                item["mtime"] = max(item.get("mtime") or 0, point_cloud.stat().st_mtime)
+    if model.exists():
+        for pattern in ("chkpnt*.pth", "checkpoint*.pth", "*.ckpt"):
+            for checkpoint in model.glob(pattern):
+                if not checkpoint.is_file():
+                    continue
+                iteration = checkpoint_iteration_from_name(checkpoint)
+                if iteration is None:
+                    continue
+                item = by_iteration.setdefault(iteration, {"iteration": iteration})
+                item["checkpoint_path"] = str(checkpoint)
+                item["checkpoint_exists"] = True
+                item["checkpoint_size"] = checkpoint.stat().st_size
+                item["mtime"] = max(item.get("mtime") or 0, checkpoint.stat().st_mtime)
+    checkpoints = []
+    for iteration, item in by_iteration.items():
+        checkpoints.append({
+            "iteration": iteration,
+            "label": f"Iteration {iteration}",
+            "loadable": bool(item.get("checkpoint_exists")),
+            "checkpoint_path": item.get("checkpoint_path"),
+            "checkpoint_size": item.get("checkpoint_size", 0),
+            "point_cloud_path": item.get("point_cloud_path"),
+            "point_cloud_exists": bool(item.get("point_cloud_exists")),
+            "point_cloud_size": item.get("point_cloud_size", 0),
+            "mtime": item.get("mtime"),
+            "best": iteration == best,
+            "pinned": iteration in pinned,
+        })
+    checkpoints.sort(key=lambda item: item["iteration"], reverse=True)
+    return checkpoints
+
+
+def checkpoint_for_iteration(scene, iteration):
+    iteration = int(iteration)
+    for item in scene_checkpoints(scene):
+        if item["iteration"] == iteration and item.get("checkpoint_path"):
+            path = Path(item["checkpoint_path"])
+            if path.exists():
+                return path
+    raise ValueError(f"No resumable checkpoint found for output/{safe_name(scene)} iteration {iteration}")
+
+
+def experiment_training_metadata(scene):
+    scene = safe_name(scene)
+    model = model_dir(scene)
+    scene_metadata = read_json_file(model / "scene.json", {})
+    backend_metadata = read_json_file(model / "training_backend.json", {})
+    training = scene_metadata.get("training") if isinstance(scene_metadata.get("training"), dict) else {}
+    return {
+        "backend": safe_training_backend(training.get("backend") or backend_metadata.get("backend") or scene_backend(scene)),
+        "quality": training.get("quality") or backend_metadata.get("quality") or "",
+        "options": json_safe_value(training.get("options") if isinstance(training.get("options"), dict) else {}),
+        "metadata": json_safe_value(backend_metadata),
+        "scene_metadata": json_safe_value(scene_metadata),
+    }
+
+
+def extract_training_curve_from_logs(logs, limit=500):
+    points = []
+    patterns = [
+        re.compile(r"(?P<iteration>\d+)\s*/\s*(?P<total>\d+).*?(?:Loss|loss)\s*[=:]\s*(?P<loss>[0-9.eE+-]+)"),
+        re.compile(r"(?:iter(?:ation)?\.?\s*)[:=]?\s*(?P<iteration>\d+).*?(?:Loss|loss)\s*[=:]\s*(?P<loss>[0-9.eE+-]+)", re.IGNORECASE),
+        re.compile(r"(?:Loss|loss)\s*[=:]\s*(?P<loss>[0-9.eE+-]+).*?(?:iter(?:ation)?\.?\s*)[:=]?\s*(?P<iteration>\d+)", re.IGNORECASE),
+    ]
+    for line in logs or []:
+        text = str(line)
+        for pattern in patterns:
+            match = pattern.search(text)
+            if not match:
+                continue
+            try:
+                point = {
+                    "iteration": int(match.group("iteration")),
+                    "loss": float(match.group("loss")),
+                }
+                if "total" in match.groupdict() and match.group("total"):
+                    point["total"] = int(match.group("total"))
+                points.append(point)
+            except Exception:
+                pass
+            break
+    return points[-int(limit):]
+
+
+def experiment_training_curve(scene):
+    scene = safe_name(scene)
+    logs = []
+    with TRAIN_LOCK:
+        jobs = [
+            job for job in TRAIN_JOBS.values()
+            if job.get("scene") == scene or job.get("output_scene") == scene
+        ]
+    jobs.sort(key=lambda item: item.get("created_at") or 0)
+    for job in jobs:
+        logs.extend(job.get("log") or [])
+    return extract_training_curve_from_logs(logs)
+
+
+def tensorboard_event_accumulator_factory():
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+        return EventAccumulator
+    except Exception:
+        return None
+
+
+def tensorboard_training_curves(scene, limit=1000):
+    scene = safe_name(scene)
+    model = model_dir(scene)
+    event_files = sorted(model.rglob("events.out.tfevents*")) if model.exists() else []
+    if not event_files:
+        return None
+    factory = tensorboard_event_accumulator_factory()
+    if factory is None:
+        return None
+    try:
+        accumulator = factory(str(model), size_guidance={"scalars": 0})
+        accumulator.Reload()
+        tags = accumulator.Tags().get("scalars", [])
+    except Exception:
+        return None
+    wanted = [
+        "train_loss_patches/total_loss",
+        "train_loss_patches/l1_loss",
+        "train_loss_patches/reg_loss",
+        "train_loss_patches/dist_loss",
+        "train_loss_patches/normal_loss",
+        "iter_time",
+        "total_points",
+    ]
+    wanted.extend(tag for tag in tags if "psnr" in tag.lower())
+    series = []
+    seen = set()
+    for tag in wanted:
+        if tag in seen or tag not in tags:
+            continue
+        seen.add(tag)
+        try:
+            events = accumulator.Scalars(tag)
+        except Exception:
+            continue
+        points = [
+            {
+                "iteration": int(event.step),
+                "value": float(event.value),
+                "wall_time": float(getattr(event, "wall_time", 0.0) or 0.0),
+            }
+            for event in events[-int(limit):]
+        ]
+        if points:
+            series.append({"tag": tag, "points": points})
+    if not series:
+        return None
+    return {
+        "source": "tensorboard",
+        "event_files": [str(path) for path in event_files[:20]],
+        "series": series,
+    }
+
+
+def primary_training_curve(curves, fallback):
+    if curves and curves.get("series"):
+        primary = next(
+            (series for series in curves["series"] if series.get("tag") == "train_loss_patches/total_loss"),
+            curves["series"][0],
+        )
+        return [
+            {
+                "iteration": point["iteration"],
+                "loss": point["value"],
+                "wall_time": point.get("wall_time"),
+            }
+            for point in primary.get("points", [])
+        ]
+    return fallback
+
+
+def experiment_payload(scene):
+    scene = safe_name(scene)
+    iteration = latest_iteration(scene)
+    if iteration is None:
+        raise ValueError(f"Experiment output not found: {scene}")
+    cfg_args = cfg_args_payload(scene)
+    training = experiment_training_metadata(scene)
+    source_path = cfg_args.get("source_path") or str(scene_source_path(scene))
+    log_curve = experiment_training_curve(scene)
+    curves = tensorboard_training_curves(scene) or {
+        "source": "job_logs" if log_curve else "none",
+        "series": [{"tag": "loss", "points": [{"iteration": point["iteration"], "value": point["loss"], "wall_time": point.get("wall_time")} for point in log_curve]}] if log_curve else [],
+    }
+    return {
+        "scene": scene,
+        "backend": scene_backend(scene, iteration),
+        "latest_iteration": iteration,
+        "output_dir": str(model_dir(scene)),
+        "source_path": source_path,
+        "checkpoints": scene_checkpoints(scene),
+        "training": training,
+        "cfg_args": cfg_args,
+        "curves": curves,
+        "curve": primary_training_curve(curves, log_curve),
+        "jobs": scene_related_jobs(scene),
+    }
+
+
+def flatten_experiment_params(payload):
+    flat = {
+        "backend": payload.get("backend"),
+        "latest_iteration": payload.get("latest_iteration"),
+        "source_path": payload.get("source_path"),
+    }
+    training = payload.get("training") or {}
+    flat["training.backend"] = training.get("backend")
+    flat["training.quality"] = training.get("quality")
+    for key, value in sorted((training.get("options") or {}).items()):
+        flat[f"training.options.{key}"] = json_safe_value(value)
+    for key, value in sorted((payload.get("cfg_args") or {}).items()):
+        if key in {"model_path", "source_path"}:
+            continue
+        flat[f"cfg_args.{key}"] = json_safe_value(value)
+    return flat
+
+
+def experiment_diff_payload(scene, compare):
+    left = experiment_payload(scene)
+    right = experiment_payload(compare)
+    left_flat = flatten_experiment_params(left)
+    right_flat = flatten_experiment_params(right)
+    changes = []
+    for key in sorted(set(left_flat) | set(right_flat)):
+        left_value = left_flat.get(key)
+        right_value = right_flat.get(key)
+        if left_value != right_value:
+            changes.append({"key": key, "left": left_value, "right": right_value})
+    return {
+        "scene": left["scene"],
+        "compare": right["scene"],
+        "changes": changes,
+    }
+
+
+def clone_experiment(scene, output_scene, overwrite=False):
+    scene = safe_name(scene)
+    output_scene = safe_name(output_scene)
+    if output_scene == scene:
+        raise ValueError("Clone output scene must be different")
+    src = model_dir(scene)
+    dst = model_dir(output_scene)
+    if not src.exists():
+        raise ValueError(f"Experiment output not found: {scene}")
+    if dst.exists() and any(dst.iterdir()):
+        if not overwrite:
+            raise ValueError(f"Output scene already exists: {output_scene}")
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+    metadata = read_json_file(dst / "scene.json", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["name"] = output_scene
+    metadata["cloned_from"] = scene
+    metadata["cloned_at"] = time.time()
+    with open(dst / "scene.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    return experiment_payload(output_scene)
+
+
+def output_child_path(scene):
+    path = model_dir(scene).resolve()
+    root = OUTPUT_DIR.resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Invalid output path") from exc
+    if path == root:
+        raise ValueError("Invalid output path")
+    return path
+
+
+def copy_file_cancelable(src, dst, job=None, chunk_size=8 * 1024 * 1024):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(src, "rb") as reader, open(dst, "wb") as writer:
+        while True:
+            if job is not None and job.get("cancel_requested"):
+                raise RuntimeError("Experiment clone cancelled by user")
+            chunk = reader.read(chunk_size)
+            if not chunk:
+                break
+            writer.write(chunk)
+            if job is not None:
+                job["copied_bytes"] = int(job.get("copied_bytes") or 0) + len(chunk)
+    shutil.copystat(src, dst, follow_symlinks=True)
+
+
+def copy_experiment_tree(src, dst, job=None):
+    src = Path(src)
+    dst = Path(dst)
+    files = [path for path in src.rglob("*") if path.is_file()]
+    if job is not None:
+        with MESH_LOCK:
+            job["total_files"] = len(files)
+            job["total_bytes"] = sum(path.stat().st_size for path in files)
+            job["copied_files"] = 0
+            job["copied_bytes"] = 0
+            job["updated_at"] = time.time()
+    for directory in [src, *[path for path in src.rglob("*") if path.is_dir()]]:
+        if job is not None and job.get("cancel_requested"):
+            raise RuntimeError("Experiment clone cancelled by user")
+        (dst / directory.relative_to(src)).mkdir(parents=True, exist_ok=True)
+    for path in files:
+        if job is not None and job.get("cancel_requested"):
+            raise RuntimeError("Experiment clone cancelled by user")
+        target = dst / path.relative_to(src)
+        copy_file_cancelable(path, target, job=job)
+        if job is not None:
+            with MESH_LOCK:
+                job["copied_files"] = int(job.get("copied_files") or 0) + 1
+                job["updated_at"] = time.time()
+    return len(files)
+
+
+def write_clone_metadata(scene, output_scene):
+    dst = model_dir(output_scene)
+    metadata = read_json_file(dst / "scene.json", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["name"] = output_scene
+    metadata["cloned_from"] = scene
+    metadata["cloned_at"] = time.time()
+    with open(dst / "scene.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+
+def run_experiment_clone_job(job):
+    created_dst = False
+    try:
+        set_job_stage(job, "running", "copy")
+        scene = safe_name(job["scene"])
+        output_scene = safe_name(job["output_scene"])
+        src = output_child_path(scene)
+        dst = output_child_path(output_scene)
+        if not src.exists():
+            raise ValueError(f"Experiment output not found: {scene}")
+        if output_scene == scene:
+            raise ValueError("Clone output scene must be different")
+        if dst.exists() and any(dst.iterdir()):
+            if not job.get("overwrite"):
+                raise ValueError(f"Output scene already exists: {output_scene}")
+            shutil.rmtree(dst)
+        add_job_log(job, f"Cloning output/{scene} to output/{output_scene}")
+        dst.mkdir(parents=True, exist_ok=True)
+        created_dst = True
+        copied_files = copy_experiment_tree(src, dst, job=job)
+        if job.get("cancel_requested"):
+            raise RuntimeError("Experiment clone cancelled by user")
+        write_clone_metadata(scene, output_scene)
+        iteration = latest_iteration(output_scene)
+        with MESH_LOCK:
+            job["status"] = "done"
+            job["stage"] = "done"
+            job["returncode"] = 0
+            job["updated_at"] = time.time()
+            job["iteration"] = iteration or 0
+            job["output_dir"] = str(dst)
+            job["copied_files"] = copied_files
+        add_job_log(job, f"Experiment clone complete: output/{output_scene}")
+    except Exception as exc:
+        with MESH_LOCK:
+            if job.get("cancel_requested"):
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+            else:
+                job["status"] = "failed"
+                job["stage"] = "failed"
+            job["error"] = str(exc)
+            job["returncode"] = 1
+            job["updated_at"] = time.time()
+        add_job_log(job, f"ERROR: {exc}")
+        if created_dst and job.get("cancel_requested"):
+            try:
+                dst = output_child_path(job["output_scene"])
+                if dst.exists():
+                    shutil.rmtree(dst)
+            except Exception:
+                pass
+
+
+def start_experiment_clone(scene, output_scene, overwrite=False):
+    scene = safe_name(scene)
+    output_scene = safe_name(output_scene)
+    iteration = latest_iteration(scene) or 0
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "kind": "experiment_clone",
+        "scene": scene,
+        "output_scene": output_scene,
+        "iteration": iteration,
+        "mode": "experiment",
+        "overwrite": bool(overwrite),
+        "status": "queued",
+        "stage": "queued",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "returncode": None,
+        "error": None,
+        "cancel_requested": False,
+        "process": None,
+        "output_dir": str(model_dir(output_scene)),
+        "output_mesh": None,
+        "download_url": None,
+        "texture": None,
+        "texture_download_url": None,
+        "alignment": None,
+        "log": [],
+    }
+    with MESH_LOCK:
+        MESH_JOBS[job_id] = job
+    thread = threading.Thread(target=run_experiment_clone_job, args=(job,), daemon=True)
+    thread.start()
+    return unified_job_snapshot("mesh", job)
+
+
+def resume_experiment_training(scene, checkpoint_iteration, output_scene=None, target_iterations=None, train_options=None):
+    scene = safe_name(scene)
+    output_scene = safe_name(output_scene or scene)
+    checkpoint_iteration = int(checkpoint_iteration)
+    checkpoint = checkpoint_for_iteration(scene, checkpoint_iteration)
+    payload = experiment_payload(scene)
+    backend = safe_training_backend(payload.get("backend") or "3dgs")
+    source_path = payload.get("source_path") or str(DATASETS_DIR / scene)
+    if not source_path:
+        raise ValueError("Experiment has no source_path in cfg_args; cannot resume training")
+    previous_options = (payload.get("training") or {}).get("options") or {}
+    previous_quality = (payload.get("training") or {}).get("quality") or "full"
+    if previous_quality not in {"quick", "full", "quality", "max_quality"}:
+        previous_quality = "full"
+    options = dict(previous_options)
+    if isinstance(train_options, dict):
+        options.update(train_options)
+    final_iterations = int(target_iterations or options.get("iterations") or max(checkpoint_iteration + 1000, 30000))
+    if final_iterations <= checkpoint_iteration:
+        raise ValueError("Target iterations must be greater than the selected checkpoint iteration")
+    options["iterations"] = final_iterations
+    job = start_training(
+        scene,
+        output_scene,
+        previous_quality,
+        run_convert=False,
+        overwrite=False,
+        backend=backend,
+        colmap_options={},
+        train_options=options,
+        allow_existing_output=output_scene == scene or model_dir(output_scene).exists(),
+        dataset_path=source_path,
+        resume_checkpoint=checkpoint,
+        resume_checkpoint_iteration=checkpoint_iteration,
+        resume_from_scene=scene,
+    )
+    return job
 
 
 def flatten_mesh_assets(mesh_payload):
@@ -3389,8 +4007,9 @@ def persist_train_job(job):
 
 
 def persist_splat_job(job):
-    if not job.get("id"):
-        return True
+    if not valid_splat_job_record(job):
+        job["_persist_error"] = "Incomplete splat export job record"
+        return False
     data = serializable_job(job)
     path = SPLAT_JOBS_DIR / f"{safe_filename(data['id'])}.json"
     result = atomic_write_json(path, data)
@@ -3399,6 +4018,10 @@ def persist_splat_job(job):
         return True
     job["_persist_error"] = result
     return False
+
+
+def valid_splat_job_record(job):
+    return all(job.get(key) not in (None, "") for key in ("id", "scene", "iteration", "format"))
 
 
 def load_persisted_train_jobs():
@@ -3431,6 +4054,8 @@ def load_persisted_splat_jobs():
     for path in SPLAT_JOBS_DIR.glob("*.json"):
         try:
             job = json.loads(path.read_text(encoding="utf-8"))
+            if not valid_splat_job_record(job):
+                continue
             job["process"] = None
             job.setdefault("kind", "splat_export")
             job.setdefault("log", [])
@@ -3460,6 +4085,10 @@ def job_snapshot(job):
         "updated_at": job["updated_at"],
         "returncode": job.get("returncode"),
         "error": job.get("error"),
+        "dataset_path": job.get("dataset_path"),
+        "resume_from_scene": job.get("resume_from_scene"),
+        "resume_checkpoint": job.get("resume_checkpoint"),
+        "resume_checkpoint_iteration": job.get("resume_checkpoint_iteration"),
         "log": job["log"][-240:],
         "cancel_requested": bool(job.get("cancel_requested")),
     }
@@ -4422,7 +5051,7 @@ def write_training_metadata(output, backend, quality=None, options=None):
             json.dump(scene_metadata, f, indent=2)
 
 
-def training_command(backend, dataset, output, options):
+def training_command(backend, dataset, output, options, start_checkpoint=None):
     backend = safe_training_backend(backend)
     iterations = options["iterations"]
     save_iterations = [str(value) for value in training_milestone_iterations(iterations)]
@@ -4452,6 +5081,8 @@ def training_command(backend, dataset, output, options):
         command.extend(["--densify_grad_threshold", f"{options['densify_grad_threshold']:.12g}"])
         command.extend(["--densification_interval", str(options["densification_interval"])])
         command.extend(["--densify_until_iter", str(options["densify_until_iter"])])
+        if start_checkpoint:
+            command.extend(["--start_checkpoint", str(start_checkpoint)])
         return command
 
     command = [
@@ -4495,6 +5126,8 @@ def training_command(backend, dataset, output, options):
             "--exposure_lr_delay_mult",
             "0.001",
         ])
+    if start_checkpoint:
+        command.extend(["--start_checkpoint", str(start_checkpoint)])
     return command
 
 
@@ -4509,7 +5142,7 @@ def run_training_job(job, run_convert, quality, overwrite):
             add_job_log(job, f"2DGS: {report['two_dgs_dir']}")
         add_job_log(job, f"COLMAP: {report['colmap']}")
         add_job_log(job, "OpenCV: OK")
-        dataset = DATASETS_DIR / job["scene"]
+        dataset = Path(job.get("dataset_path") or (DATASETS_DIR / job["scene"]))
         output = OUTPUT_DIR / job["output_scene"]
         images_dir = dataset / "images"
         if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
@@ -4566,7 +5199,10 @@ def run_training_job(job, run_convert, quality, overwrite):
                     "the guard caps densification and saves 7000/15000/final checkpoints "
                     "so long jobs remain recoverable.",
                 )
-        command = training_command(backend, dataset, output, options)
+        start_checkpoint = job.get("resume_checkpoint")
+        if start_checkpoint:
+            add_job_log(job, f"Resuming from checkpoint: {start_checkpoint}")
+        command = training_command(backend, dataset, output, options, start_checkpoint=start_checkpoint)
         set_job_stage(job, "running", "train")
         run_logged(job, command, TWO_DGS_DIR if backend == "2dgs" else GAUSSIAN_DIR, backend)
         write_training_metadata(output, backend, quality, options)
@@ -4593,7 +5229,92 @@ def run_training_job(job, run_convert, quality, overwrite):
         add_job_log(job, f"ERROR: {exc}")
 
 
-def start_training(scene, output_scene, quality="quick", run_convert=True, overwrite=False, backend="3dgs", colmap_options=None, train_options=None, allow_existing_output=False):
+def run_colmap_alignment_job(job):
+    try:
+        set_job_stage(job, "running", "colmap")
+        dataset = DATASETS_DIR / job["scene"]
+        images_dir = colmap_image_input_path(dataset)
+        if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
+            raise ValueError(f"No training images found: {images_dir}")
+        options = job.get("options") or colmap_options_from_payload({})
+        add_job_log(job, f"Dataset: {dataset}")
+        add_job_log(job, f"Images: {images_dir}")
+        run_colmap_convert(job, dataset, options)
+        with MESH_LOCK:
+            job["status"] = "done"
+            job["stage"] = "done"
+            job["returncode"] = 0
+            job["updated_at"] = time.time()
+            job["output_dir"] = str(dataset)
+            job["alignment"] = {
+                "has_alignment": dataset_has_alignment_source(dataset),
+                "cache_dir": str(alignment_cache_dir(dataset)),
+            }
+        add_job_log(job, f"COLMAP alignment complete: {dataset}")
+    except Exception as exc:
+        with MESH_LOCK:
+            if job.get("cancel_requested"):
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+            else:
+                job["status"] = "failed"
+                job["stage"] = "failed"
+            job["error"] = str(exc)
+            job["returncode"] = 1
+            job["updated_at"] = time.time()
+        add_job_log(job, f"ERROR: {exc}")
+
+
+def start_colmap_alignment(scene, options=None):
+    scene = safe_name(scene)
+    options = colmap_options_from_payload(options or {})
+    dataset = DATASETS_DIR / scene
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "kind": "colmap",
+        "scene": scene,
+        "iteration": 0,
+        "mode": "colmap",
+        "options": options,
+        "status": "queued",
+        "stage": "queued",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "returncode": None,
+        "error": None,
+        "cancel_requested": False,
+        "process": None,
+        "output_dir": str(dataset),
+        "output_mesh": None,
+        "download_url": None,
+        "texture": None,
+        "texture_download_url": None,
+        "alignment": None,
+        "log": [],
+    }
+    with MESH_LOCK:
+        MESH_JOBS[job_id] = job
+    thread = threading.Thread(target=run_colmap_alignment_job, args=(job,), daemon=True)
+    thread.start()
+    return mesh_job_snapshot(job)
+
+
+def start_training(
+    scene,
+    output_scene,
+    quality="quick",
+    run_convert=True,
+    overwrite=False,
+    backend="3dgs",
+    colmap_options=None,
+    train_options=None,
+    allow_existing_output=False,
+    dataset_path=None,
+    resume_checkpoint=None,
+    resume_checkpoint_iteration=None,
+    resume_from_scene=None,
+):
     scene = safe_name(scene)
     output_scene = safe_name(output_scene or scene)
     backend = safe_training_backend(backend)
@@ -4612,6 +5333,10 @@ def start_training(scene, output_scene, quality="quick", run_convert=True, overw
         "error": None,
         "cancel_requested": False,
         "allow_existing_output": bool(allow_existing_output),
+        "dataset_path": str(dataset_path) if dataset_path else None,
+        "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
+        "resume_checkpoint_iteration": int(resume_checkpoint_iteration) if resume_checkpoint_iteration is not None else None,
+        "resume_from_scene": safe_name(resume_from_scene) if resume_from_scene else None,
         "process": None,
         "colmap_options": colmap_options_from_payload(colmap_options or {}),
         "train_options": train_options if isinstance(train_options, dict) else {},
@@ -4684,7 +5409,7 @@ def run_splat_export_job(job):
         add_job_log(job, f"Scene: output/{job['scene']}")
         add_job_log(job, f"Iteration: {job['iteration']}")
         add_job_log(job, f"Format: {job['format'].upper()}")
-        path = export_splat_format(job["scene"], job["iteration"], job["format"])
+        path = export_splat_format(job["scene"], job["iteration"], job["format"], job=job)
         if job.get("cancel_requested"):
             raise RuntimeError("Splat export cancelled by user")
         with SPLAT_LOCK:
@@ -4757,8 +5482,10 @@ def cancel_splat_job(job_id):
         job["cancel_requested"] = True
         job["status"] = "cancelling"
         job["updated_at"] = time.time()
+        process = job.get("process")
         persist_splat_job(job)
-    add_job_log(job, "Cancel requested. Export will stop before download is published.")
+    terminated = terminate_process(process)
+    add_job_log(job, "Cancel requested. Terminating splat export process..." if terminated else "Cancel requested. Export will stop before download is published.")
     return splat_job_snapshot(job)
 
 
@@ -4775,8 +5502,27 @@ def unified_job_snapshot(kind, job):
             snapshot["title"] = "PSNR analysis"
             snapshot["output_dir"] = job.get("output_dir") or str(PSNR_REPORTS_DIR)
         else:
-            snapshot["title"] = "Texture bake" if snapshot.get("kind") == "texture" else "Mesh export"
-            snapshot["output_dir"] = str(model_dir(snapshot["scene"]) / "train" / f"ours_{int(snapshot['iteration'])}")
+            if snapshot.get("kind") == "texture":
+                snapshot["title"] = "Texture bake"
+                post = (job.get("options") or {}).get("post", True)
+                snapshot["output_dir"] = str(mesh_texture_paths(
+                    snapshot["scene"], snapshot["iteration"], snapshot.get("mode", "bounded"), post
+                )["dir"])
+            elif snapshot.get("kind") == "glb":
+                snapshot["title"] = "GLB export"
+                post = (job.get("options") or {}).get("post", True)
+                snapshot["output_dir"] = str(mesh_texture_paths(
+                    snapshot["scene"], snapshot["iteration"], snapshot.get("mode", "bounded"), post
+                )["dir"])
+            elif snapshot.get("kind") == "colmap":
+                snapshot["title"] = "COLMAP alignment"
+                snapshot["output_dir"] = job.get("output_dir") or str(DATASETS_DIR / snapshot["scene"])
+            elif snapshot.get("kind") == "experiment_clone":
+                snapshot["title"] = "Experiment clone"
+                snapshot["output_dir"] = job.get("output_dir") or str(model_dir(job.get("output_scene") or snapshot["scene"]))
+            else:
+                snapshot["title"] = "Mesh export"
+                snapshot["output_dir"] = str(model_dir(snapshot["scene"]) / "train" / f"ours_{int(snapshot['iteration'])}")
         snapshot["can_retry"] = snapshot["status"] in {"failed", "cancelled"}
         return snapshot
     if kind == "splat":
@@ -4840,6 +5586,12 @@ def retry_unified_job(job_id):
     if kind == "mesh":
         if job.get("kind") == "texture":
             return unified_job_snapshot("mesh", start_texture_bake(job["scene"], job["iteration"], job.get("options", {})))
+        if job.get("kind") == "glb":
+            return unified_job_snapshot("mesh", start_glb_export(job["scene"], job["iteration"], job.get("options", {})))
+        if job.get("kind") == "colmap":
+            return unified_job_snapshot("mesh", start_colmap_alignment(job["scene"], job.get("options", {})))
+        if job.get("kind") == "experiment_clone":
+            return unified_job_snapshot("mesh", start_experiment_clone(job["scene"], job.get("output_scene"), job.get("overwrite", False)))
         return unified_job_snapshot("mesh", start_mesh_export(job["scene"], job["iteration"], job.get("options", {})))
     return unified_job_snapshot(
         "training",
@@ -4874,6 +5626,7 @@ def mesh_job_snapshot(job):
         "id": job["id"],
         "kind": job.get("kind", "mesh"),
         "scene": job["scene"],
+        "output_scene": job.get("output_scene"),
         "iteration": job["iteration"],
         "mode": job["mode"],
         "status": job["status"],
@@ -4884,8 +5637,15 @@ def mesh_job_snapshot(job):
         "error": job.get("error"),
         "output_mesh": job.get("output_mesh"),
         "download_url": job.get("download_url"),
+        "glb_download_url": job.get("glb_download_url"),
         "texture": job.get("texture"),
         "texture_download_url": job.get("texture_download_url"),
+        "output_dir": job.get("output_dir"),
+        "alignment": job.get("alignment"),
+        "copied_files": job.get("copied_files"),
+        "total_files": job.get("total_files"),
+        "copied_bytes": job.get("copied_bytes"),
+        "total_bytes": job.get("total_bytes"),
         "log": job["log"][-240:],
         "cancel_requested": bool(job.get("cancel_requested")),
     }
@@ -4950,13 +5710,20 @@ def shutdown_active_jobs(reason="server shutdown"):
             if job.get("status") in {"done", "failed", "cancelled"}:
                 continue
             job["cancel_requested"] = True
-            job["status"] = "cancelled"
-            job["stage"] = "cancelled"
+            process = job.get("process")
+            if process is None or process.poll() is not None:
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+                job["error"] = job.get("error") or f"Splat export cancelled: {reason}"
+            else:
+                job["status"] = "cancelling"
             job["updated_at"] = time.time()
             persist_splat_job(job)
-            stopped["splat"] = stopped.get("splat", 0) + 1
     for job in splat_jobs:
         if job.get("cancel_requested"):
+            process = job.get("process")
+            if terminate_process(process):
+                stopped["splat"] = stopped.get("splat", 0) + 1
             add_job_log(job, f"Cancel requested: {reason}")
     return stopped
 
@@ -5413,6 +6180,104 @@ def run_texture_bake_job(job):
             job["returncode"] = 1
             job["updated_at"] = time.time()
         add_job_log(job, f"ERROR: {exc}")
+
+
+def glb_export_options(options=None):
+    options = options if isinstance(options, dict) else {}
+    return {
+        "mode": safe_mesh_mode(options.get("mode", "bounded")),
+        "post": safe_bool(options.get("post"), True),
+    }
+
+
+def run_glb_export_job(job):
+    try:
+        set_job_stage(job, "running", "glb")
+        options = job.get("options", {})
+        output_paths = mesh_texture_paths(job["scene"], job["iteration"], options["mode"], options["post"])
+        required = [output_paths["obj"], output_paths["mtl"], output_paths["png"]]
+        missing = [path.name for path in required if not path.exists()]
+        if missing:
+            raise FileNotFoundError(
+                "Textured mesh is incomplete. Bake or load a texture first. Missing: " + ", ".join(missing)
+            )
+        if job.get("cancel_requested"):
+            raise RuntimeError("GLB export cancelled by user")
+        add_job_log(job, f"Source OBJ: {output_paths['obj']}")
+        add_job_log(job, f"Source texture: {output_paths['png']}")
+        glb_path = export_textured_obj_to_glb(output_paths)
+        if job.get("cancel_requested"):
+            raise RuntimeError("GLB export cancelled by user")
+        result = {
+            "obj": str(output_paths["obj"]),
+            "mtl": str(output_paths["mtl"]),
+            "png": str(output_paths["png"]),
+            "zip": str(output_paths["zip"]) if output_paths["zip"].exists() else None,
+            "glb": str(glb_path),
+        }
+        with MESH_LOCK:
+            job["status"] = "done"
+            job["stage"] = "done"
+            job["returncode"] = 0
+            job["updated_at"] = time.time()
+            job["texture"] = result
+            job["download_url"] = mesh_texture_file_url(
+                job["scene"], job["iteration"], options["mode"], "glb", options["post"]
+            )
+            job["texture_download_url"] = (
+                mesh_texture_file_url(job["scene"], job["iteration"], options["mode"], "zip", options["post"])
+                if output_paths["zip"].exists()
+                else None
+            )
+            job["glb_download_url"] = job["download_url"]
+        add_job_log(job, f"GLB export complete: {glb_path}")
+    except Exception as exc:
+        with MESH_LOCK:
+            if job.get("cancel_requested"):
+                job["status"] = "cancelled"
+                job["stage"] = "cancelled"
+            else:
+                job["status"] = "failed"
+                job["stage"] = "failed"
+            job["error"] = str(exc)
+            job["returncode"] = 1
+            job["updated_at"] = time.time()
+        add_job_log(job, f"ERROR: {exc}")
+
+
+def start_glb_export(scene, iteration, options=None):
+    scene = safe_name(scene)
+    iteration = int(iteration or latest_iteration(scene))
+    options = glb_export_options(options)
+    output_paths = mesh_texture_paths(scene, iteration, options["mode"], options["post"])
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "kind": "glb",
+        "scene": scene,
+        "iteration": iteration,
+        "mode": options["mode"],
+        "options": options,
+        "status": "queued",
+        "stage": "queued",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "returncode": None,
+        "error": None,
+        "cancel_requested": False,
+        "process": None,
+        "output_mesh": str(output_paths["obj"]),
+        "download_url": None,
+        "glb_download_url": None,
+        "texture": None,
+        "texture_download_url": None,
+        "log": [],
+    }
+    with MESH_LOCK:
+        MESH_JOBS[job_id] = job
+    thread = threading.Thread(target=run_glb_export_job, args=(job,), daemon=True)
+    thread.start()
+    return mesh_job_snapshot(job)
 
 
 def start_texture_bake(scene, iteration, options=None):
@@ -5952,6 +6817,9 @@ class Handler(BaseHTTPRequestHandler):
                         "job_center": True,
                         "asset_manager": True,
                         "splat_export_jobs": True,
+                        "glb_export_jobs": True,
+                        "colmap_jobs": True,
+                        "experiment_manager": True,
                         "psnr_analysis": True,
                     },
                 })
@@ -5964,6 +6832,15 @@ class Handler(BaseHTTPRequestHandler):
                 scene = safe_name(qs.get("scene", [""])[0])
                 iteration = int(qs.get("iteration", [latest_iteration(scene)])[0])
                 return self.send_json(scene_asset_payload(scene, iteration))
+            if parsed.path == "/api/experiments":
+                qs = parse_qs(parsed.query)
+                scene = safe_name(qs.get("scene", [""])[0])
+                return self.send_json(experiment_payload(scene))
+            if parsed.path == "/api/experiments/diff":
+                qs = parse_qs(parsed.query)
+                scene = safe_name(qs.get("scene", [""])[0])
+                compare = safe_name(qs.get("compare", [""])[0])
+                return self.send_json(experiment_diff_payload(scene, compare))
             if parsed.path == "/api/assets/file":
                 qs = parse_qs(parsed.query)
                 scene = safe_name(qs.get("scene", [""])[0])
@@ -6185,6 +7062,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/mesh/cancel",
                 "/api/mesh/trimmed/save",
                 "/api/mesh/texture/start",
+                "/api/mesh/glb/start",
+                "/api/colmap/start",
                 "/api/psnr/start",
                 "/api/splat/export/start",
                 "/api/splat/export/cancel",
@@ -6193,6 +7072,10 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/jobs/open-output",
                 "/api/assets/open-dir",
                 "/api/assets/open-psnr",
+                "/api/experiments/clone",
+                "/api/experiments/resume",
+                "/api/experiments/checkpoint-mark",
+                "/api/experiments/checkpoint-delete",
             ):
                 return self.send_json({"error": "Not found"}, 404)
             length = int(self.headers.get("Content-Length", "0"))
@@ -6209,6 +7092,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(open_asset_dir(data["scene"], data.get("target", "output")))
             if parsed_path == "/api/assets/open-psnr":
                 return self.send_json(open_psnr_report_dir(data["scene"], data["run"]))
+            if parsed_path == "/api/experiments/clone":
+                return self.send_json(start_experiment_clone(
+                    data["scene"],
+                    data["output_scene"],
+                    bool(data.get("overwrite", False)),
+                ))
+            if parsed_path == "/api/experiments/resume":
+                return self.send_json(resume_experiment_training(
+                    data["scene"],
+                    int(data["checkpoint_iteration"]),
+                    data.get("output_scene") or data["scene"],
+                    data.get("target_iterations"),
+                    data.get("train_options", {}),
+                ))
+            if parsed_path == "/api/experiments/checkpoint-mark":
+                return self.send_json(mark_experiment_checkpoint(
+                    data["scene"],
+                    int(data["iteration"]),
+                    data.get("mark", "pinned"),
+                    bool(data.get("enabled", True)),
+                ))
+            if parsed_path == "/api/experiments/checkpoint-delete":
+                return self.send_json(delete_experiment_checkpoint(
+                    data["scene"],
+                    int(data["iteration"]),
+                ))
             if parsed_path == "/api/train/cancel":
                 return self.send_json(cancel_training(data["id"]))
             if parsed_path == "/api/mesh/cancel":
@@ -6243,6 +7152,19 @@ class Handler(BaseHTTPRequestHandler):
                     data["scene"],
                     int(data.get("iteration") or latest_iteration(data["scene"])),
                     data.get("options", {}),
+                )
+                return self.send_json(job)
+            if parsed_path == "/api/mesh/glb/start":
+                job = start_glb_export(
+                    data["scene"],
+                    int(data.get("iteration") or latest_iteration(data["scene"])),
+                    data.get("options", {}),
+                )
+                return self.send_json(job)
+            if parsed_path == "/api/colmap/start":
+                job = start_colmap_alignment(
+                    data["scene"],
+                    data.get("options", data.get("colmap", {})),
                 )
                 return self.send_json(job)
             if parsed_path == "/api/psnr/start":

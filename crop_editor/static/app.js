@@ -32,6 +32,17 @@ import {
   meshModeUsesSugar,
 } from "./mesh-mode-capabilities.mjs?v=20260629_gs2mesh_texture";
 import { sugarOptionsFromPreset } from "./sugar-options.mjs?v=20260625_sugar_quality_ui";
+import {
+  collectPickingIds,
+  deviceReadRect,
+  encodePickingId,
+  pickingRenderKey,
+  pickingBoundsForBrush,
+  pickingBoundsForPolygon,
+  pickingBoundsForRect,
+  pointInPickingPolygon,
+  shouldSampleBrushPicking,
+} from "./selection-picking.mjs";
 
 const MESH_PREVIEW_SIZE_THRESHOLD = 80 * 1024 * 1024;
 const TEXTURED_OBJ_INLINE_LOAD_LIMIT = 256 * 1024 * 1024;
@@ -52,6 +63,7 @@ const outputInput = document.getElementById("outputScene");
 const visibleSelectionToggle = document.getElementById("visibleSelection");
 const splatImportFileInput = document.getElementById("splatImportFile");
 const openAssetManagerButton = document.getElementById("openAssetManager");
+const openExperimentManagerButton = document.getElementById("openExperimentManager");
 const downloadSpzButton = document.getElementById("downloadSpz");
 const downloadSogButton = document.getElementById("downloadSog");
 const trainSceneInput = document.getElementById("trainScene");
@@ -100,9 +112,13 @@ const openJobCenterButton = document.getElementById("openJobCenter");
 const assetManagerPanel = document.getElementById("assetManagerPanel");
 const assetManagerSummary = document.getElementById("assetManagerSummary");
 const assetManagerList = document.getElementById("assetManagerList");
+const experimentManagerPanel = document.getElementById("experimentManagerPanel");
+const experimentManagerSummary = document.getElementById("experimentManagerSummary");
+const experimentManagerList = document.getElementById("experimentManagerList");
 const importOnlyButton = document.getElementById("importOnly");
 const startTrainButton = document.getElementById("startTrain");
 const trainExistingButton = document.getElementById("trainExisting");
+const runColmapButton = document.getElementById("runColmap");
 const cancelTrainButton = document.getElementById("cancelTrain");
 const clearTrainInputButton = document.getElementById("clearTrainInput");
 const meshModeSelect = document.getElementById("meshMode");
@@ -245,6 +261,14 @@ const I18N = {
     "button.save": "Save",
     "button.importSplat": "Import Splat",
     "button.assetManager": "Assets",
+    "button.experimentManager": "Experiments",
+    "button.cloneExperiment": "Clone",
+    "button.resumeCheckpoint": "Resume",
+    "button.compareExperiment": "Compare",
+    "button.markBest": "Best",
+    "button.pinCheckpoint": "Pin",
+    "button.unpinCheckpoint": "Unpin",
+    "button.deleteCheckpoint": "Delete CKPT",
     "button.downloadSpz": "Download SPZ",
     "button.downloadSog": "Download SOG",
     "button.exportAsset": "Export",
@@ -273,6 +297,7 @@ const I18N = {
     "button.importOnly": "Import Only",
     "button.importTrain": "Import + Train",
     "button.trainExisting": "Train Existing",
+    "button.runColmap": "Run COLMAP",
     "button.cancel": "Cancel",
     "button.refresh": "Refresh",
     "button.close": "Close",
@@ -316,12 +341,15 @@ const I18N = {
     "panel.importProgress": "Import Progress",
     "panel.jobCenter": "Job Center",
     "panel.assetManager": "Asset Manager",
+    "panel.experimentManager": "Experiment Manager",
     "status.loadingScenes": "Loading scenes...",
     "status.noInput": "No input selected",
     "status.inputSelected": "input selected",
     "status.selectScene": "Select a scene and press Load.",
     "status.noJobs": "No jobs yet.",
     "status.noAssets": "No assets found.",
+    "status.noCheckpoints": "No checkpoints found.",
+    "status.noDiff": "No parameter differences.",
     "status.noModels": "No trained models found under output/."
   },
   zh: {
@@ -419,6 +447,14 @@ const I18N = {
     "button.save": "保存",
     "button.importSplat": "导入 Splat",
     "button.assetManager": "资产",
+    "button.experimentManager": "实验",
+    "button.cloneExperiment": "复制实验",
+    "button.resumeCheckpoint": "继续训练",
+    "button.compareExperiment": "对比",
+    "button.markBest": "设为最佳",
+    "button.pinCheckpoint": "固定",
+    "button.unpinCheckpoint": "取消固定",
+    "button.deleteCheckpoint": "删除CKPT",
     "button.downloadSpz": "下载 SPZ",
     "button.downloadSog": "下载 SOG",
     "button.exportAsset": "导出",
@@ -447,6 +483,7 @@ const I18N = {
     "button.importOnly": "仅导入",
     "button.importTrain": "导入并训练",
     "button.trainExisting": "训练已有数据",
+    "button.runColmap": "运行 COLMAP",
     "button.cancel": "取消",
     "button.refresh": "刷新",
     "button.close": "关闭",
@@ -490,12 +527,15 @@ const I18N = {
     "panel.importProgress": "导入/抽帧进度",
     "panel.jobCenter": "任务中心",
     "panel.assetManager": "资产管理",
+    "panel.experimentManager": "实验管理",
     "status.loadingScenes": "正在加载场景...",
     "status.noInput": "未选择输入",
     "status.inputSelected": "个输入已选择",
     "status.selectScene": "选择场景后点击加载。",
     "status.noJobs": "暂无任务。",
     "status.noAssets": "没有找到资产。",
+    "status.noCheckpoints": "没有找到 checkpoint。",
+    "status.noDiff": "参数没有差异。",
     "status.noModels": "output/ 下没有找到训练模型。"
   },
   ja: {
@@ -593,6 +633,14 @@ const I18N = {
     "button.save": "保存",
     "button.importSplat": "Splat 読込",
     "button.assetManager": "アセット",
+    "button.experimentManager": "実験",
+    "button.cloneExperiment": "複製",
+    "button.resumeCheckpoint": "再開",
+    "button.compareExperiment": "比較",
+    "button.markBest": "Best",
+    "button.pinCheckpoint": "固定",
+    "button.unpinCheckpoint": "固定解除",
+    "button.deleteCheckpoint": "CKPT削除",
     "button.downloadSpz": "SPZ 保存",
     "button.downloadSog": "SOG 保存",
     "button.exportAsset": "出力",
@@ -621,6 +669,7 @@ const I18N = {
     "button.importOnly": "インポートのみ",
     "button.importTrain": "インポート+学習",
     "button.trainExisting": "既存データ学習",
+    "button.runColmap": "COLMAP実行",
     "button.cancel": "中止",
     "button.refresh": "更新",
     "button.close": "閉じる",
@@ -664,12 +713,15 @@ const I18N = {
     "panel.importProgress": "インポート進捗",
     "panel.jobCenter": "ジョブセンター",
     "panel.assetManager": "アセット管理",
+    "panel.experimentManager": "実験管理",
     "status.loadingScenes": "シーンを読み込み中...",
     "status.noInput": "入力未選択",
     "status.inputSelected": "件の入力を選択済み",
     "status.selectScene": "シーンを選択して読込を押してください。",
     "status.noJobs": "ジョブはありません。",
     "status.noAssets": "アセットがありません。",
+    "status.noCheckpoints": "checkpoint がありません。",
+    "status.noDiff": "パラメータ差分はありません。",
     "status.noModels": "output/ に学習済みモデルが見つかりません。"
   }
 };
@@ -725,7 +777,7 @@ let currentLanguage = localStorage.getItem("cropEditorLanguage") || "en";
 let uiScaleMode = normalizeUiScaleMode(localStorage.getItem(UI_SCALE_STORAGE_KEY) || "auto");
 let currentUiScale = 1;
 
-let renderer, scene, centerGizmoScene, camera, controls, pointCloud, splatCloud, cameraGroup, selectionPoints, meshObject, meshSelectionPoints, centerGizmo;
+let renderer, scene, centerGizmoScene, pickingScene, camera, controls, pointCloud, splatCloud, pickingCloud, pickingTarget, cameraGroup, selectionPoints, meshObject, meshSelectionPoints, centerGizmo;
 let focusRaycaster = null;
 let realSplatViewer = null;
 let realSplatSceneIndex = null;
@@ -756,6 +808,11 @@ let alignedDatasets = [];
 let currentBounds = null;
 let hasUnsavedEdits = false;
 let editRevision = 0;
+let pickingRevision = -1;
+let pickingTargetKey = "";
+let pickingRenderCacheKey = "";
+let lastBrushPickingSample = null;
+const pickingStats = { renders: 0, cacheHits: 0, readbacks: 0, brushSkips: 0 };
 let trainPollTimer = null;
 let jobCenterPollTimer = null;
 let trainMaskFiles = [];
@@ -1100,6 +1157,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   scene = new THREE.Scene();
   centerGizmoScene = new THREE.Scene();
+  pickingScene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
   camera = new THREE.PerspectiveCamera(60, 1, 0.01, 10000);
   camera.position.set(0, -4, 2);
@@ -1162,6 +1220,7 @@ function initUi() {
   document.getElementById("save").onclick = saveModel;
   splatImportFileInput.onchange = importSplatFile;
   openAssetManagerButton.onclick = showAssetManager;
+  if (openExperimentManagerButton) openExperimentManagerButton.onclick = showExperimentManager;
   downloadSpzButton.onclick = () => downloadSplatFormat("spz");
   downloadSogButton.onclick = () => downloadSplatFormat("sog");
   meshModeSelect.onchange = () => {
@@ -1187,6 +1246,7 @@ function initUi() {
   importOnlyButton.onclick = importOnly;
   startTrainButton.onclick = () => importAndStartTraining(true);
   trainExistingButton.onclick = () => importAndStartTraining(false);
+  if (runColmapButton) runColmapButton.onclick = startColmapAlignment;
   cancelTrainButton.onclick = cancelActiveTraining;
   exportMeshButton.onclick = startMeshExport;
   loadMeshButton.onclick = loadCurrentMesh;
@@ -1236,10 +1296,21 @@ function initUi() {
     assetManagerPanel.hidden = true;
   };
   document.getElementById("refreshAssetManager").onclick = refreshAssetManager;
+  if (document.getElementById("closeExperimentManager")) {
+    document.getElementById("closeExperimentManager").onclick = () => {
+      experimentManagerPanel.hidden = true;
+    };
+  }
+  if (document.getElementById("refreshExperimentManager")) {
+    document.getElementById("refreshExperimentManager").onclick = refreshExperimentManager;
+  }
   makePanelDraggable(mediaPanel, document.getElementById("mediaPanelHeader"), { storageKey: "cropEditor.mediaPanel.position" });
   makePanelDraggable(trainPanel, document.getElementById("trainPanelHeader"), { storageKey: "cropEditor.trainPanel.position" });
   makePanelDraggable(jobCenterPanel, document.getElementById("jobCenterHeader"), { storageKey: "cropEditor.jobCenterPanel.position" });
   makePanelDraggable(assetManagerPanel, document.getElementById("assetManagerHeader"), { storageKey: "cropEditor.assetManagerPanel.position" });
+  if (experimentManagerPanel) {
+    makePanelDraggable(experimentManagerPanel, document.getElementById("experimentManagerHeader"), { storageKey: "cropEditor.experimentManagerPanel.position" });
+  }
   makePanelDraggable(importProgressPanel, document.getElementById("importProgressHeader"), { storageKey: "cropEditor.importProgressPanel.position" });
   trainFilesInput.onchange = () => appendTrainingInputFiles(trainFilesInput);
   trainFolderInput.onchange = () => appendTrainingInputFiles(trainFolderInput);
@@ -1856,8 +1927,10 @@ function writeTrainingLog(job) {
 function writeMeshLog(job) {
   showTrainingLog();
   const isTexture = job.kind === "texture";
+  const isGlb = job.kind === "glb";
+  const isColmap = job.kind === "colmap";
   const lines = [
-    `${isTexture ? "Texture Job" : "Mesh Job"}: ${job.id}`,
+    `${isColmap ? "COLMAP Job" : (isGlb ? "GLB Job" : (isTexture ? "Texture Job" : "Mesh Job"))}: ${job.id}`,
     `Scene: output/${job.scene}`,
     `Iteration: ${job.iteration}`,
     `Mode: ${job.mode}`,
@@ -1892,6 +1965,9 @@ function jobIsActive(job) {
 function jobKindLabel(job) {
   if (job.kind === "training") return `${(job.backend || "3dgs").toUpperCase()} training`;
   if (job.kind === "texture") return "Texture bake";
+  if (job.kind === "glb") return "GLB export";
+  if (job.kind === "colmap") return "COLMAP alignment";
+  if (job.kind === "experiment_clone") return "Experiment clone";
   if (job.kind === "mesh") return `${job.mode || "mesh"} mesh export`;
   if (job.kind === "splat_export") return `${(job.format || "splat").toUpperCase()} export`;
   return job.title || job.kind || "Job";
@@ -1899,6 +1975,7 @@ function jobKindLabel(job) {
 
 function jobSceneLabel(job) {
   if (job.kind === "training") return `${job.scene} -> ${job.output_scene}`;
+  if (job.kind === "experiment_clone") return `${job.scene} -> ${job.output_scene}`;
   const iteration = Number.isFinite(Number(job.iteration)) ? ` @ ${job.iteration}` : "";
   return `${job.scene || "scene"}${iteration}`;
 }
@@ -1909,12 +1986,22 @@ function formatJobTime(value) {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
+function jobProgressText(job) {
+  if (job.kind !== "experiment_clone" || !job.total_files) return "";
+  const files = `${Number(job.copied_files || 0).toLocaleString()}/${Number(job.total_files || 0).toLocaleString()} files`;
+  if (job.total_bytes) {
+    return `${files}, ${formatByteSize(job.copied_bytes || 0)}/${formatByteSize(job.total_bytes)}`;
+  }
+  return files;
+}
+
 function writeUnifiedJobLog(job) {
   showTrainingLog();
   const lines = [
     `${jobKindLabel(job)}: ${job.id}`,
     `Scene: ${jobSceneLabel(job)}`,
     `Status: ${job.status} / ${job.stage}`,
+    jobProgressText(job) ? `Progress: ${jobProgressText(job)}` : "",
     job.output_dir ? `Output: ${job.output_dir}` : "",
     job.output_path ? `File: ${job.output_path}` : "",
     job.output_mesh ? `Mesh: ${job.output_mesh}` : "",
@@ -1959,7 +2046,7 @@ function renderJobCenterJobs(jobs) {
     title.textContent = jobKindLabel(job);
     const meta = document.createElement("div");
     meta.className = "job-meta";
-    meta.textContent = `${jobSceneLabel(job)} | ${formatJobTime(job.updated_at || job.created_at)}`;
+    meta.textContent = [jobSceneLabel(job), jobProgressText(job), formatJobTime(job.updated_at || job.created_at)].filter(Boolean).join(" | ");
     titleWrap.append(title, meta);
     const status = document.createElement("div");
     status.className = "job-status";
@@ -2262,13 +2349,13 @@ async function refreshAssetManager() {
   }
 }
 
-async function openAssetDir(target) {
-  if (!currentScene) return;
+async function openAssetDir(target, scene = currentScene) {
+  if (!scene) return;
   try {
     const res = await fetch(apiPath("/api/assets/open-dir"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scene: currentScene, target }),
+      body: JSON.stringify({ scene, target }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Open directory failed");
@@ -2294,6 +2381,409 @@ async function openPsnrReport(run) {
   }
 }
 
+function experimentSceneName() {
+  return currentScene || sceneSelect.value;
+}
+
+function showExperimentManager() {
+  if (!experimentManagerPanel) return;
+  experimentManagerPanel.hidden = false;
+  refreshExperimentManager();
+}
+
+function experimentValueText(value) {
+  if (value === undefined || value === null || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function renderExperimentParamGroup(titleText, params, limit = 18) {
+  const section = document.createElement("section");
+  section.className = "asset-group";
+  const title = document.createElement("div");
+  title.className = "asset-group-title";
+  title.textContent = titleText;
+  section.appendChild(title);
+  const entries = Object.entries(params || {}).slice(0, limit);
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "asset-empty";
+    empty.textContent = "-";
+    section.appendChild(empty);
+    return section;
+  }
+  for (const [key, value] of entries) {
+    const row = document.createElement("div");
+    row.className = "asset-row exists";
+    const info = document.createElement("div");
+    info.className = "asset-info";
+    const name = document.createElement("div");
+    name.className = "asset-name";
+    name.textContent = key;
+    const meta = document.createElement("div");
+    meta.className = "asset-meta";
+    meta.textContent = experimentValueText(value);
+    info.append(name, meta);
+    row.appendChild(info);
+    section.appendChild(row);
+  }
+  return section;
+}
+
+function renderCheckpointRow(checkpoint, data) {
+  const row = document.createElement("div");
+  row.className = `asset-row ${checkpoint.loadable ? "exists" : "missing"}`;
+  const info = document.createElement("div");
+  info.className = "asset-info";
+  const name = document.createElement("div");
+  name.className = "asset-name";
+  const badges = [checkpoint.best ? "BEST" : "", checkpoint.pinned ? "PINNED" : ""].filter(Boolean);
+  name.textContent = `${checkpoint.label || `Iteration ${checkpoint.iteration}`}${badges.length ? ` [${badges.join(", ")}]` : ""}`;
+  const meta = document.createElement("div");
+  meta.className = "asset-meta";
+  const parts = [];
+  if (checkpoint.checkpoint_size) parts.push(`checkpoint ${formatByteSize(checkpoint.checkpoint_size)}`);
+  if (checkpoint.point_cloud_size) parts.push(`ply ${formatByteSize(checkpoint.point_cloud_size)}`);
+  if (checkpoint.mtime) parts.push(formatJobTime(checkpoint.mtime));
+  meta.textContent = parts.join(" | ") || (checkpoint.loadable ? "checkpoint" : "point cloud only");
+  const path = document.createElement("div");
+  path.className = "asset-path";
+  path.textContent = checkpoint.checkpoint_path || checkpoint.point_cloud_path || "";
+  info.append(name, meta, path);
+  const actions = document.createElement("div");
+  actions.className = "asset-actions";
+  const options = data.training?.options || {};
+  const defaultTarget = Math.max(Number(options.iterations || 0), Number(checkpoint.iteration || 0) + 1000, 30000);
+  const resumeTarget = document.createElement("input");
+  resumeTarget.className = "experiment-small-input";
+  resumeTarget.type = "number";
+  resumeTarget.min = String(Number(checkpoint.iteration || 0) + 1);
+  resumeTarget.step = "1000";
+  resumeTarget.value = String(defaultTarget);
+  resumeTarget.title = currentLanguage === "zh" ? "续训目标迭代数" : currentLanguage === "ja" ? "再開後の目標反復数" : "Target iterations";
+  const resumeOutput = document.createElement("input");
+  resumeOutput.className = "experiment-name-input";
+  resumeOutput.value = `${data.scene}_resume_${checkpoint.iteration}`;
+  resumeOutput.title = currentLanguage === "zh" ? "续训输出实验名" : currentLanguage === "ja" ? "再開出力の実験名" : "Resume output experiment";
+  actions.append(resumeTarget, resumeOutput);
+  actions.appendChild(makeJobButton("button.resumeCheckpoint", () => {
+    resumeExperimentCheckpoint(data, checkpoint, resumeOutput.value.trim(), Number(resumeTarget.value));
+  }, !checkpoint.loadable));
+  actions.appendChild(makeJobButton("button.markBest", () => markExperimentCheckpoint(data.scene, checkpoint.iteration, "best", true), checkpoint.best));
+  actions.appendChild(makeJobButton(checkpoint.pinned ? "button.unpinCheckpoint" : "button.pinCheckpoint", () => {
+    markExperimentCheckpoint(data.scene, checkpoint.iteration, "pinned", !checkpoint.pinned);
+  }));
+  actions.appendChild(makeJobButton("button.deleteCheckpoint", (event) => deleteExperimentCheckpoint(data.scene, checkpoint.iteration, event.currentTarget), !checkpoint.loadable));
+  row.append(info, actions);
+  return row;
+}
+
+function renderCheckpointGroup(data) {
+  const section = document.createElement("section");
+  section.className = "asset-group";
+  const checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : [];
+  const title = document.createElement("div");
+  title.className = "asset-group-title";
+  title.textContent = `Checkpoints (${checkpoints.length})`;
+  section.appendChild(title);
+  if (!checkpoints.length) {
+    const empty = document.createElement("div");
+    empty.className = "asset-empty";
+    empty.textContent = t("status.noCheckpoints");
+    section.appendChild(empty);
+    return section;
+  }
+  for (const checkpoint of checkpoints) {
+    section.appendChild(renderCheckpointRow(checkpoint, data));
+  }
+  return section;
+}
+
+function renderCurveSummary(data) {
+  const section = document.createElement("details");
+  section.className = "asset-group";
+  const curve = Array.isArray(data.curve) ? data.curve : [];
+  const curves = data.curves || {};
+  const series = Array.isArray(curves.series) ? curves.series : [];
+  const title = document.createElement("summary");
+  title.className = "asset-group-title";
+  const pointCount = series.reduce((sum, item) => sum + (Array.isArray(item.points) ? item.points.length : 0), 0);
+  title.textContent = `Training Curves (${curves.source || "none"}, ${pointCount || curve.length} points)`;
+  section.appendChild(title);
+  if (!curve.length && !series.length) {
+    const empty = document.createElement("div");
+    empty.className = "asset-empty";
+    empty.textContent = "No TensorBoard or parsed log curve points.";
+    section.appendChild(empty);
+    return section;
+  }
+  for (const item of series.slice(0, 8)) {
+    const points = Array.isArray(item.points) ? item.points : [];
+    const latest = points[points.length - 1];
+    const row = document.createElement("div");
+    row.className = "asset-row exists";
+    const info = document.createElement("div");
+    info.className = "asset-info";
+    const name = document.createElement("div");
+    name.className = "asset-name";
+    name.textContent = item.tag || "curve";
+    const meta = document.createElement("div");
+    meta.className = "asset-meta";
+    meta.textContent = latest
+      ? `${points.length.toLocaleString()} points | latest iter ${latest.iteration}: ${Number(latest.value).toPrecision(6)}`
+      : "0 points";
+    info.append(name, meta);
+    row.appendChild(info);
+    section.appendChild(row);
+  }
+  if (curve.length) {
+    const recent = document.createElement("div");
+    recent.className = "asset-group-title";
+    recent.textContent = "Recent Loss Points";
+    section.appendChild(recent);
+  }
+  for (const point of curve.slice(-6).reverse()) {
+    const row = document.createElement("div");
+    row.className = "asset-row exists";
+    const info = document.createElement("div");
+    info.className = "asset-info";
+    const name = document.createElement("div");
+    name.className = "asset-name";
+    name.textContent = `Iteration ${point.iteration}`;
+    const meta = document.createElement("div");
+    meta.className = "asset-meta";
+    meta.textContent = `loss ${Number(point.loss).toPrecision(6)}${point.total ? ` / ${point.total}` : ""}`;
+    info.append(name, meta);
+    row.appendChild(info);
+    section.appendChild(row);
+  }
+  return section;
+}
+
+function renderExperimentDiffRows(diff) {
+  const wrap = document.createElement("div");
+  wrap.className = "experiment-diff";
+  const changes = Array.isArray(diff?.changes) ? diff.changes : [];
+  if (!changes.length) {
+    const empty = document.createElement("div");
+    empty.className = "asset-empty";
+    empty.textContent = t("status.noDiff");
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  for (const change of changes.slice(0, 80)) {
+    const row = document.createElement("div");
+    row.className = "experiment-diff-row";
+    const key = document.createElement("strong");
+    key.textContent = change.key;
+    const left = document.createElement("span");
+    left.textContent = experimentValueText(change.left);
+    const right = document.createElement("span");
+    right.textContent = experimentValueText(change.right);
+    row.append(key, left, right);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function renderCompareGroup(data) {
+  const section = document.createElement("section");
+  section.className = "asset-group";
+  const title = document.createElement("div");
+  title.className = "asset-group-title";
+  title.textContent = "Parameter Diff";
+  section.appendChild(title);
+  const form = document.createElement("div");
+  form.className = "experiment-form";
+  const select = document.createElement("select");
+  for (const opt of Array.from(sceneSelect.options)) {
+    if (opt.value === data.scene) continue;
+    const item = document.createElement("option");
+    item.value = opt.value;
+    item.textContent = opt.textContent;
+    select.appendChild(item);
+  }
+  const diffBody = document.createElement("div");
+  diffBody.className = "experiment-diff";
+  const button = makeJobButton("button.compareExperiment", async () => {
+    if (!select.value) return;
+    try {
+      const res = await fetch(apiPath(`/api/experiments/diff?scene=${encodeURIComponent(data.scene)}&compare=${encodeURIComponent(select.value)}`));
+      const diff = await res.json();
+      if (!res.ok) throw new Error(diff.error || "Compare failed");
+      diffBody.innerHTML = "";
+      diffBody.appendChild(renderExperimentDiffRows(diff));
+    } catch (err) {
+      setStatus(`Compare failed: ${err.message}`);
+    }
+  }, !select.options.length);
+  form.append(select, button);
+  section.appendChild(form);
+  const empty = document.createElement("div");
+  empty.className = "asset-empty";
+  empty.textContent = select.options.length ? "Choose another experiment to compare." : "No other experiment found.";
+  diffBody.appendChild(empty);
+  section.appendChild(diffBody);
+  return section;
+}
+
+function renderExperimentActions(data) {
+  const actions = document.createElement("div");
+  actions.className = "asset-manager-actions";
+  actions.appendChild(makeJobButton("button.openOutput", () => openAssetDir("output", data.scene)));
+  const cloneInput = document.createElement("input");
+  cloneInput.className = "experiment-name-input";
+  cloneInput.value = `${data.scene}_copy`;
+  cloneInput.title = currentLanguage === "zh" ? "复制输出实验名" : currentLanguage === "ja" ? "複製先の実験名" : "Clone output experiment";
+  cloneInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") cloneCurrentExperiment(data, cloneInput.value.trim());
+  });
+  actions.appendChild(cloneInput);
+  actions.appendChild(makeJobButton("button.cloneExperiment", () => cloneCurrentExperiment(data, cloneInput.value.trim())));
+  return actions;
+}
+
+function renderExperimentManager(data) {
+  if (!experimentManagerSummary || !experimentManagerList) return;
+  const training = data.training || {};
+  const options = training.options || {};
+  const summaryParts = [
+    `output/${data.scene}`,
+    `${(data.backend || "3dgs").toUpperCase()} iteration ${data.latest_iteration}`,
+    training.quality ? `quality ${training.quality}` : "",
+    options.iterations ? `target ${options.iterations}` : "",
+    `${(data.checkpoints || []).length} checkpoints`,
+  ].filter(Boolean);
+  experimentManagerSummary.textContent = summaryParts.join(" | ");
+  experimentManagerList.innerHTML = "";
+  experimentManagerList.appendChild(renderExperimentActions(data));
+  experimentManagerList.appendChild(renderCheckpointGroup(data));
+  experimentManagerList.appendChild(renderCompareGroup(data));
+  experimentManagerList.appendChild(renderExperimentParamGroup("Training Options", options));
+  experimentManagerList.appendChild(renderExperimentParamGroup("cfg_args", data.cfg_args || {}));
+  experimentManagerList.appendChild(renderCurveSummary(data));
+  experimentManagerList.appendChild(renderAssetJobs(data.jobs || []));
+}
+
+async function refreshExperimentManager() {
+  const scene = experimentSceneName();
+  if (!scene || !experimentManagerList) {
+    setStatus("Load a scene first.");
+    return;
+  }
+  try {
+    const res = await fetch(apiPath(`/api/experiments?scene=${encodeURIComponent(scene)}`));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load experiment");
+    renderExperimentManager(data);
+    setStatus(`Experiment refreshed for output/${data.scene}.`);
+  } catch (err) {
+    experimentManagerList.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "asset-empty";
+    empty.textContent = err.message;
+    experimentManagerList.appendChild(empty);
+    setStatus(`Experiment Manager failed: ${err.message}`);
+  }
+}
+
+async function cloneCurrentExperiment(data, outputScene) {
+  if (!outputScene) return;
+  try {
+    const res = await fetch(apiPath("/api/experiments/clone"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scene: data.scene, output_scene: outputScene, overwrite: false }),
+    });
+    const job = await res.json();
+    if (!res.ok) throw new Error(job.error || "Clone failed");
+    writeUnifiedJobLog(job);
+    await refreshJobCenter();
+    setStatus(`Experiment clone queued: output/${outputScene}.`);
+  } catch (err) {
+    setStatus(`Clone failed: ${err.message}`);
+  }
+}
+
+async function markExperimentCheckpoint(scene, iteration, mark, enabled) {
+  try {
+    const res = await fetch(apiPath("/api/experiments/checkpoint-mark"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scene, iteration, mark, enabled }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Checkpoint mark failed");
+    renderExperimentManager(data);
+    setStatus(`Checkpoint ${iteration} updated.`);
+  } catch (err) {
+    setStatus(`Checkpoint mark failed: ${err.message}`);
+  }
+}
+
+async function deleteExperimentCheckpoint(scene, iteration, button) {
+  if (button && button.dataset.confirmDelete !== "true") {
+    button.dataset.confirmDelete = "true";
+    button.textContent = currentLanguage === "zh" ? "确认删除" : currentLanguage === "ja" ? "削除確認" : "Confirm";
+    setStatus(`Click Confirm to delete checkpoint ${iteration}. point_cloud is kept.`);
+    setTimeout(() => {
+      if (button.dataset.confirmDelete === "true") {
+        button.dataset.confirmDelete = "false";
+        button.textContent = t("button.deleteCheckpoint");
+      }
+    }, 5000);
+    return;
+  }
+  try {
+    const res = await fetch(apiPath("/api/experiments/checkpoint-delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scene, iteration }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Checkpoint delete failed");
+    renderExperimentManager(result.payload);
+    setStatus(`Checkpoint ${iteration} deleted.`);
+  } catch (err) {
+    setStatus(`Checkpoint delete failed: ${err.message}`);
+  }
+}
+
+async function resumeExperimentCheckpoint(data, checkpoint, outputScene, targetIterations) {
+  if (!Number.isFinite(targetIterations) || targetIterations <= Number(checkpoint.iteration || 0)) {
+    setStatus("Target iterations must be greater than the checkpoint iteration.");
+    return;
+  }
+  if (!outputScene) return;
+  try {
+    setTrainingBusy(true);
+    showTrainingLog();
+    trainLog.textContent = "";
+    const res = await fetch(apiPath("/api/experiments/resume"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scene: data.scene,
+        checkpoint_iteration: checkpoint.iteration,
+        output_scene: outputScene,
+        target_iterations: targetIterations,
+      }),
+    });
+    const job = await res.json();
+    if (!res.ok) throw new Error(job.error || "Resume failed");
+    activeTrainJobId = job.id;
+    writeTrainingLog(job);
+    setStatus(`Resume training queued: output/${outputScene}.`);
+    pollTrainingJob(job.id, outputScene);
+    refreshJobCenter();
+  } catch (err) {
+    activeTrainJobId = null;
+    setTrainingBusy(false);
+    setStatus(`Resume failed: ${err.message}`);
+    appendTrainingLog(`ERROR: ${err.message}`);
+  }
+}
+
 function updateCancelButton() {
   cancelTrainButton.disabled = !(activeTrainJobId || activeMeshJobId);
 }
@@ -2302,6 +2792,7 @@ function setTrainingBusy(busy) {
   importOnlyButton.disabled = busy;
   startTrainButton.disabled = busy;
   trainExistingButton.disabled = busy;
+  if (runColmapButton) runColmapButton.disabled = busy;
   trainFilesInput.disabled = busy;
   trainFolderInput.disabled = busy;
   trainMasksInput.disabled = busy;
@@ -2310,6 +2801,7 @@ function setTrainingBusy(busy) {
   trainSceneInput.disabled = busy;
   trainBackendSelect.disabled = busy;
   trainQualitySelect.disabled = busy;
+  if (openExperimentManagerButton) openExperimentManagerButton.disabled = busy || !currentScene;
   for (const control of document.querySelectorAll(".train-control")) {
     control.disabled = busy;
   }
@@ -2343,8 +2835,9 @@ function setMeshBusy(busy) {
   if (meshTrimToggle) meshTrimToggle.disabled = busy || !meshData;
   downloadMeshButton.disabled = busy || (!lastMeshDownloadUrl && !meshDirty);
   downloadTextureButton.disabled = busy || !lastTextureDownloadUrl;
-  downloadGlbButton.disabled = busy || !lastGlbDownloadUrl;
+  downloadGlbButton.disabled = busy || !currentScene;
   if (openAssetManagerButton) openAssetManagerButton.disabled = busy || !currentScene;
+  if (openExperimentManagerButton) openExperimentManagerButton.disabled = busy || !currentScene;
   downloadSpzButton.disabled = busy || !currentScene;
   downloadSogButton.disabled = busy || !currentScene;
   splatImportFileInput.disabled = busy;
@@ -2824,6 +3317,49 @@ async function importAndStartTraining(uploadFirst) {
   }
 }
 
+async function startColmapAlignment() {
+  const sceneName = trainSceneInput.value.trim();
+  if (!sceneName) {
+    setStatus("Training scene name is required.");
+    return;
+  }
+  try {
+    validateSceneName(sceneName);
+  } catch (err) {
+    setStatus(err.message);
+    return;
+  }
+  activeMeshJobId = null;
+  setTrainingBusy(true);
+  showTrainingLog();
+  trainLog.textContent = "";
+  try {
+    await checkTrainingEnvironment();
+    setStatus(`Starting COLMAP alignment for datasets/${sceneName}...`);
+    appendTrainingLog(`Starting COLMAP alignment for datasets/${sceneName}...`);
+    const res = await fetch(apiPath("/api/colmap/start"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scene: sceneName,
+        options: colmapTrainingOptions(),
+      }),
+    });
+    const job = await res.json();
+    if (!res.ok) throw new Error(job.error || "Could not start COLMAP alignment");
+    activeMeshJobId = job.id;
+    updateCancelButton();
+    writeMeshLog(job);
+    refreshJobCenter();
+    pollMeshJob(job.id);
+  } catch (err) {
+    setStatus(`COLMAP start failed: ${err.message}`);
+    appendTrainingLog(`ERROR: ${err.message}`);
+    activeMeshJobId = null;
+    setTrainingBusy(false);
+  }
+}
+
 async function cancelActiveTraining() {
   if (!activeTrainJobId && !activeMeshJobId) return;
   try {
@@ -3051,16 +3587,28 @@ function pollMeshJob(jobId) {
       if (!res.ok) throw new Error(job.error || "Mesh status failed");
       writeMeshLog(job);
       const isTexture = job.kind === "texture";
-      const meshBackendLabel = job.mode === "sugar" ? "SuGaR" : (job.mode === "gs2mesh" ? "GS2Mesh" : "2DGS");
-      setStatus(`${meshBackendLabel} ${isTexture ? "texture bake" : "mesh export"} ${job.scene}: ${job.status} / ${job.stage}`);
+      const isGlb = job.kind === "glb";
+      const isColmap = job.kind === "colmap";
+      const meshBackendLabel = isColmap ? "COLMAP" : (job.mode === "sugar" ? "SuGaR" : (job.mode === "gs2mesh" ? "GS2Mesh" : "2DGS"));
+      const jobLabel = isColmap ? "alignment" : (isGlb ? "GLB export" : (isTexture ? "texture bake" : "mesh export"));
+      setStatus(`${meshBackendLabel} ${jobLabel} ${job.scene}: ${job.status} / ${job.stage}`);
       if (job.status === "done") {
         clearInterval(meshPollTimer);
         meshPollTimer = null;
         activeMeshJobId = null;
-        if (isTexture || job.texture_download_url) lastTextureDownloadUrl = job.texture_download_url;
+        if (isGlb) {
+          lastGlbDownloadUrl = job.glb_download_url || job.download_url || null;
+          if (job.texture_download_url) lastTextureDownloadUrl = job.texture_download_url;
+        } else if (isTexture || job.texture_download_url) lastTextureDownloadUrl = job.texture_download_url;
         else lastMeshDownloadUrl = job.download_url;
-        setMeshBusy(false);
-        setStatus(isTexture ? `Texture bake complete. ${job.texture?.zip || ""}` : `Mesh export complete. ${job.output_mesh}`);
+        if (isColmap) setTrainingBusy(false);
+        else setMeshBusy(false);
+        setStatus(isColmap ? `COLMAP alignment complete. ${job.output_dir || ""}` : (isGlb ? `GLB export complete. ${job.texture?.glb || ""}` : (isTexture ? `Texture bake complete. ${job.texture?.zip || ""}` : `Mesh export complete. ${job.output_mesh}`)));
+        if (isColmap) {
+          await refreshSceneList();
+          refreshJobCenter();
+          return;
+        }
         if ((isTexture || job.mode === "sugar") && job.texture_download_url) {
           try {
             await loadCurrentTexture();
@@ -3081,14 +3629,17 @@ function pollMeshJob(jobId) {
         clearInterval(meshPollTimer);
         meshPollTimer = null;
         activeMeshJobId = null;
-        setMeshBusy(false);
-        setStatus(job.status === "cancelled" ? "Mesh job cancelled." : `Mesh job failed: ${job.error}`);
+        if (isColmap) setTrainingBusy(false);
+        else setMeshBusy(false);
+        const failedLabel = isColmap ? "COLMAP" : (isGlb ? "GLB" : "Mesh");
+        setStatus(job.status === "cancelled" ? `${failedLabel} job cancelled.` : `${failedLabel} job failed: ${job.error}`);
         refreshJobCenter();
       }
     } catch (err) {
       clearInterval(meshPollTimer);
       meshPollTimer = null;
       activeMeshJobId = null;
+      setTrainingBusy(false);
       setMeshBusy(false);
       setStatus(`Mesh status failed: ${err.message}`);
     }
@@ -3242,9 +3793,56 @@ function formatByteSize(bytes) {
   return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-function downloadLastGlb() {
+async function downloadLastGlb() {
   if (!lastGlbDownloadUrl) {
-    setStatus("Bake or load a textured mesh first.");
+    if (!currentScene || !currentIteration) {
+      setStatus("Load a scene first.");
+      return;
+    }
+    try {
+      setMeshBusy(true);
+      setStatus(`Checking textured assets for ${currentScene} before GLB export...`);
+      const assetsRes = await fetch(apiPath(`/api/mesh/assets?scene=${encodeURIComponent(currentScene)}&iteration=${currentIteration}`));
+      const assets = await assetsRes.json();
+      if (!assetsRes.ok) throw new Error(assets.error || "Could not list texture assets");
+      const texture = assets.meshes?.[meshModeSelect.value]?.texture;
+      if (!texture?.files?.obj?.exists || !texture?.files?.png?.exists) {
+        throw new Error(`No baked ${meshModeSelect.value} texture found. Bake Texture first.`);
+      }
+      const glbFile = texture.files.glb;
+      if (glbFile?.exists) {
+        lastGlbDownloadUrl = glbFile.url;
+        window.location.href = apiPath(lastGlbDownloadUrl);
+        setMeshBusy(false);
+        return;
+      }
+      showTrainingLog();
+      appendTrainingLog(`Starting GLB export for ${meshModeSelect.value} output/${currentScene} iteration ${currentIteration}...`);
+      const res = await fetch(apiPath("/api/mesh/glb/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scene: currentScene,
+          iteration: currentIteration,
+          options: {
+            mode: meshModeSelect.value,
+            post: true,
+          },
+        }),
+      });
+      const job = await res.json();
+      if (!res.ok) throw new Error(job.error || "Could not start GLB export");
+      activeMeshJobId = job.id;
+      updateCancelButton();
+      writeMeshLog(job);
+      refreshJobCenter();
+      pollMeshJob(job.id);
+    } catch (err) {
+      setStatus(`GLB export failed to start: ${err.message}`);
+      appendTrainingLog(`ERROR: ${err.message}`);
+      activeMeshJobId = null;
+      setMeshBusy(false);
+    }
     return;
   }
   window.location.href = apiPath(lastGlbDownloadUrl);
@@ -3846,6 +4444,7 @@ function disposeObject(object) {
 function buildRenderLayers() {
   disposeObject(pointCloud);
   disposeObject(splatCloud);
+  disposePickingResources();
   pointCloud = buildPointCloud();
   splatCloud = buildSplatCloud();
   scene.add(pointCloud);
@@ -4158,6 +4757,171 @@ function buildPointCloud() {
   return new THREE.Points(geometry, material);
 }
 
+function disposePickingResources({ target = false } = {}) {
+  if (pickingCloud) {
+    pickingScene?.remove(pickingCloud);
+    pickingCloud.geometry?.dispose?.();
+    pickingCloud.material?.dispose?.();
+    pickingCloud = null;
+  }
+  pickingRevision = -1;
+  pickingRenderCacheKey = "";
+  if (target && pickingTarget) {
+    pickingTarget.dispose();
+    pickingTarget = null;
+    pickingTargetKey = "";
+  }
+}
+
+function makePickingColorFloat(count) {
+  const pickingColors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const [r, g, b] = encodePickingId(i);
+    pickingColors[i * 3] = r / 255;
+    pickingColors[i * 3 + 1] = g / 255;
+    pickingColors[i * 3 + 2] = b / 255;
+  }
+  return pickingColors;
+}
+
+function buildPickingCloud() {
+  if (!positions || !positions.length || !pickingScene) return null;
+  const count = positions.length / 3;
+  if (count > 0xffffff - 1) {
+    setStatus("Visible selection ID pass supports up to 16,777,214 Gaussians. Falling back to depth map.");
+    return null;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("pickingColor", new THREE.BufferAttribute(makePickingColorFloat(count), 3));
+  geometry.setAttribute("splatScale", new THREE.BufferAttribute(splatScales || new Float32Array(count).fill(0.01), 1));
+  const material = new THREE.ShaderMaterial({
+    depthTest: true,
+    depthWrite: true,
+    transparent: false,
+    toneMapped: false,
+    uniforms: {
+      pointScale: { value: 650.0 },
+      minSize: { value: 2.0 },
+      maxSize: { value: 72.0 },
+    },
+    vertexShader: `
+      attribute vec3 pickingColor;
+      attribute float splatScale;
+      varying vec3 vPickingColor;
+      uniform float pointScale;
+      uniform float minSize;
+      uniform float maxSize;
+      void main() {
+        vPickingColor = pickingColor;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        float size = pointScale * max(splatScale, 0.0001) / max(-mvPosition.z, 0.001);
+        gl_PointSize = clamp(size, minSize, maxSize);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vPickingColor;
+      void main() {
+        vec2 p = gl_PointCoord * 2.0 - 1.0;
+        if (dot(p, p) > 1.0) discard;
+        gl_FragColor = vec4(vPickingColor, 1.0);
+      }
+    `,
+  });
+  const object = new THREE.Points(geometry, material);
+  object.frustumCulled = false;
+  pickingScene.add(object);
+  return object;
+}
+
+function ensurePickingCloud() {
+  if (!visibleSelectionEnabled() || !positions || !renderer || !camera || !pickingScene) return false;
+  if (pickingCloud && pickingRevision === editRevision) return true;
+  disposePickingResources();
+  pickingCloud = buildPickingCloud();
+  if (!pickingCloud) return false;
+  pickingRevision = editRevision;
+  return true;
+}
+
+function ensurePickingTarget() {
+  if (!renderer || !canvas) return null;
+  const ratio = Math.max(1, renderer.getPixelRatio?.() || Math.min(window.devicePixelRatio, 2));
+  const width = Math.max(1, Math.ceil(canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.ceil(canvas.clientHeight * ratio));
+  const key = `${width}x${height}`;
+  if (pickingTarget && pickingTargetKey === key) return { target: pickingTarget, width, height, pixelRatio: ratio };
+  if (pickingTarget) pickingTarget.dispose();
+  pickingTarget = new THREE.WebGLRenderTarget(width, height, {
+    depthBuffer: true,
+    stencilBuffer: false,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+  });
+  pickingTarget.texture.generateMipmaps = false;
+  pickingTargetKey = key;
+  return { target: pickingTarget, width, height, pixelRatio: ratio };
+}
+
+function currentPickingRenderKey(targetInfo) {
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  return pickingRenderKey({
+    editRevision,
+    pointCount: positions ? positions.length / 3 : 0,
+    width: targetInfo.width,
+    height: targetInfo.height,
+    pixelRatio: targetInfo.pixelRatio,
+    viewMatrix: camera.matrixWorldInverse.elements,
+    projectionMatrix: camera.projectionMatrix.elements,
+  });
+}
+
+function renderPickingTarget() {
+  if (!ensurePickingCloud()) return null;
+  const targetInfo = ensurePickingTarget();
+  if (!targetInfo) return null;
+  const cacheKey = currentPickingRenderKey(targetInfo);
+  if (pickingRenderCacheKey === cacheKey) {
+    pickingStats.cacheHits++;
+    window.__pickingDebug = pickingStats;
+    return targetInfo;
+  }
+  const previousTarget = renderer.getRenderTarget();
+  const previousClearColor = renderer.getClearColor(new THREE.Color());
+  const previousClearAlpha = renderer.getClearAlpha();
+  renderer.setRenderTarget(targetInfo.target);
+  renderer.setClearColor(0x000000, 1);
+  renderer.clear(true, true, true);
+  renderer.render(pickingScene, camera);
+  renderer.setRenderTarget(previousTarget);
+  renderer.setClearColor(previousClearColor, previousClearAlpha);
+  pickingRenderCacheKey = cacheKey;
+  pickingStats.renders++;
+  window.__pickingDebug = pickingStats;
+  return targetInfo;
+}
+
+function readVisiblePickingIds(cssBounds, shape = null) {
+  if (!cssBounds) return null;
+  try {
+    const targetInfo = renderPickingTarget();
+    if (!targetInfo) return null;
+    const readRect = deviceReadRect(cssBounds, targetInfo.pixelRatio, targetInfo.height);
+    const buffer = new Uint8Array(readRect.width * readRect.height * 4);
+    renderer.readRenderTargetPixels(targetInfo.target, readRect.x, readRect.y, readRect.width, readRect.height, buffer);
+    pickingStats.readbacks++;
+    window.__pickingDebug = pickingStats;
+    return collectPickingIds(buffer, readRect, cssBounds, shape);
+  } catch (err) {
+    console.warn("GPU picking failed; falling back to CPU visibility map.", err);
+    return null;
+  }
+}
+
 function updatePointSize() {
   const pointSize = Number(document.getElementById("pointSize")?.value || 1);
   if (pointCloud?.material) pointCloud.material.size = pointSize;
@@ -4324,6 +5088,9 @@ function resize() {
   ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (pickingTarget && pickingTargetKey !== `${Math.max(1, Math.ceil(w * renderer.getPixelRatio()))}x${Math.max(1, Math.ceil(h * renderer.getPixelRatio()))}`) {
+    disposePickingResources({ target: true });
+  }
   if (controls && controls.handleResize) controls.handleResize();
 }
 
@@ -4573,7 +5340,8 @@ function pointerDown(e) {
   lasso = [dragStart];
   if (mode === "brush") {
     lastBrushBuild = 0;
-    brushSelectAt(dragStart, e.shiftKey);
+    lastBrushPickingSample = null;
+    brushSelectAt(dragStart, e.shiftKey, { forcePicking: true });
     buildSelectionCloud();
   }
   drawOverlay();
@@ -4614,7 +5382,7 @@ function pointerUp(e) {
   if (mode === "rect") selectRect(dragStart, end, e.shiftKey);
   if (mode === "lasso") selectLasso(lasso, e.shiftKey);
   if (mode === "brush") {
-    brushSelectAt(end, e.shiftKey);
+    brushSelectAt(end, e.shiftKey, { forcePicking: true });
     if (meshTrimEnabled()) {
       buildMeshSelectionCloud();
       setStatus(`${meshSelected.size.toLocaleString()} mesh vertices selected. Brush selection updated.`);
@@ -4625,6 +5393,7 @@ function pointerUp(e) {
   }
   dragStart = null;
   dragCurrent = null;
+  lastBrushPickingSample = null;
   lasso = [];
   drawOverlay();
   controls.enabled = true;
@@ -4642,6 +5411,7 @@ function pointerCancel(e) {
 function cancelSelectionDrag(pointerId = null) {
   dragStart = null;
   dragCurrent = null;
+  lastBrushPickingSample = null;
   lasso = [];
   drawOverlay();
   controls.enabled = true;
@@ -4809,13 +5579,47 @@ function isPointVisibleInMap(projected, visibilityMap) {
   return projected.z <= visibilityMap.depth[idx] + visibilityMap.tolerance;
 }
 
-function brushSelectAt(center, subtract) {
+function applyPickingIds(ids, subtract = false) {
+  if (!ids) return false;
+  for (const id of ids) {
+    if (id < 0 || !positions || id >= positions.length / 3) continue;
+    if (subtract) selected.delete(id);
+    else selected.add(id);
+  }
+  return true;
+}
+
+function brushSelectAt(center, subtract, options = {}) {
   if (meshTrimEnabled()) {
     brushSelectMeshAt(center, subtract);
     return;
   }
   if (!positions) return;
   const r = brushRadius();
+  if (visibleSelectionEnabled()) {
+    if (!shouldSampleBrushPicking({
+      last: lastBrushPickingSample,
+      point: center,
+      radius: r,
+      subtract,
+      force: Boolean(options.forcePicking),
+    })) {
+      pickingStats.brushSkips++;
+      window.__pickingDebug = pickingStats;
+      return;
+    }
+    const bounds = pickingBoundsForBrush(center, r, { width: canvas.clientWidth, height: canvas.clientHeight });
+    const r2 = r * r;
+    const ids = readVisiblePickingIds(bounds, (x, y) => {
+      const dx = x - center.x;
+      const dy = y - center.y;
+      return dx * dx + dy * dy <= r2;
+    });
+    if (applyPickingIds(ids, subtract)) {
+      lastBrushPickingSample = { x: center.x, y: center.y, subtract };
+      return;
+    }
+  }
   const r2 = r * r;
   const p = { x: 0, y: 0, z: 0 };
   const visibilityMap = buildPointVisibilityMap();
@@ -4838,6 +5642,15 @@ function selectRect(a, b, append) {
     return;
   }
   if (!append) selected.clear();
+  if (visibleSelectionEnabled()) {
+    const bounds = pickingBoundsForRect(a, b, { width: canvas.clientWidth, height: canvas.clientHeight });
+    const ids = readVisiblePickingIds(bounds);
+    if (applyPickingIds(ids)) {
+      setStatus(`${selected.size.toLocaleString()} selected. Hold Shift to add to selection.`);
+      buildSelectionCloud();
+      return;
+    }
+  }
   const minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x);
   const minY = Math.min(a.y, b.y), maxY = Math.max(a.y, b.y);
   const p = { x: 0, y: 0, z: 0 };
@@ -4857,6 +5670,15 @@ function selectLasso(poly, append) {
   }
   if (poly.length < 3) return;
   if (!append) selected.clear();
+  if (visibleSelectionEnabled()) {
+    const bounds = pickingBoundsForPolygon(poly, { width: canvas.clientWidth, height: canvas.clientHeight });
+    const ids = readVisiblePickingIds(bounds, (x, y) => pointInPickingPolygon(x, y, poly));
+    if (applyPickingIds(ids)) {
+      setStatus(`${selected.size.toLocaleString()} selected. Hold Shift to add to selection.`);
+      buildSelectionCloud();
+      return;
+    }
+  }
   const p = { x: 0, y: 0, z: 0 };
   const visibilityMap = buildPointVisibilityMap();
   for (let i = 0; i < positions.length / 3; i++) {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampPanelPosition } from "../static/floating-panels.mjs";
+import { clampPanelPosition, clampPanelSize } from "../static/floating-panels.mjs";
 
 test("floating panel positions stay inside the viewport", () => {
   assert.deepEqual(clampPanelPosition({
@@ -22,4 +22,30 @@ test("floating panel positions stay inside the viewport", () => {
     viewportHeight: 800,
     margin: 8,
   }), { left: 892, top: 612 });
+});
+
+test("floating panel sizes stay usable inside the viewport", () => {
+  assert.deepEqual(clampPanelSize({
+    width: 120,
+    height: 80,
+    minWidth: 280,
+    minHeight: 180,
+    maxWidth: 900,
+    maxHeight: 700,
+    viewportWidth: 1200,
+    viewportHeight: 800,
+    margin: 8,
+  }), { width: 280, height: 180 });
+
+  assert.deepEqual(clampPanelSize({
+    width: 2000,
+    height: 1200,
+    minWidth: 280,
+    minHeight: 180,
+    maxWidth: 1900,
+    maxHeight: 1100,
+    viewportWidth: 1200,
+    viewportHeight: 800,
+    margin: 8,
+  }), { width: 1184, height: 784 });
 });

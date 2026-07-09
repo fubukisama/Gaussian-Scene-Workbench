@@ -22,11 +22,27 @@ export function clampPanelPosition(position) {
   };
 }
 
+export function clampPanelSize(size) {
+  const margin = finiteNumber(size.margin, DEFAULT_MARGIN);
+  const fallbackWidth = globalThis.window?.innerWidth ?? 0;
+  const fallbackHeight = globalThis.window?.innerHeight ?? 0;
+  const viewportWidth = Math.max(0, finiteNumber(size.viewportWidth, fallbackWidth));
+  const viewportHeight = Math.max(0, finiteNumber(size.viewportHeight, fallbackHeight));
+  const minWidth = Math.max(1, finiteNumber(size.minWidth, 280));
+  const minHeight = Math.max(1, finiteNumber(size.minHeight, 180));
+  const maxWidth = Math.max(minWidth, Math.min(finiteNumber(size.maxWidth, viewportWidth), Math.max(minWidth, viewportWidth - margin * 2)));
+  const maxHeight = Math.max(minHeight, Math.min(finiteNumber(size.maxHeight, viewportHeight), Math.max(minHeight, viewportHeight - margin * 2)));
+  return {
+    width: Math.min(maxWidth, Math.max(minWidth, finiteNumber(size.width, minWidth))),
+    height: Math.min(maxHeight, Math.max(minHeight, finiteNumber(size.height, minHeight))),
+  };
+}
+
 function isInteractiveTarget(target) {
   return Boolean(target?.closest?.("button, input, select, textarea, a, label"));
 }
 
-function readStoredPosition(storageKey) {
+function readStoredState(storageKey) {
   if (!storageKey) return null;
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || "null");
@@ -37,12 +53,12 @@ function readStoredPosition(storageKey) {
   }
 }
 
-function writeStoredPosition(storageKey, position) {
+function writeStoredState(storageKey, state) {
   if (!storageKey) return;
   try {
-    localStorage.setItem(storageKey, JSON.stringify(position));
+    localStorage.setItem(storageKey, JSON.stringify(state));
   } catch (_) {
-    // Position persistence is optional.
+    // Window persistence is optional.
   }
 }
 
@@ -53,13 +69,38 @@ function applyPanelPosition(panel, position) {
   panel.style.bottom = "auto";
 }
 
+function applyPanelSize(panel, size) {
+  panel.style.width = `${size.width}px`;
+  panel.style.height = `${size.height}px`;
+  panel.style.maxWidth = `calc(100vw - ${DEFAULT_MARGIN * 2}px)`;
+  panel.style.maxHeight = `calc(100vh - ${DEFAULT_MARGIN * 2}px)`;
+}
+
+function panelState(panel) {
+  const rect = panel.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
 export function makePanelDraggable(panel, handle, options = {}) {
   if (!panel || !handle) return;
   const margin = options.margin ?? DEFAULT_MARGIN;
   const storageKey = options.storageKey || "";
-  const stored = readStoredPosition(storageKey);
+  const stored = readStoredState(storageKey);
   if (stored) {
     const rect = panel.getBoundingClientRect();
+    if (Number.isFinite(stored.width) && Number.isFinite(stored.height)) {
+      applyPanelSize(panel, clampPanelSize({
+        width: stored.width,
+        height: stored.height,
+        minWidth: options.minWidth,
+        minHeight: options.minHeight,
+        maxWidth: options.maxWidth,
+        maxHeight: options.maxHeight,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        margin,
+      }));
+    }
     applyPanelPosition(panel, clampPanelPosition({
       left: stored.left,
       top: stored.top,
@@ -72,6 +113,8 @@ export function makePanelDraggable(panel, handle, options = {}) {
   }
 
   let drag = null;
+  let resizeObserver = null;
+  let resizeWriteTimer = null;
 
   function panelPositionFromPointer(event) {
     const position = clampPanelPosition({
@@ -118,7 +161,7 @@ export function makePanelDraggable(panel, handle, options = {}) {
   function finishDrag(event) {
     if (!drag) return;
     const position = panelPositionFromPointer(event);
-    writeStoredPosition(storageKey, position);
+    writeStoredState(storageKey, { ...panelState(panel), ...position });
     drag = null;
     document.body.classList.remove("dragging-panel");
   }
@@ -126,18 +169,41 @@ export function makePanelDraggable(panel, handle, options = {}) {
   handle.addEventListener("pointerup", finishDrag);
   handle.addEventListener("pointercancel", finishDrag);
 
+  if (storageKey && "ResizeObserver" in window) {
+    resizeObserver = new ResizeObserver(() => {
+      if (drag) return;
+      if (resizeWriteTimer) clearTimeout(resizeWriteTimer);
+      resizeWriteTimer = setTimeout(() => {
+        writeStoredState(storageKey, panelState(panel));
+      }, 120);
+    });
+    resizeObserver.observe(panel);
+  }
+
   window.addEventListener("resize", () => {
     const rect = panel.getBoundingClientRect();
+    const size = clampPanelSize({
+      width: rect.width,
+      height: rect.height,
+      minWidth: options.minWidth,
+      minHeight: options.minHeight,
+      maxWidth: options.maxWidth,
+      maxHeight: options.maxHeight,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin,
+    });
+    applyPanelSize(panel, size);
     const position = clampPanelPosition({
       left: rect.left,
       top: rect.top,
-      width: rect.width,
-      height: rect.height,
+      width: size.width,
+      height: size.height,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       margin,
     });
     applyPanelPosition(panel, position);
-    writeStoredPosition(storageKey, position);
+    writeStoredState(storageKey, { ...position, ...size });
   });
 }

@@ -670,6 +670,129 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertTrue((dataset / ".alignment_cache" / "metadata.json").exists())
             self.assertTrue(any("Saved COLMAP alignment cache" in line for line in job["log"]))
 
+    def test_colmap_alignment_job_runs_converter_and_marks_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_datasets = server.DATASETS_DIR
+            server.DATASETS_DIR = Path(tmp) / "datasets"
+            dataset = server.DATASETS_DIR / "align_scene"
+            (dataset / "images").mkdir(parents=True)
+            (dataset / "images" / "frame.jpg").write_bytes(b"jpg")
+            try:
+                def fake_convert(job, dataset_path, options):
+                    self.assertEqual(dataset_path, dataset)
+                    self.assertEqual(options["preset"], "robust")
+                    sparse0 = dataset_path / "sparse" / "0"
+                    sparse0.mkdir(parents=True)
+                    for name in ("cameras.bin", "images.bin", "points3D.bin"):
+                        (sparse0 / name).write_bytes(b"colmap")
+
+                job = {
+                    "id": "colmap-job",
+                    "kind": "colmap",
+                    "scene": "align_scene",
+                    "iteration": 0,
+                    "mode": "colmap",
+                    "options": server.colmap_options_from_payload({"preset": "robust"}),
+                    "status": "queued",
+                    "stage": "queued",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": None,
+                    "error": None,
+                    "cancel_requested": False,
+                    "process": None,
+                    "output_dir": str(dataset),
+                    "output_mesh": None,
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                with mock.patch.object(server, "run_colmap_convert", side_effect=fake_convert):
+                    server.run_colmap_alignment_job(job)
+
+                self.assertEqual(job["status"], "done")
+                self.assertEqual(job["stage"], "done")
+                self.assertTrue(job["alignment"]["has_alignment"])
+                self.assertEqual(job["output_dir"], str(dataset))
+                self.assertTrue(any("COLMAP alignment complete" in line for line in job["log"]))
+            finally:
+                server.DATASETS_DIR = original_datasets
+
+    def test_colmap_alignment_job_fails_when_dataset_images_are_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_datasets = server.DATASETS_DIR
+            server.DATASETS_DIR = Path(tmp) / "datasets"
+            try:
+                job = {
+                    "id": "colmap-missing",
+                    "kind": "colmap",
+                    "scene": "missing_scene",
+                    "iteration": 0,
+                    "mode": "colmap",
+                    "options": server.colmap_options_from_payload({}),
+                    "status": "queued",
+                    "stage": "queued",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": None,
+                    "error": None,
+                    "cancel_requested": False,
+                    "process": None,
+                    "output_dir": str(server.DATASETS_DIR / "missing_scene"),
+                    "output_mesh": None,
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                server.run_colmap_alignment_job(job)
+
+                self.assertEqual(job["status"], "failed")
+                self.assertIn("No training images found", job["error"])
+            finally:
+                server.DATASETS_DIR = original_datasets
+
+    def test_colmap_job_snapshot_title_output_and_retry_are_unified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_datasets = server.DATASETS_DIR
+            server.DATASETS_DIR = Path(tmp) / "datasets"
+            try:
+                job = {
+                    "id": "colmap-retry",
+                    "kind": "colmap",
+                    "scene": "align_scene",
+                    "iteration": 0,
+                    "mode": "colmap",
+                    "options": server.colmap_options_from_payload({"preset": "sequential"}),
+                    "status": "failed",
+                    "stage": "failed",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": 1,
+                    "error": "failed",
+                    "cancel_requested": False,
+                    "output_dir": str(server.DATASETS_DIR / "align_scene"),
+                    "output_mesh": None,
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                snapshot = server.unified_job_snapshot("mesh", job)
+
+                self.assertEqual(snapshot["title"], "COLMAP alignment")
+                self.assertEqual(snapshot["output_dir"], str(server.DATASETS_DIR / "align_scene"))
+                with mock.patch.object(server, "start_colmap_alignment", return_value=job) as start:
+                    server.MESH_JOBS["colmap-retry"] = job
+                    retry = server.retry_unified_job("colmap-retry")
+
+                start.assert_called_once_with("align_scene", job["options"])
+                self.assertEqual(retry["title"], "COLMAP alignment")
+            finally:
+                server.MESH_JOBS.pop("colmap-retry", None)
+                server.DATASETS_DIR = original_datasets
+
     def test_colmap_reset_preserves_alignment_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp) / "dataset"
@@ -859,6 +982,241 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertEqual(scene_metadata["training"]["quality"], "quality")
             self.assertEqual(scene_metadata["training"]["options"]["optimizer_type"], "sparse_adam")
 
+    def test_experiment_payload_lists_checkpoints_and_training_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                model = server.OUTPUT_DIR / "exp_a"
+                write_test_ply(model / "point_cloud" / "iteration_7000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                write_test_ply(model / "point_cloud" / "iteration_15000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (model / "chkpnt7000.pth").write_bytes(b"checkpoint-7000")
+                (model / "chkpnt15000.pth").write_bytes(b"checkpoint-15000")
+                (model / "training_backend.json").write_text(json.dumps({"backend": "3dgs", "quality": "quality"}), encoding="utf-8")
+                (model / "scene.json").write_text(json.dumps({
+                    "training": {
+                        "backend": "3dgs",
+                        "quality": "quality",
+                        "options": {"iterations": 30000, "resolution": 4, "optimizer_type": "sparse_adam"},
+                    }
+                }), encoding="utf-8")
+                (model / "cfg_args").write_text("Namespace(source_path=r'C:\\datasets\\exp_a', model_path='ignored', iterations=30000, resolution=4)", encoding="utf-8")
+
+                payload = server.experiment_payload("exp_a")
+
+                self.assertEqual(payload["scene"], "exp_a")
+                self.assertEqual(payload["latest_iteration"], 15000)
+                self.assertEqual(payload["backend"], "3dgs")
+                self.assertEqual([item["iteration"] for item in payload["checkpoints"]], [15000, 7000])
+                self.assertTrue(payload["checkpoints"][0]["loadable"])
+                self.assertEqual(payload["training"]["quality"], "quality")
+                self.assertEqual(payload["training"]["options"]["optimizer_type"], "sparse_adam")
+                self.assertEqual(payload["cfg_args"]["source_path"], r"C:\datasets\exp_a")
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_experiment_diff_reports_parameter_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                for name, resolution, optimizer in (("exp_a", 4, "default"), ("exp_b", 2, "sparse_adam")):
+                    model = server.OUTPUT_DIR / name
+                    write_test_ply(model / "point_cloud" / "iteration_30000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                    (model / "training_backend.json").write_text(json.dumps({"backend": "3dgs"}), encoding="utf-8")
+                    (model / "scene.json").write_text(json.dumps({
+                        "training": {
+                            "backend": "3dgs",
+                            "quality": "quality",
+                            "options": {"iterations": 30000, "resolution": resolution, "optimizer_type": optimizer},
+                        }
+                    }), encoding="utf-8")
+
+                diff = server.experiment_diff_payload("exp_a", "exp_b")
+                changes = {item["key"]: (item["left"], item["right"]) for item in diff["changes"]}
+
+                self.assertEqual(changes["training.options.resolution"], (4, 2))
+                self.assertEqual(changes["training.options.optimizer_type"], ("default", "sparse_adam"))
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_clone_experiment_copies_model_and_marks_clone_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                src = server.OUTPUT_DIR / "exp_src"
+                write_test_ply(src / "point_cloud" / "iteration_7000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (src / "chkpnt7000.pth").write_bytes(b"checkpoint")
+                (src / "scene.json").write_text(json.dumps({"name": "exp_src"}), encoding="utf-8")
+
+                result = server.clone_experiment("exp_src", "exp_clone")
+
+                dst = server.OUTPUT_DIR / "exp_clone"
+                self.assertEqual(result["scene"], "exp_clone")
+                self.assertTrue((dst / "point_cloud" / "iteration_7000" / "point_cloud.ply").exists())
+                self.assertEqual((dst / "chkpnt7000.pth").read_bytes(), b"checkpoint")
+                metadata = json.loads((dst / "scene.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["name"], "exp_clone")
+                self.assertEqual(metadata["cloned_from"], "exp_src")
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_experiment_clone_job_copies_model_and_appears_in_unified_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_mesh_jobs = server.MESH_JOBS
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.MESH_JOBS = {}
+            try:
+                src = server.OUTPUT_DIR / "exp_src"
+                write_test_ply(src / "point_cloud" / "iteration_7000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (src / "chkpnt7000.pth").write_bytes(b"checkpoint")
+                (src / "scene.json").write_text(json.dumps({"name": "exp_src"}), encoding="utf-8")
+
+                with mock.patch.object(server.threading, "Thread", return_value=types.SimpleNamespace(start=lambda: None)):
+                    snapshot = server.start_experiment_clone("exp_src", "exp_clone")
+                server.run_experiment_clone_job(server.MESH_JOBS[snapshot["id"]])
+
+                dst = server.OUTPUT_DIR / "exp_clone"
+                unified = server.unified_job_snapshot("mesh", server.MESH_JOBS[snapshot["id"]])
+                self.assertEqual(unified["kind"], "experiment_clone")
+                self.assertEqual(unified["title"], "Experiment clone")
+                self.assertEqual(unified["status"], "done")
+                self.assertEqual(Path(unified["output_dir"]).resolve(), dst.resolve())
+                self.assertEqual((dst / "chkpnt7000.pth").read_bytes(), b"checkpoint")
+                metadata = json.loads((dst / "scene.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["cloned_from"], "exp_src")
+            finally:
+                server.OUTPUT_DIR = original_output
+                server.MESH_JOBS = original_mesh_jobs
+
+    def test_checkpoint_mark_and_delete_updates_experiment_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                model = server.OUTPUT_DIR / "exp_a"
+                write_test_ply(model / "point_cloud" / "iteration_7000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (model / "chkpnt7000.pth").write_bytes(b"checkpoint")
+                (model / "training_backend.json").write_text(json.dumps({"backend": "3dgs"}), encoding="utf-8")
+
+                server.mark_experiment_checkpoint("exp_a", 7000, "best", True)
+                server.mark_experiment_checkpoint("exp_a", 7000, "pinned", True)
+                payload = server.experiment_payload("exp_a")
+
+                checkpoint = payload["checkpoints"][0]
+                self.assertTrue(checkpoint["best"])
+                self.assertTrue(checkpoint["pinned"])
+
+                result = server.delete_experiment_checkpoint("exp_a", 7000)
+                payload = server.experiment_payload("exp_a")
+
+                self.assertTrue(result["deleted"])
+                self.assertFalse((model / "chkpnt7000.pth").exists())
+                self.assertTrue((model / "point_cloud" / "iteration_7000" / "point_cloud.ply").exists())
+                self.assertFalse(payload["checkpoints"][0]["loadable"])
+                self.assertFalse(payload["checkpoints"][0]["best"])
+                self.assertFalse(payload["checkpoints"][0]["pinned"])
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_experiment_payload_prefers_tensorboard_training_curve(self):
+        class FakeScalar:
+            def __init__(self, step, value, wall_time=1.0):
+                self.step = step
+                self.value = value
+                self.wall_time = wall_time
+
+        class FakeAccumulator:
+            def __init__(self, _path, size_guidance=None):
+                self.size_guidance = size_guidance
+
+            def Reload(self):
+                return self
+
+            def Tags(self):
+                return {"scalars": ["train_loss_patches/total_loss", "test/loss_viewpoint - psnr"]}
+
+            def Scalars(self, tag):
+                if tag == "train_loss_patches/total_loss":
+                    return [FakeScalar(100, 0.5), FakeScalar(200, 0.25)]
+                return [FakeScalar(200, 28.5)]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                model = server.OUTPUT_DIR / "exp_a"
+                write_test_ply(model / "point_cloud" / "iteration_200" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (model / "events.out.tfevents.fake").write_bytes(b"fake")
+                (model / "training_backend.json").write_text(json.dumps({"backend": "3dgs"}), encoding="utf-8")
+
+                with mock.patch.object(server, "tensorboard_event_accumulator_factory", return_value=FakeAccumulator):
+                    payload = server.experiment_payload("exp_a")
+
+                self.assertEqual(payload["curves"]["source"], "tensorboard")
+                self.assertEqual(payload["curve"], [
+                    {"iteration": 100, "loss": 0.5, "wall_time": 1.0},
+                    {"iteration": 200, "loss": 0.25, "wall_time": 1.0},
+                ])
+                self.assertEqual(payload["curves"]["series"][1]["tag"], "test/loss_viewpoint - psnr")
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_resume_experiment_training_uses_start_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_datasets = server.DATASETS_DIR
+            original_train_jobs = server.TRAIN_JOBS
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.DATASETS_DIR = Path(tmp) / "datasets"
+            server.TRAIN_JOBS = {}
+            try:
+                dataset = server.DATASETS_DIR / "exp_a"
+                (dataset / "images").mkdir(parents=True)
+                (dataset / "images" / "0001.jpg").write_bytes(b"image")
+                model = server.OUTPUT_DIR / "exp_a"
+                write_test_ply(model / "point_cloud" / "iteration_7000" / "point_cloud.ply", np.zeros((1, 3), dtype=np.float32))
+                (model / "chkpnt7000.pth").write_bytes(b"checkpoint")
+                (model / "training_backend.json").write_text(json.dumps({"backend": "3dgs", "quality": "quick"}), encoding="utf-8")
+                (model / "scene.json").write_text(json.dumps({
+                    "training": {"backend": "3dgs", "quality": "quick", "options": {"iterations": 7000, "resolution": 8}}
+                }), encoding="utf-8")
+                (model / "cfg_args").write_text(f"Namespace(source_path=r'{dataset}', model_path='ignored')", encoding="utf-8")
+
+                captured = {}
+
+                def fake_run_logged(job, command, cwd, backend):
+                    command = [str(item) for item in command]
+                    if "train.py" in command:
+                        captured["command"] = command
+                        captured["cwd"] = cwd
+                        captured["backend"] = backend
+
+                with mock.patch.object(server.threading, "Thread", return_value=types.SimpleNamespace(start=lambda: None)):
+                    job = server.resume_experiment_training("exp_a", 7000, "exp_a_resume", target_iterations=15000)
+                with (
+                    mock.patch.object(server, "ensure_training_environment", return_value={"python": "python", "colmap": "colmap"}),
+                    mock.patch.object(server, "run_logged", side_effect=fake_run_logged),
+                    mock.patch.object(server, "run_colmap_convert"),
+                    mock.patch.object(server, "resolve_training_options_for_environment", side_effect=lambda backend, options, job: options),
+                    mock.patch.object(server, "write_training_metadata"),
+                    mock.patch.object(server, "latest_iteration", return_value=15000),
+                    mock.patch.object(server, "persist_train_job"),
+                ):
+                    stored_job = server.TRAIN_JOBS[job["id"]]
+                    server.run_training_job(stored_job, run_convert=False, quality=stored_job["quality"], overwrite=False)
+
+                self.assertIn("--start_checkpoint", captured["command"])
+                self.assertEqual(captured["command"][captured["command"].index("--start_checkpoint") + 1], str(model / "chkpnt7000.pth"))
+                self.assertEqual(captured["command"][captured["command"].index("--iterations") + 1], "15000")
+                self.assertEqual(captured["backend"], "3dgs")
+            finally:
+                server.OUTPUT_DIR = original_output
+                server.DATASETS_DIR = original_datasets
+                server.TRAIN_JOBS = original_train_jobs
+
     def test_training_job_persistence_round_trips_without_process_handle(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_jobs_dir = server.TRAIN_JOBS_DIR
@@ -1005,11 +1363,15 @@ class TrainingBackendTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             original_jobs_dir = server.TRAIN_JOBS_DIR
+            original_splat_jobs_dir = server.SPLAT_JOBS_DIR
             original_train_jobs = server.TRAIN_JOBS
             original_mesh_jobs = server.MESH_JOBS
+            original_splat_jobs = server.SPLAT_JOBS
             train_process = RunningProcess()
             mesh_process = RunningProcess()
+            splat_process = RunningProcess()
             server.TRAIN_JOBS_DIR = Path(tmp) / "training"
+            server.SPLAT_JOBS_DIR = Path(tmp) / "splat"
             server.TRAIN_JOBS = {
                 "train": {
                     "id": "train",
@@ -1040,20 +1402,41 @@ class TrainingBackendTests(unittest.TestCase):
                     "log": [],
                 }
             }
+            server.SPLAT_JOBS = {
+                "splat": {
+                    "id": "splat",
+                    "kind": "splat_export",
+                    "scene": "scene_a",
+                    "iteration": 1,
+                    "format": "sog",
+                    "status": "running",
+                    "stage": "export",
+                    "created_at": 1.0,
+                    "updated_at": 1.0,
+                    "process": splat_process,
+                    "cancel_requested": False,
+                    "log": [],
+                }
+            }
             try:
                 stopped = server.shutdown_active_jobs("test shutdown")
 
-                self.assertEqual(stopped, {"training": 1, "mesh": 1})
+                self.assertEqual(stopped, {"training": 1, "mesh": 1, "splat": 1})
                 self.assertTrue(train_process.terminated)
                 self.assertTrue(mesh_process.terminated)
+                self.assertTrue(splat_process.terminated)
                 self.assertEqual(server.TRAIN_JOBS["train"]["status"], "cancelling")
                 self.assertEqual(server.MESH_JOBS["mesh"]["status"], "cancelling")
+                self.assertEqual(server.SPLAT_JOBS["splat"]["status"], "cancelling")
                 self.assertTrue(server.TRAIN_JOBS["train"]["cancel_requested"])
                 self.assertTrue(server.MESH_JOBS["mesh"]["cancel_requested"])
+                self.assertTrue(server.SPLAT_JOBS["splat"]["cancel_requested"])
             finally:
                 server.TRAIN_JOBS_DIR = original_jobs_dir
+                server.SPLAT_JOBS_DIR = original_splat_jobs_dir
                 server.TRAIN_JOBS = original_train_jobs
                 server.MESH_JOBS = original_mesh_jobs
+                server.SPLAT_JOBS = original_splat_jobs
 
     def test_uploaded_masks_are_applied_as_training_image_alpha(self):
         try:
@@ -1096,33 +1479,85 @@ class TrainingBackendTests(unittest.TestCase):
                 model = server.OUTPUT_DIR / "scene_splat" / "point_cloud" / "iteration_7"
                 write_test_ply(model / "point_cloud.ply", np.array([[0.0, 0.0, 0.0]], dtype=np.float32))
                 with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
-                    with mock.patch.object(server.subprocess, "run") as run:
-                        run.return_value.returncode = 0
+                    with mock.patch.object(server.subprocess, "Popen") as popen:
+                        popen.return_value.communicate.return_value = ("", "")
+                        popen.return_value.returncode = 0
                         spz = server.export_splat_format("scene_splat", 7, "spz")
                         sog = server.export_splat_format("scene_splat", 7, "sog")
 
                 self.assertEqual(spz.suffix, ".spz")
                 self.assertEqual(sog.suffix, ".sog")
-                self.assertEqual(run.call_count, 2)
-                first_command = [str(part) for part in run.call_args_list[0].args[0]]
+                self.assertEqual(popen.call_count, 2)
+                first_command = [str(part) for part in popen.call_args_list[0].args[0]]
                 self.assertIn("-w", first_command)
                 self.assertTrue(first_command[-1].endswith("point_cloud.spz"))
             finally:
                 server.OUTPUT_DIR = original_output
+
+    def test_splat_transform_cancel_terminates_process_and_clears_job_handle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_jobs_dir = server.SPLAT_JOBS_DIR
+            server.SPLAT_JOBS_DIR = Path(tmp) / "jobs"
+            source = Path(tmp) / "point_cloud.ply"
+            target = Path(tmp) / "point_cloud.sog"
+            write_test_ply(source, np.array([[0.0, 0.0, 0.0]], dtype=np.float32))
+            process = FakeProcess()
+            process.communicate = mock.Mock(side_effect=server.subprocess.TimeoutExpired("splat-transform", 0.1))
+            job = {
+                "id": "splat-cancel",
+                "kind": "splat_export",
+                "scene": "scene_3dgs",
+                "iteration": 7,
+                "format": "sog",
+                "log": [],
+                "updated_at": 1.0,
+                "cancel_requested": True,
+                "process": None,
+            }
+            try:
+                with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
+                    with mock.patch.object(server.subprocess, "Popen", return_value=process):
+                        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+                            server.run_splat_transform(source, target, job=job)
+
+                self.assertTrue(process.terminated)
+                self.assertIsNone(job["process"])
+            finally:
+                server.SPLAT_JOBS_DIR = original_jobs_dir
+
+    def test_splat_job_persistence_skips_incomplete_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_jobs_dir = server.SPLAT_JOBS_DIR
+            server.SPLAT_JOBS_DIR = Path(tmp) / "jobs"
+            try:
+                job = {
+                    "id": "incomplete",
+                    "kind": "splat_export",
+                    "cancel_requested": True,
+                    "log": [],
+                }
+
+                self.assertFalse(server.persist_splat_job(job))
+                self.assertEqual(server.load_persisted_splat_jobs(), {})
+            finally:
+                server.SPLAT_JOBS_DIR = original_jobs_dir
 
     def test_import_splat_scene_converts_spz_to_point_cloud_ply(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR
             server.OUTPUT_DIR = Path(tmp) / "output"
             try:
-                def fake_run(command, cwd=None, capture_output=False, text=False):
+                def fake_popen(command, cwd=None, stdout=None, stderr=None, text=False, encoding=None, errors=None):
                     Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
                     write_test_ply(Path(command[-1]), np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
-                    return mock.Mock(returncode=0, stdout="", stderr="")
+                    process = mock.Mock()
+                    process.communicate.return_value = ("", "")
+                    process.returncode = 0
+                    return process
 
                 upload = FakeUploadItem("scan.spz", b"spz-bytes")
                 with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
-                    with mock.patch.object(server.subprocess, "run", side_effect=fake_run):
+                    with mock.patch.object(server.subprocess, "Popen", side_effect=fake_popen):
                         result = server.import_splat_scene(upload, "imported_spz", overwrite=False)
 
                 self.assertEqual(result["scene"], "imported_spz")
@@ -1163,6 +1598,43 @@ class TrainingBackendTests(unittest.TestCase):
         finally:
             with server.MESH_LOCK:
                 server.MESH_JOBS.pop(job["id"], None)
+
+    def test_splat_job_cancel_marks_request_and_terminates_process(self):
+        process = FakeProcess()
+        job = {
+            "id": "splat-job-1",
+            "kind": "splat_export",
+            "scene": "scene_3dgs",
+            "iteration": 7,
+            "format": "sog",
+            "status": "running",
+            "stage": "export",
+            "created_at": 1.0,
+            "updated_at": 1.0,
+            "returncode": None,
+            "error": None,
+            "cancel_requested": False,
+            "process": process,
+            "output_path": None,
+            "download_url": None,
+            "log": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            original_jobs_dir = server.SPLAT_JOBS_DIR
+            server.SPLAT_JOBS_DIR = Path(tmp) / "splat"
+            with server.SPLAT_LOCK:
+                server.SPLAT_JOBS[job["id"]] = job
+            try:
+                snapshot = server.cancel_splat_job(job["id"])
+
+                self.assertTrue(process.terminated)
+                self.assertTrue(snapshot["cancel_requested"])
+                self.assertEqual(snapshot["status"], "cancelling")
+                self.assertTrue(any("Cancel requested" in line for line in snapshot["log"]))
+            finally:
+                server.SPLAT_JOBS_DIR = original_jobs_dir
+                with server.SPLAT_LOCK:
+                    server.SPLAT_JOBS.pop(job["id"], None)
 
     def test_2dgs_environment_report_points_to_local_training_env(self):
         report = server.training_environment_report("2dgs")
@@ -2492,6 +2964,123 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertIn("vt 1 0", obj_text)
             self.assertIn("f 1/1 2/2 3/3", obj_text)
             self.assertTrue(paths["zip"].exists())
+
+    def test_glb_export_job_generates_glb_from_existing_texture_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            paths = server.mesh_texture_paths("glb_scene", 7, "bounded", True)
+            paths["dir"].mkdir(parents=True)
+            paths["obj"].write_text("mtllib mesh.mtl\nv 0 0 0\n", encoding="utf-8")
+            paths["mtl"].write_text("newmtl material_0\nmap_Kd mesh.png\n", encoding="utf-8")
+            paths["png"].write_bytes(b"png")
+            paths["zip"].write_bytes(b"zip")
+            try:
+                def fake_export(output_paths):
+                    output_paths["glb"].write_bytes(b"glTFfake")
+                    return output_paths["glb"]
+
+                job = {
+                    "id": "glb-job",
+                    "kind": "glb",
+                    "scene": "glb_scene",
+                    "iteration": 7,
+                    "mode": "bounded",
+                    "options": {"mode": "bounded", "post": True},
+                    "status": "queued",
+                    "stage": "queued",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": None,
+                    "error": None,
+                    "cancel_requested": False,
+                    "output_mesh": str(paths["obj"]),
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                with mock.patch.object(server, "export_textured_obj_to_glb", side_effect=fake_export):
+                    server.run_glb_export_job(job)
+
+                self.assertEqual(job["status"], "done")
+                self.assertEqual(job["stage"], "done")
+                self.assertEqual(job["download_url"], "/api/mesh/texture/file?scene=glb_scene&iteration=7&mode=bounded&post=true&kind=glb")
+                self.assertEqual(job["texture"]["glb"], str(paths["glb"]))
+                self.assertTrue(paths["glb"].exists())
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_glb_export_job_fails_when_texture_assets_are_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                job = {
+                    "id": "glb-missing",
+                    "kind": "glb",
+                    "scene": "glb_scene",
+                    "iteration": 7,
+                    "mode": "bounded",
+                    "options": {"mode": "bounded", "post": True},
+                    "status": "queued",
+                    "stage": "queued",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": None,
+                    "error": None,
+                    "cancel_requested": False,
+                    "output_mesh": "missing.obj",
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                server.run_glb_export_job(job)
+
+                self.assertEqual(job["status"], "failed")
+                self.assertIn("Textured mesh is incomplete", job["error"])
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_glb_job_snapshot_title_output_and_retry_are_unified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                job = {
+                    "id": "glb-retry",
+                    "kind": "glb",
+                    "scene": "glb_scene",
+                    "iteration": 7,
+                    "mode": "bounded",
+                    "options": {"mode": "bounded", "post": True},
+                    "status": "failed",
+                    "stage": "failed",
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "returncode": 1,
+                    "error": "failed",
+                    "cancel_requested": False,
+                    "output_mesh": "mesh.obj",
+                    "download_url": None,
+                    "texture": None,
+                    "texture_download_url": None,
+                    "log": [],
+                }
+                snapshot = server.unified_job_snapshot("mesh", job)
+
+                self.assertEqual(snapshot["title"], "GLB export")
+                self.assertTrue(snapshot["output_dir"].endswith("fuse_post_texture"))
+                with mock.patch.object(server, "start_glb_export", return_value=job) as start:
+                    server.MESH_JOBS["glb-retry"] = job
+                    retry = server.retry_unified_job("glb-retry")
+
+                start.assert_called_once_with("glb_scene", 7, {"mode": "bounded", "post": True})
+                self.assertEqual(retry["title"], "GLB export")
+            finally:
+                server.MESH_JOBS.pop("glb-retry", None)
+                server.OUTPUT_DIR = original_output
 
 if __name__ == "__main__":
     unittest.main()

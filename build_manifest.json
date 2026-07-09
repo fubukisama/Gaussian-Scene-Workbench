@@ -1,14 +1,14 @@
 {
     "appName":  "3DGS Editor",
-    "sourceVersion":  "36.9.19",
-    "packageVersion":  "0.1.11",
-    "releaseTag":  "v0.1.11",
-    "packageName":  "3DGS-Editor-0.1.11-win-x64.zip",
-    "updatedAt":  "2026-07-09T10:11:27+09:00",
+    "sourceVersion":  "36.9.20",
+    "packageVersion":  "0.1.12",
+    "releaseTag":  "v0.1.12",
+    "packageName":  "3DGS-Editor-0.1.12-win-x64.zip",
+    "updatedAt":  "2026-07-09T16:10:20+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "603c149",
+    "gitCommit":  "08a644c",
     "gitDirty":  true,
-    "note":  "Add guarded 2DGS max quality training milestones"
+    "note":  "Experiment Manager upgrades, real GPU picking, resizable panels, and clone workflow fixes"
 }

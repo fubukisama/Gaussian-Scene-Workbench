@@ -377,6 +377,7 @@ select {
 #trainPanel,
 #jobCenterPanel,
 #assetManagerPanel,
+#experimentManagerPanel,
 #importProgressPanel {
   position: fixed;
   z-index: 5;
@@ -387,32 +388,50 @@ select {
   border-radius: 6px;
   box-shadow: 0 16px 34px rgba(0, 0, 0, .42);
   overflow: hidden;
+  resize: both;
+  min-width: min(280px, calc(100vw - 16px));
+  min-height: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 #mediaPanel {
   left: 12px;
   width: min(520px, calc(100vw - 24px));
-  max-height: min(480px, calc(100vh - var(--workspace-top) - 32px));
+  height: min(480px, calc(100vh - var(--workspace-top) - 32px));
 }
 
 #trainPanel {
   right: 12px;
   width: min(760px, calc(100vw - 24px));
-  max-height: min(520px, calc(100vh - var(--workspace-top) - 32px));
+  height: min(520px, calc(100vh - var(--workspace-top) - 32px));
 }
 
 #jobCenterPanel {
   right: 12px;
   top: calc(var(--workspace-top) + 56px);
   width: min(640px, calc(100vw - 24px));
-  max-height: min(620px, calc(100vh - var(--workspace-top) - 48px));
+  height: min(620px, calc(100vh - var(--workspace-top) - 48px));
 }
 
 #assetManagerPanel {
   left: 12px;
   top: calc(var(--workspace-top) + 56px);
   width: min(680px, calc(100vw - 24px));
-  max-height: min(660px, calc(100vh - var(--workspace-top) - 48px));
+  height: min(660px, calc(100vh - var(--workspace-top) - 48px));
+}
+
+#experimentManagerPanel {
+  right: 12px;
+  top: calc(var(--workspace-top) + 96px);
+  width: min(760px, calc(100vw - 24px));
+  height: min(700px, calc(100vh - var(--workspace-top) - 56px));
 }
 
 #importProgressPanel {
@@ -420,13 +439,16 @@ select {
   top: auto;
   bottom: 48px;
   width: min(460px, calc(100vw - 24px));
+  height: 260px;
 }
 
 #mediaPanelHeader,
 #trainPanelHeader,
 #jobCenterHeader,
 #assetManagerHeader,
+#experimentManagerHeader,
 #importProgressHeader {
+  flex: 0 0 auto;
   height: 36px;
   display: flex;
   align-items: center;
@@ -443,6 +465,7 @@ select {
 #trainPanelHeader button,
 #jobCenterHeader button,
 #assetManagerHeader button,
+#experimentManagerHeader button,
 #importProgressHeader button {
   cursor: default;
 }
@@ -456,15 +479,18 @@ body.dragging-panel #mediaPanelHeader,
 body.dragging-panel #trainPanelHeader,
 body.dragging-panel #jobCenterHeader,
 body.dragging-panel #assetManagerHeader,
+body.dragging-panel #experimentManagerHeader,
 body.dragging-panel #importProgressHeader {
   cursor: grabbing;
 }
 
 #jobCenterList {
   padding: 10px;
-  max-height: 574px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   display: grid;
+  align-content: start;
   gap: 8px;
 }
 
@@ -568,6 +594,16 @@ body.dragging-panel #importProgressHeader {
 }
 
 #assetManagerSummary {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  color: #cdd6e3;
+  font: 12px/1.4 Consolas, ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+#experimentManagerSummary {
+  flex: 0 0 auto;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line-soft);
   color: #cdd6e3;
@@ -577,9 +613,21 @@ body.dragging-panel #importProgressHeader {
 
 #assetManagerList {
   padding: 10px;
-  max-height: 604px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+#experimentManagerList {
+  padding: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
   gap: 10px;
 }
 
@@ -587,6 +635,11 @@ body.dragging-panel #importProgressHeader {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 4px;
+  background: rgba(16, 19, 25, .97);
 }
 
 .asset-group {
@@ -599,6 +652,11 @@ body.dragging-panel #importProgressHeader {
   font-weight: 700;
   font-size: 12px;
   letter-spacing: 0;
+}
+
+summary.asset-group-title {
+  cursor: pointer;
+  user-select: none;
 }
 
 .asset-row {
@@ -660,6 +718,63 @@ body.dragging-panel #importProgressHeader {
   padding: 4px 8px;
 }
 
+.asset-actions input,
+.asset-manager-actions input {
+  min-height: 26px;
+  border: 1px solid #384456;
+  border-radius: 5px;
+  background: #10151d;
+  color: #e4ebf5;
+  padding: 4px 7px;
+  font: 12px/1.2 Consolas, ui-monospace, monospace;
+}
+
+.experiment-name-input {
+  width: min(220px, 42vw);
+}
+
+.experiment-small-input {
+  width: 92px;
+}
+
+.experiment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.experiment-form input,
+.experiment-form select {
+  min-width: 0;
+}
+
+.experiment-diff {
+  display: grid;
+  gap: 5px;
+}
+
+.experiment-diff-row {
+  display: grid;
+  grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  border: 1px solid #343d4b;
+  border-radius: 6px;
+  background: #171b22;
+  padding: 7px 8px;
+  color: #aeb8c7;
+  font: 11px/1.35 Consolas, ui-monospace, monospace;
+}
+
+.experiment-diff-row strong {
+  color: #f1f5fb;
+  overflow-wrap: anywhere;
+}
+
+.experiment-diff-row span {
+  overflow-wrap: anywhere;
+}
+
 .asset-empty {
   padding: 12px;
   color: #9eaaba;
@@ -669,6 +784,9 @@ body.dragging-panel #importProgressHeader {
 }
 
 #importProgressBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   padding: 10px 12px 12px;
   color: #d7dde8;
   font-size: 12px;
@@ -723,6 +841,7 @@ body.dragging-panel #importProgressHeader {
 }
 
 #mediaSummary {
+  flex: 0 0 auto;
   padding: 8px 10px;
   color: #d7dde8;
   border-bottom: 1px solid var(--line-soft);
@@ -734,7 +853,8 @@ body.dragging-panel #importProgressHeader {
   grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: 8px;
   padding: 10px;
-  max-height: 390px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -766,7 +886,8 @@ body.dragging-panel #importProgressHeader {
 #trainLog {
   margin: 0;
   padding: 10px 12px;
-  max-height: 482px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   white-space: pre-wrap;
   color: #d7dde8;
@@ -804,7 +925,6 @@ body.nav-override #three {
 
 #status {
   position: absolute;
-  zoom: var(--ui-scale);
   left: 12px;
   bottom: 12px;
   padding: 8px 10px;
@@ -816,7 +936,6 @@ body.nav-override #three {
 
 #fpsMeter {
   position: absolute;
-  zoom: var(--ui-scale);
   top: 12px;
   right: 12px;
   min-width: 72px;

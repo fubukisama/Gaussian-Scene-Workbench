@@ -93,6 +93,7 @@
         <button id="save" data-i18n="button.save">Save</button>
         <label class="file-button"><span data-i18n="button.importSplat">Import Splat</span><input id="splatImportFile" type="file" accept=".ply,.spz,.sog"></label>
         <button id="openAssetManager" disabled data-i18n="button.assetManager">Assets</button>
+        <button id="openExperimentManager" disabled data-i18n="button.experimentManager">Experiments</button>
         <button id="downloadSpz" disabled data-i18n="button.downloadSpz">Download SPZ</button>
         <button id="downloadSog" disabled data-i18n="button.downloadSog">Download SOG</button>
       </div>
@@ -257,6 +258,7 @@
         <button id="importOnly" data-i18n="button.importOnly">Import Only</button>
         <button id="startTrain" data-i18n="button.importTrain">Import + Train</button>
         <button id="trainExisting" data-i18n="button.trainExisting">Train Existing</button>
+        <button id="runColmap" data-i18n="button.runColmap">Run COLMAP</button>
         <button id="cancelTrain" disabled data-i18n="button.cancel">Cancel</button>
         <span id="trainSelection" class="muted" data-i18n="status.noInput">No input selected</span>
       </div>
@@ -313,6 +315,17 @@
     </div>
     <div id="assetManagerSummary"></div>
     <div id="assetManagerList"></div>
+  </div>
+  <div id="experimentManagerPanel" hidden>
+    <div id="experimentManagerHeader">
+      <strong data-i18n="panel.experimentManager">Experiment Manager</strong>
+      <div class="panel-actions">
+        <button id="refreshExperimentManager" data-i18n="button.refresh">Refresh</button>
+        <button id="closeExperimentManager" data-i18n="button.close">Close</button>
+      </div>
+    </div>
+    <div id="experimentManagerSummary"></div>
+    <div id="experimentManagerList"></div>
   </div>
   <div id="importProgressPanel" hidden>
     <div id="importProgressHeader">
