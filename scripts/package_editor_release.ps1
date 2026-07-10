@@ -103,6 +103,10 @@ Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination (Join-Path $Pack
 Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination (Join-Path $PackageDir "THIRD_PARTY_LICENSES.md") -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $Root "README_RELEASE.md") -Destination (Join-Path $PackageDir "README_RELEASE.md") -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $PackageDir "README.md") -Force -ErrorAction SilentlyContinue
+$ReleaseNotes = Join-Path $Root ("release_notes_v{0}.md" -f $Version)
+if (Test-Path -LiteralPath $ReleaseNotes) {
+  Copy-Item -LiteralPath $ReleaseNotes -Destination (Join-Path $PackageDir (Split-Path -Leaf $ReleaseNotes)) -Force
+}
 Copy-Item -LiteralPath (Join-Path $Root "version") -Destination (Join-Path $PackageDir "version") -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $Root "build_manifest.json") -Destination (Join-Path $PackageDir "build_manifest.json") -Force -ErrorAction SilentlyContinue
 
