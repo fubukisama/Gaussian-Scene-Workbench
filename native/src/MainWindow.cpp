@@ -34,6 +34,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -309,6 +310,18 @@ void MainWindow::createActions() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Lasso);
   });
 
+  mBrushAction = new QAction(
+      style()->standardIcon(QStyle::SP_FileDialogListView),
+      QStringLiteral("笔刷"), this);
+  mBrushAction->setCheckable(true);
+  mBrushAction->setShortcut(QKeySequence(QStringLiteral("B")));
+  mBrushAction->setToolTip(
+      QStringLiteral("连续笔刷选择 (B)，Shift 添加，Alt 减去"));
+  mEditModeActionGroup->addAction(mBrushAction);
+  connect(mBrushAction, &QAction::triggered, this, [this]() {
+    mViewport->setInteractionMode(NativeViewport::InteractionMode::Brush);
+  });
+
   mVisibleOnlyAction = new QAction(
       style()->standardIcon(QStyle::SP_DialogApplyButton),
       QStringLiteral("仅选择可见点"), this);
@@ -365,6 +378,9 @@ void MainWindow::createActions() {
   connect(mExportCropAction, &QAction::triggered, this,
           &MainWindow::exportCroppedScene);
 
+  connect(mEditModeActionGroup, &QActionGroup::triggered, this,
+          [this]() { updateEditActions(); });
+
   updateEditActions();
 
   auto *exitAction = new QAction(QStringLiteral("退出"), this);
@@ -419,6 +435,7 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mInspectAction);
   sceneMenu->addAction(mRectangleAction);
   sceneMenu->addAction(mLassoAction);
+  sceneMenu->addAction(mBrushAction);
   sceneMenu->addAction(mVisibleOnlyAction);
   sceneMenu->addSeparator();
   sceneMenu->addAction(mExportCropAction);
@@ -493,7 +510,34 @@ void MainWindow::createToolBars() {
   editToolbar->addAction(mInspectAction);
   editToolbar->addAction(mRectangleAction);
   editToolbar->addAction(mLassoAction);
+  editToolbar->addAction(mBrushAction);
   editToolbar->addAction(mVisibleOnlyAction);
+  editToolbar->addSeparator();
+  auto *brushRadiusLabel = new QLabel(QStringLiteral("半径"), editToolbar);
+  brushRadiusLabel->setObjectName(QStringLiteral("mutedLabel"));
+  editToolbar->addWidget(brushRadiusLabel);
+  mBrushRadiusSpin = new QSpinBox(editToolbar);
+  mBrushRadiusSpin->setObjectName(QStringLiteral("brushRadiusSpin"));
+  mBrushRadiusSpin->setAccessibleName(QStringLiteral("笔刷半径"));
+  mBrushRadiusSpin->setRange(4, 256);
+  mBrushRadiusSpin->setSingleStep(4);
+  mBrushRadiusSpin->setSuffix(QStringLiteral(" px"));
+  mBrushRadiusSpin->setKeyboardTracking(false);
+  mBrushRadiusSpin->setMinimumWidth(86);
+  mBrushRadiusSpin->setMaximumWidth(110);
+  const int savedBrushRadius =
+      std::clamp(QSettings().value(QStringLiteral("selection/brushRadius"), 32)
+                     .toInt(),
+                 4, 256);
+  mBrushRadiusSpin->setValue(savedBrushRadius);
+  mViewport->setBrushRadius(savedBrushRadius);
+  connect(mBrushRadiusSpin, &QSpinBox::valueChanged, this,
+          [this](const int radius) {
+            mViewport->setBrushRadius(radius);
+            QSettings().setValue(QStringLiteral("selection/brushRadius"),
+                                 radius);
+          });
+  editToolbar->addWidget(mBrushRadiusSpin);
   editToolbar->addSeparator();
   editToolbar->addAction(mClearSelectionAction);
   editToolbar->addAction(mInvertSelectionAction);
@@ -794,6 +838,10 @@ void MainWindow::updateEditActions() {
   mInspectAction->setEnabled(interactive);
   mRectangleAction->setEnabled(interactive);
   mLassoAction->setEnabled(interactive);
+  mBrushAction->setEnabled(interactive);
+  if (mBrushRadiusSpin != nullptr) {
+    mBrushRadiusSpin->setEnabled(interactive && mBrushAction->isChecked());
+  }
   mVisibleOnlyAction->setEnabled(interactive);
   mClearSelectionAction->setEnabled(interactive && mSelectedPointCount > 0);
   mInvertSelectionAction->setEnabled(interactive);

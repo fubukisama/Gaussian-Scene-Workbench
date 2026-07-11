@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PlyPointCloudLoader.h"
+#include "ScreenSpaceSelection.h"
 #include "SceneEditModel.h"
 
 #include <QElapsedTimer>
@@ -21,6 +22,8 @@
 class QMouseEvent;
 class QPainter;
 class QOpenGLShaderProgram;
+class QEnterEvent;
+class QEvent;
 class QWheelEvent;
 
 namespace gsw {
@@ -35,6 +38,7 @@ public:
     Select,
     Rectangle,
     Lasso,
+    Brush,
     Crop
   };
 
@@ -52,6 +56,7 @@ public:
   void setInteractionMode(InteractionMode mode);
   void setRenderMode(RenderMode mode);
   void setVisibleOnlySelection(bool enabled);
+  void setBrushRadius(int pixels);
   void resetCamera();
   void clearSelection();
   void invertSelection();
@@ -82,6 +87,8 @@ protected:
   void initializeGL() override;
   void resizeGL(int width, int height) override;
   void paintGL() override;
+  void enterEvent(QEnterEvent *event) override;
+  void leaveEvent(QEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *event) override;
@@ -95,7 +102,7 @@ private:
   [[nodiscard]] std::optional<QPointF> projectPoint(const QVector3D &point,
                                                     const QMatrix4x4 &viewProjection) const;
   void startSceneLoad(const QString &scenePath);
-  void startSelection(const QRectF &rectangle, const QPolygonF &lasso,
+  void startSelection(const ScreenSelectionRequest &request,
                       SelectionOperation operation);
   void finishSelectionGesture(Qt::KeyboardModifiers modifiers);
   void rebuildRenderedVertices();
@@ -121,8 +128,11 @@ private:
   Qt::MouseButtons mPressedButtons = Qt::NoButton;
   QPointF mSelectionStart;
   QPointF mSelectionCurrent;
-  QPolygonF mSelectionLasso;
+  QPolygonF mSelectionPath;
+  QPointF mBrushCursorPosition;
+  qreal mBrushRadius = 32.0;
   bool mSelectionGestureActive = false;
+  bool mBrushCursorVisible = false;
   bool mVisibleOnlySelection = true;
   bool mSelectionBusy = false;
   bool mCameraManipulated = false;

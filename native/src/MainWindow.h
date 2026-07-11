@@ -12,6 +12,7 @@ class QCloseEvent;
 class QDockWidget;
 class QLabel;
 class QPlainTextEdit;
+class QSpinBox;
 class QTableWidget;
 class QTreeWidget;
 
@@ -94,6 +95,7 @@ private:
   QAction *mInspectAction = nullptr;
   QAction *mRectangleAction = nullptr;
   QAction *mLassoAction = nullptr;
+  QAction *mBrushAction = nullptr;
   QAction *mVisibleOnlyAction = nullptr;
   QAction *mClearSelectionAction = nullptr;
   QAction *mInvertSelectionAction = nullptr;
@@ -104,6 +106,7 @@ private:
   QActionGroup *mEditModeActionGroup = nullptr;
   QActionGroup *mRenderModeActionGroup = nullptr;
   QActionGroup *mScaleActionGroup = nullptr;
+  QSpinBox *mBrushRadiusSpin = nullptr;
 
   int mUiScalePercent = 90;
   int mActiveTaskRow = -1;

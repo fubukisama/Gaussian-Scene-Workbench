@@ -32,6 +32,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ProcessSupervisor.h
   src/SceneEditModel.cpp
   src/SceneEditModel.h
+  src/ScreenSpaceSelection.cpp
+  src/ScreenSpaceSelection.h
   src/TrainingDialog.cpp
   src/TrainingDialog.h
   src/WorkspaceDocument.cpp
@@ -79,6 +81,8 @@ if(BUILD_TESTING)
       src/PlyPointCloudLoader.h
       src/SceneEditModel.cpp
       src/SceneEditModel.h
+      src/ScreenSpaceSelection.cpp
+      src/ScreenSpaceSelection.h
       src/WorkspaceDocument.cpp
       src/WorkspaceDocument.h
     )

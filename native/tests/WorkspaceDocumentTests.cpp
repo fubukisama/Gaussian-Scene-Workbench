@@ -1,5 +1,6 @@
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
+#include "ScreenSpaceSelection.h"
 #include "WorkspaceDocument.h"
 
 #include <QBitArray>
@@ -21,6 +22,7 @@ private slots:
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsBinaryGaussianSphericalHarmonicColors();
   void activatesGaussianScaleRotationAndOpacity();
+  void selectsBrushStrokeAndHonorsVisibility();
   void tracksSelectionDeletionUndoAndRedo();
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
@@ -183,6 +185,36 @@ void WorkspaceDocumentTests::activatesGaussianScaleRotationAndOpacity() {
   QCOMPARE(vertex.rotationX, 0.0F);
   QCOMPARE(vertex.rotationY, 0.0F);
   QCOMPARE(vertex.rotationZ, 0.0F);
+}
+
+void WorkspaceDocumentTests::selectsBrushStrokeAndHonorsVisibility() {
+  const QVector<gsw::PointPosition> positions = {
+      {-0.5F, 0.0F, -0.3F}, {0.0F, 0.0F, -0.4F},
+      {0.5F, 0.0F, -0.2F},  {0.0F, 0.6F, 0.0F},
+      {0.0F, 0.0F, 0.6F}};
+  QBitArray deleted(positions.size(), false);
+  QMatrix4x4 identity;
+  identity.setToIdentity();
+
+  gsw::ScreenSelectionRequest request;
+  request.shape = gsw::ScreenSelectionShape::Brush;
+  request.path = {QPointF(45.0, 100.0), QPointF(155.0, 100.0)};
+  request.brushRadius = 8.0;
+  request.visibleOnly = false;
+
+  QCOMPARE(gsw::selectSourcePoints(positions, deleted, identity,
+                                   QSize(200, 200), request),
+           QVector<quint32>({0U, 1U, 2U, 4U}));
+
+  request.visibleOnly = true;
+  QCOMPARE(gsw::selectSourcePoints(positions, deleted, identity,
+                                   QSize(200, 200), request),
+           QVector<quint32>({0U, 1U, 2U}));
+
+  deleted.setBit(1);
+  QCOMPARE(gsw::selectSourcePoints(positions, deleted, identity,
+                                   QSize(200, 200), request),
+           QVector<quint32>({0U, 2U, 4U}));
 }
 
 void WorkspaceDocumentTests::tracksSelectionDeletionUndoAndRedo() {

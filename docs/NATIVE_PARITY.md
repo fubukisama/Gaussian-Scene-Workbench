@@ -12,7 +12,7 @@ Status: `available`, `partial`, `missing`, `hidden`.
 | Training | 3DGS/2DGS presets, advanced options, resume | partial | Native dialog must call the guarded worker path, prevent output loss, expose progress, and support cancellation/resume. |
 | Scene load | PLY metadata, points, soft/real splats, cameras | partial | ASCII and binary little-endian points render natively. Standard 3DGS `scale_*`, `rot_*`, and `opacity` fields drive a depth-sorted screen-space Gaussian preview with SH-DC color; higher-order SH, tile rasterization, and cameras remain missing. |
 | Navigation | Orbit, pan, zoom, reset | available | Mouse navigation and scene-bounds camera fit work at supported UI scales. |
-| Selection | Rectangle, lasso, brush, visible-only, invert | partial | Rectangle/lasso, visible-only depth filtering, clear, and invert operate on full source coordinates; brush selection and GPU ID picking remain missing. |
+| Selection | Rectangle, lasso, brush, visible-only, invert | partial | Rectangle, lasso, and configurable 4-256 px continuous brush selection share full-source projection, visible-only depth filtering, clear, invert, add, and subtract behavior; GPU ID picking remains missing. |
 | Editing | Delete, crop, undo/redo, save crop | available | Delete history preserves original vertex indices; undo/redo is lossless; cropped ASCII/binary point and Gaussian PLY files retain every source field and are written atomically. |
 | Mesh | 2DGS/SuGaR/GS2Mesh/OpenMVS workflows | missing | Typed jobs expose source, options, progress, output validation, and retry. |
 | Texture | Bake, preview, trim, OBJ/GLB download | missing | Native asset entry survives reopen and exported files pass format validation. |
@@ -26,7 +26,7 @@ Status: `available`, `partial`, `missing`, `hidden`.
 ## Priority order
 
 1. P0: honest controls, robust project/assets state, typed training/COLMAP worker, real PLY point preview, actionable errors.
-2. P1: camera visualization, brush/GPU ID selection, production tile-based Gaussian rendering, and crop-volume tools. The native screen-space Gaussian preview, rectangle/lasso editing, and lossless cropped PLY export are complete.
+2. P1: camera visualization, GPU ID selection, production tile-based Gaussian rendering, and crop-volume tools. The native screen-space Gaussian preview, rectangle/lasso/brush editing, and lossless cropped PLY export are complete.
 3. P2: image/video import, 2DGS/resume, mesh/texture/export, PSNR, experiments, persistent task queue.
 
 `main` remains the stable legacy release until every P0 and P1 row is `available` and parity regression checks pass.
