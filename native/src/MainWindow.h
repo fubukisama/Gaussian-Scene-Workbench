@@ -40,9 +40,12 @@ private:
   void saveWindowState();
   void resetDockLayout();
   void applyUiScale(int scalePercent, bool persist);
+  void updateEditActions();
 
   bool confirmDiscardChanges();
+  bool confirmDiscardSceneEdits();
   bool saveProject(bool forceChoosePath = false);
+  bool exportCroppedScene();
   void newProject();
   void importDataset();
   void importScene();
@@ -78,6 +81,7 @@ private:
   QLabel *mPlyFormatValue = nullptr;
   QLabel *mProjectStatus = nullptr;
   QLabel *mRendererStatus = nullptr;
+  QLabel *mEditStatus = nullptr;
   QLabel *mScaleStatus = nullptr;
 
   QAction *mSaveAction = nullptr;
@@ -85,10 +89,27 @@ private:
   QAction *mImportSceneAction = nullptr;
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;
+  QAction *mInspectAction = nullptr;
+  QAction *mRectangleAction = nullptr;
+  QAction *mLassoAction = nullptr;
+  QAction *mVisibleOnlyAction = nullptr;
+  QAction *mClearSelectionAction = nullptr;
+  QAction *mInvertSelectionAction = nullptr;
+  QAction *mDeleteSelectionAction = nullptr;
+  QAction *mUndoEditAction = nullptr;
+  QAction *mRedoEditAction = nullptr;
+  QAction *mExportCropAction = nullptr;
+  QActionGroup *mEditModeActionGroup = nullptr;
   QActionGroup *mScaleActionGroup = nullptr;
 
   int mUiScalePercent = 90;
   int mActiveTaskRow = -1;
+  qsizetype mSelectedPointCount = 0;
+  qsizetype mDeletedPointCount = 0;
+  bool mSceneReady = false;
+  bool mSelectionBusy = false;
+  bool mCanUndoEdit = false;
+  bool mCanRedoEdit = false;
 };
 
 } // namespace gsw

@@ -248,6 +248,102 @@ void MainWindow::createActions() {
   connect(resetCameraAction, &QAction::triggered, mViewport, &NativeViewport::resetCamera);
   resetCameraAction->setObjectName(QStringLiteral("resetCameraAction"));
 
+  mEditModeActionGroup = new QActionGroup(this);
+  mEditModeActionGroup->setExclusive(true);
+
+  mInspectAction = new QAction(style()->standardIcon(QStyle::SP_ArrowUp),
+                               QStringLiteral("查看"), this);
+  mInspectAction->setCheckable(true);
+  mInspectAction->setChecked(true);
+  mInspectAction->setShortcut(QKeySequence(QStringLiteral("V")));
+  mInspectAction->setToolTip(QStringLiteral("查看与导航 (V)"));
+  mEditModeActionGroup->addAction(mInspectAction);
+  connect(mInspectAction, &QAction::triggered, this, [this]() {
+    mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
+  });
+
+  mRectangleAction = new QAction(
+      style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+      QStringLiteral("框选"), this);
+  mRectangleAction->setCheckable(true);
+  mRectangleAction->setShortcut(QKeySequence(QStringLiteral("R")));
+  mRectangleAction->setToolTip(
+      QStringLiteral("矩形选择 (R)，Shift 添加，Alt 减去"));
+  mEditModeActionGroup->addAction(mRectangleAction);
+  connect(mRectangleAction, &QAction::triggered, this, [this]() {
+    mViewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
+  });
+
+  mLassoAction = new QAction(
+      style()->standardIcon(QStyle::SP_FileDialogListView),
+      QStringLiteral("套索"), this);
+  mLassoAction->setCheckable(true);
+  mLassoAction->setShortcut(QKeySequence(QStringLiteral("L")));
+  mLassoAction->setToolTip(
+      QStringLiteral("套索选择 (L)，Shift 添加，Alt 减去"));
+  mEditModeActionGroup->addAction(mLassoAction);
+  connect(mLassoAction, &QAction::triggered, this, [this]() {
+    mViewport->setInteractionMode(NativeViewport::InteractionMode::Lasso);
+  });
+
+  mVisibleOnlyAction = new QAction(
+      style()->standardIcon(QStyle::SP_DialogApplyButton),
+      QStringLiteral("仅选择可见点"), this);
+  mVisibleOnlyAction->setCheckable(true);
+  mVisibleOnlyAction->setChecked(true);
+  mVisibleOnlyAction->setToolTip(QStringLiteral("仅选择当前视角可见的点"));
+  connect(mVisibleOnlyAction, &QAction::toggled, mViewport,
+          &NativeViewport::setVisibleOnlySelection);
+
+  mClearSelectionAction = new QAction(
+      style()->standardIcon(QStyle::SP_DialogResetButton),
+      QStringLiteral("清除选择"), this);
+  mClearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
+  mClearSelectionAction->setToolTip(QStringLiteral("清除选择 (Esc)"));
+  connect(mClearSelectionAction, &QAction::triggered, mViewport,
+          &NativeViewport::clearSelection);
+
+  mInvertSelectionAction = new QAction(
+      style()->standardIcon(QStyle::SP_BrowserReload),
+      QStringLiteral("反选"), this);
+  mInvertSelectionAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
+  mInvertSelectionAction->setToolTip(QStringLiteral("反选未删除的点 (Ctrl+I)"));
+  connect(mInvertSelectionAction, &QAction::triggered, mViewport,
+          &NativeViewport::invertSelection);
+
+  mDeleteSelectionAction = new QAction(
+      style()->standardIcon(QStyle::SP_TrashIcon), QStringLiteral("删除所选"),
+      this);
+  mDeleteSelectionAction->setShortcut(QKeySequence::Delete);
+  mDeleteSelectionAction->setToolTip(QStringLiteral("删除所选点 (Delete)"));
+  connect(mDeleteSelectionAction, &QAction::triggered, mViewport,
+          &NativeViewport::deleteSelection);
+
+  mUndoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
+                                QStringLiteral("撤销删除"), this);
+  mUndoEditAction->setShortcut(QKeySequence::Undo);
+  mUndoEditAction->setToolTip(QStringLiteral("撤销删除 (Ctrl+Z)"));
+  connect(mUndoEditAction, &QAction::triggered, mViewport,
+          &NativeViewport::undoEdit);
+
+  mRedoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
+                                QStringLiteral("重做删除"), this);
+  mRedoEditAction->setShortcut(QKeySequence::Redo);
+  mRedoEditAction->setToolTip(QStringLiteral("重做删除 (Ctrl+Y)"));
+  connect(mRedoEditAction, &QAction::triggered, mViewport,
+          &NativeViewport::redoEdit);
+
+  mExportCropAction = new QAction(
+      style()->standardIcon(QStyle::SP_DialogSaveButton),
+      QStringLiteral("裁剪另存为..."), this);
+  mExportCropAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
+  mExportCropAction->setToolTip(
+      QStringLiteral("按原始顶点索引无损导出裁剪 PLY"));
+  connect(mExportCropAction, &QAction::triggered, this,
+          &MainWindow::exportCroppedScene);
+
+  updateEditActions();
+
   auto *exitAction = new QAction(QStringLiteral("退出"), this);
   exitAction->setShortcut(QKeySequence::Quit);
   connect(exitAction, &QAction::triggered, this, &QWidget::close);
@@ -279,6 +375,14 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(actions().at(5));
 
+  QMenu *editMenu = menuBar()->addMenu(QStringLiteral("编辑"));
+  editMenu->addAction(mUndoEditAction);
+  editMenu->addAction(mRedoEditAction);
+  editMenu->addSeparator();
+  editMenu->addAction(mClearSelectionAction);
+  editMenu->addAction(mInvertSelectionAction);
+  editMenu->addAction(mDeleteSelectionAction);
+
   QMenu *workflowMenu = menuBar()->addMenu(QStringLiteral("工作流"));
   workflowMenu->addAction(actions().at(3));
   workflowMenu->addSeparator();
@@ -288,6 +392,13 @@ void MainWindow::createMenus() {
   QMenu *sceneMenu = menuBar()->addMenu(QStringLiteral("场景"));
   sceneMenu->addAction(mImportSceneAction);
   sceneMenu->addAction(actions().at(4));
+  sceneMenu->addSeparator();
+  sceneMenu->addAction(mInspectAction);
+  sceneMenu->addAction(mRectangleAction);
+  sceneMenu->addAction(mLassoAction);
+  sceneMenu->addAction(mVisibleOnlyAction);
+  sceneMenu->addSeparator();
+  sceneMenu->addAction(mExportCropAction);
 
   QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
   viewMenu->addAction(mProjectDock->toggleViewAction());
@@ -340,6 +451,22 @@ void MainWindow::createToolBars() {
   mainToolbar->addSeparator();
   mainToolbar->addAction(actions().at(4));
 
+  auto *editToolbar = addToolBar(QStringLiteral("场景编辑"));
+  editToolbar->setObjectName(QStringLiteral("editToolbar"));
+  editToolbar->setMovable(false);
+  editToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  editToolbar->addAction(mInspectAction);
+  editToolbar->addAction(mRectangleAction);
+  editToolbar->addAction(mLassoAction);
+  editToolbar->addAction(mVisibleOnlyAction);
+  editToolbar->addSeparator();
+  editToolbar->addAction(mClearSelectionAction);
+  editToolbar->addAction(mInvertSelectionAction);
+  editToolbar->addAction(mDeleteSelectionAction);
+  editToolbar->addSeparator();
+  editToolbar->addAction(mUndoEditAction);
+  editToolbar->addAction(mRedoEditAction);
+  editToolbar->addAction(mExportCropAction);
 }
 
 void MainWindow::createProjectDock() {
@@ -458,10 +585,13 @@ void MainWindow::createStatusBar() {
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
   mRendererStatus = new QLabel(QStringLiteral("原生点云预览 | 未载入场景"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
+  mEditStatus = new QLabel(QStringLiteral("选择 0 | 删除 0"), this);
+  mEditStatus->setObjectName(QStringLiteral("mutedLabel"));
   mScaleStatus = new QLabel(this);
   mScaleStatus->setObjectName(QStringLiteral("mutedLabel"));
   statusBar()->addWidget(mProjectStatus, 1);
   statusBar()->addPermanentWidget(mRendererStatus);
+  statusBar()->addPermanentWidget(mEditStatus);
   statusBar()->addPermanentWidget(mScaleStatus);
 }
 
@@ -520,6 +650,22 @@ void MainWindow::connectServices() {
             mRendererStatus->setText(QStringLiteral("点云读取失败"));
             appendTaskEvent(QStringLiteral("场景读取失败：%1").arg(message));
           });
+  connect(mViewport, &NativeViewport::editStateChanged, this,
+          [this](const qsizetype selectedCount, const qsizetype deletedCount,
+                 const bool canUndo, const bool canRedo, const bool sceneReady,
+                 const bool) {
+            mSelectedPointCount = selectedCount;
+            mDeletedPointCount = deletedCount;
+            mCanUndoEdit = canUndo;
+            mCanRedoEdit = canRedo;
+            mSceneReady = sceneReady;
+            updateEditActions();
+          });
+  connect(mViewport, &NativeViewport::selectionBusyChanged, this,
+          [this](const bool busy) {
+            mSelectionBusy = busy;
+            updateEditActions();
+          });
 }
 
 void MainWindow::restoreWindowState() {
@@ -575,15 +721,60 @@ void MainWindow::applyUiScale(const int scalePercent, const bool persist) {
   }
 }
 
+void MainWindow::updateEditActions() {
+  const bool interactive = mSceneReady && !mSelectionBusy;
+  if (mInspectAction == nullptr) {
+    return;
+  }
+  mInspectAction->setEnabled(interactive);
+  mRectangleAction->setEnabled(interactive);
+  mLassoAction->setEnabled(interactive);
+  mVisibleOnlyAction->setEnabled(interactive);
+  mClearSelectionAction->setEnabled(interactive && mSelectedPointCount > 0);
+  mInvertSelectionAction->setEnabled(interactive);
+  mDeleteSelectionAction->setEnabled(interactive && mSelectedPointCount > 0);
+  mUndoEditAction->setEnabled(interactive && mCanUndoEdit);
+  mRedoEditAction->setEnabled(interactive && mCanRedoEdit);
+  mExportCropAction->setEnabled(interactive && mDeletedPointCount > 0);
+  if (mEditStatus != nullptr) {
+    mEditStatus->setVisible(mSceneReady || mSelectionBusy);
+    mEditStatus->setText(
+        mSelectionBusy
+            ? QStringLiteral("正在计算选择")
+            : QStringLiteral("选择 %1 | 删除 %2")
+                  .arg(mSelectedPointCount)
+                  .arg(mDeletedPointCount));
+  }
+}
+
 bool MainWindow::confirmDiscardChanges() {
-  if (!mWorkspace.isModified()) {
+  if (mWorkspace.isModified()) {
+    const QMessageBox::StandardButton answer = QMessageBox::warning(
+        this, QStringLiteral("工程尚未保存"),
+        QStringLiteral("当前工程包含未保存的修改。"),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+    if (answer == QMessageBox::Save && !saveProject(false)) {
+      return false;
+    }
+    if (answer == QMessageBox::Cancel) {
+      return false;
+    }
+  }
+  return confirmDiscardSceneEdits();
+}
+
+bool MainWindow::confirmDiscardSceneEdits() {
+  if (!mViewport->hasUnsavedSceneEdits()) {
     return true;
   }
   const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QStringLiteral("工程尚未保存"), QStringLiteral("当前工程包含未保存的修改。"),
-      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+      this, QStringLiteral("裁剪尚未导出"),
+      QStringLiteral("当前场景包含尚未导出的删除操作。"),
+      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+      QMessageBox::Save);
   if (answer == QMessageBox::Save) {
-    return saveProject(false);
+    return exportCroppedScene();
   }
   return answer == QMessageBox::Discard;
 }
@@ -609,6 +800,39 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
     return false;
   }
   appendTaskEvent(QStringLiteral("工程已保存：%1").arg(QDir::toNativeSeparators(target)));
+  return true;
+}
+
+bool MainWindow::exportCroppedScene() {
+  const QString sourcePath = mWorkspace.scenePath();
+  if (sourcePath.isEmpty()) {
+    return false;
+  }
+  const QFileInfo sourceInfo(sourcePath);
+  QString target = QDir(sourceInfo.absolutePath())
+                       .filePath(sourceInfo.completeBaseName() +
+                                 QStringLiteral("-cropped.ply"));
+  target = QFileDialog::getSaveFileName(
+      this, QStringLiteral("裁剪另存为"), target,
+      QStringLiteral("PLY Scene (*.ply);;All files (*.*)"));
+  if (target.isEmpty()) {
+    return false;
+  }
+  if (!target.endsWith(QStringLiteral(".ply"), Qt::CaseInsensitive)) {
+    target += QStringLiteral(".ply");
+  }
+
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  QString error;
+  const bool saved = mViewport->saveCroppedScene(target, &error);
+  QApplication::restoreOverrideCursor();
+  if (!saved) {
+    showError(QStringLiteral("无法导出裁剪场景"), error);
+    return false;
+  }
+  appendTaskEvent(QStringLiteral("裁剪场景已导出：%1")
+                      .arg(QDir::toNativeSeparators(target)));
+  statusBar()->showMessage(QStringLiteral("裁剪场景已导出"), 5000);
   return true;
 }
 
@@ -649,6 +873,9 @@ void MainWindow::importDataset() {
 void MainWindow::importScene() {
   if (!mWorkspace.hasProject()) {
     QMessageBox::information(this, QStringLiteral("请先创建工程"), QStringLiteral("导入场景前需要创建或打开工程。"));
+    return;
+  }
+  if (!confirmDiscardSceneEdits()) {
     return;
   }
   const QString filePath = QFileDialog::getOpenFileName(
@@ -766,6 +993,7 @@ void MainWindow::updateWorkspaceUi() {
   mImportSceneAction->setEnabled(mWorkspace.hasProject());
   mTrainAction->setEnabled(!mProcessSupervisor.isRunning() && mWorkspace.hasProject() &&
                            !mWorkspace.datasetPath().isEmpty());
+  updateEditActions();
 }
 
 void MainWindow::rebuildProjectTree() {

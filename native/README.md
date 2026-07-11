@@ -9,10 +9,14 @@
 - Portable `.gsw.json` project files with relative asset paths.
 - Dataset folder import plus asynchronous ASCII/binary PLY point-cloud loading.
 - Native OpenGL point rendering with RGB or Gaussian SH-DC colors, deterministic large-scene sampling, and scene-bounds camera fitting.
+- Full-source rectangle/lasso selection with optional visible-point depth filtering, clear, and invert actions.
+- Original-index delete history with undo/redo and atomic cropped PLY export that preserves all vertex fields.
 - Existing PowerShell/Python backend execution through `QProcess`.
 - Qt high-DPI support plus persistent 75%-125% manual UI scaling.
 
-The current viewport is a real native point-cloud preview, not a Gaussian splat renderer. It reports frame processing time and does not label that value as SIBR FPS. Selection and crop controls remain hidden until their ID/depth picking path is implemented.
+The current viewport is a real native point-cloud editor, not yet a Gaussian splat renderer. It reports frame processing time and does not label that value as SIBR FPS. Rectangle and lasso selection operate on every source vertex even when display rendering is sampled; brush selection and GPU ID picking are still pending.
+
+Crop export supports ASCII and binary little-endian point/Gaussian PLY files. It copies retained vertex records without re-encoding custom Gaussian fields, updates the vertex count, writes atomically, and refuses indexed mesh PLY files whose face indices would become invalid.
 
 Feature parity and release gates are tracked in `docs/NATIVE_PARITY.md` (packaged as `NATIVE_PARITY.md`).
 

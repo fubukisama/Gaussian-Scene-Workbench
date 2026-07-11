@@ -30,6 +30,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/PlyPointCloudLoader.h
   src/ProcessSupervisor.cpp
   src/ProcessSupervisor.h
+  src/SceneEditModel.cpp
+  src/SceneEditModel.h
   src/TrainingDialog.cpp
   src/TrainingDialog.h
   src/WorkspaceDocument.cpp
@@ -75,6 +77,8 @@ if(BUILD_TESTING)
       tests/WorkspaceDocumentTests.cpp
       src/PlyPointCloudLoader.cpp
       src/PlyPointCloudLoader.h
+      src/SceneEditModel.cpp
+      src/SceneEditModel.h
       src/WorkspaceDocument.cpp
       src/WorkspaceDocument.h
     )

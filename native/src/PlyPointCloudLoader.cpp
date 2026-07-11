@@ -1,7 +1,9 @@
 #include "PlyPointCloudLoader.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QStringList>
 #include <QtEndian>
 
@@ -16,6 +18,8 @@ namespace gsw {
 namespace {
 constexpr double kSphericalHarmonicDc = 0.28209479177387814;
 constexpr qint64 kMaximumHeaderBytes = 1024 * 1024;
+constexpr qint64 kMaximumEditableVertexCount = 50'000'000;
+constexpr qint64 kMaximumRecordBytes = 256LL * 1024LL * 1024LL;
 
 enum class PlyFormat {
   Unknown,
@@ -51,6 +55,8 @@ struct ElementDefinition {
 struct PlyHeader {
   PlyFormat format = PlyFormat::Unknown;
   QVector<ElementDefinition> elements;
+  QVector<QByteArray> rawLines;
+  qsizetype vertexElementLine = -1;
 };
 
 ScalarType scalarTypeFromName(const QString &name) {
@@ -114,6 +120,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
 
   while (!file.atEnd() && consumed < kMaximumHeaderBytes) {
     const QByteArray rawLine = file.readLine();
+    header.rawLines.append(rawLine);
     consumed += rawLine.size();
     const QString line = QString::fromLatin1(rawLine).trimmed();
     if (firstLine) {
@@ -149,6 +156,9 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
         return false;
       }
       header.elements.append({parts.at(1), count, {}});
+      if (parts.at(1) == QStringLiteral("vertex")) {
+        header.vertexElementLine = header.rawLines.size() - 1;
+      }
       currentElement = &header.elements.last();
       continue;
     }
@@ -181,6 +191,125 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
   }
 
   error = QStringLiteral("The PLY header is incomplete or too large.");
+  return false;
+}
+
+qsizetype scalarByteSize(const ScalarType type) {
+  switch (type) {
+  case ScalarType::Int8:
+  case ScalarType::UInt8:
+    return 1;
+  case ScalarType::Int16:
+  case ScalarType::UInt16:
+    return 2;
+  case ScalarType::Int32:
+  case ScalarType::UInt32:
+  case ScalarType::Float32:
+    return 4;
+  case ScalarType::Float64:
+    return 8;
+  case ScalarType::Invalid:
+    return 0;
+  }
+  return 0;
+}
+
+std::optional<qint64> binaryListCount(const QByteArray &bytes,
+                                      const ScalarType type) {
+  const auto *data = reinterpret_cast<const uchar *>(bytes.constData());
+  switch (type) {
+  case ScalarType::Int8:
+    return static_cast<qint8>(bytes.at(0));
+  case ScalarType::UInt8:
+    return static_cast<quint8>(bytes.at(0));
+  case ScalarType::Int16:
+    return static_cast<qint16>(qFromLittleEndian<quint16>(data));
+  case ScalarType::UInt16:
+    return qFromLittleEndian<quint16>(data);
+  case ScalarType::Int32:
+    return static_cast<qint32>(qFromLittleEndian<quint32>(data));
+  case ScalarType::UInt32:
+    return qFromLittleEndian<quint32>(data);
+  case ScalarType::Float32:
+  case ScalarType::Float64:
+  case ScalarType::Invalid:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+bool appendExactBytes(QFile &file, const qint64 byteCount, QByteArray &record,
+                      QString &error) {
+  if (byteCount < 0 || byteCount > kMaximumRecordBytes) {
+    error = QStringLiteral("PLY record is too large to process safely.");
+    return false;
+  }
+  const QByteArray bytes = file.read(byteCount);
+  if (bytes.size() != byteCount) {
+    error = QStringLiteral("Unexpected end of binary PLY data while exporting.");
+    return false;
+  }
+  record.append(bytes);
+  return true;
+}
+
+bool readBinaryRawRecord(QFile &file, const ElementDefinition &element,
+                         QByteArray &record, QString &error) {
+  record.clear();
+  for (const PropertyDefinition &property : element.properties) {
+    if (!property.isList) {
+      if (!appendExactBytes(file, scalarByteSize(property.valueType), record, error)) {
+        return false;
+      }
+      continue;
+    }
+
+    const qsizetype countBytes = scalarByteSize(property.listCountType);
+    const QByteArray rawCount = file.read(countBytes);
+    if (rawCount.size() != countBytes) {
+      error = QStringLiteral("Unexpected end of binary PLY list data while exporting.");
+      return false;
+    }
+    record.append(rawCount);
+    const std::optional<qint64> count = binaryListCount(rawCount, property.listCountType);
+    if (!count.has_value() || *count < 0) {
+      error = QStringLiteral("PLY list counts must use a non-negative integer type.");
+      return false;
+    }
+    const qint64 valueSize = scalarByteSize(property.valueType);
+    if (valueSize <= 0 || *count > kMaximumRecordBytes / valueSize ||
+        !appendExactBytes(file, *count * valueSize, record, error)) {
+      if (error.isEmpty()) {
+        error = QStringLiteral("PLY list record is too large to process safely.");
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool readAsciiRawRecord(QFile &file, QByteArray &record, QString &error) {
+  record.clear();
+  while (!file.atEnd()) {
+    const QByteArray line = file.readLine();
+    record.append(line);
+    if (record.size() > kMaximumRecordBytes) {
+      error = QStringLiteral("ASCII PLY record is too large to process safely.");
+      return false;
+    }
+    if (!line.trimmed().isEmpty()) {
+      return true;
+    }
+  }
+  error = QStringLiteral("Unexpected end of ASCII PLY data while exporting.");
+  return false;
+}
+
+bool writeBytes(QIODevice &destination, const QByteArray &bytes, QString &error) {
+  if (destination.write(bytes) == bytes.size()) {
+    return true;
+  }
+  error = QStringLiteral("Unable to write the cropped PLY file.");
   return false;
 }
 
@@ -301,12 +430,34 @@ bool shouldSampleVertex(const qint64 vertexIndex, const qint64 sourceCount,
 bool appendVertex(const ElementDefinition &element, const QVector<double> &values,
                   const int xIndex, const int yIndex, const int zIndex,
                   const int redIndex, const int greenIndex, const int blueIndex,
-                  const bool sphericalHarmonicColor, PointCloudData &result) {
+                  const bool sphericalHarmonicColor, const qint64 sourceIndex,
+                  const bool appendPreview, bool &hasFiniteBounds,
+                  PointCloudData &result) {
   const double x = values.at(xIndex);
   const double y = values.at(yIndex);
   const double z = values.at(zIndex);
+  result.sourcePositions.append(
+      {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
   if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
     return false;
+  }
+
+  const QVector3D position(static_cast<float>(x), static_cast<float>(y),
+                           static_cast<float>(z));
+  if (!hasFiniteBounds) {
+    result.boundsMinimum = position;
+    result.boundsMaximum = position;
+    hasFiniteBounds = true;
+  } else {
+    result.boundsMinimum.setX(std::min(result.boundsMinimum.x(), position.x()));
+    result.boundsMinimum.setY(std::min(result.boundsMinimum.y(), position.y()));
+    result.boundsMinimum.setZ(std::min(result.boundsMinimum.z(), position.z()));
+    result.boundsMaximum.setX(std::max(result.boundsMaximum.x(), position.x()));
+    result.boundsMaximum.setY(std::max(result.boundsMaximum.y(), position.y()));
+    result.boundsMaximum.setZ(std::max(result.boundsMaximum.z(), position.z()));
+  }
+  if (!appendPreview) {
+    return true;
   }
 
   PointCloudVertex vertex;
@@ -324,19 +475,7 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
       vertex.blue = normalizedColor(values.at(blueIndex), element.properties.at(blueIndex).valueType);
     }
   }
-
-  const QVector3D position(vertex.x, vertex.y, vertex.z);
-  if (result.vertices.isEmpty()) {
-    result.boundsMinimum = position;
-    result.boundsMaximum = position;
-  } else {
-    result.boundsMinimum.setX(std::min(result.boundsMinimum.x(), vertex.x));
-    result.boundsMinimum.setY(std::min(result.boundsMinimum.y(), vertex.y));
-    result.boundsMinimum.setZ(std::min(result.boundsMinimum.z(), vertex.z));
-    result.boundsMaximum.setX(std::max(result.boundsMaximum.x(), vertex.x));
-    result.boundsMaximum.setY(std::max(result.boundsMaximum.y(), vertex.y));
-    result.boundsMaximum.setZ(std::max(result.boundsMaximum.z(), vertex.z));
-  }
+  vertex.sourceIndex = static_cast<quint32>(sourceIndex);
   result.vertices.append(vertex);
   return true;
 }
@@ -420,7 +559,8 @@ bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
 } // namespace
 
 bool PointCloudData::isValid() const {
-  return error.isEmpty() && sourceVertexCount >= 0 && !vertices.isEmpty();
+  return error.isEmpty() && sourceVertexCount > 0 &&
+         sourceVertexCount == sourcePositions.size() && !vertices.isEmpty();
 }
 
 QVector3D PointCloudData::center() const {
@@ -460,6 +600,14 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   }
   const ElementDefinition &vertexElement = *vertexElementIterator;
   result.sourceVertexCount = vertexElement.count;
+  if (vertexElement.count > kMaximumEditableVertexCount ||
+      vertexElement.count > std::numeric_limits<quint32>::max()) {
+    result.error = QStringLiteral(
+        "The PLY contains %1 vertices. Native editing currently supports up to %2 vertices.")
+                       .arg(vertexElement.count)
+                       .arg(kMaximumEditableVertexCount);
+    return result;
+  }
 
   const int xIndex = findProperty(vertexElement, {QStringLiteral("x")});
   const int yIndex = findProperty(vertexElement, {QStringLiteral("y")});
@@ -489,7 +637,9 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   const qsizetype sampleCount = static_cast<qsizetype>(
       std::min<qint64>(vertexElement.count, maximumPreviewPoints));
   result.vertices.reserve(sampleCount);
+  result.sourcePositions.reserve(static_cast<qsizetype>(vertexElement.count));
   qsizetype nextSampleIndex = 0;
+  bool hasFiniteBounds = false;
 
   for (const ElementDefinition &element : header.elements) {
     QVector<double> values(element.properties.size());
@@ -499,21 +649,168 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                             : readBinaryElementRecord(file, element, values, result.error);
       if (!read) {
         result.vertices.clear();
+        result.sourcePositions.clear();
         return result;
       }
-      if (element.name != QStringLiteral("vertex") ||
-          !shouldSampleVertex(recordIndex, vertexElement.count, sampleCount, nextSampleIndex)) {
+      if (element.name != QStringLiteral("vertex")) {
         continue;
       }
+      const bool appendPreview = shouldSampleVertex(
+          recordIndex, vertexElement.count, sampleCount, nextSampleIndex);
       appendVertex(element, values, xIndex, yIndex, zIndex, redIndex, greenIndex,
-                   blueIndex, sphericalHarmonicColor, result);
+                   blueIndex, sphericalHarmonicColor, recordIndex, appendPreview,
+                   hasFiniteBounds, result);
     }
   }
 
-  if (result.vertices.isEmpty()) {
-    result.error = QStringLiteral("The PLY file contains no finite preview vertices.");
+  if (!hasFiniteBounds || result.vertices.isEmpty()) {
+    result.error = QStringLiteral("The PLY file contains no finite vertices.");
   }
   return result;
+}
+
+bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
+                                        const QString &destinationFilePath,
+                                        const QBitArray &deletedVertices,
+                                        QString *errorMessage) {
+  QString error;
+  const QString sourceAbsolute = QDir::cleanPath(QFileInfo(sourceFilePath).absoluteFilePath());
+  const QString destinationAbsolute =
+      QDir::cleanPath(QFileInfo(destinationFilePath).absoluteFilePath());
+  if (sourceAbsolute.compare(destinationAbsolute, Qt::CaseInsensitive) == 0) {
+    error = QStringLiteral("Choose a new file name; cropped export cannot overwrite its source PLY.");
+  }
+
+  QFile source(sourceFilePath);
+  if (error.isEmpty() && !source.open(QIODevice::ReadOnly)) {
+    error = QStringLiteral("Unable to open source PLY: %1").arg(source.errorString());
+  }
+
+  PlyHeader header;
+  if (error.isEmpty() && !parseHeader(source, header, error)) {
+    // parseHeader provides the error.
+  }
+
+  const auto vertexElementIterator = std::find_if(
+      header.elements.cbegin(), header.elements.cend(),
+      [](const ElementDefinition &element) {
+        return element.name == QStringLiteral("vertex");
+      });
+  if (error.isEmpty() && vertexElementIterator == header.elements.cend()) {
+    error = QStringLiteral("The source PLY does not contain a vertex element.");
+  }
+  if (error.isEmpty() && vertexElementIterator->count != deletedVertices.size()) {
+    error = QStringLiteral("The edit state no longer matches the source PLY vertex count.");
+  }
+  if (error.isEmpty()) {
+    const bool hasIndexedFaces = std::any_of(
+        header.elements.cbegin(), header.elements.cend(),
+        [](const ElementDefinition &element) {
+          if (element.count <= 0) {
+            return false;
+          }
+          if (element.name.compare(QStringLiteral("face"), Qt::CaseInsensitive) == 0) {
+            return true;
+          }
+          return std::any_of(
+              element.properties.cbegin(), element.properties.cend(),
+              [](const PropertyDefinition &property) {
+                return property.name.contains(QStringLiteral("vertex_index"),
+                                              Qt::CaseInsensitive) ||
+                       property.name.contains(QStringLiteral("vertex_indices"),
+                                              Qt::CaseInsensitive);
+              });
+        });
+    if (hasIndexedFaces) {
+      error = QStringLiteral(
+          "This PLY contains indexed mesh faces. Native crop export currently supports point and Gaussian PLY files only.");
+    }
+  }
+
+  qsizetype deletedCount = 0;
+  if (error.isEmpty()) {
+    for (qsizetype index = 0; index < deletedVertices.size(); ++index) {
+      deletedCount += deletedVertices.testBit(index) ? 1 : 0;
+    }
+    if (deletedCount == 0) {
+      error = QStringLiteral("No deleted vertices are available to export.");
+    } else if (deletedCount >= deletedVertices.size()) {
+      error = QStringLiteral("A cropped PLY must retain at least one vertex.");
+    }
+  }
+
+  QSaveFile destination(destinationFilePath);
+  if (error.isEmpty() && !destination.open(QIODevice::WriteOnly)) {
+    error = QStringLiteral("Unable to create cropped PLY: %1").arg(destination.errorString());
+  }
+
+  if (error.isEmpty()) {
+    const qint64 remaining = deletedVertices.size() - deletedCount;
+    for (qsizetype lineIndex = 0; lineIndex < header.rawLines.size(); ++lineIndex) {
+      QByteArray line = header.rawLines.at(lineIndex);
+      if (lineIndex == header.vertexElementLine) {
+        QByteArray newline;
+        if (line.endsWith("\r\n")) {
+          newline = "\r\n";
+        } else if (line.endsWith('\n')) {
+          newline = "\n";
+        }
+        line = "element vertex " + QByteArray::number(remaining) + newline;
+      }
+      if (!writeBytes(destination, line, error)) {
+        break;
+      }
+    }
+  }
+
+  qsizetype sourceVertexIndex = 0;
+  if (error.isEmpty()) {
+    for (const ElementDefinition &element : header.elements) {
+      for (qint64 recordIndex = 0; recordIndex < element.count; ++recordIndex) {
+        QByteArray record;
+        const bool read = header.format == PlyFormat::Ascii
+                              ? readAsciiRawRecord(source, record, error)
+                              : readBinaryRawRecord(source, element, record, error);
+        if (!read) {
+          break;
+        }
+        bool keep = true;
+        if (element.name == QStringLiteral("vertex")) {
+          keep = !deletedVertices.testBit(sourceVertexIndex);
+          ++sourceVertexIndex;
+        }
+        if (keep && !writeBytes(destination, record, error)) {
+          break;
+        }
+      }
+      if (!error.isEmpty()) {
+        break;
+      }
+    }
+  }
+
+  while (error.isEmpty() && !source.atEnd()) {
+    const QByteArray trailing = source.read(1024 * 1024);
+    if (trailing.isEmpty() && source.error() != QFileDevice::NoError) {
+      error = QStringLiteral("Unable to read trailing PLY data: %1").arg(source.errorString());
+      break;
+    }
+    if (!writeBytes(destination, trailing, error)) {
+      break;
+    }
+  }
+
+  bool succeeded = error.isEmpty();
+  if (succeeded && !destination.commit()) {
+    error = QStringLiteral("Unable to finalize cropped PLY: %1").arg(destination.errorString());
+    succeeded = false;
+  } else if (!succeeded) {
+    destination.cancelWriting();
+  }
+  if (errorMessage != nullptr) {
+    *errorMessage = error;
+  }
+  return succeeded;
 }
 
 } // namespace gsw

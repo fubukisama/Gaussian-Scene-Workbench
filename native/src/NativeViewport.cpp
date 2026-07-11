@@ -3,21 +3,26 @@
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QFutureWatcher>
+#include <QLineF>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QOpenGLShaderProgram>
+#include <QVector4D>
 #include <QWheelEvent>
 #include <QtConcurrent>
 
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
+#include <limits>
 
 namespace gsw {
 
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
+constexpr float kVisibleDepthTolerance = 0.006F;
+constexpr int kMaximumDepthGridDimension = 1280;
 
 float radians(const float degrees) { return degrees * kPi / 180.0F; }
 
@@ -45,6 +50,142 @@ QString formatCount(const qint64 count) {
     return QStringLiteral("%1 K").arg(static_cast<double>(count) / 1000.0, 0, 'f', 1);
   }
   return QString::number(count);
+}
+
+struct ProjectedSourcePoint {
+  float x = 0.0F;
+  float y = 0.0F;
+  float depth = 0.0F;
+};
+
+bool projectSourcePoint(const PointPosition &point, const QMatrix4x4 &viewProjection,
+                        const QSize &viewport, ProjectedSourcePoint &projected) {
+  if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+      !std::isfinite(point.z) || viewport.isEmpty()) {
+    return false;
+  }
+  const QVector4D clip =
+      viewProjection * QVector4D(point.x, point.y, point.z, 1.0F);
+  if (clip.w() <= 0.0001F) {
+    return false;
+  }
+  const float inverseW = 1.0F / clip.w();
+  const float normalizedX = clip.x() * inverseW;
+  const float normalizedY = clip.y() * inverseW;
+  const float normalizedZ = clip.z() * inverseW;
+  if (normalizedX < -1.0F || normalizedX > 1.0F || normalizedY < -1.0F ||
+      normalizedY > 1.0F || normalizedZ < -1.0F || normalizedZ > 1.0F) {
+    return false;
+  }
+  projected.x = (normalizedX * 0.5F + 0.5F) * viewport.width();
+  projected.y = (1.0F - (normalizedY * 0.5F + 0.5F)) * viewport.height();
+  projected.depth = normalizedZ;
+  return true;
+}
+
+bool pointInsidePolygon(const QPointF &point, const QPolygonF &polygon) {
+  if (polygon.size() < 3) {
+    return false;
+  }
+  bool inside = false;
+  qsizetype previous = polygon.size() - 1;
+  for (qsizetype current = 0; current < polygon.size(); ++current) {
+    const QPointF &a = polygon.at(current);
+    const QPointF &b = polygon.at(previous);
+    const bool crosses = (a.y() > point.y()) != (b.y() > point.y());
+    if (crosses) {
+      const qreal intersectionX =
+          (b.x() - a.x()) * (point.y() - a.y()) / (b.y() - a.y()) + a.x();
+      if (point.x() < intersectionX) {
+        inside = !inside;
+      }
+    }
+    previous = current;
+  }
+  return inside;
+}
+
+QVector<quint32> selectSourcePoints(const QVector<PointPosition> &positions,
+                                    const QBitArray &deleted,
+                                    const QMatrix4x4 &viewProjection,
+                                    const QSize &viewport,
+                                    const QRectF &selectionRectangle,
+                                    const QPolygonF &selectionLasso,
+                                    const bool visibleOnly) {
+  QVector<quint32> matches;
+  matches.reserve(std::min<qsizetype>(positions.size() / 10, 1'000'000));
+  if (positions.isEmpty() || viewport.isEmpty()) {
+    return matches;
+  }
+
+  const bool useLasso = selectionLasso.size() >= 3;
+  const QRectF lassoBounds = selectionLasso.boundingRect();
+  auto contains = [&](const ProjectedSourcePoint &point) {
+    const QPointF screenPoint(point.x, point.y);
+    if (!useLasso) {
+      return selectionRectangle.contains(screenPoint);
+    }
+    return lassoBounds.contains(screenPoint) &&
+           pointInsidePolygon(screenPoint, selectionLasso);
+  };
+
+  int gridWidth = 0;
+  int gridHeight = 0;
+  QVector<float> depthGrid;
+  if (visibleOnly) {
+    const int maximumViewportDimension =
+        std::max(viewport.width(), viewport.height());
+    const float scale = std::min(
+        1.0F, static_cast<float>(kMaximumDepthGridDimension) /
+                  static_cast<float>(maximumViewportDimension));
+    gridWidth = std::max(1, qRound(viewport.width() * scale));
+    gridHeight = std::max(1, qRound(viewport.height() * scale));
+    depthGrid.fill(std::numeric_limits<float>::infinity(),
+                   gridWidth * gridHeight);
+
+    for (qsizetype index = 0; index < positions.size(); ++index) {
+      if (deleted.testBit(index)) {
+        continue;
+      }
+      ProjectedSourcePoint point;
+      if (!projectSourcePoint(positions.at(index), viewProjection, viewport, point)) {
+        continue;
+      }
+      const int gridX = std::clamp(
+          static_cast<int>(point.x / viewport.width() * gridWidth), 0,
+          gridWidth - 1);
+      const int gridY = std::clamp(
+          static_cast<int>(point.y / viewport.height() * gridHeight), 0,
+          gridHeight - 1);
+      float &nearestDepth = depthGrid[gridY * gridWidth + gridX];
+      nearestDepth = std::min(nearestDepth, point.depth);
+    }
+  }
+
+  for (qsizetype index = 0; index < positions.size(); ++index) {
+    if (deleted.testBit(index)) {
+      continue;
+    }
+    ProjectedSourcePoint point;
+    if (!projectSourcePoint(positions.at(index), viewProjection, viewport, point) ||
+        !contains(point)) {
+      continue;
+    }
+    if (visibleOnly) {
+      const int gridX = std::clamp(
+          static_cast<int>(point.x / viewport.width() * gridWidth), 0,
+          gridWidth - 1);
+      const int gridY = std::clamp(
+          static_cast<int>(point.y / viewport.height() * gridHeight), 0,
+          gridHeight - 1);
+      if (point.depth > depthGrid.at(gridY * gridWidth + gridX) +
+                            kVisibleDepthTolerance) {
+        continue;
+      }
+    }
+    matches.append(static_cast<quint32>(index));
+  }
+  return matches;
 }
 } // namespace
 
@@ -76,12 +217,25 @@ void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCou
     return;
   }
 
+  ++mSceneGeneration;
+  if (mSelectionBusy) {
+    mSelectionBusy = false;
+    emit selectionBusyChanged(false);
+  }
   mRequestedScenePath = scenePath;
   mScenePath = scenePath;
   mPreviewPointCount = 0;
+  mRenderedPointCount = 0;
   mSceneLoadMessage.clear();
+  mSourcePositions.clear();
+  mSourcePositions.squeeze();
+  mPreviewVertices.clear();
+  mPreviewVertices.squeeze();
   mPendingVertices.clear();
+  mPendingVertices.squeeze();
+  mEditModel.reset(0);
   mPointUploadPending = true;
+  notifyEditState();
   if (scenePath.isEmpty()) {
     mSceneRadius = 4.0F;
     resetCamera();
@@ -93,7 +247,16 @@ void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCou
 
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
   mMode = mode;
+  mSelectionGestureActive = false;
+  mSelectionLasso.clear();
+  setCursor(mode == InteractionMode::Rectangle || mode == InteractionMode::Lasso
+                ? Qt::CrossCursor
+                : Qt::ArrowCursor);
   update();
+}
+
+void NativeViewport::setVisibleOnlySelection(const bool enabled) {
+  mVisibleOnlySelection = enabled;
 }
 
 void NativeViewport::resetCamera() {
@@ -101,6 +264,73 @@ void NativeViewport::resetCamera() {
   mPitchDegrees = 24.0F;
   mDistance = std::max(mSceneRadius * 2.8F, 0.1F);
   update();
+}
+
+void NativeViewport::clearSelection() {
+  if (mSelectionBusy) {
+    return;
+  }
+  mEditModel.clearSelection();
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
+}
+
+void NativeViewport::invertSelection() {
+  if (mSelectionBusy || !hasEditableScene()) {
+    return;
+  }
+  mEditModel.invertSelection();
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
+}
+
+void NativeViewport::deleteSelection() {
+  if (mSelectionBusy || mEditModel.deleteSelection() == 0) {
+    return;
+  }
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
+}
+
+void NativeViewport::undoEdit() {
+  if (mSelectionBusy || mEditModel.undo() == 0) {
+    return;
+  }
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
+}
+
+void NativeViewport::redoEdit() {
+  if (mSelectionBusy || mEditModel.redo() == 0) {
+    return;
+  }
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
+}
+
+bool NativeViewport::saveCroppedScene(const QString &filePath,
+                                      QString *errorMessage) {
+  if (!PlyPointCloudLoader::writeFiltered(mScenePath, filePath,
+                                          mEditModel.deletedBits(),
+                                          errorMessage)) {
+    return false;
+  }
+  mEditModel.markExported();
+  notifyEditState();
+  return true;
+}
+
+bool NativeViewport::hasUnsavedSceneEdits() const {
+  return mEditModel.hasUnsavedChanges();
+}
+
+bool NativeViewport::hasEditableScene() const {
+  return !mScenePath.isEmpty() && mEditModel.pointCount() > 0;
 }
 
 void NativeViewport::initializeGL() {
@@ -172,15 +402,7 @@ void NativeViewport::paintGL() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
 
-  QMatrix4x4 projection;
-  const float aspect = height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0F;
-  const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
-  const float farPlane = std::max(100.0F, mDistance + mSceneRadius * 12.0F);
-  projection.perspective(46.0F, aspect, nearPlane, farPlane);
-
-  QMatrix4x4 view;
-  view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
-  const QMatrix4x4 viewProjection = projection * view;
+  const QMatrix4x4 viewProjection = viewProjectionMatrix();
   drawPointCloud(viewProjection);
 
   QPainter painter(this);
@@ -188,6 +410,7 @@ void NativeViewport::paintGL() {
   if (mPreviewPointCount == 0) {
     drawGrid(painter, viewProjection);
   }
+  drawSelectionGesture(painter);
 
   const double frameMilliseconds = paintTimer.nsecsElapsed() / 1000000.0;
   if (mSmoothedFrameMilliseconds <= 0.0) {
@@ -204,13 +427,14 @@ void NativeViewport::paintGL() {
 void NativeViewport::startSceneLoad(const QString &scenePath) {
   mSceneLoadMessage = QStringLiteral("正在读取点云...");
   emit sceneLoadStarted(scenePath);
+  const int generation = mSceneGeneration;
 
   auto *watcher = new QFutureWatcher<PointCloudData>(this);
   connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
-          [this, watcher, scenePath]() {
+          [this, watcher, scenePath, generation]() {
             PointCloudData data = watcher->result();
             watcher->deleteLater();
-            if (scenePath != mRequestedScenePath) {
+            if (scenePath != mRequestedScenePath || generation != mSceneGeneration) {
               return;
             }
             if (!data.isValid()) {
@@ -223,14 +447,117 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mTarget = data.center();
             mSceneRadius = data.radius();
             mPreviewPointCount = data.vertices.size();
-            mPendingVertices = std::move(data.vertices);
-            mPointUploadPending = true;
+            mSourcePositions = std::move(data.sourcePositions);
+            mPreviewVertices = std::move(data.vertices);
+            mEditModel.reset(mSourcePositions.size());
+            rebuildRenderedVertices();
             mSceneLoadMessage.clear();
             resetCamera();
+            notifyEditState();
             emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount);
           });
   watcher->setFuture(QtConcurrent::run(
       [scenePath]() { return PlyPointCloudLoader::load(scenePath); }));
+}
+
+void NativeViewport::startSelection(const QRectF &rectangle,
+                                    const QPolygonF &lasso,
+                                    const SelectionOperation operation) {
+  if (mSelectionBusy || !hasEditableScene()) {
+    return;
+  }
+
+  mSelectionBusy = true;
+  emit selectionBusyChanged(true);
+  notifyEditState();
+  update();
+
+  const int generation = mSceneGeneration;
+  const QVector<PointPosition> positions = mSourcePositions;
+  const QBitArray deleted = mEditModel.deletedBits();
+  const QMatrix4x4 viewProjection = viewProjectionMatrix();
+  const QSize viewportSize = size();
+  const bool visibleOnly = mVisibleOnlySelection;
+
+  auto *watcher = new QFutureWatcher<QVector<quint32>>(this);
+  connect(watcher, &QFutureWatcher<QVector<quint32>>::finished, this,
+          [this, watcher, generation, operation]() {
+            const QVector<quint32> matches = watcher->result();
+            watcher->deleteLater();
+            if (generation != mSceneGeneration) {
+              return;
+            }
+            mSelectionBusy = false;
+            mEditModel.applySelection(matches, operation);
+            rebuildRenderedVertices();
+            notifyEditState();
+            emit selectionBusyChanged(false);
+            update();
+          });
+  watcher->setFuture(QtConcurrent::run(
+      [positions, deleted, viewProjection, viewportSize, rectangle, lasso,
+       visibleOnly]() {
+        return selectSourcePoints(positions, deleted, viewProjection,
+                                  viewportSize, rectangle, lasso, visibleOnly);
+      }));
+}
+
+void NativeViewport::finishSelectionGesture(
+    const Qt::KeyboardModifiers modifiers) {
+  if (!mSelectionGestureActive) {
+    return;
+  }
+  mSelectionGestureActive = false;
+
+  QRectF rectangle(mSelectionStart, mSelectionCurrent);
+  rectangle = rectangle.normalized();
+  QPolygonF lasso = mSelectionLasso;
+  mSelectionLasso.clear();
+
+  if (mMode == InteractionMode::Rectangle && rectangle.width() < 3.0 &&
+      rectangle.height() < 3.0) {
+    rectangle = QRectF(mSelectionCurrent - QPointF(4.0, 4.0), QSizeF(8.0, 8.0));
+  }
+  if (mMode == InteractionMode::Lasso && lasso.size() < 3) {
+    update();
+    return;
+  }
+
+  SelectionOperation operation = SelectionOperation::Replace;
+  if (modifiers.testFlag(Qt::ShiftModifier)) {
+    operation = SelectionOperation::Add;
+  } else if (modifiers.testFlag(Qt::AltModifier)) {
+    operation = SelectionOperation::Subtract;
+  }
+  startSelection(rectangle, lasso, operation);
+}
+
+void NativeViewport::rebuildRenderedVertices() {
+  mPendingVertices.clear();
+  mPendingVertices.reserve(mPreviewVertices.size());
+  const QBitArray &selected = mEditModel.selectedBits();
+  const QBitArray &deleted = mEditModel.deletedBits();
+  for (const PointCloudVertex &sourceVertex : mPreviewVertices) {
+    const qsizetype sourceIndex = static_cast<qsizetype>(sourceVertex.sourceIndex);
+    if (sourceIndex >= deleted.size() || deleted.testBit(sourceIndex)) {
+      continue;
+    }
+    PointCloudVertex renderedVertex = sourceVertex;
+    if (selected.testBit(sourceIndex)) {
+      renderedVertex.red = 1.0F;
+      renderedVertex.green = 0.72F;
+      renderedVertex.blue = 0.16F;
+    }
+    mPendingVertices.append(renderedVertex);
+  }
+  mRenderedPointCount = mPendingVertices.size();
+  mPointUploadPending = true;
+}
+
+void NativeViewport::notifyEditState() {
+  emit editStateChanged(mEditModel.selectedCount(), mEditModel.deletedCount(),
+                        mEditModel.canUndo(), mEditModel.canRedo(),
+                        hasEditableScene(), mEditModel.hasUnsavedChanges());
 }
 
 void NativeViewport::uploadPendingPointCloud() {
@@ -244,12 +571,11 @@ void NativeViewport::uploadPendingPointCloud() {
                         static_cast<int>(byteCount));
   mPointBuffer.release();
   mPendingVertices.clear();
-  mPendingVertices.squeeze();
   mPointUploadPending = false;
 }
 
 void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
-  if (mPreviewPointCount <= 0 || mPointProgram == nullptr || !mPointProgram->isLinked()) {
+  if (mRenderedPointCount <= 0 || mPointProgram == nullptr || !mPointProgram->isLinked()) {
     return;
   }
 
@@ -261,7 +587,7 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   mPointProgram->setUniformValue("pointSize", static_cast<float>(2.4 * devicePixelRatioF()));
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
-    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mPreviewPointCount));
+    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
   }
   mPointProgram->release();
   glDisable(GL_BLEND);
@@ -270,10 +596,33 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
   mPressedButtons = event->buttons();
   mLastMousePosition = event->position().toPoint();
+  if (event->button() == Qt::LeftButton && !mSelectionBusy &&
+      (mMode == InteractionMode::Rectangle || mMode == InteractionMode::Lasso) &&
+      hasEditableScene()) {
+    mSelectionGestureActive = true;
+    mSelectionStart = event->position();
+    mSelectionCurrent = event->position();
+    mSelectionLasso.clear();
+    if (mMode == InteractionMode::Lasso) {
+      mSelectionLasso.append(event->position());
+    }
+    update();
+  }
   event->accept();
 }
 
 void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
+  if (mSelectionGestureActive) {
+    mSelectionCurrent = event->position();
+    if (mMode == InteractionMode::Lasso &&
+        (mSelectionLasso.isEmpty() ||
+         QLineF(mSelectionLasso.last(), event->position()).length() >= 3.0)) {
+      mSelectionLasso.append(event->position());
+    }
+    update();
+    event->accept();
+    return;
+  }
   if (mPressedButtons == Qt::NoButton) {
     QOpenGLWidget::mouseMoveEvent(event);
     return;
@@ -303,6 +652,13 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && mSelectionGestureActive) {
+    mSelectionCurrent = event->position();
+    if (mMode == InteractionMode::Lasso) {
+      mSelectionLasso.append(event->position());
+    }
+    finishSelectionGesture(event->modifiers());
+  }
   mPressedButtons = event->buttons();
   event->accept();
 }
@@ -321,6 +677,21 @@ QVector3D NativeViewport::cameraPosition() const {
   return mTarget + QVector3D(mDistance * cosPitch * std::sin(yaw),
                             mDistance * std::sin(pitch),
                             mDistance * cosPitch * std::cos(yaw));
+}
+
+QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
+  QMatrix4x4 projection;
+  const float aspect =
+      height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
+                   : 1.0F;
+  const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
+  const float farPlane =
+      std::max(100.0F, mDistance + mSceneRadius * 12.0F);
+  projection.perspective(46.0F, aspect, nearPlane, farPlane);
+
+  QMatrix4x4 view;
+  view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
+  return projection * view;
 }
 
 std::optional<QPointF> NativeViewport::projectPoint(const QVector3D &point,
@@ -378,6 +749,30 @@ void NativeViewport::drawGrid(QPainter &painter, const QMatrix4x4 &viewProjectio
   }
 }
 
+void NativeViewport::drawSelectionGesture(QPainter &painter) {
+  if (!mSelectionGestureActive) {
+    return;
+  }
+
+  painter.save();
+  painter.setRenderHint(QPainter::Antialiasing, true);
+  painter.setPen(QPen(QColor(102, 193, 168), 1.5, Qt::SolidLine));
+  painter.setBrush(QColor(102, 193, 168, 36));
+  if (mMode == InteractionMode::Rectangle) {
+    painter.drawRect(QRectF(mSelectionStart, mSelectionCurrent).normalized());
+  } else if (mMode == InteractionMode::Lasso && !mSelectionLasso.isEmpty()) {
+    QPainterPath path;
+    path.moveTo(mSelectionLasso.first());
+    for (qsizetype index = 1; index < mSelectionLasso.size(); ++index) {
+      path.lineTo(mSelectionLasso.at(index));
+    }
+    path.lineTo(mSelectionCurrent);
+    path.closeSubpath();
+    painter.drawPath(path);
+  }
+  painter.restore();
+}
+
 void NativeViewport::drawOverlay(QPainter &painter, const double frameMilliseconds) {
   painter.save();
   painter.setPen(Qt::NoPen);
@@ -394,6 +789,13 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
     count = QStringLiteral("%1 点").arg(formatCount(mGaussianCount));
   } else {
     count = QStringLiteral("场景数据待载入");
+  }
+  if (mSelectionBusy) {
+    count += QStringLiteral(" | 正在计算选择");
+  } else if (mEditModel.selectedCount() > 0 || mEditModel.deletedCount() > 0) {
+    count += QStringLiteral(" | 已选 %1 | 已删 %2")
+                 .arg(formatCount(mEditModel.selectedCount()),
+                      formatCount(mEditModel.deletedCount()));
   }
   const QFontMetrics metrics(font());
   const int widthHint = std::max({metrics.horizontalAdvance(project), metrics.horizontalAdvance(sceneName),
@@ -425,7 +827,7 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   painter.drawText(metricRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    metrics.elidedText(metric, Qt::ElideRight, metricRect.width() - 20));
 
-  const QString mode = modeLabel(mMode);
+  const QString mode = mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
   const int modeWidth = metrics.horizontalAdvance(mode) + 22;
   const QRect modeRect(width() - modeWidth - 12, 12, modeWidth, 26);
   painter.setPen(Qt::NoPen);

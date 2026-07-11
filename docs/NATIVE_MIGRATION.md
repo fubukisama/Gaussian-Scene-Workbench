@@ -40,10 +40,11 @@ The first implementation intentionally keeps these boundaries small:
 
 - `WorkspaceDocument` owns portable project metadata and asset references.
 - `ProcessSupervisor` owns one external worker lifecycle and streams logs into the native task panel.
-- `NativeViewport` owns OpenGL context, asynchronous point-scene upload, navigation, overlays, and interaction-mode state.
+- `NativeViewport` owns OpenGL context, asynchronous point-scene upload, navigation, full-source selection projection, overlays, and interaction-mode state.
+- `SceneEditModel` owns compact selection/deletion masks, original vertex identity, and bounded undo/redo history.
 - `MainWindow` composes UI only; training and scene behavior move into dedicated managers as their state models mature.
 
-The next internal services will follow the same proven separation visible in LichtFeld Studio without copying GPL implementation code: `SceneManager`, `TrainingStateMachine`, `SelectionState`, `ToolRegistry`, and a renderer frame-lifecycle service.
+The next internal services will follow the same proven separation visible in LichtFeld Studio without copying GPL implementation code: `SceneManager`, `TrainingStateMachine`, `ToolRegistry`, and a renderer frame-lifecycle service.
 
 ## Migration phases
 
@@ -53,13 +54,14 @@ The next internal services will follow the same proven separation visible in Lic
 - Adaptive DPI/manual UI scale, dock layout persistence, and compact professional workspace.
 - Project creation/open/save, dataset import, PLY metadata and point import, task logs, environment checks, and supervised 3DGS training launch.
 - Native OpenGL point preview with deterministic sampling and explicit separation from future SIBR splat metrics.
+- Full-source rectangle/lasso selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export.
 
 ### 0.3.x renderer integration
 
 - Introduce the renderer boundary and embed the bundled SIBR Gaussian renderer in the Qt-owned graphics context.
 - Load scene data once and keep it in native/GPU memory.
 - Report renderer frame time, presented FPS, GPU time, and Gaussian count separately. Never infer thousands of FPS by dividing a sub-millisecond UI paint duration.
-- Add camera frustums, point/splat modes, selection masks, crop volumes, and export.
+- Add camera frustums, point/splat modes, brush/GPU ID selection, crop volumes, and additional export formats.
 
 ### 0.4 training and reconstruction parity
 

@@ -11,6 +11,7 @@ The application is being rebuilt as a fully native Qt 6/C++ desktop program on t
 
 - Current version: `0.3.0-native-preview`
 - Updated: `2026-07-11`
+- Current native slice: full-source rectangle/lasso selection, delete undo/redo, and lossless cropped PLY export.
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)
 - Local build instructions: [native/README.md](native/README.md)

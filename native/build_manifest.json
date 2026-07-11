@@ -5,6 +5,7 @@
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
   "renderer": "Native OpenGL point preview; embedded Gaussian renderer pending",
+  "editing": "Full-source rectangle/lasso selection, original-index delete history, and atomic cropped PLY export",
   "computeBackendIncluded": true,
   "featureGate": "NATIVE_PARITY.md",
   "legacyWebRuntimeIncluded": false
