@@ -71,6 +71,24 @@ def write_test_ply(path, xyz):
 
 
 class TrainingBackendTests(unittest.TestCase):
+    def test_conda_root_candidates_accepts_base_prefix(self):
+        prefix = Path("/opt/miniforge3")
+        with mock.patch.dict(server.os.environ, {"CONDA_PREFIX": str(prefix)}, clear=False):
+            candidates = server.conda_root_candidates()
+
+        self.assertIn(prefix, candidates)
+
+    def test_conda_root_candidates_accepts_named_environment_prefix(self):
+        root = Path("/opt/miniforge3")
+        with mock.patch.dict(
+            server.os.environ,
+            {"CONDA_PREFIX": str(root / "envs" / "gaussian_splatting")},
+            clear=False,
+        ):
+            candidates = server.conda_root_candidates()
+
+        self.assertIn(root, candidates)
+
     def test_form_items_reads_upload_fields_not_cgi_values(self):
         upload = FakeUploadItem("clip.mov", b"video")
         upload.value = b"video"

@@ -16,7 +16,7 @@ set(CMAKE_AUTORCC ON)
 
 set(GSW_RELEASE_DATE "2026-07-11" CACHE STRING "Release date shown by the application")
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets)
 qt_standard_project_setup()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
@@ -26,8 +26,12 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MainWindow.h
   src/NativeViewport.cpp
   src/NativeViewport.h
+  src/PlyPointCloudLoader.cpp
+  src/PlyPointCloudLoader.h
   src/ProcessSupervisor.cpp
   src/ProcessSupervisor.h
+  src/TrainingDialog.cpp
+  src/TrainingDialog.h
   src/WorkspaceDocument.cpp
   src/WorkspaceDocument.h
   src/main.cpp
@@ -36,6 +40,7 @@ qt_add_executable(GaussianSceneWorkbench WIN32
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
   Qt6::Core
+  Qt6::Concurrent
   Qt6::Gui
   Qt6::Widgets
   Qt6::OpenGL
@@ -68,11 +73,13 @@ if(BUILD_TESTING)
   if(TARGET Qt6::Test)
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
+      src/PlyPointCloudLoader.cpp
+      src/PlyPointCloudLoader.h
       src/WorkspaceDocument.cpp
       src/WorkspaceDocument.h
     )
     target_include_directories(gsw_native_tests PRIVATE src)
-    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Test)
+    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()

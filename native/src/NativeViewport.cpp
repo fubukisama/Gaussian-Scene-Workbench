@@ -2,12 +2,16 @@
 
 #include <QFileInfo>
 #include <QFontMetrics>
+#include <QFutureWatcher>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QOpenGLShaderProgram>
 #include <QWheelEvent>
+#include <QtConcurrent>
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 
 namespace gsw {
@@ -51,14 +55,39 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   setMinimumSize(420, 280);
 }
 
+NativeViewport::~NativeViewport() {
+  if (context() != nullptr && context()->isValid()) {
+    makeCurrent();
+    mPointVertexArray.destroy();
+    mPointBuffer.destroy();
+    doneCurrent();
+  }
+}
+
 void NativeViewport::setProjectLabel(const QString &label) {
   mProjectLabel = label;
   update();
 }
 
 void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCount) {
-  mScenePath = scenePath;
   mGaussianCount = gaussianCount;
+  if (mRequestedScenePath == scenePath) {
+    update();
+    return;
+  }
+
+  mRequestedScenePath = scenePath;
+  mScenePath = scenePath;
+  mPreviewPointCount = 0;
+  mSceneLoadMessage.clear();
+  mPendingVertices.clear();
+  mPointUploadPending = true;
+  if (scenePath.isEmpty()) {
+    mSceneRadius = 4.0F;
+    resetCamera();
+    return;
+  }
+  startSceneLoad(scenePath);
   update();
 }
 
@@ -68,10 +97,9 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
 }
 
 void NativeViewport::resetCamera() {
-  mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
-  mDistance = 12.0F;
+  mDistance = std::max(mSceneRadius * 2.8F, 0.1F);
   update();
 }
 
@@ -79,6 +107,57 @@ void NativeViewport::initializeGL() {
   initializeOpenGLFunctions();
   glClearColor(0.047F, 0.051F, 0.055F, 1.0F);
   glDisable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_PROGRAM_POINT_SIZE);
+
+  mPointProgram = new QOpenGLShaderProgram(this);
+  const bool vertexCompiled = mPointProgram->addShaderFromSourceCode(
+      QOpenGLShader::Vertex,
+      R"GLSL(#version 330 core
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 color;
+uniform mat4 viewProjection;
+uniform float pointSize;
+out vec3 vertexColor;
+void main() {
+  gl_Position = viewProjection * vec4(position, 1.0);
+  gl_PointSize = pointSize;
+  vertexColor = color;
+}
+)GLSL");
+  const bool fragmentCompiled = mPointProgram->addShaderFromSourceCode(
+      QOpenGLShader::Fragment,
+      R"GLSL(#version 330 core
+in vec3 vertexColor;
+out vec4 fragmentColor;
+void main() {
+  float radialDistance = length(gl_PointCoord - vec2(0.5)) * 2.0;
+  if (radialDistance > 1.0) {
+    discard;
+  }
+  float alpha = 1.0 - smoothstep(0.72, 1.0, radialDistance);
+  fragmentColor = vec4(vertexColor, alpha);
+}
+)GLSL");
+  const bool shaderReady = vertexCompiled && fragmentCompiled && mPointProgram->link();
+  if (!shaderReady) {
+    mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1").arg(mPointProgram->log());
+  } else {
+    mPointVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
+    mPointBuffer.create();
+    mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    mPointBuffer.bind();
+    mPointProgram->bind();
+    mPointProgram->enableAttributeArray(0);
+    mPointProgram->setAttributeBuffer(0, GL_FLOAT, offsetof(PointCloudVertex, x), 3,
+                                      sizeof(PointCloudVertex));
+    mPointProgram->enableAttributeArray(1);
+    mPointProgram->setAttributeBuffer(1, GL_FLOAT, offsetof(PointCloudVertex, red), 3,
+                                      sizeof(PointCloudVertex));
+    mPointProgram->release();
+    mPointBuffer.release();
+  }
   mFrameTimer.start();
 }
 
@@ -91,18 +170,24 @@ void NativeViewport::paintGL() {
   QElapsedTimer paintTimer;
   paintTimer.start();
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  uploadPendingPointCloud();
 
   QMatrix4x4 projection;
   const float aspect = height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0F;
-  projection.perspective(46.0F, aspect, 0.05F, 5000.0F);
+  const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
+  const float farPlane = std::max(100.0F, mDistance + mSceneRadius * 12.0F);
+  projection.perspective(46.0F, aspect, nearPlane, farPlane);
 
   QMatrix4x4 view;
   view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
   const QMatrix4x4 viewProjection = projection * view;
+  drawPointCloud(viewProjection);
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
-  drawGrid(painter, viewProjection);
+  if (mPreviewPointCount == 0) {
+    drawGrid(painter, viewProjection);
+  }
 
   const double frameMilliseconds = paintTimer.nsecsElapsed() / 1000000.0;
   if (mSmoothedFrameMilliseconds <= 0.0) {
@@ -114,6 +199,72 @@ void NativeViewport::paintGL() {
   drawAxisGizmo(painter);
   painter.end();
   emit frameTimeChanged(mSmoothedFrameMilliseconds);
+}
+
+void NativeViewport::startSceneLoad(const QString &scenePath) {
+  mSceneLoadMessage = QStringLiteral("正在读取点云...");
+  emit sceneLoadStarted(scenePath);
+
+  auto *watcher = new QFutureWatcher<PointCloudData>(this);
+  connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
+          [this, watcher, scenePath]() {
+            PointCloudData data = watcher->result();
+            watcher->deleteLater();
+            if (scenePath != mRequestedScenePath) {
+              return;
+            }
+            if (!data.isValid()) {
+              mSceneLoadMessage = data.error;
+              emit sceneLoadFailed(scenePath, data.error);
+              update();
+              return;
+            }
+
+            mTarget = data.center();
+            mSceneRadius = data.radius();
+            mPreviewPointCount = data.vertices.size();
+            mPendingVertices = std::move(data.vertices);
+            mPointUploadPending = true;
+            mSceneLoadMessage.clear();
+            resetCamera();
+            emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount);
+          });
+  watcher->setFuture(QtConcurrent::run(
+      [scenePath]() { return PlyPointCloudLoader::load(scenePath); }));
+}
+
+void NativeViewport::uploadPendingPointCloud() {
+  if (!mPointUploadPending || !mPointBuffer.isCreated()) {
+    return;
+  }
+  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
+  mPointBuffer.bind();
+  const qsizetype byteCount = mPendingVertices.size() * static_cast<qsizetype>(sizeof(PointCloudVertex));
+  mPointBuffer.allocate(mPendingVertices.isEmpty() ? nullptr : mPendingVertices.constData(),
+                        static_cast<int>(byteCount));
+  mPointBuffer.release();
+  mPendingVertices.clear();
+  mPendingVertices.squeeze();
+  mPointUploadPending = false;
+}
+
+void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
+  if (mPreviewPointCount <= 0 || mPointProgram == nullptr || !mPointProgram->isLinked()) {
+    return;
+  }
+
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  mPointProgram->bind();
+  mPointProgram->setUniformValue("viewProjection", viewProjection);
+  mPointProgram->setUniformValue("pointSize", static_cast<float>(2.4 * devicePixelRatioF()));
+  {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
+    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mPreviewPointCount));
+  }
+  mPointProgram->release();
+  glDisable(GL_BLEND);
 }
 
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
@@ -234,8 +385,16 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
 
   const QString sceneName = mScenePath.isEmpty() ? QStringLiteral("未载入场景") : QFileInfo(mScenePath).fileName();
   const QString project = mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
-  const QString count = mGaussianCount > 0 ? QStringLiteral("%1 Gaussians").arg(formatCount(mGaussianCount))
-                                           : QStringLiteral("场景元数据待载入");
+  QString count;
+  if (!mSceneLoadMessage.isEmpty()) {
+    count = mSceneLoadMessage;
+  } else if (mGaussianCount > 0 && mPreviewPointCount > 0 && mGaussianCount != mPreviewPointCount) {
+    count = QStringLiteral("%1 点 | 预览 %2").arg(formatCount(mGaussianCount), formatCount(mPreviewPointCount));
+  } else if (mGaussianCount > 0) {
+    count = QStringLiteral("%1 点").arg(formatCount(mGaussianCount));
+  } else {
+    count = QStringLiteral("场景数据待载入");
+  }
   const QFontMetrics metrics(font());
   const int widthHint = std::max({metrics.horizontalAdvance(project), metrics.horizontalAdvance(sceneName),
                                   metrics.horizontalAdvance(count)}) + 28;
@@ -255,7 +414,7 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   painter.setPen(QColor(102, 193, 168));
   painter.drawText(headerRect.adjusted(12, 49, -12, -4), Qt::AlignLeft | Qt::AlignVCenter, count);
 
-  const QString metric = QStringLiteral("原生 OpenGL  |  CPU %1 ms  |  SIBR 离线")
+  const QString metric = QStringLiteral("原生点云预览  |  帧处理 %1 ms")
                              .arg(frameMilliseconds, 0, 'f', 2);
   const int metricWidth = metrics.horizontalAdvance(metric) + 24;
   const QRect metricRect(12, height() - 38, std::min(metricWidth, width() - 24), 26);

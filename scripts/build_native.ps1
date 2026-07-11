@@ -99,6 +99,25 @@ function Copy-AppLocalDependencies {
   }
 }
 
+function Remove-DirectoryWithRetry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [int]$Attempts = 6
+  )
+
+  for ($Attempt = 1; $Attempt -le $Attempts; $Attempt++) {
+    try {
+      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($Attempt -eq $Attempts) {
+        throw "Unable to remove package directory after $Attempts attempts: $Path. $($_.Exception.Message)"
+      }
+      Start-Sleep -Milliseconds (350 * $Attempt)
+    }
+  }
+}
+
 Import-VisualStudioEnvironment -ScriptPath $VsDevCmd
 
 $CMake = Join-Path $QtRoot "Library\bin\cmake.exe"
@@ -162,7 +181,12 @@ if ($Package) {
   }
   $PackageRoot = Join-Path $NativeRoot "dist\Gaussian-Scene-Workbench-0.3.0-native-preview-win-x64"
   if (Test-Path -LiteralPath $PackageRoot) {
-    Remove-Item -LiteralPath $PackageRoot -Recurse -Force
+    $ResolvedPackage = (Resolve-Path -LiteralPath $PackageRoot).Path
+    $ResolvedDist = (Resolve-Path -LiteralPath (Join-Path $NativeRoot "dist")).Path
+    if (-not $ResolvedPackage.StartsWith($ResolvedDist + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to remove a package directory outside native/dist: $ResolvedPackage"
+    }
+    Remove-DirectoryWithRetry -Path $ResolvedPackage
   }
   & $CMake --install $BuildDirectory --prefix $PackageRoot
   if ($LASTEXITCODE -ne 0) { throw "Native install failed with exit code $LASTEXITCODE." }
@@ -177,8 +201,12 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $NativeRoot "README.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $NativeRoot "build_manifest.json") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_MIGRATION.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_PARITY.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
+  & (Join-Path $Root "scripts\stage_native_backend.ps1") `
+    -SourceRoot $Root `
+    -DestinationRoot $PackageRoot
   Write-Host "Native package directory:"
   Write-Host $PackageRoot
 }

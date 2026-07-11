@@ -18,6 +18,7 @@ ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
       emit outputReady(tr("Failed to start process: %1\n").arg(mProcess.errorString()));
       const QString failedTask = mActiveTask;
       mActiveTask.clear();
+      mAcceptsCancelCommand = false;
       emit taskFinished(failedTask, -1, false);
       emit runningChanged(false);
     }
@@ -28,6 +29,7 @@ ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
             const QString finishedTask = mActiveTask;
             const bool succeeded = exitStatus == QProcess::NormalExit && exitCode == 0;
             mActiveTask.clear();
+            mAcceptsCancelCommand = false;
             emit taskFinished(finishedTask, exitCode, succeeded);
             emit runningChanged(false);
           });
@@ -37,7 +39,9 @@ bool ProcessSupervisor::isRunning() const { return mProcess.state() != QProcess:
 QString ProcessSupervisor::activeTask() const { return mActiveTask; }
 
 bool ProcessSupervisor::start(const QString &taskName, const QString &program,
-                              const QStringList &arguments, const QString &workingDirectory) {
+                              const QStringList &arguments, const QString &workingDirectory,
+                              const QProcessEnvironment &environment,
+                              const bool acceptsCancelCommand) {
   if (isRunning() || program.isEmpty()) {
     return false;
   }
@@ -46,8 +50,12 @@ bool ProcessSupervisor::start(const QString &taskName, const QString &program,
   if (!workingDirectory.isEmpty()) {
     mProcess.setWorkingDirectory(workingDirectory);
   }
-  mProcess.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
-  mProcess.start(program, arguments, QIODevice::ReadOnly);
+  mAcceptsCancelCommand = acceptsCancelCommand;
+  mProcess.setProcessEnvironment(environment.isEmpty()
+                                     ? QProcessEnvironment::systemEnvironment()
+                                     : environment);
+  mProcess.start(program, arguments,
+                 acceptsCancelCommand ? QIODevice::ReadWrite : QIODevice::ReadOnly);
   return true;
 }
 
@@ -56,11 +64,28 @@ void ProcessSupervisor::stop() {
     return;
   }
 
-  emit outputReady(tr("Requesting task termination...\n"));
-  mProcess.terminate();
-  QTimer::singleShot(2500, this, [this]() {
-    if (isRunning()) {
-      emit outputReady(tr("Task did not stop in time; terminating it now.\n"));
+  const qint64 processId = mProcess.processId();
+  if (mAcceptsCancelCommand) {
+    emit outputReady(tr("Requesting graceful task cancellation...\n"));
+    mProcess.write("cancel\n");
+    mProcess.waitForBytesWritten(500);
+  } else {
+    emit outputReady(tr("Requesting task termination...\n"));
+    mProcess.terminate();
+  }
+
+  const int timeout = mAcceptsCancelCommand ? 6500 : 2500;
+  QTimer::singleShot(timeout, this, [this, processId]() {
+    if (!isRunning() || mProcess.processId() != processId) {
+      return;
+    }
+    emit outputReady(tr("Task did not stop in time; terminating its process tree.\n"));
+#ifdef Q_OS_WIN
+    QProcess::execute(QStringLiteral("taskkill.exe"),
+                      {QStringLiteral("/PID"), QString::number(processId),
+                       QStringLiteral("/T"), QStringLiteral("/F")});
+#endif
+    if (isRunning() && mProcess.processId() == processId) {
       mProcess.kill();
     }
   });

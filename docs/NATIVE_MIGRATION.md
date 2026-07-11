@@ -40,7 +40,7 @@ The first implementation intentionally keeps these boundaries small:
 
 - `WorkspaceDocument` owns portable project metadata and asset references.
 - `ProcessSupervisor` owns one external worker lifecycle and streams logs into the native task panel.
-- `NativeViewport` owns OpenGL context, navigation, overlays, and interaction-mode state.
+- `NativeViewport` owns OpenGL context, asynchronous point-scene upload, navigation, overlays, and interaction-mode state.
 - `MainWindow` composes UI only; training and scene behavior move into dedicated managers as their state models mature.
 
 The next internal services will follow the same proven separation visible in LichtFeld Studio without copying GPL implementation code: `SceneManager`, `TrainingStateMachine`, `SelectionState`, `ToolRegistry`, and a renderer frame-lifecycle service.
@@ -51,8 +51,8 @@ The next internal services will follow the same proven separation visible in Lic
 
 - Buildable Qt 6 application and Windows CI artifact.
 - Adaptive DPI/manual UI scale, dock layout persistence, and compact professional workspace.
-- Project creation/open/save, dataset import, PLY metadata import, task logs, environment checks, and supervised 3DGS training launch.
-- Native OpenGL interaction viewport with an explicit SIBR-offline state.
+- Project creation/open/save, dataset import, PLY metadata and point import, task logs, environment checks, and supervised 3DGS training launch.
+- Native OpenGL point preview with deterministic sampling and explicit separation from future SIBR splat metrics.
 
 ### 0.3.x renderer integration
 

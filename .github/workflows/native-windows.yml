@@ -6,15 +6,30 @@ on:
       - agent/native-desktop-0.3
     paths:
       - "native/**"
+      - "crop_editor/server.py"
+      - "crop_editor/tests/test_training_backends.py"
+      - "gaussian-splatting/**"
+      - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/check_3dgs_env.ps1"
+      - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
       - "docs/NATIVE_MIGRATION.md"
+      - "docs/NATIVE_PARITY.md"
       - "README.md"
   pull_request:
     paths:
       - "native/**"
+      - "crop_editor/server.py"
+      - "crop_editor/tests/test_training_backends.py"
+      - "gaussian-splatting/**"
+      - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/check_3dgs_env.ps1"
+      - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
+      - "docs/NATIVE_MIGRATION.md"
+      - "docs/NATIVE_PARITY.md"
   workflow_dispatch:
 
 permissions:
@@ -56,6 +71,10 @@ jobs:
         shell: pwsh
         run: ctest --test-dir native/build-ci -C Release --output-on-failure
 
+      - name: Test native worker
+        shell: pwsh
+        run: python -m unittest native.worker.test_gsw_worker
+
       - name: Install application
         shell: pwsh
         run: cmake --install native/build-ci --config Release --prefix native/artifact
@@ -68,8 +87,16 @@ jobs:
           Copy-Item native/README.md native/artifact/README.md
           Copy-Item native/build_manifest.json native/artifact/build_manifest.json
           Copy-Item docs/NATIVE_MIGRATION.md native/artifact/NATIVE_MIGRATION.md
+          Copy-Item docs/NATIVE_PARITY.md native/artifact/NATIVE_PARITY.md
           Copy-Item LICENSE native/artifact/LICENSE
           Copy-Item THIRD_PARTY_LICENSES.md native/artifact/THIRD_PARTY_LICENSES.md
+
+      - name: Stage native compute backend
+        shell: pwsh
+        run: >-
+          ./scripts/stage_native_backend.ps1
+          -SourceRoot $PWD
+          -DestinationRoot (Join-Path $PWD "native/artifact")
 
       - name: Verify native-only package
         shell: pwsh
@@ -86,6 +113,18 @@ jobs:
           $exe = "native/artifact/bin/Gaussian Scene Workbench.exe"
           if (-not (Test-Path -LiteralPath $exe)) {
             throw "Native executable is missing."
+          }
+          $requiredBackend = @(
+            "native/artifact/native/worker/gsw_worker.py",
+            "native/artifact/crop_editor/server.py",
+            "native/artifact/gaussian-splatting/train.py",
+            "native/artifact/training_kit/apply_local_fixes.bat",
+            "native/artifact/backend_manifest.json"
+          )
+          $missingBackend = $requiredBackend | Where-Object { -not (Test-Path -LiteralPath $_) }
+          if ($missingBackend) {
+            $missingBackend
+            throw "Native artifact is missing required compute backend files."
           }
 
       - name: Upload Windows preview

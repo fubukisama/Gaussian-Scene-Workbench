@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -16,7 +17,9 @@ public:
   [[nodiscard]] bool isRunning() const;
   [[nodiscard]] QString activeTask() const;
   bool start(const QString &taskName, const QString &program, const QStringList &arguments,
-             const QString &workingDirectory = {});
+             const QString &workingDirectory = {},
+             const QProcessEnvironment &environment = {},
+             bool acceptsCancelCommand = false);
   void stop();
 
 signals:
@@ -30,6 +33,7 @@ private:
 
   QProcess mProcess;
   QString mActiveTask;
+  bool mAcceptsCancelCommand = false;
 };
 
 } // namespace gsw

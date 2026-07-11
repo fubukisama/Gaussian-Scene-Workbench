@@ -85,7 +85,6 @@ private:
   QAction *mImportSceneAction = nullptr;
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;
-  QActionGroup *mModeActionGroup = nullptr;
   QActionGroup *mScaleActionGroup = nullptr;
 
   int mUiScalePercent = 90;

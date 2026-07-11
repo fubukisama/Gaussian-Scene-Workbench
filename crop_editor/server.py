@@ -62,13 +62,22 @@ def install_drive_root():
     return Path(ROOT.anchor) if ROOT.anchor else None
 
 
+def conda_root_from_prefix(prefix):
+    if not prefix:
+        return None
+    path = Path(prefix)
+    if path.parent.name.lower() == "envs":
+        return path.parent.parent
+    return path
+
+
 def conda_root_candidates():
     drive = install_drive_root()
     candidates = [
         os.environ.get("CONDA_ROOT"),
         os.environ.get("MINIFORGE_ROOT"),
         os.environ.get("MAMBA_ROOT_PREFIX"),
-        Path(os.environ["CONDA_PREFIX"]).parents[1] if os.environ.get("CONDA_PREFIX") else None,
+        conda_root_from_prefix(os.environ.get("CONDA_PREFIX")),
         drive / "miniforge3" if drive else None,
         drive / "conda" if drive else None,
         drive / "anaconda" if drive else None,
@@ -5144,9 +5153,12 @@ def run_training_job(job, run_convert, quality, overwrite):
         add_job_log(job, "OpenCV: OK")
         dataset = Path(job.get("dataset_path") or (DATASETS_DIR / job["scene"]))
         output = OUTPUT_DIR / job["output_scene"]
-        images_dir = dataset / "images"
+        images_dir = colmap_image_input_path(dataset)
         if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
             raise ValueError(f"No training images found: {images_dir}")
+        if images_dir.name == "input" and not (dataset / "images").exists() and not run_convert:
+            add_job_log(job, "Dataset contains input images but no undistorted images; enabling COLMAP conversion.")
+            run_convert = True
         if output.exists() and any(output.iterdir()):
             ensure_output_backend_compatible(job["output_scene"], backend)
             if overwrite:

@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "AppTheme.h"
+#include "TrainingDialog.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -17,16 +18,19 @@
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHeaderView>
-#include <QInputDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
@@ -37,6 +41,7 @@
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -76,6 +81,53 @@ QString safeFileName(QString value) {
   value.replace(QRegularExpression(QStringLiteral(R"([<>:"/\\|?*]+)")), QStringLiteral("_"));
   value = value.trimmed();
   return value.isEmpty() ? QStringLiteral("gaussian-scene") : value;
+}
+
+bool hasRecognizedSparseScene(const QString &datasetPath) {
+  if (datasetPath.isEmpty()) {
+    return false;
+  }
+  const QDir sparse(QDir(datasetPath).filePath(QStringLiteral("sparse/0")));
+  const bool binary = QFileInfo::exists(sparse.filePath(QStringLiteral("cameras.bin"))) &&
+                      QFileInfo::exists(sparse.filePath(QStringLiteral("images.bin"))) &&
+                      QFileInfo::exists(sparse.filePath(QStringLiteral("points3D.bin")));
+  const bool text = QFileInfo::exists(sparse.filePath(QStringLiteral("cameras.txt"))) &&
+                    QFileInfo::exists(sparse.filePath(QStringLiteral("images.txt"))) &&
+                    QFileInfo::exists(sparse.filePath(QStringLiteral("points3D.txt")));
+  return binary || text || QFileInfo::exists(QDir(datasetPath).filePath(QStringLiteral("transforms_train.json")));
+}
+
+bool twoDgsAvailable(const QString &repositoryRoot) {
+  QStringList candidates;
+  const QString configured = qEnvironmentVariable("TWO_DGS_DIR");
+  if (!configured.isEmpty()) {
+    candidates.append(configured);
+  }
+  candidates.append(QDir(QDir::homePath()).filePath(QStringLiteral("Documents/2dgs")));
+  candidates.append(QDir(repositoryRoot).filePath(QStringLiteral("2dgs")));
+  return std::any_of(candidates.cbegin(), candidates.cend(), [](const QString &candidate) {
+    return QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("train.py"))) &&
+           QFileInfo::exists(QDir(candidate).filePath(QStringLiteral(".venv/Scripts/python.exe")));
+  });
+}
+
+QProcessEnvironment pythonProcessEnvironment(const QString &pythonPath) {
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  const QString prefix = QFileInfo(pythonPath).absolutePath();
+  const QStringList pathParts = {
+      prefix,
+      QDir(prefix).filePath(QStringLiteral("Library/mingw-w64/bin")),
+      QDir(prefix).filePath(QStringLiteral("Library/usr/bin")),
+      QDir(prefix).filePath(QStringLiteral("Library/bin")),
+      QDir(prefix).filePath(QStringLiteral("Scripts")),
+      QDir(prefix).filePath(QStringLiteral("bin")),
+      environment.value(QStringLiteral("PATH"))};
+  environment.insert(QStringLiteral("PATH"), pathParts.join(QDir::listSeparator()));
+  environment.insert(QStringLiteral("CONDA_PREFIX"), prefix);
+  environment.insert(QStringLiteral("GAUSSIAN_SPLATTING_CONDA_PREFIX"), prefix);
+  environment.insert(QStringLiteral("GS_CONDA_PREFIX"), prefix);
+  environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+  return environment;
 }
 } // namespace
 
@@ -205,26 +257,6 @@ void MainWindow::createActions() {
   connect(resetLayoutAction, &QAction::triggered, this, &MainWindow::resetDockLayout);
   resetLayoutAction->setObjectName(QStringLiteral("resetLayoutAction"));
 
-  mModeActionGroup = new QActionGroup(this);
-  mModeActionGroup->setExclusive(true);
-  const QList<QPair<QString, NativeViewport::InteractionMode>> modes = {
-      {QStringLiteral("查看"), NativeViewport::InteractionMode::Inspect},
-      {QStringLiteral("选择"), NativeViewport::InteractionMode::Select},
-      {QStringLiteral("框选"), NativeViewport::InteractionMode::Rectangle},
-      {QStringLiteral("套索"), NativeViewport::InteractionMode::Lasso},
-      {QStringLiteral("裁剪"), NativeViewport::InteractionMode::Crop}};
-  for (const auto &[label, mode] : modes) {
-    auto *action = new QAction(label, mModeActionGroup);
-    action->setCheckable(true);
-    action->setData(static_cast<int>(mode));
-    if (mode == NativeViewport::InteractionMode::Inspect) {
-      action->setChecked(true);
-    }
-  }
-  connect(mModeActionGroup, &QActionGroup::triggered, this, [this](QAction *action) {
-    mViewport->setInteractionMode(static_cast<NativeViewport::InteractionMode>(action->data().toInt()));
-  });
-
   addAction(newAction);
   addAction(openAction);
   addAction(saveAsAction);
@@ -308,13 +340,6 @@ void MainWindow::createToolBars() {
   mainToolbar->addSeparator();
   mainToolbar->addAction(actions().at(4));
 
-  auto *modeToolbar = addToolBar(QStringLiteral("视口工具"));
-  modeToolbar->setObjectName(QStringLiteral("modeToolbar"));
-  modeToolbar->setMovable(false);
-  modeToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  for (QAction *action : mModeActionGroup->actions()) {
-    modeToolbar->addAction(action);
-  }
 }
 
 void MainWindow::createProjectDock() {
@@ -431,7 +456,7 @@ void MainWindow::createTaskDock() {
 void MainWindow::createStatusBar() {
   mProjectStatus = new QLabel(QStringLiteral("未打开工程"), this);
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  mRendererStatus = new QLabel(QStringLiteral("原生 OpenGL | SIBR 离线"), this);
+  mRendererStatus = new QLabel(QStringLiteral("原生点云预览 | 未载入场景"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mScaleStatus = new QLabel(this);
   mScaleStatus->setObjectName(QStringLiteral("mutedLabel"));
@@ -475,8 +500,26 @@ void MainWindow::connectServices() {
             mActiveTaskRow = -1;
           });
   connect(mViewport, &NativeViewport::frameTimeChanged, this, [this](const double milliseconds) {
-    mRendererStatus->setText(QStringLiteral("OpenGL CPU %1 ms | SIBR 离线").arg(milliseconds, 0, 'f', 2));
+    if (!mWorkspace.scenePath().isEmpty()) {
+      mRendererStatus->setText(QStringLiteral("原生点云 | 帧处理 %1 ms").arg(milliseconds, 0, 'f', 2));
+    }
   });
+  connect(mViewport, &NativeViewport::sceneLoadStarted, this, [this](const QString &scenePath) {
+    mRendererStatus->setText(QStringLiteral("正在读取点云"));
+    appendTaskEvent(QStringLiteral("读取场景：%1").arg(QDir::toNativeSeparators(scenePath)));
+  });
+  connect(mViewport, &NativeViewport::sceneLoaded, this,
+          [this](const qint64 sourceVertexCount, const qsizetype previewVertexCount) {
+            mRendererStatus->setText(QStringLiteral("原生点云 | %1 个预览点").arg(previewVertexCount));
+            appendTaskEvent(QStringLiteral("场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。")
+                                .arg(sourceVertexCount)
+                                .arg(previewVertexCount));
+          });
+  connect(mViewport, &NativeViewport::sceneLoadFailed, this,
+          [this](const QString &, const QString &message) {
+            mRendererStatus->setText(QStringLiteral("点云读取失败"));
+            appendTaskEvent(QStringLiteral("场景读取失败：%1").arg(message));
+          });
 }
 
 void MainWindow::restoreWindowState() {
@@ -647,39 +690,66 @@ void MainWindow::startTraining() {
     return;
   }
   const QString root = findRepositoryRoot();
-  const QString trainScript = QDir(root).filePath(QStringLiteral("gaussian-splatting/train.py"));
+  const QString workerScript = QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
   const QString python = findTrainingPython(root);
-  if (!QFileInfo::exists(trainScript) || python.isEmpty()) {
+  if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
     showError(QStringLiteral("训练后端不可用"),
-              QStringLiteral("未找到 gaussian-splatting/train.py 或 gaussian_splatting Python 环境。"));
+              QStringLiteral("未找到原生训练 worker、gaussian-splatting 源码或 gaussian_splatting Python 环境。"));
     return;
   }
 
-  bool accepted = false;
-  const int iterations = QInputDialog::getInt(this, QStringLiteral("训练设置"), QStringLiteral("迭代次数"),
-                                               7000, 100, 1000000, 100, &accepted);
-  if (!accepted) {
+  const QString defaultOutputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output"));
+  TrainingDialog dialog(mWorkspace.datasetPath(), mWorkspace.projectName(), defaultOutputRoot,
+                        hasRecognizedSparseScene(mWorkspace.datasetPath()), twoDgsAvailable(root), this);
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+  const TrainingConfiguration config = dialog.configuration();
+
+  const QString jobsRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs"));
+  const QString trainingJobStore = QDir(jobsRoot).filePath(QStringLiteral("training"));
+  if (!QDir().mkpath(trainingJobStore)) {
+    showError(QStringLiteral("无法创建任务目录"), QDir::toNativeSeparators(trainingJobStore));
     return;
   }
 
-  const QString outputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output"));
-  QDir().mkpath(outputRoot);
-  const QString selectedOutputRoot = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("选择输出目录"), outputRoot);
-  if (selectedOutputRoot.isEmpty()) {
+  QJsonObject trainOptions;
+  trainOptions.insert(QStringLiteral("iterations"), config.iterations);
+  trainOptions.insert(QStringLiteral("resolution"), config.resolution);
+  QJsonObject workerConfig;
+  workerConfig.insert(QStringLiteral("repositoryRoot"), QDir::cleanPath(root));
+  workerConfig.insert(QStringLiteral("datasetPath"), QDir::cleanPath(mWorkspace.datasetPath()));
+  workerConfig.insert(QStringLiteral("outputRoot"), QDir::cleanPath(config.outputRoot));
+  workerConfig.insert(QStringLiteral("outputScene"), config.outputScene);
+  workerConfig.insert(QStringLiteral("scene"), QStringLiteral("native-project"));
+  workerConfig.insert(QStringLiteral("backend"), config.backend);
+  workerConfig.insert(QStringLiteral("quality"), config.quality);
+  workerConfig.insert(QStringLiteral("runColmap"), config.runColmap);
+  workerConfig.insert(QStringLiteral("overwrite"), config.overwrite);
+  workerConfig.insert(QStringLiteral("jobStore"), QDir::cleanPath(trainingJobStore));
+  workerConfig.insert(QStringLiteral("colmapOptions"), QJsonObject());
+  workerConfig.insert(QStringLiteral("trainOptions"), trainOptions);
+
+  const QString configPath = QDir(jobsRoot).filePath(
+      QStringLiteral("training-%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+  QSaveFile configFile(configPath);
+  if (!configFile.open(QIODevice::WriteOnly) ||
+      configFile.write(QJsonDocument(workerConfig).toJson(QJsonDocument::Indented)) < 0 ||
+      !configFile.commit()) {
+    showError(QStringLiteral("无法保存训练任务"), configFile.errorString());
     return;
   }
-  const QString outputPath = QDir(selectedOutputRoot).filePath(
-      safeFileName(mWorkspace.projectName()) + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss")));
 
-  const QString gaussianRoot = QDir(root).filePath(QStringLiteral("gaussian-splatting"));
   const bool started = mProcessSupervisor.start(
-      QStringLiteral("3DGS 训练 (%1 次迭代)").arg(iterations), python,
-      {trainScript, QStringLiteral("-s"), mWorkspace.datasetPath(), QStringLiteral("-m"), outputPath,
-       QStringLiteral("--iterations"), QString::number(iterations)},
-      gaussianRoot);
+      QStringLiteral("%1 训练 | %2 | %3 次迭代")
+          .arg(config.backend.toUpper(), config.quality)
+          .arg(config.iterations),
+      python, {workerScript, QStringLiteral("--config"), configPath}, root,
+      pythonProcessEnvironment(python), true);
   if (!started) {
     QMessageBox::information(this, QStringLiteral("任务繁忙"), QStringLiteral("请等待当前任务结束后再试。"));
+  } else {
+    appendTaskEvent(QStringLiteral("训练配置已保存：%1").arg(QDir::toNativeSeparators(configPath)));
   }
 }
 
@@ -714,8 +784,7 @@ void MainWindow::rebuildProjectTree() {
 
   auto *reconstruction = new QTreeWidgetItem(root, {QStringLiteral("重建")});
   reconstruction->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogContentsView));
-  const bool hasSparse = !mWorkspace.datasetPath().isEmpty() &&
-                         QDir(mWorkspace.datasetPath()).exists(QStringLiteral("sparse"));
+  const bool hasSparse = hasRecognizedSparseScene(mWorkspace.datasetPath());
   new QTreeWidgetItem(reconstruction, {hasSparse ? QStringLiteral("COLMAP sparse") : QStringLiteral("未检测到稀疏重建")});
 
   auto *scene = new QTreeWidgetItem(root, {QStringLiteral("场景")});

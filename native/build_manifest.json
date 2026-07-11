@@ -4,6 +4,8 @@
   "releaseDate": "2026-07-11",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
-  "renderer": "Native OpenGL shell; SIBR adapter pending",
+  "renderer": "Native OpenGL point preview; embedded Gaussian renderer pending",
+  "computeBackendIncluded": true,
+  "featureGate": "NATIVE_PARITY.md",
   "legacyWebRuntimeIncluded": false
 }

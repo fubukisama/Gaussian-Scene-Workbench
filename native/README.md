@@ -7,11 +7,16 @@
 - Native Qt Widgets application with a GPU-backed OpenGL viewport.
 - Dockable project tree, inspector, task queue, and process log.
 - Portable `.gsw.json` project files with relative asset paths.
-- Dataset folder and PLY scene metadata import.
+- Dataset folder import plus asynchronous ASCII/binary PLY point-cloud loading.
+- Native OpenGL point rendering with RGB or Gaussian SH-DC colors, deterministic large-scene sampling, and scene-bounds camera fitting.
 - Existing PowerShell/Python backend execution through `QProcess`.
 - Qt high-DPI support plus persistent 75%-125% manual UI scaling.
 
-The current viewport is the native shell and interaction layer. SIBR scene rendering is deliberately reported as offline until the renderer adapter is integrated; the preview does not fabricate an FPS value from lightweight UI paint time.
+The current viewport is a real native point-cloud preview, not a Gaussian splat renderer. It reports frame processing time and does not label that value as SIBR FPS. Selection and crop controls remain hidden until their ID/depth picking path is implemented.
+
+Feature parity and release gates are tracked in `docs/NATIVE_PARITY.md` (packaged as `NATIVE_PARITY.md`).
+
+The Windows preview package includes the native worker and compute source needed to launch training. A compatible external Conda/CUDA environment is still required and may be located outside the system drive.
 
 ## Local Windows build
 

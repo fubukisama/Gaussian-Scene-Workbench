@@ -1,8 +1,12 @@
 #pragma once
 
+#include "PlyPointCloudLoader.h"
+
 #include <QElapsedTimer>
 #include <QMatrix4x4>
+#include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
+#include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QPointF>
@@ -13,6 +17,7 @@
 
 class QMouseEvent;
 class QPainter;
+class QOpenGLShaderProgram;
 class QWheelEvent;
 
 namespace gsw {
@@ -30,6 +35,7 @@ public:
   };
 
   explicit NativeViewport(QWidget *parent = nullptr);
+  ~NativeViewport() override;
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
@@ -38,6 +44,9 @@ public:
 
 signals:
   void frameTimeChanged(double milliseconds);
+  void sceneLoadStarted(const QString &scenePath);
+  void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount);
+  void sceneLoadFailed(const QString &scenePath, const QString &message);
 
 protected:
   void initializeGL() override;
@@ -52,13 +61,19 @@ private:
   [[nodiscard]] QVector3D cameraPosition() const;
   [[nodiscard]] std::optional<QPointF> projectPoint(const QVector3D &point,
                                                     const QMatrix4x4 &viewProjection) const;
+  void startSceneLoad(const QString &scenePath);
+  void uploadPendingPointCloud();
+  void drawPointCloud(const QMatrix4x4 &viewProjection);
   void drawGrid(QPainter &painter, const QMatrix4x4 &viewProjection);
   void drawOverlay(QPainter &painter, double frameMilliseconds);
   void drawAxisGizmo(QPainter &painter);
 
   QString mProjectLabel;
   QString mScenePath;
+  QString mRequestedScenePath;
+  QString mSceneLoadMessage;
   qint64 mGaussianCount = 0;
+  qsizetype mPreviewPointCount = 0;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
   Qt::MouseButtons mPressedButtons;
@@ -66,6 +81,12 @@ private:
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;
   float mDistance = 12.0F;
+  float mSceneRadius = 4.0F;
+  QVector<PointCloudVertex> mPendingVertices;
+  bool mPointUploadPending = false;
+  QOpenGLShaderProgram *mPointProgram = nullptr;
+  QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
+  QOpenGLVertexArrayObject mPointVertexArray;
   QElapsedTimer mFrameTimer;
   double mSmoothedFrameMilliseconds = 0.0;
 };
