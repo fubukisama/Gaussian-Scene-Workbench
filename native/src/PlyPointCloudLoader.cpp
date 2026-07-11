@@ -8,6 +8,7 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -413,6 +414,26 @@ float normalizedColor(const double value, const ScalarType type) {
   return static_cast<float>(std::clamp(normalized, 0.0, 1.0));
 }
 
+float activatedOpacity(const double logit) {
+  if (std::isnan(logit)) {
+    return 0.0F;
+  }
+  const double bounded = std::clamp(logit, -80.0, 80.0);
+  if (bounded >= 0.0) {
+    return static_cast<float>(1.0 / (1.0 + std::exp(-bounded)));
+  }
+  const double exponential = std::exp(bounded);
+  return static_cast<float>(exponential / (1.0 + exponential));
+}
+
+float activatedScale(const double logarithmicScale) {
+  if (std::isnan(logarithmicScale)) {
+    return std::exp(-20.0F);
+  }
+  return static_cast<float>(
+      std::exp(std::clamp(logarithmicScale, -20.0, 20.0)));
+}
+
 bool shouldSampleVertex(const qint64 vertexIndex, const qint64 sourceCount,
                         const qsizetype sampleCount, qsizetype &nextSampleIndex) {
   if (nextSampleIndex >= sampleCount || sourceCount <= 0) {
@@ -430,7 +451,10 @@ bool shouldSampleVertex(const qint64 vertexIndex, const qint64 sourceCount,
 bool appendVertex(const ElementDefinition &element, const QVector<double> &values,
                   const int xIndex, const int yIndex, const int zIndex,
                   const int redIndex, const int greenIndex, const int blueIndex,
-                  const bool sphericalHarmonicColor, const qint64 sourceIndex,
+                  const bool sphericalHarmonicColor, const int opacityIndex,
+                  const std::array<int, 3> &scaleIndices,
+                  const std::array<int, 4> &rotationIndices,
+                  const bool hasGaussianAttributes, const qint64 sourceIndex,
                   const bool appendPreview, bool &hasFiniteBounds,
                   PointCloudData &result) {
   const double x = values.at(xIndex);
@@ -473,6 +497,26 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
       vertex.red = normalizedColor(values.at(redIndex), element.properties.at(redIndex).valueType);
       vertex.green = normalizedColor(values.at(greenIndex), element.properties.at(greenIndex).valueType);
       vertex.blue = normalizedColor(values.at(blueIndex), element.properties.at(blueIndex).valueType);
+    }
+  }
+  if (hasGaussianAttributes) {
+    vertex.opacity = activatedOpacity(values.at(opacityIndex));
+    vertex.scaleX = activatedScale(values.at(scaleIndices.at(0)));
+    vertex.scaleY = activatedScale(values.at(scaleIndices.at(1)));
+    vertex.scaleZ = activatedScale(values.at(scaleIndices.at(2)));
+
+    const double rotationW = values.at(rotationIndices.at(0));
+    const double rotationX = values.at(rotationIndices.at(1));
+    const double rotationY = values.at(rotationIndices.at(2));
+    const double rotationZ = values.at(rotationIndices.at(3));
+    const double normSquared = rotationW * rotationW + rotationX * rotationX +
+                               rotationY * rotationY + rotationZ * rotationZ;
+    if (std::isfinite(normSquared) && normSquared > 1.0e-20) {
+      const double inverseNorm = 1.0 / std::sqrt(normSquared);
+      vertex.rotationW = static_cast<float>(rotationW * inverseNorm);
+      vertex.rotationX = static_cast<float>(rotationX * inverseNorm);
+      vertex.rotationY = static_cast<float>(rotationY * inverseNorm);
+      vertex.rotationZ = static_cast<float>(rotationZ * inverseNorm);
     }
   }
   vertex.sourceIndex = static_cast<quint32>(sourceIndex);
@@ -634,6 +678,25 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     sphericalHarmonicColor = redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0;
   }
 
+  const int opacityIndex = findProperty(vertexElement, {QStringLiteral("opacity")});
+  const std::array<int, 3> scaleIndices = {
+      findProperty(vertexElement, {QStringLiteral("scale_0")}),
+      findProperty(vertexElement, {QStringLiteral("scale_1")}),
+      findProperty(vertexElement, {QStringLiteral("scale_2")})};
+  const std::array<int, 4> rotationIndices = {
+      findProperty(vertexElement, {QStringLiteral("rot_0")}),
+      findProperty(vertexElement, {QStringLiteral("rot_1")}),
+      findProperty(vertexElement, {QStringLiteral("rot_2")}),
+      findProperty(vertexElement, {QStringLiteral("rot_3")})};
+  const auto isScalarProperty = [&vertexElement](const int index) {
+    return index >= 0 && !vertexElement.properties.at(index).isList;
+  };
+  result.hasGaussianAttributes = isScalarProperty(opacityIndex) &&
+      std::all_of(scaleIndices.cbegin(), scaleIndices.cend(),
+                  isScalarProperty) &&
+      std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
+                  isScalarProperty);
+
   const qsizetype sampleCount = static_cast<qsizetype>(
       std::min<qint64>(vertexElement.count, maximumPreviewPoints));
   result.vertices.reserve(sampleCount);
@@ -658,8 +721,9 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       const bool appendPreview = shouldSampleVertex(
           recordIndex, vertexElement.count, sampleCount, nextSampleIndex);
       appendVertex(element, values, xIndex, yIndex, zIndex, redIndex, greenIndex,
-                   blueIndex, sphericalHarmonicColor, recordIndex, appendPreview,
-                   hasFiniteBounds, result);
+                   blueIndex, sphericalHarmonicColor, opacityIndex,
+                   scaleIndices, rotationIndices, result.hasGaussianAttributes,
+                   recordIndex, appendPreview, hasFiniteBounds, result);
     }
   }
 

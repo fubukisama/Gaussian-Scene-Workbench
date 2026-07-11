@@ -248,6 +248,29 @@ void MainWindow::createActions() {
   connect(resetCameraAction, &QAction::triggered, mViewport, &NativeViewport::resetCamera);
   resetCameraAction->setObjectName(QStringLiteral("resetCameraAction"));
 
+  mRenderModeActionGroup = new QActionGroup(this);
+  mRenderModeActionGroup->setExclusive(true);
+  mGaussianRenderAction = new QAction(QStringLiteral("高斯"), this);
+  mGaussianRenderAction->setObjectName(QStringLiteral("gaussianRenderAction"));
+  mGaussianRenderAction->setCheckable(true);
+  mGaussianRenderAction->setEnabled(false);
+  mGaussianRenderAction->setToolTip(
+      QStringLiteral("使用缩放、旋转与透明度显示屏幕空间高斯"));
+  mRenderModeActionGroup->addAction(mGaussianRenderAction);
+  connect(mGaussianRenderAction, &QAction::triggered, this, [this]() {
+    mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+  });
+
+  mPointRenderAction = new QAction(QStringLiteral("点"), this);
+  mPointRenderAction->setObjectName(QStringLiteral("pointRenderAction"));
+  mPointRenderAction->setCheckable(true);
+  mPointRenderAction->setChecked(true);
+  mPointRenderAction->setToolTip(QStringLiteral("使用固定大小点预览场景"));
+  mRenderModeActionGroup->addAction(mPointRenderAction);
+  connect(mPointRenderAction, &QAction::triggered, this, [this]() {
+    mViewport->setRenderMode(NativeViewport::RenderMode::Points);
+  });
+
   mEditModeActionGroup = new QActionGroup(this);
   mEditModeActionGroup->setExclusive(true);
 
@@ -401,6 +424,10 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mExportCropAction);
 
   QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
+  QMenu *renderMenu = viewMenu->addMenu(QStringLiteral("渲染模式"));
+  renderMenu->addAction(mGaussianRenderAction);
+  renderMenu->addAction(mPointRenderAction);
+  viewMenu->addSeparator();
   viewMenu->addAction(mProjectDock->toggleViewAction());
   viewMenu->addAction(mInspectorDock->toggleViewAction());
   viewMenu->addAction(mTaskDock->toggleViewAction());
@@ -428,8 +455,9 @@ void MainWindow::createMenus() {
         this, QStringLiteral("关于 Gaussian Scene Workbench"),
         QStringLiteral("<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>"
                        "高斯场景研究工作台<br><br>"
-                       "Qt 6 原生桌面架构，构建日期 2026-07-11。<br>"
-                       "当前为原生桌面预览通道；稳定版仍保留在 main。"));
+                       "Qt 6 原生桌面架构，构建日期 %1。<br>"
+                       "当前为原生桌面预览通道；稳定版仍保留在 main。")
+            .arg(QStringLiteral(GSW_RELEASE_DATE)));
   });
 }
 
@@ -450,6 +478,13 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(mStopAction);
   mainToolbar->addSeparator();
   mainToolbar->addAction(actions().at(4));
+
+  auto *renderToolbar = addToolBar(QStringLiteral("渲染模式"));
+  renderToolbar->setObjectName(QStringLiteral("renderToolbar"));
+  renderToolbar->setMovable(false);
+  renderToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  renderToolbar->addAction(mGaussianRenderAction);
+  renderToolbar->addAction(mPointRenderAction);
 
   auto *editToolbar = addToolBar(QStringLiteral("场景编辑"));
   editToolbar->setObjectName(QStringLiteral("editToolbar"));
@@ -583,7 +618,7 @@ void MainWindow::createTaskDock() {
 void MainWindow::createStatusBar() {
   mProjectStatus = new QLabel(QStringLiteral("未打开工程"), this);
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  mRendererStatus = new QLabel(QStringLiteral("原生点云预览 | 未载入场景"), this);
+  mRendererStatus = new QLabel(QStringLiteral("原生点预览 | 未载入场景"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mEditStatus = new QLabel(QStringLiteral("选择 0 | 删除 0"), this);
   mEditStatus->setObjectName(QStringLiteral("mutedLabel"));
@@ -631,7 +666,14 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::frameTimeChanged, this, [this](const double milliseconds) {
     if (!mWorkspace.scenePath().isEmpty()) {
-      mRendererStatus->setText(QStringLiteral("原生点云 | 帧处理 %1 ms").arg(milliseconds, 0, 'f', 2));
+      const QString renderer =
+          mRenderMode == NativeViewport::RenderMode::Gaussians
+              ? QStringLiteral("高斯预览")
+              : QStringLiteral("点预览");
+      mRendererStatus->setText(
+          QStringLiteral("%1 | CPU 提交 %2 ms")
+              .arg(renderer)
+              .arg(milliseconds, 0, 'f', 2));
     }
   });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this, [this](const QString &scenePath) {
@@ -640,8 +682,15 @@ void MainWindow::connectServices() {
   });
   connect(mViewport, &NativeViewport::sceneLoaded, this,
           [this](const qint64 sourceVertexCount, const qsizetype previewVertexCount) {
-            mRendererStatus->setText(QStringLiteral("原生点云 | %1 个预览点").arg(previewVertexCount));
-            appendTaskEvent(QStringLiteral("场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。")
+            const QString renderer =
+                mRenderMode == NativeViewport::RenderMode::Gaussians
+                    ? QStringLiteral("高斯预览")
+                    : QStringLiteral("点预览");
+            mRendererStatus->setText(
+                QStringLiteral("%1 | %2 个预览图元")
+                    .arg(renderer)
+                    .arg(previewVertexCount));
+            appendTaskEvent(QStringLiteral("场景已载入 GPU 预览：源数据 %1 个图元，显示 %2 个图元。")
                                 .arg(sourceVertexCount)
                                 .arg(previewVertexCount));
           });
@@ -665,6 +714,22 @@ void MainWindow::connectServices() {
           [this](const bool busy) {
             mSelectionBusy = busy;
             updateEditActions();
+          });
+  connect(mViewport,
+          &NativeViewport::gaussianRenderingAvailabilityChanged, this,
+          [this](const bool available) {
+            mGaussianRenderAction->setEnabled(available);
+            if (!available && mGaussianRenderAction->isChecked()) {
+              mPointRenderAction->setChecked(true);
+            }
+          });
+  connect(mViewport, &NativeViewport::renderModeChanged, this,
+          [this](const NativeViewport::RenderMode mode) {
+            mRenderMode = mode;
+            mGaussianRenderAction->setChecked(
+                mode == NativeViewport::RenderMode::Gaussians);
+            mPointRenderAction->setChecked(
+                mode == NativeViewport::RenderMode::Points);
           });
 }
 

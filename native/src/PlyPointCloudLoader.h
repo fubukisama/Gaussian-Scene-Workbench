@@ -14,6 +14,14 @@ struct PointCloudVertex {
   float red = 0.72F;
   float green = 0.75F;
   float blue = 0.78F;
+  float opacity = 1.0F;
+  float scaleX = 1.0F;
+  float scaleY = 1.0F;
+  float scaleZ = 1.0F;
+  float rotationW = 1.0F;
+  float rotationX = 0.0F;
+  float rotationY = 0.0F;
+  float rotationZ = 0.0F;
   quint32 sourceIndex = 0;
 };
 
@@ -31,6 +39,7 @@ struct PointCloudData {
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   qint64 sourceVertexCount = 0;
+  bool hasGaussianAttributes = false;
   QString error;
 
   [[nodiscard]] bool isValid() const;

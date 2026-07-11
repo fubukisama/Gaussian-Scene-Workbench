@@ -1,10 +1,10 @@
 {
   "product": "Gaussian Scene Workbench",
   "version": "0.3.0-native-preview",
-  "releaseDate": "2026-07-11",
+  "releaseDate": "2026-07-12",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
-  "renderer": "Native OpenGL point preview; embedded Gaussian renderer pending",
+  "renderer": "Native OpenGL screen-space Gaussian preview with point fallback; higher-order SH and tile renderer pending",
   "editing": "Full-source rectangle/lasso selection, original-index delete history, and atomic cropped PLY export",
   "computeBackendIncluded": true,
   "featureGate": "NATIVE_PARITY.md",

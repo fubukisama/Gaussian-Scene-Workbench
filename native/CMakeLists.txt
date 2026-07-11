@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-07-11" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-07-12" CACHE STRING "Release date shown by the application")
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets)
 qt_standard_project_setup()

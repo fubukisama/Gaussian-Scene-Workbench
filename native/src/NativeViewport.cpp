@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QOpenGLShaderProgram>
+#include <QVector2D>
 #include <QVector4D>
 #include <QWheelEvent>
 #include <QtConcurrent>
@@ -199,6 +200,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
 NativeViewport::~NativeViewport() {
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
+    mGaussianVertexArray.destroy();
     mPointVertexArray.destroy();
     mPointBuffer.destroy();
     doneCurrent();
@@ -226,6 +228,10 @@ void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCou
   mScenePath = scenePath;
   mPreviewPointCount = 0;
   mRenderedPointCount = 0;
+  const bool availabilityChanged = gaussianRenderingAvailable();
+  const bool renderModeChangedToPoints = mRenderMode != RenderMode::Points;
+  mHasGaussianAttributes = false;
+  mRenderMode = RenderMode::Points;
   mSceneLoadMessage.clear();
   mSourcePositions.clear();
   mSourcePositions.squeeze();
@@ -236,6 +242,12 @@ void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCou
   mEditModel.reset(0);
   mPointUploadPending = true;
   notifyEditState();
+  if (availabilityChanged) {
+    emit gaussianRenderingAvailabilityChanged(false);
+  }
+  if (renderModeChangedToPoints) {
+    emit renderModeChanged(mRenderMode);
+  }
   if (scenePath.isEmpty()) {
     mSceneRadius = 4.0F;
     resetCamera();
@@ -255,6 +267,19 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
   update();
 }
 
+void NativeViewport::setRenderMode(const RenderMode mode) {
+  if (mode == RenderMode::Gaussians && !gaussianRenderingAvailable()) {
+    return;
+  }
+  if (mRenderMode == mode) {
+    return;
+  }
+  mRenderMode = mode;
+  rebuildRenderedVertices();
+  emit renderModeChanged(mRenderMode);
+  update();
+}
+
 void NativeViewport::setVisibleOnlySelection(const bool enabled) {
   mVisibleOnlySelection = enabled;
 }
@@ -263,6 +288,9 @@ void NativeViewport::resetCamera() {
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
   mDistance = std::max(mSceneRadius * 2.8F, 0.1F);
+  if (!mPreviewVertices.isEmpty()) {
+    rebuildRenderedVertices();
+  }
   update();
 }
 
@@ -333,6 +361,10 @@ bool NativeViewport::hasEditableScene() const {
   return !mScenePath.isEmpty() && mEditModel.pointCount() > 0;
 }
 
+bool NativeViewport::gaussianRenderingAvailable() const {
+  return mHasGaussianAttributes && mGaussianShaderReady;
+}
+
 void NativeViewport::initializeGL() {
   initializeOpenGLFunctions();
   glClearColor(0.047F, 0.051F, 0.055F, 1.0F);
@@ -369,14 +401,157 @@ void main() {
   fragmentColor = vec4(vertexColor, alpha);
 }
 )GLSL");
-  const bool shaderReady = vertexCompiled && fragmentCompiled && mPointProgram->link();
-  if (!shaderReady) {
+  const bool pointShaderReady =
+      vertexCompiled && fragmentCompiled && mPointProgram->link();
+  if (!pointShaderReady) {
     mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1").arg(mPointProgram->log());
+  }
+
+  mGaussianProgram = new QOpenGLShaderProgram(this);
+  const bool gaussianVertexCompiled = mGaussianProgram->addShaderFromSourceCode(
+      QOpenGLShader::Vertex,
+      R"GLSL(#version 330 core
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 color;
+layout(location = 2) in float opacity;
+layout(location = 3) in vec3 scale;
+layout(location = 4) in vec4 rotation;
+
+uniform mat4 view;
+uniform mat4 projection;
+uniform vec2 viewportPixels;
+
+out vec3 vertexColor;
+out float vertexOpacity;
+out vec2 gaussianCoordinate;
+
+mat3 rotationMatrix(vec4 quaternionWxyz) {
+  vec4 q = quaternionWxyz / max(length(quaternionWxyz), 1e-8);
+  float w = q.x;
+  float x = q.y;
+  float y = q.z;
+  float z = q.w;
+  return mat3(
+      vec3(1.0 - 2.0 * (y * y + z * z),
+           2.0 * (x * y + w * z),
+           2.0 * (x * z - w * y)),
+      vec3(2.0 * (x * y - w * z),
+           1.0 - 2.0 * (x * x + z * z),
+           2.0 * (y * z + w * x)),
+      vec3(2.0 * (x * z + w * y),
+           2.0 * (y * z - w * x),
+           1.0 - 2.0 * (x * x + y * y)));
+}
+
+void main() {
+  vec4 cameraCenter = view * vec4(position, 1.0);
+  vec4 clipCenter = projection * cameraCenter;
+  vertexColor = color;
+  vertexOpacity = clamp(opacity, 0.0, 1.0);
+
+  vec2 localCoordinate;
+  if (gl_VertexID == 0) {
+    localCoordinate = vec2(-3.0, -3.0);
+  } else if (gl_VertexID == 1) {
+    localCoordinate = vec2(3.0, -3.0);
+  } else if (gl_VertexID == 2) {
+    localCoordinate = vec2(-3.0, 3.0);
   } else {
-    mPointVertexArray.create();
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
+    localCoordinate = vec2(3.0, 3.0);
+  }
+  gaussianCoordinate = localCoordinate;
+
+  if (cameraCenter.z >= -1e-4 || clipCenter.w <= 0.0 ||
+      vertexOpacity <= (1.0 / 255.0)) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vertexOpacity = 0.0;
+    return;
+  }
+
+  vec3 safeScale = clamp(scale, vec3(1e-8), vec3(1e6));
+  mat3 worldRotation = rotationMatrix(rotation);
+  mat3 scaleSquared = mat3(
+      vec3(safeScale.x * safeScale.x, 0.0, 0.0),
+      vec3(0.0, safeScale.y * safeScale.y, 0.0),
+      vec3(0.0, 0.0, safeScale.z * safeScale.z));
+  mat3 worldCovariance =
+      worldRotation * scaleSquared * transpose(worldRotation);
+  mat3 viewRotation = mat3(view);
+  mat3 cameraCovariance =
+      viewRotation * worldCovariance * transpose(viewRotation);
+
+  float depth = -cameraCenter.z;
+  float focalX = 0.5 * viewportPixels.x * projection[0][0];
+  float focalY = 0.5 * viewportPixels.y * projection[1][1];
+  vec3 jacobianX = vec3(focalX / depth, 0.0,
+                        focalX * cameraCenter.x / (depth * depth));
+  vec3 jacobianY = vec3(0.0, focalY / depth,
+                        focalY * cameraCenter.y / (depth * depth));
+  float covarianceXX =
+      dot(jacobianX, cameraCovariance * jacobianX) + 0.09;
+  float covarianceXY = dot(jacobianX, cameraCovariance * jacobianY);
+  float covarianceYY =
+      dot(jacobianY, cameraCovariance * jacobianY) + 0.09;
+
+  float discriminant = sqrt(max(
+      0.0, (covarianceXX - covarianceYY) *
+                   (covarianceXX - covarianceYY) +
+               4.0 * covarianceXY * covarianceXY));
+  float eigenvalueMajor =
+      max(0.09, 0.5 * (covarianceXX + covarianceYY + discriminant));
+  float eigenvalueMinor =
+      max(0.09, 0.5 * (covarianceXX + covarianceYY - discriminant));
+
+  vec2 majorAxis;
+  if (abs(covarianceXY) > 1e-5) {
+    majorAxis = normalize(vec2(covarianceXY,
+                               eigenvalueMajor - covarianceXX));
+  } else {
+    majorAxis = covarianceXX >= covarianceYY ? vec2(1.0, 0.0)
+                                               : vec2(0.0, 1.0);
+  }
+  vec2 minorAxis = vec2(-majorAxis.y, majorAxis.x);
+  float sigmaMajor = clamp(sqrt(eigenvalueMajor), 0.3, 256.0);
+  float sigmaMinor = clamp(sqrt(eigenvalueMinor), 0.3, 256.0);
+  vec2 pixelOffset = majorAxis * (sigmaMajor * localCoordinate.x) +
+                     minorAxis * (sigmaMinor * localCoordinate.y);
+  vec2 ndcOffset = 2.0 * pixelOffset / max(viewportPixels, vec2(1.0));
+
+  gl_Position = clipCenter;
+  gl_Position.xy += ndcOffset * clipCenter.w;
+}
+)GLSL");
+  const bool gaussianFragmentCompiled =
+      mGaussianProgram->addShaderFromSourceCode(
+          QOpenGLShader::Fragment,
+          R"GLSL(#version 330 core
+in vec3 vertexColor;
+in float vertexOpacity;
+in vec2 gaussianCoordinate;
+out vec4 fragmentColor;
+void main() {
+  float power = -0.5 * dot(gaussianCoordinate, gaussianCoordinate);
+  float alpha = vertexOpacity * exp(power);
+  if (alpha < (1.0 / 255.0)) {
+    discard;
+  }
+  fragmentColor = vec4(vertexColor * alpha, alpha);
+}
+)GLSL");
+  mGaussianShaderReady = pointShaderReady && gaussianVertexCompiled &&
+                         gaussianFragmentCompiled && mGaussianProgram->link();
+  if (!mGaussianShaderReady && mSceneLoadMessage.isEmpty()) {
+    mSceneLoadMessage =
+        QStringLiteral("OpenGL Gaussian shader failed: %1")
+            .arg(mGaussianProgram->log());
+  }
+
+  if (pointShaderReady) {
     mPointBuffer.create();
     mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+
+    mPointVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
     mPointBuffer.bind();
     mPointProgram->bind();
     mPointProgram->enableAttributeArray(0);
@@ -387,6 +562,47 @@ void main() {
                                       sizeof(PointCloudVertex));
     mPointProgram->release();
     mPointBuffer.release();
+  }
+
+  if (pointShaderReady && mGaussianShaderReady) {
+    mGaussianVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
+    mPointBuffer.bind();
+    mGaussianProgram->bind();
+    mGaussianProgram->enableAttributeArray(0);
+    mGaussianProgram->setAttributeBuffer(
+        0, GL_FLOAT, offsetof(PointCloudVertex, x), 3,
+        sizeof(PointCloudVertex));
+    mGaussianProgram->enableAttributeArray(1);
+    mGaussianProgram->setAttributeBuffer(
+        1, GL_FLOAT, offsetof(PointCloudVertex, red), 3,
+        sizeof(PointCloudVertex));
+    mGaussianProgram->enableAttributeArray(2);
+    mGaussianProgram->setAttributeBuffer(
+        2, GL_FLOAT, offsetof(PointCloudVertex, opacity), 1,
+        sizeof(PointCloudVertex));
+    mGaussianProgram->enableAttributeArray(3);
+    mGaussianProgram->setAttributeBuffer(
+        3, GL_FLOAT, offsetof(PointCloudVertex, scaleX), 3,
+        sizeof(PointCloudVertex));
+    mGaussianProgram->enableAttributeArray(4);
+    mGaussianProgram->setAttributeBuffer(
+        4, GL_FLOAT, offsetof(PointCloudVertex, rotationW), 4,
+        sizeof(PointCloudVertex));
+    for (GLuint attribute = 0; attribute <= 4; ++attribute) {
+      glVertexAttribDivisor(attribute, 1);
+    }
+    mGaussianProgram->release();
+    mPointBuffer.release();
+  }
+
+  if (gaussianRenderingAvailable()) {
+    emit gaussianRenderingAvailabilityChanged(true);
+    if (mRenderMode != RenderMode::Gaussians) {
+      mRenderMode = RenderMode::Gaussians;
+      rebuildRenderedVertices();
+      emit renderModeChanged(mRenderMode);
+    }
   }
   mFrameTimer.start();
 }
@@ -402,8 +618,15 @@ void NativeViewport::paintGL() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
 
-  const QMatrix4x4 viewProjection = viewProjectionMatrix();
-  drawPointCloud(viewProjection);
+  const QMatrix4x4 view = viewMatrix();
+  const QMatrix4x4 projection = projectionMatrix();
+  const QMatrix4x4 viewProjection = projection * view;
+  if (mRenderMode == RenderMode::Gaussians &&
+      gaussianRenderingAvailable()) {
+    drawGaussianCloud(view, projection);
+  } else {
+    drawPointCloud(viewProjection);
+  }
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
@@ -450,7 +673,18 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mSourcePositions = std::move(data.sourcePositions);
             mPreviewVertices = std::move(data.vertices);
             mEditModel.reset(mSourcePositions.size());
-            rebuildRenderedVertices();
+            const bool wasAvailable = gaussianRenderingAvailable();
+            mHasGaussianAttributes = data.hasGaussianAttributes;
+            const bool isAvailable = gaussianRenderingAvailable();
+            if (isAvailable != wasAvailable) {
+              emit gaussianRenderingAvailabilityChanged(isAvailable);
+            }
+            const RenderMode loadedMode =
+                isAvailable ? RenderMode::Gaussians : RenderMode::Points;
+            if (mRenderMode != loadedMode) {
+              mRenderMode = loadedMode;
+              emit renderModeChanged(mRenderMode);
+            }
             mSceneLoadMessage.clear();
             resetCamera();
             notifyEditState();
@@ -547,8 +781,27 @@ void NativeViewport::rebuildRenderedVertices() {
       renderedVertex.red = 1.0F;
       renderedVertex.green = 0.72F;
       renderedVertex.blue = 0.16F;
+      renderedVertex.opacity = std::max(renderedVertex.opacity, 0.85F);
     }
     mPendingVertices.append(renderedVertex);
+  }
+  if (mRenderMode == RenderMode::Gaussians &&
+      gaussianRenderingAvailable()) {
+    const QVector3D forward = (mTarget - cameraPosition()).normalized();
+    std::sort(mPendingVertices.begin(), mPendingVertices.end(),
+              [&forward](const PointCloudVertex &left,
+                         const PointCloudVertex &right) {
+                const float leftDepth = left.x * forward.x() +
+                                        left.y * forward.y() +
+                                        left.z * forward.z();
+                const float rightDepth = right.x * forward.x() +
+                                         right.y * forward.y() +
+                                         right.z * forward.z();
+                if (leftDepth == rightDepth) {
+                  return left.sourceIndex < right.sourceIndex;
+                }
+                return leftDepth > rightDepth;
+              });
   }
   mRenderedPointCount = mPendingVertices.size();
   mPointUploadPending = true;
@@ -593,6 +846,37 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   glDisable(GL_BLEND);
 }
 
+void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
+                                       const QMatrix4x4 &projection) {
+  if (mRenderedPointCount <= 0 || mGaussianProgram == nullptr ||
+      !mGaussianProgram->isLinked()) {
+    return;
+  }
+
+  const qreal ratio = devicePixelRatioF();
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  mGaussianProgram->bind();
+  mGaussianProgram->setUniformValue("view", view);
+  mGaussianProgram->setUniformValue("projection", projection);
+  mGaussianProgram->setUniformValue(
+      "viewportPixels",
+      QVector2D(static_cast<float>(width() * ratio),
+                static_cast<float>(height() * ratio)));
+  {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(
+        &mGaussianVertexArray);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
+                          static_cast<GLsizei>(mRenderedPointCount));
+  }
+  mGaussianProgram->release();
+  glDisable(GL_BLEND);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_DEPTH_TEST);
+}
+
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
   mPressedButtons = event->buttons();
   mLastMousePosition = event->position().toPoint();
@@ -631,6 +915,9 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
   const QPoint current = event->position().toPoint();
   const QPoint delta = current - mLastMousePosition;
   mLastMousePosition = current;
+  if (!delta.isNull()) {
+    mCameraManipulated = true;
+  }
 
   const bool pan = mPressedButtons.testFlag(Qt::MiddleButton) ||
                    mPressedButtons.testFlag(Qt::RightButton) ||
@@ -660,6 +947,14 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
     finishSelectionGesture(event->modifiers());
   }
   mPressedButtons = event->buttons();
+  if (mCameraManipulated && mPressedButtons == Qt::NoButton) {
+    mCameraManipulated = false;
+    if (mRenderMode == RenderMode::Gaussians &&
+        gaussianRenderingAvailable()) {
+      rebuildRenderedVertices();
+      update();
+    }
+  }
   event->accept();
 }
 
@@ -679,7 +974,13 @@ QVector3D NativeViewport::cameraPosition() const {
                             mDistance * cosPitch * std::cos(yaw));
 }
 
-QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
+QMatrix4x4 NativeViewport::viewMatrix() const {
+  QMatrix4x4 view;
+  view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
+  return view;
+}
+
+QMatrix4x4 NativeViewport::projectionMatrix() const {
   QMatrix4x4 projection;
   const float aspect =
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
@@ -688,10 +989,11 @@ QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
   const float farPlane =
       std::max(100.0F, mDistance + mSceneRadius * 12.0F);
   projection.perspective(46.0F, aspect, nearPlane, farPlane);
+  return projection;
+}
 
-  QMatrix4x4 view;
-  view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
-  return projection * view;
+QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
+  return projectionMatrix() * viewMatrix();
 }
 
 std::optional<QPointF> NativeViewport::projectPoint(const QVector3D &point,
@@ -784,9 +1086,16 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
   } else if (mGaussianCount > 0 && mPreviewPointCount > 0 && mGaussianCount != mPreviewPointCount) {
-    count = QStringLiteral("%1 点 | 预览 %2").arg(formatCount(mGaussianCount), formatCount(mPreviewPointCount));
+    count = QStringLiteral("%1 %2 | 预览 %3")
+                .arg(formatCount(mGaussianCount),
+                     mHasGaussianAttributes ? QStringLiteral("高斯")
+                                            : QStringLiteral("点"),
+                     formatCount(mPreviewPointCount));
   } else if (mGaussianCount > 0) {
-    count = QStringLiteral("%1 点").arg(formatCount(mGaussianCount));
+    count = QStringLiteral("%1 %2")
+                .arg(formatCount(mGaussianCount),
+                     mHasGaussianAttributes ? QStringLiteral("高斯")
+                                            : QStringLiteral("点"));
   } else {
     count = QStringLiteral("场景数据待载入");
   }
@@ -816,7 +1125,12 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   painter.setPen(QColor(102, 193, 168));
   painter.drawText(headerRect.adjusted(12, 49, -12, -4), Qt::AlignLeft | Qt::AlignVCenter, count);
 
-  const QString metric = QStringLiteral("原生点云预览  |  帧处理 %1 ms")
+  const QString renderer =
+      mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
+          ? QStringLiteral("原生高斯预览 (DC SH)")
+          : QStringLiteral("原生点预览");
+  const QString metric = QStringLiteral("%1  |  CPU 提交 %2 ms")
+                             .arg(renderer)
                              .arg(frameMilliseconds, 0, 'f', 2);
   const int metricWidth = metrics.horizontalAdvance(metric) + 24;
   const QRect metricRect(12, height() - 38, std::min(metricWidth, width() - 24), 26);

@@ -8,13 +8,16 @@
 - Dockable project tree, inspector, task queue, and process log.
 - Portable `.gsw.json` project files with relative asset paths.
 - Dataset folder import plus asynchronous ASCII/binary PLY point-cloud loading.
-- Native OpenGL point rendering with RGB or Gaussian SH-DC colors, deterministic large-scene sampling, and scene-bounds camera fitting.
+- Native OpenGL point rendering plus depth-sorted screen-space Gaussian splats using activated scale, normalized rotation, sigmoid opacity, and SH-DC color.
+- Automatic Gaussian/point mode selection, deterministic large-scene sampling, scene-bounds camera fitting, and a manual diagnostic fallback.
 - Full-source rectangle/lasso selection with optional visible-point depth filtering, clear, and invert actions.
 - Original-index delete history with undo/redo and atomic cropped PLY export that preserves all vertex fields.
 - Existing PowerShell/Python backend execution through `QProcess`.
 - Qt high-DPI support plus persistent 75%-125% manual UI scaling.
 
-The current viewport is a real native point-cloud editor, not yet a Gaussian splat renderer. It reports frame processing time and does not label that value as SIBR FPS. Rectangle and lasso selection operate on every source vertex even when display rendering is sampled; brush selection and GPU ID picking are still pending.
+The current viewport includes a native Gaussian preview, but it is not yet a production SIBR/vksplat-class tile rasterizer. It projects each 3D covariance to a 2D EWA ellipse, sorts preview splats by camera depth after navigation, and composites premultiplied alpha. Higher-order view-dependent SH, GPU tile sorting/culling, and GPU timing remain pending. The displayed metric is CPU submission time and is not labeled as FPS.
+
+Rectangle and lasso selection operate on every source vertex even when display rendering is sampled; brush selection and GPU ID picking are still pending.
 
 Crop export supports ASCII and binary little-endian point/Gaussian PLY files. It copies retained vertex records without re-encoding custom Gaussian fields, updates the vertex count, writes atomically, and refuses indexed mesh PLY files whose face indices would become invalid.
 
@@ -40,6 +43,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration
 ```
 
 Set `GSW_NATIVE_QT_ROOT` or pass `-QtRoot` when Qt is installed elsewhere.
+
+Generate the deterministic Gaussian renderer QA project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File native\tests\generate_gaussian_visual_fixture.ps1
+```
 
 ## License boundary
 

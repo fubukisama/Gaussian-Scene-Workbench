@@ -20,6 +20,7 @@ private slots:
   void parsesGaussianPlyHeader();
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsBinaryGaussianSphericalHarmonicColors();
+  void activatesGaussianScaleRotationAndOpacity();
   void tracksSelectionDeletionUndoAndRedo();
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
@@ -135,6 +136,53 @@ void WorkspaceDocumentTests::loadsBinaryGaussianSphericalHarmonicColors() {
   QCOMPARE(data.vertices.first().red, 0.5F);
   QCOMPARE(data.vertices.first().green, 0.5F);
   QCOMPARE(data.vertices.first().blue, 0.5F);
+  QVERIFY(!data.hasGaussianAttributes);
+}
+
+void WorkspaceDocumentTests::activatesGaussianScaleRotationAndOpacity() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("gaussian-attributes.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  ply.write("ply\n"
+            "format binary_little_endian 1.0\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property float f_dc_0\n"
+            "property float f_dc_1\n"
+            "property float f_dc_2\n"
+            "property float opacity\n"
+            "property float scale_0\n"
+            "property float scale_1\n"
+            "property float scale_2\n"
+            "property float rot_0\n"
+            "property float rot_1\n"
+            "property float rot_2\n"
+            "property float rot_3\n"
+            "end_header\n");
+  for (const float value : {1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 0.0F, 0.0F,
+                            0.0F, 0.69314718056F, -0.69314718056F,
+                            2.0F, 0.0F, 0.0F, 0.0F}) {
+    writeLittleEndianFloat(ply, value);
+  }
+  ply.close();
+
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(plyPath);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasGaussianAttributes);
+  const gsw::PointCloudVertex &vertex = data.vertices.first();
+  QVERIFY(qAbs(vertex.opacity - 0.5F) < 1.0e-6F);
+  QVERIFY(qAbs(vertex.scaleX - 1.0F) < 1.0e-6F);
+  QVERIFY(qAbs(vertex.scaleY - 2.0F) < 1.0e-5F);
+  QVERIFY(qAbs(vertex.scaleZ - 0.5F) < 1.0e-5F);
+  QVERIFY(qAbs(vertex.rotationW - 1.0F) < 1.0e-6F);
+  QCOMPARE(vertex.rotationX, 0.0F);
+  QCOMPARE(vertex.rotationY, 0.0F);
+  QCOMPARE(vertex.rotationZ, 0.0F);
 }
 
 void WorkspaceDocumentTests::tracksSelectionDeletionUndoAndRedo() {

@@ -89,6 +89,8 @@ private:
   QAction *mImportSceneAction = nullptr;
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;
+  QAction *mGaussianRenderAction = nullptr;
+  QAction *mPointRenderAction = nullptr;
   QAction *mInspectAction = nullptr;
   QAction *mRectangleAction = nullptr;
   QAction *mLassoAction = nullptr;
@@ -100,6 +102,7 @@ private:
   QAction *mRedoEditAction = nullptr;
   QAction *mExportCropAction = nullptr;
   QActionGroup *mEditModeActionGroup = nullptr;
+  QActionGroup *mRenderModeActionGroup = nullptr;
   QActionGroup *mScaleActionGroup = nullptr;
 
   int mUiScalePercent = 90;
@@ -110,6 +113,7 @@ private:
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;
   bool mCanRedoEdit = false;
+  NativeViewport::RenderMode mRenderMode = NativeViewport::RenderMode::Points;
 };
 
 } // namespace gsw

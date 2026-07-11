@@ -61,7 +61,7 @@ jobs:
           cmake -S native -B native/build-ci
           -G "Visual Studio 17 2022" -A x64
           -DBUILD_TESTING=ON
-          -DGSW_RELEASE_DATE=2026-07-11
+          -DGSW_RELEASE_DATE=2026-07-12
 
       - name: Build
         shell: pwsh

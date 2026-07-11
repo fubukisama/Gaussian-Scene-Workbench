@@ -6,7 +6,7 @@
 #include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
-#include <QOpenGLFunctions>
+#include <QOpenGLExtraFunctions>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPoint>
@@ -25,7 +25,8 @@ class QWheelEvent;
 
 namespace gsw {
 
-class NativeViewport final : public QOpenGLWidget, protected QOpenGLFunctions {
+class NativeViewport final : public QOpenGLWidget,
+                             protected QOpenGLExtraFunctions {
   Q_OBJECT
 
 public:
@@ -37,12 +38,19 @@ public:
     Crop
   };
 
+  enum class RenderMode {
+    Points,
+    Gaussians
+  };
+  Q_ENUM(RenderMode)
+
   explicit NativeViewport(QWidget *parent = nullptr);
   ~NativeViewport() override;
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
   void setInteractionMode(InteractionMode mode);
+  void setRenderMode(RenderMode mode);
   void setVisibleOnlySelection(bool enabled);
   void resetCamera();
   void clearSelection();
@@ -55,6 +63,8 @@ public:
                                       QString *errorMessage = nullptr);
   [[nodiscard]] bool hasUnsavedSceneEdits() const;
   [[nodiscard]] bool hasEditableScene() const;
+  [[nodiscard]] bool gaussianRenderingAvailable() const;
+  [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
 
 signals:
   void frameTimeChanged(double milliseconds);
@@ -65,6 +75,8 @@ signals:
                         bool canUndo, bool canRedo, bool sceneReady,
                         bool hasUnsavedChanges);
   void selectionBusyChanged(bool busy);
+  void gaussianRenderingAvailabilityChanged(bool available);
+  void renderModeChanged(gsw::NativeViewport::RenderMode mode);
 
 protected:
   void initializeGL() override;
@@ -77,6 +89,8 @@ protected:
 
 private:
   [[nodiscard]] QVector3D cameraPosition() const;
+  [[nodiscard]] QMatrix4x4 viewMatrix() const;
+  [[nodiscard]] QMatrix4x4 projectionMatrix() const;
   [[nodiscard]] QMatrix4x4 viewProjectionMatrix() const;
   [[nodiscard]] std::optional<QPointF> projectPoint(const QVector3D &point,
                                                     const QMatrix4x4 &viewProjection) const;
@@ -88,6 +102,8 @@ private:
   void notifyEditState();
   void uploadPendingPointCloud();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
+  void drawGaussianCloud(const QMatrix4x4 &view,
+                         const QMatrix4x4 &projection);
   void drawGrid(QPainter &painter, const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
   void drawOverlay(QPainter &painter, double frameMilliseconds);
@@ -109,7 +125,11 @@ private:
   bool mSelectionGestureActive = false;
   bool mVisibleOnlySelection = true;
   bool mSelectionBusy = false;
+  bool mCameraManipulated = false;
+  bool mHasGaussianAttributes = false;
+  bool mGaussianShaderReady = false;
   int mSceneGeneration = 0;
+  RenderMode mRenderMode = RenderMode::Points;
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;
@@ -121,8 +141,10 @@ private:
   SceneEditModel mEditModel;
   bool mPointUploadPending = false;
   QOpenGLShaderProgram *mPointProgram = nullptr;
+  QOpenGLShaderProgram *mGaussianProgram = nullptr;
   QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLVertexArrayObject mPointVertexArray;
+  QOpenGLVertexArrayObject mGaussianVertexArray;
   QElapsedTimer mFrameTimer;
   double mSmoothedFrameMilliseconds = 0.0;
 };

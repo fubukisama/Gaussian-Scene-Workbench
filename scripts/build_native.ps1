@@ -11,6 +11,15 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $NativeRoot = Join-Path $Root "native"
 $DriveRoot = Split-Path -Qualifier $Root
+$BuildManifestPath = Join-Path $NativeRoot "build_manifest.json"
+if (-not (Test-Path -LiteralPath $BuildManifestPath)) {
+  throw "Native build manifest not found: $BuildManifestPath"
+}
+$BuildManifest = Get-Content -LiteralPath $BuildManifestPath -Raw | ConvertFrom-Json
+$ReleaseDate = [string]$BuildManifest.releaseDate
+if ($ReleaseDate -notmatch '^\d{4}-\d{2}-\d{2}$') {
+  throw "Native build manifest contains an invalid releaseDate: $ReleaseDate"
+}
 
 if ([string]::IsNullOrWhiteSpace($QtRoot)) {
   $QtCandidates = @(
@@ -158,6 +167,7 @@ if ($Clean -and (Test-Path -LiteralPath $BuildDirectory)) {
   "-DCMAKE_MAKE_PROGRAM=$Ninja" `
   "-DCMAKE_PREFIX_PATH=$(Join-Path $QtRoot 'Library')" `
   "-DCMAKE_BUILD_TYPE=$Configuration" `
+  "-DGSW_RELEASE_DATE=$ReleaseDate" `
   "-DBUILD_TESTING=ON"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed with exit code $LASTEXITCODE." }
 
