@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -19,13 +20,28 @@ def configure_stdout():
         pass
 
 
-def load_configuration(path):
+def load_configuration(path, requested_task=None):
     with open(path, "r", encoding="utf-8") as stream:
         config = json.load(stream)
-    required = ("repositoryRoot", "datasetPath", "outputRoot", "outputScene", "backend", "quality")
+    task = requested_task or config.get("task") or "training"
+    required_by_task = {
+        "training": (
+            "repositoryRoot",
+            "datasetPath",
+            "outputRoot",
+            "outputScene",
+            "backend",
+            "quality",
+        ),
+        "colmap": ("repositoryRoot", "datasetPath"),
+    }
+    if task not in required_by_task:
+        raise ValueError("Unsupported worker task: {}".format(task))
+    required = required_by_task[task]
     missing = [name for name in required if not config.get(name)]
     if missing:
         raise ValueError("Missing worker configuration fields: " + ", ".join(missing))
+    config["task"] = task
     return config
 
 
@@ -39,16 +55,47 @@ def import_backend(repository_root):
     return server
 
 
-def watch_cancel_input(server, job_id):
+def watch_cancel_input(cancel_callback, job_id):
     for line in sys.stdin:
         if line.strip().lower() != "cancel":
             continue
         print("[worker] Cancellation requested by the desktop application.")
         try:
-            server.cancel_training(job_id)
+            cancel_callback(job_id)
         except Exception as exc:  # cancellation must still let the main loop finish
             print("[worker] Cancellation error: {}".format(exc))
         return
+
+
+def stream_job(lock, jobs, job_id):
+    next_log_index = 0
+    state = "queued"
+    error = None
+    previous_stage = None
+    while state not in FINAL_STATES:
+        with lock:
+            job = jobs[job_id]
+            lines = list(job.get("log", [])[next_log_index:])
+            next_log_index += len(lines)
+            state = job.get("status", "failed")
+            stage = job.get("stage", state)
+            error = job.get("error")
+        for line in lines:
+            print(line)
+        current_stage = (state, stage)
+        if current_stage != previous_stage:
+            print("[worker-status] {} / {}".format(state, stage))
+            previous_stage = current_stage
+        if state not in FINAL_STATES:
+            time.sleep(0.5)
+
+    with lock:
+        job = jobs[job_id]
+        lines = list(job.get("log", [])[next_log_index:])
+        error = job.get("error")
+    for line in lines:
+        print(line)
+    return state, error
 
 
 def run_training(config):
@@ -74,37 +121,14 @@ def run_training(config):
     print("[worker] Output: {}".format(server.OUTPUT_DIR / config["outputScene"]))
 
     cancel_thread = threading.Thread(
-        target=watch_cancel_input, args=(server, job_id), name="gsw-cancel", daemon=True
+        target=watch_cancel_input,
+        args=(server.cancel_training, job_id),
+        name="gsw-cancel",
+        daemon=True,
     )
     cancel_thread.start()
 
-    next_log_index = 0
-    state = "queued"
-    error = None
-    previous_stage = None
-    while state not in FINAL_STATES:
-        with server.TRAIN_LOCK:
-            job = server.TRAIN_JOBS[job_id]
-            lines = list(job.get("log", [])[next_log_index:])
-            next_log_index += len(lines)
-            state = job.get("status", "failed")
-            stage = job.get("stage", state)
-            error = job.get("error")
-        for line in lines:
-            print(line)
-        current_stage = (state, stage)
-        if current_stage != previous_stage:
-            print("[worker-status] {} / {}".format(state, stage))
-            previous_stage = current_stage
-        if state not in FINAL_STATES:
-            time.sleep(0.5)
-
-    with server.TRAIN_LOCK:
-        job = server.TRAIN_JOBS[job_id]
-        lines = list(job.get("log", [])[next_log_index:])
-        error = job.get("error")
-    for line in lines:
-        print(line)
+    state, error = stream_job(server.TRAIN_LOCK, server.TRAIN_JOBS, job_id)
 
     if state == "done":
         print("[worker] Training completed successfully.")
@@ -116,13 +140,69 @@ def run_training(config):
     return 1
 
 
+def run_colmap(config):
+    server = import_backend(config["repositoryRoot"])
+    dataset = Path(config["datasetPath"]).resolve()
+    if not dataset.is_dir():
+        raise FileNotFoundError("Dataset directory is missing: {}".format(dataset))
+
+    configured_colmap = config.get("colmapExecutable")
+    if configured_colmap:
+        colmap = Path(configured_colmap).resolve()
+        if not colmap.is_file():
+            raise FileNotFoundError("COLMAP executable is missing: {}".format(colmap))
+        os.environ["COLMAP_PATH"] = str(colmap)
+        os.environ["COLMAP_EXE"] = str(colmap)
+    else:
+        colmap = Path(server.colmap_executable())
+        if not colmap.is_file():
+            raise FileNotFoundError("COLMAP executable is missing: {}".format(colmap))
+
+    options = config.get("colmapOptions") or {}
+    snapshot = server.start_colmap_alignment(
+        config.get("scene") or "native-project",
+        options,
+        dataset_path=str(dataset),
+    )
+    job_id = snapshot["id"]
+    print("[worker] COLMAP job {} started.".format(job_id))
+    print("[worker] Dataset: {}".format(dataset))
+    print("[worker] Executable: {}".format(colmap))
+
+    cancel_thread = threading.Thread(
+        target=watch_cancel_input,
+        args=(server.cancel_mesh_job, job_id),
+        name="gsw-cancel",
+        daemon=True,
+    )
+    cancel_thread.start()
+
+    state, error = stream_job(server.MESH_LOCK, server.MESH_JOBS, job_id)
+    if state == "done":
+        if not server.dataset_has_colmap_scene(dataset):
+            print("[worker] COLMAP finished without a complete sparse/0 camera model.")
+            return 1
+        print("[worker] COLMAP reconstruction completed successfully.")
+        print("[worker] Sparse model: {}".format(dataset / "sparse" / "0"))
+        return 0
+    if state == "cancelled":
+        print("[worker] COLMAP reconstruction cancelled.")
+        return 130
+    print("[worker] COLMAP reconstruction failed: {}".format(error or "unknown error"))
+    return 1
+
+
 def main():
     configure_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--task", choices=("training", "colmap"))
     args = parser.parse_args()
     try:
-        return run_training(load_configuration(args.config))
+        config = load_configuration(args.config, args.task)
+        if config["task"] == "colmap":
+            return run_colmap(config)
+        return run_training(config)
     except Exception as exc:
         print("[worker] Fatal error: {}".format(exc), file=sys.stderr)
         return 1

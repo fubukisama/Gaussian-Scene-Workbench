@@ -11,7 +11,7 @@ The application is being rebuilt as a fully native Qt 6/C++ desktop program on t
 
 - Current version: `0.3.0-native-preview`
 - Updated: `2026-07-12`
-- Current native slice: screen-space Gaussian preview with point fallback, full-source rectangle/lasso/brush selection, delete undo/redo, and lossless cropped PLY export.
+- Current native slice: guarded COLMAP reconstruction and training, screen-space Gaussian preview with point fallback, full-source rectangle/lasso/brush selection, delete undo/redo, and lossless cropped PLY export.
 - Renderer metric: honest CPU submission time; GPU/SIBR timing remains a tracked parity item.
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)
@@ -136,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
 
 ### 原生桌面版开发
 
-`0.3.0-native-preview` 已在 `agent/native-desktop-0.3` 分支开始重构。该版本使用 Qt 6/C++，不加载 HTML、Electron、Node.js 或本地网页服务器。当前原生视口已支持由缩放、旋转、透明度和 SH-DC 颜色驱动的屏幕空间高斯预览，并保留点模式回退；矩形、套索和可调半径连续笔刷均针对完整源数据工作。显示的是 CPU 提交耗时，不冒充 SIBR FPS。GitHub Actions 会在每次推送后自动生成 Windows 预览 artifact；迁移阶段仍保留 `0.2.1` 作为稳定版本。
+`0.3.0-native-preview` 已在 `agent/native-desktop-0.3` 分支开始重构。该版本使用 Qt 6/C++，不加载 HTML、Electron、Node.js 或本地网页服务器。当前原生工作流已支持带路径检查、缓存保护、实时日志、取消和输出验证的 COLMAP 重建；原生视口支持由缩放、旋转、透明度和 SH-DC 颜色驱动的屏幕空间高斯预览，并保留点模式回退；矩形、套索和可调半径连续笔刷均针对完整源数据工作。显示的是 CPU 提交耗时，不冒充 SIBR FPS。GitHub Actions 会在每次推送后自动生成 Windows 预览 artifact；迁移阶段仍保留 `0.2.1` 作为稳定版本。
 
 ---
 
@@ -178,4 +178,4 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
 
 ### ネイティブデスクトップ版の開発
 
-`0.3.0-native-preview` は `agent/native-desktop-0.3` ブランチで開発中です。Qt 6/C++ を使用し、HTML、Electron、Node.js、ローカル Web サーバーを実行しません。現在のネイティブビューはスケール、回転、不透明度、SH-DC 色を使うスクリーンスペース Gaussian プレビューとポイント表示へのフォールバックを備え、矩形、投げ縄、半径可変ブラシは完全なソースデータを選択します。表示値は CPU の送信時間であり、SIBR FPS ではありません。GitHub Actions は各更新から Windows プレビュー artifact を生成します。機能が揃うまでは `0.2.1` を安定版として維持します。
+`0.3.0-native-preview` は `agent/native-desktop-0.3` ブランチで開発中です。Qt 6/C++ を使用し、HTML、Electron、Node.js、ローカル Web サーバーを実行しません。ネイティブ COLMAP ワークフローはパス検証、既存キャッシュ保護、ライブログ、キャンセル、出力検証を備えています。現在のネイティブビューはスケール、回転、不透明度、SH-DC 色を使うスクリーンスペース Gaussian プレビューとポイント表示へのフォールバックを備え、矩形、投げ縄、半径可変ブラシは完全なソースデータを選択します。表示値は CPU の送信時間であり、SIBR FPS ではありません。GitHub Actions は各更新から Windows プレビュー artifact を生成します。機能が揃うまでは `0.2.1` を安定版として維持します。

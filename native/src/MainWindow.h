@@ -51,6 +51,7 @@ private:
   void importDataset();
   void importScene();
   void runEnvironmentCheck();
+  void startReconstruction();
   void startTraining();
   void updateWorkspaceUi();
   void rebuildProjectTree();
@@ -88,6 +89,7 @@ private:
   QAction *mSaveAction = nullptr;
   QAction *mImportDatasetAction = nullptr;
   QAction *mImportSceneAction = nullptr;
+  QAction *mReconstructAction = nullptr;
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;
   QAction *mGaussianRenderAction = nullptr;

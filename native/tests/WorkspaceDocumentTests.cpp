@@ -1,3 +1,4 @@
+#include "ColmapSupport.h"
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
 #include "ScreenSpaceSelection.h"
@@ -9,6 +10,7 @@
 #include <bit>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -22,6 +24,8 @@ private slots:
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsBinaryGaussianSphericalHarmonicColors();
   void activatesGaussianScaleRotationAndOpacity();
+  void detectsColmapDatasetLayoutAndExecutable();
+  void detectsCompleteAndIncompleteColmapModels();
   void selectsBrushStrokeAndHonorsVisibility();
   void tracksSelectionDeletionUndoAndRedo();
   void exportsFilteredAsciiPlyWithOriginalFields();
@@ -185,6 +189,47 @@ void WorkspaceDocumentTests::activatesGaussianScaleRotationAndOpacity() {
   QCOMPARE(vertex.rotationX, 0.0F);
   QCOMPARE(vertex.rotationY, 0.0F);
   QCOMPARE(vertex.rotationZ, 0.0F);
+}
+
+void WorkspaceDocumentTests::detectsColmapDatasetLayoutAndExecutable() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("images")));
+  QFile image(root.filePath(QStringLiteral("images/frame.JPG")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  image.write("fixture");
+  image.close();
+
+  QCOMPARE(gsw::datasetImageDirectory(root.absolutePath()),
+           QDir::cleanPath(root.filePath(QStringLiteral("images"))));
+
+  QFile executable(root.filePath(QStringLiteral("colmap.exe")));
+  QVERIFY(executable.open(QIODevice::WriteOnly));
+  executable.write("fixture");
+  executable.close();
+  QCOMPARE(gsw::findColmapExecutable({}, executable.fileName()),
+           QDir::toNativeSeparators(QFileInfo(executable).absoluteFilePath()));
+}
+
+void WorkspaceDocumentTests::detectsCompleteAndIncompleteColmapModels() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("sparse/0")));
+  const QDir sparse(root.filePath(QStringLiteral("sparse/0")));
+  for (const QString &name : {QStringLiteral("cameras.bin"),
+                              QStringLiteral("images.bin")}) {
+    QFile file(sparse.filePath(name));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+  }
+  QVERIFY(!gsw::hasRecognizedColmapScene(root.absolutePath()));
+  QFile points(sparse.filePath(QStringLiteral("points3D.bin")));
+  QVERIFY(points.open(QIODevice::WriteOnly));
+  points.close();
+  QVERIFY(gsw::hasRecognizedColmapScene(root.absolutePath()));
+  QVERIFY(gsw::hasRecognizedTrainingScene(root.absolutePath()));
+  QVERIFY(gsw::hasColmapWorkingData(root.absolutePath()));
 }
 
 void WorkspaceDocumentTests::selectsBrushStrokeAndHonorsVisibility() {

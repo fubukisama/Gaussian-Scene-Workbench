@@ -22,6 +22,8 @@ qt_standard_project_setup()
 qt_add_executable(GaussianSceneWorkbench WIN32
   src/AppTheme.cpp
   src/AppTheme.h
+  src/ColmapSupport.cpp
+  src/ColmapSupport.h
   src/MainWindow.cpp
   src/MainWindow.h
   src/NativeViewport.cpp
@@ -30,6 +32,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/PlyPointCloudLoader.h
   src/ProcessSupervisor.cpp
   src/ProcessSupervisor.h
+  src/ReconstructionDialog.cpp
+  src/ReconstructionDialog.h
   src/SceneEditModel.cpp
   src/SceneEditModel.h
   src/ScreenSpaceSelection.cpp
@@ -77,6 +81,8 @@ if(BUILD_TESTING)
   if(TARGET Qt6::Test)
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
+      src/ColmapSupport.cpp
+      src/ColmapSupport.h
       src/PlyPointCloudLoader.cpp
       src/PlyPointCloudLoader.h
       src/SceneEditModel.cpp

@@ -4658,8 +4658,13 @@ def colmap_options_from_payload(payload):
 
 def colmap_image_input_path(dataset):
     dataset = Path(dataset)
-    input_dir = dataset / "input"
-    return input_dir if input_dir.exists() else dataset / "images"
+    for candidate in (dataset / "input", dataset / "images", dataset):
+        if candidate.exists() and any(
+            item.is_file() and item.suffix.lower() in IMAGE_EXTS
+            for item in candidate.iterdir()
+        ):
+            return candidate
+    return dataset / "images"
 
 
 def dataset_has_mixed_image_dimensions(dataset):
@@ -5244,7 +5249,7 @@ def run_training_job(job, run_convert, quality, overwrite):
 def run_colmap_alignment_job(job):
     try:
         set_job_stage(job, "running", "colmap")
-        dataset = DATASETS_DIR / job["scene"]
+        dataset = Path(job.get("dataset_path") or (DATASETS_DIR / job["scene"])).resolve()
         images_dir = colmap_image_input_path(dataset)
         if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
             raise ValueError(f"No training images found: {images_dir}")
@@ -5277,15 +5282,16 @@ def run_colmap_alignment_job(job):
         add_job_log(job, f"ERROR: {exc}")
 
 
-def start_colmap_alignment(scene, options=None):
+def start_colmap_alignment(scene, options=None, dataset_path=None):
     scene = safe_name(scene)
     options = colmap_options_from_payload(options or {})
-    dataset = DATASETS_DIR / scene
+    dataset = Path(dataset_path).resolve() if dataset_path else DATASETS_DIR / scene
     job_id = uuid.uuid4().hex
     job = {
         "id": job_id,
         "kind": "colmap",
         "scene": scene,
+        "dataset_path": str(dataset),
         "iteration": 0,
         "mode": "colmap",
         "options": options,
@@ -5647,6 +5653,7 @@ def mesh_job_snapshot(job):
         "updated_at": job["updated_at"],
         "returncode": job.get("returncode"),
         "error": job.get("error"),
+        "dataset_path": job.get("dataset_path"),
         "output_mesh": job.get("output_mesh"),
         "download_url": job.get("download_url"),
         "glb_download_url": job.get("glb_download_url"),

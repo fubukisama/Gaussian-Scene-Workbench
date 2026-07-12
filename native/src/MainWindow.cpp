@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 
 #include "AppTheme.h"
+#include "ColmapSupport.h"
+#include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
 
 #include <QAction>
@@ -82,20 +84,6 @@ QString safeFileName(QString value) {
   value.replace(QRegularExpression(QStringLiteral(R"([<>:"/\\|?*]+)")), QStringLiteral("_"));
   value = value.trimmed();
   return value.isEmpty() ? QStringLiteral("gaussian-scene") : value;
-}
-
-bool hasRecognizedSparseScene(const QString &datasetPath) {
-  if (datasetPath.isEmpty()) {
-    return false;
-  }
-  const QDir sparse(QDir(datasetPath).filePath(QStringLiteral("sparse/0")));
-  const bool binary = QFileInfo::exists(sparse.filePath(QStringLiteral("cameras.bin"))) &&
-                      QFileInfo::exists(sparse.filePath(QStringLiteral("images.bin"))) &&
-                      QFileInfo::exists(sparse.filePath(QStringLiteral("points3D.bin")));
-  const bool text = QFileInfo::exists(sparse.filePath(QStringLiteral("cameras.txt"))) &&
-                    QFileInfo::exists(sparse.filePath(QStringLiteral("images.txt"))) &&
-                    QFileInfo::exists(sparse.filePath(QStringLiteral("points3D.txt")));
-  return binary || text || QFileInfo::exists(QDir(datasetPath).filePath(QStringLiteral("transforms_train.json")));
 }
 
 bool twoDgsAvailable(const QString &repositoryRoot) {
@@ -233,6 +221,15 @@ void MainWindow::createActions() {
   environmentAction->setToolTip(QStringLiteral("检查训练与重建环境"));
   connect(environmentAction, &QAction::triggered, this, &MainWindow::runEnvironmentCheck);
   environmentAction->setObjectName(QStringLiteral("environmentAction"));
+
+  mReconstructAction = new QAction(
+      style()->standardIcon(QStyle::SP_ComputerIcon),
+      QStringLiteral("COLMAP 重建..."), this);
+  mReconstructAction->setShortcut(QKeySequence(QStringLiteral("F7")));
+  mReconstructAction->setToolTip(QStringLiteral("计算相机位姿与稀疏点云 (F7)"));
+  mReconstructAction->setObjectName(QStringLiteral("reconstructAction"));
+  connect(mReconstructAction, &QAction::triggered, this,
+          &MainWindow::startReconstruction);
 
   mTrainAction = new QAction(style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("开始训练..."), this);
   mTrainAction->setToolTip(QStringLiteral("启动当前工程训练"));
@@ -425,6 +422,7 @@ void MainWindow::createMenus() {
   QMenu *workflowMenu = menuBar()->addMenu(QStringLiteral("工作流"));
   workflowMenu->addAction(actions().at(3));
   workflowMenu->addSeparator();
+  workflowMenu->addAction(mReconstructAction);
   workflowMenu->addAction(mTrainAction);
   workflowMenu->addAction(mStopAction);
 
@@ -491,6 +489,7 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(mImportSceneAction);
   mainToolbar->addSeparator();
   mainToolbar->addAction(actions().at(3));
+  mainToolbar->addAction(mReconstructAction);
   mainToolbar->addAction(mTrainAction);
   mainToolbar->addAction(mStopAction);
   mainToolbar->addSeparator();
@@ -681,6 +680,8 @@ void MainWindow::connectServices() {
   });
   connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this, [this](const bool running) {
     mStopAction->setEnabled(running);
+    mReconstructAction->setEnabled(!running && mWorkspace.hasProject() &&
+                                   !mWorkspace.datasetPath().isEmpty());
     mTrainAction->setEnabled(!running && mWorkspace.hasProject() && !mWorkspace.datasetPath().isEmpty());
   });
   connect(&mProcessSupervisor, &ProcessSupervisor::taskStarted, this, [this](const QString &taskName) {
@@ -707,6 +708,8 @@ void MainWindow::connectServices() {
             }
             appendTaskEvent(QStringLiteral("任务%1：%2").arg(succeeded ? QStringLiteral("完成") : QStringLiteral("失败"), taskName));
             mActiveTaskRow = -1;
+            rebuildProjectTree();
+            updateInspector();
           });
   connect(mViewport, &NativeViewport::frameTimeChanged, this, [this](const double milliseconds) {
     if (!mWorkspace.scenePath().isEmpty()) {
@@ -1024,6 +1027,95 @@ void MainWindow::runEnvironmentCheck() {
   }
 }
 
+void MainWindow::startReconstruction() {
+  if (mWorkspace.datasetPath().isEmpty()) {
+    QMessageBox::information(
+        this, QStringLiteral("尚未导入数据集"),
+        QStringLiteral("请先导入包含照片的图像数据集。"));
+    return;
+  }
+  const QString root = findRepositoryRoot();
+  const QString workerScript =
+      QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
+  const QString python = findTrainingPython(root);
+  if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
+    showError(QStringLiteral("重建后端不可用"),
+              QStringLiteral("未找到原生计算 worker、gaussian-splatting 源码或 Python 环境。"));
+    return;
+  }
+
+  ReconstructionDialog dialog(mWorkspace.datasetPath(), root, this);
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+  const ReconstructionConfiguration config = dialog.configuration();
+
+  const QString jobsRoot =
+      QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs"));
+  if (!QDir().mkpath(jobsRoot)) {
+    showError(QStringLiteral("无法创建任务目录"),
+              QDir::toNativeSeparators(jobsRoot));
+    return;
+  }
+
+  QJsonObject colmapOptions;
+  colmapOptions.insert(QStringLiteral("preset"), config.preset);
+  colmapOptions.insert(QStringLiteral("matching"), config.matching);
+  colmapOptions.insert(QStringLiteral("camera_model"), config.cameraModel);
+  colmapOptions.insert(QStringLiteral("single_camera"), config.singleCamera);
+  colmapOptions.insert(QStringLiteral("use_gpu"), config.useGpu);
+  colmapOptions.insert(QStringLiteral("reset"), config.reset);
+  colmapOptions.insert(QStringLiteral("feature_max_image_size"),
+                       config.featureMaxImageSize);
+  colmapOptions.insert(QStringLiteral("feature_max_num_features"),
+                       config.featureMaxNumFeatures);
+  colmapOptions.insert(QStringLiteral("matcher_guided"),
+                       config.matcherGuided);
+  colmapOptions.insert(QStringLiteral("mapper_max_runtime_seconds"),
+                       config.mapperMaxRuntimeSeconds);
+
+  QJsonObject workerConfig;
+  workerConfig.insert(QStringLiteral("task"), QStringLiteral("colmap"));
+  workerConfig.insert(QStringLiteral("scene"), QStringLiteral("native-project"));
+  workerConfig.insert(QStringLiteral("repositoryRoot"), QDir::cleanPath(root));
+  workerConfig.insert(QStringLiteral("datasetPath"),
+                      QDir::cleanPath(mWorkspace.datasetPath()));
+  workerConfig.insert(QStringLiteral("colmapExecutable"),
+                      QDir::cleanPath(config.colmapExecutable));
+  workerConfig.insert(QStringLiteral("colmapOptions"), colmapOptions);
+
+  const QString configPath = QDir(jobsRoot).filePath(
+      QStringLiteral("colmap-%1.json").arg(
+          QUuid::createUuid().toString(QUuid::WithoutBraces)));
+  QSaveFile configFile(configPath);
+  if (!configFile.open(QIODevice::WriteOnly) ||
+      configFile.write(QJsonDocument(workerConfig).toJson(
+                           QJsonDocument::Indented)) < 0 ||
+      !configFile.commit()) {
+    showError(QStringLiteral("无法保存重建任务"), configFile.errorString());
+    return;
+  }
+
+  QProcessEnvironment environment = pythonProcessEnvironment(python);
+  environment.insert(QStringLiteral("COLMAP_PATH"), config.colmapExecutable);
+  environment.insert(QStringLiteral("COLMAP_EXE"), config.colmapExecutable);
+  const bool started = mProcessSupervisor.start(
+      QStringLiteral("COLMAP | %1 | %2")
+          .arg(config.preset, config.matching),
+      python,
+      {workerScript, QStringLiteral("--task"), QStringLiteral("colmap"),
+       QStringLiteral("--config"), configPath},
+      root, environment, true);
+  if (!started) {
+    QMessageBox::information(
+        this, QStringLiteral("任务繁忙"),
+        QStringLiteral("请等待当前任务结束后再试。"));
+  } else {
+    appendTaskEvent(QStringLiteral("重建配置已保存：%1")
+                        .arg(QDir::toNativeSeparators(configPath)));
+  }
+}
+
 void MainWindow::startTraining() {
   if (mWorkspace.datasetPath().isEmpty()) {
     QMessageBox::information(this, QStringLiteral("尚未导入数据集"), QStringLiteral("请先导入包含 COLMAP 数据的图像工程。"));
@@ -1040,7 +1132,8 @@ void MainWindow::startTraining() {
 
   const QString defaultOutputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output"));
   TrainingDialog dialog(mWorkspace.datasetPath(), mWorkspace.projectName(), defaultOutputRoot,
-                        hasRecognizedSparseScene(mWorkspace.datasetPath()), twoDgsAvailable(root), this);
+                        hasRecognizedTrainingScene(mWorkspace.datasetPath()),
+                        twoDgsAvailable(root), this);
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }
@@ -1104,6 +1197,9 @@ void MainWindow::updateWorkspaceUi() {
   mSaveAction->setEnabled(mWorkspace.hasProject());
   mImportDatasetAction->setEnabled(mWorkspace.hasProject());
   mImportSceneAction->setEnabled(mWorkspace.hasProject());
+  mReconstructAction->setEnabled(!mProcessSupervisor.isRunning() &&
+                                 mWorkspace.hasProject() &&
+                                 !mWorkspace.datasetPath().isEmpty());
   mTrainAction->setEnabled(!mProcessSupervisor.isRunning() && mWorkspace.hasProject() &&
                            !mWorkspace.datasetPath().isEmpty());
   updateEditActions();
@@ -1125,7 +1221,7 @@ void MainWindow::rebuildProjectTree() {
 
   auto *reconstruction = new QTreeWidgetItem(root, {QStringLiteral("重建")});
   reconstruction->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogContentsView));
-  const bool hasSparse = hasRecognizedSparseScene(mWorkspace.datasetPath());
+  const bool hasSparse = hasRecognizedColmapScene(mWorkspace.datasetPath());
   new QTreeWidgetItem(reconstruction, {hasSparse ? QStringLiteral("COLMAP sparse") : QStringLiteral("未检测到稀疏重建")});
 
   auto *scene = new QTreeWidgetItem(root, {QStringLiteral("场景")});

@@ -7,8 +7,8 @@ Status: `available`, `partial`, `missing`, `hidden`.
 | Workflow | Legacy capability | Native status | Native acceptance gate |
 | --- | --- | --- | --- |
 | Project | Open/save scene-oriented work | partial | Portable `.gsw.json` paths survive moving the project directory; missing assets are reported in the project tree. |
-| Dataset | Images and video import, metadata preservation | partial | Folder import works; image/video copy, frame extraction, and import progress remain missing. |
-| Reconstruction | COLMAP presets and alignment cache | missing | Typed COLMAP job with validated options, cancellable process tree, persisted log, and recoverable output. |
+| Dataset | Images and video import, metadata preservation | partial | Folder import works for `input`, `images`, or images stored directly in the selected root; image/video copy, frame extraction, and import progress remain missing. |
+| Reconstruction | COLMAP presets and alignment cache | partial | Native standard/robust/sequential jobs validate the executable and dataset, protect existing caches, stream logs, support process-tree cancellation, and reject incomplete `sparse/0` output. Persisted logs, resume, and retry remain missing. |
 | Training | 3DGS/2DGS presets, advanced options, resume | partial | Native dialog must call the guarded worker path, prevent output loss, expose progress, and support cancellation/resume. |
 | Scene load | PLY metadata, points, soft/real splats, cameras | partial | ASCII and binary little-endian points render natively. Standard 3DGS `scale_*`, `rot_*`, and `opacity` fields drive a depth-sorted screen-space Gaussian preview with SH-DC color; higher-order SH, tile rasterization, and cameras remain missing. |
 | Navigation | Orbit, pan, zoom, reset | available | Mouse navigation and scene-bounds camera fit work at supported UI scales. |
@@ -19,7 +19,7 @@ Status: `available`, `partial`, `missing`, `hidden`.
 | Analysis | PSNR and experiment comparison | missing | Results are persisted and linked to exact scene, iteration, backend, and evaluation settings. |
 | Assets | Asset and experiment managers | missing | Imported/generated outputs are searchable, inspectable, and portable within the project. |
 | Export | PLY, SPZ, SOG, mesh, texture, GLB | partial | Native cropped PLY export is available for point/Gaussian files and rejects indexed meshes; SPZ, SOG, mesh, texture, and GLB remain missing. |
-| Tasks | Logs, cancel, retry, open output | partial | One supervised process is available; typed queue, process-tree cancellation, persistence, and retry remain missing. |
+| Tasks | Logs, cancel, retry, open output | partial | One supervised training or COLMAP process streams logs and supports process-tree cancellation; typed queue, persistence, retry, and open-output actions remain missing. |
 | Renderer metrics | Point/splat frame and GPU timing | partial | Point and Gaussian modes report CPU submission time without presenting it as FPS. GPU timer queries and SIBR-equivalent renderer metrics remain missing. |
 | UI scaling | DPI-aware automatic/manual scale | available | 75%-125% settings persist and desktop QA covers 1366x768, 1920x1080, and high-DPI displays. |
 

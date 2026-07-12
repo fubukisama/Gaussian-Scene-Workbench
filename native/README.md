@@ -8,6 +8,7 @@
 - Dockable project tree, inspector, task queue, and process log.
 - Portable `.gsw.json` project files with relative asset paths.
 - Dataset folder import plus asynchronous ASCII/binary PLY point-cloud loading.
+- Native COLMAP reconstruction dialog with standard, robust, and sequential presets, explicit E-drive executable selection, cache overwrite protection, live logs, cancellation, and sparse-model validation.
 - Native OpenGL point rendering plus depth-sorted screen-space Gaussian splats using activated scale, normalized rotation, sigmoid opacity, and SH-DC color.
 - Automatic Gaussian/point mode selection, deterministic large-scene sampling, scene-bounds camera fitting, and a manual diagnostic fallback.
 - Full-source rectangle/lasso selection plus a persistent 4-256 px continuous brush, with optional visible-point depth filtering, replace/add/subtract, clear, and invert actions.
@@ -20,6 +21,8 @@ The current viewport includes a native Gaussian preview, but it is not yet a pro
 Rectangle, lasso, and brush selection operate on every source vertex even when display rendering is sampled. The brush shows its exact screen-space radius, persists the chosen size, and uses the same visible-only filter and original-index edit model; GPU ID picking remains pending.
 
 Crop export supports ASCII and binary little-endian point/Gaussian PLY files. It copies retained vertex records without re-encoding custom Gaussian fields, updates the vertex count, writes atomically, and refuses indexed mesh PLY files whose face indices would become invalid.
+
+COLMAP is an external native dependency and is never assumed to live on the system drive. The application checks the saved path, `COLMAP_PATH`/`COLMAP_EXE`, repository-local tool folders, the current drive, and `PATH`; if none exists, the reconstruction dialog requires the user to select `colmap.exe` before a task can start.
 
 Feature parity and release gates are tracked in `docs/NATIVE_PARITY.md` (packaged as `NATIVE_PARITY.md`).
 

@@ -1,5 +1,7 @@
 #include "TrainingDialog.h"
 
+#include "ColmapSupport.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -30,13 +32,6 @@ QString safeSceneName(QString value) {
   return value + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss"));
 }
 
-bool directoryHasImages(const QString &path) {
-  static const QStringList filters = {
-      QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.png"),
-      QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.bmp"),
-      QStringLiteral("*.webp")};
-  return !QDir(path).entryList(filters, QDir::Files).isEmpty();
-}
 } // namespace
 
 TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projectName,
@@ -219,9 +214,7 @@ void TrainingDialog::chooseOutputRoot() {
 }
 
 bool TrainingDialog::datasetContainsImages() const {
-  const QDir dataset(mDatasetPath);
-  return directoryHasImages(dataset.filePath(QStringLiteral("images"))) ||
-         directoryHasImages(dataset.filePath(QStringLiteral("input")));
+  return !datasetImageDirectory(mDatasetPath).isEmpty();
 }
 
 } // namespace gsw
