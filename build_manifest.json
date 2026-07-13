@@ -8,7 +8,7 @@
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "6454227",
-    "gitDirty":  true,
+    "gitCommit":  "86b6982",
+    "gitDirty":  false,
     "note":  "Restore legacy model workspace scene discovery"
 }
