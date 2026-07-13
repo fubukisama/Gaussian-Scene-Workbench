@@ -8,7 +8,7 @@
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "5d13ba0",
-    "gitDirty":  true,
+    "gitCommit":  "137382b",
+    "gitDirty":  false,
     "note":  "Prefer bundled repository root over legacy Desktop workspace"
 }
