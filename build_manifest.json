@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench",
-    "sourceVersion":  "36.10.1",
-    "packageVersion":  "0.2.1",
-    "releaseTag":  "v0.2.1",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.1-win-x64.zip",
-    "updatedAt":  "2026-07-10T19:54:26+09:00",
-    "updatedBy":  "ztx",
-    "machine":  "LAPTOP-QS64PJGJ",
+    "sourceVersion":  "36.10.2",
+    "packageVersion":  "0.2.2",
+    "releaseTag":  "v0.2.2",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.2-win-x64.zip",
+    "updatedAt":  "2026-07-13T11:37:55+09:00",
+    "updatedBy":  "Ishida_Lab",
+    "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "0705b82",
-    "gitDirty":  false,
-    "note":  "SIBR-style GPU render-performance meter"
+    "gitCommit":  "5d13ba0",
+    "gitDirty":  true,
+    "note":  "Prefer bundled repository root over legacy Desktop workspace"
 }

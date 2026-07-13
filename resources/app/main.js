@@ -6,6 +6,7 @@ const path = require("path");
 const { createExitConfirmation } = require("./exit_confirmation");
 const { stopServerProcess } = require("./process_cleanup");
 const { checkPortAvailable, resolveServerPort, serverPortForMode } = require("./port_policy");
+const { resolveProjectRoot } = require("./project_root");
 const { showEnvironmentWizard } = require("./environment_wizard");
 
 let mainWindow = null;
@@ -103,28 +104,14 @@ function setupExitConfirmation() {
   });
 }
 
-function resolveProjectRoot() {
-  const packagedRoot = path.dirname(process.execPath);
-  const legacyWorkspaceRoot = app.isPackaged
-    ? path.resolve(packagedRoot, "..", "..", "..")
-    : "";
-  const candidates = [
-    process.env.GS_EDITOR_ROOT,
-    legacyWorkspaceRoot,
-    path.resolve(__dirname, ".."),
-    packagedRoot,
-    path.join(app.getPath("desktop"), "3dgs")
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const server = path.join(candidate, "crop_editor", "server.py");
-    if (fs.existsSync(server)) return candidate;
-  }
-  throw new Error(`Could not find 3dgs project root. Set GS_EDITOR_ROOT or keep the project at ${path.join(app.getPath("desktop"), "3dgs")}`);
-}
-
 function configurePaths() {
-  ROOT = resolveProjectRoot();
+  ROOT = resolveProjectRoot({
+    appDir: __dirname,
+    execPath: process.execPath,
+    desktopPath: app.getPath("desktop"),
+    isPackaged: app.isPackaged,
+    env: process.env
+  });
   CROP_EDITOR_DIR = path.join(ROOT, "crop_editor");
   SERVER_PATH = path.join(CROP_EDITOR_DIR, "server.py");
   LOG_PATH = path.join(ROOT, "desktop_app", "gaussian_scene_workbench.log");
