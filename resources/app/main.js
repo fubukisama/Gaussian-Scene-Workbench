@@ -6,7 +6,7 @@ const path = require("path");
 const { createExitConfirmation } = require("./exit_confirmation");
 const { stopServerProcess } = require("./process_cleanup");
 const { checkPortAvailable, resolveServerPort, serverPortForMode } = require("./port_policy");
-const { resolveProjectRoot } = require("./project_root");
+const { resolveProjectRoot, resolveWorkspaceRoot } = require("./project_root");
 const { showEnvironmentWizard } = require("./environment_wizard");
 
 let mainWindow = null;
@@ -15,6 +15,7 @@ let serverPort = null;
 let serverProcessPid = null;
 let cleanupStarted = false;
 let ROOT = null;
+let WORKSPACE_ROOT = null;
 let CROP_EDITOR_DIR = null;
 let SERVER_PATH = null;
 let LOG_PATH = null;
@@ -112,11 +113,17 @@ function configurePaths() {
     isPackaged: app.isPackaged,
     env: process.env
   });
+  WORKSPACE_ROOT = resolveWorkspaceRoot({
+    projectRoot: ROOT,
+    desktopPath: app.getPath("desktop"),
+    env: process.env
+  });
   CROP_EDITOR_DIR = path.join(ROOT, "crop_editor");
   SERVER_PATH = path.join(CROP_EDITOR_DIR, "server.py");
   LOG_PATH = path.join(ROOT, "desktop_app", "gaussian_scene_workbench.log");
   fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
   log(`ROOT=${ROOT}`);
+  log(`WORKSPACE_ROOT=${WORKSPACE_ROOT}`);
   log(`SERVER_PATH=${SERVER_PATH}`);
 }
 
@@ -332,6 +339,7 @@ async function startPythonServer() {
     CONDA_PREFIX: envRoot,
     GAUSSIAN_SPLATTING_CONDA_PREFIX: envRoot,
     GS_CONDA_PREFIX: envRoot,
+    GS_EDITOR_WORKSPACE_ROOT: WORKSPACE_ROOT,
     ...(condaRoot ? { CONDA_ROOT: condaRoot } : {})
   };
 

@@ -22,9 +22,10 @@ from plyfile import PlyData, PlyElement
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATASETS_DIR = ROOT / "datasets"
-OUTPUT_DIR = ROOT / "output"
-PSNR_REPORTS_DIR = ROOT / "reports" / "psnr"
+WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
+DATASETS_DIR = WORKSPACE_ROOT / "datasets"
+OUTPUT_DIR = WORKSPACE_ROOT / "output"
+PSNR_REPORTS_DIR = WORKSPACE_ROOT / "reports" / "psnr"
 GAUSSIAN_DIR = ROOT / "gaussian-splatting"
 TWO_DGS_DIR = Path(os.environ.get("TWO_DGS_DIR", Path.home() / "Documents" / "2dgs"))
 SUGAR_DIR = Path(os.environ.get("SUGAR_DIR", ROOT / "SuGaR"))
@@ -466,7 +467,12 @@ def list_scenes():
             continue
         it = latest_iteration(child.name)
         if it is not None and ply_path(child.name, it).exists():
-            scenes.append({"name": child.name, "latest_iteration": it, "backend": scene_backend(child.name, it)})
+            scenes.append({
+                "name": child.name,
+                "latest_iteration": it,
+                "backend": scene_backend(child.name, it),
+                "path": str(child.resolve()),
+            })
     return scenes
 
 
@@ -6824,7 +6830,11 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 })
             if parsed.path == "/api/scenes":
-                return self.send_json({"scenes": list_scenes()})
+                return self.send_json({
+                    "scenes": list_scenes(),
+                    "workspace_root": str(WORKSPACE_ROOT),
+                    "output_dir": str(OUTPUT_DIR),
+                })
             if parsed.path == "/api/datasets":
                 return self.send_json({"datasets": list_datasets()})
             if parsed.path == "/api/assets":

@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-const { resolveProjectRoot } = require("../project_root");
+const { resolveProjectRoot, resolveWorkspaceRoot } = require("../project_root");
 
 function fakeExists(...roots) {
   const servers = new Set(roots.map((root) => path.join(root, "crop_editor", "server.py").toLowerCase()));
@@ -55,4 +55,30 @@ test("GS_EDITOR_ROOT remains the highest-priority override", () => {
   });
 
   assert.equal(resolved, explicitRoot);
+});
+
+test("workspace discovery keeps existing models in the legacy Desktop workspace", () => {
+  const projectRoot = "C:\\work\\Gaussian-Scene-Workbench";
+  const desktopPath = "C:\\Users\\tester\\Desktop";
+  const legacyOutput = path.join(desktopPath, "3dgs", "output").toLowerCase();
+
+  const resolved = resolveWorkspaceRoot({
+    projectRoot,
+    desktopPath,
+    env: {},
+    existsSync: (candidate) => candidate.toLowerCase() === legacyOutput
+  });
+
+  assert.equal(resolved, path.join(desktopPath, "3dgs"));
+});
+
+test("GS_EDITOR_WORKSPACE_ROOT can select another model workspace", () => {
+  const resolved = resolveWorkspaceRoot({
+    projectRoot: "C:\\work\\Gaussian-Scene-Workbench",
+    desktopPath: "C:\\Users\\tester\\Desktop",
+    env: { GS_EDITOR_WORKSPACE_ROOT: "D:\\Gaussian Models" },
+    existsSync: () => false
+  });
+
+  assert.equal(resolved, "D:\\Gaussian Models");
 });

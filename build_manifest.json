@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench",
-    "sourceVersion":  "36.10.2",
-    "packageVersion":  "0.2.2",
-    "releaseTag":  "v0.2.2",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.2-win-x64.zip",
-    "updatedAt":  "2026-07-13T11:37:55+09:00",
+    "sourceVersion":  "36.10.3",
+    "packageVersion":  "0.2.3",
+    "releaseTag":  "v0.2.3",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.3-win-x64.zip",
+    "updatedAt":  "2026-07-13T12:26:47+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "137382b",
-    "gitDirty":  false,
-    "note":  "Prefer bundled repository root over legacy Desktop workspace"
+    "gitCommit":  "6454227",
+    "gitDirty":  true,
+    "note":  "Restore legacy model workspace scene discovery"
 }

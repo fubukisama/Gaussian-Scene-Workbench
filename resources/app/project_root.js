@@ -37,7 +37,19 @@ function resolveProjectRoot(options) {
   );
 }
 
+function resolveWorkspaceRoot({ projectRoot, desktopPath, env = process.env, existsSync = fs.existsSync }) {
+  if (env.GS_EDITOR_WORKSPACE_ROOT) {
+    return path.resolve(env.GS_EDITOR_WORKSPACE_ROOT);
+  }
+
+  const legacyRoot = path.join(desktopPath, "3dgs");
+  const legacyHasData = existsSync(path.join(legacyRoot, "output"))
+    || existsSync(path.join(legacyRoot, "datasets"));
+  return legacyHasData ? path.resolve(legacyRoot) : path.resolve(projectRoot);
+}
+
 module.exports = {
   projectRootCandidates,
-  resolveProjectRoot
+  resolveProjectRoot,
+  resolveWorkspaceRoot
 };

@@ -1634,6 +1634,8 @@ async function loadScenes() {
     const opt = document.createElement("option");
     opt.value = item.name;
     opt.textContent = item.backend ? `${item.name} [${item.backend.toUpperCase()}]` : item.name;
+    opt.title = item.path || "";
+    opt.dataset.path = item.path || "";
     opt.dataset.iteration = item.latest_iteration;
     opt.dataset.backend = item.backend || "3dgs";
     sceneSelect.appendChild(opt);
