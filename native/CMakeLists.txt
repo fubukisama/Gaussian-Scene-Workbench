@@ -27,6 +27,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL Open
 qt_standard_project_setup()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
+  resources.qrc
   src/AppTheme.cpp
   src/AppTheme.h
   src/BackendLocator.cpp
@@ -61,6 +62,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/WorkspaceDocument.h
   src/main.cpp
 )
+
+if(WIN32)
+  target_sources(GaussianSceneWorkbench PRIVATE assets/gsw-app-icon.rc)
+endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE

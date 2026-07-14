@@ -5,34 +5,13 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
-#include <QPainter>
-#include <QPixmap>
 #include <QSurfaceFormat>
 #include <QTimer>
-
-namespace {
-QIcon createApplicationIcon() {
-  QPixmap pixmap(128, 128);
-  pixmap.fill(QColor(24, 27, 29));
-  QPainter painter(&pixmap);
-  painter.setRenderHint(QPainter::Antialiasing, true);
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(77, 176, 158, 225));
-  painter.drawEllipse(QRectF(22, 26, 66, 38));
-  painter.setBrush(QColor(218, 169, 82, 220));
-  painter.drawEllipse(QRectF(49, 50, 59, 35));
-  painter.setBrush(QColor(105, 139, 211, 220));
-  painter.drawEllipse(QRectF(29, 72, 54, 32));
-  painter.setPen(QPen(QColor(241, 243, 244), 5.0));
-  painter.setBrush(Qt::NoBrush);
-  painter.drawEllipse(QRectF(17, 17, 94, 94));
-  return QIcon(pixmap);
-}
-} // namespace
 
 int main(int argc, char *argv[]) {
   QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -51,7 +30,12 @@ int main(int argc, char *argv[]) {
   QCoreApplication::setOrganizationDomain(QStringLiteral("github.com/fubukisama"));
   QCoreApplication::setApplicationName(QStringLiteral("Gaussian Scene Workbench"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
-  application.setWindowIcon(createApplicationIcon());
+  const QIcon applicationIcon(QStringLiteral(":/icons/gsw-app-icon.png"));
+  if (applicationIcon.isNull()) {
+    qCritical() << "Failed to load the embedded application icon.";
+    return 3;
+  }
+  application.setWindowIcon(applicationIcon);
 
   const int scalePercent = gsw::AppTheme::loadScalePercent(QGuiApplication::primaryScreen());
   gsw::AppTheme::apply(application, scalePercent, false);
