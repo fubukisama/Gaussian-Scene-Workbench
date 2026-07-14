@@ -240,6 +240,191 @@ print("Compiled {} staged Python files without bytecode output.".format(len(path
   }
 }
 
+function Test-NinjaDependencyListContainsPath {
+  param(
+    [Parameter(Mandatory = $true)][object[]]$DependencyLines,
+    [Parameter(Mandatory = $true)][string]$Directory,
+    [Parameter(Mandatory = $true)][string]$ExpectedPath
+  )
+
+  $ExpectedFullPath = [IO.Path]::GetFullPath($ExpectedPath)
+  foreach ($DependencyLine in $DependencyLines) {
+    $Candidate = $DependencyLine.ToString().Trim()
+    if ([string]::IsNullOrWhiteSpace($Candidate) -or $Candidate.Contains(': #deps ')) {
+      continue
+    }
+    try {
+      $CandidateFullPath = if ([IO.Path]::IsPathRooted($Candidate)) {
+        [IO.Path]::GetFullPath($Candidate)
+      } else {
+        [IO.Path]::GetFullPath((Join-Path $Directory $Candidate))
+      }
+      if ($CandidateFullPath.Equals($ExpectedFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+      }
+    } catch {
+      continue
+    }
+  }
+  return $false
+}
+
+function Test-NativeBuildNeedsDependencyReset {
+  param(
+    [Parameter(Mandatory = $true)][string]$Ninja,
+    [Parameter(Mandatory = $true)][string]$Directory,
+    [Parameter(Mandatory = $true)][string]$ObjectPath,
+    [Parameter(Mandatory = $true)][string]$ExpectedHeader
+  )
+
+  if (-not (Test-Path -LiteralPath (Join-Path $Directory $ObjectPath))) {
+    return $false
+  }
+
+  $DependencyLines = @(& $Ninja -C $Directory -t deps $ObjectPath)
+  if ($LASTEXITCODE -ne 0) {
+    return $true
+  }
+
+  return -not (Test-NinjaDependencyListContainsPath `
+    -DependencyLines $DependencyLines `
+    -Directory $Directory `
+    -ExpectedPath $ExpectedHeader)
+}
+
+function Get-MsvcShowIncludesPrefix {
+  $ProbeName = "gsw-showincludes-$([Guid]::NewGuid().ToString('N'))"
+  $ProbeHeader = Join-Path ([IO.Path]::GetTempPath()) "$ProbeName.h"
+  $ProbeSource = Join-Path ([IO.Path]::GetTempPath()) "$ProbeName.cpp"
+  $OriginalConsoleEncoding = [Console]::OutputEncoding
+  $OriginalPipelineEncoding = $OutputEncoding
+  $OemEncoding = [Text.Encoding]::GetEncoding(
+    [Globalization.CultureInfo]::CurrentUICulture.TextInfo.OEMCodePage
+  )
+
+  try {
+    [IO.File]::WriteAllText(
+      $ProbeHeader,
+      "#pragma once`r`n",
+      [Text.UTF8Encoding]::new($false)
+    )
+    $PortableHeaderPath = $ProbeHeader.Replace('\', '/')
+    [IO.File]::WriteAllText(
+      $ProbeSource,
+      "#include `"$PortableHeaderPath`"`r`n",
+      [Text.UTF8Encoding]::new($false)
+    )
+
+    [Console]::OutputEncoding = $OemEncoding
+    $OutputEncoding = $OemEncoding
+    $CompilerOutput = @(& cl.exe /nologo /showIncludes /EP $ProbeSource 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+      throw "MSVC /showIncludes probe failed with exit code $LASTEXITCODE."
+    }
+
+    foreach ($OutputLine in $CompilerOutput) {
+      $Text = $OutputLine.ToString()
+      if (-not $Text.EndsWith("$ProbeName.h", [StringComparison]::OrdinalIgnoreCase)) {
+        continue
+      }
+      $PathStart = [regex]::Match($Text, '[A-Za-z]:[\\/]').Index
+      if ($PathStart -gt 0) {
+        return $Text.Substring(0, $PathStart)
+      }
+    }
+    throw "MSVC /showIncludes probe did not emit a recognizable header dependency line."
+  } finally {
+    [Console]::OutputEncoding = $OriginalConsoleEncoding
+    $OutputEncoding = $OriginalPipelineEncoding
+    [IO.File]::Delete($ProbeSource)
+    [IO.File]::Delete($ProbeHeader)
+  }
+}
+
+function Assert-NinjaHeaderDependency {
+  param(
+    [Parameter(Mandatory = $true)][string]$Ninja,
+    [Parameter(Mandatory = $true)][string]$Directory,
+    [Parameter(Mandatory = $true)][string]$ObjectPath,
+    [Parameter(Mandatory = $true)][string]$ExpectedHeader
+  )
+
+  $DependencyLines = @(& $Ninja -C $Directory -t deps $ObjectPath)
+  if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect Ninja header dependencies for $ObjectPath."
+  }
+
+  $ExpectedPath = [IO.Path]::GetFullPath($ExpectedHeader)
+  $HasExpectedHeader = Test-NinjaDependencyListContainsPath `
+    -DependencyLines $DependencyLines `
+    -Directory $Directory `
+    -ExpectedPath $ExpectedPath
+  if (-not $HasExpectedHeader) {
+    throw "Native build did not record the required header dependency '$ExpectedPath' for '$ObjectPath'. Refusing to package a potentially ABI-inconsistent executable."
+  }
+}
+
+function Invoke-NativeLaunchSmokeTest {
+  param([Parameter(Mandatory = $true)][string]$Executable)
+
+  $PackageBin = Split-Path -Parent $Executable
+  $LaunchEnvironment = @{
+    PATH = [Environment]::GetEnvironmentVariable("PATH", "Process")
+    QT_OPENGL = [Environment]::GetEnvironmentVariable("QT_OPENGL", "Process")
+    QT_PLUGIN_PATH = [Environment]::GetEnvironmentVariable("QT_PLUGIN_PATH", "Process")
+    QT_QPA_PLATFORM = [Environment]::GetEnvironmentVariable("QT_QPA_PLATFORM", "Process")
+    QT_QPA_PLATFORM_PLUGIN_PATH = [Environment]::GetEnvironmentVariable(
+      "QT_QPA_PLATFORM_PLUGIN_PATH",
+      "Process"
+    )
+  }
+  $Process = $null
+  try {
+    $IsolatedPath = @(
+      $PackageBin,
+      (Join-Path $env:SystemRoot "System32"),
+      $env:SystemRoot,
+      (Join-Path $env:SystemRoot "System32\Wbem")
+    ) -join ";"
+    [Environment]::SetEnvironmentVariable("PATH", $IsolatedPath, "Process")
+    [Environment]::SetEnvironmentVariable("QT_OPENGL", "software", "Process")
+    [Environment]::SetEnvironmentVariable("QT_PLUGIN_PATH", $null, "Process")
+    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM", "windows", "Process")
+    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM_PLUGIN_PATH", $null, "Process")
+
+    $Process = Start-Process `
+      -FilePath $Executable `
+      -ArgumentList "--smoke-test" `
+      -WorkingDirectory $PackageBin `
+      -WindowStyle Hidden `
+      -PassThru `
+      -ErrorAction Stop
+    if (-not $Process.WaitForExit(15000)) {
+      Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+      $Process.WaitForExit(5000) | Out-Null
+      throw "Native application launch smoke test timed out: $Executable"
+    }
+    if ($Process.ExitCode -ne 0) {
+      $UnsignedExitCode = [BitConverter]::ToUInt32(
+        [BitConverter]::GetBytes([int]$Process.ExitCode),
+        0
+      )
+      throw "Native application launch smoke test failed with exit code $($Process.ExitCode) (0x$($UnsignedExitCode.ToString('X8'))): $Executable"
+    }
+  } finally {
+    if ($null -ne $Process) {
+      if (-not $Process.HasExited) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        $Process.WaitForExit(5000) | Out-Null
+      }
+      $Process.Dispose()
+    }
+    foreach ($Name in $LaunchEnvironment.Keys) {
+      [Environment]::SetEnvironmentVariable($Name, $LaunchEnvironment[$Name], "Process")
+    }
+  }
+}
+
 Import-VisualStudioEnvironment -ScriptPath $VsDevCmd
 
 $CMake = Join-Path $QtRoot "Library\bin\cmake.exe"
@@ -256,6 +441,10 @@ foreach ($tool in @($CMake, $CTest, $Ninja)) {
     throw "Required native build tool not found: $tool"
   }
 }
+$MsvcShowIncludesPrefix = Get-MsvcShowIncludesPrefix
+$Utf8ConsoleEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $Utf8ConsoleEncoding
+$OutputEncoding = $Utf8ConsoleEncoding
 
 $QtRuntimePaths = @(
   $QtRoot,
@@ -267,6 +456,14 @@ $env:Path = "$QtRuntimePaths;$env:Path"
 
 if ($Clean -and (Test-Path -LiteralPath $BuildDirectory)) {
   Remove-DirectoryWithRetry -Path $BuildDirectory -AllowedParent $NativeRoot
+} elseif ((Test-Path -LiteralPath $BuildDirectory) -and
+          (Test-NativeBuildNeedsDependencyReset `
+            -Ninja $Ninja `
+            -Directory $BuildDirectory `
+            -ObjectPath "CMakeFiles/GaussianSceneWorkbench.dir/src/main.cpp.obj" `
+            -ExpectedHeader (Join-Path $NativeRoot "src\MainWindow.h"))) {
+  Write-Host "Resetting native build cache to repair localized MSVC header dependency tracking."
+  Remove-DirectoryWithRetry -Path $BuildDirectory -AllowedParent $NativeRoot
 }
 
 & $CMake `
@@ -277,11 +474,18 @@ if ($Clean -and (Test-Path -LiteralPath $BuildDirectory)) {
   "-DCMAKE_PREFIX_PATH=$(Join-Path $QtRoot 'Library')" `
   "-DCMAKE_BUILD_TYPE=$Configuration" `
   "-DGSW_RELEASE_DATE=$ReleaseDate" `
+  "-DGSW_MSVC_SHOWINCLUDES_PREFIX=$($MsvcShowIncludesPrefix.TrimEnd())" `
   "-DBUILD_TESTING=ON"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed with exit code $LASTEXITCODE." }
 
 & $CMake --build $BuildDirectory --parallel
 if ($LASTEXITCODE -ne 0) { throw "Native build failed with exit code $LASTEXITCODE." }
+
+Assert-NinjaHeaderDependency `
+  -Ninja $Ninja `
+  -Directory $BuildDirectory `
+  -ObjectPath "CMakeFiles/GaussianSceneWorkbench.dir/src/main.cpp.obj" `
+  -ExpectedHeader (Join-Path $NativeRoot "src\MainWindow.h")
 
 & $CTest --test-dir $BuildDirectory --no-tests=error --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw "Native tests failed with exit code $LASTEXITCODE." }
@@ -327,6 +531,7 @@ if ($Package) {
     (Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT")
   )
   Copy-AppLocalDependencies -PackageBin (Split-Path -Parent $PackagedExecutable) -SearchRoots $RuntimeSearchRoots
+  Invoke-NativeLaunchSmokeTest -Executable $PackagedExecutable
   Copy-Item -LiteralPath (Join-Path $NativeRoot "README.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $NativeRoot "build_manifest.json") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_MIGRATION.md") -Destination $PackageRoot -Force

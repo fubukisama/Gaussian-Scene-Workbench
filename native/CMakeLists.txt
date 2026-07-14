@@ -15,6 +15,13 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 set(GSW_RELEASE_DATE "2026-07-12" CACHE STRING "Release date shown by the application")
+set(GSW_MSVC_SHOWINCLUDES_PREFIX "" CACHE STRING
+  "Locale-correct MSVC /showIncludes prefix supplied by the build bootstrap"
+)
+if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja" AND GSW_MSVC_SHOWINCLUDES_PREFIX)
+  set(CMAKE_CXX_CL_SHOWINCLUDES_PREFIX "${GSW_MSVC_SHOWINCLUDES_PREFIX}")
+  set(CMAKE_CL_SHOWINCLUDES_PREFIX "${GSW_MSVC_SHOWINCLUDES_PREFIX}")
+endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets)
 qt_standard_project_setup()
@@ -88,6 +95,17 @@ install(TARGETS GaussianSceneWorkbench
 include(CTest)
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  add_test(
+    NAME native_application_launch
+    COMMAND GaussianSceneWorkbench --smoke-test
+  )
+  set_tests_properties(native_application_launch PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT
+      "QT_OPENGL=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
+
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
       src/CameraTrajectory.cpp

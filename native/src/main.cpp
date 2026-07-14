@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QSurfaceFormat>
+#include <QTimer>
 
 namespace {
 QIcon createApplicationIcon() {
@@ -63,11 +64,16 @@ int main(int argc, char *argv[]) {
       {QStringLiteral("p"), QStringLiteral("project")},
       QStringLiteral("Open a .gsw.json project file."), QStringLiteral("file"));
   parser.addOption(projectOption);
+  QCommandLineOption smokeTestOption(
+      QStringLiteral("smoke-test"),
+      QStringLiteral("Launch the main window briefly, then exit successfully."));
+  parser.addOption(smokeTestOption);
   parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("Project file to open."), QStringLiteral("[project]"));
   parser.process(application);
 
   gsw::MainWindow window;
   QString projectPath = parser.value(projectOption);
+  const bool smokeTest = parser.isSet(smokeTestOption);
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -75,5 +81,13 @@ int main(int argc, char *argv[]) {
     window.openProjectFile(QFileInfo(projectPath).absoluteFilePath());
   }
   window.show();
-  return application.exec();
+  bool smokeTestCompleted = !smokeTest;
+  if (smokeTest) {
+    QTimer::singleShot(250, &application, [&application, &window, &smokeTestCompleted]() {
+      smokeTestCompleted = window.isVisible();
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  }
+  const int exitCode = application.exec();
+  return smokeTestCompleted ? exitCode : 2;
 }
