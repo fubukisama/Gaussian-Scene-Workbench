@@ -2,9 +2,14 @@ param(
   [ValidateSet("Debug", "RelWithDebInfo", "Release")]
   [string]$Configuration = "RelWithDebInfo",
   [string]$QtRoot = "",
+  [string]$CMakeRoot = "",
   [string]$BuildDirectory = "",
   [switch]$Clean,
-  [switch]$Package
+  [switch]$Package,
+  [string]$SigningCertificateThumbprint = "",
+  [string]$SigningCertificateStoreLocation = "CurrentUser",
+  [string]$SigningTimestampUrl = "",
+  [string]$SignToolPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +25,27 @@ $ReleaseDate = [string]$BuildManifest.releaseDate
 if ($ReleaseDate -notmatch '^\d{4}-\d{2}-\d{2}$') {
   throw "Native build manifest contains an invalid releaseDate: $ReleaseDate"
 }
+
+if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
+  $SigningCertificateThumbprint = $env:GSW_WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT
+}
+if (-not $PSBoundParameters.ContainsKey("SigningCertificateStoreLocation") -and
+    -not [string]::IsNullOrWhiteSpace($env:GSW_WINDOWS_SIGNING_CERTIFICATE_STORE_LOCATION)) {
+  $SigningCertificateStoreLocation = $env:GSW_WINDOWS_SIGNING_CERTIFICATE_STORE_LOCATION
+}
+if ([string]::IsNullOrWhiteSpace($SigningTimestampUrl)) {
+  $SigningTimestampUrl = $env:GSW_WINDOWS_SIGNING_TIMESTAMP_URL
+}
+if ([string]::IsNullOrWhiteSpace($SignToolPath)) {
+  $SignToolPath = $env:GSW_WINDOWS_SIGNTOOL_PATH
+}
+if ([string]::IsNullOrWhiteSpace($CMakeRoot)) {
+  $CMakeRoot = $env:GSW_NATIVE_CMAKE_ROOT
+}
+if ($SigningCertificateStoreLocation -notin @("CurrentUser", "LocalMachine")) {
+  throw "SigningCertificateStoreLocation must be CurrentUser or LocalMachine."
+}
+$SigningEnabled = -not [string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)
 
 if ([string]::IsNullOrWhiteSpace($QtRoot)) {
   $QtCandidates = @(
@@ -425,10 +451,62 @@ function Invoke-NativeLaunchSmokeTest {
   }
 }
 
+function Invoke-WindowsArtifactSigning {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$Artifacts,
+    [Parameter(Mandatory = $true)][string]$Purpose
+  )
+
+  if (-not $SigningEnabled) { return }
+
+  $SigningScript = Join-Path $Root "scripts\sign_windows_artifacts.ps1"
+  if (-not (Test-Path -LiteralPath $SigningScript -PathType Leaf)) {
+    throw "Windows signing script was not found: $SigningScript"
+  }
+
+  Write-Host "Signing $Purpose with the configured enterprise certificate."
+  $SigningParameters = @{
+    Path = $Artifacts
+    CertificateThumbprint = $SigningCertificateThumbprint
+    CertificateStoreLocation = $SigningCertificateStoreLocation
+    Confirm = $false
+  }
+  if (-not [string]::IsNullOrWhiteSpace($SigningTimestampUrl)) {
+    $SigningParameters.TimestampUrl = $SigningTimestampUrl
+  }
+  if (-not [string]::IsNullOrWhiteSpace($SignToolPath)) {
+    $SigningParameters.SignToolPath = $SignToolPath
+  }
+
+  & $SigningScript @SigningParameters
+}
+
 Import-VisualStudioEnvironment -ScriptPath $VsDevCmd
 
-$CMake = Join-Path $QtRoot "Library\bin\cmake.exe"
-$CTest = Join-Path $QtRoot "Library\bin\ctest.exe"
+if (-not [string]::IsNullOrWhiteSpace($CMakeRoot)) {
+  $ExplicitCMakeBin = if (Test-Path -LiteralPath (Join-Path $CMakeRoot "bin\cmake.exe") -PathType Leaf) {
+    Join-Path $CMakeRoot "bin"
+  } elseif (Test-Path -LiteralPath (Join-Path $CMakeRoot "cmake.exe") -PathType Leaf) {
+    $CMakeRoot
+  } else {
+    throw "CMakeRoot does not contain bin\cmake.exe or cmake.exe: $CMakeRoot"
+  }
+  $CMakeBinCandidates = @($ExplicitCMakeBin)
+} else {
+  $CMakeBinCandidates = @(
+    (Join-Path ([Environment]::GetFolderPath("ProgramFiles")) "CMake\bin"),
+    (Join-Path $QtRoot "Library\bin")
+  )
+}
+$CMakeBin = $CMakeBinCandidates | Where-Object {
+  (Test-Path -LiteralPath (Join-Path $_ "cmake.exe") -PathType Leaf) -and
+  (Test-Path -LiteralPath (Join-Path $_ "ctest.exe") -PathType Leaf)
+} | Select-Object -First 1
+if (-not $CMakeBin) {
+  throw "A CMake tool directory containing both cmake.exe and ctest.exe was not found. Set GSW_NATIVE_CMAKE_ROOT or pass -CMakeRoot."
+}
+$CMake = Join-Path $CMakeBin "cmake.exe"
+$CTest = Join-Path $CMakeBin "ctest.exe"
 $Ninja = Join-Path $QtRoot "Library\bin\ninja.exe"
 $WinDeployQtCandidates = @(
   (Join-Path $QtRoot "Library\bin\windeployqt.exe"),
@@ -487,6 +565,26 @@ Assert-NinjaHeaderDependency `
   -ObjectPath "CMakeFiles/GaussianSceneWorkbench.dir/src/main.cpp.obj" `
   -ExpectedHeader (Join-Path $NativeRoot "src\MainWindow.h")
 
+$Executable = Join-Path $BuildDirectory "Gaussian Scene Workbench.exe"
+$BuildExecutables = @(
+  $Executable,
+  (Join-Path $BuildDirectory "gsw_native_tests.exe"),
+  (Join-Path $BuildDirectory "gsw_dataset_import_plan_tests.exe"),
+  (Join-Path $BuildDirectory "gsw_process_output_fixture.exe"),
+  (Join-Path $BuildDirectory "gsw_process_supervisor_tests.exe"),
+  (Join-Path $BuildDirectory "gsw_workspace_scene_format_tests.exe"),
+  (Join-Path $BuildDirectory "gsw_backend_locator_tests.exe")
+)
+$MissingBuildExecutables = $BuildExecutables | Where-Object {
+  -not (Test-Path -LiteralPath $_ -PathType Leaf)
+}
+if ($MissingBuildExecutables) {
+  throw "Native build did not produce the expected executables: $($MissingBuildExecutables -join ', ')"
+}
+Invoke-WindowsArtifactSigning `
+  -Artifacts $BuildExecutables `
+  -Purpose "native application and test executables"
+
 & $CTest --test-dir $BuildDirectory --no-tests=error --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw "Native tests failed with exit code $LASTEXITCODE." }
 
@@ -502,11 +600,6 @@ try {
 } finally {
   Pop-Location
   $env:PYTHONDONTWRITEBYTECODE = $PreviousBytecodeSetting
-}
-
-$Executable = Join-Path $BuildDirectory "Gaussian Scene Workbench.exe"
-if (-not (Test-Path -LiteralPath $Executable)) {
-  throw "Native executable was not produced: $Executable"
 }
 
 Write-Host "Native build completed:"
@@ -531,12 +624,16 @@ if ($Package) {
     (Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT")
   )
   Copy-AppLocalDependencies -PackageBin (Split-Path -Parent $PackagedExecutable) -SearchRoots $RuntimeSearchRoots
+  Invoke-WindowsArtifactSigning `
+    -Artifacts @($PackagedExecutable) `
+    -Purpose "packaged native application"
   Invoke-NativeLaunchSmokeTest -Executable $PackagedExecutable
   Copy-Item -LiteralPath (Join-Path $NativeRoot "README.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $NativeRoot "build_manifest.json") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_MIGRATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_PARITY.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\COLMAP_SETUP.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_APPLICATION_CONTROL.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
@@ -550,8 +647,10 @@ if ($Package) {
     "crop_editor\server.py",
     "crop_editor\video_extract.py",
     "scripts\check_3dgs_env.ps1",
+    "scripts\sign_windows_artifacts.ps1",
     "gaussian-splatting\train.py",
     "training_kit\apply_local_fixes.bat",
+    "WINDOWS_APPLICATION_CONTROL.md",
     "backend_manifest.json"
   ) | ForEach-Object { Join-Path $PackageRoot $_ }
   $MissingBackendFiles = $RequiredBackendFiles | Where-Object {

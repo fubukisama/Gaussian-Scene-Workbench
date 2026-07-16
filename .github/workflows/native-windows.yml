@@ -15,11 +15,13 @@ on:
       - "scripts/bootstrap_3dgs_editor.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
+      - "scripts/sign_windows_artifacts.ps1"
       - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
       - "docs/COLMAP_SETUP.md"
+      - "docs/WINDOWS_APPLICATION_CONTROL.md"
       - "README.md"
   pull_request:
     paths:
@@ -33,11 +35,13 @@ on:
       - "scripts/bootstrap_3dgs_editor.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
+      - "scripts/sign_windows_artifacts.ps1"
       - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
       - "docs/COLMAP_SETUP.md"
+      - "docs/WINDOWS_APPLICATION_CONTROL.md"
   workflow_dispatch:
 
 permissions:
@@ -87,9 +91,12 @@ jobs:
         shell: pwsh
         run: |
           $scripts = @(
+            "scripts/build_native.ps1",
             "scripts/bootstrap_3dgs_editor.ps1",
             "scripts/check_3dgs_env.ps1",
-            "scripts/install_colmap.ps1"
+            "scripts/install_colmap.ps1",
+            "scripts/sign_windows_artifacts.ps1",
+            "scripts/stage_native_backend.ps1"
           )
           foreach ($script in $scripts) {
             $tokens = $null
@@ -118,6 +125,7 @@ jobs:
           Copy-Item docs/NATIVE_MIGRATION.md native/artifact/NATIVE_MIGRATION.md
           Copy-Item docs/NATIVE_PARITY.md native/artifact/NATIVE_PARITY.md
           Copy-Item docs/COLMAP_SETUP.md native/artifact/COLMAP_SETUP.md
+          Copy-Item docs/WINDOWS_APPLICATION_CONTROL.md native/artifact/WINDOWS_APPLICATION_CONTROL.md
           Copy-Item LICENSE native/artifact/LICENSE
           Copy-Item THIRD_PARTY_LICENSES.md native/artifact/THIRD_PARTY_LICENSES.md
 
@@ -131,7 +139,7 @@ jobs:
       - name: Verify native-only package
         shell: pwsh
         run: |
-          python -B -c "from pathlib import Path; files=[Path('native/artifact/native/worker/gsw_worker.py'),Path('native/artifact/native/worker/import_preflight.py'),Path('native/artifact/crop_editor/server.py'),Path('native/artifact/crop_editor/video_extract.py')]; [compile(path.read_bytes(),str(path),'exec') for path in files]"
+          python -B -c "from pathlib import Path; files=[Path('native/artifact/native/worker/gsw_worker.py'),Path('native/artifact/native/worker/import_preflight.py'),Path('native/artifact/native/worker/training_preflight.py'),Path('native/artifact/crop_editor/server.py'),Path('native/artifact/crop_editor/video_extract.py')]; [compile(path.read_bytes(),str(path),'exec') for path in files]"
           $forbidden = Get-ChildItem native/artifact -Recurse -File | Where-Object {
             $_.Name -match '^(node|electron)\.exe$' -or
             $_.Name -match '^Qt6WebEngine' -or
@@ -148,13 +156,16 @@ jobs:
           $requiredBackend = @(
             "native/artifact/native/worker/gsw_worker.py",
             "native/artifact/native/worker/import_preflight.py",
+            "native/artifact/native/worker/training_preflight.py",
             "native/artifact/crop_editor/server.py",
             "native/artifact/crop_editor/video_extract.py",
             "native/artifact/scripts/check_3dgs_env.ps1",
             "native/artifact/gaussian-splatting/train.py",
             "native/artifact/training_kit/apply_local_fixes.bat",
             "native/artifact/scripts/install_colmap.ps1",
+            "native/artifact/scripts/sign_windows_artifacts.ps1",
             "native/artifact/COLMAP_SETUP.md",
+            "native/artifact/WINDOWS_APPLICATION_CONTROL.md",
             "native/artifact/backend_manifest.json"
           )
           $missingBackend = $requiredBackend | Where-Object { -not (Test-Path -LiteralPath $_) }

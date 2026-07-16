@@ -55,7 +55,8 @@ $StaticFiles = @(
   @{ Source = "crop_editor\server.py"; Destination = "crop_editor\server.py" },
   @{ Source = "crop_editor\video_extract.py"; Destination = "crop_editor\video_extract.py" },
   @{ Source = "scripts\check_3dgs_env.ps1"; Destination = "scripts\check_3dgs_env.ps1" },
-  @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" }
+  @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" },
+  @{ Source = "scripts\sign_windows_artifacts.ps1"; Destination = "scripts\sign_windows_artifacts.ps1" }
 )
 foreach ($Entry in $StaticFiles) {
   $Source = Join-Path $SourceRoot $Entry.Source
@@ -88,7 +89,8 @@ $Manifest = [ordered]@{
     "gaussian-splatting",
     "training_kit",
     "scripts/check_3dgs_env.ps1",
-    "scripts/install_colmap.ps1"
+    "scripts/install_colmap.ps1",
+    "scripts/sign_windows_artifacts.ps1"
   )
   forbiddenWebRuntime = @("html", "js", "css", "electron", "node")
 }

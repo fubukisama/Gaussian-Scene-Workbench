@@ -53,6 +53,18 @@ powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration
 
 Set `GSW_NATIVE_QT_ROOT` or pass `-QtRoot` when Qt is installed elsewhere.
 
+On a managed Windows workstation, configure an organization-approved code-signing certificate before building so the application and native test executables are signed before launch:
+
+```powershell
+$env:GSW_WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT = "40_HEX_CHARACTER_THUMBPRINT"
+$env:GSW_WINDOWS_SIGNING_CERTIFICATE_STORE_LOCATION = "LocalMachine"
+$env:GSW_WINDOWS_SIGNING_TIMESTAMP_URL = "https://organization.example/rfc3161"
+$env:GSW_NATIVE_CMAKE_ROOT = "C:\Program Files\CMake"
+powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration Release -Package
+```
+
+`GSW_NATIVE_CMAKE_ROOT` (or `-CMakeRoot`) selects a CMake distribution containing both `cmake.exe` and `ctest.exe`; this is useful when a managed policy rejects the copy bundled with Conda. The certificate or publisher must also be permitted by the active Windows Application Control policy. The project does not create or trust self-signed certificates and does not disable the policy. See `docs/WINDOWS_APPLICATION_CONTROL.md` for certificate checks, explicit CUDA-extension signing, verification, and the information to send to endpoint management.
+
 Install or verify COLMAP on a non-system drive:
 
 ```powershell

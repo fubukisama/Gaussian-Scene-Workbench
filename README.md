@@ -16,6 +16,7 @@ The application is being rebuilt as a fully native Qt 6/C++ desktop program on t
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)
 - COLMAP install and discovery: [docs/COLMAP_SETUP.md](docs/COLMAP_SETUP.md)
+- Managed Windows signing and App Control: [docs/WINDOWS_APPLICATION_CONTROL.md](docs/WINDOWS_APPLICATION_CONTROL.md)
 - Local build instructions: [native/README.md](native/README.md)
 
 The released `0.2.4` Electron application remains the stable fallback while the native branch reaches feature parity.
