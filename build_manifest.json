@@ -1,14 +1,14 @@
 {
-    "appName":  "Gaussian Scene Workbench",
-    "sourceVersion":  "36.10.6",
-    "packageVersion":  "0.2.6",
-    "releaseTag":  "v0.2.6",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.6-win-x64.zip",
-    "updatedAt":  "2026-07-16T23:00:35+09:00",
+    "appName":  "Gaussian Scene Workbench (Legacy HTML)",
+    "sourceVersion":  "36.10.7",
+    "packageVersion":  "0.2.7",
+    "releaseTag":  "v0.2.7",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.7-win-x64.zip",
+    "updatedAt":  "2026-07-16T23:30:02+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "20eb152",
-    "gitDirty":  false,
-    "note":  "Import Metashape COLMAP cameras with scale-preserving 3DGS and 2DGS training"
+    "gitCommit":  "e909871",
+    "gitDirty":  true,
+    "note":  "Identify the Legacy HTML desktop build with a distinct window title and Windows AppUserModelID"
 }

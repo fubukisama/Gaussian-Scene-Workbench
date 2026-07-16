@@ -1,7 +1,7 @@
 {
   "name": "gaussian-scene-workbench-desktop",
-  "version": "0.2.6",
-  "description": "Desktop research workbench for Gaussian scene reconstruction, analysis, and editing",
+  "version": "0.2.7",
+  "description": "Legacy HTML desktop research workbench for Gaussian scene reconstruction, analysis, and editing",
   "main": "main.js",
   "private": true,
   "scripts": {

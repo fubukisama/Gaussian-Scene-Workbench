@@ -9,6 +9,12 @@ const { checkPortAvailable, resolveServerPort, serverPortForMode } = require("./
 const { resolveProjectRoot, resolveWorkspaceRoot } = require("./project_root");
 const { showEnvironmentWizard } = require("./environment_wizard");
 
+const LEGACY_APP_TITLE = "Gaussian Scene Workbench (Legacy HTML)";
+const LEGACY_APP_USER_MODEL_ID = "Fubukisama.GaussianSceneWorkbench.LegacyHtml";
+if (process.platform === "win32") {
+  app.setAppUserModelId(LEGACY_APP_USER_MODEL_ID);
+}
+
 let mainWindow = null;
 let serverProcess = null;
 let serverPort = null;
@@ -481,7 +487,7 @@ async function createWindow() {
     height: 950,
     minWidth: 1100,
     minHeight: 700,
-    title: "Gaussian Scene Workbench",
+    title: LEGACY_APP_TITLE,
     backgroundColor: "#111111",
     webPreferences: {
       contextIsolation: true,

@@ -27,8 +27,8 @@ test("UI scale controls are available during app startup", () => {
   assert.match(appSource, /function computeAutoUiScale/);
 });
 
-test("workbench branding is present in the document shell", () => {
-  assert.match(indexSource, /<title>Gaussian Scene Workbench<\/title>/);
+test("legacy HTML workbench branding is present in the document shell", () => {
+  assert.match(indexSource, /<title>Gaussian Scene Workbench \(Legacy HTML\)<\/title>/);
   assert.match(indexSource, /<strong class="brand">Gaussian Scene Workbench<\/strong>/);
 });
 
