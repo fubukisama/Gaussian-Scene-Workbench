@@ -8,6 +8,7 @@
 ## Capabilities
 
 - Prepare image and video datasets with COLMAP-assisted reconstruction tools.
+- Import Metashape COLMAP camera projects without changing camera poses, image dimensions, or world-coordinate scale.
 - Train and manage Gaussian Splatting methods, including 3DGS and 2DGS workflows.
 - Resume checkpoints, clone experiments, compare parameters, inspect curves, and review job history.
 - Load large Gaussian scenes, inspect cameras, select visible Gaussians on the GPU, crop, and edit scene content.
@@ -22,15 +23,15 @@ See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## Windows Download
 
-- [Gaussian Scene Workbench 0.2.1 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.1)
-- Package: `Gaussian-Scene-Workbench-0.2.1-win-x64.zip`
+- [Gaussian Scene Workbench 0.2.6 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.6)
+- Package: `Gaussian-Scene-Workbench-0.2.6-win-x64.zip`
 - Verify the package with the matching `.sha256` Release asset.
 
 The large Windows package is distributed through GitHub Releases rather than committed to git.
 
 ## Quick Start
 
-1. Download and extract `Gaussian-Scene-Workbench-0.2.1-win-x64.zip` to a writable folder, preferably outside the system drive.
+1. Download and extract `Gaussian-Scene-Workbench-0.2.6-win-x64.zip` to a writable folder, preferably outside the system drive.
 2. Double-click `Setup Gaussian Scene Workbench.cmd` and choose a runtime folder. Press Enter to use the same-drive default, such as `E:\Gaussian-Scene-Workbench-Runtime`.
 3. Setup launches the application when it finishes. Later, start it with `Gaussian Scene Workbench.exe`.
 
@@ -74,6 +75,7 @@ COLMAP and Gaussian Splatting reconstruction require real camera motion and para
 ### 主要功能
 
 - 使用图像或视频准备数据集，并辅助完成 COLMAP 重建。
+- 直接导入 Metashape COLMAP 相机工程，不改变相机位姿、图像尺寸或世界坐标尺度。
 - 管理 3DGS、2DGS 等 Gaussian Splatting 训练流程。
 - 恢复检查点、克隆实验、对比参数、查看训练曲线和任务历史。
 - 加载大型高斯场景，查看相机，使用 GPU 选择可见高斯并进行裁剪与编辑。
@@ -88,8 +90,8 @@ COLMAP and Gaussian Splatting reconstruction require real camera motion and para
 
 ### Windows 下载
 
-- [Gaussian Scene Workbench 0.2.1 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.1)
-- 安装包：`Gaussian-Scene-Workbench-0.2.1-win-x64.zip`
+- [Gaussian Scene Workbench 0.2.6 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.6)
+- 安装包：`Gaussian-Scene-Workbench-0.2.6-win-x64.zip`
 - 使用 Release 中对应的 `.sha256` 文件校验安装包。
 
 ### 快速开始
@@ -127,6 +129,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
 ### 主な機能
 
 - 画像・動画データセットの準備と COLMAP 再構成支援。
+- Metashape COLMAP カメラプロジェクトを、姿勢・画像寸法・ワールド座標スケールを変えずに直接読み込み。
 - 3DGS、2DGS を含む Gaussian Splatting 学習ワークフロー。
 - チェックポイント再開、実験の複製、パラメータ比較、学習曲線、ジョブ履歴。
 - GPU による可視 Gaussian 選択、クロップ、シーン編集、カメラ確認。
@@ -141,8 +144,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
 
 ### Windows 版
 
-- [Gaussian Scene Workbench 0.2.1 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.1)
-- パッケージ：`Gaussian-Scene-Workbench-0.2.1-win-x64.zip`
+- [Gaussian Scene Workbench 0.2.6 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.6)
+- パッケージ：`Gaussian-Scene-Workbench-0.2.6-win-x64.zip`
 
 1. パッケージをシステムドライブ以外の書き込み可能なフォルダに展開します。
 2. `Setup Gaussian Scene Workbench.cmd` を実行し、ランタイム先を選択します。既定値は同じドライブ上の `Gaussian-Scene-Workbench-Runtime` です。

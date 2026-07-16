@@ -72,6 +72,7 @@ const trainSceneInput = document.getElementById("trainScene");
 const alignedSourceSelect = document.getElementById("alignedSource");
 const trainFilesInput = document.getElementById("trainFiles");
 const trainFolderInput = document.getElementById("trainFolder");
+const metashapeFolderInput = document.getElementById("metashapeFolder");
 const trainMasksInput = document.getElementById("trainMasks");
 const trainBackendSelect = document.getElementById("trainBackend");
 const trainQualitySelect = document.getElementById("trainQuality");
@@ -296,6 +297,7 @@ const I18N = {
     "button.openPsnrOutput": "Open PSNR Output",
     "button.photosVideo": "Photos/Video",
     "button.folder": "Folder",
+    "button.metashapeCameras": "Metashape Cameras",
     "button.masks": "Masks",
     "button.clearInput": "Clear Input",
     "button.importOnly": "Import Only",
@@ -357,7 +359,15 @@ const I18N = {
     "status.noAssets": "No assets found.",
     "status.noCheckpoints": "No checkpoints found.",
     "status.noDiff": "No parameter differences.",
-    "status.noModels": "No trained models found under output/."
+    "status.noModels": "No trained models found under output/.",
+    "status.metashapeImporting": "Importing Metashape cameras...",
+    "status.metashapeImported": "Metashape cameras imported. Use Train Existing to preserve them.",
+    "status.metashapeInvalidFolder": "Choose a Metashape COLMAP text project containing images/ and sparse/0/cameras.txt, images.txt, points3D.txt.",
+    "status.metashapeDesktopRequired": "Metashape camera import requires the desktop app so the source directory path is available.",
+    "status.metashapeImportFailed": "Metashape import failed",
+    "option.aligned": "aligned",
+    "option.imagesOnly": "images only",
+    "option.metashapeAligned": "Metashape cameras"
   },
   zh: {
     "app.subtitle": "高斯场景研究工具链",
@@ -487,6 +497,7 @@ const I18N = {
     "button.openPsnrOutput": "打开 PSNR 结果",
     "button.photosVideo": "照片/视频",
     "button.folder": "文件夹",
+    "button.metashapeCameras": "Metashape 相机",
     "button.masks": "Mask",
     "button.clearInput": "清空输入",
     "button.importOnly": "仅导入",
@@ -548,7 +559,15 @@ const I18N = {
     "status.noAssets": "没有找到资产。",
     "status.noCheckpoints": "没有找到 checkpoint。",
     "status.noDiff": "参数没有差异。",
-    "status.noModels": "output/ 下没有找到训练模型。"
+    "status.noModels": "output/ 下没有找到训练模型。",
+    "status.metashapeImporting": "正在导入 Metashape 相机...",
+    "status.metashapeImported": "Metashape 相机已导入，请用“训练已有数据”保留相机对齐。",
+    "status.metashapeInvalidFolder": "请选择包含 images/ 和 sparse/0/cameras.txt、images.txt、points3D.txt 的 Metashape COLMAP 文本工程。",
+    "status.metashapeDesktopRequired": "Metashape 相机导入需要桌面版提供源目录的绝对路径。",
+    "status.metashapeImportFailed": "Metashape 导入失败",
+    "option.aligned": "已对齐",
+    "option.imagesOnly": "仅图像",
+    "option.metashapeAligned": "Metashape 相机"
   },
   ja: {
     "app.subtitle": "ガウスシーン研究ツール",
@@ -678,6 +697,7 @@ const I18N = {
     "button.openPsnrOutput": "PSNR出力を開く",
     "button.photosVideo": "写真/動画",
     "button.folder": "フォルダ",
+    "button.metashapeCameras": "Metashape カメラ",
     "button.masks": "マスク",
     "button.clearInput": "入力クリア",
     "button.importOnly": "インポートのみ",
@@ -739,7 +759,15 @@ const I18N = {
     "status.noAssets": "アセットがありません。",
     "status.noCheckpoints": "checkpoint がありません。",
     "status.noDiff": "パラメータ差分はありません。",
-    "status.noModels": "output/ に学習済みモデルが見つかりません。"
+    "status.noModels": "output/ に学習済みモデルが見つかりません。",
+    "status.metashapeImporting": "Metashape カメラをインポート中...",
+    "status.metashapeImported": "Metashape カメラをインポートしました。「既存データ学習」を使用してください。",
+    "status.metashapeInvalidFolder": "images/ と sparse/0/cameras.txt、images.txt、points3D.txt を含む Metashape COLMAP テキストプロジェクトを選択してください。",
+    "status.metashapeDesktopRequired": "Metashape カメラのインポートには、ソースフォルダの絶対パスを取得できるデスクトップ版が必要です。",
+    "status.metashapeImportFailed": "Metashape インポート失敗",
+    "option.aligned": "整列済み",
+    "option.imagesOnly": "画像のみ",
+    "option.metashapeAligned": "Metashape カメラ"
   }
 };
 
@@ -1141,6 +1169,7 @@ function applyLanguage(lang = currentLanguage) {
     setStatus(t("status.loadingScenes"));
   }
   updateMeshTextureToggleLabel();
+  refreshAlignedSourceLabels();
   updateTrainFileStatus();
   requestAnimationFrame(resize);
 }
@@ -1334,6 +1363,7 @@ function initUi() {
   makePanelDraggable(importProgressPanel, document.getElementById("importProgressHeader"), { storageKey: "cropEditor.importProgressPanel.position" });
   trainFilesInput.onchange = () => appendTrainingInputFiles(trainFilesInput);
   trainFolderInput.onchange = () => appendTrainingInputFiles(trainFolderInput);
+  if (metashapeFolderInput) metashapeFolderInput.onchange = importMetashapeCameraProject;
   trainMasksInput.onchange = () => {
     trainMaskFiles = Array.from(trainMasksInput.files || []);
     updateTrainFileStatus();
@@ -1407,6 +1437,7 @@ async function clearTrainingInputFiles() {
   trainMaskFiles = [];
   if (trainFilesInput) trainFilesInput.value = "";
   if (trainFolderInput) trainFolderInput.value = "";
+  if (metashapeFolderInput) metashapeFolderInput.value = "";
   if (trainMasksInput) trainMasksInput.value = "";
   await updateTrainFileStatus();
   setStatus(t("status.noInput"));
@@ -1696,9 +1727,7 @@ async function loadAlignedSources() {
     const opt = document.createElement("option");
     opt.value = item.name;
     opt.dataset.hasAlignment = item.has_alignment ? "true" : "false";
-    const count = Number(item.image_count || 0).toLocaleString();
-    const suffix = item.has_alignment ? "aligned" : "images only";
-    opt.textContent = `${item.name} (${count}, ${suffix})`;
+    opt.textContent = alignedSourceOptionLabel(item);
     alignedSourceSelect.appendChild(opt);
   }
   if (previous && Array.from(alignedSourceSelect.options).some((opt) => opt.value === previous)) {
@@ -2818,6 +2847,7 @@ function setTrainingBusy(busy) {
   if (runColmapButton) runColmapButton.disabled = busy;
   trainFilesInput.disabled = busy;
   trainFolderInput.disabled = busy;
+  if (metashapeFolderInput) metashapeFolderInput.disabled = busy;
   trainMasksInput.disabled = busy;
   splatImportFileInput.disabled = busy;
   clearTrainInputButton.disabled = busy || (selectedTrainingFiles().length === 0 && trainMaskFiles.length === 0);
@@ -3037,6 +3067,129 @@ function buildImportForm(sceneName, overwrite, files, importJobId = "") {
 function localPathForFile(file) {
   if (window.gsEditor?.getPathForFile) return window.gsEditor.getPathForFile(file);
   return file.path || "";
+}
+
+function directoryProjectRelativePath(file) {
+  const parts = String(file.webkitRelativePath || file.name || "")
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter(Boolean);
+  return (parts.length > 1 ? parts.slice(1) : parts).join("/");
+}
+
+function localDirectoryRoot(files) {
+  for (const file of files) {
+    const absolute = String(localPathForFile(file) || "").replaceAll("\\", "/");
+    const relative = directoryProjectRelativePath(file);
+    if (!absolute || !relative) continue;
+    const suffix = `/${relative}`;
+    if (absolute.toLocaleLowerCase().endsWith(suffix.toLocaleLowerCase())) {
+      return absolute.slice(0, -suffix.length);
+    }
+  }
+  return "";
+}
+
+function validateMetashapeDirectorySelection(files) {
+  const paths = new Set(files.map((file) => directoryProjectRelativePath(file).toLocaleLowerCase()));
+  const sparseRoots = ["sparse/0", "sparse", ""];
+  const sparseRoot = sparseRoots.find((root) => {
+    const prefix = root ? `${root}/` : "";
+    return ["cameras.txt", "images.txt", "points3d.txt"].every((name) => paths.has(`${prefix}${name}`));
+  });
+  const hasImages = Array.from(paths).some((path) => path.startsWith("images/") && path.split("/").length > 1);
+  if (sparseRoot === undefined || !hasImages) {
+    throw new Error(t("status.metashapeInvalidFolder"));
+  }
+}
+
+function alignedSourceOptionLabel(item) {
+  const count = Number(item.image_count || 0).toLocaleString();
+  let suffix = item.has_alignment ? t("option.aligned") : t("option.imagesOnly");
+  if (item.source_type === "metashape_colmap") {
+    const cameras = Number(item.camera_count || item.image_count || 0).toLocaleString();
+    const dimensions = Array.isArray(item.image_dimensions)
+      ? item.image_dimensions
+          .filter((size) => Array.isArray(size) && size.length === 2)
+          .map((size) => `${size[0]}x${size[1]}`)
+          .join(", ")
+      : "";
+    suffix = `${t("option.metashapeAligned")}, ${cameras}${dimensions ? `, ${dimensions}` : ""}`;
+  }
+  return `${item.name} (${count}, ${suffix})`;
+}
+
+function refreshAlignedSourceLabels() {
+  if (!alignedSourceSelect || !alignedDatasets.length) return;
+  for (const option of alignedSourceSelect.options) {
+    if (!option.value) continue;
+    const item = alignedDatasetInfo(option.value);
+    if (item) option.textContent = alignedSourceOptionLabel(item);
+  }
+}
+
+async function importMetashapeCameraProject() {
+  const files = Array.from(metashapeFolderInput?.files || []);
+  if (!files.length) return;
+  const sceneName = trainSceneInput.value.trim();
+  try {
+    validateSceneName(sceneName);
+    validateMetashapeDirectorySelection(files);
+  } catch (err) {
+    setStatus(err.message);
+    if (metashapeFolderInput) metashapeFolderInput.value = "";
+    return;
+  }
+  const sourceDir = localDirectoryRoot(files);
+  if (!sourceDir) {
+    setStatus(t("status.metashapeDesktopRequired"));
+    if (metashapeFolderInput) metashapeFolderInput.value = "";
+    return;
+  }
+
+  const overwrite = Boolean(document.getElementById("overwriteTrain")?.checked);
+  setTrainingBusy(true);
+  showTrainingLog();
+  trainLog.textContent = "";
+  try {
+    setStatus(t("status.metashapeImporting"));
+    appendTrainingLog(`Metashape camera project: ${sourceDir}`);
+    appendTrainingLog("Validating image dimensions, camera poses, sparse points, and source coordinate scale...");
+    const res = await fetch(apiPath("/api/metashape/import"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scene: sceneName, source_dir: sourceDir, overwrite }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Metashape camera import failed");
+
+    const dimensions = Array.isArray(data.image_dimensions)
+      ? data.image_dimensions.map((size) => `${size[0]}x${size[1]}`).join(", ")
+      : "source dimensions";
+    const pointDiagonal = Number(data.point_bounds?.diagonal);
+    const sourceModels = Array.isArray(data.camera_models) ? data.camera_models.join(", ") : "n/a";
+    const cameraConversion = data.intrinsics_conversion === "SIMPLE_PINHOLE_to_PINHOLE_exact"
+      ? " -> PINHOLE (projection-equivalent; focal length, principal point, poses, and scale unchanged)"
+      : "";
+    appendTrainingLog([
+      `Metashape import complete: datasets/${data.scene}`,
+      `Aligned cameras: ${Number(data.camera_count || 0).toLocaleString()}`,
+      `Image dimensions: ${dimensions} (preserved exactly)`,
+      `Camera model: ${sourceModels}${cameraConversion}`,
+      `Sparse points: ${Number(data.point_count || 0).toLocaleString()}`,
+      `Source-coordinate bounding-box diagonal: ${Number.isFinite(pointDiagonal) ? pointDiagonal.toPrecision(8) : "n/a"}`,
+      "Training will use imported cameras directly and skip COLMAP realignment.",
+    ].join("\n"));
+    await loadAlignedSources();
+    if (alignedSourceSelect) alignedSourceSelect.value = data.scene;
+    setStatus(`${t("status.metashapeImported")} ${Number(data.camera_count || 0).toLocaleString()} @ ${dimensions}.`);
+  } catch (err) {
+    appendTrainingLog(`ERROR: ${err.message}`);
+    setStatus(`${t("status.metashapeImportFailed")}: ${err.message}`);
+  } finally {
+    if (metashapeFolderInput) metashapeFolderInput.value = "";
+    setTrainingBusy(false);
+  }
 }
 
 function fileMetadata(file) {

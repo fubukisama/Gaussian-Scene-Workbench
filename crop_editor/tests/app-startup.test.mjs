@@ -46,3 +46,13 @@ test("training does not start when the runtime preflight fails", () => {
   assert.match(appSource, /runtime_ready/);
   assert.match(appSource, /smart_app_control_state/);
 });
+
+test("Metashape COLMAP camera projects have a lossless import entry point", () => {
+  assert.match(indexSource, /id="metashapeFolder"[^>]+webkitdirectory/);
+  assert.match(indexSource, /data-i18n="button\.metashapeCameras"/);
+  assert.match(appSource, /function importMetashapeCameraProject\(\)/);
+  assert.match(appSource, /\/api\/metashape\/import/);
+  assert.match(appSource, /"button\.metashapeCameras": "Metashape Cameras"/);
+  assert.match(appSource, /"button\.metashapeCameras": "Metashape 相机"/);
+  assert.match(appSource, /"button\.metashapeCameras": "Metashape カメラ"/);
+});

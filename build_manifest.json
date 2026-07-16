@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench",
-    "sourceVersion":  "36.10.5",
-    "packageVersion":  "0.2.5",
-    "releaseTag":  "v0.2.5",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.5-win-x64.zip",
-    "updatedAt":  "2026-07-16T14:42:19+09:00",
+    "sourceVersion":  "36.10.6",
+    "packageVersion":  "0.2.6",
+    "releaseTag":  "v0.2.6",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.6-win-x64.zip",
+    "updatedAt":  "2026-07-16T22:52:54+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "0742173",
-    "gitDirty":  false,
-    "note":  "Harden 3DGS runtime preflight and Smart App Control compatibility"
+    "gitCommit":  "2596eae",
+    "gitDirty":  true,
+    "note":  "Import Metashape COLMAP cameras with scale-preserving 3DGS and 2DGS training"
 }

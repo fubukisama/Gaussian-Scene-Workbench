@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+from PIL import Image
 from plyfile import PlyData, PlyElement
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -68,6 +69,33 @@ def write_test_ply(path, xyz):
     vertices["opacity"] = 1.0
     path.parent.mkdir(parents=True, exist_ok=True)
     PlyData([PlyElement.describe(vertices, "vertex")]).write(path)
+
+
+def write_metashape_colmap_project(root, image_size=(8, 6), image_name="frame.jpg"):
+    images_dir = root / "images"
+    sparse_dir = root / "sparse" / "0"
+    images_dir.mkdir(parents=True)
+    sparse_dir.mkdir(parents=True)
+    Image.new("RGB", image_size, (120, 80, 40)).save(images_dir / image_name)
+    width, height = image_size
+    (sparse_dir / "cameras.txt").write_text(
+        "# Camera list\n"
+        f"0 SIMPLE_PINHOLE {width} {height} 7.0 {width / 2} {height / 2}\n",
+        encoding="utf-8",
+    )
+    (sparse_dir / "images.txt").write_text(
+        "# Image list\n"
+        f"0 1 0 0 0 0 0 0 0 {image_name}\n"
+        "\n",
+        encoding="utf-8",
+    )
+    (sparse_dir / "points3D.txt").write_text(
+        "# 3D point list\n"
+        "0 -2 -1 -3 10 20 30 0 0 0\n"
+        "1 4 5 6 40 50 60 0 0 1\n",
+        encoding="utf-8",
+    )
+    return root
 
 
 class TrainingBackendTests(unittest.TestCase):
@@ -718,6 +746,132 @@ class TrainingBackendTests(unittest.TestCase):
                 self.assertTrue(any("COLMAP alignment complete" in line for line in job["log"]))
             finally:
                 server.DATASETS_DIR = original_datasets
+
+    def test_metashape_colmap_project_validation_preserves_dimensions_and_scale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_metashape_colmap_project(Path(tmp) / "metashape")
+
+            report = server.inspect_metashape_colmap_project(source)
+
+            self.assertEqual(report["camera_count"], 1)
+            self.assertEqual(report["image_count"], 1)
+            self.assertEqual(report["image_dimensions"], [[8, 6]])
+            self.assertEqual(report["camera_models"], ["SIMPLE_PINHOLE"])
+            self.assertEqual(report["point_count"], 2)
+            self.assertEqual(report["point_bounds"]["min"], [-2.0, -1.0, -3.0])
+            self.assertEqual(report["point_bounds"]["max"], [4.0, 5.0, 6.0])
+            self.assertAlmostEqual(report["point_bounds"]["diagonal"], np.sqrt(153.0))
+            self.assertEqual(report["scale_mode"], "preserve_source_coordinates")
+
+    def test_metashape_colmap_project_import_is_aligned_and_transactional(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_datasets = server.DATASETS_DIR
+            server.DATASETS_DIR = Path(tmp) / "datasets"
+            source = write_metashape_colmap_project(Path(tmp) / "metashape")
+            try:
+                result = server.import_metashape_colmap_project({
+                    "scene": "metashape_scene",
+                    "source_dir": str(source),
+                    "overwrite": False,
+                })
+
+                dataset = server.DATASETS_DIR / "metashape_scene"
+                self.assertTrue((dataset / "images" / "frame.jpg").exists())
+                self.assertIn(
+                    "0 PINHOLE 8 6 7.0 7.0 4.0 3.0",
+                    (dataset / "sparse" / "0" / "cameras.txt").read_text(encoding="utf-8"),
+                )
+                self.assertEqual(
+                    (dataset / "source" / "metashape_sparse_raw" / "cameras.txt").read_text(encoding="utf-8"),
+                    (source / "sparse" / "0" / "cameras.txt").read_text(encoding="utf-8"),
+                )
+                self.assertTrue(server.dataset_has_alignment_source(dataset))
+                self.assertEqual(result["source_type"], "metashape_colmap")
+                self.assertEqual(result["camera_count"], 1)
+                metadata = json.loads((dataset / "source" / "metashape_import.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["scale_mode"], "preserve_source_coordinates")
+                self.assertEqual(metadata["training_camera_models"], ["PINHOLE"])
+                self.assertEqual(metadata["intrinsics_conversion"], "SIMPLE_PINHOLE_to_PINHOLE_exact")
+                self.assertTrue((dataset / ".alignment_cache" / "sparse" / "0" / "images.txt").exists())
+
+                with self.assertRaisesRegex(ValueError, "already exists"):
+                    server.import_metashape_colmap_project({
+                        "scene": "metashape_scene",
+                        "source_dir": str(source),
+                        "overwrite": False,
+                    })
+            finally:
+                server.DATASETS_DIR = original_datasets
+
+    def test_metashape_colmap_project_rejects_camera_image_dimension_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_metashape_colmap_project(Path(tmp) / "metashape")
+            cameras = source / "sparse" / "0" / "cameras.txt"
+            cameras.write_text("0 SIMPLE_PINHOLE 16 12 7 8 6\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "dimension mismatch"):
+                server.inspect_metashape_colmap_project(source)
+
+    def test_nested_metashape_images_are_discovered_for_training(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            images_dir = Path(tmp) / "images"
+            nested = images_dir / "camera_a" / "frame.jpg"
+            nested.parent.mkdir(parents=True)
+            Image.new("RGB", (8, 6), (1, 2, 3)).save(nested)
+
+            self.assertEqual([nested], list(server.iter_image_files(images_dir)))
+
+    def test_metashape_training_never_realigns_authoritative_imported_cameras(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            original_datasets = server.DATASETS_DIR
+            original_output = server.OUTPUT_DIR
+            server.DATASETS_DIR = base / "datasets"
+            server.OUTPUT_DIR = base / "output"
+            dataset = write_metashape_colmap_project(server.DATASETS_DIR / "metashape_scene")
+            metadata_path = server.aligned_import_metadata_path(dataset)
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(json.dumps({
+                "source_type": "metashape_colmap",
+                "camera_count": 1,
+                "image_dimensions": [[8, 6]],
+                "scale_mode": "preserve_source_coordinates",
+            }), encoding="utf-8")
+            job = {
+                "id": "metashape-train",
+                "scene": "metashape_scene",
+                "output_scene": "metashape_scene",
+                "backend": "3dgs",
+                "status": "queued",
+                "stage": "queued",
+                "error": None,
+                "cancel_requested": False,
+                "colmap_options": server.colmap_options_from_payload({"reset": True}),
+                "train_options": {"iterations": 1},
+                "log": [],
+            }
+
+            try:
+                with (
+                    mock.patch.object(server, "ensure_training_environment", return_value={
+                        "python": "python",
+                        "colmap": "colmap",
+                    }),
+                    mock.patch.object(server, "run_logged"),
+                    mock.patch.object(server, "run_colmap_convert") as colmap_mock,
+                    mock.patch.object(server, "resolve_training_options_for_environment", side_effect=lambda backend, options, job: options),
+                    mock.patch.object(server, "write_training_metadata"),
+                    mock.patch.object(server, "latest_iteration", return_value=1),
+                    mock.patch.object(server, "persist_train_job"),
+                ):
+                    server.run_training_job(job, run_convert=True, quality="quick", overwrite=False)
+            finally:
+                server.DATASETS_DIR = original_datasets
+                server.OUTPUT_DIR = original_output
+
+            self.assertEqual(job["status"], "done")
+            colmap_mock.assert_not_called()
+            self.assertTrue(any("skipping COLMAP realignment" in line for line in job["log"]))
 
     def test_colmap_alignment_job_fails_when_dataset_images_are_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

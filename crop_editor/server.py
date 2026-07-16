@@ -237,6 +237,15 @@ def mask_match_key(path):
     return re.sub(r"[^a-z0-9]+", "", stem)
 
 
+def iter_image_files(images_dir):
+    images_dir = Path(images_dir)
+    if not images_dir.is_dir():
+        return
+    for path in images_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTS:
+            yield path
+
+
 def save_uploaded_masks(dataset, form):
     masks = form_items(form, "maskFiles")
     if not masks:
@@ -492,11 +501,16 @@ def list_datasets():
         images_dir = child / "images"
         image_count = 0
         if images_dir.exists():
-            image_count = sum(1 for p in images_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
+            image_count = sum(1 for _ in iter_image_files(images_dir))
+        aligned_metadata = read_aligned_import_metadata(child)
         datasets.append({
             "name": child.name,
             "image_count": image_count,
             "has_alignment": dataset_has_alignment_source(child),
+            "source_type": aligned_metadata.get("source_type"),
+            "camera_count": aligned_metadata.get("camera_count"),
+            "image_dimensions": aligned_metadata.get("image_dimensions", []),
+            "scale_mode": aligned_metadata.get("scale_mode"),
         })
     return datasets
 
@@ -4834,6 +4848,261 @@ def dataset_has_alignment_source(dataset):
     return dataset_has_recognized_training_scene(dataset) or dataset_has_colmap_scene(alignment_cache_dir(dataset))
 
 
+def aligned_import_metadata_path(dataset):
+    return Path(dataset) / "source" / "metashape_import.json"
+
+
+def read_aligned_import_metadata(dataset):
+    path = aligned_import_metadata_path(dataset)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def find_metashape_colmap_sparse_dir(source_dir):
+    source_dir = Path(source_dir).expanduser().resolve()
+    candidates = [source_dir / "sparse" / "0", source_dir / "sparse", source_dir]
+    required = ("cameras.txt", "images.txt", "points3D.txt")
+    for candidate in candidates:
+        if all((candidate / name).is_file() for name in required):
+            return candidate
+    raise ValueError(
+        "Metashape camera folder must contain sparse/0/cameras.txt, images.txt, and points3D.txt. "
+        "Export an undistorted COLMAP text project from Metashape."
+    )
+
+
+def read_colmap_text_cameras(path):
+    cameras = {}
+    supported_models = {"SIMPLE_PINHOLE", "PINHOLE"}
+    with Path(path).open("r", encoding="utf-8-sig") as stream:
+        for line_number, raw_line in enumerate(stream, 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split()
+            if len(fields) < 5:
+                raise ValueError(f"Invalid cameras.txt line {line_number}: expected camera parameters")
+            try:
+                camera_id = int(fields[0])
+                model = fields[1].upper()
+                width = int(fields[2])
+                height = int(fields[3])
+                params = [float(value) for value in fields[4:]]
+            except ValueError as exc:
+                raise ValueError(f"Invalid cameras.txt line {line_number}: {exc}") from exc
+            if model not in supported_models:
+                raise ValueError(
+                    f"Unsupported Metashape camera model {model}. "
+                    "Export undistorted cameras as SIMPLE_PINHOLE or PINHOLE."
+                )
+            expected_params = 3 if model == "SIMPLE_PINHOLE" else 4
+            if len(params) != expected_params or width <= 0 or height <= 0:
+                raise ValueError(f"Invalid {model} parameters in cameras.txt line {line_number}")
+            cameras[camera_id] = {
+                "id": camera_id,
+                "model": model,
+                "width": width,
+                "height": height,
+                "params": params,
+            }
+    if not cameras:
+        raise ValueError("Metashape cameras.txt contains no cameras")
+    return cameras
+
+
+def write_training_colmap_cameras(source_path, target_path):
+    source_path = Path(source_path)
+    target_path = Path(target_path)
+    source_text = source_path.read_text(encoding="utf-8-sig")
+    output_lines = []
+    converted = 0
+    for raw_line in source_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            output_lines.append(raw_line)
+            continue
+        fields = line.split()
+        if len(fields) >= 7 and fields[1].upper() == "SIMPLE_PINHOLE":
+            # PINHOLE(fx=f, fy=f, cx, cy) is projection-equivalent to SIMPLE_PINHOLE.
+            fields = [fields[0], "PINHOLE", fields[2], fields[3], fields[4], fields[4], fields[5], fields[6]]
+            output_lines.append(" ".join(fields))
+            converted += 1
+        else:
+            output_lines.append(raw_line)
+    trailing_newline = "\n" if source_text.endswith(("\n", "\r")) else ""
+    target_path.write_text("\n".join(output_lines) + trailing_newline, encoding="utf-8")
+    return {
+        "training_camera_models": ["PINHOLE"],
+        "intrinsics_conversion": "SIMPLE_PINHOLE_to_PINHOLE_exact" if converted else "none",
+        "converted_camera_count": converted,
+    }
+
+
+def colmap_qvec_to_rotmat(qvec):
+    qw, qx, qy, qz = qvec
+    return np.array([
+        [1 - 2 * qy * qy - 2 * qz * qz, 2 * qx * qy - 2 * qw * qz, 2 * qx * qz + 2 * qw * qy],
+        [2 * qx * qy + 2 * qw * qz, 1 - 2 * qx * qx - 2 * qz * qz, 2 * qy * qz - 2 * qw * qx],
+        [2 * qx * qz - 2 * qw * qy, 2 * qy * qz + 2 * qw * qx, 1 - 2 * qx * qx - 2 * qy * qy],
+    ], dtype=np.float64)
+
+
+def read_colmap_text_images(path, cameras):
+    images = []
+    names = set()
+    with Path(path).open("r", encoding="utf-8-sig") as stream:
+        while True:
+            raw_line = stream.readline()
+            if not raw_line:
+                break
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split(maxsplit=9)
+            if len(fields) != 10:
+                raise ValueError("Invalid images.txt camera record")
+            try:
+                image_id = int(fields[0])
+                qvec = np.asarray([float(value) for value in fields[1:5]], dtype=np.float64)
+                tvec = np.asarray([float(value) for value in fields[5:8]], dtype=np.float64)
+                camera_id = int(fields[8])
+            except ValueError as exc:
+                raise ValueError(f"Invalid images.txt camera record: {exc}") from exc
+            if camera_id not in cameras:
+                raise ValueError(f"images.txt references missing camera id {camera_id}")
+            image_name = fields[9].strip().replace("\\", "/")
+            relative = PurePosixPath(image_name)
+            if not image_name or relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Invalid image path in images.txt: {image_name}")
+            folded_name = image_name.casefold()
+            if folded_name in names:
+                raise ValueError(f"Duplicate image name in images.txt: {image_name}")
+            names.add(folded_name)
+            qnorm = float(np.linalg.norm(qvec))
+            if not np.isfinite(qnorm) or qnorm <= 0 or not np.all(np.isfinite(tvec)):
+                raise ValueError(f"Invalid camera pose for {image_name}")
+            qvec = qvec / qnorm
+            center = -colmap_qvec_to_rotmat(qvec).T @ tvec
+            images.append({
+                "id": image_id,
+                "camera_id": camera_id,
+                "name": image_name,
+                "center": center.tolist(),
+            })
+            # COLMAP text stores one POINTS2D line after every camera record.
+            stream.readline()
+    if not images:
+        raise ValueError("Metashape images.txt contains no aligned camera poses")
+    return images
+
+
+def read_colmap_text_point_bounds(path):
+    point_count = 0
+    minimum = np.full(3, np.inf, dtype=np.float64)
+    maximum = np.full(3, -np.inf, dtype=np.float64)
+    with Path(path).open("r", encoding="utf-8-sig") as stream:
+        for line_number, raw_line in enumerate(stream, 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split()
+            if len(fields) < 8:
+                raise ValueError(f"Invalid points3D.txt line {line_number}")
+            try:
+                xyz = np.asarray([float(value) for value in fields[1:4]], dtype=np.float64)
+            except ValueError as exc:
+                raise ValueError(f"Invalid points3D.txt line {line_number}: {exc}") from exc
+            if not np.all(np.isfinite(xyz)):
+                raise ValueError(f"Non-finite point in points3D.txt line {line_number}")
+            minimum = np.minimum(minimum, xyz)
+            maximum = np.maximum(maximum, xyz)
+            point_count += 1
+    if point_count == 0:
+        raise ValueError("Metashape points3D.txt contains no sparse points")
+    return {
+        "count": point_count,
+        "min": minimum.tolist(),
+        "max": maximum.tolist(),
+        "diagonal": float(np.linalg.norm(maximum - minimum)),
+    }
+
+
+def inspect_metashape_colmap_project(source_dir):
+    source_dir = Path(source_dir).expanduser().resolve()
+    if not source_dir.is_dir():
+        raise ValueError(f"Metashape camera folder does not exist: {source_dir}")
+    images_dir = source_dir / "images"
+    if not images_dir.is_dir():
+        raise ValueError(f"Metashape camera folder is missing images/: {source_dir}")
+    sparse_dir = find_metashape_colmap_sparse_dir(source_dir)
+    cameras = read_colmap_text_cameras(sparse_dir / "cameras.txt")
+    aligned_images = read_colmap_text_images(sparse_dir / "images.txt", cameras)
+    point_bounds = read_colmap_text_point_bounds(sparse_dir / "points3D.txt")
+
+    dimensions = set()
+    missing_images = []
+    from PIL import Image
+    for item in aligned_images:
+        image_path = images_dir.joinpath(*PurePosixPath(item["name"]).parts)
+        if not image_path.is_file():
+            missing_images.append(item["name"])
+            continue
+        expected = cameras[item["camera_id"]]
+        try:
+            with Image.open(image_path) as image:
+                actual_size = tuple(int(value) for value in image.size)
+        except Exception as exc:
+            raise ValueError(f"Could not read Metashape image {item['name']}: {exc}") from exc
+        expected_size = (expected["width"], expected["height"])
+        if actual_size != expected_size:
+            raise ValueError(
+                f"Camera/image dimension mismatch for {item['name']}: "
+                f"camera={expected_size[0]}x{expected_size[1]}, image={actual_size[0]}x{actual_size[1]}"
+            )
+        dimensions.add(actual_size)
+    if missing_images:
+        preview = ", ".join(missing_images[:5])
+        suffix = "..." if len(missing_images) > 5 else ""
+        raise ValueError(f"Metashape project is missing {len(missing_images)} camera image(s): {preview}{suffix}")
+
+    camera_centers = np.asarray([item["center"] for item in aligned_images], dtype=np.float64)
+    center_min = camera_centers.min(axis=0)
+    center_max = camera_centers.max(axis=0)
+    source_camera_models = sorted({camera["model"] for camera in cameras.values()})
+    return {
+        "source_type": "metashape_colmap",
+        "source_dir": str(source_dir),
+        "sparse_dir": str(sparse_dir),
+        "camera_count": len(aligned_images),
+        "calibration_count": len(cameras),
+        "image_count": len(aligned_images),
+        "image_names": [item["name"] for item in aligned_images],
+        "image_dimensions": [list(size) for size in sorted(dimensions)],
+        "camera_models": source_camera_models,
+        "training_camera_models": ["PINHOLE"],
+        "intrinsics_conversion": (
+            "SIMPLE_PINHOLE_to_PINHOLE_exact" if "SIMPLE_PINHOLE" in source_camera_models else "none"
+        ),
+        "camera_center_bounds": {
+            "min": center_min.tolist(),
+            "max": center_max.tolist(),
+            "diagonal": float(np.linalg.norm(center_max - center_min)),
+        },
+        "point_count": point_bounds["count"],
+        "point_bounds": {
+            "min": point_bounds["min"],
+            "max": point_bounds["max"],
+            "diagonal": point_bounds["diagonal"],
+        },
+        "scale_mode": "preserve_source_coordinates",
+    }
+
+
 def save_alignment_cache(dataset, job=None):
     dataset = Path(dataset)
     if not dataset_has_colmap_scene(dataset):
@@ -5285,8 +5554,24 @@ def run_training_job(job, run_convert, quality, overwrite):
         dataset = Path(job.get("dataset_path") or (DATASETS_DIR / job["scene"]))
         output = OUTPUT_DIR / job["output_scene"]
         images_dir = dataset / "images"
-        if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
+        if not any(iter_image_files(images_dir)):
             raise ValueError(f"No training images found: {images_dir}")
+        aligned_metadata = read_aligned_import_metadata(dataset)
+        if aligned_metadata.get("source_type") == "metashape_colmap":
+            dimensions = ", ".join(
+                f"{size[0]}x{size[1]}"
+                for size in aligned_metadata.get("image_dimensions", [])
+                if isinstance(size, list) and len(size) == 2
+            ) or "source dimensions"
+            add_job_log(
+                job,
+                "Metashape/COLMAP source: "
+                f"{aligned_metadata.get('camera_count', 0)} aligned cameras, {dimensions}; "
+                "preserving imported world coordinates and sparse-point scale.",
+            )
+            if run_convert:
+                add_job_log(job, "Imported Metashape cameras are authoritative; skipping COLMAP realignment.")
+                run_convert = False
         if output.exists() and any(output.iterdir()):
             ensure_output_backend_compatible(job["output_scene"], backend)
             if overwrite:
@@ -5381,7 +5666,7 @@ def run_colmap_alignment_job(job):
         set_job_stage(job, "running", "colmap")
         dataset = DATASETS_DIR / job["scene"]
         images_dir = colmap_image_input_path(dataset)
-        if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
+        if not any(iter_image_files(images_dir)):
             raise ValueError(f"No training images found: {images_dir}")
         options = job.get("options") or colmap_options_from_payload({})
         add_job_log(job, f"Dataset: {dataset}")
@@ -6799,6 +7084,97 @@ def archive_local_source(source, target):
         return "copy"
 
 
+def import_metashape_colmap_project(data):
+    scene = safe_name(data.get("scene", ""))
+    source_dir = Path(data.get("source_dir", "")).expanduser().resolve()
+    overwrite = bool(data.get("overwrite", False))
+    report = inspect_metashape_colmap_project(source_dir)
+
+    DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+    dataset = DATASETS_DIR / scene
+    if dataset.exists() and any(dataset.iterdir()) and not overwrite:
+        raise ValueError(f"Dataset already exists: {dataset}. Enable overwrite or choose another name.")
+
+    staging = DATASETS_DIR / f".{scene}.metashape_import_{uuid.uuid4().hex[:8]}"
+    backup = None
+    if staging.exists():
+        shutil.rmtree(staging)
+    try:
+        target_images = staging / "images"
+        target_sparse = staging / "sparse" / "0"
+        target_source = staging / "source"
+        target_raw_sparse = target_source / "metashape_sparse_raw"
+        target_images.mkdir(parents=True)
+        target_sparse.mkdir(parents=True)
+        target_source.mkdir(parents=True)
+        target_raw_sparse.mkdir(parents=True)
+
+        image_modes = {"hardlink": 0, "copy": 0}
+        source_images = source_dir / "images"
+        for image_name in report["image_names"]:
+            relative = PurePosixPath(image_name)
+            source_image = source_images.joinpath(*relative.parts)
+            target_image = target_images.joinpath(*relative.parts)
+            target_image.parent.mkdir(parents=True, exist_ok=True)
+            mode = archive_local_source(source_image, target_image)
+            image_modes[mode] = image_modes.get(mode, 0) + 1
+
+        source_sparse = Path(report["sparse_dir"])
+        for source_file in source_sparse.iterdir():
+            if source_file.is_file():
+                shutil.copy2(source_file, target_sparse / source_file.name)
+                shutil.copy2(source_file, target_raw_sparse / source_file.name)
+        camera_conversion = write_training_colmap_cameras(
+            source_sparse / "cameras.txt",
+            target_sparse / "cameras.txt",
+        )
+        report.update(camera_conversion)
+
+        metadata = {
+            key: value
+            for key, value in report.items()
+            if key not in {"image_names", "sparse_dir"}
+        }
+        metadata.update({
+            "version": 1,
+            "imported_at": time.time(),
+            "image_import_modes": image_modes,
+            "training_behavior": "skip_colmap_use_imported_cameras",
+        })
+        aligned_import_metadata_path(staging).write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        save_alignment_cache(staging)
+
+        if dataset.exists():
+            backup = DATASETS_DIR / f".{scene}.before_metashape_{uuid.uuid4().hex[:8]}"
+            dataset.rename(backup)
+        staging.rename(dataset)
+        if backup and backup.exists():
+            # The imported dataset is already committed at this point. A stale backup
+            # must not turn a successful import into a reported failure.
+            shutil.rmtree(backup, ignore_errors=True)
+            backup = None
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup and backup.exists() and not dataset.exists():
+            backup.rename(dataset)
+        raise
+
+    result = dict(report)
+    result.pop("image_names", None)
+    result.pop("sparse_dir", None)
+    result.update({
+        "scene": scene,
+        "path": str(dataset.resolve()),
+        "has_alignment": True,
+        "image_import_modes": image_modes,
+    })
+    return result
+
+
 def save_uploaded_dataset(form):
     scene = safe_name(form.getfirst("scene", ""))
     overwrite = form.getfirst("overwrite", "false").lower() == "true"
@@ -6966,6 +7342,7 @@ class Handler(BaseHTTPRequestHandler):
                         "splat_export_jobs": True,
                         "glb_export_jobs": True,
                         "colmap_jobs": True,
+                        "metashape_colmap_import": True,
                         "experiment_manager": True,
                         "psnr_analysis": True,
                     },
@@ -7215,6 +7592,7 @@ class Handler(BaseHTTPRequestHandler):
                 ))
             if parsed_path not in (
                 "/api/import-paths",
+                "/api/metashape/import",
                 "/api/save",
                 "/api/preview",
                 "/api/train/start",
@@ -7243,6 +7621,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode("utf-8"))
             if parsed_path == "/api/import-paths":
                 return self.send_json(save_path_dataset(data))
+            if parsed_path == "/api/metashape/import":
+                return self.send_json(import_metashape_colmap_project(data))
             if parsed_path == "/api/jobs/cancel":
                 return self.send_json(cancel_unified_job(data["id"]))
             if parsed_path == "/api/jobs/retry":
