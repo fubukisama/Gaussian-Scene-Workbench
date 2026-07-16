@@ -4,11 +4,11 @@
     "packageVersion":  "0.2.7",
     "releaseTag":  "v0.2.7",
     "packageName":  "Gaussian-Scene-Workbench-0.2.7-win-x64.zip",
-    "updatedAt":  "2026-07-16T23:30:02+09:00",
+    "updatedAt":  "2026-07-16T23:43:09+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "e909871",
-    "gitDirty":  true,
+    "gitCommit":  "1020de5",
+    "gitDirty":  false,
     "note":  "Identify the Legacy HTML desktop build with a distinct window title and Windows AppUserModelID"
 }
