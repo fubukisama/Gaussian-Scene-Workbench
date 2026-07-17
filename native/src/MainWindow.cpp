@@ -8,6 +8,7 @@
 #include "ImportEnvironmentProbe.h"
 #include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
+#include "TrainingOutputLocator.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -187,6 +188,52 @@ bool hasImportRecoveryArtifacts(const QString &datasetRoot) {
   return std::any_of(entries.cbegin(), entries.cend(), [](const QFileInfo &entry) {
     return artifactPattern.match(entry.fileName()).hasMatch();
   });
+}
+
+QString backendUnavailableMessage(const QString &repositoryRoot,
+                                  const QString &workerScript,
+                                  const QString &pythonPath) {
+  const QString missing = QStringLiteral("<未发现>");
+  const QString applicationDirectory =
+      QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
+  const QString backend = repositoryRoot.isEmpty()
+                              ? missing
+                              : QDir::toNativeSeparators(repositoryRoot);
+  const QString worker = QFileInfo(workerScript).isFile()
+                             ? QDir::toNativeSeparators(workerScript)
+                             : missing;
+  const QString python = pythonPath.isEmpty()
+                             ? missing
+                             : QDir::toNativeSeparators(pythonPath);
+
+  QStringList checkedCandidates;
+  const QStringList candidates =
+      BackendLocator::gaussianPythonCandidates(repositoryRoot);
+  constexpr qsizetype maximumDisplayedCandidates = 12;
+  for (qsizetype index = 0;
+       index < std::min(candidates.size(), maximumDisplayedCandidates);
+       ++index) {
+    checkedCandidates.append(QStringLiteral("  - %1").arg(candidates.at(index)));
+  }
+  if (candidates.size() > maximumDisplayedCandidates) {
+    checkedCandidates.append(
+        QStringLiteral("  - …另有 %1 个候选路径")
+            .arg(candidates.size() - maximumDisplayedCandidates));
+  }
+
+  return QStringLiteral(
+             "未找到可用的原生计算后端或 gaussian_splatting Python 环境。\n\n"
+             "应用目录：%1\n"
+             "后端目录：%2\n"
+             "Worker：%3\n"
+             "Python：%4\n\n"
+             "已检查的 Python 候选路径：\n%5\n\n"
+             "请确认安装包目录完整；如使用自定义位置，可设置 "
+             "GSW_BACKEND_ROOT 和 GAUSSIAN_SPLATTING_CONDA_PREFIX。")
+      .arg(applicationDirectory, backend, worker, python,
+           checkedCandidates.isEmpty()
+               ? QStringLiteral("  - <无候选路径>")
+               : checkedCandidates.join(QLatin1Char('\n')));
 }
 } // namespace
 
@@ -940,6 +987,49 @@ void MainWindow::connectServices() {
               }
             }
 
+            if (mPendingTrainingResult.has_value() &&
+                mPendingTrainingResult->taskName == taskName) {
+              const PendingTrainingResult pending = *mPendingTrainingResult;
+              mPendingTrainingResult.reset();
+              if (effectiveSucceeded) {
+                const TrainingOutputScene scene =
+                    findLatestTrainingOutputScene(pending.outputSceneRoot);
+                if (!scene.isValid()) {
+                  effectiveSucceeded = false;
+                  const QString detail =
+                      QStringLiteral("训练进程已完成，但输出目录中没有找到 point_cloud/iteration_*/point_cloud.ply：\n%1")
+                          .arg(QDir::toNativeSeparators(pending.outputSceneRoot));
+                  appendTaskEvent(detail);
+                  showError(QStringLiteral("训练结果无效"), detail);
+                } else if (!pathsReferToSameLocation(mWorkspace.rootPath(),
+                                                     pending.projectRoot)) {
+                  appendTaskEvent(
+                      QStringLiteral("训练已完成，但当前工程已切换，因此未自动载入：%1")
+                          .arg(QDir::toNativeSeparators(scene.path)));
+                } else {
+                  QString sceneError;
+                  if (!mWorkspace.setScenePath(scene.path, &sceneError)) {
+                    effectiveSucceeded = false;
+                    appendTaskEvent(QStringLiteral("训练结果无法载入：%1")
+                                        .arg(sceneError));
+                    showError(QStringLiteral("无法载入训练结果"), sceneError);
+                  } else {
+                    QString saveError;
+                    if (!mWorkspace.projectFilePath().isEmpty() &&
+                        !mWorkspace.save({}, &saveError)) {
+                      appendTaskEvent(
+                          QStringLiteral("训练结果已载入，但工程自动保存失败：%1")
+                              .arg(saveError));
+                    }
+                    appendTaskEvent(
+                        QStringLiteral("已自动载入训练结果（迭代 %1）：%2")
+                            .arg(scene.iteration)
+                            .arg(QDir::toNativeSeparators(scene.path)));
+                  }
+                }
+              }
+            }
+
             const bool cancelled =
                 processCancelled && !effectiveSucceeded && !recoveryFailed;
             if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
@@ -1401,9 +1491,9 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
   const QString python = findTrainingPython(repositoryRoot);
   if (repositoryRoot.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("检测到未完成的导入事务，但未找到受信任的原生 worker "
-                                     "或 Python 环境。请从完整安装目录运行，或显式设置 "
-                                     "GSW_BACKEND_ROOT。");
+      *errorMessage = QStringLiteral("检测到未完成的导入事务。\n\n") +
+                      backendUnavailableMessage(repositoryRoot, workerScript,
+                                                python);
     }
     return false;
   }
@@ -1539,8 +1629,7 @@ void MainWindow::importDataset() {
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
     showError(QStringLiteral("导入后端不可用"),
-              QStringLiteral("未找到受信任的原生 worker 或 Python 环境。请从完整安装目录运行，"
-                             "或显式设置 GSW_BACKEND_ROOT。"));
+              backendUnavailableMessage(root, workerScript, python));
     return;
   }
 
@@ -1753,7 +1842,7 @@ void MainWindow::startReconstruction() {
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
     showError(QStringLiteral("重建后端不可用"),
-              QStringLiteral("未找到原生计算 worker、gaussian-splatting 源码或 Python 环境。"));
+              backendUnavailableMessage(root, workerScript, python));
     return;
   }
 
@@ -1843,7 +1932,7 @@ void MainWindow::startTraining() {
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
     showError(QStringLiteral("训练后端不可用"),
-              QStringLiteral("未找到原生训练 worker、gaussian-splatting 源码或 gaussian_splatting Python 环境。"));
+              backendUnavailableMessage(root, workerScript, python));
     return;
   }
 
@@ -1890,13 +1979,20 @@ void MainWindow::startTraining() {
     return;
   }
 
+  const QString taskName = QStringLiteral("%1 训练 | %2 | %3 次迭代")
+                               .arg(config.backend.toUpper(), config.quality)
+                               .arg(config.iterations);
+  mPendingTrainingResult = PendingTrainingResult{
+      taskName,
+      QDir(config.outputRoot).filePath(config.outputScene),
+      mWorkspace.rootPath(),
+  };
   const bool started = mProcessSupervisor.start(
-      QStringLiteral("%1 训练 | %2 | %3 次迭代")
-          .arg(config.backend.toUpper(), config.quality)
-          .arg(config.iterations),
+      taskName,
       python, {workerScript, QStringLiteral("--config"), configPath}, root,
       pythonProcessEnvironment(python), true);
   if (!started) {
+    mPendingTrainingResult.reset();
     QMessageBox::information(this, QStringLiteral("任务繁忙"), QStringLiteral("请等待当前任务结束后再试。"));
   } else {
     appendTaskEvent(QStringLiteral("训练配置已保存：%1").arg(QDir::toNativeSeparators(configPath)));

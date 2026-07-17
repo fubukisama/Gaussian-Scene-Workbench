@@ -43,6 +43,12 @@ private:
     QString recoveryTask;
   };
 
+  struct PendingTrainingResult {
+    QString taskName;
+    QString outputSceneRoot;
+    QString projectRoot;
+  };
+
   void createActions();
   void createMenus();
   void createToolBars();
@@ -138,6 +144,7 @@ private:
   int mUiScalePercent = 90;
   int mActiveTaskRow = -1;
   std::optional<PendingDatasetImport> mPendingDatasetImport;
+  std::optional<PendingTrainingResult> mPendingTrainingResult;
   QString mActiveWorkerState;
   qsizetype mSelectedPointCount = 0;
   qsizetype mDeletedPointCount = 0;

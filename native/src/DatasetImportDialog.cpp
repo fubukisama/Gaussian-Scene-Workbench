@@ -157,7 +157,13 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   connect(buttons, &QDialogButtonBox::rejected, this,
           &DatasetImportDialog::reject);
 
-  refreshSummary();
+  const QStringList initialMediaSources =
+      qApp->property("gswInitialMediaSources").toStringList();
+  if (initialMediaSources.isEmpty()) {
+    refreshSummary();
+  } else {
+    appendSourcePaths(initialMediaSources);
+  }
 }
 
 DatasetImportRequest DatasetImportDialog::request() const {

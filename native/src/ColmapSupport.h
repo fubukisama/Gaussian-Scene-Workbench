@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 namespace gsw {
 
@@ -11,6 +12,7 @@ namespace gsw {
 [[nodiscard]] QString findVersionedColmapExecutable(
     const QString &installRoot);
 [[nodiscard]] QString findColmapExecutable(const QString &repositoryRoot,
-                                           const QString &preferredPath = {});
+                                           const QString &preferredPath = {},
+                                           const QStringList &searchVolumeRoots = {});
 
 } // namespace gsw

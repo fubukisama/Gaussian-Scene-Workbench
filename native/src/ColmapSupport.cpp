@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QList>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QStringList>
 #include <QVersionNumber>
 
@@ -26,6 +27,51 @@ bool completeModel(const QDir &directory, const QString &extension) {
   return QFileInfo::exists(directory.filePath(QStringLiteral("cameras.") + extension)) &&
          QFileInfo::exists(directory.filePath(QStringLiteral("images.") + extension)) &&
          QFileInfo::exists(directory.filePath(QStringLiteral("points3D.") + extension));
+}
+
+Qt::CaseSensitivity pathCaseSensitivity() {
+#ifdef Q_OS_WIN
+  return Qt::CaseInsensitive;
+#else
+  return Qt::CaseSensitive;
+#endif
+}
+
+void appendUniquePath(QStringList *paths, const QString &path) {
+  if (paths == nullptr || path.trimmed().isEmpty()) {
+    return;
+  }
+  const QString cleanPath = QDir::cleanPath(path);
+  for (const QString &existing : *paths) {
+    if (existing.compare(cleanPath, pathCaseSensitivity()) == 0) {
+      return;
+    }
+  }
+  paths->append(cleanPath);
+}
+
+QStringList colmapSearchVolumeRoots(const QString &repositoryRoot,
+                                    const QStringList &configuredRoots) {
+  QStringList roots;
+  if (!configuredRoots.isEmpty()) {
+    for (const QString &root : configuredRoots) {
+      appendUniquePath(&roots, root);
+    }
+    return roots;
+  }
+
+  if (!repositoryRoot.isEmpty()) {
+    const QStorageInfo repositoryStorage(repositoryRoot);
+    if (repositoryStorage.isValid() && repositoryStorage.isReady()) {
+      appendUniquePath(&roots, repositoryStorage.rootPath());
+    }
+  }
+  for (const QStorageInfo &storage : QStorageInfo::mountedVolumes()) {
+    if (storage.isValid() && storage.isReady()) {
+      appendUniquePath(&roots, storage.rootPath());
+    }
+  }
+  return roots;
 }
 } // namespace
 
@@ -127,7 +173,8 @@ QString findVersionedColmapExecutable(const QString &installRoot) {
 }
 
 QString findColmapExecutable(const QString &repositoryRoot,
-                             const QString &preferredPath) {
+                             const QString &preferredPath,
+                             const QStringList &searchVolumeRoots) {
   QStringList candidates;
   candidates << preferredPath << qEnvironmentVariable("COLMAP_PATH")
              << qEnvironmentVariable("COLMAP_EXE");
@@ -136,13 +183,16 @@ QString findColmapExecutable(const QString &repositoryRoot,
     candidates << repository.filePath(QStringLiteral("third_party/colmap/bin/colmap.exe"))
                << repository.filePath(QStringLiteral("tools/colmap/bin/colmap.exe"))
                << repository.filePath(QStringLiteral("colmap/bin/colmap.exe"));
-    const QDir drive(repository.rootPath());
+  }
+  for (const QString &volumeRoot :
+       colmapSearchVolumeRoots(repositoryRoot, searchVolumeRoots)) {
+    const QDir volume(volumeRoot);
     candidates << findVersionedColmapExecutable(
-                      drive.filePath(QStringLiteral("Tools/COLMAP")))
+                      volume.filePath(QStringLiteral("Tools/COLMAP")))
                << findVersionedColmapExecutable(
-                      drive.filePath(QStringLiteral("tools/colmap")))
+                      volume.filePath(QStringLiteral("tools/colmap")))
                << findVersionedColmapExecutable(
-                      drive.filePath(QStringLiteral("COLMAP")));
+                      volume.filePath(QStringLiteral("COLMAP")));
   }
   candidates << QDir(QDir::homePath())
                     .filePath(QStringLiteral(

@@ -44,6 +44,7 @@ private slots:
   void rejectsBackendWithoutImportPreflight();
   void locatesCompletePackagedBackendAboveBinDirectory();
   void prefersConfiguredGaussianEnvironmentAndSupportsGsPrefix();
+  void locatesGaussianEnvironmentOnRepositoryVolume();
   void doesNotTreatArbitraryPathPythonAsGaussianEnvironment();
 };
 
@@ -138,6 +139,29 @@ void BackendLocatorTests::prefersConfiguredGaussianEnvironmentAndSupportsGsPrefi
   qunsetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
   QCOMPARE(gsw::BackendLocator::findGaussianPython(root.path()),
            QDir::toNativeSeparators(QDir(fallback).filePath(QStringLiteral("python.exe"))));
+}
+
+void BackendLocatorTests::locatesGaussianEnvironmentOnRepositoryVolume() {
+  ScopedEnvironment gaussianGuard("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  ScopedEnvironment gsGuard("GS_CONDA_PREFIX");
+  ScopedEnvironment condaGuard("CONDA_PREFIX");
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir fixture(temporary.path());
+  const QString volumeRoot = fixture.filePath(QStringLiteral("data-volume"));
+  const QString repositoryRoot =
+      QDir(volumeRoot).filePath(QStringLiteral("apps/gsw"));
+  const QString expectedPython = QDir(volumeRoot).filePath(
+      QStringLiteral("conda/envs/gaussian_splatting/python.exe"));
+  QVERIFY(QDir().mkpath(repositoryRoot));
+  QVERIFY(touchFile(expectedPython));
+  qunsetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  qunsetenv("GS_CONDA_PREFIX");
+  qunsetenv("CONDA_PREFIX");
+
+  QCOMPARE(gsw::BackendLocator::findGaussianPython(repositoryRoot,
+                                                    {volumeRoot}),
+           QDir::toNativeSeparators(expectedPython));
 }
 
 void BackendLocatorTests::doesNotTreatArbitraryPathPythonAsGaussianEnvironment() {

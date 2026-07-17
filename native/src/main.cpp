@@ -49,6 +49,9 @@ int main(int argc, char *argv[]) {
 #endif
 
   QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+  if (qEnvironmentVariableIntValue("GSW_USE_NON_NATIVE_DIALOGS") != 0) {
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+  }
 
   QSurfaceFormat format;
   format.setVersion(3, 3);
@@ -87,9 +90,17 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test"),
       QStringLiteral("Launch the main window briefly, then exit successfully."));
   parser.addOption(smokeTestOption);
+  QCommandLineOption mediaSourceOption(
+      QStringLiteral("media-source"),
+      QStringLiteral("Pre-populate the media import dialog with a file or directory. "
+                     "May be specified more than once."),
+      QStringLiteral("path"));
+  parser.addOption(mediaSourceOption);
   parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("Project file to open."), QStringLiteral("[project]"));
   parser.process(application);
 
+  application.setProperty("gswInitialMediaSources",
+                          parser.values(mediaSourceOption));
   gsw::MainWindow window;
   QString projectPath = parser.value(projectOption);
   const bool smokeTest = parser.isSet(smokeTestOption);

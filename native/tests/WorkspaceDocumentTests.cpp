@@ -3,6 +3,7 @@
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
 #include "ScreenSpaceSelection.h"
+#include "TrainingOutputLocator.h"
 #include "WorkspaceDocument.h"
 
 #include <QBitArray>
@@ -28,6 +29,8 @@ private slots:
   void activatesGaussianScaleRotationAndOpacity();
   void detectsColmapDatasetLayoutAndExecutable();
   void selectsNewestVersionedColmapExecutable();
+  void locatesVersionedColmapOnRepositoryVolume();
+  void locatesNewestCompletedTrainingScene();
   void detectsCompleteAndIncompleteColmapModels();
   void selectsBrushStrokeAndHonorsVisibility();
   void tracksSelectionDeletionUndoAndRedo();
@@ -41,6 +44,39 @@ private slots:
   void reloadsCameraSidecarAfterRepair();
   void decimatesLargeCameraVisualization();
 };
+
+void WorkspaceDocumentTests::locatesNewestCompletedTrainingScene() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("model/point_cloud/iteration_20")));
+  QVERIFY(root.mkpath(QStringLiteral("model/point_cloud/iteration_100")));
+  QVERIFY(root.mkpath(QStringLiteral("model/point_cloud/iteration_invalid")));
+
+  QFile older(root.filePath(
+      QStringLiteral("model/point_cloud/iteration_20/point_cloud.ply")));
+  QVERIFY(older.open(QIODevice::WriteOnly));
+  QCOMPARE(older.write("ply\n"), 4);
+  older.close();
+
+  const gsw::TrainingOutputScene latest = gsw::findLatestTrainingOutputScene(
+      root.filePath(QStringLiteral("model")));
+  QVERIFY(latest.isValid());
+  QCOMPARE(latest.iteration, 20);
+  QCOMPARE(latest.path, QDir::cleanPath(older.fileName()));
+
+  QFile newer(root.filePath(
+      QStringLiteral("model/point_cloud/iteration_100/point_cloud.ply")));
+  QVERIFY(newer.open(QIODevice::WriteOnly));
+  QCOMPARE(newer.write("ply\n"), 4);
+  newer.close();
+
+  const gsw::TrainingOutputScene updated = gsw::findLatestTrainingOutputScene(
+      root.filePath(QStringLiteral("model")));
+  QVERIFY(updated.isValid());
+  QCOMPARE(updated.iteration, 100);
+  QCOMPARE(updated.path, QDir::cleanPath(newer.fileName()));
+}
 
 namespace {
 void writeLittleEndianFloat(QFile &file, const float value) {
@@ -280,6 +316,26 @@ void WorkspaceDocumentTests::selectsNewestVersionedColmapExecutable() {
   QCOMPARE(gsw::findVersionedColmapExecutable(root.absolutePath()),
            QDir::toNativeSeparators(
                root.filePath(QStringLiteral("4.1.0/bin/colmap.exe"))));
+}
+
+void WorkspaceDocumentTests::locatesVersionedColmapOnRepositoryVolume() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir fixture(temporary.path());
+  const QString volumeRoot = fixture.filePath(QStringLiteral("data-volume"));
+  const QString repositoryRoot =
+      QDir(volumeRoot).filePath(QStringLiteral("apps/gsw"));
+  const QString executablePath = QDir(volumeRoot).filePath(
+      QStringLiteral("Tools/COLMAP/4.1.0/bin/colmap.exe"));
+  QVERIFY(QDir().mkpath(repositoryRoot));
+  QVERIFY(QDir().mkpath(QFileInfo(executablePath).absolutePath()));
+  QFile executable(executablePath);
+  QVERIFY(executable.open(QIODevice::WriteOnly));
+  QCOMPARE(executable.write("fixture"), qint64(7));
+  executable.close();
+
+  QCOMPARE(gsw::findColmapExecutable(repositoryRoot, {}, {volumeRoot}),
+           QDir::toNativeSeparators(executablePath));
 }
 
 void WorkspaceDocumentTests::detectsCompleteAndIncompleteColmapModels() {
