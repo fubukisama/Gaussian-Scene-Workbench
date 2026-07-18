@@ -1,6 +1,7 @@
 #include "AppTheme.h"
 #include "MainWindow.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -114,7 +115,16 @@ int main(int argc, char *argv[]) {
   bool smokeTestCompleted = !smokeTest;
   if (smokeTest) {
     QTimer::singleShot(250, &application, [&application, &window, &smokeTestCompleted]() {
+      const QStringList requiredEntryActions = {
+          QStringLiteral("importDatasetAction"),
+          QStringLiteral("attachDatasetAction"),
+          QStringLiteral("importSceneAction"),
+      };
       smokeTestCompleted = window.isVisible();
+      for (const QString &objectName : requiredEntryActions) {
+        const QAction *action = window.findChild<QAction *>(objectName);
+        smokeTestCompleted = smokeTestCompleted && action != nullptr && action->isEnabled();
+      }
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   }

@@ -61,10 +61,12 @@ private:
   void saveWindowState();
   void resetDockLayout();
   void applyUiScale(int scalePercent, bool persist);
+  void updateActionAvailability();
   void updateEditActions();
 
   bool confirmDiscardChanges();
   bool confirmDiscardSceneEdits();
+  bool ensureProjectForDataAction(const QString &actionName);
   bool saveProject(bool forceChoosePath = false);
   bool exportCroppedScene();
   bool ensureProjectRecoveryReady();

@@ -377,17 +377,20 @@ void MainWindow::createActions() {
 
   mImportDatasetAction = new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
                                      QStringLiteral("导入照片/视频..."), this);
+  mImportDatasetAction->setObjectName(QStringLiteral("importDatasetAction"));
   mImportDatasetAction->setToolTip(QStringLiteral("复制照片或视频到工程并自动抽帧"));
   connect(mImportDatasetAction, &QAction::triggered, this, &MainWindow::importDataset);
 
   mAttachDatasetAction = new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
                                      QStringLiteral("关联已有数据集..."), this);
+  mAttachDatasetAction->setObjectName(QStringLiteral("attachDatasetAction"));
   mAttachDatasetAction->setToolTip(
       QStringLiteral("直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
   connect(mAttachDatasetAction, &QAction::triggered, this,
           &MainWindow::attachExistingDataset);
 
   mImportSceneAction = new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), QStringLiteral("导入高斯场景"), this);
+  mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
   mImportSceneAction->setToolTip(QStringLiteral("导入 PLY 高斯场景"));
   connect(mImportSceneAction, &QAction::triggered, this, &MainWindow::importScene);
 
@@ -874,20 +877,8 @@ void MainWindow::connectServices() {
   connect(&mWorkspace, &WorkspaceDocument::modifiedChanged, this, [this](const bool modified) {
     setWindowModified(modified);
   });
-  connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this, [this](const bool running) {
-    const bool workspaceReady = mWorkspace.hasProject() && !mRecoveryBlocked;
-    mNewProjectAction->setEnabled(!running);
-    mOpenProjectAction->setEnabled(!running);
-    mStopAction->setEnabled(running);
-    mSaveAction->setEnabled(!running && workspaceReady);
-    mImportDatasetAction->setEnabled(!running && workspaceReady);
-    mAttachDatasetAction->setEnabled(!running && workspaceReady);
-    mImportSceneAction->setEnabled(!running && workspaceReady);
-    mReconstructAction->setEnabled(!running && workspaceReady &&
-                                   !mWorkspace.datasetPath().isEmpty());
-    mTrainAction->setEnabled(!running && workspaceReady && !mWorkspace.datasetPath().isEmpty());
-    updateEditActions();
-  });
+  connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this,
+          [this](const bool) { updateActionAvailability(); });
   connect(&mProcessSupervisor, &ProcessSupervisor::taskStarted, this, [this](const QString &taskName) {
     mActiveWorkerState.clear();
     mActiveTaskRow = mTaskTable->rowCount();
@@ -1609,12 +1600,30 @@ void MainWindow::newProject() {
   saveProject(false);
 }
 
+bool MainWindow::ensureProjectForDataAction(const QString &actionName) {
+  if (mWorkspace.hasProject()) {
+    return true;
+  }
+
+  const auto answer = QMessageBox::question(
+      this, QStringLiteral("需要先建立工程"),
+      QStringLiteral("“%1”需要一个工程目录来保存数据。是否现在新建工程？\n\n"
+                     "如果已有工程，请选择“取消”，然后使用“打开工程”。")
+          .arg(actionName),
+      QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes);
+  if (answer != QMessageBox::Yes) {
+    return false;
+  }
+
+  newProject();
+  return mWorkspace.hasProject();
+}
+
 void MainWindow::importDataset() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!mWorkspace.hasProject()) {
-    QMessageBox::information(this, QStringLiteral("请先创建工程"), QStringLiteral("导入数据前需要创建或打开工程。"));
+  if (!ensureProjectForDataAction(QStringLiteral("导入照片/视频"))) {
     return;
   }
   if (mProcessSupervisor.isRunning()) {
@@ -1740,10 +1749,7 @@ void MainWindow::attachExistingDataset() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!mWorkspace.hasProject()) {
-    QMessageBox::information(
-        this, QStringLiteral("请先创建工程"),
-        QStringLiteral("关联已有数据集前需要创建或打开工程。"));
+  if (!ensureProjectForDataAction(QStringLiteral("关联已有数据集"))) {
     return;
   }
   if (mProcessSupervisor.isRunning()) {
@@ -1784,8 +1790,7 @@ void MainWindow::importScene() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!mWorkspace.hasProject()) {
-    QMessageBox::information(this, QStringLiteral("请先创建工程"), QStringLiteral("导入场景前需要创建或打开工程。"));
+  if (!ensureProjectForDataAction(QStringLiteral("导入高斯场景"))) {
     return;
   }
   if (!confirmDiscardSceneEdits()) {
@@ -2009,14 +2014,22 @@ void MainWindow::updateWorkspaceUi() {
       projectName + (mWorkspace.isModified() ? QStringLiteral(" *") : QString()) +
       (mRecoveryBlocked ? QStringLiteral(" · 导入恢复待处理") : QString()));
   setWindowTitle(QStringLiteral("%1[*]").arg(projectName));
+  updateActionAvailability();
+}
+
+void MainWindow::updateActionAvailability() {
   const bool running = mProcessSupervisor.isRunning();
-  const bool workspaceReady = mWorkspace.hasProject() && !mRecoveryBlocked;
-  mSaveAction->setEnabled(workspaceReady && !running);
+  const bool hasProject = mWorkspace.hasProject();
+  const bool workspaceReady = hasProject && !mRecoveryBlocked;
+  const bool dataEntryReady = !running && (!hasProject || !mRecoveryBlocked);
+
   mNewProjectAction->setEnabled(!running);
   mOpenProjectAction->setEnabled(!running);
-  mImportDatasetAction->setEnabled(workspaceReady && !running);
-  mAttachDatasetAction->setEnabled(workspaceReady && !running);
-  mImportSceneAction->setEnabled(workspaceReady && !running);
+  mStopAction->setEnabled(running);
+  mSaveAction->setEnabled(!running && workspaceReady);
+  mImportDatasetAction->setEnabled(dataEntryReady);
+  mAttachDatasetAction->setEnabled(dataEntryReady);
+  mImportSceneAction->setEnabled(dataEntryReady);
   mReconstructAction->setEnabled(!running && workspaceReady &&
                                  !mWorkspace.datasetPath().isEmpty());
   mTrainAction->setEnabled(!running && workspaceReady &&
