@@ -13,6 +13,7 @@
 #include <QIcon>
 #include <QSurfaceFormat>
 #include <QTimer>
+#include <QWidget>
 
 #ifdef _WIN32
 #include <shobjidl.h>
@@ -91,6 +92,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test"),
       QStringLiteral("Launch the main window briefly, then exit successfully."));
   parser.addOption(smokeTestOption);
+  QCommandLineOption importDialogSmokeTestOption(
+      QStringLiteral("smoke-test-import-dialog"),
+      QStringLiteral("Verify that adding media from an empty workspace opens the import dialog."));
+  parser.addOption(importDialogSmokeTestOption);
   QCommandLineOption mediaSourceOption(
       QStringLiteral("media-source"),
       QStringLiteral("Pre-populate the media import dialog with a file or directory. "
@@ -104,7 +109,8 @@ int main(int argc, char *argv[]) {
                           parser.values(mediaSourceOption));
   gsw::MainWindow window;
   QString projectPath = parser.value(projectOption);
-  const bool smokeTest = parser.isSet(smokeTestOption);
+  const bool importDialogSmokeTest = parser.isSet(importDialogSmokeTestOption);
+  const bool smokeTest = parser.isSet(smokeTestOption) || importDialogSmokeTest;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -113,10 +119,34 @@ int main(int argc, char *argv[]) {
   }
   window.show();
   bool smokeTestCompleted = !smokeTest;
-  if (smokeTest) {
+  if (importDialogSmokeTest) {
+    QTimer::singleShot(100, &window, [&window]() {
+      QAction *action = window.findChild<QAction *>(
+          QStringLiteral("importDatasetAction"));
+      if (action != nullptr && action->isEnabled()) {
+        action->trigger();
+      }
+    });
+    QTimer::singleShot(
+        500, &application,
+        [&application, &window, &smokeTestCompleted]() {
+          QWidget *dialog = window.findChild<QWidget *>(
+              QStringLiteral("datasetImportDialog"));
+          smokeTestCompleted = window.isVisible() && dialog != nullptr &&
+                               dialog->isVisible();
+          const auto topLevels = QApplication::topLevelWidgets();
+          for (QWidget *widget : topLevels) {
+            if (widget != &window && widget->isVisible()) {
+              widget->close();
+            }
+          }
+          application.exit(smokeTestCompleted ? 0 : 2);
+        });
+  } else if (smokeTest) {
     QTimer::singleShot(250, &application, [&application, &window, &smokeTestCompleted]() {
       const QStringList requiredEntryActions = {
           QStringLiteral("importDatasetAction"),
+          QStringLiteral("importDatasetDirectoryAction"),
           QStringLiteral("attachDatasetAction"),
           QStringLiteral("importSceneAction"),
       };

@@ -6,6 +6,7 @@
 #include "DatasetImportDialog.h"
 #include "DatasetImportPlan.h"
 #include "ImportEnvironmentProbe.h"
+#include "MediaProjectBootstrap.h"
 #include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
 #include "TrainingOutputLocator.h"
@@ -109,16 +110,6 @@ QString safeFileName(QString value) {
   value.replace(QRegularExpression(QStringLiteral(R"([<>:"/\\|?*]+)")), QStringLiteral("_"));
   value = value.trimmed();
   return value.isEmpty() ? QStringLiteral("gaussian-scene") : value;
-}
-
-QString safeSceneName(QString value) {
-  value = value.trimmed();
-  value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]+")),
-                QStringLiteral("_"));
-  while (value.contains(QStringLiteral(".."))) {
-    value.replace(QStringLiteral(".."), QStringLiteral("_"));
-  }
-  return value.isEmpty() ? QStringLiteral("dataset") : value;
 }
 
 QString workerStageLabel(const QString &stage) {
@@ -376,10 +367,20 @@ void MainWindow::createActions() {
   connect(saveAsAction, &QAction::triggered, this, [this]() { saveProject(true); });
 
   mImportDatasetAction = new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
-                                     QStringLiteral("导入照片/视频..."), this);
+                                     QStringLiteral("添加照片/视频..."), this);
   mImportDatasetAction->setObjectName(QStringLiteral("importDatasetAction"));
-  mImportDatasetAction->setToolTip(QStringLiteral("复制照片或视频到工程并自动抽帧"));
+  mImportDatasetAction->setToolTip(QStringLiteral("直接选择照片或视频；视频会自动抽帧"));
   connect(mImportDatasetAction, &QAction::triggered, this, &MainWindow::importDataset);
+
+  mImportDatasetDirectoryAction = new QAction(
+      style()->standardIcon(QStyle::SP_DirIcon),
+      QStringLiteral("添加媒体目录..."), this);
+  mImportDatasetDirectoryAction->setObjectName(
+      QStringLiteral("importDatasetDirectoryAction"));
+  mImportDatasetDirectoryAction->setToolTip(
+      QStringLiteral("递归添加目录中的照片与视频"));
+  connect(mImportDatasetDirectoryAction, &QAction::triggered, this,
+          &MainWindow::importDatasetDirectory);
 
   mAttachDatasetAction = new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
                                      QStringLiteral("关联已有数据集..."), this);
@@ -600,6 +601,7 @@ void MainWindow::createMenus() {
   fileMenu->addAction(actions().at(2));
   fileMenu->addSeparator();
   fileMenu->addAction(mImportDatasetAction);
+  fileMenu->addAction(mImportDatasetDirectoryAction);
   fileMenu->addAction(mAttachDatasetAction);
   fileMenu->addAction(mImportSceneAction);
   fileMenu->addSeparator();
@@ -614,6 +616,9 @@ void MainWindow::createMenus() {
   editMenu->addAction(mDeleteSelectionAction);
 
   QMenu *workflowMenu = menuBar()->addMenu(QStringLiteral("工作流"));
+  workflowMenu->addAction(mImportDatasetAction);
+  workflowMenu->addAction(mImportDatasetDirectoryAction);
+  workflowMenu->addSeparator();
   workflowMenu->addAction(actions().at(3));
   workflowMenu->addSeparator();
   workflowMenu->addAction(mReconstructAction);
@@ -1623,7 +1628,31 @@ void MainWindow::importDataset() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!ensureProjectForDataAction(QStringLiteral("导入照片/视频"))) {
+  if (mProcessSupervisor.isRunning()) {
+    QMessageBox::information(this, QStringLiteral("任务繁忙"),
+                             QStringLiteral("请等待当前任务结束后再导入媒体。"));
+    return;
+  }
+
+  QStringList sourcePaths =
+      qApp->property("gswInitialMediaSources").toStringList();
+  if (!sourcePaths.isEmpty()) {
+    qApp->setProperty("gswInitialMediaSources", QStringList{});
+  } else {
+    sourcePaths = QFileDialog::getOpenFileNames(
+        this, QStringLiteral("添加照片或视频"), mWorkspace.rootPath(),
+        QStringLiteral(
+            "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;"
+            "照片 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;"
+            "视频 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)"));
+  }
+  if (!sourcePaths.isEmpty()) {
+    importDatasetSources(sourcePaths);
+  }
+}
+
+void MainWindow::importDatasetDirectory() {
+  if (!ensureProjectRecoveryReady()) {
     return;
   }
   if (mProcessSupervisor.isRunning()) {
@@ -1631,6 +1660,54 @@ void MainWindow::importDataset() {
                              QStringLiteral("请等待当前任务结束后再导入媒体。"));
     return;
   }
+
+  const QString sourcePath = QFileDialog::getExistingDirectory(
+      this, QStringLiteral("添加包含照片或视频的目录"),
+      mWorkspace.rootPath(), QFileDialog::ShowDirsOnly);
+  if (!sourcePath.isEmpty()) {
+    importDatasetSources({sourcePath});
+  }
+}
+
+void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
+  if (sourcePaths.isEmpty() || !ensureProjectRecoveryReady() ||
+      mProcessSupervisor.isRunning()) {
+    return;
+  }
+
+  QString error;
+  std::optional<MediaProjectBootstrapPlan> automaticProject;
+  if (!mWorkspace.hasProject()) {
+    automaticProject = planMediaProjectBootstrap(sourcePaths, {}, &error);
+    if (!automaticProject.has_value()) {
+      showError(QStringLiteral("无法准备自动工程"), error);
+      return;
+    }
+  }
+
+  const QFileInfo firstSource(sourcePaths.constFirst());
+  const QString initialDirectory = firstSource.isDir()
+                                       ? firstSource.absoluteFilePath()
+                                       : firstSource.absolutePath();
+  const QString projectRoot = automaticProject.has_value()
+                                  ? automaticProject->rootPath
+                                  : mWorkspace.rootPath();
+  DatasetImportDialog dialog(
+      initialDirectory, suggestedMediaSceneName(sourcePaths), sourcePaths,
+      projectRoot, automaticProject.has_value(), this);
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+
+  const std::optional<DatasetImportPlan> &validatedPlan =
+      dialog.validatedPlan();
+  if (!validatedPlan.has_value()) {
+    showError(QStringLiteral("无法准备媒体导入"),
+              QStringLiteral("导入对话框未生成有效的媒体计划。"));
+    return;
+  }
+  const DatasetImportPlan &plan = *validatedPlan;
+  const DatasetImportRequest request = dialog.request();
 
   const QString root = BackendLocator::findRepositoryRoot(
       QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
@@ -1641,22 +1718,6 @@ void MainWindow::importDataset() {
               backendUnavailableMessage(root, workerScript, python));
     return;
   }
-
-  DatasetImportDialog dialog(mWorkspace.rootPath(),
-                             safeSceneName(mWorkspace.projectName()), this);
-  if (dialog.exec() != QDialog::Accepted) {
-    return;
-  }
-
-  const std::optional<DatasetImportPlan> &validatedPlan = dialog.validatedPlan();
-  if (!validatedPlan.has_value()) {
-    showError(QStringLiteral("无法准备媒体导入"),
-              QStringLiteral("导入对话框未生成有效的媒体计划。"));
-    return;
-  }
-  const DatasetImportPlan &plan = *validatedPlan;
-  const DatasetImportRequest request = dialog.request();
-  QString error;
 
   statusBar()->showMessage(QStringLiteral("正在预检媒体导入环境…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1676,10 +1737,31 @@ void MainWindow::importDataset() {
           : QStringLiteral("媒体导入环境预检通过：%1（视频后端：%2）")
                 .arg(preflight.python, preflight.videoBackend));
 
-  const QString projectRoot = comparablePath(mWorkspace.rootPath());
-  const QString datasetRoot = QDir(projectRoot).filePath(QStringLiteral("datasets"));
+  if (automaticProject.has_value()) {
+    if (!materializeMediaProjectBootstrap(*automaticProject, &error)) {
+      showError(QStringLiteral("无法创建自动工程"), error);
+      return;
+    }
+    if (!mWorkspace.create(automaticProject->rootPath, &error)) {
+      showError(QStringLiteral("无法创建自动工程"), error);
+      return;
+    }
+    mRecoveryBlocked = false;
+    if (!mWorkspace.save(automaticProject->projectFilePath, &error)) {
+      showError(QStringLiteral("无法保存自动工程"), error);
+      return;
+    }
+    appendTaskEvent(
+        QStringLiteral("已按素材位置自动创建工程：%1")
+            .arg(QDir::toNativeSeparators(automaticProject->rootPath)));
+  }
+
+  const QString activeProjectRoot = comparablePath(mWorkspace.rootPath());
+  const QString datasetRoot =
+      QDir(activeProjectRoot).filePath(QStringLiteral("datasets"));
   const QString managedDatasetPath = plan.managedDatasetPath(datasetRoot);
-  const QString jobsDirectory = QDir(projectRoot).filePath(QStringLiteral(".gsw/jobs"));
+  const QString jobsDirectory =
+      QDir(activeProjectRoot).filePath(QStringLiteral(".gsw/jobs"));
   const QString configurationPath = QDir(jobsDirectory).filePath(
       QStringLiteral("import-%1.json")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
@@ -1693,7 +1775,7 @@ void MainWindow::importDataset() {
                                .arg(plan.sceneName())
                                .arg(mediaCount);
   const PendingDatasetImport pending{
-      taskName, managedDatasetPath, projectRoot, configurationPath,
+      taskName, managedDatasetPath, activeProjectRoot, configurationPath,
       python, workerScript, root, QStringLiteral("import-recovery")};
 
   statusBar()->showMessage(QStringLiteral("正在检查上次导入事务…"));
@@ -2028,6 +2110,7 @@ void MainWindow::updateActionAvailability() {
   mStopAction->setEnabled(running);
   mSaveAction->setEnabled(!running && workspaceReady);
   mImportDatasetAction->setEnabled(dataEntryReady);
+  mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);
   mImportSceneAction->setEnabled(dataEntryReady);
   mReconstructAction->setEnabled(!running && workspaceReady &&

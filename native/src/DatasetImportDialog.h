@@ -23,6 +23,9 @@ class DatasetImportDialog final : public QDialog {
 public:
   DatasetImportDialog(const QString &initialDirectory,
                       const QString &suggestedSceneName,
+                      const QStringList &initialSourcePaths,
+                      const QString &projectRoot,
+                      bool createsProject,
                       QWidget *parent = nullptr);
 
   [[nodiscard]] DatasetImportRequest request() const;

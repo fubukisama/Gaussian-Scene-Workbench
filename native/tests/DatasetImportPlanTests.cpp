@@ -1,4 +1,5 @@
 #include "DatasetImportPlan.h"
+#include "MediaProjectBootstrap.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -27,6 +28,10 @@ private slots:
   void rejectsRequestsWithoutSupportedMedia();
   void rejectsUnsafeWindowsSceneNames_data();
   void rejectsUnsafeWindowsSceneNames();
+  void plansAutomaticProjectBesideMediaWithoutNestingInSource();
+  void avoidsReusingAnExistingAutomaticProjectDirectory();
+  void suggestsSceneNamesFromFoldersAndVideos();
+  void usesMeaningfulParentForGenericImageFolders();
 };
 
 void DatasetImportPlanTests::collectsSupportedMediaFromFilesAndFolders() {
@@ -258,6 +263,85 @@ void DatasetImportPlanTests::rejectsUnsafeWindowsSceneNames() {
   QString error;
   QVERIFY(!DatasetImportPlan::create(request, &error).has_value());
   QVERIFY(!error.isEmpty());
+}
+
+void DatasetImportPlanTests::plansAutomaticProjectBesideMediaWithoutNestingInSource() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("survey/capture")));
+  const QString imagePath =
+      root.filePath(QStringLiteral("survey/capture/frame.jpg"));
+  QVERIFY(writeBytes(imagePath, QByteArrayLiteral("image")));
+
+  QString error;
+  const auto fromFile = planMediaProjectBootstrap({imagePath}, {}, &error);
+  QVERIFY2(fromFile.has_value(), qPrintable(error));
+  const QString projectsRoot = root.filePath(
+      QStringLiteral("survey/Gaussian Scene Workbench Projects"));
+  QVERIFY(QDir::cleanPath(fromFile->rootPath).startsWith(
+      QDir::cleanPath(projectsRoot)));
+  QVERIFY(!QFileInfo::exists(fromFile->rootPath));
+
+  const auto fromFolder = planMediaProjectBootstrap(
+      {root.filePath(QStringLiteral("survey/capture"))}, {}, &error);
+  QVERIFY2(fromFolder.has_value(), qPrintable(error));
+  QCOMPARE(fromFolder->rootPath, fromFile->rootPath);
+}
+
+void DatasetImportPlanTests::avoidsReusingAnExistingAutomaticProjectDirectory() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("survey/capture")));
+  const QString imagePath =
+      root.filePath(QStringLiteral("survey/capture/frame.jpg"));
+  QVERIFY(writeBytes(imagePath, QByteArrayLiteral("image")));
+
+  QString error;
+  const auto first = planMediaProjectBootstrap({imagePath}, {}, &error);
+  QVERIFY2(first.has_value(), qPrintable(error));
+  QVERIFY2(materializeMediaProjectBootstrap(*first, &error), qPrintable(error));
+
+  const auto second = planMediaProjectBootstrap({imagePath}, {}, &error);
+  QVERIFY2(second.has_value(), qPrintable(error));
+  QVERIFY(second->rootPath.endsWith(QStringLiteral("capture-2")));
+  QVERIFY(second->rootPath != first->rootPath);
+}
+
+void DatasetImportPlanTests::suggestsSceneNamesFromFoldersAndVideos() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("room-capture")));
+  const QString videoPath = root.filePath(QStringLiteral("walkthrough.mp4"));
+  QVERIFY(writeBytes(videoPath, QByteArrayLiteral("video")));
+
+  QCOMPARE(suggestedMediaSceneName({videoPath}),
+           QStringLiteral("walkthrough"));
+  QCOMPARE(suggestedMediaSceneName(
+               {root.filePath(QStringLiteral("room-capture"))}),
+           QStringLiteral("room-capture"));
+}
+
+void DatasetImportPlanTests::usesMeaningfulParentForGenericImageFolders() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("temple/source/originals/images")));
+  const QString imagePath = root.filePath(
+      QStringLiteral("temple/source/originals/images/frame.jpg"));
+  QVERIFY(writeBytes(imagePath, QByteArrayLiteral("image")));
+
+  QCOMPARE(suggestedMediaProjectName({imagePath}), QStringLiteral("temple"));
+  QCOMPARE(suggestedMediaSceneName({imagePath}), QStringLiteral("temple"));
+
+  QString error;
+  const auto plan = planMediaProjectBootstrap({imagePath}, {}, &error);
+  QVERIFY2(plan.has_value(), qPrintable(error));
+  const QString expectedContainer = root.filePath(
+      QStringLiteral("Gaussian Scene Workbench Projects"));
+  QVERIFY(plan->rootPath.startsWith(QDir::cleanPath(expectedContainer)));
 }
 
 QTEST_GUILESS_MAIN(DatasetImportPlanTests)

@@ -77,6 +77,8 @@ private:
   bool recoverInterruptedProjectImports(QString *errorMessage = nullptr);
   void newProject();
   void importDataset();
+  void importDatasetDirectory();
+  void importDatasetSources(const QStringList &sourcePaths);
   void attachExistingDataset();
   void importScene();
   void runEnvironmentCheck();
@@ -119,6 +121,7 @@ private:
   QAction *mOpenProjectAction = nullptr;
   QAction *mSaveAction = nullptr;
   QAction *mImportDatasetAction = nullptr;
+  QAction *mImportDatasetDirectoryAction = nullptr;
   QAction *mAttachDatasetAction = nullptr;
   QAction *mImportSceneAction = nullptr;
   QAction *mReconstructAction = nullptr;

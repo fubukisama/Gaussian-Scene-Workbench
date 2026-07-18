@@ -51,6 +51,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
   src/MainWindow.h
+  src/MediaProjectBootstrap.cpp
+  src/MediaProjectBootstrap.h
   src/NativeViewport.cpp
   src/NativeViewport.h
   src/PlyPointCloudLoader.cpp
@@ -115,7 +117,14 @@ if(BUILD_TESTING)
     NAME native_application_launch
     COMMAND GaussianSceneWorkbench --smoke-test
   )
-  set_tests_properties(native_application_launch PROPERTIES
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-import.jpg" "smoke")
+  add_test(
+    NAME native_metashape_import_entry
+    COMMAND GaussianSceneWorkbench
+      --smoke-test-import-dialog
+      --media-source "${CMAKE_CURRENT_BINARY_DIR}/smoke-import.jpg"
+  )
+  set_tests_properties(native_application_launch native_metashape_import_entry PROPERTIES
     TIMEOUT 15
     ENVIRONMENT
       "QT_OPENGL=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
@@ -150,6 +159,8 @@ if(BUILD_TESTING)
       tests/DatasetImportPlanTests.cpp
       src/DatasetImportPlan.cpp
       src/DatasetImportPlan.h
+      src/MediaProjectBootstrap.cpp
+      src/MediaProjectBootstrap.h
     )
     target_include_directories(gsw_dataset_import_plan_tests PRIVATE src)
     target_link_libraries(gsw_dataset_import_plan_tests PRIVATE Qt6::Core Qt6::Test)

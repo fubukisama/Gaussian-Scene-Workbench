@@ -44,11 +44,14 @@ QString pathKey(const QString &path) {
 
 DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
                                          const QString &suggestedSceneName,
+                                         const QStringList &initialSourcePaths,
+                                         const QString &projectRoot,
+                                         const bool createsProject,
                                          QWidget *parent)
     : QDialog(parent),
       mInitialDirectory(normalizedPath(initialDirectory)) {
   setObjectName(QStringLiteral("datasetImportDialog"));
-  setWindowTitle(QStringLiteral("导入照片与视频"));
+  setWindowTitle(QStringLiteral("添加照片与视频"));
   setModal(true);
   setMinimumSize(640, 460);
 
@@ -57,11 +60,24 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   rootLayout->setSpacing(12);
 
   auto *introduction = new QLabel(
-      QStringLiteral("选择照片、视频或包含媒体的目录。媒体将复制到当前工程，视频会按指定帧率抽帧。"),
+      createsProject
+          ? QStringLiteral("素材已选好。开始后会在素材同盘自动创建工程；照片会复制到托管数据集，视频会按指定帧率抽帧。")
+          : QStringLiteral("素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。"),
       this);
   introduction->setObjectName(QStringLiteral("datasetImportIntroductionLabel"));
   introduction->setWordWrap(true);
   rootLayout->addWidget(introduction);
+
+  auto *projectPath = new QLabel(
+      QStringLiteral("%1：%2")
+          .arg(createsProject ? QStringLiteral("自动工程")
+                              : QStringLiteral("当前工程"),
+               QDir::toNativeSeparators(projectRoot)),
+      this);
+  projectPath->setObjectName(QStringLiteral("datasetImportProjectPathLabel"));
+  projectPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  projectPath->setWordWrap(true);
+  rootLayout->addWidget(projectPath);
 
   auto *form = new QFormLayout();
   form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -106,9 +122,9 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
   auto *sourceButtons = new QHBoxLayout();
   sourceButtons->setSpacing(6);
-  auto *addFilesButton = new QPushButton(QStringLiteral("添加照片/视频..."), this);
+  auto *addFilesButton = new QPushButton(QStringLiteral("继续添加照片/视频..."), this);
   addFilesButton->setObjectName(QStringLiteral("datasetImportAddFilesButton"));
-  auto *addDirectoryButton = new QPushButton(QStringLiteral("添加目录..."), this);
+  auto *addDirectoryButton = new QPushButton(QStringLiteral("继续添加目录..."), this);
   addDirectoryButton->setObjectName(
       QStringLiteral("datasetImportAddDirectoryButton"));
   mRemoveButton = new QPushButton(QStringLiteral("移除所选"), this);
@@ -133,7 +149,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   cancelButton->setObjectName(QStringLiteral("datasetImportCancelButton"));
   cancelButton->setText(QStringLiteral("取消"));
   mImportButton =
-      buttons->addButton(QStringLiteral("开始导入"), QDialogButtonBox::AcceptRole);
+      buttons->addButton(QStringLiteral("添加到工程"), QDialogButtonBox::AcceptRole);
   mImportButton->setObjectName(QStringLiteral("datasetImportStartButton"));
   mImportButton->setDefault(true);
   rootLayout->addWidget(buttons);
@@ -157,12 +173,10 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   connect(buttons, &QDialogButtonBox::rejected, this,
           &DatasetImportDialog::reject);
 
-  const QStringList initialMediaSources =
-      qApp->property("gswInitialMediaSources").toStringList();
-  if (initialMediaSources.isEmpty()) {
+  if (initialSourcePaths.isEmpty()) {
     refreshSummary();
   } else {
-    appendSourcePaths(initialMediaSources);
+    appendSourcePaths(initialSourcePaths);
   }
 }
 
