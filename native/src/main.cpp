@@ -8,7 +8,9 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLabel>
@@ -158,8 +160,13 @@ int main(int argc, char *argv[]) {
               QStringLiteral("selectionToolbar"));
           const QToolBar *editToolbar = window.findChild<QToolBar *>(
               QStringLiteral("editToolbar"));
+          const QDockWidget *inspectorDock = window.findChild<QDockWidget *>(
+              QStringLiteral("inspectorDock"));
+          const QDockWidget *taskDock = window.findChild<QDockWidget *>(
+              QStringLiteral("taskDock"));
           const QLabel *scaleStatus = window.findChild<QLabel *>(
               QStringLiteral("uiScaleStatus"));
+          const int fontHeight = QFontMetrics(window.font()).height();
 
           smokeTestCompleted =
               window.isVisible() && autoScale != nullptr &&
@@ -171,6 +178,9 @@ int main(int argc, char *argv[]) {
               environment != nullptr && resetCamera != nullptr &&
               !mainToolbar->actions().contains(environment) &&
               !mainToolbar->actions().contains(resetCamera) &&
+              inspectorDock != nullptr && taskDock != nullptr &&
+              inspectorDock->minimumWidth() >= fontHeight * 12 &&
+              taskDock->minimumHeight() >= fontHeight * 7 &&
               scaleStatus != nullptr && scaleStatus->text().contains('%') &&
               scaleStatus->text().contains(QChar(0x00D7));
           application.exit(smokeTestCompleted ? 0 : 2);

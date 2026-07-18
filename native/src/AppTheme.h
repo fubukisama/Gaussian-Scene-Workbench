@@ -20,9 +20,14 @@ public:
   static int recommendedScalePercent(const QScreen *screen);
   static int recommendedScalePercent(const QSize &availableSize,
                                      const QSize &windowSize);
+  static int recommendedScalePercent(const QSize &availableSize,
+                                     const QSize &windowSize,
+                                     double devicePixelRatio);
   static QSize fitWindowResolution(const QSize &requestedSize,
                                    const QSize &availableSize,
                                    const QSize &minimumSize);
+  static int rescaledDockExtent(int currentExtent, int fromScalePercent,
+                                int toScalePercent, int minimumExtent);
   static void saveScaleMode(UiScaleMode mode);
   static void apply(QApplication &application, int scalePercent, bool persist);
   static int scaled(int value, int scalePercent);

@@ -10,8 +10,10 @@ class AppThemeTests final : public QObject {
 
 private slots:
   void keepsAutomaticTextReadableAcrossCommonWindowSizes();
+  void compensatesForOperatingSystemDisplayScale();
   void growsAutomaticScaleForHighResolutionWorkspaces();
   void fitsRequestedWindowResolutionInsideTheScreen();
+  void rescalesDockExtentWhenDensityChanges();
   void clampsManualScaleToSupportedRange();
 };
 
@@ -21,6 +23,15 @@ void AppThemeTests::keepsAutomaticTextReadableAcrossCommonWindowSizes() {
            100);
   QVERIFY(AppTheme::recommendedScalePercent(QSize(1366, 728),
                                             QSize(1280, 700)) >= 90);
+}
+
+void AppThemeTests::compensatesForOperatingSystemDisplayScale() {
+  QCOMPARE(AppTheme::recommendedScalePercent(QSize(1707, 933),
+                                             QSize(1570, 917), 1.5),
+           90);
+  QCOMPARE(AppTheme::recommendedScalePercent(QSize(2048, 1117),
+                                             QSize(1900, 1000), 1.25),
+           95);
 }
 
 void AppThemeTests::growsAutomaticScaleForHighResolutionWorkspaces() {
@@ -39,6 +50,12 @@ void AppThemeTests::fitsRequestedWindowResolutionInsideTheScreen() {
   QVERIFY(fitted.height() <= 699);
   QVERIFY(fitted.width() >= 940);
   QVERIFY(fitted.height() >= 620);
+}
+
+void AppThemeTests::rescalesDockExtentWhenDensityChanges() {
+  QCOMPARE(AppTheme::rescaledDockExtent(350, 150, 90, 207), 210);
+  QCOMPARE(AppTheme::rescaledDockExtent(150, 90, 150, 230), 250);
+  QCOMPARE(AppTheme::rescaledDockExtent(120, 0, 100, 180), 180);
 }
 
 void AppThemeTests::clampsManualScaleToSupportedRange() {

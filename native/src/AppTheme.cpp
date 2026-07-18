@@ -36,11 +36,18 @@ int AppTheme::recommendedScalePercent(const QScreen *screen) {
     return 100;
   }
   const QSize availableSize = screen->availableGeometry().size();
-  return recommendedScalePercent(availableSize, availableSize);
+  return recommendedScalePercent(availableSize, availableSize,
+                                 screen->devicePixelRatio());
 }
 
 int AppTheme::recommendedScalePercent(const QSize &availableSize,
                                       const QSize &windowSize) {
+  return recommendedScalePercent(availableSize, windowSize, 1.0);
+}
+
+int AppTheme::recommendedScalePercent(const QSize &availableSize,
+                                      const QSize &windowSize,
+                                      const double devicePixelRatio) {
   QSize basis = windowSize.isValid() ? windowSize : availableSize;
   if (availableSize.isValid()) {
     basis = basis.boundedTo(availableSize);
@@ -49,19 +56,25 @@ int AppTheme::recommendedScalePercent(const QSize &availableSize,
     return 100;
   }
 
+  int scale = 125;
   if (basis.width() <= 1280 || basis.height() <= 720) {
-    return 90;
+    scale = 90;
+  } else if (basis.width() < 1500 || basis.height() < 820) {
+    scale = 95;
+  } else if (basis.width() < 2200 || basis.height() < 1200) {
+    scale = 100;
+  } else if (basis.width() < 3200 || basis.height() < 1750) {
+    scale = 110;
   }
-  if (basis.width() < 1500 || basis.height() < 820) {
-    return 95;
+
+  if (devicePixelRatio >= 1.75) {
+    scale -= 15;
+  } else if (devicePixelRatio >= 1.4) {
+    scale -= 10;
+  } else if (devicePixelRatio >= 1.2) {
+    scale -= 5;
   }
-  if (basis.width() < 2200 || basis.height() < 1200) {
-    return 100;
-  }
-  if (basis.width() < 3200 || basis.height() < 1750) {
-    return 110;
-  }
-  return 125;
+  return clampScale(scale);
 }
 
 QSize AppTheme::fitWindowResolution(const QSize &requestedSize,
@@ -83,6 +96,19 @@ QSize AppTheme::fitWindowResolution(const QSize &requestedSize,
   const QSize boundedMinimum = minimumSize.boundedTo(maximumSize);
   fitted = fitted.expandedTo(boundedMinimum).boundedTo(maximumSize);
   return fitted;
+}
+
+int AppTheme::rescaledDockExtent(const int currentExtent,
+                                 const int fromScalePercent,
+                                 const int toScalePercent,
+                                 const int minimumExtent) {
+  if (fromScalePercent <= 0) {
+    return std::max(currentExtent, minimumExtent);
+  }
+  const int target = qRound(
+      static_cast<double>(currentExtent) * clampScale(toScalePercent) /
+      clampScale(fromScalePercent));
+  return std::max(target, minimumExtent);
 }
 
 int AppTheme::loadScalePercent(const QScreen *screen) {
@@ -202,6 +228,7 @@ QDockWidget::title {
   background: #222528;
   border-bottom: 1px solid #363a3e;
   padding: @DOCK_PAD@px;
+  font-weight: 500;
   text-align: left;
 }
 QTabWidget::pane { border: 0; border-top: 1px solid #373b3f; }
@@ -260,12 +287,12 @@ QToolTip { background: #2c3033; color: #ffffff; border: 1px solid #555b60; paddi
   replace(QStringLiteral("@COMBO_ARROW@"), 22);
   replace(QStringLiteral("@ROW_HEIGHT@"), 25);
   replace(QStringLiteral("@HEADER_PAD@"), 6);
-  replace(QStringLiteral("@DOCK_PAD@"), 7);
-  replace(QStringLiteral("@TAB_V@"), 7);
+  replace(QStringLiteral("@DOCK_PAD@"), 4);
+  replace(QStringLiteral("@TAB_V@"), 5);
   replace(QStringLiteral("@TAB_H@"), 12);
   replace(QStringLiteral("@SCROLL@"), 10);
-  replace(QStringLiteral("@SECTION_TOP@"), 9);
-  replace(QStringLiteral("@SECTION_BOTTOM@"), 6);
+  replace(QStringLiteral("@SECTION_TOP@"), 6);
+  replace(QStringLiteral("@SECTION_BOTTOM@"), 4);
   return css;
 }
 

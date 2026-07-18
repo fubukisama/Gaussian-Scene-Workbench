@@ -23,6 +23,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGuiApplication>
@@ -65,6 +66,8 @@
 namespace gsw {
 
 namespace {
+constexpr int kDockLayoutStateVersion = 4;
+
 QLabel *createValueLabel(QWidget *parent = nullptr) {
   auto *label = new QLabel(QStringLiteral("-"), parent);
   label->setObjectName(QStringLiteral("mutedLabel"));
@@ -1267,9 +1270,8 @@ void MainWindow::restoreWindowState() {
     resize(size);
     move(available.center() - rect().center());
   }
-  if (!state.isEmpty()) {
-    restoreState(state, 1);
-  } else {
+  if (state.isEmpty() ||
+      !restoreState(state, kDockLayoutStateVersion)) {
     resetDockLayout();
   }
 }
@@ -1277,7 +1279,8 @@ void MainWindow::restoreWindowState() {
 void MainWindow::saveWindowState() {
   QSettings settings;
   settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
-  settings.setValue(QStringLiteral("window/state"), saveState(1));
+  settings.setValue(QStringLiteral("window/state"),
+                    saveState(kDockLayoutStateVersion));
 }
 
 void MainWindow::resetDockLayout() {
@@ -1287,14 +1290,61 @@ void MainWindow::resetDockLayout() {
   mProjectDock->show();
   mInspectorDock->show();
   mTaskDock->show();
+  rebalanceDockSizes();
+}
+
+void MainWindow::rebalanceDockSizes() {
+  updateDockMetrics();
   resizeDocks({mProjectDock, mInspectorDock},
-              {AppTheme::scaled(250, mUiScalePercent), AppTheme::scaled(300, mUiScalePercent)}, Qt::Horizontal);
-  resizeDocks({mTaskDock}, {AppTheme::scaled(210, mUiScalePercent)}, Qt::Vertical);
+              {std::max(AppTheme::scaled(225, mUiScalePercent),
+                        mProjectDock->minimumWidth()),
+               std::max(AppTheme::scaled(270, mUiScalePercent),
+                        mInspectorDock->minimumWidth())},
+              Qt::Horizontal);
+  resizeDocks({mTaskDock},
+              {std::max(AppTheme::scaled(180, mUiScalePercent),
+                        mTaskDock->minimumHeight())},
+              Qt::Vertical);
+}
+
+void MainWindow::updateDockMetrics() {
+  const int fontHeight = QFontMetrics(qApp->font()).height();
+  if (mProjectDock != nullptr) {
+    mProjectDock->setMinimumWidth(
+        std::max(AppTheme::scaled(190, mUiScalePercent), fontHeight * 10));
+  }
+  if (mInspectorDock != nullptr) {
+    mInspectorDock->setMinimumWidth(
+        std::max(AppTheme::scaled(230, mUiScalePercent), fontHeight * 12));
+  }
+  if (mTaskDock != nullptr) {
+    mTaskDock->setMinimumHeight(
+        std::max(AppTheme::scaled(150, mUiScalePercent), fontHeight * 7));
+  }
 }
 
 void MainWindow::applyUiScale(const int scalePercent, const bool persist) {
+  const int previousScalePercent = mUiScalePercent;
   mUiScalePercent = std::clamp(scalePercent, 90, 150);
   AppTheme::apply(*qApp, mUiScalePercent, persist);
+  updateDockMetrics();
+  if (previousScalePercent != mUiScalePercent) {
+    resizeDocks(
+        {mProjectDock, mInspectorDock},
+        {AppTheme::rescaledDockExtent(
+             mProjectDock->width(), previousScalePercent, mUiScalePercent,
+             mProjectDock->minimumWidth()),
+         AppTheme::rescaledDockExtent(
+             mInspectorDock->width(), previousScalePercent, mUiScalePercent,
+             mInspectorDock->minimumWidth())},
+        Qt::Horizontal);
+    resizeDocks(
+        {mTaskDock},
+        {AppTheme::rescaledDockExtent(
+            mTaskDock->height(), previousScalePercent, mUiScalePercent,
+            mTaskDock->minimumHeight())},
+        Qt::Vertical);
+  }
   const QSize iconSize(AppTheme::scaled(20, mUiScalePercent),
                        AppTheme::scaled(20, mUiScalePercent));
   for (QToolBar *toolbar : findChildren<QToolBar *>()) {
@@ -1327,6 +1377,7 @@ void MainWindow::setAutomaticUiScale(const bool automatic,
   }
   if (automatic) {
     refreshAutomaticUiScale();
+    rebalanceDockSizes();
   } else {
     applyUiScale(mUiScalePercent, false);
   }
@@ -1345,7 +1396,9 @@ void MainWindow::refreshAutomaticUiScale() {
       activeScreen == nullptr ? QSize{}
                               : activeScreen->availableGeometry().size();
   const int recommended =
-      AppTheme::recommendedScalePercent(availableSize, size());
+      AppTheme::recommendedScalePercent(
+          availableSize, size(),
+          activeScreen == nullptr ? 1.0 : activeScreen->devicePixelRatio());
   if (recommended != mUiScalePercent) {
     applyUiScale(recommended, false);
   } else {

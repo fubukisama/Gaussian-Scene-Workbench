@@ -67,6 +67,8 @@ private:
   void restoreWindowState();
   void saveWindowState();
   void resetDockLayout();
+  void updateDockMetrics();
+  void rebalanceDockSizes();
   void applyUiScale(int scalePercent, bool persist);
   void setAutomaticUiScale(bool automatic, bool persist);
   void refreshAutomaticUiScale();
