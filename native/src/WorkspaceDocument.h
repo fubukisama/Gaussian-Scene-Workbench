@@ -23,6 +23,7 @@ public:
   explicit WorkspaceDocument(QObject *parent = nullptr);
 
   [[nodiscard]] bool hasProject() const;
+  [[nodiscard]] bool isUntitled() const;
   [[nodiscard]] bool isModified() const;
   [[nodiscard]] QString projectName() const;
   [[nodiscard]] QString rootPath() const;
@@ -33,6 +34,9 @@ public:
   [[nodiscard]] PlyMetadata sceneMetadata() const;
 
   bool create(const QString &rootPath, QString *errorMessage = nullptr);
+  bool createUntitled(const QString &workingRoot,
+                      const QString &displayName = {},
+                      QString *errorMessage = nullptr);
   bool load(const QString &filePath, QString *errorMessage = nullptr);
   bool save(const QString &filePath = {}, QString *errorMessage = nullptr);
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
@@ -40,6 +44,7 @@ public:
 
   static PlyMetadata inspectPly(const QString &filePath, QString *errorMessage = nullptr);
   static qint64 countDatasetImages(const QString &directoryPath);
+  static QString projectDataRootForFile(const QString &projectFilePath);
 
 signals:
   void changed();
@@ -47,7 +52,6 @@ signals:
 
 private:
   void setModified(bool modified);
-  QString makePortablePath(const QString &absolutePath) const;
   QString resolvePortablePath(const QString &storedPath) const;
 
   QString mProjectName;

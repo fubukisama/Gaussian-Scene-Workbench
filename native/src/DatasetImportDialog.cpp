@@ -46,7 +46,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
                                          const QString &suggestedSceneName,
                                          const QStringList &initialSourcePaths,
                                          const QString &projectRoot,
-                                         const bool createsProject,
+                                         const bool unsavedProject,
                                          QWidget *parent)
     : QDialog(parent),
       mInitialDirectory(normalizedPath(initialDirectory)) {
@@ -60,8 +60,8 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   rootLayout->setSpacing(12);
 
   auto *introduction = new QLabel(
-      createsProject
-          ? QStringLiteral("素材已选好。开始后会在素材同盘自动创建工程；照片会复制到托管数据集，视频会按指定帧率抽帧。")
+      unsavedProject
+          ? QStringLiteral("素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。")
           : QStringLiteral("素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。"),
       this);
   introduction->setObjectName(QStringLiteral("datasetImportIntroductionLabel"));
@@ -69,10 +69,10 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   rootLayout->addWidget(introduction);
 
   auto *projectPath = new QLabel(
-      QStringLiteral("%1：%2")
-          .arg(createsProject ? QStringLiteral("自动工程")
-                              : QStringLiteral("当前工程"),
-               QDir::toNativeSeparators(projectRoot)),
+      unsavedProject
+          ? QStringLiteral("当前工程：未命名工程（尚未保存，首次保存时可选择位置）")
+          : QStringLiteral("当前工程数据：%1")
+                .arg(QDir::toNativeSeparators(projectRoot)),
       this);
   projectPath->setObjectName(QStringLiteral("datasetImportProjectPathLabel"));
   projectPath->setTextInteractionFlags(Qt::TextSelectableByMouse);

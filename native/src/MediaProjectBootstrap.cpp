@@ -8,12 +8,6 @@
 namespace gsw {
 namespace {
 
-void assignError(QString *target, const QString &message) {
-  if (target != nullptr) {
-    *target = message;
-  }
-}
-
 bool isReservedWindowsName(const QString &name) {
   static const QSet<QString> reserved = {
       QStringLiteral("CON"),  QStringLiteral("PRN"),  QStringLiteral("AUX"),
@@ -92,14 +86,6 @@ QString sourceLabel(const QStringList &sourcePaths) {
   return QDir(logicalMediaRoot(sourcePaths)).dirName();
 }
 
-QString sourceSiblingDirectory(const QStringList &sourcePaths) {
-  QDir siblingParent(logicalMediaRoot(sourcePaths));
-  if (!siblingParent.cdUp()) {
-    siblingParent = QDir(logicalMediaRoot(sourcePaths));
-  }
-  return QDir::cleanPath(siblingParent.absolutePath());
-}
-
 } // namespace
 
 QString suggestedMediaProjectName(const QStringList &sourcePaths) {
@@ -127,67 +113,6 @@ QString suggestedMediaSceneName(const QStringList &sourcePaths) {
     return QStringLiteral("dataset");
   }
   return value.left(120);
-}
-
-std::optional<MediaProjectBootstrapPlan>
-planMediaProjectBootstrap(const QStringList &sourcePaths,
-                          const QString &displayName,
-                          QString *errorMessage) {
-  if (errorMessage != nullptr) {
-    errorMessage->clear();
-  }
-  if (sourcePaths.isEmpty()) {
-    assignError(errorMessage, QStringLiteral("没有可用于创建工程的媒体来源。"));
-    return std::nullopt;
-  }
-
-  const QFileInfo first(sourcePaths.constFirst());
-  if (!first.exists()) {
-    assignError(errorMessage,
-                QStringLiteral("媒体来源不存在：%1").arg(sourcePaths.constFirst()));
-    return std::nullopt;
-  }
-
-  const QString projectName = safeProjectComponent(
-      displayName.isEmpty() ? suggestedMediaProjectName(sourcePaths)
-                            : displayName);
-  const QString projectsDirectory =
-      QDir(sourceSiblingDirectory(sourcePaths))
-          .filePath(QStringLiteral("Gaussian Scene Workbench Projects"));
-  QString rootPath = QDir(projectsDirectory).filePath(projectName);
-  for (int suffix = 2; QFileInfo::exists(rootPath); ++suffix) {
-    rootPath = QDir(projectsDirectory)
-                   .filePath(QStringLiteral("%1-%2").arg(projectName).arg(suffix));
-  }
-
-  MediaProjectBootstrapPlan plan;
-  plan.displayName = QFileInfo(rootPath).fileName();
-  plan.rootPath = QDir::cleanPath(QFileInfo(rootPath).absoluteFilePath());
-  plan.projectFilePath =
-      QDir(plan.rootPath)
-          .filePath(safeProjectComponent(plan.displayName) +
-                    QStringLiteral(".gsw.json"));
-  return plan;
-}
-
-bool materializeMediaProjectBootstrap(
-    const MediaProjectBootstrapPlan &plan, QString *errorMessage) {
-  if (errorMessage != nullptr) {
-    errorMessage->clear();
-  }
-  if (plan.rootPath.isEmpty() || QFileInfo::exists(plan.rootPath)) {
-    assignError(errorMessage,
-                QStringLiteral("自动工程目录已存在或无效：%1")
-                    .arg(QDir::toNativeSeparators(plan.rootPath)));
-    return false;
-  }
-  if (!QDir().mkpath(plan.rootPath) || !QFileInfo(plan.rootPath).isDir()) {
-    assignError(errorMessage,
-                QStringLiteral("无法在素材旁创建工程目录：%1")
-                    .arg(QDir::toNativeSeparators(plan.rootPath)));
-    return false;
-  }
-  return true;
 }
 
 } // namespace gsw

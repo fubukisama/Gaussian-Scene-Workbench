@@ -25,7 +25,7 @@ public:
                       const QString &suggestedSceneName,
                       const QStringList &initialSourcePaths,
                       const QString &projectRoot,
-                      bool createsProject,
+                      bool unsavedProject,
                       QWidget *parent = nullptr);
 
   [[nodiscard]] DatasetImportRequest request() const;

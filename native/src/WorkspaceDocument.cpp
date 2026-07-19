@@ -2,12 +2,14 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QSet>
+#include <QUuid>
 
 namespace gsw {
 
@@ -16,10 +18,129 @@ QString normalizedAbsolutePath(const QString &path) {
   return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
 }
 
+Qt::CaseSensitivity pathCaseSensitivity() {
+#ifdef Q_OS_WIN
+  return Qt::CaseInsensitive;
+#else
+  return Qt::CaseSensitive;
+#endif
+}
+
+bool pathsEqual(const QString &left, const QString &right) {
+  return normalizedAbsolutePath(left).compare(normalizedAbsolutePath(right),
+                                               pathCaseSensitivity()) == 0;
+}
+
+bool relativePathInside(const QString &rootPath, const QString &candidatePath,
+                        QString *relativePath = nullptr) {
+  if (rootPath.isEmpty() || candidatePath.isEmpty()) {
+    return false;
+  }
+  const QString relative =
+      QDir(rootPath).relativeFilePath(normalizedAbsolutePath(candidatePath));
+  const bool inside =
+      !QDir::isAbsolutePath(relative) && relative != QStringLiteral("..") &&
+      !relative.startsWith(QStringLiteral("../")) &&
+      !relative.startsWith(QStringLiteral("..\\"));
+  if (inside && relativePath != nullptr) {
+    *relativePath = relative;
+  }
+  return inside;
+}
+
+QString portablePathForRoot(const QString &absolutePath,
+                            const QString &rootPath) {
+  QString relative;
+  return relativePathInside(rootPath, absolutePath, &relative) ? relative
+                                                               : absolutePath;
+}
+
+QString remapManagedPath(const QString &absolutePath,
+                         const QString &oldRootPath,
+                         const QString &newRootPath) {
+  if (absolutePath.isEmpty()) {
+    return {};
+  }
+  QString relative;
+  if (!relativePathInside(oldRootPath, absolutePath, &relative)) {
+    return absolutePath;
+  }
+  return relative == QStringLiteral(".")
+             ? newRootPath
+             : QDir::cleanPath(QDir(newRootPath).filePath(relative));
+}
+
+QString projectStem(const QString &projectFilePath) {
+  QString name = QFileInfo(projectFilePath).fileName();
+  const QString suffix = QStringLiteral(".gsw.json");
+  if (name.endsWith(suffix, Qt::CaseInsensitive)) {
+    name.chop(suffix.size());
+  } else {
+    name = QFileInfo(projectFilePath).completeBaseName();
+  }
+  return name.isEmpty() ? QStringLiteral("Gaussian Scene Project") : name;
+}
+
 void assignError(QString *target, const QString &message) {
   if (target != nullptr) {
     *target = message;
   }
+}
+
+bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
+                       const QStringList &excludedPaths,
+                       QString *errorMessage) {
+  if (!QDir().mkpath(targetRoot)) {
+    assignError(errorMessage,
+                QObject::tr("Unable to create project data directory: %1")
+                    .arg(targetRoot));
+    return false;
+  }
+
+  QDirIterator iterator(
+      sourceRoot,
+      QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+      QDirIterator::Subdirectories);
+  while (iterator.hasNext()) {
+    const QString sourcePath = iterator.next();
+    bool excluded = false;
+    for (const QString &excludedPath : excludedPaths) {
+      if (!excludedPath.isEmpty() && pathsEqual(sourcePath, excludedPath)) {
+        excluded = true;
+        break;
+      }
+    }
+    if (excluded) {
+      continue;
+    }
+
+    const QFileInfo sourceInfo = iterator.fileInfo();
+    if (sourceInfo.isSymLink()) {
+      assignError(errorMessage,
+                  QObject::tr("Project data contains an unsupported symbolic link: %1")
+                      .arg(sourcePath));
+      return false;
+    }
+    const QString relativePath = QDir(sourceRoot).relativeFilePath(sourcePath);
+    const QString targetPath = QDir(targetRoot).filePath(relativePath);
+    if (sourceInfo.isDir()) {
+      if (!QDir().mkpath(targetPath)) {
+        assignError(errorMessage,
+                    QObject::tr("Unable to create project data directory: %1")
+                        .arg(targetPath));
+        return false;
+      }
+      continue;
+    }
+    if (!QDir().mkpath(QFileInfo(targetPath).absolutePath()) ||
+        !QFile::copy(sourcePath, targetPath)) {
+      assignError(errorMessage,
+                  QObject::tr("Unable to copy project data: %1")
+                      .arg(sourcePath));
+      return false;
+    }
+  }
+  return true;
 }
 
 qint64 countImageFiles(const QString &rootPath) {
@@ -50,6 +171,9 @@ bool PlyMetadata::looksLikeGaussianSplat() const {
 WorkspaceDocument::WorkspaceDocument(QObject *parent) : QObject(parent) {}
 
 bool WorkspaceDocument::hasProject() const { return !mRootPath.isEmpty(); }
+bool WorkspaceDocument::isUntitled() const {
+  return hasProject() && mProjectFilePath.isEmpty();
+}
 bool WorkspaceDocument::isModified() const { return mModified; }
 QString WorkspaceDocument::projectName() const { return mProjectName; }
 QString WorkspaceDocument::rootPath() const { return mRootPath; }
@@ -77,6 +201,31 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mImageCount = 0;
   mSceneMetadata = {};
   setModified(true);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::createUntitled(const QString &workingRoot,
+                                       const QString &displayName,
+                                       QString *errorMessage) {
+  const QFileInfo rootInfo(workingRoot);
+  if (!rootInfo.exists() || !rootInfo.isDir()) {
+    assignError(errorMessage,
+                tr("Temporary project directory does not exist: %1")
+                    .arg(workingRoot));
+    return false;
+  }
+
+  mRootPath = normalizedAbsolutePath(workingRoot);
+  mProjectName = displayName.trimmed().isEmpty()
+                     ? tr("Untitled Project")
+                     : displayName.trimmed();
+  mProjectFilePath.clear();
+  mDatasetPath.clear();
+  mScenePath.clear();
+  mImageCount = 0;
+  mSceneMetadata = {};
+  setModified(false);
   emit changed();
   return true;
 }
@@ -128,38 +277,127 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     return false;
   }
 
-  const QString targetPath = filePath.isEmpty() ? mProjectFilePath : normalizedAbsolutePath(filePath);
+  const QString targetPath =
+      filePath.isEmpty() ? mProjectFilePath : normalizedAbsolutePath(filePath);
   if (targetPath.isEmpty()) {
     assignError(errorMessage, tr("A project file path is required."));
     return false;
   }
 
+  const QFileInfo targetInfo(targetPath);
+  if (!QFileInfo(targetInfo.absolutePath()).isDir()) {
+    assignError(errorMessage,
+                tr("Project save directory does not exist: %1")
+                    .arg(targetInfo.absolutePath()));
+    return false;
+  }
+
+  const bool saveAs =
+      !filePath.isEmpty() &&
+      (mProjectFilePath.isEmpty() ||
+       !pathsEqual(targetPath, mProjectFilePath));
+  const QString oldRootPath = mRootPath;
+  QString savedRootPath = mRootPath;
+  QString savedDatasetPath = mDatasetPath;
+  QString savedScenePath = mScenePath;
+  QString savedProjectName = mProjectName;
+  bool createdDataRoot = false;
+
+  if (saveAs) {
+    const QString targetDataRoot = projectDataRootForFile(targetPath);
+    if (!pathsEqual(oldRootPath, targetDataRoot)) {
+      if (relativePathInside(oldRootPath, targetDataRoot)) {
+        assignError(
+            errorMessage,
+            tr("Choose a project file outside the current working data directory."));
+        return false;
+      }
+      if (QFileInfo::exists(targetDataRoot)) {
+        assignError(errorMessage,
+                    tr("Project data directory already exists: %1")
+                        .arg(targetDataRoot));
+        return false;
+      }
+
+      const QString stagingRoot =
+          QDir(targetInfo.absolutePath())
+              .filePath(QStringLiteral(".%1.gsw-stage-%2")
+                            .arg(QFileInfo(targetDataRoot).fileName(),
+                                 QUuid::createUuid().toString(
+                                     QUuid::WithoutBraces)));
+      const QStringList exclusions = {mProjectFilePath, targetPath};
+      if (!copyDirectoryTree(oldRootPath, stagingRoot, exclusions,
+                             errorMessage)) {
+        QDir(stagingRoot).removeRecursively();
+        return false;
+      }
+      if (!QDir().rename(stagingRoot, targetDataRoot)) {
+        QDir(stagingRoot).removeRecursively();
+        assignError(errorMessage,
+                    tr("Unable to finalize project data directory: %1")
+                        .arg(targetDataRoot));
+        return false;
+      }
+      createdDataRoot = true;
+      savedRootPath = normalizedAbsolutePath(targetDataRoot);
+      savedDatasetPath =
+          remapManagedPath(mDatasetPath, oldRootPath, savedRootPath);
+      savedScenePath =
+          remapManagedPath(mScenePath, oldRootPath, savedRootPath);
+    }
+    savedProjectName = projectStem(targetPath);
+  }
+
   QJsonObject root;
   root.insert(QStringLiteral("schemaVersion"), 1);
   root.insert(QStringLiteral("application"), QStringLiteral("Gaussian Scene Workbench"));
-  root.insert(QStringLiteral("projectName"), mProjectName);
+  root.insert(QStringLiteral("projectName"), savedProjectName);
   const QString projectDirectory = QFileInfo(targetPath).absolutePath();
-  const QString relativeRoot = QDir(projectDirectory).relativeFilePath(mRootPath);
-  const QString storedRoot = !relativeRoot.startsWith(QStringLiteral("..")) && !QDir::isAbsolutePath(relativeRoot)
-                                 ? relativeRoot
-                                 : mRootPath;
+  QString relativeRoot;
+  const QString storedRoot =
+      relativePathInside(projectDirectory, savedRootPath, &relativeRoot)
+          ? relativeRoot
+          : savedRootPath;
   root.insert(QStringLiteral("rootPath"), storedRoot);
-  root.insert(QStringLiteral("datasetPath"), makePortablePath(mDatasetPath));
-  root.insert(QStringLiteral("scenePath"), makePortablePath(mScenePath));
+  root.insert(QStringLiteral("datasetPath"),
+              portablePathForRoot(savedDatasetPath, savedRootPath));
+  root.insert(QStringLiteral("scenePath"),
+              portablePathForRoot(savedScenePath, savedRootPath));
   root.insert(QStringLiteral("updatedUtc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
   QSaveFile output(targetPath);
   if (!output.open(QIODevice::WriteOnly)) {
+    if (createdDataRoot) {
+      QDir(savedRootPath).removeRecursively();
+    }
     assignError(errorMessage, tr("Unable to save project: %1").arg(output.errorString()));
     return false;
   }
-  output.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+  const QByteArray serialized =
+      QJsonDocument(root).toJson(QJsonDocument::Indented);
+  if (output.write(serialized) != serialized.size()) {
+    output.cancelWriting();
+    if (createdDataRoot) {
+      QDir(savedRootPath).removeRecursively();
+    }
+    assignError(errorMessage,
+                tr("Unable to write project file: %1")
+                    .arg(output.errorString()));
+    return false;
+  }
   if (!output.commit()) {
+    if (createdDataRoot) {
+      QDir(savedRootPath).removeRecursively();
+    }
     assignError(errorMessage, tr("Unable to commit project file: %1").arg(output.errorString()));
     return false;
   }
 
+  mProjectName = savedProjectName;
+  mRootPath = savedRootPath;
   mProjectFilePath = targetPath;
+  mDatasetPath = savedDatasetPath;
+  mScenePath = savedScenePath;
   setModified(false);
   emit changed();
   return true;
@@ -280,23 +518,24 @@ qint64 WorkspaceDocument::countDatasetImages(const QString &directoryPath) {
   return countImageFiles(directoryPath);
 }
 
+QString WorkspaceDocument::projectDataRootForFile(
+    const QString &projectFilePath) {
+  if (projectFilePath.isEmpty()) {
+    return {};
+  }
+  const QFileInfo info(normalizedAbsolutePath(projectFilePath));
+  return QDir::cleanPath(
+      QDir(info.absolutePath())
+          .filePath(projectStem(info.absoluteFilePath()) +
+                    QStringLiteral(".files")));
+}
+
 void WorkspaceDocument::setModified(const bool modified) {
   if (mModified == modified) {
     return;
   }
   mModified = modified;
   emit modifiedChanged(mModified);
-}
-
-QString WorkspaceDocument::makePortablePath(const QString &absolutePath) const {
-  if (absolutePath.isEmpty() || mRootPath.isEmpty()) {
-    return absolutePath;
-  }
-  const QString relative = QDir(mRootPath).relativeFilePath(absolutePath);
-  if (!relative.startsWith(QStringLiteral("..")) && !QDir::isAbsolutePath(relative)) {
-    return relative;
-  }
-  return absolutePath;
 }
 
 QString WorkspaceDocument::resolvePortablePath(const QString &storedPath) const {

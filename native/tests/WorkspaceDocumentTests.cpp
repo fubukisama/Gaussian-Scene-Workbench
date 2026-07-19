@@ -36,7 +36,10 @@ private slots:
   void tracksSelectionDeletionUndoAndRedo();
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
+  void createsUntitledProjectWithoutAProjectFile();
   void savesAndLoadsPortableProject();
+  void saveAsCopiesManagedDataIntoANewLinkedDirectory();
+  void firstSaveKeepsExternalDatasetAsALink();
   void loadsStandardCameraSidecarAndBuildsLegacyAxes();
   void skipsMalformedCameraEntries();
   void reportsMalformedCameraDocument();
@@ -523,18 +526,43 @@ void WorkspaceDocumentTests::exportsFilteredBinaryPlyWithoutReencoding() {
   QVERIFY(bytes.left(payloadOffset).contains("element vertex 2\n"));
 }
 
+void WorkspaceDocumentTests::createsUntitledProjectWithoutAProjectFile() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working")));
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.createUntitled(root.filePath(QStringLiteral("working")),
+                                  QStringLiteral("未命名工程"), &error),
+           qPrintable(error));
+
+  QVERIFY(project.hasProject());
+  QVERIFY(project.isUntitled());
+  QVERIFY(!project.isModified());
+  QCOMPARE(project.projectName(), QStringLiteral("未命名工程"));
+  QCOMPARE(project.projectFilePath(), QString());
+  QCOMPARE(project.rootPath(),
+           QDir::cleanPath(root.filePath(QStringLiteral("working"))));
+}
+
 void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
   QDir root(temporary.path());
-  QVERIFY(root.mkpath(QStringLiteral("images")));
-  QVERIFY(root.mkpath(QStringLiteral("models")));
+  QVERIFY(root.mkpath(QStringLiteral("working/images")));
+  QVERIFY(root.mkpath(QStringLiteral("working/models")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
 
-  QFile image(root.filePath(QStringLiteral("images/frame_0001.jpg")));
+  QDir working(root.filePath(QStringLiteral("working")));
+
+  QFile image(working.filePath(QStringLiteral("images/frame_0001.jpg")));
   QVERIFY(image.open(QIODevice::WriteOnly));
   image.close();
 
-  const QString plyPath = root.filePath(QStringLiteral("models/scene.ply"));
+  const QString plyPath =
+      working.filePath(QStringLiteral("models/scene.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   ply.write("ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\nend_header\n0\n1\n");
@@ -542,27 +570,128 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
 
   gsw::WorkspaceDocument source;
   QString error;
-  QVERIFY2(source.create(root.path(), &error), qPrintable(error));
-  QVERIFY2(source.setDatasetPath(root.filePath(QStringLiteral("images")), &error), qPrintable(error));
+  QVERIFY2(source.createUntitled(working.path(), QStringLiteral("未命名工程"),
+                                 &error),
+           qPrintable(error));
+  QVERIFY2(source.setDatasetPath(working.filePath(QStringLiteral("images")),
+                                 &error),
+           qPrintable(error));
   QVERIFY2(source.setScenePath(plyPath, &error), qPrintable(error));
-  const QString projectPath = root.filePath(QStringLiteral("test.gsw.json"));
+  const QString projectPath =
+      root.filePath(QStringLiteral("saved/test.gsw.json"));
   QVERIFY2(source.save(projectPath, &error), qPrintable(error));
   QVERIFY(!source.isModified());
+  QVERIFY(!source.isUntitled());
+  QCOMPARE(source.projectName(), QStringLiteral("test"));
+  QCOMPARE(source.rootPath(),
+           QDir::cleanPath(root.filePath(QStringLiteral("saved/test.files"))));
+  QCOMPARE(source.datasetPath(), QDir::cleanPath(root.filePath(
+                                        QStringLiteral("saved/test.files/images"))));
+  QCOMPARE(source.scenePath(), QDir::cleanPath(root.filePath(
+                                      QStringLiteral("saved/test.files/models/scene.ply"))));
+  QVERIFY(QFileInfo::exists(root.filePath(
+      QStringLiteral("saved/test.files/images/frame_0001.jpg"))));
 
   QFile serialized(projectPath);
   QVERIFY(serialized.open(QIODevice::ReadOnly));
   const QJsonObject projectJson = QJsonDocument::fromJson(serialized.readAll()).object();
-  QCOMPARE(projectJson.value(QStringLiteral("rootPath")).toString(), QStringLiteral("."));
+  QCOMPARE(projectJson.value(QStringLiteral("rootPath")).toString(),
+           QStringLiteral("test.files"));
   QCOMPARE(projectJson.value(QStringLiteral("datasetPath")).toString(), QStringLiteral("images"));
   QCOMPARE(projectJson.value(QStringLiteral("scenePath")).toString(), QStringLiteral("models/scene.ply"));
 
   gsw::WorkspaceDocument restored;
   QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
-  QCOMPARE(restored.rootPath(), QDir::cleanPath(root.absolutePath()));
-  QCOMPARE(restored.datasetPath(), QDir::cleanPath(root.filePath(QStringLiteral("images"))));
-  QCOMPARE(restored.scenePath(), QDir::cleanPath(plyPath));
+  QCOMPARE(restored.rootPath(),
+           QDir::cleanPath(root.filePath(QStringLiteral("saved/test.files"))));
+  QCOMPARE(restored.datasetPath(), QDir::cleanPath(root.filePath(
+                                          QStringLiteral("saved/test.files/images"))));
+  QCOMPARE(restored.scenePath(), QDir::cleanPath(root.filePath(
+                                        QStringLiteral("saved/test.files/models/scene.ply"))));
   QCOMPARE(restored.imageCount(), 1);
   QCOMPARE(restored.sceneMetadata().vertexCount, 2);
+}
+
+void WorkspaceDocumentTests::saveAsCopiesManagedDataIntoANewLinkedDirectory() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("first")));
+  QVERIFY(root.mkpath(QStringLiteral("second")));
+
+  QFile image(root.filePath(
+      QStringLiteral("working/datasets/capture/images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.createUntitled(root.filePath(QStringLiteral("working")),
+                                  QStringLiteral("未命名工程"), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(
+               root.filePath(QStringLiteral("working/datasets/capture")),
+               &error),
+           qPrintable(error));
+
+  const QString firstProject =
+      root.filePath(QStringLiteral("first/capture.gsw.json"));
+  QVERIFY2(project.save(firstProject, &error), qPrintable(error));
+  const QString firstData =
+      root.filePath(QStringLiteral("first/capture.files"));
+  QVERIFY(QFileInfo::exists(QDir(firstData).filePath(
+      QStringLiteral("datasets/capture/images/frame.jpg"))));
+
+  const QString secondProject =
+      root.filePath(QStringLiteral("second/capture-copy.gsw.json"));
+  QVERIFY2(project.save(secondProject, &error), qPrintable(error));
+  const QString secondData =
+      root.filePath(QStringLiteral("second/capture-copy.files"));
+  QCOMPARE(project.rootPath(), QDir::cleanPath(secondData));
+  QCOMPARE(project.datasetPath(), QDir::cleanPath(QDir(secondData).filePath(
+                                        QStringLiteral("datasets/capture"))));
+  QVERIFY(QFileInfo::exists(QDir(secondData).filePath(
+      QStringLiteral("datasets/capture/images/frame.jpg"))));
+  QVERIFY(QFileInfo::exists(QDir(firstData).filePath(
+      QStringLiteral("datasets/capture/images/frame.jpg"))));
+}
+
+void WorkspaceDocumentTests::firstSaveKeepsExternalDatasetAsALink() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working")));
+  QVERIFY(root.mkpath(QStringLiteral("external/images")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  const QString externalDataset = root.filePath(QStringLiteral("external"));
+  QFile image(
+      QDir(externalDataset).filePath(QStringLiteral("images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  image.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.createUntitled(root.filePath(QStringLiteral("working")),
+                                  QStringLiteral("未命名工程"), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(externalDataset, &error), qPrintable(error));
+
+  const QString projectPath =
+      root.filePath(QStringLiteral("saved/linked.gsw.json"));
+  QVERIFY2(project.save(projectPath, &error), qPrintable(error));
+  QCOMPARE(project.datasetPath(), QDir::cleanPath(externalDataset));
+
+  QFile serialized(projectPath);
+  QVERIFY(serialized.open(QIODevice::ReadOnly));
+  const QJsonObject projectJson =
+      QJsonDocument::fromJson(serialized.readAll()).object();
+  QCOMPARE(projectJson.value(QStringLiteral("datasetPath")).toString(),
+           QDir::cleanPath(externalDataset));
+  QVERIFY(!QFileInfo::exists(root.filePath(
+      QStringLiteral("saved/linked.files/external/images/frame.jpg"))));
 }
 
 void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {

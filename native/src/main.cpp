@@ -253,8 +253,25 @@ int main(int argc, char *argv[]) {
         [&application, &window, &smokeTestCompleted]() {
           QWidget *dialog = window.findChild<QWidget *>(
               QStringLiteral("datasetImportDialog"));
+          const QLabel *introduction =
+              dialog == nullptr
+                  ? nullptr
+                  : dialog->findChild<QLabel *>(QStringLiteral(
+                        "datasetImportIntroductionLabel"));
+          const QLabel *projectPath =
+              dialog == nullptr
+                  ? nullptr
+                  : dialog->findChild<QLabel *>(QStringLiteral(
+                        "datasetImportProjectPathLabel"));
           smokeTestCompleted = window.isVisible() && dialog != nullptr &&
-                               dialog->isVisible();
+                               dialog->isVisible() && introduction != nullptr &&
+                               introduction->text().contains(
+                                   QStringLiteral("稍后")) &&
+                               projectPath != nullptr &&
+                               projectPath->text().contains(
+                                   QStringLiteral("尚未保存")) &&
+                               !projectPath->text().contains(
+                                   QStringLiteral(".Gaussian-Scene-Workbench"));
           const auto topLevels = QApplication::topLevelWidgets();
           for (QWidget *widget : topLevels) {
             if (widget != &window && widget->isVisible()) {
@@ -266,6 +283,9 @@ int main(int argc, char *argv[]) {
   } else if (smokeTest) {
     QTimer::singleShot(250, &application, [&application, &window, &smokeTestCompleted]() {
       const QStringList requiredEntryActions = {
+          QStringLiteral("newProjectAction"),
+          QStringLiteral("saveProjectAction"),
+          QStringLiteral("saveProjectAsAction"),
           QStringLiteral("importDatasetAction"),
           QStringLiteral("importDatasetDirectoryAction"),
           QStringLiteral("attachDatasetAction"),
@@ -276,6 +296,15 @@ int main(int argc, char *argv[]) {
         const QAction *action = window.findChild<QAction *>(objectName);
         smokeTestCompleted = smokeTestCompleted && action != nullptr && action->isEnabled();
       }
+      const QLabel *projectName = window.findChild<QLabel *>(
+          QStringLiteral("projectNameValue"));
+      const QLabel *projectRoot = window.findChild<QLabel *>(
+          QStringLiteral("projectRootValue"));
+      smokeTestCompleted =
+          smokeTestCompleted && projectName != nullptr &&
+          projectName->text() == QStringLiteral("未命名工程") &&
+          projectRoot != nullptr &&
+          projectRoot->text().contains(QStringLiteral("首次保存"));
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   }

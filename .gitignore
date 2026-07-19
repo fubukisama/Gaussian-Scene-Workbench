@@ -37,6 +37,7 @@ __pycache__/
 
 # Build intermediates
 build/
+build-*/
 dist/
 *.obj
 *.exp

@@ -8,6 +8,7 @@
 #include <QSize>
 #include <QStringList>
 
+#include <memory>
 #include <optional>
 
 class QAction;
@@ -20,6 +21,7 @@ class QPlainTextEdit;
 class QResizeEvent;
 class QSpinBox;
 class QTableWidget;
+class QTemporaryDir;
 class QTimer;
 class QToolBar;
 class QTreeWidget;
@@ -31,6 +33,7 @@ class MainWindow final : public QMainWindow {
 
 public:
   explicit MainWindow(QWidget *parent = nullptr);
+  ~MainWindow() override;
   bool openProjectFile(const QString &filePath);
 
 protected:
@@ -81,6 +84,8 @@ private:
 
   bool confirmDiscardChanges();
   bool confirmDiscardSceneEdits();
+  bool beginUntitledProject(const QString &displayName,
+                            QString *errorMessage = nullptr);
   bool ensureProjectForDataAction(const QString &actionName);
   bool saveProject(bool forceChoosePath = false);
   bool exportCroppedScene();
@@ -110,6 +115,7 @@ private:
   [[nodiscard]] QString suggestedProjectFilePath() const;
 
   WorkspaceDocument mWorkspace;
+  std::unique_ptr<QTemporaryDir> mUntitledWorkspace;
   ProcessSupervisor mProcessSupervisor;
   NativeViewport *mViewport = nullptr;
   QDockWidget *mProjectDock = nullptr;
@@ -139,6 +145,7 @@ private:
   QAction *mNewProjectAction = nullptr;
   QAction *mOpenProjectAction = nullptr;
   QAction *mSaveAction = nullptr;
+  QAction *mSaveAsAction = nullptr;
   QAction *mImportDatasetAction = nullptr;
   QAction *mImportDatasetDirectoryAction = nullptr;
   QAction *mAttachDatasetAction = nullptr;

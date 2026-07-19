@@ -55,11 +55,13 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTextCursor>
+#include <QStorageInfo>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -221,13 +223,17 @@ QString comparablePath(const QString &path) {
   return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical);
 }
 
-bool pathsReferToSameLocation(const QString &left, const QString &right) {
+Qt::CaseSensitivity localPathCaseSensitivity() {
 #ifdef Q_OS_WIN
-  constexpr Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive;
+  return Qt::CaseInsensitive;
 #else
-  constexpr Qt::CaseSensitivity sensitivity = Qt::CaseSensitive;
+  return Qt::CaseSensitive;
 #endif
-  return comparablePath(left).compare(comparablePath(right), sensitivity) == 0;
+}
+
+bool pathsReferToSameLocation(const QString &left, const QString &right) {
+  return comparablePath(left).compare(comparablePath(right),
+                                      localPathCaseSensitivity()) == 0;
 }
 
 QString formatFileSize(const qint64 bytes) {
@@ -315,6 +321,92 @@ bool hasImportRecoveryArtifacts(const QString &datasetRoot) {
   });
 }
 
+QString existingAncestor(QString path) {
+  path = QFileInfo(path).absoluteFilePath();
+  QFileInfo info(path);
+  while (!info.exists()) {
+    const QString parent = info.absolutePath();
+    if (parent == path) {
+      return {};
+    }
+    path = parent;
+    info.setFile(path);
+  }
+  return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+}
+
+QString untitledWorkspaceBase(QString *errorMessage) {
+  const QString systemRoot = comparablePath(QStorageInfo::root().rootPath());
+  QSet<QString> checkedRoots;
+
+  const auto tryCandidate = [&](const QString &candidate,
+                                const bool explicitLocation) -> QString {
+    if (candidate.trimmed().isEmpty()) {
+      return {};
+    }
+    const QString ancestor = existingAncestor(candidate);
+    if (ancestor.isEmpty()) {
+      return {};
+    }
+    const QStorageInfo storage(ancestor);
+    if (!storage.isValid() || !storage.isReady() || storage.isReadOnly()) {
+      return {};
+    }
+    const QString volumeRoot = comparablePath(storage.rootPath());
+    if (!explicitLocation &&
+        volumeRoot.compare(systemRoot, localPathCaseSensitivity()) == 0) {
+      return {};
+    }
+    const QString rootKey =
+        explicitLocation ? comparablePath(candidate) : volumeRoot;
+    if (checkedRoots.contains(rootKey.toCaseFolded())) {
+      return {};
+    }
+    checkedRoots.insert(rootKey.toCaseFolded());
+
+    const QString base = explicitLocation
+                             ? QFileInfo(candidate).absoluteFilePath()
+                             : QDir(storage.rootPath())
+                                   .filePath(QStringLiteral(
+                                       ".Gaussian-Scene-Workbench/temporary"));
+    if (!QDir().mkpath(base) || !QFileInfo(base).isDir() ||
+        !QFileInfo(base).isWritable()) {
+      return {};
+    }
+    return QDir::cleanPath(QFileInfo(base).absoluteFilePath());
+  };
+
+  const QString configured =
+      qEnvironmentVariable("GSW_UNTITLED_ROOT").trimmed();
+  if (!configured.isEmpty()) {
+    const QString selected = tryCandidate(configured, true);
+    if (!selected.isEmpty()) {
+      return selected;
+    }
+  }
+
+  for (const QString &candidate :
+       {QCoreApplication::applicationDirPath(), QDir::currentPath()}) {
+    const QString selected = tryCandidate(candidate, false);
+    if (!selected.isEmpty()) {
+      return selected;
+    }
+  }
+  for (const QStorageInfo &storage : QStorageInfo::mountedVolumes()) {
+    const QString selected = tryCandidate(storage.rootPath(), false);
+    if (!selected.isEmpty()) {
+      return selected;
+    }
+  }
+
+  if (errorMessage != nullptr) {
+    *errorMessage = QStringLiteral(
+        "找不到可写的非系统盘临时工作区。请连接或准备 D:/E: 等数据盘，"
+        "也可通过 GSW_UNTITLED_ROOT 指定临时工作区。");
+  }
+  return {};
+}
+
 QString backendUnavailableMessage(const QString &repositoryRoot,
                                   const QString &workerScript,
                                   const QString &pythonPath) {
@@ -398,9 +490,23 @@ MainWindow::MainWindow(QWidget *parent)
   restoreWindowState();
   applyUiScale(mUiScalePercent, false);
   scheduleAutomaticUiScale();
+  QString untitledError;
+  const bool untitledReady =
+      beginUntitledProject(QStringLiteral("未命名工程"), &untitledError);
   updateWorkspaceUi();
   appendTaskEvent(QStringLiteral("原生桌面预览版已启动。"));
+  if (untitledReady) {
+    appendTaskEvent(
+        QStringLiteral("已建立未命名工程；可先导入和处理，稍后再保存。"));
+  } else {
+    appendTaskEvent(QStringLiteral("无法建立未命名工程：%1").arg(untitledError));
+    QTimer::singleShot(0, this, [this, untitledError]() {
+      showError(QStringLiteral("无法准备临时工作区"), untitledError);
+    });
+  }
 }
+
+MainWindow::~MainWindow() = default;
 
 void MainWindow::moveEvent(QMoveEvent *event) {
   QMainWindow::moveEvent(event);
@@ -426,6 +532,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
     showError(QStringLiteral("无法打开工程"), error);
     return false;
   }
+  mUntitledWorkspace.reset();
   mRecoveryBlocked = true;
   updateWorkspaceUi();
   statusBar()->showMessage(QStringLiteral("正在检查未完成的导入事务…"));
@@ -493,6 +600,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 void MainWindow::createActions() {
   mNewProjectAction = new QAction(style()->standardIcon(QStyle::SP_FileIcon),
                                   QStringLiteral("新建工程"), this);
+  mNewProjectAction->setObjectName(QStringLiteral("newProjectAction"));
   mNewProjectAction->setShortcut(QKeySequence::New);
   mNewProjectAction->setToolTip(QStringLiteral("新建工程"));
   connect(mNewProjectAction, &QAction::triggered, this, &MainWindow::newProject);
@@ -511,13 +619,16 @@ void MainWindow::createActions() {
   });
 
   mSaveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), QStringLiteral("保存工程"), this);
+  mSaveAction->setObjectName(QStringLiteral("saveProjectAction"));
   mSaveAction->setShortcut(QKeySequence::Save);
   mSaveAction->setToolTip(QStringLiteral("保存工程"));
   connect(mSaveAction, &QAction::triggered, this, [this]() { saveProject(false); });
 
-  auto *saveAsAction = new QAction(QStringLiteral("工程另存为..."), this);
-  saveAsAction->setShortcut(QKeySequence::SaveAs);
-  connect(saveAsAction, &QAction::triggered, this, [this]() { saveProject(true); });
+  mSaveAsAction = new QAction(QStringLiteral("工程另存为..."), this);
+  mSaveAsAction->setObjectName(QStringLiteral("saveProjectAsAction"));
+  mSaveAsAction->setShortcut(QKeySequence::SaveAs);
+  connect(mSaveAsAction, &QAction::triggered, this,
+          [this]() { saveProject(true); });
 
   mImportDatasetAction = new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
                                      QStringLiteral("添加照片/视频..."), this);
@@ -738,7 +849,7 @@ void MainWindow::createActions() {
 
   addAction(mNewProjectAction);
   addAction(mOpenProjectAction);
-  addAction(saveAsAction);
+  addAction(mSaveAsAction);
   addAction(environmentAction);
   addAction(resetCameraAction);
   addAction(exitAction);
@@ -751,7 +862,7 @@ void MainWindow::createMenus() {
   fileMenu->addAction(actions().at(1));
   fileMenu->addSeparator();
   fileMenu->addAction(mSaveAction);
-  fileMenu->addAction(actions().at(2));
+  fileMenu->addAction(mSaveAsAction);
   fileMenu->addSeparator();
   fileMenu->addAction(mImportDatasetAction);
   fileMenu->addAction(mImportDatasetDirectoryAction);
@@ -1000,7 +1111,9 @@ void MainWindow::createInspectorDock() {
   projectForm->setHorizontalSpacing(12);
   projectForm->setVerticalSpacing(7);
   mProjectNameValue = createValueLabel(panel);
+  mProjectNameValue->setObjectName(QStringLiteral("projectNameValue"));
   mProjectRootValue = createValueLabel(panel);
+  mProjectRootValue->setObjectName(QStringLiteral("projectRootValue"));
   projectForm->addRow(QStringLiteral("名称"), mProjectNameValue);
   projectForm->addRow(QStringLiteral("路径"), mProjectRootValue);
   layout->addLayout(projectForm);
@@ -1676,7 +1789,44 @@ bool MainWindow::confirmDiscardSceneEdits() {
   return answer == QMessageBox::Discard;
 }
 
+bool MainWindow::beginUntitledProject(const QString &displayName,
+                                      QString *errorMessage) {
+  const QString base = untitledWorkspaceBase(errorMessage);
+  if (base.isEmpty()) {
+    return false;
+  }
+
+  auto temporary = std::make_unique<QTemporaryDir>(
+      QDir(base).filePath(QStringLiteral("Untitled-XXXXXX")));
+  temporary->setAutoRemove(true);
+  if (!temporary->isValid()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("无法创建临时工程目录：%1")
+                          .arg(QDir::toNativeSeparators(base));
+    }
+    return false;
+  }
+
+  QString createError;
+  if (!mWorkspace.createUntitled(temporary->path(), displayName,
+                                 &createError)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = createError;
+    }
+    return false;
+  }
+  mUntitledWorkspace = std::move(temporary);
+  mRecoveryBlocked = false;
+  return true;
+}
+
 bool MainWindow::saveProject(const bool forceChoosePath) {
+  if (mProcessSupervisor.isRunning()) {
+    QMessageBox::information(
+        this, QStringLiteral("任务仍在运行"),
+        QStringLiteral("请在当前处理阶段结束后保存工程。"));
+    return false;
+  }
   if (!ensureProjectRecoveryReady()) {
     return false;
   }
@@ -1695,11 +1845,25 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
     }
   }
   QString error;
-  if (!mWorkspace.save(target, &error)) {
+  statusBar()->showMessage(QStringLiteral("正在保存工程与托管数据…"));
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const bool saved = mWorkspace.save(target, &error);
+  QApplication::restoreOverrideCursor();
+  statusBar()->clearMessage();
+  if (!saved) {
     showError(QStringLiteral("无法保存工程"), error);
     return false;
   }
-  appendTaskEvent(QStringLiteral("工程已保存：%1").arg(QDir::toNativeSeparators(target)));
+  if (!mWorkspace.isUntitled()) {
+    mUntitledWorkspace.reset();
+  }
+  QSettings settings;
+  settings.setValue(QStringLiteral("project/lastSaveDirectory"),
+                    QFileInfo(target).absolutePath());
+  appendTaskEvent(
+      QStringLiteral("工程已保存：%1（数据：%2）")
+          .arg(QDir::toNativeSeparators(target),
+               QDir::toNativeSeparators(mWorkspace.rootPath())));
   return true;
 }
 
@@ -1937,7 +2101,8 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
     if (trustedLocation && imageCount > 0 &&
         mWorkspace.setDatasetPath(recoveredDataset, &attachError)) {
       QString saveError;
-      if (!mWorkspace.save({}, &saveError)) {
+      if (!mWorkspace.projectFilePath().isEmpty() &&
+          !mWorkspace.save({}, &saveError)) {
         appendTaskEvent(
             QStringLiteral("已恢复并关联数据集，但工程自动保存失败：%1").arg(saveError));
       }
@@ -1969,18 +2134,14 @@ void MainWindow::newProject() {
   if (!confirmDiscardChanges()) {
     return;
   }
-  const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择工程目录"));
-  if (directory.isEmpty()) {
-    return;
-  }
   QString error;
-  if (!mWorkspace.create(directory, &error)) {
+  if (!beginUntitledProject(QStringLiteral("未命名工程"), &error)) {
     showError(QStringLiteral("无法创建工程"), error);
     return;
   }
-  mRecoveryBlocked = false;
   updateWorkspaceUi();
-  saveProject(false);
+  appendTaskEvent(
+      QStringLiteral("已新建未命名工程；无需预先选择目录，可在任意阶段保存。"));
 }
 
 bool MainWindow::ensureProjectForDataAction(const QString &actionName) {
@@ -1988,18 +2149,13 @@ bool MainWindow::ensureProjectForDataAction(const QString &actionName) {
     return true;
   }
 
-  const auto answer = QMessageBox::question(
-      this, QStringLiteral("需要先建立工程"),
-      QStringLiteral("“%1”需要一个工程目录来保存数据。是否现在新建工程？\n\n"
-                     "如果已有工程，请选择“取消”，然后使用“打开工程”。")
-          .arg(actionName),
-      QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes);
-  if (answer != QMessageBox::Yes) {
+  QString error;
+  if (!beginUntitledProject(QStringLiteral("未命名工程"), &error)) {
+    showError(QStringLiteral("无法准备%1").arg(actionName), error);
     return false;
   }
-
-  newProject();
-  return mWorkspace.hasProject();
+  updateWorkspaceUi();
+  return true;
 }
 
 void MainWindow::importDataset() {
@@ -2054,25 +2210,17 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
   }
 
   QString error;
-  std::optional<MediaProjectBootstrapPlan> automaticProject;
-  if (!mWorkspace.hasProject()) {
-    automaticProject = planMediaProjectBootstrap(sourcePaths, {}, &error);
-    if (!automaticProject.has_value()) {
-      showError(QStringLiteral("无法准备自动工程"), error);
-      return;
-    }
+  if (!ensureProjectForDataAction(QStringLiteral("添加照片与视频"))) {
+    return;
   }
 
   const QFileInfo firstSource(sourcePaths.constFirst());
   const QString initialDirectory = firstSource.isDir()
                                        ? firstSource.absoluteFilePath()
                                        : firstSource.absolutePath();
-  const QString projectRoot = automaticProject.has_value()
-                                  ? automaticProject->rootPath
-                                  : mWorkspace.rootPath();
   DatasetImportDialog dialog(
       initialDirectory, suggestedMediaSceneName(sourcePaths), sourcePaths,
-      projectRoot, automaticProject.has_value(), this);
+      mWorkspace.rootPath(), mWorkspace.isUntitled(), this);
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }
@@ -2114,25 +2262,6 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
           ? QStringLiteral("媒体导入环境预检通过：%1").arg(preflight.python)
           : QStringLiteral("媒体导入环境预检通过：%1（视频后端：%2）")
                 .arg(preflight.python, preflight.videoBackend));
-
-  if (automaticProject.has_value()) {
-    if (!materializeMediaProjectBootstrap(*automaticProject, &error)) {
-      showError(QStringLiteral("无法创建自动工程"), error);
-      return;
-    }
-    if (!mWorkspace.create(automaticProject->rootPath, &error)) {
-      showError(QStringLiteral("无法创建自动工程"), error);
-      return;
-    }
-    mRecoveryBlocked = false;
-    if (!mWorkspace.save(automaticProject->projectFilePath, &error)) {
-      showError(QStringLiteral("无法保存自动工程"), error);
-      return;
-    }
-    appendTaskEvent(
-        QStringLiteral("已按素材位置自动创建工程：%1")
-            .arg(QDir::toNativeSeparators(automaticProject->rootPath)));
-  }
 
   const QString activeProjectRoot = comparablePath(mWorkspace.rootPath());
   const QString datasetRoot =
@@ -2487,6 +2616,7 @@ void MainWindow::updateActionAvailability() {
   mOpenProjectAction->setEnabled(!running);
   mStopAction->setEnabled(running);
   mSaveAction->setEnabled(!running && workspaceReady);
+  mSaveAsAction->setEnabled(!running && workspaceReady);
   mImportDatasetAction->setEnabled(dataEntryReady);
   mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);
@@ -2554,7 +2684,10 @@ void MainWindow::rebuildProjectTree() {
 
 void MainWindow::updateInspector() {
   mProjectNameValue->setText(mWorkspace.hasProject() ? mWorkspace.projectName() : QStringLiteral("-"));
-  mProjectRootValue->setText(compactPath(mWorkspace.rootPath()));
+  mProjectRootValue->setText(
+      mWorkspace.isUntitled()
+          ? QStringLiteral("尚未保存（首次保存时选择位置）")
+          : compactPath(mWorkspace.rootPath()));
   mDatasetValue->setText(compactPath(mWorkspace.datasetPath()));
   mImageCountValue->setText(mWorkspace.datasetPath().isEmpty()
                                 ? QStringLiteral("-")
@@ -2620,7 +2753,21 @@ QString MainWindow::findTrainingPython(const QString &repositoryRoot) const {
 }
 
 QString MainWindow::suggestedProjectFilePath() const {
-  return QDir(mWorkspace.rootPath()).filePath(safeFileName(mWorkspace.projectName()) + QStringLiteral(".gsw.json"));
+  if (!mWorkspace.projectFilePath().isEmpty()) {
+    return mWorkspace.projectFilePath();
+  }
+
+  QSettings settings;
+  QString directory =
+      settings.value(QStringLiteral("project/lastSaveDirectory")).toString();
+  if (!QFileInfo(directory).isDir()) {
+    const QStorageInfo storage(mWorkspace.rootPath());
+    directory = storage.isValid() && storage.isReady()
+                    ? storage.rootPath()
+                    : QFileInfo(mWorkspace.rootPath()).absolutePath();
+  }
+  return QDir(directory).filePath(
+      safeFileName(mWorkspace.projectName()) + QStringLiteral(".gsw.json"));
 }
 
 } // namespace gsw

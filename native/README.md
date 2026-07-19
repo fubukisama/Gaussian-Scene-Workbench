@@ -6,8 +6,8 @@
 
 - Native Qt Widgets application with a GPU-backed OpenGL viewport.
 - Dockable project tree, inspector, task queue, and process log.
-- Portable `.gsw.json` project files with relative asset paths.
-- Metashape-style Add Photos/Add Folder entry points that select media first, prefill the import plan, and automatically create a collision-safe managed project beside the source when no project is open. Managed import includes recursive discovery, metadata manifest, video frame extraction, structured progress, and crash-safe journaled publish/recovery (including project reopen); existing image/COLMAP datasets can also be linked in place.
+- Metashape-style untitled projects that can import, reconstruct, and train before the user chooses a save location. First save writes a portable `.gsw.json` document beside a linked `<name>.files` data directory; Save As copies managed data to a newly selected location while external datasets remain linked in place.
+- Metashape-style Add Photos/Add Folder entry points that select media first and prefill the import plan without forcing project setup. Managed import includes recursive discovery, metadata manifest, video frame extraction, structured progress, and crash-safe journaled publish/recovery (including project reopen); existing image/COLMAP datasets can also be linked without copying.
 - Native COLMAP reconstruction dialog with standard, robust, and sequential presets, automatic newest-version discovery on the application drive, cache overwrite protection, live logs, cancellation, and sparse-model validation.
 - Native OpenGL point rendering plus depth-sorted screen-space Gaussian splats using activated scale, normalized rotation, sigmoid opacity, and SH-DC color.
 - Optional camera visualization that walks upward from the loaded scene to find a standard 3DGS `cameras.json`, with one camera-trajectory toggle for the frustums and capture path.
