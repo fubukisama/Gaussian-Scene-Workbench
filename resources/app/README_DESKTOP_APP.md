@@ -4,10 +4,10 @@ Electron desktop application for the local Gaussian scene research workbench.
 
 ## Start In Development
 
-From:
+From the repository's `resources\app` directory:
 
 ```bat
-C:\Users\Ishida_Lab\Desktop\3dgs\desktop_app
+cd resources\app
 ```
 
 run:
@@ -28,7 +28,7 @@ The app starts the Python crop editor server automatically and opens a desktop w
 3dgs/
   crop_editor/
   output/
-  desktop_app/
+  resources/app/
 ```
 
 ## Package

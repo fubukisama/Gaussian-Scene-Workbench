@@ -63,7 +63,7 @@ $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
 if ($cl) {
     Write-Host $cl.Source
 } else {
-    $VsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $VsWhere) {
         $VsPath = & $VsWhere -products * -requires Microsoft.VisualStudio.Workload.VCTools -property installationPath
         if ($VsPath) {

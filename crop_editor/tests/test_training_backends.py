@@ -99,6 +99,175 @@ def write_metashape_colmap_project(root, image_size=(8, 6), image_name="frame.jp
 
 
 class TrainingBackendTests(unittest.TestCase):
+    def test_optional_backend_dir_prefers_explicit_environment_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repository"
+            workspace = Path(tmp) / "workspace"
+            configured = Path(tmp) / "configured-gs2mesh"
+            (root / "gs2mesh").mkdir(parents=True)
+            (workspace / "gs2mesh").mkdir(parents=True)
+
+            resolved = server.resolve_optional_backend_dir(
+                "GS2MESH_DIR",
+                "gs2mesh",
+                root=root,
+                workspace_root=workspace,
+                environ={"GS2MESH_DIR": str(configured)},
+            )
+
+            self.assertEqual(resolved, configured.resolve())
+
+    def test_optional_backend_dir_prefers_repository_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repository"
+            workspace = Path(tmp) / "workspace"
+            repository_backend = root / "gs2mesh"
+            repository_backend.mkdir(parents=True)
+            (workspace / "gs2mesh").mkdir(parents=True)
+
+            resolved = server.resolve_optional_backend_dir(
+                "GS2MESH_DIR",
+                "gs2mesh",
+                root=root,
+                workspace_root=workspace,
+                environ={},
+            )
+
+            self.assertEqual(resolved, repository_backend.resolve())
+
+    def test_optional_backend_dir_falls_back_to_existing_workspace_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repository"
+            workspace = Path(tmp) / "workspace"
+            workspace_backend = workspace / "gs2mesh"
+            root.mkdir(parents=True)
+            workspace_backend.mkdir(parents=True)
+
+            resolved = server.resolve_optional_backend_dir(
+                "GS2MESH_DIR",
+                "gs2mesh",
+                root=root,
+                workspace_root=workspace,
+                environ={},
+            )
+
+            self.assertEqual(resolved, workspace_backend.resolve())
+
+    def test_2dgs_dir_uses_existing_workspace_without_device_specific_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repository"
+            workspace = Path(tmp) / "workspace"
+            two_dgs = workspace / "2dgs"
+            root.mkdir(parents=True)
+            two_dgs.mkdir(parents=True)
+
+            resolved = server.resolve_2dgs_dir(
+                root=root,
+                workspace_root=workspace,
+                environ={},
+                home=Path(tmp) / "home",
+            )
+
+            self.assertEqual(resolved, two_dgs.resolve())
+
+    def test_gs2mesh_env_root_uses_dedicated_conda_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conda_root = Path(tmp) / "miniforge3"
+            gs2mesh_python = conda_root / "envs" / "gs2mesh" / "python.exe"
+            gs2mesh_python.parent.mkdir(parents=True)
+            gs2mesh_python.write_bytes(b"")
+
+            with mock.patch.dict(server.os.environ, {}, clear=True), \
+                    mock.patch.object(server, "conda_root_candidates", return_value=[conda_root]), \
+                    mock.patch.object(server, "install_drive_root", return_value=None), \
+                    mock.patch.object(server.Path, "home", return_value=Path(tmp) / "home"):
+                resolved = server.gs2mesh_env_root()
+
+            self.assertEqual(resolved, gs2mesh_python.parent.resolve())
+
+    def test_gs2mesh_environment_does_not_inherit_other_conda_or_sugar_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_root = base / "miniforge3" / "envs" / "gs2mesh"
+            other_env = base / "miniforge3" / "envs" / "gaussian_splatting"
+            sugar_source = base / "SuGaR" / "gaussian_splatting"
+            system_bin = base / "system-bin"
+            inherited = server.os.pathsep.join([str(other_env), str(system_bin)])
+
+            with mock.patch.dict(
+                server.os.environ,
+                {"PATH": inherited, "PYTHONPATH": str(sugar_source)},
+                clear=True,
+            ), mock.patch.object(server, "gs2mesh_env_root", return_value=env_root):
+                environment = server.gs2mesh_env()
+
+            self.assertNotIn(str(other_env), environment["PATH"])
+            self.assertIn(str(system_bin), environment["PATH"])
+            self.assertNotIn("PYTHONPATH", environment)
+            self.assertEqual(environment["CONDA_PREFIX"], str(env_root))
+            self.assertEqual(environment["PYTHONNOUSERSITE"], "1")
+
+    def test_sugar_environment_does_not_inherit_gs2mesh_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_root = base / "miniforge3" / "envs" / "sugar"
+            gs2mesh_env = base / "miniforge3" / "envs" / "gs2mesh"
+            system_bin = base / "system-bin"
+            inherited = server.os.pathsep.join([str(gs2mesh_env), str(system_bin)])
+
+            with mock.patch.dict(
+                server.os.environ,
+                {"PATH": inherited, "PYTHONPATH": str(base / "gs2mesh")},
+                clear=True,
+            ), mock.patch.object(server, "sugar_env_root", return_value=env_root):
+                environment = server.sugar_env()
+
+            self.assertNotIn(str(gs2mesh_env), environment["PATH"])
+            self.assertIn(str(system_bin), environment["PATH"])
+            self.assertNotIn("PYTHONPATH", environment)
+            self.assertEqual(environment["CONDA_PREFIX"], str(env_root))
+
+    def test_gs2mesh_environment_rejects_shared_sugar_python(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh_dir = server.GS2MESH_DIR
+            original_sugar_dir = server.SUGAR_DIR
+            gs2mesh_dir = Path(tmp) / "gs2mesh"
+            sugar_dir = Path(tmp) / "sugar"
+            shared_python = Path(tmp) / "envs" / "shared" / "python.exe"
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_dir.mkdir(parents=True)
+            shared_python.parent.mkdir(parents=True)
+            shared_python.write_bytes(b"")
+            (gs2mesh_dir / "run_single.py").write_text("print('gs2mesh')", encoding="utf-8")
+            server.GS2MESH_DIR = gs2mesh_dir
+            server.SUGAR_DIR = sugar_dir
+            try:
+                with mock.patch.object(server, "gs2mesh_python", return_value=shared_python), \
+                        mock.patch.object(server, "sugar_python", return_value=shared_python):
+                    with self.assertRaisesRegex(RuntimeError, "must use different Python environments"):
+                        server.ensure_gs2mesh_environment()
+            finally:
+                server.GS2MESH_DIR = original_gs2mesh_dir
+                server.SUGAR_DIR = original_sugar_dir
+
+    def test_gs2mesh_environment_check_rejects_missing_dedicated_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_dir = server.GS2MESH_DIR
+            gs2mesh_dir = Path(tmp) / "gs2mesh"
+            python_path = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            gs2mesh_dir.mkdir(parents=True)
+            python_path.parent.mkdir(parents=True)
+            (gs2mesh_dir / "run_single.py").write_text("print('gs2mesh')", encoding="utf-8")
+            python_path.write_bytes(b"")
+            server.GS2MESH_DIR = gs2mesh_dir
+            try:
+                with mock.patch.object(server, "gs2mesh_python", return_value=python_path), \
+                        mock.patch.object(server, "python_probe", return_value=(False, "No module named simple_knn")):
+                    with self.assertRaisesRegex(RuntimeError, "GS2Mesh runtime imports failed"):
+                        server.ensure_gs2mesh_environment()
+            finally:
+                server.GS2MESH_DIR = original_dir
+
     def test_form_items_reads_upload_fields_not_cgi_values(self):
         upload = FakeUploadItem("clip.mov", b"video")
         upload.value = b"video"

@@ -28,14 +28,62 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
+
+
+def resolve_optional_backend_dir(
+    env_name,
+    folder_name,
+    *,
+    root=None,
+    workspace_root=None,
+    environ=None,
+):
+    environment = os.environ if environ is None else environ
+    configured = environment.get(env_name)
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    project_root = Path(ROOT if root is None else root)
+    data_root = Path(WORKSPACE_ROOT if workspace_root is None else workspace_root)
+    candidates = [project_root / folder_name, data_root / folder_name]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
+def resolve_2dgs_dir(*, root=None, workspace_root=None, environ=None, home=None):
+    environment = os.environ if environ is None else environ
+    configured = environment.get("TWO_DGS_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    project_root = Path(ROOT if root is None else root)
+    data_root = Path(WORKSPACE_ROOT if workspace_root is None else workspace_root)
+    user_home = Path.home() if home is None else Path(home)
+    candidates = [
+        project_root / "2dgs",
+        data_root / "2dgs",
+        user_home / "Documents" / "2dgs",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
+def same_resolved_path(left, right):
+    return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(str(Path(right).resolve()))
+
+
 DATASETS_DIR = WORKSPACE_ROOT / "datasets"
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
 PSNR_REPORTS_DIR = WORKSPACE_ROOT / "reports" / "psnr"
 GAUSSIAN_DIR = ROOT / "gaussian-splatting"
-TWO_DGS_DIR = Path(os.environ.get("TWO_DGS_DIR", Path.home() / "Documents" / "2dgs"))
-SUGAR_DIR = Path(os.environ.get("SUGAR_DIR", ROOT / "SuGaR"))
-GS2MESH_DIR = Path(os.environ.get("GS2MESH_DIR", ROOT / "gs2mesh"))
-OPENMVS_DIR = Path(os.environ.get("OPENMVS_DIR", ROOT / "openMVS"))
+TWO_DGS_DIR = resolve_2dgs_dir()
+SUGAR_DIR = resolve_optional_backend_dir("SUGAR_DIR", "SuGaR")
+GS2MESH_DIR = resolve_optional_backend_dir("GS2MESH_DIR", "gs2mesh")
+OPENMVS_DIR = resolve_optional_backend_dir("OPENMVS_DIR", "openMVS")
 TRAINING_KIT_DIR = ROOT / "training_kit"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PREVIEW_DIR = Path(__file__).resolve().parent / ".preview"
@@ -3063,6 +3111,10 @@ def ensure_sugar_environment():
         problems.append(f"Missing SuGaR Python executable: {python_path}")
     if not script_path.exists():
         problems.append(f"Missing SuGaR train.py: {script_path}")
+    if same_resolved_path(SUGAR_DIR, GS2MESH_DIR):
+        problems.append("SuGaR and GS2Mesh source directories must be different")
+    if same_resolved_path(python_path, gs2mesh_python()):
+        problems.append("SuGaR and GS2Mesh must use different Python environments")
     if not problems:
         probe = (
             "import importlib.util\n"
@@ -3111,6 +3163,26 @@ def ensure_gs2mesh_environment():
         problems.append(f"Missing GS2Mesh Python executable: {python_path}")
     if not script_path.exists():
         problems.append(f"Missing GS2Mesh run_single.py: {script_path}")
+    if same_resolved_path(GS2MESH_DIR, SUGAR_DIR):
+        problems.append("GS2Mesh and SuGaR source directories must be different")
+    if same_resolved_path(python_path, sugar_python()):
+        problems.append("GS2Mesh and SuGaR must use different Python environments")
+    if not problems:
+        probe = (
+            "import torch, cv2, open3d, matplotlib.pyplot\n"
+            "import diff_gaussian_rasterization, simple_knn\n"
+            "print('cuda', torch.cuda.is_available())\n"
+        )
+        runtime_ok, detail = python_probe(
+            python_path,
+            gs2mesh_env(),
+            probe,
+            timeout=90,
+        )
+        if not runtime_ok:
+            problems.append(
+                f"GS2Mesh runtime imports failed in {python_path}: {detail}"
+            )
     if problems:
         raise RuntimeError("; ".join(problems))
     return {"gs2mesh_dir": str(GS2MESH_DIR), "python": str(python_path), "script": str(script_path)}
@@ -4166,6 +4238,26 @@ def set_job_stage(job, status, stage):
             persist_train_job(job)
 
 
+def cuda_toolkit_root(environ=None):
+    environment = os.environ if environ is None else environ
+    configured = environment.get("CUDA_PATH") or environment.get("CUDA_HOME")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    nvcc = shutil.which("nvcc.exe" if os.name == "nt" else "nvcc", path=environment.get("PATH"))
+    if nvcc:
+        return Path(nvcc).resolve().parent.parent
+
+    program_files = environment.get("ProgramFiles")
+    if not program_files:
+        return None
+    cuda_root = Path(program_files) / "NVIDIA GPU Computing Toolkit" / "CUDA"
+    if not cuda_root.exists():
+        return None
+    candidates = [path for path in cuda_root.glob("v*") if (path / "bin").exists()]
+    return max(candidates, key=lambda path: path.name) if candidates else None
+
+
 def training_env(backend="3dgs", runtime_mode=None):
     backend = safe_training_backend(backend)
     if backend == "3dgs" and runtime_mode == "legacy_sugar":
@@ -4184,14 +4276,12 @@ def training_env(backend="3dgs", runtime_mode=None):
     ]
     if backend == "2dgs":
         two_dgs_venv = TWO_DGS_DIR / ".venv"
-        cuda_path = Path(os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"))
-        path_parts = [
-            str(two_dgs_venv / "Scripts"),
-            str(cuda_path / "bin"),
-            *path_parts,
-        ]
-        env["CUDA_PATH"] = str(cuda_path)
-        env["CUDA_HOME"] = str(cuda_path)
+        path_parts = [str(two_dgs_venv / "Scripts"), *path_parts]
+        cuda_path = cuda_toolkit_root(env)
+        if cuda_path:
+            path_parts.insert(1, str(cuda_path / "bin"))
+            env["CUDA_PATH"] = str(cuda_path)
+            env["CUDA_HOME"] = str(cuda_path)
         env["TORCH_CUDA_ARCH_LIST"] = env.get("TORCH_CUDA_ARCH_LIST", "8.6")
     env["PATH"] = os.pathsep.join(path_parts)
     env["CONDA_PREFIX"] = str(env_root)
@@ -4210,16 +4300,11 @@ def sugar_env_root():
 def sugar_env():
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
     env_root = sugar_env_root()
-    path_parts = [
-        str(env_root),
-        str(env_root / "Library" / "bin"),
-        str(env_root / "Library" / "usr" / "bin"),
-        str(env_root / "Scripts"),
-        env.get("PATH", ""),
-    ]
-    env["PATH"] = os.pathsep.join(path_parts)
+    env["PATH"] = isolated_conda_path(env_root, env.get("PATH", ""))
     env["CONDA_PREFIX"] = str(env_root)
+    env.pop("PYTHONPATH", None)
     return env
 
 
@@ -4282,7 +4367,8 @@ def smart_app_control_guidance():
     return (
         "Windows Smart App Control is ON and blocked the unsigned CUDA extension required by 3DGS. "
         "This Windows feature has no per-file allow rule. The workbench will use a compatible local "
-        "SuGaR runtime when available; otherwise open Windows Security > App & browser control > "
+        "SuGaR runtime only for 3DGS training compatibility when available; GS2Mesh never uses that "
+        "runtime. Otherwise open Windows Security > App & browser control > "
         "Smart App Control settings, or install a build signed by a trusted certificate authority."
     )
 
@@ -4290,31 +4376,62 @@ def smart_app_control_guidance():
 def gs2mesh_env_root():
     configured = os.environ.get("GS2MESH_CONDA_PREFIX")
     if configured:
-        return Path(configured)
-    # GS2Mesh reuses the SuGaR environment by default because that environment
-    # already carries the Windows-compatible 3DGS rasterizer extensions.
-    return sugar_env_root()
+        return Path(configured).expanduser().resolve()
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix and Path(conda_prefix).name.lower() == "gs2mesh":
+        return Path(conda_prefix).resolve()
+    drive = install_drive_root()
+    candidates = [
+        drive / "miniforge3" / "envs" / "gs2mesh" if drive else None,
+        drive / "conda" / "envs" / "gs2mesh" if drive else None,
+        drive / "anaconda" / "envs" / "gs2mesh" if drive else None,
+        Path.home() / "miniforge3" / "envs" / "gs2mesh",
+        *[root / "envs" / "gs2mesh" for root in conda_root_candidates()],
+    ]
+    usable = [Path(candidate) for candidate in candidates if candidate]
+    for candidate in usable:
+        if (candidate / "python.exe").exists():
+            return candidate.resolve()
+    return usable[0].resolve()
+
+
+def isolated_conda_path(env_root, inherited_path=""):
+    env_root = Path(env_root).resolve()
+    selected = os.path.normcase(str(env_root))
+    envs_root = env_root.parent
+    entries = [
+        env_root,
+        env_root / "Library" / "bin",
+        env_root / "Library" / "usr" / "bin",
+        env_root / "Scripts",
+    ]
+    seen = {os.path.normcase(str(path)) for path in entries}
+    for item in str(inherited_path or "").split(os.pathsep):
+        if not item:
+            continue
+        path = Path(item)
+        normalized = os.path.normcase(str(path.resolve()))
+        try:
+            path.resolve().relative_to(envs_root)
+            belongs_to_conda_envs = True
+        except ValueError:
+            belongs_to_conda_envs = False
+        if belongs_to_conda_envs and normalized != selected and not normalized.startswith(selected + os.sep):
+            continue
+        if normalized not in seen:
+            entries.append(path)
+            seen.add(normalized)
+    return os.pathsep.join(str(path) for path in entries)
 
 
 def gs2mesh_env():
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
     env_root = gs2mesh_env_root()
-    path_parts = [
-        str(env_root),
-        str(env_root / "Library" / "bin"),
-        str(env_root / "Library" / "usr" / "bin"),
-        str(env_root / "Scripts"),
-        env.get("PATH", ""),
-    ]
-    env["PATH"] = os.pathsep.join(path_parts)
+    env["PATH"] = isolated_conda_path(env_root, env.get("PATH", ""))
     env["CONDA_PREFIX"] = str(env_root)
-    sugar_extension_paths = [
-        str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "diff-gaussian-rasterization"),
-        str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "simple-knn"),
-    ]
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = os.pathsep.join([*sugar_extension_paths, existing_pythonpath])
+    env.pop("PYTHONPATH", None)
     return env
 
 
@@ -4336,7 +4453,10 @@ def command_path(name):
 
 
 def vs_build_tools_installation():
-    vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    program_files_x86 = os.environ.get("ProgramFiles(x86)")
+    if not program_files_x86:
+        return None
+    vswhere = Path(program_files_x86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
     if not vswhere.exists():
         return None
     try:

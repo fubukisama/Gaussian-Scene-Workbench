@@ -4,7 +4,7 @@ Local editor for trained 3D Gaussian Splatting models.
 
 ## Start
 
-From `C:\Users\Ishida_Lab\Desktop\3dgs`:
+From the repository root:
 
 ```bat
 training_kit\open_crop_editor.bat
@@ -58,6 +58,6 @@ Do not open `index.html` directly.
 ## Open Cropped Model In SIBR
 
 ```bat
-cd C:\Users\Ishida_Lab\Desktop\SIBR\bin
-SIBR_gaussianViewer_app.exe -m C:\Users\Ishida_Lab\Desktop\3dgs\output\your_crop_scene
+cd "%SIBR_ROOT%\bin"
+SIBR_gaussianViewer_app.exe -m "%GS_EDITOR_WORKSPACE_ROOT%\output\your_crop_scene"
 ```

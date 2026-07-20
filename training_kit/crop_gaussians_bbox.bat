@@ -48,5 +48,5 @@ echo Cropped model:
 echo %DST_MODEL%
 echo.
 echo Open with SIBR:
-echo C:\Users\Ishida_Lab\Desktop\SIBR\bin\SIBR_gaussianViewer_app.exe -m "%DST_MODEL%"
+echo "%%SIBR_ROOT%%\bin\SIBR_gaussianViewer_app.exe" -m "%DST_MODEL%"
 exit /b 0
