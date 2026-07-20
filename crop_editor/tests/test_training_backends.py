@@ -1205,13 +1205,14 @@ class TrainingBackendTests(unittest.TestCase):
     def test_2dgs_training_command_saves_milestones_and_caps_densification(self):
         options = server.training_options_from_payload("2dgs", "max_quality", {})
 
-        command = server.training_command("2dgs", "dataset", "output", options)
+        command = server.training_command("2dgs", "dataset", "output", options, network_port=6111)
 
         self.assertEqual(command[command.index("--save_iterations") + 1:command.index("--checkpoint_iterations")], ["7000", "15000", "30000"])
         self.assertEqual(command[command.index("--checkpoint_iterations") + 1:command.index("--depth_ratio")], ["7000", "15000", "30000"])
         self.assertIn("--densify_grad_threshold", command)
         self.assertEqual(command[command.index("--densify_until_iter") + 1], "10000")
         self.assertEqual(command[command.index("--densification_interval") + 1], "200")
+        self.assertEqual(command[command.index("--port") + 1], "6111")
 
     def test_3dgs_max_quality_profile_enables_quality_oriented_training(self):
         options = server.train_args_for_quality("max_quality", "3dgs")
@@ -1249,7 +1250,7 @@ class TrainingBackendTests(unittest.TestCase):
             "exposure_compensation": True,
         })
 
-        command = server.training_command("3dgs", "dataset", "output", options)
+        command = server.training_command("3dgs", "dataset", "output", options, network_port=6112)
 
         self.assertIn("--antialiasing", command)
         self.assertIn("--optimizer_type", command)
@@ -1259,6 +1260,25 @@ class TrainingBackendTests(unittest.TestCase):
         self.assertIn("--densify_until_iter", command)
         self.assertIn("--exposure_lr_init", command)
         self.assertEqual(command[command.index("--exposure_lr_init") + 1], "0.001")
+        self.assertEqual(command[command.index("--port") + 1], "6112")
+
+    def test_task_port_allocator_skips_external_and_app_managed_conflicts(self):
+        job_a = {"id": "job-a"}
+        job_b = {"id": "job-b"}
+        server.TASK_PORT_OWNERS.clear()
+        try:
+            with mock.patch.object(server, "task_port_available", side_effect=lambda port: port != 6009):
+                port_a = server.reserve_task_port(job_a, "3DGS training", preferred=6009, start=6110, end=6111)
+                port_b = server.reserve_task_port(job_b, "2DGS training", preferred=6009, start=6110, end=6111)
+
+            self.assertEqual(port_a, 6110)
+            self.assertEqual(port_b, 6111)
+            self.assertEqual(job_a["task_port"], 6110)
+            self.assertEqual(job_b["task_port"], 6111)
+        finally:
+            server.release_task_port(job_a)
+            server.release_task_port(job_b)
+            server.TASK_PORT_OWNERS.clear()
 
     def test_3dgs_training_command_selects_legacy_runtime_python(self):
         options = server.training_options_from_payload("3dgs", "quick", {})
@@ -2498,6 +2518,7 @@ class TrainingBackendTests(unittest.TestCase):
                     7000,
                     {
                         "mode": "gs2mesh",
+                        "task_port": 6113,
                         "gs2mesh_downsample": 2,
                         "gs2mesh_baseline_percentage": 7,
                         "gs2mesh_tsdf_voxel": 2,
@@ -2516,6 +2537,7 @@ class TrainingBackendTests(unittest.TestCase):
                 self.assertIn("--skip_GS", command_text)
                 self.assertNotIn("--skip_rendering", command_text)
                 self.assertEqual(command_text[command_text.index("--GS_iterations") + 1], "7000")
+                self.assertEqual(command_text[command_text.index("--GS_port") + 1], "6113")
                 self.assertEqual(command_text[command_text.index("--colmap_name") + 1], "mesh_scene")
                 self.assertNotIn("--renderer_max_images", command_text)
                 self.assertEqual(command_text[command_text.index("--downsample") + 1], "2")

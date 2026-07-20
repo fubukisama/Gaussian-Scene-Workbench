@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -105,12 +106,66 @@ SPLAT_JOBS = {}
 SPLAT_LOCK = threading.Lock()
 IMPORT_JOBS = {}
 IMPORT_LOCK = threading.Lock()
+TASK_PORT_LOCK = threading.Lock()
+TASK_PORT_OWNERS = {}
+TASK_PORT_START = 6100
+TASK_PORT_END = 6999
 TRAINING_BACKENDS = {"3dgs", "2dgs"}
 MESH_MODES = {"bounded", "unbounded", "sugar", "gs2mesh"}
 SPARSE_ADAM_AVAILABLE_CACHE = None
 MESH_PREVIEW_MAX_FACES = 300000
 MESH_CHUNK_MAX_FACES = 250000
 SMART_APP_CONTROL_SETTINGS_URI = "windowsdefender://smartscreen/"
+
+
+def task_port_available(port):
+    port = int(port)
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        probe.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def reserve_task_port(job, purpose, preferred=6009, start=TASK_PORT_START, end=TASK_PORT_END):
+    preferred = int(preferred)
+    start = int(start)
+    end = int(end)
+    if start > end:
+        raise ValueError("Task port range is invalid")
+    candidates = [preferred, *range(start, end + 1)]
+    with TASK_PORT_LOCK:
+        for port in candidates:
+            if port < 1024 or port > 65535 or port in TASK_PORT_OWNERS:
+                continue
+            if not task_port_available(port):
+                continue
+            owner = str(job.get("id") or uuid.uuid4().hex)
+            TASK_PORT_OWNERS[port] = {"job_id": owner, "purpose": str(purpose)}
+            job["task_port"] = port
+            job["task_port_purpose"] = str(purpose)
+            job["task_port_released"] = False
+            return port
+    raise RuntimeError(
+        f"No free task port is available (preferred {preferred}, range {start}-{end}). "
+        "Stop the process using those ports and retry."
+    )
+
+
+def release_task_port(job):
+    port = job.get("task_port")
+    if port is None:
+        return
+    with TASK_PORT_LOCK:
+        owner = TASK_PORT_OWNERS.get(int(port))
+        if owner is None or owner.get("job_id") == str(job.get("id")):
+            TASK_PORT_OWNERS.pop(int(port), None)
+    job["task_port_released"] = True
 
 
 def install_drive_root():
@@ -2412,6 +2467,9 @@ def mesh_asset_payload(scene, iteration):
 def mesh_export_options(options):
     options = options or {}
     mode = safe_mesh_mode(options.get("mode", "bounded"))
+    task_port = int(options.get("task_port", 0) or 0)
+    if task_port and (task_port < 1024 or task_port > 65535):
+        raise ValueError("task_port must be between 1024 and 65535")
     mesh_res = int(options.get("mesh_res", 512 if mode == "bounded" else 1024))
     num_cluster = int(options.get("num_cluster", 50))
     depth_ratio = float(options.get("depth_ratio", 0.0))
@@ -2460,6 +2518,7 @@ def mesh_export_options(options):
         raise ValueError("gs2mesh_tsdf_cleaning_threshold must be between 0 and 10000000")
     return {
         "mode": mode,
+        "task_port": task_port,
         "mesh_res": mesh_res,
         "num_cluster": num_cluster,
         "depth_ratio": depth_ratio,
@@ -3037,6 +3096,8 @@ def mesh_export_command(scene, iteration, options=None):
             "--TSDF_cleaning_threshold",
             str(opts["gs2mesh_tsdf_cleaning_threshold"]),
         ]
+        if opts["task_port"]:
+            command.extend(["--GS_port", str(opts["task_port"])])
         if not opts["gs2mesh_scene_360"]:
             command.append("--no-renderer_scene_360")
         if can_reuse_render_cache:
@@ -4187,6 +4248,9 @@ def job_snapshot(job):
         "resume_from_scene": job.get("resume_from_scene"),
         "resume_checkpoint": job.get("resume_checkpoint"),
         "resume_checkpoint_iteration": job.get("resume_checkpoint_iteration"),
+        "task_port": job.get("task_port"),
+        "task_port_purpose": job.get("task_port_purpose"),
+        "task_port_released": bool(job.get("task_port_released")),
         "log": job["log"][-240:],
         "cancel_requested": bool(job.get("cancel_requested")),
     }
@@ -5582,7 +5646,15 @@ def write_training_metadata(output, backend, quality=None, options=None):
             json.dump(scene_metadata, f, indent=2)
 
 
-def training_command(backend, dataset, output, options, start_checkpoint=None, runtime_mode=None):
+def training_command(
+    backend,
+    dataset,
+    output,
+    options,
+    start_checkpoint=None,
+    runtime_mode=None,
+    network_port=None,
+):
     backend = safe_training_backend(backend)
     iterations = options["iterations"]
     save_iterations = [str(value) for value in training_milestone_iterations(iterations)]
@@ -5612,6 +5684,8 @@ def training_command(backend, dataset, output, options, start_checkpoint=None, r
         command.extend(["--densify_grad_threshold", f"{options['densify_grad_threshold']:.12g}"])
         command.extend(["--densification_interval", str(options["densification_interval"])])
         command.extend(["--densify_until_iter", str(options["densify_until_iter"])])
+        if network_port is not None:
+            command.extend(["--port", str(int(network_port))])
         if start_checkpoint:
             command.extend(["--start_checkpoint", str(start_checkpoint)])
         return command
@@ -5657,6 +5731,8 @@ def training_command(backend, dataset, output, options, start_checkpoint=None, r
             "--exposure_lr_delay_mult",
             "0.001",
         ])
+    if network_port is not None:
+        command.extend(["--port", str(int(network_port))])
     if start_checkpoint:
         command.extend(["--start_checkpoint", str(start_checkpoint)])
     return command
@@ -5755,6 +5831,8 @@ def run_training_job(job, run_convert, quality, overwrite):
         start_checkpoint = job.get("resume_checkpoint")
         if start_checkpoint:
             add_job_log(job, f"Resuming from checkpoint: {start_checkpoint}")
+        task_port = reserve_task_port(job, f"{backend.upper()} training")
+        add_job_log(job, f"Task port: {task_port} ({backend.upper()} network viewer)")
         command = training_command(
             backend,
             dataset,
@@ -5762,6 +5840,7 @@ def run_training_job(job, run_convert, quality, overwrite):
             options,
             start_checkpoint=start_checkpoint,
             runtime_mode=job.get("runtime_mode"),
+            network_port=task_port,
         )
         set_job_stage(job, "running", "train")
         run_logged(job, command, TWO_DGS_DIR if backend == "2dgs" else GAUSSIAN_DIR, backend)
@@ -5787,6 +5866,9 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["updated_at"] = time.time()
             persist_train_job(job)
         add_job_log(job, f"ERROR: {exc}")
+    finally:
+        release_task_port(job)
+        persist_train_job(job)
 
 
 def run_colmap_alignment_job(job):
@@ -6206,6 +6288,9 @@ def mesh_job_snapshot(job):
         "total_files": job.get("total_files"),
         "copied_bytes": job.get("copied_bytes"),
         "total_bytes": job.get("total_bytes"),
+        "task_port": job.get("task_port"),
+        "task_port_purpose": job.get("task_port_purpose"),
+        "task_port_released": bool(job.get("task_port_released")),
         "log": job["log"][-240:],
         "cancel_requested": bool(job.get("cancel_requested")),
     }
@@ -6291,11 +6376,15 @@ def shutdown_active_jobs(reason="server shutdown"):
 def run_mesh_export_job(job):
     try:
         set_job_stage(job, "running", "environment")
-        options = job.get("options", {})
+        options = dict(job.get("options", {}))
         if options.get("mode") == "sugar":
             ensure_sugar_environment()
         elif options.get("mode") == "gs2mesh":
             ensure_gs2mesh_environment()
+            task_port = reserve_task_port(job, "GS2Mesh Gaussian renderer")
+            options["task_port"] = task_port
+            job["options"] = options
+            add_job_log(job, f"Task port: {task_port} (GS2Mesh Gaussian renderer)")
         else:
             ensure_mesh_environment()
         command, cwd, output_path = mesh_export_command(job["scene"], job["iteration"], options)
@@ -6352,6 +6441,8 @@ def run_mesh_export_job(job):
             job["returncode"] = 1
             job["updated_at"] = time.time()
         add_job_log(job, f"ERROR: {exc}")
+    finally:
+        release_task_port(job)
 
 
 def start_mesh_export(scene, iteration, options=None):

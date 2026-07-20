@@ -61,3 +61,20 @@ test("Metashape COLMAP camera projects have a lossless import entry point", () =
   assert.match(appSource, /"button\.metashapeCameras": "Metashape 相机"/);
   assert.match(appSource, /"button\.metashapeCameras": "Metashape カメラ"/);
 });
+
+test("large mesh loading blocks asset refresh until the load settles", () => {
+  const start = appSource.indexOf("async function loadCurrentMesh");
+  const end = appSource.indexOf("\nasync function loadTexturedMeshFromUrls", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const loadCurrentMeshSource = appSource.slice(start, end);
+  const busyIndex = loadCurrentMeshSource.indexOf("setMeshBusy(true)");
+  assert.notEqual(busyIndex, -1);
+  assert.ok(
+    busyIndex < loadCurrentMeshSource.indexOf("await fetch"),
+    "mesh loading must enter the busy state before its first request",
+  );
+  assert.match(loadCurrentMeshSource, /finally\s*\{\s*setMeshBusy\(false\);\s*\}/);
+  assert.match(appSource, /refreshAssetManagerButton\.disabled = busy \|\| !currentScene/);
+  assert.match(appSource, /function showAssetManager\(\) \{\s*if \(meshUiBusy\) return;/);
+});

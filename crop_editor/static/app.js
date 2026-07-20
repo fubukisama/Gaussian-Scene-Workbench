@@ -65,6 +65,7 @@ const outputInput = document.getElementById("outputScene");
 const visibleSelectionToggle = document.getElementById("visibleSelection");
 const splatImportFileInput = document.getElementById("splatImportFile");
 const openAssetManagerButton = document.getElementById("openAssetManager");
+const refreshAssetManagerButton = document.getElementById("refreshAssetManager");
 const openExperimentManagerButton = document.getElementById("openExperimentManager");
 const downloadPlyButton = document.getElementById("downloadPly");
 const downloadSpzButton = document.getElementById("downloadSpz");
@@ -882,6 +883,7 @@ let meshSelected = new Set();
 let meshDeletedFaces = new Set();
 let meshUndoStack = [];
 let meshDirty = false;
+let meshUiBusy = false;
 let mediaObjectUrls = [];
 const trainingFiles = createTrainingFileStore();
 let threeReady = false;
@@ -1345,7 +1347,7 @@ function initUi() {
   document.getElementById("closeAssetManager").onclick = () => {
     assetManagerPanel.hidden = true;
   };
-  document.getElementById("refreshAssetManager").onclick = refreshAssetManager;
+  refreshAssetManagerButton.onclick = refreshAssetManager;
   if (document.getElementById("closeExperimentManager")) {
     document.getElementById("closeExperimentManager").onclick = () => {
       experimentManagerPanel.hidden = true;
@@ -2217,6 +2219,7 @@ async function openJobOutput(jobId) {
 }
 
 function showAssetManager() {
+  if (meshUiBusy) return;
   if (!assetManagerPanel) return;
   assetManagerPanel.hidden = false;
   refreshAssetManager();
@@ -2381,6 +2384,7 @@ function renderAssetManager(data) {
 }
 
 async function refreshAssetManager() {
+  if (meshUiBusy) return;
   if (!currentScene || !assetManagerList) {
     setStatus("Load a scene first.");
     return;
@@ -2391,14 +2395,14 @@ async function refreshAssetManager() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not list assets");
     renderAssetManager(data);
-    setStatus(`Assets refreshed for output/${data.scene}.`);
+    if (!meshUiBusy) setStatus(`Assets refreshed for output/${data.scene}.`);
   } catch (err) {
     assetManagerList.innerHTML = "";
     const empty = document.createElement("div");
     empty.className = "asset-empty";
     empty.textContent = err.message;
     assetManagerList.appendChild(empty);
-    setStatus(`Asset Manager failed: ${err.message}`);
+    if (!meshUiBusy) setStatus(`Asset Manager failed: ${err.message}`);
   }
 }
 
@@ -2868,6 +2872,7 @@ function setTrainingBusy(busy) {
 }
 
 function setMeshBusy(busy) {
+  meshUiBusy = Boolean(busy);
   const actions = meshActionsForMode(selectedMeshMode(), currentBackend, Boolean(currentScene), busy);
   updateMeshTextureToggleLabel();
   exportMeshButton.disabled = actions.exportMeshDisabled;
@@ -2891,6 +2896,7 @@ function setMeshBusy(busy) {
   downloadTextureButton.disabled = busy || !lastTextureDownloadUrl;
   downloadGlbButton.disabled = busy || !currentScene;
   if (openAssetManagerButton) openAssetManagerButton.disabled = busy || !currentScene;
+  if (refreshAssetManagerButton) refreshAssetManagerButton.disabled = busy || !currentScene;
   if (openExperimentManagerButton) openExperimentManagerButton.disabled = busy || !currentScene;
   downloadPlyButton.disabled = busy || !currentScene;
   downloadSpzButton.disabled = busy || !currentScene;
@@ -4120,6 +4126,7 @@ async function loadCurrentMesh({ forceOriginal = false } = {}) {
     setStatus("Mesh trim edits are still unsaved. Save trimmed mesh or Undo before reloading the original mesh.");
     return;
   }
+  setMeshBusy(true);
   try {
     setStatus(`Looking for ${meshModeSelect.value} mesh for ${currentScene}...`);
     const res = await fetch(apiPath(`/api/mesh/assets?scene=${encodeURIComponent(currentScene)}&iteration=${currentIteration}`));
@@ -4157,10 +4164,11 @@ async function loadCurrentMesh({ forceOriginal = false } = {}) {
         originalSize: mesh.size,
       });
     }
-    setMeshBusy(false);
   } catch (err) {
     if (forceOriginal && meshTrimToggle) meshTrimToggle.checked = false;
     setStatus(`Mesh load failed: ${err.message}`);
+  } finally {
+    setMeshBusy(false);
   }
 }
 
