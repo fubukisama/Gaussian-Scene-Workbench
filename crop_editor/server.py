@@ -4361,6 +4361,9 @@ def vs_build_tools_installation():
     return Path(path) if path else None
 
 
+RUNTIME_PROBE_TIMEOUT_SECONDS = 90
+
+
 def python_probe(python_path, env, code, timeout=20):
     if not python_path or not Path(python_path).exists():
         return False, "python missing"
@@ -4401,9 +4404,12 @@ def training_environment_report(backend="3dgs"):
         env,
         "import cv2; print(cv2.__version__)",
     )
+    video_python = Path(sys.executable)
+    video_env = os.environ.copy()
+    video_env["PYTHONUTF8"] = "1"
     video_ok, video_detail = python_probe(
-        python_path,
-        env,
+        video_python,
+        video_env,
         "import cv2, imageio, imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())",
     )
     runtime_probe_code = (
@@ -4418,6 +4424,7 @@ def training_environment_report(backend="3dgs"):
         python_path,
         env,
         runtime_probe_code,
+        timeout=RUNTIME_PROBE_TIMEOUT_SECONDS,
     )
     smart_app_state = smart_app_control_state()
     policy_blocked = native_extension_policy_blocked(runtime_detail, smart_app_state) if not runtime_ok else False
@@ -4473,6 +4480,7 @@ def training_environment_report(backend="3dgs"):
         "video_packages_ok": video_ok,
         "video_packages_error": None if video_ok else video_detail,
         "video_packages_detail": video_detail if video_ok else None,
+        "video_python": str(video_python),
         "runtime_imports_ok": runtime_ok,
         "runtime_imports_error": None if runtime_ok else runtime_detail,
         "runtime_imports_detail": runtime_detail if runtime_ok else None,

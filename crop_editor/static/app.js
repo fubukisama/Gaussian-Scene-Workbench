@@ -23,6 +23,7 @@ import { createTrainingFileStore } from "./training-files.mjs";
 import { makePanelDraggable } from "./floating-panels.mjs";
 import { createFpsMeter } from "./fps-meter.mjs";
 import { createGpuRenderTimer } from "./gpu-render-timer.mjs";
+import { trainingEnvironmentReady } from "./training-environment.mjs?v=20260720_metashape_preflight";
 import { existingTrainingOutputSceneName, trainingOutputSceneName } from "./training-targets.mjs?v=20260625_aligned_source";
 import {
   meshActionsForMode,
@@ -3347,8 +3348,11 @@ async function downloadSplatFormat(format) {
   }
 }
 
-async function checkTrainingEnvironment() {
+async function checkTrainingEnvironment(options = {}) {
   const backend = trainBackendSelect?.value || "3dgs";
+  const requireVideo = typeof options.requireVideo === "boolean"
+    ? options.requireVideo
+    : selectedTrainingFiles().some(isVideoFile);
   try {
     showTrainingLog();
     appendTrainingLog(`Checking ${backend.toUpperCase()} training environment...`);
@@ -3376,6 +3380,8 @@ async function checkTrainingEnvironment() {
       `ffmpeg: ${data.ffmpeg_exists ? "OK" : "MISSING"} - ${data.ffmpeg}`,
       `OpenCV: ${data.opencv_ok ? `OK - ${data.opencv_detail || ""}` : `MISSING - ${data.opencv_error}`}`,
       `Video packages: ${data.video_packages_ok ? "OK" : `MISSING - ${data.video_packages_error}`}`,
+      `Video runtime Python: ${data.video_python || data.python || ""}`,
+      `Video import required: ${requireVideo ? "YES" : "NO"}`,
       `${backend.toUpperCase()} primary runtime: ${data.runtime_imports_ok ? `OK - ${data.runtime_imports_detail || ""}` : `FAILED - ${data.runtime_imports_error}`}`,
       ...(data.native_extension_policy_blocked
         ? [`Smart App Control: ON - ${t("env.smartAppControlBlocked")}`]
@@ -3386,11 +3392,7 @@ async function checkTrainingEnvironment() {
       `Node helper: ${data.crop_node_helper_exists ? "OK" : "MISSING"} - ${data.crop_node_helper}`,
     ];
     appendTrainingLog(lines.join("\n"));
-    const backendOk = backend === "2dgs"
-      ? data.two_dgs_dir_exists && data.two_dgs_python_exists && data.two_dgs_train_exists
-      : true;
-    const commonOk = data.conda_exists && data.python_exists && data.env_root_exists && data.colmap_exists && data.opencv_ok && data.video_packages_ok && data.ffmpeg_exists && data.gaussian_dir_exists && data.runtime_ready;
-    const ready = commonOk && backendOk;
+    const ready = trainingEnvironmentReady(data, backend, { requireVideo });
     setStatus(ready ? `${backend.toUpperCase()} training environment OK (${data.runtime_mode || "primary"}).` : t("env.preflightFailed"));
     return ready;
   } catch (err) {
@@ -3470,7 +3472,9 @@ async function importAndStartTraining(uploadFirst) {
   showTrainingLog();
   trainLog.textContent = "";
   try {
-    const envReady = await checkTrainingEnvironment();
+    const envReady = await checkTrainingEnvironment({
+      requireVideo: uploadFirst && files.some(isVideoFile),
+    });
     if (!envReady) {
       appendTrainingLog(t("env.preflightFailed"));
       setTrainingBusy(false);
@@ -3543,7 +3547,12 @@ async function startColmapAlignment() {
   showTrainingLog();
   trainLog.textContent = "";
   try {
-    await checkTrainingEnvironment();
+    const envReady = await checkTrainingEnvironment({ requireVideo: false });
+    if (!envReady) {
+      appendTrainingLog(t("env.preflightFailed"));
+      setTrainingBusy(false);
+      return;
+    }
     setStatus(`Starting COLMAP alignment for datasets/${sceneName}...`);
     appendTrainingLog(`Starting COLMAP alignment for datasets/${sceneName}...`);
     const res = await fetch(apiPath("/api/colmap/start"), {

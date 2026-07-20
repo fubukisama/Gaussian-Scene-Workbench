@@ -5,6 +5,10 @@ import path from "node:path";
 
 const appSource = fs.readFileSync(path.join(process.cwd(), "static", "app.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(process.cwd(), "static", "index.html"), "utf8");
+const trainingEnvironmentSource = fs.readFileSync(
+  path.join(process.cwd(), "static", "training-environment.mjs"),
+  "utf8",
+);
 
 function topLevelDeclarationIndex(source, declaration) {
   let depth = 0;
@@ -41,9 +45,10 @@ test("Gaussian PLY export is available in the output ribbon", () => {
 });
 
 test("training does not start when the runtime preflight fails", () => {
-  assert.match(appSource, /const envReady = await checkTrainingEnvironment\(\)/);
+  assert.match(appSource, /const envReady = await checkTrainingEnvironment\(\{/);
+  assert.match(appSource, /requireVideo: uploadFirst && files\.some\(isVideoFile\)/);
   assert.match(appSource, /if \(!envReady\)/);
-  assert.match(appSource, /runtime_ready/);
+  assert.match(trainingEnvironmentSource, /data\.runtime_ready/);
   assert.match(appSource, /smart_app_control_state/);
 });
 

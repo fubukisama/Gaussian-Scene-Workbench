@@ -1814,6 +1814,16 @@ class TrainingBackendTests(unittest.TestCase):
         self.assertTrue(report["two_dgs_python"].endswith(".venv\\Scripts\\python.exe"))
         self.assertTrue(report["two_dgs_train"].endswith("train.py"))
 
+    def test_2dgs_environment_uses_server_video_runtime_and_long_cuda_timeout(self):
+        with mock.patch.object(server, "python_probe", return_value=(True, "ok")) as probe:
+            with mock.patch.object(server, "openmvs_environment_report", return_value={}):
+                server.training_environment_report("2dgs")
+
+        video_call = next(call for call in probe.call_args_list if "imageio_ffmpeg" in call.args[2])
+        runtime_call = next(call for call in probe.call_args_list if "diff_surfel_rasterization" in call.args[2])
+        self.assertEqual(Path(video_call.args[0]).resolve(), Path(sys.executable).resolve())
+        self.assertGreaterEqual(runtime_call.kwargs["timeout"], 60)
+
     def test_training_environment_rejects_smart_app_control_blocked_runtime(self):
         report = {
             "python_exists": True,
