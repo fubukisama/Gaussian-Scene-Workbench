@@ -62,6 +62,14 @@ test("Metashape COLMAP camera projects have a lossless import entry point", () =
   assert.match(appSource, /"button\.metashapeCameras": "Metashape カメラ"/);
 });
 
+test("GS2Mesh auto scale is enabled by default and localized", () => {
+  assert.match(indexSource, /id="gs2meshAutoScale"[^>]+checked/);
+  assert.match(appSource, /gs2mesh_auto_scale: Boolean\(gs2meshAutoScaleToggle\?\.checked\)/);
+  assert.match(appSource, /"toggle\.gs2meshAutoScale": "Auto Scale"/);
+  assert.match(appSource, /"toggle\.gs2meshAutoScale": "自动尺度"/);
+  assert.match(appSource, /"toggle\.gs2meshAutoScale": "自動スケール"/);
+});
+
 test("large mesh loading blocks asset refresh until the load settles", () => {
   const start = appSource.indexOf("async function loadCurrentMesh");
   const end = appSource.indexOf("\nasync function loadTexturedMeshFromUrls", start);

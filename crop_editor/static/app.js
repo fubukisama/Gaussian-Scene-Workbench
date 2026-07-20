@@ -146,6 +146,7 @@ const gs2meshTsdfVoxelInput = document.getElementById("gs2meshTsdfVoxel");
 const gs2meshTsdfMinInput = document.getElementById("gs2meshTsdfMin");
 const gs2meshTsdfMaxInput = document.getElementById("gs2meshTsdfMax");
 const gs2meshScene360Toggle = document.getElementById("gs2meshScene360");
+const gs2meshAutoScaleToggle = document.getElementById("gs2meshAutoScale");
 const exportMeshButton = document.getElementById("exportMesh");
 const loadMeshButton = document.getElementById("loadMesh");
 const bakeTextureButton = document.getElementById("bakeTexture");
@@ -252,6 +253,7 @@ const I18N = {
     "toggle.meshTrim": "Mesh Trim",
     "toggle.sugarPost": "Postprocess",
     "toggle.gs2mesh360": "360 Scene",
+    "toggle.gs2meshAutoScale": "Auto Scale",
     "button.load": "Load",
     "button.reset": "Reset",
     "button.previewReal": "Preview Real",
@@ -452,6 +454,7 @@ const I18N = {
     "toggle.meshTrim": "网格修剪",
     "toggle.sugarPost": "后处理",
     "toggle.gs2mesh360": "360场景",
+    "toggle.gs2meshAutoScale": "自动尺度",
     "button.load": "加载",
     "button.reset": "重置",
     "button.previewReal": "预览真实渲染",
@@ -652,6 +655,7 @@ const I18N = {
     "toggle.meshTrim": "メッシュ編集",
     "toggle.sugarPost": "後処理",
     "toggle.gs2mesh360": "360シーン",
+    "toggle.gs2meshAutoScale": "自動スケール",
     "button.load": "読込",
     "button.reset": "リセット",
     "button.previewReal": "実レンダー確認",
@@ -1817,6 +1821,7 @@ function gs2meshMeshOptions() {
     gs2mesh_tsdf_min_depth_baselines: Math.round(numberOrFallback(gs2meshTsdfMinInput?.value, 4)),
     gs2mesh_tsdf_max_depth_baselines: Math.round(numberOrFallback(gs2meshTsdfMaxInput?.value, 20)),
     gs2mesh_scene_360: Boolean(gs2meshScene360Toggle?.checked),
+    gs2mesh_auto_scale: Boolean(gs2meshAutoScaleToggle?.checked),
   };
 }
 
@@ -3706,6 +3711,7 @@ async function startMeshExport() {
         voxel: options.gs2mesh_tsdf_voxel,
         depth: [options.gs2mesh_tsdf_min_depth_baselines, options.gs2mesh_tsdf_max_depth_baselines],
         scene360: options.gs2mesh_scene_360,
+        autoScale: options.gs2mesh_auto_scale,
       })}`);
     }
     const res = await fetch(apiPath("/api/mesh/start"), {

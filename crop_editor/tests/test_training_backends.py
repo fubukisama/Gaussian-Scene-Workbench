@@ -2653,6 +2653,285 @@ class TrainingBackendTests(unittest.TestCase):
                 if original_gs2mesh is not None:
                     server.GS2MESH_DIR = original_gs2mesh
 
+    def test_gs2mesh_auto_scale_expands_depth_window_and_voxel_without_transform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            model = Path(tmp) / "output" / "mesh_scene"
+            camera_data = []
+            for index, depth_value in enumerate((10.0, 15.0)):
+                stereo = cache / f"{index:03d}" / "out_DLNR_Middlebury"
+                stereo.mkdir(parents=True)
+                np.save(stereo / "depth.npy", np.full((32, 32), depth_value, dtype=np.float32))
+                np.save(stereo / "occlusion_mask.npy", np.ones((32, 32), dtype=np.uint8))
+                camera_data.append({"left": {"baseline": 0.25, "pos": [float(index), 0.0, 0.0]}})
+            (cache / "camera_data.json").write_text(json.dumps(camera_data), encoding="utf-8")
+            write_test_ply(
+                model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                np.array([[-12.0, 0.0, 0.0], [12.0, 0.0, 0.0]], dtype=np.float32),
+            )
+            requested = server.mesh_export_options(
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_tsdf_voxel": 2,
+                    "gs2mesh_tsdf_min_depth_baselines": 4,
+                    "gs2mesh_tsdf_max_depth_baselines": 20,
+                    "gs2mesh_auto_scale": True,
+                }
+            )
+
+            profile = server.profile_gs2mesh_render_cache(cache, requested)
+            effective, report = server.resolve_gs2mesh_scale_options(requested, profile, model, 7000)
+
+            self.assertEqual(profile["requested_coverage"], 0.0)
+            self.assertEqual(effective["gs2mesh_tsdf_voxel"], 8)
+            self.assertEqual(effective["gs2mesh_tsdf_min_depth_baselines"], 4)
+            self.assertEqual(effective["gs2mesh_tsdf_max_depth_baselines"], 80)
+            self.assertEqual(report["source_coordinates"], "preserved")
+            self.assertEqual(report["tsdf_scale"], 1.0)
+
+    def test_gs2mesh_manual_scale_options_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            model = Path(tmp) / "output" / "mesh_scene"
+            stereo = cache / "000" / "out_DLNR_Middlebury"
+            stereo.mkdir(parents=True)
+            np.save(stereo / "depth.npy", np.full((8, 8), 10.0, dtype=np.float32))
+            np.save(stereo / "occlusion_mask.npy", np.ones((8, 8), dtype=np.uint8))
+            (cache / "camera_data.json").write_text(
+                json.dumps([{"left": {"baseline": 0.25, "pos": [0.0, 0.0, 0.0]}}]),
+                encoding="utf-8",
+            )
+            write_test_ply(
+                model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                np.array([[0.0, 0.0, 0.0], [24.0, 0.0, 0.0]], dtype=np.float32),
+            )
+            requested = server.mesh_export_options(
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_tsdf_voxel": 3,
+                    "gs2mesh_tsdf_min_depth_baselines": 5,
+                    "gs2mesh_tsdf_max_depth_baselines": 30,
+                    "gs2mesh_auto_scale": False,
+                }
+            )
+
+            profile = server.profile_gs2mesh_render_cache(cache, requested)
+            effective, _report = server.resolve_gs2mesh_scale_options(requested, profile, model, 7000)
+
+            self.assertEqual(effective["gs2mesh_tsdf_voxel"], 3)
+            self.assertEqual(effective["gs2mesh_tsdf_min_depth_baselines"], 5)
+            self.assertEqual(effective["gs2mesh_tsdf_max_depth_baselines"], 30)
+
+    def test_gs2mesh_depth_profile_honors_disabled_occlusion_mask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            stereo = cache / "000" / "out_DLNR_Middlebury"
+            stereo.mkdir(parents=True)
+            np.save(stereo / "depth.npy", np.full((8, 8), 10.0, dtype=np.float32))
+            np.save(stereo / "occlusion_mask.npy", np.zeros((8, 8), dtype=np.uint8))
+            (cache / "camera_data.json").write_text(
+                json.dumps([{"left": {"baseline": 0.25, "pos": [0.0, 0.0, 0.0]}}]),
+                encoding="utf-8",
+            )
+
+            profile = server.profile_gs2mesh_render_cache(
+                cache,
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_use_occlusion_mask": False,
+                    "gs2mesh_tsdf_min_depth_baselines": 4,
+                    "gs2mesh_tsdf_max_depth_baselines": 80,
+                },
+            )
+
+            self.assertEqual(profile["sampled_after_mask"], 64)
+            self.assertEqual(profile["depth"]["p50"], 10.0)
+            self.assertTrue(profile["occlusion_mask_usable"])
+
+    def test_gs2mesh_staging_keeps_aligned_camera_source_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = server.GS2MESH_DIR
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = Path(tmp) / "source"
+                images = source / "images"
+                sparse = source / "sparse" / "0"
+                images.mkdir(parents=True)
+                sparse.mkdir(parents=True)
+                (images / "frame.jpg").write_bytes(b"image")
+                originals = {
+                    "cameras.txt": b"# cameras\n1 PINHOLE 100 50 80 80 50 25\n",
+                    "images.txt": b"# images\n1 1 0 0 0 0 0 0 1 frame.jpg\n\n",
+                    "points3D.txt": b"# points\n1 0 0 0 255 255 255 0\n",
+                }
+                for name, value in originals.items():
+                    (sparse / name).write_bytes(value)
+
+                server.prepare_gs2mesh_dataset("mesh_scene", source, downsample=2)
+
+                for name, value in originals.items():
+                    self.assertEqual((sparse / name).read_bytes(), value)
+            finally:
+                server.GS2MESH_DIR = original_gs2mesh
+
+    def test_gs2mesh_staging_expands_multi_camera_mapping_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = server.GS2MESH_DIR
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = Path(tmp) / "source"
+                (source / "images").mkdir(parents=True)
+                sparse = source / "sparse" / "0"
+                sparse.mkdir(parents=True)
+                (source / "images" / "first.jpg").write_bytes(b"first")
+                (source / "images" / "second.jpg").write_bytes(b"second")
+                cameras = (
+                    "# Camera list\n"
+                    "# Number of cameras: 2\n"
+                    "7 PINHOLE 200 100 150 151 100 50\n"
+                    "9 PINHOLE 400 300 320 321 200 150\n"
+                )
+                images = (
+                    "# Image list\n"
+                    "2 1 0 0 0 -1 0 0 9 second.jpg\n\n"
+                    "1 1 0 0 0 0 0 0 7 first.jpg\n\n"
+                )
+                (sparse / "cameras.txt").write_text(cameras, encoding="utf-8")
+                (sparse / "images.txt").write_text(images, encoding="utf-8")
+                (sparse / "points3D.txt").write_text("# points\n", encoding="utf-8")
+
+                staged = server.prepare_gs2mesh_dataset("mesh_scene", source, downsample=1)
+
+                self.assertEqual((sparse / "cameras.txt").read_text(encoding="utf-8"), cameras)
+                self.assertEqual((sparse / "images.txt").read_text(encoding="utf-8"), images)
+                staged_sparse = staged / "sparse" / "0"
+                staged_cameras = server.gs2mesh_colmap_renderer_intrinsics(
+                    staged_sparse / "cameras.txt",
+                    server.gs2mesh_colmap_image_records(staged_sparse / "images.txt"),
+                )
+                self.assertEqual(staged_cameras[0][:2], (200, 100))
+                self.assertEqual(staged_cameras[1][:2], (400, 300))
+                staged_records = server.gs2mesh_colmap_image_records(staged_sparse / "images.txt")
+                self.assertEqual(
+                    [record["camera_id"] for record in staged_records],
+                    [record["image_id"] for record in staged_records],
+                )
+            finally:
+                server.GS2MESH_DIR = original_gs2mesh
+
+    def test_gs2mesh_invalid_signed_cache_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = server.GS2MESH_DIR
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                options = server.mesh_export_options(
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2, "gs2mesh_baseline_percentage": 7}
+                )
+                runtime = server.GS2MESH_DIR / "data" / "custom" / "mesh_scene_downsample2"
+                sparse = runtime / "sparse" / "0"
+                sparse.mkdir(parents=True)
+                (sparse / "images.txt").write_text(
+                    "1 1 0 0 0 0 0 0 1 frame.jpg\n\n", encoding="utf-8"
+                )
+                cache = server.gs2mesh_output_dirs("mesh_scene", 7000, options)[1]
+                stereo = cache / "000" / "out_DLNR_Middlebury"
+                stereo.mkdir(parents=True)
+                (cache / "000" / "left.png").write_bytes(b"left")
+                np.save(stereo / "depth.npy", np.ones((2, 2), dtype=np.float32))
+                np.save(stereo / "occlusion_mask.npy", np.ones((2, 2), dtype=np.uint8))
+                server.write_gs2mesh_cache_manifest(cache, {"version": 1, "scene": "wrong"})
+                signature = {"version": 1, "scene": "mesh_scene", "scene_360": True, "baseline_percentage": 7.0}
+
+                reused = server.prepare_gs2mesh_render_cache_dir(
+                    "mesh_scene",
+                    7000,
+                    options,
+                    signature=signature,
+                    quarantine_invalid=True,
+                )
+
+                self.assertIsNone(reused)
+                self.assertFalse(cache.exists())
+                self.assertTrue(any((cache.parent / ".stale").iterdir()))
+            finally:
+                server.GS2MESH_DIR = original_gs2mesh
+
+    def test_gs2mesh_legacy_cache_rejects_changed_orientation_and_maps_camera_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            colmap = Path(tmp) / "colmap"
+            sparse = colmap / "sparse" / "0"
+            sparse.mkdir(parents=True)
+            (sparse / "cameras.txt").write_text(
+                "7 PINHOLE 200 100 150 151 100 50\n"
+                "9 PINHOLE 400 300 320 321 200 150\n",
+                encoding="utf-8",
+            )
+            (sparse / "images.txt").write_text(
+                "2 1 0 0 0 -1 0 0 9 second.jpg\n\n"
+                "1 1 0 0 0 0 0 0 7 first.jpg\n\n",
+                encoding="utf-8",
+            )
+            cache = Path(tmp) / "cache"
+            cache.mkdir()
+            camera_data = [
+                {
+                    "left": {
+                        "baseline": 0.035,
+                        "pos": [0.0, 0.0, 0.0],
+                        "width": 200,
+                        "height": 100,
+                        "fx": 150,
+                        "fy": 151,
+                        "cx": 100,
+                        "cy": 50,
+                        "extrinsic": np.eye(4).tolist(),
+                    }
+                },
+                {
+                    "left": {
+                        "baseline": 0.035,
+                        "pos": [1.0, 0.0, 0.0],
+                        "width": 400,
+                        "height": 300,
+                        "fx": 320,
+                        "fy": 321,
+                        "cx": 200,
+                        "cy": 150,
+                        "extrinsic": np.asarray(
+                            [[1, 0, 0, 1], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                            dtype=float,
+                        ).tolist(),
+                    }
+                },
+            ]
+            camera_data_path = cache / "camera_data.json"
+            camera_data_path.write_text(json.dumps(camera_data), encoding="utf-8")
+            signature = {
+                "scene_360": True,
+                "baseline_percentage": 7.0,
+                "point_cloud": {"mtime_ns": 0},
+                "runner": {"mtime_ns": 0},
+            }
+
+            self.assertTrue(server.gs2mesh_legacy_cache_matches(cache, colmap, signature))
+
+            camera_data[0]["left"]["extrinsic"][0][0] = -1.0
+            camera_data_path.write_text(json.dumps(camera_data), encoding="utf-8")
+            self.assertFalse(server.gs2mesh_legacy_cache_matches(cache, colmap, signature))
+
+    def test_gs2mesh_two_stage_commands_keep_source_scale(self):
+        options = server.mesh_export_options(
+            {"mode": "gs2mesh", "task_port": 6113, "gs2mesh_auto_scale": True}
+        )
+        render = [str(value) for value in server.build_gs2mesh_command("mesh_scene", 7000, options, skip_tsdf=True)]
+        fusion = [str(value) for value in server.build_gs2mesh_command("mesh_scene", 7000, options, skip_rendering=True)]
+
+        self.assertIn("--skip_TSDF", render)
+        self.assertNotIn("--skip_rendering", render)
+        self.assertIn("--skip_rendering", fusion)
+        self.assertNotIn("--skip_TSDF", fusion)
+        self.assertEqual(fusion[fusion.index("--TSDF_scale") + 1], "1.0")
+
     def test_collect_gs2mesh_output_copies_fresh_mesh_from_current_scene(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR
@@ -2771,6 +3050,44 @@ class TrainingBackendTests(unittest.TestCase):
                 server.OUTPUT_DIR = original_output
                 if original_gs2mesh is not None:
                     server.GS2MESH_DIR = original_gs2mesh
+
+    def test_collect_gs2mesh_output_preserves_nonempty_raw_mesh_when_cleaning_removes_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_gs2mesh = server.GS2MESH_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                root = server.GS2MESH_DIR / "output" / "app" / "mesh_scene_d2"
+                stem = (
+                    "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20"
+                )
+                root.mkdir(parents=True)
+                cleaned = root / f"{stem}_cleaned_mesh.ply"
+                raw = root / f"{stem}_mesh.ply"
+                cleaned.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 0\nelement face 0\nend_header\n",
+                    encoding="utf-8",
+                )
+                raw.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                result = server.collect_gs2mesh_mesh_output(
+                    "mesh_scene",
+                    7,
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                    0,
+                )
+
+                self.assertFalse(result["cleaned"])
+                self.assertEqual(result["source"], str(raw))
+                self.assertIn("raw TSDF mesh", result["warning"])
+            finally:
+                server.OUTPUT_DIR = original_output
+                server.GS2MESH_DIR = original_gs2mesh
 
     def test_collect_gs2mesh_output_rejects_stale_mesh_from_same_scene(self):
         with tempfile.TemporaryDirectory() as tmp:

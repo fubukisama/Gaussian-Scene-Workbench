@@ -162,9 +162,10 @@
         <label class="check sugar-control" hidden><input id="sugarPostprocess" type="checkbox"> <span data-i18n="toggle.sugarPost">Postprocess</span></label>
         <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshDownsample">Down</span><input id="gs2meshDownsample" type="number" min="1" max="8" step="1" value="2"></label>
         <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshBaseline">Base %</span><input id="gs2meshBaseline" type="number" min="0.1" max="50" step="0.5" value="7"></label>
-        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshVoxel">Voxel</span><input id="gs2meshTsdfVoxel" type="number" min="1" max="8" step="1" value="2"></label>
-        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshDepth">Depth</span><input id="gs2meshTsdfMin" type="number" min="1" max="100" step="1" value="4"><input id="gs2meshTsdfMax" type="number" min="1" max="200" step="1" value="20"></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshVoxel">Voxel</span><input id="gs2meshTsdfVoxel" type="number" min="1" max="4096" step="1" value="2"></label>
+        <label class="field compact gs2mesh-control" hidden><span data-i18n="label.gs2meshDepth">Depth</span><input id="gs2meshTsdfMin" type="number" min="1" max="100" step="1" value="4"><input id="gs2meshTsdfMax" type="number" min="1" max="100000" step="1" value="20"></label>
         <label class="check gs2mesh-control" hidden><input id="gs2meshScene360" type="checkbox" checked> <span data-i18n="toggle.gs2mesh360">360 Scene</span></label>
+        <label class="check gs2mesh-control" hidden><input id="gs2meshAutoScale" type="checkbox" checked> <span data-i18n="toggle.gs2meshAutoScale">Auto Scale</span></label>
         </details>
         <div class="action-strip">
           <button id="exportMesh" data-i18n="button.exportMesh">Export Mesh</button>
