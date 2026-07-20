@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench (Legacy HTML)",
-    "sourceVersion":  "36.10.10",
-    "packageVersion":  "0.2.10",
-    "releaseTag":  "v0.2.10",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.10-win-x64.zip",
-    "updatedAt":  "2026-07-20T15:32:13+09:00",
+    "sourceVersion":  "36.10.11",
+    "packageVersion":  "0.2.11",
+    "releaseTag":  "v0.2.11",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.11-win-x64.zip",
+    "updatedAt":  "2026-07-20T16:13:37+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "3c1d08d",
-    "gitDirty":  false,
-    "note":  "Isolate training task ports and prevent asset actions from interrupting large mesh loading"
+    "gitCommit":  "7b180c5",
+    "gitDirty":  true,
+    "note":  "Prevent GS2Mesh cross-scene mesh reuse and validate fresh non-empty output"
 }

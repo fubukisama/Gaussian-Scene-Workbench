@@ -2988,28 +2988,80 @@ def prepare_gs2mesh_inputs(scene, model_path, source_path, iteration, downsample
     return dataset_dir, checkpoint_dir
 
 
-def find_latest_gs2mesh_cleaned_mesh(started_at):
-    output_root = GS2MESH_DIR / "output"
-    if not output_root.exists():
-        raise FileNotFoundError(f"GS2Mesh output directory was not created: {output_root}")
-    threshold = float(started_at) - 5.0
-    candidates = [
-        path for path in output_root.rglob("*cleaned_mesh.ply")
-        if path.is_file() and path.stat().st_mtime >= threshold
-    ]
+def gs2mesh_cleaned_mesh_pattern(scene, iteration, options):
+    runtime_scene = gs2mesh_runtime_colmap_name(scene, options["gs2mesh_downsample"])
+    dataset_name = gs2mesh_dataset_string(iteration, options["gs2mesh_baseline_percentage"])
+    voxel = options["gs2mesh_tsdf_voxel"]
+    min_depth = options["gs2mesh_tsdf_min_depth_baselines"]
+    max_depth = options["gs2mesh_tsdf_max_depth_baselines"]
+    return f"{runtime_scene}_{dataset_name}_*voxel{voxel}_512_trunc{min_depth}_{max_depth}_cleaned_mesh.ply"
+
+
+def find_latest_gs2mesh_cleaned_mesh(scene, iteration, options, started_at):
+    expected_roots = gs2mesh_output_dirs(scene, iteration, options)
+    threshold = max(0.0, float(started_at) - 5.0)
+    pattern = gs2mesh_cleaned_mesh_pattern(scene, iteration, options)
+    candidates = []
+    for root in expected_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob(pattern):
+            if path.is_file() and path.stat().st_mtime >= threshold:
+                candidates.append(path)
     if not candidates:
-        candidates = [path for path in output_root.rglob("*cleaned_mesh.ply") if path.is_file()]
-    if not candidates:
-        raise FileNotFoundError(f"GS2Mesh completed but no *_cleaned_mesh.ply was found under {output_root}")
+        roots = ", ".join(str(path) for path in expected_roots)
+        raise FileNotFoundError(
+            f"GS2Mesh did not create a fresh cleaned mesh for scene '{scene}'. "
+            f"Expected {pattern} under: {roots}. Existing render/depth caches were preserved."
+        )
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
-def collect_gs2mesh_mesh_output(scene, iteration, started_at):
-    source = find_latest_gs2mesh_cleaned_mesh(started_at)
+def ply_mesh_element_counts(path):
+    vertex_count = None
+    face_count = None
+    header_complete = False
+    header_bytes = 0
+    with open(path, "rb") as handle:
+        if handle.readline(256).strip() != b"ply":
+            raise RuntimeError(f"GS2Mesh output is not a PLY file: {path}")
+        for _ in range(256):
+            line = handle.readline(4096)
+            if not line:
+                break
+            header_bytes += len(line)
+            if header_bytes > 65536:
+                break
+            fields = line.decode("ascii", errors="replace").strip().split()
+            if len(fields) == 3 and fields[:2] == ["element", "vertex"]:
+                vertex_count = int(fields[2])
+            elif len(fields) == 3 and fields[:2] == ["element", "face"]:
+                face_count = int(fields[2])
+            elif fields == ["end_header"]:
+                header_complete = True
+                break
+    if not header_complete:
+        raise RuntimeError(f"GS2Mesh output has an invalid PLY header: {path}")
+    return int(vertex_count or 0), int(face_count or 0)
+
+
+def collect_gs2mesh_mesh_output(scene, iteration, options, started_at):
+    opts = mesh_export_options(options)
+    source = find_latest_gs2mesh_cleaned_mesh(scene, iteration, opts, started_at)
+    vertex_count, face_count = ply_mesh_element_counts(source)
+    if vertex_count <= 0 or face_count <= 0:
+        raise RuntimeError(
+            f"GS2Mesh produced a cleaned mesh with no vertices or faces for scene '{scene}': {source}"
+        )
     target = mesh_output_path(scene, iteration, "gs2mesh", post=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return {"source": str(source), "mesh": str(target)}
+    return {
+        "source": str(source),
+        "mesh": str(target),
+        "vertices": vertex_count,
+        "faces": face_count,
+    }
 
 
 def mesh_export_command(scene, iteration, options=None):
@@ -6412,8 +6464,15 @@ def run_mesh_export_job(job):
             if texture_result.get("glb_error"):
                 add_job_log(job, f"WARNING: GLB export skipped: {texture_result['glb_error']}")
         elif options.get("mode") == "gs2mesh":
-            gs2mesh_result = collect_gs2mesh_mesh_output(job["scene"], job["iteration"], started_at)
+            gs2mesh_result = collect_gs2mesh_mesh_output(
+                job["scene"], job["iteration"], options, started_at
+            )
             add_job_log(job, f"GS2Mesh cleaned mesh: {gs2mesh_result['source']}")
+            add_job_log(
+                job,
+                f"GS2Mesh geometry: {gs2mesh_result['vertices']:,} vertices, "
+                f"{gs2mesh_result['faces']:,} faces",
+            )
         if not output_path.exists():
             raise RuntimeError(f"Mesh export finished but output file was not found: {output_path}")
         with MESH_LOCK:

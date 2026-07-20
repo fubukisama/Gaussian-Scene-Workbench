@@ -63,6 +63,16 @@ $currentVersion = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
 $packageRaw = Get-Content -LiteralPath $PackageJsonPath -Raw
 $packageJson = $packageRaw | ConvertFrom-Json
 $currentPackageVersion = [string]$packageJson.version
+$appName = "Gaussian Scene Workbench (Legacy HTML)"
+if (Test-Path -LiteralPath $ManifestPath) {
+  try {
+    $currentManifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    if (-not [string]::IsNullOrWhiteSpace([string]$currentManifest.appName)) {
+      $appName = [string]$currentManifest.appName
+    }
+  } catch {
+  }
+}
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $Version = if ($Bump -eq "none") { $currentVersion } else { Bump-Version $currentVersion $Bump }
@@ -81,7 +91,7 @@ $gitBranch = Get-GitValue -GitArgs @("branch", "--show-current")
 $dirty = Get-GitValue -GitArgs @("status", "--short")
 
 $manifest = [ordered]@{
-  appName = "Gaussian Scene Workbench"
+  appName = $appName
   sourceVersion = $Version
   packageVersion = $PackageVersion
   releaseTag = "v$PackageVersion"

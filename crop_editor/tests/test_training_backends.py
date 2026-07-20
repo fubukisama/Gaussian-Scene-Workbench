@@ -1,6 +1,7 @@
 import sys
 import io
 import json
+import os
 import shutil
 import struct
 import tempfile
@@ -2652,23 +2653,154 @@ class TrainingBackendTests(unittest.TestCase):
                 if original_gs2mesh is not None:
                     server.GS2MESH_DIR = original_gs2mesh
 
-    def test_collect_gs2mesh_output_copies_latest_cleaned_mesh(self):
+    def test_collect_gs2mesh_output_copies_fresh_mesh_from_current_scene(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR
             original_gs2mesh = getattr(server, "GS2MESH_DIR", None)
             server.OUTPUT_DIR = Path(tmp) / "output"
             server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
             try:
-                source = server.GS2MESH_DIR / "output" / "custom_nw_iterations7" / "mesh_scene" / "result_cleaned_mesh.ply"
+                source = (
+                    server.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
                 source.parent.mkdir(parents=True, exist_ok=True)
-                source.write_text("ply\n", encoding="utf-8")
+                source.write_text(
+                    "\n".join([
+                        "ply",
+                        "format ascii 1.0",
+                        "element vertex 3",
+                        "property float x",
+                        "property float y",
+                        "property float z",
+                        "element face 1",
+                        "property list uchar int vertex_indices",
+                        "end_header",
+                        "0 0 0",
+                        "1 0 0",
+                        "0 1 0",
+                        "3 0 1 2",
+                        "",
+                    ]),
+                    encoding="utf-8",
+                )
 
-                result = server.collect_gs2mesh_mesh_output("mesh_scene", 7, 0)
+                result = server.collect_gs2mesh_mesh_output(
+                    "mesh_scene",
+                    7,
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                    0,
+                )
 
                 target = server.mesh_output_path("mesh_scene", 7, "gs2mesh", post=True)
                 self.assertEqual(result["mesh"], str(target))
-                self.assertEqual(target.read_text(encoding="utf-8"), "ply\n")
+                self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
                 self.assertEqual(result["source"], str(source))
+            finally:
+                server.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    server.GS2MESH_DIR = original_gs2mesh
+
+    def test_collect_gs2mesh_output_never_falls_back_to_another_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_gs2mesh = getattr(server, "GS2MESH_DIR", None)
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                wrong = (
+                    server.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "other_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                wrong.parent.mkdir(parents=True, exist_ok=True)
+                wrong.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(FileNotFoundError, "mesh_scene"):
+                    server.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        0,
+                    )
+                self.assertFalse(server.mesh_output_path("mesh_scene", 7, "gs2mesh", post=True).exists())
+            finally:
+                server.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    server.GS2MESH_DIR = original_gs2mesh
+
+    def test_collect_gs2mesh_output_rejects_empty_mesh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_gs2mesh = getattr(server, "GS2MESH_DIR", None)
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = (
+                    server.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 0\nelement face 0\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "no vertices or faces"):
+                    server.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        0,
+                    )
+            finally:
+                server.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    server.GS2MESH_DIR = original_gs2mesh
+
+    def test_collect_gs2mesh_output_rejects_stale_mesh_from_same_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            original_gs2mesh = getattr(server, "GS2MESH_DIR", None)
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            server.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = (
+                    server.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+                os.utime(source, (10, 10))
+
+                with self.assertRaisesRegex(FileNotFoundError, "fresh cleaned mesh"):
+                    server.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        100,
+                    )
             finally:
                 server.OUTPUT_DIR = original_output
                 if original_gs2mesh is not None:
