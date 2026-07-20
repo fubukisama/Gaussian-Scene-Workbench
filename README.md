@@ -10,8 +10,8 @@
 The application is being rebuilt as a fully native Qt 6/C++ desktop program on the [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3) branch. This target does not embed HTML, a browser engine, Electron, Node.js, or a local web server.
 
 - Current version: `0.3.1-native-preview`
-- Updated: `2026-07-16`
-- Current native slice: guarded COLMAP reconstruction and training, screen-space Gaussian preview with point fallback, full-source rectangle/lasso/brush selection, delete undo/redo, and lossless cropped PLY export.
+- Updated: `2026-07-20`
+- Current native slice: guarded COLMAP reconstruction and training, a world-fixed infinite reference grid, screen-space Gaussian preview with point fallback, full-source rectangle/lasso/brush selection, delete undo/redo, and lossless cropped PLY export.
 - Renderer metric: honest CPU submission time; GPU/SIBR timing remains a tracked parity item.
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)
@@ -144,7 +144,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
 
 ### 原生桌面版开发
 
-`0.3.1-native-preview` 已在 `agent/native-desktop-0.3` 分支继续重构。该版本使用 Qt 6/C++，不加载 HTML、Electron、Node.js 或本地网页服务器。当前原生工作流已支持带路径检查、缓存保护、实时日志、取消和输出验证的 COLMAP 重建；原生视口支持由缩放、旋转、透明度和 SH-DC 颜色驱动的屏幕空间高斯预览，并保留点模式回退；矩形、套索和可调半径连续笔刷均针对完整源数据工作。显示的是 CPU 提交耗时，不冒充 SIBR FPS。GitHub Actions 会在每次推送后自动生成 Windows 预览 artifact；迁移阶段保留 `0.2.4` 作为稳定版本。
+`0.3.1-native-preview` 已在 `agent/native-desktop-0.3` 分支继续重构。该版本使用 Qt 6/C++，不加载 HTML、Electron、Node.js 或本地网页服务器。当前原生工作流已支持带路径检查、缓存保护、实时日志、取消和输出验证的 COLMAP 重建；原生视口提供固定在 Y=0 世界平面的无限自适应网格，并支持由缩放、旋转、透明度和 SH-DC 颜色驱动的屏幕空间高斯预览，保留点模式回退；矩形、套索和可调半径连续笔刷均针对完整源数据工作。显示的是 CPU 提交耗时，不冒充 SIBR FPS。GitHub Actions 会在每次推送后自动生成 Windows 预览 artifact；迁移阶段保留 `0.2.4` 作为稳定版本。
 
 ---
 

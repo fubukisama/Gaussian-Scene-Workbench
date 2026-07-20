@@ -74,6 +74,10 @@ public:
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
   [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
+  [[nodiscard]] bool infiniteGridRenderingAvailable() const;
+  [[nodiscard]] static QVector3D referenceGridOrigin() {
+    return QVector3D(0.0F, 0.0F, 0.0F);
+  }
 
 signals:
   void frameTimeChanged(double milliseconds);
@@ -121,8 +125,10 @@ private:
   void uploadPendingPointCloud();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view,
-                         const QMatrix4x4 &projection);
-  void drawGrid(QPainter &painter, const QMatrix4x4 &viewProjection);
+                          const QMatrix4x4 &projection);
+  void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
+  void drawReferenceAxes(QPainter &painter,
+                         const QMatrix4x4 &viewProjection);
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
@@ -152,6 +158,7 @@ private:
   bool mShowCameras = false;
   bool mHasGaussianAttributes = false;
   bool mGaussianShaderReady = false;
+  bool mGridShaderReady = false;
   int mSceneGeneration = 0;
   int mCameraTrajectoryGeneration = 0;
   RenderMode mRenderMode = RenderMode::Points;
@@ -170,9 +177,11 @@ private:
   bool mPointUploadPending = false;
   QOpenGLShaderProgram *mPointProgram = nullptr;
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
+  QOpenGLShaderProgram *mGridProgram = nullptr;
   QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLVertexArrayObject mPointVertexArray;
   QOpenGLVertexArrayObject mGaussianVertexArray;
+  QOpenGLVertexArrayObject mGridVertexArray;
   QElapsedTimer mFrameTimer;
   double mSmoothedFrameMilliseconds = 0.0;
 };

@@ -136,11 +136,16 @@ if(BUILD_TESTING)
     NAME native_exit_confirmation
     COMMAND GaussianSceneWorkbench --smoke-test-exit-confirmation
   )
+  add_test(
+    NAME native_infinite_reference_grid
+    COMMAND GaussianSceneWorkbench --smoke-test-infinite-grid
+  )
   set_tests_properties(
     native_application_launch
     native_metashape_import_entry
     native_adaptive_display_layout
     native_exit_confirmation
+    native_infinite_reference_grid
     PROPERTIES
     TIMEOUT 15
     ENVIRONMENT

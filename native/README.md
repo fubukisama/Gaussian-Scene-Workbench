@@ -11,6 +11,7 @@
 - Native COLMAP reconstruction dialog with standard, robust, and sequential presets, automatic newest-version discovery on the application drive, cache overwrite protection, live logs, cancellation, and sparse-model validation.
 - Exit confirmation defaults to Cancel, waits for active work to stop, offers to save project/crop progress, associates the latest usable training checkpoint before saving, and uses a Windows Job Object plus PID fallback to synchronously terminate the complete worker process tree before shutdown.
 - Native OpenGL point rendering plus depth-sorted screen-space Gaussian splats using activated scale, normalized rotation, sigmoid opacity, and SH-DC color.
+- A procedural, world-fixed infinite reference grid on the Y=0/XZ ground plane, with adaptive decimal spacing, anti-aliasing, horizon/distance fading, and colored world axes. It is viewport-only and cannot be selected, transformed, or saved as scene content.
 - Optional camera visualization that walks upward from the loaded scene to find a standard 3DGS `cameras.json`, with one camera-trajectory toggle for the frustums and capture path.
 - Automatic Gaussian/point mode selection, deterministic large-scene sampling, scene-bounds camera fitting, and a manual diagnostic fallback.
 - Full-source rectangle/lasso selection plus a persistent 4-256 px continuous brush, with optional visible-point depth filtering, replace/add/subtract, clear, and invert actions.
@@ -98,3 +99,5 @@ different empty directory; the script never deletes an existing run.
 ## License boundary
 
 LichtFeld Studio is used as an architecture and workflow reference. Its source is GPL-3.0-or-later. No LichtFeld source code is copied into this MIT-licensed native preview. Any future direct reuse must be isolated and licensed compatibly before it is merged.
+
+Blender's infinite-grid behavior is also used as a visual and algorithmic reference. The native viewport implementation was written independently for this project's Y-up coordinate system; no Blender source or shader code is copied into this MIT-licensed application.

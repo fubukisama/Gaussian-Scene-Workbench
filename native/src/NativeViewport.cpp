@@ -67,6 +67,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
 NativeViewport::~NativeViewport() {
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
+    mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mPointVertexArray.destroy();
     mPointBuffer.destroy();
@@ -255,6 +256,10 @@ bool NativeViewport::hasEditableScene() const {
 
 bool NativeViewport::gaussianRenderingAvailable() const {
   return mHasGaussianAttributes && mGaussianShaderReady;
+}
+
+bool NativeViewport::infiniteGridRenderingAvailable() const {
+  return mGridShaderReady;
 }
 
 bool NativeViewport::camerasAvailable() const {
@@ -446,6 +451,150 @@ void main() {
             .arg(mGaussianProgram->log());
   }
 
+  // Independently implements Blender-style infinite-grid behavior: a
+  // full-screen ray is intersected with this application's fixed Y-up ground
+  // plane, so navigation never changes the grid's world-space anchor.
+  mGridProgram = new QOpenGLShaderProgram(this);
+  const bool gridVertexCompiled = mGridProgram->addShaderFromSourceCode(
+      QOpenGLShader::Vertex,
+      R"GLSL(#version 130
+out vec2 clipCoordinate;
+
+void main() {
+  vec2 position;
+  if (gl_VertexID == 0) {
+    position = vec2(-1.0, -1.0);
+  } else if (gl_VertexID == 1) {
+    position = vec2(3.0, -1.0);
+  } else {
+    position = vec2(-1.0, 3.0);
+  }
+  clipCoordinate = position;
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+)GLSL");
+  const bool gridFragmentCompiled = mGridProgram->addShaderFromSourceCode(
+      QOpenGLShader::Fragment,
+      R"GLSL(#version 130
+in vec2 clipCoordinate;
+out vec4 fragmentColor;
+
+uniform mat4 inverseViewProjection;
+uniform mat4 viewProjection;
+uniform vec3 cameraWorld;
+uniform float cameraDistance;
+uniform float farDistance;
+uniform float uiScale;
+
+vec3 unprojectPoint(float clipDepth) {
+  vec4 world = inverseViewProjection *
+               vec4(clipCoordinate, clipDepth, 1.0);
+  return world.xyz / world.w;
+}
+
+float periodicLine(float coordinate, float stepSize, float widthPixels) {
+  float normalized = coordinate / stepSize;
+  float pixelFootprint = max(fwidth(normalized), 1e-6);
+  float lineDistance =
+      abs(fract(normalized + 0.5) - 0.5) / pixelFootprint;
+  float coverage = 1.0 - smoothstep(widthPixels * 0.5,
+                                     widthPixels * 0.5 + 1.0,
+                                     lineDistance);
+  float frequencyFade = 1.0 - smoothstep(0.32, 0.72, pixelFootprint);
+  return coverage * frequencyFade;
+}
+
+float gridLines(vec2 coordinate, float stepSize, float widthPixels) {
+  return max(periodicLine(coordinate.x, stepSize, widthPixels),
+             periodicLine(coordinate.y, stepSize, widthPixels));
+}
+
+float originAxis(float coordinate, float widthPixels) {
+  float pixelFootprint = max(fwidth(coordinate), 1e-6);
+  float lineDistance = abs(coordinate) / pixelFootprint;
+  return 1.0 - smoothstep(widthPixels * 0.5,
+                          widthPixels * 0.5 + 1.0, lineDistance);
+}
+
+void main() {
+  vec3 nearPoint = unprojectPoint(-1.0);
+  vec3 farPoint = unprojectPoint(1.0);
+  vec3 ray = farPoint - nearPoint;
+  if (abs(ray.y) < 1e-7) {
+    discard;
+  }
+
+  float rayParameter = -nearPoint.y / ray.y;
+  if (rayParameter <= 0.0 || rayParameter >= 1.0) {
+    discard;
+  }
+  vec3 world = nearPoint + rayParameter * ray;
+
+  // The scale is uniform for the whole frame. Keeping it out of derivative
+  // calculations avoids spatial level boundaries and the moire they create.
+  float desiredStep = max(cameraDistance * 0.06, 1e-7);
+  float fineStep = pow(10.0, floor(log(desiredStep) / log(10.0)));
+  float levelBlend = smoothstep(
+      0.12, 0.88,
+      clamp(log(desiredStep / fineStep) / log(10.0), 0.0, 1.0));
+  float coarseStep = fineStep * 10.0;
+  float majorStep = coarseStep * 10.0;
+
+  float fineLines = mix(gridLines(world.xz, fineStep, 0.72 * uiScale),
+                        gridLines(world.xz, coarseStep, 0.72 * uiScale),
+                        levelBlend);
+  float majorLines = mix(gridLines(world.xz, coarseStep, 1.02 * uiScale),
+                         gridLines(world.xz, majorStep, 1.02 * uiScale),
+                         levelBlend);
+  float lineAlpha = max(fineLines * 0.38, majorLines * 0.58);
+
+  float xAxis = originAxis(world.z, 1.35 * uiScale);
+  float zAxis = originAxis(world.x, 1.35 * uiScale);
+  vec3 minorColor = vec3(0.17, 0.19, 0.20);
+  vec3 majorColor = vec3(0.29, 0.31, 0.33);
+  vec3 color = mix(minorColor, majorColor, majorLines);
+  if (xAxis > 0.0) {
+    color = mix(color, vec3(0.72, 0.26, 0.26), xAxis);
+    lineAlpha = max(lineAlpha, xAxis * 0.78);
+  }
+  if (zAxis > 0.0) {
+    color = mix(color, vec3(0.25, 0.42, 0.76), zAxis);
+    lineAlpha = max(lineAlpha, zAxis * 0.78);
+  }
+
+  vec3 toCamera = cameraWorld - world;
+  float distanceToCamera = length(toCamera);
+  float planeFacing = abs(toCamera.y) / max(distanceToCamera, 1e-6);
+  float horizonFade = 1.0 - pow(1.0 - clamp(planeFacing, 0.0, 1.0), 4.0);
+  float distanceFade = 1.0 - smoothstep(farDistance * 0.55,
+                                        farDistance * 0.92,
+                                        distanceToCamera);
+  float clipFade = 1.0 - smoothstep(0.78, 0.995, rayParameter);
+  float alpha = lineAlpha * horizonFade * distanceFade * clipFade;
+  if (alpha < 0.003) {
+    discard;
+  }
+
+  vec4 planeClip = viewProjection * vec4(world, 1.0);
+  float depth = planeClip.z / planeClip.w * 0.5 + 0.5;
+  if (depth < 0.0 || depth > 1.0) {
+    discard;
+  }
+  gl_FragDepth = depth;
+  fragmentColor = vec4(color, alpha);
+}
+)GLSL");
+  mGridShaderReady = gridVertexCompiled && gridFragmentCompiled &&
+                     mGridProgram->link();
+  if (!mGridShaderReady && mSceneLoadMessage.isEmpty()) {
+    mSceneLoadMessage =
+        QStringLiteral("OpenGL reference-grid shader failed: %1")
+            .arg(mGridProgram->log());
+  }
+  if (mGridShaderReady) {
+    mGridVertexArray.create();
+  }
+
   if (pointShaderReady) {
     mPointBuffer.create();
     mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
@@ -521,6 +670,7 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
   const QMatrix4x4 viewProjection = projection * view;
+  drawInfiniteGrid(viewProjection);
   if (mRenderMode == RenderMode::Gaussians &&
       gaussianRenderingAvailable()) {
     drawGaussianCloud(view, projection);
@@ -531,7 +681,7 @@ void NativeViewport::paintGL() {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
   if (mPreviewPointCount == 0) {
-    drawGrid(painter, viewProjection);
+    drawReferenceAxes(painter, viewProjection);
   }
   drawCameraTrajectory(painter, viewProjection);
   drawSelectionGesture(painter);
@@ -833,6 +983,42 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   glEnable(GL_DEPTH_TEST);
 }
 
+void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
+  if (!mGridShaderReady || mGridProgram == nullptr ||
+      !mGridProgram->isLinked() || !mGridVertexArray.isCreated()) {
+    return;
+  }
+  bool invertible = false;
+  const QMatrix4x4 inverseViewProjection =
+      viewProjection.inverted(&invertible);
+  if (!invertible) {
+    return;
+  }
+
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  mGridProgram->bind();
+  mGridProgram->setUniformValue("inverseViewProjection",
+                                inverseViewProjection);
+  mGridProgram->setUniformValue("viewProjection", viewProjection);
+  mGridProgram->setUniformValue("cameraWorld", cameraPosition());
+  mGridProgram->setUniformValue("cameraDistance", mDistance);
+  mGridProgram->setUniformValue(
+      "farDistance", std::max(100.0F, mDistance + mSceneRadius * 12.0F));
+  mGridProgram->setUniformValue("uiScale",
+                                static_cast<float>(devicePixelRatioF()));
+  {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGridVertexArray);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+  }
+  mGridProgram->release();
+  glDisable(GL_BLEND);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_DEPTH_TEST);
+}
+
 void NativeViewport::enterEvent(QEnterEvent *event) {
   if (mMode == InteractionMode::Brush) {
     mBrushCursorPosition = event->position();
@@ -1001,29 +1187,8 @@ std::optional<QPointF> NativeViewport::projectPoint(const QVector3D &point,
                  (1.0F - (normalized.y() * 0.5F + 0.5F)) * height());
 }
 
-void NativeViewport::drawGrid(QPainter &painter, const QMatrix4x4 &viewProjection) {
-  constexpr int extent = 20;
-  for (int value = -extent; value <= extent; ++value) {
-    const bool major = value % 5 == 0;
-    QColor color = major ? QColor(63, 68, 72, 205) : QColor(43, 47, 50, 165);
-    if (value == 0) {
-      color = QColor(73, 79, 83, 230);
-    }
-    painter.setPen(QPen(color, major ? 1.1 : 0.7));
-
-    const auto xStart = projectPoint(QVector3D(static_cast<float>(-extent), 0.0F, static_cast<float>(value)), viewProjection);
-    const auto xEnd = projectPoint(QVector3D(static_cast<float>(extent), 0.0F, static_cast<float>(value)), viewProjection);
-    if (xStart.has_value() && xEnd.has_value()) {
-      painter.drawLine(*xStart, *xEnd);
-    }
-
-    const auto zStart = projectPoint(QVector3D(static_cast<float>(value), 0.0F, static_cast<float>(-extent)), viewProjection);
-    const auto zEnd = projectPoint(QVector3D(static_cast<float>(value), 0.0F, static_cast<float>(extent)), viewProjection);
-    if (zStart.has_value() && zEnd.has_value()) {
-      painter.drawLine(*zStart, *zEnd);
-    }
-  }
-
+void NativeViewport::drawReferenceAxes(
+    QPainter &painter, const QMatrix4x4 &viewProjection) {
   const auto origin = projectPoint(QVector3D(0.0F, 0.0F, 0.0F), viewProjection);
   const auto xAxis = projectPoint(QVector3D(3.0F, 0.0F, 0.0F), viewProjection);
   const auto yAxis = projectPoint(QVector3D(0.0F, 3.0F, 0.0F), viewProjection);

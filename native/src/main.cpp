@@ -1,5 +1,6 @@
 #include "AppTheme.h"
 #include "MainWindow.h"
+#include "NativeViewport.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -14,8 +15,10 @@
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QImage>
 #include <QLabel>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QSurfaceFormat>
 #include <QTimer>
@@ -122,6 +125,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-exit-confirmation"),
       QStringLiteral("Verify that closing requires explicit exit confirmation."));
   parser.addOption(exitConfirmationSmokeTestOption);
+  QCommandLineOption infiniteGridSmokeTestOption(
+      QStringLiteral("smoke-test-infinite-grid"),
+      QStringLiteral("Verify the world-fixed infinite reference grid."));
+  parser.addOption(infiniteGridSmokeTestOption);
   QCommandLineOption mediaSourceOption(
       QStringLiteral("media-source"),
       QStringLiteral("Pre-populate the media import dialog with a file or directory. "
@@ -140,9 +147,11 @@ int main(int argc, char *argv[]) {
       parser.isSet(displayLayoutSmokeTestOption);
   const bool exitConfirmationSmokeTest =
       parser.isSet(exitConfirmationSmokeTestOption);
+  const bool infiniteGridSmokeTest =
+      parser.isSet(infiniteGridSmokeTestOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
-                         exitConfirmationSmokeTest;
+                         exitConfirmationSmokeTest || infiniteGridSmokeTest;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -151,7 +160,95 @@ int main(int argc, char *argv[]) {
   }
   window.show();
   bool smokeTestCompleted = !smokeTest;
-  if (exitConfirmationSmokeTest) {
+  int smokeTestFailureCode = 2;
+  if (infiniteGridSmokeTest) {
+    QTimer::singleShot(
+        450, &application, [&window]() {
+          auto *viewport =
+              qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+          if (viewport == nullptr) {
+            return;
+          }
+          const QPointF start(viewport->width() * 0.5,
+                              viewport->height() * 0.5);
+          const QPointF moved = start + QPointF(5000.0, 0.0);
+          const QPointF globalStart(
+              viewport->mapToGlobal(start.toPoint()));
+          const QPointF globalMoved(
+              viewport->mapToGlobal(moved.toPoint()));
+          QMouseEvent press(QEvent::MouseButtonPress, start, start,
+                            globalStart,
+                            Qt::MiddleButton, Qt::MiddleButton,
+                            Qt::NoModifier);
+          QMouseEvent move(QEvent::MouseMove, moved, moved, globalMoved,
+                           Qt::NoButton,
+                           Qt::MiddleButton, Qt::NoModifier);
+          QMouseEvent release(QEvent::MouseButtonRelease, moved, moved,
+                              globalMoved,
+                              Qt::MiddleButton, Qt::NoButton,
+                              Qt::NoModifier);
+          QCoreApplication::sendEvent(viewport, &press);
+          QCoreApplication::sendEvent(viewport, &move);
+          QCoreApplication::sendEvent(viewport, &release);
+        });
+    QTimer::singleShot(
+        950, &application,
+        [&application, &window, &smokeTestCompleted,
+         &smokeTestFailureCode]() {
+          auto *viewport =
+              qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+          int visibleGridPixels = 0;
+          bool gridRenderingAvailable = false;
+          bool gridOriginFixed = false;
+          QRect sampleRect;
+          QImage frame;
+          if (viewport != nullptr) {
+            frame = viewport->grabFramebuffer();
+            sampleRect = QRect(
+                qRound(frame.width() * 0.30),
+                qRound(frame.height() * 0.45),
+                qRound(frame.width() * 0.45),
+                qRound(frame.height() * 0.30));
+            for (int y = sampleRect.top(); y <= sampleRect.bottom(); ++y) {
+              for (int x = sampleRect.left(); x <= sampleRect.right(); ++x) {
+                const QColor pixel = frame.pixelColor(x, y);
+                if ((std::max)({pixel.red(), pixel.green(), pixel.blue()}) >
+                    30) {
+                  ++visibleGridPixels;
+                }
+              }
+            }
+            gridRenderingAvailable =
+                viewport->infiniteGridRenderingAvailable();
+            gridOriginFixed =
+                gsw::NativeViewport::referenceGridOrigin() ==
+                QVector3D(0.0F, 0.0F, 0.0F);
+            smokeTestCompleted =
+                gridRenderingAvailable && gridOriginFixed &&
+                visibleGridPixels > sampleRect.width();
+          }
+          int exitCode = 0;
+          if (viewport == nullptr) {
+            exitCode = 2;
+          } else if (!gridRenderingAvailable) {
+            exitCode = 3;
+          } else if (!gridOriginFixed) {
+            exitCode = 4;
+          } else if (visibleGridPixels <= sampleRect.width()) {
+            exitCode = 5;
+          }
+          if (!frame.isNull()) {
+            frame.save(QDir::temp().filePath(
+                QStringLiteral("gsw-infinite-grid-smoke.png")));
+          }
+          qInfo() << "Infinite-grid smoke:" << "viewport" << (viewport != nullptr)
+                  << "shader" << gridRenderingAvailable << "fixed-origin"
+                  << gridOriginFixed << "visible-pixels" << visibleGridPixels
+                  << "required" << sampleRect.width();
+          smokeTestFailureCode = exitCode;
+          application.exit(exitCode);
+        });
+  } else if (exitConfirmationSmokeTest) {
     bool exitPromptFound = false;
     bool savePromptFound = false;
     bool exitPromptReset = false;
@@ -409,5 +506,5 @@ int main(int argc, char *argv[]) {
     });
   }
   const int exitCode = application.exec();
-  return smokeTestCompleted ? exitCode : 2;
+  return smokeTestCompleted ? exitCode : smokeTestFailureCode;
 }
