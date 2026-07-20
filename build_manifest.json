@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench (Legacy HTML)",
-    "sourceVersion":  "36.10.12",
-    "packageVersion":  "0.2.12",
-    "releaseTag":  "v0.2.12",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.12-win-x64.zip",
-    "updatedAt":  "2026-07-20T17:43:31+09:00",
+    "sourceVersion":  "36.10.13",
+    "packageVersion":  "0.2.13",
+    "releaseTag":  "v0.2.13",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.13-win-x64.zip",
+    "updatedAt":  "2026-07-20T18:17:08+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "e2e2e45",
+    "gitCommit":  "2cda3a5",
     "gitDirty":  false,
-    "note":  "Preserve Metashape camera coordinates and adapt GS2Mesh fusion scale from verified depth caches"
+    "note":  "Electron 43 isolated packaging keeps live editor and 2DGS training files untouched"
 }
