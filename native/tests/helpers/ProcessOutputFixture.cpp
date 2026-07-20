@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QThread>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <fcntl.h>
@@ -23,7 +24,8 @@ int main(int argc, char *argv[]) {
     return 0;
   }
   if (arguments.size() == 3 &&
-      arguments.at(1) == QStringLiteral("tree-parent")) {
+      (arguments.at(1) == QStringLiteral("tree-parent") ||
+       arguments.at(1) == QStringLiteral("tree-parent-exits"))) {
     qint64 childProcessId = 0;
     if (!QProcess::startDetached(application.applicationFilePath(),
                                  {QStringLiteral("tree-child")}, {},
@@ -36,6 +38,9 @@ int main(int argc, char *argv[]) {
       return 7;
     }
     ready.close();
+    if (arguments.at(1) == QStringLiteral("tree-parent-exits")) {
+      QTimer::singleShot(300, &application, &QCoreApplication::quit);
+    }
     return application.exec();
   }
   if (application.arguments().size() != 3) {

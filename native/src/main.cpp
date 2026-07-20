@@ -1,6 +1,7 @@
 #include "AppTheme.h"
 #include "MainWindow.h"
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QCommandLineOption>
@@ -14,6 +15,8 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QToolBar>
@@ -115,6 +118,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-display-layout"),
       QStringLiteral("Verify adaptive display controls and the simplified empty-workspace toolbars."));
   parser.addOption(displayLayoutSmokeTestOption);
+  QCommandLineOption exitConfirmationSmokeTestOption(
+      QStringLiteral("smoke-test-exit-confirmation"),
+      QStringLiteral("Verify that closing requires explicit exit confirmation."));
+  parser.addOption(exitConfirmationSmokeTestOption);
   QCommandLineOption mediaSourceOption(
       QStringLiteral("media-source"),
       QStringLiteral("Pre-populate the media import dialog with a file or directory. "
@@ -131,8 +138,11 @@ int main(int argc, char *argv[]) {
   const bool importDialogSmokeTest = parser.isSet(importDialogSmokeTestOption);
   const bool displayLayoutSmokeTest =
       parser.isSet(displayLayoutSmokeTestOption);
+  const bool exitConfirmationSmokeTest =
+      parser.isSet(exitConfirmationSmokeTestOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
-                         importDialogSmokeTest || displayLayoutSmokeTest;
+                         importDialogSmokeTest || displayLayoutSmokeTest ||
+                         exitConfirmationSmokeTest;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -141,7 +151,97 @@ int main(int argc, char *argv[]) {
   }
   window.show();
   bool smokeTestCompleted = !smokeTest;
-  if (displayLayoutSmokeTest) {
+  if (exitConfirmationSmokeTest) {
+    bool exitPromptFound = false;
+    bool savePromptFound = false;
+    bool exitPromptReset = false;
+    QTimer::singleShot(100, &window, [&window]() { window.close(); });
+    QTimer::singleShot(
+        350, &application,
+        [&exitPromptFound]() {
+          for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *prompt = qobject_cast<QMessageBox *>(widget);
+            if (prompt == nullptr || !prompt->isVisible() ||
+                prompt->windowTitle() != QStringLiteral("确认退出") ||
+                !prompt->text().contains(QStringLiteral("退出"))) {
+              continue;
+            }
+            const QPushButton *defaultButton = prompt->defaultButton();
+            QAbstractButton *escapeButton = prompt->escapeButton();
+            exitPromptFound = defaultButton != nullptr &&
+                              defaultButton->text() == QStringLiteral("取消") &&
+                              escapeButton != nullptr &&
+                              escapeButton->text() == QStringLiteral("取消");
+            prompt->reject();
+            return;
+          }
+        });
+    QTimer::singleShot(650, &window, [&window]() {
+      window.setWindowModified(true);
+      window.close();
+    });
+    QTimer::singleShot(
+        900, &application,
+        []() {
+          for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *prompt = qobject_cast<QMessageBox *>(widget);
+            if (prompt == nullptr || !prompt->isVisible() ||
+                prompt->windowTitle() != QStringLiteral("确认退出")) {
+              continue;
+            }
+            for (QAbstractButton *button : prompt->buttons()) {
+              if (button->text() == QStringLiteral("退出")) {
+                button->click();
+                return;
+              }
+            }
+          }
+        });
+    QTimer::singleShot(
+        1150, &application,
+        [&savePromptFound]() {
+          for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *prompt = qobject_cast<QMessageBox *>(widget);
+            if (prompt == nullptr || !prompt->isVisible() ||
+                prompt->windowTitle() != QStringLiteral("退出前保存进度")) {
+              continue;
+            }
+            QAbstractButton *cancelButton =
+                prompt->button(QMessageBox::Cancel);
+            savePromptFound =
+                cancelButton != nullptr && prompt->defaultButton() != nullptr &&
+                prompt->standardButton(prompt->defaultButton()) ==
+                    QMessageBox::Save;
+            if (cancelButton != nullptr) {
+              cancelButton->click();
+            }
+            return;
+          }
+        });
+    QTimer::singleShot(1450, &window, [&window]() { window.close(); });
+    QTimer::singleShot(
+        1700, &application,
+        [&exitPromptReset]() {
+          for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *prompt = qobject_cast<QMessageBox *>(widget);
+            if (prompt == nullptr || !prompt->isVisible() ||
+                prompt->windowTitle() != QStringLiteral("确认退出")) {
+              continue;
+            }
+            exitPromptReset = true;
+            prompt->reject();
+            return;
+          }
+        });
+    QTimer::singleShot(
+        2050, &application,
+        [&application, &window, &smokeTestCompleted, &exitPromptFound,
+         &savePromptFound, &exitPromptReset]() {
+          smokeTestCompleted = exitPromptFound && savePromptFound &&
+                               exitPromptReset && window.isVisible();
+          application.exit(smokeTestCompleted ? 0 : 2);
+        });
+  } else if (displayLayoutSmokeTest) {
     QTimer::singleShot(
         350, &application,
         [&application, &window, &smokeTestCompleted]() {

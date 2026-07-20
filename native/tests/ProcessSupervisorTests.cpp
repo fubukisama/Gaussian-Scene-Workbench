@@ -50,6 +50,8 @@ private slots:
   void initTestCase();
   void parsesFragmentedWorkerStatusWithoutPollutingLogs();
   void stopTerminatesTheEntireProcessTree();
+  void gracefulStopCleansChildAfterParentExitsFirst();
+  void shutdownTerminatesTheEntireProcessTreeSynchronously();
   void destructionAfterStopDoesNotLeaveChildProcess();
 };
 
@@ -132,6 +134,86 @@ void ProcessSupervisorTests::stopTerminatesTheEntireProcessTree() {
   }
   QVERIFY2(!childStillRunning,
            "Stopping a task must terminate every process in its tree.");
+#endif
+}
+
+void ProcessSupervisorTests::gracefulStopCleansChildAfterParentExitsFirst() {
+#ifndef Q_OS_WIN
+  QSKIP("Process-tree termination currently targets the native Windows application.");
+#else
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString childPidPath =
+      QDir(temporary.path()).filePath(QStringLiteral("orphan-child-pid"));
+  const QString helperPath = processOutputFixturePath();
+  QVERIFY2(QFileInfo::exists(helperPath), qPrintable(helperPath));
+
+  ProcessSupervisor supervisor;
+  QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
+  QVERIFY(supervisor.start(QStringLiteral("graceful-orphan-fixture"), helperPath,
+                           {QStringLiteral("tree-parent-exits"), childPidPath},
+                           temporary.path(), {}, true));
+  QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(childPidPath), 5000);
+  QFile childPidFile(childPidPath);
+  QVERIFY(childPidFile.open(QIODevice::ReadOnly));
+  bool validPid = false;
+  const qint64 childPid =
+      childPidFile.readAll().trimmed().toLongLong(&validPid);
+  QVERIFY(validPid);
+  QVERIFY(processIsRunning(childPid));
+
+  supervisor.stop();
+  QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 1500);
+  QVERIFY(!supervisor.isRunning());
+  supervisor.shutdown();
+  const bool childStillRunning = processIsRunning(childPid);
+  if (childStillRunning) {
+    QProcess::execute(QStringLiteral("taskkill.exe"),
+                      {QStringLiteral("/PID"), QString::number(childPid),
+                       QStringLiteral("/T"), QStringLiteral("/F")});
+  }
+  QVERIFY2(!childStillRunning,
+           "Graceful shutdown must not orphan a child after its parent exits.");
+#endif
+}
+
+void ProcessSupervisorTests::shutdownTerminatesTheEntireProcessTreeSynchronously() {
+#ifndef Q_OS_WIN
+  QSKIP("Process-tree termination currently targets the native Windows application.");
+#else
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString childPidPath =
+      QDir(temporary.path()).filePath(QStringLiteral("shutdown-child-pid"));
+  const QString helperPath = processOutputFixturePath();
+  QVERIFY2(QFileInfo::exists(helperPath), qPrintable(helperPath));
+
+  ProcessSupervisor supervisor;
+  QVERIFY(supervisor.start(QStringLiteral("shutdown-tree-fixture"), helperPath,
+                           {QStringLiteral("tree-parent"), childPidPath},
+                           temporary.path(), {}, true));
+  QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(childPidPath), 5000);
+  QFile childPidFile(childPidPath);
+  QVERIFY(childPidFile.open(QIODevice::ReadOnly));
+  bool validPid = false;
+  const qint64 childPid =
+      childPidFile.readAll().trimmed().toLongLong(&validPid);
+  QVERIFY(validPid);
+  QVERIFY(processIsRunning(childPid));
+
+  supervisor.shutdown();
+  QVERIFY(!supervisor.isRunning());
+  const bool childStillRunning = processIsRunning(childPid);
+  if (childStillRunning) {
+    QProcess::execute(QStringLiteral("taskkill.exe"),
+                      {QStringLiteral("/PID"), QString::number(childPid),
+                       QStringLiteral("/T"), QStringLiteral("/F")});
+  }
+  QVERIFY2(!childStillRunning,
+           "Shutdown must terminate every process before returning.");
+
+  supervisor.shutdown();
+  QVERIFY(!supervisor.isRunning());
 #endif
 }
 

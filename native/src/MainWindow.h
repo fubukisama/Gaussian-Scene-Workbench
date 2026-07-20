@@ -84,8 +84,9 @@ private:
   void updateActionAvailability();
   void updateEditActions();
 
-  bool confirmDiscardChanges();
-  bool confirmDiscardSceneEdits();
+  bool confirmDiscardChanges(bool exiting = false);
+  bool confirmDiscardSceneEdits(bool exiting = false);
+  bool confirmExit();
   bool beginUntitledProject(const QString &displayName,
                             QString *errorMessage = nullptr);
   bool ensureProjectForDataAction(const QString &actionName);
@@ -193,6 +194,7 @@ private:
   bool mCanUndoEdit = false;
   bool mCanRedoEdit = false;
   bool mClosePending = false;
+  bool mExitConfirmed = false;
   bool mRecoveryBlocked = false;
   bool mAutomaticUiScale = true;
   NativeViewport::RenderMode mRenderMode = NativeViewport::RenderMode::Points;

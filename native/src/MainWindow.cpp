@@ -44,6 +44,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScreen>
@@ -492,7 +493,7 @@ MainWindow::MainWindow(QWidget *parent)
   }
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() { mProcessSupervisor.shutdown(); }
 
 void MainWindow::moveEvent(QMoveEvent *event) {
   QMainWindow::moveEvent(event);
@@ -550,36 +551,36 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     }
     mClosePending = false;
     statusBar()->clearMessage();
-    if (!confirmDiscardChanges()) {
+    if (!confirmDiscardChanges(true)) {
+      mExitConfirmed = false;
       event->ignore();
       return;
     }
     saveWindowState();
+    mProcessSupervisor.shutdown();
     event->accept();
     return;
   }
 
-  if (mProcessSupervisor.isRunning()) {
-    const QMessageBox::StandardButton answer = QMessageBox::question(
-        this, QStringLiteral("任务仍在运行"), QStringLiteral("关闭软件将停止当前任务。是否继续？"),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (answer != QMessageBox::Yes) {
-      event->ignore();
-      return;
-    }
-    if (mProcessSupervisor.isRunning()) {
-      mClosePending = true;
-      statusBar()->showMessage(QStringLiteral("正在停止任务，完成后将关闭软件…"));
-      mProcessSupervisor.stop();
-      event->ignore();
-      return;
-    }
+  if (!confirmExit()) {
+    event->ignore();
+    return;
   }
-  if (!confirmDiscardChanges()) {
+
+  if (mProcessSupervisor.isRunning()) {
+    mClosePending = true;
+    statusBar()->showMessage(QStringLiteral("正在停止任务，完成后将关闭软件…"));
+    mProcessSupervisor.stop();
+    event->ignore();
+    return;
+  }
+  if (!confirmDiscardChanges(true)) {
+    mExitConfirmed = false;
     event->ignore();
     return;
   }
   saveWindowState();
+  mProcessSupervisor.shutdown();
   event->accept();
 }
 
@@ -1235,6 +1236,7 @@ void MainWindow::connectServices() {
                 recoveryFailed = true;
                 effectiveSucceeded = false;
                 mClosePending = false;
+                mExitConfirmed = false;
                 if (mWorkspace.hasProject() &&
                     pathsReferToSameLocation(mWorkspace.rootPath(), pending.projectRoot)) {
                   mRecoveryBlocked = true;
@@ -1358,6 +1360,23 @@ void MainWindow::connectServices() {
                       QStringLiteral("训练未完成，已保留最近可用检查点：迭代 %1，%2")
                           .arg(partial->iteration)
                           .arg(QDir::toNativeSeparators(partial->path)));
+                  if (mClosePending && pathsReferToSameLocation(
+                                           mWorkspace.rootPath(),
+                                           pending.projectRoot)) {
+                    QString sceneError;
+                    if (mWorkspace.setScenePath(partial->path, &sceneError)) {
+                      completionDetail =
+                          QStringLiteral("保留迭代 %1 · 等待保存")
+                              .arg(partial->iteration);
+                      appendTaskEvent(
+                          QStringLiteral("退出前已将最近训练检查点关联到当前工程；"
+                                         "请在保存确认中选择是否保留。"));
+                    } else {
+                      appendTaskEvent(
+                          QStringLiteral("无法将保留的训练检查点关联到工程：%1")
+                              .arg(sceneError));
+                    }
+                  }
                 }
               }
             }
@@ -1777,11 +1796,16 @@ void MainWindow::updateEditActions() {
   }
 }
 
-bool MainWindow::confirmDiscardChanges() {
-  if (mWorkspace.isModified()) {
+bool MainWindow::confirmDiscardChanges(const bool exiting) {
+  if (mWorkspace.isModified() || isWindowModified()) {
     const QMessageBox::StandardButton answer = QMessageBox::warning(
-        this, QStringLiteral("工程尚未保存"),
-        QStringLiteral("当前工程包含未保存的修改。"),
+        this,
+        exiting ? QStringLiteral("退出前保存进度")
+                : QStringLiteral("工程尚未保存"),
+        exiting
+            ? QStringLiteral("当前工程包含未保存的修改或最近保留的"
+                             "任务进度。是否在退出前保存？")
+            : QStringLiteral("当前工程包含未保存的修改。"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
         QMessageBox::Save);
     if (answer == QMessageBox::Save && !saveProject(false)) {
@@ -1791,16 +1815,48 @@ bool MainWindow::confirmDiscardChanges() {
       return false;
     }
   }
-  return confirmDiscardSceneEdits();
+  return confirmDiscardSceneEdits(exiting);
 }
 
-bool MainWindow::confirmDiscardSceneEdits() {
+bool MainWindow::confirmExit() {
+  if (mExitConfirmed) {
+    return true;
+  }
+
+  QMessageBox prompt(QMessageBox::Question, QStringLiteral("确认退出"),
+                     QStringLiteral("确定要退出 Gaussian Scene Workbench Native 吗？"),
+                     QMessageBox::NoButton, this);
+  prompt.setObjectName(QStringLiteral("exitConfirmationDialog"));
+  prompt.setInformativeText(
+      QStringLiteral("退出前如有未保存进度，软件将继续询问是否保存。\n"
+                     "退出后会停止当前软件启动的训练、COLMAP、"
+                     "导入及其他后台进程。"));
+  auto *exitButton =
+      prompt.addButton(QStringLiteral("退出"), QMessageBox::AcceptRole);
+  auto *cancelButton =
+      prompt.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
+  prompt.setDefaultButton(cancelButton);
+  prompt.setEscapeButton(cancelButton);
+  prompt.exec();
+  if (prompt.clickedButton() != exitButton) {
+    return false;
+  }
+  mExitConfirmed = true;
+  return true;
+}
+
+bool MainWindow::confirmDiscardSceneEdits(const bool exiting) {
   if (!mViewport->hasUnsavedSceneEdits()) {
     return true;
   }
   const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QStringLiteral("裁剪尚未导出"),
-      QStringLiteral("当前场景包含尚未导出的删除操作。"),
+      this,
+      exiting ? QStringLiteral("退出前导出裁剪进度")
+              : QStringLiteral("裁剪尚未导出"),
+      exiting
+          ? QStringLiteral("当前场景包含尚未导出的删除操作。"
+                           "是否在退出前导出？")
+          : QStringLiteral("当前场景包含尚未导出的删除操作。"),
       QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
       QMessageBox::Save);
   if (answer == QMessageBox::Save) {

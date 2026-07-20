@@ -132,10 +132,15 @@ if(BUILD_TESTING)
     NAME native_adaptive_display_layout
     COMMAND GaussianSceneWorkbench --smoke-test-display-layout
   )
+  add_test(
+    NAME native_exit_confirmation
+    COMMAND GaussianSceneWorkbench --smoke-test-exit-confirmation
+  )
   set_tests_properties(
     native_application_launch
     native_metashape_import_entry
     native_adaptive_display_layout
+    native_exit_confirmation
     PROPERTIES
     TIMEOUT 15
     ENVIRONMENT

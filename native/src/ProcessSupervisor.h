@@ -33,6 +33,7 @@ public:
              const QProcessEnvironment &environment = {},
              bool acceptsCancelCommand = false);
   void stop();
+  void shutdown();
 
 signals:
   void taskStarted(const QString &taskName);
@@ -42,6 +43,9 @@ signals:
   void runningChanged(bool running);
 
 private:
+  void prepareProcessJob();
+  bool attachProcessToJob();
+  void terminateAndReleaseProcessJob();
   void drainOutput();
   void processBufferedOutput(bool flushTail);
   void handleOutputLine(const QByteArray &line);
@@ -51,6 +55,8 @@ private:
   QString mActiveTask;
   bool mAcceptsCancelCommand = false;
   bool mStopRequested = false;
+  bool mShutdownStarted = false;
+  quintptr mProcessJobHandle = 0;
 };
 
 } // namespace gsw
