@@ -1785,6 +1785,44 @@ def mesh_output_path(scene, iteration, mode="bounded", post=True):
     return model_dir(scene) / "train" / f"ours_{int(iteration)}" / name
 
 
+def recover_2dgs_post_mesh(job, scene, iteration, mode, num_cluster, started_at):
+    """Recover a fresh raw mesh when upstream 2DGS post-processing fails."""
+    source_path = mesh_output_path(scene, iteration, mode, post=False)
+    output_path = mesh_output_path(scene, iteration, mode, post=True)
+    if not source_path.is_file():
+        return False
+    if source_path.stat().st_mtime < float(started_at) - 5.0:
+        add_job_log(job, f"2DGS recovery ignored stale raw mesh: {source_path}")
+        return False
+
+    helper_path = ROOT / "scripts" / "postprocess_2dgs_mesh.py"
+    if not helper_path.is_file():
+        raise RuntimeError(f"Missing 2DGS mesh recovery helper: {helper_path}")
+    add_job_log(
+        job,
+        "2DGS produced a fresh raw mesh but its connected-component post-process failed; "
+        "recovering without rerunning rendering or TSDF integration.",
+    )
+    run_logged(
+        job,
+        [
+            training_python("2dgs"),
+            helper_path,
+            "--input",
+            source_path,
+            "--output",
+            output_path,
+            "--num-cluster",
+            str(int(num_cluster)),
+        ],
+        ROOT,
+        "2dgs",
+    )
+    if not output_path.is_file():
+        raise RuntimeError(f"2DGS mesh recovery finished without an output file: {output_path}")
+    return True
+
+
 def mesh_file_url(scene, iteration, mode="bounded", post=True):
     return f"/api/mesh/file?scene={safe_name(scene)}&iteration={int(iteration)}&mode={safe_mesh_mode(mode)}&post={'true' if post else 'false'}"
 
@@ -7229,7 +7267,31 @@ def run_mesh_export_job(job):
         if options.get("mode") == "gs2mesh":
             output_path, effective_options, gs2mesh_result = run_gs2mesh_mesh_job(job, options)
         else:
-            run_logged(job, command, cwd, run_backend)
+            try:
+                run_logged(job, command, cwd, run_backend)
+            except Exception:
+                if (
+                    run_backend != "2dgs"
+                    or job.get("cancel_requested")
+                    or not recover_2dgs_post_mesh(
+                        job,
+                        job["scene"],
+                        job["iteration"],
+                        options.get("mode", "bounded"),
+                        options.get("num_cluster", 50),
+                        started_at,
+                    )
+                ):
+                    raise
+        if run_backend == "2dgs" and not output_path.exists():
+            recover_2dgs_post_mesh(
+                job,
+                job["scene"],
+                job["iteration"],
+                options.get("mode", "bounded"),
+                options.get("num_cluster", 50),
+                started_at,
+            )
         texture_result = None
         if options.get("mode") == "sugar":
             cfg = load_cfg_args(model_dir(job["scene"]))

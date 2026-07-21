@@ -2984,6 +2984,108 @@ class TrainingBackendTests(unittest.TestCase):
                 if original_gs2mesh is not None:
                     server.GS2MESH_DIR = original_gs2mesh
 
+    def test_recover_2dgs_post_mesh_uses_fresh_raw_mesh_and_runtime_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = server.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                post_mesh = server.mesh_output_path("mesh_scene", 7, "bounded", post=True)
+                raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                raw_mesh.write_bytes(b"fresh raw mesh")
+                started_at = raw_mesh.stat().st_mtime
+
+                def fake_run_logged(job, command, cwd, backend):
+                    self.assertEqual(command[0], Path("runtime-python.exe"))
+                    self.assertEqual(command[1], server.ROOT / "scripts" / "postprocess_2dgs_mesh.py")
+                    self.assertEqual(Path(command[command.index("--input") + 1]), raw_mesh)
+                    self.assertEqual(Path(command[command.index("--output") + 1]), post_mesh)
+                    self.assertEqual(command[command.index("--num-cluster") + 1], "50")
+                    self.assertEqual(cwd, server.ROOT)
+                    self.assertEqual(backend, "2dgs")
+                    post_mesh.write_bytes(b"processed mesh")
+
+                job = {"backend": "2dgs", "log": []}
+                with mock.patch.object(server, "training_python", return_value=Path("runtime-python.exe")), \
+                        mock.patch.object(server, "run_logged", side_effect=fake_run_logged):
+                    recovered = server.recover_2dgs_post_mesh(
+                        job, "mesh_scene", 7, "bounded", 50, started_at
+                    )
+
+                self.assertTrue(recovered)
+                self.assertTrue(post_mesh.exists())
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_recover_2dgs_post_mesh_rejects_stale_raw_mesh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = server.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                raw_mesh.write_bytes(b"stale raw mesh")
+                started_at = raw_mesh.stat().st_mtime + 60.0
+
+                job = {"backend": "2dgs", "log": []}
+                with mock.patch.object(server, "run_logged") as run_mock:
+                    recovered = server.recover_2dgs_post_mesh(
+                        job, "mesh_scene", 7, "bounded", 50, started_at
+                    )
+
+                self.assertFalse(recovered)
+                run_mock.assert_not_called()
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_2dgs_mesh_job_recovers_when_upstream_post_process_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = server.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                post_mesh = server.mesh_output_path("mesh_scene", 7, "bounded", post=True)
+                calls = []
+
+                def fake_run_logged(job, command, cwd, backend):
+                    calls.append([str(part) for part in command])
+                    if len(calls) == 1:
+                        raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                        raw_mesh.write_bytes(b"fresh raw mesh")
+                        raise RuntimeError("upstream connected-component post-process failed")
+                    post_mesh.write_bytes(b"recovered mesh")
+
+                job = {
+                    "id": "mesh-job",
+                    "kind": "mesh",
+                    "scene": "mesh_scene",
+                    "iteration": 7,
+                    "mode": "bounded",
+                    "options": {"mode": "bounded", "num_cluster": 50},
+                    "status": "queued",
+                    "stage": "queued",
+                    "log": [],
+                    "cancel_requested": False,
+                }
+                with mock.patch.object(server, "ensure_mesh_environment"), \
+                        mock.patch.object(
+                            server,
+                            "mesh_export_command",
+                            return_value=([Path("runtime-python.exe"), "render.py"], Path(tmp), post_mesh),
+                        ), \
+                        mock.patch.object(server, "training_python", return_value=Path("runtime-python.exe")), \
+                        mock.patch.object(server, "run_logged", side_effect=fake_run_logged):
+                    server.run_mesh_export_job(job)
+
+                self.assertEqual(job["status"], "done")
+                self.assertEqual(job["stage"], "done")
+                self.assertEqual(Path(job["output_mesh"]), post_mesh)
+                self.assertTrue(post_mesh.exists())
+                self.assertEqual(len(calls), 2)
+                self.assertIn("postprocess_2dgs_mesh.py", calls[1][1])
+            finally:
+                server.OUTPUT_DIR = original_output
+
     def test_collect_gs2mesh_output_never_falls_back_to_another_scene(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR
