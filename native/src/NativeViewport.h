@@ -1,9 +1,10 @@
 #pragma once
 
 #include "CameraTrajectory.h"
+#include "NavigationGizmo.h"
 #include "PlyPointCloudLoader.h"
-#include "ScreenSpaceSelection.h"
 #include "SceneEditModel.h"
+#include "ScreenSpaceSelection.h"
 
 #include <QElapsedTimer>
 #include <QMatrix4x4>
@@ -26,6 +27,7 @@ class QOpenGLShaderProgram;
 class QEnterEvent;
 class QEvent;
 class QWheelEvent;
+class QVariantAnimation;
 
 namespace gsw {
 
@@ -34,19 +36,9 @@ class NativeViewport final : public QOpenGLWidget,
   Q_OBJECT
 
 public:
-  enum class InteractionMode {
-    Inspect,
-    Select,
-    Rectangle,
-    Lasso,
-    Brush,
-    Crop
-  };
+  enum class InteractionMode { Inspect, Select, Rectangle, Lasso, Brush, Crop };
 
-  enum class RenderMode {
-    Points,
-    Gaussians
-  };
+  enum class RenderMode { Points, Gaussians };
   Q_ENUM(RenderMode)
 
   explicit NativeViewport(QWidget *parent = nullptr);
@@ -92,8 +84,7 @@ signals:
   void renderModeChanged(gsw::NativeViewport::RenderMode mode);
   void cameraTrajectoryChanged(qsizetype cameraCount,
                                qsizetype invalidCameraCount,
-                               bool displayDecimated,
-                               const QString &sourcePath,
+                               bool displayDecimated, const QString &sourcePath,
                                const QString &error);
 
 protected:
@@ -108,12 +99,20 @@ protected:
   void wheelEvent(QWheelEvent *event) override;
 
 private:
+  struct StoredCameraView {
+    QVector3D target;
+    float yawDegrees = 0.0F;
+    float pitchDegrees = 0.0F;
+    float distance = 0.0F;
+    bool orthographic = false;
+  };
+
   [[nodiscard]] QVector3D cameraPosition() const;
   [[nodiscard]] QMatrix4x4 viewMatrix() const;
   [[nodiscard]] QMatrix4x4 projectionMatrix() const;
   [[nodiscard]] QMatrix4x4 viewProjectionMatrix() const;
-  [[nodiscard]] std::optional<QPointF> projectPoint(const QVector3D &point,
-                                                    const QMatrix4x4 &viewProjection) const;
+  [[nodiscard]] std::optional<QPointF>
+  projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
   void rebuildCameraGeometry();
   void startSceneLoad(const QString &scenePath);
@@ -124,16 +123,22 @@ private:
   void notifyEditState();
   void uploadPendingPointCloud();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
-  void drawGaussianCloud(const QMatrix4x4 &view,
-                          const QMatrix4x4 &projection);
+  void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
-  void drawReferenceAxes(QPainter &painter,
-                         const QMatrix4x4 &viewProjection);
+  void drawReferenceAxes(QPainter &painter, const QMatrix4x4 &viewProjection);
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
   void drawOverlay(QPainter &painter, double frameMilliseconds);
   void drawAxisGizmo(QPainter &painter);
+  [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
+  void updateNavigationGizmoHover(const QPointF &position);
+  void updateNavigationGizmoInteraction(const QPoint &current);
+  void finishNavigationGizmoInteraction();
+  void snapToNavigationAxis(NavigationAxis axis);
+  void panCamera(const QPoint &delta);
+  void toggleCameraView();
+  void leaveCameraView();
 
   QString mProjectLabel;
   QString mScenePath;
@@ -155,6 +160,10 @@ private:
   bool mVisibleOnlySelection = true;
   bool mSelectionBusy = false;
   bool mCameraManipulated = false;
+  bool mNavigationInteractionActive = false;
+  bool mNavigationDragging = false;
+  bool mOrthographic = false;
+  bool mCameraViewActive = false;
   bool mShowCameras = false;
   bool mHasGaussianAttributes = false;
   bool mGaussianShaderReady = false;
@@ -168,6 +177,10 @@ private:
   float mPitchDegrees = 24.0F;
   float mDistance = 12.0F;
   float mSceneRadius = 4.0F;
+  NavigationGizmoHit mNavigationHover;
+  NavigationGizmoHit mNavigationPress;
+  QPoint mNavigationPressPosition;
+  std::optional<StoredCameraView> mStoredCameraView;
   QVector<PointPosition> mSourcePositions;
   QVector<PointCloudVertex> mPreviewVertices;
   QVector<PointCloudVertex> mPendingVertices;
@@ -182,6 +195,7 @@ private:
   QOpenGLVertexArrayObject mPointVertexArray;
   QOpenGLVertexArrayObject mGaussianVertexArray;
   QOpenGLVertexArrayObject mGridVertexArray;
+  QVariantAnimation *mViewSnapAnimation = nullptr;
   QElapsedTimer mFrameTimer;
   double mSmoothedFrameMilliseconds = 0.0;
 };

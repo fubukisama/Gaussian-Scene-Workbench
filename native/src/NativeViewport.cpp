@@ -1,26 +1,32 @@
 #include "NativeViewport.h"
 
+#include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
 #include "ViewportCamera.h"
 
+#include <QApplication>
+#include <QEasingCurve>
 #include <QEnterEvent>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
+#include <QFontMetricsF>
 #include <QFutureWatcher>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QPainterPath>
-#include <QOpenGLShaderProgram>
+#include <QVariantAnimation>
 #include <QVector2D>
 #include <QVector4D>
 #include <QWheelEvent>
 #include <QtConcurrent>
 
 #include <algorithm>
-#include <cstddef>
+#include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace gsw {
 
@@ -30,6 +36,52 @@ constexpr float kReferenceGridMinimumVisibleDistance = 10000.0F;
 constexpr float kReferenceGridDistanceMultiplier = 256.0F;
 
 float radians(const float degrees) { return degrees * kPi / 180.0F; }
+
+QColor mixColor(const QColor &background, const QColor &foreground,
+                const qreal foregroundAmount) {
+  const qreal amount = std::clamp(foregroundAmount, 0.0, 1.0);
+  return QColor::fromRgbF(
+      background.redF() * (1.0 - amount) + foreground.redF() * amount,
+      background.greenF() * (1.0 - amount) + foreground.greenF() * amount,
+      background.blueF() * (1.0 - amount) + foreground.blueF() * amount,
+      background.alphaF() * (1.0 - amount) + foreground.alphaF() * amount);
+}
+
+QColor navigationAxisColor(const int axisIndex) {
+  static const std::array<QColor, 3> colors = {
+      QColor(226, 67, 67), QColor(104, 185, 57), QColor(62, 116, 232)};
+  return colors[static_cast<std::size_t>(axisIndex)];
+}
+
+QString navigationAxisLabel(const NavigationAxis axis) {
+  switch (axis) {
+  case NavigationAxis::PositiveX:
+    return QStringLiteral("X");
+  case NavigationAxis::NegativeX:
+    return QStringLiteral("-X");
+  case NavigationAxis::PositiveY:
+    return QStringLiteral("Y");
+  case NavigationAxis::NegativeY:
+    return QStringLiteral("-Y");
+  case NavigationAxis::PositiveZ:
+    return QStringLiteral("Z");
+  case NavigationAxis::NegativeZ:
+    return QStringLiteral("-Z");
+  case NavigationAxis::None:
+    return {};
+  }
+  return {};
+}
+
+float shortestEquivalentAngle(const float current, float target) {
+  while (target - current > 180.0F) {
+    target -= 360.0F;
+  }
+  while (target - current < -180.0F) {
+    target += 360.0F;
+  }
+  return target;
+}
 
 QString modeLabel(const NativeViewport::InteractionMode mode) {
   switch (mode) {
@@ -51,10 +103,12 @@ QString modeLabel(const NativeViewport::InteractionMode mode) {
 
 QString formatCount(const qint64 count) {
   if (count >= 1000000) {
-    return QStringLiteral("%1 M").arg(static_cast<double>(count) / 1000000.0, 0, 'f', 2);
+    return QStringLiteral("%1 M").arg(static_cast<double>(count) / 1000000.0, 0,
+                                      'f', 2);
   }
   if (count >= 1000) {
-    return QStringLiteral("%1 K").arg(static_cast<double>(count) / 1000.0, 0, 'f', 1);
+    return QStringLiteral("%1 K").arg(static_cast<double>(count) / 1000.0, 0,
+                                      'f', 1);
   }
   return QString::number(count);
 }
@@ -65,6 +119,24 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setMinimumSize(420, 280);
+
+  mViewSnapAnimation = new QVariantAnimation(this);
+  mViewSnapAnimation->setDuration(220);
+  mViewSnapAnimation->setEasingCurve(QEasingCurve::OutCubic);
+  connect(mViewSnapAnimation, &QVariantAnimation::valueChanged, this,
+          [this](const QVariant &value) {
+            const QPointF angles = value.toPointF();
+            mYawDegrees = static_cast<float>(angles.x());
+            mPitchDegrees = static_cast<float>(angles.y());
+            update();
+          });
+  connect(mViewSnapAnimation, &QVariantAnimation::finished, this, [this]() {
+    mYawDegrees = std::remainder(mYawDegrees, 360.0F);
+    if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+      rebuildRenderedVertices();
+    }
+    update();
+  });
 }
 
 NativeViewport::~NativeViewport() {
@@ -83,7 +155,8 @@ void NativeViewport::setProjectLabel(const QString &label) {
   update();
 }
 
-void NativeViewport::setScene(const QString &scenePath, const qint64 gaussianCount) {
+void NativeViewport::setScene(const QString &scenePath,
+                              const qint64 gaussianCount) {
   mGaussianCount = gaussianCount;
   if (mRequestedScenePath == scenePath) {
     reloadCameraTrajectory(scenePath, false);
@@ -180,10 +253,14 @@ void NativeViewport::setBrushRadius(const int pixels) {
 }
 
 void NativeViewport::resetCamera() {
+  mViewSnapAnimation->stop();
   mTarget = mSceneCenter;
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
   mDistance = std::max(mSceneRadius * 2.8F, 0.1F);
+  mOrthographic = false;
+  mCameraViewActive = false;
+  mStoredCameraView.reset();
   if (!mPreviewVertices.isEmpty()) {
     rebuildRenderedVertices();
   }
@@ -239,9 +316,8 @@ void NativeViewport::redoEdit() {
 
 bool NativeViewport::saveCroppedScene(const QString &filePath,
                                       QString *errorMessage) {
-  if (!PlyPointCloudLoader::writeFiltered(mScenePath, filePath,
-                                          mEditModel.deletedBits(),
-                                          errorMessage)) {
+  if (!PlyPointCloudLoader::writeFiltered(
+          mScenePath, filePath, mEditModel.deletedBits(), errorMessage)) {
     return false;
   }
   mEditModel.markExported();
@@ -281,9 +357,9 @@ void NativeViewport::initializeGL() {
   glEnable(GL_PROGRAM_POINT_SIZE);
 
   mPointProgram = new QOpenGLShaderProgram(this);
-  const bool vertexCompiled = mPointProgram->addShaderFromSourceCode(
-      QOpenGLShader::Vertex,
-      R"GLSL(#version 330 core
+  const bool vertexCompiled =
+      mPointProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
+                                             R"GLSL(#version 330 core
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 uniform mat4 viewProjection;
@@ -295,9 +371,9 @@ void main() {
   vertexColor = color;
 }
 )GLSL");
-  const bool fragmentCompiled = mPointProgram->addShaderFromSourceCode(
-      QOpenGLShader::Fragment,
-      R"GLSL(#version 330 core
+  const bool fragmentCompiled =
+      mPointProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                             R"GLSL(#version 330 core
 in vec3 vertexColor;
 out vec4 fragmentColor;
 void main() {
@@ -312,13 +388,14 @@ void main() {
   const bool pointShaderReady =
       vertexCompiled && fragmentCompiled && mPointProgram->link();
   if (!pointShaderReady) {
-    mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1").arg(mPointProgram->log());
+    mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1")
+                            .arg(mPointProgram->log());
   }
 
   mGaussianProgram = new QOpenGLShaderProgram(this);
-  const bool gaussianVertexCompiled = mGaussianProgram->addShaderFromSourceCode(
-      QOpenGLShader::Vertex,
-      R"GLSL(#version 330 core
+  const bool gaussianVertexCompiled =
+      mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
+                                                R"GLSL(#version 330 core
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 layout(location = 2) in float opacity;
@@ -430,9 +507,8 @@ void main() {
 }
 )GLSL");
   const bool gaussianFragmentCompiled =
-      mGaussianProgram->addShaderFromSourceCode(
-          QOpenGLShader::Fragment,
-          R"GLSL(#version 330 core
+      mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                                R"GLSL(#version 330 core
 in vec3 vertexColor;
 in float vertexOpacity;
 in vec2 gaussianCoordinate;
@@ -449,18 +525,17 @@ void main() {
   mGaussianShaderReady = pointShaderReady && gaussianVertexCompiled &&
                          gaussianFragmentCompiled && mGaussianProgram->link();
   if (!mGaussianShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage =
-        QStringLiteral("OpenGL Gaussian shader failed: %1")
-            .arg(mGaussianProgram->log());
+    mSceneLoadMessage = QStringLiteral("OpenGL Gaussian shader failed: %1")
+                            .arg(mGaussianProgram->log());
   }
 
   // Independently implements Blender-style infinite-grid behavior: a
   // full-screen ray is intersected with this application's fixed Y-up ground
   // plane, so navigation never changes the grid's world-space anchor.
   mGridProgram = new QOpenGLShaderProgram(this);
-  const bool gridVertexCompiled = mGridProgram->addShaderFromSourceCode(
-      QOpenGLShader::Vertex,
-      R"GLSL(#version 130
+  const bool gridVertexCompiled =
+      mGridProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
+                                            R"GLSL(#version 130
 out vec2 clipCoordinate;
 
 void main() {
@@ -476,9 +551,9 @@ void main() {
   gl_Position = vec4(position, 0.0, 1.0);
 }
 )GLSL");
-  const bool gridFragmentCompiled = mGridProgram->addShaderFromSourceCode(
-      QOpenGLShader::Fragment,
-      R"GLSL(#version 130
+  const bool gridFragmentCompiled =
+      mGridProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                            R"GLSL(#version 130
 in vec2 clipCoordinate;
 out vec4 fragmentColor;
 
@@ -581,8 +656,8 @@ void main() {
   fragmentColor = vec4(color, alpha);
 }
 )GLSL");
-  mGridShaderReady = gridVertexCompiled && gridFragmentCompiled &&
-                     mGridProgram->link();
+  mGridShaderReady =
+      gridVertexCompiled && gridFragmentCompiled && mGridProgram->link();
   if (!mGridShaderReady && mSceneLoadMessage.isEmpty()) {
     mSceneLoadMessage =
         QStringLiteral("OpenGL reference-grid shader failed: %1")
@@ -601,10 +676,12 @@ void main() {
     mPointBuffer.bind();
     mPointProgram->bind();
     mPointProgram->enableAttributeArray(0);
-    mPointProgram->setAttributeBuffer(0, GL_FLOAT, offsetof(PointCloudVertex, x), 3,
+    mPointProgram->setAttributeBuffer(0, GL_FLOAT,
+                                      offsetof(PointCloudVertex, x), 3,
                                       sizeof(PointCloudVertex));
     mPointProgram->enableAttributeArray(1);
-    mPointProgram->setAttributeBuffer(1, GL_FLOAT, offsetof(PointCloudVertex, red), 3,
+    mPointProgram->setAttributeBuffer(1, GL_FLOAT,
+                                      offsetof(PointCloudVertex, red), 3,
                                       sizeof(PointCloudVertex));
     mPointProgram->release();
     mPointBuffer.release();
@@ -616,25 +693,25 @@ void main() {
     mPointBuffer.bind();
     mGaussianProgram->bind();
     mGaussianProgram->enableAttributeArray(0);
-    mGaussianProgram->setAttributeBuffer(
-        0, GL_FLOAT, offsetof(PointCloudVertex, x), 3,
-        sizeof(PointCloudVertex));
+    mGaussianProgram->setAttributeBuffer(0, GL_FLOAT,
+                                         offsetof(PointCloudVertex, x), 3,
+                                         sizeof(PointCloudVertex));
     mGaussianProgram->enableAttributeArray(1);
-    mGaussianProgram->setAttributeBuffer(
-        1, GL_FLOAT, offsetof(PointCloudVertex, red), 3,
-        sizeof(PointCloudVertex));
+    mGaussianProgram->setAttributeBuffer(1, GL_FLOAT,
+                                         offsetof(PointCloudVertex, red), 3,
+                                         sizeof(PointCloudVertex));
     mGaussianProgram->enableAttributeArray(2);
-    mGaussianProgram->setAttributeBuffer(
-        2, GL_FLOAT, offsetof(PointCloudVertex, opacity), 1,
-        sizeof(PointCloudVertex));
+    mGaussianProgram->setAttributeBuffer(2, GL_FLOAT,
+                                         offsetof(PointCloudVertex, opacity), 1,
+                                         sizeof(PointCloudVertex));
     mGaussianProgram->enableAttributeArray(3);
-    mGaussianProgram->setAttributeBuffer(
-        3, GL_FLOAT, offsetof(PointCloudVertex, scaleX), 3,
-        sizeof(PointCloudVertex));
+    mGaussianProgram->setAttributeBuffer(3, GL_FLOAT,
+                                         offsetof(PointCloudVertex, scaleX), 3,
+                                         sizeof(PointCloudVertex));
     mGaussianProgram->enableAttributeArray(4);
-    mGaussianProgram->setAttributeBuffer(
-        4, GL_FLOAT, offsetof(PointCloudVertex, rotationW), 4,
-        sizeof(PointCloudVertex));
+    mGaussianProgram->setAttributeBuffer(4, GL_FLOAT,
+                                         offsetof(PointCloudVertex, rotationW),
+                                         4, sizeof(PointCloudVertex));
     for (GLuint attribute = 0; attribute <= 4; ++attribute) {
       glVertexAttribDivisor(attribute, 1);
     }
@@ -668,8 +745,7 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 projection = projectionMatrix();
   const QMatrix4x4 viewProjection = projection * view;
   drawInfiniteGrid(viewProjection);
-  if (mRenderMode == RenderMode::Gaussians &&
-      gaussianRenderingAvailable()) {
+  if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     drawGaussianCloud(view, projection);
   } else {
     drawPointCloud(viewProjection);
@@ -687,7 +763,8 @@ void NativeViewport::paintGL() {
   if (mSmoothedFrameMilliseconds <= 0.0) {
     mSmoothedFrameMilliseconds = frameMilliseconds;
   } else {
-    mSmoothedFrameMilliseconds = mSmoothedFrameMilliseconds * 0.88 + frameMilliseconds * 0.12;
+    mSmoothedFrameMilliseconds =
+        mSmoothedFrameMilliseconds * 0.88 + frameMilliseconds * 0.12;
   }
   drawOverlay(painter, mSmoothedFrameMilliseconds);
   drawAxisGizmo(painter);
@@ -724,9 +801,8 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
                 mCameraTrajectory.error());
             update();
           });
-  watcher->setFuture(QtConcurrent::run([scenePath]() {
-    return CameraTrajectory::loadForScene(scenePath);
-  }));
+  watcher->setFuture(QtConcurrent::run(
+      [scenePath]() { return CameraTrajectory::loadForScene(scenePath); }));
 }
 
 void NativeViewport::rebuildCameraGeometry() {
@@ -743,7 +819,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
           [this, watcher, scenePath, generation]() {
             PointCloudData data = watcher->result();
             watcher->deleteLater();
-            if (scenePath != mRequestedScenePath || generation != mSceneGeneration) {
+            if (scenePath != mRequestedScenePath ||
+                generation != mSceneGeneration) {
               return;
             }
             if (!data.isValid()) {
@@ -875,7 +952,8 @@ void NativeViewport::rebuildRenderedVertices() {
   const QBitArray &selected = mEditModel.selectedBits();
   const QBitArray &deleted = mEditModel.deletedBits();
   for (const PointCloudVertex &sourceVertex : mPreviewVertices) {
-    const qsizetype sourceIndex = static_cast<qsizetype>(sourceVertex.sourceIndex);
+    const qsizetype sourceIndex =
+        static_cast<qsizetype>(sourceVertex.sourceIndex);
     if (sourceIndex >= deleted.size() || deleted.testBit(sourceIndex)) {
       continue;
     }
@@ -888,8 +966,7 @@ void NativeViewport::rebuildRenderedVertices() {
     }
     mPendingVertices.append(renderedVertex);
   }
-  if (mRenderMode == RenderMode::Gaussians &&
-      gaussianRenderingAvailable()) {
+  if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     const QVector3D forward = (mTarget - cameraPosition()).normalized();
     std::sort(mPendingVertices.begin(), mPendingVertices.end(),
               [&forward](const PointCloudVertex &left,
@@ -922,16 +999,19 @@ void NativeViewport::uploadPendingPointCloud() {
   }
   QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
   mPointBuffer.bind();
-  const qsizetype byteCount = mPendingVertices.size() * static_cast<qsizetype>(sizeof(PointCloudVertex));
-  mPointBuffer.allocate(mPendingVertices.isEmpty() ? nullptr : mPendingVertices.constData(),
-                        static_cast<int>(byteCount));
+  const qsizetype byteCount = mPendingVertices.size() *
+                              static_cast<qsizetype>(sizeof(PointCloudVertex));
+  mPointBuffer.allocate(
+      mPendingVertices.isEmpty() ? nullptr : mPendingVertices.constData(),
+      static_cast<int>(byteCount));
   mPointBuffer.release();
   mPendingVertices.clear();
   mPointUploadPending = false;
 }
 
 void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
-  if (mRenderedPointCount <= 0 || mPointProgram == nullptr || !mPointProgram->isLinked()) {
+  if (mRenderedPointCount <= 0 || mPointProgram == nullptr ||
+      !mPointProgram->isLinked()) {
     return;
   }
 
@@ -940,7 +1020,8 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   mPointProgram->bind();
   mPointProgram->setUniformValue("viewProjection", viewProjection);
-  mPointProgram->setUniformValue("pointSize", static_cast<float>(2.4 * devicePixelRatioF()));
+  mPointProgram->setUniformValue("pointSize",
+                                 static_cast<float>(2.4 * devicePixelRatioF()));
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
     glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
@@ -965,12 +1046,10 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   mGaussianProgram->setUniformValue("view", view);
   mGaussianProgram->setUniformValue("projection", projection);
   mGaussianProgram->setUniformValue(
-      "viewportPixels",
-      QVector2D(static_cast<float>(width() * ratio),
-                static_cast<float>(height() * ratio)));
+      "viewportPixels", QVector2D(static_cast<float>(width() * ratio),
+                                  static_cast<float>(height() * ratio)));
   {
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(
-        &mGaussianVertexArray);
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(mRenderedPointCount));
   }
@@ -986,8 +1065,7 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
     return;
   }
   bool invertible = false;
-  const QMatrix4x4 inverseViewProjection =
-      viewProjection.inverted(&invertible);
+  const QMatrix4x4 inverseViewProjection = viewProjection.inverted(&invertible);
   if (!invertible) {
     return;
   }
@@ -997,8 +1075,7 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   mGridProgram->bind();
-  mGridProgram->setUniformValue("inverseViewProjection",
-                                inverseViewProjection);
+  mGridProgram->setUniformValue("inverseViewProjection", inverseViewProjection);
   mGridProgram->setUniformValue("cameraWorld", cameraPosition());
   mGridProgram->setUniformValue("cameraDistance", mDistance);
   mGridProgram->setUniformValue(
@@ -1031,10 +1108,40 @@ void NativeViewport::leaveEvent(QEvent *event) {
     mBrushCursorVisible = false;
     update();
   }
+  if (!mNavigationInteractionActive &&
+      mNavigationHover.part != NavigationGizmoPart::None) {
+    mNavigationHover = {};
+    setToolTip({});
+    setCursor(mMode == InteractionMode::Rectangle ||
+                      mMode == InteractionMode::Lasso ||
+                      mMode == InteractionMode::Brush
+                  ? Qt::CrossCursor
+                  : Qt::ArrowCursor);
+    update();
+  }
   QOpenGLWidget::leaveEvent(event);
 }
 
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
+  updateNavigationGizmoHover(event->position());
+  if (event->button() == Qt::LeftButton &&
+      mNavigationHover.part != NavigationGizmoPart::None) {
+    mNavigationInteractionActive = true;
+    mNavigationDragging = false;
+    mNavigationPress = mNavigationHover;
+    mNavigationPressPosition = event->position().toPoint();
+    mLastMousePosition = mNavigationPressPosition;
+    mPressedButtons = Qt::NoButton;
+    if (mNavigationPress.part == NavigationGizmoPart::Zoom) {
+      setCursor(Qt::SizeVerCursor);
+    } else {
+      setCursor(Qt::ClosedHandCursor);
+    }
+    update();
+    event->accept();
+    return;
+  }
+
   mPressedButtons = event->buttons();
   mLastMousePosition = event->position().toPoint();
   if (mMode == InteractionMode::Brush) {
@@ -1042,8 +1149,8 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     mBrushCursorVisible = true;
   }
   if (event->button() == Qt::LeftButton && !mSelectionBusy &&
-      (mMode == InteractionMode::Rectangle ||
-       mMode == InteractionMode::Lasso || mMode == InteractionMode::Brush) &&
+      (mMode == InteractionMode::Rectangle || mMode == InteractionMode::Lasso ||
+       mMode == InteractionMode::Brush) &&
       hasEditableScene()) {
     mSelectionGestureActive = true;
     mSelectionStart = event->position();
@@ -1058,14 +1165,19 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
+  if (mNavigationInteractionActive) {
+    updateNavigationGizmoInteraction(event->position().toPoint());
+    event->accept();
+    return;
+  }
+
   if (mMode == InteractionMode::Brush) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
   }
   if (mSelectionGestureActive) {
     mSelectionCurrent = event->position();
-    if ((mMode == InteractionMode::Lasso ||
-         mMode == InteractionMode::Brush) &&
+    if ((mMode == InteractionMode::Lasso || mMode == InteractionMode::Brush) &&
         (mSelectionPath.isEmpty() ||
          QLineF(mSelectionPath.last(), event->position()).length() >= 2.0)) {
       mSelectionPath.append(event->position());
@@ -1075,6 +1187,7 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     return;
   }
   if (mPressedButtons == Qt::NoButton) {
+    updateNavigationGizmoHover(event->position());
     if (mMode == InteractionMode::Brush) {
       update();
       event->accept();
@@ -1089,19 +1202,17 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
   mLastMousePosition = current;
   if (!delta.isNull()) {
     mCameraManipulated = true;
+    leaveCameraView();
   }
 
   const bool pan = mPressedButtons.testFlag(Qt::MiddleButton) ||
                    mPressedButtons.testFlag(Qt::RightButton) ||
                    event->modifiers().testFlag(Qt::ShiftModifier);
   if (pan) {
-    const QVector3D forward = (mTarget - cameraPosition()).normalized();
-    const QVector3D right = QVector3D::crossProduct(forward, QVector3D(0.0F, 1.0F, 0.0F)).normalized();
-    const QVector3D up = QVector3D::crossProduct(right, forward).normalized();
-    const float scale = mDistance * 0.0018F;
-    mTarget += right * (-static_cast<float>(delta.x()) * scale);
-    mTarget += up * (static_cast<float>(delta.y()) * scale);
+    panCamera(delta);
   } else if (mPressedButtons.testFlag(Qt::LeftButton)) {
+    mViewSnapAnimation->stop();
+    mOrthographic = false;
     const OrbitAngles angles =
         orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
     mYawDegrees = angles.yawDegrees;
@@ -1113,10 +1224,16 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && mNavigationInteractionActive) {
+    finishNavigationGizmoInteraction();
+    mPressedButtons = event->buttons();
+    event->accept();
+    return;
+  }
+
   if (event->button() == Qt::LeftButton && mSelectionGestureActive) {
     mSelectionCurrent = event->position();
-    if ((mMode == InteractionMode::Lasso ||
-         mMode == InteractionMode::Brush) &&
+    if ((mMode == InteractionMode::Lasso || mMode == InteractionMode::Brush) &&
         (mSelectionPath.isEmpty() ||
          mSelectionPath.last() != event->position())) {
       mSelectionPath.append(event->position());
@@ -1126,8 +1243,7 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
   mPressedButtons = event->buttons();
   if (mCameraManipulated && mPressedButtons == Qt::NoButton) {
     mCameraManipulated = false;
-    if (mRenderMode == RenderMode::Gaussians &&
-        gaussianRenderingAvailable()) {
+    if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
       rebuildRenderedVertices();
       update();
     }
@@ -1136,10 +1252,207 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::wheelEvent(QWheelEvent *event) {
+  leaveCameraView();
   const float steps = static_cast<float>(event->angleDelta().y()) / 120.0F;
   mDistance = std::clamp(mDistance * std::pow(0.84F, steps), 0.05F, 2500.0F);
   update();
   event->accept();
+}
+
+NavigationGizmoLayout NativeViewport::navigationGizmo() const {
+  return navigationGizmoLayout(
+      viewMatrix(),
+      QSizeF(static_cast<qreal>(width()), static_cast<qreal>(height())),
+      QFontMetricsF(font()).height());
+}
+
+void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
+  const NavigationGizmoHit hit =
+      hitTestNavigationGizmo(navigationGizmo(), position);
+  if (hit == mNavigationHover) {
+    return;
+  }
+
+  mNavigationHover = hit;
+  QString tooltip;
+  switch (hit.part) {
+  case NavigationGizmoPart::Rotate:
+    tooltip = QStringLiteral("拖动环绕视图；单击 %1 轴吸附到正交视图")
+                  .arg(navigationAxisLabel(hit.axis));
+    setCursor(Qt::OpenHandCursor);
+    break;
+  case NavigationGizmoPart::Zoom:
+    tooltip = QStringLiteral("上下拖动缩放视图");
+    setCursor(Qt::SizeVerCursor);
+    break;
+  case NavigationGizmoPart::Pan:
+    tooltip = QStringLiteral("拖动平移视图");
+    setCursor(Qt::OpenHandCursor);
+    break;
+  case NavigationGizmoPart::Camera:
+    tooltip = camerasAvailable()
+                  ? (mCameraViewActive ? QStringLiteral("返回用户视图")
+                                       : QStringLiteral("切换到场景相机视图"))
+                  : QStringLiteral("当前场景没有可用相机");
+    setCursor(camerasAvailable() ? Qt::PointingHandCursor
+                                 : Qt::ForbiddenCursor);
+    break;
+  case NavigationGizmoPart::Projection:
+    tooltip = mOrthographic ? QStringLiteral("切换到透视视图")
+                            : QStringLiteral("切换到正交视图");
+    setCursor(Qt::PointingHandCursor);
+    break;
+  case NavigationGizmoPart::None:
+    setCursor(mMode == InteractionMode::Rectangle ||
+                      mMode == InteractionMode::Lasso ||
+                      mMode == InteractionMode::Brush
+                  ? Qt::CrossCursor
+                  : Qt::ArrowCursor);
+    break;
+  }
+  setToolTip(tooltip);
+  update();
+}
+
+void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
+  const QPoint totalDelta = current - mNavigationPressPosition;
+  if (!mNavigationDragging &&
+      totalDelta.manhattanLength() < QApplication::startDragDistance()) {
+    return;
+  }
+  if (!mNavigationDragging) {
+    mNavigationDragging = true;
+    mViewSnapAnimation->stop();
+    if (mNavigationPress.part == NavigationGizmoPart::Rotate ||
+        mNavigationPress.part == NavigationGizmoPart::Zoom ||
+        mNavigationPress.part == NavigationGizmoPart::Pan) {
+      leaveCameraView();
+    }
+    if (mNavigationPress.part == NavigationGizmoPart::Rotate) {
+      mOrthographic = false;
+    }
+  }
+
+  const QPoint delta = current - mLastMousePosition;
+  mLastMousePosition = current;
+  if (delta.isNull()) {
+    return;
+  }
+
+  switch (mNavigationPress.part) {
+  case NavigationGizmoPart::Rotate: {
+    const OrbitAngles angles =
+        orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
+    mYawDegrees = angles.yawDegrees;
+    mPitchDegrees = angles.pitchDegrees;
+    break;
+  }
+  case NavigationGizmoPart::Zoom:
+    mDistance =
+        std::clamp(mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
+                   0.05F, 2500.0F);
+    break;
+  case NavigationGizmoPart::Pan:
+    panCamera(delta);
+    break;
+  case NavigationGizmoPart::Camera:
+  case NavigationGizmoPart::Projection:
+  case NavigationGizmoPart::None:
+    break;
+  }
+  update();
+}
+
+void NativeViewport::finishNavigationGizmoInteraction() {
+  const NavigationGizmoHit pressed = mNavigationPress;
+  const bool dragged = mNavigationDragging;
+  mNavigationInteractionActive = false;
+  mNavigationDragging = false;
+  mNavigationPress = {};
+
+  if (!dragged) {
+    if (pressed.part == NavigationGizmoPart::Rotate) {
+      snapToNavigationAxis(pressed.axis);
+    } else if (pressed.part == NavigationGizmoPart::Camera) {
+      toggleCameraView();
+    } else if (pressed.part == NavigationGizmoPart::Projection) {
+      leaveCameraView();
+      mOrthographic = !mOrthographic;
+      update();
+    }
+  } else if (mRenderMode == RenderMode::Gaussians &&
+             gaussianRenderingAvailable()) {
+    rebuildRenderedVertices();
+  }
+
+  updateNavigationGizmoHover(QPointF(mLastMousePosition));
+}
+
+void NativeViewport::snapToNavigationAxis(const NavigationAxis axis) {
+  const std::optional<OrbitAngles> target = navigationAxisViewAngles(axis);
+  if (!target.has_value()) {
+    return;
+  }
+
+  mViewSnapAnimation->stop();
+  leaveCameraView();
+  mOrthographic = true;
+  const float targetYaw =
+      shortestEquivalentAngle(mYawDegrees, target->yawDegrees);
+  mViewSnapAnimation->setStartValue(QPointF(mYawDegrees, mPitchDegrees));
+  mViewSnapAnimation->setEndValue(QPointF(targetYaw, target->pitchDegrees));
+  mViewSnapAnimation->start();
+}
+
+void NativeViewport::panCamera(const QPoint &delta) {
+  const QMatrix4x4 view = viewMatrix();
+  const QVector3D right(view(0, 0), view(0, 1), view(0, 2));
+  const QVector3D up(view(1, 0), view(1, 1), view(1, 2));
+  const float scale = mDistance * 0.0018F;
+  mTarget += right * (-static_cast<float>(delta.x()) * scale);
+  mTarget += up * (static_cast<float>(delta.y()) * scale);
+}
+
+void NativeViewport::toggleCameraView() {
+  if (mCameraViewActive && mStoredCameraView.has_value()) {
+    mTarget = mStoredCameraView->target;
+    mYawDegrees = mStoredCameraView->yawDegrees;
+    mPitchDegrees = mStoredCameraView->pitchDegrees;
+    mDistance = mStoredCameraView->distance;
+    mOrthographic = mStoredCameraView->orthographic;
+    mCameraViewActive = false;
+    mStoredCameraView.reset();
+    update();
+    return;
+  }
+  if (!camerasAvailable()) {
+    return;
+  }
+
+  const CameraPose &camera = mCameraTrajectory.cameras().constFirst();
+  const QVector3D forward = camera.forward.normalized();
+  if (forward.lengthSquared() < 1.0e-6F) {
+    return;
+  }
+
+  mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
+                                       mDistance, mOrthographic};
+  const QVector3D cameraOffset = -forward;
+  mPitchDegrees =
+      std::asin(std::clamp(cameraOffset.y(), -1.0F, 1.0F)) * 180.0F / kPi;
+  mYawDegrees = std::atan2(cameraOffset.x(), cameraOffset.z()) * 180.0F / kPi;
+  mTarget = camera.position + forward * mDistance;
+  mOrthographic = false;
+  mCameraViewActive = true;
+  update();
+}
+
+void NativeViewport::leaveCameraView() {
+  if (!mCameraViewActive) {
+    return;
+  }
+  mCameraViewActive = false;
+  mStoredCameraView.reset();
 }
 
 QVector3D NativeViewport::cameraPosition() const {
@@ -1147,13 +1460,20 @@ QVector3D NativeViewport::cameraPosition() const {
   const float pitch = radians(mPitchDegrees);
   const float cosPitch = std::cos(pitch);
   return mTarget + QVector3D(mDistance * cosPitch * std::sin(yaw),
-                            mDistance * std::sin(pitch),
-                            mDistance * cosPitch * std::cos(yaw));
+                             mDistance * std::sin(pitch),
+                             mDistance * cosPitch * std::cos(yaw));
 }
 
 QMatrix4x4 NativeViewport::viewMatrix() const {
   QMatrix4x4 view;
-  view.lookAt(cameraPosition(), mTarget, QVector3D(0.0F, 1.0F, 0.0F));
+  const QVector3D position = cameraPosition();
+  const QVector3D forward = (mTarget - position).normalized();
+  QVector3D up(0.0F, 1.0F, 0.0F);
+  if (std::abs(QVector3D::dotProduct(forward, up)) > 0.999F) {
+    up = mPitchDegrees >= 0.0F ? QVector3D(0.0F, 0.0F, -1.0F)
+                               : QVector3D(0.0F, 0.0F, 1.0F);
+  }
+  view.lookAt(position, mTarget, up);
   return view;
 }
 
@@ -1163,9 +1483,15 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
                    : 1.0F;
   const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
-  const float farPlane =
-      std::max(100.0F, mDistance + mSceneRadius * 12.0F);
-  projection.perspective(46.0F, aspect, nearPlane, farPlane);
+  const float farPlane = std::max(100.0F, mDistance + mSceneRadius * 12.0F);
+  if (mOrthographic) {
+    const float halfHeight =
+        std::max(0.05F, mDistance * std::tan(radians(23.0F)));
+    projection.ortho(-halfHeight * aspect, halfHeight * aspect, -halfHeight,
+                     halfHeight, nearPlane, farPlane);
+  } else {
+    projection.perspective(46.0F, aspect, nearPlane, farPlane);
+  }
   return projection;
 }
 
@@ -1173,8 +1499,9 @@ QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
   return projectionMatrix() * viewMatrix();
 }
 
-std::optional<QPointF> NativeViewport::projectPoint(const QVector3D &point,
-                                                    const QMatrix4x4 &viewProjection) const {
+std::optional<QPointF>
+NativeViewport::projectPoint(const QVector3D &point,
+                             const QMatrix4x4 &viewProjection) const {
   const QVector4D clip = viewProjection * QVector4D(point, 1.0F);
   if (clip.w() <= 0.0001F) {
     return std::nullopt;
@@ -1187,8 +1514,8 @@ std::optional<QPointF> NativeViewport::projectPoint(const QVector3D &point,
                  (1.0F - (normalized.y() * 0.5F + 0.5F)) * height());
 }
 
-void NativeViewport::drawReferenceAxes(
-    QPainter &painter, const QMatrix4x4 &viewProjection) {
+void NativeViewport::drawReferenceAxes(QPainter &painter,
+                                       const QMatrix4x4 &viewProjection) {
   const auto origin = projectPoint(QVector3D(0.0F, 0.0F, 0.0F), viewProjection);
   const auto xAxis = projectPoint(QVector3D(3.0F, 0.0F, 0.0F), viewProjection);
   const auto yAxis = projectPoint(QVector3D(0.0F, 3.0F, 0.0F), viewProjection);
@@ -1207,8 +1534,8 @@ void NativeViewport::drawReferenceAxes(
   }
 }
 
-void NativeViewport::drawCameraTrajectory(
-    QPainter &painter, const QMatrix4x4 &viewProjection) {
+void NativeViewport::drawCameraTrajectory(QPainter &painter,
+                                          const QMatrix4x4 &viewProjection) {
   if (!mShowCameras || !camerasAvailable()) {
     return;
   }
@@ -1262,8 +1589,8 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
       painter.setPen(QPen(QColor(102, 193, 168, 48), mBrushRadius * 2.0,
                           Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
       painter.drawPath(stroke);
-      painter.setPen(QPen(QColor(124, 219, 191, 205), 1.2,
-                          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+      painter.setPen(QPen(QColor(124, 219, 191, 205), 1.2, Qt::SolidLine,
+                          Qt::RoundCap, Qt::RoundJoin));
       painter.drawPath(stroke);
     }
     if (drawBrushCursor) {
@@ -1292,27 +1619,31 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
   painter.restore();
 }
 
-void NativeViewport::drawOverlay(QPainter &painter, const double frameMilliseconds) {
+void NativeViewport::drawOverlay(QPainter &painter,
+                                 const double frameMilliseconds) {
   painter.save();
   painter.setPen(Qt::NoPen);
   painter.setBrush(QColor(17, 19, 21, 225));
 
-  const QString sceneName = mScenePath.isEmpty() ? QStringLiteral("未载入场景") : QFileInfo(mScenePath).fileName();
-  const QString project = mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
+  const QString sceneName = mScenePath.isEmpty()
+                                ? QStringLiteral("未载入场景")
+                                : QFileInfo(mScenePath).fileName();
+  const QString project =
+      mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
   QString count;
   if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
-  } else if (mGaussianCount > 0 && mPreviewPointCount > 0 && mGaussianCount != mPreviewPointCount) {
+  } else if (mGaussianCount > 0 && mPreviewPointCount > 0 &&
+             mGaussianCount != mPreviewPointCount) {
     count = QStringLiteral("%1 %2 | 预览 %3")
                 .arg(formatCount(mGaussianCount),
                      mHasGaussianAttributes ? QStringLiteral("高斯")
                                             : QStringLiteral("点"),
                      formatCount(mPreviewPointCount));
   } else if (mGaussianCount > 0) {
-    count = QStringLiteral("%1 %2")
-                .arg(formatCount(mGaussianCount),
-                     mHasGaussianAttributes ? QStringLiteral("高斯")
-                                            : QStringLiteral("点"));
+    count = QStringLiteral("%1 %2").arg(
+        formatCount(mGaussianCount),
+        mHasGaussianAttributes ? QStringLiteral("高斯") : QStringLiteral("点"));
   } else {
     count = QStringLiteral("场景数据待载入");
   }
@@ -1334,10 +1665,11 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   const int headerPaddingX = 12;
   const int headerPaddingY = 8;
   const int lineGap = 2;
-  const int widthHint = std::max({metrics.horizontalAdvance(project), metrics.horizontalAdvance(sceneName),
-                                  metrics.horizontalAdvance(count)}) + headerPaddingX * 2 + 4;
-  const int headerHeight =
-      headerPaddingY * 2 + lineHeight * 3 + lineGap * 2;
+  const int widthHint = std::max({metrics.horizontalAdvance(project),
+                                  metrics.horizontalAdvance(sceneName),
+                                  metrics.horizontalAdvance(count)}) +
+                        headerPaddingX * 2 + 4;
+  const int headerHeight = headerPaddingY * 2 + lineHeight * 3 + lineGap * 2;
   const QRect headerRect(12, 12,
                          std::clamp(widthHint, 180, qMax(180, width() - 24)),
                          headerHeight);
@@ -1350,20 +1682,19 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   QRect lineRect(headerRect.left() + headerPaddingX,
                  headerRect.top() + headerPaddingY,
                  headerRect.width() - headerPaddingX * 2, lineHeight);
-  painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-                   metrics.elidedText(project, Qt::ElideMiddle,
-                                      lineRect.width()));
+  painter.drawText(
+      lineRect, Qt::AlignLeft | Qt::AlignVCenter,
+      metrics.elidedText(project, Qt::ElideMiddle, lineRect.width()));
   painter.setFont(font());
   painter.setPen(QColor(174, 181, 185));
   lineRect.translate(0, lineHeight + lineGap);
-  painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-                   metrics.elidedText(sceneName, Qt::ElideMiddle,
-                                      lineRect.width()));
+  painter.drawText(
+      lineRect, Qt::AlignLeft | Qt::AlignVCenter,
+      metrics.elidedText(sceneName, Qt::ElideMiddle, lineRect.width()));
   painter.setPen(QColor(102, 193, 168));
   lineRect.translate(0, lineHeight + lineGap);
   painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-                   metrics.elidedText(count, Qt::ElideRight,
-                                      lineRect.width()));
+                   metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
 
   const QString renderer =
       mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
@@ -1380,10 +1711,12 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
   painter.setBrush(QColor(17, 19, 21, 225));
   painter.drawRoundedRect(metricRect, 4, 4);
   painter.setPen(QColor(165, 172, 176));
-  painter.drawText(metricRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                   metrics.elidedText(metric, Qt::ElideRight, metricRect.width() - 20));
+  painter.drawText(
+      metricRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
+      metrics.elidedText(metric, Qt::ElideRight, metricRect.width() - 20));
 
-  const QString mode = mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
+  const QString mode =
+      mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
   const int modeWidth = metrics.horizontalAdvance(mode) + 22;
   const QRect modeRect(width() - modeWidth - 12, 12, modeWidth, badgeHeight);
   painter.setPen(Qt::NoPen);
@@ -1397,23 +1730,185 @@ void NativeViewport::drawOverlay(QPainter &painter, const double frameMillisecon
 
 void NativeViewport::drawAxisGizmo(QPainter &painter) {
   painter.save();
-  const QPointF origin(width() - 54.0, height() - 52.0);
   painter.setRenderHint(QPainter::Antialiasing, true);
+  const NavigationGizmoLayout layout = navigationGizmo();
+  const QColor viewportColor(12, 15, 17);
+  const bool rotateActive =
+      mNavigationHover.part == NavigationGizmoPart::Rotate ||
+      (mNavigationInteractionActive &&
+       mNavigationPress.part == NavigationGizmoPart::Rotate);
 
-  painter.setPen(QPen(QColor(214, 91, 91), 2.2));
-  painter.drawLine(origin, origin + QPointF(30.0, 8.0));
-  painter.setPen(QColor(235, 120, 120));
-  painter.drawText(origin + QPointF(34.0, 13.0), QStringLiteral("X"));
+  if (rotateActive) {
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 82));
+    painter.drawEllipse(layout.rotateBounds);
+  }
 
-  painter.setPen(QPen(QColor(91, 191, 137), 2.2));
-  painter.drawLine(origin, origin + QPointF(0.0, -31.0));
-  painter.setPen(QColor(117, 213, 158));
-  painter.drawText(origin + QPointF(-4.0, -36.0), QStringLiteral("Y"));
+  std::array<const NavigationAxisHandle *, 6> orderedHandles;
+  for (std::size_t index = 0; index < orderedHandles.size(); ++index) {
+    orderedHandles[index] = &layout.handles[index];
+  }
+  std::sort(
+      orderedHandles.begin(), orderedHandles.end(),
+      [](const NavigationAxisHandle *left, const NavigationAxisHandle *right) {
+        return left->depth < right->depth;
+      });
 
-  painter.setPen(QPen(QColor(89, 139, 222), 2.2));
-  painter.drawLine(origin, origin + QPointF(-18.0, 17.0));
-  painter.setPen(QColor(116, 160, 233));
-  painter.drawText(origin + QPointF(-29.0, 27.0), QStringLiteral("Z"));
+  for (const NavigationAxisHandle *handle : orderedHandles) {
+    if (!handle->positive || handle->hidden) {
+      continue;
+    }
+    const QColor axisColor = navigationAxisColor(handle->axisIndex);
+    const qreal colorAmount =
+        (static_cast<qreal>(handle->depth) + 1.0) * 0.25 + 0.5;
+    painter.setPen(QPen(mixColor(viewportColor, axisColor, colorAmount),
+                        layout.lineWidth, Qt::SolidLine, Qt::RoundCap));
+    QLineF axisLine(layout.center, handle->center);
+    if (axisLine.length() > handle->radius) {
+      axisLine.setLength(axisLine.length() - handle->radius * 0.72);
+    }
+    painter.drawLine(axisLine);
+  }
+
+  QFont axisFont = painter.font();
+  axisFont.setBold(true);
+  axisFont.setPixelSize(std::max(11, qRound(layout.radius * 0.30)));
+  painter.setFont(axisFont);
+
+  for (const NavigationAxisHandle *handle : orderedHandles) {
+    if (handle->hidden) {
+      continue;
+    }
+    const QColor axisColor = navigationAxisColor(handle->axisIndex);
+    const bool highlighted =
+        (mNavigationHover.part == NavigationGizmoPart::Rotate &&
+         mNavigationHover.axis == handle->axis) ||
+        (mNavigationInteractionActive &&
+         mNavigationPress.part == NavigationGizmoPart::Rotate &&
+         mNavigationPress.axis == handle->axis);
+
+    QColor fill;
+    if (handle->positive) {
+      const qreal amount =
+          (static_cast<qreal>(handle->depth) + 1.0) * 0.25 + 0.5;
+      fill = mixColor(viewportColor, axisColor, amount);
+    } else {
+      fill = mixColor(viewportColor, axisColor, 0.25);
+      fill.setAlphaF(
+          std::clamp(static_cast<qreal>(handle->depth) + 1.0, 0.22, 1.0));
+    }
+
+    painter.setBrush(fill);
+    painter.setPen(QPen(highlighted ? QColor(255, 255, 255, 230) : fill,
+                        std::max(1.0, layout.lineWidth * 0.55)));
+    painter.drawEllipse(handle->center, handle->radius, handle->radius);
+
+    if (handle->positive || highlighted) {
+      painter.setPen(highlighted ? QColor(255, 255, 255)
+                                 : QColor(11, 13, 15, 225));
+      const QRectF textRect(handle->center.x() - handle->radius * 1.35,
+                            handle->center.y() - handle->radius * 1.2,
+                            handle->radius * 2.7, handle->radius * 2.4);
+      painter.drawText(textRect, Qt::AlignCenter,
+                       navigationAxisLabel(handle->axis));
+    }
+  }
+
+  const auto drawButtonBackground =
+      [this, &painter](const QRectF &rect, const NavigationGizmoPart part) {
+        const bool active =
+            mNavigationHover.part == part ||
+            (mNavigationInteractionActive && mNavigationPress.part == part);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(active ? QColor(0, 0, 0, 112) : QColor(0, 0, 0, 42));
+        painter.drawEllipse(rect);
+      };
+  const QColor iconColor(216, 220, 224, 225);
+  const qreal iconWidth = std::max(1.5, layout.lineWidth * 0.72);
+
+  drawButtonBackground(layout.zoomButton, NavigationGizmoPart::Zoom);
+  painter.setBrush(Qt::NoBrush);
+  painter.setPen(
+      QPen(iconColor, iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  const QPointF zoomCenter = layout.zoomButton.center() + QPointF(-2.0, -2.0);
+  const qreal zoomRadius = layout.zoomButton.width() * 0.20;
+  painter.drawEllipse(zoomCenter, zoomRadius, zoomRadius);
+  painter.drawLine(zoomCenter + QPointF(zoomRadius * 0.72, zoomRadius * 0.72),
+                   zoomCenter + QPointF(zoomRadius * 1.65, zoomRadius * 1.65));
+
+  drawButtonBackground(layout.panButton, NavigationGizmoPart::Pan);
+  painter.setPen(
+      QPen(iconColor, iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  const QPointF panCenter = layout.panButton.center();
+  const qreal panExtent = layout.panButton.width() * 0.23;
+  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
+                   panCenter + QPointF(panExtent, 0.0));
+  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
+                   panCenter + QPointF(0.0, panExtent));
+  const qreal arrow = panExtent * 0.36;
+  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
+                   panCenter + QPointF(-panExtent + arrow, -arrow));
+  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
+                   panCenter + QPointF(-panExtent + arrow, arrow));
+  painter.drawLine(panCenter + QPointF(panExtent, 0.0),
+                   panCenter + QPointF(panExtent - arrow, -arrow));
+  painter.drawLine(panCenter + QPointF(panExtent, 0.0),
+                   panCenter + QPointF(panExtent - arrow, arrow));
+  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
+                   panCenter + QPointF(-arrow, -panExtent + arrow));
+  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
+                   panCenter + QPointF(arrow, -panExtent + arrow));
+  painter.drawLine(panCenter + QPointF(0.0, panExtent),
+                   panCenter + QPointF(-arrow, panExtent - arrow));
+  painter.drawLine(panCenter + QPointF(0.0, panExtent),
+                   panCenter + QPointF(arrow, panExtent - arrow));
+
+  drawButtonBackground(layout.cameraButton, NavigationGizmoPart::Camera);
+  const QColor cameraIconColor =
+      !camerasAvailable()
+          ? QColor(135, 140, 145, 120)
+          : (mCameraViewActive ? QColor(114, 190, 255) : iconColor);
+  painter.setPen(QPen(cameraIconColor, iconWidth, Qt::SolidLine, Qt::RoundCap,
+                      Qt::RoundJoin));
+  painter.setBrush(Qt::NoBrush);
+  const qreal cameraWidth = layout.cameraButton.width() * 0.36;
+  const qreal cameraHeight = layout.cameraButton.height() * 0.27;
+  const QRectF cameraBody(layout.cameraButton.center().x() - cameraWidth * 0.58,
+                          layout.cameraButton.center().y() - cameraHeight * 0.5,
+                          cameraWidth, cameraHeight);
+  painter.drawRoundedRect(cameraBody, cameraHeight * 0.16, cameraHeight * 0.16);
+  QPolygonF cameraLens;
+  cameraLens << QPointF(cameraBody.right(),
+                        cameraBody.top() + cameraHeight * 0.18)
+             << QPointF(cameraBody.right() + cameraWidth * 0.38,
+                        cameraBody.top() - cameraHeight * 0.10)
+             << QPointF(cameraBody.right() + cameraWidth * 0.38,
+                        cameraBody.bottom() + cameraHeight * 0.10)
+             << QPointF(cameraBody.right(),
+                        cameraBody.bottom() - cameraHeight * 0.18);
+  painter.drawPolygon(cameraLens);
+
+  drawButtonBackground(layout.projectionButton,
+                       NavigationGizmoPart::Projection);
+  painter.setPen(QPen(mOrthographic ? QColor(114, 190, 255) : iconColor,
+                      iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  const QRectF projectionIcon = layout.projectionButton.adjusted(
+      layout.projectionButton.width() * 0.27,
+      layout.projectionButton.height() * 0.27,
+      -layout.projectionButton.width() * 0.27,
+      -layout.projectionButton.height() * 0.27);
+  if (mOrthographic) {
+    painter.drawRect(projectionIcon);
+  } else {
+    QPolygonF trapezoid;
+    trapezoid << QPointF(projectionIcon.left() + projectionIcon.width() * 0.18,
+                         projectionIcon.top())
+              << QPointF(projectionIcon.right() - projectionIcon.width() * 0.18,
+                         projectionIcon.top())
+              << QPointF(projectionIcon.right(), projectionIcon.bottom())
+              << QPointF(projectionIcon.left(), projectionIcon.bottom());
+    painter.drawPolygon(trapezoid);
+  }
   painter.restore();
 }
 

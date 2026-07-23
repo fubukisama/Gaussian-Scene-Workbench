@@ -53,6 +53,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MainWindow.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
+  src/NavigationGizmo.cpp
+  src/NavigationGizmo.h
   src/NativeViewport.cpp
   src/NativeViewport.h
   src/PlyPointCloudLoader.cpp
@@ -270,4 +272,28 @@ if(BUILD_TESTING)
       target_compile_options(gsw_viewport_camera_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME viewport_camera COMMAND gsw_viewport_camera_tests)
+
+    qt_add_executable(gsw_navigation_gizmo_tests
+      tests/NavigationGizmoTests.cpp
+      src/NavigationGizmo.cpp
+      src/NavigationGizmo.h
+      src/ViewportCamera.cpp
+      src/ViewportCamera.h
+    )
+    target_include_directories(gsw_navigation_gizmo_tests PRIVATE src)
+    target_link_libraries(gsw_navigation_gizmo_tests PRIVATE
+      Qt6::Core
+      Qt6::Gui
+      Qt6::Test
+    )
+    if(MSVC)
+      target_compile_options(gsw_navigation_gizmo_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME navigation_gizmo COMMAND gsw_navigation_gizmo_tests)
+    set_tests_properties(
+      navigation_gizmo
+      PROPERTIES
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin"
+    )
 endif()
