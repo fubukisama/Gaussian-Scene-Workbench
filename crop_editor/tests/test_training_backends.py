@@ -2261,6 +2261,75 @@ class TrainingBackendTests(unittest.TestCase):
             finally:
                 server.OUTPUT_DIR = original_output
 
+    def test_2dgs_bounded_mesh_command_derives_voxel_from_gaussian_extent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp)
+            try:
+                model = server.OUTPUT_DIR / "mesh_scene"
+                model.mkdir(parents=True, exist_ok=True)
+                (model / "training_backend.json").write_text(json.dumps({"backend": "2dgs"}), encoding="utf-8")
+                (model / "cfg_args").write_text("Namespace(source_path=r'C:\\\\datasets\\\\mesh_scene')", encoding="utf-8")
+                core = np.column_stack(
+                    [
+                        np.linspace(-10.0, 10.0, 100, dtype=np.float32),
+                        np.zeros(100, dtype=np.float32),
+                        np.zeros(100, dtype=np.float32),
+                    ]
+                )
+                xyz = np.vstack([core, np.array([[10000.0, 0.0, 0.0]], dtype=np.float32)])
+                write_test_ply(model / "point_cloud" / "iteration_7000" / "point_cloud.ply", xyz)
+
+                command, _cwd, _output_path = server.mesh_export_command(
+                    "mesh_scene",
+                    7000,
+                    {"mode": "bounded", "mesh_res": 512},
+                )
+
+                command_text = [str(part) for part in command]
+                voxel_size = float(command_text[command_text.index("--voxel_size") + 1])
+                sdf_trunc = float(command_text[command_text.index("--sdf_trunc") + 1])
+                expected_extent = float(np.max(np.diff(np.percentile(xyz, [1.0, 99.0], axis=0), axis=0)))
+                self.assertAlmostEqual(voxel_size, expected_extent / 512, places=7)
+                self.assertAlmostEqual(sdf_trunc, voxel_size * 5.0, places=7)
+                self.assertLess(voxel_size, 0.05)
+                self.assertNotIn("--depth_trunc", command_text)
+            finally:
+                server.OUTPUT_DIR = original_output
+
+    def test_2dgs_bounded_mesh_command_preserves_manual_tsdf_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = server.OUTPUT_DIR
+            server.OUTPUT_DIR = Path(tmp)
+            try:
+                model = server.OUTPUT_DIR / "mesh_scene"
+                model.mkdir(parents=True, exist_ok=True)
+                (model / "training_backend.json").write_text(json.dumps({"backend": "2dgs"}), encoding="utf-8")
+                (model / "cfg_args").write_text("Namespace(source_path=r'C:\\\\datasets\\\\mesh_scene')", encoding="utf-8")
+                write_test_ply(
+                    model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                    np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]], dtype=np.float32),
+                )
+
+                command, _cwd, _output_path = server.mesh_export_command(
+                    "mesh_scene",
+                    7000,
+                    {
+                        "mode": "bounded",
+                        "mesh_res": 512,
+                        "voxel_size": 0.25,
+                        "depth_trunc": 80.0,
+                        "sdf_trunc": 1.5,
+                    },
+                )
+
+                command_text = [str(part) for part in command]
+                self.assertEqual(command_text[command_text.index("--voxel_size") + 1], "0.25")
+                self.assertEqual(command_text[command_text.index("--depth_trunc") + 1], "80.0")
+                self.assertEqual(command_text[command_text.index("--sdf_trunc") + 1], "1.5")
+            finally:
+                server.OUTPUT_DIR = original_output
+
     def test_mesh_export_rejects_non_2dgs_scene(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR

@@ -3225,6 +3225,58 @@ def gs2mesh_scene_scale(model_path, iteration, profile, max_samples=250_000):
     return {"diagonal": fallback, "source": "camera/depth fallback", "sample_count": len(positions)}
 
 
+def two_dgs_gaussian_extent(scene, iteration, max_samples=1_000_000):
+    point_cloud = ply_path(scene, iteration)
+    try:
+        vertices = PlyData.read(str(point_cloud), mmap="r")["vertex"].data
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(f"Could not read the 2DGS point cloud for automatic mesh sizing: {point_cloud}") from exc
+
+    count = len(vertices)
+    stride = max(1, int(math.ceil(count / max_samples)))
+    xyz = np.column_stack(
+        [
+            np.asarray(vertices[axis][::stride], dtype=np.float64)
+            for axis in ("x", "y", "z")
+        ]
+    )
+    xyz = xyz[np.all(np.isfinite(xyz), axis=1)]
+    if len(xyz) < 2:
+        raise RuntimeError("At least two finite 2DGS points are required for automatic mesh sizing")
+
+    if len(xyz) >= 100:
+        bounds = np.percentile(xyz, [1.0, 99.0], axis=0)
+        source = "2DGS point cloud p1-p99"
+    else:
+        bounds = np.asarray([xyz.min(axis=0), xyz.max(axis=0)])
+        source = "2DGS point cloud bounds"
+    axis_extents = bounds[1] - bounds[0]
+    extent = float(np.max(axis_extents))
+    if not math.isfinite(extent) or extent <= 0:
+        raise RuntimeError("Could not estimate a positive 2DGS Gaussian extent for automatic mesh sizing")
+    return {
+        "extent": extent,
+        "axis_extents": [float(value) for value in axis_extents],
+        "source": source,
+        "sample_count": int(len(xyz)),
+    }
+
+
+def apply_2dgs_bounded_tsdf_defaults(scene, iteration, options):
+    opts = dict(options)
+    if opts.get("mode") != "bounded" or float(opts.get("voxel_size", -1.0)) > 0:
+        return opts, None
+
+    extent_info = two_dgs_gaussian_extent(scene, iteration)
+    voxel_size = extent_info["extent"] / int(opts["mesh_res"])
+    if not math.isfinite(voxel_size) or voxel_size <= 0:
+        raise RuntimeError("Could not derive a positive 2DGS voxel size")
+    opts["voxel_size"] = voxel_size
+    if float(opts.get("sdf_trunc", -1.0)) <= 0:
+        opts["sdf_trunc"] = voxel_size * 5.0
+    return opts, extent_info
+
+
 def resolve_gs2mesh_scale_options(options, profile, model_path, iteration):
     requested = mesh_export_options(options)
     effective = dict(requested)
@@ -3820,6 +3872,7 @@ def mesh_export_command(scene, iteration, options=None):
         raise ValueError("Mesh export is only available for 2DGS scenes")
     if not ply_path(scene, iteration).exists():
         raise FileNotFoundError(f"Missing point cloud for mesh export: {ply_path(scene, iteration)}")
+    opts, _extent_info = apply_2dgs_bounded_tsdf_defaults(scene, iteration, opts)
     cfg = load_cfg_args(model_path)
     source_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
     command = [
@@ -7258,6 +7311,28 @@ def run_mesh_export_job(job):
         else:
             backend_label = "2DGS"
             run_backend = "2dgs"
+        if run_backend == "2dgs":
+            effective_options = mesh_export_options(options)
+            command_text = [str(part) for part in command]
+            for arg_name in ("voxel_size", "depth_trunc", "sdf_trunc"):
+                flag = f"--{arg_name}"
+                if flag in command_text:
+                    effective_options[arg_name] = float(command_text[command_text.index(flag) + 1])
+            with MESH_LOCK:
+                job["effective_options"] = dict(effective_options)
+            if (
+                effective_options["mode"] == "bounded"
+                and float(options.get("voxel_size", -1.0)) <= 0
+                and effective_options["voxel_size"] > 0
+            ):
+                gaussian_extent = effective_options["voxel_size"] * effective_options["mesh_res"]
+                add_job_log(
+                    job,
+                    "2DGS automatic TSDF sizing: "
+                    f"Gaussian extent {gaussian_extent:.6g}, mesh resolution {effective_options['mesh_res']}, "
+                    f"voxel {effective_options['voxel_size']:.6g}, SDF truncation {effective_options['sdf_trunc']:.6g}. "
+                    "Source camera poses and model coordinates are unchanged.",
+                )
         add_job_log(job, f"Backend: {backend_label}")
         add_job_log(job, f"Scene: output/{job['scene']}")
         add_job_log(job, f"Mode: {job['mode']}")
