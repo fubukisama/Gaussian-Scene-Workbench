@@ -1,6 +1,7 @@
 #include "NativeViewport.h"
 
 #include "ScreenSpaceSelection.h"
+#include "ViewportCamera.h"
 
 #include <QEnterEvent>
 #include <QEvent>
@@ -1101,8 +1102,10 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     mTarget += right * (-static_cast<float>(delta.x()) * scale);
     mTarget += up * (static_cast<float>(delta.y()) * scale);
   } else if (mPressedButtons.testFlag(Qt::LeftButton)) {
-    mYawDegrees += static_cast<float>(delta.x()) * 0.32F;
-    mPitchDegrees = std::clamp(mPitchDegrees + static_cast<float>(delta.y()) * 0.28F, -86.0F, 86.0F);
+    const OrbitAngles angles =
+        orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
+    mYawDegrees = angles.yawDegrees;
+    mPitchDegrees = angles.pitchDegrees;
   }
 
   update();

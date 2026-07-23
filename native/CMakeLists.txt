@@ -73,6 +73,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingOutputLocator.h
   src/UntitledWorkspaceStorage.cpp
   src/UntitledWorkspaceStorage.h
+  src/ViewportCamera.cpp
+  src/ViewportCamera.h
   src/WorkspaceDocument.cpp
   src/WorkspaceDocument.h
   src/main.cpp
@@ -252,4 +254,20 @@ if(BUILD_TESTING)
       target_compile_options(gsw_app_theme_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME app_theme COMMAND gsw_app_theme_tests)
+
+    qt_add_executable(gsw_viewport_camera_tests
+      tests/ViewportCameraTests.cpp
+      src/ViewportCamera.cpp
+      src/ViewportCamera.h
+    )
+    target_include_directories(gsw_viewport_camera_tests PRIVATE src)
+    target_link_libraries(gsw_viewport_camera_tests PRIVATE
+      Qt6::Core
+      Qt6::Gui
+      Qt6::Test
+    )
+    if(MSVC)
+      target_compile_options(gsw_viewport_camera_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME viewport_camera COMMAND gsw_viewport_camera_tests)
 endif()
