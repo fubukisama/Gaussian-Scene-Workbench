@@ -3836,7 +3836,8 @@ def mesh_export_command(scene, iteration, options=None):
         sugar_model_path = posix_dir_with_trailing_slash(sugar_checkpoint_path)
         command = [
             sugar_python(),
-            "train.py",
+            SUGAR_RUNNER,
+            SUGAR_DIR / "train.py",
             "-s",
             sugar_source_path,
             "-c",
@@ -3946,6 +3947,46 @@ def sugar_python():
     return training_python("3dgs")
 
 
+SUGAR_RUNTIME_PROBE_ATTEMPTS = 3
+SUGAR_RUNTIME_PROBE_RETRY_SECONDS = 2
+SUGAR_RUNNER = ROOT / "scripts" / "run_sugar.py"
+
+
+def probe_sugar_runtime(python_path):
+    probe_code = (
+        "from scripts.run_sugar import install_eager_dynamo_shim\n"
+        "torch=install_eager_dynamo_shim()\n"
+        "import torch\n"
+        "import pytorch3d\n"
+        "import open3d\n"
+        "parameter=torch.nn.Parameter(torch.zeros(1))\n"
+        "optimizer=torch.optim.Adam([parameter])\n"
+        "parameter.sum().backward()\n"
+        "optimizer.step()\n"
+        "optimizer.zero_grad()\n"
+        "print('torch', torch.__version__)\n"
+        "print('pytorch3d', getattr(pytorch3d, '__version__', 'unknown'))\n"
+        "print('open3d', open3d.__version__)\n"
+        "print('adam', 'ok')\n"
+    )
+    smart_app_state = smart_app_control_state()
+    detail = ""
+    for attempt in range(SUGAR_RUNTIME_PROBE_ATTEMPTS):
+        ok, detail = python_probe(
+            python_path,
+            sugar_env(),
+            probe_code,
+            timeout=RUNTIME_PROBE_TIMEOUT_SECONDS,
+        )
+        if ok:
+            return True, detail
+        policy_blocked = native_extension_policy_blocked(detail, smart_app_state)
+        if not policy_blocked or attempt + 1 >= SUGAR_RUNTIME_PROBE_ATTEMPTS:
+            break
+        time.sleep(SUGAR_RUNTIME_PROBE_RETRY_SECONDS * (attempt + 1))
+    return False, detail
+
+
 def ensure_sugar_environment():
     problems = []
     python_path = sugar_python()
@@ -3956,36 +3997,23 @@ def ensure_sugar_environment():
         problems.append(f"Missing SuGaR Python executable: {python_path}")
     if not script_path.exists():
         problems.append(f"Missing SuGaR train.py: {script_path}")
+    if not SUGAR_RUNNER.exists():
+        problems.append(f"Missing SuGaR compatibility runner: {SUGAR_RUNNER}")
     if same_resolved_path(SUGAR_DIR, GS2MESH_DIR):
         problems.append("SuGaR and GS2Mesh source directories must be different")
     if same_resolved_path(python_path, gs2mesh_python()):
         problems.append("SuGaR and GS2Mesh must use different Python environments")
     if not problems:
-        probe = (
-            "import importlib.util\n"
-            "missing=[m for m in ('torch','pytorch3d','open3d') if importlib.util.find_spec(m) is None]\n"
-            "print(','.join(missing))\n"
-        )
-        try:
-            result = subprocess.run(
-                [str(python_path), "-c", probe],
-                cwd=str(SUGAR_DIR),
-                env=sugar_env(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=20,
-                check=False,
-            )
-            missing = (result.stdout or "").strip()
-            if result.returncode != 0:
-                problems.append(f"SuGaR dependency probe failed: {(result.stderr or result.stdout or '').strip()}")
-            elif missing:
-                problems.append(f"Missing SuGaR Python modules in {python_path}: {missing}")
-        except Exception as exc:
-            problems.append(f"SuGaR dependency probe failed: {exc}")
+        runtime_ok, runtime_detail = probe_sugar_runtime(python_path)
+        if not runtime_ok:
+            if native_extension_policy_blocked(runtime_detail, smart_app_control_state()):
+                problems.append(
+                    "Windows application control blocked a native SuGaR/Open3D DLL after three cold-start attempts. "
+                    "Keep Windows security enabled and replace the conda-forge Open3D build in the dedicated SuGaR "
+                    f"environment with the official PyPI Open3D wheel. Detail: {runtime_detail}"
+                )
+            else:
+                problems.append(f"SuGaR native runtime imports failed: {runtime_detail}")
     if problems:
         raise RuntimeError("; ".join(problems))
     return {"sugar_dir": str(SUGAR_DIR), "python": str(python_path), "script": str(script_path)}

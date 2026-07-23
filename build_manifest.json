@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench (Legacy HTML)",
-    "sourceVersion":  "36.10.16",
+    "sourceVersion":  "36.10.17",
     "packageVersion":  "0.2.15",
     "releaseTag":  "v0.2.15",
     "packageName":  "Gaussian-Scene-Workbench-0.2.15-win-x64.zip",
-    "updatedAt":  "2026-07-23T11:48:01+09:00",
+    "updatedAt":  "2026-07-23T17:11:20+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "1b6e3c3",
-    "gitDirty":  false,
-    "note":  "Group 2DGS extraction controls and expose validated TSDF mesh quality parameters"
+    "gitCommit":  "d57fb14",
+    "gitDirty":  true,
+    "note":  "Run SuGaR through an eager PyTorch compatibility launcher and validate native runtime imports"
 }

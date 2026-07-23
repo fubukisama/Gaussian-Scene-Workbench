@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import tempfile
 import types
 import unittest
@@ -227,6 +228,100 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertIn(str(system_bin), environment["PATH"])
             self.assertNotIn("PYTHONPATH", environment)
             self.assertEqual(environment["CONDA_PREFIX"], str(env_root))
+
+    def test_sugar_environment_check_imports_native_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_sugar_dir = server.SUGAR_DIR
+            original_gs2mesh_dir = server.GS2MESH_DIR
+            sugar_dir = Path(tmp) / "SuGaR"
+            gs2mesh_dir = Path(tmp) / "GS2Mesh"
+            sugar_python = Path(tmp) / "envs" / "sugar" / "python.exe"
+            gs2mesh_python = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            sugar_dir.mkdir(parents=True)
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_python.parent.mkdir(parents=True)
+            gs2mesh_python.parent.mkdir(parents=True)
+            sugar_python.write_bytes(b"")
+            gs2mesh_python.write_bytes(b"")
+            (sugar_dir / "train.py").write_text("print('sugar')", encoding="utf-8")
+            server.SUGAR_DIR = sugar_dir
+            server.GS2MESH_DIR = gs2mesh_dir
+            try:
+                with mock.patch.object(server, "sugar_python", return_value=sugar_python), \
+                        mock.patch.object(server, "gs2mesh_python", return_value=gs2mesh_python), \
+                        mock.patch.object(server, "python_probe", return_value=(True, "runtime ok")) as probe:
+                    report = server.ensure_sugar_environment()
+
+                self.assertEqual(report["python"], str(sugar_python))
+                probe_code = probe.call_args.args[2]
+                self.assertIn("import torch", probe_code)
+                self.assertIn("import pytorch3d", probe_code)
+                self.assertIn("import open3d", probe_code)
+            finally:
+                server.SUGAR_DIR = original_sugar_dir
+                server.GS2MESH_DIR = original_gs2mesh_dir
+
+    def test_sugar_environment_retries_transient_application_control_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_sugar_dir = server.SUGAR_DIR
+            original_gs2mesh_dir = server.GS2MESH_DIR
+            sugar_dir = Path(tmp) / "SuGaR"
+            gs2mesh_dir = Path(tmp) / "GS2Mesh"
+            sugar_python = Path(tmp) / "envs" / "sugar" / "python.exe"
+            gs2mesh_python = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            sugar_dir.mkdir(parents=True)
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_python.parent.mkdir(parents=True)
+            gs2mesh_python.parent.mkdir(parents=True)
+            sugar_python.write_bytes(b"")
+            gs2mesh_python.write_bytes(b"")
+            (sugar_dir / "train.py").write_text("print('sugar')", encoding="utf-8")
+            server.SUGAR_DIR = sugar_dir
+            server.GS2MESH_DIR = gs2mesh_dir
+            blocked = "OSError: [WinError 4551] application control policy blocked tinyobjloader.dll"
+            try:
+                with mock.patch.object(server, "sugar_python", return_value=sugar_python), \
+                        mock.patch.object(server, "gs2mesh_python", return_value=gs2mesh_python), \
+                        mock.patch.object(server, "smart_app_control_state", return_value="on"), \
+                        mock.patch.object(server, "python_probe", side_effect=[(False, blocked), (True, "runtime ok")]) as probe, \
+                        mock.patch.object(server.time, "sleep") as sleep:
+                    report = server.ensure_sugar_environment()
+
+                self.assertEqual(report["python"], str(sugar_python))
+                self.assertEqual(probe.call_count, 2)
+                sleep.assert_called_once()
+            finally:
+                server.SUGAR_DIR = original_sugar_dir
+                server.GS2MESH_DIR = original_gs2mesh_dir
+
+    def test_sugar_runner_imports_modules_next_to_upstream_entry_point(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_torch = Path(tmp) / "torch"
+            fake_torch.mkdir()
+            (fake_torch / "__init__.py").write_text("", encoding="utf-8")
+            upstream = Path(tmp) / "SuGaR"
+            upstream.mkdir()
+            (upstream / "sugar_sibling.py").write_text("VALUE = 'sugar import ok'\n", encoding="utf-8")
+            entry = upstream / "train.py"
+            entry.write_text("from sugar_sibling import VALUE\nprint(VALUE)\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(server.SUGAR_RUNNER),
+                    str(entry),
+                ],
+                cwd=server.ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("sugar import ok", result.stdout)
 
     def test_gs2mesh_environment_rejects_shared_sugar_python(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2429,7 +2524,8 @@ class TrainingBackendTests(unittest.TestCase):
                 )
 
                 self.assertEqual(cwd, server.SUGAR_DIR)
-                self.assertIn("train.py", [str(part) for part in command])
+                self.assertEqual(command[1], server.SUGAR_RUNNER)
+                self.assertEqual(command[2], server.SUGAR_DIR / "train.py")
                 self.assertIn("-c", [str(part) for part in command])
                 stage = model / "_sugar_input"
                 self.assertEqual(command[command.index("-c") + 1], f"{stage.as_posix()}/")
