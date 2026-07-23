@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPoint>
+#include <QVector3D>
 
 namespace gsw {
 
@@ -11,7 +12,14 @@ struct OrbitAngles {
   [[nodiscard]] bool operator==(const OrbitAngles &) const = default;
 };
 
+struct OrbitFrame {
+  QVector3D cameraOffsetDirection;
+  QVector3D upDirection;
+};
+
 [[nodiscard]] OrbitAngles orbitAnglesAfterLeftDrag(OrbitAngles current,
                                                    const QPoint &delta);
+
+[[nodiscard]] OrbitFrame orbitFrame(OrbitAngles angles);
 
 } // namespace gsw

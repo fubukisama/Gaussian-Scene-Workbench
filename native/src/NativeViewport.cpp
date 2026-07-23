@@ -1456,24 +1456,15 @@ void NativeViewport::leaveCameraView() {
 }
 
 QVector3D NativeViewport::cameraPosition() const {
-  const float yaw = radians(mYawDegrees);
-  const float pitch = radians(mPitchDegrees);
-  const float cosPitch = std::cos(pitch);
-  return mTarget + QVector3D(mDistance * cosPitch * std::sin(yaw),
-                             mDistance * std::sin(pitch),
-                             mDistance * cosPitch * std::cos(yaw));
+  const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+  return mTarget + frame.cameraOffsetDirection * mDistance;
 }
 
 QMatrix4x4 NativeViewport::viewMatrix() const {
   QMatrix4x4 view;
-  const QVector3D position = cameraPosition();
-  const QVector3D forward = (mTarget - position).normalized();
-  QVector3D up(0.0F, 1.0F, 0.0F);
-  if (std::abs(QVector3D::dotProduct(forward, up)) > 0.999F) {
-    up = mPitchDegrees >= 0.0F ? QVector3D(0.0F, 0.0F, -1.0F)
-                               : QVector3D(0.0F, 0.0F, 1.0F);
-  }
-  view.lookAt(position, mTarget, up);
+  const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+  const QVector3D position = mTarget + frame.cameraOffsetDirection * mDistance;
+  view.lookAt(position, mTarget, frame.upDirection);
   return view;
 }
 
