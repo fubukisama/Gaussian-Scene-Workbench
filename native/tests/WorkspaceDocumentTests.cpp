@@ -38,6 +38,7 @@ private slots:
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
   void createsUntitledProjectWithoutAProjectFile();
+  void serializesCurrentUnsavedStateForRecovery();
   void savesRecoverableManifestWithoutMovingActiveWorkspace();
   void finalizesPendingMigrationWithDataWrittenAfterManifestSave();
   void resumesMigrationAfterDataDirectoryWasPublished();
@@ -587,6 +588,33 @@ void WorkspaceDocumentTests::createsUntitledProjectWithoutAProjectFile() {
   QCOMPARE(project.projectFilePath(), QString());
   QCOMPARE(project.rootPath(),
            QDir::cleanPath(root.filePath(QStringLiteral("working"))));
+}
+
+void WorkspaceDocumentTests::serializesCurrentUnsavedStateForRecovery() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/images")));
+  gsw::WorkspaceDocument project;
+  QString error;
+  const QString workingRoot = root.filePath(QStringLiteral("working"));
+  const QString dataset = root.filePath(QStringLiteral("working/images"));
+  QVERIFY2(project.createUntitled(workingRoot, QStringLiteral("现场工程"),
+                                  &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(dataset, &error), qPrintable(error));
+
+  const QJsonDocument recovery =
+      QJsonDocument::fromJson(project.recoveryManifestJson());
+  QVERIFY(recovery.isObject());
+  QCOMPARE(recovery.object().value(QStringLiteral("projectName")).toString(),
+           QStringLiteral("现场工程"));
+  QCOMPARE(recovery.object().value(QStringLiteral("rootPath")).toString(),
+           QDir::cleanPath(workingRoot));
+  QCOMPARE(recovery.object().value(QStringLiteral("datasetPath")).toString(),
+           QStringLiteral("images"));
+  QVERIFY(project.projectFilePath().isEmpty());
+  QVERIFY(project.isModified());
 }
 
 void WorkspaceDocumentTests::

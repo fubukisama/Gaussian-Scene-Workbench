@@ -47,6 +47,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/DatasetImportDialog.h
   src/DatasetImportPlan.cpp
   src/DatasetImportPlan.h
+  src/DurableArtifactStore.cpp
+  src/DurableArtifactStore.h
+  src/ExternalBackupStore.cpp
+  src/ExternalBackupStore.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
@@ -61,6 +65,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/PlyPointCloudLoader.h
   src/ProcessSupervisor.cpp
   src/ProcessSupervisor.h
+  src/RecoveryStore.cpp
+  src/RecoveryStore.h
   src/ReconstructionDialog.cpp
   src/ReconstructionDialog.h
   src/SceneEditModel.cpp
@@ -180,6 +186,42 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+
+    qt_add_executable(gsw_recovery_store_tests
+      tests/RecoveryStoreTests.cpp
+      src/RecoveryStore.cpp
+      src/RecoveryStore.h
+    )
+    target_include_directories(gsw_recovery_store_tests PRIVATE src)
+    target_link_libraries(gsw_recovery_store_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_recovery_store_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME recovery_store COMMAND gsw_recovery_store_tests)
+
+    qt_add_executable(gsw_durable_artifact_store_tests
+      tests/DurableArtifactStoreTests.cpp
+      src/DurableArtifactStore.cpp
+      src/DurableArtifactStore.h
+    )
+    target_include_directories(gsw_durable_artifact_store_tests PRIVATE src)
+    target_link_libraries(gsw_durable_artifact_store_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_durable_artifact_store_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME durable_artifact_store COMMAND gsw_durable_artifact_store_tests)
+
+    qt_add_executable(gsw_external_backup_store_tests
+      tests/ExternalBackupStoreTests.cpp
+      src/ExternalBackupStore.cpp
+      src/ExternalBackupStore.h
+    )
+    target_include_directories(gsw_external_backup_store_tests PRIVATE src)
+    target_link_libraries(gsw_external_backup_store_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_external_backup_store_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME external_backup_store COMMAND gsw_external_backup_store_tests)
 
     qt_add_executable(gsw_dataset_import_plan_tests
       tests/DatasetImportPlanTests.cpp

@@ -592,6 +592,28 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
   return true;
 }
 
+QByteArray WorkspaceDocument::recoveryManifestJson() const {
+  if (!hasProject()) {
+    return {};
+  }
+  QJsonObject root;
+  root.insert(QStringLiteral("schemaVersion"), 1);
+  root.insert(QStringLiteral("application"),
+              QStringLiteral("Gaussian Scene Workbench"));
+  root.insert(QStringLiteral("projectName"), mProjectName);
+  root.insert(QStringLiteral("rootPath"), mRootPath);
+  root.insert(QStringLiteral("datasetPath"),
+              portablePathForRoot(mDatasetPath, mRootPath));
+  root.insert(QStringLiteral("scenePath"),
+              portablePathForRoot(mScenePath, mRootPath));
+  if (!mPendingDataRoot.isEmpty()) {
+    root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);
+  }
+  root.insert(QStringLiteral("updatedUtc"),
+              QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+  return QJsonDocument(root).toJson(QJsonDocument::Indented);
+}
+
 bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
   if (!hasPendingDataMigration()) {
     return true;

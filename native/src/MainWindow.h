@@ -2,6 +2,7 @@
 
 #include "NativeViewport.h"
 #include "ProcessSupervisor.h"
+#include "RecoveryStore.h"
 #include "WorkspaceDocument.h"
 
 #include <QMainWindow>
@@ -21,7 +22,6 @@ class QPlainTextEdit;
 class QResizeEvent;
 class QSpinBox;
 class QTableWidget;
-class QTemporaryDir;
 class QTimer;
 class QToolBar;
 class QTreeWidget;
@@ -35,6 +35,7 @@ public:
   explicit MainWindow(QWidget *parent = nullptr);
   ~MainWindow() override;
   bool openProjectFile(const QString &filePath);
+  void offerStartupRecovery();
 
 protected:
   void closeEvent(QCloseEvent *event) override;
@@ -89,6 +90,17 @@ private:
   bool confirmExit();
   bool beginUntitledProject(const QString &displayName,
                             QString *errorMessage = nullptr);
+  void checkpointCurrentRecovery();
+  void snapshotCurrentProject();
+  bool discardCurrentRecovery(QString *errorMessage = nullptr);
+  bool completeCurrentRecovery(const QString &managedProjectRoot,
+                               QString *errorMessage = nullptr);
+  void showRecoveryCenter(bool startupPrompt);
+  void showSnapshotHistory();
+  void configureExternalBackup();
+  void startExternalBackup(bool interactive);
+  void showExternalBackups();
+  bool restoreRecoveryWorkspace(const RecoveryWorkspace &workspace);
   bool ensureProjectForDataAction(const QString &actionName);
   bool saveProject(bool forceChoosePath = false);
   bool finalizePendingProjectSave(QString *errorMessage = nullptr);
@@ -120,7 +132,9 @@ private:
   [[nodiscard]] QString suggestedProjectFilePath() const;
 
   WorkspaceDocument mWorkspace;
-  std::unique_ptr<QTemporaryDir> mUntitledWorkspace;
+  std::unique_ptr<RecoveryStore> mRecoveryStore;
+  std::optional<RecoveryWorkspace> mCurrentRecovery;
+  QList<RecoveryWorkspace> mStartupRecovery;
   ProcessSupervisor mProcessSupervisor;
   NativeViewport *mViewport = nullptr;
   QDockWidget *mProjectDock = nullptr;
@@ -133,6 +147,7 @@ private:
   QToolBar *mSelectionToolbar = nullptr;
   QToolBar *mEditToolbar = nullptr;
   QTimer *mUiAdaptTimer = nullptr;
+  QTimer *mRecoveryCheckpointTimer = nullptr;
 
   QLabel *mProjectNameValue = nullptr;
   QLabel *mProjectRootValue = nullptr;
@@ -151,6 +166,10 @@ private:
   QAction *mOpenProjectAction = nullptr;
   QAction *mSaveAction = nullptr;
   QAction *mSaveAsAction = nullptr;
+  QAction *mRecoveryCenterAction = nullptr;
+  QAction *mSnapshotHistoryAction = nullptr;
+  QAction *mConfigureBackupAction = nullptr;
+  QAction *mExternalBackupsAction = nullptr;
   QAction *mImportDatasetAction = nullptr;
   QAction *mImportDatasetDirectoryAction = nullptr;
   QAction *mAttachDatasetAction = nullptr;
@@ -198,6 +217,9 @@ private:
   bool mClosePending = false;
   bool mExitConfirmed = false;
   bool mRecoveryBlocked = false;
+  bool mDiscardRecoveryOnDestruction = false;
+  bool mExternalBackupRunning = false;
+  bool mSuppressSnapshots = false;
   bool mAutomaticUiScale = true;
   NativeViewport::RenderMode mRenderMode = NativeViewport::RenderMode::Points;
 };

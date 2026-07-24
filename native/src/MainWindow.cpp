@@ -5,6 +5,8 @@
 #include "ColmapSupport.h"
 #include "DatasetImportDialog.h"
 #include "DatasetImportPlan.h"
+#include "DurableArtifactStore.h"
+#include "ExternalBackupStore.h"
 #include "ImportEnvironmentProbe.h"
 #include "MediaProjectBootstrap.h"
 #include "ReconstructionDialog.h"
@@ -20,6 +22,8 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -28,6 +32,7 @@
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QFrame>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
@@ -44,6 +49,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
@@ -58,7 +64,6 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QTextCursor>
 #include <QTimer>
@@ -68,6 +73,7 @@
 #include <QTreeWidgetItem>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QtConcurrent>
 
 #include <algorithm>
 #include <functional>
@@ -262,6 +268,11 @@ struct ResolvedTrainingPointCloud final {
   PlyMetadata metadata;
 };
 
+struct ExternalBackupTaskResult final {
+  std::optional<ExternalBackupSnapshot> snapshot;
+  QString error;
+};
+
 std::optional<ResolvedTrainingPointCloud>
 resolveTrainingPointCloud(const QString &outputDirectory,
                           const std::optional<int> expectedIteration,
@@ -325,6 +336,27 @@ resolveTrainingPointCloud(const QString &outputDirectory,
   }
   return std::nullopt;
 }
+
+std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
+    const ResolvedTrainingPointCloud &checkpoint, const QString &projectRoot,
+    const QString &outputDirectory, QString *errorMessage = nullptr) {
+  const QString group = safeFileName(QFileInfo(outputDirectory).fileName());
+  const QString destination =
+      QDir(projectRoot)
+          .filePath(QStringLiteral(
+                        ".gsw/checkpoints/training/%1/iteration_%2/"
+                        "point_cloud.ply")
+                        .arg(group)
+                        .arg(checkpoint.iteration));
+  const DurableArtifact artifact = DurableArtifactStore::publish(
+      checkpoint.path, destination, errorMessage);
+  if (!artifact.isValid()) {
+    return std::nullopt;
+  }
+  return ResolvedTrainingPointCloud{artifact.path, checkpoint.iteration,
+                                    checkpoint.metadata};
+}
+
 QString workerStageLabel(const QString &stage) {
   static const QHash<QString, QString> labels = {
       {QStringLiteral("queued"), QStringLiteral("排队")},
@@ -450,6 +482,12 @@ QString backendUnavailableMessage(const QString &repositoryRoot,
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), mWorkspace(this), mProcessSupervisor(this) {
+  const QStringList appArguments = qApp->arguments();
+  mDiscardRecoveryOnDestruction =
+      std::any_of(appArguments.cbegin(), appArguments.cend(),
+                  [](const QString &argument) {
+                    return argument.startsWith(QStringLiteral("--smoke-test"));
+                  });
   mUiScalePercent = qApp->property("gswUiScalePercent").toInt();
   if (mUiScalePercent <= 0) {
     mUiScalePercent = 100;
@@ -461,6 +499,18 @@ MainWindow::MainWindow(QWidget *parent)
   mUiAdaptTimer->setInterval(160);
   connect(mUiAdaptTimer, &QTimer::timeout, this,
           &MainWindow::refreshAutomaticUiScale);
+
+  QString recoveryBaseError;
+  const QString recoveryBase =
+      defaultUntitledWorkspaceBase(&recoveryBaseError);
+  if (!recoveryBase.isEmpty()) {
+    mRecoveryStore = std::make_unique<RecoveryStore>(recoveryBase);
+    QString scanError;
+    mStartupRecovery = mRecoveryStore->recoverableWorkspaces(&scanError);
+    if (!scanError.isEmpty()) {
+      recoveryBaseError = scanError;
+    }
+  }
 
   setObjectName(QStringLiteral("mainWindow"));
   setWindowTitle(QStringLiteral("Native Preview"));
@@ -497,9 +547,26 @@ MainWindow::MainWindow(QWidget *parent)
       showError(QStringLiteral("无法准备临时工作区"), untitledError);
     });
   }
+  if (!recoveryBaseError.isEmpty()) {
+    appendTaskEvent(
+        QStringLiteral("恢复存储检查提示：%1").arg(recoveryBaseError));
+  }
+
+  mRecoveryCheckpointTimer = new QTimer(this);
+  mRecoveryCheckpointTimer->setInterval(30000);
+  connect(mRecoveryCheckpointTimer, &QTimer::timeout, this, [this]() {
+    checkpointCurrentRecovery();
+    snapshotCurrentProject();
+  });
+  mRecoveryCheckpointTimer->start();
 }
 
-MainWindow::~MainWindow() { mProcessSupervisor.shutdown(); }
+MainWindow::~MainWindow() {
+  mProcessSupervisor.shutdown();
+  if (mDiscardRecoveryOnDestruction) {
+    discardCurrentRecovery();
+  }
+}
 
 void MainWindow::moveEvent(QMoveEvent *event) {
   QMainWindow::moveEvent(event);
@@ -521,12 +588,22 @@ bool MainWindow::openProjectFile(const QString &filePath) {
   if (!confirmDiscardChanges()) {
     return false;
   }
+  mSuppressSnapshots = true;
   QString error;
   if (!mWorkspace.load(filePath, &error)) {
+    mSuppressSnapshots = false;
     showError(QStringLiteral("无法打开工程"), error);
     return false;
   }
-  mUntitledWorkspace.reset();
+  if (mCurrentRecovery.has_value() &&
+      !pathsReferToSameLocation(mCurrentRecovery->rootPath,
+                                mWorkspace.rootPath())) {
+    QString discardError;
+    if (!discardCurrentRecovery(&discardError)) {
+      appendTaskEvent(
+          QStringLiteral("旧恢复工作区清理失败：%1").arg(discardError));
+    }
+  }
   mRecoveryBlocked = true;
   updateWorkspaceUi();
   statusBar()->showMessage(QStringLiteral("正在检查未完成的导入事务…"));
@@ -543,6 +620,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
                   "工程已打开，但数据集导入事务尚未恢复。请勿手动修改 datasets "
                   "目录中的隐藏事务文件；修复后重新打开工程即可重试。\n\n%1")
                   .arg(error));
+    mSuppressSnapshots = false;
     return false;
   }
   mRecoveryBlocked = false;
@@ -572,6 +650,78 @@ bool MainWindow::openProjectFile(const QString &filePath) {
                     .arg(error));
     }
   }
+
+  if (mRecoveryStore != nullptr &&
+      !mWorkspace.projectFilePath().isEmpty() &&
+      !mWorkspace.hasPendingDataMigration()) {
+    QString snapshotError;
+    const QList<ProjectSnapshot> snapshots =
+        mRecoveryStore->projectSnapshots(mWorkspace.rootPath(),
+                                         &snapshotError);
+    if (!snapshots.isEmpty()) {
+      const ProjectSnapshot latest = snapshots.constFirst();
+      const QByteArray snapshotJson =
+          mRecoveryStore->projectSnapshotJson(latest, &snapshotError);
+      const QJsonDocument snapshotDocument =
+          QJsonDocument::fromJson(snapshotJson);
+      const QJsonDocument currentDocument =
+          QJsonDocument::fromJson(mWorkspace.recoveryManifestJson());
+      if (snapshotDocument.isObject() && currentDocument.isObject()) {
+        QJsonObject snapshotProject = snapshotDocument.object();
+        QJsonObject currentProject = currentDocument.object();
+        snapshotProject.remove(QStringLiteral("updatedUtc"));
+        currentProject.remove(QStringLiteral("updatedUtc"));
+        const QString snapshotRoot =
+            snapshotProject.value(QStringLiteral("rootPath")).toString();
+        const bool sameManagedRoot =
+            QDir::isAbsolutePath(snapshotRoot) &&
+            pathsReferToSameLocation(snapshotRoot, mWorkspace.rootPath());
+        if (sameManagedRoot && snapshotProject != currentProject) {
+          const QMessageBox::StandardButton recoverSnapshot =
+              QMessageBox::question(
+                  this, QStringLiteral("发现较新的自动恢复版本"),
+                  QStringLiteral(
+                      "检测到异常退出前保存的工程状态，与当前工程文件不同。"
+                      "是否将它恢复为一个新工程文件？\n\n快照时间：%1")
+                      .arg(latest.createdUtc.toLocalTime().toString(
+                          QStringLiteral("yyyy-MM-dd HH:mm:ss"))),
+                  QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+          if (recoverSnapshot == QMessageBox::Yes) {
+            const QFileInfo currentProjectFile(
+                mWorkspace.projectFilePath());
+            QString stem = currentProjectFile.fileName();
+            const QString suffix = QStringLiteral(".gsw.json");
+            if (stem.endsWith(suffix, Qt::CaseInsensitive)) {
+              stem.chop(suffix.size());
+            }
+            const QString recoveredPath =
+                QDir(currentProjectFile.absolutePath())
+                    .filePath(
+                        QStringLiteral("%1-autosave-recovered-%2.gsw.json")
+                            .arg(stem,
+                                 QDateTime::currentDateTime().toString(
+                                     QStringLiteral("yyyyMMdd-HHmmss"))));
+            if (mRecoveryStore->restoreProjectSnapshot(
+                    latest, recoveredPath, &snapshotError) &&
+                mWorkspace.load(recoveredPath, &snapshotError)) {
+              appendTaskEvent(
+                  QStringLiteral("已恢复异常退出前的自动快照：%1")
+                      .arg(QDir::toNativeSeparators(recoveredPath)));
+            } else {
+              showError(QStringLiteral("无法恢复自动快照"),
+                        snapshotError);
+            }
+          }
+        }
+      }
+    }
+    if (!snapshotError.isEmpty()) {
+      appendTaskEvent(
+          QStringLiteral("自动快照检查提示：%1").arg(snapshotError));
+    }
+  }
+  mSuppressSnapshots = false;
+  snapshotCurrentProject();
   updateWorkspaceUi();
   appendTaskEvent(
       QStringLiteral("已打开工程：%1").arg(QDir::toNativeSeparators(filePath)));
@@ -592,6 +742,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
       return;
     }
     saveWindowState();
+    QString discardError;
+    if (!discardCurrentRecovery(&discardError)) {
+      appendTaskEvent(
+          QStringLiteral("退出时恢复工作区清理失败，将保留供下次恢复：%1")
+              .arg(discardError));
+    }
     mProcessSupervisor.shutdown();
     event->accept();
     return;
@@ -615,6 +771,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     return;
   }
   saveWindowState();
+  QString discardError;
+  if (!discardCurrentRecovery(&discardError)) {
+    appendTaskEvent(
+        QStringLiteral("退出时恢复工作区清理失败，将保留供下次恢复：%1")
+            .arg(discardError));
+  }
   mProcessSupervisor.shutdown();
   event->accept();
 }
@@ -656,6 +818,38 @@ void MainWindow::createActions() {
   mSaveAsAction->setShortcut(QKeySequence::SaveAs);
   connect(mSaveAsAction, &QAction::triggered, this,
           [this]() { saveProject(true); });
+
+  mRecoveryCenterAction =
+      new QAction(QStringLiteral("恢复中心..."), this);
+  mRecoveryCenterAction->setObjectName(
+      QStringLiteral("recoveryCenterAction"));
+  mRecoveryCenterAction->setToolTip(
+      QStringLiteral("恢复异常退出时保留的未命名工程"));
+  connect(mRecoveryCenterAction, &QAction::triggered, this,
+          [this]() { showRecoveryCenter(false); });
+
+  mSnapshotHistoryAction =
+      new QAction(QStringLiteral("版本历史..."), this);
+  mSnapshotHistoryAction->setObjectName(
+      QStringLiteral("snapshotHistoryAction"));
+  mSnapshotHistoryAction->setToolTip(
+      QStringLiteral("查看并恢复工程自动快照"));
+  connect(mSnapshotHistoryAction, &QAction::triggered, this,
+          &MainWindow::showSnapshotHistory);
+
+  mConfigureBackupAction =
+      new QAction(QStringLiteral("设置第二存储位置..."), this);
+  mConfigureBackupAction->setObjectName(
+      QStringLiteral("configureExternalBackupAction"));
+  connect(mConfigureBackupAction, &QAction::triggered, this,
+          &MainWindow::configureExternalBackup);
+
+  mExternalBackupsAction =
+      new QAction(QStringLiteral("外部备份与恢复..."), this);
+  mExternalBackupsAction->setObjectName(
+      QStringLiteral("externalBackupsAction"));
+  connect(mExternalBackupsAction, &QAction::triggered, this,
+          &MainWindow::showExternalBackups);
 
   mImportDatasetAction =
       new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
@@ -907,6 +1101,11 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(mSaveAction);
   fileMenu->addAction(mSaveAsAction);
+  fileMenu->addAction(mRecoveryCenterAction);
+  fileMenu->addAction(mSnapshotHistoryAction);
+  fileMenu->addSeparator();
+  fileMenu->addAction(mConfigureBackupAction);
+  fileMenu->addAction(mExternalBackupsAction);
   fileMenu->addSeparator();
   fileMenu->addAction(mImportDatasetAction);
   fileMenu->addAction(mImportDatasetDirectoryAction);
@@ -1245,6 +1444,10 @@ void MainWindow::createStatusBar() {
 void MainWindow::connectServices() {
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
           &MainWindow::updateWorkspaceUi);
+  connect(&mWorkspace, &WorkspaceDocument::changed, this,
+          &MainWindow::checkpointCurrentRecovery);
+  connect(&mWorkspace, &WorkspaceDocument::changed, this,
+          &MainWindow::snapshotCurrentProject);
   connect(&mWorkspace, &WorkspaceDocument::modifiedChanged, this,
           [this](const bool modified) { setWindowModified(modified); });
   connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this,
@@ -1376,7 +1579,7 @@ void MainWindow::connectServices() {
           mPendingTraining.reset();
           if (effectiveSucceeded) {
             QString resultError;
-            const std::optional<ResolvedTrainingPointCloud> result =
+            std::optional<ResolvedTrainingPointCloud> result =
                 resolveTrainingPointCloud(pending.outputDirectory,
                                           pending.expectedIterations,
                                           &resultError);
@@ -1387,14 +1590,33 @@ void MainWindow::connectServices() {
                         QStringLiteral(
                             "训练进程已正常退出，但最终模型未通过校验。\n\n%1")
                             .arg(resultError));
-            } else if (!pathsReferToSameLocation(mWorkspace.rootPath(),
+            } else {
+              QString durableError;
+              const std::optional<ResolvedTrainingPointCloud> durable =
+                  publishDurableTrainingPointCloud(
+                      *result, pending.projectRoot, pending.outputDirectory,
+                      &durableError);
+              if (durable.has_value()) {
+                result = durable;
+                appendTaskEvent(
+                    QStringLiteral("训练检查点已通过校验并原子发布：%1")
+                        .arg(QDir::toNativeSeparators(result->path)));
+              } else {
+                appendTaskEvent(
+                    QStringLiteral("训练结果有效，但保护副本发布失败；"
+                                   "仍保留原始输出：%1")
+                        .arg(durableError));
+              }
+            }
+            if (result.has_value() &&
+                !pathsReferToSameLocation(mWorkspace.rootPath(),
                                                  pending.projectRoot)) {
               completionDetail = QStringLiteral("模型已生成（当前工程已切换）");
               appendTaskEvent(
                   QStringLiteral(
                       "训练模型已生成，但当前工程已切换，未自动关联：%1")
                       .arg(QDir::toNativeSeparators(result->path)));
-            } else {
+            } else if (result.has_value()) {
               QString sceneError;
               if (!mWorkspace.setScenePath(result->path, &sceneError)) {
                 effectiveSucceeded = false;
@@ -1429,10 +1651,22 @@ void MainWindow::connectServices() {
               }
             }
           } else {
-            const std::optional<ResolvedTrainingPointCloud> partial =
+            std::optional<ResolvedTrainingPointCloud> partial =
                 resolveTrainingPointCloud(pending.outputDirectory,
                                           std::nullopt);
             if (partial.has_value()) {
+              QString durableError;
+              const std::optional<ResolvedTrainingPointCloud> durable =
+                  publishDurableTrainingPointCloud(
+                      *partial, pending.projectRoot, pending.outputDirectory,
+                      &durableError);
+              if (durable.has_value()) {
+                partial = durable;
+              } else {
+                appendTaskEvent(
+                    QStringLiteral("最近检查点有效，但保护副本发布失败：%1")
+                        .arg(durableError));
+              }
               completionDetail =
                   QStringLiteral("保留迭代 %1").arg(partial->iteration);
               appendTaskEvent(
@@ -1516,6 +1750,9 @@ void MainWindow::connectServices() {
                           "任务结果仍保留在原工作区，工程清单也已保存。"
                           "软件不会自动关闭；请修复目标位置后再次保存。\n\n%1")
                           .arg(migrationError));
+          } else {
+            snapshotCurrentProject();
+            startExternalBackup(false);
           }
         }
         mActiveTaskRow = -1;
@@ -1969,33 +2206,623 @@ bool MainWindow::confirmDiscardSceneEdits(const bool exiting) {
 
 bool MainWindow::beginUntitledProject(const QString &displayName,
                                       QString *errorMessage) {
-  const QString base = defaultUntitledWorkspaceBase(errorMessage);
-  if (base.isEmpty()) {
-    return false;
-  }
-
-  auto temporary = std::make_unique<QTemporaryDir>(
-      QDir(base).filePath(QStringLiteral("Untitled-XXXXXX")));
-  temporary->setAutoRemove(true);
-  if (!temporary->isValid()) {
-    if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("无法创建临时工程目录：%1")
-                          .arg(QDir::toNativeSeparators(base));
+  if (mRecoveryStore == nullptr) {
+    if (errorMessage != nullptr && errorMessage->isEmpty()) {
+      *errorMessage = QStringLiteral("恢复工作区存储不可用。");
     }
     return false;
   }
 
+  if (mCurrentRecovery.has_value() &&
+      !discardCurrentRecovery(errorMessage)) {
+    return false;
+  }
+
+  const std::optional<RecoveryWorkspace> recovery =
+      mRecoveryStore->beginWorkspace(displayName, errorMessage);
+  if (!recovery.has_value()) {
+    return false;
+  }
   QString createError;
-  if (!mWorkspace.createUntitled(temporary->path(), displayName,
+  if (!mWorkspace.createUntitled(recovery->rootPath, displayName,
                                  &createError)) {
+    mRecoveryStore->discardWorkspace(*recovery);
     if (errorMessage != nullptr) {
       *errorMessage = createError;
     }
     return false;
   }
-  mUntitledWorkspace = std::move(temporary);
+  mCurrentRecovery = recovery;
+  checkpointCurrentRecovery();
   mRecoveryBlocked = false;
   return true;
+}
+
+void MainWindow::checkpointCurrentRecovery() {
+  if (mRecoveryStore == nullptr || !mCurrentRecovery.has_value()) {
+    return;
+  }
+  mCurrentRecovery->displayName = mWorkspace.projectName();
+  mCurrentRecovery->projectFilePath = mWorkspace.projectFilePath();
+  mCurrentRecovery->datasetPath = mWorkspace.datasetPath();
+  mCurrentRecovery->scenePath = mWorkspace.scenePath();
+  QString error;
+  if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
+    appendTaskEvent(
+        QStringLiteral("自动恢复检查点保存失败：%1").arg(error));
+  }
+}
+
+void MainWindow::snapshotCurrentProject() {
+  if (mSuppressSnapshots || mRecoveryStore == nullptr ||
+      mWorkspace.projectFilePath().isEmpty() ||
+      !QFileInfo::exists(mWorkspace.projectFilePath()) ||
+      mWorkspace.rootPath().isEmpty()) {
+    return;
+  }
+  const int maximumSnapshots =
+      std::clamp(QSettings().value(QStringLiteral("recovery/maxSnapshots"), 20)
+                     .toInt(),
+                 3, 100);
+  QString error;
+  if (!mRecoveryStore
+           ->createProjectSnapshot(
+               mWorkspace.recoveryManifestJson(),
+               mWorkspace.projectFilePath(), mWorkspace.rootPath(),
+               maximumSnapshots, &error)
+           .has_value()) {
+    appendTaskEvent(
+        QStringLiteral("工程版本快照保存失败：%1").arg(error));
+  }
+}
+
+bool MainWindow::discardCurrentRecovery(QString *errorMessage) {
+  if (!mCurrentRecovery.has_value()) {
+    return true;
+  }
+  if (mRecoveryStore == nullptr) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("恢复工作区存储不可用。");
+    }
+    return false;
+  }
+  const RecoveryWorkspace recovery = *mCurrentRecovery;
+  if (!mRecoveryStore->discardWorkspace(recovery, errorMessage)) {
+    return false;
+  }
+  mCurrentRecovery.reset();
+  return true;
+}
+
+bool MainWindow::completeCurrentRecovery(
+    const QString &managedProjectRoot, QString *errorMessage) {
+  if (!mCurrentRecovery.has_value()) {
+    return true;
+  }
+  if (mRecoveryStore == nullptr ||
+      !mRecoveryStore->completeWorkspace(*mCurrentRecovery,
+                                         managedProjectRoot,
+                                         errorMessage)) {
+    return false;
+  }
+  mCurrentRecovery.reset();
+  return true;
+}
+
+void MainWindow::offerStartupRecovery() {
+  if (mDiscardRecoveryOnDestruction || mStartupRecovery.isEmpty()) {
+    return;
+  }
+  QTimer::singleShot(0, this, [this]() { showRecoveryCenter(true); });
+}
+
+void MainWindow::showRecoveryCenter(const bool startupPrompt) {
+  if (mRecoveryStore == nullptr) {
+    if (!startupPrompt) {
+      QMessageBox::information(this, QStringLiteral("恢复中心"),
+                               QStringLiteral("恢复存储当前不可用。"));
+    }
+    return;
+  }
+
+  QString scanError;
+  QList<RecoveryWorkspace> candidates =
+      mRecoveryStore->recoverableWorkspaces(&scanError);
+  if (mCurrentRecovery.has_value()) {
+    candidates.erase(
+        std::remove_if(candidates.begin(), candidates.end(),
+                       [this](const RecoveryWorkspace &candidate) {
+                         return candidate.sessionId ==
+                                mCurrentRecovery->sessionId;
+                       }),
+        candidates.end());
+  }
+  if (candidates.isEmpty()) {
+    if (!startupPrompt) {
+      QMessageBox::information(
+          this, QStringLiteral("恢复中心"),
+          scanError.isEmpty() ? QStringLiteral("没有可恢复的异常退出工程。")
+                              : scanError);
+    }
+    return;
+  }
+
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("工程恢复中心"));
+  dialog.resize(820, 380);
+  auto *layout = new QVBoxLayout(&dialog);
+  auto *description = new QLabel(
+      startupPrompt
+          ? QStringLiteral("检测到上次异常退出保留的工程。选择一项恢复，"
+                           "或稍后从“文件 → 恢复中心”处理。")
+          : QStringLiteral("以下工程由异常退出保护保留。"),
+      &dialog);
+  description->setWordWrap(true);
+  layout->addWidget(description);
+
+  auto *table = new QTableWidget(candidates.size(), 4, &dialog);
+  table->setHorizontalHeaderLabels(
+      {QStringLiteral("更新时间"), QStringLiteral("名称"),
+       QStringLiteral("状态"), QStringLiteral("恢复位置")});
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->verticalHeader()->setVisible(false);
+  table->horizontalHeader()->setStretchLastSection(true);
+  for (qsizetype row = 0; row < candidates.size(); ++row) {
+    const RecoveryWorkspace &candidate = candidates.at(row);
+    table->setItem(
+        static_cast<int>(row), 0,
+        new QTableWidgetItem(
+            candidate.updatedUtc.toLocalTime().toString(
+                QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+    table->setItem(static_cast<int>(row), 1,
+                   new QTableWidgetItem(candidate.displayName));
+    table->setItem(
+        static_cast<int>(row), 2,
+        new QTableWidgetItem(candidate.projectFilePath.isEmpty()
+                                 ? QStringLiteral("未命名工程")
+                                 : QStringLiteral("保存迁移待恢复")));
+    table->setItem(
+        static_cast<int>(row), 3,
+        new QTableWidgetItem(QDir::toNativeSeparators(candidate.rootPath)));
+  }
+  table->selectRow(0);
+  layout->addWidget(table, 1);
+
+  auto *buttons = new QDialogButtonBox(&dialog);
+  auto *recoverButton =
+      buttons->addButton(QStringLiteral("恢复所选工程"),
+                         QDialogButtonBox::AcceptRole);
+  auto *discardButton =
+      buttons->addButton(QStringLiteral("永久删除所选"),
+                         QDialogButtonBox::DestructiveRole);
+  auto *laterButton =
+      buttons->addButton(QStringLiteral("稍后处理"),
+                         QDialogButtonBox::RejectRole);
+  connect(recoverButton, &QPushButton::clicked, &dialog,
+          [&dialog]() { dialog.done(1); });
+  connect(discardButton, &QPushButton::clicked, &dialog,
+          [&dialog]() { dialog.done(2); });
+  connect(laterButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+  layout->addWidget(buttons);
+
+  const int result = dialog.exec();
+  const int selectedRow = table->currentRow();
+  if (selectedRow < 0 || selectedRow >= candidates.size()) {
+    return;
+  }
+  const RecoveryWorkspace selected = candidates.at(selectedRow);
+  if (result == 1) {
+    restoreRecoveryWorkspace(selected);
+    return;
+  }
+  if (result == 2) {
+    const QMessageBox::StandardButton confirmed = QMessageBox::warning(
+        this, QStringLiteral("永久删除恢复工程"),
+        QStringLiteral("将永久删除以下异常恢复数据：\n%1")
+            .arg(QDir::toNativeSeparators(selected.rootPath)),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (confirmed != QMessageBox::Yes) {
+      return;
+    }
+    QString discardError;
+    if (!mRecoveryStore->discardWorkspace(selected, &discardError)) {
+      showError(QStringLiteral("无法删除恢复工程"), discardError);
+      return;
+    }
+    appendTaskEvent(
+        QStringLiteral("已永久删除恢复工程：%1").arg(selected.displayName));
+    showRecoveryCenter(false);
+  }
+}
+
+bool MainWindow::restoreRecoveryWorkspace(
+    const RecoveryWorkspace &workspace) {
+  if (!workspace.projectFilePath.isEmpty() &&
+      QFileInfo::exists(workspace.projectFilePath)) {
+    if (!openProjectFile(workspace.projectFilePath)) {
+      return false;
+    }
+    if (!pathsReferToSameLocation(workspace.rootPath,
+                                  mWorkspace.rootPath())) {
+      QString discardError;
+      if (!mRecoveryStore->completeWorkspace(
+              workspace, mWorkspace.rootPath(), &discardError)) {
+        appendTaskEvent(
+            QStringLiteral("工程已恢复，但旧恢复目录清理失败：%1")
+                .arg(discardError));
+      }
+    } else {
+      mCurrentRecovery = workspace;
+      checkpointCurrentRecovery();
+    }
+    appendTaskEvent(
+        QStringLiteral("已从恢复中心恢复工程：%1")
+            .arg(workspace.displayName));
+    return true;
+  }
+
+  if (!confirmDiscardChanges()) {
+    return false;
+  }
+  QString createError;
+  if (!mWorkspace.createUntitled(workspace.rootPath, workspace.displayName,
+                                 &createError)) {
+    showError(QStringLiteral("无法恢复未命名工程"), createError);
+    return false;
+  }
+  QString discardError;
+  if (mCurrentRecovery.has_value() &&
+      mCurrentRecovery->sessionId != workspace.sessionId &&
+      !discardCurrentRecovery(&discardError)) {
+    appendTaskEvent(
+        QStringLiteral("旧恢复工作区清理失败：%1").arg(discardError));
+  }
+  mCurrentRecovery = workspace;
+  mRecoveryBlocked = true;
+  QString importRecoveryError;
+  if (!recoverInterruptedProjectImports(&importRecoveryError)) {
+    appendTaskEvent(
+        QStringLiteral("未命名工程已恢复，但导入事务仍待处理：%1")
+            .arg(importRecoveryError));
+    QMessageBox::warning(
+        this, QStringLiteral("导入恢复待处理"),
+        QStringLiteral("工程数据已保留，但未完成的导入事务尚未恢复。"
+                       "修复 Python/worker 环境后，可重新启动软件再重试。\n\n%1")
+            .arg(importRecoveryError));
+  } else {
+    mRecoveryBlocked = false;
+  }
+  QString attachError;
+  if (!workspace.datasetPath.isEmpty() &&
+      QFileInfo(workspace.datasetPath).isDir() &&
+      !mWorkspace.setDatasetPath(workspace.datasetPath, &attachError)) {
+    appendTaskEvent(
+        QStringLiteral("恢复工程的数据集未能自动关联：%1").arg(attachError));
+  }
+  if (!workspace.scenePath.isEmpty() &&
+      QFileInfo(workspace.scenePath).isFile() &&
+      !mWorkspace.setScenePath(workspace.scenePath, &attachError)) {
+    appendTaskEvent(
+        QStringLiteral("恢复工程的场景未能自动关联：%1").arg(attachError));
+  }
+  if (!mRecoveryBlocked) {
+    QString trainingRecoveryError;
+    if (!recoverInterruptedTraining(&trainingRecoveryError)) {
+      appendTaskEvent(
+          QStringLiteral("未命名工程已恢复，但训练检查点仍待处理：%1")
+              .arg(trainingRecoveryError));
+      QMessageBox::warning(
+          this, QStringLiteral("训练检查点恢复待处理"),
+          QStringLiteral("工程和训练输出仍保留在磁盘上，但未能自动关联最近的"
+                         "完整检查点。\n\n%1")
+              .arg(trainingRecoveryError));
+    }
+  }
+  checkpointCurrentRecovery();
+  updateWorkspaceUi();
+  appendTaskEvent(
+      QStringLiteral("已恢复未命名工程：%1").arg(workspace.displayName));
+  return true;
+}
+
+void MainWindow::showSnapshotHistory() {
+  if (mRecoveryStore == nullptr ||
+      mWorkspace.projectFilePath().isEmpty()) {
+    QMessageBox::information(this, QStringLiteral("版本历史"),
+                             QStringLiteral("请先保存工程。"));
+    return;
+  }
+  QString error;
+  const QList<ProjectSnapshot> snapshots =
+      mRecoveryStore->projectSnapshots(mWorkspace.rootPath(), &error);
+  if (snapshots.isEmpty()) {
+    QMessageBox::information(
+        this, QStringLiteral("版本历史"),
+        error.isEmpty() ? QStringLiteral("当前工程还没有自动快照。")
+                        : error);
+    return;
+  }
+
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("工程版本历史"));
+  dialog.resize(720, 360);
+  auto *layout = new QVBoxLayout(&dialog);
+  auto *description = new QLabel(
+      QStringLiteral("自动快照保存工程状态并复用已校验的数据。恢复时会"
+                     "创建新工程文件，不覆盖当前版本。"),
+      &dialog);
+  description->setWordWrap(true);
+  layout->addWidget(description);
+  auto *table = new QTableWidget(snapshots.size(), 2, &dialog);
+  table->setHorizontalHeaderLabels(
+      {QStringLiteral("快照时间"), QStringLiteral("来源工程")});
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->verticalHeader()->setVisible(false);
+  table->horizontalHeader()->setStretchLastSection(true);
+  for (qsizetype row = 0; row < snapshots.size(); ++row) {
+    const ProjectSnapshot &snapshot = snapshots.at(row);
+    table->setItem(
+        static_cast<int>(row), 0,
+        new QTableWidgetItem(snapshot.createdUtc.toLocalTime().toString(
+            QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))));
+    table->setItem(
+        static_cast<int>(row), 1,
+        new QTableWidgetItem(
+            QDir::toNativeSeparators(snapshot.sourceProjectFilePath)));
+  }
+  table->selectRow(0);
+  layout->addWidget(table, 1);
+  auto *buttons = new QDialogButtonBox(&dialog);
+  auto *restoreButton =
+      buttons->addButton(QStringLiteral("恢复为新工程"),
+                         QDialogButtonBox::AcceptRole);
+  auto *cancelButton =
+      buttons->addButton(QStringLiteral("取消"),
+                         QDialogButtonBox::RejectRole);
+  connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+  connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+  layout->addWidget(buttons);
+  if (dialog.exec() != QDialog::Accepted || table->currentRow() < 0) {
+    return;
+  }
+
+  const ProjectSnapshot selected = snapshots.at(table->currentRow());
+  const QFileInfo currentProject(mWorkspace.projectFilePath());
+  QString projectStemName = currentProject.fileName();
+  const QString suffix = QStringLiteral(".gsw.json");
+  if (projectStemName.endsWith(suffix, Qt::CaseInsensitive)) {
+    projectStemName.chop(suffix.size());
+  }
+  const QString restoredPath =
+      QDir(currentProject.absolutePath())
+          .filePath(QStringLiteral("%1-restored-%2.gsw.json")
+                        .arg(projectStemName,
+                             QDateTime::currentDateTime().toString(
+                                 QStringLiteral("yyyyMMdd-HHmmss"))));
+  if (!mRecoveryStore->restoreProjectSnapshot(selected, restoredPath,
+                                               &error)) {
+    showError(QStringLiteral("无法恢复工程快照"), error);
+    return;
+  }
+  appendTaskEvent(
+      QStringLiteral("工程快照已恢复为：%1")
+          .arg(QDir::toNativeSeparators(restoredPath)));
+  openProjectFile(restoredPath);
+}
+
+void MainWindow::configureExternalBackup() {
+  const QString current =
+      QSettings()
+          .value(QStringLiteral("recovery/externalBackupRoot"))
+          .toString();
+  const QString selected = QFileDialog::getExistingDirectory(
+      this, QStringLiteral("选择第二存储位置"), current);
+  if (selected.isEmpty()) {
+    return;
+  }
+  if (!mWorkspace.rootPath().isEmpty()) {
+    const QStorageInfo projectStorage(mWorkspace.rootPath());
+    const QStorageInfo backupStorage(selected);
+    if (projectStorage.isValid() && backupStorage.isValid() &&
+        pathsReferToSameLocation(projectStorage.rootPath(),
+                                 backupStorage.rootPath())) {
+      QMessageBox::warning(
+          this, QStringLiteral("请选择另一存储设备"),
+          QStringLiteral("所选位置与当前工程位于同一卷，无法防护整盘损坏。"
+                         "请选择另一块硬盘、移动存储、NAS 或网络共享。"));
+      return;
+    }
+  }
+  QSettings().setValue(QStringLiteral("recovery/externalBackupRoot"),
+                       QDir::cleanPath(QFileInfo(selected).absoluteFilePath()));
+  appendTaskEvent(
+      QStringLiteral("第二存储位置已设置为：%1")
+          .arg(QDir::toNativeSeparators(selected)));
+  startExternalBackup(true);
+}
+
+void MainWindow::startExternalBackup(const bool interactive) {
+  if (mExternalBackupRunning) {
+    if (interactive) {
+      QMessageBox::information(this, QStringLiteral("外部备份"),
+                               QStringLiteral("外部备份正在运行。"));
+    }
+    return;
+  }
+  const QString backupRoot =
+      QSettings()
+          .value(QStringLiteral("recovery/externalBackupRoot"))
+          .toString();
+  if (backupRoot.isEmpty()) {
+    if (interactive) {
+      configureExternalBackup();
+    }
+    return;
+  }
+  if (mWorkspace.projectFilePath().isEmpty() ||
+      mWorkspace.rootPath().isEmpty() ||
+      mWorkspace.hasPendingDataMigration()) {
+    if (interactive) {
+      QMessageBox::information(
+          this, QStringLiteral("外部备份"),
+          QStringLiteral("请先完成工程保存和数据迁移。"));
+    }
+    return;
+  }
+
+  const QString projectFile = mWorkspace.projectFilePath();
+  const QString projectDataRoot = mWorkspace.rootPath();
+  const QString linkedDatasetPath = mWorkspace.datasetPath();
+  const QString linkedScenePath = mWorkspace.scenePath();
+  mExternalBackupRunning = true;
+  statusBar()->showMessage(
+      QStringLiteral("正在后台创建去重外部备份…"));
+  appendTaskEvent(QStringLiteral("外部备份已开始：%1")
+                      .arg(QDir::toNativeSeparators(backupRoot)));
+
+  auto *watcher = new QFutureWatcher<ExternalBackupTaskResult>(this);
+  connect(watcher, &QFutureWatcher<ExternalBackupTaskResult>::finished, this,
+          [this, watcher, interactive]() {
+            const ExternalBackupTaskResult result = watcher->result();
+            watcher->deleteLater();
+            mExternalBackupRunning = false;
+            if (!result.snapshot.has_value()) {
+              statusBar()->showMessage(QStringLiteral("外部备份失败"), 8000);
+              appendTaskEvent(
+                  QStringLiteral("外部备份失败：%1").arg(result.error));
+              if (interactive) {
+                showError(QStringLiteral("无法完成外部备份"), result.error);
+              }
+              return;
+            }
+            statusBar()->showMessage(QStringLiteral("外部备份已完成"), 8000);
+            appendTaskEvent(
+                QStringLiteral("外部备份已完成：%1 个文件，%2")
+                    .arg(result.snapshot->fileCount)
+                    .arg(formatFileSize(result.snapshot->totalBytes)));
+          });
+  watcher->setFuture(QtConcurrent::run(
+      [backupRoot, projectFile, projectDataRoot, linkedDatasetPath,
+       linkedScenePath]() {
+        ExternalBackupTaskResult result;
+        ExternalBackupStore store(backupRoot);
+        result.snapshot = store.backupProject(
+            projectFile, projectDataRoot, &result.error, linkedDatasetPath,
+            linkedScenePath);
+        return result;
+      }));
+}
+
+void MainWindow::showExternalBackups() {
+  const QString backupRoot =
+      QSettings()
+          .value(QStringLiteral("recovery/externalBackupRoot"))
+          .toString();
+  if (backupRoot.isEmpty()) {
+    configureExternalBackup();
+    return;
+  }
+  ExternalBackupStore store(backupRoot);
+  QString error;
+  const QList<ExternalBackupSnapshot> backups = store.snapshots(&error);
+  if (backups.isEmpty()) {
+    QMessageBox::information(
+        this, QStringLiteral("外部备份与恢复"),
+        error.isEmpty() ? QStringLiteral("第二存储位置中还没有备份。")
+                        : error);
+    return;
+  }
+
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("外部备份与恢复"));
+  dialog.resize(780, 380);
+  auto *layout = new QVBoxLayout(&dialog);
+  auto *table = new QTableWidget(backups.size(), 4, &dialog);
+  table->setHorizontalHeaderLabels(
+      {QStringLiteral("备份时间"), QStringLiteral("工程"),
+       QStringLiteral("文件数"), QStringLiteral("逻辑大小")});
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->verticalHeader()->setVisible(false);
+  table->horizontalHeader()->setStretchLastSection(true);
+  for (qsizetype row = 0; row < backups.size(); ++row) {
+    const ExternalBackupSnapshot &backup = backups.at(row);
+    table->setItem(
+        static_cast<int>(row), 0,
+        new QTableWidgetItem(backup.createdUtc.toLocalTime().toString(
+            QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+    table->setItem(static_cast<int>(row), 1,
+                   new QTableWidgetItem(backup.projectName));
+    table->setItem(static_cast<int>(row), 2,
+                   new QTableWidgetItem(
+                       QString::number(backup.fileCount)));
+    table->setItem(static_cast<int>(row), 3,
+                   new QTableWidgetItem(formatFileSize(backup.totalBytes)));
+  }
+  table->selectRow(0);
+  layout->addWidget(table, 1);
+  auto *buttons = new QDialogButtonBox(&dialog);
+  auto *restoreButton =
+      buttons->addButton(QStringLiteral("恢复所选备份"),
+                         QDialogButtonBox::AcceptRole);
+  auto *closeButton =
+      buttons->addButton(QStringLiteral("关闭"),
+                         QDialogButtonBox::RejectRole);
+  connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+  connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+  layout->addWidget(buttons);
+  if (dialog.exec() != QDialog::Accepted || table->currentRow() < 0) {
+    return;
+  }
+
+  const ExternalBackupSnapshot selected = backups.at(table->currentRow());
+  const QString destinationParent = QFileDialog::getExistingDirectory(
+      this, QStringLiteral("选择备份恢复位置"));
+  if (destinationParent.isEmpty()) {
+    return;
+  }
+  const QString destination =
+      QDir(destinationParent)
+          .filePath(QStringLiteral("%1-restored-%2")
+                        .arg(safeFileName(selected.projectName),
+                             QDateTime::currentDateTime().toString(
+                                 QStringLiteral("yyyyMMdd-HHmmss"))));
+  QProgressDialog progress(QStringLiteral("正在校验并恢复外部备份…"),
+                           QString(), 0, 0, this);
+  progress.setWindowModality(Qt::WindowModal);
+  progress.setCancelButton(nullptr);
+  QFutureWatcher<QPair<bool, QString>> watcher;
+  connect(&watcher, &QFutureWatcher<QPair<bool, QString>>::finished,
+          &progress, &QProgressDialog::close);
+  watcher.setFuture(QtConcurrent::run(
+      [backupRoot, selected, destination]() {
+        QString restoreError;
+        const bool restored =
+            ExternalBackupStore(backupRoot)
+                .restore(selected, destination, &restoreError);
+        return qMakePair(restored, restoreError);
+      }));
+  if (!watcher.isFinished()) {
+    progress.exec();
+  }
+  watcher.waitForFinished();
+  const QPair<bool, QString> restored = watcher.result();
+  if (!restored.first) {
+    showError(QStringLiteral("无法恢复外部备份"), restored.second);
+    return;
+  }
+  appendTaskEvent(
+      QStringLiteral("外部备份已恢复到：%1")
+          .arg(QDir::toNativeSeparators(destination)));
+  QMessageBox::information(
+      this, QStringLiteral("外部备份已恢复"),
+      QStringLiteral("恢复文件已写入：\n%1")
+          .arg(QDir::toNativeSeparators(destination)));
 }
 
 bool MainWindow::saveProject(const bool forceChoosePath) {
@@ -2052,11 +2879,24 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
   }
   if (!taskRunning && !mWorkspace.isUntitled() &&
       !mWorkspace.hasPendingDataMigration()) {
-    mUntitledWorkspace.reset();
+    if (mCurrentRecovery.has_value() &&
+        !pathsReferToSameLocation(mCurrentRecovery->rootPath,
+                                  mWorkspace.rootPath())) {
+      QString discardError;
+      if (!completeCurrentRecovery(mWorkspace.rootPath(), &discardError)) {
+        appendTaskEvent(
+            QStringLiteral("已保存工程，但恢复工作区清理失败：%1")
+                .arg(discardError));
+      }
+    }
   }
   QSettings settings;
   settings.setValue(QStringLiteral("project/lastSaveDirectory"),
                     QFileInfo(target).absolutePath());
+  snapshotCurrentProject();
+  if (!taskRunning && !mWorkspace.hasPendingDataMigration()) {
+    startExternalBackup(false);
+  }
   if (taskRunning) {
     appendTaskEvent(
         mWorkspace.hasPendingDataMigration()
@@ -2081,9 +2921,14 @@ bool MainWindow::finalizePendingProjectSave(QString *errorMessage) {
   if (!mWorkspace.finalizeDataMigration(errorMessage)) {
     return false;
   }
-  if (mUntitledWorkspace != nullptr &&
-      pathsReferToSameLocation(mUntitledWorkspace->path(), oldRoot)) {
-    mUntitledWorkspace.reset();
+  if (mCurrentRecovery.has_value() &&
+      pathsReferToSameLocation(mCurrentRecovery->rootPath, oldRoot)) {
+    QString discardError;
+    if (!completeCurrentRecovery(mWorkspace.rootPath(), &discardError)) {
+      appendTaskEvent(
+          QStringLiteral("工程迁移完成，但恢复工作区清理失败：%1")
+              .arg(discardError));
+    }
   }
   appendTaskEvent(QStringLiteral("工程托管数据已迁移到：%1")
                       .arg(QDir::toNativeSeparators(mWorkspace.rootPath())));
@@ -2105,7 +2950,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
   }
 
   QString resultError;
-  const std::optional<ResolvedTrainingPointCloud> checkpoint =
+  std::optional<ResolvedTrainingPointCloud> checkpoint =
       resolveTrainingPointCloud(job.outputSceneRoot, std::nullopt,
                                 &resultError);
   if (!checkpoint.has_value()) {
@@ -2120,6 +2965,20 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
         QStringLiteral("检测到上次训练被中断，但尚无完整检查点可恢复。"));
     return true;
   }
+
+  const std::optional<ResolvedTrainingPointCloud> durable =
+      publishDurableTrainingPointCloud(
+          *checkpoint, mWorkspace.rootPath(), job.outputSceneRoot,
+          &resultError);
+  if (!durable.has_value()) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("最近检查点有效，但无法发布保护副本：%1")
+              .arg(resultError);
+    }
+    return false;
+  }
+  checkpoint = durable;
 
   QString sceneError;
   if (!mWorkspace.setScenePath(checkpoint->path, &sceneError)) {
@@ -2372,13 +3231,15 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
     return false;
   }
 
-  QString reloadError;
-  if (!mWorkspace.load(mWorkspace.projectFilePath(), &reloadError)) {
-    if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("导入事务已恢复，但无法重新载入工程：%1")
-                          .arg(reloadError);
+  if (!mWorkspace.projectFilePath().isEmpty()) {
+    QString reloadError;
+    if (!mWorkspace.load(mWorkspace.projectFilePath(), &reloadError)) {
+      if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral("导入事务已恢复，但无法重新载入工程：%1")
+                            .arg(reloadError);
+      }
+      return false;
     }
-    return false;
   }
 
   if (committed && committedPaths.isEmpty()) {
@@ -3014,6 +3875,8 @@ void MainWindow::updateActionAvailability() {
   mSaveAction->setEnabled(workspaceReady);
   mSaveAsAction->setEnabled(
       workspaceReady && (!running || !mWorkspace.hasPendingDataMigration()));
+  mSnapshotHistoryAction->setEnabled(
+      workspaceReady && !mWorkspace.projectFilePath().isEmpty());
   mImportDatasetAction->setEnabled(dataEntryReady);
   mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);

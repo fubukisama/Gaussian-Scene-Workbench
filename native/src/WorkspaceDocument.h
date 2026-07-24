@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -43,6 +44,7 @@ public:
   bool saveManifest(const QString &filePath = {},
                     QString *errorMessage = nullptr);
   bool finalizeDataMigration(QString *errorMessage = nullptr);
+  [[nodiscard]] QByteArray recoveryManifestJson() const;
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
   bool setScenePath(const QString &path, QString *errorMessage = nullptr);
 

@@ -160,6 +160,9 @@ int main(int argc, char *argv[]) {
     window.openProjectFile(QFileInfo(projectPath).absoluteFilePath());
   }
   window.show();
+  if (projectPath.isEmpty() && !smokeTest) {
+    window.offerStartupRecovery();
+  }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
   if (infiniteGridSmokeTest) {
@@ -518,6 +521,9 @@ int main(int argc, char *argv[]) {
           QStringLiteral("importDatasetDirectoryAction"),
           QStringLiteral("attachDatasetAction"),
           QStringLiteral("importSceneAction"),
+          QStringLiteral("recoveryCenterAction"),
+          QStringLiteral("configureExternalBackupAction"),
+          QStringLiteral("externalBackupsAction"),
       };
       smokeTestCompleted = window.isVisible();
       for (const QString &objectName : requiredEntryActions) {
