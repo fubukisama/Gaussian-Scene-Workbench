@@ -32,6 +32,7 @@ public:
   [[nodiscard]] QString scenePath() const;
   [[nodiscard]] qint64 imageCount() const;
   [[nodiscard]] PlyMetadata sceneMetadata() const;
+  [[nodiscard]] bool hasPendingDataMigration() const;
 
   bool create(const QString &rootPath, QString *errorMessage = nullptr);
   bool createUntitled(const QString &workingRoot,
@@ -39,10 +40,14 @@ public:
                       QString *errorMessage = nullptr);
   bool load(const QString &filePath, QString *errorMessage = nullptr);
   bool save(const QString &filePath = {}, QString *errorMessage = nullptr);
+  bool saveManifest(const QString &filePath = {},
+                    QString *errorMessage = nullptr);
+  bool finalizeDataMigration(QString *errorMessage = nullptr);
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
   bool setScenePath(const QString &path, QString *errorMessage = nullptr);
 
-  static PlyMetadata inspectPly(const QString &filePath, QString *errorMessage = nullptr);
+  static PlyMetadata inspectPly(const QString &filePath,
+                                QString *errorMessage = nullptr);
   static qint64 countDatasetImages(const QString &directoryPath);
   static QString projectDataRootForFile(const QString &projectFilePath);
 
@@ -59,6 +64,7 @@ private:
   QString mProjectFilePath;
   QString mDatasetPath;
   QString mScenePath;
+  QString mPendingDataRoot;
   qint64 mImageCount = 0;
   PlyMetadata mSceneMetadata;
   bool mModified = false;

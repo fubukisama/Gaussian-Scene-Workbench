@@ -28,7 +28,7 @@ Qt::CaseSensitivity pathCaseSensitivity() {
 
 bool pathsEqual(const QString &left, const QString &right) {
   return normalizedAbsolutePath(left).compare(normalizedAbsolutePath(right),
-                                               pathCaseSensitivity()) == 0;
+                                              pathCaseSensitivity()) == 0;
 }
 
 bool relativePathInside(const QString &rootPath, const QString &candidatePath,
@@ -38,10 +38,10 @@ bool relativePathInside(const QString &rootPath, const QString &candidatePath,
   }
   const QString relative =
       QDir(rootPath).relativeFilePath(normalizedAbsolutePath(candidatePath));
-  const bool inside =
-      !QDir::isAbsolutePath(relative) && relative != QStringLiteral("..") &&
-      !relative.startsWith(QStringLiteral("../")) &&
-      !relative.startsWith(QStringLiteral("..\\"));
+  const bool inside = !QDir::isAbsolutePath(relative) &&
+                      relative != QStringLiteral("..") &&
+                      !relative.startsWith(QStringLiteral("../")) &&
+                      !relative.startsWith(QStringLiteral("..\\"));
   if (inside && relativePath != nullptr) {
     *relativePath = relative;
   }
@@ -87,6 +87,68 @@ void assignError(QString *target, const QString &message) {
   }
 }
 
+constexpr auto kDataMigrationMarker = ".gsw-data-migration.json";
+
+bool writeDataMigrationMarker(const QString &dataRoot,
+                              const QString &projectFilePath,
+                              const QString &sourceRoot,
+                              QString *errorMessage) {
+  const QString markerPath =
+      QDir(dataRoot).filePath(QString::fromLatin1(kDataMigrationMarker));
+  QSaveFile marker(markerPath);
+  if (!marker.open(QIODevice::WriteOnly)) {
+    assignError(errorMessage,
+                QObject::tr("Unable to create data migration marker: %1")
+                    .arg(marker.errorString()));
+    return false;
+  }
+
+  const QJsonObject markerJson{
+      {QStringLiteral("version"), 1},
+      {QStringLiteral("projectFilePath"),
+       normalizedAbsolutePath(projectFilePath)},
+      {QStringLiteral("sourceRoot"), normalizedAbsolutePath(sourceRoot)}};
+  const QByteArray serialized =
+      QJsonDocument(markerJson).toJson(QJsonDocument::Compact);
+  if (marker.write(serialized) != serialized.size()) {
+    marker.cancelWriting();
+    assignError(errorMessage,
+                QObject::tr("Unable to write data migration marker: %1")
+                    .arg(marker.errorString()));
+    return false;
+  }
+  if (!marker.commit()) {
+    assignError(errorMessage,
+                QObject::tr("Unable to commit data migration marker: %1")
+                    .arg(marker.errorString()));
+    return false;
+  }
+  return true;
+}
+
+bool dataMigrationMarkerMatches(const QString &dataRoot,
+                                const QString &projectFilePath,
+                                const QString &sourceRoot) {
+  QFile marker(
+      QDir(dataRoot).filePath(QString::fromLatin1(kDataMigrationMarker)));
+  if (!marker.open(QIODevice::ReadOnly)) {
+    return false;
+  }
+  QJsonParseError parseError;
+  const QJsonDocument document =
+      QJsonDocument::fromJson(marker.readAll(), &parseError);
+  if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    return false;
+  }
+  const QJsonObject markerJson = document.object();
+  return markerJson.value(QStringLiteral("version")).toInt() == 1 &&
+         pathsEqual(
+             markerJson.value(QStringLiteral("projectFilePath")).toString(),
+             projectFilePath) &&
+         pathsEqual(markerJson.value(QStringLiteral("sourceRoot")).toString(),
+                    sourceRoot);
+}
+
 bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
                        const QStringList &excludedPaths,
                        QString *errorMessage) {
@@ -97,10 +159,10 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
     return false;
   }
 
-  QDirIterator iterator(
-      sourceRoot,
-      QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
-      QDirIterator::Subdirectories);
+  QDirIterator iterator(sourceRoot,
+                        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden |
+                            QDir::System,
+                        QDirIterator::Subdirectories);
   while (iterator.hasNext()) {
     const QString sourcePath = iterator.next();
     bool excluded = false;
@@ -116,9 +178,10 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
 
     const QFileInfo sourceInfo = iterator.fileInfo();
     if (sourceInfo.isSymLink()) {
-      assignError(errorMessage,
-                  QObject::tr("Project data contains an unsupported symbolic link: %1")
-                      .arg(sourcePath));
+      assignError(
+          errorMessage,
+          QObject::tr("Project data contains an unsupported symbolic link: %1")
+              .arg(sourcePath));
       return false;
     }
     const QString relativePath = QDir(sourceRoot).relativeFilePath(sourcePath);
@@ -134,9 +197,9 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
     }
     if (!QDir().mkpath(QFileInfo(targetPath).absolutePath()) ||
         !QFile::copy(sourcePath, targetPath)) {
-      assignError(errorMessage,
-                  QObject::tr("Unable to copy project data: %1")
-                      .arg(sourcePath));
+      assignError(
+          errorMessage,
+          QObject::tr("Unable to copy project data: %1").arg(sourcePath));
       return false;
     }
   }
@@ -145,8 +208,8 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
 
 qint64 countImageFiles(const QString &rootPath) {
   static const QSet<QString> extensions = {
-      QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("png"),
-      QStringLiteral("tif"), QStringLiteral("tiff"), QStringLiteral("bmp"),
+      QStringLiteral("jpg"),  QStringLiteral("jpeg"), QStringLiteral("png"),
+      QStringLiteral("tif"),  QStringLiteral("tiff"), QStringLiteral("bmp"),
       QStringLiteral("webp"), QStringLiteral("exr")};
 
   qint64 count = 0;
@@ -182,11 +245,15 @@ QString WorkspaceDocument::datasetPath() const { return mDatasetPath; }
 QString WorkspaceDocument::scenePath() const { return mScenePath; }
 qint64 WorkspaceDocument::imageCount() const { return mImageCount; }
 PlyMetadata WorkspaceDocument::sceneMetadata() const { return mSceneMetadata; }
+bool WorkspaceDocument::hasPendingDataMigration() const {
+  return !mPendingDataRoot.isEmpty();
+}
 
 bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   const QFileInfo rootInfo(rootPath);
   if (!rootInfo.exists() || !rootInfo.isDir()) {
-    assignError(errorMessage, tr("Project directory does not exist: %1").arg(rootPath));
+    assignError(errorMessage,
+                tr("Project directory does not exist: %1").arg(rootPath));
     return false;
   }
 
@@ -198,6 +265,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
   setModified(true);
@@ -210,19 +278,19 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
                                        QString *errorMessage) {
   const QFileInfo rootInfo(workingRoot);
   if (!rootInfo.exists() || !rootInfo.isDir()) {
-    assignError(errorMessage,
-                tr("Temporary project directory does not exist: %1")
-                    .arg(workingRoot));
+    assignError(
+        errorMessage,
+        tr("Temporary project directory does not exist: %1").arg(workingRoot));
     return false;
   }
 
   mRootPath = normalizedAbsolutePath(workingRoot);
-  mProjectName = displayName.trimmed().isEmpty()
-                     ? tr("Untitled Project")
-                     : displayName.trimmed();
+  mProjectName = displayName.trimmed().isEmpty() ? tr("Untitled Project")
+                                                 : displayName.trimmed();
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
   setModified(false);
@@ -233,21 +301,26 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
 bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly)) {
-    assignError(errorMessage, tr("Unable to open project: %1").arg(file.errorString()));
+    assignError(errorMessage,
+                tr("Unable to open project: %1").arg(file.errorString()));
     return false;
   }
 
   QJsonParseError parseError;
-  const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+  const QJsonDocument document =
+      QJsonDocument::fromJson(file.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-    assignError(errorMessage, tr("Invalid project file: %1").arg(parseError.errorString()));
+    assignError(errorMessage,
+                tr("Invalid project file: %1").arg(parseError.errorString()));
     return false;
   }
 
   const QJsonObject root = document.object();
   const int schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt();
   if (schemaVersion != 1) {
-    assignError(errorMessage, tr("Unsupported project schema version: %1").arg(schemaVersion));
+    assignError(
+        errorMessage,
+        tr("Unsupported project schema version: %1").arg(schemaVersion));
     return false;
   }
 
@@ -259,11 +332,23 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   } else if (QDir::isAbsolutePath(storedRoot)) {
     mRootPath = normalizedAbsolutePath(storedRoot);
   } else {
-    mRootPath = QDir::cleanPath(QDir(projectDirectory).absoluteFilePath(storedRoot));
+    mRootPath =
+        QDir::cleanPath(QDir(projectDirectory).absoluteFilePath(storedRoot));
   }
-  mProjectName = root.value(QStringLiteral("projectName")).toString(QDir(mRootPath).dirName());
-  mDatasetPath = resolvePortablePath(root.value(QStringLiteral("datasetPath")).toString());
-  mScenePath = resolvePortablePath(root.value(QStringLiteral("scenePath")).toString());
+  mProjectName = root.value(QStringLiteral("projectName"))
+                     .toString(QDir(mRootPath).dirName());
+  mDatasetPath =
+      resolvePortablePath(root.value(QStringLiteral("datasetPath")).toString());
+  mScenePath =
+      resolvePortablePath(root.value(QStringLiteral("scenePath")).toString());
+  const QString storedPendingDataRoot =
+      root.value(QStringLiteral("pendingDataRoot")).toString();
+  mPendingDataRoot =
+      storedPendingDataRoot.isEmpty() ? QString()
+      : QDir::isAbsolutePath(storedPendingDataRoot)
+          ? normalizedAbsolutePath(storedPendingDataRoot)
+          : normalizedAbsolutePath(
+                QDir(projectDirectory).filePath(storedPendingDataRoot));
   mImageCount = countDatasetImages(mDatasetPath);
   mSceneMetadata = inspectPly(mScenePath);
   setModified(false);
@@ -286,16 +371,14 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
 
   const QFileInfo targetInfo(targetPath);
   if (!QFileInfo(targetInfo.absolutePath()).isDir()) {
-    assignError(errorMessage,
-                tr("Project save directory does not exist: %1")
-                    .arg(targetInfo.absolutePath()));
+    assignError(errorMessage, tr("Project save directory does not exist: %1")
+                                  .arg(targetInfo.absolutePath()));
     return false;
   }
 
   const bool saveAs =
       !filePath.isEmpty() &&
-      (mProjectFilePath.isEmpty() ||
-       !pathsEqual(targetPath, mProjectFilePath));
+      (mProjectFilePath.isEmpty() || !pathsEqual(targetPath, mProjectFilePath));
   const QString oldRootPath = mRootPath;
   QString savedRootPath = mRootPath;
   QString savedDatasetPath = mDatasetPath;
@@ -307,9 +390,8 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     const QString targetDataRoot = projectDataRootForFile(targetPath);
     if (!pathsEqual(oldRootPath, targetDataRoot)) {
       if (relativePathInside(oldRootPath, targetDataRoot)) {
-        assignError(
-            errorMessage,
-            tr("Choose a project file outside the current working data directory."));
+        assignError(errorMessage, tr("Choose a project file outside the "
+                                     "current working data directory."));
         return false;
       }
       if (QFileInfo::exists(targetDataRoot)) {
@@ -321,10 +403,10 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
 
       const QString stagingRoot =
           QDir(targetInfo.absolutePath())
-              .filePath(QStringLiteral(".%1.gsw-stage-%2")
-                            .arg(QFileInfo(targetDataRoot).fileName(),
-                                 QUuid::createUuid().toString(
-                                     QUuid::WithoutBraces)));
+              .filePath(
+                  QStringLiteral(".%1.gsw-stage-%2")
+                      .arg(QFileInfo(targetDataRoot).fileName(),
+                           QUuid::createUuid().toString(QUuid::WithoutBraces)));
       const QStringList exclusions = {mProjectFilePath, targetPath};
       if (!copyDirectoryTree(oldRootPath, stagingRoot, exclusions,
                              errorMessage)) {
@@ -342,15 +424,15 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
       savedRootPath = normalizedAbsolutePath(targetDataRoot);
       savedDatasetPath =
           remapManagedPath(mDatasetPath, oldRootPath, savedRootPath);
-      savedScenePath =
-          remapManagedPath(mScenePath, oldRootPath, savedRootPath);
+      savedScenePath = remapManagedPath(mScenePath, oldRootPath, savedRootPath);
     }
     savedProjectName = projectStem(targetPath);
   }
 
   QJsonObject root;
   root.insert(QStringLiteral("schemaVersion"), 1);
-  root.insert(QStringLiteral("application"), QStringLiteral("Gaussian Scene Workbench"));
+  root.insert(QStringLiteral("application"),
+              QStringLiteral("Gaussian Scene Workbench"));
   root.insert(QStringLiteral("projectName"), savedProjectName);
   const QString projectDirectory = QFileInfo(targetPath).absolutePath();
   QString relativeRoot;
@@ -363,14 +445,16 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
               portablePathForRoot(savedDatasetPath, savedRootPath));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(savedScenePath, savedRootPath));
-  root.insert(QStringLiteral("updatedUtc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+  root.insert(QStringLiteral("updatedUtc"),
+              QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
   QSaveFile output(targetPath);
   if (!output.open(QIODevice::WriteOnly)) {
     if (createdDataRoot) {
       QDir(savedRootPath).removeRecursively();
     }
-    assignError(errorMessage, tr("Unable to save project: %1").arg(output.errorString()));
+    assignError(errorMessage,
+                tr("Unable to save project: %1").arg(output.errorString()));
     return false;
   }
   const QByteArray serialized =
@@ -380,16 +464,18 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     if (createdDataRoot) {
       QDir(savedRootPath).removeRecursively();
     }
-    assignError(errorMessage,
-                tr("Unable to write project file: %1")
-                    .arg(output.errorString()));
+    assignError(
+        errorMessage,
+        tr("Unable to write project file: %1").arg(output.errorString()));
     return false;
   }
   if (!output.commit()) {
     if (createdDataRoot) {
       QDir(savedRootPath).removeRecursively();
     }
-    assignError(errorMessage, tr("Unable to commit project file: %1").arg(output.errorString()));
+    assignError(
+        errorMessage,
+        tr("Unable to commit project file: %1").arg(output.errorString()));
     return false;
   }
 
@@ -398,15 +484,201 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   mProjectFilePath = targetPath;
   mDatasetPath = savedDatasetPath;
   mScenePath = savedScenePath;
+  mPendingDataRoot.clear();
   setModified(false);
   emit changed();
   return true;
 }
 
-bool WorkspaceDocument::setDatasetPath(const QString &path, QString *errorMessage) {
+bool WorkspaceDocument::saveManifest(const QString &filePath,
+                                     QString *errorMessage) {
+  if (!hasProject()) {
+    assignError(errorMessage, tr("No project is open."));
+    return false;
+  }
+
+  const QString targetPath =
+      filePath.isEmpty() ? mProjectFilePath : normalizedAbsolutePath(filePath);
+  if (targetPath.isEmpty()) {
+    assignError(errorMessage, tr("A project file path is required."));
+    return false;
+  }
+
+  const QFileInfo targetInfo(targetPath);
+  if (!QFileInfo(targetInfo.absolutePath()).isDir()) {
+    assignError(errorMessage, tr("Project save directory does not exist: %1")
+                                  .arg(targetInfo.absolutePath()));
+    return false;
+  }
+
+  const bool saveAs =
+      !filePath.isEmpty() &&
+      (mProjectFilePath.isEmpty() || !pathsEqual(targetPath, mProjectFilePath));
+  QString pendingDataRoot = mPendingDataRoot;
+  if (saveAs) {
+    pendingDataRoot = projectDataRootForFile(targetPath);
+    if (!pathsEqual(mRootPath, pendingDataRoot)) {
+      if (relativePathInside(mRootPath, pendingDataRoot)) {
+        assignError(errorMessage, tr("Choose a project file outside the "
+                                     "current working data directory."));
+        return false;
+      }
+      if (QFileInfo::exists(pendingDataRoot)) {
+        assignError(errorMessage,
+                    tr("Project data directory already exists: %1")
+                        .arg(pendingDataRoot));
+        return false;
+      }
+    } else {
+      pendingDataRoot.clear();
+    }
+  }
+
+  const QString savedProjectName =
+      saveAs ? projectStem(targetPath) : mProjectName;
+  const QString projectDirectory = targetInfo.absolutePath();
+  QJsonObject root;
+  root.insert(QStringLiteral("schemaVersion"), 1);
+  root.insert(QStringLiteral("application"),
+              QStringLiteral("Gaussian Scene Workbench"));
+  root.insert(QStringLiteral("projectName"), savedProjectName);
+  QString relativeRoot;
+  root.insert(QStringLiteral("rootPath"),
+              relativePathInside(projectDirectory, mRootPath, &relativeRoot)
+                  ? relativeRoot
+                  : mRootPath);
+  root.insert(QStringLiteral("datasetPath"),
+              portablePathForRoot(mDatasetPath, mRootPath));
+  root.insert(QStringLiteral("scenePath"),
+              portablePathForRoot(mScenePath, mRootPath));
+  if (!pendingDataRoot.isEmpty()) {
+    QString relativePendingRoot;
+    root.insert(QStringLiteral("pendingDataRoot"),
+                relativePathInside(projectDirectory, pendingDataRoot,
+                                   &relativePendingRoot)
+                    ? relativePendingRoot
+                    : pendingDataRoot);
+  }
+  root.insert(QStringLiteral("updatedUtc"),
+              QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+
+  QSaveFile output(targetPath);
+  if (!output.open(QIODevice::WriteOnly)) {
+    assignError(errorMessage,
+                tr("Unable to save project: %1").arg(output.errorString()));
+    return false;
+  }
+  const QByteArray serialized =
+      QJsonDocument(root).toJson(QJsonDocument::Indented);
+  if (output.write(serialized) != serialized.size()) {
+    output.cancelWriting();
+    assignError(
+        errorMessage,
+        tr("Unable to write project file: %1").arg(output.errorString()));
+    return false;
+  }
+  if (!output.commit()) {
+    assignError(
+        errorMessage,
+        tr("Unable to commit project file: %1").arg(output.errorString()));
+    return false;
+  }
+
+  mProjectName = savedProjectName;
+  mProjectFilePath = targetPath;
+  mPendingDataRoot = pendingDataRoot;
+  setModified(false);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
+  if (!hasPendingDataMigration()) {
+    return true;
+  }
+  if (mProjectFilePath.isEmpty()) {
+    assignError(
+        errorMessage,
+        tr("A project file is required before migrating project data."));
+    return false;
+  }
+
+  const QString oldRootPath = mRootPath;
+  const QString targetDataRoot = mPendingDataRoot;
+  if (relativePathInside(oldRootPath, targetDataRoot)) {
+    assignError(errorMessage, tr("Choose a project file outside the current "
+                                 "working data directory."));
+    return false;
+  }
+  bool publishedByThisCall = false;
+  if (QFileInfo::exists(targetDataRoot)) {
+    if (!QFileInfo(targetDataRoot).isDir() ||
+        !dataMigrationMarkerMatches(targetDataRoot, mProjectFilePath,
+                                    oldRootPath)) {
+      assignError(
+          errorMessage,
+          tr("Project data directory already exists and does not belong to "
+             "this pending save: %1")
+              .arg(targetDataRoot));
+      return false;
+    }
+  } else {
+    const QFileInfo targetInfo(targetDataRoot);
+    const QString stagingRoot =
+        QDir(targetInfo.absolutePath())
+            .filePath(
+                QStringLiteral(".%1.gsw-stage-%2")
+                    .arg(targetInfo.fileName(),
+                         QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    const QStringList exclusions = {mProjectFilePath, targetDataRoot};
+    if (!copyDirectoryTree(oldRootPath, stagingRoot, exclusions,
+                           errorMessage)) {
+      QDir(stagingRoot).removeRecursively();
+      return false;
+    }
+    if (!writeDataMigrationMarker(stagingRoot, mProjectFilePath, oldRootPath,
+                                  errorMessage)) {
+      QDir(stagingRoot).removeRecursively();
+      return false;
+    }
+    if (!QDir().rename(stagingRoot, targetDataRoot)) {
+      QDir(stagingRoot).removeRecursively();
+      assignError(errorMessage,
+                  tr("Unable to finalize project data directory: %1")
+                      .arg(targetDataRoot));
+      return false;
+    }
+    publishedByThisCall = true;
+  }
+
+  const QString oldDatasetPath = mDatasetPath;
+  const QString oldScenePath = mScenePath;
+  mRootPath = normalizedAbsolutePath(targetDataRoot);
+  mDatasetPath = remapManagedPath(oldDatasetPath, oldRootPath, mRootPath);
+  mScenePath = remapManagedPath(oldScenePath, oldRootPath, mRootPath);
+  mPendingDataRoot.clear();
+
+  if (!saveManifest({}, errorMessage)) {
+    mRootPath = oldRootPath;
+    mDatasetPath = oldDatasetPath;
+    mScenePath = oldScenePath;
+    mPendingDataRoot = targetDataRoot;
+    if (publishedByThisCall) {
+      QDir(targetDataRoot).removeRecursively();
+    }
+    return false;
+  }
+  QFile::remove(
+      QDir(targetDataRoot).filePath(QString::fromLatin1(kDataMigrationMarker)));
+  return true;
+}
+
+bool WorkspaceDocument::setDatasetPath(const QString &path,
+                                       QString *errorMessage) {
   const QFileInfo info(path);
   if (!info.exists() || !info.isDir()) {
-    assignError(errorMessage, tr("Dataset directory does not exist: %1").arg(path));
+    assignError(errorMessage,
+                tr("Dataset directory does not exist: %1").arg(path));
     return false;
   }
   mDatasetPath = normalizedAbsolutePath(path);
@@ -416,7 +688,8 @@ bool WorkspaceDocument::setDatasetPath(const QString &path, QString *errorMessag
   return true;
 }
 
-bool WorkspaceDocument::setScenePath(const QString &path, QString *errorMessage) {
+bool WorkspaceDocument::setScenePath(const QString &path,
+                                     QString *errorMessage) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);
   if (!metadata.valid) {
     return false;
@@ -428,7 +701,8 @@ bool WorkspaceDocument::setScenePath(const QString &path, QString *errorMessage)
   return true;
 }
 
-PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath, QString *errorMessage) {
+PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
+                                          QString *errorMessage) {
   PlyMetadata metadata;
   if (filePath.isEmpty()) {
     return metadata;
@@ -438,7 +712,8 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath, QString *erro
   const QFileInfo info(filePath);
   metadata.fileSize = info.size();
   if (!file.open(QIODevice::ReadOnly)) {
-    assignError(errorMessage, tr("Unable to open PLY file: %1").arg(file.errorString()));
+    assignError(errorMessage,
+                tr("Unable to open PLY file: %1").arg(file.errorString()));
     return metadata;
   }
 
@@ -465,8 +740,10 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath, QString *erro
     if (line.startsWith(QStringLiteral("format "))) {
       metadata.format = line.section(QLatin1Char(' '), 1, 1);
     } else if (line.startsWith(QStringLiteral("element "))) {
-      const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-      readingVertexProperties = parts.size() >= 3 && parts.at(1) == QStringLiteral("vertex");
+      const QStringList parts =
+          line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+      readingVertexProperties =
+          parts.size() >= 3 && parts.at(1) == QStringLiteral("vertex");
       if (readingVertexProperties) {
         bool ok = false;
         const qint64 count = parts.at(2).toLongLong(&ok);
@@ -474,7 +751,8 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath, QString *erro
           metadata.vertexCount = count;
         }
       }
-    } else if (readingVertexProperties && line.startsWith(QStringLiteral("property "))) {
+    } else if (readingVertexProperties &&
+               line.startsWith(QStringLiteral("property "))) {
       const QString propertyName = line.section(QLatin1Char(' '), -1);
       if (!propertyName.isEmpty()) {
         metadata.properties.append(propertyName);
@@ -486,12 +764,14 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath, QString *erro
   }
 
   if (!foundEndHeader || metadata.format.isEmpty()) {
-    assignError(errorMessage, tr("The PLY header is incomplete or unsupported."));
+    assignError(errorMessage,
+                tr("The PLY header is incomplete or unsupported."));
     return metadata;
   }
   if (metadata.format != QStringLiteral("ascii") &&
       metadata.format != QStringLiteral("binary_little_endian")) {
-    assignError(errorMessage, tr("Unsupported PLY format: %1").arg(metadata.format));
+    assignError(errorMessage,
+                tr("Unsupported PLY format: %1").arg(metadata.format));
     return metadata;
   }
   metadata.valid = true;
@@ -518,16 +798,15 @@ qint64 WorkspaceDocument::countDatasetImages(const QString &directoryPath) {
   return countImageFiles(directoryPath);
 }
 
-QString WorkspaceDocument::projectDataRootForFile(
-    const QString &projectFilePath) {
+QString
+WorkspaceDocument::projectDataRootForFile(const QString &projectFilePath) {
   if (projectFilePath.isEmpty()) {
     return {};
   }
   const QFileInfo info(normalizedAbsolutePath(projectFilePath));
-  return QDir::cleanPath(
-      QDir(info.absolutePath())
-          .filePath(projectStem(info.absoluteFilePath()) +
-                    QStringLiteral(".files")));
+  return QDir::cleanPath(QDir(info.absolutePath())
+                             .filePath(projectStem(info.absoluteFilePath()) +
+                                       QStringLiteral(".files")));
 }
 
 void WorkspaceDocument::setModified(const bool modified) {
@@ -538,7 +817,8 @@ void WorkspaceDocument::setModified(const bool modified) {
   emit modifiedChanged(mModified);
 }
 
-QString WorkspaceDocument::resolvePortablePath(const QString &storedPath) const {
+QString
+WorkspaceDocument::resolvePortablePath(const QString &storedPath) const {
   if (storedPath.isEmpty() || QDir::isAbsolutePath(storedPath)) {
     return storedPath;
   }

@@ -91,6 +91,7 @@ private:
                             QString *errorMessage = nullptr);
   bool ensureProjectForDataAction(const QString &actionName);
   bool saveProject(bool forceChoosePath = false);
+  bool finalizePendingProjectSave(QString *errorMessage = nullptr);
   bool exportCroppedScene();
   bool ensureProjectRecoveryReady();
   bool recoverDatasetImport(const PendingDatasetImport &pending,
@@ -98,6 +99,7 @@ private:
                             bool *committed = nullptr,
                             QStringList *committedPaths = nullptr);
   bool recoverInterruptedProjectImports(QString *errorMessage = nullptr);
+  bool recoverInterruptedTraining(QString *errorMessage = nullptr);
   void newProject();
   void importDataset();
   void importDatasetDirectory();

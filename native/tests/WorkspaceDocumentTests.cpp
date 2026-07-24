@@ -9,15 +9,15 @@
 #include <QBitArray>
 #include <QtEndian>
 
-#include <bit>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
+#include <bit>
 
 class WorkspaceDocumentTests final : public QObject {
   Q_OBJECT
@@ -31,12 +31,16 @@ private slots:
   void selectsNewestVersionedColmapExecutable();
   void locatesVersionedColmapOnRepositoryVolume();
   void locatesNewestCompletedTrainingScene();
+  void persistsActiveTrainingJobForCrashRecovery();
   void detectsCompleteAndIncompleteColmapModels();
   void selectsBrushStrokeAndHonorsVisibility();
   void tracksSelectionDeletionUndoAndRedo();
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
   void createsUntitledProjectWithoutAProjectFile();
+  void savesRecoverableManifestWithoutMovingActiveWorkspace();
+  void finalizesPendingMigrationWithDataWrittenAfterManifestSave();
+  void resumesMigrationAfterDataDirectoryWasPublished();
   void savesAndLoadsPortableProject();
   void saveAsCopiesManagedDataIntoANewLinkedDirectory();
   void firstSaveKeepsExternalDatasetAsALink();
@@ -79,6 +83,37 @@ void WorkspaceDocumentTests::locatesNewestCompletedTrainingScene() {
   QVERIFY(updated.isValid());
   QCOMPARE(updated.iteration, 100);
   QCOMPARE(updated.path, QDir::cleanPath(newer.fileName()));
+}
+
+void WorkspaceDocumentTests::persistsActiveTrainingJobForCrashRecovery() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("project")));
+  QVERIFY(root.mkpath(QStringLiteral("output/scene")));
+
+  const QString projectRoot = root.filePath(QStringLiteral("project"));
+  const gsw::ActiveTrainingJob expected{
+      root.filePath(QStringLiteral("project/.gsw/jobs/training-job.json")),
+      root.filePath(QStringLiteral("output/scene"))};
+  QString error;
+  QVERIFY2(gsw::saveActiveTrainingJob(projectRoot, expected, &error),
+           qPrintable(error));
+
+  const gsw::ActiveTrainingJob restored =
+      gsw::loadActiveTrainingJob(projectRoot, &error);
+  QVERIFY2(restored.isValid(), qPrintable(error));
+  QCOMPARE(restored.configurationPath,
+           QDir::cleanPath(QFileInfo(expected.configurationPath)
+                               .absoluteFilePath()));
+  QCOMPARE(restored.outputSceneRoot,
+           QDir::cleanPath(
+               QFileInfo(expected.outputSceneRoot).absoluteFilePath()));
+
+  QVERIFY2(gsw::clearActiveTrainingJob(projectRoot, &error),
+           qPrintable(error));
+  QVERIFY(!gsw::loadActiveTrainingJob(projectRoot, &error).isValid());
+  QVERIFY2(error.isEmpty(), qPrintable(error));
 }
 
 namespace {
@@ -134,7 +169,8 @@ void compareVector(const QVector3D &actual, const QVector3D &expected,
 void WorkspaceDocumentTests::parsesGaussianPlyHeader() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
-  const QString plyPath = QDir(temporary.path()).filePath(QStringLiteral("scene.ply"));
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("scene.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   ply.write("ply\n"
@@ -150,17 +186,20 @@ void WorkspaceDocumentTests::parsesGaussianPlyHeader() {
   ply.close();
 
   QString error;
-  const gsw::PlyMetadata metadata = gsw::WorkspaceDocument::inspectPly(plyPath, &error);
+  const gsw::PlyMetadata metadata =
+      gsw::WorkspaceDocument::inspectPly(plyPath, &error);
   QVERIFY2(metadata.valid, qPrintable(error));
   QCOMPARE(metadata.format, QStringLiteral("binary_little_endian"));
   QCOMPARE(metadata.vertexCount, 1234);
   QVERIFY(metadata.looksLikeGaussianSplat());
 }
 
-void WorkspaceDocumentTests::loadsAsciiPointColorsAndSamplesDeterministically() {
+void WorkspaceDocumentTests::
+    loadsAsciiPointColorsAndSamplesDeterministically() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
-  const QString plyPath = QDir(temporary.path()).filePath(QStringLiteral("colored.ply"));
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("colored.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   ply.write("ply\n"
@@ -197,7 +236,8 @@ void WorkspaceDocumentTests::loadsAsciiPointColorsAndSamplesDeterministically() 
 void WorkspaceDocumentTests::loadsBinaryGaussianSphericalHarmonicColors() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
-  const QString plyPath = QDir(temporary.path()).filePath(QStringLiteral("gaussian.ply"));
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("gaussian.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   ply.write("ply\n"
@@ -234,7 +274,8 @@ void WorkspaceDocumentTests::activatesGaussianScaleRotationAndOpacity() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
   const QString plyPath =
-      QDir(temporary.path()).filePath(QStringLiteral("gaussian-attributes.ply"));
+      QDir(temporary.path())
+          .filePath(QStringLiteral("gaussian-attributes.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   ply.write("ply\n"
@@ -255,9 +296,9 @@ void WorkspaceDocumentTests::activatesGaussianScaleRotationAndOpacity() {
             "property float rot_2\n"
             "property float rot_3\n"
             "end_header\n");
-  for (const float value : {1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 0.0F, 0.0F,
-                            0.0F, 0.69314718056F, -0.69314718056F,
-                            2.0F, 0.0F, 0.0F, 0.0F}) {
+  for (const float value :
+       {1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.69314718056F,
+        -0.69314718056F, 2.0F, 0.0F, 0.0F, 0.0F}) {
     writeLittleEndianFloat(ply, value);
   }
   ply.close();
@@ -305,10 +346,11 @@ void WorkspaceDocumentTests::selectsNewestVersionedColmapExecutable() {
   QFile direct(root.filePath(QStringLiteral("bin/colmap.exe")));
   QVERIFY(direct.open(QIODevice::WriteOnly));
   direct.write("older direct fixture");
-  for (const QString &version : {QStringLiteral("3.13.0"),
-                                 QStringLiteral("4.1.0")}) {
+  for (const QString &version :
+       {QStringLiteral("3.13.0"), QStringLiteral("4.1.0")}) {
     QVERIFY(root.mkpath(version + QStringLiteral("/bin")));
-    QFile executable(root.filePath(version + QStringLiteral("/bin/colmap.exe")));
+    QFile executable(
+        root.filePath(version + QStringLiteral("/bin/colmap.exe")));
     QVERIFY(executable.open(QIODevice::WriteOnly));
     executable.write("fixture");
   }
@@ -328,8 +370,9 @@ void WorkspaceDocumentTests::locatesVersionedColmapOnRepositoryVolume() {
   const QString volumeRoot = fixture.filePath(QStringLiteral("data-volume"));
   const QString repositoryRoot =
       QDir(volumeRoot).filePath(QStringLiteral("apps/gsw"));
-  const QString executablePath = QDir(volumeRoot).filePath(
-      QStringLiteral("Tools/COLMAP/4.1.0/bin/colmap.exe"));
+  const QString executablePath =
+      QDir(volumeRoot)
+          .filePath(QStringLiteral("Tools/COLMAP/4.1.0/bin/colmap.exe"));
   QVERIFY(QDir().mkpath(repositoryRoot));
   QVERIFY(QDir().mkpath(QFileInfo(executablePath).absolutePath()));
   QFile executable(executablePath);
@@ -347,8 +390,8 @@ void WorkspaceDocumentTests::detectsCompleteAndIncompleteColmapModels() {
   const QDir root(temporary.path());
   QVERIFY(root.mkpath(QStringLiteral("sparse/0")));
   const QDir sparse(root.filePath(QStringLiteral("sparse/0")));
-  for (const QString &name : {QStringLiteral("cameras.bin"),
-                              QStringLiteral("images.bin")}) {
+  for (const QString &name :
+       {QStringLiteral("cameras.bin"), QStringLiteral("images.bin")}) {
     QFile file(sparse.filePath(name));
     QVERIFY(file.open(QIODevice::WriteOnly));
   }
@@ -362,10 +405,11 @@ void WorkspaceDocumentTests::detectsCompleteAndIncompleteColmapModels() {
 }
 
 void WorkspaceDocumentTests::selectsBrushStrokeAndHonorsVisibility() {
-  const QVector<gsw::PointPosition> positions = {
-      {-0.5F, 0.0F, -0.3F}, {0.0F, 0.0F, -0.4F},
-      {0.5F, 0.0F, -0.2F},  {0.0F, 0.6F, 0.0F},
-      {0.0F, 0.0F, 0.6F}};
+  const QVector<gsw::PointPosition> positions = {{-0.5F, 0.0F, -0.3F},
+                                                 {0.0F, 0.0F, -0.4F},
+                                                 {0.5F, 0.0F, -0.2F},
+                                                 {0.0F, 0.6F, 0.0F},
+                                                 {0.0F, 0.0F, 0.6F}};
   QBitArray deleted(positions.size(), false);
   QMatrix4x4 identity;
   identity.setToIdentity();
@@ -452,7 +496,7 @@ void WorkspaceDocumentTests::exportsFilteredAsciiPlyWithOriginalFields() {
   deleted.setBit(3);
   QString error;
   QVERIFY2(gsw::PlyPointCloudLoader::writeFiltered(sourcePath, targetPath,
-                                                    deleted, &error),
+                                                   deleted, &error),
            qPrintable(error));
 
   QFile output(targetPath);
@@ -481,15 +525,14 @@ void WorkspaceDocumentTests::exportsFilteredBinaryPlyWithoutReencoding() {
       QDir(temporary.path()).filePath(QStringLiteral("source-binary.ply"));
   const QString targetPath =
       QDir(temporary.path()).filePath(QStringLiteral("cropped-binary.ply"));
-  const QByteArray header =
-      "ply\n"
-      "format binary_little_endian 1.0\n"
-      "element vertex 3\n"
-      "property float x\n"
-      "property float y\n"
-      "property float z\n"
-      "property float opacity\n"
-      "end_header\n";
+  const QByteArray header = "ply\n"
+                            "format binary_little_endian 1.0\n"
+                            "element vertex 3\n"
+                            "property float x\n"
+                            "property float y\n"
+                            "property float z\n"
+                            "property float opacity\n"
+                            "end_header\n";
   QFile source(sourcePath);
   QVERIFY(source.open(QIODevice::WriteOnly));
   source.write(header);
@@ -505,22 +548,21 @@ void WorkspaceDocumentTests::exportsFilteredBinaryPlyWithoutReencoding() {
   deleted.setBit(1);
   QString error;
   QVERIFY2(gsw::PlyPointCloudLoader::writeFiltered(sourcePath, targetPath,
-                                                    deleted, &error),
+                                                   deleted, &error),
            qPrintable(error));
 
   QFile output(targetPath);
   QVERIFY(output.open(QIODevice::ReadOnly));
   const QByteArray bytes = output.readAll();
-  const qsizetype payloadOffset = bytes.indexOf("end_header\n") +
-                                  QByteArray("end_header\n").size();
+  const qsizetype payloadOffset =
+      bytes.indexOf("end_header\n") + QByteArray("end_header\n").size();
   QVERIFY(payloadOffset > 0);
   QByteArray expectedPayload;
   for (const int index : {0, 2}) {
     appendLittleEndianFloat(expectedPayload, static_cast<float>(index));
     appendLittleEndianFloat(expectedPayload, 1.0F);
     appendLittleEndianFloat(expectedPayload, 2.0F);
-    appendLittleEndianFloat(expectedPayload,
-                            0.1F + static_cast<float>(index));
+    appendLittleEndianFloat(expectedPayload, 0.1F + static_cast<float>(index));
   }
   QCOMPARE(bytes.mid(payloadOffset), expectedPayload);
   QVERIFY(bytes.left(payloadOffset).contains("element vertex 2\n"));
@@ -547,6 +589,153 @@ void WorkspaceDocumentTests::createsUntitledProjectWithoutAProjectFile() {
            QDir::cleanPath(root.filePath(QStringLiteral("working"))));
 }
 
+void WorkspaceDocumentTests::
+    savesRecoverableManifestWithoutMovingActiveWorkspace() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  QFile image(root.filePath(
+      QStringLiteral("working/datasets/capture/images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  const QString workingRoot = root.filePath(QStringLiteral("working"));
+  QVERIFY2(
+      project.createUntitled(workingRoot, QStringLiteral("未命名工程"), &error),
+      qPrintable(error));
+  QVERIFY2(
+      project.setDatasetPath(
+          root.filePath(QStringLiteral("working/datasets/capture")), &error),
+      qPrintable(error));
+
+  const QString projectPath =
+      root.filePath(QStringLiteral("saved/capture.gsw.json"));
+  QVERIFY2(project.saveManifest(projectPath, &error), qPrintable(error));
+
+  QCOMPARE(project.rootPath(), QDir::cleanPath(workingRoot));
+  QVERIFY(project.hasPendingDataMigration());
+  QVERIFY(QFileInfo::exists(projectPath));
+  QVERIFY(
+      !QFileInfo::exists(root.filePath(QStringLiteral("saved/capture.files"))));
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
+  QCOMPARE(restored.rootPath(), QDir::cleanPath(workingRoot));
+  QVERIFY(restored.hasPendingDataMigration());
+  QCOMPARE(restored.datasetPath(), QDir::cleanPath(root.filePath(QStringLiteral(
+                                       "working/datasets/capture"))));
+}
+
+void WorkspaceDocumentTests::
+    finalizesPendingMigrationWithDataWrittenAfterManifestSave() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  gsw::WorkspaceDocument active;
+  QString error;
+  const QString workingRoot = root.filePath(QStringLiteral("working"));
+  const QString datasetPath =
+      root.filePath(QStringLiteral("working/datasets/capture"));
+  QVERIFY2(
+      active.createUntitled(workingRoot, QStringLiteral("未命名工程"), &error),
+      qPrintable(error));
+  QVERIFY2(active.setDatasetPath(datasetPath, &error), qPrintable(error));
+
+  const QString projectPath =
+      root.filePath(QStringLiteral("saved/capture.gsw.json"));
+  QVERIFY2(active.saveManifest(projectPath, &error), qPrintable(error));
+
+  QFile completedFrame(
+      QDir(datasetPath).filePath(QStringLiteral("images/completed.jpg")));
+  QVERIFY(completedFrame.open(QIODevice::WriteOnly));
+  QCOMPARE(completedFrame.write("completed"), qint64(9));
+  completedFrame.close();
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
+  QVERIFY(restored.hasPendingDataMigration());
+  QVERIFY2(restored.finalizeDataMigration(&error), qPrintable(error));
+
+  const QString savedRoot =
+      root.filePath(QStringLiteral("saved/capture.files"));
+  QCOMPARE(restored.rootPath(), QDir::cleanPath(savedRoot));
+  QCOMPARE(restored.datasetPath(), QDir::cleanPath(QDir(savedRoot).filePath(
+                                       QStringLiteral("datasets/capture"))));
+  QVERIFY(!restored.hasPendingDataMigration());
+  QVERIFY(QFileInfo::exists(QDir(savedRoot).filePath(
+      QStringLiteral("datasets/capture/images/completed.jpg"))));
+
+  QFile serialized(projectPath);
+  QVERIFY(serialized.open(QIODevice::ReadOnly));
+  const QJsonObject projectJson =
+      QJsonDocument::fromJson(serialized.readAll()).object();
+  QCOMPARE(projectJson.value(QStringLiteral("rootPath")).toString(),
+           QStringLiteral("capture.files"));
+  QVERIFY(!projectJson.contains(QStringLiteral("pendingDataRoot")));
+}
+
+void WorkspaceDocumentTests::resumesMigrationAfterDataDirectoryWasPublished() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  gsw::WorkspaceDocument active;
+  QString error;
+  const QString workingRoot = root.filePath(QStringLiteral("working"));
+  QVERIFY2(active.createUntitled(workingRoot, QStringLiteral("未命名工程"),
+                                 &error),
+           qPrintable(error));
+  const QString projectPath =
+      root.filePath(QStringLiteral("saved/recovered.gsw.json"));
+  QVERIFY2(active.saveManifest(projectPath, &error), qPrintable(error));
+
+  const QString publishedRoot =
+      root.filePath(QStringLiteral("saved/recovered.files"));
+  QVERIFY(root.mkpath(QStringLiteral("saved/recovered.files/output")));
+  QFile checkpoint(
+      QDir(publishedRoot).filePath(QStringLiteral("output/checkpoint.ply")));
+  QVERIFY(checkpoint.open(QIODevice::WriteOnly));
+  QCOMPARE(checkpoint.write("checkpoint"), qint64(10));
+  checkpoint.close();
+
+  QFile marker(QDir(publishedRoot).filePath(
+      QStringLiteral(".gsw-data-migration.json")));
+  QVERIFY(marker.open(QIODevice::WriteOnly));
+  const QJsonObject markerJson{
+      {QStringLiteral("version"), 1},
+      {QStringLiteral("projectFilePath"),
+       QDir::cleanPath(QFileInfo(projectPath).absoluteFilePath())},
+      {QStringLiteral("sourceRoot"),
+       QDir::cleanPath(QFileInfo(workingRoot).absoluteFilePath())}};
+  QCOMPARE(marker.write(
+               QJsonDocument(markerJson).toJson(QJsonDocument::Compact)),
+           QJsonDocument(markerJson).toJson(QJsonDocument::Compact).size());
+  marker.close();
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
+  QVERIFY(restored.hasPendingDataMigration());
+  QVERIFY2(restored.finalizeDataMigration(&error), qPrintable(error));
+
+  QCOMPARE(restored.rootPath(), QDir::cleanPath(publishedRoot));
+  QVERIFY(!restored.hasPendingDataMigration());
+  QVERIFY(QFileInfo::exists(QDir(publishedRoot).filePath(
+      QStringLiteral("output/checkpoint.ply"))));
+  QVERIFY(!QFileInfo::exists(QDir(publishedRoot).filePath(
+      QStringLiteral(".gsw-data-migration.json"))));
+}
+
 void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -561,11 +750,11 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   QVERIFY(image.open(QIODevice::WriteOnly));
   image.close();
 
-  const QString plyPath =
-      working.filePath(QStringLiteral("models/scene.ply"));
+  const QString plyPath = working.filePath(QStringLiteral("models/scene.ply"));
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
-  ply.write("ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\nend_header\n0\n1\n");
+  ply.write("ply\nformat ascii 1.0\nelement vertex 2\nproperty float "
+            "x\nend_header\n0\n1\n");
   ply.close();
 
   gsw::WorkspaceDocument source;
@@ -573,9 +762,9 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   QVERIFY2(source.createUntitled(working.path(), QStringLiteral("未命名工程"),
                                  &error),
            qPrintable(error));
-  QVERIFY2(source.setDatasetPath(working.filePath(QStringLiteral("images")),
-                                 &error),
-           qPrintable(error));
+  QVERIFY2(
+      source.setDatasetPath(working.filePath(QStringLiteral("images")), &error),
+      qPrintable(error));
   QVERIFY2(source.setScenePath(plyPath, &error), qPrintable(error));
   const QString projectPath =
       root.filePath(QStringLiteral("saved/test.gsw.json"));
@@ -585,29 +774,32 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   QCOMPARE(source.projectName(), QStringLiteral("test"));
   QCOMPARE(source.rootPath(),
            QDir::cleanPath(root.filePath(QStringLiteral("saved/test.files"))));
-  QCOMPARE(source.datasetPath(), QDir::cleanPath(root.filePath(
-                                        QStringLiteral("saved/test.files/images"))));
-  QCOMPARE(source.scenePath(), QDir::cleanPath(root.filePath(
-                                      QStringLiteral("saved/test.files/models/scene.ply"))));
-  QVERIFY(QFileInfo::exists(root.filePath(
-      QStringLiteral("saved/test.files/images/frame_0001.jpg"))));
+  QCOMPARE(source.datasetPath(), QDir::cleanPath(root.filePath(QStringLiteral(
+                                     "saved/test.files/images"))));
+  QCOMPARE(source.scenePath(), QDir::cleanPath(root.filePath(QStringLiteral(
+                                   "saved/test.files/models/scene.ply"))));
+  QVERIFY(QFileInfo::exists(
+      root.filePath(QStringLiteral("saved/test.files/images/frame_0001.jpg"))));
 
   QFile serialized(projectPath);
   QVERIFY(serialized.open(QIODevice::ReadOnly));
-  const QJsonObject projectJson = QJsonDocument::fromJson(serialized.readAll()).object();
+  const QJsonObject projectJson =
+      QJsonDocument::fromJson(serialized.readAll()).object();
   QCOMPARE(projectJson.value(QStringLiteral("rootPath")).toString(),
            QStringLiteral("test.files"));
-  QCOMPARE(projectJson.value(QStringLiteral("datasetPath")).toString(), QStringLiteral("images"));
-  QCOMPARE(projectJson.value(QStringLiteral("scenePath")).toString(), QStringLiteral("models/scene.ply"));
+  QCOMPARE(projectJson.value(QStringLiteral("datasetPath")).toString(),
+           QStringLiteral("images"));
+  QCOMPARE(projectJson.value(QStringLiteral("scenePath")).toString(),
+           QStringLiteral("models/scene.ply"));
 
   gsw::WorkspaceDocument restored;
   QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
   QCOMPARE(restored.rootPath(),
            QDir::cleanPath(root.filePath(QStringLiteral("saved/test.files"))));
-  QCOMPARE(restored.datasetPath(), QDir::cleanPath(root.filePath(
-                                          QStringLiteral("saved/test.files/images"))));
-  QCOMPARE(restored.scenePath(), QDir::cleanPath(root.filePath(
-                                        QStringLiteral("saved/test.files/models/scene.ply"))));
+  QCOMPARE(restored.datasetPath(), QDir::cleanPath(root.filePath(QStringLiteral(
+                                       "saved/test.files/images"))));
+  QCOMPARE(restored.scenePath(), QDir::cleanPath(root.filePath(QStringLiteral(
+                                     "saved/test.files/models/scene.ply"))));
   QCOMPARE(restored.imageCount(), 1);
   QCOMPARE(restored.sceneMetadata().vertexCount, 2);
 }
@@ -631,10 +823,10 @@ void WorkspaceDocumentTests::saveAsCopiesManagedDataIntoANewLinkedDirectory() {
   QVERIFY2(project.createUntitled(root.filePath(QStringLiteral("working")),
                                   QStringLiteral("未命名工程"), &error),
            qPrintable(error));
-  QVERIFY2(project.setDatasetPath(
-               root.filePath(QStringLiteral("working/datasets/capture")),
-               &error),
-           qPrintable(error));
+  QVERIFY2(
+      project.setDatasetPath(
+          root.filePath(QStringLiteral("working/datasets/capture")), &error),
+      qPrintable(error));
 
   const QString firstProject =
       root.filePath(QStringLiteral("first/capture.gsw.json"));
@@ -650,10 +842,12 @@ void WorkspaceDocumentTests::saveAsCopiesManagedDataIntoANewLinkedDirectory() {
   const QString secondData =
       root.filePath(QStringLiteral("second/capture-copy.files"));
   QCOMPARE(project.rootPath(), QDir::cleanPath(secondData));
-  QCOMPARE(project.datasetPath(), QDir::cleanPath(QDir(secondData).filePath(
-                                        QStringLiteral("datasets/capture"))));
-  QVERIFY(QFileInfo::exists(QDir(secondData).filePath(
-      QStringLiteral("datasets/capture/images/frame.jpg"))));
+  QCOMPARE(project.datasetPath(),
+           QDir::cleanPath(
+               QDir(secondData).filePath(QStringLiteral("datasets/capture"))));
+  QVERIFY(QFileInfo::exists(
+      QDir(secondData)
+          .filePath(QStringLiteral("datasets/capture/images/frame.jpg"))));
   QVERIFY(QFileInfo::exists(QDir(firstData).filePath(
       QStringLiteral("datasets/capture/images/frame.jpg"))));
 }
@@ -710,7 +904,7 @@ void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {
                           vector3(0.0, 1.0, 0.0))),
           camera(QStringLiteral("right.jpg"), vector3(3.0, 2.0, 3.0),
                  rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 0.0, -1.0),
-                          vector3(0.0, 1.0, 0.0))) })));
+                          vector3(0.0, 1.0, 0.0)))})));
 
   const gsw::CameraTrajectory trajectory =
       gsw::CameraTrajectory::loadForScene(scene);
@@ -729,10 +923,8 @@ void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {
   const gsw::CameraTrajectoryGeometry geometry = trajectory.geometry(2.0F);
   QCOMPARE(geometry.frustums.size(), qsizetype(16));
   QCOMPARE(geometry.path.size(), qsizetype(1));
-  compareVector(geometry.path.constFirst().start,
-                QVector3D(1.0F, 2.0F, 3.0F));
-  compareVector(geometry.path.constFirst().end,
-                QVector3D(3.0F, 2.0F, 3.0F));
+  compareVector(geometry.path.constFirst().start, QVector3D(1.0F, 2.0F, 3.0F));
+  compareVector(geometry.path.constFirst().end, QVector3D(3.0F, 2.0F, 3.0F));
   compareVector(geometry.frustums.constFirst().start,
                 QVector3D(1.0F, 2.0F, 3.0F));
   compareVector(geometry.frustums.constFirst().end,
@@ -744,17 +936,17 @@ void WorkspaceDocumentTests::skipsMalformedCameraEntries() {
   QVERIFY(temporary.isValid());
   const QString scene =
       QDir(temporary.path()).filePath(QStringLiteral("scene.ply"));
-  const QJsonObject valid = camera(
-      QStringLiteral("valid.jpg"), vector3(0.0, 0.0, 0.0),
-      rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
-               vector3(0.0, 0.0, 1.0)));
-  const QJsonObject invalid = camera(
-      QStringLiteral("broken.jpg"), vector3(0.0, 1.0, 0.0),
-      rotation(vector3(1.0, 1.0, 0.0), vector3(0.0, 0.0, 0.0),
-               vector3(0.0, 0.0, 1.0)));
-  QVERIFY(writeJson(
-      QDir(temporary.path()).filePath(QStringLiteral("cameras.json")),
-      QJsonDocument(QJsonArray{valid, invalid})));
+  const QJsonObject valid =
+      camera(QStringLiteral("valid.jpg"), vector3(0.0, 0.0, 0.0),
+             rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
+                      vector3(0.0, 0.0, 1.0)));
+  const QJsonObject invalid =
+      camera(QStringLiteral("broken.jpg"), vector3(0.0, 1.0, 0.0),
+             rotation(vector3(1.0, 1.0, 0.0), vector3(0.0, 0.0, 0.0),
+                      vector3(0.0, 0.0, 1.0)));
+  QVERIFY(
+      writeJson(QDir(temporary.path()).filePath(QStringLiteral("cameras.json")),
+                QJsonDocument(QJsonArray{valid, invalid})));
 
   const gsw::CameraTrajectory trajectory =
       gsw::CameraTrajectory::loadForScene(scene);
@@ -775,14 +967,14 @@ void WorkspaceDocumentTests::skipsMalformedCameraEntries() {
 void WorkspaceDocumentTests::reportsMalformedCameraDocument() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
-  QFile sidecar(QDir(temporary.path()).filePath(QStringLiteral("cameras.json")));
+  QFile sidecar(
+      QDir(temporary.path()).filePath(QStringLiteral("cameras.json")));
   QVERIFY(sidecar.open(QIODevice::WriteOnly));
   QCOMPARE(sidecar.write("{not-json"), qint64(9));
   sidecar.close();
 
-  const gsw::CameraTrajectory trajectory =
-      gsw::CameraTrajectory::loadForScene(
-          QDir(temporary.path()).filePath(QStringLiteral("scene.ply")));
+  const gsw::CameraTrajectory trajectory = gsw::CameraTrajectory::loadForScene(
+      QDir(temporary.path()).filePath(QStringLiteral("scene.ply")));
 
   QVERIFY(trajectory.cameras().isEmpty());
   QVERIFY(!trajectory.sourcePath().isEmpty());
@@ -793,9 +985,8 @@ void WorkspaceDocumentTests::treatsMissingCameraSidecarAsOptional() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
 
-  const gsw::CameraTrajectory trajectory =
-      gsw::CameraTrajectory::loadForScene(
-          QDir(temporary.path()).filePath(QStringLiteral("scene.ply")));
+  const gsw::CameraTrajectory trajectory = gsw::CameraTrajectory::loadForScene(
+      QDir(temporary.path()).filePath(QStringLiteral("scene.ply")));
 
   QVERIFY(trajectory.cameras().isEmpty());
   QCOMPARE(trajectory.sourcePath(), QString());
@@ -820,12 +1011,11 @@ void WorkspaceDocumentTests::reloadsCameraSidecarAfterRepair() {
   damaged.close();
   QVERIFY(!gsw::CameraTrajectory::loadForScene(scene).error().isEmpty());
 
-  QVERIFY(writeJson(
-      sidecar,
-      QJsonDocument(QJsonArray{camera(
-          QStringLiteral("repaired.jpg"), vector3(0.0, 0.0, 0.0),
-          rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
-                   vector3(0.0, 0.0, 1.0)))})));
+  QVERIFY(writeJson(sidecar,
+                    QJsonDocument(QJsonArray{camera(
+                        QStringLiteral("repaired.jpg"), vector3(0.0, 0.0, 0.0),
+                        rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
+                                 vector3(0.0, 0.0, 1.0)))})));
   const gsw::CameraTrajectory repaired =
       gsw::CameraTrajectory::loadForScene(scene);
   QCOMPARE(repaired.error(), QString());
@@ -841,17 +1031,16 @@ void WorkspaceDocumentTests::decimatesLargeCameraVisualization() {
   QJsonArray cameras;
   constexpr int cameraCount = 5002;
   for (int index = 0; index < cameraCount; ++index) {
-    cameras.append(camera(
-        QStringLiteral("frame_%1.jpg").arg(index),
-        vector3(static_cast<double>(index), 0.0, 0.0),
-        rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
-                 vector3(0.0, 0.0, 1.0))));
+    cameras.append(
+        camera(QStringLiteral("frame_%1.jpg").arg(index),
+               vector3(static_cast<double>(index), 0.0, 0.0),
+               rotation(vector3(1.0, 0.0, 0.0), vector3(0.0, 1.0, 0.0),
+                        vector3(0.0, 0.0, 1.0))));
   }
   QVERIFY(writeJson(root.filePath(QStringLiteral("cameras.json")),
                     QJsonDocument(cameras)));
-  const gsw::CameraTrajectory trajectory =
-      gsw::CameraTrajectory::loadForScene(
-          root.filePath(QStringLiteral("scene.ply")));
+  const gsw::CameraTrajectory trajectory = gsw::CameraTrajectory::loadForScene(
+      root.filePath(QStringLiteral("scene.ply")));
 
   QCOMPARE(trajectory.cameras().size(), qsizetype(cameraCount));
   const gsw::CameraTrajectoryGeometry geometry = trajectory.geometry(1.0F);
@@ -860,8 +1049,7 @@ void WorkspaceDocumentTests::decimatesLargeCameraVisualization() {
   QCOMPARE(geometry.displayedPathCameraCount, qsizetype(5000));
   QCOMPARE(geometry.frustums.size(), qsizetype(8000));
   QCOMPARE(geometry.path.size(), qsizetype(4999));
-  compareVector(geometry.path.constFirst().start,
-                QVector3D(0.0F, 0.0F, 0.0F));
+  compareVector(geometry.path.constFirst().start, QVector3D(0.0F, 0.0F, 0.0F));
   compareVector(geometry.path.constLast().end,
                 QVector3D(static_cast<float>(cameraCount - 1), 0.0F, 0.0F));
 }
