@@ -149,13 +149,13 @@ std::optional<OrbitAngles> navigationAxisViewAngles(const NavigationAxis axis) {
   case NavigationAxis::NegativeX:
     return OrbitAngles{-90.0F, 0.0F};
   case NavigationAxis::PositiveY:
-    return OrbitAngles{0.0F, 90.0F};
-  case NavigationAxis::NegativeY:
-    return OrbitAngles{0.0F, -90.0F};
-  case NavigationAxis::PositiveZ:
     return OrbitAngles{0.0F, 0.0F};
-  case NavigationAxis::NegativeZ:
+  case NavigationAxis::NegativeY:
     return OrbitAngles{180.0F, 0.0F};
+  case NavigationAxis::PositiveZ:
+    return OrbitAngles{0.0F, 90.0F};
+  case NavigationAxis::NegativeZ:
+    return OrbitAngles{0.0F, -90.0F};
   case NavigationAxis::None:
     break;
   }

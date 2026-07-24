@@ -49,7 +49,7 @@ QColor mixColor(const QColor &background, const QColor &foreground,
 
 QColor navigationAxisColor(const int axisIndex) {
   static const std::array<QColor, 3> colors = {
-      QColor(226, 67, 67), QColor(104, 185, 57), QColor(62, 116, 232)};
+      QColor(226, 67, 67), QColor(62, 116, 232), QColor(104, 185, 57)};
   return colors[static_cast<std::size_t>(axisIndex)];
 }
 
@@ -530,7 +530,7 @@ void main() {
   }
 
   // Independently implements Blender-style infinite-grid behavior: a
-  // full-screen ray is intersected with this application's fixed Y-up ground
+  // full-screen ray is intersected with this application's fixed Z-up ground
   // plane, so navigation never changes the grid's world-space anchor.
   mGridProgram = new QOpenGLShaderProgram(this);
   const bool gridVertexCompiled =
@@ -597,11 +597,11 @@ void main() {
   vec3 nearPoint = unprojectPoint(-1.0);
   vec3 farPoint = unprojectPoint(1.0);
   vec3 ray = farPoint - nearPoint;
-  if (abs(ray.y) < 1e-7) {
+  if (abs(ray.z) < 1e-7) {
     discard;
   }
 
-  float rayParameter = -nearPoint.y / ray.y;
+  float rayParameter = -nearPoint.z / ray.z;
   if (rayParameter <= 0.0) {
     discard;
   }
@@ -620,16 +620,16 @@ void main() {
   float coarseStep = fineStep * 10.0;
   float majorStep = coarseStep * 10.0;
 
-  float fineLines = mix(gridLines(world.xz, fineStep, 0.72 * uiScale),
-                        gridLines(world.xz, coarseStep, 0.72 * uiScale),
+  float fineLines = mix(gridLines(world.xy, fineStep, 0.72 * uiScale),
+                        gridLines(world.xy, coarseStep, 0.72 * uiScale),
                         levelBlend);
-  float majorLines = mix(gridLines(world.xz, coarseStep, 1.02 * uiScale),
-                         gridLines(world.xz, majorStep, 1.02 * uiScale),
+  float majorLines = mix(gridLines(world.xy, coarseStep, 1.02 * uiScale),
+                         gridLines(world.xy, majorStep, 1.02 * uiScale),
                          levelBlend);
   float lineAlpha = max(fineLines * 0.38, majorLines * 0.58);
 
-  float xAxis = originAxis(world.z, 1.35 * uiScale);
-  float zAxis = originAxis(world.x, 1.35 * uiScale);
+  float xAxis = originAxis(world.y, 1.35 * uiScale);
+  float yAxis = originAxis(world.x, 1.35 * uiScale);
   vec3 minorColor = vec3(0.17, 0.19, 0.20);
   vec3 majorColor = vec3(0.29, 0.31, 0.33);
   vec3 color = mix(minorColor, majorColor, majorLines);
@@ -637,14 +637,14 @@ void main() {
     color = mix(color, vec3(0.72, 0.26, 0.26), xAxis);
     lineAlpha = max(lineAlpha, xAxis * 0.78);
   }
-  if (zAxis > 0.0) {
-    color = mix(color, vec3(0.25, 0.42, 0.76), zAxis);
-    lineAlpha = max(lineAlpha, zAxis * 0.78);
+  if (yAxis > 0.0) {
+    color = mix(color, vec3(0.25, 0.42, 0.76), yAxis);
+    lineAlpha = max(lineAlpha, yAxis * 0.78);
   }
 
   vec3 toCamera = cameraWorld - world;
   float distanceToCamera = length(toCamera);
-  float planeFacing = abs(toCamera.y) / max(distanceToCamera, 1e-6);
+  float planeFacing = abs(toCamera.z) / max(distanceToCamera, 1e-6);
   float horizonFade = 1.0 - pow(1.0 - clamp(planeFacing, 0.0, 1.0), 4.0);
   float distanceFade = 1.0 - smoothstep(gridVisibleDistance * 0.5,
                                         gridVisibleDistance,
@@ -1439,8 +1439,8 @@ void NativeViewport::toggleCameraView() {
                                        mDistance, mOrthographic};
   const QVector3D cameraOffset = -forward;
   mPitchDegrees =
-      std::asin(std::clamp(cameraOffset.y(), -1.0F, 1.0F)) * 180.0F / kPi;
-  mYawDegrees = std::atan2(cameraOffset.x(), cameraOffset.z()) * 180.0F / kPi;
+      std::asin(std::clamp(cameraOffset.z(), -1.0F, 1.0F)) * 180.0F / kPi;
+  mYawDegrees = std::atan2(cameraOffset.x(), cameraOffset.y()) * 180.0F / kPi;
   mTarget = camera.position + forward * mDistance;
   mOrthographic = false;
   mCameraViewActive = true;
@@ -1516,11 +1516,11 @@ void NativeViewport::drawReferenceAxes(QPainter &painter,
     painter.drawLine(*origin, *xAxis);
   }
   if (origin.has_value() && yAxis.has_value()) {
-    painter.setPen(QPen(QColor(91, 191, 137), 2.0));
+    painter.setPen(QPen(QColor(89, 139, 222), 2.0));
     painter.drawLine(*origin, *yAxis);
   }
   if (origin.has_value() && zAxis.has_value()) {
-    painter.setPen(QPen(QColor(89, 139, 222), 2.0));
+    painter.setPen(QPen(QColor(91, 191, 137), 2.0));
     painter.drawLine(*origin, *zAxis);
   }
 }

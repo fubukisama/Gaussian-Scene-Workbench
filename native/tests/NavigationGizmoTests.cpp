@@ -17,29 +17,29 @@ private slots:
 
 void NavigationGizmoTests::projectsAxesAndHidesAlignedBackHandle() {
   QMatrix4x4 view;
-  view.lookAt(QVector3D(0.0F, 0.0F, 10.0F), QVector3D(),
-              QVector3D(0.0F, 1.0F, 0.0F));
+  view.lookAt(QVector3D(0.0F, 10.0F, 0.0F), QVector3D(),
+              QVector3D(0.0F, 0.0F, 1.0F));
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
 
   const NavigationAxisHandle &negativeX = layout.handles[0];
   const NavigationAxisHandle &positiveX = layout.handles[1];
+  const NavigationAxisHandle &negativeY = layout.handles[2];
   const NavigationAxisHandle &positiveY = layout.handles[3];
-  const NavigationAxisHandle &negativeZ = layout.handles[4];
   const NavigationAxisHandle &positiveZ = layout.handles[5];
 
-  QVERIFY(negativeX.center.x() < layout.center.x());
-  QVERIFY(positiveX.center.x() > layout.center.x());
-  QVERIFY(positiveY.center.y() < layout.center.y());
-  QVERIFY(negativeZ.hidden);
-  QVERIFY(!positiveZ.hidden);
-  QCOMPARE(positiveZ.center, layout.center);
+  QVERIFY(negativeX.center.x() > layout.center.x());
+  QVERIFY(positiveX.center.x() < layout.center.x());
+  QVERIFY(positiveZ.center.y() < layout.center.y());
+  QVERIFY(negativeY.hidden);
+  QVERIFY(!positiveY.hidden);
+  QCOMPARE(positiveY.center, layout.center);
 }
 
 void NavigationGizmoTests::selectsNearestAxisInsideRotationCircle() {
   QMatrix4x4 view;
-  view.lookAt(QVector3D(0.0F, 0.0F, 10.0F), QVector3D(),
-              QVector3D(0.0F, 1.0F, 0.0F));
+  view.lookAt(QVector3D(0.0F, 10.0F, 0.0F), QVector3D(),
+              QVector3D(0.0F, 0.0F, 1.0F));
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
 
@@ -60,13 +60,13 @@ void NavigationGizmoTests::mapsSixAxisViews() {
   QCOMPARE(navigationAxisViewAngles(NavigationAxis::NegativeX),
            std::optional<OrbitAngles>({-90.0F, 0.0F}));
   QCOMPARE(navigationAxisViewAngles(NavigationAxis::PositiveY),
-           std::optional<OrbitAngles>({0.0F, 90.0F}));
-  QCOMPARE(navigationAxisViewAngles(NavigationAxis::NegativeY),
-           std::optional<OrbitAngles>({0.0F, -90.0F}));
-  QCOMPARE(navigationAxisViewAngles(NavigationAxis::PositiveZ),
            std::optional<OrbitAngles>({0.0F, 0.0F}));
-  QCOMPARE(navigationAxisViewAngles(NavigationAxis::NegativeZ),
+  QCOMPARE(navigationAxisViewAngles(NavigationAxis::NegativeY),
            std::optional<OrbitAngles>({180.0F, 0.0F}));
+  QCOMPARE(navigationAxisViewAngles(NavigationAxis::PositiveZ),
+           std::optional<OrbitAngles>({0.0F, 90.0F}));
+  QCOMPARE(navigationAxisViewAngles(NavigationAxis::NegativeZ),
+           std::optional<OrbitAngles>({0.0F, -90.0F}));
 }
 
 void NavigationGizmoTests::keepsNavigationButtonsInsideViewport() {

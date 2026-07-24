@@ -40,8 +40,8 @@ OrbitFrame orbitFrame(const OrbitAngles angles) {
   const float cosPitch = std::cos(pitch);
 
   return {
-      QVector3D(cosPitch * sinYaw, sinPitch, cosPitch * cosYaw),
-      QVector3D(-sinPitch * sinYaw, cosPitch, -sinPitch * cosYaw),
+      QVector3D(cosPitch * sinYaw, cosPitch * cosYaw, sinPitch),
+      QVector3D(-sinPitch * sinYaw, -sinPitch * cosYaw, cosPitch),
   };
 }
 

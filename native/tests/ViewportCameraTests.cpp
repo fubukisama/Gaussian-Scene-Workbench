@@ -11,6 +11,7 @@ private slots:
   void mapsHorizontalAndVerticalLeftDragDirections();
   void allowsVerticalOrbitPastBothPoles();
   void wrapsAnglesAfterCompleteTurns();
+  void usesZAsWorldUpAxis();
   void keepsCameraFrameContinuousAcrossPoles();
 };
 
@@ -45,6 +46,13 @@ void ViewportCameraTests::wrapsAnglesAfterCompleteTurns() {
   const OrbitAngles fullPitchTurn =
       orbitAnglesAfterLeftDrag({0.0F, 0.0F}, QPoint(0, 1286));
   QVERIFY(qAbs(fullPitchTurn.pitchDegrees) < 0.1F);
+}
+
+void ViewportCameraTests::usesZAsWorldUpAxis() {
+  const OrbitFrame frame = orbitFrame({0.0F, 0.0F});
+
+  QCOMPARE(frame.cameraOffsetDirection, QVector3D(0.0F, 1.0F, 0.0F));
+  QCOMPARE(frame.upDirection, QVector3D(0.0F, 0.0F, 1.0F));
 }
 
 void ViewportCameraTests::keepsCameraFrameContinuousAcrossPoles() {
