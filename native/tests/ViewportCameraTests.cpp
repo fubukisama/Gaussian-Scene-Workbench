@@ -8,13 +8,13 @@ class ViewportCameraTests final : public QObject {
   Q_OBJECT
 
 private slots:
-  void reversesHorizontalAndVerticalLeftDragRotation();
+  void mapsHorizontalAndVerticalLeftDragDirections();
   void allowsVerticalOrbitPastBothPoles();
   void wrapsAnglesAfterCompleteTurns();
   void keepsCameraFrameContinuousAcrossPoles();
 };
 
-void ViewportCameraTests::reversesHorizontalAndVerticalLeftDragRotation() {
+void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
   const OrbitAngles horizontal =
       orbitAnglesAfterLeftDrag({42.0F, 24.0F}, QPoint(25, 0));
   QCOMPARE(horizontal.yawDegrees, 34.0F);
@@ -23,16 +23,16 @@ void ViewportCameraTests::reversesHorizontalAndVerticalLeftDragRotation() {
   const OrbitAngles vertical =
       orbitAnglesAfterLeftDrag({42.0F, 24.0F}, QPoint(0, 10));
   QCOMPARE(vertical.yawDegrees, 42.0F);
-  QVERIFY(qAbs(vertical.pitchDegrees - 21.2F) < 1.0e-5F);
+  QVERIFY(qAbs(vertical.pitchDegrees - 26.8F) < 1.0e-5F);
 }
 
 void ViewportCameraTests::allowsVerticalOrbitPastBothPoles() {
   const OrbitAngles pastNorth =
-      orbitAnglesAfterLeftDrag({0.0F, 85.0F}, QPoint(0, -30));
+      orbitAnglesAfterLeftDrag({0.0F, 85.0F}, QPoint(0, 30));
   QVERIFY(qAbs(pastNorth.pitchDegrees - 93.4F) < 1.0e-5F);
 
   const OrbitAngles pastSouth =
-      orbitAnglesAfterLeftDrag({0.0F, -85.0F}, QPoint(0, 30));
+      orbitAnglesAfterLeftDrag({0.0F, -85.0F}, QPoint(0, -30));
   QVERIFY(qAbs(pastSouth.pitchDegrees + 93.4F) < 1.0e-5F);
 }
 
@@ -43,7 +43,7 @@ void ViewportCameraTests::wrapsAnglesAfterCompleteTurns() {
   QVERIFY(wrapped.pitchDegrees >= -180.0F && wrapped.pitchDegrees < 180.0F);
 
   const OrbitAngles fullPitchTurn =
-      orbitAnglesAfterLeftDrag({0.0F, 0.0F}, QPoint(0, -1286));
+      orbitAnglesAfterLeftDrag({0.0F, 0.0F}, QPoint(0, 1286));
   QVERIFY(qAbs(fullPitchTurn.pitchDegrees) < 0.1F);
 }
 
