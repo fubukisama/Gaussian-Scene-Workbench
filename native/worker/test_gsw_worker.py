@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -101,6 +102,24 @@ class FakeImportBackend:
         if job_id != self.job_id or self.snapshot is None:
             raise ValueError("Import job not found")
         return dict(self.snapshot)
+
+
+class SafeNameImportBackend(FakeImportBackend):
+    def __init__(self, imported_bytes=b"imported"):
+        super().__init__(imported_bytes=imported_bytes)
+        self.received_scene = None
+
+    def save_path_dataset(self, request):
+        self.received_scene = request["scene"]
+        if (
+            len(self.received_scene) > 120
+            or self.received_scene.startswith(".")
+            or self.received_scene.endswith(".")
+            or ".." in self.received_scene
+            or re.fullmatch(r"[A-Za-z0-9_.-]+", self.received_scene) is None
+        ):
+            raise ValueError("Invalid scene name")
+        return super().save_path_dataset(request)
 
 
 class WorkerTests(unittest.TestCase):
@@ -212,6 +231,45 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(journal.read_text(encoding="utf-8"))["state"],
                 "committed",
+            )
+
+    def test_run_import_uses_backend_safe_staging_scene(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.import_configuration(root)
+            config["scene"] = "C0001"
+            backend = SafeNameImportBackend(imported_bytes=b"video frame")
+
+            with (
+                mock.patch.object(gsw_worker, "import_backend", return_value=backend),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                exit_code = gsw_worker.run_import(config)
+
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(backend.received_scene.startswith("."))
+            imported = (
+                root / "project" / "datasets" / "C0001" / "images" / "frame.jpg"
+            )
+            self.assertEqual(imported.read_bytes(), b"video frame")
+
+    def test_run_import_bounds_staging_name_for_maximum_scene_length(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.import_configuration(root)
+            config["scene"] = "a" * 120
+            backend = SafeNameImportBackend()
+
+            with (
+                mock.patch.object(gsw_worker, "import_backend", return_value=backend),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                exit_code = gsw_worker.run_import(config)
+
+            self.assertEqual(exit_code, 0)
+            self.assertLessEqual(len(backend.received_scene), 120)
+            self.assertTrue(
+                (root / "project" / "datasets" / ("a" * 120)).is_dir()
             )
 
     def test_run_import_overwrites_existing_dataset_with_new_data(self):
@@ -360,6 +418,27 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual((dataset_root / "capture" / "old.txt").read_text(encoding="utf-8"), "old")
             self.assertFalse(backup.exists())
             self.assertFalse(staging.exists())
+
+    def test_recover_interrupted_import_removes_backend_safe_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset_root = Path(temporary) / "datasets"
+            dataset_root.mkdir()
+            final = dataset_root / "capture"
+            staging = dataset_root / gsw_worker._staging_scene_name(
+                "capture", "a" * 32
+            )
+            backup = dataset_root / ".capture.backup-test"
+            staging.mkdir()
+            (staging / "partial.txt").write_text("partial", encoding="utf-8")
+            journal = self.write_import_transaction(
+                dataset_root, "capture", "staging", final, staging, backup
+            )
+
+            result = gsw_worker.recover_import_artifacts(dataset_root, "capture")
+
+            self.assertFalse(result["restored"])
+            self.assertFalse(staging.exists())
+            self.assertFalse(journal.exists())
 
     def test_recover_import_preserves_final_and_removes_obsolete_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:

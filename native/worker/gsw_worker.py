@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -404,9 +405,31 @@ def _journal_artifact_path(payload, field, dataset_root, expected_prefix):
     return path
 
 
+def _staging_scene_name(scene, token):
+    scene_digest = hashlib.sha256(scene.encode("utf-8")).hexdigest()[:16]
+    return "gsw-import-{}-{}".format(scene_digest, token)
+
+
+def _is_staging_artifact_name(name, scene):
+    legacy_prefix = ".{}.import-".format(scene)
+    if name.startswith(legacy_prefix):
+        return True
+    scene_digest = hashlib.sha256(scene.encode("utf-8")).hexdigest()[:16]
+    return re.fullmatch(
+        r"gsw-import-{}-[0-9a-f]{{32}}".format(scene_digest), name
+    ) is not None
+
+
+def _journal_staging_path(payload, dataset_root, scene):
+    path = _journal_artifact_path(payload, "stagingPath", dataset_root, "")
+    if not _is_staging_artifact_name(path.name, scene):
+        raise RuntimeError("Import transaction journal has an invalid stagingPath")
+    return path
+
+
 def _scene_artifacts(dataset_root, scene):
     backup_prefix = ".{}.backup-".format(scene)
-    staging_prefix = ".{}.import-".format(scene)
+    legacy_staging_prefix = ".{}.import-".format(scene)
     journal_name = ".{}.import-transaction.json".format(scene)
     backups = []
     staging_paths = []
@@ -419,7 +442,7 @@ def _scene_artifacts(dataset_root, scene):
             backups.append(entry)
         elif name.startswith("{}.tmp-".format(journal_name)):
             journal_temps.append(entry)
-        elif name.startswith(staging_prefix) and name != journal_name:
+        elif name.startswith(legacy_staging_prefix) and name != journal_name:
             staging_paths.append(entry)
     return backups, staging_paths, journal_temps
 
@@ -451,9 +474,7 @@ def _recover_import_artifacts(dataset_root, scene):
         expected_final = _journal_artifact_path(journal, "finalPath", dataset_root, scene)
         if os.path.normcase(str(expected_final)) != os.path.normcase(str(final_path)):
             raise RuntimeError("Import transaction journal has an invalid finalPath")
-        staging_path = _journal_artifact_path(
-            journal, "stagingPath", dataset_root, ".{}.import-".format(scene)
-        )
+        staging_path = _journal_staging_path(journal, dataset_root, scene)
         backup_path = _journal_artifact_path(
             journal, "backupPath", dataset_root, ".{}.backup-".format(scene)
         )
@@ -601,7 +622,7 @@ def _run_import_locked(config, server, dataset_root, scene):
         raise FileExistsError("Dataset already exists: {}".format(final_path))
 
     token = uuid.uuid4().hex
-    staging_scene = ".{}.import-{}".format(scene, token)
+    staging_scene = _staging_scene_name(scene, token)
     staging_path = dataset_root / staging_scene
     backup_path = dataset_root / ".{}.backup-{}".format(scene, token)
     journal_path = import_journal_path(dataset_root, scene)
