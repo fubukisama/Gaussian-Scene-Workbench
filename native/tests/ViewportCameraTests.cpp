@@ -13,6 +13,8 @@ private slots:
   void wrapsAnglesAfterCompleteTurns();
   void usesZAsWorldUpAxis();
   void keepsCameraFrameContinuousAcrossPoles();
+  void selectsScreenParallelGridForAxisOrthographicViews();
+  void keepsWorldGroundGridForPerspectiveViews();
 };
 
 void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
@@ -67,6 +69,28 @@ void ViewportCameraTests::keepsCameraFrameContinuousAcrossPoles() {
                                      after.upDirection)) < 1.0e-5F);
   QVERIFY(qAbs(after.cameraOffsetDirection.length() - 1.0F) < 1.0e-5F);
   QVERIFY(qAbs(after.upDirection.length() - 1.0F) < 1.0e-5F);
+}
+
+void ViewportCameraTests::selectsScreenParallelGridForAxisOrthographicViews() {
+  QCOMPARE(referenceGridPlane({90.0F, 0.0F}, true),
+           ReferenceGridPlane::YZ);
+  QCOMPARE(referenceGridPlane({-90.0F, 0.0F}, true),
+           ReferenceGridPlane::YZ);
+  QCOMPARE(referenceGridPlane({0.0F, 0.0F}, true),
+           ReferenceGridPlane::XZ);
+  QCOMPARE(referenceGridPlane({180.0F, 0.0F}, true),
+           ReferenceGridPlane::XZ);
+  QCOMPARE(referenceGridPlane({0.0F, 90.0F}, true),
+           ReferenceGridPlane::XY);
+  QCOMPARE(referenceGridPlane({0.0F, -90.0F}, true),
+           ReferenceGridPlane::XY);
+}
+
+void ViewportCameraTests::keepsWorldGroundGridForPerspectiveViews() {
+  QCOMPARE(referenceGridPlane({90.0F, 0.0F}, false),
+           ReferenceGridPlane::XY);
+  QCOMPARE(referenceGridPlane({0.0F, 0.0F}, false),
+           ReferenceGridPlane::XY);
 }
 
 QTEST_GUILESS_MAIN(ViewportCameraTests)

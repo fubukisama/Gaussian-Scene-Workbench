@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
   parser.addOption(exitConfirmationSmokeTestOption);
   QCommandLineOption infiniteGridSmokeTestOption(
       QStringLiteral("smoke-test-infinite-grid"),
-      QStringLiteral("Verify the world-fixed infinite reference grid."));
+      QStringLiteral("Verify the adaptive all-axis infinite reference grid."));
   parser.addOption(infiniteGridSmokeTestOption);
   QCommandLineOption mediaSourceOption(
       QStringLiteral("media-source"),
@@ -198,6 +198,7 @@ int main(int argc, char *argv[]) {
               start, globalStart, QPoint(), QPoint(0, -24 * 120),
               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
           QCoreApplication::sendEvent(viewport, &zoomOut);
+          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
         });
     QTimer::singleShot(
         950, &application,

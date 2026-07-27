@@ -35,6 +35,35 @@ constexpr float kPi = 3.14159265358979323846F;
 constexpr float kReferenceGridMinimumVisibleDistance = 10000.0F;
 constexpr float kReferenceGridDistanceMultiplier = 256.0F;
 
+struct ReferenceGridFrame final {
+  QVector3D normal;
+  QVector3D axisU;
+  QVector3D axisV;
+  QVector3D axisUColor;
+  QVector3D axisVColor;
+};
+
+ReferenceGridFrame referenceGridFrame(const ReferenceGridPlane plane) {
+  const QVector3D xColor(0.72F, 0.26F, 0.26F);
+  const QVector3D yColor(0.25F, 0.42F, 0.76F);
+  const QVector3D zColor(0.38F, 0.68F, 0.25F);
+  switch (plane) {
+  case ReferenceGridPlane::XY:
+    return {QVector3D(0.0F, 0.0F, 1.0F),
+            QVector3D(1.0F, 0.0F, 0.0F),
+            QVector3D(0.0F, 1.0F, 0.0F), xColor, yColor};
+  case ReferenceGridPlane::XZ:
+    return {QVector3D(0.0F, 1.0F, 0.0F),
+            QVector3D(1.0F, 0.0F, 0.0F),
+            QVector3D(0.0F, 0.0F, 1.0F), xColor, zColor};
+  case ReferenceGridPlane::YZ:
+    return {QVector3D(1.0F, 0.0F, 0.0F),
+            QVector3D(0.0F, 1.0F, 0.0F),
+            QVector3D(0.0F, 0.0F, 1.0F), yColor, zColor};
+  }
+  return {};
+}
+
 float radians(const float degrees) { return degrees * kPi / 180.0F; }
 
 QColor mixColor(const QColor &background, const QColor &foreground,
@@ -529,9 +558,9 @@ void main() {
                             .arg(mGaussianProgram->log());
   }
 
-  // Independently implements Blender-style infinite-grid behavior: a
-  // full-screen ray is intersected with this application's fixed Z-up ground
-  // plane, so navigation never changes the grid's world-space anchor.
+  // Independently implements Blender-style infinite-grid behavior. Perspective
+  // uses the fixed Z-up ground plane; orthographic axis views use the matching
+  // world plane so the scale remains visible in all six directions.
   mGridProgram = new QOpenGLShaderProgram(this);
   const bool gridVertexCompiled =
       mGridProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
@@ -562,6 +591,11 @@ uniform vec3 cameraWorld;
 uniform float cameraDistance;
 uniform float gridVisibleDistance;
 uniform float uiScale;
+uniform vec3 gridPlaneNormal;
+uniform vec3 gridAxisU;
+uniform vec3 gridAxisV;
+uniform vec3 gridAxisUColor;
+uniform vec3 gridAxisVColor;
 
 vec3 unprojectPoint(float clipDepth) {
   vec4 world = inverseViewProjection *
@@ -597,11 +631,12 @@ void main() {
   vec3 nearPoint = unprojectPoint(-1.0);
   vec3 farPoint = unprojectPoint(1.0);
   vec3 ray = farPoint - nearPoint;
-  if (abs(ray.z) < 1e-7) {
+  float planeRay = dot(ray, gridPlaneNormal);
+  if (abs(planeRay) < 1e-7) {
     discard;
   }
 
-  float rayParameter = -nearPoint.z / ray.z;
+  float rayParameter = -dot(nearPoint, gridPlaneNormal) / planeRay;
   if (rayParameter <= 0.0) {
     discard;
   }
@@ -609,6 +644,8 @@ void main() {
   // beyond the scene far plane keeps the background grid independent from
   // the much tighter depth range used by points and Gaussian splats.
   vec3 world = nearPoint + rayParameter * ray;
+  vec2 gridCoordinate = vec2(dot(world, gridAxisU),
+                             dot(world, gridAxisV));
 
   // The scale is uniform for the whole frame. Keeping it out of derivative
   // calculations avoids spatial level boundaries and the moire they create.
@@ -620,31 +657,32 @@ void main() {
   float coarseStep = fineStep * 10.0;
   float majorStep = coarseStep * 10.0;
 
-  float fineLines = mix(gridLines(world.xy, fineStep, 0.72 * uiScale),
-                        gridLines(world.xy, coarseStep, 0.72 * uiScale),
+  float fineLines = mix(gridLines(gridCoordinate, fineStep, 0.72 * uiScale),
+                        gridLines(gridCoordinate, coarseStep, 0.72 * uiScale),
                         levelBlend);
-  float majorLines = mix(gridLines(world.xy, coarseStep, 1.02 * uiScale),
-                         gridLines(world.xy, majorStep, 1.02 * uiScale),
+  float majorLines = mix(gridLines(gridCoordinate, coarseStep, 1.02 * uiScale),
+                         gridLines(gridCoordinate, majorStep, 1.02 * uiScale),
                          levelBlend);
   float lineAlpha = max(fineLines * 0.38, majorLines * 0.58);
 
-  float xAxis = originAxis(world.y, 1.35 * uiScale);
-  float yAxis = originAxis(world.x, 1.35 * uiScale);
+  float uAxis = originAxis(gridCoordinate.y, 1.35 * uiScale);
+  float vAxis = originAxis(gridCoordinate.x, 1.35 * uiScale);
   vec3 minorColor = vec3(0.17, 0.19, 0.20);
   vec3 majorColor = vec3(0.29, 0.31, 0.33);
   vec3 color = mix(minorColor, majorColor, majorLines);
-  if (xAxis > 0.0) {
-    color = mix(color, vec3(0.72, 0.26, 0.26), xAxis);
-    lineAlpha = max(lineAlpha, xAxis * 0.78);
+  if (uAxis > 0.0) {
+    color = mix(color, gridAxisUColor, uAxis);
+    lineAlpha = max(lineAlpha, uAxis * 0.78);
   }
-  if (yAxis > 0.0) {
-    color = mix(color, vec3(0.25, 0.42, 0.76), yAxis);
-    lineAlpha = max(lineAlpha, yAxis * 0.78);
+  if (vAxis > 0.0) {
+    color = mix(color, gridAxisVColor, vAxis);
+    lineAlpha = max(lineAlpha, vAxis * 0.78);
   }
 
   vec3 toCamera = cameraWorld - world;
   float distanceToCamera = length(toCamera);
-  float planeFacing = abs(toCamera.z) / max(distanceToCamera, 1e-6);
+  float planeFacing = abs(dot(toCamera, gridPlaneNormal)) /
+                      max(distanceToCamera, 1e-6);
   float horizonFade = 1.0 - pow(1.0 - clamp(planeFacing, 0.0, 1.0), 4.0);
   float distanceFade = 1.0 - smoothstep(gridVisibleDistance * 0.5,
                                         gridVisibleDistance,
@@ -1078,6 +1116,13 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->setUniformValue("inverseViewProjection", inverseViewProjection);
   mGridProgram->setUniformValue("cameraWorld", cameraPosition());
   mGridProgram->setUniformValue("cameraDistance", mDistance);
+  const ReferenceGridFrame grid = referenceGridFrame(
+      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic));
+  mGridProgram->setUniformValue("gridPlaneNormal", grid.normal);
+  mGridProgram->setUniformValue("gridAxisU", grid.axisU);
+  mGridProgram->setUniformValue("gridAxisV", grid.axisV);
+  mGridProgram->setUniformValue("gridAxisUColor", grid.axisUColor);
+  mGridProgram->setUniformValue("gridAxisVColor", grid.axisVColor);
   mGridProgram->setUniformValue(
       "gridVisibleDistance",
       std::max(kReferenceGridMinimumVisibleDistance,
@@ -1372,7 +1417,7 @@ void NativeViewport::finishNavigationGizmoInteraction() {
 
   if (!dragged) {
     if (pressed.part == NavigationGizmoPart::Rotate) {
-      snapToNavigationAxis(pressed.axis);
+      setAxisView(pressed.axis);
     } else if (pressed.part == NavigationGizmoPart::Camera) {
       toggleCameraView();
     } else if (pressed.part == NavigationGizmoPart::Projection) {
@@ -1388,7 +1433,7 @@ void NativeViewport::finishNavigationGizmoInteraction() {
   updateNavigationGizmoHover(QPointF(mLastMousePosition));
 }
 
-void NativeViewport::snapToNavigationAxis(const NavigationAxis axis) {
+void NativeViewport::setAxisView(const NavigationAxis axis) {
   const std::optional<OrbitAngles> target = navigationAxisViewAngles(axis);
   if (!target.has_value()) {
     return;

@@ -17,9 +17,14 @@ struct OrbitFrame {
   QVector3D upDirection;
 };
 
+enum class ReferenceGridPlane { XY, XZ, YZ };
+
 [[nodiscard]] OrbitAngles orbitAnglesAfterLeftDrag(OrbitAngles current,
                                                    const QPoint &delta);
 
 [[nodiscard]] OrbitFrame orbitFrame(OrbitAngles angles);
+
+[[nodiscard]] ReferenceGridPlane
+referenceGridPlane(OrbitAngles angles, bool orthographic);
 
 } // namespace gsw

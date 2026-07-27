@@ -45,4 +45,23 @@ OrbitFrame orbitFrame(const OrbitAngles angles) {
   };
 }
 
+ReferenceGridPlane referenceGridPlane(const OrbitAngles angles,
+                                      const bool orthographic) {
+  if (!orthographic) {
+    return ReferenceGridPlane::XY;
+  }
+
+  const QVector3D viewNormal = orbitFrame(angles).cameraOffsetDirection;
+  const float absoluteX = std::abs(viewNormal.x());
+  const float absoluteY = std::abs(viewNormal.y());
+  const float absoluteZ = std::abs(viewNormal.z());
+  if (absoluteX >= absoluteY && absoluteX >= absoluteZ) {
+    return ReferenceGridPlane::YZ;
+  }
+  if (absoluteY >= absoluteZ) {
+    return ReferenceGridPlane::XZ;
+  }
+  return ReferenceGridPlane::XY;
+}
+
 } // namespace gsw

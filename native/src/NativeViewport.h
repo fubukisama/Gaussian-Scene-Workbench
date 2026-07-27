@@ -51,6 +51,7 @@ public:
   void setRenderMode(RenderMode mode);
   void setVisibleOnlySelection(bool enabled);
   void setBrushRadius(int pixels);
+  void setAxisView(NavigationAxis axis);
   void resetCamera();
   void clearSelection();
   void invertSelection();
@@ -135,7 +136,6 @@ private:
   void updateNavigationGizmoHover(const QPointF &position);
   void updateNavigationGizmoInteraction(const QPoint &current);
   void finishNavigationGizmoInteraction();
-  void snapToNavigationAxis(NavigationAxis axis);
   void panCamera(const QPoint &delta);
   void toggleCameraView();
   void leaveCameraView();
