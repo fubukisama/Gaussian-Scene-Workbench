@@ -49,6 +49,8 @@ private slots:
   void clearsExternalDatasetWithoutDeletingSourceFiles();
   void clearsSceneAssociationWithoutDeletingSceneFile();
   void rollsBackManagedCleanupWhenManifestSaveFails();
+  void clearsOnlyManagedReconstructionData();
+  void refusesToModifyExternalReconstructionData();
   void loadsStandardCameraSidecarAndBuildsLegacyAxes();
   void skipsMalformedCameraEntries();
   void reportsMalformedCameraDocument();
@@ -1091,6 +1093,123 @@ void WorkspaceDocumentTests::rollsBackManagedCleanupWhenManifestSaveFails() {
   QVERIFY(QFileInfo::exists(
       QDir(activeDataset).filePath(QStringLiteral("images/frame.jpg"))));
   QVERIFY(!result.datasetCleared);
+}
+
+void WorkspaceDocumentTests::clearsOnlyManagedReconstructionData() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/sparse/0")));
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/distorted")));
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/stereo")));
+  QVERIFY(root.mkpath(
+      QStringLiteral("working/datasets/capture/.alignment_cache/sparse/0")));
+  QVERIFY(root.mkpath(QStringLiteral("working/output")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  const QString dataset =
+      root.filePath(QStringLiteral("working/datasets/capture"));
+  const QString imagePath =
+      QDir(dataset).filePath(QStringLiteral("images/frame.jpg"));
+  QFile image(imagePath);
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+  for (const QString &relative :
+       {QStringLiteral("sparse/0/cameras.bin"),
+        QStringLiteral("sparse/0/images.bin"),
+        QStringLiteral("sparse/0/points3D.bin"),
+        QStringLiteral("distorted/database.db"),
+        QStringLiteral("stereo/depth.bin"),
+        QStringLiteral(".alignment_cache/sparse/0/cameras.bin")}) {
+    QFile artifact(QDir(dataset).filePath(relative));
+    QVERIFY(artifact.open(QIODevice::WriteOnly));
+    QVERIFY(artifact.write("fixture") > 0);
+  }
+
+  const QString sourceScene =
+      root.filePath(QStringLiteral("working/output/point_cloud.ply"));
+  QFile ply(sourceScene);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  QVERIFY(ply.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float "
+                    "x\nend_header\n0\n") > 0);
+  ply.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(dataset, &error), qPrintable(error));
+  QVERIFY2(project.setScenePath(sourceScene, &error), qPrintable(error));
+  const QString projectFile =
+      root.filePath(QStringLiteral("saved/reconstruction.gsw.json"));
+  QVERIFY2(project.save(projectFile, &error), qPrintable(error));
+  const QString activeDataset = project.datasetPath();
+  const QString activeScene = project.scenePath();
+  QVERIFY(project.hasManagedReconstructionData());
+
+  gsw::ReconstructionCleanupResult result;
+  QVERIFY2(project.clearReconstructionData(&result, &error),
+           qPrintable(error));
+  QVERIFY(!result.removedPaths.isEmpty());
+  QVERIFY(result.cleanupPendingPath.isEmpty());
+  QCOMPARE(project.datasetPath(), QDir::cleanPath(activeDataset));
+  QCOMPARE(project.scenePath(), QDir::cleanPath(activeScene));
+  QCOMPARE(project.imageCount(), qint64(1));
+  QVERIFY(QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral("images/frame.jpg"))));
+  QVERIFY(QFileInfo::exists(activeScene));
+  QVERIFY(!QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral("sparse"))));
+  QVERIFY(!QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral("distorted"))));
+  QVERIFY(!QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral("stereo"))));
+  QVERIFY(!QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral(".alignment_cache"))));
+  QVERIFY(!project.hasManagedReconstructionData());
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectFile, &error), qPrintable(error));
+  QCOMPARE(restored.datasetPath(), QDir::cleanPath(activeDataset));
+  QCOMPARE(restored.scenePath(), QDir::cleanPath(activeScene));
+  QCOMPARE(restored.imageCount(), qint64(1));
+}
+
+void WorkspaceDocumentTests::refusesToModifyExternalReconstructionData() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working")));
+  QVERIFY(root.mkpath(QStringLiteral("external/images")));
+  QVERIFY(root.mkpath(QStringLiteral("external/sparse/0")));
+
+  const QString externalDataset = root.filePath(QStringLiteral("external"));
+  QFile image(
+      QDir(externalDataset).filePath(QStringLiteral("images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QVERIFY(image.write("image") > 0);
+  image.close();
+  const QString sparseFile =
+      QDir(externalDataset).filePath(QStringLiteral("sparse/0/cameras.bin"));
+  QFile sparse(sparseFile);
+  QVERIFY(sparse.open(QIODevice::WriteOnly));
+  QVERIFY(sparse.write("fixture") > 0);
+  sparse.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(externalDataset, &error), qPrintable(error));
+  QVERIFY(!project.hasManagedReconstructionData());
+
+  gsw::ReconstructionCleanupResult result;
+  QVERIFY(!project.clearReconstructionData(&result, &error));
+  QVERIFY(error.contains(QStringLiteral("external"), Qt::CaseInsensitive));
+  QCOMPARE(project.datasetPath(), QDir::cleanPath(externalDataset));
+  QVERIFY(QFileInfo::exists(sparseFile));
 }
 
 void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {

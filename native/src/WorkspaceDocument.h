@@ -31,6 +31,11 @@ struct ImportCleanupResult {
   QString cleanupPendingPath;
 };
 
+struct ReconstructionCleanupResult {
+  QStringList removedPaths;
+  QString cleanupPendingPath;
+};
+
 class WorkspaceDocument final : public QObject {
   Q_OBJECT
 
@@ -49,6 +54,7 @@ public:
   [[nodiscard]] PlyMetadata sceneMetadata() const;
   [[nodiscard]] bool hasPendingDataMigration() const;
   [[nodiscard]] bool isDatasetManaged() const;
+  [[nodiscard]] bool hasManagedReconstructionData() const;
 
   bool create(const QString &rootPath, QString *errorMessage = nullptr);
   bool createUntitled(const QString &workingRoot,
@@ -65,6 +71,8 @@ public:
   bool clearImportedData(const ImportCleanupOptions &options,
                          ImportCleanupResult *result = nullptr,
                          QString *errorMessage = nullptr);
+  bool clearReconstructionData(ReconstructionCleanupResult *result = nullptr,
+                               QString *errorMessage = nullptr);
 
   static PlyMetadata inspectPly(const QString &filePath,
                                 QString *errorMessage = nullptr);

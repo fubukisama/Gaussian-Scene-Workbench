@@ -118,7 +118,10 @@ private:
   void importDatasetSources(const QStringList &sourcePaths);
   void attachExistingDataset();
   void importScene();
-  void clearImportedData();
+  void clearDatasetImport();
+  void clearReconstructionImport();
+  void clearSceneImport();
+  void clearTaskHistory();
   void runEnvironmentCheck();
   void startReconstruction();
   void startTraining();
@@ -175,7 +178,10 @@ private:
   QAction *mImportDatasetDirectoryAction = nullptr;
   QAction *mAttachDatasetAction = nullptr;
   QAction *mImportSceneAction = nullptr;
-  QAction *mClearImportedDataAction = nullptr;
+  QAction *mClearDatasetAction = nullptr;
+  QAction *mClearReconstructionAction = nullptr;
+  QAction *mClearSceneAction = nullptr;
+  QAction *mClearTasksAction = nullptr;
   QAction *mReconstructAction = nullptr;
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;

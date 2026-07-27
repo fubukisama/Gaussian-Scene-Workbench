@@ -534,13 +534,23 @@ int main(int argc, char *argv[]) {
           QStringLiteral("projectNameValue"));
       const QLabel *projectRoot = window.findChild<QLabel *>(
           QStringLiteral("projectRootValue"));
-      const QAction *clearImportedData = window.findChild<QAction *>(
-          QStringLiteral("clearImportedDataAction"));
+      const QAction *clearDataset = window.findChild<QAction *>(
+          QStringLiteral("clearDatasetAction"));
+      const QAction *clearReconstruction = window.findChild<QAction *>(
+          QStringLiteral("clearReconstructionAction"));
+      const QAction *clearScene = window.findChild<QAction *>(
+          QStringLiteral("clearSceneAction"));
+      const QAction *clearTasks = window.findChild<QAction *>(
+          QStringLiteral("clearTasksAction"));
       smokeTestCompleted =
           smokeTestCompleted && projectName != nullptr &&
           projectName->text() == QStringLiteral("未命名工程") &&
           projectRoot != nullptr &&
-          clearImportedData != nullptr && !clearImportedData->isEnabled() &&
+          clearDataset != nullptr && !clearDataset->isEnabled() &&
+          clearReconstruction != nullptr &&
+          !clearReconstruction->isEnabled() && clearScene != nullptr &&
+          !clearScene->isEnabled() && clearTasks != nullptr &&
+          clearTasks->isEnabled() &&
           projectRoot->text().contains(QStringLiteral("首次保存"));
       application.exit(smokeTestCompleted ? 0 : 2);
     });

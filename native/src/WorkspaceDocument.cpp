@@ -222,6 +222,37 @@ qint64 countImageFiles(const QString &rootPath) {
   }
   return count;
 }
+
+QStringList reconstructionArtifactPaths(const QString &datasetPath) {
+  if (datasetPath.isEmpty() || !QFileInfo(datasetPath).isDir()) {
+    return {};
+  }
+  const QDir dataset(datasetPath);
+  QStringList artifacts;
+  const auto appendExisting = [&artifacts](const QString &path) {
+    const QString cleanPath = QDir::cleanPath(path);
+    if (QFileInfo::exists(cleanPath) && !artifacts.contains(cleanPath)) {
+      artifacts.append(cleanPath);
+    }
+  };
+  for (const QString &name :
+       {QStringLiteral("distorted"), QStringLiteral("sparse"),
+        QStringLiteral("stereo"), QStringLiteral("database.db"),
+        QStringLiteral(".alignment_cache"),
+        QStringLiteral(".colmap-undistorted")}) {
+    appendExisting(dataset.filePath(name));
+  }
+  const QFileInfoList transientArtifacts = dataset.entryInfoList(
+      {QStringLiteral(".colmap-undistorted-*"),
+       QStringLiteral(".colmap-backup-*")},
+      QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden |
+          QDir::System,
+      QDir::Name);
+  for (const QFileInfo &artifact : transientArtifacts) {
+    appendExisting(artifact.absoluteFilePath());
+  }
+  return artifacts;
+}
 } // namespace
 
 bool PlyMetadata::looksLikeGaussianSplat() const {
@@ -258,6 +289,11 @@ bool WorkspaceDocument::isDatasetManaged() const {
   QString relative;
   return relativePathInside(managedDatasetsRoot, mDatasetPath, &relative) &&
          relative != QStringLiteral(".");
+}
+
+bool WorkspaceDocument::hasManagedReconstructionData() const {
+  return isDatasetManaged() &&
+         !reconstructionArtifactPaths(mDatasetPath).isEmpty();
 }
 
 bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
@@ -865,6 +901,90 @@ bool WorkspaceDocument::clearImportedData(
     result->previousScenePath = previousScenePath;
     result->cleanupPendingPath = cleanupPendingPath;
   }
+  return true;
+}
+
+bool WorkspaceDocument::clearReconstructionData(
+    ReconstructionCleanupResult *result, QString *errorMessage) {
+  if (result != nullptr) {
+    *result = {};
+  }
+  if (!hasProject()) {
+    assignError(errorMessage, tr("No project is open."));
+    return false;
+  }
+  if (hasPendingDataMigration()) {
+    assignError(errorMessage,
+                tr("Finish the pending project data migration before "
+                   "cleaning reconstruction data."));
+    return false;
+  }
+  if (mDatasetPath.isEmpty()) {
+    assignError(errorMessage, tr("No dataset is attached."));
+    return false;
+  }
+  if (!isDatasetManaged()) {
+    assignError(errorMessage,
+                tr("Reconstruction data belongs to an external linked "
+                   "dataset and will not be modified."));
+    return false;
+  }
+
+  const QStringList artifacts = reconstructionArtifactPaths(mDatasetPath);
+  if (artifacts.isEmpty()) {
+    assignError(errorMessage, tr("No managed reconstruction data was found."));
+    return false;
+  }
+
+  const QFileInfo projectRootInfo(mRootPath);
+  const QString stagingRoot =
+      QDir(projectRootInfo.absolutePath())
+          .filePath(QStringLiteral(".%1.gsw-reconstruction-cleanup-%2")
+                        .arg(projectRootInfo.fileName(),
+                             QUuid::createUuid().toString(
+                                 QUuid::WithoutBraces)));
+  if (!QDir().mkpath(stagingRoot)) {
+    assignError(errorMessage,
+                tr("Unable to prepare the reconstruction cleanup area: %1")
+                    .arg(stagingRoot));
+    return false;
+  }
+
+  QList<QPair<QString, QString>> stagedArtifacts;
+  for (const QString &artifact : artifacts) {
+    const QString stagedPath =
+        QDir(stagingRoot).filePath(QFileInfo(artifact).fileName());
+    if (!QDir().rename(artifact, stagedPath)) {
+      bool restored = true;
+      for (auto iterator = stagedArtifacts.crbegin();
+           iterator != stagedArtifacts.crend(); ++iterator) {
+        restored = QDir().rename(iterator->second, iterator->first) && restored;
+      }
+      if (restored) {
+        QDir().rmdir(stagingRoot);
+      }
+      assignError(
+          errorMessage,
+          restored
+              ? tr("Unable to stage reconstruction data for cleanup: %1")
+                    .arg(artifact)
+              : tr("Unable to stage reconstruction data for cleanup, and "
+                   "some files could not be restored from: %1")
+                    .arg(stagingRoot));
+      return false;
+    }
+    stagedArtifacts.append(qMakePair(artifact, stagedPath));
+  }
+
+  QString cleanupPendingPath;
+  if (!QDir(stagingRoot).removeRecursively()) {
+    cleanupPendingPath = stagingRoot;
+  }
+  if (result != nullptr) {
+    result->removedPaths = artifacts;
+    result->cleanupPendingPath = cleanupPendingPath;
+  }
+  emit changed();
   return true;
 }
 
