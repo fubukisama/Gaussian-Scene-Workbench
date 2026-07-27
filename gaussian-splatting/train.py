@@ -10,7 +10,9 @@
 #
 
 import os
+import json
 import torch
+import time
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -69,6 +71,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     viewpoint_indices = list(range(len(viewpoint_stack)))
     ema_loss_for_log = 0.0
     ema_Ll1depth_for_log = 0.0
+    training_started_at = time.monotonic()
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     progress_interval = max(1, opt.iterations // 100)
@@ -156,6 +159,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.update(10)
             if iteration == first_iter or iteration % progress_interval == 0 or iteration == opt.iterations:
                 print("\n[gsw-training-progress] {}/{}".format(iteration, opt.iterations), flush=True)
+                training_psnr = psnr(image, gt_image).mean().item()
+                telemetry = {
+                    "iteration": iteration,
+                    "total_iterations": opt.iterations,
+                    "loss": loss.item(),
+                    "psnr": training_psnr,
+                    "gaussian_count": gaussians.get_xyz.shape[0],
+                    "iteration_milliseconds": iter_start.elapsed_time(iter_end),
+                    "elapsed_seconds": time.monotonic() - training_started_at,
+                }
+                print(
+                    "[gsw-training-metrics] "
+                    + json.dumps(telemetry, ensure_ascii=False, separators=(",", ":")),
+                    flush=True,
+                )
             if iteration == opt.iterations:
                 progress_bar.close()
 
@@ -164,6 +182,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
+                preview_path = os.path.abspath(os.path.join(
+                    scene.model_path,
+                    "point_cloud",
+                    "iteration_{}".format(iteration),
+                    "point_cloud.ply",
+                ))
+                print(
+                    "[gsw-training-preview] "
+                    + json.dumps({
+                        "iteration": iteration,
+                        "point_cloud_path": preview_path,
+                    }, ensure_ascii=False, separators=(",", ":")),
+                    flush=True,
+                )
 
             # Densification
             if iteration < opt.densify_until_iter:

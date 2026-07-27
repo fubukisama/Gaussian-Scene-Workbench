@@ -77,6 +77,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingDialog.h
   src/TrainingEnvironmentProbe.cpp
   src/TrainingEnvironmentProbe.h
+  src/TrainingMonitorWidget.cpp
+  src/TrainingMonitorWidget.h
+  src/TrainingTelemetry.cpp
+  src/TrainingTelemetry.h
   src/TrainingOutputLocator.cpp
   src/TrainingOutputLocator.h
   src/UntitledWorkspaceStorage.cpp
@@ -257,6 +261,18 @@ if(BUILD_TESTING)
       target_compile_options(gsw_process_supervisor_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME process_supervisor COMMAND gsw_process_supervisor_tests)
+
+    qt_add_executable(gsw_training_telemetry_tests
+      tests/TrainingTelemetryTests.cpp
+      src/TrainingTelemetry.cpp
+      src/TrainingTelemetry.h
+    )
+    target_include_directories(gsw_training_telemetry_tests PRIVATE src)
+    target_link_libraries(gsw_training_telemetry_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_training_telemetry_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME training_telemetry COMMAND gsw_training_telemetry_tests)
 
     qt_add_executable(gsw_workspace_scene_format_tests
       tests/WorkspaceSceneFormatTests.cpp

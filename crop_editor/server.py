@@ -2,6 +2,7 @@ import argparse
 import cgi
 import concurrent.futures
 import json
+import math
 import os
 import re
 import shutil
@@ -58,6 +59,8 @@ SPARSE_ADAM_AVAILABLE_CACHE = None
 MESH_PREVIEW_MAX_FACES = 300000
 MESH_CHUNK_MAX_FACES = 250000
 TRAINING_PROGRESS_PATTERN = re.compile(r"\[gsw-training-progress\]\s+(\d+)\s*/\s*(\d+)")
+TRAINING_METRICS_PREFIX = "[gsw-training-metrics]"
+TRAINING_PREVIEW_PREFIX = "[gsw-training-preview]"
 WINDOWS_DEVICE_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{index}" for index in range(1, 10)),
@@ -4246,6 +4249,11 @@ def job_snapshot(job):
         "iteration": job.get("iteration"),
         "total_iterations": job.get("total_iterations"),
         "progressPercent": job.get("progressPercent"),
+        "loss": job.get("loss"),
+        "psnr": job.get("psnr"),
+        "gaussian_count": job.get("gaussian_count"),
+        "iteration_milliseconds": job.get("iteration_milliseconds"),
+        "elapsed_seconds": job.get("elapsed_seconds"),
         "latest_iteration": job.get("latest_iteration"),
         "point_cloud_path": job.get("point_cloud_path"),
         "partial_point_cloud_path": job.get("partial_point_cloud_path"),
@@ -4274,6 +4282,56 @@ def splat_job_snapshot(job):
     }
 
 
+def finite_training_number(value, *, integer=False):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < 0:
+        return None
+    return int(numeric) if integer else numeric
+
+
+def training_event_payload(line, prefix):
+    marker = line.find(prefix)
+    if marker < 0:
+        return None
+    try:
+        payload = json.loads(line[marker + len(prefix):].strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def apply_training_metrics(job, payload):
+    iteration = finite_training_number(payload.get("iteration"), integer=True)
+    total = finite_training_number(payload.get("total_iterations"), integer=True)
+    if total is not None and total > 0:
+        job["total_iterations"] = total
+    effective_total = job.get("total_iterations")
+    if iteration is not None:
+        job["iteration"] = min(iteration, effective_total) if effective_total else iteration
+    if effective_total and job.get("iteration") is not None:
+        job["progressPercent"] = max(
+            0, min(100, round(job["iteration"] / effective_total * 100))
+        )
+
+    for name in ("loss", "psnr", "iteration_milliseconds", "elapsed_seconds"):
+        value = finite_training_number(payload.get(name))
+        if value is not None:
+            job[name] = value
+    gaussian_count = finite_training_number(payload.get("gaussian_count"), integer=True)
+    if gaussian_count is not None:
+        job["gaussian_count"] = gaussian_count
+
+
+def apply_training_preview(job, payload):
+    iteration = finite_training_number(payload.get("iteration"), integer=True)
+    point_cloud_path = payload.get("point_cloud_path")
+    if iteration is not None and isinstance(point_cloud_path, str) and point_cloud_path.strip():
+        job["latest_iteration"] = iteration
+        job["partial_point_cloud_path"] = point_cloud_path
+
+
 def add_job_log(job, message):
     line = str(message).rstrip()
     if not line:
@@ -4281,8 +4339,14 @@ def add_job_log(job, message):
     lock = MESH_LOCK if mesh_like_job_kind(job) else SPLAT_LOCK if job.get("kind") == "splat_export" else TRAIN_LOCK
     with lock:
         if not mesh_like_job_kind(job) and job.get("kind") != "splat_export":
+            metrics_payload = training_event_payload(line, TRAINING_METRICS_PREFIX)
+            preview_payload = training_event_payload(line, TRAINING_PREVIEW_PREFIX)
+            if metrics_payload is not None:
+                apply_training_metrics(job, metrics_payload)
+            if preview_payload is not None:
+                apply_training_preview(job, preview_payload)
             progress_match = TRAINING_PROGRESS_PATTERN.search(line)
-            if progress_match:
+            if progress_match and metrics_payload is None:
                 iteration = int(progress_match.group(1))
                 total_iterations = max(int(progress_match.group(2)), 1)
                 job["iteration"] = max(0, min(iteration, total_iterations))
@@ -5661,6 +5725,11 @@ def start_training(
         "iteration": 0,
         "total_iterations": None,
         "progressPercent": 0,
+        "loss": None,
+        "psnr": None,
+        "gaussian_count": None,
+        "iteration_milliseconds": None,
+        "elapsed_seconds": None,
         "latest_iteration": None,
         "point_cloud_path": None,
         "partial_point_cloud_path": None,

@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -82,7 +83,54 @@ def watch_cancel_input(cancel_callback, job_id):
         return
 
 
-def emit_status(state, stage, progress_percent=None):
+def _finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def status_telemetry(snapshot):
+    """Return the safe, versioned training telemetry exposed to the Qt client."""
+    if not isinstance(snapshot, dict):
+        return {}
+
+    telemetry = {}
+    integer_fields = {
+        "iteration": ("iteration",),
+        "totalIterations": ("total_iterations", "totalIterations"),
+        "gaussianCount": ("gaussian_count", "point_count", "gaussianCount"),
+        "previewIteration": ("latest_iteration", "preview_iteration", "previewIteration"),
+    }
+    floating_fields = {
+        "loss": ("loss",),
+        "psnr": ("psnr",),
+        "iterationMilliseconds": ("iteration_milliseconds", "iterationMilliseconds"),
+        "elapsedSeconds": ("elapsed_seconds", "elapsedSeconds"),
+    }
+
+    for output_name, input_names in integer_fields.items():
+        value = next((snapshot.get(name) for name in input_names if snapshot.get(name) is not None), None)
+        if _finite_number(value) and float(value) >= 0:
+            telemetry[output_name] = int(value)
+
+    for output_name, input_names in floating_fields.items():
+        value = next((snapshot.get(name) for name in input_names if snapshot.get(name) is not None), None)
+        if _finite_number(value) and float(value) >= 0:
+            telemetry[output_name] = float(value)
+
+    preview_path = (
+        snapshot.get("partial_point_cloud_path")
+        or snapshot.get("point_cloud_path")
+        or snapshot.get("previewPath")
+    )
+    if isinstance(preview_path, str) and preview_path.strip():
+        telemetry["previewPath"] = preview_path
+    return telemetry
+
+
+def emit_status(state, stage, progress_percent=None, snapshot=None):
     """Emit one machine-readable status line for the native application."""
     payload = {
         "version": 1,
@@ -93,6 +141,7 @@ def emit_status(state, stage, progress_percent=None):
     if progress_percent is not None:
         progress = int(round(float(progress_percent)))
         payload["progressPercent"] = max(0, min(100, progress))
+    payload.update(status_telemetry(snapshot))
     print(
         "[worker-event] "
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
@@ -126,11 +175,12 @@ def stream_job(lock, jobs, job_id):
             stage = job.get("stage", state)
             error = job.get("error")
             progress_percent = job_progress_percent(job)
+            telemetry = status_telemetry(job)
         for line in lines:
             print(line)
-        current_stage = (state, stage, progress_percent)
+        current_stage = (state, stage, progress_percent, tuple(sorted(telemetry.items())))
         if current_stage != previous_stage:
-            emit_status(state, stage, progress_percent)
+            emit_status(state, stage, progress_percent, telemetry)
             previous_stage = current_stage
         if state not in FINAL_STATES:
             time.sleep(0.5)

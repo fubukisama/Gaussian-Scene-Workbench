@@ -74,7 +74,13 @@ int main(int argc, char *argv[]) {
     return 5;
   }
 
-  output.write("ning\",\"stage\":\"train\",\"progressPercent\":37}\nplain log\n");
+  output.write(
+      "ning\",\"stage\":\"train\",\"progressPercent\":37,"
+      "\"iteration\":11100,\"totalIterations\":30000,"
+      "\"loss\":0.0234,\"psnr\":27.5,\"gaussianCount\":123456,"
+      "\"iterationMilliseconds\":12.5,\"elapsedSeconds\":144.0,"
+      "\"previewIteration\":10000,"
+      "\"previewPath\":\"E:/model/point_cloud.ply\"}\nplain log\n");
   output.flush();
   return 0;
 }

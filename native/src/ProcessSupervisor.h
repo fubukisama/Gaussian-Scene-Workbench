@@ -16,6 +16,15 @@ struct WorkerStatus final {
   QString state;
   QString stage;
   std::optional<int> progressPercent;
+  std::optional<int> iteration;
+  std::optional<int> totalIterations;
+  std::optional<double> loss;
+  std::optional<double> psnr;
+  std::optional<qint64> gaussianCount;
+  std::optional<double> iterationMilliseconds;
+  std::optional<double> elapsedSeconds;
+  std::optional<int> previewIteration;
+  QString previewPath;
 };
 
 class ProcessSupervisor final : public QObject {

@@ -344,6 +344,34 @@ class WorkerTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
 
+    def test_training_status_event_exposes_visualization_telemetry(self):
+        output = io.StringIO()
+        snapshot = {
+            "iteration": 11100,
+            "total_iterations": 30000,
+            "loss": 0.0234,
+            "psnr": 27.5,
+            "gaussian_count": 123456,
+            "iteration_milliseconds": 12.5,
+            "elapsed_seconds": 144.0,
+            "latest_iteration": 10000,
+            "partial_point_cloud_path": "E:/model/point_cloud.ply",
+        }
+
+        with contextlib.redirect_stdout(output):
+            gsw_worker.emit_status("running", "train", 37, snapshot)
+
+        event = json.loads(output.getvalue().split(" ", 1)[1])
+        self.assertEqual(event["iteration"], 11100)
+        self.assertEqual(event["totalIterations"], 30000)
+        self.assertEqual(event["loss"], 0.0234)
+        self.assertEqual(event["psnr"], 27.5)
+        self.assertEqual(event["gaussianCount"], 123456)
+        self.assertEqual(event["iterationMilliseconds"], 12.5)
+        self.assertEqual(event["elapsedSeconds"], 144.0)
+        self.assertEqual(event["previewIteration"], 10000)
+        self.assertEqual(event["previewPath"], "E:/model/point_cloud.ply")
+
     def test_run_colmap_forwards_absolute_dataset_and_options(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -90,6 +90,17 @@ void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() 
   QCOMPARE(status.stage, QStringLiteral("train"));
   QVERIFY(status.progressPercent.has_value());
   QCOMPARE(status.progressPercent.value(), 37);
+  QCOMPARE(status.iteration.value(), 11100);
+  QCOMPARE(status.totalIterations.value(), 30000);
+  QVERIFY(status.loss.has_value());
+  QCOMPARE(status.loss.value(), 0.0234);
+  QVERIFY(status.psnr.has_value());
+  QCOMPARE(status.psnr.value(), 27.5);
+  QCOMPARE(status.gaussianCount.value(), qint64(123456));
+  QCOMPARE(status.iterationMilliseconds.value(), 12.5);
+  QCOMPARE(status.elapsedSeconds.value(), 144.0);
+  QCOMPARE(status.previewIteration.value(), 10000);
+  QCOMPARE(status.previewPath, QStringLiteral("E:/model/point_cloud.ply"));
 
   QString output;
   for (const QList<QVariant> &arguments : outputSpy) {

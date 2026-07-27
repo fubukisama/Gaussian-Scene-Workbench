@@ -12,6 +12,7 @@
 #include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
 #include "TrainingEnvironmentProbe.h"
+#include "TrainingMonitorWidget.h"
 #include "TrainingOutputLocator.h"
 #include "UntitledWorkspaceStorage.h"
 
@@ -241,6 +242,19 @@ Qt::CaseSensitivity localPathCaseSensitivity() {
 bool pathsReferToSameLocation(const QString &left, const QString &right) {
   return comparablePath(left).compare(comparablePath(right),
                                       localPathCaseSensitivity()) == 0;
+}
+
+bool pathIsWithinDirectory(const QString &path, const QString &directory) {
+  if (path.isEmpty() || directory.isEmpty()) {
+    return false;
+  }
+  const QString root = comparablePath(directory);
+  const QString candidate = comparablePath(path);
+  const QString relative = QDir(root).relativeFilePath(candidate);
+  return !relative.isEmpty() && relative != QStringLiteral("..") &&
+         !relative.startsWith(QStringLiteral("../")) &&
+         !relative.startsWith(QStringLiteral("..\\")) &&
+         !QDir::isAbsolutePath(relative);
 }
 
 QString formatFileSize(const qint64 bytes) {
@@ -1471,8 +1485,8 @@ void MainWindow::createTaskDock() {
   mTaskDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
   installDockTitleBar(mTaskDock, mUiScalePercent);
 
-  auto *tabs = new QTabWidget(mTaskDock);
-  mTaskTable = new QTableWidget(0, 4, tabs);
+  mTaskTabs = new QTabWidget(mTaskDock);
+  mTaskTable = new QTableWidget(0, 4, mTaskTabs);
   mTaskTable->setHorizontalHeaderLabels(
       {QStringLiteral("状态"), QStringLiteral("任务"),
        QStringLiteral("开始时间"), QStringLiteral("结果")});
@@ -1487,14 +1501,17 @@ void MainWindow::createTaskDock() {
       2, QHeaderView::ResizeToContents);
   mTaskTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
 
-  mConsole = new QPlainTextEdit(tabs);
+  mTrainingMonitor = new TrainingMonitorWidget(mTaskTabs);
+
+  mConsole = new QPlainTextEdit(mTaskTabs);
   mConsole->setReadOnly(true);
   mConsole->setMaximumBlockCount(10000);
   mConsole->setLineWrapMode(QPlainTextEdit::NoWrap);
 
-  tabs->addTab(mTaskTable, QStringLiteral("任务"));
-  tabs->addTab(mConsole, QStringLiteral("日志"));
-  mTaskDock->setWidget(tabs);
+  mTaskTabs->addTab(mTaskTable, QStringLiteral("任务"));
+  mTaskTabs->addTab(mTrainingMonitor, QStringLiteral("训练监视"));
+  mTaskTabs->addTab(mConsole, QStringLiteral("日志"));
+  mTaskDock->setWidget(mTaskTabs);
   addDockWidget(Qt::BottomDockWidgetArea, mTaskDock);
 }
 
@@ -1540,6 +1557,16 @@ void MainWindow::connectServices() {
                     QStringLiteral("HH:mm:ss"))));
             mTaskTable->setItem(mActiveTaskRow, 3,
                                 new QTableWidgetItem(QStringLiteral("-")));
+            if (mPendingTraining.has_value() &&
+                mPendingTraining->taskName == taskName) {
+              mLiveTrainingPreviewPath.clear();
+              mLiveTrainingGaussianCount = 0;
+              mLastTrainingPreviewIteration = -1;
+              mTrainingMonitor->beginTraining(
+                  taskName, mPendingTraining->backend,
+                  mPendingTraining->expectedIterations);
+              mTaskTabs->setCurrentWidget(mTrainingMonitor);
+            }
             appendTaskEvent(QStringLiteral("开始任务：%1").arg(taskName));
           });
   connect(&mProcessSupervisor, &ProcessSupervisor::outputReady, this,
@@ -1547,6 +1574,32 @@ void MainWindow::connectServices() {
   connect(&mProcessSupervisor, &ProcessSupervisor::workerStatusReady, this,
           [this](const WorkerStatus &status) {
             mActiveWorkerState = status.state;
+            if (mPendingTraining.has_value()) {
+              mTrainingMonitor->updateStatus(status);
+              if (status.previewIteration.has_value() &&
+                  status.previewIteration.value() >
+                      mLastTrainingPreviewIteration &&
+                  !status.previewPath.isEmpty()) {
+                const QFileInfo previewInfo(status.previewPath);
+                if (previewInfo.isFile() &&
+                    previewInfo.suffix().compare(QStringLiteral("ply"),
+                                                 Qt::CaseInsensitive) == 0 &&
+                    pathIsWithinDirectory(previewInfo.absoluteFilePath(),
+                                          mPendingTraining->outputDirectory)) {
+                  mLastTrainingPreviewIteration =
+                      status.previewIteration.value();
+                  mLiveTrainingPreviewPath =
+                      comparablePath(previewInfo.absoluteFilePath());
+                  mLiveTrainingGaussianCount =
+                      status.gaussianCount.value_or(0);
+                  mViewport->setScene(mLiveTrainingPreviewPath,
+                                      mLiveTrainingGaussianCount);
+                  appendTaskEvent(
+                      QStringLiteral("训练预览已更新：迭代 %1")
+                          .arg(mLastTrainingPreviewIteration));
+                }
+              }
+            }
             if (mActiveTaskRow < 0 ||
                 mActiveTaskRow >= mTaskTable->rowCount()) {
               return;
@@ -1565,6 +1618,9 @@ void MainWindow::connectServices() {
         const bool processCancelled =
             mActiveWorkerState == QStringLiteral("cancelled") ||
             exitCode == 130 || mProcessSupervisor.wasStopRequested();
+        const bool finishingTraining =
+            mPendingTraining.has_value() &&
+            mPendingTraining->taskName == taskName;
         bool effectiveSucceeded = succeeded;
         bool recoveryFailed = false;
         QString completionDetail;
@@ -1775,6 +1831,9 @@ void MainWindow::connectServices() {
 
         const bool cancelled =
             processCancelled && !effectiveSucceeded && !recoveryFailed;
+        if (finishingTraining) {
+          mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled);
+        }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
           state->setText(effectiveSucceeded ? QStringLiteral("完成")
@@ -4106,8 +4165,13 @@ void MainWindow::updateWorkspaceUi() {
                                   ? mWorkspace.projectName()
                                   : QStringLiteral("未打开工程");
   mViewport->setProjectLabel(projectName);
-  mViewport->setScene(mWorkspace.scenePath(),
-                      mWorkspace.sceneMetadata().vertexCount);
+  if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
+    mViewport->setScene(mLiveTrainingPreviewPath,
+                        mLiveTrainingGaussianCount);
+  } else {
+    mViewport->setScene(mWorkspace.scenePath(),
+                        mWorkspace.sceneMetadata().vertexCount);
+  }
   mProjectStatus->setText(
       projectName +
       (mWorkspace.isModified() ? QStringLiteral(" *") : QString()) +

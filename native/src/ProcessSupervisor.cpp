@@ -7,6 +7,7 @@
 #include <QTimer>
 
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #ifdef Q_OS_WIN
@@ -24,6 +25,43 @@ namespace gsw {
 namespace {
 
 const QByteArray kWorkerEventPrefix = QByteArrayLiteral("[worker-event] ");
+
+bool parseOptionalInteger(const QJsonObject &object, const QString &name,
+                          std::optional<int> *target, const int minimum = 0) {
+  const QJsonValue value = object.value(name);
+  if (value.isUndefined()) {
+    return true;
+  }
+  if (!value.isDouble()) {
+    return false;
+  }
+  const double number = value.toDouble();
+  if (!std::isfinite(number) || std::floor(number) != number ||
+      number < static_cast<double>(minimum) ||
+      number > static_cast<double>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+  *target = static_cast<int>(number);
+  return true;
+}
+
+bool parseOptionalReal(const QJsonObject &object, const QString &name,
+                       std::optional<double> *target,
+                       const double minimum = 0.0) {
+  const QJsonValue value = object.value(name);
+  if (value.isUndefined()) {
+    return true;
+  }
+  if (!value.isDouble()) {
+    return false;
+  }
+  const double number = value.toDouble();
+  if (!std::isfinite(number) || number < minimum) {
+    return false;
+  }
+  *target = number;
+  return true;
+}
 
 bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
   QJsonParseError parseError;
@@ -59,6 +97,41 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       return false;
     }
     parsedStatus.progressPercent = static_cast<int>(progress);
+  }
+
+  if (!parseOptionalInteger(object, QStringLiteral("iteration"),
+                            &parsedStatus.iteration) ||
+      !parseOptionalInteger(object, QStringLiteral("totalIterations"),
+                            &parsedStatus.totalIterations, 1) ||
+      !parseOptionalReal(object, QStringLiteral("loss"), &parsedStatus.loss) ||
+      !parseOptionalReal(object, QStringLiteral("psnr"), &parsedStatus.psnr) ||
+      !parseOptionalReal(object, QStringLiteral("iterationMilliseconds"),
+                         &parsedStatus.iterationMilliseconds) ||
+      !parseOptionalReal(object, QStringLiteral("elapsedSeconds"),
+                         &parsedStatus.elapsedSeconds) ||
+      !parseOptionalInteger(object, QStringLiteral("previewIteration"),
+                            &parsedStatus.previewIteration)) {
+    return false;
+  }
+  const QJsonValue gaussianCount =
+      object.value(QStringLiteral("gaussianCount"));
+  if (!gaussianCount.isUndefined()) {
+    if (!gaussianCount.isDouble()) {
+      return false;
+    }
+    const double count = gaussianCount.toDouble();
+    if (!std::isfinite(count) || std::floor(count) != count || count < 0.0 ||
+        count > static_cast<double>(std::numeric_limits<qint64>::max())) {
+      return false;
+    }
+    parsedStatus.gaussianCount = static_cast<qint64>(count);
+  }
+  const QJsonValue previewPath = object.value(QStringLiteral("previewPath"));
+  if (!previewPath.isUndefined()) {
+    if (!previewPath.isString()) {
+      return false;
+    }
+    parsedStatus.previewPath = previewPath.toString();
   }
 
   *status = std::move(parsedStatus);

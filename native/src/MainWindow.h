@@ -22,11 +22,14 @@ class QPlainTextEdit;
 class QResizeEvent;
 class QSpinBox;
 class QTableWidget;
+class QTabWidget;
 class QTimer;
 class QToolBar;
 class QTreeWidget;
 
 namespace gsw {
+
+class TrainingMonitorWidget;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -145,8 +148,10 @@ private:
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;
   QTreeWidget *mProjectTree = nullptr;
+  QTabWidget *mTaskTabs = nullptr;
   QTableWidget *mTaskTable = nullptr;
   QPlainTextEdit *mConsole = nullptr;
+  TrainingMonitorWidget *mTrainingMonitor = nullptr;
   QToolBar *mRenderToolbar = nullptr;
   QToolBar *mSelectionToolbar = nullptr;
   QToolBar *mEditToolbar = nullptr;
@@ -218,6 +223,9 @@ private:
   QString mCameraSourcePath;
   QString mCameraTrajectoryError;
   QString mLastCameraTrajectoryEventKey;
+  QString mLiveTrainingPreviewPath;
+  qint64 mLiveTrainingGaussianCount = 0;
+  int mLastTrainingPreviewIteration = -1;
   bool mSceneReady = false;
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;

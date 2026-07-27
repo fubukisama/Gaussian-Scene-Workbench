@@ -572,6 +572,7 @@ $BuildExecutables = @(
   (Join-Path $BuildDirectory "gsw_dataset_import_plan_tests.exe"),
   (Join-Path $BuildDirectory "gsw_process_output_fixture.exe"),
   (Join-Path $BuildDirectory "gsw_process_supervisor_tests.exe"),
+  (Join-Path $BuildDirectory "gsw_training_telemetry_tests.exe"),
   (Join-Path $BuildDirectory "gsw_workspace_scene_format_tests.exe"),
   (Join-Path $BuildDirectory "gsw_backend_locator_tests.exe")
 )
@@ -593,7 +594,7 @@ $PreviousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = "1"
 Push-Location $Root
 try {
-  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight
+  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight crop_editor.tests.test_training_telemetry
   if ($LASTEXITCODE -ne 0) {
     throw "Native worker tests failed with exit code $LASTEXITCODE."
   }
