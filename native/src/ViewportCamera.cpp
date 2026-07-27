@@ -153,4 +153,24 @@ ReferenceGridScale referenceGridScale(const float cameraDistance,
           std::max(safeDistance * 8.0F, upper * 40.0F)};
 }
 
+QString formatMetricDistance(const float metres) {
+  if (!std::isfinite(metres)) {
+    return QStringLiteral("—");
+  }
+
+  const float absoluteMetres = std::abs(metres);
+  float factor = 1.0F;
+  QString suffix = QStringLiteral("m");
+  if (absoluteMetres < 0.01F) {
+    factor = 1000.0F;
+    suffix = QStringLiteral("mm");
+  } else if (absoluteMetres < 1.0F) {
+    factor = 100.0F;
+    suffix = QStringLiteral("cm");
+  }
+  return QStringLiteral("%1 %2")
+      .arg(QString::number(static_cast<double>(metres * factor), 'g', 4),
+           suffix);
+}
+
 } // namespace gsw

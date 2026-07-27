@@ -20,6 +20,7 @@ private slots:
   void clampsZoomToSceneAwareFiniteLimits();
   void keepsGridStepsOnConcreteDecimalScales();
   void enforcesMinimumGridStepAtClosestZoom();
+  void formatsGridScaleWithReadableMetricUnits();
 };
 
 void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
@@ -129,6 +130,15 @@ void ViewportCameraTests::enforcesMinimumGridStepAtClosestZoom() {
   QCOMPARE(scale.levelBlend, 0.0F);
   QCOMPARE(scale.displayMajorStep, 0.01F);
   QVERIFY(scale.visibleDistance > 0.0F);
+}
+
+void ViewportCameraTests::formatsGridScaleWithReadableMetricUnits() {
+  QCOMPARE(formatMetricDistance(0.001F), QStringLiteral("1 mm"));
+  QCOMPARE(formatMetricDistance(0.009F), QStringLiteral("9 mm"));
+  QCOMPARE(formatMetricDistance(0.01F), QStringLiteral("1 cm"));
+  QCOMPARE(formatMetricDistance(0.5F), QStringLiteral("50 cm"));
+  QCOMPARE(formatMetricDistance(1.0F), QStringLiteral("1 m"));
+  QCOMPARE(formatMetricDistance(250.0F), QStringLiteral("250 m"));
 }
 
 QTEST_GUILESS_MAIN(ViewportCameraTests)

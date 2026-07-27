@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPoint>
+#include <QString>
 #include <QVector3D>
 
 namespace gsw {
@@ -47,5 +48,9 @@ referenceGridPlane(OrbitAngles angles, bool orthographic);
 
 [[nodiscard]] ReferenceGridScale referenceGridScale(float cameraDistance,
                                                     int viewportPixelHeight);
+
+// Display convention: one scene unit is treated as one metre until a project
+// supplies an explicit scale calibration.
+[[nodiscard]] QString formatMetricDistance(float metres);
 
 } // namespace gsw

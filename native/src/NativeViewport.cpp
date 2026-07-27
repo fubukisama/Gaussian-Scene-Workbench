@@ -140,10 +140,6 @@ QString formatCount(const qint64 count) {
   return QString::number(count);
 }
 
-QString formatSceneUnits(const float value) {
-  return QStringLiteral("%1 u").arg(
-      QString::number(static_cast<double>(value), 'g', 4));
-}
 } // namespace
 
 NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
@@ -1332,8 +1328,8 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     {
       const ViewportZoomLimits limits = viewportZoomLimits(mSceneRadius);
       tooltip = QStringLiteral("上下拖动缩放视图（%1 – %2）")
-                    .arg(formatSceneUnits(limits.minimumDistance),
-                         formatSceneUnits(limits.maximumDistance));
+                    .arg(formatMetricDistance(limits.minimumDistance),
+                         formatMetricDistance(limits.maximumDistance));
     }
     setCursor(Qt::SizeVerCursor);
     break;
@@ -1762,9 +1758,9 @@ void NativeViewport::drawOverlay(QPainter &painter,
   const ReferenceGridScale gridScale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
   const QString scaleText = QStringLiteral("主网格 %1  |  视距 %2  |  最小刻度 %3")
-                                .arg(formatSceneUnits(gridScale.displayMajorStep),
-                                     formatSceneUnits(mDistance),
-                                     formatSceneUnits(gridScale.minimumStep));
+                                .arg(formatMetricDistance(gridScale.displayMajorStep),
+                                     formatMetricDistance(mDistance),
+                                     formatMetricDistance(gridScale.minimumStep));
   const int scaleWidth = metrics.horizontalAdvance(scaleText) + 24;
   const QRect scaleRect(
       12, metricRect.top() - badgeHeight - 6,
