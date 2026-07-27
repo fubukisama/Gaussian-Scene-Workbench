@@ -249,6 +249,17 @@ bool WorkspaceDocument::hasPendingDataMigration() const {
   return !mPendingDataRoot.isEmpty();
 }
 
+bool WorkspaceDocument::isDatasetManaged() const {
+  if (!hasProject() || mDatasetPath.isEmpty()) {
+    return false;
+  }
+  const QString managedDatasetsRoot =
+      QDir(mRootPath).filePath(QStringLiteral("datasets"));
+  QString relative;
+  return relativePathInside(managedDatasetsRoot, mDatasetPath, &relative) &&
+         relative != QStringLiteral(".");
+}
+
 bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   const QFileInfo rootInfo(rootPath);
   if (!rootInfo.exists() || !rootInfo.isDir()) {
@@ -720,6 +731,140 @@ bool WorkspaceDocument::setScenePath(const QString &path,
   mSceneMetadata = metadata;
   setModified(true);
   emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::clearImportedData(
+    const ImportCleanupOptions &options, ImportCleanupResult *result,
+    QString *errorMessage) {
+  if (result != nullptr) {
+    *result = {};
+  }
+  if (!hasProject()) {
+    assignError(errorMessage, tr("No project is open."));
+    return false;
+  }
+  if (hasPendingDataMigration()) {
+    assignError(errorMessage,
+                tr("Finish the pending project data migration before "
+                   "cleaning imported data."));
+    return false;
+  }
+
+  const bool clearDataset = options.clearDataset && !mDatasetPath.isEmpty();
+  const bool clearScene = options.clearScene && !mScenePath.isEmpty();
+  if (!clearDataset && !clearScene) {
+    assignError(errorMessage, tr("There is no selected imported data to clear."));
+    return false;
+  }
+
+  const bool managedDataset = clearDataset && isDatasetManaged();
+  if (managedDataset && !clearScene && !mScenePath.isEmpty() &&
+      relativePathInside(mDatasetPath, mScenePath)) {
+    assignError(errorMessage,
+                tr("The current scene is stored inside the managed dataset. "
+                   "Clear the scene association as well, or move the scene "
+                   "outside the dataset first."));
+    return false;
+  }
+
+  const QString previousDatasetPath = mDatasetPath;
+  const QString previousScenePath = mScenePath;
+  const qint64 previousImageCount = mImageCount;
+  const PlyMetadata previousSceneMetadata = mSceneMetadata;
+  const bool previousModified = mModified;
+  QString stagedDatasetPath;
+  QString stagingRoot;
+
+  if (managedDataset && QFileInfo(mDatasetPath).exists()) {
+    const QFileInfo projectRootInfo(mRootPath);
+    stagingRoot =
+        QDir(projectRootInfo.absolutePath())
+            .filePath(QStringLiteral(".%1.gsw-cleanup-%2")
+                          .arg(projectRootInfo.fileName(),
+                               QUuid::createUuid().toString(
+                                   QUuid::WithoutBraces)));
+    if (!QDir().mkpath(stagingRoot)) {
+      assignError(errorMessage,
+                  tr("Unable to prepare the managed dataset cleanup area: %1")
+                      .arg(stagingRoot));
+      return false;
+    }
+    stagedDatasetPath =
+        QDir(stagingRoot)
+            .filePath(QStringLiteral("%1-%2")
+                          .arg(QUuid::createUuid().toString(
+                                   QUuid::WithoutBraces),
+                               QFileInfo(mDatasetPath).fileName()));
+    if (!QDir().rename(mDatasetPath, stagedDatasetPath)) {
+      QDir().rmdir(stagingRoot);
+      assignError(errorMessage,
+                  tr("Unable to stage the managed dataset for cleanup: %1")
+                      .arg(mDatasetPath));
+      return false;
+    }
+  }
+
+  if (clearDataset) {
+    mDatasetPath.clear();
+    mImageCount = 0;
+  }
+  if (clearScene) {
+    mScenePath.clear();
+    mSceneMetadata = {};
+  }
+
+  QString saveError;
+  bool committed = true;
+  if (!mProjectFilePath.isEmpty()) {
+    committed = saveManifest({}, &saveError);
+  } else {
+    setModified(true);
+    emit changed();
+  }
+  if (!committed) {
+    mDatasetPath = previousDatasetPath;
+    mScenePath = previousScenePath;
+    mImageCount = previousImageCount;
+    mSceneMetadata = previousSceneMetadata;
+    setModified(previousModified);
+    bool restored = true;
+    if (!stagedDatasetPath.isEmpty()) {
+      restored = QDir().rename(stagedDatasetPath, previousDatasetPath);
+      if (restored) {
+        QDir().rmdir(stagingRoot);
+      }
+    }
+    emit changed();
+    assignError(
+        errorMessage,
+        restored
+            ? tr("Unable to save the cleaned project state: %1").arg(saveError)
+            : tr("Unable to save the cleaned project state, and the managed "
+                 "dataset could not be restored from %1: %2")
+                  .arg(stagedDatasetPath, saveError));
+    return false;
+  }
+
+  bool managedDatasetRemoved = false;
+  QString cleanupPendingPath;
+  if (!stagedDatasetPath.isEmpty()) {
+    if (QDir(stagedDatasetPath).removeRecursively()) {
+      managedDatasetRemoved = true;
+      QDir().rmdir(stagingRoot);
+    } else {
+      cleanupPendingPath = stagedDatasetPath;
+    }
+  }
+
+  if (result != nullptr) {
+    result->datasetCleared = clearDataset;
+    result->sceneCleared = clearScene;
+    result->managedDatasetRemoved = managedDatasetRemoved;
+    result->previousDatasetPath = previousDatasetPath;
+    result->previousScenePath = previousScenePath;
+    result->cleanupPendingPath = cleanupPendingPath;
+  }
   return true;
 }
 

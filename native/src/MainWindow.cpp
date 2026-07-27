@@ -19,6 +19,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -887,6 +888,16 @@ void MainWindow::createActions() {
   connect(mImportSceneAction, &QAction::triggered, this,
           &MainWindow::importScene);
 
+  mClearImportedDataAction =
+      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QStringLiteral("清理导入数据..."), this);
+  mClearImportedDataAction->setObjectName(
+      QStringLiteral("clearImportedDataAction"));
+  mClearImportedDataAction->setToolTip(
+      QStringLiteral("解除数据集或场景关联，并清理工程托管的导入副本"));
+  connect(mClearImportedDataAction, &QAction::triggered, this,
+          &MainWindow::clearImportedData);
+
   auto *environmentAction =
       new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
                   QStringLiteral("检查环境"), this);
@@ -1111,6 +1122,7 @@ void MainWindow::createMenus() {
   fileMenu->addAction(mImportDatasetDirectoryAction);
   fileMenu->addAction(mAttachDatasetAction);
   fileMenu->addAction(mImportSceneAction);
+  fileMenu->addAction(mClearImportedDataAction);
   fileMenu->addSeparator();
   fileMenu->addAction(actions().at(5));
 
@@ -1125,6 +1137,7 @@ void MainWindow::createMenus() {
   QMenu *workflowMenu = menuBar()->addMenu(QStringLiteral("工作流"));
   workflowMenu->addAction(mImportDatasetAction);
   workflowMenu->addAction(mImportDatasetDirectoryAction);
+  workflowMenu->addAction(mClearImportedDataAction);
   workflowMenu->addSeparator();
   workflowMenu->addAction(actions().at(3));
   workflowMenu->addSeparator();
@@ -1314,6 +1327,7 @@ void MainWindow::createProjectDock() {
   mProjectTree->setAlternatingRowColors(false);
   mProjectTree->setUniformRowHeights(true);
   mProjectTree->setSelectionMode(QAbstractItemView::SingleSelection);
+  mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
 
@@ -1327,6 +1341,24 @@ void MainWindow::createProjectDock() {
       statusBar()->showMessage(QDir::toNativeSeparators(path), 5000);
     }
   });
+  connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
+          [this](const QPoint &position) {
+            QTreeWidgetItem *item = mProjectTree->itemAt(position);
+            if (item == nullptr) {
+              return;
+            }
+            const QString kind =
+                item->data(0, Qt::UserRole + 1).toString();
+            if (kind != QStringLiteral("dataset") &&
+                kind != QStringLiteral("reconstruction") &&
+                kind != QStringLiteral("scene")) {
+              return;
+            }
+            mProjectTree->setCurrentItem(item);
+            QMenu menu(mProjectTree);
+            menu.addAction(mClearImportedDataAction);
+            menu.exec(mProjectTree->viewport()->mapToGlobal(position));
+          });
 }
 
 void MainWindow::createInspectorDock() {
@@ -3586,6 +3618,168 @@ void MainWindow::importScene() {
                                : QStringLiteral("PLY")));
 }
 
+void MainWindow::clearImportedData() {
+  if (!ensureProjectRecoveryReady()) {
+    return;
+  }
+  if (mProcessSupervisor.isRunning()) {
+    QMessageBox::information(
+        this, QStringLiteral("任务繁忙"),
+        QStringLiteral("请等待当前任务结束后再清理导入数据。"));
+    return;
+  }
+  if (mWorkspace.hasPendingDataMigration()) {
+    QMessageBox::information(
+        this, QStringLiteral("工程迁移尚未完成"),
+        QStringLiteral("请先保存工程并完成托管数据迁移，再执行清理。"));
+    return;
+  }
+
+  const bool hasDataset = !mWorkspace.datasetPath().isEmpty();
+  const bool hasScene = !mWorkspace.scenePath().isEmpty();
+  if (!hasDataset && !hasScene) {
+    QMessageBox::information(this, QStringLiteral("没有可清理的数据"),
+                             QStringLiteral("当前工程尚未导入数据集或场景。"));
+    return;
+  }
+
+  QString selectedKind;
+  const QList<QTreeWidgetItem *> selection = mProjectTree->selectedItems();
+  if (!selection.isEmpty()) {
+    selectedKind =
+        selection.constFirst()->data(0, Qt::UserRole + 1).toString();
+  }
+  const bool sceneSelected = selectedKind == QStringLiteral("scene");
+
+  QDialog dialog(this);
+  dialog.setObjectName(QStringLiteral("clearImportedDataDialog"));
+  dialog.setWindowTitle(QStringLiteral("清理导入数据"));
+  dialog.setModal(true);
+  dialog.resize(560, 300);
+  auto *layout = new QVBoxLayout(&dialog);
+
+  auto *introduction = new QLabel(
+      QStringLiteral("选择要从当前工程移除的内容。外部文件和训练输出不会被"
+                     "删除；只有工程 datasets 目录内的软件托管副本会被"
+                     "永久清理。"),
+      &dialog);
+  introduction->setWordWrap(true);
+  layout->addWidget(introduction);
+
+  auto *datasetCheck = new QCheckBox(
+      QStringLiteral("数据集与 COLMAP 重建数据"), &dialog);
+  datasetCheck->setObjectName(QStringLiteral("clearDatasetCheckBox"));
+  datasetCheck->setEnabled(hasDataset);
+  datasetCheck->setChecked(hasDataset && !sceneSelected);
+  layout->addWidget(datasetCheck);
+
+  auto *datasetDetails = new QLabel(&dialog);
+  datasetDetails->setObjectName(QStringLiteral("clearDatasetDetailsLabel"));
+  datasetDetails->setWordWrap(true);
+  datasetDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  if (!hasDataset) {
+    datasetDetails->setText(QStringLiteral("未关联数据集"));
+  } else if (mWorkspace.isDatasetManaged()) {
+    datasetDetails->setText(
+        QStringLiteral("将删除工程托管的照片、视频抽帧和重建副本：\n%1")
+            .arg(QDir::toNativeSeparators(mWorkspace.datasetPath())));
+  } else {
+    datasetDetails->setText(
+        QStringLiteral("仅解除关联，外部数据集目录保持不变：\n%1")
+            .arg(QDir::toNativeSeparators(mWorkspace.datasetPath())));
+  }
+  datasetDetails->setStyleSheet(QStringLiteral("color: #8b949e;"));
+  layout->addWidget(datasetDetails);
+
+  auto *sceneCheck =
+      new QCheckBox(QStringLiteral("当前场景关联"), &dialog);
+  sceneCheck->setObjectName(QStringLiteral("clearSceneCheckBox"));
+  sceneCheck->setEnabled(hasScene);
+  sceneCheck->setChecked(hasScene && (sceneSelected || !hasDataset));
+  layout->addWidget(sceneCheck);
+
+  auto *sceneDetails = new QLabel(&dialog);
+  sceneDetails->setObjectName(QStringLiteral("clearSceneDetailsLabel"));
+  sceneDetails->setWordWrap(true);
+  sceneDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  sceneDetails->setText(
+      hasScene
+          ? QStringLiteral("只从视口和工程中卸载，不删除 PLY 或训练输出：\n%1")
+                .arg(QDir::toNativeSeparators(mWorkspace.scenePath()))
+          : QStringLiteral("未导入场景"));
+  sceneDetails->setStyleSheet(QStringLiteral("color: #8b949e;"));
+  layout->addWidget(sceneDetails);
+  layout->addStretch(1);
+
+  auto *buttons = new QDialogButtonBox(&dialog);
+  auto *cleanupButton =
+      buttons->addButton(QStringLiteral("清理"),
+                         QDialogButtonBox::DestructiveRole);
+  auto *cancelButton =
+      buttons->addButton(QStringLiteral("取消"),
+                         QDialogButtonBox::RejectRole);
+  cleanupButton->setObjectName(QStringLiteral("confirmImportCleanupButton"));
+  cancelButton->setDefault(true);
+  const auto updateCleanupButton = [datasetCheck, sceneCheck, cleanupButton]() {
+    cleanupButton->setEnabled(datasetCheck->isChecked() ||
+                              sceneCheck->isChecked());
+  };
+  connect(datasetCheck, &QCheckBox::toggled, &dialog, updateCleanupButton);
+  connect(sceneCheck, &QCheckBox::toggled, &dialog, updateCleanupButton);
+  connect(cleanupButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+  connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+  updateCleanupButton();
+  layout->addWidget(buttons);
+
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+  const ImportCleanupOptions options{datasetCheck->isChecked(),
+                                     sceneCheck->isChecked()};
+  if (options.clearScene && !confirmDiscardSceneEdits()) {
+    return;
+  }
+
+  const bool managedDataset =
+      options.clearDataset && mWorkspace.isDatasetManaged();
+  ImportCleanupResult result;
+  QString error;
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const bool cleared =
+      mWorkspace.clearImportedData(options, &result, &error);
+  QApplication::restoreOverrideCursor();
+  if (!cleared) {
+    showError(QStringLiteral("无法清理导入数据"), error);
+    return;
+  }
+
+  if (result.datasetCleared) {
+    appendTaskEvent(
+        managedDataset
+            ? QStringLiteral("已清理工程托管数据集与重建数据：%1")
+                  .arg(QDir::toNativeSeparators(result.previousDatasetPath))
+            : QStringLiteral("已解除外部数据集关联；原目录保持不变：%1")
+                  .arg(QDir::toNativeSeparators(result.previousDatasetPath)));
+  }
+  if (result.sceneCleared) {
+    appendTaskEvent(
+        QStringLiteral("已卸载场景关联；PLY 与训练输出保持不变：%1")
+            .arg(QDir::toNativeSeparators(result.previousScenePath)));
+  }
+  if (!result.cleanupPendingPath.isEmpty()) {
+    appendTaskEvent(
+        QStringLiteral("数据集已从工程解除，但有待清理的托管文件：%1")
+            .arg(QDir::toNativeSeparators(result.cleanupPendingPath)));
+    QMessageBox::warning(
+        this, QStringLiteral("部分文件等待清理"),
+        QStringLiteral("工程关联已清除，但部分托管文件可能正被其他程序"
+                       "占用。关闭占用程序后可手动删除：\n%1")
+            .arg(QDir::toNativeSeparators(result.cleanupPendingPath)));
+  } else {
+    statusBar()->showMessage(QStringLiteral("导入数据已清理"), 5000);
+  }
+}
+
 void MainWindow::runEnvironmentCheck() {
   const QString root = BackendLocator::findRepositoryRoot(
       QCoreApplication::applicationDirPath(),
@@ -3881,6 +4075,10 @@ void MainWindow::updateActionAvailability() {
   mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);
   mImportSceneAction->setEnabled(dataEntryReady);
+  mClearImportedDataAction->setEnabled(
+      !running && workspaceReady && !mWorkspace.hasPendingDataMigration() &&
+      (!mWorkspace.datasetPath().isEmpty() ||
+       !mWorkspace.scenePath().isEmpty()));
   mReconstructAction->setEnabled(!running && workspaceReady &&
                                  !mWorkspace.datasetPath().isEmpty());
   mTrainAction->setEnabled(!running && workspaceReady &&
@@ -3900,12 +4098,15 @@ void MainWindow::rebuildProjectTree() {
   auto *dataset = new QTreeWidgetItem(root, {QStringLiteral("数据集")});
   dataset->setIcon(0, style()->standardIcon(QStyle::SP_DirOpenIcon));
   dataset->setData(0, Qt::UserRole, mWorkspace.datasetPath());
+  dataset->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
   new QTreeWidgetItem(
       dataset, {mWorkspace.datasetPath().isEmpty()
                     ? QStringLiteral("未导入")
                     : QStringLiteral("图像 %1").arg(mWorkspace.imageCount())});
 
   auto *reconstruction = new QTreeWidgetItem(root, {QStringLiteral("重建")});
+  reconstruction->setData(0, Qt::UserRole + 1,
+                          QStringLiteral("reconstruction"));
   reconstruction->setIcon(
       0, style()->standardIcon(QStyle::SP_FileDialogContentsView));
   const bool hasSparse = hasRecognizedColmapScene(mWorkspace.datasetPath());
@@ -3916,6 +4117,7 @@ void MainWindow::rebuildProjectTree() {
   auto *scene = new QTreeWidgetItem(root, {QStringLiteral("场景")});
   scene->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogDetailedView));
   scene->setData(0, Qt::UserRole, mWorkspace.scenePath());
+  scene->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
   new QTreeWidgetItem(scene,
                       {mWorkspace.scenePath().isEmpty()
                            ? QStringLiteral("未导入")

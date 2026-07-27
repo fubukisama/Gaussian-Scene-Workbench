@@ -534,10 +534,13 @@ int main(int argc, char *argv[]) {
           QStringLiteral("projectNameValue"));
       const QLabel *projectRoot = window.findChild<QLabel *>(
           QStringLiteral("projectRootValue"));
+      const QAction *clearImportedData = window.findChild<QAction *>(
+          QStringLiteral("clearImportedDataAction"));
       smokeTestCompleted =
           smokeTestCompleted && projectName != nullptr &&
           projectName->text() == QStringLiteral("未命名工程") &&
           projectRoot != nullptr &&
+          clearImportedData != nullptr && !clearImportedData->isEnabled() &&
           projectRoot->text().contains(QStringLiteral("首次保存"));
       application.exit(smokeTestCompleted ? 0 : 2);
     });

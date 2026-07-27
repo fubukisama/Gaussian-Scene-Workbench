@@ -17,6 +17,20 @@ struct PlyMetadata {
   [[nodiscard]] bool looksLikeGaussianSplat() const;
 };
 
+struct ImportCleanupOptions {
+  bool clearDataset = true;
+  bool clearScene = false;
+};
+
+struct ImportCleanupResult {
+  bool datasetCleared = false;
+  bool sceneCleared = false;
+  bool managedDatasetRemoved = false;
+  QString previousDatasetPath;
+  QString previousScenePath;
+  QString cleanupPendingPath;
+};
+
 class WorkspaceDocument final : public QObject {
   Q_OBJECT
 
@@ -34,6 +48,7 @@ public:
   [[nodiscard]] qint64 imageCount() const;
   [[nodiscard]] PlyMetadata sceneMetadata() const;
   [[nodiscard]] bool hasPendingDataMigration() const;
+  [[nodiscard]] bool isDatasetManaged() const;
 
   bool create(const QString &rootPath, QString *errorMessage = nullptr);
   bool createUntitled(const QString &workingRoot,
@@ -47,6 +62,9 @@ public:
   [[nodiscard]] QByteArray recoveryManifestJson() const;
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
   bool setScenePath(const QString &path, QString *errorMessage = nullptr);
+  bool clearImportedData(const ImportCleanupOptions &options,
+                         ImportCleanupResult *result = nullptr,
+                         QString *errorMessage = nullptr);
 
   static PlyMetadata inspectPly(const QString &filePath,
                                 QString *errorMessage = nullptr);

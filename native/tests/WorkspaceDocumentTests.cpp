@@ -45,6 +45,10 @@ private slots:
   void savesAndLoadsPortableProject();
   void saveAsCopiesManagedDataIntoANewLinkedDirectory();
   void firstSaveKeepsExternalDatasetAsALink();
+  void clearsManagedDatasetAndPersistsSceneAssociation();
+  void clearsExternalDatasetWithoutDeletingSourceFiles();
+  void clearsSceneAssociationWithoutDeletingSceneFile();
+  void rollsBackManagedCleanupWhenManifestSaveFails();
   void loadsStandardCameraSidecarAndBuildsLegacyAxes();
   void skipsMalformedCameraEntries();
   void reportsMalformedCameraDocument();
@@ -914,6 +918,179 @@ void WorkspaceDocumentTests::firstSaveKeepsExternalDatasetAsALink() {
            QDir::cleanPath(externalDataset));
   QVERIFY(!QFileInfo::exists(root.filePath(
       QStringLiteral("saved/linked.files/external/images/frame.jpg"))));
+}
+
+void WorkspaceDocumentTests::clearsManagedDatasetAndPersistsSceneAssociation() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("working/output")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  const QString dataset =
+      root.filePath(QStringLiteral("working/datasets/capture"));
+  QFile image(QDir(dataset).filePath(QStringLiteral("images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+  QVERIFY(QDir(dataset).mkpath(QStringLiteral("sparse/0")));
+
+  const QString scene =
+      root.filePath(QStringLiteral("working/output/point_cloud.ply"));
+  QFile ply(scene);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  QVERIFY(ply.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float "
+                    "x\nend_header\n0\n") > 0);
+  ply.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(dataset, &error), qPrintable(error));
+  QVERIFY2(project.setScenePath(scene, &error), qPrintable(error));
+  const QString projectFile =
+      root.filePath(QStringLiteral("saved/capture.gsw.json"));
+  QVERIFY2(project.save(projectFile, &error), qPrintable(error));
+  QVERIFY(project.isDatasetManaged());
+  const QString activeDataset = project.datasetPath();
+  const QString activeScene = project.scenePath();
+
+  gsw::ImportCleanupResult result;
+  QVERIFY2(project.clearImportedData({}, &result, &error), qPrintable(error));
+  QVERIFY(result.datasetCleared);
+  QVERIFY(result.managedDatasetRemoved);
+  QVERIFY(!result.sceneCleared);
+  QCOMPARE(result.previousDatasetPath, QDir::cleanPath(activeDataset));
+  QCOMPARE(project.datasetPath(), QString());
+  QCOMPARE(project.imageCount(), qint64(0));
+  QCOMPARE(project.scenePath(), QDir::cleanPath(activeScene));
+  QVERIFY(!QFileInfo::exists(activeDataset));
+  QVERIFY(QFileInfo::exists(activeScene));
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectFile, &error), qPrintable(error));
+  QCOMPARE(restored.datasetPath(), QString());
+  QCOMPARE(restored.scenePath(), QDir::cleanPath(activeScene));
+}
+
+void WorkspaceDocumentTests::clearsExternalDatasetWithoutDeletingSourceFiles() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+  QVERIFY(root.mkpath(QStringLiteral("external/images")));
+
+  const QString dataset = root.filePath(QStringLiteral("external"));
+  const QString imagePath =
+      QDir(dataset).filePath(QStringLiteral("images/frame.jpg"));
+  QFile image(imagePath);
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(dataset, &error), qPrintable(error));
+  const QString projectFile =
+      root.filePath(QStringLiteral("saved/linked.gsw.json"));
+  QVERIFY2(project.save(projectFile, &error), qPrintable(error));
+  QVERIFY(!project.isDatasetManaged());
+
+  gsw::ImportCleanupResult result;
+  QVERIFY2(project.clearImportedData({}, &result, &error), qPrintable(error));
+  QVERIFY(result.datasetCleared);
+  QVERIFY(!result.managedDatasetRemoved);
+  QVERIFY(QFileInfo::exists(imagePath));
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectFile, &error), qPrintable(error));
+  QCOMPARE(restored.datasetPath(), QString());
+  QVERIFY(QFileInfo::exists(imagePath));
+}
+
+void WorkspaceDocumentTests::clearsSceneAssociationWithoutDeletingSceneFile() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/output")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  const QString sourceScene =
+      root.filePath(QStringLiteral("working/output/point_cloud.ply"));
+  QFile ply(sourceScene);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  QVERIFY(ply.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float "
+                    "x\nend_header\n0\n") > 0);
+  ply.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setScenePath(sourceScene, &error), qPrintable(error));
+  const QString projectFile =
+      root.filePath(QStringLiteral("saved/scene.gsw.json"));
+  QVERIFY2(project.save(projectFile, &error), qPrintable(error));
+  const QString activeScene = project.scenePath();
+
+  gsw::ImportCleanupOptions options;
+  options.clearDataset = false;
+  options.clearScene = true;
+  gsw::ImportCleanupResult result;
+  QVERIFY2(project.clearImportedData(options, &result, &error),
+           qPrintable(error));
+  QVERIFY(!result.datasetCleared);
+  QVERIFY(result.sceneCleared);
+  QCOMPARE(result.previousScenePath, QDir::cleanPath(activeScene));
+  QCOMPARE(project.scenePath(), QString());
+  QVERIFY(QFileInfo::exists(activeScene));
+
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(projectFile, &error), qPrintable(error));
+  QCOMPARE(restored.scenePath(), QString());
+  QVERIFY(QFileInfo::exists(activeScene));
+}
+
+void WorkspaceDocumentTests::rollsBackManagedCleanupWhenManifestSaveFails() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/images")));
+  QVERIFY(root.mkpath(QStringLiteral("saved")));
+
+  const QString sourceDataset =
+      root.filePath(QStringLiteral("working/datasets/capture"));
+  QFile image(
+      QDir(sourceDataset).filePath(QStringLiteral("images/frame.jpg")));
+  QVERIFY(image.open(QIODevice::WriteOnly));
+  QCOMPARE(image.write("image"), qint64(5));
+  image.close();
+
+  gsw::WorkspaceDocument project;
+  QString error;
+  QVERIFY2(project.create(root.filePath(QStringLiteral("working")), &error),
+           qPrintable(error));
+  QVERIFY2(project.setDatasetPath(sourceDataset, &error), qPrintable(error));
+  const QString projectFile =
+      root.filePath(QStringLiteral("saved/rollback.gsw.json"));
+  QVERIFY2(project.save(projectFile, &error), qPrintable(error));
+  const QString activeDataset = project.datasetPath();
+  QVERIFY(QFile::remove(projectFile));
+  QVERIFY(QDir().mkpath(projectFile));
+
+  gsw::ImportCleanupResult result;
+  QVERIFY(!project.clearImportedData({}, &result, &error));
+  QVERIFY(error.contains(QStringLiteral("Unable to save")));
+  QCOMPARE(project.datasetPath(), QDir::cleanPath(activeDataset));
+  QCOMPARE(project.imageCount(), qint64(1));
+  QVERIFY(QFileInfo::exists(
+      QDir(activeDataset).filePath(QStringLiteral("images/frame.jpg"))));
+  QVERIFY(!result.datasetCleared);
 }
 
 void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {
