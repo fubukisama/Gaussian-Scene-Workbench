@@ -2,6 +2,8 @@
 
 #include <QtTest>
 
+#include <limits>
+
 using namespace gsw;
 
 class ViewportCameraTests final : public QObject {
@@ -15,6 +17,9 @@ private slots:
   void keepsCameraFrameContinuousAcrossPoles();
   void selectsScreenParallelGridForAxisOrthographicViews();
   void keepsWorldGroundGridForPerspectiveViews();
+  void clampsZoomToSceneAwareFiniteLimits();
+  void keepsGridStepsOnConcreteDecimalScales();
+  void enforcesMinimumGridStepAtClosestZoom();
 };
 
 void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
@@ -91,6 +96,39 @@ void ViewportCameraTests::keepsWorldGroundGridForPerspectiveViews() {
            ReferenceGridPlane::XY);
   QCOMPARE(referenceGridPlane({0.0F, 0.0F}, false),
            ReferenceGridPlane::XY);
+}
+
+void ViewportCameraTests::clampsZoomToSceneAwareFiniteLimits() {
+  const ViewportZoomLimits limits = viewportZoomLimits(4.0F);
+
+  QVERIFY(limits.minimumDistance > 0.0F);
+  QVERIFY(limits.maximumDistance > limits.minimumDistance);
+  QCOMPARE(clampViewportDistance(0.0F, 4.0F), limits.minimumDistance);
+  QCOMPARE(clampViewportDistance(1.0e9F, 4.0F), limits.maximumDistance);
+  QCOMPARE(clampViewportDistance(std::numeric_limits<float>::infinity(), 4.0F),
+           limits.maximumDistance);
+  QCOMPARE(clampViewportDistance(12.0F, 4.0F), 12.0F);
+}
+
+void ViewportCameraTests::keepsGridStepsOnConcreteDecimalScales() {
+  const ReferenceGridScale scale = referenceGridScale(12.0F, 800);
+
+  QCOMPARE(scale.minimumStep, 0.001F);
+  QCOMPARE(scale.lowerMinorStep, 0.2F);
+  QCOMPARE(scale.upperMinorStep, 0.5F);
+  QVERIFY(scale.levelBlend >= 0.0F && scale.levelBlend <= 1.0F);
+  QVERIFY(scale.visibleDistance >= 12.0F * 8.0F);
+  QCOMPARE(scale.displayMajorStep, 5.0F);
+}
+
+void ViewportCameraTests::enforcesMinimumGridStepAtClosestZoom() {
+  const ReferenceGridScale scale = referenceGridScale(1.0e-9F, 2160);
+
+  QCOMPARE(scale.lowerMinorStep, 0.001F);
+  QCOMPARE(scale.upperMinorStep, 0.001F);
+  QCOMPARE(scale.levelBlend, 0.0F);
+  QCOMPARE(scale.displayMajorStep, 0.01F);
+  QVERIFY(scale.visibleDistance > 0.0F);
 }
 
 QTEST_GUILESS_MAIN(ViewportCameraTests)

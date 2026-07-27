@@ -32,8 +32,6 @@ namespace gsw {
 
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
-constexpr float kReferenceGridMinimumVisibleDistance = 10000.0F;
-constexpr float kReferenceGridDistanceMultiplier = 256.0F;
 
 struct ReferenceGridFrame final {
   QVector3D normal;
@@ -140,6 +138,11 @@ QString formatCount(const qint64 count) {
                                       'f', 1);
   }
   return QString::number(count);
+}
+
+QString formatSceneUnits(const float value) {
+  return QStringLiteral("%1 u").arg(
+      QString::number(static_cast<double>(value), 'g', 4));
 }
 } // namespace
 
@@ -286,7 +289,8 @@ void NativeViewport::resetCamera() {
   mTarget = mSceneCenter;
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
-  mDistance = std::max(mSceneRadius * 2.8F, 0.1F);
+  mDistance = clampViewportDistance(
+      std::max(mSceneRadius * 2.8F, 0.1F), mSceneRadius);
   mOrthographic = false;
   mCameraViewActive = false;
   mStoredCameraView.reset();
@@ -588,8 +592,10 @@ out vec4 fragmentColor;
 
 uniform mat4 inverseViewProjection;
 uniform vec3 cameraWorld;
-uniform float cameraDistance;
 uniform float gridVisibleDistance;
+uniform float gridLowerMinorStep;
+uniform float gridUpperMinorStep;
+uniform float gridLevelBlend;
 uniform float uiScale;
 uniform vec3 gridPlaneNormal;
 uniform vec3 gridAxisU;
@@ -647,22 +653,16 @@ void main() {
   vec2 gridCoordinate = vec2(dot(world, gridAxisU),
                              dot(world, gridAxisV));
 
-  // The scale is uniform for the whole frame. Keeping it out of derivative
-  // calculations avoids spatial level boundaries and the moire they create.
-  float desiredStep = max(cameraDistance * 0.06, 1e-7);
-  float fineStep = pow(10.0, floor(log(desiredStep) / log(10.0)));
-  float levelBlend = smoothstep(
-      0.12, 0.88,
-      clamp(log(desiredStep / fineStep) / log(10.0), 0.0, 1.0));
-  float coarseStep = fineStep * 10.0;
-  float majorStep = coarseStep * 10.0;
-
-  float fineLines = mix(gridLines(gridCoordinate, fineStep, 0.72 * uiScale),
-                        gridLines(gridCoordinate, coarseStep, 0.72 * uiScale),
-                        levelBlend);
-  float majorLines = mix(gridLines(gridCoordinate, coarseStep, 1.02 * uiScale),
-                         gridLines(gridCoordinate, majorStep, 1.02 * uiScale),
-                         levelBlend);
+  // CPU-selected 1-2-5 levels give the viewport a concrete minimum scale and
+  // keep the visible scale label in exact agreement with the rendered grid.
+  float fineLines = mix(
+      gridLines(gridCoordinate, gridLowerMinorStep, 0.72 * uiScale),
+      gridLines(gridCoordinate, gridUpperMinorStep, 0.72 * uiScale),
+      gridLevelBlend);
+  float majorLines = mix(
+      gridLines(gridCoordinate, gridLowerMinorStep * 10.0, 1.02 * uiScale),
+      gridLines(gridCoordinate, gridUpperMinorStep * 10.0, 1.02 * uiScale),
+      gridLevelBlend);
   float lineAlpha = max(fineLines * 0.38, majorLines * 0.58);
 
   float uAxis = originAxis(gridCoordinate.y, 1.35 * uiScale);
@@ -1115,7 +1115,8 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->bind();
   mGridProgram->setUniformValue("inverseViewProjection", inverseViewProjection);
   mGridProgram->setUniformValue("cameraWorld", cameraPosition());
-  mGridProgram->setUniformValue("cameraDistance", mDistance);
+  const ReferenceGridScale scale = referenceGridScale(
+      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
   const ReferenceGridFrame grid = referenceGridFrame(
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic));
   mGridProgram->setUniformValue("gridPlaneNormal", grid.normal);
@@ -1123,10 +1124,10 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->setUniformValue("gridAxisV", grid.axisV);
   mGridProgram->setUniformValue("gridAxisUColor", grid.axisUColor);
   mGridProgram->setUniformValue("gridAxisVColor", grid.axisVColor);
-  mGridProgram->setUniformValue(
-      "gridVisibleDistance",
-      std::max(kReferenceGridMinimumVisibleDistance,
-               mDistance * kReferenceGridDistanceMultiplier));
+  mGridProgram->setUniformValue("gridVisibleDistance", scale.visibleDistance);
+  mGridProgram->setUniformValue("gridLowerMinorStep", scale.lowerMinorStep);
+  mGridProgram->setUniformValue("gridUpperMinorStep", scale.upperMinorStep);
+  mGridProgram->setUniformValue("gridLevelBlend", scale.levelBlend);
   mGridProgram->setUniformValue("uiScale",
                                 static_cast<float>(devicePixelRatioF()));
   {
@@ -1299,7 +1300,8 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
 void NativeViewport::wheelEvent(QWheelEvent *event) {
   leaveCameraView();
   const float steps = static_cast<float>(event->angleDelta().y()) / 120.0F;
-  mDistance = std::clamp(mDistance * std::pow(0.84F, steps), 0.05F, 2500.0F);
+  mDistance = clampViewportDistance(
+      mDistance * std::pow(0.84F, steps), mSceneRadius);
   update();
   event->accept();
 }
@@ -1327,7 +1329,12 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     setCursor(Qt::OpenHandCursor);
     break;
   case NavigationGizmoPart::Zoom:
-    tooltip = QStringLiteral("上下拖动缩放视图");
+    {
+      const ViewportZoomLimits limits = viewportZoomLimits(mSceneRadius);
+      tooltip = QStringLiteral("上下拖动缩放视图（%1 – %2）")
+                    .arg(formatSceneUnits(limits.minimumDistance),
+                         formatSceneUnits(limits.maximumDistance));
+    }
     setCursor(Qt::SizeVerCursor);
     break;
   case NavigationGizmoPart::Pan:
@@ -1393,9 +1400,9 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
     break;
   }
   case NavigationGizmoPart::Zoom:
-    mDistance =
-        std::clamp(mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
-                   0.05F, 2500.0F);
+    mDistance = clampViewportDistance(
+        mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
+        mSceneRadius);
     break;
   case NavigationGizmoPart::Pan:
     panCamera(delta);
@@ -1463,7 +1470,8 @@ void NativeViewport::toggleCameraView() {
     mTarget = mStoredCameraView->target;
     mYawDegrees = mStoredCameraView->yawDegrees;
     mPitchDegrees = mStoredCameraView->pitchDegrees;
-    mDistance = mStoredCameraView->distance;
+    mDistance =
+        clampViewportDistance(mStoredCameraView->distance, mSceneRadius);
     mOrthographic = mStoredCameraView->orthographic;
     mCameraViewActive = false;
     mStoredCameraView.reset();
@@ -1750,6 +1758,24 @@ void NativeViewport::drawOverlay(QPainter &painter,
   painter.drawText(
       metricRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
       metrics.elidedText(metric, Qt::ElideRight, metricRect.width() - 20));
+
+  const ReferenceGridScale gridScale = referenceGridScale(
+      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const QString scaleText = QStringLiteral("主网格 %1  |  视距 %2  |  最小刻度 %3")
+                                .arg(formatSceneUnits(gridScale.displayMajorStep),
+                                     formatSceneUnits(mDistance),
+                                     formatSceneUnits(gridScale.minimumStep));
+  const int scaleWidth = metrics.horizontalAdvance(scaleText) + 24;
+  const QRect scaleRect(
+      12, metricRect.top() - badgeHeight - 6,
+      std::min(scaleWidth, width() - 24), badgeHeight);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(QColor(17, 19, 21, 225));
+  painter.drawRoundedRect(scaleRect, 4, 4);
+  painter.setPen(QColor(190, 198, 202));
+  painter.drawText(
+      scaleRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
+      metrics.elidedText(scaleText, Qt::ElideRight, scaleRect.width() - 20));
 
   const QString mode =
       mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);

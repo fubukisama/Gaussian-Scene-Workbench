@@ -19,6 +19,20 @@ struct OrbitFrame {
 
 enum class ReferenceGridPlane { XY, XZ, YZ };
 
+struct ViewportZoomLimits {
+  float minimumDistance = 0.001F;
+  float maximumDistance = 100.0F;
+};
+
+struct ReferenceGridScale {
+  float minimumStep = 0.001F;
+  float lowerMinorStep = 0.001F;
+  float upperMinorStep = 0.001F;
+  float levelBlend = 0.0F;
+  float displayMajorStep = 0.01F;
+  float visibleDistance = 1.0F;
+};
+
 [[nodiscard]] OrbitAngles orbitAnglesAfterLeftDrag(OrbitAngles current,
                                                    const QPoint &delta);
 
@@ -26,5 +40,12 @@ enum class ReferenceGridPlane { XY, XZ, YZ };
 
 [[nodiscard]] ReferenceGridPlane
 referenceGridPlane(OrbitAngles angles, bool orthographic);
+
+[[nodiscard]] ViewportZoomLimits viewportZoomLimits(float sceneRadius);
+
+[[nodiscard]] float clampViewportDistance(float distance, float sceneRadius);
+
+[[nodiscard]] ReferenceGridScale referenceGridScale(float cameraDistance,
+                                                    int viewportPixelHeight);
 
 } // namespace gsw
