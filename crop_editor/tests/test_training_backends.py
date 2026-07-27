@@ -137,6 +137,31 @@ class TrainingBackendTests(unittest.TestCase):
 
             self.assertEqual(server.load_runtime_config(path=config_path), {})
 
+    def test_sugar_env_root_prefers_machine_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_app_data = Path(tmp) / "LocalAppData"
+            runtime_root = Path(tmp) / "runtime"
+            env_root = runtime_root / "envs" / "sugar"
+            (env_root / "Scripts").mkdir(parents=True)
+            (env_root / "Scripts" / "python.exe").write_bytes(b"")
+            legacy_env_root = Path(tmp) / "legacy" / "sugar"
+            legacy_env_root.mkdir(parents=True)
+            (legacy_env_root / "python.exe").write_bytes(b"")
+            config_path = local_app_data / "Gaussian Scene Workbench" / "runtime.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"schema_version": 1, "runtime_root": str(runtime_root), "sugar_env_root": str(env_root)}),
+                encoding="utf-8",
+            )
+
+            resolved = server.sugar_env_root(
+                environ={"LOCALAPPDATA": str(local_app_data), "SUGAR_CONDA_PREFIX": str(legacy_env_root)},
+                home=Path(tmp) / "home",
+            )
+
+            self.assertEqual(resolved, env_root)
+            self.assertEqual(server.environment_python_path(resolved), env_root / "Scripts" / "python.exe")
+
     def test_bootstrap_migrates_blocked_legacy_pytorch_instead_of_repairing_mkl(self):
         bootstrap = (server.ROOT / "scripts" / "bootstrap_3dgs_editor.ps1").read_text(encoding="utf-8")
 
@@ -300,12 +325,13 @@ class TrainingBackendTests(unittest.TestCase):
                 probe_code = probe.call_args.args[2]
                 self.assertIn("import torch", probe_code)
                 self.assertIn("import pytorch3d", probe_code)
+                self.assertIn("from pytorch3d import _C", probe_code)
                 self.assertIn("import open3d", probe_code)
             finally:
                 server.SUGAR_DIR = original_sugar_dir
                 server.GS2MESH_DIR = original_gs2mesh_dir
 
-    def test_sugar_environment_retries_transient_application_control_block(self):
+    def test_sugar_environment_reports_deterministic_pytorch3d_policy_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_sugar_dir = server.SUGAR_DIR
             original_gs2mesh_dir = server.GS2MESH_DIR
@@ -322,18 +348,19 @@ class TrainingBackendTests(unittest.TestCase):
             (sugar_dir / "train.py").write_text("print('sugar')", encoding="utf-8")
             server.SUGAR_DIR = sugar_dir
             server.GS2MESH_DIR = gs2mesh_dir
-            blocked = "OSError: [WinError 4551] application control policy blocked tinyobjloader.dll"
+            blocked = "OSError: [WinError 4551] application control policy blocked pytorch3d\\_C.pyd"
             try:
                 with mock.patch.object(server, "sugar_python", return_value=sugar_python), \
                         mock.patch.object(server, "gs2mesh_python", return_value=gs2mesh_python), \
                         mock.patch.object(server, "smart_app_control_state", return_value="on"), \
-                        mock.patch.object(server, "python_probe", side_effect=[(False, blocked), (True, "runtime ok")]) as probe, \
-                        mock.patch.object(server.time, "sleep") as sleep:
-                    report = server.ensure_sugar_environment()
+                        mock.patch.object(server, "python_probe", return_value=(False, blocked)) as probe:
+                    with self.assertRaisesRegex(RuntimeError, "unsigned PyTorch3D native module") as raised:
+                        server.ensure_sugar_environment()
 
-                self.assertEqual(report["python"], str(sugar_python))
-                self.assertEqual(probe.call_count, 2)
-                sleep.assert_called_once()
+                self.assertEqual(probe.call_count, 1)
+                self.assertIn("no per-file allow rule", str(raised.exception))
+                self.assertIn("Linux/WSL", str(raised.exception))
+                self.assertNotIn("replace the conda-forge Open3D", str(raised.exception))
             finally:
                 server.SUGAR_DIR = original_sugar_dir
                 server.GS2MESH_DIR = original_gs2mesh_dir

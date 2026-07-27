@@ -3982,14 +3982,12 @@ def sugar_python():
     configured = os.environ.get("SUGAR_PYTHON")
     if configured:
         return Path(configured)
-    env_python = sugar_env_root() / "python.exe"
+    env_python = environment_python_path(sugar_env_root())
     if env_python.exists():
         return env_python
     return training_python("3dgs")
 
 
-SUGAR_RUNTIME_PROBE_ATTEMPTS = 3
-SUGAR_RUNTIME_PROBE_RETRY_SECONDS = 2
 SUGAR_RUNNER = ROOT / "scripts" / "run_sugar.py"
 
 
@@ -3999,7 +3997,14 @@ def probe_sugar_runtime(python_path):
         "torch=install_eager_dynamo_shim()\n"
         "import torch\n"
         "import pytorch3d\n"
-        "import open3d\n"
+        "try:\n"
+        " from pytorch3d import _C as pytorch3d_native\n"
+        "except Exception as exc:\n"
+        " raise RuntimeError(f'PyTorch3D native module probe failed: {exc}') from exc\n"
+        "try:\n"
+        " import open3d\n"
+        "except Exception as exc:\n"
+        " raise RuntimeError(f'Open3D native module probe failed: {exc}') from exc\n"
         "parameter=torch.nn.Parameter(torch.zeros(1))\n"
         "optimizer=torch.optim.Adam([parameter])\n"
         "parameter.sum().backward()\n"
@@ -4010,22 +4015,23 @@ def probe_sugar_runtime(python_path):
         "print('open3d', open3d.__version__)\n"
         "print('adam', 'ok')\n"
     )
-    smart_app_state = smart_app_control_state()
-    detail = ""
-    for attempt in range(SUGAR_RUNTIME_PROBE_ATTEMPTS):
-        ok, detail = python_probe(
-            python_path,
-            sugar_env(),
-            probe_code,
-            timeout=RUNTIME_PROBE_TIMEOUT_SECONDS,
-        )
-        if ok:
-            return True, detail
-        policy_blocked = native_extension_policy_blocked(detail, smart_app_state)
-        if not policy_blocked or attempt + 1 >= SUGAR_RUNTIME_PROBE_ATTEMPTS:
-            break
-        time.sleep(SUGAR_RUNTIME_PROBE_RETRY_SECONDS * (attempt + 1))
-    return False, detail
+    return python_probe(
+        python_path,
+        sugar_env(),
+        probe_code,
+        timeout=RUNTIME_PROBE_TIMEOUT_SECONDS,
+    )
+
+
+def sugar_blocked_component(detail):
+    text = str(detail or "").lower().replace("/", "\\")
+    if "pytorch3d" in text or "tinyobjloader" in text:
+        return "PyTorch3D"
+    if "open3d" in text or "pybind" in text:
+        return "Open3D"
+    if any(marker in text for marker in ("torch\\", "c10.dll", "torch_cpu.dll", "torch_cuda.dll")):
+        return "PyTorch"
+    return "SuGaR native runtime"
 
 
 def ensure_sugar_environment():
@@ -4048,10 +4054,14 @@ def ensure_sugar_environment():
         runtime_ok, runtime_detail = probe_sugar_runtime(python_path)
         if not runtime_ok:
             if native_extension_policy_blocked(runtime_detail, smart_app_control_state()):
+                component = sugar_blocked_component(runtime_detail)
                 problems.append(
-                    "Windows application control blocked a native SuGaR/Open3D DLL after three cold-start attempts. "
-                    "Keep Windows security enabled and replace the conda-forge Open3D build in the dedicated SuGaR "
-                    f"environment with the official PyPI Open3D wheel. Detail: {runtime_detail}"
+                    f"Windows Smart App Control blocked the unsigned {component} native module required by SuGaR. "
+                    "Smart App Control has no per-file allow rule, and reinstalling or running as administrator will "
+                    "not make an unsigned module trusted. Keep Windows security enabled and use either a PyTorch3D "
+                    "build signed by a CA in the Microsoft Trusted Root Program or a Linux/WSL SuGaR worker. "
+                    "GS2Mesh remains available as the Windows-native mesh backend. "
+                    f"Detail: {runtime_detail}"
                 )
             else:
                 problems.append(f"SuGaR native runtime imports failed: {runtime_detail}")
@@ -5209,11 +5219,21 @@ def training_env(backend="3dgs", runtime_mode=None):
     return env
 
 
-def sugar_env_root():
-    configured = os.environ.get("SUGAR_CONDA_PREFIX")
-    if configured:
-        return Path(configured)
-    return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "miniforge3" / "envs" / "sugar"
+def sugar_env_root(*, environ=None, home=None):
+    environment = os.environ if environ is None else environ
+    runtime_config = load_runtime_config(environ=environment, home=home)
+    configured = [
+        runtime_config.get("sugar_env_root"),
+        environment.get("SUGAR_CONDA_PREFIX"),
+    ]
+    runtime_root = environment.get("GS_EDITOR_RUNTIME_ROOT") or runtime_config.get("runtime_root")
+    if runtime_root:
+        configured.append(Path(runtime_root) / "envs" / "sugar")
+    for candidate in configured:
+        if candidate and environment_python_path(candidate).exists():
+            return Path(candidate)
+    user_home = Path.home() if home is None else Path(home)
+    return user_home / "miniforge3" / "envs" / "sugar"
 
 
 def sugar_env():

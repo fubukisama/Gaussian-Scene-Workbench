@@ -1,14 +1,14 @@
 {
     "appName":  "Gaussian Scene Workbench (Legacy HTML)",
-    "sourceVersion":  "36.10.18",
-    "packageVersion":  "0.2.16",
-    "releaseTag":  "v0.2.16",
-    "packageName":  "Gaussian-Scene-Workbench-0.2.16-win-x64.zip",
-    "updatedAt":  "2026-07-27T11:02:37+09:00",
+    "sourceVersion":  "36.10.19",
+    "packageVersion":  "0.2.17",
+    "releaseTag":  "v0.2.17",
+    "packageName":  "Gaussian-Scene-Workbench-0.2.17-win-x64.zip",
+    "updatedAt":  "2026-07-27T12:07:51+09:00",
     "updatedBy":  "Ishida_Lab",
     "machine":  "DESKTOP-UTA4K5M",
     "gitBranch":  "main",
-    "gitCommit":  "84c43ae",
+    "gitCommit":  "10359af",
     "gitDirty":  true,
-    "note":  "Migrate Smart App Control blocked 3DGS runtimes to validated PyTorch 2.12 CUDA 13.2"
+    "note":  "Detect blocked PyTorch3D before SuGaR startup and support configured SuGaR runtimes"
 }
