@@ -401,9 +401,10 @@ int main(int argc, char *argv[]) {
               QStringLiteral("inspectorDock"));
           const QDockWidget *taskDock = window.findChild<QDockWidget *>(
               QStringLiteral("taskDock"));
+          const QWidget *viewport = window.findChild<QWidget *>(
+              QStringLiteral("nativeViewport"));
           const QLabel *scaleStatus = window.findChild<QLabel *>(
               QStringLiteral("uiScaleStatus"));
-          const int fontHeight = QFontMetrics(window.font()).height();
           const int uiScalePercent =
               application.property("gswUiScalePercent").toInt();
           const auto hasCompactDockTitle =
@@ -466,8 +467,16 @@ int main(int argc, char *argv[]) {
               taskDock != nullptr && hasCompactDockTitle(projectDock) &&
               hasCompactDockTitle(inspectorDock) &&
               hasCompactDockTitle(taskDock) &&
-              inspectorDock->minimumWidth() >= fontHeight * 12 &&
-              taskDock->minimumHeight() >= fontHeight * 7 &&
+              projectDock->minimumWidth() == 0 &&
+              inspectorDock->minimumWidth() == 0 &&
+              taskDock->minimumHeight() <=
+                  taskDock->titleBarWidget()->height() +
+                      gsw::AppTheme::scaled(2, uiScalePercent) &&
+              viewport != nullptr &&
+              viewport->minimumWidth() == 0 &&
+              viewport->minimumHeight() == 0 &&
+              taskDock->height() <=
+                  gsw::AppTheme::scaled(140, uiScalePercent) &&
               scaleStatus != nullptr && scaleStatus->text().contains('%') &&
               scaleStatus->text().contains(QChar(0x00D7));
           application.exit(smokeTestCompleted ? 0 : 2);

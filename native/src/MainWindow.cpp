@@ -82,21 +82,22 @@
 namespace gsw {
 
 namespace {
-constexpr int kDockLayoutStateVersion = 4;
+constexpr int kDockLayoutStateVersion = 5;
+constexpr int kDefaultTaskDockHeight = 105;
 
 class DockTitleBar final : public QWidget {
 public:
   explicit DockTitleBar(QDockWidget *dock) : QWidget(dock), mDock(dock) {
     setObjectName(QStringLiteral("dockTitleBar"));
     setAccessibleName(dock->windowTitle());
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 
     mLayout = new QHBoxLayout(this);
     mTitleLabel = new QLabel(dock->windowTitle(), this);
     mTitleLabel->setObjectName(QStringLiteral("dockTitleLabel"));
     mTitleLabel->setTextFormat(Qt::PlainText);
     mTitleLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    mTitleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    mTitleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     mTitleLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
     mLayout->addWidget(mTitleLabel, 1);
 
@@ -147,6 +148,10 @@ public:
                             contentHeight + paddingY * 2));
     updateActions();
     updateGeometry();
+  }
+
+  QSize minimumSizeHint() const override {
+    return QSize(0, minimumHeight());
   }
 
 protected:
@@ -248,6 +253,7 @@ bool pathIsWithinDirectory(const QString &path, const QString &directory) {
   if (path.isEmpty() || directory.isEmpty()) {
     return false;
   }
+
   const QString root = comparablePath(directory);
   const QString candidate = comparablePath(path);
   const QString relative = QDir(root).relativeFilePath(candidate);
@@ -1370,8 +1376,12 @@ void MainWindow::createProjectDock() {
   mProjectDock->setObjectName(QStringLiteral("projectDock"));
   mProjectDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                 Qt::RightDockWidgetArea);
+  mProjectDock->setMinimumSize(0, 0);
+  mProjectDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mProjectDock, mUiScalePercent);
   mProjectTree = new QTreeWidget(mProjectDock);
+  mProjectTree->setMinimumSize(0, 0);
+  mProjectTree->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mProjectTree->setHeaderHidden(true);
   mProjectTree->setAlternatingRowColors(false);
   mProjectTree->setUniformRowHeights(true);
@@ -1420,9 +1430,13 @@ void MainWindow::createInspectorDock() {
   mInspectorDock->setObjectName(QStringLiteral("inspectorDock"));
   mInspectorDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                   Qt::RightDockWidgetArea);
+  mInspectorDock->setMinimumSize(0, 0);
+  mInspectorDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mInspectorDock, mUiScalePercent);
 
   auto *scrollArea = new QScrollArea(mInspectorDock);
+  scrollArea->setMinimumSize(0, 0);
+  scrollArea->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   scrollArea->setWidgetResizable(true);
   scrollArea->setFrameShape(QFrame::NoFrame);
   auto *panel = new QFrame(scrollArea);
@@ -1483,9 +1497,13 @@ void MainWindow::createTaskDock() {
   mTaskDock = new QDockWidget(QStringLiteral("任务与日志"), this);
   mTaskDock->setObjectName(QStringLiteral("taskDock"));
   mTaskDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+  mTaskDock->setMinimumSize(0, 0);
+  mTaskDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mTaskDock, mUiScalePercent);
 
   mTaskTabs = new QTabWidget(mTaskDock);
+  mTaskTabs->setMinimumSize(0, 0);
+  mTaskTabs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mTaskTable = new QTableWidget(0, 4, mTaskTabs);
   mTaskTable->setHorizontalHeaderLabels(
       {QStringLiteral("状态"), QStringLiteral("任务"),
@@ -2067,8 +2085,7 @@ void MainWindow::rebalanceDockSizes() {
                         mInspectorDock->minimumWidth())},
               Qt::Horizontal);
   resizeDocks({mTaskDock},
-              {std::max(AppTheme::scaled(180, mUiScalePercent),
-                        mTaskDock->minimumHeight())},
+              {AppTheme::scaled(kDefaultTaskDockHeight, mUiScalePercent)},
               Qt::Vertical);
 }
 
@@ -2076,18 +2093,14 @@ void MainWindow::updateDockMetrics() {
   updateDockTitleBarScale(mProjectDock, mUiScalePercent);
   updateDockTitleBarScale(mInspectorDock, mUiScalePercent);
   updateDockTitleBarScale(mTaskDock, mUiScalePercent);
-  const int fontHeight = QFontMetrics(qApp->font()).height();
   if (mProjectDock != nullptr) {
-    mProjectDock->setMinimumWidth(
-        std::max(AppTheme::scaled(190, mUiScalePercent), fontHeight * 10));
+    mProjectDock->setMinimumWidth(0);
   }
   if (mInspectorDock != nullptr) {
-    mInspectorDock->setMinimumWidth(
-        std::max(AppTheme::scaled(230, mUiScalePercent), fontHeight * 12));
+    mInspectorDock->setMinimumWidth(0);
   }
   if (mTaskDock != nullptr) {
-    mTaskDock->setMinimumHeight(
-        std::max(AppTheme::scaled(150, mUiScalePercent), fontHeight * 7));
+    mTaskDock->setMinimumHeight(0);
   }
 }
 

@@ -17,6 +17,7 @@
 #include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QPainterPath>
+#include <QSizePolicy>
 #include <QVariantAnimation>
 #include <QVector2D>
 #include <QVector4D>
@@ -146,7 +147,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   setObjectName(QStringLiteral("nativeViewport"));
   setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
-  setMinimumSize(420, 280);
+  setMinimumSize(0, 0);
+  setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
 
   mViewSnapAnimation = new QVariantAnimation(this);
   mViewSnapAnimation->setDuration(220);

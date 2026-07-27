@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QProgressBar>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -78,8 +79,8 @@ void addMetric(QGridLayout *layout, const int column, const QString &caption,
 class TrainingCurvesWidget final : public QWidget {
 public:
   explicit TrainingCurvesWidget(QWidget *parent = nullptr) : QWidget(parent) {
-    setMinimumHeight(112);
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    setMinimumHeight(0);
+    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   }
 
   void setSamples(const QVector<TrainingSample> &samples) {
@@ -193,6 +194,8 @@ private:
 };
 
 TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) {
+  setMinimumSize(0, 0);
+  setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   auto *layout = new QVBoxLayout(this);
   layout->setContentsMargins(10, 8, 10, 8);
   layout->setSpacing(6);
