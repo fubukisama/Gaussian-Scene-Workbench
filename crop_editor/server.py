@@ -197,29 +197,70 @@ def first_existing_path(candidates):
     return None
 
 
-def gaussian_env_root():
+def runtime_config_path(*, environ=None, home=None):
+    environment = os.environ if environ is None else environ
+    configured = environment.get("GS_EDITOR_RUNTIME_CONFIG")
+    if configured:
+        return Path(configured).expanduser()
+    local_app_data = environment.get("LOCALAPPDATA")
+    if local_app_data:
+        base = Path(local_app_data)
+    else:
+        user_home = Path.home() if home is None else Path(home)
+        base = user_home / "AppData" / "Local"
+    return base / "Gaussian Scene Workbench" / "runtime.json"
+
+
+def load_runtime_config(*, path=None, environ=None, home=None):
+    config_path = Path(path) if path is not None else runtime_config_path(environ=environ, home=home)
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def environment_python_path(env_root):
+    root = Path(env_root)
+    candidates = [root / "python.exe", root / "Scripts" / "python.exe"]
+    return first_existing_path(candidates) or candidates[0]
+
+
+def gaussian_env_root(*, environ=None, home=None, root=None):
+    environment = os.environ if environ is None else environ
+    runtime_config = load_runtime_config(environ=environment, home=home)
     configured = [
-        os.environ.get("GAUSSIAN_SPLATTING_CONDA_PREFIX"),
-        os.environ.get("GS_CONDA_PREFIX"),
+        runtime_config.get("gaussian_env_root"),
+        environment.get("GAUSSIAN_SPLATTING_CONDA_PREFIX"),
+        environment.get("GS_CONDA_PREFIX"),
     ]
-    conda_prefix = os.environ.get("CONDA_PREFIX")
+    runtime_root = environment.get("GS_EDITOR_RUNTIME_ROOT") or runtime_config.get("runtime_root")
+    if runtime_root:
+        configured.append(Path(runtime_root) / "envs" / "gaussian_splatting")
+    conda_prefix = environment.get("CONDA_PREFIX")
     if conda_prefix and Path(conda_prefix).name.lower() == "gaussian_splatting":
         configured.append(conda_prefix)
     for candidate in configured:
-        if candidate and (Path(candidate) / "python.exe").exists():
+        if candidate and environment_python_path(candidate).exists():
             return Path(candidate)
-    drive = install_drive_root()
+    project_root = Path(ROOT if root is None else root)
+    drive = Path(project_root.anchor) if project_root.anchor else install_drive_root()
+    user_home = Path.home() if home is None else Path(home)
     candidates = [
         drive / "miniforge3" / "envs" / "gaussian_splatting" if drive else None,
         drive / "conda" / "envs" / "gaussian_splatting" if drive else None,
         drive / "anaconda" / "envs" / "gaussian_splatting" if drive else None,
-        Path.home() / "miniforge3" / "envs" / "gaussian_splatting",
+        user_home / "miniforge3" / "envs" / "gaussian_splatting",
         *[root / "envs" / "gaussian_splatting" for root in conda_root_candidates()],
     ]
     for candidate in [item for item in candidates if item]:
-        if (candidate / "python.exe").exists():
+        if environment_python_path(candidate).exists():
             return candidate
     return next(item for item in candidates if item)
+
+
+def gaussian_python_path():
+    return environment_python_path(gaussian_env_root())
 
 
 def conda_bat_path():
@@ -5244,10 +5285,9 @@ def native_extension_policy_blocked(error_text, smart_app_state):
 def smart_app_control_guidance():
     return (
         "Windows Smart App Control is ON and blocked an unsigned PyTorch/CUDA native DLL required by this backend. "
-        "This Windows feature has no per-file allow rule. The workbench will use a compatible local "
-        "SuGaR runtime only for 3DGS training compatibility when available; GS2Mesh never uses that "
-        "runtime. For 2DGS, use a trusted signed Windows runtime or a WSL2/Linux runtime. Disabling Smart App "
-        "Control is system-wide and is not performed automatically by the workbench."
+        "This Windows feature has no per-file allow rule. Run Setup Gaussian Scene Workbench.cmd to migrate "
+        "3DGS to the validated PyTorch 2.12 CUDA 13.2 runtime. The installer keeps Smart App Control enabled "
+        "and stores the selected runtime in the machine-local workbench configuration."
     )
 
 
@@ -5319,7 +5359,7 @@ def training_python(backend="3dgs", runtime_mode=None):
         return TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe"
     if runtime_mode == "legacy_sugar":
         return sugar_env_root() / "python.exe"
-    gaussian_python = gaussian_env_root() / "python.exe"
+    gaussian_python = gaussian_python_path()
     if gaussian_python.exists():
         return gaussian_python
     return Path(sys.executable)

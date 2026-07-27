@@ -92,13 +92,42 @@ function Get-DefaultInstallRoot {
 }
 
 function Resolve-RuntimeRoot {
+  $resolved = $null
   if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
-    return [IO.Path]::GetFullPath($InstallRoot)
+    $resolved = [IO.Path]::GetFullPath($InstallRoot)
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:GS_EDITOR_RUNTIME_ROOT)) {
+    $resolved = [IO.Path]::GetFullPath($env:GS_EDITOR_RUNTIME_ROOT)
+  } else {
+    $resolved = Get-DefaultInstallRoot
   }
-  if (-not [string]::IsNullOrWhiteSpace($env:GS_EDITOR_RUNTIME_ROOT)) {
-    return [IO.Path]::GetFullPath($env:GS_EDITOR_RUNTIME_ROOT)
+  $driveRoot = [IO.Path]::GetPathRoot($resolved)
+  if ([string]::IsNullOrWhiteSpace($driveRoot) -or -not (Test-Path -LiteralPath $driveRoot)) {
+    throw "Runtime install drive does not exist: $driveRoot (requested path: $resolved)"
   }
-  return Get-DefaultInstallRoot
+  return $resolved
+}
+
+function Get-RuntimeConfigPath {
+  $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+  return Join-Path $localAppData "Gaussian Scene Workbench\runtime.json"
+}
+
+function Write-RuntimeConfig {
+  if (-not (Test-Path -LiteralPath $EnvPython)) { return }
+  if ($CheckOnly) {
+    Write-Step "CHECK ONLY: active runtime would be saved as $(Get-EnvRootFromPython $EnvPython)"
+    return
+  }
+  $configPath = Get-RuntimeConfigPath
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
+  $payload = [ordered]@{
+    schema_version = 1
+    runtime_root = $script:RuntimeRoot
+    gaussian_env_root = (Get-EnvRootFromPython $EnvPython)
+    updated_at = (Get-Date).ToString("o")
+  }
+  $payload | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
+  Write-Step "Runtime configuration saved: $configPath"
 }
 
 function Get-CondaRootCandidates {
@@ -135,6 +164,7 @@ function Find-CondaExe {
 function Find-GaussianEnvPython {
   $drive = Get-InstallDriveRoot
   $candidates = @(
+    (Join-Path $script:RuntimeRoot "envs\gaussian_splatting"),
     $env:GAUSSIAN_SPLATTING_CONDA_PREFIX,
     $env:GS_CONDA_PREFIX,
     (Join-Path $script:MiniforgeRoot "envs\gaussian_splatting"),
@@ -144,10 +174,18 @@ function Find-GaussianEnvPython {
     (Join-Path $env:USERPROFILE "miniforge3\envs\gaussian_splatting")
   )
   foreach ($candidateRoot in @($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
-    $candidate = Join-Path $candidateRoot "python.exe"
-    if (Test-Path -LiteralPath $candidate) { return $candidate }
+    foreach ($relativePython in @("python.exe", "Scripts\python.exe")) {
+      $candidate = Join-Path $candidateRoot $relativePython
+      if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
   }
   return Join-Path $script:MiniforgeRoot "envs\gaussian_splatting\python.exe"
+}
+
+function Get-EnvRootFromPython($pythonPath) {
+  $parent = Split-Path -Parent $pythonPath
+  if ((Split-Path -Leaf $parent) -ieq "Scripts") { return Split-Path -Parent $parent }
+  return $parent
 }
 
 function Install-Miniforge {
@@ -357,19 +395,111 @@ function Invoke-CondaRun($arguments) {
 
 function Test-EnvPythonImport($code, $name) {
   if (-not (Test-Path -LiteralPath $EnvPython)) { return $false }
-  $envRoot = Split-Path -Parent $EnvPython
+  $envRoot = Get-EnvRootFromPython $EnvPython
   Add-SetupPath $envRoot
   Add-SetupPath (Join-Path $envRoot "Library\bin")
   Add-SetupPath (Join-Path $envRoot "Library\usr\bin")
   Add-SetupPath (Join-Path $envRoot "Scripts")
   $env:CONDA_PREFIX = $envRoot
-  & $EnvPython -c $code | Out-Host
-  if ($LASTEXITCODE -eq 0) {
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $output = @(& $EnvPython -c $code 2>&1 | ForEach-Object { "$_" })
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousPreference
+  $script:LastEnvPythonOutput = ($output -join [Environment]::NewLine)
+  if ($output.Count -gt 0) { $output | ForEach-Object { Write-Host $_ } }
+  if ($exitCode -eq 0) {
     Write-Step "OK: $name"
     return $true
   }
   Write-Step "MISSING/FAILED: $name"
   return $false
+}
+
+function Test-ApplicationControlBlock($message) {
+  if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+  return [bool]($message -match "(?i)WinError\s*4551|application control policy|application control|Smart App Control|アプリケーション制御ポリシー|应用程序控制策略")
+}
+
+function Get-CudaRoot {
+  $preferred = Join-Path $env:ProgramFiles "NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+  $candidates = @($preferred, $env:CUDA_HOME, $env:CUDA_PATH)
+  $cudaParent = Join-Path $env:ProgramFiles "NVIDIA GPU Computing Toolkit\CUDA"
+  if (Test-Path -LiteralPath $cudaParent) {
+    $candidates += @(Get-ChildItem -LiteralPath $cudaParent -Directory | Sort-Object @{ Expression = { [version]($_.Name -replace '^v', '') }; Descending = $true } | ForEach-Object { $_.FullName })
+  }
+  foreach ($candidate in @($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+    if (Test-Path -LiteralPath (Join-Path $candidate "bin\nvcc.exe")) { return $candidate }
+  }
+  return $null
+}
+
+function Get-VsDevCmd {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
+  $install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Workload.VCTools -property installationPath
+  if ([string]::IsNullOrWhiteSpace($install)) { return $null }
+  $candidate = Join-Path $install "Common7\Tools\VsDevCmd.bat"
+  if (Test-Path -LiteralPath $candidate) { return $candidate }
+  return $null
+}
+
+function Import-VsBuildEnvironment {
+  $devCmd = Get-VsDevCmd
+  if (-not $devCmd) { throw "Visual Studio C++ Build Tools environment was not found." }
+  $lines = & cmd.exe /d /s /c "call `"$devCmd`" -arch=x64 -host_arch=x64 >nul && set"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to initialize Visual Studio C++ Build Tools." }
+  foreach ($line in $lines) {
+    $separator = $line.IndexOf("=")
+    if ($separator -gt 0) {
+      [Environment]::SetEnvironmentVariable($line.Substring(0, $separator), $line.Substring($separator + 1), "Process")
+    }
+  }
+}
+
+function Patch-TorchExtensionDecoder {
+  $envRoot = Get-EnvRootFromPython $EnvPython
+  $extensionFile = Join-Path $envRoot "Lib\site-packages\torch\utils\cpp_extension.py"
+  if (-not (Test-Path -LiteralPath $extensionFile)) { return }
+  $content = Get-Content -LiteralPath $extensionFile -Raw
+  $patched = $content.Replace("SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()", "SUBPROCESS_DECODE_ARGS = ('utf-8', 'ignore') if IS_WINDOWS else ()")
+  if ($patched -ne $content) {
+    Set-Content -LiteralPath $extensionFile -Value $patched -Encoding UTF8
+    Write-Step "Patched PyTorch extension output decoding for localized Windows builds."
+  }
+}
+
+function Install-ModernGaussianRuntime {
+  $targetRoot = Join-Path $script:RuntimeRoot "envs\gaussian_splatting"
+  $targetPython = Join-Path $targetRoot "python.exe"
+  if (-not (Test-Path -LiteralPath $targetPython)) {
+    $venvPython = Join-Path $targetRoot "Scripts\python.exe"
+    if (Test-Path -LiteralPath $venvPython) { $targetPython = $venvPython }
+  }
+  if (-not (Test-Path -LiteralPath $targetPython)) {
+    if ($CheckOnly) {
+      Mark-Missing "Smart App Control compatible 3DGS runtime" $targetPython
+      return $false
+    }
+    Write-Step "Creating Smart App Control compatible Python 3.10 runtime: $targetRoot"
+    $code = Invoke-CondaRun -arguments @("create", "--prefix", $targetRoot, "-y", "python=3.10", "pip", "setuptools", "wheel", "ninja")
+    if ($code -ne 0 -or -not (Test-Path -LiteralPath $targetPython)) {
+      throw "Failed to create the modern gaussian_splatting runtime: $targetRoot"
+    }
+  }
+  $script:EnvPython = $targetPython
+  $env:GAUSSIAN_SPLATTING_CONDA_PREFIX = $targetRoot
+  $env:GS_CONDA_PREFIX = $targetRoot
+  Write-Step "Installing modern PyTorch prerequisite packages..."
+  & $targetPython -m pip install --upgrade pip setuptools wheel ninja filelock typing-extensions sympy networkx jinja2 fsspec numpy pillow
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install modern PyTorch prerequisite packages." }
+  Write-Step "Installing PyTorch 2.12 CUDA 13.2 runtime..."
+  & $targetPython -m pip install --upgrade --index-url "https://download.pytorch.org/whl/cu132" "torch==2.12.0" "torchvision==0.27.0"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install PyTorch 2.12 CUDA 13.2 runtime." }
+  & $targetPython -m pip install --upgrade plyfile tqdm opencv-python joblib imageio imageio-ffmpeg pillow ninja setuptools wheel
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install 3DGS Python runtime packages." }
+  Patch-TorchExtensionDecoder
+  return $true
 }
 
 function Repair-GaussianEnvironment {
@@ -378,7 +508,7 @@ function Repair-GaussianEnvironment {
     Mark-Missing "gaussian_splatting Python" $EnvPython
     return
   }
-  $envRoot = Split-Path -Parent $EnvPython
+  $envRoot = Get-EnvRootFromPython $EnvPython
   Add-SetupPath $envRoot
   Add-SetupPath (Join-Path $envRoot "Library\bin")
   Add-SetupPath (Join-Path $envRoot "Library\usr\bin")
@@ -393,10 +523,7 @@ function Repair-GaussianEnvironment {
     if ($CheckOnly) {
       Write-Step "CHECK ONLY: skipping ffmpeg installation."
     } else {
-    $condaCode = Invoke-CondaRun -arguments @("install", "-n", "gaussian_splatting", "-y", "-c", "conda-forge", "ffmpeg")
-    if ($condaCode -ne 0) {
-      Write-Step "WARNING: conda ffmpeg install failed; falling back to imageio-ffmpeg."
-    }
+      Write-Step "ffmpeg will be provided by imageio-ffmpeg in the active runtime."
     }
   }
   $videoPackagesOk = Test-EnvPythonImport "import cv2, imageio, imageio_ffmpeg; print('OpenCV', cv2.__version__); print('imageio-ffmpeg', imageio_ffmpeg.get_ffmpeg_exe())" "OpenCV/imageio video packages"
@@ -421,17 +548,20 @@ function Repair-GaussianEnvironment {
       return
     }
     Write-Step "Copying imageio-ffmpeg binary to conda environment..."
+    $env:GS_EDITOR_FFMPEG_TARGET = $ffmpegExe
     $copyScript = @"
+import os
 import imageio_ffmpeg
 import pathlib
 import shutil
-dst = pathlib.Path(r"$ffmpegExe")
+dst = pathlib.Path(os.environ['GS_EDITOR_FFMPEG_TARGET'])
 dst.parent.mkdir(parents=True, exist_ok=True)
 src = pathlib.Path(imageio_ffmpeg.get_ffmpeg_exe())
 shutil.copy2(src, dst)
 print(dst)
 "@
     & $EnvPython -c $copyScript
+    Remove-Item Env:GS_EDITOR_FFMPEG_TARGET -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0) { throw "Failed to copy imageio-ffmpeg executable into the conda environment." }
   }
   if (-not (Test-Path -LiteralPath $ffmpegExe)) {
@@ -449,23 +579,23 @@ function Repair-PytorchRuntime {
     Write-Step "SKIP: PyTorch runtime already imports correctly."
     return
   }
+  $policyBlocked = Test-ApplicationControlBlock $script:LastEnvPythonOutput
   if ($CheckOnly) {
-    Mark-Missing "PyTorch 1.12 compatible MKL runtime"
-    Write-Step "CHECK ONLY: skipping PyTorch MKL runtime repair."
+    $reason = if ($policyBlocked) { "Windows application control blocked the legacy PyTorch DLL" } else { "PyTorch import failed" }
+    Mark-Missing "Smart App Control compatible 3DGS runtime" $reason
+    Write-Step "CHECK ONLY: modern PyTorch runtime migration is required."
     return
   }
-  Write-Step "Installing PyTorch 1.12-compatible MKL runtime..."
-  $code = Invoke-CondaRun -arguments @(
-    "install", "-n", "gaussian_splatting", "-y",
-    "defaults::mkl=2021.4",
-    "defaults::mkl-service=2.4",
-    "defaults::intel-openmp=2021.4"
-  )
-  if ($code -ne 0) { throw "Failed to install PyTorch-compatible MKL runtime." }
+  if ($policyBlocked) {
+    Write-Step "Windows application control blocked the legacy PyTorch runtime. MKL repair cannot fix this policy decision."
+  } else {
+    Write-Step "The existing PyTorch runtime is unusable. Migrating to the validated modern runtime instead of modifying it in place."
+  }
+  if (-not (Install-ModernGaussianRuntime)) { throw "Modern PyTorch runtime migration did not complete." }
   $torchOk = Test-EnvPythonImport "import torch; print('torch', torch.__version__); print('cuda available:', torch.cuda.is_available())" "PyTorch runtime"
   if (-not $torchOk) {
-    Mark-Failed "PyTorch runtime" "torch import failed after MKL repair"
-    throw "PyTorch import still fails after MKL runtime repair."
+    Mark-Failed "PyTorch runtime" "torch import failed after modern runtime migration"
+    throw "PyTorch import still fails after modern runtime migration."
   }
 }
 
@@ -481,57 +611,51 @@ function Repair-PillowRuntime {
     Write-Step "CHECK ONLY: skipping Pillow DLL runtime repair."
     return
   }
-  Write-Step "Installing Pillow-compatible image DLL runtime..."
-  $code = Invoke-CondaRun -arguments @(
-    "install", "-n", "gaussian_splatting", "-y",
-    "defaults::pillow=9.4.0",
-    "defaults::libtiff",
-    "defaults::libdeflate",
-    "defaults::zlib",
-    "defaults::jpeg",
-    "defaults::libjpeg-turbo"
-  )
-  if ($code -ne 0) { throw "Failed to install Pillow-compatible image DLL runtime." }
+  Write-Step "Installing Pillow into the active 3DGS runtime..."
+  & $EnvPython -m pip install --upgrade pillow
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install Pillow." }
   $pillowOk = Test-EnvPythonImport "from PIL import Image; print('Pillow', Image.__version__)" "Pillow runtime"
   if (-not $pillowOk) {
     Mark-Failed "Pillow runtime" "PIL.Image import failed after DLL repair"
-    throw "Pillow import still fails after image DLL runtime repair."
+    throw "Pillow import still fails after reinstall."
   }
 }
 
 function Ensure-3DGSSubmodulePaths {
   if (-not (Test-Path -LiteralPath $EnvPython)) { return }
-  $envRoot = Split-Path -Parent $EnvPython
-  $sitePackages = Join-Path $envRoot "Lib\site-packages"
-  if (-not (Test-Path -LiteralPath $sitePackages)) {
-    Mark-Missing "Python site-packages" $sitePackages
+  $extensionsOk = Test-EnvPythonImport "import diff_gaussian_rasterization, simple_knn, fused_ssim; print('3DGS CUDA extensions import OK')" "3DGS CUDA extensions"
+  if ($extensionsOk) {
+    Write-Step "SKIP: 3DGS CUDA extensions already import correctly."
     return
   }
-  $submodulePaths = @(
-    (Join-Path $Root "gaussian-splatting\submodules\diff-gaussian-rasterization\build\lib.win-amd64-cpython-37"),
-    (Join-Path $Root "gaussian-splatting\submodules\simple-knn\build\lib.win-amd64-cpython-37"),
-    (Join-Path $Root "gaussian-splatting\submodules\fused-ssim\build\lib.win-amd64-cpython-37")
-  )
-  $missing = @($submodulePaths | Where-Object { -not (Test-Path -LiteralPath $_) })
-  if ($missing.Count -gt 0) {
-    foreach ($path in $missing) {
-      Mark-Missing "prebuilt 3DGS CUDA extension path" $path
-      Write-Step "MISSING: prebuilt 3DGS CUDA extension path -> $path"
-    }
-    return
-  }
-  $pth = Join-Path $sitePackages "3dgs_editor_submodules.pth"
   if ($CheckOnly) {
-    if (Test-Path -LiteralPath $pth) {
-      Write-Step "OK: 3DGS extension path file -> $pth"
-    } else {
-      Mark-Missing "3DGS extension path file" $pth
-      Write-Step "MISSING: 3DGS extension path file -> $pth"
-    }
+    Mark-Missing "3DGS CUDA extensions" "diff_gaussian_rasterization/simple_knn/fused_ssim"
     return
   }
-  Set-Content -LiteralPath $pth -Value $submodulePaths -Encoding ASCII
-  Write-Step "OK: 3DGS extension path file -> $pth"
+  $cudaRoot = Get-CudaRoot
+  if (-not $cudaRoot) { throw "CUDA Toolkit with nvcc was not found. Install CUDA Toolkit 13.2 and retry setup." }
+  Import-VsBuildEnvironment
+  $env:CUDA_HOME = $cudaRoot
+  $env:CUDA_PATH = $cudaRoot
+  $env:DISTUTILS_USE_SDK = "1"
+  $env:MSSdk = "1"
+  $env:TORCH_CUDA_ARCH_LIST = "8.6"
+  $env:MAX_JOBS = "2"
+  $env:PYTHONNOUSERSITE = "1"
+  Patch-TorchExtensionDecoder
+  $submodulePaths = @(
+    (Join-Path $Root "gaussian-splatting\submodules\diff-gaussian-rasterization"),
+    (Join-Path $Root "gaussian-splatting\submodules\simple-knn"),
+    (Join-Path $Root "gaussian-splatting\submodules\fused-ssim")
+  )
+  foreach ($path in $submodulePaths) {
+    if (-not (Test-Path -LiteralPath (Join-Path $path "setup.py"))) { throw "Missing 3DGS CUDA extension source: $path" }
+    Write-Step "Building 3DGS CUDA extension: $path"
+    & $EnvPython -m pip install --no-build-isolation --no-deps --force-reinstall $path
+    if ($LASTEXITCODE -ne 0) { throw "Failed to build 3DGS CUDA extension: $path" }
+  }
+  $extensionsOk = Test-EnvPythonImport "import diff_gaussian_rasterization, simple_knn, fused_ssim; print('3DGS CUDA extensions import OK')" "3DGS CUDA extensions"
+  if (-not $extensionsOk) { throw "3DGS CUDA extensions still fail after rebuilding." }
 }
 
 Write-Step "Gaussian Scene Workbench setup started."
@@ -546,7 +670,7 @@ $MiniforgeConda = Find-CondaBat
 $EnvPython = Find-GaussianEnvPython
 $env:MINIFORGE_ROOT = Split-Path -Parent (Split-Path -Parent $MiniforgeConda)
 $env:CONDA_ROOT = $env:MINIFORGE_ROOT
-$env:GAUSSIAN_SPLATTING_CONDA_PREFIX = Split-Path -Parent $EnvPython
+$env:GAUSSIAN_SPLATTING_CONDA_PREFIX = Get-EnvRootFromPython $EnvPython
 $env:GS_CONDA_PREFIX = $env:GAUSSIAN_SPLATTING_CONDA_PREFIX
 $ColmapExe = if ($env:COLMAP_EXE) { $env:COLMAP_EXE } else { Get-LocalColmapExe }
 
@@ -582,25 +706,15 @@ if (-not (Test-PathReport $ColmapExe "COLMAP executable")) {
 
 if (-not (Test-Path -LiteralPath $EnvPython)) {
   Mark-Missing "gaussian_splatting conda environment" $EnvPython
-  $CreateEnv = Join-Path $Root "scripts\create_3dgs_env.bat"
-  if (-not (Test-Path -LiteralPath $CreateEnv)) {
-    throw "Missing environment creation script: $CreateEnv"
-  }
   if ($CheckOnly) {
-    Write-Step "CHECK ONLY: skipping conda environment creation."
+    Write-Step "CHECK ONLY: skipping modern 3DGS runtime creation."
   } elseif (Confirm-Step "Create/update the gaussian_splatting conda environment now?") {
-    Write-Step "Running $CreateEnv"
-    $env:MINIFORGE_ROOT = Split-Path -Parent (Split-Path -Parent $MiniforgeConda)
-    $env:CONDA_ROOT = $env:MINIFORGE_ROOT
-    & cmd.exe /d /s /c "`"$CreateEnv`""
-    $EnvPython = Find-GaussianEnvPython
-    $env:GAUSSIAN_SPLATTING_CONDA_PREFIX = Split-Path -Parent $EnvPython
-    $env:GS_CONDA_PREFIX = $env:GAUSSIAN_SPLATTING_CONDA_PREFIX
+    Install-ModernGaussianRuntime | Out-Null
   }
 }
 
-Repair-GaussianEnvironment
 Repair-PytorchRuntime
+Repair-GaussianEnvironment
 Repair-PillowRuntime
 Ensure-3DGSSubmodulePaths
 
@@ -630,6 +744,8 @@ if (Test-Path -LiteralPath $EnvPython) {
   if (-not $runtimeOk) {
     Mark-Failed "3DGS runtime imports" "torch/cv2/PIL/diff_gaussian_rasterization/simple_knn"
     if (-not $CheckOnly) { throw "3DGS runtime import verification failed." }
+  } else {
+    Write-RuntimeConfig
   }
 }
 

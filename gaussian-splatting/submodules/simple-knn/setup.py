@@ -15,15 +15,13 @@ import os
 
 cxx_compiler_flags = []
 nvcc_flags = []
-nvcc_flags = []
 
 if os.name == 'nt':
     cxx_compiler_flags.append("/wd4624")
+    cxx_compiler_flags.append("/Zc:preprocessor")
     cxx_compiler_flags.append("/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
     nvcc_flags.append("-allow-unsupported-compiler")
-    nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
-    cxx_compiler_flags.append("/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
-    nvcc_flags.append("-allow-unsupported-compiler")
+    nvcc_flags.append("-Xcompiler=/Zc:preprocessor")
     nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
 
 setup(

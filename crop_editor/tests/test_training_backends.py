@@ -101,6 +101,50 @@ def write_metashape_colmap_project(root, image_size=(8, 6), image_name="frame.jp
 
 
 class TrainingBackendTests(unittest.TestCase):
+    def test_gaussian_env_root_prefers_machine_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_app_data = Path(tmp) / "LocalAppData"
+            runtime_root = Path(tmp) / "runtime"
+            env_root = runtime_root / "envs" / "gaussian_splatting"
+            (env_root / "Scripts").mkdir(parents=True)
+            (env_root / "Scripts" / "python.exe").write_bytes(b"")
+            legacy_env_root = Path(tmp) / "legacy" / "gaussian_splatting"
+            legacy_env_root.mkdir(parents=True)
+            (legacy_env_root / "python.exe").write_bytes(b"")
+            config_path = local_app_data / "Gaussian Scene Workbench" / "runtime.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"schema_version": 1, "runtime_root": str(runtime_root), "gaussian_env_root": str(env_root)}),
+                encoding="utf-8",
+            )
+
+            resolved = server.gaussian_env_root(
+                environ={
+                    "LOCALAPPDATA": str(local_app_data),
+                    "GAUSSIAN_SPLATTING_CONDA_PREFIX": str(legacy_env_root),
+                },
+                home=Path(tmp) / "home",
+                root=Path(tmp) / "repository",
+            )
+
+            self.assertEqual(resolved, env_root)
+            self.assertEqual(server.environment_python_path(resolved), env_root / "Scripts" / "python.exe")
+
+    def test_runtime_config_ignores_invalid_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "runtime.json"
+            config_path.write_text("not-json", encoding="utf-8")
+
+            self.assertEqual(server.load_runtime_config(path=config_path), {})
+
+    def test_bootstrap_migrates_blocked_legacy_pytorch_instead_of_repairing_mkl(self):
+        bootstrap = (server.ROOT / "scripts" / "bootstrap_3dgs_editor.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("torch==2.12.0", bootstrap)
+        self.assertIn("Test-ApplicationControlBlock", bootstrap)
+        self.assertIn("Runtime install drive does not exist", bootstrap)
+        self.assertNotIn("PyTorch 1.12-compatible MKL runtime", bootstrap)
+
     def test_optional_backend_dir_prefers_explicit_environment_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repository"
