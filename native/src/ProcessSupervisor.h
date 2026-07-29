@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TrainingGpuPreviewProtocol.h"
+
 #include <QByteArray>
 #include <QMetaType>
 #include <QObject>
@@ -48,6 +50,8 @@ signals:
   void taskStarted(const QString &taskName);
   void outputReady(const QString &text);
   void workerStatusReady(const WorkerStatus &status);
+  void trainingGpuPreviewReady(
+      const gsw::TrainingGpuPreviewDescriptor &descriptor);
   void taskFinished(const QString &taskName, int exitCode, bool succeeded);
   void runningChanged(bool running);
 

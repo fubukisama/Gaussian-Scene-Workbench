@@ -25,6 +25,8 @@ namespace gsw {
 namespace {
 
 const QByteArray kWorkerEventPrefix = QByteArrayLiteral("[worker-event] ");
+const QByteArray kTrainingGpuPreviewPrefix =
+    QByteArrayLiteral("[gsw-training-gpu-preview] ");
 
 bool parseOptionalInteger(const QJsonObject &object, const QString &name,
                           std::optional<int> *target, const int minimum = 0) {
@@ -141,6 +143,7 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
 } // namespace
 
 ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
+  qRegisterMetaType<TrainingGpuPreviewDescriptor>();
   mProcess.setProcessChannelMode(QProcess::MergedChannels);
 
   connect(&mProcess, &QProcess::readyReadStandardOutput, this, &ProcessSupervisor::drainOutput);
@@ -405,6 +408,16 @@ void ProcessSupervisor::handleOutputLine(const QByteArray &line) {
     const QByteArray payload = content.mid(kWorkerEventPrefix.size());
     if (parseWorkerStatus(payload, &status)) {
       emit workerStatusReady(status);
+      return;
+    }
+  }
+
+  if (content.startsWith(kTrainingGpuPreviewPrefix)) {
+    TrainingGpuPreviewDescriptor descriptor;
+    const QByteArray payload =
+        content.mid(kTrainingGpuPreviewPrefix.size());
+    if (parseTrainingGpuPreviewDescriptor(payload, &descriptor)) {
+      emit trainingGpuPreviewReady(descriptor);
       return;
     }
   }

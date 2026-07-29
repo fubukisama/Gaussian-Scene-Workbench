@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSizePolicy>
+#include <QTimer>
 #include <QVariantAnimation>
 #include <QVector2D>
 #include <QVector4D>
@@ -167,17 +168,39 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     }
     update();
   });
+  mTrainingGpuPreviewTimer = new QTimer(this);
+  mTrainingGpuPreviewTimer->setTimerType(Qt::PreciseTimer);
+  mTrainingGpuPreviewTimer->setInterval(16);
+  connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
+          QOverload<>::of(&NativeViewport::update));
 }
 
 NativeViewport::~NativeViewport() {
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
+    mTrainingGpuPreview.release();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mPointVertexArray.destroy();
     mPointBuffer.destroy();
     doneCurrent();
   }
+}
+
+void NativeViewport::setTrainingGpuPreviewDescriptor(
+    const TrainingGpuPreviewDescriptor &descriptor) {
+  mPendingTrainingGpuPreviewDescriptor = descriptor;
+  mTrainingGpuPreviewStopPending = false;
+  if (descriptor.state == TrainingGpuPreviewState::Ready) {
+    mTrainingGpuPreviewTimer->start();
+  }
+  update();
+}
+
+void NativeViewport::stopTrainingGpuPreview() {
+  mPendingTrainingGpuPreviewDescriptor.reset();
+  mTrainingGpuPreviewStopPending = true;
+  update();
 }
 
 void NativeViewport::setProjectLabel(const QString &label) {
@@ -365,7 +388,8 @@ bool NativeViewport::hasEditableScene() const {
 }
 
 bool NativeViewport::gaussianRenderingAvailable() const {
-  return mHasGaussianAttributes && mGaussianShaderReady;
+  return (mHasGaussianAttributes || mTrainingGpuPreview.attached()) &&
+         mGaussianShaderReady;
 }
 
 bool NativeViewport::infiniteGridRenderingAvailable() const {
@@ -703,6 +727,9 @@ void main() {
     mGridVertexArray.create();
   }
 
+  mTrainingGpuPreviewCapability =
+      TrainingGpuPreviewBuffer::probe(QOpenGLContext::currentContext());
+
   if (pointShaderReady) {
     mPointBuffer.create();
     mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
@@ -774,6 +801,30 @@ void NativeViewport::resizeGL(const int width, const int height) {
 void NativeViewport::paintGL() {
   QElapsedTimer paintTimer;
   paintTimer.start();
+  applyPendingTrainingGpuPreview();
+  QString gpuPreviewError;
+  const bool previewChanged =
+      mTrainingGpuPreview.poll(&gpuPreviewError);
+  if (!gpuPreviewError.isEmpty() &&
+      gpuPreviewError != mTrainingGpuPreviewError) {
+    mTrainingGpuPreviewError = gpuPreviewError;
+    emit trainingGpuPreviewStateChanged(
+        mTrainingGpuPreview.attached(), QStringLiteral("GPU 共享显存"),
+        gpuPreviewError);
+  }
+  if (previewChanged && mTrainingGpuPreview.attached()) {
+    mTrainingGpuPreviewError.clear();
+    emit trainingGpuPreviewStateChanged(
+        true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
+        QStringLiteral("迭代 %1 · %2 个高斯")
+            .arg(mTrainingGpuPreview.iteration())
+            .arg(mTrainingGpuPreview.pointCount()));
+  } else if (previewChanged && !mTrainingGpuPreview.attached()) {
+    mTrainingGpuPreviewTimer->stop();
+    emit trainingGpuPreviewStateChanged(
+        false, QStringLiteral("PLY 检查点回退"),
+        QStringLiteral("共享显存预览已结束"));
+  }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
 
@@ -781,7 +832,9 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 projection = projectionMatrix();
   const QMatrix4x4 viewProjection = projection * view;
   drawInfiniteGrid(viewProjection);
-  if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+  if ((mRenderMode == RenderMode::Gaussians ||
+       mTrainingGpuPreview.hasFrame()) &&
+      gaussianRenderingAvailable()) {
     drawGaussianCloud(view, projection);
   } else {
     drawPointCloud(viewProjection);
@@ -789,7 +842,7 @@ void NativeViewport::paintGL() {
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
-  if (mPreviewPointCount == 0) {
+  if (mPreviewPointCount == 0 && !mTrainingGpuPreview.hasFrame()) {
     drawReferenceAxes(painter, viewProjection);
   }
   drawCameraTrajectory(painter, viewProjection);
@@ -806,6 +859,57 @@ void NativeViewport::paintGL() {
   drawAxisGizmo(painter);
   painter.end();
   emit frameTimeChanged(mSmoothedFrameMilliseconds);
+}
+
+void NativeViewport::applyPendingTrainingGpuPreview() {
+  if (mTrainingGpuPreviewStopPending) {
+    mTrainingGpuPreviewStopPending = false;
+    const bool wasAttached = mTrainingGpuPreview.attached();
+    mTrainingGpuPreview.release();
+    mTrainingGpuPreviewTimer->stop();
+    if (wasAttached) {
+      emit trainingGpuPreviewStateChanged(
+          false, QStringLiteral("PLY 检查点回退"),
+          QStringLiteral("训练任务已停止"));
+    }
+  }
+  if (!mPendingTrainingGpuPreviewDescriptor.has_value()) {
+    return;
+  }
+  const TrainingGpuPreviewDescriptor descriptor =
+      *mPendingTrainingGpuPreviewDescriptor;
+  mPendingTrainingGpuPreviewDescriptor.reset();
+  if (descriptor.state != TrainingGpuPreviewState::Ready) {
+    const bool wasAttached = mTrainingGpuPreview.attached();
+    mTrainingGpuPreview.release();
+    mTrainingGpuPreviewTimer->stop();
+    const QString detail =
+        descriptor.state == TrainingGpuPreviewState::Failed
+            ? descriptor.error
+            : QStringLiteral("训练共享显存发布器已关闭");
+    if (wasAttached || descriptor.state == TrainingGpuPreviewState::Failed) {
+      emit trainingGpuPreviewStateChanged(
+          false, QStringLiteral("PLY 检查点回退"), detail);
+    }
+    return;
+  }
+
+  QString error;
+  if (!mTrainingGpuPreview.attach(descriptor, &error)) {
+    mTrainingGpuPreviewTimer->stop();
+    mTrainingGpuPreviewError = error;
+    emit trainingGpuPreviewStateChanged(
+        false, QStringLiteral("PLY 检查点回退"), error);
+    return;
+  }
+  mTrainingGpuPreviewError.clear();
+  if (mRenderMode != RenderMode::Gaussians) {
+    mRenderMode = RenderMode::Gaussians;
+    emit renderModeChanged(mRenderMode);
+  }
+  emit trainingGpuPreviewStateChanged(
+      true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
+      QStringLiteral("已连接 %1，等待首帧").arg(descriptor.device));
 }
 
 void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
@@ -1068,7 +1172,10 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
 
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
-  if (mRenderedPointCount <= 0 || mGaussianProgram == nullptr ||
+  const bool livePreview = mTrainingGpuPreview.hasFrame();
+  const qsizetype drawCount =
+      livePreview ? mTrainingGpuPreview.pointCount() : mRenderedPointCount;
+  if (drawCount <= 0 || mGaussianProgram == nullptr ||
       !mGaussianProgram->isLinked()) {
     return;
   }
@@ -1084,10 +1191,15 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   mGaussianProgram->setUniformValue(
       "viewportPixels", QVector2D(static_cast<float>(width() * ratio),
                                   static_cast<float>(height() * ratio)));
-  {
+  if (livePreview) {
+    glBindVertexArray(mTrainingGpuPreview.activeVertexArray());
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
+                          static_cast<GLsizei>(drawCount));
+    glBindVertexArray(0);
+  } else {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
-                          static_cast<GLsizei>(mRenderedPointCount));
+                          static_cast<GLsizei>(drawCount));
   }
   mGaussianProgram->release();
   glDisable(GL_BLEND);
@@ -1667,13 +1779,19 @@ void NativeViewport::drawOverlay(QPainter &painter,
   painter.setPen(Qt::NoPen);
   painter.setBrush(QColor(17, 19, 21, 225));
 
-  const QString sceneName = mScenePath.isEmpty()
-                                ? QStringLiteral("未载入场景")
-                                : QFileInfo(mScenePath).fileName();
+  const QString sceneName = mTrainingGpuPreview.hasFrame()
+                                ? QStringLiteral("训练中 · GPU 实时预览")
+                                : mScenePath.isEmpty()
+                                      ? QStringLiteral("未载入场景")
+                                      : QFileInfo(mScenePath).fileName();
   const QString project =
       mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
   QString count;
-  if (!mSceneLoadMessage.isEmpty()) {
+  if (mTrainingGpuPreview.hasFrame()) {
+    count = QStringLiteral("迭代 %1 | %2 高斯 | 共享 GPU 显存")
+                .arg(mTrainingGpuPreview.iteration())
+                .arg(formatCount(mTrainingGpuPreview.pointCount()));
+  } else if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
   } else if (mGaussianCount > 0 && mPreviewPointCount > 0 &&
              mGaussianCount != mPreviewPointCount) {

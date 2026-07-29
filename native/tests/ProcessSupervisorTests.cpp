@@ -69,6 +69,8 @@ void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() 
 
   ProcessSupervisor supervisor;
   QSignalSpy statusSpy(&supervisor, &ProcessSupervisor::workerStatusReady);
+  QSignalSpy gpuPreviewSpy(
+      &supervisor, &ProcessSupervisor::trainingGpuPreviewReady);
   QSignalSpy outputSpy(&supervisor, &ProcessSupervisor::outputReady);
   QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
 
@@ -85,6 +87,7 @@ void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() 
 
   QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 5000);
   QCOMPARE(statusSpy.count(), 1);
+  QCOMPARE(gpuPreviewSpy.count(), 1);
   const WorkerStatus status = qvariant_cast<WorkerStatus>(statusSpy.takeFirst().at(0));
   QCOMPARE(status.state, QStringLiteral("running"));
   QCOMPARE(status.stage, QStringLiteral("train"));
@@ -101,6 +104,15 @@ void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() 
   QCOMPARE(status.elapsedSeconds.value(), 144.0);
   QCOMPARE(status.previewIteration.value(), 10000);
   QCOMPARE(status.previewPath, QStringLiteral("E:/model/point_cloud.ply"));
+  const TrainingGpuPreviewDescriptor gpuPreview =
+      qvariant_cast<TrainingGpuPreviewDescriptor>(
+          gpuPreviewSpy.takeFirst().at(0));
+  QCOMPARE(gpuPreview.state, TrainingGpuPreviewState::Ready);
+  QCOMPARE(gpuPreview.producerPid, quint32(4242));
+  QCOMPARE(gpuPreview.memoryHandle, quint64(0x41c));
+  QCOMPARE(gpuPreview.memoryHandleType,
+           TrainingGpuPreviewHandleType::OpaqueWin32Kmt);
+  QCOMPARE(gpuPreview.capacity, quint64(1000));
 
   QString output;
   for (const QList<QVariant> &arguments : outputSpy) {

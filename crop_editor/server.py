@@ -5445,6 +5445,7 @@ def training_command(backend, dataset, output, options, start_checkpoint=None):
         "--checkpoint_iterations",
         *recovery_arguments,
         "--disable_viewer",
+        "--enable_gpu_preview",
     ]
     if options["antialiasing"]:
         command.append("--antialiasing")

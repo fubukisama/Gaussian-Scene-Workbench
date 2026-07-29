@@ -1577,6 +1577,7 @@ void MainWindow::connectServices() {
                                 new QTableWidgetItem(QStringLiteral("-")));
             if (mPendingTraining.has_value() &&
                 mPendingTraining->taskName == taskName) {
+              mViewport->stopTrainingGpuPreview();
               mLiveTrainingPreviewPath.clear();
               mLiveTrainingGaussianCount = 0;
               mLastTrainingPreviewIteration = -1;
@@ -1589,12 +1590,16 @@ void MainWindow::connectServices() {
           });
   connect(&mProcessSupervisor, &ProcessSupervisor::outputReady, this,
           &MainWindow::appendLog);
+  connect(&mProcessSupervisor,
+          &ProcessSupervisor::trainingGpuPreviewReady, mViewport,
+          &NativeViewport::setTrainingGpuPreviewDescriptor);
   connect(&mProcessSupervisor, &ProcessSupervisor::workerStatusReady, this,
           [this](const WorkerStatus &status) {
             mActiveWorkerState = status.state;
             if (mPendingTraining.has_value()) {
               mTrainingMonitor->updateStatus(status);
-              if (status.previewIteration.has_value() &&
+              if (!mViewport->trainingGpuPreviewActive() &&
+                  status.previewIteration.has_value() &&
                   status.previewIteration.value() >
                       mLastTrainingPreviewIteration &&
                   !status.previewPath.isEmpty()) {
@@ -1850,6 +1855,7 @@ void MainWindow::connectServices() {
         const bool cancelled =
             processCancelled && !effectiveSucceeded && !recoveryFailed;
         if (finishingTraining) {
+          mViewport->stopTrainingGpuPreview();
           mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled);
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
@@ -1914,7 +1920,8 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::frameTimeChanged, this,
           [this](const double milliseconds) {
-            if (!mWorkspace.scenePath().isEmpty()) {
+            if (!mWorkspace.scenePath().isEmpty() &&
+                !mViewport->trainingGpuPreviewActive()) {
               const QString renderer =
                   mRenderMode == NativeViewport::RenderMode::Gaussians
                       ? QStringLiteral("高斯预览")
@@ -1924,6 +1931,30 @@ void MainWindow::connectServices() {
                                            .arg(milliseconds, 0, 'f', 2));
             }
           });
+  connect(
+      mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,
+      [this](const bool active, const QString &mode, const QString &detail) {
+        const bool stateChanged =
+            mRendererStatus->property("gpuPreviewActive").toBool() != active ||
+            mRendererStatus->property("gpuPreviewMode").toString() != mode;
+        mRendererStatus->setProperty("gpuPreviewActive", active);
+        mRendererStatus->setProperty("gpuPreviewMode", mode);
+        mRendererStatus->setText(
+            detail.isEmpty() ? mode : QStringLiteral("%1 | %2").arg(mode, detail));
+        if (active) {
+          mRendererStatus->setObjectName(QStringLiteral("statusOk"));
+        } else {
+          mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
+        }
+        mRendererStatus->style()->unpolish(mRendererStatus);
+        mRendererStatus->style()->polish(mRendererStatus);
+        if (stateChanged) {
+          appendTaskEvent(QStringLiteral("训练预览：%1%2")
+                              .arg(mode, detail.isEmpty()
+                                             ? QString()
+                                             : QStringLiteral(" · %1").arg(detail)));
+        }
+      });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this,
           [this](const QString &scenePath) {
             mRendererStatus->setText(QStringLiteral("正在读取点云"));

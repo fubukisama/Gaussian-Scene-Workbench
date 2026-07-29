@@ -80,7 +80,18 @@ int main(int argc, char *argv[]) {
       "\"loss\":0.0234,\"psnr\":27.5,\"gaussianCount\":123456,"
       "\"iterationMilliseconds\":12.5,\"elapsedSeconds\":144.0,"
       "\"previewIteration\":10000,"
-      "\"previewPath\":\"E:/model/point_cloud.ply\"}\nplain log\n");
+      "\"previewPath\":\"E:/model/point_cloud.ply\"}\n"
+      "[gsw-training-gpu-preview] {\"version\":1,\"type\":\"gpu_preview\","
+      "\"state\":\"ready\",\"sessionId\":\"fixture-session\","
+      "\"producerPid\":4242,\"memoryHandle\":\"0x41c\","
+      "\"memoryHandleType\":\"opaque_win32_kmt\","
+      "\"allocationBytes\":112000,\"slotBytes\":56000,"
+      "\"slotCount\":2,\"strideBytes\":56,\"capacity\":1000,"
+      "\"controlMapping\":\"Local\\\\GSW-GPU-fixture-control\","
+      "\"frameEvent\":\"Local\\\\GSW-GPU-fixture-frame\","
+      "\"releaseEvent0\":\"Local\\\\GSW-GPU-fixture-release-0\","
+      "\"releaseEvent1\":\"Local\\\\GSW-GPU-fixture-release-1\","
+      "\"device\":\"NVIDIA fixture\"}\nplain log\n");
   output.flush();
   return 0;
 }

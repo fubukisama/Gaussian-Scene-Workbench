@@ -42,7 +42,7 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, load_iteration=None):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, load_iteration=None, enable_gpu_preview=False, gpu_preview_fps=15.0):
 
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
@@ -72,6 +72,34 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     ema_Ll1depth_for_log = 0.0
     training_started_at = time.monotonic()
+    gpu_preview = None
+    gpu_preview_emit = None
+    if enable_gpu_preview:
+        try:
+            repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            if repository_root not in sys.path:
+                sys.path.insert(0, repository_root)
+            from native.worker.gpu_preview_publisher import create_publisher, emit_descriptor
+            gpu_preview_emit = emit_descriptor
+            gpu_preview, failure_descriptor = create_publisher(
+                torch, fps=gpu_preview_fps
+            )
+            if gpu_preview is not None:
+                gpu_preview_emit(gpu_preview.descriptor())
+            elif failure_descriptor is not None:
+                gpu_preview_emit(failure_descriptor)
+        except Exception as preview_error:
+            print(
+                "[gsw-training-gpu-preview] "
+                + json.dumps({
+                    "version": 1,
+                    "type": "gpu_preview",
+                    "state": "failed",
+                    "sessionId": str(uuid.uuid4()),
+                    "error": str(preview_error)[:1000],
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     progress_interval = max(1, opt.iterations // 100)
@@ -222,9 +250,32 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
 
+            if gpu_preview is not None:
+                try:
+                    gpu_preview.publish(gaussians, iteration)
+                except Exception as preview_error:
+                    gpu_preview_emit({
+                        "version": 1,
+                        "type": "gpu_preview",
+                        "state": "failed",
+                        "sessionId": gpu_preview.session_id,
+                        "error": str(preview_error)[:1000],
+                    })
+                    gpu_preview.close(detach_timeout=0)
+                    gpu_preview = None
+
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+
+    if gpu_preview is not None:
+        gpu_preview_emit({
+            "version": 1,
+            "type": "gpu_preview",
+            "state": "closing",
+            "sessionId": gpu_preview.session_id,
+        })
+        gpu_preview.close()
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
@@ -302,6 +353,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument('--disable_viewer', action='store_true', default=False)
+    parser.add_argument('--enable_gpu_preview', action='store_true', default=False)
+    parser.add_argument('--gpu_preview_fps', type=float, default=15.0)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--load_iteration", type=int, default=None)
@@ -317,7 +370,7 @@ if __name__ == "__main__":
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
 
     # All done
     print("\nTraining complete.")

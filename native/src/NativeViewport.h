@@ -5,6 +5,7 @@
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
 #include "ScreenSpaceSelection.h"
+#include "TrainingGpuPreviewBuffer.h"
 
 #include <QElapsedTimer>
 #include <QMatrix4x4>
@@ -28,6 +29,7 @@ class QEnterEvent;
 class QEvent;
 class QWheelEvent;
 class QVariantAnimation;
+class QTimer;
 
 namespace gsw {
 
@@ -58,6 +60,9 @@ public:
   void deleteSelection();
   void undoEdit();
   void redoEdit();
+  void setTrainingGpuPreviewDescriptor(
+      const TrainingGpuPreviewDescriptor &descriptor);
+  void stopTrainingGpuPreview();
 
   [[nodiscard]] bool saveCroppedScene(const QString &filePath,
                                       QString *errorMessage = nullptr);
@@ -68,6 +73,13 @@ public:
   [[nodiscard]] qsizetype cameraCount() const;
   [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
+  [[nodiscard]] TrainingGpuPreviewCapability
+  trainingGpuPreviewCapability() const {
+    return mTrainingGpuPreviewCapability;
+  }
+  [[nodiscard]] bool trainingGpuPreviewActive() const {
+    return mTrainingGpuPreview.attached();
+  }
   [[nodiscard]] static QVector3D referenceGridOrigin() {
     return QVector3D(0.0F, 0.0F, 0.0F);
   }
@@ -87,6 +99,8 @@ signals:
                                qsizetype invalidCameraCount,
                                bool displayDecimated, const QString &sourcePath,
                                const QString &error);
+  void trainingGpuPreviewStateChanged(bool active, const QString &mode,
+                                      const QString &detail);
 
 protected:
   void initializeGL() override;
@@ -123,6 +137,7 @@ private:
   void rebuildRenderedVertices();
   void notifyEditState();
   void uploadPendingPointCloud();
+  void applyPendingTrainingGpuPreview();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
@@ -195,6 +210,13 @@ private:
   QOpenGLVertexArrayObject mPointVertexArray;
   QOpenGLVertexArrayObject mGaussianVertexArray;
   QOpenGLVertexArrayObject mGridVertexArray;
+  TrainingGpuPreviewBuffer mTrainingGpuPreview;
+  TrainingGpuPreviewCapability mTrainingGpuPreviewCapability;
+  std::optional<TrainingGpuPreviewDescriptor>
+      mPendingTrainingGpuPreviewDescriptor;
+  bool mTrainingGpuPreviewStopPending = false;
+  QString mTrainingGpuPreviewError;
+  QTimer *mTrainingGpuPreviewTimer = nullptr;
   QVariantAnimation *mViewSnapAnimation = nullptr;
   QElapsedTimer mFrameTimer;
   double mSmoothedFrameMilliseconds = 0.0;

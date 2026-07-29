@@ -20,6 +20,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QSettings>
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QToolBar>
@@ -84,6 +85,17 @@ int main(int argc, char *argv[]) {
   QCoreApplication::setApplicationName(QStringLiteral("Gaussian Scene Workbench"));
   QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Scene Workbench Native"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
+  if (application.arguments().contains(
+          QStringLiteral("--smoke-test-display-layout"))) {
+    // The layout smoke test validates the default dock arrangement. Isolate
+    // it from the interactive app's persisted geometry and scale settings.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(
+        QSettings::IniFormat, QSettings::UserScope,
+        QDir(QCoreApplication::applicationDirPath())
+            .filePath(QStringLiteral("test-settings/%1")
+                          .arg(QCoreApplication::applicationPid())));
+  }
   const QIcon applicationIcon(QStringLiteral(":/icons/gsw-app-icon.png"));
   if (applicationIcon.isNull()) {
     qCritical() << "Failed to load the embedded application icon.";
@@ -130,6 +142,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-infinite-grid"),
       QStringLiteral("Verify the adaptive all-axis infinite reference grid."));
   parser.addOption(infiniteGridSmokeTestOption);
+  QCommandLineOption gpuPreviewInteropProbeOption(
+      QStringLiteral("probe-gpu-preview-interop"),
+      QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
+  parser.addOption(gpuPreviewInteropProbeOption);
   QCommandLineOption mediaSourceOption(
       QStringLiteral("media-source"),
       QStringLiteral("Pre-populate the media import dialog with a file or directory. "
@@ -150,9 +166,12 @@ int main(int argc, char *argv[]) {
       parser.isSet(exitConfirmationSmokeTestOption);
   const bool infiniteGridSmokeTest =
       parser.isSet(infiniteGridSmokeTestOption);
+  const bool gpuPreviewInteropProbe =
+      parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
-                         exitConfirmationSmokeTest || infiniteGridSmokeTest;
+                         exitConfirmationSmokeTest || infiniteGridSmokeTest ||
+                         gpuPreviewInteropProbe;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -165,7 +184,30 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (infiniteGridSmokeTest) {
+  if (gpuPreviewInteropProbe) {
+    QTimer::singleShot(
+        650, &application,
+        [&application, &window, &smokeTestCompleted,
+         &smokeTestFailureCode]() {
+          auto *viewport =
+              qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+          if (viewport == nullptr) {
+            smokeTestFailureCode = 2;
+            application.exit(smokeTestFailureCode);
+            return;
+          }
+          const gsw::TrainingGpuPreviewCapability capability =
+              viewport->trainingGpuPreviewCapability();
+          qInfo().noquote()
+              << QStringLiteral("GPU_PREVIEW_INTEROP available=%1 renderer=%2 detail=%3")
+                     .arg(capability.available ? QStringLiteral("true")
+                                               : QStringLiteral("false"),
+                          capability.renderer, capability.detail);
+          smokeTestCompleted = capability.available;
+          smokeTestFailureCode = capability.available ? 0 : 3;
+          application.exit(smokeTestFailureCode);
+        });
+  } else if (infiniteGridSmokeTest) {
     QTimer::singleShot(
         450, &application, [&window]() {
           auto *viewport =

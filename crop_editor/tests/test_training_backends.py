@@ -1106,6 +1106,7 @@ class TrainingBackendTests(unittest.TestCase):
         self.assertIn("--densify_until_iter", command)
         self.assertIn("--exposure_lr_init", command)
         self.assertEqual(command[command.index("--exposure_lr_init") + 1], "0.001")
+        self.assertIn("--enable_gpu_preview", command)
 
     def test_sparse_adam_falls_back_when_accelerated_rasterizer_is_missing(self):
         options = server.training_options_from_payload("3dgs", "quality", {

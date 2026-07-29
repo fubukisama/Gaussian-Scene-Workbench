@@ -77,6 +77,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingDialog.h
   src/TrainingEnvironmentProbe.cpp
   src/TrainingEnvironmentProbe.h
+  src/TrainingGpuPreviewProtocol.cpp
+  src/TrainingGpuPreviewProtocol.h
+  src/TrainingGpuPreviewBuffer.cpp
+  src/TrainingGpuPreviewBuffer.h
   src/TrainingMonitorWidget.cpp
   src/TrainingMonitorWidget.h
   src/TrainingTelemetry.cpp
@@ -252,6 +256,8 @@ if(BUILD_TESTING)
       tests/ProcessSupervisorTests.cpp
       src/ProcessSupervisor.cpp
       src/ProcessSupervisor.h
+      src/TrainingGpuPreviewProtocol.cpp
+      src/TrainingGpuPreviewProtocol.h
     )
     target_include_directories(gsw_process_supervisor_tests PRIVATE src)
     target_link_libraries(gsw_process_supervisor_tests PRIVATE Qt6::Core Qt6::Test)
@@ -273,6 +279,35 @@ if(BUILD_TESTING)
       target_compile_options(gsw_training_telemetry_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME training_telemetry COMMAND gsw_training_telemetry_tests)
+
+    qt_add_executable(gsw_training_gpu_preview_protocol_tests
+      tests/TrainingGpuPreviewProtocolTests.cpp
+      src/TrainingGpuPreviewProtocol.cpp
+      src/TrainingGpuPreviewProtocol.h
+    )
+    target_include_directories(gsw_training_gpu_preview_protocol_tests PRIVATE src)
+    target_link_libraries(gsw_training_gpu_preview_protocol_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_training_gpu_preview_protocol_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME training_gpu_preview_protocol COMMAND gsw_training_gpu_preview_protocol_tests)
+
+    qt_add_executable(gsw_gpu_preview_capability_probe
+      tests/GpuPreviewCapabilityProbe.cpp
+      src/TrainingGpuPreviewBuffer.cpp
+      src/TrainingGpuPreviewBuffer.h
+      src/TrainingGpuPreviewProtocol.cpp
+      src/TrainingGpuPreviewProtocol.h
+    )
+    target_include_directories(gsw_gpu_preview_capability_probe PRIVATE src)
+    target_link_libraries(gsw_gpu_preview_capability_probe PRIVATE
+      Qt6::Core Qt6::Gui Qt6::OpenGL)
+    set_target_properties(gsw_gpu_preview_capability_probe PROPERTIES
+      WIN32_EXECUTABLE FALSE)
+    if(MSVC)
+      target_compile_options(gsw_gpu_preview_capability_probe PRIVATE
+        /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
 
     qt_add_executable(gsw_workspace_scene_format_tests
       tests/WorkspaceSceneFormatTests.cpp
