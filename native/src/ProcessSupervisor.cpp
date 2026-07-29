@@ -160,6 +160,13 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
     }
     parsedStatus.previewPath = previewPath.toString();
   }
+  const QJsonValue previewKind = object.value(QStringLiteral("previewKind"));
+  if (!previewKind.isUndefined()) {
+    if (!previewKind.isString()) {
+      return false;
+    }
+    parsedStatus.previewKind = previewKind.toString();
+  }
 
   *status = std::move(parsedStatus);
   return true;

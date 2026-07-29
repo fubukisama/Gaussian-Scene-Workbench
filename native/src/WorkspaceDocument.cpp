@@ -239,7 +239,8 @@ QStringList reconstructionArtifactPaths(const QString &datasetPath) {
        {QStringLiteral("distorted"), QStringLiteral("sparse"),
         QStringLiteral("stereo"), QStringLiteral("database.db"),
         QStringLiteral(".alignment_cache"),
-        QStringLiteral(".colmap-undistorted")}) {
+        QStringLiteral(".colmap-undistorted"),
+        QStringLiteral(".gsw/previews/colmap")}) {
     appendExisting(dataset.filePath(name));
   }
   const QFileInfoList transientArtifacts = dataset.entryInfoList(

@@ -1,5 +1,7 @@
 import json
+import struct
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -20,6 +22,19 @@ if "plyfile" not in sys.modules:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server  # noqa: E402
+
+
+def write_colmap_points(path, points):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as stream:
+        stream.write(struct.pack("<Q", len(points)))
+        for index, (x, y, z, red, green, blue) in enumerate(points, start=1):
+            stream.write(
+                struct.pack(
+                    "<QdddBBBdQ", index, x, y, z, red, green, blue, 0.25, 1
+                )
+            )
+            stream.write(struct.pack("<II", index, index - 1))
 
 
 class TrainingTelemetryTests(unittest.TestCase):
@@ -71,6 +86,83 @@ class TrainingTelemetryTests(unittest.TestCase):
         self.assertEqual(snapshot["elapsed_seconds"], 144.0)
         self.assertEqual(snapshot["latest_iteration"], 10000)
         self.assertEqual(snapshot["partial_point_cloud_path"], "E:/model/point_cloud.ply")
+
+    def test_colmap_binary_preview_is_bounded_and_preserves_color(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "points3D.bin"
+            write_colmap_points(
+                source,
+                [
+                    (1.0, 2.0, 3.0, 10, 20, 30),
+                    (4.0, 5.0, 6.0, 40, 50, 60),
+                    (7.0, 8.0, 9.0, 70, 80, 90),
+                ],
+            )
+
+            source_count, points = server.read_colmap_points3d_binary(
+                source, max_points=2
+            )
+
+            self.assertEqual(source_count, 3)
+            self.assertEqual(points, [(1.0, 2.0, 3.0, 10, 20, 30),
+                                      (7.0, 8.0, 9.0, 70, 80, 90)])
+
+    def test_colmap_preview_publisher_updates_live_job_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "dataset"
+            snapshot = dataset / "distorted" / "snapshots" / "2"
+            write_colmap_points(
+                snapshot / "points3D.bin",
+                [(1.25, -2.5, 3.75, 120, 121, 122)],
+            )
+            job = {
+                "id": "colmap-preview",
+                "kind": "colmap",
+                "scene": "scene",
+                "status": "running",
+                "stage": "colmap",
+                "created_at": 1,
+                "updated_at": 1,
+                "log": [],
+            }
+            publisher = server.ColmapPointCloudPreviewPublisher(
+                job, dataset, [snapshot.parent], interval=60
+            )
+
+            self.assertTrue(publisher.publish_latest(force=True))
+
+            preview = Path(job["partial_point_cloud_path"])
+            self.assertTrue(preview.is_file())
+            self.assertEqual(job["preview_kind"], "colmap_sparse")
+            self.assertEqual(job["latest_iteration"], 1)
+            self.assertEqual(job["point_count"], 1)
+            header = preview.read_bytes().split(b"end_header\n", 1)[0]
+            self.assertIn(b"element vertex 1", header)
+
+    def test_colmap_snapshot_cadence_limits_preview_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "dataset"
+            images = dataset / "images"
+            images.mkdir(parents=True)
+            for index in range(97):
+                (images / f"{index:04d}.jpg").write_bytes(b"image")
+
+            self.assertEqual(
+                server.colmap_snapshot_frames_frequency(dataset, target_count=48),
+                3,
+            )
+            command = ["colmap.exe", "mapper"]
+            server.configure_colmap_mapper_snapshots(
+                command, dataset / "snapshots", 3
+            )
+            self.assertEqual(
+                command[command.index("--Mapper.snapshot_frames_freq") + 1],
+                "3",
+            )
+            self.assertEqual(
+                Path(command[command.index("--Mapper.snapshot_path") + 1]),
+                dataset / "snapshots",
+            )
 
 
 if __name__ == "__main__":

@@ -137,8 +137,10 @@ private:
   void rebuildRenderedVertices();
   void notifyEditState();
   void uploadPendingPointCloud();
+  void synchronizeGaussianRenderingAvailability(bool previousAvailability);
   void applyPendingTrainingGpuPreview();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
+  void drawTrainingPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
   void drawReferenceAxes(QPainter &painter, const QMatrix4x4 &viewProjection);

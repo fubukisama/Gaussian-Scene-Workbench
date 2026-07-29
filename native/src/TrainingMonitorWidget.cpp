@@ -46,7 +46,7 @@ QString stageLabel(const QString &stage) {
     return QStringLiteral("准备数据");
   }
   if (stage == QStringLiteral("colmap")) {
-    return QStringLiteral("相机解算");
+    return QStringLiteral("相机解算 · 稀疏点云生成");
   }
   if (stage == QStringLiteral("train")) {
     return QStringLiteral("训练中");
@@ -66,12 +66,13 @@ QLabel *metricValue(QWidget *parent) {
   return label;
 }
 
-void addMetric(QGridLayout *layout, const int column, const QString &caption,
-               QLabel *value) {
+QLabel *addMetric(QGridLayout *layout, const int column,
+                  const QString &caption, QLabel *value) {
   auto *captionLabel = new QLabel(caption, value->parentWidget());
   captionLabel->setObjectName(QStringLiteral("mutedLabel"));
   layout->addWidget(captionLabel, 0, column);
   layout->addWidget(value, 1, column);
+  return captionLabel;
 }
 
 } // namespace
@@ -230,7 +231,8 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   addMetric(metrics, 0, QStringLiteral("迭代"), mIteration);
   addMetric(metrics, 1, QStringLiteral("Loss"), mLoss);
   addMetric(metrics, 2, QStringLiteral("训练 PSNR"), mPsnr);
-  addMetric(metrics, 3, QStringLiteral("高斯数量"), mGaussianCount);
+  mPrimitiveCountCaption =
+      addMetric(metrics, 3, QStringLiteral("高斯数量"), mGaussianCount);
   addMetric(metrics, 4, QStringLiteral("速度"), mSpeed);
   addMetric(metrics, 5, QStringLiteral("已用时"), mElapsed);
   addMetric(metrics, 6, QStringLiteral("预计剩余"), mRemaining);
@@ -249,6 +251,7 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
   mTelemetry.reset(expectedIterations);
   mTitle->setText(QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName));
   mState->setText(QStringLiteral("启动中"));
+  mPrimitiveCountCaption->setText(QStringLiteral("高斯数量"));
   mProgress->setValue(0);
   refreshMetrics();
 }
@@ -256,6 +259,11 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
   mState->setText(stageLabel(status.stage));
+  mPrimitiveCountCaption->setText(
+      status.previewKind == QStringLiteral("colmap_sparse") ||
+              status.stage == QStringLiteral("colmap")
+          ? QStringLiteral("稀疏点数")
+          : QStringLiteral("高斯数量"));
   if (status.progressPercent.has_value()) {
     mProgress->setValue(status.progressPercent.value());
   } else if (mTelemetry.iteration().has_value() &&

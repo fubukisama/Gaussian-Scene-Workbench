@@ -576,6 +576,7 @@ int main(int argc, char *argv[]) {
           QStringLiteral("recoveryCenterAction"),
           QStringLiteral("configureExternalBackupAction"),
           QStringLiteral("externalBackupsAction"),
+          QStringLiteral("pointRenderAction"),
       };
       smokeTestCompleted = window.isVisible();
       for (const QString &objectName : requiredEntryActions) {

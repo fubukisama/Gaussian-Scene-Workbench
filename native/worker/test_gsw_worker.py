@@ -356,6 +356,7 @@ class WorkerTests(unittest.TestCase):
             "elapsed_seconds": 144.0,
             "latest_iteration": 10000,
             "partial_point_cloud_path": "E:/model/point_cloud.ply",
+            "preview_kind": "colmap_sparse",
         }
 
         with contextlib.redirect_stdout(output):
@@ -371,6 +372,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(event["elapsedSeconds"], 144.0)
         self.assertEqual(event["previewIteration"], 10000)
         self.assertEqual(event["previewPath"], "E:/model/point_cloud.ply")
+        self.assertEqual(event["previewKind"], "colmap_sparse")
 
     def test_run_colmap_forwards_absolute_dataset_and_options(self):
         with tempfile.TemporaryDirectory() as temporary:

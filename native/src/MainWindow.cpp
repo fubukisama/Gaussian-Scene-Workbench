@@ -996,11 +996,12 @@ void MainWindow::createActions() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
   });
 
-  mPointRenderAction = new QAction(QStringLiteral("点"), this);
+  mPointRenderAction = new QAction(QStringLiteral("点云"), this);
   mPointRenderAction->setObjectName(QStringLiteral("pointRenderAction"));
   mPointRenderAction->setCheckable(true);
   mPointRenderAction->setChecked(true);
-  mPointRenderAction->setToolTip(QStringLiteral("使用固定大小点预览场景"));
+  mPointRenderAction->setToolTip(
+      QStringLiteral("显示静态点云或训练中持续增密的高斯中心点"));
   mRenderModeActionGroup->addAction(mPointRenderAction);
   connect(mPointRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
@@ -1586,6 +1587,17 @@ void MainWindow::connectServices() {
                   mPendingTraining->expectedIterations);
               mTaskTabs->setCurrentWidget(mTrainingMonitor);
             }
+            if (mPendingReconstruction.has_value() &&
+                mPendingReconstruction->taskName == taskName) {
+              mViewport->stopTrainingGpuPreview();
+              mLiveReconstructionPreviewPath.clear();
+              mLiveReconstructionDatasetPath =
+                  comparablePath(mPendingReconstruction->datasetPath);
+              mLiveReconstructionPointCount = 0;
+              mLastReconstructionPreviewIteration = -1;
+              mViewport->setScene(QString(), 0);
+              mViewport->setRenderMode(NativeViewport::RenderMode::Points);
+            }
             appendTaskEvent(QStringLiteral("开始任务：%1").arg(taskName));
           });
   connect(&mProcessSupervisor, &ProcessSupervisor::outputReady, this,
@@ -1598,29 +1610,56 @@ void MainWindow::connectServices() {
             mActiveWorkerState = status.state;
             if (mPendingTraining.has_value()) {
               mTrainingMonitor->updateStatus(status);
-              if (!mViewport->trainingGpuPreviewActive() &&
-                  status.previewIteration.has_value() &&
-                  status.previewIteration.value() >
-                      mLastTrainingPreviewIteration &&
-                  !status.previewPath.isEmpty()) {
-                const QFileInfo previewInfo(status.previewPath);
-                if (previewInfo.isFile() &&
-                    previewInfo.suffix().compare(QStringLiteral("ply"),
-                                                 Qt::CaseInsensitive) == 0 &&
-                    pathIsWithinDirectory(previewInfo.absoluteFilePath(),
-                                          mPendingTraining->outputDirectory)) {
-                  mLastTrainingPreviewIteration =
-                      status.previewIteration.value();
-                  mLiveTrainingPreviewPath =
-                      comparablePath(previewInfo.absoluteFilePath());
-                  mLiveTrainingGaussianCount =
-                      status.gaussianCount.value_or(0);
-                  mViewport->setScene(mLiveTrainingPreviewPath,
-                                      mLiveTrainingGaussianCount);
-                  appendTaskEvent(
-                      QStringLiteral("训练预览已更新：迭代 %1")
-                          .arg(mLastTrainingPreviewIteration));
+            }
+            if (!mViewport->trainingGpuPreviewActive() &&
+                status.previewIteration.has_value() &&
+                !status.previewPath.isEmpty()) {
+              const bool colmapPreview =
+                  status.previewKind == QStringLiteral("colmap_sparse") ||
+                  status.stage == QStringLiteral("colmap");
+              QString allowedRoot;
+              int *lastPreviewIteration = nullptr;
+              QString *livePreviewPath = nullptr;
+              qint64 *livePreviewCount = nullptr;
+              if (mPendingTraining.has_value()) {
+                allowedRoot = colmapPreview
+                                  ? mPendingTraining->datasetPath
+                                  : mPendingTraining->outputDirectory;
+                lastPreviewIteration = &mLastTrainingPreviewIteration;
+                livePreviewPath = &mLiveTrainingPreviewPath;
+                livePreviewCount = &mLiveTrainingGaussianCount;
+              } else if (mPendingReconstruction.has_value()) {
+                allowedRoot = mPendingReconstruction->datasetPath;
+                lastPreviewIteration =
+                    &mLastReconstructionPreviewIteration;
+                livePreviewPath = &mLiveReconstructionPreviewPath;
+                livePreviewCount = &mLiveReconstructionPointCount;
+              }
+
+              const QFileInfo previewInfo(status.previewPath);
+              if (lastPreviewIteration != nullptr &&
+                  status.previewIteration.value() > *lastPreviewIteration &&
+                  previewInfo.isFile() &&
+                  previewInfo.suffix().compare(QStringLiteral("ply"),
+                                               Qt::CaseInsensitive) == 0 &&
+                  pathIsWithinDirectory(previewInfo.absoluteFilePath(),
+                                        allowedRoot)) {
+                *lastPreviewIteration = status.previewIteration.value();
+                *livePreviewPath =
+                    comparablePath(previewInfo.absoluteFilePath());
+                *livePreviewCount = status.gaussianCount.value_or(0);
+                mViewport->setScene(*livePreviewPath, *livePreviewCount);
+                if (colmapPreview) {
+                  mViewport->setRenderMode(NativeViewport::RenderMode::Points);
                 }
+                appendTaskEvent(
+                    colmapPreview
+                        ? QStringLiteral(
+                              "COLMAP 稀疏点云已更新：快照 %1 · %2 个点")
+                              .arg(*lastPreviewIteration)
+                              .arg(*livePreviewCount)
+                        : QStringLiteral("训练预览已更新：迭代 %1")
+                              .arg(*lastPreviewIteration));
               }
             }
             if (mActiveTaskRow < 0 ||
@@ -1628,6 +1667,11 @@ void MainWindow::connectServices() {
               return;
             }
             QString detail = workerStageLabel(status.stage);
+            if (status.previewKind == QStringLiteral("colmap_sparse") &&
+                status.gaussianCount.has_value()) {
+              detail += QStringLiteral(" · 稀疏点 %1")
+                            .arg(status.gaussianCount.value());
+            }
             if (status.progressPercent.has_value()) {
               detail +=
                   QStringLiteral(" · %1%").arg(status.progressPercent.value());
@@ -1644,6 +1688,9 @@ void MainWindow::connectServices() {
         const bool finishingTraining =
             mPendingTraining.has_value() &&
             mPendingTraining->taskName == taskName;
+        const bool finishingReconstruction =
+            mPendingReconstruction.has_value() &&
+            mPendingReconstruction->taskName == taskName;
         bool effectiveSucceeded = succeeded;
         bool recoveryFailed = false;
         QString completionDetail;
@@ -1721,6 +1768,20 @@ void MainWindow::connectServices() {
                   QStringLiteral("当前数据集已切换到：%1")
                       .arg(QDir::toNativeSeparators(pending.datasetPath)));
             }
+          }
+        }
+
+        if (finishingReconstruction) {
+          mPendingReconstruction.reset();
+          if (!mLiveReconstructionPreviewPath.isEmpty()) {
+            completionDetail =
+                effectiveSucceeded
+                    ? QStringLiteral("稀疏点云已生成 · %1 个点")
+                          .arg(mLiveReconstructionPointCount)
+                    : QStringLiteral("保留最后一个可用稀疏点云快照");
+          } else {
+            mViewport->setScene(mWorkspace.scenePath(),
+                                mWorkspace.sceneMetadata().vertexCount);
           }
         }
 
@@ -3873,6 +3934,11 @@ void MainWindow::clearReconstructionImport() {
     showError(QStringLiteral("无法清理重建结果"), error);
     return;
   }
+  mLiveReconstructionPreviewPath.clear();
+  mLiveReconstructionDatasetPath.clear();
+  mLiveReconstructionPointCount = 0;
+  mLastReconstructionPreviewIteration = -1;
+  updateWorkspaceUi();
   appendTaskEvent(QStringLiteral("已单独清理 COLMAP 重建结果，照片与场景保持"
                                  "不变：%1")
                       .arg(QDir::toNativeSeparators(mWorkspace.datasetPath())));
@@ -4044,13 +4110,18 @@ void MainWindow::startReconstruction() {
   QProcessEnvironment environment = pythonProcessEnvironment(python);
   environment.insert(QStringLiteral("COLMAP_PATH"), config.colmapExecutable);
   environment.insert(QStringLiteral("COLMAP_EXE"), config.colmapExecutable);
+  const QString taskName =
+      QStringLiteral("COLMAP | %1 | %2").arg(config.preset, config.matching);
+  mPendingReconstruction = PendingReconstruction{
+      taskName, comparablePath(mWorkspace.rootPath()),
+      comparablePath(mWorkspace.datasetPath())};
   const bool started = mProcessSupervisor.start(
-      QStringLiteral("COLMAP | %1 | %2").arg(config.preset, config.matching),
-      python,
+      taskName, python,
       {workerScript, QStringLiteral("--task"), QStringLiteral("colmap"),
        QStringLiteral("--config"), configPath},
       root, environment, true);
   if (!started) {
+    mPendingReconstruction.reset();
     QMessageBox::information(this, QStringLiteral("任务繁忙"),
                              QStringLiteral("请等待当前任务结束后再试。"));
   } else {
@@ -4181,9 +4252,14 @@ void MainWindow::startTraining() {
     showError(QStringLiteral("无法保存训练恢复信息"), recoveryRecordError);
     return;
   }
-  mPendingTraining =
-      PendingTraining{taskName, comparablePath(mWorkspace.rootPath()),
-                      outputDirectory, config.backend, config.iterations};
+  mPendingTraining = PendingTraining{
+      taskName, comparablePath(mWorkspace.rootPath()),
+      comparablePath(mWorkspace.datasetPath()), outputDirectory,
+      config.backend, config.iterations};
+  mLiveReconstructionPreviewPath.clear();
+  mLiveReconstructionDatasetPath.clear();
+  mLiveReconstructionPointCount = 0;
+  mLastReconstructionPreviewIteration = -1;
   const bool started = mProcessSupervisor.start(
       taskName, python, {workerScript, QStringLiteral("--config"), configPath},
       root, pythonProcessEnvironment(python), true);
@@ -4203,6 +4279,14 @@ void MainWindow::startTraining() {
 }
 
 void MainWindow::updateWorkspaceUi() {
+  if (!mLiveReconstructionPreviewPath.isEmpty() &&
+      !pathsReferToSameLocation(mWorkspace.datasetPath(),
+                                mLiveReconstructionDatasetPath)) {
+    mLiveReconstructionPreviewPath.clear();
+    mLiveReconstructionDatasetPath.clear();
+    mLiveReconstructionPointCount = 0;
+    mLastReconstructionPreviewIteration = -1;
+  }
   rebuildProjectTree();
   updateInspector();
   const QString projectName = mWorkspace.hasProject()
@@ -4212,6 +4296,13 @@ void MainWindow::updateWorkspaceUi() {
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setScene(mLiveTrainingPreviewPath,
                         mLiveTrainingGaussianCount);
+  } else if (!mLiveReconstructionPreviewPath.isEmpty() &&
+             QFileInfo::exists(mLiveReconstructionPreviewPath) &&
+             pathsReferToSameLocation(mWorkspace.datasetPath(),
+                                      mLiveReconstructionDatasetPath)) {
+    mViewport->setScene(mLiveReconstructionPreviewPath,
+                        mLiveReconstructionPointCount);
+    mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   } else {
     mViewport->setScene(mWorkspace.scenePath(),
                         mWorkspace.sceneMetadata().vertexCount);

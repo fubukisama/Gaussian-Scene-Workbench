@@ -127,6 +127,9 @@ def status_telemetry(snapshot):
     )
     if isinstance(preview_path, str) and preview_path.strip():
         telemetry["previewPath"] = preview_path
+    preview_kind = snapshot.get("preview_kind") or snapshot.get("previewKind")
+    if isinstance(preview_kind, str) and preview_kind.strip():
+        telemetry["previewKind"] = preview_kind.strip()
     return telemetry
 
 

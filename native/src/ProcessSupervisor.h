@@ -27,6 +27,7 @@ struct WorkerStatus final {
   std::optional<double> elapsedSeconds;
   std::optional<int> previewIteration;
   QString previewPath;
+  QString previewKind;
 };
 
 class ProcessSupervisor final : public QObject {

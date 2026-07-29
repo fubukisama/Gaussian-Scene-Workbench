@@ -58,6 +58,9 @@ MESH_MODES = {"bounded", "unbounded", "sugar", "gs2mesh"}
 SPARSE_ADAM_AVAILABLE_CACHE = None
 MESH_PREVIEW_MAX_FACES = 300000
 MESH_CHUNK_MAX_FACES = 250000
+COLMAP_POINT_PREVIEW_MAX_POINTS = 500000
+COLMAP_POINT_PREVIEW_INTERVAL_SECONDS = 0.5
+COLMAP_SNAPSHOT_TARGET_COUNT = 48
 TRAINING_PROGRESS_PATTERN = re.compile(r"\[gsw-training-progress\]\s+(\d+)\s*/\s*(\d+)")
 TRAINING_METRICS_PREFIX = "[gsw-training-metrics]"
 TRAINING_PREVIEW_PREFIX = "[gsw-training-preview]"
@@ -4255,8 +4258,11 @@ def job_snapshot(job):
         "iteration_milliseconds": job.get("iteration_milliseconds"),
         "elapsed_seconds": job.get("elapsed_seconds"),
         "latest_iteration": job.get("latest_iteration"),
+        "preview_iteration": job.get("preview_iteration"),
+        "preview_kind": job.get("preview_kind"),
         "point_cloud_path": job.get("point_cloud_path"),
         "partial_point_cloud_path": job.get("partial_point_cloud_path"),
+        "point_count": job.get("point_count"),
         "log": job["log"][-240:],
         "cancel_requested": bool(job.get("cancel_requested")),
     }
@@ -4330,7 +4336,9 @@ def apply_training_preview(job, payload):
     point_cloud_path = payload.get("point_cloud_path")
     if iteration is not None and isinstance(point_cloud_path, str) and point_cloud_path.strip():
         job["latest_iteration"] = iteration
+        job["preview_iteration"] = iteration
         job["partial_point_cloud_path"] = point_cloud_path
+        job["preview_kind"] = "training_checkpoint"
 
 
 def add_job_log(job, message):
@@ -4914,6 +4922,230 @@ def colmap_image_input_path(dataset):
     return dataset / "images"
 
 
+def colmap_snapshot_frames_frequency(dataset, target_count=COLMAP_SNAPSHOT_TARGET_COUNT):
+    """Choose a bounded native mapper snapshot cadence for live point previews."""
+    image_path = colmap_image_input_path(dataset)
+    image_count = 0
+    if image_path.exists():
+        image_count = sum(
+            1
+            for item in image_path.iterdir()
+            if item.is_file() and item.suffix.lower() in IMAGE_EXTS
+        )
+    target_count = max(int(target_count), 1)
+    return max(1, math.ceil(max(image_count, 1) / target_count))
+
+
+def configure_colmap_mapper_snapshots(command, snapshot_path, frames_frequency):
+    command.extend(
+        [
+            "--Mapper.snapshot_path",
+            Path(snapshot_path),
+            "--Mapper.snapshot_frames_freq",
+            str(max(int(frames_frequency), 1)),
+        ]
+    )
+    return command
+
+
+def read_colmap_points3d_binary(path, max_points=COLMAP_POINT_PREVIEW_MAX_POINTS):
+    """Read a bounded, deterministic sample from a COLMAP points3D.bin file."""
+    path = Path(path)
+    file_size = path.stat().st_size
+    if file_size < 8:
+        raise ValueError(f"COLMAP point model is incomplete: {path}")
+    max_points = max(int(max_points), 1)
+    points = []
+    with path.open("rb") as stream:
+        header = stream.read(8)
+        if len(header) != 8:
+            raise ValueError(f"COLMAP point model has no header: {path}")
+        source_count = struct.unpack("<Q", header)[0]
+        if source_count > 100_000_000:
+            raise ValueError(
+                f"COLMAP point model declares an unsafe point count: {source_count}"
+            )
+        sample_stride = max(1, math.ceil(source_count / max_points))
+        record_size = struct.calcsize("<QdddBBBdQ")
+        for index in range(source_count):
+            record = stream.read(record_size)
+            if len(record) != record_size:
+                raise ValueError(
+                    f"COLMAP point model ended inside point {index}: {path}"
+                )
+            (
+                _point_id,
+                x,
+                y,
+                z,
+                red,
+                green,
+                blue,
+                _error,
+                track_length,
+            ) = struct.unpack("<QdddBBBdQ", record)
+            track_bytes = int(track_length) * struct.calcsize("<II")
+            if track_bytes > file_size - stream.tell():
+                raise ValueError(
+                    f"COLMAP point track is incomplete at point {index}: {path}"
+                )
+            if index % sample_stride == 0 and len(points) < max_points:
+                if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
+                    points.append((float(x), float(y), float(z), red, green, blue))
+            stream.seek(track_bytes, os.SEEK_CUR)
+    return int(source_count), points
+
+
+def write_point_cloud_preview_ply(path, points):
+    """Atomically publish a compact binary PLY consumable by the native viewport."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        "comment Gaussian Scene Workbench live COLMAP preview\n"
+        f"element vertex {len(points)}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+    ).encode("ascii")
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(header)
+            for x, y, z, red, green, blue in points:
+                stream.write(struct.pack("<fffBBB", x, y, z, red, green, blue))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+    return path
+
+
+class ColmapPointCloudPreviewPublisher:
+    """Publish stable mapper snapshots as incrementally numbered point-cloud PLYs."""
+
+    def __init__(
+        self,
+        job,
+        dataset,
+        source_roots,
+        interval=COLMAP_POINT_PREVIEW_INTERVAL_SECONDS,
+    ):
+        self.job = job
+        self.dataset = Path(dataset)
+        self.source_roots = [Path(root) for root in source_roots]
+        job_id = safe_filename(job.get("id") or uuid.uuid4().hex)
+        self.output_dir = (
+            self.dataset / ".gsw" / "previews" / "colmap" / job_id
+        )
+        self.interval = max(float(interval), 0.05)
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.observed = {}
+        self.published_signatures = set()
+        self.generation = 0
+
+    def start(self):
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        thread_name = safe_filename(self.job.get("id") or "job")[:24]
+        self.thread = threading.Thread(
+            target=self._run,
+            name=f"gsw-colmap-preview-{thread_name}",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+        self.publish_latest(force=True)
+        self.prune()
+
+    def _run(self):
+        while not self.stop_event.wait(self.interval):
+            self.publish_latest(force=False)
+
+    def candidates(self):
+        candidates = []
+        for root in self.source_roots:
+            if root.exists():
+                candidates.extend(root.rglob("points3D.bin"))
+        unique = {}
+        for candidate in candidates:
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            unique[str(candidate.resolve())] = (
+                candidate,
+                stat.st_mtime_ns,
+                stat.st_size,
+            )
+        return sorted(
+            unique.values(), key=lambda item: (item[1], item[2]), reverse=True
+        )
+
+    def publish_latest(self, force=False):
+        for candidate, modified_ns, size in self.candidates():
+            signature = (str(candidate.resolve()), modified_ns, size)
+            if signature in self.published_signatures:
+                continue
+            previous = self.observed.get(signature[0])
+            self.observed[signature[0]] = (modified_ns, size)
+            if not force and previous != (modified_ns, size):
+                continue
+            try:
+                source_count, points = read_colmap_points3d_binary(candidate)
+                if source_count <= 0 or not points:
+                    continue
+                generation = self.generation + 1
+                output = self.output_dir / f"sparse_{generation:06d}.ply"
+                write_point_cloud_preview_ply(output, points)
+            except (OSError, OverflowError, ValueError, struct.error):
+                continue
+
+            self.generation = generation
+            self.published_signatures.add(signature)
+            lock = MESH_LOCK if mesh_like_job_kind(self.job) else TRAIN_LOCK
+            with lock:
+                self.job["latest_iteration"] = generation
+                self.job["preview_iteration"] = generation
+                self.job["partial_point_cloud_path"] = str(output.resolve())
+                self.job["point_count"] = source_count
+                self.job["preview_kind"] = "colmap_sparse"
+                self.job["updated_at"] = time.time()
+                self.job.setdefault("log", []).append(
+                    f"COLMAP sparse preview {generation}: {source_count} points "
+                    f"({len(points)} displayed)"
+                )
+                if not mesh_like_job_kind(self.job):
+                    persist_train_job(self.job)
+            return True
+        return False
+
+    def prune(self, keep=4):
+        if not self.output_dir.exists():
+            return
+        previews = sorted(self.output_dir.glob("sparse_*.ply"))
+        for preview in previews[:-max(int(keep), 1)]:
+            try:
+                preview.unlink()
+            except OSError:
+                pass
+
+
 def dataset_has_mixed_image_dimensions(dataset):
     image_path = colmap_image_input_path(dataset)
     if not image_path.exists():
@@ -5177,6 +5409,9 @@ def publish_undistorted_colmap_output(dataset, staging):
 def run_colmap_convert(job, dataset, options):
     dataset = Path(dataset)
     options = dict(options)
+    job_id = safe_filename(job.get("id") or uuid.uuid4().hex)
+    snapshot_root = dataset / "distorted" / f".gsw-snapshots-{job_id}"
+    preview_publisher = None
     if options.get("reset", True):
         database = dataset / "database.db"
         if database.exists():
@@ -5198,16 +5433,47 @@ def run_colmap_convert(job, dataset, options):
     commands = colmap_convert_commands(dataset, options, undistort_staging)
     try:
         for command in commands:
-            run_logged(job, command, ROOT, "3dgs")
+            is_mapper = len(command) > 1 and str(command[1]).lower() == "mapper"
+            if not is_mapper:
+                run_logged(job, command, ROOT, "3dgs")
+                continue
+
+            snapshot_root.mkdir(parents=True, exist_ok=True)
+            snapshot_frequency = colmap_snapshot_frames_frequency(dataset)
+            configure_colmap_mapper_snapshots(
+                command, snapshot_root, snapshot_frequency
+            )
+            add_job_log(
+                job,
+                "COLMAP live sparse preview enabled: "
+                f"snapshot every {snapshot_frequency} registered frame(s)",
+            )
+            preview_publisher = ColmapPointCloudPreviewPublisher(
+                job, dataset, [snapshot_root]
+            )
+            preview_publisher.start()
+            try:
+                run_logged(job, command, ROOT, "3dgs")
+            finally:
+                preview_publisher.source_roots.append(
+                    dataset / "distorted" / "sparse"
+                )
+                preview_publisher.stop()
         if commands:
             validate_undistorted_colmap_output(undistort_staging)
             publish_undistorted_colmap_output(dataset, undistort_staging)
+            if preview_publisher is not None:
+                preview_publisher.source_roots.append(dataset / "sparse")
+                preview_publisher.publish_latest(force=True)
+                preview_publisher.prune()
         else:
             # Unit-test and repair callers may provide an already published model.
             normalize_undistorted_sparse(dataset)
     finally:
         if undistort_staging.exists():
             shutil.rmtree(undistort_staging)
+        if snapshot_root.exists():
+            shutil.rmtree(snapshot_root)
     save_alignment_cache(dataset, job)
 
 
@@ -5562,6 +5828,13 @@ def run_training_job(job, run_convert, quality, overwrite):
         if start_checkpoint:
             add_job_log(job, f"Resuming from checkpoint: {start_checkpoint}")
         command = training_command(backend, dataset, output, options, start_checkpoint=start_checkpoint)
+        with TRAIN_LOCK:
+            # The sparse COLMAP preview remains visible until the first GPU or
+            # checkpoint frame arrives, but training metrics must immediately
+            # switch back to Gaussian semantics.
+            job["preview_kind"] = None
+            job["point_count"] = None
+            persist_train_job(job)
         set_job_stage(job, "running", "train")
         run_logged(job, command, TWO_DGS_DIR if backend == "2dgs" else GAUSSIAN_DIR, backend)
         result = training_point_cloud(job["output_scene"], options["iterations"])
@@ -5579,6 +5852,8 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["total_iterations"] = int(options["iterations"])
             job["progressPercent"] = 100
             job["latest_iteration"] = int(result["iteration"])
+            job["preview_iteration"] = int(result["iteration"])
+            job["preview_kind"] = "training_checkpoint"
             job["point_cloud_path"] = result["path"]
             job["point_count"] = int(result["vertex_count"])
             persist_train_job(job)
@@ -5601,6 +5876,8 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["updated_at"] = time.time()
             if partial_result is not None:
                 job["latest_iteration"] = int(partial_result["iteration"])
+                job["preview_iteration"] = int(partial_result["iteration"])
+                job["preview_kind"] = "training_checkpoint"
                 job["partial_point_cloud_path"] = partial_result["path"]
             persist_train_job(job)
         add_job_log(job, f"ERROR: {exc}")
@@ -5675,6 +5952,11 @@ def start_colmap_alignment(scene, options=None, dataset_path=None):
         "texture": None,
         "texture_download_url": None,
         "alignment": None,
+        "latest_iteration": None,
+        "preview_iteration": None,
+        "preview_kind": None,
+        "partial_point_cloud_path": None,
+        "point_count": None,
         "log": [],
     }
     with MESH_LOCK:
@@ -5733,8 +6015,11 @@ def start_training(
         "iteration_milliseconds": None,
         "elapsed_seconds": None,
         "latest_iteration": None,
+        "preview_iteration": None,
+        "preview_kind": None,
         "point_cloud_path": None,
         "partial_point_cloud_path": None,
+        "point_count": None,
         "log": [],
     }
     with TRAIN_LOCK:
@@ -6038,6 +6323,11 @@ def mesh_job_snapshot(job):
         "texture_download_url": job.get("texture_download_url"),
         "output_dir": job.get("output_dir"),
         "alignment": job.get("alignment"),
+        "latest_iteration": job.get("latest_iteration"),
+        "preview_iteration": job.get("preview_iteration"),
+        "preview_kind": job.get("preview_kind"),
+        "partial_point_cloud_path": job.get("partial_point_cloud_path"),
+        "point_count": job.get("point_count"),
         "copied_files": job.get("copied_files"),
         "total_files": job.get("total_files"),
         "copied_bytes": job.get("copied_bytes"),

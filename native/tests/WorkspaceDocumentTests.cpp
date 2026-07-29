@@ -1105,6 +1105,8 @@ void WorkspaceDocumentTests::clearsOnlyManagedReconstructionData() {
   QVERIFY(root.mkpath(QStringLiteral("working/datasets/capture/stereo")));
   QVERIFY(root.mkpath(
       QStringLiteral("working/datasets/capture/.alignment_cache/sparse/0")));
+  QVERIFY(root.mkpath(
+      QStringLiteral("working/datasets/capture/.gsw/previews/colmap/session")));
   QVERIFY(root.mkpath(QStringLiteral("working/output")));
   QVERIFY(root.mkpath(QStringLiteral("saved")));
 
@@ -1122,7 +1124,8 @@ void WorkspaceDocumentTests::clearsOnlyManagedReconstructionData() {
         QStringLiteral("sparse/0/points3D.bin"),
         QStringLiteral("distorted/database.db"),
         QStringLiteral("stereo/depth.bin"),
-        QStringLiteral(".alignment_cache/sparse/0/cameras.bin")}) {
+        QStringLiteral(".alignment_cache/sparse/0/cameras.bin"),
+        QStringLiteral(".gsw/previews/colmap/session/sparse_000001.ply")}) {
     QFile artifact(QDir(dataset).filePath(relative));
     QVERIFY(artifact.open(QIODevice::WriteOnly));
     QVERIFY(artifact.write("fixture") > 0);
@@ -1168,6 +1171,8 @@ void WorkspaceDocumentTests::clearsOnlyManagedReconstructionData() {
       QDir(activeDataset).filePath(QStringLiteral("stereo"))));
   QVERIFY(!QFileInfo::exists(
       QDir(activeDataset).filePath(QStringLiteral(".alignment_cache"))));
+  QVERIFY(!QFileInfo::exists(QDir(activeDataset).filePath(
+      QStringLiteral(".gsw/previews/colmap"))));
   QVERIFY(!project.hasManagedReconstructionData());
 
   gsw::WorkspaceDocument restored;

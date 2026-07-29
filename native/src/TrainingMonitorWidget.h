@@ -35,6 +35,7 @@ private:
   QLabel *mIteration = nullptr;
   QLabel *mLoss = nullptr;
   QLabel *mPsnr = nullptr;
+  QLabel *mPrimitiveCountCaption = nullptr;
   QLabel *mGaussianCount = nullptr;
   QLabel *mSpeed = nullptr;
   QLabel *mElapsed = nullptr;

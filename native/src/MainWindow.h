@@ -60,9 +60,16 @@ private:
   struct PendingTraining {
     QString taskName;
     QString projectRoot;
+    QString datasetPath;
     QString outputDirectory;
     QString backend;
     int expectedIterations = 0;
+  };
+
+  struct PendingReconstruction {
+    QString taskName;
+    QString projectRoot;
+    QString datasetPath;
   };
 
   void createActions();
@@ -214,6 +221,7 @@ private:
   int mActiveTaskRow = -1;
   std::optional<PendingDatasetImport> mPendingDatasetImport;
   std::optional<PendingTraining> mPendingTraining;
+  std::optional<PendingReconstruction> mPendingReconstruction;
   QString mActiveWorkerState;
   qsizetype mSelectedPointCount = 0;
   qsizetype mDeletedPointCount = 0;
@@ -226,6 +234,10 @@ private:
   QString mLiveTrainingPreviewPath;
   qint64 mLiveTrainingGaussianCount = 0;
   int mLastTrainingPreviewIteration = -1;
+  QString mLiveReconstructionPreviewPath;
+  QString mLiveReconstructionDatasetPath;
+  qint64 mLiveReconstructionPointCount = 0;
+  int mLastReconstructionPreviewIteration = -1;
   bool mSceneReady = false;
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;
