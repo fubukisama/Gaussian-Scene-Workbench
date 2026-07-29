@@ -7,6 +7,7 @@ control mapping and named events cross the CPU boundary.
 
 import ctypes
 import json
+import math
 import mmap
 import os
 import struct
@@ -16,10 +17,11 @@ import uuid
 from ctypes import wintypes
 
 
-PROTOCOL_VERSION = 1
-CONTROL_MAGIC = b"GSWGPU1\0"
+PROTOCOL_VERSION = 2
+CONTROL_MAGIC = b"GSWGPU2\0"
 CONTROL_BYTES = 4096
-CONTROL_HEADER_BYTES = 124
+CONTROL_HEADER_BYTES = 156
+CONTROL_TRAILING_SEQUENCE_OFFSET = 152
 CONTROL_INITIALIZING = 0
 CONTROL_READY = 1
 CONTROL_CLOSING = 2
@@ -183,11 +185,13 @@ def state_descriptor(session_id, state, error=""):
 
 
 def emit_descriptor(descriptor):
-    print(
+    stream = getattr(sys, "__stdout__", None) or sys.stdout
+    stream.write(
         "[gsw-training-gpu-preview] "
-        + json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")),
-        flush=True,
+        + json.dumps(descriptor, ensure_ascii=False, separators=(",", ":"))
+        + "\n"
     )
+    stream.flush()
 
 
 def build_control_block(
@@ -218,8 +222,16 @@ def build_control_block(
         int(allocation_bytes),
     )
     for index, snapshot in enumerate(snapshots):
-        struct.pack_into("<QQQQ", block, 56 + index * 32, *map(int, snapshot))
-    struct.pack_into("<I", block, 120, int(sequence))
+        if len(snapshot) != 8:
+            raise ValueError("GPU preview slot snapshot must contain metadata and bounds")
+        struct.pack_into(
+            "<QQQQffff",
+            block,
+            56 + index * 48,
+            *map(int, snapshot[:4]),
+            *map(float, snapshot[4:]),
+        )
+    struct.pack_into("<I", block, CONTROL_TRAILING_SEQUENCE_OFFSET, int(sequence))
     return bytes(block)
 
 
@@ -427,13 +439,19 @@ class GpuPreviewPublisher:
         self.frame_event = None
         self.release_events = []
         self.pending = [None, None]
-        self.slot_snapshots = [[0, 0, 0, 0], [0, 0, 0, 0]]
+        self.slot_snapshots = [
+            [0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0],
+            [0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0],
+        ]
         self.sequence = 0
         self.next_slot = 0
         self.generation = 0
         self.last_enqueue = 0.0
         self.minimum_interval = 1.0 / max(min(float(fps), 60.0), 1.0)
         self._sample_cache = None
+        self._bounds_cache = None
+        self._bounds_point_count = -1
+        self._bounds_updated_at = 0.0
         self._closed = False
         try:
             self._allocate()
@@ -562,10 +580,16 @@ class GpuPreviewPublisher:
         odd = struct.pack("<I", next_sequence - 1)
         even = struct.pack("<I", next_sequence)
         self.control[16:20] = odd
-        self.control[120:124] = odd
+        self.control[
+            CONTROL_TRAILING_SEQUENCE_OFFSET:CONTROL_HEADER_BYTES
+        ] = odd
         self.control[0:16] = stable[0:16]
-        self.control[20:120] = stable[20:120]
-        self.control[120:124] = even
+        self.control[20:CONTROL_TRAILING_SEQUENCE_OFFSET] = stable[
+            20:CONTROL_TRAILING_SEQUENCE_OFFSET
+        ]
+        self.control[
+            CONTROL_TRAILING_SEQUENCE_OFFSET:CONTROL_HEADER_BYTES
+        ] = even
         self.control[16:20] = even
         self.sequence = next_sequence
 
@@ -574,7 +598,7 @@ class GpuPreviewPublisher:
         for slot, pending in enumerate(self.pending):
             if pending is None:
                 continue
-            event, packed, point_count, iteration = pending
+            event, packed, point_count, iteration, bounds = pending
             if wait:
                 event.synchronize()
                 ready = True
@@ -588,6 +612,7 @@ class GpuPreviewPublisher:
                 int(point_count),
                 int(iteration),
                 time.monotonic_ns(),
+                *bounds,
             ]
             self.pending[slot] = None
             # Keep the tensor alive until the recorded CUDA event completes.
@@ -645,6 +670,33 @@ class GpuPreviewPublisher:
             raise RuntimeError("Packed GPU preview vertex ABI is invalid")
         return packed
 
+    def _scene_bounds(self, xyz, now):
+        point_count = int(xyz.shape[0])
+        refresh = (
+            self._bounds_cache is None
+            or self._bounds_point_count != point_count
+            or now - self._bounds_updated_at >= 1.0
+        )
+        if not refresh:
+            return self._bounds_cache
+        if point_count <= 0:
+            bounds = (0.0, 0.0, 0.0, 1.0)
+        else:
+            lower = self.torch.min(xyz, dim=0).values
+            upper = self.torch.max(xyz, dim=0).values
+            center = (lower + upper) * 0.5
+            half_extent = (upper - lower) * 0.5
+            radius = (half_extent * half_extent).sum().sqrt().reshape(1)
+            values = self.torch.cat((center, radius)).detach().cpu().tolist()
+            bounds = tuple(float(value) for value in values)
+            if not all(math.isfinite(value) for value in bounds):
+                raise RuntimeError("GPU preview scene bounds are not finite")
+            bounds = bounds[:3] + (max(bounds[3], 1.0e-4),)
+        self._bounds_cache = bounds
+        self._bounds_point_count = point_count
+        self._bounds_updated_at = now
+        return bounds
+
     def publish(self, gaussians, iteration):
         if self._closed:
             return False
@@ -657,6 +709,7 @@ class GpuPreviewPublisher:
             return False
         try:
             packed = self._pack(gaussians)
+            bounds = self._scene_bounds(packed[:, :3], now)
             byte_count = int(packed.numel() * packed.element_size())
             if byte_count > self.slot_bytes:
                 raise RuntimeError("Packed GPU preview exceeds its slot")
@@ -673,7 +726,13 @@ class GpuPreviewPublisher:
             )
             event = self.torch.cuda.Event(enable_timing=False, blocking=False)
             event.record(stream)
-            self.pending[slot] = (event, packed, int(packed.shape[0]), int(iteration))
+            self.pending[slot] = (
+                event,
+                packed,
+                int(packed.shape[0]),
+                int(iteration),
+                bounds,
+            )
             self.last_enqueue = now
             return True
         except Exception:

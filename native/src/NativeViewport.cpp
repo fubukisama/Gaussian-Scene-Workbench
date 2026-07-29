@@ -192,6 +192,7 @@ void NativeViewport::setTrainingGpuPreviewDescriptor(
   mPendingTrainingGpuPreviewDescriptor = descriptor;
   mTrainingGpuPreviewStopPending = false;
   if (descriptor.state == TrainingGpuPreviewState::Ready) {
+    mTrainingGpuPreviewCameraFramed = false;
     mTrainingGpuPreviewTimer->start();
   }
   update();
@@ -200,6 +201,7 @@ void NativeViewport::setTrainingGpuPreviewDescriptor(
 void NativeViewport::stopTrainingGpuPreview() {
   mPendingTrainingGpuPreviewDescriptor.reset();
   mTrainingGpuPreviewStopPending = true;
+  mTrainingGpuPreviewCameraFramed = false;
   update();
 }
 
@@ -813,6 +815,22 @@ void NativeViewport::paintGL() {
         gpuPreviewError);
   }
   if (previewChanged && mTrainingGpuPreview.attached()) {
+    if (mTrainingGpuPreview.hasFrame()) {
+      const QVector3D previewCenter = mTrainingGpuPreview.sceneCenter();
+      const float previewRadius = mTrainingGpuPreview.sceneRadius();
+      if (std::isfinite(previewCenter.x()) &&
+          std::isfinite(previewCenter.y()) &&
+          std::isfinite(previewCenter.z()) && std::isfinite(previewRadius) &&
+          previewRadius > 0.0F) {
+        mSceneCenter = previewCenter;
+        mSceneRadius = std::max(previewRadius, 1.0e-4F);
+        rebuildCameraGeometry();
+        if (!mTrainingGpuPreviewCameraFramed) {
+          mTrainingGpuPreviewCameraFramed = true;
+          resetCamera();
+        }
+      }
+    }
     mTrainingGpuPreviewError.clear();
     emit trainingGpuPreviewStateChanged(
         true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
@@ -867,6 +885,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     const bool wasAttached = mTrainingGpuPreview.attached();
     mTrainingGpuPreview.release();
     mTrainingGpuPreviewTimer->stop();
+    mTrainingGpuPreviewCameraFramed = false;
     if (wasAttached) {
       emit trainingGpuPreviewStateChanged(
           false, QStringLiteral("PLY 检查点回退"),
@@ -883,6 +902,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     const bool wasAttached = mTrainingGpuPreview.attached();
     mTrainingGpuPreview.release();
     mTrainingGpuPreviewTimer->stop();
+    mTrainingGpuPreviewCameraFramed = false;
     const QString detail =
         descriptor.state == TrainingGpuPreviewState::Failed
             ? descriptor.error
@@ -903,6 +923,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     return;
   }
   mTrainingGpuPreviewError.clear();
+  mTrainingGpuPreviewCameraFramed = false;
   if (mRenderMode != RenderMode::Gaussians) {
     mRenderMode = RenderMode::Gaussians;
     emit renderModeChanged(mRenderMode);

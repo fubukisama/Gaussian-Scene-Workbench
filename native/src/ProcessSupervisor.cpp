@@ -28,6 +28,26 @@ const QByteArray kWorkerEventPrefix = QByteArrayLiteral("[worker-event] ");
 const QByteArray kTrainingGpuPreviewPrefix =
     QByteArrayLiteral("[gsw-training-gpu-preview] ");
 
+QByteArray jsonObjectPrefix(const QByteArray &payload) {
+  QJsonParseError parseError;
+  const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
+  if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+    return payload;
+  }
+  if (parseError.error != QJsonParseError::GarbageAtEnd ||
+      parseError.offset <= 0 || parseError.offset > payload.size()) {
+    return {};
+  }
+  const QByteArray prefix = payload.first(parseError.offset).trimmed();
+  parseError = {};
+  const QJsonDocument prefixDocument =
+      QJsonDocument::fromJson(prefix, &parseError);
+  return parseError.error == QJsonParseError::NoError &&
+                 prefixDocument.isObject()
+             ? prefix
+             : QByteArray();
+}
+
 bool parseOptionalInteger(const QJsonObject &object, const QString &name,
                           std::optional<int> *target, const int minimum = 0) {
   const QJsonValue value = object.value(name);
@@ -66,8 +86,13 @@ bool parseOptionalReal(const QJsonObject &object, const QString &name,
 }
 
 bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
+  const QByteArray jsonPayload = jsonObjectPrefix(payload);
+  if (jsonPayload.isEmpty()) {
+    return false;
+  }
   QJsonParseError parseError;
-  const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
+  const QJsonDocument document =
+      QJsonDocument::fromJson(jsonPayload, &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     return false;
   }
@@ -414,8 +439,8 @@ void ProcessSupervisor::handleOutputLine(const QByteArray &line) {
 
   if (content.startsWith(kTrainingGpuPreviewPrefix)) {
     TrainingGpuPreviewDescriptor descriptor;
-    const QByteArray payload =
-        content.mid(kTrainingGpuPreviewPrefix.size());
+    const QByteArray payload = jsonObjectPrefix(
+        content.mid(kTrainingGpuPreviewPrefix.size()));
     if (parseTrainingGpuPreviewDescriptor(payload, &descriptor)) {
       emit trainingGpuPreviewReady(descriptor);
       return;

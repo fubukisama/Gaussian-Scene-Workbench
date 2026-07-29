@@ -456,6 +456,9 @@ bool TrainingGpuPreviewBuffer::poll(QString *errorMessage) {
   mPointCount = frame.pointCount;
   mIteration = frame.iteration;
   mGeneration = frame.generation;
+  mSceneCenter = QVector3D(frame.sceneCenterX, frame.sceneCenterY,
+                           frame.sceneCenterZ);
+  mSceneRadius = frame.sceneRadius;
   return true;
 #else
   Q_UNUSED(errorMessage)
@@ -518,6 +521,8 @@ void TrainingGpuPreviewBuffer::release() {
   mPointCount = 0;
   mIteration = 0;
   mGeneration = 0;
+  mSceneCenter = {};
+  mSceneRadius = 0.0F;
   mAttached = false;
   mInitialPoll = true;
 }

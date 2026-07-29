@@ -4296,7 +4296,8 @@ def training_event_payload(line, prefix):
     if marker < 0:
         return None
     try:
-        payload = json.loads(line[marker + len(prefix):].strip())
+        encoded = line[marker + len(prefix):].lstrip()
+        payload, _end = json.JSONDecoder().raw_decode(encoded)
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None

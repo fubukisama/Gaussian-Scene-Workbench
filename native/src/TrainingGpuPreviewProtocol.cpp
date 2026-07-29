@@ -7,6 +7,7 @@
 #include <QtEndian>
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace gsw {
@@ -68,6 +69,14 @@ quint64 readLe64(QByteArrayView bytes, const qsizetype offset) {
       reinterpret_cast<const uchar *>(bytes.data() + offset));
 }
 
+float readLeFloat(QByteArrayView bytes, const qsizetype offset) {
+  const quint32 bits = readLe32(bytes, offset);
+  float value = 0.0F;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
 bool geometryIsSafe(const quint64 capacity, const quint64 slotBytes,
                     const quint64 allocationBytes) {
   if (capacity == 0 || capacity > 20000000ULL || slotBytes == 0 ||
@@ -108,7 +117,9 @@ bool parseTrainingGpuPreviewDescriptor(
   const QJsonValue type = object.value(QStringLiteral("type"));
   const QJsonValue state = object.value(QStringLiteral("state"));
   const QJsonValue session = object.value(QStringLiteral("sessionId"));
-  if (!version.isDouble() || version.toDouble() != 1.0 || !type.isString() ||
+  if (!version.isDouble() ||
+      version.toDouble() != kTrainingGpuPreviewProtocolVersion ||
+      !type.isString() ||
       type.toString() != QStringLiteral("gpu_preview") || !state.isString() ||
       !session.isString() || !safeSessionId(session.toString())) {
     setError(errorMessage,
@@ -264,15 +275,16 @@ bool parseTrainingGpuPreviewControl(
              QStringLiteral("GPU preview control block is too small."));
     return false;
   }
-  if (QByteArrayView(bytes.data(), 8) != QByteArrayView("GSWGPU1\0", 8) ||
-      readLe32(bytes, 8) != 1 ||
+  if (QByteArrayView(bytes.data(), 8) != QByteArrayView("GSWGPU2\0", 8) ||
+      readLe32(bytes, 8) != kTrainingGpuPreviewProtocolVersion ||
       readLe32(bytes, 12) != kTrainingGpuPreviewHeaderBytes) {
     setError(errorMessage,
              QStringLiteral("GPU preview control header is incompatible."));
     return false;
   }
   const quint32 sequence = readLe32(bytes, 16);
-  const quint32 trailingSequence = readLe32(bytes, 120);
+  const quint32 trailingSequence =
+      readLe32(bytes, kTrainingGpuPreviewTrailingSequenceOffset);
   if ((sequence & 1U) != 0U || sequence != trailingSequence) {
     setError(errorMessage,
              QStringLiteral("GPU preview control snapshot is not stable."));
@@ -302,15 +314,29 @@ bool parseTrainingGpuPreviewControl(
   }
   parsed.slotSnapshots.reserve(kTrainingGpuPreviewSlotCount);
   for (int index = 0; index < kTrainingGpuPreviewSlotCount; ++index) {
-    const qsizetype offset = 56 + index * 32;
+    const qsizetype offset =
+        56 + index * kTrainingGpuPreviewSlotSnapshotBytes;
     TrainingGpuPreviewSlotSnapshot slot;
     slot.generation = readLe64(bytes, offset);
     slot.pointCount = readLe64(bytes, offset + 8);
     slot.iteration = readLe64(bytes, offset + 16);
     slot.timestampNanoseconds = readLe64(bytes, offset + 24);
+    slot.sceneCenterX = readLeFloat(bytes, offset + 32);
+    slot.sceneCenterY = readLeFloat(bytes, offset + 36);
+    slot.sceneCenterZ = readLeFloat(bytes, offset + 40);
+    slot.sceneRadius = readLeFloat(bytes, offset + 44);
     if (slot.pointCount > parsed.capacity) {
       setError(errorMessage,
                QStringLiteral("GPU preview point count exceeds capacity."));
+      return false;
+    }
+    if (slot.generation > 0 &&
+        (!std::isfinite(slot.sceneCenterX) ||
+         !std::isfinite(slot.sceneCenterY) ||
+         !std::isfinite(slot.sceneCenterZ) ||
+         !std::isfinite(slot.sceneRadius) || slot.sceneRadius <= 0.0F)) {
+      setError(errorMessage,
+               QStringLiteral("GPU preview scene bounds are invalid."));
       return false;
     }
     parsed.slotSnapshots.append(slot);

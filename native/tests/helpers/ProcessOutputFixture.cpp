@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
       "\"iterationMilliseconds\":12.5,\"elapsedSeconds\":144.0,"
       "\"previewIteration\":10000,"
       "\"previewPath\":\"E:/model/point_cloud.ply\"}\n"
-      "[gsw-training-gpu-preview] {\"version\":1,\"type\":\"gpu_preview\","
+      "[gsw-training-gpu-preview] {\"version\":2,\"type\":\"gpu_preview\","
       "\"state\":\"ready\",\"sessionId\":\"fixture-session\","
       "\"producerPid\":4242,\"memoryHandle\":\"0x41c\","
       "\"memoryHandleType\":\"opaque_win32_kmt\","
@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
       "\"frameEvent\":\"Local\\\\GSW-GPU-fixture-frame\","
       "\"releaseEvent0\":\"Local\\\\GSW-GPU-fixture-release-0\","
       "\"releaseEvent1\":\"Local\\\\GSW-GPU-fixture-release-1\","
-      "\"device\":\"NVIDIA fixture\"}\nplain log\n");
+      "\"device\":\"NVIDIA fixture\"} [30/07 02:25:25]\nplain log\n");
   output.flush();
   return 0;
 }

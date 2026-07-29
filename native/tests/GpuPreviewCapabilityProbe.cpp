@@ -44,7 +44,7 @@ QByteArray readDescriptorPayload(const QString &filePath, QString *error) {
 
 bool expectedFirstVertex(const std::array<float, 14> &vertex) {
   constexpr std::array<float, 14> expected = {
-      1.0F, 2.0F, 3.0F, 0.5F, 0.5F, 0.5F, 0.8F,
+      -2.0F, 2.0F, 3.0F, 0.5F, 0.5F, 0.5F, 0.8F,
       0.01F, 0.01F, 0.01F, 1.0F, 0.0F, 0.0F, 0.0F};
   for (size_t index = 0; index < expected.size(); ++index) {
     if (!std::isfinite(vertex.at(index)) ||
@@ -145,6 +145,20 @@ int main(int argc, char **argv) {
     finishProbe(9, QStringLiteral("GPU_PREVIEW_INTEROP frame=false detail=%1")
                        .arg(detail));
   }
+  if ((buffer.sceneCenter() - QVector3D(0.0F, 2.0F, 3.0F)).length() >
+          0.0001F ||
+      std::abs(buffer.sceneRadius() - 2.0F) > 0.0001F) {
+    const QString detail =
+        QStringLiteral("bounds center=(%1,%2,%3) radius=%4")
+            .arg(buffer.sceneCenter().x())
+            .arg(buffer.sceneCenter().y())
+            .arg(buffer.sceneCenter().z())
+            .arg(buffer.sceneRadius());
+    buffer.release();
+    context.doneCurrent();
+    finishProbe(12, QStringLiteral("GPU_PREVIEW_INTEROP bounds=false detail=%1")
+                        .arg(detail));
+  }
 
   QOpenGLExtraFunctions *gl = context.extraFunctions();
   using GetBufferSubDataProc =
@@ -182,7 +196,7 @@ int main(int argc, char **argv) {
   finishProbe(
       0,
       QStringLiteral("GPU_PREVIEW_INTEROP end_to_end=true renderer=%1 "
-                     "generation=%2 count=64 iteration=12")
+                     "generation=%2 count=64 iteration=12 bounds=true")
           .arg(capability.renderer)
           .arg(generation));
 }

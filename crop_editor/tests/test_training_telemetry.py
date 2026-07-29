@@ -46,13 +46,18 @@ class TrainingTelemetryTests(unittest.TestCase):
         }
 
         with mock.patch.object(server, "persist_train_job"):
-            server.add_job_log(job, "[gsw-training-metrics] " + json.dumps(metrics))
+            server.add_job_log(
+                job,
+                "[gsw-training-metrics] "
+                + json.dumps(metrics)
+                + " [30/07 02:25:25]",
+            )
             server.add_job_log(
                 job,
                 "[gsw-training-preview] " + json.dumps({
                     "iteration": 10000,
                     "point_cloud_path": "E:/model/point_cloud.ply",
-                }),
+                }) + " [30/07 02:25:25]",
             )
 
         snapshot = server.job_snapshot(job)

@@ -42,6 +42,22 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
+
+GPU_PREVIEW_PROTOCOL_VERSION = 2
+
+
+def emit_gsw_event(prefix, payload):
+    """Write a machine event without safe_state's human-log timestamp suffix."""
+    stream = getattr(sys, "__stdout__", None) or sys.stdout
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(payload, dict)
+        else str(payload)
+    )
+    stream.write("{} {}\n".format(prefix, encoded))
+    stream.flush()
+
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, load_iteration=None, enable_gpu_preview=False, gpu_preview_fps=15.0):
 
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
@@ -89,16 +105,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             elif failure_descriptor is not None:
                 gpu_preview_emit(failure_descriptor)
         except Exception as preview_error:
-            print(
-                "[gsw-training-gpu-preview] "
-                + json.dumps({
-                    "version": 1,
+            emit_gsw_event(
+                "[gsw-training-gpu-preview]",
+                {
+                    "version": GPU_PREVIEW_PROTOCOL_VERSION,
                     "type": "gpu_preview",
                     "state": "failed",
                     "sessionId": str(uuid.uuid4()),
                     "error": str(preview_error)[:1000],
-                }, ensure_ascii=False, separators=(",", ":")),
-                flush=True,
+                },
             )
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -186,7 +201,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}"})
                 progress_bar.update(10)
             if iteration == first_iter or iteration % progress_interval == 0 or iteration == opt.iterations:
-                print("\n[gsw-training-progress] {}/{}".format(iteration, opt.iterations), flush=True)
+                emit_gsw_event(
+                    "[gsw-training-progress]",
+                    "{}/{}".format(iteration, opt.iterations),
+                )
                 training_psnr = psnr(image, gt_image).mean().item()
                 telemetry = {
                     "iteration": iteration,
@@ -197,11 +215,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     "iteration_milliseconds": iter_start.elapsed_time(iter_end),
                     "elapsed_seconds": time.monotonic() - training_started_at,
                 }
-                print(
-                    "[gsw-training-metrics] "
-                    + json.dumps(telemetry, ensure_ascii=False, separators=(",", ":")),
-                    flush=True,
-                )
+                emit_gsw_event("[gsw-training-metrics]", telemetry)
             if iteration == opt.iterations:
                 progress_bar.close()
 
@@ -216,13 +230,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     "iteration_{}".format(iteration),
                     "point_cloud.ply",
                 ))
-                print(
-                    "[gsw-training-preview] "
-                    + json.dumps({
+                emit_gsw_event(
+                    "[gsw-training-preview]",
+                    {
                         "iteration": iteration,
                         "point_cloud_path": preview_path,
-                    }, ensure_ascii=False, separators=(",", ":")),
-                    flush=True,
+                    },
                 )
 
             # Densification
@@ -255,7 +268,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gpu_preview.publish(gaussians, iteration)
                 except Exception as preview_error:
                     gpu_preview_emit({
-                        "version": 1,
+                        "version": GPU_PREVIEW_PROTOCOL_VERSION,
                         "type": "gpu_preview",
                         "state": "failed",
                         "sessionId": gpu_preview.session_id,
@@ -270,7 +283,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     if gpu_preview is not None:
         gpu_preview_emit({
-            "version": 1,
+            "version": GPU_PREVIEW_PROTOCOL_VERSION,
             "type": "gpu_preview",
             "state": "closing",
             "sessionId": gpu_preview.session_id,

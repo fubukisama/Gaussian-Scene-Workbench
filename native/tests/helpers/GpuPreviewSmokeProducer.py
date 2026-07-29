@@ -26,7 +26,9 @@ from native.worker.gpu_preview_publisher import (  # noqa: E402
 class DeterministicGaussians:
     def __init__(self, count):
         self.get_xyz = torch.empty((count, 3), device="cuda", dtype=torch.float32)
-        self.get_xyz[:, 0] = 1.0
+        self.get_xyz[:, 0] = torch.linspace(
+            -2.0, 2.0, count, device="cuda", dtype=torch.float32
+        )
         self.get_xyz[:, 1] = 2.0
         self.get_xyz[:, 2] = 3.0
         self.get_features_dc = torch.zeros(

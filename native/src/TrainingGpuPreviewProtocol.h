@@ -9,7 +9,10 @@
 namespace gsw {
 
 inline constexpr qsizetype kTrainingGpuPreviewControlBytes = 4096;
-inline constexpr quint32 kTrainingGpuPreviewHeaderBytes = 124;
+inline constexpr quint32 kTrainingGpuPreviewProtocolVersion = 2;
+inline constexpr quint32 kTrainingGpuPreviewHeaderBytes = 156;
+inline constexpr qsizetype kTrainingGpuPreviewTrailingSequenceOffset = 152;
+inline constexpr qsizetype kTrainingGpuPreviewSlotSnapshotBytes = 48;
 inline constexpr int kTrainingGpuPreviewSlotCount = 2;
 inline constexpr int kTrainingGpuPreviewStrideBytes = 14 * sizeof(float);
 
@@ -49,6 +52,10 @@ struct TrainingGpuPreviewSlotSnapshot final {
   quint64 pointCount = 0;
   quint64 iteration = 0;
   quint64 timestampNanoseconds = 0;
+  float sceneCenterX = 0.0F;
+  float sceneCenterY = 0.0F;
+  float sceneCenterZ = 0.0F;
+  float sceneRadius = 0.0F;
 };
 
 struct TrainingGpuPreviewControlSnapshot final {

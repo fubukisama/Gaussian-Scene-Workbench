@@ -5,6 +5,7 @@
 #include <QOpenGLExtraFunctions>
 #include <QString>
 #include <QVector>
+#include <QVector3D>
 
 #include <array>
 
@@ -50,6 +51,8 @@ public:
   }
   [[nodiscard]] quint64 iteration() const { return mIteration; }
   [[nodiscard]] quint64 generation() const { return mGeneration; }
+  [[nodiscard]] QVector3D sceneCenter() const { return mSceneCenter; }
+  [[nodiscard]] float sceneRadius() const { return mSceneRadius; }
   [[nodiscard]] QString sessionId() const { return mDescriptor.sessionId; }
   [[nodiscard]] QString device() const { return mDescriptor.device; }
 
@@ -103,6 +106,8 @@ private:
   quint64 mPointCount = 0;
   quint64 mIteration = 0;
   quint64 mGeneration = 0;
+  QVector3D mSceneCenter;
+  float mSceneRadius = 0.0F;
   bool mAttached = false;
   bool mInitialPoll = true;
 };

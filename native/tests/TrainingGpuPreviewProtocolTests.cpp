@@ -5,13 +5,15 @@
 #include <QtEndian>
 #include <QtTest>
 
+#include <cstring>
+
 using namespace gsw;
 
 namespace {
 
 QByteArray validReadyPayload() {
   QJsonObject object;
-  object.insert(QStringLiteral("version"), 1);
+  object.insert(QStringLiteral("version"), 2);
   object.insert(QStringLiteral("type"), QStringLiteral("gpu_preview"));
   object.insert(QStringLiteral("state"), QStringLiteral("ready"));
   object.insert(QStringLiteral("sessionId"),
@@ -44,6 +46,13 @@ void writeLe32(QByteArray *bytes, const qsizetype offset, const quint32 value) {
 
 void writeLe64(QByteArray *bytes, const qsizetype offset, const quint64 value) {
   qToLittleEndian(value, reinterpret_cast<uchar *>(bytes->data() + offset));
+}
+
+void writeLeFloat(QByteArray *bytes, const qsizetype offset, const float value) {
+  quint32 bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(bits));
+  writeLe32(bytes, offset, bits);
 }
 
 } // namespace
@@ -94,9 +103,10 @@ void TrainingGpuPreviewProtocolTests::rejectsUnsafeDescriptorGeometry() {
 }
 
 void TrainingGpuPreviewProtocolTests::parsesStableControlSnapshot() {
+  QCOMPARE(kTrainingGpuPreviewHeaderBytes, quint32(156));
   QByteArray bytes(kTrainingGpuPreviewControlBytes, '\0');
-  bytes.replace(0, 8, QByteArrayLiteral("GSWGPU1\0"));
-  writeLe32(&bytes, 8, 1);
+  bytes.replace(0, 8, QByteArrayLiteral("GSWGPU2\0"));
+  writeLe32(&bytes, 8, kTrainingGpuPreviewProtocolVersion);
   writeLe32(&bytes, 12, kTrainingGpuPreviewHeaderBytes);
   writeLe32(&bytes, 16, 2); // even sequence means stable
   writeLe32(&bytes, 20, 1); // ready
@@ -109,11 +119,19 @@ void TrainingGpuPreviewProtocolTests::parsesStableControlSnapshot() {
   writeLe64(&bytes, 64, 900);
   writeLe64(&bytes, 72, 80);
   writeLe64(&bytes, 80, 123456789);
-  writeLe64(&bytes, 88, 18);
-  writeLe64(&bytes, 96, 950);
-  writeLe64(&bytes, 104, 81);
-  writeLe64(&bytes, 112, 123456999);
-  writeLe32(&bytes, 120, 2); // matching trailing sequence
+  writeLeFloat(&bytes, 88, -2.0F);
+  writeLeFloat(&bytes, 92, 1.0F);
+  writeLeFloat(&bytes, 96, 4.0F);
+  writeLeFloat(&bytes, 100, 8.0F);
+  writeLe64(&bytes, 104, 18);
+  writeLe64(&bytes, 112, 950);
+  writeLe64(&bytes, 120, 81);
+  writeLe64(&bytes, 128, 123456999);
+  writeLeFloat(&bytes, 136, -1.5F);
+  writeLeFloat(&bytes, 140, 1.5F);
+  writeLeFloat(&bytes, 144, 4.5F);
+  writeLeFloat(&bytes, 148, 9.0F);
+  writeLe32(&bytes, 152, 2); // matching trailing sequence
 
   TrainingGpuPreviewControlSnapshot snapshot;
   QString error;
@@ -124,15 +142,19 @@ void TrainingGpuPreviewProtocolTests::parsesStableControlSnapshot() {
   QCOMPARE(snapshot.slotSnapshots.at(1).generation, quint64(18));
   QCOMPARE(snapshot.slotSnapshots.at(1).pointCount, quint64(950));
   QCOMPARE(snapshot.slotSnapshots.at(1).iteration, quint64(81));
+  QCOMPARE(snapshot.slotSnapshots.at(1).sceneCenterX, -1.5F);
+  QCOMPARE(snapshot.slotSnapshots.at(1).sceneCenterY, 1.5F);
+  QCOMPARE(snapshot.slotSnapshots.at(1).sceneCenterZ, 4.5F);
+  QCOMPARE(snapshot.slotSnapshots.at(1).sceneRadius, 9.0F);
 }
 
 void TrainingGpuPreviewProtocolTests::rejectsTornControlSnapshot() {
   QByteArray bytes(kTrainingGpuPreviewControlBytes, '\0');
-  bytes.replace(0, 8, QByteArrayLiteral("GSWGPU1\0"));
-  writeLe32(&bytes, 8, 1);
+  bytes.replace(0, 8, QByteArrayLiteral("GSWGPU2\0"));
+  writeLe32(&bytes, 8, kTrainingGpuPreviewProtocolVersion);
   writeLe32(&bytes, 12, kTrainingGpuPreviewHeaderBytes);
   writeLe32(&bytes, 16, 3); // odd means writer is active
-  writeLe32(&bytes, 120, 2);
+  writeLe32(&bytes, 152, 2);
   TrainingGpuPreviewControlSnapshot snapshot;
   QString error;
   QVERIFY(!parseTrainingGpuPreviewControl(bytes, &snapshot, &error));

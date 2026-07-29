@@ -215,6 +215,7 @@ private:
   std::optional<TrainingGpuPreviewDescriptor>
       mPendingTrainingGpuPreviewDescriptor;
   bool mTrainingGpuPreviewStopPending = false;
+  bool mTrainingGpuPreviewCameraFramed = false;
   QString mTrainingGpuPreviewError;
   QTimer *mTrainingGpuPreviewTimer = nullptr;
   QVariantAnimation *mViewSnapAnimation = nullptr;
