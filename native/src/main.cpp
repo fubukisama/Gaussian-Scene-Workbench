@@ -76,8 +76,8 @@ int main(int argc, char *argv[]) {
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setSamples(4);
-  // Match SIBR's unlocked mode. Frame pacing is controlled by the viewport,
-  // while the FPS meter reports completed render work like the HTML viewer.
+  // Match SIBR's unlocked mode. The FPS meter separately measures completed
+  // Qt frame swaps, so a driver or compositor cap remains visible to users.
   format.setSwapInterval(0);
   QSurfaceFormat::setDefaultFormat(format);
 

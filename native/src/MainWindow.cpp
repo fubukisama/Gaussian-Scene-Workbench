@@ -1537,7 +1537,8 @@ void MainWindow::createTaskDock() {
 void MainWindow::createStatusBar() {
   mProjectStatus = new QLabel(QStringLiteral("未打开工程"), this);
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  mRendererStatus = new QLabel(QStringLiteral("原生点预览 | 未载入场景"), this);
+  mRendererStatus = new QLabel(
+      QStringLiteral("点预览 | 未载入场景 | FPS — (— ms)"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
   mEditStatus = new QLabel(QStringLiteral("选择 0 | 删除 0"), this);
@@ -1983,7 +1984,7 @@ void MainWindow::connectServices() {
   connect(
       mViewport, &NativeViewport::frameMetricsChanged, this,
       [this](const double framesPerSecond,
-             const double averageRenderMilliseconds) {
+             const double averageFrameMilliseconds) {
         const bool trainingPreview = mViewport->trainingGpuPreviewActive();
         QString renderer;
         if (trainingPreview) {
@@ -2004,13 +2005,16 @@ void MainWindow::connectServices() {
                          : mode;
         }
         const QString frameRate =
-            framesPerSecond > 0.0 && averageRenderMilliseconds > 0.0
+            framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
                 ? QStringLiteral("%1 FPS (%2 ms)")
                       .arg(framesPerSecond, 0, 'f', 1)
-                      .arg(averageRenderMilliseconds, 0, 'f', 1)
-                : QStringLiteral("FPS —");
-        mRendererStatus->setText(QStringLiteral("%1 | %2")
-                                     .arg(renderer, frameRate));
+                      .arg(averageFrameMilliseconds, 0, 'f', 1)
+                : QStringLiteral("FPS — (— ms)");
+        const QString statusText =
+            QStringLiteral("%1 | %2").arg(renderer, frameRate);
+        if (mRendererStatus->text() != statusText) {
+          mRendererStatus->setText(statusText);
+        }
       });
   connect(
       mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,

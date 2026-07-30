@@ -86,7 +86,7 @@ public:
 
 signals:
   void frameMetricsChanged(double framesPerSecond,
-                           double averageRenderMilliseconds);
+                           double averageFrameMilliseconds);
   void sceneLoadStarted(const QString &scenePath);
   void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount);
   void sceneLoadFailed(const QString &scenePath, const QString &message);

@@ -4,19 +4,32 @@
 
 namespace gsw {
 
-void FrameRateCounter::addRenderDurationMilliseconds(
-    const double milliseconds) {
-  if (!std::isfinite(milliseconds) || milliseconds <= 0.0) {
+void FrameRateCounter::frameCompleted(const TimePoint completionTime) {
+  if (!mLastCompletionTime.has_value()) {
+    mLastCompletionTime = completionTime;
     return;
   }
 
+  const double milliseconds =
+      std::chrono::duration<double, std::milli>(completionTime -
+                                                *mLastCompletionTime)
+          .count();
+  if (!std::isfinite(milliseconds) || milliseconds <= 0.0) {
+    return;
+  }
+  mLastCompletionTime = completionTime;
+  addFrameIntervalMilliseconds(milliseconds);
+}
+
+void FrameRateCounter::addFrameIntervalMilliseconds(
+    const double milliseconds) {
   if (mSampleCount == kSmoothingWindow) {
-    mRenderDurationSum -= mRenderDurations[mNextSample];
+    mFrameIntervalSum -= mFrameIntervals[mNextSample];
   } else {
     ++mSampleCount;
   }
-  mRenderDurations[mNextSample] = milliseconds;
-  mRenderDurationSum += milliseconds;
+  mFrameIntervals[mNextSample] = milliseconds;
+  mFrameIntervalSum += milliseconds;
   mNextSample = (mNextSample + 1) % kSmoothingWindow;
 }
 
@@ -24,7 +37,7 @@ std::size_t FrameRateCounter::sampleCount() const { return mSampleCount; }
 
 double FrameRateCounter::averageFrameMilliseconds() const {
   return mSampleCount > 0
-             ? mRenderDurationSum / static_cast<double>(mSampleCount)
+             ? mFrameIntervalSum / static_cast<double>(mSampleCount)
              : 0.0;
 }
 

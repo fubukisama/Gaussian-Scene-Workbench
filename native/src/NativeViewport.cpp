@@ -7,7 +7,6 @@
 #include <QApplication>
 #include <QEasingCurve>
 #include <QEnterEvent>
-#include <QElapsedTimer>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -179,6 +178,14 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mFrameRefreshTimer->setInterval(0);
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
+  connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
+    if (mRenderedPointCount <= 0 && !mTrainingGpuPreview.attached()) {
+      return;
+    }
+    mFrameRateCounter.frameCompleted(FrameRateCounter::Clock::now());
+    emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
+                             mFrameRateCounter.averageFrameMilliseconds());
+  });
 }
 
 NativeViewport::~NativeViewport() {
@@ -807,8 +814,6 @@ void NativeViewport::resizeGL(const int width, const int height) {
 }
 
 void NativeViewport::paintGL() {
-  QElapsedTimer paintTimer;
-  paintTimer.start();
   applyPendingTrainingGpuPreview();
   const bool gaussianWasAvailable = gaussianRenderingAvailable();
   QString gpuPreviewError;
@@ -876,10 +881,6 @@ void NativeViewport::paintGL() {
   drawOverlay(painter);
   drawAxisGizmo(painter);
   painter.end();
-  mFrameRateCounter.addRenderDurationMilliseconds(
-      static_cast<double>(paintTimer.nsecsElapsed()) / 1000000.0);
-  emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
-                           mFrameRateCounter.averageFrameMilliseconds());
 }
 
 void NativeViewport::applyPendingTrainingGpuPreview() {

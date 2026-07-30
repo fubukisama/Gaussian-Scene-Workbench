@@ -2,7 +2,7 @@
 
 #include <QtTest>
 
-#include <limits>
+#include <chrono>
 
 using namespace gsw;
 
@@ -12,15 +12,17 @@ class FrameRateCounterTests final : public QObject {
 private slots:
   void averagesWarmupFramesWithoutZeroPadding();
   void keepsOnlyTheLatestSixtyFrames();
-  void ignoresInvalidFrameIntervals();
-  void reportsRenderThroughputAboveDisplayRefreshRate();
+  void ignoresNonIncreasingFrameCompletions();
+  void reportsActualFrameCadence();
 };
 
 void FrameRateCounterTests::averagesWarmupFramesWithoutZeroPadding() {
   FrameRateCounter counter;
+  const FrameRateCounter::TimePoint origin{};
 
-  counter.addRenderDurationMilliseconds(10.0);
-  counter.addRenderDurationMilliseconds(20.0);
+  counter.frameCompleted(origin);
+  counter.frameCompleted(origin + std::chrono::milliseconds(10));
+  counter.frameCompleted(origin + std::chrono::milliseconds(30));
 
   QCOMPARE(counter.sampleCount(), std::size_t(2));
   QCOMPARE(counter.averageFrameMilliseconds(), 15.0);
@@ -29,41 +31,46 @@ void FrameRateCounterTests::averagesWarmupFramesWithoutZeroPadding() {
 
 void FrameRateCounterTests::keepsOnlyTheLatestSixtyFrames() {
   FrameRateCounter counter;
+  FrameRateCounter::TimePoint completion{};
+  counter.frameCompleted(completion);
   for (std::size_t index = 0; index < FrameRateCounter::kSmoothingWindow;
        ++index) {
-    counter.addRenderDurationMilliseconds(10.0);
+    completion += std::chrono::milliseconds(10);
+    counter.frameCompleted(completion);
   }
-  counter.addRenderDurationMilliseconds(20.0);
+  completion += std::chrono::milliseconds(20);
+  counter.frameCompleted(completion);
 
   QCOMPARE(counter.sampleCount(), FrameRateCounter::kSmoothingWindow);
   QCOMPARE(counter.averageFrameMilliseconds(), 610.0 / 60.0);
   QVERIFY(qAbs(counter.framesPerSecond() - (60000.0 / 610.0)) < 1.0e-9);
 }
 
-void FrameRateCounterTests::ignoresInvalidFrameIntervals() {
+void FrameRateCounterTests::ignoresNonIncreasingFrameCompletions() {
   FrameRateCounter counter;
+  const FrameRateCounter::TimePoint origin{};
 
-  counter.addRenderDurationMilliseconds(0.0);
-  counter.addRenderDurationMilliseconds(-1.0);
-  counter.addRenderDurationMilliseconds(
-      std::numeric_limits<double>::quiet_NaN());
-  counter.addRenderDurationMilliseconds(
-      std::numeric_limits<double>::infinity());
+  counter.frameCompleted(origin);
+  counter.frameCompleted(origin);
+  counter.frameCompleted(origin - std::chrono::milliseconds(1));
 
   QCOMPARE(counter.sampleCount(), std::size_t(0));
   QCOMPARE(counter.averageFrameMilliseconds(), 0.0);
   QCOMPARE(counter.framesPerSecond(), 0.0);
 }
 
-void FrameRateCounterTests::reportsRenderThroughputAboveDisplayRefreshRate() {
+void FrameRateCounterTests::reportsActualFrameCadence() {
   FrameRateCounter counter;
+  FrameRateCounter::TimePoint completion{};
+  counter.frameCompleted(completion);
   for (std::size_t index = 0; index < FrameRateCounter::kSmoothingWindow;
        ++index) {
-    counter.addRenderDurationMilliseconds(2.0);
+    completion += std::chrono::milliseconds(8);
+    counter.frameCompleted(completion);
   }
 
-  QCOMPARE(counter.averageFrameMilliseconds(), 2.0);
-  QCOMPARE(counter.framesPerSecond(), 500.0);
+  QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+  QCOMPARE(counter.framesPerSecond(), 125.0);
 }
 
 QTEST_GUILESS_MAIN(FrameRateCounterTests)
