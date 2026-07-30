@@ -20,6 +20,7 @@ private slots:
   void clampsZoomToSceneAwareFiniteLimits();
   void keepsGridStepsOnConcreteDecimalScales();
   void enforcesMinimumGridStepAtClosestZoom();
+  void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
 };
 
@@ -130,6 +131,16 @@ void ViewportCameraTests::enforcesMinimumGridStepAtClosestZoom() {
   QCOMPARE(scale.levelBlend, 0.0F);
   QCOMPARE(scale.displayMajorStep, 0.01F);
   QVERIFY(scale.visibleDistance > 0.0F);
+}
+
+void ViewportCameraTests::usesMetashapeStylePointPreviewDiameter() {
+  QCOMPARE(pointPreviewDiameterPixels(1.0F), 1.0F);
+  QCOMPARE(pointPreviewDiameterPixels(1.5F), 1.5F);
+  QCOMPARE(pointPreviewDiameterPixels(2.0F), 2.0F);
+  QCOMPARE(pointPreviewDiameterPixels(0.0F), 1.0F);
+  QCOMPARE(pointPreviewDiameterPixels(
+               std::numeric_limits<float>::quiet_NaN()),
+           1.0F);
 }
 
 void ViewportCameraTests::formatsGridScaleWithReadableMetricUnits() {

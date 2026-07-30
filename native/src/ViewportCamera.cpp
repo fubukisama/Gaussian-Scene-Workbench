@@ -153,6 +153,15 @@ ReferenceGridScale referenceGridScale(const float cameraDistance,
           std::max(safeDistance * 8.0F, upper * 40.0F)};
 }
 
+float pointPreviewDiameterPixels(const float devicePixelRatio) {
+  constexpr float kMetashapeStyleLogicalPointDiameter = 1.0F;
+  const float safeRatio =
+      std::isfinite(devicePixelRatio) && devicePixelRatio > 0.0F
+          ? devicePixelRatio
+          : 1.0F;
+  return kMetashapeStyleLogicalPointDiameter * safeRatio;
+}
+
 QString formatMetricDistance(const float metres) {
   if (!std::isfinite(metres)) {
     return QStringLiteral("—");

@@ -1202,8 +1202,9 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   mPointProgram->bind();
   mPointProgram->setUniformValue("viewProjection", viewProjection);
-  mPointProgram->setUniformValue("pointSize",
-                                 static_cast<float>(2.4 * devicePixelRatioF()));
+  mPointProgram->setUniformValue(
+      "pointSize",
+      pointPreviewDiameterPixels(static_cast<float>(devicePixelRatioF())));
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
     glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
@@ -1228,7 +1229,8 @@ void NativeViewport::drawTrainingPointCloud(
   mPointProgram->bind();
   mPointProgram->setUniformValue("viewProjection", viewProjection);
   mPointProgram->setUniformValue(
-      "pointSize", static_cast<float>(2.8 * devicePixelRatioF()));
+      "pointSize",
+      pointPreviewDiameterPixels(static_cast<float>(devicePixelRatioF())));
   glBindVertexArray(vertexArray);
   // The shared VAO advances its attributes per Gaussian instance for the
   // splat renderer. Point rendering consumes the same GPU memory per vertex,

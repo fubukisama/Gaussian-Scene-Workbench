@@ -49,6 +49,10 @@ referenceGridPlane(OrbitAngles angles, bool orthographic);
 [[nodiscard]] ReferenceGridScale referenceGridScale(float cameraDistance,
                                                     int viewportPixelHeight);
 
+// Metashape-style point previews use a one-logical-pixel footprint. Convert
+// that footprint to the physical pixels expected by OpenGL.
+[[nodiscard]] float pointPreviewDiameterPixels(float devicePixelRatio);
+
 // Display convention: one scene unit is treated as one metre until a project
 // supplies an explicit scale calibration.
 [[nodiscard]] QString formatMetricDistance(float metres);
