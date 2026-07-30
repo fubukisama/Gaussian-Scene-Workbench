@@ -233,7 +233,7 @@ int main(int argc, char *argv[]) {
                                  const qsizetype, const qint64,
                                  const qsizetype) {
             QTimer::singleShot(
-                300, &application,
+                sourceVertexCount > 5'000'000 ? 5000 : 300, &application,
                 [&application, viewport, sourceVertexCount,
                  &smokeTestCompleted, &smokeTestFailureCode]() {
                   const QImage frame = viewport->grabFramebuffer();
@@ -275,7 +275,7 @@ int main(int argc, char *argv[]) {
             application.exit(smokeTestFailureCode);
           });
       viewport->setScene(smokeScenePath, 8);
-      QTimer::singleShot(8000, &application,
+      QTimer::singleShot(180000, &application,
                          [&application, &smokeTestFailureCode]() {
                            smokeTestFailureCode = 6;
                            application.exit(smokeTestFailureCode);

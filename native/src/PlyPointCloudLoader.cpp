@@ -19,11 +19,11 @@ namespace gsw {
 namespace {
 constexpr double kSphericalHarmonicDc = 0.28209479177387814;
 constexpr qint64 kMaximumHeaderBytes = 1024 * 1024;
-constexpr qint64 kMaximumEditableVertexCount = 50'000'000;
 constexpr qint64 kMaximumRecordBytes = 256LL * 1024LL * 1024LL;
 constexpr qint64 kMaximumMeshVertexCount = 5'000'000;
 constexpr qint64 kMaximumMeshPreviewFaces = 2'000'000;
 constexpr qint64 kMaximumMeshPreviewTriangles = 5'000'000;
+constexpr qsizetype kFullResolutionPointChunkSize = 1'000'000;
 
 enum class PlyFormat {
   Unknown,
@@ -651,6 +651,192 @@ bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
   return true;
 }
 
+std::optional<double> scalarFromMemory(const uchar *data,
+                                       const ScalarType type,
+                                       const PlyFormat format) {
+  const bool bigEndian = format == PlyFormat::BinaryBigEndian;
+  switch (type) {
+  case ScalarType::Int8:
+    return static_cast<qint8>(*data);
+  case ScalarType::UInt8:
+    return *data;
+  case ScalarType::Int16:
+    return static_cast<qint16>(bigEndian ? qFromBigEndian<quint16>(data)
+                                        : qFromLittleEndian<quint16>(data));
+  case ScalarType::UInt16:
+    return bigEndian ? qFromBigEndian<quint16>(data)
+                     : qFromLittleEndian<quint16>(data);
+  case ScalarType::Int32:
+    return static_cast<qint32>(bigEndian ? qFromBigEndian<quint32>(data)
+                                        : qFromLittleEndian<quint32>(data));
+  case ScalarType::UInt32:
+    return bigEndian ? qFromBigEndian<quint32>(data)
+                     : qFromLittleEndian<quint32>(data);
+  case ScalarType::Float32: {
+    const quint32 bits = bigEndian ? qFromBigEndian<quint32>(data)
+                                   : qFromLittleEndian<quint32>(data);
+    return std::bit_cast<float>(bits);
+  }
+  case ScalarType::Float64: {
+    const quint64 bits = bigEndian ? qFromBigEndian<quint64>(data)
+                                   : qFromLittleEndian<quint64>(data);
+    return std::bit_cast<double>(bits);
+  }
+  case ScalarType::Invalid:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+quint8 packedColor(const double value, const ScalarType type) {
+  return static_cast<quint8>(
+      std::clamp(qRound(normalizedColor(value, type) * 255.0F), 0, 255));
+}
+
+bool loadFullResolutionPointPreview(
+    QFile &file, const PlyHeader &header, const ElementDefinition &vertexElement,
+    const int xIndex, const int yIndex, const int zIndex, const int redIndex,
+    const int greenIndex, const int blueIndex,
+    const bool sphericalHarmonicColor, PointCloudData &result) {
+  const auto firstNonEmpty = std::find_if(
+      header.elements.cbegin(), header.elements.cend(),
+      [](const ElementDefinition &element) { return element.count > 0; });
+  if (firstNonEmpty == header.elements.cend() || &(*firstNonEmpty) != &vertexElement) {
+    result.error = QStringLiteral(
+        "Full-resolution large-cloud preview requires the vertex element to "
+        "be the first non-empty PLY element.");
+    return false;
+  }
+  if (header.format == PlyFormat::Ascii ||
+      std::any_of(vertexElement.properties.cbegin(),
+                  vertexElement.properties.cend(),
+                  [](const PropertyDefinition &property) {
+                    return property.isList;
+                  })) {
+    result.error = QStringLiteral(
+        "Full-resolution large-cloud preview currently requires fixed-width "
+        "binary PLY vertex records.");
+    return false;
+  }
+
+  QVector<qsizetype> offsets;
+  offsets.reserve(vertexElement.properties.size());
+  qsizetype recordBytes = 0;
+  for (const PropertyDefinition &property : vertexElement.properties) {
+    offsets.append(recordBytes);
+    recordBytes += scalarByteSize(property.valueType);
+  }
+  if (recordBytes <= 0 || recordBytes > kMaximumRecordBytes) {
+    result.error = QStringLiteral("The binary PLY vertex record is too large.");
+    return false;
+  }
+
+  const auto valueAt = [&](const uchar *record, const int propertyIndex) {
+    return scalarFromMemory(record + offsets.at(propertyIndex),
+                            vertexElement.properties.at(propertyIndex).valueType,
+                            header.format);
+  };
+  bool hasFiniteBounds = false;
+  qint64 sourceFirstVertex = 0;
+  while (sourceFirstVertex < vertexElement.count) {
+    const qsizetype requestedRecords = static_cast<qsizetype>(
+        std::min<qint64>(kFullResolutionPointChunkSize,
+                         vertexElement.count - sourceFirstVertex));
+    const qint64 requestedBytes =
+        static_cast<qint64>(requestedRecords) * recordBytes;
+    const QByteArray bytes = file.read(requestedBytes);
+    if (bytes.size() != requestedBytes) {
+      result.error = QStringLiteral(
+          "Unexpected end of binary PLY data while reading the large cloud.");
+      result.fullResolutionPointChunks.clear();
+      return false;
+    }
+
+    PointPreviewChunk chunk;
+    chunk.sourceFirstVertex = sourceFirstVertex;
+    chunk.vertices.reserve(requestedRecords);
+    bool hasChunkBounds = false;
+    const auto *raw = reinterpret_cast<const uchar *>(bytes.constData());
+    for (qsizetype index = 0; index < requestedRecords; ++index) {
+      const uchar *record = raw + index * recordBytes;
+      const std::optional<double> x = valueAt(record, xIndex);
+      const std::optional<double> y = valueAt(record, yIndex);
+      const std::optional<double> z = valueAt(record, zIndex);
+      if (!x.has_value() || !y.has_value() || !z.has_value() ||
+          !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) {
+        continue;
+      }
+
+      PointPreviewVertex vertex;
+      vertex.x = static_cast<float>(*x);
+      vertex.y = static_cast<float>(*y);
+      vertex.z = static_cast<float>(*z);
+      if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0) {
+        const double red = valueAt(record, redIndex).value_or(0.72);
+        const double green = valueAt(record, greenIndex).value_or(0.75);
+        const double blue = valueAt(record, blueIndex).value_or(0.78);
+        if (sphericalHarmonicColor) {
+          vertex.red = static_cast<quint8>(std::clamp(
+              qRound((0.5 + kSphericalHarmonicDc * red) * 255.0), 0, 255));
+          vertex.green = static_cast<quint8>(std::clamp(
+              qRound((0.5 + kSphericalHarmonicDc * green) * 255.0), 0, 255));
+          vertex.blue = static_cast<quint8>(std::clamp(
+              qRound((0.5 + kSphericalHarmonicDc * blue) * 255.0), 0, 255));
+        } else {
+          vertex.red = packedColor(
+              red, vertexElement.properties.at(redIndex).valueType);
+          vertex.green = packedColor(
+              green, vertexElement.properties.at(greenIndex).valueType);
+          vertex.blue = packedColor(
+              blue, vertexElement.properties.at(blueIndex).valueType);
+        }
+      }
+      chunk.vertices.append(vertex);
+      const QVector3D position(vertex.x, vertex.y, vertex.z);
+      if (!hasChunkBounds) {
+        chunk.boundsMinimum = position;
+        chunk.boundsMaximum = position;
+        hasChunkBounds = true;
+      } else {
+        chunk.boundsMinimum.setX(std::min(chunk.boundsMinimum.x(), position.x()));
+        chunk.boundsMinimum.setY(std::min(chunk.boundsMinimum.y(), position.y()));
+        chunk.boundsMinimum.setZ(std::min(chunk.boundsMinimum.z(), position.z()));
+        chunk.boundsMaximum.setX(std::max(chunk.boundsMaximum.x(), position.x()));
+        chunk.boundsMaximum.setY(std::max(chunk.boundsMaximum.y(), position.y()));
+        chunk.boundsMaximum.setZ(std::max(chunk.boundsMaximum.z(), position.z()));
+      }
+    }
+    if (hasChunkBounds) {
+      if (!hasFiniteBounds) {
+        result.boundsMinimum = chunk.boundsMinimum;
+        result.boundsMaximum = chunk.boundsMaximum;
+        hasFiniteBounds = true;
+      } else {
+        result.boundsMinimum.setX(
+            std::min(result.boundsMinimum.x(), chunk.boundsMinimum.x()));
+        result.boundsMinimum.setY(
+            std::min(result.boundsMinimum.y(), chunk.boundsMinimum.y()));
+        result.boundsMinimum.setZ(
+            std::min(result.boundsMinimum.z(), chunk.boundsMinimum.z()));
+        result.boundsMaximum.setX(
+            std::max(result.boundsMaximum.x(), chunk.boundsMaximum.x()));
+        result.boundsMaximum.setY(
+            std::max(result.boundsMaximum.y(), chunk.boundsMaximum.y()));
+        result.boundsMaximum.setZ(
+            std::max(result.boundsMaximum.z(), chunk.boundsMaximum.z()));
+      }
+      result.fullResolutionPointChunks.append(std::move(chunk));
+    }
+    sourceFirstVertex += requestedRecords;
+  }
+  if (!hasFiniteBounds || result.fullResolutionPointChunks.isEmpty()) {
+    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    return false;
+  }
+  result.previewOnly = true;
+  return true;
+}
+
 bool appendFaceTriangles(const QVector<double> &faceIndices,
                          const qint64 sourceVertexCount,
                          const bool appendPreview, PointCloudData &result) {
@@ -760,13 +946,29 @@ bool finalizeMeshGeometry(PointCloudData &result) {
 } // namespace
 
 bool PointCloudData::isValid() const {
-  return error.isEmpty() && sourceVertexCount > 0 &&
-         sourceVertexCount == sourcePositions.size() && !vertices.isEmpty();
+  if (!error.isEmpty() || sourceVertexCount <= 0) {
+    return false;
+  }
+  if (previewOnly) {
+    return previewPointCount() > 0;
+  }
+  return sourceVertexCount == sourcePositions.size() && !vertices.isEmpty();
 }
 
 bool PointCloudData::hasMesh() const {
   return meshVertices.size() == sourceVertexCount && meshIndices.size() >= 3 &&
          meshIndices.size() % 3 == 0;
+}
+
+qsizetype PointCloudData::previewPointCount() const {
+  if (!previewOnly) {
+    return vertices.size();
+  }
+  qsizetype count = 0;
+  for (const PointPreviewChunk &chunk : fullResolutionPointChunks) {
+    count += chunk.vertices.size();
+  }
+  return count;
 }
 
 QVector3D PointCloudData::center() const {
@@ -778,7 +980,8 @@ float PointCloudData::radius() const {
 }
 
 PointCloudData PlyPointCloudLoader::load(const QString &filePath,
-                                         const qsizetype maximumPreviewPoints) {
+                                         const qsizetype maximumPreviewPoints,
+                                         const qint64 maximumEditablePoints) {
   PointCloudData result;
   if (maximumPreviewPoints <= 0) {
     result.error = QStringLiteral("The point preview limit must be greater than zero.");
@@ -806,12 +1009,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   }
   const ElementDefinition &vertexElement = *vertexElementIterator;
   result.sourceVertexCount = vertexElement.count;
-  if (vertexElement.count > kMaximumEditableVertexCount ||
-      vertexElement.count > std::numeric_limits<quint32>::max()) {
-    result.error = QStringLiteral(
-        "The PLY contains %1 vertices. Native editing currently supports up to %2 vertices.")
-                       .arg(vertexElement.count)
-                       .arg(kMaximumEditableVertexCount);
+  if (maximumEditablePoints <= 0) {
+    result.error = QStringLiteral("The editable point limit must be greater than zero.");
     return result;
   }
 
@@ -892,6 +1091,21 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                   isScalarProperty) &&
       std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
                   isScalarProperty);
+
+  if (!containsMeshFaces && vertexElement.count > maximumEditablePoints) {
+    loadFullResolutionPointPreview(
+        file, header, vertexElement, xIndex, yIndex, zIndex, redIndex,
+        greenIndex, blueIndex, sphericalHarmonicColor, result);
+    return result;
+  }
+
+  if (vertexElement.count > std::numeric_limits<quint32>::max()) {
+    result.error = QStringLiteral(
+        "Editable PLY point clouds currently support up to %1 vertices; "
+        "use a fixed-width binary PLY for full-resolution read-only preview.")
+                       .arg(std::numeric_limits<quint32>::max());
+    return result;
+  }
 
   const qsizetype sampleCount = static_cast<qsizetype>(
       containsMeshFaces

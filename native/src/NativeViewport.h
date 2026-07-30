@@ -118,6 +118,14 @@ protected:
   void wheelEvent(QWheelEvent *event) override;
 
 private:
+  struct FullResolutionGpuChunk {
+    GLuint vertexArray = 0;
+    GLuint buffer = 0;
+    GLsizei pointCount = 0;
+    QVector3D boundsMinimum;
+    QVector3D boundsMaximum;
+  };
+
   struct StoredCameraView {
     QVector3D target;
     float yawDegrees = 0.0F;
@@ -142,6 +150,8 @@ private:
   void updateFrameRefreshPolicy();
   void notifyEditState();
   void uploadPendingPointCloud();
+  void uploadPendingFullResolutionPointCloud();
+  void releaseFullResolutionPointCloud();
   void uploadPendingMesh();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
   void applyPendingTrainingGpuPreview();
@@ -173,6 +183,8 @@ private:
   qsizetype mPreviewPointCount = 0;
   qsizetype mPreviewTriangleCount = 0;
   qsizetype mRenderedPointCount = 0;
+  qsizetype mFullResolutionPointCount = 0;
+  qsizetype mUploadedFullResolutionPointCount = 0;
   qsizetype mRenderedMeshIndexCount = 0;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
@@ -197,6 +209,10 @@ private:
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
   bool mGridShaderReady = false;
+  bool mPreviewOnlyScene = false;
+  bool mInteractionLodActive = false;
+  bool mProgressiveUploadActive = false;
+  bool mFullResolutionPointClearPending = false;
   int mSceneGeneration = 0;
   int mCameraTrajectoryGeneration = 0;
   RenderMode mRenderMode = RenderMode::Points;
@@ -213,6 +229,9 @@ private:
   QVector<PointPosition> mSourcePositions;
   QVector<PointCloudVertex> mPreviewVertices;
   QVector<PointCloudVertex> mPendingVertices;
+  QVector<PointPreviewChunk> mPendingFullResolutionPointChunks;
+  qsizetype mPendingFullResolutionChunkIndex = 0;
+  QVector<FullResolutionGpuChunk> mFullResolutionPointGpuChunks;
   QVector<MeshVertex> mPendingMeshVertices;
   QVector<quint32> mPendingMeshIndices;
   CameraTrajectory mCameraTrajectory;

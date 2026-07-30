@@ -29,6 +29,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <utility>
 
 namespace gsw {
 
@@ -179,7 +180,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
-    if (mRenderedPointCount <= 0 && mRenderedMeshIndexCount <= 0 &&
+    if (mRenderedPointCount <= 0 && mFullResolutionPointCount <= 0 &&
+        mRenderedMeshIndexCount <= 0 &&
         !mTrainingGpuPreview.attached()) {
       return;
     }
@@ -193,6 +195,7 @@ NativeViewport::~NativeViewport() {
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
     mTrainingGpuPreview.release();
+    releaseFullResolutionPointCloud();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mMeshVertexArray.destroy();
@@ -250,6 +253,8 @@ void NativeViewport::setScene(const QString &scenePath,
   mPreviewPointCount = 0;
   mPreviewTriangleCount = 0;
   mRenderedPointCount = 0;
+  mFullResolutionPointCount = 0;
+  mUploadedFullResolutionPointCount = 0;
   mRenderedMeshIndexCount = 0;
   updateFrameRefreshPolicy();
   const bool gaussianAvailabilityChanged = gaussianRenderingAvailable();
@@ -257,6 +262,7 @@ void NativeViewport::setScene(const QString &scenePath,
   const bool renderModeChangedToPoints = mRenderMode != RenderMode::Points;
   mHasGaussianAttributes = false;
   mHasMesh = false;
+  mPreviewOnlyScene = false;
   mRenderMode = RenderMode::Points;
   mSceneLoadMessage.clear();
   mSourcePositions.clear();
@@ -265,6 +271,10 @@ void NativeViewport::setScene(const QString &scenePath,
   mPreviewVertices.squeeze();
   mPendingVertices.clear();
   mPendingVertices.squeeze();
+  mPendingFullResolutionPointChunks.clear();
+  mPendingFullResolutionPointChunks.squeeze();
+  mPendingFullResolutionChunkIndex = 0;
+  mFullResolutionPointClearPending = true;
   mPendingMeshVertices.clear();
   mPendingMeshVertices.squeeze();
   mPendingMeshIndices.clear();
@@ -420,8 +430,35 @@ bool NativeViewport::hasUnsavedSceneEdits() const {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mHasMesh && !mScenePath.isEmpty() && mEditModel.pointCount() > 0;
+  return !mPreviewOnlyScene && !mHasMesh && !mScenePath.isEmpty() &&
+         mEditModel.pointCount() > 0;
 }
+
+namespace {
+bool boundsIntersectView(const QVector3D &minimum, const QVector3D &maximum,
+                         const QMatrix4x4 &viewProjection) {
+  bool outsideLeft = true;
+  bool outsideRight = true;
+  bool outsideBottom = true;
+  bool outsideTop = true;
+  bool outsideNear = true;
+  bool outsideFar = true;
+  for (int corner = 0; corner < 8; ++corner) {
+    const QVector3D point((corner & 1) != 0 ? maximum.x() : minimum.x(),
+                          (corner & 2) != 0 ? maximum.y() : minimum.y(),
+                          (corner & 4) != 0 ? maximum.z() : minimum.z());
+    const QVector4D clip = viewProjection * QVector4D(point, 1.0F);
+    outsideLeft = outsideLeft && clip.x() < -clip.w();
+    outsideRight = outsideRight && clip.x() > clip.w();
+    outsideBottom = outsideBottom && clip.y() < -clip.w();
+    outsideTop = outsideTop && clip.y() > clip.w();
+    outsideNear = outsideNear && clip.z() < -clip.w();
+    outsideFar = outsideFar && clip.z() > clip.w();
+  }
+  return !(outsideLeft || outsideRight || outsideBottom || outsideTop ||
+           outsideNear || outsideFar);
+}
+} // namespace
 
 bool NativeViewport::gaussianRenderingAvailable() const {
   return (mHasGaussianAttributes || mTrainingGpuPreview.attached()) &&
@@ -958,6 +995,7 @@ void NativeViewport::paintGL() {
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
+  uploadPendingFullResolutionPointCloud();
   uploadPendingMesh();
 
   const QMatrix4x4 view = viewMatrix();
@@ -1110,17 +1148,26 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mTarget = mSceneCenter;
             mSceneRadius = data.radius();
             rebuildCameraGeometry();
-            mPreviewPointCount = data.vertices.size();
+            mPreviewPointCount = data.previewPointCount();
             mSourceFaceCount = data.sourceFaceCount;
             mPreviewTriangleCount = data.meshIndices.size() / 3;
             mRenderedMeshIndexCount = data.meshIndices.size();
             mSourcePositions = std::move(data.sourcePositions);
             mPreviewVertices = std::move(data.vertices);
+            mPreviewOnlyScene = data.previewOnly;
+            mPendingFullResolutionPointChunks =
+                std::move(data.fullResolutionPointChunks);
+            mPendingFullResolutionChunkIndex = 0;
+            mFullResolutionPointCount =
+                mPreviewOnlyScene ? mPreviewPointCount : 0;
+            mUploadedFullResolutionPointCount = 0;
+            mFullResolutionPointClearPending = true;
             mPendingMeshVertices = std::move(data.meshVertices);
             mPendingMeshIndices = std::move(data.meshIndices);
             mMeshUploadPending = true;
             mHasMesh = mRenderedMeshIndexCount > 0;
-            mEditModel.reset(mHasMesh ? 0 : mSourcePositions.size());
+            mEditModel.reset(
+                mHasMesh || mPreviewOnlyScene ? 0 : mSourcePositions.size());
             const bool wasAvailable = gaussianRenderingAvailable();
             mHasGaussianAttributes = data.hasGaussianAttributes;
             const bool isAvailable = gaussianRenderingAvailable();
@@ -1277,8 +1324,12 @@ void NativeViewport::rebuildRenderedVertices() {
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
+  const bool fullResolutionUploadPending =
+      mPendingFullResolutionChunkIndex <
+      mPendingFullResolutionPointChunks.size();
   const bool shouldRefreshContinuously =
-      mRenderedPointCount > 0 || mRenderedMeshIndexCount > 0;
+      mRenderedPointCount > 0 || fullResolutionUploadPending ||
+      mRenderedMeshIndexCount > 0;
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
@@ -1306,6 +1357,72 @@ void NativeViewport::uploadPendingPointCloud() {
   mPointBuffer.release();
   mPendingVertices.clear();
   mPointUploadPending = false;
+}
+
+void NativeViewport::releaseFullResolutionPointCloud() {
+  for (const FullResolutionGpuChunk &chunk :
+       std::as_const(mFullResolutionPointGpuChunks)) {
+    if (chunk.buffer != 0) {
+      glDeleteBuffers(1, &chunk.buffer);
+    }
+    if (chunk.vertexArray != 0) {
+      glDeleteVertexArrays(1, &chunk.vertexArray);
+    }
+  }
+  mFullResolutionPointGpuChunks.clear();
+  mUploadedFullResolutionPointCount = 0;
+}
+
+void NativeViewport::uploadPendingFullResolutionPointCloud() {
+  if (mFullResolutionPointClearPending) {
+    releaseFullResolutionPointCloud();
+    mFullResolutionPointClearPending = false;
+  }
+  if (mPendingFullResolutionChunkIndex >=
+          mPendingFullResolutionPointChunks.size() ||
+      mPointProgram == nullptr || !mPointProgram->isLinked()) {
+    if (!mPendingFullResolutionPointChunks.isEmpty() &&
+        mPendingFullResolutionChunkIndex >=
+            mPendingFullResolutionPointChunks.size()) {
+      mPendingFullResolutionPointChunks.clear();
+      mPendingFullResolutionPointChunks.squeeze();
+    }
+    return;
+  }
+
+  PointPreviewChunk &source = mPendingFullResolutionPointChunks[
+      mPendingFullResolutionChunkIndex];
+  if (!source.vertices.isEmpty()) {
+    FullResolutionGpuChunk gpuChunk;
+    gpuChunk.pointCount = static_cast<GLsizei>(source.vertices.size());
+    gpuChunk.boundsMinimum = source.boundsMinimum;
+    gpuChunk.boundsMaximum = source.boundsMaximum;
+    glGenVertexArrays(1, &gpuChunk.vertexArray);
+    glGenBuffers(1, &gpuChunk.buffer);
+    glBindVertexArray(gpuChunk.vertexArray);
+    glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.buffer);
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        source.vertices.size() *
+            static_cast<qsizetype>(sizeof(PointPreviewVertex)),
+        source.vertices.constData(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(PointPreviewVertex), nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(
+        1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
+        reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    mUploadedFullResolutionPointCount += source.vertices.size();
+    mFullResolutionPointGpuChunks.append(gpuChunk);
+  }
+  source.vertices.clear();
+  source.vertices.squeeze();
+  ++mPendingFullResolutionChunkIndex;
+  updateFrameRefreshPolicy();
+  update();
 }
 
 void NativeViewport::uploadPendingMesh() {
@@ -1351,7 +1468,11 @@ void NativeViewport::synchronizeGaussianRenderingAvailability(
 }
 
 void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
-  if (mRenderedPointCount <= 0 || mPointProgram == nullptr ||
+  mInteractionLodActive = false;
+  mProgressiveUploadActive = false;
+  if ((mRenderedPointCount <= 0 &&
+       mFullResolutionPointGpuChunks.isEmpty()) ||
+      mPointProgram == nullptr ||
       !mPointProgram->isLinked()) {
     return;
   }
@@ -1366,8 +1487,59 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
       pointPreviewDiameterPixels(static_cast<float>(devicePixelRatioF())));
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
-    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
+    if (mRenderedPointCount > 0) {
+      glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
+    }
   }
+  QVector<const FullResolutionGpuChunk *> visibleChunks;
+  visibleChunks.reserve(mFullResolutionPointGpuChunks.size());
+  for (const FullResolutionGpuChunk &chunk :
+       std::as_const(mFullResolutionPointGpuChunks)) {
+    if (boundsIntersectView(chunk.boundsMinimum, chunk.boundsMaximum,
+                            viewProjection)) {
+      visibleChunks.append(&chunk);
+    }
+  }
+  const QVector3D eye = cameraPosition();
+  std::sort(visibleChunks.begin(), visibleChunks.end(),
+            [&eye](const FullResolutionGpuChunk *left,
+                   const FullResolutionGpuChunk *right) {
+              const QVector3D leftCenter =
+                  (left->boundsMinimum + left->boundsMaximum) * 0.5F;
+              const QVector3D rightCenter =
+                  (right->boundsMinimum + right->boundsMaximum) * 0.5F;
+              return (leftCenter - eye).lengthSquared() <
+                     (rightCenter - eye).lengthSquared();
+            });
+  const bool interacting =
+      mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
+      (mViewSnapAnimation != nullptr &&
+       mViewSnapAnimation->state() == QAbstractAnimation::Running);
+  const bool progressiveUpload =
+      mPendingFullResolutionChunkIndex <
+      mPendingFullResolutionPointChunks.size();
+  constexpr qsizetype kInteractivePointBudget = 12'000'000;
+  constexpr qsizetype kProgressiveUploadPointBudget = 4'000'000;
+  const qsizetype pointBudget = progressiveUpload
+                                    ? kProgressiveUploadPointBudget
+                                    : kInteractivePointBudget;
+  qsizetype drawnFullResolutionPoints = 0;
+  qsizetype visibleFullResolutionPoints = 0;
+  for (const FullResolutionGpuChunk *chunk : std::as_const(visibleChunks)) {
+    visibleFullResolutionPoints += chunk->pointCount;
+    if ((interacting || progressiveUpload) &&
+        drawnFullResolutionPoints >= pointBudget) {
+      continue;
+    }
+    glBindVertexArray(chunk->vertexArray);
+    glDrawArrays(GL_POINTS, 0, chunk->pointCount);
+    drawnFullResolutionPoints += chunk->pointCount;
+  }
+  mInteractionLodActive =
+      interacting && drawnFullResolutionPoints < visibleFullResolutionPoints;
+  mProgressiveUploadActive =
+      progressiveUpload && drawnFullResolutionPoints < visibleFullResolutionPoints;
+  glBindVertexArray(0);
   mPointProgram->release();
   glDisable(GL_BLEND);
 }
@@ -2060,6 +2232,15 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
   } else if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
+  } else if (mPreviewOnlyScene) {
+    count = QStringLiteral("%1 点 | %2 | GPU 已载 %3 | 只读")
+                .arg(formatCount(mPreviewPointCount),
+                     mProgressiveUploadActive
+                         ? QStringLiteral("渐进加载")
+                         : mInteractionLodActive
+                               ? QStringLiteral("交互 LOD")
+                               : QStringLiteral("完整分辨率"),
+                     formatCount(mUploadedFullResolutionPointCount));
   } else if (mSourceFaceCount > 0 && mPreviewTriangleCount > 0) {
     count = QStringLiteral("%1 顶点 | %2 面 | %3 预览三角形")
                 .arg(formatCount(mGaussianCount),

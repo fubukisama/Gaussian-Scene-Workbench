@@ -25,6 +25,7 @@ class WorkspaceDocumentTests final : public QObject {
 private slots:
   void parsesGaussianPlyHeader();
   void loadsAsciiPointColorsAndSamplesDeterministically();
+  void loadsOversizedBinaryPointCloudAtFullResolution();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
   void loadsBinaryGaussianSphericalHarmonicColors();
@@ -252,6 +253,61 @@ void WorkspaceDocumentTests::
   QCOMPARE(data.vertices.at(1).blue, 1.0F);
   QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, 0.0F));
   QCOMPARE(data.boundsMaximum, QVector3D(3.0F, 0.0F, 0.0F));
+}
+
+void WorkspaceDocumentTests::loadsOversizedBinaryPointCloudAtFullResolution() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("large-cloud.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  ply.write("ply\n"
+            "format binary_little_endian 1.0\n"
+            "element vertex 4\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property float nx\n"
+            "property float ny\n"
+            "property float nz\n"
+            "property uchar red\n"
+            "property uchar green\n"
+            "property uchar blue\n"
+            "property uchar class\n"
+            "end_header\n");
+  for (int index = 0; index < 4; ++index) {
+    writeLittleEndianFloat(ply, static_cast<float>(index));
+    writeLittleEndianFloat(ply, static_cast<float>(index * 2));
+    writeLittleEndianFloat(ply, static_cast<float>(-index));
+    writeLittleEndianFloat(ply, 0.0F);
+    writeLittleEndianFloat(ply, 0.0F);
+    writeLittleEndianFloat(ply, 1.0F);
+    const char attributes[4] = {static_cast<char>(10 + index),
+                                static_cast<char>(20 + index),
+                                static_cast<char>(30 + index),
+                                static_cast<char>(index)};
+    QCOMPARE(ply.write(attributes, sizeof(attributes)),
+             static_cast<qint64>(sizeof(attributes)));
+  }
+  ply.close();
+
+  const gsw::PointCloudData data =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.previewOnly);
+  QCOMPARE(data.sourceVertexCount, 4);
+  QCOMPARE(data.sourcePositions.size(), 0);
+  QCOMPARE(data.vertices.size(), 0);
+  QCOMPARE(data.previewPointCount(), 4);
+  QCOMPARE(data.fullResolutionPointChunks.size(), 1);
+  const gsw::PointPreviewChunk &chunk =
+      data.fullResolutionPointChunks.constFirst();
+  QCOMPARE(chunk.vertices.size(), 4);
+  QCOMPARE(chunk.vertices.at(0).red, static_cast<quint8>(10));
+  QCOMPARE(chunk.vertices.at(3).blue, static_cast<quint8>(33));
+  QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, -3.0F));
+  QCOMPARE(data.boundsMaximum, QVector3D(3.0F, 6.0F, 0.0F));
 }
 
 void WorkspaceDocumentTests::loadsAsciiPolygonMeshAndTriangulates() {

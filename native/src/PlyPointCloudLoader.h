@@ -33,6 +33,25 @@ struct PointPosition {
   [[nodiscard]] QVector3D toVector3D() const { return QVector3D(x, y, z); }
 };
 
+struct PointPreviewVertex {
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+  quint8 red = 184;
+  quint8 green = 191;
+  quint8 blue = 199;
+  quint8 padding = 255;
+};
+
+static_assert(sizeof(PointPreviewVertex) == 16);
+
+struct PointPreviewChunk {
+  QVector<PointPreviewVertex> vertices;
+  QVector3D boundsMinimum;
+  QVector3D boundsMaximum;
+  qint64 sourceFirstVertex = 0;
+};
+
 struct MeshVertex {
   float x = 0.0F;
   float y = 0.0F;
@@ -48,6 +67,7 @@ struct MeshVertex {
 struct PointCloudData {
   QVector<PointCloudVertex> vertices;
   QVector<PointPosition> sourcePositions;
+  QVector<PointPreviewChunk> fullResolutionPointChunks;
   QVector<MeshVertex> meshVertices;
   QVector<quint32> meshIndices;
   QVector3D boundsMinimum;
@@ -57,10 +77,12 @@ struct PointCloudData {
   qint64 sourceTriangleCount = 0;
   bool hasGaussianAttributes = false;
   bool meshPreviewDecimated = false;
+  bool previewOnly = false;
   QString error;
 
   [[nodiscard]] bool isValid() const;
   [[nodiscard]] bool hasMesh() const;
+  [[nodiscard]] qsizetype previewPointCount() const;
   [[nodiscard]] QVector3D center() const;
   [[nodiscard]] float radius() const;
 };
@@ -68,10 +90,12 @@ struct PointCloudData {
 class PlyPointCloudLoader final {
 public:
   static constexpr qsizetype DefaultMaximumPreviewPoints = 1'500'000;
+  static constexpr qint64 DefaultMaximumEditablePoints = 50'000'000;
 
   [[nodiscard]] static PointCloudData load(
       const QString &filePath,
-      qsizetype maximumPreviewPoints = DefaultMaximumPreviewPoints);
+      qsizetype maximumPreviewPoints = DefaultMaximumPreviewPoints,
+      qint64 maximumEditablePoints = DefaultMaximumEditablePoints);
 
   [[nodiscard]] static bool writeFiltered(
       const QString &sourceFilePath, const QString &destinationFilePath,
