@@ -1903,23 +1903,42 @@ void NativeViewport::drawOverlay(QPainter &painter,
                  .arg(formatCount(mEditModel.selectedCount()),
                       formatCount(mEditModel.deletedCount()));
   }
-  const QFontMetrics metrics(font());
+  QFont compactFont = font();
+  if (compactFont.pointSizeF() > 0.0) {
+    compactFont.setPointSizeF(
+        (std::max)(8.0, compactFont.pointSizeF() - 1.0));
+  } else if (compactFont.pixelSize() > 0) {
+    compactFont.setPixelSize((std::max)(11, compactFont.pixelSize() - 1));
+  }
+  painter.setFont(compactFont);
+  const QFontMetrics metrics(compactFont);
   const int lineHeight = metrics.height();
-  const int headerPaddingX = 12;
-  const int headerPaddingY = 8;
-  const int lineGap = 2;
-  const int widthHint = std::max({metrics.horizontalAdvance(project),
-                                  metrics.horizontalAdvance(sceneName),
-                                  metrics.horizontalAdvance(count)}) +
-                        headerPaddingX * 2 + 4;
-  const int headerHeight = headerPaddingY * 2 + lineHeight * 3 + lineGap * 2;
-  const QRect headerRect(12, 12,
-                         std::clamp(widthHint, 180, qMax(180, width() - 24)),
-                         headerHeight);
-  painter.drawRoundedRect(headerRect, 4, 4);
+  const int viewportMargin = 8;
+  const int headerPaddingX = 9;
+  const int headerPaddingY = 5;
+  const int lineGap = 1;
+  const int badgeHeight = (std::max)(22, lineHeight + 6);
+  const QString mode =
+      mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
+  const int modeWidth = metrics.horizontalAdvance(mode) + 18;
+  const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);
+  const int widthHint =
+      (std::max)(metrics.horizontalAdvance(title),
+                 metrics.horizontalAdvance(count)) +
+      headerPaddingX * 2;
+  const int headerHeight =
+      headerPaddingY * 2 + lineHeight * 2 + lineGap;
+  const int headerMaxWidth =
+      qMax(1, width() - modeWidth - viewportMargin * 4);
+  const int headerMinWidth = (std::min)(160, headerMaxWidth);
+  const QRect headerRect(
+      viewportMargin, viewportMargin,
+      std::clamp(widthHint, headerMinWidth, headerMaxWidth), headerHeight);
+  painter.setBrush(QColor(17, 19, 21, 215));
+  painter.drawRoundedRect(headerRect, 5, 5);
 
   painter.setPen(QColor(232, 235, 236));
-  QFont strongFont = font();
+  QFont strongFont = compactFont;
   strongFont.setWeight(QFont::DemiBold);
   painter.setFont(strongFont);
   QRect lineRect(headerRect.left() + headerPaddingX,
@@ -1927,13 +1946,9 @@ void NativeViewport::drawOverlay(QPainter &painter,
                  headerRect.width() - headerPaddingX * 2, lineHeight);
   painter.drawText(
       lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-      metrics.elidedText(project, Qt::ElideMiddle, lineRect.width()));
-  painter.setFont(font());
-  painter.setPen(QColor(174, 181, 185));
-  lineRect.translate(0, lineHeight + lineGap);
-  painter.drawText(
-      lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-      metrics.elidedText(sceneName, Qt::ElideMiddle, lineRect.width()));
+      QFontMetrics(strongFont).elidedText(title, Qt::ElideMiddle,
+                                          lineRect.width()));
+  painter.setFont(compactFont);
   painter.setPen(QColor(102, 193, 168));
   lineRect.translate(0, lineHeight + lineGap);
   painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
@@ -1941,48 +1956,36 @@ void NativeViewport::drawOverlay(QPainter &painter,
 
   const QString renderer =
       mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
-          ? QStringLiteral("原生高斯预览 (DC SH)")
-          : QStringLiteral("原生点预览");
-  const QString metric = QStringLiteral("%1  |  CPU 提交 %2 ms")
-                             .arg(renderer)
-                             .arg(frameMilliseconds, 0, 'f', 2);
-  const int metricWidth = metrics.horizontalAdvance(metric) + 24;
-  const int badgeHeight = std::max(26, lineHeight + 10);
-  const QRect metricRect(12, height() - badgeHeight - 12,
-                         std::min(metricWidth, width() - 24), badgeHeight);
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(17, 19, 21, 225));
-  painter.drawRoundedRect(metricRect, 4, 4);
-  painter.setPen(QColor(165, 172, 176));
-  painter.drawText(
-      metricRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
-      metrics.elidedText(metric, Qt::ElideRight, metricRect.width() - 20));
+          ? QStringLiteral("高斯 DC SH")
+          : QStringLiteral("点预览");
 
   const ReferenceGridScale gridScale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
-  const QString scaleText = QStringLiteral("主网格 %1  |  视距 %2  |  最小刻度 %3")
-                                .arg(formatMetricDistance(gridScale.displayMajorStep),
-                                     formatMetricDistance(mDistance),
-                                     formatMetricDistance(gridScale.minimumStep));
-  const int scaleWidth = metrics.horizontalAdvance(scaleText) + 24;
-  const QRect scaleRect(
-      12, metricRect.top() - badgeHeight - 6,
-      std::min(scaleWidth, width() - 24), badgeHeight);
+  const QString statusText =
+      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  CPU %5 ms")
+          .arg(formatMetricDistance(gridScale.displayMajorStep),
+               formatMetricDistance(mDistance),
+               formatMetricDistance(gridScale.minimumStep), renderer)
+          .arg(frameMilliseconds, 0, 'f', 1);
+  const int statusWidth = metrics.horizontalAdvance(statusText) + 20;
+  const QRect statusRect(
+      viewportMargin, height() - badgeHeight - viewportMargin,
+      (std::min)(statusWidth, qMax(1, width() - viewportMargin * 2)),
+      badgeHeight);
   painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(17, 19, 21, 225));
-  painter.drawRoundedRect(scaleRect, 4, 4);
-  painter.setPen(QColor(190, 198, 202));
+  painter.setBrush(QColor(17, 19, 21, 215));
+  painter.drawRoundedRect(statusRect, 5, 5);
+  painter.setPen(QColor(181, 189, 193));
   painter.drawText(
-      scaleRect.adjusted(10, 0, -10, 0), Qt::AlignVCenter | Qt::AlignLeft,
-      metrics.elidedText(scaleText, Qt::ElideRight, scaleRect.width() - 20));
+      statusRect.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft,
+      metrics.elidedText(statusText, Qt::ElideRight,
+                         statusRect.width() - 16));
 
-  const QString mode =
-      mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
-  const int modeWidth = metrics.horizontalAdvance(mode) + 22;
-  const QRect modeRect(width() - modeWidth - 12, 12, modeWidth, badgeHeight);
+  const QRect modeRect(width() - modeWidth - viewportMargin, viewportMargin,
+                       modeWidth, badgeHeight);
   painter.setPen(Qt::NoPen);
   painter.setBrush(QColor(49, 93, 88, 235));
-  painter.drawRoundedRect(modeRect, 4, 4);
+  painter.drawRoundedRect(modeRect, 5, 5);
   painter.setPen(QColor(238, 246, 244));
   painter.drawText(modeRect, Qt::AlignCenter, mode);
 

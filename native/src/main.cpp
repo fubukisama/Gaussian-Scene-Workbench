@@ -520,7 +520,7 @@ int main(int argc, char *argv[]) {
               QStringLiteral("inspectorDock"));
           const QDockWidget *taskDock = window.findChild<QDockWidget *>(
               QStringLiteral("taskDock"));
-          const QWidget *viewport = window.findChild<QWidget *>(
+          auto *viewport = window.findChild<gsw::NativeViewport *>(
               QStringLiteral("nativeViewport"));
           const QLabel *scaleStatus = window.findChild<QLabel *>(
               QStringLiteral("uiScaleStatus"));
@@ -572,6 +572,15 @@ int main(int argc, char *argv[]) {
                 return true;
               };
 
+          QImage viewportFrame;
+          if (viewport != nullptr) {
+            viewportFrame = viewport->grabFramebuffer();
+            if (!viewportFrame.isNull()) {
+              viewportFrame.save(QDir::temp().filePath(
+                  QStringLiteral("gsw-compact-overlay-smoke.png")));
+            }
+          }
+
           smokeTestCompleted =
               window.isVisible() && autoScale != nullptr &&
               fitWindow != nullptr && resolution != nullptr &&
@@ -591,7 +600,7 @@ int main(int argc, char *argv[]) {
               taskDock->minimumHeight() <=
                   taskDock->titleBarWidget()->height() +
                       gsw::AppTheme::scaled(2, uiScalePercent) &&
-              viewport != nullptr &&
+              viewport != nullptr && !viewportFrame.isNull() &&
               viewport->minimumWidth() == 0 &&
               viewport->minimumHeight() == 0 &&
               taskDock->height() <=
