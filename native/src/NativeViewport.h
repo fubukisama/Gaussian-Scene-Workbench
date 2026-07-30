@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraTrajectory.h"
+#include "FrameRateCounter.h"
 #include "NavigationGizmo.h"
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
@@ -85,7 +86,8 @@ public:
   }
 
 signals:
-  void frameTimeChanged(double milliseconds);
+  void frameMetricsChanged(double cpuMilliseconds, double framesPerSecond,
+                           double averageFrameMilliseconds);
   void sceneLoadStarted(const QString &scenePath);
   void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount);
   void sceneLoadFailed(const QString &scenePath, const QString &message);
@@ -220,8 +222,10 @@ private:
   bool mTrainingGpuPreviewCameraFramed = false;
   QString mTrainingGpuPreviewError;
   QTimer *mTrainingGpuPreviewTimer = nullptr;
+  QTimer *mFrameRefreshTimer = nullptr;
   QVariantAnimation *mViewSnapAnimation = nullptr;
   QElapsedTimer mFrameTimer;
+  FrameRateCounter mFrameRateCounter;
   double mSmoothedFrameMilliseconds = 0.0;
 };
 

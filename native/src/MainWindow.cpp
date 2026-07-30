@@ -1539,6 +1539,7 @@ void MainWindow::createStatusBar() {
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
   mRendererStatus = new QLabel(QStringLiteral("原生点预览 | 未载入场景"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
+  mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
   mEditStatus = new QLabel(QStringLiteral("选择 0 | 删除 0"), this);
   mEditStatus->setObjectName(QStringLiteral("mutedLabel"));
   mScaleStatus = new QLabel(this);
@@ -1979,19 +1980,40 @@ void MainWindow::connectServices() {
           QTimer::singleShot(0, this, &QWidget::close);
         }
       });
-  connect(mViewport, &NativeViewport::frameTimeChanged, this,
-          [this](const double milliseconds) {
-            if (!mWorkspace.scenePath().isEmpty() &&
-                !mViewport->trainingGpuPreviewActive()) {
-              const QString renderer =
-                  mRenderMode == NativeViewport::RenderMode::Gaussians
-                      ? QStringLiteral("高斯预览")
-                      : QStringLiteral("点预览");
-              mRendererStatus->setText(QStringLiteral("%1 | CPU 提交 %2 ms")
-                                           .arg(renderer)
-                                           .arg(milliseconds, 0, 'f', 2));
-            }
-          });
+  connect(
+      mViewport, &NativeViewport::frameMetricsChanged, this,
+      [this](const double cpuMilliseconds, const double framesPerSecond,
+             const double averageFrameMilliseconds) {
+        const bool trainingPreview = mViewport->trainingGpuPreviewActive();
+        QString renderer;
+        if (trainingPreview) {
+          const QString mode =
+              mRendererStatus->property("gpuPreviewMode").toString();
+          const QString detail =
+              mRendererStatus->property("gpuPreviewDetail").toString();
+          renderer = detail.isEmpty()
+                         ? mode
+                         : QStringLiteral("%1 | %2").arg(mode, detail);
+        } else {
+          const QString mode =
+              mRenderMode == NativeViewport::RenderMode::Gaussians
+                  ? QStringLiteral("高斯预览")
+                  : QStringLiteral("点预览");
+          renderer = mWorkspace.scenePath().isEmpty()
+                         ? QStringLiteral("%1 | 未载入场景").arg(mode)
+                         : mode;
+        }
+        const QString frameRate =
+            framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
+                ? QStringLiteral("%1 FPS (%2 ms)")
+                      .arg(framesPerSecond, 0, 'f', 1)
+                      .arg(averageFrameMilliseconds, 0, 'f', 1)
+                : QStringLiteral("FPS —");
+        mRendererStatus->setText(
+            QStringLiteral("%1 | %2 | CPU 提交 %3 ms")
+                .arg(renderer, frameRate)
+                .arg(cpuMilliseconds, 0, 'f', 2));
+      });
   connect(
       mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,
       [this](const bool active, const QString &mode, const QString &detail) {
@@ -2000,6 +2022,7 @@ void MainWindow::connectServices() {
             mRendererStatus->property("gpuPreviewMode").toString() != mode;
         mRendererStatus->setProperty("gpuPreviewActive", active);
         mRendererStatus->setProperty("gpuPreviewMode", mode);
+        mRendererStatus->setProperty("gpuPreviewDetail", detail);
         mRendererStatus->setText(
             detail.isEmpty() ? mode : QStringLiteral("%1 | %2").arg(mode, detail));
         if (active) {

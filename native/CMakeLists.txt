@@ -51,6 +51,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/DurableArtifactStore.h
   src/ExternalBackupStore.cpp
   src/ExternalBackupStore.h
+  src/FrameRateCounter.cpp
+  src/FrameRateCounter.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
@@ -392,6 +394,21 @@ if(BUILD_TESTING)
       target_compile_options(gsw_viewport_camera_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME viewport_camera COMMAND gsw_viewport_camera_tests)
+
+    qt_add_executable(gsw_frame_rate_counter_tests
+      tests/FrameRateCounterTests.cpp
+      src/FrameRateCounter.cpp
+      src/FrameRateCounter.h
+    )
+    target_include_directories(gsw_frame_rate_counter_tests PRIVATE src)
+    target_link_libraries(gsw_frame_rate_counter_tests PRIVATE
+      Qt6::Core
+      Qt6::Test
+    )
+    if(MSVC)
+      target_compile_options(gsw_frame_rate_counter_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME frame_rate_counter COMMAND gsw_frame_rate_counter_tests)
 
     qt_add_executable(gsw_navigation_gizmo_tests
       tests/NavigationGizmoTests.cpp

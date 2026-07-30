@@ -173,6 +173,12 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mTrainingGpuPreviewTimer->setInterval(16);
   connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
+  mFrameRefreshTimer = new QTimer(this);
+  mFrameRefreshTimer->setTimerType(Qt::PreciseTimer);
+  mFrameRefreshTimer->setInterval(16);
+  connect(mFrameRefreshTimer, &QTimer::timeout, this,
+          QOverload<>::of(&NativeViewport::update));
+  mFrameRefreshTimer->start();
 }
 
 NativeViewport::~NativeViewport() {
@@ -792,7 +798,6 @@ void main() {
       emit renderModeChanged(mRenderMode);
     }
   }
-  mFrameTimer.start();
 }
 
 void NativeViewport::resizeGL(const int width, const int height) {
@@ -801,6 +806,13 @@ void NativeViewport::resizeGL(const int width, const int height) {
 }
 
 void NativeViewport::paintGL() {
+  if (mFrameTimer.isValid()) {
+    mFrameRateCounter.addFrameIntervalMilliseconds(
+        static_cast<double>(mFrameTimer.nsecsElapsed()) / 1000000.0);
+    mFrameTimer.restart();
+  } else {
+    mFrameTimer.start();
+  }
   QElapsedTimer paintTimer;
   paintTimer.start();
   applyPendingTrainingGpuPreview();
@@ -877,7 +889,9 @@ void NativeViewport::paintGL() {
   drawOverlay(painter, mSmoothedFrameMilliseconds);
   drawAxisGizmo(painter);
   painter.end();
-  emit frameTimeChanged(mSmoothedFrameMilliseconds);
+  emit frameMetricsChanged(mSmoothedFrameMilliseconds,
+                           mFrameRateCounter.framesPerSecond(),
+                           mFrameRateCounter.averageFrameMilliseconds());
 }
 
 void NativeViewport::applyPendingTrainingGpuPreview() {
@@ -1963,11 +1977,21 @@ void NativeViewport::drawOverlay(QPainter &painter,
 
   const ReferenceGridScale gridScale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const double framesPerSecond = mFrameRateCounter.framesPerSecond();
+  const double averageFrameMilliseconds =
+      mFrameRateCounter.averageFrameMilliseconds();
+  const QString frameRateText =
+      framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
+          ? QStringLiteral("%1 FPS (%2 ms)")
+                .arg(framesPerSecond, 0, 'f', 1)
+                .arg(averageFrameMilliseconds, 0, 'f', 1)
+          : QStringLiteral("FPS —");
   const QString statusText =
-      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  CPU %5 ms")
+      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  %5  ·  CPU %6 ms")
           .arg(formatMetricDistance(gridScale.displayMajorStep),
                formatMetricDistance(mDistance),
-               formatMetricDistance(gridScale.minimumStep), renderer)
+               formatMetricDistance(gridScale.minimumStep), renderer,
+               frameRateText)
           .arg(frameMilliseconds, 0, 'f', 1);
   const int statusWidth = metrics.horizontalAdvance(statusText) + 20;
   const QRect statusRect(

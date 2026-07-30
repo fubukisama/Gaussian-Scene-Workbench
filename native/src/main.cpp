@@ -524,6 +524,14 @@ int main(int argc, char *argv[]) {
               QStringLiteral("nativeViewport"));
           const QLabel *scaleStatus = window.findChild<QLabel *>(
               QStringLiteral("uiScaleStatus"));
+          const QLabel *rendererStatus = nullptr;
+          for (const QLabel *label : window.findChildren<QLabel *>()) {
+            if (label->property("gswStatusRole").toString() ==
+                QStringLiteral("renderer")) {
+              rendererStatus = label;
+              break;
+            }
+          }
           const int uiScalePercent =
               application.property("gswUiScalePercent").toInt();
           const auto hasCompactDockTitle =
@@ -605,6 +613,9 @@ int main(int argc, char *argv[]) {
               viewport->minimumHeight() == 0 &&
               taskDock->height() <=
                   gsw::AppTheme::scaled(140, uiScalePercent) &&
+              rendererStatus != nullptr &&
+              rendererStatus->text().contains(QStringLiteral("FPS")) &&
+              rendererStatus->text().contains(QStringLiteral("ms")) &&
               scaleStatus != nullptr && scaleStatus->text().contains('%') &&
               scaleStatus->text().contains(QChar(0x00D7));
           application.exit(smokeTestCompleted ? 0 : 2);
