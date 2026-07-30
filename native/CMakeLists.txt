@@ -140,6 +140,26 @@ if(BUILD_TESTING)
     COMMAND GaussianSceneWorkbench --smoke-test
   )
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-import.jpg" "smoke")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
+    "ply\n"
+    "format ascii 1.0\n"
+    "element vertex 8\n"
+    "property float x\n"
+    "property float y\n"
+    "property float z\n"
+    "property uchar red\n"
+    "property uchar green\n"
+    "property uchar blue\n"
+    "end_header\n"
+    "-100 -100 -50 180 180 180\n"
+    "100 -100 -50 180 180 180\n"
+    "-100 100 -50 180 180 180\n"
+    "100 100 -50 180 180 180\n"
+    "-100 -100 50 180 180 180\n"
+    "100 -100 50 180 180 180\n"
+    "-100 100 50 180 180 180\n"
+    "100 100 50 180 180 180\n"
+  )
   add_test(
     NAME native_metashape_import_entry
     COMMAND GaussianSceneWorkbench
@@ -158,12 +178,19 @@ if(BUILD_TESTING)
     NAME native_infinite_reference_grid
     COMMAND GaussianSceneWorkbench --smoke-test-infinite-grid
   )
+  add_test(
+    NAME native_reference_axes_with_scene
+    COMMAND GaussianSceneWorkbench
+      --smoke-test-reference-axes
+      --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
+  )
   set_tests_properties(
     native_application_launch
     native_metashape_import_entry
     native_adaptive_display_layout
     native_exit_confirmation
     native_infinite_reference_grid
+    native_reference_axes_with_scene
     PROPERTIES
     TIMEOUT 15
     ENVIRONMENT

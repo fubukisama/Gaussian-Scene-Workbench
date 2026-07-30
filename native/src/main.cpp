@@ -142,6 +142,15 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-infinite-grid"),
       QStringLiteral("Verify the adaptive all-axis infinite reference grid."));
   parser.addOption(infiniteGridSmokeTestOption);
+  QCommandLineOption referenceAxesSmokeTestOption(
+      QStringLiteral("smoke-test-reference-axes"),
+      QStringLiteral("Verify reference axes remain visible after scene load."));
+  parser.addOption(referenceAxesSmokeTestOption);
+  QCommandLineOption smokeSceneOption(
+      QStringLiteral("smoke-scene"),
+      QStringLiteral("Scene PLY used by viewport smoke tests."),
+      QStringLiteral("file"));
+  parser.addOption(smokeSceneOption);
   QCommandLineOption gpuPreviewInteropProbeOption(
       QStringLiteral("probe-gpu-preview-interop"),
       QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
@@ -166,12 +175,14 @@ int main(int argc, char *argv[]) {
       parser.isSet(exitConfirmationSmokeTestOption);
   const bool infiniteGridSmokeTest =
       parser.isSet(infiniteGridSmokeTestOption);
+  const bool referenceAxesSmokeTest =
+      parser.isSet(referenceAxesSmokeTestOption);
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
                          exitConfirmationSmokeTest || infiniteGridSmokeTest ||
-                         gpuPreviewInteropProbe;
+                         referenceAxesSmokeTest || gpuPreviewInteropProbe;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
   }
@@ -207,6 +218,72 @@ int main(int argc, char *argv[]) {
           smokeTestFailureCode = capability.available ? 0 : 3;
           application.exit(smokeTestFailureCode);
         });
+  } else if (referenceAxesSmokeTest) {
+    auto *viewport =
+        qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+    const QString smokeScenePath =
+        QFileInfo(parser.value(smokeSceneOption)).absoluteFilePath();
+    if (viewport != nullptr && QFileInfo::exists(smokeScenePath)) {
+      QObject::connect(
+          viewport, &gsw::NativeViewport::sceneLoaded, &application,
+          [&application, viewport, &smokeTestCompleted,
+           &smokeTestFailureCode](const qint64 sourceVertexCount,
+                                 const qsizetype) {
+            QTimer::singleShot(
+                300, &application,
+                [&application, viewport, sourceVertexCount,
+                 &smokeTestCompleted, &smokeTestFailureCode]() {
+                  const QImage frame = viewport->grabFramebuffer();
+                  const QRect sampleRect(
+                      qRound(frame.width() * 0.25),
+                      qRound(frame.height() * 0.10),
+                      qRound(frame.width() * 0.50),
+                      qRound(frame.height() * 0.70));
+                  int greenAxisPixels = 0;
+                  for (int y = sampleRect.top(); y <= sampleRect.bottom(); ++y) {
+                    for (int x = sampleRect.left(); x <= sampleRect.right();
+                         ++x) {
+                      const QColor pixel = frame.pixelColor(x, y);
+                      if (pixel.green() > 70 &&
+                          pixel.green() - pixel.red() > 20 &&
+                          pixel.green() - pixel.blue() > 10) {
+                        ++greenAxisPixels;
+                      }
+                    }
+                  }
+                  smokeTestCompleted = sourceVertexCount > 0 &&
+                                       greenAxisPixels >= 30;
+                  smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
+                  if (!frame.isNull()) {
+                    frame.save(QDir::temp().filePath(QStringLiteral(
+                        "gsw-reference-axes-smoke.png")));
+                  }
+                  qInfo() << "Reference-axes smoke:" << "vertices"
+                          << sourceVertexCount << "green-pixels"
+                          << greenAxisPixels << "required" << 30;
+                  application.exit(smokeTestFailureCode);
+                });
+          });
+      QObject::connect(
+          viewport, &gsw::NativeViewport::sceneLoadFailed, &application,
+          [&application, &smokeTestFailureCode](const QString &,
+                                                const QString &) {
+            smokeTestFailureCode = 4;
+            application.exit(smokeTestFailureCode);
+          });
+      viewport->setScene(smokeScenePath, 8);
+      QTimer::singleShot(8000, &application,
+                         [&application, &smokeTestFailureCode]() {
+                           smokeTestFailureCode = 6;
+                           application.exit(smokeTestFailureCode);
+                         });
+    } else {
+      smokeTestFailureCode = 3;
+      QTimer::singleShot(0, &application,
+                         [&application, &smokeTestFailureCode]() {
+                           application.exit(smokeTestFailureCode);
+                         });
+    }
   } else if (infiniteGridSmokeTest) {
     QTimer::singleShot(
         450, &application, [&window]() {

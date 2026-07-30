@@ -863,9 +863,7 @@ void NativeViewport::paintGL() {
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
-  if (mPreviewPointCount == 0 && !mTrainingGpuPreview.hasFrame()) {
-    drawReferenceAxes(painter, viewProjection);
-  }
+  drawReferenceAxes(painter, viewProjection);
   drawCameraTrajectory(painter, viewProjection);
   drawSelectionGesture(painter);
 
@@ -1745,10 +1743,14 @@ NativeViewport::projectPoint(const QVector3D &point,
 
 void NativeViewport::drawReferenceAxes(QPainter &painter,
                                        const QMatrix4x4 &viewProjection) {
+  const float axisLength = std::max(3.0F, mSceneRadius);
   const auto origin = projectPoint(QVector3D(0.0F, 0.0F, 0.0F), viewProjection);
-  const auto xAxis = projectPoint(QVector3D(3.0F, 0.0F, 0.0F), viewProjection);
-  const auto yAxis = projectPoint(QVector3D(0.0F, 3.0F, 0.0F), viewProjection);
-  const auto zAxis = projectPoint(QVector3D(0.0F, 0.0F, 3.0F), viewProjection);
+  const auto xAxis =
+      projectPoint(QVector3D(axisLength, 0.0F, 0.0F), viewProjection);
+  const auto yAxis =
+      projectPoint(QVector3D(0.0F, axisLength, 0.0F), viewProjection);
+  const auto zAxis =
+      projectPoint(QVector3D(0.0F, 0.0F, axisLength), viewProjection);
   if (origin.has_value() && xAxis.has_value()) {
     painter.setPen(QPen(QColor(214, 91, 91), 2.0));
     painter.drawLine(*origin, *xAxis);
