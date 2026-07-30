@@ -1982,8 +1982,8 @@ void MainWindow::connectServices() {
       });
   connect(
       mViewport, &NativeViewport::frameMetricsChanged, this,
-      [this](const double cpuMilliseconds, const double framesPerSecond,
-             const double averageFrameMilliseconds) {
+      [this](const double framesPerSecond,
+             const double averageRenderMilliseconds) {
         const bool trainingPreview = mViewport->trainingGpuPreviewActive();
         QString renderer;
         if (trainingPreview) {
@@ -2004,15 +2004,13 @@ void MainWindow::connectServices() {
                          : mode;
         }
         const QString frameRate =
-            framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
+            framesPerSecond > 0.0 && averageRenderMilliseconds > 0.0
                 ? QStringLiteral("%1 FPS (%2 ms)")
                       .arg(framesPerSecond, 0, 'f', 1)
-                      .arg(averageFrameMilliseconds, 0, 'f', 1)
+                      .arg(averageRenderMilliseconds, 0, 'f', 1)
                 : QStringLiteral("FPS —");
-        mRendererStatus->setText(
-            QStringLiteral("%1 | %2 | CPU 提交 %3 ms")
-                .arg(renderer, frameRate)
-                .arg(cpuMilliseconds, 0, 'f', 2));
+        mRendererStatus->setText(QStringLiteral("%1 | %2")
+                                     .arg(renderer, frameRate));
       });
   connect(
       mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,

@@ -13,13 +13,14 @@ private slots:
   void averagesWarmupFramesWithoutZeroPadding();
   void keepsOnlyTheLatestSixtyFrames();
   void ignoresInvalidFrameIntervals();
+  void reportsRenderThroughputAboveDisplayRefreshRate();
 };
 
 void FrameRateCounterTests::averagesWarmupFramesWithoutZeroPadding() {
   FrameRateCounter counter;
 
-  counter.addFrameIntervalMilliseconds(10.0);
-  counter.addFrameIntervalMilliseconds(20.0);
+  counter.addRenderDurationMilliseconds(10.0);
+  counter.addRenderDurationMilliseconds(20.0);
 
   QCOMPARE(counter.sampleCount(), std::size_t(2));
   QCOMPARE(counter.averageFrameMilliseconds(), 15.0);
@@ -30,9 +31,9 @@ void FrameRateCounterTests::keepsOnlyTheLatestSixtyFrames() {
   FrameRateCounter counter;
   for (std::size_t index = 0; index < FrameRateCounter::kSmoothingWindow;
        ++index) {
-    counter.addFrameIntervalMilliseconds(10.0);
+    counter.addRenderDurationMilliseconds(10.0);
   }
-  counter.addFrameIntervalMilliseconds(20.0);
+  counter.addRenderDurationMilliseconds(20.0);
 
   QCOMPARE(counter.sampleCount(), FrameRateCounter::kSmoothingWindow);
   QCOMPARE(counter.averageFrameMilliseconds(), 610.0 / 60.0);
@@ -42,16 +43,27 @@ void FrameRateCounterTests::keepsOnlyTheLatestSixtyFrames() {
 void FrameRateCounterTests::ignoresInvalidFrameIntervals() {
   FrameRateCounter counter;
 
-  counter.addFrameIntervalMilliseconds(0.0);
-  counter.addFrameIntervalMilliseconds(-1.0);
-  counter.addFrameIntervalMilliseconds(
+  counter.addRenderDurationMilliseconds(0.0);
+  counter.addRenderDurationMilliseconds(-1.0);
+  counter.addRenderDurationMilliseconds(
       std::numeric_limits<double>::quiet_NaN());
-  counter.addFrameIntervalMilliseconds(
+  counter.addRenderDurationMilliseconds(
       std::numeric_limits<double>::infinity());
 
   QCOMPARE(counter.sampleCount(), std::size_t(0));
   QCOMPARE(counter.averageFrameMilliseconds(), 0.0);
   QCOMPARE(counter.framesPerSecond(), 0.0);
+}
+
+void FrameRateCounterTests::reportsRenderThroughputAboveDisplayRefreshRate() {
+  FrameRateCounter counter;
+  for (std::size_t index = 0; index < FrameRateCounter::kSmoothingWindow;
+       ++index) {
+    counter.addRenderDurationMilliseconds(2.0);
+  }
+
+  QCOMPARE(counter.averageFrameMilliseconds(), 2.0);
+  QCOMPARE(counter.framesPerSecond(), 500.0);
 }
 
 QTEST_GUILESS_MAIN(FrameRateCounterTests)

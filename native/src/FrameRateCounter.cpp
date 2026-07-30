@@ -4,19 +4,19 @@
 
 namespace gsw {
 
-void FrameRateCounter::addFrameIntervalMilliseconds(
+void FrameRateCounter::addRenderDurationMilliseconds(
     const double milliseconds) {
   if (!std::isfinite(milliseconds) || milliseconds <= 0.0) {
     return;
   }
 
   if (mSampleCount == kSmoothingWindow) {
-    mFrameIntervalSum -= mFrameIntervals[mNextSample];
+    mRenderDurationSum -= mRenderDurations[mNextSample];
   } else {
     ++mSampleCount;
   }
-  mFrameIntervals[mNextSample] = milliseconds;
-  mFrameIntervalSum += milliseconds;
+  mRenderDurations[mNextSample] = milliseconds;
+  mRenderDurationSum += milliseconds;
   mNextSample = (mNextSample + 1) % kSmoothingWindow;
 }
 
@@ -24,7 +24,7 @@ std::size_t FrameRateCounter::sampleCount() const { return mSampleCount; }
 
 double FrameRateCounter::averageFrameMilliseconds() const {
   return mSampleCount > 0
-             ? mFrameIntervalSum / static_cast<double>(mSampleCount)
+             ? mRenderDurationSum / static_cast<double>(mSampleCount)
              : 0.0;
 }
 

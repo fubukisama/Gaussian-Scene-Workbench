@@ -76,7 +76,9 @@ int main(int argc, char *argv[]) {
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setSamples(4);
-  format.setSwapInterval(1);
+  // Match SIBR's unlocked mode. Frame pacing is controlled by the viewport,
+  // while the FPS meter reports completed render work like the HTML viewer.
+  format.setSwapInterval(0);
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);

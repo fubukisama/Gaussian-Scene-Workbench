@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QEasingCurve>
 #include <QEnterEvent>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -170,15 +171,14 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   });
   mTrainingGpuPreviewTimer = new QTimer(this);
   mTrainingGpuPreviewTimer->setTimerType(Qt::PreciseTimer);
-  mTrainingGpuPreviewTimer->setInterval(16);
+  mTrainingGpuPreviewTimer->setInterval(0);
   connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
   mFrameRefreshTimer = new QTimer(this);
   mFrameRefreshTimer->setTimerType(Qt::PreciseTimer);
-  mFrameRefreshTimer->setInterval(16);
+  mFrameRefreshTimer->setInterval(0);
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
-  mFrameRefreshTimer->start();
 }
 
 NativeViewport::~NativeViewport() {
@@ -237,6 +237,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mScenePath = scenePath;
   mPreviewPointCount = 0;
   mRenderedPointCount = 0;
+  updateFrameRefreshPolicy();
   const bool availabilityChanged = gaussianRenderingAvailable();
   const bool renderModeChangedToPoints = mRenderMode != RenderMode::Points;
   mHasGaussianAttributes = false;
@@ -806,13 +807,6 @@ void NativeViewport::resizeGL(const int width, const int height) {
 }
 
 void NativeViewport::paintGL() {
-  if (mFrameTimer.isValid()) {
-    mFrameRateCounter.addFrameIntervalMilliseconds(
-        static_cast<double>(mFrameTimer.nsecsElapsed()) / 1000000.0);
-    mFrameTimer.restart();
-  } else {
-    mFrameTimer.start();
-  }
   QElapsedTimer paintTimer;
   paintTimer.start();
   applyPendingTrainingGpuPreview();
@@ -879,18 +873,12 @@ void NativeViewport::paintGL() {
   drawCameraTrajectory(painter, viewProjection);
   drawSelectionGesture(painter);
 
-  const double frameMilliseconds = paintTimer.nsecsElapsed() / 1000000.0;
-  if (mSmoothedFrameMilliseconds <= 0.0) {
-    mSmoothedFrameMilliseconds = frameMilliseconds;
-  } else {
-    mSmoothedFrameMilliseconds =
-        mSmoothedFrameMilliseconds * 0.88 + frameMilliseconds * 0.12;
-  }
-  drawOverlay(painter, mSmoothedFrameMilliseconds);
+  drawOverlay(painter);
   drawAxisGizmo(painter);
   painter.end();
-  emit frameMetricsChanged(mSmoothedFrameMilliseconds,
-                           mFrameRateCounter.framesPerSecond(),
+  mFrameRateCounter.addRenderDurationMilliseconds(
+      static_cast<double>(paintTimer.nsecsElapsed()) / 1000000.0);
+  emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
                            mFrameRateCounter.averageFrameMilliseconds());
 }
 
@@ -1168,6 +1156,16 @@ void NativeViewport::rebuildRenderedVertices() {
   }
   mRenderedPointCount = mPendingVertices.size();
   mPointUploadPending = true;
+  updateFrameRefreshPolicy();
+}
+
+void NativeViewport::updateFrameRefreshPolicy() {
+  const bool shouldRefreshContinuously = mRenderedPointCount > 0;
+  if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
+    mFrameRefreshTimer->start();
+  } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
+    mFrameRefreshTimer->stop();
+  }
 }
 
 void NativeViewport::notifyEditState() {
@@ -1866,8 +1864,7 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
   painter.restore();
 }
 
-void NativeViewport::drawOverlay(QPainter &painter,
-                                 const double frameMilliseconds) {
+void NativeViewport::drawOverlay(QPainter &painter) {
   painter.save();
   painter.setPen(Qt::NoPen);
   painter.setBrush(QColor(17, 19, 21, 225));
@@ -1987,12 +1984,11 @@ void NativeViewport::drawOverlay(QPainter &painter,
                 .arg(averageFrameMilliseconds, 0, 'f', 1)
           : QStringLiteral("FPS —");
   const QString statusText =
-      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  %5  ·  CPU %6 ms")
+      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  %5")
           .arg(formatMetricDistance(gridScale.displayMajorStep),
                formatMetricDistance(mDistance),
                formatMetricDistance(gridScale.minimumStep), renderer,
-               frameRateText)
-          .arg(frameMilliseconds, 0, 'f', 1);
+               frameRateText);
   const int statusWidth = metrics.horizontalAdvance(statusText) + 20;
   const QRect statusRect(
       viewportMargin, height() - badgeHeight - viewportMargin,

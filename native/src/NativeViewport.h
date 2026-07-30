@@ -8,7 +8,6 @@
 #include "ScreenSpaceSelection.h"
 #include "TrainingGpuPreviewBuffer.h"
 
-#include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLExtraFunctions>
@@ -86,8 +85,8 @@ public:
   }
 
 signals:
-  void frameMetricsChanged(double cpuMilliseconds, double framesPerSecond,
-                           double averageFrameMilliseconds);
+  void frameMetricsChanged(double framesPerSecond,
+                           double averageRenderMilliseconds);
   void sceneLoadStarted(const QString &scenePath);
   void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount);
   void sceneLoadFailed(const QString &scenePath, const QString &message);
@@ -137,6 +136,7 @@ private:
                       SelectionOperation operation);
   void finishSelectionGesture(Qt::KeyboardModifiers modifiers);
   void rebuildRenderedVertices();
+  void updateFrameRefreshPolicy();
   void notifyEditState();
   void uploadPendingPointCloud();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
@@ -149,7 +149,7 @@ private:
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
-  void drawOverlay(QPainter &painter, double frameMilliseconds);
+  void drawOverlay(QPainter &painter);
   void drawAxisGizmo(QPainter &painter);
   [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
   void updateNavigationGizmoHover(const QPointF &position);
@@ -224,9 +224,7 @@ private:
   QTimer *mTrainingGpuPreviewTimer = nullptr;
   QTimer *mFrameRefreshTimer = nullptr;
   QVariantAnimation *mViewSnapAnimation = nullptr;
-  QElapsedTimer mFrameTimer;
   FrameRateCounter mFrameRateCounter;
-  double mSmoothedFrameMilliseconds = 0.0;
 };
 
 } // namespace gsw
