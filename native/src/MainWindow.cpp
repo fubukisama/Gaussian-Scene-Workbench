@@ -901,9 +901,10 @@ void MainWindow::createActions() {
 
   mImportSceneAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QStringLiteral("导入高斯场景"), this);
+                  QStringLiteral("导入 PLY 场景/网格"), this);
   mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
-  mImportSceneAction->setToolTip(QStringLiteral("导入 PLY 高斯场景"));
+  mImportSceneAction->setToolTip(
+      QStringLiteral("导入 PLY 点云、高斯场景或三角网格"));
   connect(mImportSceneAction, &QAction::triggered, this,
           &MainWindow::importScene);
 
@@ -994,6 +995,17 @@ void MainWindow::createActions() {
   mRenderModeActionGroup->addAction(mGaussianRenderAction);
   connect(mGaussianRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+  });
+
+  mMeshRenderAction = new QAction(QStringLiteral("网格"), this);
+  mMeshRenderAction->setObjectName(QStringLiteral("meshRenderAction"));
+  mMeshRenderAction->setCheckable(true);
+  mMeshRenderAction->setEnabled(false);
+  mMeshRenderAction->setToolTip(
+      QStringLiteral("显示 PLY 面拓扑三角化后的着色网格"));
+  mRenderModeActionGroup->addAction(mMeshRenderAction);
+  connect(mMeshRenderAction, &QAction::triggered, this, [this]() {
+    mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
   });
 
   mPointRenderAction = new QAction(QStringLiteral("点云"), this);
@@ -1216,6 +1228,7 @@ void MainWindow::createMenus() {
   QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
   QMenu *renderMenu = viewMenu->addMenu(QStringLiteral("渲染模式"));
   renderMenu->addAction(mGaussianRenderAction);
+  renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
   viewMenu->addAction(mShowCamerasAction);
   viewMenu->addSeparator();
@@ -1315,6 +1328,7 @@ void MainWindow::createToolBars() {
   mRenderToolbar->setMovable(false);
   mRenderToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mRenderToolbar->addAction(mGaussianRenderAction);
+  mRenderToolbar->addAction(mMeshRenderAction);
   mRenderToolbar->addAction(mPointRenderAction);
   mRenderToolbar->addSeparator();
   mRenderToolbar->addAction(mShowCamerasAction);
@@ -1997,9 +2011,11 @@ void MainWindow::connectServices() {
                          : QStringLiteral("%1 | %2").arg(mode, detail);
         } else {
           const QString mode =
-              mRenderMode == NativeViewport::RenderMode::Gaussians
-                  ? QStringLiteral("高斯预览")
-                  : QStringLiteral("点预览");
+              mRenderMode == NativeViewport::RenderMode::Mesh
+                  ? QStringLiteral("网格预览")
+                  : mRenderMode == NativeViewport::RenderMode::Gaussians
+                        ? QStringLiteral("高斯预览")
+                        : QStringLiteral("点预览");
           renderer = mWorkspace.scenePath().isEmpty()
                          ? QStringLiteral("%1 | 未载入场景").arg(mode)
                          : mode;
@@ -2043,29 +2059,45 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this,
           [this](const QString &scenePath) {
-            mRendererStatus->setText(QStringLiteral("正在读取点云"));
+            mRendererStatus->setText(QStringLiteral("正在读取 PLY 场景"));
             appendTaskEvent(QStringLiteral("读取场景：%1")
                                 .arg(QDir::toNativeSeparators(scenePath)));
           });
   connect(mViewport, &NativeViewport::sceneLoaded, this,
           [this](const qint64 sourceVertexCount,
-                 const qsizetype previewVertexCount) {
+                 const qsizetype previewVertexCount,
+                 const qint64 sourceFaceCount,
+                 const qsizetype previewTriangleCount) {
             const QString renderer =
-                mRenderMode == NativeViewport::RenderMode::Gaussians
-                    ? QStringLiteral("高斯预览")
-                    : QStringLiteral("点预览");
+                mRenderMode == NativeViewport::RenderMode::Mesh
+                    ? QStringLiteral("网格预览")
+                    : mRenderMode == NativeViewport::RenderMode::Gaussians
+                          ? QStringLiteral("高斯预览")
+                          : QStringLiteral("点预览");
+            const qsizetype previewPrimitiveCount =
+                sourceFaceCount > 0 ? previewTriangleCount
+                                    : previewVertexCount;
             mRendererStatus->setText(QStringLiteral("%1 | %2 个预览图元")
                                          .arg(renderer)
-                                         .arg(previewVertexCount));
-            appendTaskEvent(
-                QStringLiteral(
-                    "场景已载入 GPU 预览：源数据 %1 个图元，显示 %2 个图元。")
-                    .arg(sourceVertexCount)
-                    .arg(previewVertexCount));
+                                         .arg(previewPrimitiveCount));
+            if (sourceFaceCount > 0) {
+              appendTaskEvent(
+                  QStringLiteral(
+                      "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。")
+                      .arg(sourceVertexCount)
+                      .arg(sourceFaceCount)
+                      .arg(previewTriangleCount));
+            } else {
+              appendTaskEvent(
+                  QStringLiteral(
+                      "场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。")
+                      .arg(sourceVertexCount)
+                      .arg(previewVertexCount));
+            }
           });
   connect(mViewport, &NativeViewport::sceneLoadFailed, this,
           [this](const QString &, const QString &message) {
-            mRendererStatus->setText(QStringLiteral("点云读取失败"));
+            mRendererStatus->setText(QStringLiteral("PLY 场景读取失败"));
             appendTaskEvent(QStringLiteral("场景读取失败：%1").arg(message));
           });
   connect(
@@ -2145,11 +2177,20 @@ void MainWindow::connectServices() {
               mPointRenderAction->setChecked(true);
             }
           });
+  connect(mViewport, &NativeViewport::meshRenderingAvailabilityChanged, this,
+          [this](const bool available) {
+            mMeshRenderAction->setEnabled(available);
+            if (!available && mMeshRenderAction->isChecked()) {
+              mPointRenderAction->setChecked(true);
+            }
+          });
   connect(mViewport, &NativeViewport::renderModeChanged, this,
           [this](const NativeViewport::RenderMode mode) {
             mRenderMode = mode;
             mGaussianRenderAction->setChecked(
                 mode == NativeViewport::RenderMode::Gaussians);
+            mMeshRenderAction->setChecked(
+                mode == NativeViewport::RenderMode::Mesh);
             mPointRenderAction->setChecked(mode ==
                                            NativeViewport::RenderMode::Points);
           });
@@ -3822,15 +3863,15 @@ void MainWindow::importScene() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!ensureProjectForDataAction(QStringLiteral("导入高斯场景"))) {
+  if (!ensureProjectForDataAction(QStringLiteral("导入 PLY 场景/网格"))) {
     return;
   }
   if (!confirmDiscardSceneEdits()) {
     return;
   }
   const QString filePath = QFileDialog::getOpenFileName(
-      this, QStringLiteral("导入高斯场景"), mWorkspace.rootPath(),
-      QStringLiteral("PLY Scene (*.ply);;All files (*.*)"));
+      this, QStringLiteral("导入 PLY 场景/网格"), mWorkspace.rootPath(),
+      QStringLiteral("PLY 场景与网格 (*.ply);;所有文件 (*.*)"));
   if (filePath.isEmpty()) {
     return;
   }
@@ -3840,11 +3881,18 @@ void MainWindow::importScene() {
     return;
   }
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
-  appendTaskEvent(QStringLiteral("已读取场景元数据：%1 个顶点，%2")
+  const QString sceneType =
+      metadata.looksLikeGaussianSplat()
+          ? QStringLiteral("Gaussian Splat")
+          : metadata.looksLikeMesh() ? QStringLiteral("PLY 三角网格")
+                                     : QStringLiteral("PLY 点云");
+  const QString faceDetail =
+      metadata.looksLikeMesh()
+          ? QStringLiteral("，%1 个面").arg(metadata.faceCount)
+          : QString();
+  appendTaskEvent(QStringLiteral("已读取场景元数据：%1 个顶点%2，%3")
                       .arg(metadata.vertexCount)
-                      .arg(metadata.looksLikeGaussianSplat()
-                               ? QStringLiteral("Gaussian Splat")
-                               : QStringLiteral("PLY")));
+                      .arg(faceDetail, sceneType));
 }
 
 void MainWindow::clearDatasetImport() {
@@ -4474,14 +4522,21 @@ void MainWindow::updateInspector() {
   mSceneValue->setText(compactPath(mWorkspace.scenePath()));
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   mGaussianCountValue->setText(
-      metadata.valid ? QStringLiteral("%1").arg(metadata.vertexCount)
-                     : QStringLiteral("-"));
+      metadata.valid
+          ? metadata.looksLikeMesh()
+                ? QStringLiteral("%1 顶点 | %2 面")
+                      .arg(metadata.vertexCount)
+                      .arg(metadata.faceCount)
+                : QStringLiteral("%1").arg(metadata.vertexCount)
+          : QStringLiteral("-"));
   mPlyFormatValue->setText(metadata.valid
                                ? QStringLiteral("%1 | %2 | %3")
                                      .arg(metadata.format,
                                           metadata.looksLikeGaussianSplat()
                                               ? QStringLiteral("Gaussian Splat")
-                                              : QStringLiteral("PLY"),
+                                              : metadata.looksLikeMesh()
+                                                    ? QStringLiteral("PLY 网格")
+                                                    : QStringLiteral("PLY 点云"),
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
   if (mCameraCount > 0) {

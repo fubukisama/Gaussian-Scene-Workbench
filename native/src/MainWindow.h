@@ -198,6 +198,7 @@ private:
   QAction *mTrainAction = nullptr;
   QAction *mStopAction = nullptr;
   QAction *mGaussianRenderAction = nullptr;
+  QAction *mMeshRenderAction = nullptr;
   QAction *mPointRenderAction = nullptr;
   QAction *mShowCamerasAction = nullptr;
   QAction *mInspectAction = nullptr;

@@ -152,6 +152,8 @@ if(BUILD_TESTING)
     "property uchar red\n"
     "property uchar green\n"
     "property uchar blue\n"
+    "element face 12\n"
+    "property list uchar int vertex_indices\n"
     "end_header\n"
     "-100 -100 -50 180 180 180\n"
     "100 -100 -50 180 180 180\n"
@@ -161,6 +163,18 @@ if(BUILD_TESTING)
     "100 -100 50 180 180 180\n"
     "-100 100 50 180 180 180\n"
     "100 100 50 180 180 180\n"
+    "3 0 2 1\n"
+    "3 1 2 3\n"
+    "3 4 5 6\n"
+    "3 5 7 6\n"
+    "3 0 1 4\n"
+    "3 1 5 4\n"
+    "3 2 6 3\n"
+    "3 3 6 7\n"
+    "3 0 4 2\n"
+    "3 2 4 6\n"
+    "3 1 3 5\n"
+    "3 3 7 5\n"
   )
   add_test(
     NAME native_metashape_import_entry

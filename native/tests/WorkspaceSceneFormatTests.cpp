@@ -9,14 +9,14 @@ class WorkspaceSceneFormatTests final : public QObject {
   Q_OBJECT
 
 private slots:
-  void rejectsUnsupportedBigEndianSceneWithoutChangingDocument();
+  void acceptsBigEndianPlySceneMetadata();
   void countsManagedImagesWithoutCountingArchivedOriginals();
   void fallsBackToInputWhenImagesDirectoryIsEmpty();
   void prefersInputWhenBothStandardDirectoriesContainImages();
   void rejectsNestedOnlyImagesThatTrainingCannotConsume();
 };
 
-void WorkspaceSceneFormatTests::rejectsUnsupportedBigEndianSceneWithoutChangingDocument() {
+void WorkspaceSceneFormatTests::acceptsBigEndianPlySceneMetadata() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
   const QString plyPath =
@@ -29,15 +29,21 @@ void WorkspaceSceneFormatTests::rejectsUnsupportedBigEndianSceneWithoutChangingD
             "property float x\n"
             "property float y\n"
             "property float z\n"
+            "element face 1\n"
+            "property list uchar int vertex_indices\n"
             "end_header\n");
   ply.close();
 
   gsw::WorkspaceDocument document;
   QString error;
   QVERIFY(document.create(temporary.path(), &error));
-  QVERIFY(!document.setScenePath(plyPath, &error));
-  QVERIFY(document.scenePath().isEmpty());
-  QVERIFY(error.contains(QStringLiteral("binary_big_endian")));
+  QVERIFY2(document.setScenePath(plyPath, &error), qPrintable(error));
+  QCOMPARE(document.scenePath(), QDir::cleanPath(plyPath));
+  QCOMPARE(document.sceneMetadata().format,
+           QStringLiteral("binary_big_endian"));
+  QCOMPARE(document.sceneMetadata().vertexCount, 1);
+  QCOMPARE(document.sceneMetadata().faceCount, 1);
+  QVERIFY(document.sceneMetadata().looksLikeMesh());
 }
 
 void WorkspaceSceneFormatTests::countsManagedImagesWithoutCountingArchivedOriginals() {

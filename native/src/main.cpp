@@ -230,6 +230,7 @@ int main(int argc, char *argv[]) {
           viewport, &gsw::NativeViewport::sceneLoaded, &application,
           [&application, viewport, &smokeTestCompleted,
            &smokeTestFailureCode](const qint64 sourceVertexCount,
+                                 const qsizetype, const qint64,
                                  const qsizetype) {
             QTimer::singleShot(
                 300, &application,

@@ -40,7 +40,7 @@ class NativeViewport final : public QOpenGLWidget,
 public:
   enum class InteractionMode { Inspect, Select, Rectangle, Lasso, Brush, Crop };
 
-  enum class RenderMode { Points, Gaussians };
+  enum class RenderMode { Points, Mesh, Gaussians };
   Q_ENUM(RenderMode)
 
   explicit NativeViewport(QWidget *parent = nullptr);
@@ -69,6 +69,7 @@ public:
   [[nodiscard]] bool hasUnsavedSceneEdits() const;
   [[nodiscard]] bool hasEditableScene() const;
   [[nodiscard]] bool gaussianRenderingAvailable() const;
+  [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
   [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
@@ -88,13 +89,15 @@ signals:
   void frameMetricsChanged(double framesPerSecond,
                            double averageFrameMilliseconds);
   void sceneLoadStarted(const QString &scenePath);
-  void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount);
+  void sceneLoaded(qint64 sourceVertexCount, qsizetype previewVertexCount,
+                   qint64 sourceFaceCount, qsizetype previewTriangleCount);
   void sceneLoadFailed(const QString &scenePath, const QString &message);
   void editStateChanged(qsizetype selectedCount, qsizetype deletedCount,
                         bool canUndo, bool canRedo, bool sceneReady,
                         bool hasUnsavedChanges);
   void selectionBusyChanged(bool busy);
   void gaussianRenderingAvailabilityChanged(bool available);
+  void meshRenderingAvailabilityChanged(bool available);
   void renderModeChanged(gsw::NativeViewport::RenderMode mode);
   void cameraTrajectoryChanged(qsizetype cameraCount,
                                qsizetype invalidCameraCount,
@@ -139,9 +142,11 @@ private:
   void updateFrameRefreshPolicy();
   void notifyEditState();
   void uploadPendingPointCloud();
+  void uploadPendingMesh();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
   void applyPendingTrainingGpuPreview();
   void drawPointCloud(const QMatrix4x4 &viewProjection);
+  void drawMesh(const QMatrix4x4 &viewProjection);
   void drawTrainingPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
@@ -164,8 +169,11 @@ private:
   QString mRequestedScenePath;
   QString mSceneLoadMessage;
   qint64 mGaussianCount = 0;
+  qint64 mSourceFaceCount = 0;
   qsizetype mPreviewPointCount = 0;
+  qsizetype mPreviewTriangleCount = 0;
   qsizetype mRenderedPointCount = 0;
+  qsizetype mRenderedMeshIndexCount = 0;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
   Qt::MouseButtons mPressedButtons = Qt::NoButton;
@@ -185,7 +193,9 @@ private:
   bool mCameraViewActive = false;
   bool mShowCameras = false;
   bool mHasGaussianAttributes = false;
+  bool mHasMesh = false;
   bool mGaussianShaderReady = false;
+  bool mMeshShaderReady = false;
   bool mGridShaderReady = false;
   int mSceneGeneration = 0;
   int mCameraTrajectoryGeneration = 0;
@@ -203,15 +213,22 @@ private:
   QVector<PointPosition> mSourcePositions;
   QVector<PointCloudVertex> mPreviewVertices;
   QVector<PointCloudVertex> mPendingVertices;
+  QVector<MeshVertex> mPendingMeshVertices;
+  QVector<quint32> mPendingMeshIndices;
   CameraTrajectory mCameraTrajectory;
   CameraTrajectoryGeometry mCameraGeometry;
   SceneEditModel mEditModel;
   bool mPointUploadPending = false;
+  bool mMeshUploadPending = false;
   QOpenGLShaderProgram *mPointProgram = nullptr;
+  QOpenGLShaderProgram *mMeshProgram = nullptr;
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
   QOpenGLShaderProgram *mGridProgram = nullptr;
   QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
+  QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
+  QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};
   QOpenGLVertexArrayObject mPointVertexArray;
+  QOpenGLVertexArrayObject mMeshVertexArray;
   QOpenGLVertexArrayObject mGaussianVertexArray;
   QOpenGLVertexArrayObject mGridVertexArray;
   TrainingGpuPreviewBuffer mTrainingGpuPreview;

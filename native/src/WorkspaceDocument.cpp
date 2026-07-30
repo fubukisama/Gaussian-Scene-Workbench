@@ -1038,6 +1038,14 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
         if (ok) {
           metadata.vertexCount = count;
         }
+      } else if (parts.size() >= 3 &&
+                 parts.at(1).compare(QStringLiteral("face"),
+                                     Qt::CaseInsensitive) == 0) {
+        bool ok = false;
+        const qint64 count = parts.at(2).toLongLong(&ok);
+        if (ok) {
+          metadata.faceCount = count;
+        }
       }
     } else if (readingVertexProperties &&
                line.startsWith(QStringLiteral("property "))) {
@@ -1057,7 +1065,8 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
     return metadata;
   }
   if (metadata.format != QStringLiteral("ascii") &&
-      metadata.format != QStringLiteral("binary_little_endian")) {
+      metadata.format != QStringLiteral("binary_little_endian") &&
+      metadata.format != QStringLiteral("binary_big_endian")) {
     assignError(errorMessage,
                 tr("Unsupported PLY format: %1").arg(metadata.format));
     return metadata;

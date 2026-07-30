@@ -33,16 +33,34 @@ struct PointPosition {
   [[nodiscard]] QVector3D toVector3D() const { return QVector3D(x, y, z); }
 };
 
+struct MeshVertex {
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+  float red = 0.72F;
+  float green = 0.75F;
+  float blue = 0.78F;
+  float normalX = 0.0F;
+  float normalY = 0.0F;
+  float normalZ = 1.0F;
+};
+
 struct PointCloudData {
   QVector<PointCloudVertex> vertices;
   QVector<PointPosition> sourcePositions;
+  QVector<MeshVertex> meshVertices;
+  QVector<quint32> meshIndices;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   qint64 sourceVertexCount = 0;
+  qint64 sourceFaceCount = 0;
+  qint64 sourceTriangleCount = 0;
   bool hasGaussianAttributes = false;
+  bool meshPreviewDecimated = false;
   QString error;
 
   [[nodiscard]] bool isValid() const;
+  [[nodiscard]] bool hasMesh() const;
   [[nodiscard]] QVector3D center() const;
   [[nodiscard]] float radius() const;
 };

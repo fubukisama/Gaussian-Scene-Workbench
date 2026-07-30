@@ -179,7 +179,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
-    if (mRenderedPointCount <= 0 && !mTrainingGpuPreview.attached()) {
+    if (mRenderedPointCount <= 0 && mRenderedMeshIndexCount <= 0 &&
+        !mTrainingGpuPreview.attached()) {
       return;
     }
     mFrameRateCounter.frameCompleted(FrameRateCounter::Clock::now());
@@ -194,7 +195,10 @@ NativeViewport::~NativeViewport() {
     mTrainingGpuPreview.release();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
+    mMeshVertexArray.destroy();
     mPointVertexArray.destroy();
+    mMeshIndexBuffer.destroy();
+    mMeshVertexBuffer.destroy();
     mPointBuffer.destroy();
     doneCurrent();
   }
@@ -242,12 +246,17 @@ void NativeViewport::setScene(const QString &scenePath,
   mBrushCursorVisible = false;
   mRequestedScenePath = scenePath;
   mScenePath = scenePath;
+  mSourceFaceCount = 0;
   mPreviewPointCount = 0;
+  mPreviewTriangleCount = 0;
   mRenderedPointCount = 0;
+  mRenderedMeshIndexCount = 0;
   updateFrameRefreshPolicy();
-  const bool availabilityChanged = gaussianRenderingAvailable();
+  const bool gaussianAvailabilityChanged = gaussianRenderingAvailable();
+  const bool meshAvailabilityChanged = meshRenderingAvailable();
   const bool renderModeChangedToPoints = mRenderMode != RenderMode::Points;
   mHasGaussianAttributes = false;
+  mHasMesh = false;
   mRenderMode = RenderMode::Points;
   mSceneLoadMessage.clear();
   mSourcePositions.clear();
@@ -256,13 +265,21 @@ void NativeViewport::setScene(const QString &scenePath,
   mPreviewVertices.squeeze();
   mPendingVertices.clear();
   mPendingVertices.squeeze();
+  mPendingMeshVertices.clear();
+  mPendingMeshVertices.squeeze();
+  mPendingMeshIndices.clear();
+  mPendingMeshIndices.squeeze();
   mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   mSceneRadius = 4.0F;
   mEditModel.reset(0);
   mPointUploadPending = true;
+  mMeshUploadPending = true;
   notifyEditState();
-  if (availabilityChanged) {
+  if (gaussianAvailabilityChanged) {
     emit gaussianRenderingAvailabilityChanged(false);
+  }
+  if (meshAvailabilityChanged) {
+    emit meshRenderingAvailabilityChanged(false);
   }
   if (renderModeChangedToPoints) {
     emit renderModeChanged(mRenderMode);
@@ -299,6 +316,9 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
 
 void NativeViewport::setRenderMode(const RenderMode mode) {
   if (mode == RenderMode::Gaussians && !gaussianRenderingAvailable()) {
+    return;
+  }
+  if (mode == RenderMode::Mesh && !meshRenderingAvailable()) {
     return;
   }
   if (mRenderMode == mode) {
@@ -400,12 +420,16 @@ bool NativeViewport::hasUnsavedSceneEdits() const {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mScenePath.isEmpty() && mEditModel.pointCount() > 0;
+  return !mHasMesh && !mScenePath.isEmpty() && mEditModel.pointCount() > 0;
 }
 
 bool NativeViewport::gaussianRenderingAvailable() const {
   return (mHasGaussianAttributes || mTrainingGpuPreview.attached()) &&
          mGaussianShaderReady;
+}
+
+bool NativeViewport::meshRenderingAvailable() const {
+  return mHasMesh && mMeshShaderReady && mRenderedMeshIndexCount > 0;
 }
 
 bool NativeViewport::infiniteGridRenderingAvailable() const {
@@ -461,6 +485,53 @@ void main() {
   if (!pointShaderReady) {
     mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1")
                             .arg(mPointProgram->log());
+  }
+
+  mMeshProgram = new QOpenGLShaderProgram(this);
+  const bool meshVertexCompiled =
+      mMeshProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
+                                            R"GLSL(#version 330 core
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 color;
+layout(location = 2) in vec3 normal;
+uniform mat4 viewProjection;
+out vec3 vertexColor;
+out vec3 worldPosition;
+out vec3 worldNormal;
+void main() {
+  gl_Position = viewProjection * vec4(position, 1.0);
+  vertexColor = color;
+  worldPosition = position;
+  worldNormal = normal;
+}
+)GLSL");
+  const bool meshFragmentCompiled =
+      mMeshProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                            R"GLSL(#version 330 core
+in vec3 vertexColor;
+in vec3 worldPosition;
+in vec3 worldNormal;
+uniform vec3 cameraPosition;
+out vec4 fragmentColor;
+void main() {
+  vec3 normal = normalize(worldNormal);
+  if (!gl_FrontFacing) {
+    normal = -normal;
+  }
+  vec3 viewDirection = normalize(cameraPosition - worldPosition);
+  vec3 keyDirection = normalize(viewDirection + vec3(0.35, 0.45, 0.55));
+  float diffuse = max(dot(normal, keyDirection), 0.0);
+  float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.0);
+  vec3 litColor = vertexColor * (0.24 + 0.76 * diffuse) +
+                  vec3(0.12, 0.16, 0.19) * rim;
+  fragmentColor = vec4(litColor, 1.0);
+}
+)GLSL");
+  mMeshShaderReady = meshVertexCompiled && meshFragmentCompiled &&
+                     mMeshProgram->link();
+  if (!mMeshShaderReady && mSceneLoadMessage.isEmpty()) {
+    mSceneLoadMessage = QStringLiteral("OpenGL mesh shader failed: %1")
+                            .arg(mMeshProgram->log());
   }
 
   mGaussianProgram = new QOpenGLShaderProgram(this);
@@ -766,6 +837,29 @@ void main() {
     mPointBuffer.release();
   }
 
+  if (mMeshShaderReady) {
+    mMeshVertexBuffer.create();
+    mMeshVertexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    mMeshIndexBuffer.create();
+    mMeshIndexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+
+    mMeshVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
+    mMeshVertexBuffer.bind();
+    mMeshProgram->bind();
+    mMeshProgram->enableAttributeArray(0);
+    mMeshProgram->setAttributeBuffer(0, GL_FLOAT, offsetof(MeshVertex, x), 3,
+                                     sizeof(MeshVertex));
+    mMeshProgram->enableAttributeArray(1);
+    mMeshProgram->setAttributeBuffer(1, GL_FLOAT, offsetof(MeshVertex, red), 3,
+                                     sizeof(MeshVertex));
+    mMeshProgram->enableAttributeArray(2);
+    mMeshProgram->setAttributeBuffer(
+        2, GL_FLOAT, offsetof(MeshVertex, normalX), 3, sizeof(MeshVertex));
+    mMeshProgram->release();
+    mMeshVertexBuffer.release();
+  }
+
   if (pointShaderReady && mGaussianShaderReady) {
     mGaussianVertexArray.create();
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
@@ -798,7 +892,13 @@ void main() {
     mPointBuffer.release();
   }
 
-  if (gaussianRenderingAvailable()) {
+  if (meshRenderingAvailable()) {
+    emit meshRenderingAvailabilityChanged(true);
+    if (mRenderMode != RenderMode::Mesh) {
+      mRenderMode = RenderMode::Mesh;
+      emit renderModeChanged(mRenderMode);
+    }
+  } else if (gaussianRenderingAvailable()) {
     emit gaussianRenderingAvailabilityChanged(true);
     if (mRenderMode != RenderMode::Gaussians) {
       mRenderMode = RenderMode::Gaussians;
@@ -858,12 +958,16 @@ void NativeViewport::paintGL() {
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
+  uploadPendingMesh();
 
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
   const QMatrix4x4 viewProjection = projection * view;
   drawInfiniteGrid(viewProjection);
-  if (mTrainingGpuPreview.hasFrame() && mRenderMode == RenderMode::Points) {
+  if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
+    drawMesh(viewProjection);
+  } else if (mTrainingGpuPreview.hasFrame() &&
+             mRenderMode == RenderMode::Points) {
     drawTrainingPointCloud(viewProjection);
   } else if (mRenderMode == RenderMode::Gaussians &&
              gaussianRenderingAvailable()) {
@@ -982,7 +1086,7 @@ void NativeViewport::rebuildCameraGeometry() {
 }
 
 void NativeViewport::startSceneLoad(const QString &scenePath) {
-  mSceneLoadMessage = QStringLiteral("正在读取点云...");
+  mSceneLoadMessage = QStringLiteral("正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
   const int generation = mSceneGeneration;
 
@@ -1007,9 +1111,16 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mSceneRadius = data.radius();
             rebuildCameraGeometry();
             mPreviewPointCount = data.vertices.size();
+            mSourceFaceCount = data.sourceFaceCount;
+            mPreviewTriangleCount = data.meshIndices.size() / 3;
+            mRenderedMeshIndexCount = data.meshIndices.size();
             mSourcePositions = std::move(data.sourcePositions);
             mPreviewVertices = std::move(data.vertices);
-            mEditModel.reset(mSourcePositions.size());
+            mPendingMeshVertices = std::move(data.meshVertices);
+            mPendingMeshIndices = std::move(data.meshIndices);
+            mMeshUploadPending = true;
+            mHasMesh = mRenderedMeshIndexCount > 0;
+            mEditModel.reset(mHasMesh ? 0 : mSourcePositions.size());
             const bool wasAvailable = gaussianRenderingAvailable();
             mHasGaussianAttributes = data.hasGaussianAttributes;
             const bool isAvailable = gaussianRenderingAvailable();
@@ -1017,15 +1128,20 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
               emit gaussianRenderingAvailabilityChanged(isAvailable);
             }
             const RenderMode loadedMode =
-                isAvailable ? RenderMode::Gaussians : RenderMode::Points;
+                mHasMesh && mMeshShaderReady
+                    ? RenderMode::Mesh
+                    : isAvailable ? RenderMode::Gaussians : RenderMode::Points;
             if (mRenderMode != loadedMode) {
               mRenderMode = loadedMode;
               emit renderModeChanged(mRenderMode);
             }
             mSceneLoadMessage.clear();
             resetCamera();
+            updateFrameRefreshPolicy();
             notifyEditState();
-            emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount);
+            emit meshRenderingAvailabilityChanged(meshRenderingAvailable());
+            emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount,
+                             data.sourceFaceCount, mPreviewTriangleCount);
           });
   watcher->setFuture(QtConcurrent::run(
       [scenePath]() { return PlyPointCloudLoader::load(scenePath); }));
@@ -1161,7 +1277,8 @@ void NativeViewport::rebuildRenderedVertices() {
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
-  const bool shouldRefreshContinuously = mRenderedPointCount > 0;
+  const bool shouldRefreshContinuously =
+      mRenderedPointCount > 0 || mRenderedMeshIndexCount > 0;
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
@@ -1189,6 +1306,35 @@ void NativeViewport::uploadPendingPointCloud() {
   mPointBuffer.release();
   mPendingVertices.clear();
   mPointUploadPending = false;
+}
+
+void NativeViewport::uploadPendingMesh() {
+  if (!mMeshUploadPending || !mMeshVertexBuffer.isCreated() ||
+      !mMeshIndexBuffer.isCreated()) {
+    return;
+  }
+
+  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
+  mMeshVertexBuffer.bind();
+  const qsizetype vertexBytes =
+      mPendingMeshVertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
+  mMeshVertexBuffer.allocate(
+      mPendingMeshVertices.isEmpty() ? nullptr
+                                     : mPendingMeshVertices.constData(),
+      static_cast<int>(vertexBytes));
+  mMeshVertexBuffer.release();
+
+  mMeshIndexBuffer.bind();
+  const qsizetype indexBytes =
+      mPendingMeshIndices.size() * static_cast<qsizetype>(sizeof(quint32));
+  mMeshIndexBuffer.allocate(
+      mPendingMeshIndices.isEmpty() ? nullptr : mPendingMeshIndices.constData(),
+      static_cast<int>(indexBytes));
+  mMeshIndexBuffer.release();
+
+  mPendingMeshVertices.clear();
+  mPendingMeshIndices.clear();
+  mMeshUploadPending = false;
 }
 
 void NativeViewport::synchronizeGaussianRenderingAvailability(
@@ -1224,6 +1370,30 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   }
   mPointProgram->release();
   glDisable(GL_BLEND);
+}
+
+void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
+  if (mRenderedMeshIndexCount < 3 || mMeshProgram == nullptr ||
+      !mMeshProgram->isLinked() || !mMeshIndexBuffer.isCreated()) {
+    return;
+  }
+
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  mMeshProgram->bind();
+  mMeshProgram->setUniformValue("viewProjection", viewProjection);
+  mMeshProgram->setUniformValue("cameraPosition", cameraPosition());
+  {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
+    mMeshIndexBuffer.bind();
+    glDrawElements(GL_TRIANGLES,
+                   static_cast<GLsizei>(mRenderedMeshIndexCount),
+                   GL_UNSIGNED_INT, nullptr);
+    mMeshIndexBuffer.release();
+  }
+  mMeshProgram->release();
 }
 
 void NativeViewport::drawTrainingPointCloud(
@@ -1890,6 +2060,11 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
   } else if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
+  } else if (mSourceFaceCount > 0 && mPreviewTriangleCount > 0) {
+    count = QStringLiteral("%1 顶点 | %2 面 | %3 预览三角形")
+                .arg(formatCount(mGaussianCount),
+                     formatCount(mSourceFaceCount),
+                     formatCount(mPreviewTriangleCount));
   } else if (mGaussianCount > 0 && mPreviewPointCount > 0 &&
              mGaussianCount != mPreviewPointCount) {
     count = QStringLiteral("%1 %2 | 预览 %3")
@@ -1969,9 +2144,12 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                    metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
 
   const QString renderer =
-      mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
-          ? QStringLiteral("高斯 DC SH")
-          : QStringLiteral("点预览");
+      mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
+          ? QStringLiteral("三角网格")
+          : mRenderMode == RenderMode::Gaussians &&
+                    gaussianRenderingAvailable()
+                ? QStringLiteral("高斯 DC SH")
+                : QStringLiteral("点预览");
 
   const ReferenceGridScale gridScale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));

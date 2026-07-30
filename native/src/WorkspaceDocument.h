@@ -11,10 +11,12 @@ struct PlyMetadata {
   bool valid = false;
   QString format;
   qint64 vertexCount = 0;
+  qint64 faceCount = 0;
   qint64 fileSize = 0;
   QStringList properties;
 
   [[nodiscard]] bool looksLikeGaussianSplat() const;
+  [[nodiscard]] bool looksLikeMesh() const { return faceCount > 0; }
 };
 
 struct ImportCleanupOptions {

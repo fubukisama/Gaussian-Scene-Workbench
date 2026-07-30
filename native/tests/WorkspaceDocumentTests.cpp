@@ -25,6 +25,8 @@ class WorkspaceDocumentTests final : public QObject {
 private slots:
   void parsesGaussianPlyHeader();
   void loadsAsciiPointColorsAndSamplesDeterministically();
+  void loadsAsciiPolygonMeshAndTriangulates();
+  void loadsBinaryBigEndianMesh();
   void loadsBinaryGaussianSphericalHarmonicColors();
   void activatesGaussianScaleRotationAndOpacity();
   void detectsColmapDatasetLayoutAndExecutable();
@@ -126,6 +128,18 @@ void WorkspaceDocumentTests::persistsActiveTrainingJobForCrashRecovery() {
 namespace {
 void writeLittleEndianFloat(QFile &file, const float value) {
   const quint32 bits = qToLittleEndian(std::bit_cast<quint32>(value));
+  QCOMPARE(file.write(reinterpret_cast<const char *>(&bits), sizeof(bits)),
+           static_cast<qint64>(sizeof(bits)));
+}
+
+void writeBigEndianFloat(QFile &file, const float value) {
+  const quint32 bits = qToBigEndian(std::bit_cast<quint32>(value));
+  QCOMPARE(file.write(reinterpret_cast<const char *>(&bits), sizeof(bits)),
+           static_cast<qint64>(sizeof(bits)));
+}
+
+void writeBigEndianInt32(QFile &file, const qint32 value) {
+  const quint32 bits = qToBigEndian(static_cast<quint32>(value));
   QCOMPARE(file.write(reinterpret_cast<const char *>(&bits), sizeof(bits)),
            static_cast<qint64>(sizeof(bits)));
 }
@@ -238,6 +252,85 @@ void WorkspaceDocumentTests::
   QCOMPARE(data.vertices.at(1).blue, 1.0F);
   QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, 0.0F));
   QCOMPARE(data.boundsMaximum, QVector3D(3.0F, 0.0F, 0.0F));
+}
+
+void WorkspaceDocumentTests::loadsAsciiPolygonMeshAndTriangulates() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("quad-mesh.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  ply.write("ply\n"
+            "format ascii 1.0\n"
+            "element vertex 4\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property uchar red\n"
+            "property uchar green\n"
+            "property uchar blue\n"
+            "element face 1\n"
+            "property list uchar int vertex_indices\n"
+            "end_header\n"
+            "0 0 0 255 0 0\n"
+            "1 0 0 0 255 0\n"
+            "1 1 0 0 0 255\n"
+            "0 1 0 255 255 255\n"
+            "4 0 1 2 3\n");
+  ply.close();
+
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(plyPath, 2);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasMesh());
+  QCOMPARE(data.sourceVertexCount, 4);
+  QCOMPARE(data.sourceFaceCount, 1);
+  QCOMPARE(data.sourceTriangleCount, 2);
+  QCOMPARE(data.vertices.size(), 4);
+  QCOMPARE(data.meshVertices.size(), 4);
+  QCOMPARE(data.meshIndices,
+           QVector<quint32>({0U, 1U, 2U, 0U, 2U, 3U}));
+  QCOMPARE(data.meshVertices.at(0).red, 1.0F);
+  QVERIFY(data.meshVertices.at(0).normalZ > 0.99F);
+}
+
+void WorkspaceDocumentTests::loadsBinaryBigEndianMesh() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("big-endian-mesh.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  ply.write("ply\n"
+            "format binary_big_endian 1.0\n"
+            "element vertex 3\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "element face 1\n"
+            "property list uchar int vertex_index\n"
+            "end_header\n");
+  for (const QVector3D &position :
+       {QVector3D(0.0F, 0.0F, 0.0F), QVector3D(1.0F, 0.0F, 0.0F),
+        QVector3D(0.0F, 1.0F, 0.0F)}) {
+    writeBigEndianFloat(ply, position.x());
+    writeBigEndianFloat(ply, position.y());
+    writeBigEndianFloat(ply, position.z());
+  }
+  const char faceSize = 3;
+  QCOMPARE(ply.write(&faceSize, 1), qint64(1));
+  writeBigEndianInt32(ply, 0);
+  writeBigEndianInt32(ply, 1);
+  writeBigEndianInt32(ply, 2);
+  ply.close();
+
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(plyPath);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasMesh());
+  QCOMPARE(data.sourceFaceCount, 1);
+  QCOMPARE(data.meshIndices, QVector<quint32>({0U, 1U, 2U}));
+  QCOMPARE(data.meshVertices.at(1).x, 1.0F);
+  QVERIFY(data.meshVertices.at(0).normalZ > 0.99F);
 }
 
 void WorkspaceDocumentTests::loadsBinaryGaussianSphericalHarmonicColors() {
