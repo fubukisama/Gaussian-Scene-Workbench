@@ -77,9 +77,19 @@ int main(int argc, char *argv[]) {
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setSamples(4);
-  // Match SIBR's unlocked mode. The FPS meter separately measures completed
-  // Qt frame swaps, so a driver or compositor cap remains visible to users.
-  format.setSwapInterval(0);
+  // Dense point clouds make scan-out tearing especially visible while the
+  // camera is moving. Synchronize presentation by default; benchmarks can
+  // explicitly opt out with GSW_SWAP_INTERVAL=0.
+  bool swapIntervalOverrideValid = false;
+  const int swapIntervalOverride =
+      qEnvironmentVariableIntValue("GSW_SWAP_INTERVAL",
+                                   &swapIntervalOverrideValid);
+  const int requestedSwapInterval =
+      swapIntervalOverrideValid && swapIntervalOverride >= 0 &&
+              swapIntervalOverride <= 1
+          ? swapIntervalOverride
+          : 1;
+  format.setSwapInterval(requestedSwapInterval);
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);
@@ -708,7 +718,9 @@ int main(int argc, char *argv[]) {
           application.exit(smokeTestCompleted ? 0 : 2);
         });
   } else if (smokeTest) {
-    QTimer::singleShot(250, &application, [&application, &window, &smokeTestCompleted]() {
+    QTimer::singleShot(250, &application,
+                       [&application, &window, &smokeTestCompleted,
+                        requestedSwapInterval]() {
       const QStringList requiredEntryActions = {
           QStringLiteral("newProjectAction"),
           QStringLiteral("saveProjectAction"),
@@ -722,7 +734,10 @@ int main(int argc, char *argv[]) {
           QStringLiteral("externalBackupsAction"),
           QStringLiteral("pointRenderAction"),
       };
-      smokeTestCompleted = window.isVisible();
+      smokeTestCompleted =
+          window.isVisible() &&
+          QSurfaceFormat::defaultFormat().swapInterval() ==
+              requestedSwapInterval;
       for (const QString &objectName : requiredEntryActions) {
         const QAction *action = window.findChild<QAction *>(objectName);
         smokeTestCompleted = smokeTestCompleted && action != nullptr && action->isEnabled();

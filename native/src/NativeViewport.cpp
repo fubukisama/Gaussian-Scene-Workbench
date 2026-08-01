@@ -883,6 +883,9 @@ uniform vec3 gridAxisU;
 uniform vec3 gridAxisV;
 uniform vec3 gridAxisUColor;
 uniform vec3 gridAxisVColor;
+uniform vec3 gridAxisUScreenLine;
+uniform vec3 gridAxisVScreenLine;
+uniform bool gridScreenAxesValid;
 
 vec3 unprojectPoint(float clipDepth) {
   vec4 world = inverseViewProjection *
@@ -898,7 +901,10 @@ float periodicLine(float coordinate, float stepSize, float widthPixels) {
   float coverage = 1.0 - smoothstep(widthPixels * 0.5,
                                      widthPixels * 0.5 + 1.0,
                                      lineDistance);
-  float frequencyFade = 1.0 - smoothstep(0.32, 0.72, pixelFootprint);
+  // Fade a level before its spacing approaches the Nyquist limit. Keeping a
+  // sub-two-pixel grid alive produces the crawling/moire pattern that is most
+  // noticeable after a small point cloud has been framed.
+  float frequencyFade = 1.0 - smoothstep(0.20, 0.50, pixelFootprint);
   return coverage * frequencyFade;
 }
 
@@ -910,8 +916,18 @@ float gridLines(vec2 coordinate, float stepSize, float widthPixels) {
 float originAxis(float coordinate, float widthPixels) {
   float pixelFootprint = max(fwidth(coordinate), 1e-6);
   float lineDistance = abs(coordinate) / pixelFootprint;
-  return 1.0 - smoothstep(widthPixels * 0.5,
-                          widthPixels * 0.5 + 1.0, lineDistance);
+  float sigma = max(widthPixels * 0.5, 0.55);
+  // A Gaussian coverage profile remains continuous when a shallow diagonal
+  // advances by several horizontal pixels per scanline. A solid core plus a
+  // linear fringe makes the same line look like disconnected bars.
+  return exp(-0.5 * lineDistance * lineDistance / (sigma * sigma));
+}
+
+float screenAxis(vec3 lineEquation, float widthPixels) {
+  float lineDistance =
+      abs(dot(lineEquation.xy, gl_FragCoord.xy) + lineEquation.z);
+  float sigma = max(widthPixels * 0.5, 0.65);
+  return exp(-0.5 * lineDistance * lineDistance / (sigma * sigma));
 }
 
 void main() {
@@ -946,21 +962,36 @@ void main() {
       gridLines(gridCoordinate, gridLowerMinorStep * 10.0, 1.02 * uiScale),
       gridLines(gridCoordinate, gridUpperMinorStep * 10.0, 1.02 * uiScale),
       gridLevelBlend);
-  float lineAlpha = max(fineLines * 0.38, majorLines * 0.58);
+  float gridAlpha = max(fineLines * 0.38, majorLines * 0.58);
 
-  float uAxis = originAxis(gridCoordinate.y, 1.35 * uiScale);
-  float vAxis = originAxis(gridCoordinate.x, 1.35 * uiScale);
+  float uAxisCoverage =
+      gridScreenAxesValid
+          ? screenAxis(gridAxisUScreenLine, 1.25 * uiScale)
+          : originAxis(gridCoordinate.y, 1.15 * uiScale);
+  float vAxisCoverage =
+      gridScreenAxesValid
+          ? screenAxis(gridAxisVScreenLine, 1.25 * uiScale)
+          : originAxis(gridCoordinate.x, 1.15 * uiScale);
+  // Axis coverage used to tint an already-opaque minor grid line directly.
+  // At shallow intersections that turned every crossing into a long coloured
+  // tooth. Convert coverage to an independent alpha layer, then let only the
+  // dominant layer control the colour.
+  float uAxisAlpha = uAxisCoverage * 0.86;
+  float vAxisAlpha = vAxisCoverage * 0.86;
+  float axisAlpha = max(uAxisAlpha, vAxisAlpha);
   vec3 minorColor = vec3(0.17, 0.19, 0.20);
   vec3 majorColor = vec3(0.29, 0.31, 0.33);
-  vec3 color = mix(minorColor, majorColor, majorLines);
-  if (uAxis > 0.0) {
-    color = mix(color, gridAxisUColor, uAxis);
-    lineAlpha = max(lineAlpha, uAxis * 0.78);
-  }
-  if (vAxis > 0.0) {
-    color = mix(color, gridAxisVColor, vAxis);
-    lineAlpha = max(lineAlpha, vAxis * 0.78);
-  }
+  vec3 gridColor = mix(minorColor, majorColor, majorLines);
+  vec3 axisColor =
+      (gridAxisUColor * uAxisAlpha + gridAxisVColor * vAxisAlpha) /
+      max(uAxisAlpha + vAxisAlpha, 1e-6);
+  // Source-over composition keeps the Gaussian axis coverage continuous at
+  // pixel-corner transitions. The previous winner-takes-all comparison with
+  // the coincident grey grid line changed colour every scanline and looked
+  // like a row of disconnected teeth.
+  float lineAlpha = axisAlpha + gridAlpha * (1.0 - axisAlpha);
+  float axisDominance = axisAlpha / max(lineAlpha, 1e-6);
+  vec3 color = mix(gridColor, axisColor, axisDominance);
 
   vec3 toCamera = cameraWorld - world;
   float distanceToCamera = length(toCamera);
@@ -2568,8 +2599,9 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
   const ReferenceGridFrame grid = referenceGridFrame(plane);
+  const QVector3D gridPlaneOrigin = gridOrigin(plane);
   mGridProgram->setUniformValue("gridPlaneNormal", grid.normal);
-  mGridProgram->setUniformValue("gridPlaneOrigin", gridOrigin(plane));
+  mGridProgram->setUniformValue("gridPlaneOrigin", gridPlaneOrigin);
   mGridProgram->setUniformValue("gridAxisU", grid.axisU);
   mGridProgram->setUniformValue("gridAxisV", grid.axisV);
   mGridProgram->setUniformValue("gridAxisUColor", grid.axisUColor);
@@ -2580,6 +2612,58 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->setUniformValue("gridLevelBlend", scale.levelBlend);
   mGridProgram->setUniformValue("uiScale",
                                 static_cast<float>(devicePixelRatioF()));
+  const float framebufferWidth =
+      std::max(1.0F, static_cast<float>(width() * devicePixelRatioF()));
+  const float framebufferHeight =
+      std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
+  const auto projectToFramebuffer =
+      [&viewProjection, framebufferWidth,
+       framebufferHeight](const QVector3D &world) -> std::optional<QVector2D> {
+    const QVector4D clip = viewProjection * QVector4D(world, 1.0F);
+    if (!std::isfinite(clip.w()) || std::abs(clip.w()) <= 1.0e-6F) {
+      return std::nullopt;
+    }
+    const float inverseW = 1.0F / clip.w();
+    const QVector2D projected(
+        (clip.x() * inverseW * 0.5F + 0.5F) * framebufferWidth,
+        (clip.y() * inverseW * 0.5F + 0.5F) * framebufferHeight);
+    if (!std::isfinite(projected.x()) || !std::isfinite(projected.y())) {
+      return std::nullopt;
+    }
+    return projected;
+  };
+  const float projectedAxisExtent =
+      std::max({1.0F, scale.visibleDistance, mSceneRadius * 2.0F});
+  const auto screenLine =
+      [&projectToFramebuffer, &gridPlaneOrigin,
+       projectedAxisExtent](const QVector3D &axis) -> std::optional<QVector3D> {
+    const auto start = projectToFramebuffer(
+        gridPlaneOrigin - axis * projectedAxisExtent);
+    const auto end = projectToFramebuffer(
+        gridPlaneOrigin + axis * projectedAxisExtent);
+    if (!start.has_value() || !end.has_value()) {
+      return std::nullopt;
+    }
+    const QVector2D tangent = *end - *start;
+    const float length = tangent.length();
+    if (!std::isfinite(length) || length <= 1.0e-4F) {
+      return std::nullopt;
+    }
+    const QVector2D normal(-tangent.y() / length, tangent.x() / length);
+    return QVector3D(normal.x(), normal.y(),
+                     -QVector2D::dotProduct(normal, *start));
+  };
+  const std::optional<QVector3D> axisUScreenLine = screenLine(grid.axisU);
+  const std::optional<QVector3D> axisVScreenLine = screenLine(grid.axisV);
+  const bool screenAxesValid =
+      axisUScreenLine.has_value() && axisVScreenLine.has_value();
+  mGridProgram->setUniformValue("gridScreenAxesValid", screenAxesValid);
+  mGridProgram->setUniformValue(
+      "gridAxisUScreenLine",
+      axisUScreenLine.value_or(QVector3D(0.0F, 0.0F, 0.0F)));
+  mGridProgram->setUniformValue(
+      "gridAxisVScreenLine",
+      axisVScreenLine.value_or(QVector3D(0.0F, 0.0F, 0.0F)));
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGridVertexArray);
     glDrawArrays(GL_TRIANGLES, 0, 3);

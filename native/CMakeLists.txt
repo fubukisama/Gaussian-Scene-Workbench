@@ -182,6 +182,26 @@ if(BUILD_TESTING)
     "3 1 3 5\n"
     "3 3 7 5\n"
   )
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-dense-grid-points.ply"
+    "ply\n"
+    "format ascii 1.0\n"
+    "element vertex 8\n"
+    "property float x\n"
+    "property float y\n"
+    "property float z\n"
+    "property uchar red\n"
+    "property uchar green\n"
+    "property uchar blue\n"
+    "end_header\n"
+    "-4.750099 1.489203 98.469025 190 170 130\n"
+    "0.685180 1.489203 98.469025 190 170 130\n"
+    "-4.750099 7.951070 98.469025 190 170 130\n"
+    "0.685180 7.951070 98.469025 190 170 130\n"
+    "-4.750099 1.489203 100.449379 190 170 130\n"
+    "0.685180 1.489203 100.449379 190 170 130\n"
+    "-4.750099 7.951070 100.449379 190 170 130\n"
+    "0.685180 7.951070 100.449379 190 170 130\n"
+  )
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-mesh-texture.ppm"
     "P3\n2 2\n255\n"
     "255 0 0  0 255 0\n"
@@ -233,6 +253,12 @@ if(BUILD_TESTING)
       --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
   )
   add_test(
+    NAME native_dense_grid_point_scene
+    COMMAND GaussianSceneWorkbench
+      --smoke-test-reference-axes
+      --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-dense-grid-points.ply"
+  )
+  add_test(
     NAME native_paged_mesh_scene
     COMMAND GaussianSceneWorkbench
       --smoke-test-reference-axes
@@ -251,6 +277,7 @@ if(BUILD_TESTING)
     native_exit_confirmation
     native_infinite_reference_grid
     native_reference_axes_with_scene
+    native_dense_grid_point_scene
     native_paged_mesh_scene
     native_textured_paged_mesh_scene
     PROPERTIES
