@@ -236,6 +236,7 @@ private:
   bool mVisibleOnlySelection = true;
   bool mSelectionBusy = false;
   bool mCameraManipulated = false;
+  bool mTemporaryOrbitActive = false;
   bool mNavigationInteractionActive = false;
   bool mNavigationDragging = false;
   bool mOrthographic = false;

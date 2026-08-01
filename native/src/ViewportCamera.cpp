@@ -59,6 +59,12 @@ OrbitAngles orbitAnglesAfterLeftDrag(const OrbitAngles current,
   };
 }
 
+bool isTemporaryOrbitShortcut(const Qt::MouseButton button,
+                              const Qt::KeyboardModifiers modifiers) {
+  return button == Qt::LeftButton &&
+         modifiers.testFlag(Qt::ControlModifier);
+}
+
 OrbitFrame orbitFrame(const OrbitAngles angles) {
   const float yaw = radians(angles.yawDegrees);
   const float pitch = radians(angles.pitchDegrees);

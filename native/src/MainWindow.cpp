@@ -1054,7 +1054,7 @@ void MainWindow::createActions() {
   mRectangleAction->setCheckable(true);
   mRectangleAction->setShortcut(QKeySequence(QStringLiteral("R")));
   mRectangleAction->setToolTip(
-      QStringLiteral("矩形选择 (R)，Shift 添加，Alt 减去"));
+      QStringLiteral("矩形选择 (R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mRectangleAction);
   connect(mRectangleAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
@@ -1066,7 +1066,7 @@ void MainWindow::createActions() {
   mLassoAction->setCheckable(true);
   mLassoAction->setShortcut(QKeySequence(QStringLiteral("L")));
   mLassoAction->setToolTip(
-      QStringLiteral("套索选择 (L)，Shift 添加，Alt 减去"));
+      QStringLiteral("套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mLassoAction);
   connect(mLassoAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Lasso);
@@ -1078,7 +1078,7 @@ void MainWindow::createActions() {
   mBrushAction->setCheckable(true);
   mBrushAction->setShortcut(QKeySequence(QStringLiteral("B")));
   mBrushAction->setToolTip(
-      QStringLiteral("连续笔刷选择 (B)，Shift 添加，Alt 减去"));
+      QStringLiteral("连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mBrushAction);
   connect(mBrushAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Brush);

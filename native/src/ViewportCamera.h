@@ -37,6 +37,13 @@ struct ReferenceGridScale {
 [[nodiscard]] OrbitAngles orbitAnglesAfterLeftDrag(OrbitAngles current,
                                                    const QPoint &delta);
 
+// In an editing tool, Ctrl temporarily gives the left mouse button back to
+// camera orbit. The caller latches this decision for the full drag so modifier
+// changes cannot turn an orbit into a selection gesture halfway through.
+[[nodiscard]] bool
+isTemporaryOrbitShortcut(Qt::MouseButton button,
+                         Qt::KeyboardModifiers modifiers);
+
 [[nodiscard]] OrbitFrame orbitFrame(OrbitAngles angles);
 
 [[nodiscard]] ReferenceGridPlane

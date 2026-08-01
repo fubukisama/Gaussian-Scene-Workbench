@@ -133,6 +133,29 @@ QString modeLabel(const NativeViewport::InteractionMode mode) {
   return {};
 }
 
+bool isTrimInteractionMode(const NativeViewport::InteractionMode mode) {
+  switch (mode) {
+  case NativeViewport::InteractionMode::Select:
+  case NativeViewport::InteractionMode::Rectangle:
+  case NativeViewport::InteractionMode::Lasso:
+  case NativeViewport::InteractionMode::Brush:
+  case NativeViewport::InteractionMode::Crop:
+    return true;
+  case NativeViewport::InteractionMode::Inspect:
+    return false;
+  }
+  return false;
+}
+
+Qt::CursorShape defaultInteractionCursor(
+    const NativeViewport::InteractionMode mode) {
+  return mode == NativeViewport::InteractionMode::Rectangle ||
+                 mode == NativeViewport::InteractionMode::Lasso ||
+                 mode == NativeViewport::InteractionMode::Brush
+             ? Qt::CrossCursor
+             : Qt::ArrowCursor;
+}
+
 QString formatCount(const qint64 count) {
   if (count >= 1000000) {
     return QStringLiteral("%1 M").arg(static_cast<double>(count) / 1000000.0, 0,
@@ -252,6 +275,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mSelectionGestureActive = false;
   mSelectionPath.clear();
   mBrushCursorVisible = false;
+  mTemporaryOrbitActive = false;
   mRequestedScenePath = scenePath;
   mScenePath = scenePath;
   mSourceFaceCount = 0;
@@ -344,11 +368,8 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
   mSelectionGestureActive = false;
   mSelectionPath.clear();
   mBrushCursorVisible = false;
-  setCursor(mode == InteractionMode::Rectangle ||
-                    mode == InteractionMode::Lasso ||
-                    mode == InteractionMode::Brush
-                ? Qt::CrossCursor
-                : Qt::ArrowCursor);
+  mTemporaryOrbitActive = false;
+  setCursor(defaultInteractionCursor(mode));
   update();
 }
 
@@ -2517,7 +2538,7 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
 }
 
 void NativeViewport::enterEvent(QEnterEvent *event) {
-  if (mMode == InteractionMode::Brush) {
+  if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
     update();
@@ -2534,11 +2555,7 @@ void NativeViewport::leaveEvent(QEvent *event) {
       mNavigationHover.part != NavigationGizmoPart::None) {
     mNavigationHover = {};
     setToolTip({});
-    setCursor(mMode == InteractionMode::Rectangle ||
-                      mMode == InteractionMode::Lasso ||
-                      mMode == InteractionMode::Brush
-                  ? Qt::CrossCursor
-                  : Qt::ArrowCursor);
+    setCursor(defaultInteractionCursor(mMode));
     update();
   }
   QOpenGLWidget::leaveEvent(event);
@@ -2546,6 +2563,23 @@ void NativeViewport::leaveEvent(QEvent *event) {
 
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
   updateNavigationGizmoHover(event->position());
+  if (isTrimInteractionMode(mMode) &&
+      isTemporaryOrbitShortcut(event->button(), event->modifiers())) {
+    mTemporaryOrbitActive = true;
+    mSelectionGestureActive = false;
+    mSelectionPath.clear();
+    mBrushCursorVisible = false;
+    mPressedButtons = event->buttons();
+    mLastMousePosition = event->position().toPoint();
+    setCursor(Qt::ClosedHandCursor);
+    setToolTip(QStringLiteral("Ctrl + 左键：旋转视角"));
+    update();
+    event->accept();
+    return;
+  }
+  if (event->button() == Qt::LeftButton) {
+    mTemporaryOrbitActive = false;
+  }
   if (event->button() == Qt::LeftButton &&
       mNavigationHover.part != NavigationGizmoPart::None) {
     mNavigationInteractionActive = true;
@@ -2566,7 +2600,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
 
   mPressedButtons = event->buttons();
   mLastMousePosition = event->position().toPoint();
-  if (mMode == InteractionMode::Brush) {
+  if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
   }
@@ -2593,7 +2627,7 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     return;
   }
 
-  if (mMode == InteractionMode::Brush) {
+  if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
   }
@@ -2627,9 +2661,11 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     leaveCameraView();
   }
 
-  const bool pan = mPressedButtons.testFlag(Qt::MiddleButton) ||
-                   mPressedButtons.testFlag(Qt::RightButton) ||
-                   event->modifiers().testFlag(Qt::ShiftModifier);
+  const bool pan =
+      !mTemporaryOrbitActive &&
+      (mPressedButtons.testFlag(Qt::MiddleButton) ||
+       mPressedButtons.testFlag(Qt::RightButton) ||
+       event->modifiers().testFlag(Qt::ShiftModifier));
   if (pan) {
     panCamera(delta);
   } else if (mPressedButtons.testFlag(Qt::LeftButton)) {
@@ -2662,6 +2698,11 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
     }
     finishSelectionGesture(event->modifiers());
   }
+  const bool finishedTemporaryOrbit =
+      event->button() == Qt::LeftButton && mTemporaryOrbitActive;
+  if (finishedTemporaryOrbit) {
+    mTemporaryOrbitActive = false;
+  }
   mPressedButtons = event->buttons();
   if (mCameraManipulated && mPressedButtons == Qt::NoButton) {
     mCameraManipulated = false;
@@ -2669,6 +2710,17 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
       rebuildRenderedVertices();
       update();
     }
+  }
+  if (finishedTemporaryOrbit) {
+    if (mMode == InteractionMode::Brush) {
+      mBrushCursorPosition = event->position();
+      mBrushCursorVisible = true;
+    }
+    setCursor(defaultInteractionCursor(mMode));
+    setToolTip({});
+    mNavigationHover = {};
+    updateNavigationGizmoHover(event->position());
+    update();
   }
   event->accept();
 }
@@ -2731,11 +2783,7 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     setCursor(Qt::PointingHandCursor);
     break;
   case NavigationGizmoPart::None:
-    setCursor(mMode == InteractionMode::Rectangle ||
-                      mMode == InteractionMode::Lasso ||
-                      mMode == InteractionMode::Brush
-                  ? Qt::CrossCursor
-                  : Qt::ArrowCursor);
+    setCursor(defaultInteractionCursor(mMode));
     break;
   }
   setToolTip(tooltip);

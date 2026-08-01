@@ -11,6 +11,7 @@ class ViewportCameraTests final : public QObject {
 
 private slots:
   void mapsHorizontalAndVerticalLeftDragDirections();
+  void recognizesTemporaryTrimOrbitShortcut();
   void allowsVerticalOrbitPastBothPoles();
   void wrapsAnglesAfterCompleteTurns();
   void usesZAsWorldUpAxis();
@@ -34,6 +35,14 @@ void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
       orbitAnglesAfterLeftDrag({42.0F, 24.0F}, QPoint(0, 10));
   QCOMPARE(vertical.yawDegrees, 42.0F);
   QVERIFY(qAbs(vertical.pitchDegrees - 26.8F) < 1.0e-5F);
+}
+
+void ViewportCameraTests::recognizesTemporaryTrimOrbitShortcut() {
+  QVERIFY(isTemporaryOrbitShortcut(Qt::LeftButton, Qt::ControlModifier));
+  QVERIFY(isTemporaryOrbitShortcut(
+      Qt::LeftButton, Qt::ControlModifier | Qt::ShiftModifier));
+  QVERIFY(!isTemporaryOrbitShortcut(Qt::LeftButton, Qt::NoModifier));
+  QVERIFY(!isTemporaryOrbitShortcut(Qt::RightButton, Qt::ControlModifier));
 }
 
 void ViewportCameraTests::allowsVerticalOrbitPastBothPoles() {
