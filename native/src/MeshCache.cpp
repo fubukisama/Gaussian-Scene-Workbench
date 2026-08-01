@@ -213,6 +213,7 @@ bool MeshCacheIndex::isValid() const {
   if (formatVersion != CurrentFormatVersion || sourcePath.isEmpty() ||
       sourceSize <= 0 || fullVertexCount <= 0 || fullFaceCount <= 0 ||
       fullTriangleCount <= 0 || renderableTriangleCount <= 0 ||
+      !coordinates.valid ||
       rootNode < 0 || rootNode >= nodes.size() ||
       !nodes.at(rootNode).isValid() || !QFileInfo(dataPath).isFile()) {
     return false;
@@ -303,7 +304,10 @@ MeshCacheIndex MeshCache::loadForSource(const QString &sourcePath,
   if (!vectorFromJson(root.value(QStringLiteral("boundsMinimum")),
                       result.boundsMinimum) ||
       !vectorFromJson(root.value(QStringLiteral("boundsMaximum")),
-                      result.boundsMaximum)) {
+                      result.boundsMaximum) ||
+      !sceneCoordinateInfoFromJson(
+          root.value(QStringLiteral("coordinates")).toObject(),
+          result.coordinates)) {
     return {};
   }
   const QJsonArray nodes = root.value(QStringLiteral("nodes")).toArray();
@@ -400,6 +404,7 @@ struct MeshCacheBuilder::Impl {
   qint64 sourceModifiedMilliseconds = 0;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
+  SceneCoordinateInfo coordinates;
   bool hasFiniteBounds = false;
   bool started = false;
   bool verticesFinished = false;
@@ -563,11 +568,18 @@ struct MeshCacheBuilder::Impl {
 };
 
 MeshCacheBuilder::MeshCacheBuilder(const QString &sourcePath,
-                                   const qint64 sourceVertexCount)
+                                   const qint64 sourceVertexCount,
+                                   const SceneCoordinateInfo &coordinates)
     : mImpl(std::make_unique<Impl>()) {
   mImpl->sourcePath = normalizedSourcePath(sourcePath);
   mImpl->sourceVertexCount = sourceVertexCount;
+  mImpl->coordinates = coordinates;
   mImpl->cacheRoot = cacheRootForSource(sourcePath);
+}
+
+void MeshCacheBuilder::setCoordinateInfo(
+    const SceneCoordinateInfo &coordinates) {
+  mImpl->coordinates = coordinates;
 }
 
 MeshCacheBuilder::~MeshCacheBuilder() {
@@ -1044,6 +1056,16 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
   result.hasTextureCoordinates = mImpl->hasTextureCoordinates;
   result.boundsMinimum = mImpl->boundsMinimum;
   result.boundsMaximum = mImpl->boundsMaximum;
+  result.coordinates = mImpl->coordinates;
+  if (!result.coordinates.valid) {
+    result.coordinates.valid = true;
+    result.coordinates.globalMinimum = {
+        result.boundsMinimum.x(), result.boundsMinimum.y(),
+        result.boundsMinimum.z()};
+    result.coordinates.globalMaximum = {
+        result.boundsMaximum.x(), result.boundsMaximum.y(),
+        result.boundsMaximum.z()};
+  }
   result.nodes = mImpl->nodes;
   result.rootNode = 0;
 
@@ -1066,6 +1088,8 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
               vectorToJson(result.boundsMinimum));
   root.insert(QStringLiteral("boundsMaximum"),
               vectorToJson(result.boundsMaximum));
+  root.insert(QStringLiteral("coordinates"),
+              sceneCoordinateInfoToJson(result.coordinates));
   QJsonArray nodes;
   for (const MeshCacheNode &node : std::as_const(result.nodes)) {
     QJsonObject object;

@@ -168,6 +168,7 @@ bool PointCloudCacheIndex::isValid() const {
            minimum.z() <= maximum.z();
   };
   if (!finiteBounds(boundsMinimum, boundsMaximum) ||
+      !coordinates.valid ||
       nodes.at(rootNode).parent != -1 ||
       nodes.at(rootNode).sourcePointCount != fullPointCount) {
     return false;
@@ -274,7 +275,10 @@ PointCloudCacheIndex PointCloudCache::loadForSource(
   if (!vectorFromJson(root.value(QStringLiteral("boundsMinimum")),
                       result.boundsMinimum) ||
       !vectorFromJson(root.value(QStringLiteral("boundsMaximum")),
-                      result.boundsMaximum)) {
+                      result.boundsMaximum) ||
+      !sceneCoordinateInfoFromJson(
+          root.value(QStringLiteral("coordinates")).toObject(),
+          result.coordinates)) {
     return {};
   }
   const QJsonArray nodes = root.value(QStringLiteral("nodes")).toArray();
@@ -350,6 +354,7 @@ struct PointCloudCacheBuilder::Impl {
   QString sourcePath;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
+  SceneCoordinateInfo coordinates;
   QString cacheRoot;
   QString buildDirectory;
   QString dataPath;
@@ -394,11 +399,20 @@ struct PointCloudCacheBuilder::Impl {
 
 PointCloudCacheBuilder::PointCloudCacheBuilder(
     const QString &sourcePath, const QVector3D &boundsMinimum,
-    const QVector3D &boundsMaximum)
+    const QVector3D &boundsMaximum,
+    const SceneCoordinateInfo &coordinates)
     : mImpl(std::make_unique<Impl>()) {
   mImpl->sourcePath = normalizedSourcePath(sourcePath);
   mImpl->boundsMinimum = boundsMinimum;
   mImpl->boundsMaximum = boundsMaximum;
+  mImpl->coordinates = coordinates;
+  if (!mImpl->coordinates.valid) {
+    mImpl->coordinates.valid = true;
+    mImpl->coordinates.globalMinimum = {
+        boundsMinimum.x(), boundsMinimum.y(), boundsMinimum.z()};
+    mImpl->coordinates.globalMaximum = {
+        boundsMaximum.x(), boundsMaximum.y(), boundsMaximum.z()};
+  }
   mImpl->cacheRoot = cacheRootForSource(sourcePath);
 }
 
@@ -628,6 +642,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
   result.sourceModifiedMilliseconds = mImpl->sourceModifiedMilliseconds;
   result.boundsMinimum = mImpl->boundsMinimum;
   result.boundsMaximum = mImpl->boundsMaximum;
+  result.coordinates = mImpl->coordinates;
   result.nodes = mImpl->nodes;
   result.rootNode = 0;
   result.fullPointCount = result.nodes.constFirst().sourcePointCount;
@@ -645,6 +660,8 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
               vectorToJson(result.boundsMinimum));
   root.insert(QStringLiteral("boundsMaximum"),
               vectorToJson(result.boundsMaximum));
+  root.insert(QStringLiteral("coordinates"),
+              sceneCoordinateInfoToJson(result.coordinates));
   QJsonArray nodes;
   for (const PointCloudCacheNode &node : std::as_const(result.nodes)) {
     QJsonObject object;

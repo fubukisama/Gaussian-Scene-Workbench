@@ -19,6 +19,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <bit>
+#include <cmath>
 
 class WorkspaceDocumentTests final : public QObject {
   Q_OBJECT
@@ -28,6 +29,8 @@ private slots:
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsOversizedBinaryPointCloudAtFullResolution();
   void loadsOversizedAsciiPointCloudIntoDiskCache();
+  void preservesGlobalCoordinatesWhilePagingLocalDisplayData();
+  void parsesUnitsAndExportsCoordinateReport();
   void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
@@ -35,6 +38,7 @@ private slots:
   void preservesResidentMeshUvSeams();
   void buildsPagesAndInvalidatesDiskResidentMesh();
   void loadsConfiguredRealMeshFixture();
+  void loadsConfiguredRealCoordinateFixture();
   void loadsBinaryGaussianSphericalHarmonicColors();
   void activatesGaussianScaleRotationAndOpacity();
   void detectsColmapDatasetLayoutAndExecutable();
@@ -392,6 +396,165 @@ void WorkspaceDocumentTests::loadsOversizedAsciiPointCloudIntoDiskCache() {
   QCOMPARE(reused.pointCache.dataPath, data.pointCache.dataPath);
 }
 
+void WorkspaceDocumentTests::preservesGlobalCoordinatesWhilePagingLocalDisplayData() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("georeferenced.ply"));
+  QFile file(plyPath);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  const QByteArray payload =
+      "ply\n"
+      "format ascii 1.0\n"
+      "comment coordinate_unit m\n"
+      "comment crs=EPSG:6677\n"
+      "element vertex 3\n"
+      "property double x\n"
+      "property double y\n"
+      "property double z\n"
+      "property uchar red\n"
+      "property uchar green\n"
+      "property uchar blue\n"
+      "end_header\n"
+      "637000.123456 4000000.654321 120.25 255 0 0\n"
+      "637010.123456 4000005.654321 122.25 0 255 0\n"
+      "636995.123456 3999990.654321 119.25 0 0 255\n";
+  QCOMPARE(file.write(payload), payload.size());
+  file.close();
+
+  const gsw::PointCloudData data =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.previewOnly);
+  QVERIFY(data.coordinates.valid);
+  QVERIFY(data.coordinates.automaticDisplayShift);
+  QVERIFY(data.coordinates.unitDeclared);
+  QCOMPARE(data.coordinates.unit, gsw::SceneLengthUnit::Metres);
+  QCOMPARE(data.coordinates.coordinateReferenceSystem,
+           QStringLiteral("EPSG:6677"));
+  QVERIFY(data.coordinates.sourceUsesFloat64);
+  QVERIFY(std::abs(data.coordinates.globalMinimum.x - 636995.123456) < 1e-9);
+  QVERIFY(std::abs(data.coordinates.globalMinimum.y - 3999990.654321) < 1e-9);
+  QVERIFY(std::abs(data.coordinates.globalMinimum.z - 119.25) < 1e-12);
+  QVERIFY(std::abs(data.coordinates.globalMaximum.x - 637010.123456) < 1e-9);
+  QVERIFY(std::abs(data.coordinates.globalMaximum.y - 4000005.654321) < 1e-9);
+  QVERIFY(std::abs(data.coordinates.globalMaximum.z - 122.25) < 1e-12);
+  QCOMPARE(data.boundsMinimum, QVector3D(-5.0F, -10.0F, -1.0F));
+  QCOMPARE(data.boundsMaximum, QVector3D(10.0F, 5.0F, 2.0F));
+
+  const gsw::PointCloudCachePage root = gsw::PointCloudCache::readNode(
+      data.pointCache, data.pointCache.rootNode);
+  QVERIFY2(root.isValid(), qPrintable(root.error));
+  QVERIFY(std::all_of(
+      root.vertices.cbegin(), root.vertices.cend(),
+      [](const gsw::PointPreviewVertex &vertex) {
+        return std::abs(vertex.x) <= 10.0F && std::abs(vertex.y) <= 10.0F &&
+               std::abs(vertex.z) <= 2.0F;
+      }));
+
+  const gsw::PointCloudData reused =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(reused.isValid(), qPrintable(reused.error));
+  QCOMPARE(reused.pointCache.dataPath, data.pointCache.dataPath);
+  QVERIFY(std::abs(reused.coordinates.globalMaximum.y - 4000005.654321) <
+          1e-9);
+}
+
+void WorkspaceDocumentTests::parsesUnitsAndExportsCoordinateReport() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString sourcePath =
+      QDir(temporary.path()).filePath(QStringLiteral("metric.ply"));
+  QFile source(sourcePath);
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  source.write("ply\n");
+  source.close();
+
+  const gsw::SceneCoordinateMetadata metadata =
+      gsw::parsePlyCoordinateMetadata(
+          {QStringLiteral("units: cm"), QStringLiteral("EPSG:4978")},
+          sourcePath, true);
+  QCOMPARE(metadata.unit, gsw::SceneLengthUnit::Centimetres);
+  QVERIFY(metadata.unitDeclared);
+  QCOMPARE(metadata.coordinateReferenceSystem, QStringLiteral("EPSG:4978"));
+  QVERIFY(metadata.sourceUsesFloat64);
+
+  gsw::SceneCoordinateTracker tracker(metadata);
+  QVector3D local;
+  QVERIFY(tracker.observeAndMap(-20.0, 10.0, 5.0, local));
+  QCOMPARE(local, QVector3D(-20.0F, 10.0F, 5.0F));
+  QVERIFY(tracker.observeAndMap(80.0, 210.0, 35.0, local));
+  const gsw::SceneCoordinateInfo coordinates = tracker.info();
+  QCOMPARE(gsw::formatSceneSize(coordinates),
+           QStringLiteral("100 × 200 × 30 cm"));
+
+  QString error;
+  const QString jsonPath =
+      QDir(temporary.path()).filePath(QStringLiteral("coordinates.json"));
+  QVERIFY2(gsw::writeSceneCoordinateReport(
+               jsonPath, sourcePath, coordinates, 5.0,
+               QStringLiteral("modelBase"), &error),
+           qPrintable(error));
+  QFile jsonFile(jsonPath);
+  QVERIFY(jsonFile.open(QIODevice::ReadOnly));
+  const QJsonObject report =
+      QJsonDocument::fromJson(jsonFile.readAll()).object();
+  QCOMPARE(report.value(QStringLiteral("referencePlaneMode")).toString(),
+           QStringLiteral("modelBase"));
+  QCOMPARE(report.value(QStringLiteral("globalSize")).toArray().at(1).toDouble(),
+           200.0);
+  QCOMPARE(report.value(QStringLiteral("coordinates"))
+               .toObject()
+               .value(QStringLiteral("unit"))
+               .toString(),
+           QStringLiteral("centimetres"));
+
+  const QString csvPath =
+      QDir(temporary.path()).filePath(QStringLiteral("coordinates.csv"));
+  QVERIFY2(gsw::writeSceneCoordinateReport(
+               csvPath, sourcePath, coordinates, 0.0,
+               QStringLiteral("worldZero"), &error),
+           qPrintable(error));
+  QFile csvFile(csvPath);
+  QVERIFY(csvFile.open(QIODevice::ReadOnly));
+  const QByteArray csv = csvFile.readAll();
+  QVERIFY(csv.contains("size,100,200,30,,cm"));
+  QVERIFY(csv.contains("reference_plane_mode"));
+}
+
+void WorkspaceDocumentTests::loadsConfiguredRealCoordinateFixture() {
+  const QString fixture =
+      qEnvironmentVariable("GSW_REAL_COORDINATE_PLY").trimmed();
+  if (fixture.isEmpty()) {
+    QSKIP("GSW_REAL_COORDINATE_PLY is not configured.");
+  }
+  QVERIFY2(QFileInfo::exists(fixture), qPrintable(fixture));
+  QElapsedTimer timer;
+  timer.start();
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(fixture);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.coordinates.valid);
+  QVERIFY(data.sourceVertexCount > 0);
+  const gsw::SceneCoordinate3D size = data.coordinates.globalSize();
+  QVERIFY(size.x >= 0.0 && size.y >= 0.0 && size.z >= 0.0);
+  qInfo().noquote()
+      << QStringLiteral(
+             "REAL_COORDINATE_PLY vertices=%1 min=(%2,%3,%4) max=(%5,%6,%7) "
+             "size=(%8,%9,%10) unit=%11 elapsedMs=%12")
+             .arg(data.sourceVertexCount)
+             .arg(data.coordinates.globalMinimum.x, 0, 'g', 16)
+             .arg(data.coordinates.globalMinimum.y, 0, 'g', 16)
+             .arg(data.coordinates.globalMinimum.z, 0, 'g', 16)
+             .arg(data.coordinates.globalMaximum.x, 0, 'g', 16)
+             .arg(data.coordinates.globalMaximum.y, 0, 'g', 16)
+             .arg(data.coordinates.globalMaximum.z, 0, 'g', 16)
+             .arg(size.x, 0, 'g', 16)
+             .arg(size.y, 0, 'g', 16)
+             .arg(size.z, 0, 'g', 16)
+             .arg(gsw::sceneLengthUnitDescription(data.coordinates))
+             .arg(timer.elapsed());
+}
+
 void WorkspaceDocumentTests::buildsAndInvalidatesDiskResidentPointOctree() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -572,10 +735,11 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
       "ply\n"
       "format ascii 1.0\n"
       "comment TextureFile paged-texture.ppm\n"
+      "comment coordinate_unit m\n"
       "element vertex 5\n"
-      "property float x\n"
-      "property float y\n"
-      "property float z\n"
+      "property double x\n"
+      "property double y\n"
+      "property double z\n"
       "property uchar red\n"
       "property uchar green\n"
       "property uchar blue\n"
@@ -583,11 +747,11 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
       "property list uchar int vertex_indices\n"
       "property list uchar float texcoord\n"
       "end_header\n"
-      "+0 0 0 255 0 0\n"
-      "1e0 0 0 0 255 0\n"
-      "1 1 0 0 0 255\n"
-      "0 1 0 255 255 255\n"
-      "0.5 0.5 1 128 128 128\n"
+      "637000 4000000 100 255 0 0\n"
+      "637001 4000000 100 0 255 0\n"
+      "637001 4000001 100 0 0 255\n"
+      "637000 4000001 100 255 255 255\n"
+      "637000.5 4000000.5 101 128 128 128\n"
       "4 0 1 2 3 8 0 0 1 0 1 1 0 1\n"
       "3 0 2 4 6 0 0 1 1 0.5 0.5\n";
   QCOMPARE(ply.write(payload), payload.size());
@@ -610,6 +774,10 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
   QCOMPARE(data.sourceFaceCount, 2);
   QCOMPARE(data.sourceTriangleCount, 3);
   QCOMPARE(data.meshCache.renderableTriangleCount, qint64(3));
+  QVERIFY(data.coordinates.valid);
+  QVERIFY(data.coordinates.automaticDisplayShift);
+  QCOMPARE(data.coordinates.globalMinimum.x, 637000.0);
+  QCOMPARE(data.coordinates.globalMaximum.y, 4000001.0);
   QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, 0.0F));
   QCOMPARE(data.boundsMaximum, QVector3D(1.0F, 1.0F, 1.0F));
   const gsw::MeshCachePage rootPage =

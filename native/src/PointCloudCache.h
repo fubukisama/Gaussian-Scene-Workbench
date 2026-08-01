@@ -1,5 +1,7 @@
 #pragma once
 
+#include "SceneCoordinates.h"
+
 #include <QString>
 #include <QVector>
 #include <QVector3D>
@@ -39,7 +41,7 @@ struct PointCloudCacheNode {
 };
 
 struct PointCloudCacheIndex {
-  static constexpr int CurrentFormatVersion = 1;
+  static constexpr int CurrentFormatVersion = 2;
   static constexpr int OctreeDepth = 3;
 
   QString indexPath;
@@ -50,6 +52,7 @@ struct PointCloudCacheIndex {
   qint64 fullPointCount = 0;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
+  SceneCoordinateInfo coordinates;
   QVector<PointCloudCacheNode> nodes;
   int rootNode = 0;
   int formatVersion = 0;
@@ -82,7 +85,8 @@ class PointCloudCacheBuilder final {
 public:
   PointCloudCacheBuilder(const QString &sourcePath,
                          const QVector3D &boundsMinimum,
-                         const QVector3D &boundsMaximum);
+                         const QVector3D &boundsMaximum,
+                         const SceneCoordinateInfo &coordinates = {});
   ~PointCloudCacheBuilder();
 
   PointCloudCacheBuilder(const PointCloudCacheBuilder &) = delete;

@@ -2,6 +2,7 @@
 
 #include "MeshCache.h"
 #include "PointCloudCache.h"
+#include "SceneCoordinates.h"
 
 #include <QBitArray>
 #include <QImage>
@@ -51,6 +52,7 @@ struct PointCloudData {
   QString meshTexturePath;
   QString meshTextureError;
   bool meshHasTextureCoordinates = false;
+  SceneCoordinateInfo coordinates;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   qint64 sourceVertexCount = 0;

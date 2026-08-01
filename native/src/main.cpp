@@ -29,6 +29,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <cmath>
 
 #ifdef _WIN32
 #include <shobjidl.h>
@@ -226,9 +227,11 @@ int main(int argc, char *argv[]) {
     const QString smokeScenePath =
         QFileInfo(parser.value(smokeSceneOption)).absoluteFilePath();
     if (viewport != nullptr && QFileInfo::exists(smokeScenePath)) {
+      viewport->setReferencePlaneMode(
+          gsw::NativeViewport::ReferencePlaneMode::ModelBase);
       QObject::connect(
           viewport, &gsw::NativeViewport::sceneLoaded, &application,
-          [&application, viewport, &smokeTestCompleted,
+          [&application, &window, viewport, &smokeTestCompleted,
            &smokeTestFailureCode](const qint64 sourceVertexCount,
                                  const qsizetype, const qint64 sourceFaceCount,
                                  const qsizetype) {
@@ -241,7 +244,8 @@ int main(int argc, char *argv[]) {
                           : 300;
             QTimer::singleShot(
                 settleMilliseconds, &application,
-                [&application, viewport, sourceVertexCount, sourceFaceCount,
+                [&application, &window, viewport, sourceVertexCount,
+                 sourceFaceCount,
                  &smokeTestCompleted, &smokeTestFailureCode]() {
                   const QImage frame = viewport->grabFramebuffer();
                   const QRect sampleRect(
@@ -269,9 +273,25 @@ int main(int argc, char *argv[]) {
                   const bool meshTextureReady =
                       !qEnvironmentVariableIsSet("GSW_EXPECT_MESH_TEXTURE") ||
                       viewport->meshTextureAvailable();
+                  const gsw::SceneCoordinateInfo &coordinates =
+                      viewport->sceneCoordinates();
+                  const bool coordinateMetadataReady =
+                      coordinates.valid &&
+                      viewport->referencePlaneMode() ==
+                          gsw::NativeViewport::ReferencePlaneMode::ModelBase &&
+                      std::abs(viewport->referencePlaneElevation() -
+                               coordinates.globalMinimum.z) < 1.0e-8;
+                  const auto *coordinateReportAction =
+                      window.findChild<QAction *>(
+                          QStringLiteral("exportCoordinateReportAction"));
+                  const bool coordinateReportReady =
+                      coordinateReportAction != nullptr &&
+                      coordinateReportAction->isEnabled();
                   smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
-                                       pagedMeshReady && meshTextureReady;
+                                       pagedMeshReady && meshTextureReady &&
+                                       coordinateMetadataReady &&
+                                       coordinateReportReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -283,7 +303,11 @@ int main(int argc, char *argv[]) {
                           << "resident-mesh-triangles"
                           << viewport->residentMeshTriangleCount()
                           << "mesh-texture-ready"
-                          << viewport->meshTextureAvailable();
+                          << viewport->meshTextureAvailable()
+                          << "coordinate-metadata-ready"
+                          << coordinateMetadataReady
+                          << "coordinate-report-ready"
+                          << coordinateReportReady;
                   application.exit(smokeTestFailureCode);
                 });
           });

@@ -300,6 +300,7 @@ struct PlyHeader {
   QVector<ElementDefinition> elements;
   QVector<QByteArray> rawLines;
   QStringList textureFiles;
+  QStringList coordinateMetadata;
   qsizetype vertexElementLine = -1;
 };
 
@@ -401,6 +402,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     if (parts.first().compare(QStringLiteral("comment"),
                               Qt::CaseInsensitive) == 0) {
       const QString comment = line.sliced(parts.first().size()).trimmed();
+      header.coordinateMetadata.append(comment);
       const QString textureKey = QStringLiteral("TextureFile");
       if (comment.startsWith(textureKey, Qt::CaseInsensitive)) {
         QString textureFile = comment.sliced(textureKey.size()).trimmed();
@@ -419,6 +421,8 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     }
     if (parts.first().compare(QStringLiteral("obj_info"),
                               Qt::CaseInsensitive) == 0) {
+      header.coordinateMetadata.append(
+          line.sliced(parts.first().size()).trimmed());
       continue;
     }
     if (parts.first() == QStringLiteral("format") && parts.size() >= 2) {
@@ -810,18 +814,18 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
                   const std::array<int, 4> &rotationIndices,
                   const bool hasGaussianAttributes, const qint64 sourceIndex,
                   const bool appendPreview, bool &hasFiniteBounds,
+                  SceneCoordinateTracker &coordinateTracker,
                   PointCloudData &result) {
   const double x = values.at(xIndex);
   const double y = values.at(yIndex);
   const double z = values.at(zIndex);
-  result.sourcePositions.append(
-      {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
-  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+  QVector3D position;
+  if (!coordinateTracker.observeAndMap(x, y, z, position)) {
+    result.sourcePositions.append(PointPosition{});
     return false;
   }
+  result.sourcePositions.append({position.x(), position.y(), position.z()});
 
-  const QVector3D position(static_cast<float>(x), static_cast<float>(y),
-                           static_cast<float>(z));
   if (!hasFiniteBounds) {
     result.boundsMinimum = position;
     result.boundsMaximum = position;
@@ -839,9 +843,9 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
   }
 
   PointCloudVertex vertex;
-  vertex.x = static_cast<float>(x);
-  vertex.y = static_cast<float>(y);
-  vertex.z = static_cast<float>(z);
+  vertex.x = position.x();
+  vertex.y = position.y();
+  vertex.z = position.z();
   if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0) {
     if (sphericalHarmonicColor) {
       vertex.red = static_cast<float>(std::clamp(0.5 + kSphericalHarmonicDc * values.at(redIndex), 0.0, 1.0));
@@ -1054,7 +1058,9 @@ bool loadOutOfCoreMesh(
     const int faceTextureCoordinatesProperty,
     const int xIndex, const int yIndex, const int zIndex, const int redIndex,
     const int greenIndex, const int blueIndex,
-    const bool sphericalHarmonicColor, PointCloudData &result) {
+    const bool sphericalHarmonicColor,
+    const SceneCoordinateMetadata &coordinateMetadata,
+    PointCloudData &result) {
   const MeshCacheIndex existing = MeshCache::loadForSource(file.fileName());
   if (existing.isValid()) {
     result.meshCache = existing;
@@ -1064,6 +1070,7 @@ bool loadOutOfCoreMesh(
     result.meshHasTextureCoordinates = existing.hasTextureCoordinates;
     result.boundsMinimum = existing.boundsMinimum;
     result.boundsMaximum = existing.boundsMaximum;
+    result.coordinates = existing.coordinates;
     result.previewOnly = true;
     return true;
   }
@@ -1087,6 +1094,7 @@ bool loadOutOfCoreMesh(
   }
 
   MeshCacheBuilder builder(file.fileName(), vertexElement.count);
+  SceneCoordinateTracker coordinateTracker(coordinateMetadata);
   if (!builder.begin(&result.error)) {
     return false;
   }
@@ -1200,9 +1208,18 @@ bool loadOutOfCoreMesh(
 
       if (&element == &vertexElement) {
         MeshVertex vertex;
-        vertex.x = static_cast<float>(vertexValues.at(xIndex));
-        vertex.y = static_cast<float>(vertexValues.at(yIndex));
-        vertex.z = static_cast<float>(vertexValues.at(zIndex));
+        QVector3D localPosition;
+        if (!coordinateTracker.observeAndMap(
+                vertexValues.at(xIndex), vertexValues.at(yIndex),
+                vertexValues.at(zIndex), localPosition)) {
+          result.error = QStringLiteral(
+              "PLY mesh vertex %1 contains a non-finite coordinate.")
+                             .arg(recordIndex);
+          return false;
+        }
+        vertex.x = localPosition.x();
+        vertex.y = localPosition.y();
+        vertex.z = localPosition.z();
         if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0 &&
             std::isfinite(vertexValues.at(redIndex)) &&
             std::isfinite(vertexValues.at(greenIndex)) &&
@@ -1281,6 +1298,8 @@ bool loadOutOfCoreMesh(
     result.error = QStringLiteral("The PLY mesh vertex table was not read.");
     return false;
   }
+  result.coordinates = coordinateTracker.info();
+  builder.setCoordinateInfo(result.coordinates);
   result.meshCache = builder.finish(faceElement.count, sourceTriangleIndex,
                                     &result.error);
   if (!result.meshCache.isValid()) {
@@ -1296,6 +1315,7 @@ bool loadOutOfCoreMesh(
       result.meshCache.hasTextureCoordinates;
   result.boundsMinimum = result.meshCache.boundsMinimum;
   result.boundsMaximum = result.meshCache.boundsMaximum;
+  result.coordinates = result.meshCache.coordinates;
   result.previewOnly = true;
   return true;
 }
@@ -1304,7 +1324,9 @@ bool loadAsciiPointCache(
     QFile &file, const ElementDefinition &vertexElement, const int xIndex,
     const int yIndex, const int zIndex, const int redIndex,
     const int greenIndex, const int blueIndex,
-    const bool sphericalHarmonicColor, PointCloudData &result) {
+    const bool sphericalHarmonicColor,
+    const SceneCoordinateMetadata &coordinateMetadata,
+    PointCloudData &result) {
   const qint64 vertexDataOffset = file.pos();
   const QFileInfo sourceBefore(file.fileName());
   QDir cacheDirectory(
@@ -1337,20 +1359,21 @@ bool loadAsciiPointCache(
   spoolBuffer.reserve(kAsciiSpoolBufferPoints);
   bool hasFiniteBounds = false;
   qint64 finitePointCount = 0;
+  SceneCoordinateTracker coordinateTracker(coordinateMetadata);
   const auto appendPoint = [&](const double x, const double y, const double z,
                                const double red, const double green,
                                const double blue) -> bool {
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
       return true;
     }
-    PointPreviewVertex vertex;
-    vertex.x = static_cast<float>(x);
-    vertex.y = static_cast<float>(y);
-    vertex.z = static_cast<float>(z);
-    if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) ||
-        !std::isfinite(vertex.z)) {
+    QVector3D position;
+    if (!coordinateTracker.observeAndMap(x, y, z, position)) {
       return true;
     }
+    PointPreviewVertex vertex;
+    vertex.x = position.x();
+    vertex.y = position.y();
+    vertex.z = position.z();
     if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0 &&
         std::isfinite(red) && std::isfinite(green) &&
         std::isfinite(blue)) {
@@ -1370,7 +1393,6 @@ bool loadAsciiPointCache(
             blue, vertexElement.properties.at(blueIndex).valueType);
       }
     }
-    const QVector3D position(vertex.x, vertex.y, vertex.z);
     if (!hasFiniteBounds) {
       result.boundsMinimum = position;
       result.boundsMaximum = position;
@@ -1438,6 +1460,7 @@ bool loadAsciiPointCache(
     result.error = QStringLiteral("The PLY file contains no finite vertices.");
     return false;
   }
+  result.coordinates = coordinateTracker.info();
   if ((!spoolBuffer.isEmpty() &&
        !writePointSpoolBatch(spool, spoolBuffer, result.error)) ||
       !spool.flush() || !spool.seek(0)) {
@@ -1456,8 +1479,9 @@ bool loadAsciiPointCache(
     return false;
   }
 
-  PointCloudCacheBuilder cacheBuilder(file.fileName(), result.boundsMinimum,
-                                      result.boundsMaximum);
+  PointCloudCacheBuilder cacheBuilder(
+      file.fileName(), result.boundsMinimum, result.boundsMaximum,
+      result.coordinates);
   if (!cacheBuilder.begin(&result.error)) {
     return false;
   }
@@ -1491,6 +1515,7 @@ bool loadAsciiPointCache(
   }
   result.boundsMinimum = result.pointCache.boundsMinimum;
   result.boundsMaximum = result.pointCache.boundsMaximum;
+  result.coordinates = result.pointCache.coordinates;
   result.previewOnly = true;
   return true;
 }
@@ -1499,13 +1524,16 @@ bool loadFullResolutionPointPreview(
     QFile &file, const PlyHeader &header, const ElementDefinition &vertexElement,
     const int xIndex, const int yIndex, const int zIndex, const int redIndex,
     const int greenIndex, const int blueIndex,
-    const bool sphericalHarmonicColor, PointCloudData &result) {
+    const bool sphericalHarmonicColor,
+    const SceneCoordinateMetadata &coordinateMetadata,
+    PointCloudData &result) {
   const PointCloudCacheIndex existingCache =
       PointCloudCache::loadForSource(file.fileName());
   if (existingCache.isValid()) {
     result.pointCache = existingCache;
     result.boundsMinimum = existingCache.boundsMinimum;
     result.boundsMaximum = existingCache.boundsMaximum;
+    result.coordinates = existingCache.coordinates;
     result.previewOnly = true;
     return true;
   }
@@ -1533,7 +1561,8 @@ bool loadFullResolutionPointPreview(
   if (header.format == PlyFormat::Ascii) {
     return loadAsciiPointCache(file, vertexElement, xIndex, yIndex, zIndex,
                                redIndex, greenIndex, blueIndex,
-                               sphericalHarmonicColor, result);
+                               sphericalHarmonicColor, coordinateMetadata,
+                               result);
   }
 
   QVector<qsizetype> offsets;
@@ -1555,6 +1584,7 @@ bool loadFullResolutionPointPreview(
   };
   const qint64 vertexDataOffset = file.pos();
   bool hasFiniteBounds = false;
+  SceneCoordinateTracker coordinateTracker(coordinateMetadata);
   qint64 sourceFirstVertex = 0;
   while (sourceFirstVertex < vertexElement.count) {
     const qsizetype requestedRecords = static_cast<qsizetype>(
@@ -1578,8 +1608,10 @@ bool loadFullResolutionPointPreview(
           !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) {
         continue;
       }
-      const QVector3D position(static_cast<float>(*x), static_cast<float>(*y),
-                               static_cast<float>(*z));
+      QVector3D position;
+      if (!coordinateTracker.observeAndMap(*x, *y, *z, position)) {
+        continue;
+      }
       if (!hasFiniteBounds) {
         result.boundsMinimum = position;
         result.boundsMaximum = position;
@@ -1605,9 +1637,11 @@ bool loadFullResolutionPointPreview(
     result.error = QStringLiteral("The PLY file contains no finite vertices.");
     return false;
   }
+  result.coordinates = coordinateTracker.info();
 
-  PointCloudCacheBuilder cacheBuilder(file.fileName(), result.boundsMinimum,
-                                      result.boundsMaximum);
+  PointCloudCacheBuilder cacheBuilder(
+      file.fileName(), result.boundsMinimum, result.boundsMaximum,
+      result.coordinates);
   if (!cacheBuilder.begin(&result.error) || !file.seek(vertexDataOffset)) {
     if (result.error.isEmpty()) {
       result.error = QStringLiteral("Unable to rewind the PLY for cache construction.");
@@ -1638,9 +1672,11 @@ bool loadFullResolutionPointPreview(
         continue;
       }
       PointPreviewVertex vertex;
-      vertex.x = static_cast<float>(*x);
-      vertex.y = static_cast<float>(*y);
-      vertex.z = static_cast<float>(*z);
+      const QVector3D localPosition = result.coordinates.localFromGlobal(
+          SceneCoordinate3D{*x, *y, *z});
+      vertex.x = localPosition.x();
+      vertex.y = localPosition.y();
+      vertex.z = localPosition.z();
       if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0) {
         const double red = valueAt(record, redIndex).value_or(0.72);
         const double green = valueAt(record, greenIndex).value_or(0.75);
@@ -1677,6 +1713,7 @@ bool loadFullResolutionPointPreview(
   }
   result.boundsMinimum = result.pointCache.boundsMinimum;
   result.boundsMaximum = result.pointCache.boundsMaximum;
+  result.coordinates = result.pointCache.coordinates;
   result.previewOnly = true;
   return true;
 }
@@ -2030,6 +2067,13 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     result.error = QStringLiteral("The PLY vertex element must contain scalar x, y, and z properties.");
     return result;
   }
+  const bool sourceUsesFloat64 =
+      vertexElement.properties.at(xIndex).valueType == ScalarType::Float64 ||
+      vertexElement.properties.at(yIndex).valueType == ScalarType::Float64 ||
+      vertexElement.properties.at(zIndex).valueType == ScalarType::Float64;
+  const SceneCoordinateMetadata coordinateMetadata =
+      parsePlyCoordinateMetadata(header.coordinateMetadata, file.fileName(),
+                                 sourceUsesFloat64);
 
   int redIndex = findProperty(vertexElement, {QStringLiteral("red"), QStringLiteral("r"),
                                                QStringLiteral("diffuse_red")});
@@ -2071,14 +2115,15 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                       faceVertexIndicesProperty,
                       faceTextureCoordinatesProperty, xIndex, yIndex, zIndex,
                       redIndex, greenIndex, blueIndex,
-                      sphericalHarmonicColor, result);
+                      sphericalHarmonicColor, coordinateMetadata, result);
     return result;
   }
 
   if (!containsMeshFaces && vertexElement.count > maximumEditablePoints) {
     loadFullResolutionPointPreview(
         file, header, vertexElement, xIndex, yIndex, zIndex, redIndex,
-        greenIndex, blueIndex, sphericalHarmonicColor, result);
+        greenIndex, blueIndex, sphericalHarmonicColor, coordinateMetadata,
+        result);
     return result;
   }
 
@@ -2112,6 +2157,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                 faceElementIterator->count, kMaximumMeshPreviewFaces))
           : 0;
   bool hasFiniteBounds = false;
+  SceneCoordinateTracker coordinateTracker(coordinateMetadata);
 
   for (const ElementDefinition &element : header.elements) {
     QVector<double> values(element.properties.size());
@@ -2158,7 +2204,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       appendVertex(element, values, xIndex, yIndex, zIndex, redIndex, greenIndex,
                    blueIndex, sphericalHarmonicColor, opacityIndex,
                    scaleIndices, rotationIndices, result.hasGaussianAttributes,
-                   recordIndex, appendPreview, hasFiniteBounds, result);
+                   recordIndex, appendPreview, hasFiniteBounds,
+                   coordinateTracker, result);
     }
   }
 
@@ -2166,6 +2213,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     result.error = QStringLiteral("The PLY file contains no finite vertices.");
     return result;
   }
+  result.coordinates = coordinateTracker.info();
   if (containsMeshFaces && !finalizeMeshGeometry(result)) {
     result.error = QStringLiteral(
         "The PLY declares mesh faces but contains no renderable triangles.");

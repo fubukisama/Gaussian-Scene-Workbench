@@ -115,6 +115,7 @@ private:
   bool saveProject(bool forceChoosePath = false);
   bool finalizePendingProjectSave(QString *errorMessage = nullptr);
   bool exportCroppedScene();
+  bool exportCoordinateReport();
   bool ensureProjectRecoveryReady();
   bool recoverDatasetImport(const PendingDatasetImport &pending,
                             QString *errorMessage = nullptr,
@@ -173,6 +174,13 @@ private:
   QLabel *mGaussianCountValue = nullptr;
   QLabel *mPlyFormatValue = nullptr;
   QLabel *mCameraCountValue = nullptr;
+  QLabel *mCoordinateSystemValue = nullptr;
+  QLabel *mSceneUnitValue = nullptr;
+  QLabel *mSceneCenterValue = nullptr;
+  QLabel *mSceneSizeValue = nullptr;
+  QLabel *mSceneBoundsValue = nullptr;
+  QLabel *mDisplayShiftValue = nullptr;
+  QLabel *mReferencePlaneValue = nullptr;
   QLabel *mProjectStatus = nullptr;
   QLabel *mRendererStatus = nullptr;
   QLabel *mEditStatus = nullptr;
@@ -212,10 +220,14 @@ private:
   QAction *mUndoEditAction = nullptr;
   QAction *mRedoEditAction = nullptr;
   QAction *mExportCropAction = nullptr;
+  QAction *mExportCoordinateReportAction = nullptr;
+  QAction *mModelBasePlaneAction = nullptr;
+  QAction *mWorldZeroPlaneAction = nullptr;
   QAction *mAutoScaleAction = nullptr;
   QActionGroup *mEditModeActionGroup = nullptr;
   QActionGroup *mRenderModeActionGroup = nullptr;
   QActionGroup *mScaleActionGroup = nullptr;
+  QActionGroup *mReferencePlaneActionGroup = nullptr;
   QSpinBox *mBrushRadiusSpin = nullptr;
 
   int mUiScalePercent = 100;

@@ -35,6 +35,8 @@ class QTimer;
 
 namespace gsw {
 
+enum class ReferenceGridPlane;
+
 class NativeViewport final : public QOpenGLWidget,
                              protected QOpenGLExtraFunctions {
   Q_OBJECT
@@ -45,6 +47,9 @@ public:
   enum class RenderMode { Points, Mesh, Gaussians };
   Q_ENUM(RenderMode)
 
+  enum class ReferencePlaneMode { ModelBase, WorldZero };
+  Q_ENUM(ReferencePlaneMode)
+
   explicit NativeViewport(QWidget *parent = nullptr);
   ~NativeViewport() override;
 
@@ -53,6 +58,7 @@ public:
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
   void setRenderMode(RenderMode mode);
+  void setReferencePlaneMode(ReferencePlaneMode mode);
   void setVisibleOnlySelection(bool enabled);
   void setBrushRadius(int pixels);
   void setAxisView(NavigationAxis axis);
@@ -81,6 +87,15 @@ public:
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
   [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
+  [[nodiscard]] ReferencePlaneMode referencePlaneMode() const {
+    return mReferencePlaneMode;
+  }
+  [[nodiscard]] const SceneCoordinateInfo &sceneCoordinates() const {
+    return mSceneCoordinates;
+  }
+  [[nodiscard]] QString scenePath() const { return mScenePath; }
+  [[nodiscard]] double referencePlaneElevation() const;
+  [[nodiscard]] QString referencePlaneDescription() const;
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
   [[nodiscard]] TrainingGpuPreviewCapability
   trainingGpuPreviewCapability() const {
@@ -107,6 +122,9 @@ signals:
   void gaussianRenderingAvailabilityChanged(bool available);
   void meshRenderingAvailabilityChanged(bool available);
   void renderModeChanged(gsw::NativeViewport::RenderMode mode);
+  void sceneCoordinatesChanged();
+  void referencePlaneModeChanged(
+      gsw::NativeViewport::ReferencePlaneMode mode);
   void cameraTrajectoryChanged(qsizetype cameraCount,
                                qsizetype invalidCameraCount,
                                bool displayDecimated, const QString &sourcePath,
@@ -158,6 +176,8 @@ private:
   };
 
   [[nodiscard]] QVector3D cameraPosition() const;
+  [[nodiscard]] QVector3D gridOrigin(ReferenceGridPlane plane) const;
+  [[nodiscard]] QString formatViewportDistance(float localDistance) const;
   [[nodiscard]] bool pagedMeshAvailable() const;
   [[nodiscard]] QMatrix4x4 viewMatrix() const;
   [[nodiscard]] QMatrix4x4 projectionMatrix() const;
@@ -255,6 +275,8 @@ private:
   int mSceneGeneration = 0;
   int mCameraTrajectoryGeneration = 0;
   RenderMode mRenderMode = RenderMode::Points;
+  ReferencePlaneMode mReferencePlaneMode = ReferencePlaneMode::ModelBase;
+  SceneCoordinateInfo mSceneCoordinates;
   QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;

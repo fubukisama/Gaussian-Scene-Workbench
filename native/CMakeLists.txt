@@ -77,6 +77,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ReconstructionDialog.h
   src/SceneEditModel.cpp
   src/SceneEditModel.h
+  src/SceneCoordinates.cpp
+  src/SceneCoordinates.h
   src/ScreenSpaceSelection.cpp
   src/ScreenSpaceSelection.h
   src/TrainingDialog.cpp
@@ -284,6 +286,8 @@ if(BUILD_TESTING)
       src/PointCloudCache.h
       src/SceneEditModel.cpp
       src/SceneEditModel.h
+      src/SceneCoordinates.cpp
+      src/SceneCoordinates.h
       src/ScreenSpaceSelection.cpp
       src/ScreenSpaceSelection.h
       src/TrainingOutputLocator.cpp

@@ -1140,6 +1140,49 @@ void MainWindow::createActions() {
   connect(mExportCropAction, &QAction::triggered, this,
           &MainWindow::exportCroppedScene);
 
+  mExportCoordinateReportAction =
+      new QAction(QStringLiteral("导出坐标与尺寸报告..."), this);
+  mExportCoordinateReportAction->setObjectName(
+      QStringLiteral("exportCoordinateReportAction"));
+  mExportCoordinateReportAction->setToolTip(
+      QStringLiteral("导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移"));
+  connect(mExportCoordinateReportAction, &QAction::triggered, this,
+          &MainWindow::exportCoordinateReport);
+
+  mReferencePlaneActionGroup = new QActionGroup(this);
+  mReferencePlaneActionGroup->setExclusive(true);
+  mModelBasePlaneAction =
+      new QAction(QStringLiteral("模型底部（推荐）"), this);
+  mModelBasePlaneAction->setObjectName(
+      QStringLiteral("modelBaseReferencePlaneAction"));
+  mModelBasePlaneAction->setCheckable(true);
+  mWorldZeroPlaneAction = new QAction(QStringLiteral("世界坐标 Z=0"), this);
+  mWorldZeroPlaneAction->setObjectName(
+      QStringLiteral("worldZeroReferencePlaneAction"));
+  mWorldZeroPlaneAction->setCheckable(true);
+  mReferencePlaneActionGroup->addAction(mModelBasePlaneAction);
+  mReferencePlaneActionGroup->addAction(mWorldZeroPlaneAction);
+  const bool useWorldZero =
+      QSettings()
+          .value(QStringLiteral("view/referencePlane"),
+                 QStringLiteral("modelBase"))
+          .toString() == QStringLiteral("worldZero");
+  mModelBasePlaneAction->setChecked(!useWorldZero);
+  mWorldZeroPlaneAction->setChecked(useWorldZero);
+  mViewport->setReferencePlaneMode(
+      useWorldZero ? NativeViewport::ReferencePlaneMode::WorldZero
+                   : NativeViewport::ReferencePlaneMode::ModelBase);
+  connect(mReferencePlaneActionGroup, &QActionGroup::triggered, this,
+          [this](QAction *action) {
+            const bool worldZero = action == mWorldZeroPlaneAction;
+            mViewport->setReferencePlaneMode(
+                worldZero ? NativeViewport::ReferencePlaneMode::WorldZero
+                          : NativeViewport::ReferencePlaneMode::ModelBase);
+            QSettings().setValue(QStringLiteral("view/referencePlane"),
+                                 worldZero ? QStringLiteral("worldZero")
+                                           : QStringLiteral("modelBase"));
+          });
+
   connect(mEditModeActionGroup, &QActionGroup::triggered, this,
           [this]() { updateEditActions(); });
 
@@ -1224,6 +1267,7 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mVisibleOnlyAction);
   sceneMenu->addSeparator();
   sceneMenu->addAction(mExportCropAction);
+  sceneMenu->addAction(mExportCoordinateReportAction);
 
   QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
   QMenu *renderMenu = viewMenu->addMenu(QStringLiteral("渲染模式"));
@@ -1231,6 +1275,10 @@ void MainWindow::createMenus() {
   renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
   viewMenu->addAction(mShowCamerasAction);
+  QMenu *referencePlaneMenu =
+      viewMenu->addMenu(QStringLiteral("基准面网格"));
+  referencePlaneMenu->addAction(mModelBasePlaneAction);
+  referencePlaneMenu->addAction(mWorldZeroPlaneAction);
   viewMenu->addSeparator();
   viewMenu->addAction(mProjectDock->toggleViewAction());
   viewMenu->addAction(mInspectorDock->toggleViewAction());
@@ -1496,10 +1544,24 @@ void MainWindow::createInspectorDock() {
   mGaussianCountValue = createValueLabel(panel);
   mPlyFormatValue = createValueLabel(panel);
   mCameraCountValue = createValueLabel(panel);
+  mCoordinateSystemValue = createValueLabel(panel);
+  mSceneUnitValue = createValueLabel(panel);
+  mSceneCenterValue = createValueLabel(panel);
+  mSceneSizeValue = createValueLabel(panel);
+  mSceneBoundsValue = createValueLabel(panel);
+  mDisplayShiftValue = createValueLabel(panel);
+  mReferencePlaneValue = createValueLabel(panel);
   sceneForm->addRow(QStringLiteral("文件"), mSceneValue);
   sceneForm->addRow(QStringLiteral("数量"), mGaussianCountValue);
   sceneForm->addRow(QStringLiteral("格式"), mPlyFormatValue);
   sceneForm->addRow(QStringLiteral("相机"), mCameraCountValue);
+  sceneForm->addRow(QStringLiteral("坐标系"), mCoordinateSystemValue);
+  sceneForm->addRow(QStringLiteral("单位"), mSceneUnitValue);
+  sceneForm->addRow(QStringLiteral("中心"), mSceneCenterValue);
+  sceneForm->addRow(QStringLiteral("尺寸"), mSceneSizeValue);
+  sceneForm->addRow(QStringLiteral("范围"), mSceneBoundsValue);
+  sceneForm->addRow(QStringLiteral("显示变换"), mDisplayShiftValue);
+  sceneForm->addRow(QStringLiteral("基准面"), mReferencePlaneValue);
   layout->addLayout(sceneForm);
   layout->addStretch(1);
 
@@ -2094,6 +2156,21 @@ void MainWindow::connectServices() {
                       .arg(sourceVertexCount)
                       .arg(previewVertexCount));
             }
+          });
+  connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
+          [this]() {
+            updateInspector();
+            updateActionAvailability();
+          });
+  connect(mViewport, &NativeViewport::referencePlaneModeChanged, this,
+          [this](const NativeViewport::ReferencePlaneMode mode) {
+            if (mModelBasePlaneAction != nullptr) {
+              mModelBasePlaneAction->setChecked(
+                  mode == NativeViewport::ReferencePlaneMode::ModelBase);
+              mWorldZeroPlaneAction->setChecked(
+                  mode == NativeViewport::ReferencePlaneMode::WorldZero);
+            }
+            updateInspector();
           });
   connect(mViewport, &NativeViewport::sceneLoadFailed, this,
           [this](const QString &, const QString &message) {
@@ -3347,6 +3424,45 @@ bool MainWindow::exportCroppedScene() {
   return true;
 }
 
+bool MainWindow::exportCoordinateReport() {
+  const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  const QString sourcePath = mViewport->scenePath();
+  if (!coordinates.valid || sourcePath.isEmpty()) {
+    return false;
+  }
+  const QFileInfo sourceInfo(sourcePath);
+  QString target = sourceInfo.dir().filePath(
+      sourceInfo.completeBaseName() + QStringLiteral("-coordinates.json"));
+  target = QFileDialog::getSaveFileName(
+      this, QStringLiteral("导出坐标与尺寸报告"), target,
+      QStringLiteral("JSON 坐标报告 (*.json);;CSV 坐标报告 (*.csv)"));
+  if (target.isEmpty()) {
+    return false;
+  }
+  const QString suffix = QFileInfo(target).suffix();
+  if (suffix.compare(QStringLiteral("json"), Qt::CaseInsensitive) != 0 &&
+      suffix.compare(QStringLiteral("csv"), Qt::CaseInsensitive) != 0) {
+    target += QStringLiteral(".json");
+  }
+
+  QString error;
+  const QString planeMode =
+      mViewport->referencePlaneMode() ==
+              NativeViewport::ReferencePlaneMode::ModelBase
+          ? QStringLiteral("modelBase")
+          : QStringLiteral("worldZero");
+  if (!writeSceneCoordinateReport(
+          target, sourcePath, coordinates,
+          mViewport->referencePlaneElevation(), planeMode, &error)) {
+    showError(QStringLiteral("无法导出坐标报告"), error);
+    return false;
+  }
+  appendTaskEvent(QStringLiteral("坐标与尺寸报告已导出：%1")
+                      .arg(QDir::toNativeSeparators(target)));
+  statusBar()->showMessage(QStringLiteral("坐标与尺寸报告已导出"), 5000);
+  return true;
+}
+
 bool MainWindow::ensureProjectRecoveryReady() {
   if (!mRecoveryBlocked) {
     return true;
@@ -4409,6 +4525,10 @@ void MainWindow::updateActionAvailability() {
   mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);
   mImportSceneAction->setEnabled(dataEntryReady);
+  mExportCoordinateReportAction->setEnabled(
+      mViewport->sceneCoordinates().valid);
+  mModelBasePlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
+  mWorldZeroPlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
   const bool cleanupReady =
       !running && workspaceReady && !mWorkspace.hasPendingDataMigration();
   mClearDatasetAction->setEnabled(
@@ -4539,6 +4659,59 @@ void MainWindow::updateInspector() {
                                                     : QStringLiteral("PLY 点云"),
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
+  const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  if (coordinates.valid) {
+    mCoordinateSystemValue->setText(
+        coordinates.coordinateReferenceSystem.isEmpty()
+            ? QStringLiteral("未声明（局部/任意坐标）")
+            : coordinates.coordinateReferenceSystem);
+    mCoordinateSystemValue->setToolTip(
+        coordinates.coordinateReferenceSystem);
+    mSceneUnitValue->setText(
+        QStringLiteral("%1 | 源坐标 %2")
+            .arg(sceneLengthUnitDescription(coordinates),
+                 coordinates.sourceUsesFloat64 ? QStringLiteral("float64")
+                                               : QStringLiteral("float32")));
+    mSceneUnitValue->setToolTip(
+        coordinates.unitDeclared
+            ? QStringLiteral("单位由 PLY 元数据或同名 .prj 辅助信息识别。")
+            : QStringLiteral(
+                  "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。"));
+    mSceneCenterValue->setText(
+        formatSceneVector(coordinates.globalCenter(), coordinates));
+    mSceneSizeValue->setText(formatSceneSize(coordinates));
+    mSceneBoundsValue->setText(
+        QStringLiteral("最小  %1\n最大  %2")
+            .arg(formatSceneVector(coordinates.globalMinimum, coordinates),
+                 formatSceneVector(coordinates.globalMaximum, coordinates)));
+    const SceneCoordinate3D shift = coordinates.displayShift;
+    const bool shifted = coordinates.automaticDisplayShift ||
+                         shift.x != 0.0 || shift.y != 0.0 || shift.z != 0.0 ||
+                         coordinates.displayScale != 1.0;
+    mDisplayShiftValue->setText(
+        shifted
+            ? QStringLiteral("T=(%1, %2, %3), S=%4%5")
+                  .arg(QString::number(shift.x, 'g', 12),
+                       QString::number(shift.y, 'g', 12),
+                       QString::number(shift.z, 'g', 12),
+                       QString::number(coordinates.displayScale, 'g', 12),
+                       coordinates.automaticDisplayShift
+                           ? QStringLiteral("（自动精度保护）")
+                           : QString())
+            : QStringLiteral("无（原始坐标直接显示）"));
+    mDisplayShiftValue->setToolTip(
+        QStringLiteral(
+            "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。"));
+    mReferencePlaneValue->setText(mViewport->referencePlaneDescription());
+  } else {
+    for (QLabel *label :
+         {mCoordinateSystemValue, mSceneUnitValue, mSceneCenterValue,
+          mSceneSizeValue, mSceneBoundsValue, mDisplayShiftValue,
+          mReferencePlaneValue}) {
+      label->setText(QStringLiteral("-"));
+      label->setToolTip(QString());
+    }
+  }
   if (mCameraCount > 0) {
     const QString sourceName = mCameraSourcePath.isEmpty()
                                    ? QStringLiteral("cameras.json")

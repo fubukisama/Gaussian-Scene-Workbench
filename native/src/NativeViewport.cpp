@@ -296,6 +296,8 @@ void NativeViewport::setScene(const QString &scenePath,
   mHasMesh = false;
   mPreviewOnlyScene = false;
   mRenderMode = RenderMode::Points;
+  const bool hadSceneCoordinates = mSceneCoordinates.valid;
+  mSceneCoordinates = {};
   mSceneLoadMessage.clear();
   mSourcePositions.clear();
   mSourcePositions.squeeze();
@@ -345,6 +347,9 @@ void NativeViewport::setScene(const QString &scenePath,
   }
   if (renderModeChangedToPoints) {
     emit renderModeChanged(mRenderMode);
+  }
+  if (hadSceneCoordinates) {
+    emit sceneCoordinatesChanged();
   }
   reloadCameraTrajectory(scenePath, true);
   resetCamera();
@@ -481,6 +486,32 @@ bool NativeViewport::hasUnsavedSceneEdits() const {
 bool NativeViewport::hasEditableScene() const {
   return !mPreviewOnlyScene && !mHasMesh && !mScenePath.isEmpty() &&
          mEditModel.pointCount() > 0;
+}
+
+void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
+  if (mReferencePlaneMode == mode) {
+    return;
+  }
+  mReferencePlaneMode = mode;
+  emit referencePlaneModeChanged(mode);
+  update();
+}
+
+double NativeViewport::referencePlaneElevation() const {
+  return mReferencePlaneMode == ReferencePlaneMode::ModelBase &&
+                 mSceneCoordinates.valid
+             ? mSceneCoordinates.globalMinimum.z
+             : 0.0;
+}
+
+QString NativeViewport::referencePlaneDescription() const {
+  if (mReferencePlaneMode == ReferencePlaneMode::WorldZero ||
+      !mSceneCoordinates.valid) {
+    return QStringLiteral("世界坐标 Z=0");
+  }
+  return QStringLiteral("模型底部 Z=%1")
+      .arg(formatSceneCoordinate(mSceneCoordinates.globalMinimum.z,
+                                 mSceneCoordinates));
 }
 
 namespace {
@@ -847,6 +878,7 @@ uniform float gridUpperMinorStep;
 uniform float gridLevelBlend;
 uniform float uiScale;
 uniform vec3 gridPlaneNormal;
+uniform vec3 gridPlaneOrigin;
 uniform vec3 gridAxisU;
 uniform vec3 gridAxisV;
 uniform vec3 gridAxisUColor;
@@ -891,7 +923,8 @@ void main() {
     discard;
   }
 
-  float rayParameter = -dot(nearPoint, gridPlaneNormal) / planeRay;
+  float rayParameter =
+      dot(gridPlaneOrigin - nearPoint, gridPlaneNormal) / planeRay;
   if (rayParameter <= 0.0) {
     discard;
   }
@@ -899,8 +932,9 @@ void main() {
   // beyond the scene far plane keeps the background grid independent from
   // the much tighter depth range used by points and Gaussian splats.
   vec3 world = nearPoint + rayParameter * ray;
-  vec2 gridCoordinate = vec2(dot(world, gridAxisU),
-                             dot(world, gridAxisV));
+  vec3 relativeWorld = world - gridPlaneOrigin;
+  vec2 gridCoordinate = vec2(dot(relativeWorld, gridAxisU),
+                             dot(relativeWorld, gridAxisV));
 
   // CPU-selected 1-2-5 levels give the viewport a concrete minimum scale and
   // keep the visible scale label in exact agreement with the rendered grid.
@@ -1235,6 +1269,21 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
 
 void NativeViewport::rebuildCameraGeometry() {
   mCameraGeometry = mCameraTrajectory.geometry(mSceneRadius);
+  if (!mSceneCoordinates.valid ||
+      (!mSceneCoordinates.automaticDisplayShift &&
+       mSceneCoordinates.displayScale == 1.0)) {
+    return;
+  }
+  const auto transformSegments = [this](QList<CameraLineSegment> &segments) {
+    for (CameraLineSegment &segment : segments) {
+      segment.start = mSceneCoordinates.localFromGlobal(
+          {segment.start.x(), segment.start.y(), segment.start.z()});
+      segment.end = mSceneCoordinates.localFromGlobal(
+          {segment.end.x(), segment.end.y(), segment.end.z()});
+    }
+  };
+  transformSegments(mCameraGeometry.frustums);
+  transformSegments(mCameraGeometry.path);
 }
 
 void NativeViewport::startSceneLoad(const QString &scenePath) {
@@ -1258,6 +1307,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
               return;
             }
 
+            mSceneCoordinates = data.coordinates;
             mSceneCenter = data.center();
             mTarget = mSceneCenter;
             mSceneRadius = data.radius();
@@ -1345,6 +1395,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             emit meshRenderingAvailabilityChanged(meshRenderingAvailable());
             emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount,
                              data.sourceFaceCount, mPreviewTriangleCount);
+            emit sceneCoordinatesChanged();
           });
   watcher->setFuture(QtConcurrent::run(
       [scenePath]() { return PlyPointCloudLoader::load(scenePath); }));
@@ -2514,9 +2565,11 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->setUniformValue("cameraWorld", cameraPosition());
   const ReferenceGridScale scale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
-  const ReferenceGridFrame grid = referenceGridFrame(
-      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic));
+  const ReferenceGridPlane plane =
+      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
+  const ReferenceGridFrame grid = referenceGridFrame(plane);
   mGridProgram->setUniformValue("gridPlaneNormal", grid.normal);
+  mGridProgram->setUniformValue("gridPlaneOrigin", gridOrigin(plane));
   mGridProgram->setUniformValue("gridAxisU", grid.axisU);
   mGridProgram->setUniformValue("gridAxisV", grid.axisV);
   mGridProgram->setUniformValue("gridAxisUColor", grid.axisUColor);
@@ -2760,8 +2813,8 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     {
       const ViewportZoomLimits limits = viewportZoomLimits(mSceneRadius);
       tooltip = QStringLiteral("上下拖动缩放视图（%1 – %2）")
-                    .arg(formatMetricDistance(limits.minimumDistance),
-                         formatMetricDistance(limits.maximumDistance));
+                    .arg(formatViewportDistance(limits.minimumDistance),
+                         formatViewportDistance(limits.maximumDistance));
     }
     setCursor(Qt::SizeVerCursor);
     break;
@@ -2937,6 +2990,34 @@ QVector3D NativeViewport::cameraPosition() const {
   return mTarget + frame.cameraOffsetDirection * mDistance;
 }
 
+QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
+  if (!mSceneCoordinates.valid) {
+    return referenceGridOrigin();
+  }
+  if (mReferencePlaneMode == ReferencePlaneMode::WorldZero) {
+    return mSceneCoordinates.localFromGlobal({0.0, 0.0, 0.0});
+  }
+  const QVector3D minimum = mSceneCoordinates.localMinimum();
+  switch (plane) {
+  case ReferenceGridPlane::XY:
+    return QVector3D(0.0F, 0.0F, minimum.z());
+  case ReferenceGridPlane::XZ:
+    return QVector3D(0.0F, minimum.y(), 0.0F);
+  case ReferenceGridPlane::YZ:
+    return QVector3D(minimum.x(), 0.0F, 0.0F);
+  }
+  return referenceGridOrigin();
+}
+
+QString NativeViewport::formatViewportDistance(const float localDistance) const {
+  if (!mSceneCoordinates.valid) {
+    return formatMetricDistance(localDistance);
+  }
+  const double sourceDistance =
+      static_cast<double>(localDistance) / mSceneCoordinates.displayScale;
+  return formatSceneLength(sourceDistance, mSceneCoordinates);
+}
+
 QMatrix4x4 NativeViewport::viewMatrix() const {
   QMatrix4x4 view;
   const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
@@ -2985,13 +3066,16 @@ NativeViewport::projectPoint(const QVector3D &point,
 void NativeViewport::drawReferenceAxes(QPainter &painter,
                                        const QMatrix4x4 &viewProjection) {
   const float axisLength = std::max(3.0F, mSceneRadius);
-  const auto origin = projectPoint(QVector3D(0.0F, 0.0F, 0.0F), viewProjection);
-  const auto xAxis =
-      projectPoint(QVector3D(axisLength, 0.0F, 0.0F), viewProjection);
-  const auto yAxis =
-      projectPoint(QVector3D(0.0F, axisLength, 0.0F), viewProjection);
-  const auto zAxis =
-      projectPoint(QVector3D(0.0F, 0.0F, axisLength), viewProjection);
+  const ReferenceGridPlane plane =
+      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
+  const QVector3D originLocal = gridOrigin(plane);
+  const auto origin = projectPoint(originLocal, viewProjection);
+  const auto xAxis = projectPoint(
+      originLocal + QVector3D(axisLength, 0.0F, 0.0F), viewProjection);
+  const auto yAxis = projectPoint(
+      originLocal + QVector3D(0.0F, axisLength, 0.0F), viewProjection);
+  const auto zAxis = projectPoint(
+      originLocal + QVector3D(0.0F, 0.0F, axisLength), viewProjection);
   if (origin.has_value() && xAxis.has_value()) {
     painter.setPen(QPen(QColor(214, 91, 91), 2.0));
     painter.drawLine(*origin, *xAxis);
@@ -3266,11 +3350,12 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                 .arg(averageFrameMilliseconds, 0, 'f', 1)
           : QStringLiteral("FPS —");
   const QString statusText =
-      QStringLiteral("网格 %1  ·  视距 %2  ·  精度 %3  |  %4  ·  %5")
-          .arg(formatMetricDistance(gridScale.displayMajorStep),
-               formatMetricDistance(mDistance),
-               formatMetricDistance(gridScale.minimumStep), renderer,
-               frameRateText);
+      QStringLiteral(
+          "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6")
+          .arg(formatViewportDistance(gridScale.displayMajorStep),
+               formatViewportDistance(mDistance),
+               formatViewportDistance(gridScale.minimumStep),
+               referencePlaneDescription(), renderer, frameRateText);
   const int statusWidth = metrics.horizontalAdvance(statusText) + 20;
   const QRect statusRect(
       viewportMargin, height() - badgeHeight - viewportMargin,

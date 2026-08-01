@@ -1,5 +1,7 @@
 #pragma once
 
+#include "SceneCoordinates.h"
+
 #include <QString>
 #include <QVector>
 #include <QVector2D>
@@ -51,7 +53,7 @@ struct MeshCacheNode {
 };
 
 struct MeshCacheIndex {
-  static constexpr int CurrentFormatVersion = 2;
+  static constexpr int CurrentFormatVersion = 3;
   static constexpr int SpatialOctreeDepth = 4;
 
   QString indexPath;
@@ -66,6 +68,7 @@ struct MeshCacheIndex {
   bool hasTextureCoordinates = false;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
+  SceneCoordinateInfo coordinates;
   QVector<MeshCacheNode> nodes;
   int rootNode = 0;
   int formatVersion = 0;
@@ -98,13 +101,15 @@ public:
 
 class MeshCacheBuilder final {
 public:
-  MeshCacheBuilder(const QString &sourcePath, qint64 sourceVertexCount);
+  MeshCacheBuilder(const QString &sourcePath, qint64 sourceVertexCount,
+                   const SceneCoordinateInfo &coordinates = {});
   ~MeshCacheBuilder();
 
   MeshCacheBuilder(const MeshCacheBuilder &) = delete;
   MeshCacheBuilder &operator=(const MeshCacheBuilder &) = delete;
 
   [[nodiscard]] bool begin(QString *errorMessage = nullptr);
+  void setCoordinateInfo(const SceneCoordinateInfo &coordinates);
   [[nodiscard]] bool appendVertex(const MeshVertex &vertex,
                                   QString *errorMessage = nullptr);
   [[nodiscard]] bool finishVertices(QString *errorMessage = nullptr);
