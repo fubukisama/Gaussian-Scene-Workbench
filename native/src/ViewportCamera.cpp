@@ -159,6 +159,13 @@ ReferenceGridScale referenceGridScale(const float cameraDistance,
           std::max(safeDistance * 8.0F, upper * 40.0F)};
 }
 
+ReferenceGridDrawSpans
+referenceGridDrawSpans(const ReferenceGridScale &scale) {
+  const float fineHalfSpan = scale.displayMajorStep * 0.1F * 80.0F;
+  const float majorHalfSpan = scale.displayMajorStep * 40.0F;
+  return {fineHalfSpan, majorHalfSpan, majorHalfSpan};
+}
+
 float pointPreviewDiameterPixels(const float devicePixelRatio) {
   constexpr float kMetashapeStyleLogicalPointDiameter = 1.0F;
   const float safeRatio =

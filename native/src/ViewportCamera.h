@@ -34,6 +34,12 @@ struct ReferenceGridScale {
   float visibleDistance = 1.0F;
 };
 
+struct ReferenceGridDrawSpans {
+  float fineHalfSpan = 1.0F;
+  float majorHalfSpan = 1.0F;
+  float axisHalfSpan = 1.0F;
+};
+
 [[nodiscard]] OrbitAngles orbitAnglesAfterLeftDrag(OrbitAngles current,
                                                    const QPoint &delta);
 
@@ -55,6 +61,9 @@ referenceGridPlane(OrbitAngles angles, bool orthographic);
 
 [[nodiscard]] ReferenceGridScale referenceGridScale(float cameraDistance,
                                                     int viewportPixelHeight);
+
+[[nodiscard]] ReferenceGridDrawSpans
+referenceGridDrawSpans(const ReferenceGridScale &scale);
 
 // Metashape-style point previews use a one-logical-pixel footprint. Convert
 // that footprint to the physical pixels expected by OpenGL.

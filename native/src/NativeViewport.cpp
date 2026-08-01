@@ -865,14 +865,26 @@ out float lineCoverage;
 
 void main() {
   vec3 world;
-  if (drawAxis == 1) {
-    float endpoint = gl_VertexID == 0 ? -gridHalfSpan : gridHalfSpan;
-    world = gridPlaneOrigin + gridAxisU * endpoint;
-    lineCoverage = 1.0;
-  } else if (drawAxis == 2) {
-    float endpoint = gl_VertexID == 0 ? -gridHalfSpan : gridHalfSpan;
-    world = gridPlaneOrigin + gridAxisV * endpoint;
-    lineCoverage = 1.0;
+  if (drawAxis == 1 || drawAxis == 2) {
+    int vertexInLine = gl_VertexID;
+    float endpoint = vertexInLine == 0
+                         ? -gridHalfSpan
+                         : (vertexInLine == 3 ? gridHalfSpan : 0.0);
+    float crossCoordinate;
+    if (drawAxis == 1) {
+      world = gridPlaneOrigin +
+              gridAxisU * (gridCenter.x + endpoint);
+      crossCoordinate = gridCenter.y;
+    } else {
+      world = gridPlaneOrigin +
+              gridAxisV * (gridCenter.y + endpoint);
+      crossCoordinate = gridCenter.x;
+    }
+    float crossFade = 1.0 - smoothstep(
+        gridHalfSpan * 0.72, gridHalfSpan, abs(crossCoordinate));
+    float alongFade =
+        (vertexInLine == 0 || vertexInLine == 3) ? 0.0 : 1.0;
+    lineCoverage = crossFade * alongFade;
   } else {
     // Two GL_LINES segments form each logical line: edge->centre and
     // centre->edge. This gives the rasterizer a continuous alpha ramp at the
@@ -2503,6 +2515,8 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->bind();
   const ReferenceGridScale scale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const ReferenceGridDrawSpans drawSpans =
+      referenceGridDrawSpans(scale);
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
   const ReferenceGridFrame grid = referenceGridFrame(plane);
@@ -2549,22 +2563,32 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
     drawGridLevel(scale.displayMajorStep, 81,
                   QVector4D(0.29F, 0.31F, 0.33F, 0.58F));
 
-    const float axisHalfSpan =
-        std::max({scale.visibleDistance * 4.0F, mDistance * 20.0F,
-                  mSceneRadius * 12.0F, scale.displayMajorStep * 40.0F});
-    mGridProgram->setUniformValue("gridHalfSpan", axisHalfSpan);
+    // Keep the coloured origin axes inside the same camera-relative patch as
+    // the major grid. Extending them farther than the grey lines makes a
+    // coplanar axis appear to lift into the sky after the grid has faded.
+    const float cameraU =
+        QVector3D::dotProduct(relativeCamera, grid.axisU);
+    const float cameraV =
+        QVector3D::dotProduct(relativeCamera, grid.axisV);
+    const QVector2D axisCenter(
+        std::round(cameraU / scale.displayMajorStep) *
+            scale.displayMajorStep,
+        std::round(cameraV / scale.displayMajorStep) *
+            scale.displayMajorStep);
+    mGridProgram->setUniformValue("gridCenter", axisCenter);
+    mGridProgram->setUniformValue("gridHalfSpan", drawSpans.axisHalfSpan);
     mGridProgram->setUniformValue("drawAxis", 1);
     mGridProgram->setUniformValue(
         "lineColor",
         QVector4D(grid.axisUColor.x(), grid.axisUColor.y(),
                   grid.axisUColor.z(), 0.86F));
-    glDrawArrays(GL_LINES, 0, 2);
+    glDrawArrays(GL_LINES, 0, 4);
     mGridProgram->setUniformValue("drawAxis", 2);
     mGridProgram->setUniformValue(
         "lineColor",
         QVector4D(grid.axisVColor.x(), grid.axisVColor.y(),
                   grid.axisVColor.z(), 0.86F));
-    glDrawArrays(GL_LINES, 0, 2);
+    glDrawArrays(GL_LINES, 0, 4);
   }
   mGridProgram->release();
   glDisable(GL_BLEND);

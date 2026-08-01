@@ -21,6 +21,7 @@ private slots:
   void clampsZoomToSceneAwareFiniteLimits();
   void keepsGridStepsOnConcreteDecimalScales();
   void enforcesMinimumGridStepAtClosestZoom();
+  void keepsColoredAxesInsideRenderedGridCoverage();
   void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
 };
@@ -140,6 +141,15 @@ void ViewportCameraTests::enforcesMinimumGridStepAtClosestZoom() {
   QCOMPARE(scale.levelBlend, 0.0F);
   QCOMPARE(scale.displayMajorStep, 0.01F);
   QVERIFY(scale.visibleDistance > 0.0F);
+}
+
+void ViewportCameraTests::keepsColoredAxesInsideRenderedGridCoverage() {
+  const ReferenceGridScale scale = referenceGridScale(12.14211F, 1077);
+  const ReferenceGridDrawSpans spans =
+      referenceGridDrawSpans(scale);
+
+  QVERIFY(spans.fineHalfSpan < spans.majorHalfSpan);
+  QCOMPARE(spans.axisHalfSpan, spans.majorHalfSpan);
 }
 
 void ViewportCameraTests::usesMetashapeStylePointPreviewDiameter() {
