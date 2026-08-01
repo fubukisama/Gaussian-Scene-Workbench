@@ -266,9 +266,12 @@ int main(int argc, char *argv[]) {
                       !qEnvironmentVariableIsSet(
                           "GSW_MESH_RESIDENT_VERTEX_LIMIT") ||
                       viewport->residentMeshTriangleCount() > 0;
+                  const bool meshTextureReady =
+                      !qEnvironmentVariableIsSet("GSW_EXPECT_MESH_TEXTURE") ||
+                      viewport->meshTextureAvailable();
                   smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
-                                       pagedMeshReady;
+                                       pagedMeshReady && meshTextureReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -278,7 +281,9 @@ int main(int argc, char *argv[]) {
                           << sourceVertexCount << "green-pixels"
                           << greenAxisPixels << "required" << 30
                           << "resident-mesh-triangles"
-                          << viewport->residentMeshTriangleCount();
+                          << viewport->residentMeshTriangleCount()
+                          << "mesh-texture-ready"
+                          << viewport->meshTextureAvailable();
                   application.exit(smokeTestFailureCode);
                 });
           });

@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QVector>
+#include <QVector2D>
 #include <QVector3D>
 
 #include <memory>
@@ -18,9 +19,12 @@ struct MeshVertex {
   float normalX = 0.0F;
   float normalY = 0.0F;
   float normalZ = 1.0F;
+  float textureU = 0.0F;
+  float textureV = 0.0F;
+  float textureWeight = 0.0F;
 };
 
-static_assert(sizeof(MeshVertex) == 36);
+static_assert(sizeof(MeshVertex) == 48);
 
 struct MeshCacheNode {
   int id = -1;
@@ -47,7 +51,7 @@ struct MeshCacheNode {
 };
 
 struct MeshCacheIndex {
-  static constexpr int CurrentFormatVersion = 1;
+  static constexpr int CurrentFormatVersion = 2;
   static constexpr int SpatialOctreeDepth = 4;
 
   QString indexPath;
@@ -59,6 +63,7 @@ struct MeshCacheIndex {
   qint64 fullFaceCount = 0;
   qint64 fullTriangleCount = 0;
   qint64 renderableTriangleCount = 0;
+  bool hasTextureCoordinates = false;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   QVector<MeshCacheNode> nodes;
@@ -106,6 +111,10 @@ public:
   [[nodiscard]] bool appendTriangle(quint32 a, quint32 b, quint32 c,
                                     qint64 sourceTriangleIndex,
                                     QString *errorMessage = nullptr);
+  [[nodiscard]] bool appendTexturedTriangle(
+      quint32 a, quint32 b, quint32 c, qint64 sourceTriangleIndex,
+      const QVector2D &textureA, const QVector2D &textureB,
+      const QVector2D &textureC, QString *errorMessage = nullptr);
   [[nodiscard]] MeshCacheIndex finish(qint64 sourceFaceCount,
                                       qint64 sourceTriangleCount,
                                       QString *errorMessage = nullptr);
@@ -114,6 +123,12 @@ public:
   [[nodiscard]] QVector3D boundsMaximum() const;
 
 private:
+  [[nodiscard]] bool appendTriangleInternal(
+      quint32 a, quint32 b, quint32 c, qint64 sourceTriangleIndex,
+      const QVector2D &textureA, const QVector2D &textureB,
+      const QVector2D &textureC, bool textured,
+      QString *errorMessage = nullptr);
+
   struct Impl;
   std::unique_ptr<Impl> mImpl;
 };

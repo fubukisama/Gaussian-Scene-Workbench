@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -50,11 +51,32 @@ struct TriangleRecord {
   quint32 a = 0;
   quint32 b = 0;
   quint32 c = 0;
+  std::array<float, 3> textureU = {};
+  std::array<float, 3> textureV = {};
+  quint32 textured = 0;
 };
+
+struct MeshCornerKey {
+  quint32 sourceIndex = 0;
+  quint32 textureU = 0;
+  quint32 textureV = 0;
+  quint32 textured = 0;
+
+  bool operator==(const MeshCornerKey &) const = default;
+};
+
+size_t qHash(const MeshCornerKey &key, const size_t seed = 0) noexcept {
+  return qHashMulti(seed, key.sourceIndex, key.textureU, key.textureV,
+                    key.textured);
+}
 
 static_assert(sizeof(PackedSourceVertex) == 24);
 static_assert(sizeof(PackedNormalSum) == 12);
-static_assert(sizeof(TriangleRecord) == 12);
+static_assert(sizeof(TriangleRecord) == 40);
+
+float canonicalTextureCoordinate(const float value) {
+  return value == 0.0F ? 0.0F : value;
+}
 
 QString normalizedSourcePath(const QString &sourcePath) {
   return QDir::cleanPath(QFileInfo(sourcePath).absoluteFilePath());
@@ -272,6 +294,8 @@ MeshCacheIndex MeshCache::loadForSource(const QString &sourcePath,
       root.value(QStringLiteral("renderableTriangleCount"))
           .toVariant()
           .toLongLong();
+  result.hasTextureCoordinates =
+      root.value(QStringLiteral("hasTextureCoordinates")).toBool(false);
   result.rootNode = root.value(QStringLiteral("rootNode")).toInt(-1);
   result.dataPath = QDir(QFileInfo(result.indexPath).absolutePath())
                         .filePath(root.value(QStringLiteral("dataFile"))
@@ -389,6 +413,7 @@ struct MeshCacheBuilder::Impl {
   QVector<QVector<TriangleRecord>> reservoirs;
   QHash<int, QVector<TriangleRecord>> bucketBuffers;
   QVector<QString> bucketPaths;
+  bool hasTextureCoordinates = false;
 
   [[nodiscard]] const PackedSourceVertex *vertices() const {
     return reinterpret_cast<const PackedSourceVertex *>(vertexMapping);
@@ -462,7 +487,7 @@ struct MeshCacheBuilder::Impl {
     if (triangles.isEmpty()) {
       return true;
     }
-    QHash<quint32, quint32> localIndices;
+    QHash<MeshCornerKey, quint32> localIndices;
     localIndices.reserve(static_cast<qsizetype>(std::min<qint64>(
         triangles.size() * 2LL, std::numeric_limits<int>::max())));
     QVector<MeshVertex> pageVertices;
@@ -471,8 +496,16 @@ struct MeshCacheBuilder::Impl {
         static_cast<qsizetype>(std::min<qint64>(triangles.size() * 2LL,
                                                196'608LL)));
     pageIndices.reserve(triangles.size() * 3);
-    const auto appendIndex = [&](const quint32 sourceIndex) {
-      const auto existing = localIndices.constFind(sourceIndex);
+    const auto appendIndex = [&](const quint32 sourceIndex,
+                                 const float textureU,
+                                 const float textureV,
+                                 const bool textured) {
+      const float canonicalU = canonicalTextureCoordinate(textureU);
+      const float canonicalV = canonicalTextureCoordinate(textureV);
+      const MeshCornerKey key{
+          sourceIndex, std::bit_cast<quint32>(canonicalU),
+          std::bit_cast<quint32>(canonicalV), textured ? 1U : 0U};
+      const auto existing = localIndices.constFind(key);
       if (existing != localIndices.cend()) {
         pageIndices.append(existing.value());
         return;
@@ -496,15 +529,23 @@ struct MeshCacheBuilder::Impl {
       vertex.normalX = normal.x();
       vertex.normalY = normal.y();
       vertex.normalZ = normal.z();
+      vertex.textureU = canonicalU;
+      vertex.textureV = canonicalV;
+      vertex.textureWeight = textured ? 1.0F : 0.0F;
       const quint32 local = static_cast<quint32>(pageVertices.size());
       pageVertices.append(vertex);
-      localIndices.insert(sourceIndex, local);
+      localIndices.insert(key, local);
       pageIndices.append(local);
     };
     for (const TriangleRecord &triangle : triangles) {
-      appendIndex(triangle.a);
-      appendIndex(triangle.b);
-      appendIndex(triangle.c);
+      const std::array<quint32, 3> sourceIndices = {
+          triangle.a, triangle.b, triangle.c};
+      for (qsizetype corner = 0; corner < 3; ++corner) {
+        appendIndex(sourceIndices.at(static_cast<std::size_t>(corner)),
+                    triangle.textureU.at(static_cast<std::size_t>(corner)),
+                    triangle.textureV.at(static_cast<std::size_t>(corner)),
+                    triangle.textured != 0);
+      }
     }
     node.dataOffset = data.pos();
     node.vertexCount = pageVertices.size();
@@ -736,9 +777,37 @@ bool MeshCacheBuilder::appendTriangle(const quint32 a, const quint32 b,
                                       const quint32 c,
                                       const qint64 sourceTriangleIndex,
                                       QString *errorMessage) {
+  return appendTriangleInternal(a, b, c, sourceTriangleIndex, {}, {}, {},
+                                false, errorMessage);
+}
+
+bool MeshCacheBuilder::appendTexturedTriangle(
+    const quint32 a, const quint32 b, const quint32 c,
+    const qint64 sourceTriangleIndex, const QVector2D &textureA,
+    const QVector2D &textureB, const QVector2D &textureC,
+    QString *errorMessage) {
+  return appendTriangleInternal(a, b, c, sourceTriangleIndex, textureA,
+                                textureB, textureC, true, errorMessage);
+}
+
+bool MeshCacheBuilder::appendTriangleInternal(
+    const quint32 a, const quint32 b, const quint32 c,
+    const qint64 sourceTriangleIndex, const QVector2D &textureA,
+    const QVector2D &textureB, const QVector2D &textureC,
+    const bool textured, QString *errorMessage) {
   if (!mImpl->verticesFinished || mImpl->finished) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("The mesh-cache triangle stream is not active.");
+    }
+    return false;
+  }
+  if (textured &&
+      (!std::isfinite(textureA.x()) || !std::isfinite(textureA.y()) ||
+       !std::isfinite(textureB.x()) || !std::isfinite(textureB.y()) ||
+       !std::isfinite(textureC.x()) || !std::isfinite(textureC.y()))) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral(
+          "A textured mesh triangle contains a non-finite UV coordinate.");
     }
     return false;
   }
@@ -776,7 +845,20 @@ bool MeshCacheBuilder::appendTriangle(const quint32 a, const quint32 b,
   const QVector3D centroid = (pa + pb + pc) / 3.0F;
   const int leafCode = octreeLeafCode(
       centroid, mImpl->boundsMinimum, mImpl->boundsMaximum);
-  const TriangleRecord triangle{a, b, c};
+  TriangleRecord triangle;
+  triangle.a = a;
+  triangle.b = b;
+  triangle.c = c;
+  if (textured) {
+    triangle.textureU = {canonicalTextureCoordinate(textureA.x()),
+                         canonicalTextureCoordinate(textureB.x()),
+                         canonicalTextureCoordinate(textureC.x())};
+    triangle.textureV = {canonicalTextureCoordinate(textureA.y()),
+                         canonicalTextureCoordinate(textureB.y()),
+                         canonicalTextureCoordinate(textureC.y())};
+    triangle.textured = 1;
+    mImpl->hasTextureCoordinates = true;
+  }
   int prefix = 0;
   for (int depth = 0; depth <= MeshCacheIndex::SpatialOctreeDepth; ++depth) {
     if (depth > 0) {
@@ -959,6 +1041,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
   result.fullFaceCount = sourceFaceCount;
   result.fullTriangleCount = sourceTriangleCount;
   result.renderableTriangleCount = mImpl->renderableTriangleCount;
+  result.hasTextureCoordinates = mImpl->hasTextureCoordinates;
   result.boundsMinimum = mImpl->boundsMinimum;
   result.boundsMaximum = mImpl->boundsMaximum;
   result.nodes = mImpl->nodes;
@@ -975,6 +1058,8 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
   root.insert(QStringLiteral("fullTriangleCount"), result.fullTriangleCount);
   root.insert(QStringLiteral("renderableTriangleCount"),
               result.renderableTriangleCount);
+  root.insert(QStringLiteral("hasTextureCoordinates"),
+              result.hasTextureCoordinates);
   root.insert(QStringLiteral("rootNode"), result.rootNode);
   root.insert(QStringLiteral("dataFile"), QFileInfo(dataPath).fileName());
   root.insert(QStringLiteral("boundsMinimum"),

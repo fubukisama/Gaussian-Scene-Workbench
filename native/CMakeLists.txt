@@ -180,6 +180,32 @@ if(BUILD_TESTING)
     "3 1 3 5\n"
     "3 3 7 5\n"
   )
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-mesh-texture.ppm"
+    "P3\n2 2\n255\n"
+    "255 0 0  0 255 0\n"
+    "0 0 255  255 255 0\n"
+  )
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-textured-mesh.ply"
+    "ply\n"
+    "format ascii 1.0\n"
+    "comment TextureFile smoke-mesh-texture.ppm\n"
+    "element vertex 4\n"
+    "property float x\n"
+    "property float y\n"
+    "property float z\n"
+    "property uchar red\n"
+    "property uchar green\n"
+    "property uchar blue\n"
+    "element face 1\n"
+    "property list uchar int vertex_indices\n"
+    "property list uchar float texcoord\n"
+    "end_header\n"
+    "-100 -100 0 255 255 255\n"
+    "100 -100 0 255 255 255\n"
+    "100 100 0 255 255 255\n"
+    "-100 100 0 255 255 255\n"
+    "4 0 1 2 3 8 0 0 1 0 1 1 0 1\n"
+  )
   add_test(
     NAME native_metashape_import_entry
     COMMAND GaussianSceneWorkbench
@@ -210,6 +236,12 @@ if(BUILD_TESTING)
       --smoke-test-reference-axes
       --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
   )
+  add_test(
+    NAME native_textured_paged_mesh_scene
+    COMMAND GaussianSceneWorkbench
+      --smoke-test-reference-axes
+      --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-textured-mesh.ply"
+  )
   set_tests_properties(
     native_application_launch
     native_metashape_import_entry
@@ -218,6 +250,7 @@ if(BUILD_TESTING)
     native_infinite_reference_grid
     native_reference_axes_with_scene
     native_paged_mesh_scene
+    native_textured_paged_mesh_scene
     PROPERTIES
     TIMEOUT 15
     ENVIRONMENT
@@ -227,6 +260,12 @@ if(BUILD_TESTING)
   set_tests_properties(native_paged_mesh_scene PROPERTIES
     ENVIRONMENT
       "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4"
+    ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
+  set_tests_properties(native_textured_paged_mesh_scene PROPERTIES
+    ENVIRONMENT
+      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=3;GSW_MESH_RESIDENT_FACE_LIMIT=3;GSW_EXPECT_MESH_TEXTURE=1"
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )

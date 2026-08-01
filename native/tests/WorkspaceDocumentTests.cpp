@@ -32,6 +32,7 @@ private slots:
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
   void loadsOversizedAsciiMeshIntoDiskCache();
+  void preservesResidentMeshUvSeams();
   void buildsPagesAndInvalidatesDiskResidentMesh();
   void loadsConfiguredRealMeshFixture();
   void loadsBinaryGaussianSphericalHarmonicColors();
@@ -557,11 +558,20 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
   QVERIFY(temporary.isValid());
   const QString plyPath =
       QDir(temporary.path()).filePath(QStringLiteral("paged-mesh.ply"));
+  const QString texturePath =
+      QDir(temporary.path()).filePath(QStringLiteral("paged-texture.ppm"));
+  QFile texture(texturePath);
+  QVERIFY(texture.open(QIODevice::WriteOnly));
+  const QByteArray texturePayload =
+      "P3\n2 2\n255\n255 0 0  0 255 0\n0 0 255  255 255 0\n";
+  QCOMPARE(texture.write(texturePayload), texturePayload.size());
+  texture.close();
   QFile ply(plyPath);
   QVERIFY(ply.open(QIODevice::WriteOnly));
   const QByteArray payload =
       "ply\n"
       "format ascii 1.0\n"
+      "comment TextureFile paged-texture.ppm\n"
       "element vertex 5\n"
       "property float x\n"
       "property float y\n"
@@ -589,6 +599,11 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
   QVERIFY(data.previewOnly);
   QVERIFY(data.hasMesh());
   QVERIFY(data.meshCache.isValid());
+  QVERIFY(data.meshCache.hasTextureCoordinates);
+  QVERIFY(data.meshHasTextureCoordinates);
+  QCOMPARE(data.meshTexturePath, texturePath);
+  QCOMPARE(data.meshTextureImage.size(), QSize(2, 2));
+  QVERIFY(data.meshTextureError.isEmpty());
   QVERIFY(data.meshVertices.isEmpty());
   QVERIFY(data.meshIndices.isEmpty());
   QCOMPARE(data.sourceVertexCount, 5);
@@ -602,11 +617,84 @@ void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
   QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
   QCOMPARE(rootPage.indices.size() / 3, qsizetype(3));
   QCOMPARE(rootPage.vertices.size(), qsizetype(5));
+  QVERIFY(std::all_of(rootPage.vertices.cbegin(), rootPage.vertices.cend(),
+                      [](const gsw::MeshVertex &vertex) {
+                        return vertex.textureWeight > 0.5F;
+                      }));
 
   const gsw::PointCloudData reused =
       gsw::PlyPointCloudLoader::load(plyPath, 2, 100, 4, 1);
   QVERIFY2(reused.isValid(), qPrintable(reused.error));
   QCOMPARE(reused.meshCache.dataPath, data.meshCache.dataPath);
+
+  QVERIFY(QFile::remove(texturePath));
+  const gsw::PointCloudData fallback =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 100, 4, 1);
+  QVERIFY2(fallback.isValid(), qPrintable(fallback.error));
+  QVERIFY(fallback.meshHasTextureCoordinates);
+  QVERIFY(fallback.meshTextureImage.isNull());
+  QVERIFY(!fallback.meshTextureError.isEmpty());
+}
+
+void WorkspaceDocumentTests::preservesResidentMeshUvSeams() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString texturePath =
+      QDir(temporary.path()).filePath(QStringLiteral("seam texture.ppm"));
+  QFile texture(texturePath);
+  QVERIFY(texture.open(QIODevice::WriteOnly));
+  const QByteArray texturePayload =
+      "P3\n2 2\n255\n255 0 0  0 255 0\n0 0 255  255 255 0\n";
+  QCOMPARE(texture.write(texturePayload), texturePayload.size());
+  texture.close();
+
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("seam-mesh.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  const QByteArray payload =
+      "ply\n"
+      "format ascii 1.0\n"
+      "comment TextureFile \"seam texture.ppm\"\n"
+      "element vertex 4\n"
+      "property float x\n"
+      "property float y\n"
+      "property float z\n"
+      "property uchar red\n"
+      "property uchar green\n"
+      "property uchar blue\n"
+      "element face 2\n"
+      "property list uchar int vertex_indices\n"
+      "property list uchar float texcoord\n"
+      "end_header\n"
+      "0 0 0 255 255 255\n"
+      "1 0 0 255 255 255\n"
+      "1 1 0 255 255 255\n"
+      "0 1 0 255 255 255\n"
+      "3 0 1 2 6 0 0 1 0 1 1\n"
+      "3 0 2 3 6 0.25 0.25 1 1 0 1\n";
+  QCOMPARE(ply.write(payload), payload.size());
+  ply.close();
+
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(plyPath);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasMesh());
+  QVERIFY(data.meshHasTextureCoordinates);
+  QCOMPARE(data.meshTextureImage.size(), QSize(2, 2));
+  QCOMPARE(data.meshIndices.size(), qsizetype(6));
+  QCOMPARE(data.meshVertices.size(), qsizetype(5));
+  QVector<QVector2D> originTextureCoordinates;
+  for (const gsw::MeshVertex &vertex : data.meshVertices) {
+    QVERIFY(vertex.textureWeight > 0.5F);
+    if (qFuzzyIsNull(vertex.x) && qFuzzyIsNull(vertex.y) &&
+        qFuzzyIsNull(vertex.z)) {
+      originTextureCoordinates.append(
+          QVector2D(vertex.textureU, vertex.textureV));
+    }
+  }
+  QCOMPARE(originTextureCoordinates.size(), qsizetype(2));
+  QVERIFY(originTextureCoordinates.contains(QVector2D(0.0F, 0.0F)));
+  QVERIFY(originTextureCoordinates.contains(QVector2D(0.25F, 0.25F)));
 }
 
 void WorkspaceDocumentTests::buildsPagesAndInvalidatesDiskResidentMesh() {
@@ -687,9 +775,21 @@ void WorkspaceDocumentTests::loadsConfiguredRealMeshFixture() {
   QVERIFY2(data.isValid(), qPrintable(data.error));
   QVERIFY(data.hasMesh());
   QVERIFY(data.meshCache.isValid());
+  QVERIFY(data.meshCache.hasTextureCoordinates);
+  QVERIFY(data.meshHasTextureCoordinates);
+  QVERIFY2(!data.meshTextureImage.isNull(),
+           qPrintable(data.meshTextureError));
+  QVERIFY(data.meshTextureImage.width() > 0);
+  QVERIFY(data.meshTextureImage.height() > 0);
+  QVERIFY2(data.meshTextureError.isEmpty(),
+           qPrintable(data.meshTextureError));
   const gsw::MeshCachePage rootPage = gsw::MeshCache::readNode(
       data.meshCache, data.meshCache.rootNode);
   QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
+  QVERIFY(std::any_of(rootPage.vertices.cbegin(), rootPage.vertices.cend(),
+                      [](const gsw::MeshVertex &vertex) {
+                        return vertex.textureWeight > 0.5F;
+                      }));
   const auto deepestPage = std::max_element(
       data.meshCache.nodes.cbegin(), data.meshCache.nodes.cend(),
       [](const gsw::MeshCacheNode &left, const gsw::MeshCacheNode &right) {
@@ -708,13 +808,15 @@ void WorkspaceDocumentTests::loadsConfiguredRealMeshFixture() {
   qInfo().noquote()
       << QStringLiteral(
              "REAL_MESH_CACHE elapsedMs=%1 vertices=%2 faces=%3 "
-             "triangles=%4 nodes=%5 dataBytes=%6")
+             "triangles=%4 nodes=%5 dataBytes=%6 texture=%7x%8")
              .arg(elapsedMilliseconds)
              .arg(data.meshCache.fullVertexCount)
              .arg(data.meshCache.fullFaceCount)
              .arg(data.meshCache.renderableTriangleCount)
              .arg(data.meshCache.nodes.size())
-             .arg(QFileInfo(data.meshCache.dataPath).size());
+             .arg(QFileInfo(data.meshCache.dataPath).size())
+             .arg(data.meshTextureImage.width())
+             .arg(data.meshTextureImage.height());
 }
 
 void WorkspaceDocumentTests::loadsBinaryGaussianSphericalHarmonicColors() {

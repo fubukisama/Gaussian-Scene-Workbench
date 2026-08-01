@@ -8,6 +8,7 @@
 #include "ScreenSpaceSelection.h"
 #include "TrainingGpuPreviewBuffer.h"
 
+#include <QImage>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLExtraFunctions>
@@ -73,6 +74,9 @@ public:
   [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
     return mUploadedFullResolutionMeshTriangleCount;
+  }
+  [[nodiscard]] bool meshTextureAvailable() const {
+    return mMeshTextureReady;
   }
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
@@ -180,6 +184,8 @@ private:
   void uploadPendingMeshCachePages();
   void evictMeshCacheUntilFits(qsizetype requiredBytes);
   void releaseFullResolutionMesh();
+  void releaseMeshTexture();
+  void uploadPendingMeshTexture();
   void uploadPendingMesh();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
   void applyPendingTrainingGpuPreview();
@@ -281,6 +287,15 @@ private:
   qsizetype mMeshCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
   quint64 mMeshCacheFrameSerial = 0;
   QString mMeshCacheError;
+  QString mMeshTexturePath;
+  QString mMeshTextureError;
+  QImage mPendingMeshTexture;
+  QSize mMeshTextureSize;
+  bool mMeshHasTextureCoordinates = false;
+  bool mMeshTextureUploadPending = false;
+  bool mMeshTextureClearPending = false;
+  bool mMeshTextureReady = false;
+  GLuint mMeshTexture = 0;
   QVector<MeshVertex> mPendingMeshVertices;
   QVector<quint32> mPendingMeshIndices;
   CameraTrajectory mCameraTrajectory;

@@ -4,8 +4,10 @@
 #include "PointCloudCache.h"
 
 #include <QBitArray>
+#include <QImage>
 #include <QString>
 #include <QVector>
+#include <QVector2D>
 #include <QVector3D>
 
 namespace gsw {
@@ -43,6 +45,12 @@ struct PointCloudData {
   MeshCacheIndex meshCache;
   QVector<MeshVertex> meshVertices;
   QVector<quint32> meshIndices;
+  QVector<QVector2D> meshCornerTextureCoordinates;
+  QVector<quint8> meshCornerTextured;
+  QImage meshTextureImage;
+  QString meshTexturePath;
+  QString meshTextureError;
+  bool meshHasTextureCoordinates = false;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   qint64 sourceVertexCount = 0;

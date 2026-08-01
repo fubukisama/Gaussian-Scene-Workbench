@@ -5,6 +5,7 @@
 #include "ViewportCamera.h"
 
 #include <QApplication>
+#include <QDebug>
 #include <QEasingCurve>
 #include <QEnterEvent>
 #include <QEvent>
@@ -199,6 +200,7 @@ NativeViewport::~NativeViewport() {
     mTrainingGpuPreview.release();
     releaseFullResolutionPointCloud();
     releaseFullResolutionMesh();
+    releaseMeshTexture();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mMeshVertexArray.destroy();
@@ -293,6 +295,14 @@ void NativeViewport::setScene(const QString &scenePath,
   mPendingMeshCachePages.squeeze();
   mMeshCacheError.clear();
   mFullResolutionMeshClearPending = true;
+  mMeshTexturePath.clear();
+  mMeshTextureError.clear();
+  mPendingMeshTexture = {};
+  mMeshTextureSize = {};
+  mMeshHasTextureCoordinates = false;
+  mMeshTextureUploadPending = false;
+  mMeshTextureClearPending = true;
+  mMeshTextureReady = false;
   mPendingMeshVertices.clear();
   mPendingMeshVertices.squeeze();
   mPendingMeshIndices.clear();
@@ -587,15 +597,21 @@ void main() {
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec3 normal;
+layout(location = 3) in vec2 textureCoordinate;
+layout(location = 4) in float textureWeight;
 uniform mat4 viewProjection;
 out vec3 vertexColor;
 out vec3 worldPosition;
 out vec3 worldNormal;
+out vec2 vertexTextureCoordinate;
+out float vertexTextureWeight;
 void main() {
   gl_Position = viewProjection * vec4(position, 1.0);
   vertexColor = color;
   worldPosition = position;
   worldNormal = normal;
+  vertexTextureCoordinate = textureCoordinate;
+  vertexTextureWeight = textureWeight;
 }
 )GLSL");
   const bool meshFragmentCompiled =
@@ -604,7 +620,11 @@ void main() {
 in vec3 vertexColor;
 in vec3 worldPosition;
 in vec3 worldNormal;
+in vec2 vertexTextureCoordinate;
+in float vertexTextureWeight;
 uniform vec3 cameraPosition;
+uniform sampler2D albedoTexture;
+uniform bool textureEnabled;
 out vec4 fragmentColor;
 void main() {
   vec3 normal = normalize(worldNormal);
@@ -615,7 +635,13 @@ void main() {
   vec3 keyDirection = normalize(viewDirection + vec3(0.35, 0.45, 0.55));
   float diffuse = max(dot(normal, keyDirection), 0.0);
   float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.0);
-  vec3 litColor = vertexColor * (0.24 + 0.76 * diffuse) +
+  float textured = textureEnabled && vertexTextureWeight > 0.5 ? 1.0 : 0.0;
+  vec3 baseColor = mix(
+      vertexColor, texture(albedoTexture, vertexTextureCoordinate).rgb,
+      textured);
+  float directLight = mix(0.24 + 0.76 * diffuse,
+                          0.82 + 0.18 * diffuse, textured);
+  vec3 litColor = baseColor * directLight +
                   vec3(0.12, 0.16, 0.19) * rim;
   fragmentColor = vec4(litColor, 1.0);
 }
@@ -949,6 +975,13 @@ void main() {
     mMeshProgram->enableAttributeArray(2);
     mMeshProgram->setAttributeBuffer(
         2, GL_FLOAT, offsetof(MeshVertex, normalX), 3, sizeof(MeshVertex));
+    mMeshProgram->enableAttributeArray(3);
+    mMeshProgram->setAttributeBuffer(
+        3, GL_FLOAT, offsetof(MeshVertex, textureU), 2, sizeof(MeshVertex));
+    mMeshProgram->enableAttributeArray(4);
+    mMeshProgram->setAttributeBuffer(
+        4, GL_FLOAT, offsetof(MeshVertex, textureWeight), 1,
+        sizeof(MeshVertex));
     mMeshProgram->release();
     mMeshVertexBuffer.release();
   }
@@ -1051,6 +1084,7 @@ void NativeViewport::paintGL() {
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
+  uploadPendingMeshTexture();
   uploadPendingMesh();
 
   const QMatrix4x4 view = viewMatrix();
@@ -1224,6 +1258,21 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mPreviewOnlyScene = data.previewOnly;
             mPointCache = std::move(data.pointCache);
             mMeshCache = std::move(data.meshCache);
+            mMeshTexturePath = std::move(data.meshTexturePath);
+            mMeshTextureError = std::move(data.meshTextureError);
+            mPendingMeshTexture = std::move(data.meshTextureImage);
+            mMeshHasTextureCoordinates =
+                data.meshHasTextureCoordinates ||
+                mMeshCache.hasTextureCoordinates;
+            mMeshTextureUploadPending =
+                mMeshHasTextureCoordinates && !mPendingMeshTexture.isNull();
+            mMeshTextureClearPending = true;
+            mMeshTextureReady = false;
+            if (!mMeshTextureError.isEmpty()) {
+              qWarning().noquote()
+                  << QStringLiteral("[mesh-texture] %1")
+                         .arg(mMeshTextureError);
+            }
             mDesiredPointCacheNodes.clear();
             mPointCacheReadsInFlight.clear();
             mPointCacheFailedNodes.clear();
@@ -1412,7 +1461,8 @@ void NativeViewport::rebuildRenderedVertices() {
 void NativeViewport::updateFrameRefreshPolicy() {
   const bool shouldRefreshContinuously =
       mRenderedPointCount > 0 || !mPendingPointCachePages.isEmpty() ||
-      mRenderedMeshIndexCount > 0 || !mPendingMeshCachePages.isEmpty() ||
+      mRenderedMeshIndexCount > 0 || mMeshTextureUploadPending ||
+      !mPendingMeshCachePages.isEmpty() ||
       !mMeshCacheReadsInFlight.isEmpty() ||
       !mFullResolutionMeshGpuChunks.isEmpty();
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
@@ -1765,6 +1815,87 @@ void NativeViewport::releaseFullResolutionMesh() {
   mDrawnFullResolutionMeshTriangleCount = 0;
 }
 
+void NativeViewport::releaseMeshTexture() {
+  if (mMeshTexture != 0) {
+    glDeleteTextures(1, &mMeshTexture);
+    mMeshTexture = 0;
+  }
+  mMeshTextureReady = false;
+  mMeshTextureSize = {};
+}
+
+void NativeViewport::uploadPendingMeshTexture() {
+  if (mMeshTextureClearPending) {
+    releaseMeshTexture();
+    mMeshTextureClearPending = false;
+  }
+  if (!mMeshTextureUploadPending) {
+    return;
+  }
+  mMeshTextureUploadPending = false;
+  if (!mMeshHasTextureCoordinates || mPendingMeshTexture.isNull()) {
+    mPendingMeshTexture = {};
+    return;
+  }
+
+  GLint maximumTextureSize = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+  QImage image = mPendingMeshTexture;
+  if (maximumTextureSize > 0 &&
+      (image.width() > maximumTextureSize ||
+       image.height() > maximumTextureSize)) {
+    image = image.scaled(maximumTextureSize, maximumTextureSize,
+                         Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    mMeshTextureError =
+        QStringLiteral("Texture was reduced to the GPU limit of %1 px.")
+            .arg(maximumTextureSize);
+  }
+  image = image.convertToFormat(QImage::Format_RGBA8888)
+              .mirrored(false, true);
+  mPendingMeshTexture = {};
+  if (image.isNull()) {
+    mMeshTextureError = QStringLiteral(
+        "The mesh texture could not be converted for OpenGL.");
+    return;
+  }
+
+  while (glGetError() != GL_NO_ERROR) {
+  }
+  glGenTextures(1, &mMeshTexture);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, mMeshTexture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  constexpr GLenum kMaximumTextureAnisotropy = 0x84FF;
+  constexpr GLenum kTextureAnisotropy = 0x84FE;
+  if (QOpenGLContext::currentContext()->hasExtension(
+          QByteArrayLiteral("GL_EXT_texture_filter_anisotropic"))) {
+    GLfloat maximumAnisotropy = 1.0F;
+    glGetFloatv(kMaximumTextureAnisotropy, &maximumAnisotropy);
+    glTexParameterf(GL_TEXTURE_2D, kTextureAnisotropy,
+                    std::min(maximumAnisotropy, 8.0F));
+  }
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image.width(), image.height(), 0,
+               GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
+  glGenerateMipmap(GL_TEXTURE_2D);
+  const GLenum uploadError = glGetError();
+  glBindTexture(GL_TEXTURE_2D, 0);
+  if (uploadError != GL_NO_ERROR || mMeshTexture == 0) {
+    glDeleteTextures(1, &mMeshTexture);
+    mMeshTexture = 0;
+    mMeshTextureError = QStringLiteral(
+        "GPU memory could not accept the mesh texture.");
+    return;
+  }
+  mMeshTextureSize = image.size();
+  mMeshTextureReady = true;
+  updateFrameRefreshPolicy();
+}
+
 void NativeViewport::updateMeshCacheSelection(
     const QMatrix4x4 &viewProjection) {
   if (!pagedMeshAvailable()) {
@@ -2039,6 +2170,14 @@ void NativeViewport::uploadPendingMeshCachePages() {
     glVertexAttribPointer(
         2, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
         reinterpret_cast<const void *>(offsetof(MeshVertex, normalX)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(
+        3, 2, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+        reinterpret_cast<const void *>(offsetof(MeshVertex, textureU)));
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(
+        4, 1, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+        reinterpret_cast<const void *>(offsetof(MeshVertex, textureWeight)));
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpuChunk.indexBuffer);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, page.indices.constData(),
                  GL_STATIC_DRAW);
@@ -2201,6 +2340,12 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   mMeshProgram->bind();
   mMeshProgram->setUniformValue("viewProjection", viewProjection);
   mMeshProgram->setUniformValue("cameraPosition", cameraPosition());
+  const bool textureEnabled =
+      mMeshHasTextureCoordinates && mMeshTextureReady && mMeshTexture != 0;
+  mMeshProgram->setUniformValue("albedoTexture", 0);
+  mMeshProgram->setUniformValue("textureEnabled", textureEnabled);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, textureEnabled ? mMeshTexture : 0);
   if (mRenderedMeshIndexCount >= 3 && mMeshIndexBuffer.isCreated()) {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
     mMeshIndexBuffer.bind();
@@ -2255,6 +2400,7 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   mProgressiveUploadActive =
       desiredMissing || !mMeshCacheReadsInFlight.isEmpty() ||
       !mPendingMeshCachePages.isEmpty();
+  glBindTexture(GL_TEXTURE_2D, 0);
   mMeshProgram->release();
 }
 
@@ -2971,6 +3117,21 @@ void NativeViewport::drawOverlay(QPainter &painter) {
         mHasGaussianAttributes ? QStringLiteral("高斯") : QStringLiteral("点"));
   } else {
     count = QStringLiteral("场景数据待载入");
+  }
+  if (mHasMesh) {
+    if (mMeshTextureReady && mMeshTextureSize.isValid()) {
+      count += QStringLiteral(" | 贴图 %1 · %2×%3")
+                   .arg(QFileInfo(mMeshTexturePath).fileName())
+                   .arg(mMeshTextureSize.width())
+                   .arg(mMeshTextureSize.height());
+    } else if (mMeshHasTextureCoordinates) {
+      count += QStringLiteral(" | UV · 顶点色回退");
+    } else {
+      count += QStringLiteral(" | 顶点色");
+    }
+    if (!mMeshTextureError.isEmpty()) {
+      count += QStringLiteral(" | 贴图警告");
+    }
   }
   if (mShowCameras) {
     count += QStringLiteral(" | 相机 %1%2")

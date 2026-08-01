@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QImageReader>
 #include <QSaveFile>
 #include <QStringList>
 #include <QTemporaryFile>
@@ -297,8 +299,27 @@ struct PlyHeader {
   PlyFormat format = PlyFormat::Unknown;
   QVector<ElementDefinition> elements;
   QVector<QByteArray> rawLines;
+  QStringList textureFiles;
   qsizetype vertexElementLine = -1;
 };
+
+struct MeshCornerKey {
+  quint32 sourceIndex = 0;
+  quint32 textureU = 0;
+  quint32 textureV = 0;
+  quint32 textured = 0;
+
+  bool operator==(const MeshCornerKey &) const = default;
+};
+
+size_t qHash(const MeshCornerKey &key, const size_t seed = 0) noexcept {
+  return qHashMulti(seed, key.sourceIndex, key.textureU, key.textureV,
+                    key.textured);
+}
+
+float canonicalTextureCoordinate(const float value) {
+  return value == 0.0F ? 0.0F : value;
+}
 
 ScalarType scalarTypeFromName(const QString &name) {
   const QString lower = name.toLower();
@@ -374,8 +395,30 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     }
 
     const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    if (parts.isEmpty() || parts.first() == QStringLiteral("comment") ||
-        parts.first() == QStringLiteral("obj_info")) {
+    if (parts.isEmpty()) {
+      continue;
+    }
+    if (parts.first().compare(QStringLiteral("comment"),
+                              Qt::CaseInsensitive) == 0) {
+      const QString comment = line.sliced(parts.first().size()).trimmed();
+      const QString textureKey = QStringLiteral("TextureFile");
+      if (comment.startsWith(textureKey, Qt::CaseInsensitive)) {
+        QString textureFile = comment.sliced(textureKey.size()).trimmed();
+        if (textureFile.size() >= 2 &&
+            ((textureFile.startsWith(QLatin1Char('"')) &&
+              textureFile.endsWith(QLatin1Char('"'))) ||
+             (textureFile.startsWith(QLatin1Char('\'')) &&
+              textureFile.endsWith(QLatin1Char('\''))))) {
+          textureFile = textureFile.sliced(1, textureFile.size() - 2);
+        }
+        if (!textureFile.isEmpty()) {
+          header.textureFiles.append(textureFile);
+        }
+      }
+      continue;
+    }
+    if (parts.first().compare(QStringLiteral("obj_info"),
+                              Qt::CaseInsensitive) == 0) {
       continue;
     }
     if (parts.first() == QStringLiteral("format") && parts.size() >= 2) {
@@ -437,6 +480,61 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
 
   error = QStringLiteral("The PLY header is incomplete or too large.");
   return false;
+}
+
+QString resolveMeshTexturePath(const QString &sourcePath,
+                               const PlyHeader &header) {
+  const QDir sourceDirectory = QFileInfo(sourcePath).absoluteDir();
+  for (const QString &declared : header.textureFiles) {
+    const QFileInfo candidate(
+        QFileInfo(declared).isAbsolute()
+            ? declared
+            : sourceDirectory.filePath(QDir::fromNativeSeparators(declared)));
+    if (candidate.isFile()) {
+      return QDir::cleanPath(candidate.absoluteFilePath());
+    }
+  }
+
+  const QString baseName = QFileInfo(sourcePath).completeBaseName();
+  constexpr std::array<const char *, 8> extensions = {
+      ".jpg", ".jpeg", ".png", ".tif",
+      ".tiff", ".bmp", ".webp", ".ppm"};
+  for (const char *extension : extensions) {
+    const QFileInfo candidate(
+        sourceDirectory.filePath(baseName + QString::fromLatin1(extension)));
+    if (candidate.isFile()) {
+      return QDir::cleanPath(candidate.absoluteFilePath());
+    }
+  }
+  return {};
+}
+
+void loadMeshTexture(const QString &sourcePath, const PlyHeader &header,
+                     const bool hasTextureCoordinateProperty,
+                     PointCloudData &result) {
+  if (!hasTextureCoordinateProperty) {
+    return;
+  }
+  result.meshTexturePath = resolveMeshTexturePath(sourcePath, header);
+  if (result.meshTexturePath.isEmpty()) {
+    result.meshTextureError = header.textureFiles.isEmpty()
+                                  ? QStringLiteral(
+                                        "The mesh contains UV coordinates but "
+                                        "does not declare a texture image.")
+                                  : QStringLiteral(
+                                        "The PLY-declared texture image could "
+                                        "not be found beside the mesh.");
+    return;
+  }
+  QImageReader reader(result.meshTexturePath);
+  reader.setAutoTransform(true);
+  result.meshTextureImage = reader.read();
+  if (result.meshTextureImage.isNull()) {
+    result.meshTextureError =
+        QStringLiteral("Unable to decode mesh texture %1: %2")
+            .arg(QFileInfo(result.meshTexturePath).fileName(), reader.errorString());
+    result.meshTexturePath.clear();
+  }
 }
 
 qsizetype scalarByteSize(const ScalarType type) {
@@ -953,6 +1051,7 @@ bool loadOutOfCoreMesh(
     QFile &file, const PlyHeader &header,
     const ElementDefinition &vertexElement,
     const ElementDefinition &faceElement, const int faceIndicesProperty,
+    const int faceTextureCoordinatesProperty,
     const int xIndex, const int yIndex, const int zIndex, const int redIndex,
     const int greenIndex, const int blueIndex,
     const bool sphericalHarmonicColor, PointCloudData &result) {
@@ -962,6 +1061,7 @@ bool loadOutOfCoreMesh(
     result.sourceVertexCount = existing.fullVertexCount;
     result.sourceFaceCount = existing.fullFaceCount;
     result.sourceTriangleCount = existing.fullTriangleCount;
+    result.meshHasTextureCoordinates = existing.hasTextureCoordinates;
     result.boundsMinimum = existing.boundsMinimum;
     result.boundsMaximum = existing.boundsMaximum;
     result.previewOnly = true;
@@ -1005,6 +1105,7 @@ bool loadOutOfCoreMesh(
 
   QVector<double> vertexValues(vertexElement.properties.size());
   QVector<quint32> faceIndices;
+  QVector<double> faceTextureCoordinates;
   qint64 sourceTriangleIndex = 0;
   bool verticesFinished = false;
   for (const ElementDefinition &element : header.elements) {
@@ -1014,6 +1115,7 @@ bool loadOutOfCoreMesh(
       }
       if (&element == &faceElement) {
         faceIndices.clear();
+        faceTextureCoordinates.clear();
       }
       for (qsizetype propertyIndex = 0;
            propertyIndex < element.properties.size(); ++propertyIndex) {
@@ -1052,8 +1154,13 @@ bool loadOutOfCoreMesh(
         const bool collectFaceIndices =
             &element == &faceElement &&
             propertyIndex == faceIndicesProperty;
+        const bool collectTextureCoordinates =
+            &element == &faceElement &&
+            propertyIndex == faceTextureCoordinatesProperty;
         if (collectFaceIndices) {
           faceIndices.reserve(static_cast<qsizetype>(listCount));
+        } else if (collectTextureCoordinates) {
+          faceTextureCoordinates.reserve(static_cast<qsizetype>(listCount));
         }
         for (qint64 listIndex = 0; listIndex < listCount; ++listIndex) {
           double value = 0.0;
@@ -1063,6 +1170,15 @@ bool loadOutOfCoreMesh(
                     .arg(element.name)
                     .arg(recordIndex);
             return false;
+          }
+          if (collectTextureCoordinates) {
+            if (!std::isfinite(value)) {
+              result.error = QStringLiteral(
+                  "PLY mesh face contains a non-finite texture coordinate.");
+              return false;
+            }
+            faceTextureCoordinates.append(value);
+            continue;
           }
           if (!collectFaceIndices) {
             continue;
@@ -1117,11 +1233,37 @@ bool loadOutOfCoreMesh(
           return false;
         }
       } else if (&element == &faceElement && faceIndices.size() >= 3) {
+        const bool textured =
+            faceTextureCoordinatesProperty >= 0 &&
+            faceTextureCoordinates.size() == faceIndices.size() * 2;
+        if (!faceTextureCoordinates.isEmpty() && !textured) {
+          result.error = QStringLiteral(
+              "PLY face texcoord lists must contain one UV pair per corner.");
+          return false;
+        }
         for (qsizetype index = 1; index + 1 < faceIndices.size(); ++index) {
-          if (!builder.appendTriangle(faceIndices.first(),
-                                      faceIndices.at(index),
-                                      faceIndices.at(index + 1),
-                                      sourceTriangleIndex, &result.error)) {
+          const bool appended =
+              textured
+                  ? builder.appendTexturedTriangle(
+                        faceIndices.first(), faceIndices.at(index),
+                        faceIndices.at(index + 1), sourceTriangleIndex,
+                        QVector2D(
+                            static_cast<float>(faceTextureCoordinates.at(0)),
+                            static_cast<float>(faceTextureCoordinates.at(1))),
+                        QVector2D(static_cast<float>(
+                                      faceTextureCoordinates.at(index * 2)),
+                                  static_cast<float>(faceTextureCoordinates.at(
+                                      index * 2 + 1))),
+                        QVector2D(static_cast<float>(faceTextureCoordinates.at(
+                                      (index + 1) * 2)),
+                                  static_cast<float>(faceTextureCoordinates.at(
+                                      (index + 1) * 2 + 1))),
+                        &result.error)
+                  : builder.appendTriangle(
+                        faceIndices.first(), faceIndices.at(index),
+                        faceIndices.at(index + 1), sourceTriangleIndex,
+                        &result.error);
+          if (!appended) {
             return false;
           }
           ++sourceTriangleIndex;
@@ -1150,6 +1292,8 @@ bool loadOutOfCoreMesh(
   result.sourceVertexCount = result.meshCache.fullVertexCount;
   result.sourceFaceCount = result.meshCache.fullFaceCount;
   result.sourceTriangleCount = result.meshCache.fullTriangleCount;
+  result.meshHasTextureCoordinates =
+      result.meshCache.hasTextureCoordinates;
   result.boundsMinimum = result.meshCache.boundsMinimum;
   result.boundsMaximum = result.meshCache.boundsMaximum;
   result.previewOnly = true;
@@ -1538,6 +1682,8 @@ bool loadFullResolutionPointPreview(
 }
 
 bool appendFaceTriangles(const QVector<double> &faceIndices,
+                         const QVector<double> &faceTextureCoordinates,
+                         const bool hasTextureCoordinateProperty,
                          const qint64 sourceVertexCount,
                          const bool appendPreview, PointCloudData &result) {
   if (faceIndices.size() < 3) {
@@ -1557,6 +1703,24 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
     indices.append(static_cast<quint32>(value));
   }
 
+  const bool textured = hasTextureCoordinateProperty &&
+                        faceTextureCoordinates.size() == indices.size() * 2;
+  if (!faceTextureCoordinates.isEmpty() && !textured) {
+    result.error = QStringLiteral(
+        "PLY face texcoord lists must contain one UV pair per corner.");
+    return false;
+  }
+  if (textured &&
+      std::any_of(faceTextureCoordinates.cbegin(),
+                  faceTextureCoordinates.cend(),
+                  [](const double coordinate) {
+                    return !std::isfinite(coordinate);
+                  })) {
+    result.error = QStringLiteral(
+        "PLY mesh face contains a non-finite texture coordinate.");
+    return false;
+  }
+
   const qint64 triangleCount = indices.size() - 2;
   result.sourceTriangleCount += triangleCount;
   if (!appendPreview) {
@@ -1572,6 +1736,20 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
     result.meshIndices.append(indices.first());
     result.meshIndices.append(indices.at(index));
     result.meshIndices.append(indices.at(index + 1));
+    const std::array<qsizetype, 3> corners = {0, index, index + 1};
+    for (const qsizetype corner : corners) {
+      result.meshCornerTextureCoordinates.append(
+          textured
+              ? QVector2D(
+                    static_cast<float>(
+                        faceTextureCoordinates.at(corner * 2)),
+                    static_cast<float>(
+                        faceTextureCoordinates.at(corner * 2 + 1)))
+              : QVector2D());
+      result.meshCornerTextured.append(textured ? 1 : 0);
+    }
+    result.meshHasTextureCoordinates =
+        result.meshHasTextureCoordinates || textured;
   }
   return true;
 }
@@ -1582,10 +1760,17 @@ bool finitePosition(const PointPosition &position) {
 }
 
 bool finalizeMeshGeometry(PointCloudData &result) {
-  result.meshVertices.resize(result.sourcePositions.size());
+  if (result.meshCornerTextureCoordinates.size() != result.meshIndices.size() ||
+      result.meshCornerTextured.size() != result.meshIndices.size()) {
+    result.error = QStringLiteral(
+        "The mesh corner-attribute stream does not match its index stream.");
+    return false;
+  }
+
+  QVector<MeshVertex> sourceVertices(result.sourcePositions.size());
   for (qsizetype index = 0; index < result.sourcePositions.size(); ++index) {
     const PointPosition &position = result.sourcePositions.at(index);
-    MeshVertex &meshVertex = result.meshVertices[index];
+    MeshVertex &meshVertex = sourceVertices[index];
     if (finitePosition(position)) {
       meshVertex.x = position.x;
       meshVertex.y = position.y;
@@ -1594,18 +1779,22 @@ bool finalizeMeshGeometry(PointCloudData &result) {
   }
   for (const PointCloudVertex &pointVertex : result.vertices) {
     const qsizetype index = static_cast<qsizetype>(pointVertex.sourceIndex);
-    if (index < 0 || index >= result.meshVertices.size()) {
+    if (index < 0 || index >= sourceVertices.size()) {
       continue;
     }
-    MeshVertex &meshVertex = result.meshVertices[index];
+    MeshVertex &meshVertex = sourceVertices[index];
     meshVertex.red = pointVertex.red;
     meshVertex.green = pointVertex.green;
     meshVertex.blue = pointVertex.blue;
   }
 
-  QVector<QVector3D> normalSums(result.meshVertices.size());
-  QVector<quint32> renderableIndices;
-  renderableIndices.reserve(result.meshIndices.size());
+  QVector<QVector3D> normalSums(sourceVertices.size());
+  QVector<quint32> renderableSourceIndices;
+  QVector<QVector2D> renderableTextureCoordinates;
+  QVector<quint8> renderableTextured;
+  renderableSourceIndices.reserve(result.meshIndices.size());
+  renderableTextureCoordinates.reserve(result.meshIndices.size());
+  renderableTextured.reserve(result.meshIndices.size());
   for (qsizetype index = 0; index + 2 < result.meshIndices.size(); index += 3) {
     const quint32 a = result.meshIndices.at(index);
     const quint32 b = result.meshIndices.at(index + 1);
@@ -1624,23 +1813,73 @@ bool finalizeMeshGeometry(PointCloudData &result) {
         faceNormal.lengthSquared() <= 1.0e-20F) {
       continue;
     }
-    renderableIndices.append(a);
-    renderableIndices.append(b);
-    renderableIndices.append(c);
+    for (qsizetype corner = 0; corner < 3; ++corner) {
+      renderableSourceIndices.append(result.meshIndices.at(index + corner));
+      renderableTextureCoordinates.append(
+          result.meshCornerTextureCoordinates.at(index + corner));
+      renderableTextured.append(result.meshCornerTextured.at(index + corner));
+    }
     normalSums[static_cast<qsizetype>(a)] += faceNormal;
     normalSums[static_cast<qsizetype>(b)] += faceNormal;
     normalSums[static_cast<qsizetype>(c)] += faceNormal;
   }
-  result.meshIndices = std::move(renderableIndices);
-  for (qsizetype index = 0; index < result.meshVertices.size(); ++index) {
+  for (qsizetype index = 0; index < sourceVertices.size(); ++index) {
     const QVector3D normal = normalSums.at(index).normalized();
     if (normal.lengthSquared() <= 0.0F) {
       continue;
     }
-    result.meshVertices[index].normalX = normal.x();
-    result.meshVertices[index].normalY = normal.y();
-    result.meshVertices[index].normalZ = normal.z();
+    sourceVertices[index].normalX = normal.x();
+    sourceVertices[index].normalY = normal.y();
+    sourceVertices[index].normalZ = normal.z();
   }
+
+  if (!result.meshHasTextureCoordinates) {
+    result.meshVertices = std::move(sourceVertices);
+    result.meshIndices = std::move(renderableSourceIndices);
+  } else {
+    QHash<MeshCornerKey, quint32> localIndices;
+    localIndices.reserve(static_cast<qsizetype>(std::min<qint64>(
+        renderableSourceIndices.size(), std::numeric_limits<int>::max())));
+    QVector<MeshVertex> renderVertices;
+    renderVertices.reserve(static_cast<qsizetype>(std::min<qint64>(
+        renderableSourceIndices.size(), std::numeric_limits<int>::max())));
+    QVector<quint32> renderIndices;
+    renderIndices.reserve(renderableSourceIndices.size());
+    for (qsizetype corner = 0; corner < renderableSourceIndices.size();
+         ++corner) {
+      const quint32 sourceIndex = renderableSourceIndices.at(corner);
+      const bool textured = renderableTextured.at(corner) != 0;
+      const QVector2D textureCoordinate =
+          renderableTextureCoordinates.at(corner);
+      const float textureU =
+          canonicalTextureCoordinate(textureCoordinate.x());
+      const float textureV =
+          canonicalTextureCoordinate(textureCoordinate.y());
+      const MeshCornerKey key{
+          sourceIndex, std::bit_cast<quint32>(textureU),
+          std::bit_cast<quint32>(textureV), textured ? 1U : 0U};
+      const auto existing = localIndices.constFind(key);
+      if (existing != localIndices.cend()) {
+        renderIndices.append(existing.value());
+        continue;
+      }
+      MeshVertex vertex = sourceVertices.at(sourceIndex);
+      vertex.textureU = textureU;
+      vertex.textureV = textureV;
+      vertex.textureWeight = textured ? 1.0F : 0.0F;
+      const quint32 renderIndex =
+          static_cast<quint32>(renderVertices.size());
+      renderVertices.append(vertex);
+      renderIndices.append(renderIndex);
+      localIndices.insert(key, renderIndex);
+    }
+    result.meshVertices = std::move(renderVertices);
+    result.meshIndices = std::move(renderIndices);
+  }
+  result.meshCornerTextureCoordinates.clear();
+  result.meshCornerTextureCoordinates.squeeze();
+  result.meshCornerTextured.clear();
+  result.meshCornerTextured.squeeze();
   return !result.meshIndices.isEmpty();
 }
 } // namespace
@@ -1657,8 +1896,8 @@ bool PointCloudData::isValid() const {
 
 bool PointCloudData::hasMesh() const {
   return meshCache.isValid() ||
-         (meshVertices.size() == sourceVertexCount &&
-          meshIndices.size() >= 3 && meshIndices.size() % 3 == 0);
+         (!meshVertices.isEmpty() && meshIndices.size() >= 3 &&
+          meshIndices.size() % 3 == 0);
 }
 
 qsizetype PointCloudData::previewPointCount() const {
@@ -1747,6 +1986,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       });
   const bool containsMeshFaces = faceElementIterator != header.elements.cend();
   int faceVertexIndicesProperty = -1;
+  int faceTextureCoordinatesProperty = -1;
   if (containsMeshFaces) {
     result.sourceFaceCount = faceElementIterator->count;
     faceVertexIndicesProperty = findProperty(
@@ -1762,7 +2002,23 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
           "vertex_indices or vertex_index.");
       return result;
     }
+    faceTextureCoordinatesProperty = findProperty(
+        *faceElementIterator,
+        {QStringLiteral("texcoord"), QStringLiteral("texcoords"),
+         QStringLiteral("texture_uv"),
+         QStringLiteral("texture_coordinates"), QStringLiteral("uv")});
+    if (faceTextureCoordinatesProperty >= 0 &&
+        !faceElementIterator->properties
+             .at(faceTextureCoordinatesProperty)
+             .isList) {
+      result.error = QStringLiteral(
+          "The PLY face texcoord property must be a scalar list.");
+      return result;
+    }
   }
+
+  loadMeshTexture(file.fileName(), header,
+                  faceTextureCoordinatesProperty >= 0, result);
 
   const int xIndex = findProperty(vertexElement, {QStringLiteral("x")});
   const int yIndex = findProperty(vertexElement, {QStringLiteral("y")});
@@ -1812,7 +2068,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       (vertexElement.count > residentMeshVertexLimit ||
        faceElementIterator->count > residentMeshFaceLimit)) {
     loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
-                      faceVertexIndicesProperty, xIndex, yIndex, zIndex,
+                      faceVertexIndicesProperty,
+                      faceTextureCoordinatesProperty, xIndex, yIndex, zIndex,
                       redIndex, greenIndex, blueIndex,
                       sphericalHarmonicColor, result);
     return result;
@@ -1844,6 +2101,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         std::min<qint64>(faceElementIterator->count,
                          kMaximumMeshPreviewTriangles) *
         3));
+    result.meshCornerTextureCoordinates.reserve(result.meshIndices.capacity());
+    result.meshCornerTextured.reserve(result.meshIndices.capacity());
   }
   qsizetype nextSampleIndex = 0;
   qsizetype nextFaceSampleIndex = 0;
@@ -1874,7 +2133,14 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         const bool appendPreview = shouldSampleVertex(
             recordIndex, faceElementIterator->count, faceSampleCount,
             nextFaceSampleIndex);
+        const QVector<double> emptyTextureCoordinates;
+        const QVector<double> &textureCoordinates =
+            faceTextureCoordinatesProperty >= 0
+                ? listValues.at(faceTextureCoordinatesProperty)
+                : emptyTextureCoordinates;
         if (!appendFaceTriangles(listValues.at(faceVertexIndicesProperty),
+                                 textureCoordinates,
+                                 faceTextureCoordinatesProperty >= 0,
                                  vertexElement.count, appendPreview, result)) {
           result.vertices.clear();
           result.sourcePositions.clear();
