@@ -65,6 +65,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/NativeViewport.h
   src/PlyPointCloudLoader.cpp
   src/PlyPointCloudLoader.h
+  src/PointCloudCache.cpp
+  src/PointCloudCache.h
   src/ProcessSupervisor.cpp
   src/ProcessSupervisor.h
   src/RecoveryStore.cpp
@@ -222,6 +224,8 @@ if(BUILD_TESTING)
       src/ColmapSupport.h
       src/PlyPointCloudLoader.cpp
       src/PlyPointCloudLoader.h
+      src/PointCloudCache.cpp
+      src/PointCloudCache.h
       src/SceneEditModel.cpp
       src/SceneEditModel.h
       src/ScreenSpaceSelection.cpp

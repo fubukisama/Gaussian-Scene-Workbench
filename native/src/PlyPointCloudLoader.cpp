@@ -698,6 +698,16 @@ bool loadFullResolutionPointPreview(
     const int xIndex, const int yIndex, const int zIndex, const int redIndex,
     const int greenIndex, const int blueIndex,
     const bool sphericalHarmonicColor, PointCloudData &result) {
+  const PointCloudCacheIndex existingCache =
+      PointCloudCache::loadForSource(file.fileName());
+  if (existingCache.isValid()) {
+    result.pointCache = existingCache;
+    result.boundsMinimum = existingCache.boundsMinimum;
+    result.boundsMaximum = existingCache.boundsMaximum;
+    result.previewOnly = true;
+    return true;
+  }
+
   const auto firstNonEmpty = std::find_if(
       header.elements.cbegin(), header.elements.cend(),
       [](const ElementDefinition &element) { return element.count > 0; });
@@ -736,6 +746,7 @@ bool loadFullResolutionPointPreview(
                             vertexElement.properties.at(propertyIndex).valueType,
                             header.format);
   };
+  const qint64 vertexDataOffset = file.pos();
   bool hasFiniteBounds = false;
   qint64 sourceFirstVertex = 0;
   while (sourceFirstVertex < vertexElement.count) {
@@ -748,14 +759,8 @@ bool loadFullResolutionPointPreview(
     if (bytes.size() != requestedBytes) {
       result.error = QStringLiteral(
           "Unexpected end of binary PLY data while reading the large cloud.");
-      result.fullResolutionPointChunks.clear();
       return false;
     }
-
-    PointPreviewChunk chunk;
-    chunk.sourceFirstVertex = sourceFirstVertex;
-    chunk.vertices.reserve(requestedRecords);
-    bool hasChunkBounds = false;
     const auto *raw = reinterpret_cast<const uchar *>(bytes.constData());
     for (qsizetype index = 0; index < requestedRecords; ++index) {
       const uchar *record = raw + index * recordBytes;
@@ -766,7 +771,65 @@ bool loadFullResolutionPointPreview(
           !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) {
         continue;
       }
+      const QVector3D position(static_cast<float>(*x), static_cast<float>(*y),
+                               static_cast<float>(*z));
+      if (!hasFiniteBounds) {
+        result.boundsMinimum = position;
+        result.boundsMaximum = position;
+        hasFiniteBounds = true;
+      } else {
+        result.boundsMinimum.setX(
+            std::min(result.boundsMinimum.x(), position.x()));
+        result.boundsMinimum.setY(
+            std::min(result.boundsMinimum.y(), position.y()));
+        result.boundsMinimum.setZ(
+            std::min(result.boundsMinimum.z(), position.z()));
+        result.boundsMaximum.setX(
+            std::max(result.boundsMaximum.x(), position.x()));
+        result.boundsMaximum.setY(
+            std::max(result.boundsMaximum.y(), position.y()));
+        result.boundsMaximum.setZ(
+            std::max(result.boundsMaximum.z(), position.z()));
+      }
+    }
+    sourceFirstVertex += requestedRecords;
+  }
+  if (!hasFiniteBounds) {
+    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    return false;
+  }
 
+  PointCloudCacheBuilder cacheBuilder(file.fileName(), result.boundsMinimum,
+                                      result.boundsMaximum);
+  if (!cacheBuilder.begin(&result.error) || !file.seek(vertexDataOffset)) {
+    if (result.error.isEmpty()) {
+      result.error = QStringLiteral("Unable to rewind the PLY for cache construction.");
+    }
+    return false;
+  }
+  sourceFirstVertex = 0;
+  while (sourceFirstVertex < vertexElement.count) {
+    const qsizetype requestedRecords = static_cast<qsizetype>(
+        std::min<qint64>(kFullResolutionPointChunkSize,
+                         vertexElement.count - sourceFirstVertex));
+    const qint64 requestedBytes =
+        static_cast<qint64>(requestedRecords) * recordBytes;
+    const QByteArray bytes = file.read(requestedBytes);
+    if (bytes.size() != requestedBytes) {
+      result.error = QStringLiteral(
+          "Unexpected end of binary PLY data while building its point cache.");
+      return false;
+    }
+    const auto *raw = reinterpret_cast<const uchar *>(bytes.constData());
+    for (qsizetype index = 0; index < requestedRecords; ++index) {
+      const uchar *record = raw + index * recordBytes;
+      const std::optional<double> x = valueAt(record, xIndex);
+      const std::optional<double> y = valueAt(record, yIndex);
+      const std::optional<double> z = valueAt(record, zIndex);
+      if (!x.has_value() || !y.has_value() || !z.has_value() ||
+          !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) {
+        continue;
+      }
       PointPreviewVertex vertex;
       vertex.x = static_cast<float>(*x);
       vertex.y = static_cast<float>(*y);
@@ -791,48 +854,22 @@ bool loadFullResolutionPointPreview(
               blue, vertexElement.properties.at(blueIndex).valueType);
         }
       }
-      chunk.vertices.append(vertex);
-      const QVector3D position(vertex.x, vertex.y, vertex.z);
-      if (!hasChunkBounds) {
-        chunk.boundsMinimum = position;
-        chunk.boundsMaximum = position;
-        hasChunkBounds = true;
-      } else {
-        chunk.boundsMinimum.setX(std::min(chunk.boundsMinimum.x(), position.x()));
-        chunk.boundsMinimum.setY(std::min(chunk.boundsMinimum.y(), position.y()));
-        chunk.boundsMinimum.setZ(std::min(chunk.boundsMinimum.z(), position.z()));
-        chunk.boundsMaximum.setX(std::max(chunk.boundsMaximum.x(), position.x()));
-        chunk.boundsMaximum.setY(std::max(chunk.boundsMaximum.y(), position.y()));
-        chunk.boundsMaximum.setZ(std::max(chunk.boundsMaximum.z(), position.z()));
+      if (!cacheBuilder.append(vertex, sourceFirstVertex + index,
+                               &result.error)) {
+        return false;
       }
-    }
-    if (hasChunkBounds) {
-      if (!hasFiniteBounds) {
-        result.boundsMinimum = chunk.boundsMinimum;
-        result.boundsMaximum = chunk.boundsMaximum;
-        hasFiniteBounds = true;
-      } else {
-        result.boundsMinimum.setX(
-            std::min(result.boundsMinimum.x(), chunk.boundsMinimum.x()));
-        result.boundsMinimum.setY(
-            std::min(result.boundsMinimum.y(), chunk.boundsMinimum.y()));
-        result.boundsMinimum.setZ(
-            std::min(result.boundsMinimum.z(), chunk.boundsMinimum.z()));
-        result.boundsMaximum.setX(
-            std::max(result.boundsMaximum.x(), chunk.boundsMaximum.x()));
-        result.boundsMaximum.setY(
-            std::max(result.boundsMaximum.y(), chunk.boundsMaximum.y()));
-        result.boundsMaximum.setZ(
-            std::max(result.boundsMaximum.z(), chunk.boundsMaximum.z()));
-      }
-      result.fullResolutionPointChunks.append(std::move(chunk));
     }
     sourceFirstVertex += requestedRecords;
   }
-  if (!hasFiniteBounds || result.fullResolutionPointChunks.isEmpty()) {
-    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+  result.pointCache = cacheBuilder.finish(&result.error);
+  if (!result.pointCache.isValid()) {
+    if (result.error.isEmpty()) {
+      result.error = QStringLiteral("Unable to build the point-cache index.");
+    }
     return false;
   }
+  result.boundsMinimum = result.pointCache.boundsMinimum;
+  result.boundsMaximum = result.pointCache.boundsMaximum;
   result.previewOnly = true;
   return true;
 }
@@ -964,11 +1001,11 @@ qsizetype PointCloudData::previewPointCount() const {
   if (!previewOnly) {
     return vertices.size();
   }
-  qsizetype count = 0;
-  for (const PointPreviewChunk &chunk : fullResolutionPointChunks) {
-    count += chunk.vertices.size();
-  }
-  return count;
+  return pointCache.isValid()
+             ? static_cast<qsizetype>(std::min<qint64>(
+                   pointCache.fullPointCount,
+                   std::numeric_limits<qsizetype>::max()))
+             : 0;
 }
 
 QVector3D PointCloudData::center() const {

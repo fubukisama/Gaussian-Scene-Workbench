@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PointCloudCache.h"
+
 #include <QBitArray>
 #include <QString>
 #include <QVector>
@@ -33,25 +35,6 @@ struct PointPosition {
   [[nodiscard]] QVector3D toVector3D() const { return QVector3D(x, y, z); }
 };
 
-struct PointPreviewVertex {
-  float x = 0.0F;
-  float y = 0.0F;
-  float z = 0.0F;
-  quint8 red = 184;
-  quint8 green = 191;
-  quint8 blue = 199;
-  quint8 padding = 255;
-};
-
-static_assert(sizeof(PointPreviewVertex) == 16);
-
-struct PointPreviewChunk {
-  QVector<PointPreviewVertex> vertices;
-  QVector3D boundsMinimum;
-  QVector3D boundsMaximum;
-  qint64 sourceFirstVertex = 0;
-};
-
 struct MeshVertex {
   float x = 0.0F;
   float y = 0.0F;
@@ -67,7 +50,7 @@ struct MeshVertex {
 struct PointCloudData {
   QVector<PointCloudVertex> vertices;
   QVector<PointPosition> sourcePositions;
-  QVector<PointPreviewChunk> fullResolutionPointChunks;
+  PointCloudCacheIndex pointCache;
   QVector<MeshVertex> meshVertices;
   QVector<quint32> meshIndices;
   QVector3D boundsMinimum;

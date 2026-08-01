@@ -17,6 +17,7 @@
 #include <QPointF>
 #include <QPolygonF>
 #include <QRectF>
+#include <QSet>
 #include <QString>
 #include <QVector3D>
 
@@ -119,9 +120,12 @@ protected:
 
 private:
   struct FullResolutionGpuChunk {
+    int nodeId = -1;
     GLuint vertexArray = 0;
     GLuint buffer = 0;
     GLsizei pointCount = 0;
+    qsizetype byteCount = 0;
+    quint64 lastUsedFrame = 0;
     QVector3D boundsMinimum;
     QVector3D boundsMaximum;
   };
@@ -150,7 +154,10 @@ private:
   void updateFrameRefreshPolicy();
   void notifyEditState();
   void uploadPendingPointCloud();
-  void uploadPendingFullResolutionPointCloud();
+  void updatePointCacheSelection(const QMatrix4x4 &viewProjection);
+  void requestMissingPointCachePages();
+  void uploadPendingPointCachePages();
+  void evictPointCacheUntilFits(qsizetype requiredBytes);
   void releaseFullResolutionPointCloud();
   void uploadPendingMesh();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
@@ -229,9 +236,16 @@ private:
   QVector<PointPosition> mSourcePositions;
   QVector<PointCloudVertex> mPreviewVertices;
   QVector<PointCloudVertex> mPendingVertices;
-  QVector<PointPreviewChunk> mPendingFullResolutionPointChunks;
-  qsizetype mPendingFullResolutionChunkIndex = 0;
+  PointCloudCacheIndex mPointCache;
+  QSet<int> mDesiredPointCacheNodes;
+  QSet<int> mPointCacheReadsInFlight;
+  QSet<int> mPointCacheFailedNodes;
+  QVector<PointCloudCachePage> mPendingPointCachePages;
   QVector<FullResolutionGpuChunk> mFullResolutionPointGpuChunks;
+  qsizetype mPointCacheResidentBytes = 0;
+  qsizetype mPointCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
+  quint64 mPointCacheFrameSerial = 0;
+  QString mPointCacheError;
   QVector<MeshVertex> mPendingMeshVertices;
   QVector<quint32> mPendingMeshIndices;
   CameraTrajectory mCameraTrajectory;

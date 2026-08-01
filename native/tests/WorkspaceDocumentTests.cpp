@@ -26,6 +26,7 @@ private slots:
   void parsesGaussianPlyHeader();
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsOversizedBinaryPointCloudAtFullResolution();
+  void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
   void loadsBinaryGaussianSphericalHarmonicColors();
@@ -300,14 +301,113 @@ void WorkspaceDocumentTests::loadsOversizedBinaryPointCloudAtFullResolution() {
   QCOMPARE(data.sourcePositions.size(), 0);
   QCOMPARE(data.vertices.size(), 0);
   QCOMPARE(data.previewPointCount(), 4);
-  QCOMPARE(data.fullResolutionPointChunks.size(), 1);
-  const gsw::PointPreviewChunk &chunk =
-      data.fullResolutionPointChunks.constFirst();
-  QCOMPARE(chunk.vertices.size(), 4);
-  QCOMPARE(chunk.vertices.at(0).red, static_cast<quint8>(10));
-  QCOMPARE(chunk.vertices.at(3).blue, static_cast<quint8>(33));
+  QVERIFY(data.pointCache.isValid());
+  QCOMPARE(data.pointCache.fullPointCount, 4);
+  QCOMPARE(data.pointCache.nodes.constFirst().sourcePointCount, 4);
+  const gsw::PointCloudCachePage rootPage =
+      gsw::PointCloudCache::readNode(data.pointCache,
+                                     data.pointCache.rootNode);
+  QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
+  QCOMPARE(rootPage.vertices.size(), 4);
+  QCOMPARE(rootPage.vertices.at(0).red, static_cast<quint8>(10));
+  QCOMPARE(rootPage.vertices.at(3).blue, static_cast<quint8>(33));
+  qint64 leafSourcePoints = 0;
+  for (const gsw::PointCloudCacheNode &node : data.pointCache.nodes) {
+    if (node.isLeaf()) {
+      leafSourcePoints += node.sourcePointCount;
+    }
+  }
+  QCOMPARE(leafSourcePoints, 4);
   QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, -3.0F));
   QCOMPARE(data.boundsMaximum, QVector3D(3.0F, 6.0F, 0.0F));
+
+  const QString cacheDataPath = data.pointCache.dataPath;
+  const gsw::PointCloudData reused =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(reused.isValid(), qPrintable(reused.error));
+  QCOMPARE(reused.pointCache.dataPath, cacheDataPath);
+}
+
+void WorkspaceDocumentTests::buildsAndInvalidatesDiskResidentPointOctree() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString sourcePath =
+      QDir(temporary.path()).filePath(QStringLiteral("source.bin"));
+  QFile source(sourcePath);
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  QCOMPARE(source.write("source"), 6);
+  source.close();
+
+  gsw::PointCloudCacheBuilder builder(
+      sourcePath, QVector3D(-1.0F, -1.0F, -1.0F),
+      QVector3D(1.0F, 1.0F, 1.0F));
+  QString error;
+  QVERIFY2(builder.begin(&error), qPrintable(error));
+  constexpr int pointCount = 40'000;
+  for (int index = 0; index < pointCount; ++index) {
+    gsw::PointPreviewVertex vertex;
+    vertex.x = static_cast<float>((index % 97) - 48) / 48.0F;
+    vertex.y = static_cast<float>(((index / 97) % 89) - 44) / 44.0F;
+    vertex.z = static_cast<float>(((index / (97 * 89)) % 7) - 3) / 3.0F;
+    vertex.red = static_cast<quint8>(index % 256);
+    QVERIFY2(builder.append(vertex, index, &error), qPrintable(error));
+  }
+  const gsw::PointCloudCacheIndex built = builder.finish(&error);
+  QVERIFY2(built.isValid(), qPrintable(error));
+  QCOMPARE(built.fullPointCount, static_cast<qint64>(pointCount));
+  QCOMPARE(built.nodes.constFirst().pointCount, 32'768);
+  qint64 leafPoints = 0;
+  int populatedLeaf = -1;
+  for (const gsw::PointCloudCacheNode &node : built.nodes) {
+    if (!node.isLeaf()) {
+      continue;
+    }
+    leafPoints += node.sourcePointCount;
+    if (populatedLeaf < 0 && node.pointCount > 0) {
+      populatedLeaf = node.id;
+    }
+  }
+  QCOMPARE(leafPoints, static_cast<qint64>(pointCount));
+  QVERIFY(populatedLeaf >= 0);
+  const gsw::PointCloudCachePage leafPage =
+      gsw::PointCloudCache::readNode(built, populatedLeaf);
+  QVERIFY2(leafPage.isValid(), qPrintable(leafPage.error));
+  QCOMPARE(leafPage.vertices.size(),
+           static_cast<qsizetype>(built.nodes.at(populatedLeaf).pointCount));
+
+  const gsw::PointCloudCacheIndex reused =
+      gsw::PointCloudCache::loadForSource(sourcePath, &error);
+  QVERIFY2(reused.isValid(), qPrintable(error));
+  QCOMPARE(reused.dataPath, built.dataPath);
+
+  QFile indexFile(built.indexPath);
+  QVERIFY(indexFile.open(QIODevice::ReadOnly));
+  const QByteArray originalIndex = indexFile.readAll();
+  indexFile.close();
+  QJsonObject corruptedRoot =
+      QJsonDocument::fromJson(originalIndex).object();
+  QJsonArray corruptedNodes =
+      corruptedRoot.value(QStringLiteral("nodes")).toArray();
+  QJsonObject corruptedRootNode = corruptedNodes.at(0).toObject();
+  corruptedRootNode.insert(QStringLiteral("id"), 99);
+  corruptedNodes.replace(0, corruptedRootNode);
+  corruptedRoot.insert(QStringLiteral("nodes"), corruptedNodes);
+  QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  QVERIFY(indexFile.write(
+              QJsonDocument(corruptedRoot).toJson(QJsonDocument::Compact)) >
+          0);
+  indexFile.close();
+  QVERIFY(!gsw::PointCloudCache::loadForSource(sourcePath).isValid());
+
+  QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  QCOMPARE(indexFile.write(originalIndex), originalIndex.size());
+  indexFile.close();
+  QVERIFY(gsw::PointCloudCache::loadForSource(sourcePath).isValid());
+
+  QVERIFY(source.open(QIODevice::WriteOnly | QIODevice::Append));
+  QCOMPARE(source.write("changed"), 7);
+  source.close();
+  QVERIFY(!gsw::PointCloudCache::loadForSource(sourcePath).isValid());
 }
 
 void WorkspaceDocumentTests::loadsAsciiPolygonMeshAndTriangulates() {

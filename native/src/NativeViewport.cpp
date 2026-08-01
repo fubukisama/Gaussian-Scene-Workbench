@@ -271,9 +271,13 @@ void NativeViewport::setScene(const QString &scenePath,
   mPreviewVertices.squeeze();
   mPendingVertices.clear();
   mPendingVertices.squeeze();
-  mPendingFullResolutionPointChunks.clear();
-  mPendingFullResolutionPointChunks.squeeze();
-  mPendingFullResolutionChunkIndex = 0;
+  mPointCache = {};
+  mDesiredPointCacheNodes.clear();
+  mPointCacheReadsInFlight.clear();
+  mPointCacheFailedNodes.clear();
+  mPendingPointCachePages.clear();
+  mPendingPointCachePages.squeeze();
+  mPointCacheError.clear();
   mFullResolutionPointClearPending = true;
   mPendingMeshVertices.clear();
   mPendingMeshVertices.squeeze();
@@ -483,6 +487,27 @@ qsizetype NativeViewport::cameraCount() const {
 
 void NativeViewport::initializeGL() {
   initializeOpenGLFunctions();
+  constexpr GLenum kGpuMemoryTotalAvailableNvx = 0x9048;
+  if (QOpenGLContext::currentContext()->hasExtension(
+          QByteArrayLiteral("GL_NVX_gpu_memory_info"))) {
+    GLint totalKilobytes = 0;
+    glGetIntegerv(kGpuMemoryTotalAvailableNvx, &totalKilobytes);
+    if (totalKilobytes > 0) {
+      const qsizetype quarterBytes =
+          static_cast<qsizetype>(totalKilobytes) * 1024 / 4;
+      mPointCacheGpuBudgetBytes = std::clamp<qsizetype>(
+          quarterBytes, 512LL * 1024LL * 1024LL,
+          2048LL * 1024LL * 1024LL);
+    }
+  }
+  bool budgetOverrideValid = false;
+  const int budgetOverrideMegabytes = qEnvironmentVariableIntValue(
+      "GSW_POINT_CACHE_GPU_BUDGET_MB", &budgetOverrideValid);
+  if (budgetOverrideValid && budgetOverrideMegabytes >= 64 &&
+      budgetOverrideMegabytes <= 4096) {
+    mPointCacheGpuBudgetBytes =
+        static_cast<qsizetype>(budgetOverrideMegabytes) * 1024LL * 1024LL;
+  }
   glClearColor(0.047F, 0.051F, 0.055F, 1.0F);
   glDisable(GL_CULL_FACE);
   glEnable(GL_DEPTH_TEST);
@@ -995,12 +1020,13 @@ void NativeViewport::paintGL() {
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   uploadPendingPointCloud();
-  uploadPendingFullResolutionPointCloud();
   uploadPendingMesh();
 
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
   const QMatrix4x4 viewProjection = projection * view;
+  updatePointCacheSelection(viewProjection);
+  uploadPendingPointCachePages();
   drawInfiniteGrid(viewProjection);
   if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
     drawMesh(viewProjection);
@@ -1155,9 +1181,11 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mSourcePositions = std::move(data.sourcePositions);
             mPreviewVertices = std::move(data.vertices);
             mPreviewOnlyScene = data.previewOnly;
-            mPendingFullResolutionPointChunks =
-                std::move(data.fullResolutionPointChunks);
-            mPendingFullResolutionChunkIndex = 0;
+            mPointCache = std::move(data.pointCache);
+            mDesiredPointCacheNodes.clear();
+            mPointCacheReadsInFlight.clear();
+            mPointCacheFailedNodes.clear();
+            mPendingPointCachePages.clear();
             mFullResolutionPointCount =
                 mPreviewOnlyScene ? mPreviewPointCount : 0;
             mUploadedFullResolutionPointCount = 0;
@@ -1169,7 +1197,11 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mEditModel.reset(
                 mHasMesh || mPreviewOnlyScene ? 0 : mSourcePositions.size());
             const bool wasAvailable = gaussianRenderingAvailable();
-            mHasGaussianAttributes = data.hasGaussianAttributes;
+            // The out-of-core cache intentionally stores only exact XYZ/RGB
+            // centers. Do not expose Gaussian mode until scale, rotation, and
+            // opacity also have a paged representation.
+            mHasGaussianAttributes =
+                data.hasGaussianAttributes && !mPreviewOnlyScene;
             const bool isAvailable = gaussianRenderingAvailable();
             if (isAvailable != wasAvailable) {
               emit gaussianRenderingAvailabilityChanged(isAvailable);
@@ -1324,11 +1356,8 @@ void NativeViewport::rebuildRenderedVertices() {
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
-  const bool fullResolutionUploadPending =
-      mPendingFullResolutionChunkIndex <
-      mPendingFullResolutionPointChunks.size();
   const bool shouldRefreshContinuously =
-      mRenderedPointCount > 0 || fullResolutionUploadPending ||
+      mRenderedPointCount > 0 || !mPendingPointCachePages.isEmpty() ||
       mRenderedMeshIndexCount > 0;
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
@@ -1370,57 +1399,293 @@ void NativeViewport::releaseFullResolutionPointCloud() {
     }
   }
   mFullResolutionPointGpuChunks.clear();
+  mPointCacheResidentBytes = 0;
   mUploadedFullResolutionPointCount = 0;
 }
 
-void NativeViewport::uploadPendingFullResolutionPointCloud() {
+void NativeViewport::updatePointCacheSelection(
+    const QMatrix4x4 &viewProjection) {
+  if (!mPreviewOnlyScene || !mPointCache.isValid()) {
+    mDesiredPointCacheNodes.clear();
+    return;
+  }
+  ++mPointCacheFrameSerial;
+  const bool interacting =
+      mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
+      (mViewSnapAnimation != nullptr &&
+       mViewSnapAnimation->state() == QAbstractAnimation::Running);
+  const float refinementThresholdPixels = interacting ? 140.0F : 28.0F;
+  const qsizetype pointBudget = static_cast<qsizetype>(
+      (static_cast<long double>(mPointCacheGpuBudgetBytes) * 0.85L) /
+      sizeof(PointPreviewVertex));
+  const QVector3D eye = cameraPosition();
+  const float viewportHeight =
+      std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
+  const auto projectedPixels = [&](const PointCloudCacheNode &node) {
+    const QVector3D center =
+        (node.boundsMinimum + node.boundsMaximum) * 0.5F;
+    const float radius =
+        std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
+                 mSceneRadius * 1.0e-6F);
+    if (mOrthographic) {
+      return radius / std::max(mDistance, 1.0e-5F) * viewportHeight * 2.0F;
+    }
+    const float distance =
+        std::max((center - eye).length() - radius, mSceneRadius * 1.0e-5F);
+    return radius / distance * viewportHeight / std::tan(radians(22.5F));
+  };
+  const auto visible = [&](const PointCloudCacheNode &node) {
+    return node.sourcePointCount > 0 &&
+           boundsIntersectView(node.boundsMinimum, node.boundsMaximum,
+                               viewProjection);
+  };
+
+  QSet<int> selected;
+  QVector<int> refinable;
+  const PointCloudCacheNode &root =
+      mPointCache.nodes.at(mPointCache.rootNode);
+  qsizetype selectedPoints = 0;
+  if (visible(root)) {
+    selected.insert(root.id);
+    refinable.append(root.id);
+    selectedPoints = static_cast<qsizetype>(root.pointCount);
+  }
+  while (!refinable.isEmpty()) {
+    qsizetype bestPosition = -1;
+    float bestPriority = refinementThresholdPixels;
+    for (qsizetype position = 0; position < refinable.size(); ++position) {
+      const PointCloudCacheNode &candidate =
+          mPointCache.nodes.at(refinable.at(position));
+      const float priority = projectedPixels(candidate);
+      if (priority > bestPriority) {
+        bestPriority = priority;
+        bestPosition = position;
+      }
+    }
+    if (bestPosition < 0) {
+      break;
+    }
+    const int nodeId = refinable.takeAt(bestPosition);
+    const PointCloudCacheNode &node = mPointCache.nodes.at(nodeId);
+    QVector<int> visibleChildren;
+    qsizetype childPoints = 0;
+    for (const int childId : node.children) {
+      const PointCloudCacheNode &child = mPointCache.nodes.at(childId);
+      if (!visible(child) || child.pointCount <= 0) {
+        continue;
+      }
+      visibleChildren.append(childId);
+      childPoints += static_cast<qsizetype>(child.pointCount);
+    }
+    if (visibleChildren.isEmpty()) {
+      continue;
+    }
+    const qsizetype withoutParent =
+        selectedPoints - static_cast<qsizetype>(node.pointCount);
+    if (withoutParent + childPoints > pointBudget) {
+      continue;
+    }
+    selected.remove(nodeId);
+    selectedPoints = withoutParent + childPoints;
+    for (const int childId : std::as_const(visibleChildren)) {
+      selected.insert(childId);
+      if (!mPointCache.nodes.at(childId).isLeaf()) {
+        refinable.append(childId);
+      }
+    }
+  }
+  mDesiredPointCacheNodes = std::move(selected);
+  requestMissingPointCachePages();
+}
+
+void NativeViewport::requestMissingPointCachePages() {
+  if (!mPointCache.isValid()) {
+    return;
+  }
+  const auto isResident = [this](const int nodeId) {
+    return std::any_of(mFullResolutionPointGpuChunks.cbegin(),
+                       mFullResolutionPointGpuChunks.cend(),
+                       [nodeId](const FullResolutionGpuChunk &chunk) {
+                         return chunk.nodeId == nodeId;
+                       });
+  };
+  QSet<int> needed;
+  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+    int nodeId = desired;
+    while (nodeId >= 0 && !isResident(nodeId)) {
+      if (!mPointCacheReadsInFlight.contains(nodeId) &&
+          !mPointCacheFailedNodes.contains(nodeId)) {
+        needed.insert(nodeId);
+      }
+      nodeId = mPointCache.nodes.at(nodeId).parent;
+    }
+  }
+  QVector<int> ordered = needed.values();
+  std::sort(ordered.begin(), ordered.end(), [this](const int left,
+                                                   const int right) {
+    const PointCloudCacheNode &a = mPointCache.nodes.at(left);
+    const PointCloudCacheNode &b = mPointCache.nodes.at(right);
+    if (a.depth != b.depth) {
+      return a.depth < b.depth;
+    }
+    return a.pointCount < b.pointCount;
+  });
+  constexpr qsizetype kMaximumReadsInFlight = 2;
+  for (const int nodeId : std::as_const(ordered)) {
+    if (mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
+      break;
+    }
+    mPointCacheReadsInFlight.insert(nodeId);
+    const int generation = mSceneGeneration;
+    const PointCloudCacheIndex cache = mPointCache;
+    auto *watcher = new QFutureWatcher<PointCloudCachePage>(this);
+    connect(watcher, &QFutureWatcher<PointCloudCachePage>::finished, this,
+            [this, watcher, generation, nodeId]() {
+              PointCloudCachePage page = watcher->result();
+              watcher->deleteLater();
+              if (generation != mSceneGeneration) {
+                return;
+              }
+              mPointCacheReadsInFlight.remove(nodeId);
+              if (page.isValid()) {
+                mPendingPointCachePages.append(std::move(page));
+              } else {
+                mPointCacheFailedNodes.insert(nodeId);
+                mPointCacheError = page.error;
+              }
+              updateFrameRefreshPolicy();
+              update();
+            });
+    watcher->setFuture(QtConcurrent::run(
+        [cache, nodeId]() { return PointCloudCache::readNode(cache, nodeId); }));
+  }
+}
+
+void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
+  const auto isResident = [this](const int nodeId) {
+    return std::any_of(mFullResolutionPointGpuChunks.cbegin(),
+                       mFullResolutionPointGpuChunks.cend(),
+                       [nodeId](const FullResolutionGpuChunk &chunk) {
+                         return chunk.nodeId == nodeId;
+                       });
+  };
+  QSet<int> protectedNodes;
+  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+    int nodeId = desired;
+    while (nodeId >= 0) {
+      if (isResident(nodeId)) {
+        protectedNodes.insert(nodeId);
+        break;
+      }
+      nodeId = mPointCache.nodes.at(nodeId).parent;
+    }
+  }
+  while (!mFullResolutionPointGpuChunks.isEmpty() &&
+         mPointCacheResidentBytes + requiredBytes >
+             mPointCacheGpuBudgetBytes) {
+    qsizetype victim = -1;
+    quint64 oldest = std::numeric_limits<quint64>::max();
+    for (qsizetype index = 0;
+         index < mFullResolutionPointGpuChunks.size(); ++index) {
+      const FullResolutionGpuChunk &chunk =
+          mFullResolutionPointGpuChunks.at(index);
+      if (!protectedNodes.contains(chunk.nodeId) &&
+          chunk.lastUsedFrame < oldest) {
+        victim = index;
+        oldest = chunk.lastUsedFrame;
+      }
+    }
+    if (victim < 0) {
+      for (qsizetype index = 0;
+           index < mFullResolutionPointGpuChunks.size(); ++index) {
+        const FullResolutionGpuChunk &chunk =
+            mFullResolutionPointGpuChunks.at(index);
+        if (chunk.lastUsedFrame < oldest) {
+          victim = index;
+          oldest = chunk.lastUsedFrame;
+        }
+      }
+    }
+    if (victim < 0) {
+      break;
+    }
+    const FullResolutionGpuChunk chunk =
+        mFullResolutionPointGpuChunks.takeAt(victim);
+    if (chunk.buffer != 0) {
+      glDeleteBuffers(1, &chunk.buffer);
+    }
+    if (chunk.vertexArray != 0) {
+      glDeleteVertexArrays(1, &chunk.vertexArray);
+    }
+    mPointCacheResidentBytes -= chunk.byteCount;
+  }
+}
+
+void NativeViewport::uploadPendingPointCachePages() {
   if (mFullResolutionPointClearPending) {
     releaseFullResolutionPointCloud();
     mFullResolutionPointClearPending = false;
   }
-  if (mPendingFullResolutionChunkIndex >=
-          mPendingFullResolutionPointChunks.size() ||
-      mPointProgram == nullptr || !mPointProgram->isLinked()) {
-    if (!mPendingFullResolutionPointChunks.isEmpty() &&
-        mPendingFullResolutionChunkIndex >=
-            mPendingFullResolutionPointChunks.size()) {
-      mPendingFullResolutionPointChunks.clear();
-      mPendingFullResolutionPointChunks.squeeze();
-    }
+  if (mPendingPointCachePages.isEmpty() || mPointProgram == nullptr ||
+      !mPointProgram->isLinked()) {
     return;
   }
-
-  PointPreviewChunk &source = mPendingFullResolutionPointChunks[
-      mPendingFullResolutionChunkIndex];
-  if (!source.vertices.isEmpty()) {
+  PointCloudCachePage page = mPendingPointCachePages.takeFirst();
+  const bool alreadyResident = std::any_of(
+      mFullResolutionPointGpuChunks.cbegin(),
+      mFullResolutionPointGpuChunks.cend(),
+      [&page](const FullResolutionGpuChunk &chunk) {
+        return chunk.nodeId == page.nodeId;
+      });
+  if (!alreadyResident && page.nodeId >= 0 &&
+      page.nodeId < mPointCache.nodes.size()) {
+    const qsizetype byteCount =
+        page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
+    evictPointCacheUntilFits(byteCount);
     FullResolutionGpuChunk gpuChunk;
-    gpuChunk.pointCount = static_cast<GLsizei>(source.vertices.size());
-    gpuChunk.boundsMinimum = source.boundsMinimum;
-    gpuChunk.boundsMaximum = source.boundsMaximum;
+    gpuChunk.nodeId = page.nodeId;
+    gpuChunk.pointCount = static_cast<GLsizei>(page.vertices.size());
+    gpuChunk.byteCount = byteCount;
+    gpuChunk.lastUsedFrame = mPointCacheFrameSerial;
+    const PointCloudCacheNode &node = mPointCache.nodes.at(page.nodeId);
+    gpuChunk.boundsMinimum = node.boundsMinimum;
+    gpuChunk.boundsMaximum = node.boundsMaximum;
+    while (glGetError() != GL_NO_ERROR) {
+    }
     glGenVertexArrays(1, &gpuChunk.vertexArray);
     glGenBuffers(1, &gpuChunk.buffer);
     glBindVertexArray(gpuChunk.vertexArray);
     glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.buffer);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        source.vertices.size() *
-            static_cast<qsizetype>(sizeof(PointPreviewVertex)),
-        source.vertices.constData(), GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                          sizeof(PointPreviewVertex), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
-        reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
+    glBufferData(GL_ARRAY_BUFFER, byteCount, page.vertices.constData(),
+                 GL_STATIC_DRAW);
+    const GLenum uploadError = glGetError();
+    if (uploadError == GL_NO_ERROR) {
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                            sizeof(PointPreviewVertex), nullptr);
+      glEnableVertexAttribArray(1);
+      glVertexAttribPointer(
+          1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
+          reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
+      mPointCacheResidentBytes += byteCount;
+      mFullResolutionPointGpuChunks.append(gpuChunk);
+    } else {
+      glDeleteBuffers(1, &gpuChunk.buffer);
+      glDeleteVertexArrays(1, &gpuChunk.vertexArray);
+      mPointCacheFailedNodes.insert(page.nodeId);
+      mPointCacheError = QStringLiteral(
+          "GPU memory could not accept point-cache node %1.")
+                             .arg(page.nodeId);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
-    mUploadedFullResolutionPointCount += source.vertices.size();
-    mFullResolutionPointGpuChunks.append(gpuChunk);
   }
-  source.vertices.clear();
-  source.vertices.squeeze();
-  ++mPendingFullResolutionChunkIndex;
+  mUploadedFullResolutionPointCount = 0;
+  for (const FullResolutionGpuChunk &chunk :
+       std::as_const(mFullResolutionPointGpuChunks)) {
+    mUploadedFullResolutionPointCount += chunk.pointCount;
+  }
+  requestMissingPointCachePages();
   updateFrameRefreshPolicy();
   update();
 }
@@ -1491,54 +1756,51 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
       glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
     }
   }
-  QVector<const FullResolutionGpuChunk *> visibleChunks;
-  visibleChunks.reserve(mFullResolutionPointGpuChunks.size());
-  for (const FullResolutionGpuChunk &chunk :
-       std::as_const(mFullResolutionPointGpuChunks)) {
-    if (boundsIntersectView(chunk.boundsMinimum, chunk.boundsMaximum,
-                            viewProjection)) {
-      visibleChunks.append(&chunk);
+  const auto residentChunk = [this](const int nodeId)
+      -> FullResolutionGpuChunk * {
+    const auto iterator = std::find_if(
+        mFullResolutionPointGpuChunks.begin(),
+        mFullResolutionPointGpuChunks.end(),
+        [nodeId](const FullResolutionGpuChunk &chunk) {
+          return chunk.nodeId == nodeId;
+        });
+    return iterator == mFullResolutionPointGpuChunks.end() ? nullptr
+                                                            : &(*iterator);
+  };
+  QSet<int> drawNodes;
+  bool desiredMissing = false;
+  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+    int nodeId = desired;
+    FullResolutionGpuChunk *chunk = residentChunk(nodeId);
+    if (chunk == nullptr) {
+      desiredMissing = true;
+    }
+    while (chunk == nullptr && nodeId >= 0 && mPointCache.isValid()) {
+      nodeId = mPointCache.nodes.at(nodeId).parent;
+      chunk = nodeId >= 0 ? residentChunk(nodeId) : nullptr;
+    }
+    if (chunk != nullptr) {
+      drawNodes.insert(chunk->nodeId);
     }
   }
-  const QVector3D eye = cameraPosition();
-  std::sort(visibleChunks.begin(), visibleChunks.end(),
-            [&eye](const FullResolutionGpuChunk *left,
-                   const FullResolutionGpuChunk *right) {
-              const QVector3D leftCenter =
-                  (left->boundsMinimum + left->boundsMaximum) * 0.5F;
-              const QVector3D rightCenter =
-                  (right->boundsMinimum + right->boundsMaximum) * 0.5F;
-              return (leftCenter - eye).lengthSquared() <
-                     (rightCenter - eye).lengthSquared();
-            });
-  const bool interacting =
-      mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
-      (mViewSnapAnimation != nullptr &&
-       mViewSnapAnimation->state() == QAbstractAnimation::Running);
-  const bool progressiveUpload =
-      mPendingFullResolutionChunkIndex <
-      mPendingFullResolutionPointChunks.size();
-  constexpr qsizetype kInteractivePointBudget = 12'000'000;
-  constexpr qsizetype kProgressiveUploadPointBudget = 4'000'000;
-  const qsizetype pointBudget = progressiveUpload
-                                    ? kProgressiveUploadPointBudget
-                                    : kInteractivePointBudget;
-  qsizetype drawnFullResolutionPoints = 0;
-  qsizetype visibleFullResolutionPoints = 0;
-  for (const FullResolutionGpuChunk *chunk : std::as_const(visibleChunks)) {
-    visibleFullResolutionPoints += chunk->pointCount;
-    if ((interacting || progressiveUpload) &&
-        drawnFullResolutionPoints >= pointBudget) {
+  bool hierarchicalLod = false;
+  for (const int nodeId : std::as_const(drawNodes)) {
+    FullResolutionGpuChunk *chunk = residentChunk(nodeId);
+    if (chunk == nullptr) {
       continue;
     }
+    chunk->lastUsedFrame = mPointCacheFrameSerial;
+    hierarchicalLod =
+        hierarchicalLod ||
+        (mPointCache.isValid() &&
+         mPointCache.nodes.at(nodeId).depth < PointCloudCacheIndex::OctreeDepth);
     glBindVertexArray(chunk->vertexArray);
     glDrawArrays(GL_POINTS, 0, chunk->pointCount);
-    drawnFullResolutionPoints += chunk->pointCount;
   }
-  mInteractionLodActive =
-      interacting && drawnFullResolutionPoints < visibleFullResolutionPoints;
+  mInteractionLodActive = hierarchicalLod;
   mProgressiveUploadActive =
-      progressiveUpload && drawnFullResolutionPoints < visibleFullResolutionPoints;
+      desiredMissing || !mPointCacheReadsInFlight.isEmpty() ||
+      !mPendingPointCachePages.isEmpty();
   glBindVertexArray(0);
   mPointProgram->release();
   glDisable(GL_BLEND);
@@ -2233,14 +2495,19 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   } else if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
   } else if (mPreviewOnlyScene) {
-    count = QStringLiteral("%1 点 | %2 | GPU 已载 %3 | 只读")
+    count = QStringLiteral("%1 点 | %2 | GPU 驻留 %3 / %4 | 只读")
                 .arg(formatCount(mPreviewPointCount),
                      mProgressiveUploadActive
-                         ? QStringLiteral("渐进加载")
+                         ? QStringLiteral("磁盘分页")
                          : mInteractionLodActive
-                               ? QStringLiteral("交互 LOD")
-                               : QStringLiteral("完整分辨率"),
-                     formatCount(mUploadedFullResolutionPointCount));
+                               ? QStringLiteral("八叉树 LOD")
+                               : QStringLiteral("叶级细节"),
+                     formatCount(mUploadedFullResolutionPointCount),
+                     formatCount(mPointCacheGpuBudgetBytes /
+                                 sizeof(PointPreviewVertex)));
+    if (!mPointCacheError.isEmpty()) {
+      count += QStringLiteral(" | 分页错误");
+    }
   } else if (mSourceFaceCount > 0 && mPreviewTriangleCount > 0) {
     count = QStringLiteral("%1 顶点 | %2 面 | %3 预览三角形")
                 .arg(formatCount(mGaussianCount),
