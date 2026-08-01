@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MeshCache.h"
 #include "PointCloudCache.h"
 
 #include <QBitArray>
@@ -35,22 +36,11 @@ struct PointPosition {
   [[nodiscard]] QVector3D toVector3D() const { return QVector3D(x, y, z); }
 };
 
-struct MeshVertex {
-  float x = 0.0F;
-  float y = 0.0F;
-  float z = 0.0F;
-  float red = 0.72F;
-  float green = 0.75F;
-  float blue = 0.78F;
-  float normalX = 0.0F;
-  float normalY = 0.0F;
-  float normalZ = 1.0F;
-};
-
 struct PointCloudData {
   QVector<PointCloudVertex> vertices;
   QVector<PointPosition> sourcePositions;
   PointCloudCacheIndex pointCache;
+  MeshCacheIndex meshCache;
   QVector<MeshVertex> meshVertices;
   QVector<quint32> meshIndices;
   QVector3D boundsMinimum;
@@ -74,11 +64,16 @@ class PlyPointCloudLoader final {
 public:
   static constexpr qsizetype DefaultMaximumPreviewPoints = 1'500'000;
   static constexpr qint64 DefaultMaximumEditablePoints = 10'000'000;
+  static constexpr qint64 DefaultMaximumResidentMeshVertices = 5'000'000;
+  static constexpr qint64 DefaultMaximumResidentMeshFaces = 2'000'000;
 
   [[nodiscard]] static PointCloudData load(
       const QString &filePath,
       qsizetype maximumPreviewPoints = DefaultMaximumPreviewPoints,
-      qint64 maximumEditablePoints = DefaultMaximumEditablePoints);
+      qint64 maximumEditablePoints = DefaultMaximumEditablePoints,
+      qint64 maximumResidentMeshVertices =
+          DefaultMaximumResidentMeshVertices,
+      qint64 maximumResidentMeshFaces = DefaultMaximumResidentMeshFaces);
 
   [[nodiscard]] static bool writeFiltered(
       const QString &sourceFilePath, const QString &destinationFilePath,

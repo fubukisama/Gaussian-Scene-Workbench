@@ -230,11 +230,18 @@ int main(int argc, char *argv[]) {
           viewport, &gsw::NativeViewport::sceneLoaded, &application,
           [&application, viewport, &smokeTestCompleted,
            &smokeTestFailureCode](const qint64 sourceVertexCount,
-                                 const qsizetype, const qint64,
+                                 const qsizetype, const qint64 sourceFaceCount,
                                  const qsizetype) {
+            const int settleMilliseconds =
+                sourceVertexCount > 5'000'000
+                    ? 5000
+                    : qEnvironmentVariableIsSet(
+                          "GSW_MESH_RESIDENT_VERTEX_LIMIT")
+                          ? 1500
+                          : 300;
             QTimer::singleShot(
-                sourceVertexCount > 5'000'000 ? 5000 : 300, &application,
-                [&application, viewport, sourceVertexCount,
+                settleMilliseconds, &application,
+                [&application, viewport, sourceVertexCount, sourceFaceCount,
                  &smokeTestCompleted, &smokeTestFailureCode]() {
                   const QImage frame = viewport->grabFramebuffer();
                   const QRect sampleRect(
@@ -254,8 +261,14 @@ int main(int argc, char *argv[]) {
                       }
                     }
                   }
+                  const bool pagedMeshReady =
+                      sourceFaceCount <= 0 ||
+                      !qEnvironmentVariableIsSet(
+                          "GSW_MESH_RESIDENT_VERTEX_LIMIT") ||
+                      viewport->residentMeshTriangleCount() > 0;
                   smokeTestCompleted = sourceVertexCount > 0 &&
-                                       greenAxisPixels >= 30;
+                                       greenAxisPixels >= 30 &&
+                                       pagedMeshReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -263,7 +276,9 @@ int main(int argc, char *argv[]) {
                   }
                   qInfo() << "Reference-axes smoke:" << "vertices"
                           << sourceVertexCount << "green-pixels"
-                          << greenAxisPixels << "required" << 30;
+                          << greenAxisPixels << "required" << 30
+                          << "resident-mesh-triangles"
+                          << viewport->residentMeshTriangleCount();
                   application.exit(smokeTestFailureCode);
                 });
           });

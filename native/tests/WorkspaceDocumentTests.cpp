@@ -10,6 +10,7 @@
 #include <QtEndian>
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -30,6 +31,9 @@ private slots:
   void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
+  void loadsOversizedAsciiMeshIntoDiskCache();
+  void buildsPagesAndInvalidatesDiskResidentMesh();
+  void loadsConfiguredRealMeshFixture();
   void loadsBinaryGaussianSphericalHarmonicColors();
   void activatesGaussianScaleRotationAndOpacity();
   void detectsColmapDatasetLayoutAndExecutable();
@@ -546,6 +550,171 @@ void WorkspaceDocumentTests::loadsBinaryBigEndianMesh() {
   QCOMPARE(data.meshIndices, QVector<quint32>({0U, 1U, 2U}));
   QCOMPARE(data.meshVertices.at(1).x, 1.0F);
   QVERIFY(data.meshVertices.at(0).normalZ > 0.99F);
+}
+
+void WorkspaceDocumentTests::loadsOversizedAsciiMeshIntoDiskCache() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("paged-mesh.ply"));
+  QFile ply(plyPath);
+  QVERIFY(ply.open(QIODevice::WriteOnly));
+  const QByteArray payload =
+      "ply\n"
+      "format ascii 1.0\n"
+      "element vertex 5\n"
+      "property float x\n"
+      "property float y\n"
+      "property float z\n"
+      "property uchar red\n"
+      "property uchar green\n"
+      "property uchar blue\n"
+      "element face 2\n"
+      "property list uchar int vertex_indices\n"
+      "property list uchar float texcoord\n"
+      "end_header\n"
+      "+0 0 0 255 0 0\n"
+      "1e0 0 0 0 255 0\n"
+      "1 1 0 0 0 255\n"
+      "0 1 0 255 255 255\n"
+      "0.5 0.5 1 128 128 128\n"
+      "4 0 1 2 3 8 0 0 1 0 1 1 0 1\n"
+      "3 0 2 4 6 0 0 1 1 0.5 0.5\n";
+  QCOMPARE(ply.write(payload), payload.size());
+  ply.close();
+
+  const gsw::PointCloudData data =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 100, 4, 1);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.previewOnly);
+  QVERIFY(data.hasMesh());
+  QVERIFY(data.meshCache.isValid());
+  QVERIFY(data.meshVertices.isEmpty());
+  QVERIFY(data.meshIndices.isEmpty());
+  QCOMPARE(data.sourceVertexCount, 5);
+  QCOMPARE(data.sourceFaceCount, 2);
+  QCOMPARE(data.sourceTriangleCount, 3);
+  QCOMPARE(data.meshCache.renderableTriangleCount, qint64(3));
+  QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, 0.0F));
+  QCOMPARE(data.boundsMaximum, QVector3D(1.0F, 1.0F, 1.0F));
+  const gsw::MeshCachePage rootPage =
+      gsw::MeshCache::readNode(data.meshCache, data.meshCache.rootNode);
+  QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
+  QCOMPARE(rootPage.indices.size() / 3, qsizetype(3));
+  QCOMPARE(rootPage.vertices.size(), qsizetype(5));
+
+  const gsw::PointCloudData reused =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 100, 4, 1);
+  QVERIFY2(reused.isValid(), qPrintable(reused.error));
+  QCOMPARE(reused.meshCache.dataPath, data.meshCache.dataPath);
+}
+
+void WorkspaceDocumentTests::buildsPagesAndInvalidatesDiskResidentMesh() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString sourcePath =
+      QDir(temporary.path()).filePath(QStringLiteral("source-mesh.ply"));
+  QFile source(sourcePath);
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  QCOMPARE(source.write("source-mesh"), 11);
+  source.close();
+
+  gsw::MeshCacheBuilder builder(sourcePath, 4);
+  QString error;
+  QVERIFY2(builder.begin(&error), qPrintable(error));
+  const std::array<gsw::MeshVertex, 4> vertices = {
+      gsw::MeshVertex{0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F},
+      gsw::MeshVertex{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F},
+      gsw::MeshVertex{0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F},
+      gsw::MeshVertex{1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F}};
+  for (const gsw::MeshVertex &vertex : vertices) {
+    QVERIFY2(builder.appendVertex(vertex, &error), qPrintable(error));
+  }
+  QVERIFY2(builder.finishVertices(&error), qPrintable(error));
+  constexpr int triangleCount = 70'000;
+  for (int index = 0; index < triangleCount; ++index) {
+    QVERIFY2(builder.appendTriangle(0, 1, 2, index, &error),
+             qPrintable(error));
+  }
+  const gsw::MeshCacheIndex built =
+      builder.finish(triangleCount, triangleCount, &error);
+  QVERIFY2(built.isValid(), qPrintable(error));
+  QCOMPARE(built.fullVertexCount, qint64(4));
+  QCOMPARE(built.fullFaceCount, qint64(triangleCount));
+  QCOMPARE(built.renderableTriangleCount, qint64(triangleCount));
+  QCOMPARE(built.nodes.constFirst().indexCount / 3, qint64(32'768));
+
+  const auto splitLeaf = std::find_if(
+      built.nodes.cbegin(), built.nodes.cend(),
+      [](const gsw::MeshCacheNode &node) {
+        return node.depth == gsw::MeshCacheIndex::SpatialOctreeDepth &&
+               !node.children.isEmpty();
+      });
+  QVERIFY(splitLeaf != built.nodes.cend());
+  QCOMPARE(splitLeaf->children.size(), qsizetype(2));
+  qint64 pagedTriangles = 0;
+  for (const int childId : splitLeaf->children) {
+    const gsw::MeshCacheNode &child = built.nodes.at(childId);
+    QVERIFY(child.isLeaf());
+    QVERIFY(child.indexCount / 3 <= 65'536);
+    pagedTriangles += child.sourceTriangleCount;
+    const gsw::MeshCachePage page = gsw::MeshCache::readNode(built, childId);
+    QVERIFY2(page.isValid(), qPrintable(page.error));
+    QVERIFY(page.vertices.constFirst().normalZ > 0.99F);
+  }
+  QCOMPARE(pagedTriangles, qint64(triangleCount));
+
+  const gsw::MeshCacheIndex reused =
+      gsw::MeshCache::loadForSource(sourcePath, &error);
+  QVERIFY2(reused.isValid(), qPrintable(error));
+  QCOMPARE(reused.dataPath, built.dataPath);
+  QVERIFY(source.open(QIODevice::WriteOnly | QIODevice::Append));
+  QCOMPARE(source.write("changed"), 7);
+  source.close();
+  QVERIFY(!gsw::MeshCache::loadForSource(sourcePath).isValid());
+}
+
+void WorkspaceDocumentTests::loadsConfiguredRealMeshFixture() {
+  const QString fixture = qEnvironmentVariable("GSW_REAL_MESH_FIXTURE");
+  if (fixture.isEmpty()) {
+    QSKIP("GSW_REAL_MESH_FIXTURE is not configured.");
+  }
+  QVERIFY2(QFileInfo::exists(fixture), qPrintable(fixture));
+  QElapsedTimer timer;
+  timer.start();
+  const gsw::PointCloudData data = gsw::PlyPointCloudLoader::load(fixture);
+  const qint64 elapsedMilliseconds = timer.elapsed();
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasMesh());
+  QVERIFY(data.meshCache.isValid());
+  const gsw::MeshCachePage rootPage = gsw::MeshCache::readNode(
+      data.meshCache, data.meshCache.rootNode);
+  QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
+  const auto deepestPage = std::max_element(
+      data.meshCache.nodes.cbegin(), data.meshCache.nodes.cend(),
+      [](const gsw::MeshCacheNode &left, const gsw::MeshCacheNode &right) {
+        const int leftDepth = left.isValid() ? left.depth : -1;
+        const int rightDepth = right.isValid() ? right.depth : -1;
+        return leftDepth < rightDepth;
+      });
+  QVERIFY(deepestPage != data.meshCache.nodes.cend());
+  QVERIFY(deepestPage->isValid());
+  const gsw::MeshCachePage exactPage =
+      gsw::MeshCache::readNode(data.meshCache, deepestPage->id);
+  QVERIFY2(exactPage.isValid(), qPrintable(exactPage.error));
+  if (deepestPage->depth > gsw::MeshCacheIndex::SpatialOctreeDepth) {
+    QVERIFY(exactPage.indices.size() / 3 <= 65'536);
+  }
+  qInfo().noquote()
+      << QStringLiteral(
+             "REAL_MESH_CACHE elapsedMs=%1 vertices=%2 faces=%3 "
+             "triangles=%4 nodes=%5 dataBytes=%6")
+             .arg(elapsedMilliseconds)
+             .arg(data.meshCache.fullVertexCount)
+             .arg(data.meshCache.fullFaceCount)
+             .arg(data.meshCache.renderableTriangleCount)
+             .arg(data.meshCache.nodes.size())
+             .arg(QFileInfo(data.meshCache.dataPath).size());
 }
 
 void WorkspaceDocumentTests::loadsBinaryGaussianSphericalHarmonicColors() {

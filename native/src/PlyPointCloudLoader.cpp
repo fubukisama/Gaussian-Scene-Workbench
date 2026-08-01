@@ -25,7 +25,6 @@ namespace {
 constexpr double kSphericalHarmonicDc = 0.28209479177387814;
 constexpr qint64 kMaximumHeaderBytes = 1024 * 1024;
 constexpr qint64 kMaximumRecordBytes = 256LL * 1024LL * 1024LL;
-constexpr qint64 kMaximumMeshVertexCount = 5'000'000;
 constexpr qint64 kMaximumMeshPreviewFaces = 2'000'000;
 constexpr qint64 kMaximumMeshPreviewTriangles = 5'000'000;
 constexpr qsizetype kFullResolutionPointChunkSize = 1'000'000;
@@ -159,6 +158,137 @@ private:
   QByteArray mBuffer;
   qsizetype mPosition = 0;
   qsizetype mSize = 0;
+  bool mAtEnd = false;
+  bool mFailed = false;
+};
+
+class BufferedBinaryScalarReader final {
+public:
+  BufferedBinaryScalarReader(QFile &file, const qint64 offset,
+                             const PlyFormat format)
+      : mFile(file), mBigEndian(format == PlyFormat::BinaryBigEndian) {
+    constexpr qsizetype kBufferBytes = 8 * 1024 * 1024;
+    mBuffer.resize(kBufferBytes);
+    if (!mFile.seek(offset)) {
+      mFailed = true;
+    } else {
+      refill();
+    }
+  }
+
+  [[nodiscard]] bool next(const ScalarType type, double &value) {
+    const qsizetype byteCount = sizeOf(type);
+    if (byteCount <= 0 || !ensure(byteCount)) {
+      return false;
+    }
+    const auto *data = reinterpret_cast<const uchar *>(mBuffer.constData() +
+                                                       mPosition);
+    switch (type) {
+    case ScalarType::Int8:
+      value = static_cast<qint8>(*data);
+      break;
+    case ScalarType::UInt8:
+      value = *data;
+      break;
+    case ScalarType::Int16: {
+      const quint16 raw = mBigEndian ? qFromBigEndian<quint16>(data)
+                                     : qFromLittleEndian<quint16>(data);
+      value = static_cast<qint16>(raw);
+      break;
+    }
+    case ScalarType::UInt16:
+      value = mBigEndian ? qFromBigEndian<quint16>(data)
+                         : qFromLittleEndian<quint16>(data);
+      break;
+    case ScalarType::Int32: {
+      const quint32 raw = mBigEndian ? qFromBigEndian<quint32>(data)
+                                     : qFromLittleEndian<quint32>(data);
+      value = static_cast<qint32>(raw);
+      break;
+    }
+    case ScalarType::UInt32:
+      value = mBigEndian ? qFromBigEndian<quint32>(data)
+                         : qFromLittleEndian<quint32>(data);
+      break;
+    case ScalarType::Float32: {
+      const quint32 raw = mBigEndian ? qFromBigEndian<quint32>(data)
+                                     : qFromLittleEndian<quint32>(data);
+      value = std::bit_cast<float>(raw);
+      break;
+    }
+    case ScalarType::Float64: {
+      const quint64 raw = mBigEndian ? qFromBigEndian<quint64>(data)
+                                     : qFromLittleEndian<quint64>(data);
+      value = std::bit_cast<double>(raw);
+      break;
+    }
+    case ScalarType::Invalid:
+      return false;
+    }
+    mPosition += byteCount;
+    return true;
+  }
+
+private:
+  static qsizetype sizeOf(const ScalarType type) {
+    switch (type) {
+    case ScalarType::Int8:
+    case ScalarType::UInt8:
+      return 1;
+    case ScalarType::Int16:
+    case ScalarType::UInt16:
+      return 2;
+    case ScalarType::Int32:
+    case ScalarType::UInt32:
+    case ScalarType::Float32:
+      return 4;
+    case ScalarType::Float64:
+      return 8;
+    case ScalarType::Invalid:
+      return 0;
+    }
+    return 0;
+  }
+
+  bool ensure(const qsizetype byteCount) {
+    while (mSize - mPosition < byteCount) {
+      if (!refill()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool refill() {
+    if (mFailed || mAtEnd) {
+      return false;
+    }
+    const qsizetype remaining = mSize - mPosition;
+    if (remaining > 0 && mPosition > 0) {
+      std::memmove(mBuffer.data(), mBuffer.constData() + mPosition,
+                   static_cast<std::size_t>(remaining));
+    }
+    mPosition = 0;
+    mSize = remaining;
+    const qint64 read =
+        mFile.read(mBuffer.data() + mSize, mBuffer.size() - mSize);
+    if (read < 0) {
+      mFailed = true;
+      return false;
+    }
+    if (read == 0) {
+      mAtEnd = true;
+      return false;
+    }
+    mSize += static_cast<qsizetype>(read);
+    return true;
+  }
+
+  QFile &mFile;
+  QByteArray mBuffer;
+  qsizetype mPosition = 0;
+  qsizetype mSize = 0;
+  bool mBigEndian = false;
   bool mAtEnd = false;
   bool mFailed = false;
 };
@@ -819,6 +949,213 @@ bool writePointSpoolBatch(QIODevice &spool,
   return true;
 }
 
+bool loadOutOfCoreMesh(
+    QFile &file, const PlyHeader &header,
+    const ElementDefinition &vertexElement,
+    const ElementDefinition &faceElement, const int faceIndicesProperty,
+    const int xIndex, const int yIndex, const int zIndex, const int redIndex,
+    const int greenIndex, const int blueIndex,
+    const bool sphericalHarmonicColor, PointCloudData &result) {
+  const MeshCacheIndex existing = MeshCache::loadForSource(file.fileName());
+  if (existing.isValid()) {
+    result.meshCache = existing;
+    result.sourceVertexCount = existing.fullVertexCount;
+    result.sourceFaceCount = existing.fullFaceCount;
+    result.sourceTriangleCount = existing.fullTriangleCount;
+    result.boundsMinimum = existing.boundsMinimum;
+    result.boundsMaximum = existing.boundsMaximum;
+    result.previewOnly = true;
+    return true;
+  }
+
+  const auto vertexIterator = std::find_if(
+      header.elements.cbegin(), header.elements.cend(),
+      [&vertexElement](const ElementDefinition &element) {
+        return &element == &vertexElement;
+      });
+  const auto faceIterator = std::find_if(
+      header.elements.cbegin(), header.elements.cend(),
+      [&faceElement](const ElementDefinition &element) {
+        return &element == &faceElement;
+      });
+  if (vertexIterator == header.elements.cend() ||
+      faceIterator == header.elements.cend() || vertexIterator > faceIterator) {
+    result.error = QStringLiteral(
+        "Out-of-core mesh loading requires the PLY vertex element before "
+        "the face element.");
+    return false;
+  }
+
+  MeshCacheBuilder builder(file.fileName(), vertexElement.count);
+  if (!builder.begin(&result.error)) {
+    return false;
+  }
+  const qint64 dataOffset = file.pos();
+  std::optional<BufferedAsciiScalarReader> asciiReader;
+  std::optional<BufferedBinaryScalarReader> binaryReader;
+  if (header.format == PlyFormat::Ascii) {
+    asciiReader.emplace(file, dataOffset);
+  } else {
+    binaryReader.emplace(file, dataOffset, header.format);
+  }
+  const auto readScalar = [&](const ScalarType type, double &value) {
+    return asciiReader.has_value() ? asciiReader->next(value)
+                                   : binaryReader->next(type, value);
+  };
+
+  QVector<double> vertexValues(vertexElement.properties.size());
+  QVector<quint32> faceIndices;
+  qint64 sourceTriangleIndex = 0;
+  bool verticesFinished = false;
+  for (const ElementDefinition &element : header.elements) {
+    for (qint64 recordIndex = 0; recordIndex < element.count; ++recordIndex) {
+      if (&element == &vertexElement) {
+        std::fill(vertexValues.begin(), vertexValues.end(), 0.0);
+      }
+      if (&element == &faceElement) {
+        faceIndices.clear();
+      }
+      for (qsizetype propertyIndex = 0;
+           propertyIndex < element.properties.size(); ++propertyIndex) {
+        const PropertyDefinition &property =
+            element.properties.at(propertyIndex);
+        if (!property.isList) {
+          double value = 0.0;
+          if (!readScalar(property.valueType, value)) {
+            result.error =
+                QStringLiteral("PLY %1 record %2 has a missing scalar value.")
+                    .arg(element.name)
+                    .arg(recordIndex);
+            return false;
+          }
+          if (&element == &vertexElement) {
+            vertexValues[propertyIndex] = value;
+          }
+          continue;
+        }
+
+        double rawCount = 0.0;
+        if (!readScalar(property.listCountType, rawCount) ||
+            !std::isfinite(rawCount) || rawCount < 0.0 ||
+            std::floor(rawCount) != rawCount ||
+            rawCount > static_cast<double>(
+                           kMaximumRecordBytes /
+                           std::max<qsizetype>(
+                               1, scalarByteSize(property.valueType)))) {
+          result.error =
+              QStringLiteral("PLY %1 record %2 has an invalid list count.")
+                  .arg(element.name)
+                  .arg(recordIndex);
+          return false;
+        }
+        const qint64 listCount = static_cast<qint64>(rawCount);
+        const bool collectFaceIndices =
+            &element == &faceElement &&
+            propertyIndex == faceIndicesProperty;
+        if (collectFaceIndices) {
+          faceIndices.reserve(static_cast<qsizetype>(listCount));
+        }
+        for (qint64 listIndex = 0; listIndex < listCount; ++listIndex) {
+          double value = 0.0;
+          if (!readScalar(property.valueType, value)) {
+            result.error =
+                QStringLiteral("PLY %1 record %2 has truncated list data.")
+                    .arg(element.name)
+                    .arg(recordIndex);
+            return false;
+          }
+          if (!collectFaceIndices) {
+            continue;
+          }
+          if (!std::isfinite(value) || value < 0.0 ||
+              std::floor(value) != value ||
+              value >= static_cast<double>(vertexElement.count) ||
+              value > static_cast<double>(
+                          std::numeric_limits<quint32>::max())) {
+            result.error = QStringLiteral(
+                               "PLY mesh face contains an invalid vertex "
+                               "index: %1.")
+                               .arg(value, 0, 'g', 16);
+            return false;
+          }
+          faceIndices.append(static_cast<quint32>(value));
+        }
+      }
+
+      if (&element == &vertexElement) {
+        MeshVertex vertex;
+        vertex.x = static_cast<float>(vertexValues.at(xIndex));
+        vertex.y = static_cast<float>(vertexValues.at(yIndex));
+        vertex.z = static_cast<float>(vertexValues.at(zIndex));
+        if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0 &&
+            std::isfinite(vertexValues.at(redIndex)) &&
+            std::isfinite(vertexValues.at(greenIndex)) &&
+            std::isfinite(vertexValues.at(blueIndex))) {
+          if (sphericalHarmonicColor) {
+            vertex.red = static_cast<float>(std::clamp(
+                0.5 + kSphericalHarmonicDc * vertexValues.at(redIndex), 0.0,
+                1.0));
+            vertex.green = static_cast<float>(std::clamp(
+                0.5 + kSphericalHarmonicDc * vertexValues.at(greenIndex),
+                0.0, 1.0));
+            vertex.blue = static_cast<float>(std::clamp(
+                0.5 + kSphericalHarmonicDc * vertexValues.at(blueIndex), 0.0,
+                1.0));
+          } else {
+            vertex.red = normalizedColor(
+                vertexValues.at(redIndex),
+                vertexElement.properties.at(redIndex).valueType);
+            vertex.green = normalizedColor(
+                vertexValues.at(greenIndex),
+                vertexElement.properties.at(greenIndex).valueType);
+            vertex.blue = normalizedColor(
+                vertexValues.at(blueIndex),
+                vertexElement.properties.at(blueIndex).valueType);
+          }
+        }
+        if (!builder.appendVertex(vertex, &result.error)) {
+          return false;
+        }
+      } else if (&element == &faceElement && faceIndices.size() >= 3) {
+        for (qsizetype index = 1; index + 1 < faceIndices.size(); ++index) {
+          if (!builder.appendTriangle(faceIndices.first(),
+                                      faceIndices.at(index),
+                                      faceIndices.at(index + 1),
+                                      sourceTriangleIndex, &result.error)) {
+            return false;
+          }
+          ++sourceTriangleIndex;
+        }
+      }
+    }
+    if (&element == &vertexElement) {
+      if (!builder.finishVertices(&result.error)) {
+        return false;
+      }
+      verticesFinished = true;
+    }
+  }
+  if (!verticesFinished) {
+    result.error = QStringLiteral("The PLY mesh vertex table was not read.");
+    return false;
+  }
+  result.meshCache = builder.finish(faceElement.count, sourceTriangleIndex,
+                                    &result.error);
+  if (!result.meshCache.isValid()) {
+    if (result.error.isEmpty()) {
+      result.error = QStringLiteral("Unable to build the mesh-cache index.");
+    }
+    return false;
+  }
+  result.sourceVertexCount = result.meshCache.fullVertexCount;
+  result.sourceFaceCount = result.meshCache.fullFaceCount;
+  result.sourceTriangleCount = result.meshCache.fullTriangleCount;
+  result.boundsMinimum = result.meshCache.boundsMinimum;
+  result.boundsMaximum = result.meshCache.boundsMaximum;
+  result.previewOnly = true;
+  return true;
+}
+
 bool loadAsciiPointCache(
     QFile &file, const ElementDefinition &vertexElement, const int xIndex,
     const int yIndex, const int zIndex, const int redIndex,
@@ -1313,25 +1650,26 @@ bool PointCloudData::isValid() const {
     return false;
   }
   if (previewOnly) {
-    return previewPointCount() > 0;
+    return pointCache.isValid() || meshCache.isValid();
   }
   return sourceVertexCount == sourcePositions.size() && !vertices.isEmpty();
 }
 
 bool PointCloudData::hasMesh() const {
-  return meshVertices.size() == sourceVertexCount && meshIndices.size() >= 3 &&
-         meshIndices.size() % 3 == 0;
+  return meshCache.isValid() ||
+         (meshVertices.size() == sourceVertexCount &&
+          meshIndices.size() >= 3 && meshIndices.size() % 3 == 0);
 }
 
 qsizetype PointCloudData::previewPointCount() const {
   if (!previewOnly) {
     return vertices.size();
   }
-  return pointCache.isValid()
-             ? static_cast<qsizetype>(std::min<qint64>(
-                   pointCache.fullPointCount,
-                   std::numeric_limits<qsizetype>::max()))
-             : 0;
+  const qint64 count = pointCache.isValid()
+                           ? pointCache.fullPointCount
+                           : meshCache.isValid() ? meshCache.fullVertexCount : 0;
+  return static_cast<qsizetype>(
+      std::min<qint64>(count, std::numeric_limits<qsizetype>::max()));
 }
 
 QVector3D PointCloudData::center() const {
@@ -1344,8 +1682,26 @@ float PointCloudData::radius() const {
 
 PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                                          const qsizetype maximumPreviewPoints,
-                                         const qint64 maximumEditablePoints) {
+                                         const qint64 maximumEditablePoints,
+                                         const qint64 maximumResidentMeshVertices,
+                                         const qint64 maximumResidentMeshFaces) {
   PointCloudData result;
+  qint64 residentMeshVertexLimit = maximumResidentMeshVertices;
+  qint64 residentMeshFaceLimit = maximumResidentMeshFaces;
+  bool vertexLimitOverrideValid = false;
+  const int vertexLimitOverride = qEnvironmentVariableIntValue(
+      "GSW_MESH_RESIDENT_VERTEX_LIMIT", &vertexLimitOverrideValid);
+  if (maximumResidentMeshVertices == DefaultMaximumResidentMeshVertices &&
+      vertexLimitOverrideValid && vertexLimitOverride > 0) {
+    residentMeshVertexLimit = vertexLimitOverride;
+  }
+  bool faceLimitOverrideValid = false;
+  const int faceLimitOverride = qEnvironmentVariableIntValue(
+      "GSW_MESH_RESIDENT_FACE_LIMIT", &faceLimitOverrideValid);
+  if (maximumResidentMeshFaces == DefaultMaximumResidentMeshFaces &&
+      faceLimitOverrideValid && faceLimitOverride > 0) {
+    residentMeshFaceLimit = faceLimitOverride;
+  }
   if (maximumPreviewPoints <= 0) {
     result.error = QStringLiteral("The point preview limit must be greater than zero.");
     return result;
@@ -1376,6 +1732,11 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     result.error = QStringLiteral("The editable point limit must be greater than zero.");
     return result;
   }
+  if (maximumResidentMeshVertices <= 0 || maximumResidentMeshFaces <= 0) {
+    result.error = QStringLiteral(
+        "The resident mesh vertex and face limits must be greater than zero.");
+    return result;
+  }
 
   const auto faceElementIterator = std::find_if(
       header.elements.cbegin(), header.elements.cend(),
@@ -1388,14 +1749,6 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   int faceVertexIndicesProperty = -1;
   if (containsMeshFaces) {
     result.sourceFaceCount = faceElementIterator->count;
-    if (vertexElement.count > kMaximumMeshVertexCount) {
-      result.error = QStringLiteral(
-          "The PLY mesh contains %1 vertices. Native mesh preview currently "
-          "supports up to %2 vertices.")
-                         .arg(vertexElement.count)
-                         .arg(kMaximumMeshVertexCount);
-      return result;
-    }
     faceVertexIndicesProperty = findProperty(
         *faceElementIterator,
         {QStringLiteral("vertex_indices"), QStringLiteral("vertex_index")});
@@ -1454,6 +1807,16 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                   isScalarProperty) &&
       std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
                   isScalarProperty);
+
+  if (containsMeshFaces &&
+      (vertexElement.count > residentMeshVertexLimit ||
+       faceElementIterator->count > residentMeshFaceLimit)) {
+    loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
+                      faceVertexIndicesProperty, xIndex, yIndex, zIndex,
+                      redIndex, greenIndex, blueIndex,
+                      sphericalHarmonicColor, result);
+    return result;
+  }
 
   if (!containsMeshFaces && vertexElement.count > maximumEditablePoints) {
     loadFullResolutionPointPreview(

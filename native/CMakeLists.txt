@@ -59,6 +59,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MainWindow.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
+  src/MeshCache.cpp
+  src/MeshCache.h
   src/NavigationGizmo.cpp
   src/NavigationGizmo.h
   src/NativeViewport.cpp
@@ -202,6 +204,12 @@ if(BUILD_TESTING)
       --smoke-test-reference-axes
       --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
   )
+  add_test(
+    NAME native_paged_mesh_scene
+    COMMAND GaussianSceneWorkbench
+      --smoke-test-reference-axes
+      --smoke-scene "${CMAKE_CURRENT_BINARY_DIR}/smoke-reference-axes.ply"
+  )
   set_tests_properties(
     native_application_launch
     native_metashape_import_entry
@@ -209,11 +217,18 @@ if(BUILD_TESTING)
     native_exit_confirmation
     native_infinite_reference_grid
     native_reference_axes_with_scene
+    native_paged_mesh_scene
     PROPERTIES
     TIMEOUT 15
     ENVIRONMENT
       "QT_OPENGL=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
+  set_tests_properties(native_paged_mesh_scene PROPERTIES
+    ENVIRONMENT
+      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4"
+    ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
 
     qt_add_executable(gsw_native_tests
@@ -222,6 +237,8 @@ if(BUILD_TESTING)
       src/CameraTrajectory.h
       src/ColmapSupport.cpp
       src/ColmapSupport.h
+      src/MeshCache.cpp
+      src/MeshCache.h
       src/PlyPointCloudLoader.cpp
       src/PlyPointCloudLoader.h
       src/PointCloudCache.cpp

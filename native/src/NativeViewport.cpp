@@ -29,6 +29,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 
 namespace gsw {
@@ -182,6 +183,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
     if (mRenderedPointCount <= 0 && mFullResolutionPointCount <= 0 &&
         mRenderedMeshIndexCount <= 0 &&
+        mFullResolutionMeshTriangleCount <= 0 &&
         !mTrainingGpuPreview.attached()) {
       return;
     }
@@ -196,6 +198,7 @@ NativeViewport::~NativeViewport() {
     makeCurrent();
     mTrainingGpuPreview.release();
     releaseFullResolutionPointCloud();
+    releaseFullResolutionMesh();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mMeshVertexArray.destroy();
@@ -255,6 +258,9 @@ void NativeViewport::setScene(const QString &scenePath,
   mRenderedPointCount = 0;
   mFullResolutionPointCount = 0;
   mUploadedFullResolutionPointCount = 0;
+  mFullResolutionMeshTriangleCount = 0;
+  mUploadedFullResolutionMeshTriangleCount = 0;
+  mDrawnFullResolutionMeshTriangleCount = 0;
   mRenderedMeshIndexCount = 0;
   updateFrameRefreshPolicy();
   const bool gaussianAvailabilityChanged = gaussianRenderingAvailable();
@@ -279,6 +285,14 @@ void NativeViewport::setScene(const QString &scenePath,
   mPendingPointCachePages.squeeze();
   mPointCacheError.clear();
   mFullResolutionPointClearPending = true;
+  mMeshCache = {};
+  mDesiredMeshCacheNodes.clear();
+  mMeshCacheReadsInFlight.clear();
+  mMeshCacheFailedNodes.clear();
+  mPendingMeshCachePages.clear();
+  mPendingMeshCachePages.squeeze();
+  mMeshCacheError.clear();
+  mFullResolutionMeshClearPending = true;
   mPendingMeshVertices.clear();
   mPendingMeshVertices.squeeze();
   mPendingMeshIndices.clear();
@@ -469,8 +483,16 @@ bool NativeViewport::gaussianRenderingAvailable() const {
          mGaussianShaderReady;
 }
 
+bool NativeViewport::pagedMeshAvailable() const {
+  return mMeshCache.formatVersion == MeshCacheIndex::CurrentFormatVersion &&
+         mMeshCache.rootNode >= 0 &&
+         mMeshCache.rootNode < mMeshCache.nodes.size() &&
+         mMeshCache.nodes.at(mMeshCache.rootNode).isValid();
+}
+
 bool NativeViewport::meshRenderingAvailable() const {
-  return mHasMesh && mMeshShaderReady && mRenderedMeshIndexCount > 0;
+  return mHasMesh && mMeshShaderReady &&
+         (mRenderedMeshIndexCount > 0 || pagedMeshAvailable());
 }
 
 bool NativeViewport::infiniteGridRenderingAvailable() const {
@@ -498,6 +520,7 @@ void NativeViewport::initializeGL() {
       mPointCacheGpuBudgetBytes = std::clamp<qsizetype>(
           quarterBytes, 512LL * 1024LL * 1024LL,
           2048LL * 1024LL * 1024LL);
+      mMeshCacheGpuBudgetBytes = mPointCacheGpuBudgetBytes;
     }
   }
   bool budgetOverrideValid = false;
@@ -507,6 +530,14 @@ void NativeViewport::initializeGL() {
       budgetOverrideMegabytes <= 4096) {
     mPointCacheGpuBudgetBytes =
         static_cast<qsizetype>(budgetOverrideMegabytes) * 1024LL * 1024LL;
+  }
+  bool meshBudgetOverrideValid = false;
+  const int meshBudgetOverrideMegabytes = qEnvironmentVariableIntValue(
+      "GSW_MESH_CACHE_GPU_BUDGET_MB", &meshBudgetOverrideValid);
+  if (meshBudgetOverrideValid && meshBudgetOverrideMegabytes >= 64 &&
+      meshBudgetOverrideMegabytes <= 4096) {
+    mMeshCacheGpuBudgetBytes =
+        static_cast<qsizetype>(meshBudgetOverrideMegabytes) * 1024LL * 1024LL;
   }
   glClearColor(0.047F, 0.051F, 0.055F, 1.0F);
   glDisable(GL_CULL_FACE);
@@ -1027,6 +1058,8 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 viewProjection = projection * view;
   updatePointCacheSelection(viewProjection);
   uploadPendingPointCachePages();
+  updateMeshCacheSelection(viewProjection);
+  uploadPendingMeshCachePages();
   drawInfiniteGrid(viewProjection);
   if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
     drawMesh(viewProjection);
@@ -1174,26 +1207,47 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             mTarget = mSceneCenter;
             mSceneRadius = data.radius();
             rebuildCameraGeometry();
+            const bool loadedHasMesh = data.hasMesh();
             mPreviewPointCount = data.previewPointCount();
             mSourceFaceCount = data.sourceFaceCount;
-            mPreviewTriangleCount = data.meshIndices.size() / 3;
+            mPreviewTriangleCount = data.meshCache.isValid()
+                                        ? static_cast<qsizetype>(
+                                              std::min<qint64>(
+                                                  data.meshCache
+                                                      .renderableTriangleCount,
+                                                  std::numeric_limits<
+                                                      qsizetype>::max()))
+                                        : data.meshIndices.size() / 3;
             mRenderedMeshIndexCount = data.meshIndices.size();
             mSourcePositions = std::move(data.sourcePositions);
             mPreviewVertices = std::move(data.vertices);
             mPreviewOnlyScene = data.previewOnly;
             mPointCache = std::move(data.pointCache);
+            mMeshCache = std::move(data.meshCache);
             mDesiredPointCacheNodes.clear();
             mPointCacheReadsInFlight.clear();
             mPointCacheFailedNodes.clear();
             mPendingPointCachePages.clear();
             mFullResolutionPointCount =
-                mPreviewOnlyScene ? mPreviewPointCount : 0;
+                mPointCache.isValid() ? mPreviewPointCount : 0;
             mUploadedFullResolutionPointCount = 0;
             mFullResolutionPointClearPending = true;
+            mDesiredMeshCacheNodes.clear();
+            mMeshCacheReadsInFlight.clear();
+            mMeshCacheFailedNodes.clear();
+            mPendingMeshCachePages.clear();
+            mFullResolutionMeshTriangleCount =
+                pagedMeshAvailable()
+                    ? static_cast<qsizetype>(std::min<qint64>(
+                          mMeshCache.renderableTriangleCount,
+                          std::numeric_limits<qsizetype>::max()))
+                    : 0;
+            mUploadedFullResolutionMeshTriangleCount = 0;
+            mFullResolutionMeshClearPending = true;
             mPendingMeshVertices = std::move(data.meshVertices);
             mPendingMeshIndices = std::move(data.meshIndices);
             mMeshUploadPending = true;
-            mHasMesh = mRenderedMeshIndexCount > 0;
+            mHasMesh = loadedHasMesh;
             mEditModel.reset(
                 mHasMesh || mPreviewOnlyScene ? 0 : mSourcePositions.size());
             const bool wasAvailable = gaussianRenderingAvailable();
@@ -1358,7 +1412,9 @@ void NativeViewport::rebuildRenderedVertices() {
 void NativeViewport::updateFrameRefreshPolicy() {
   const bool shouldRefreshContinuously =
       mRenderedPointCount > 0 || !mPendingPointCachePages.isEmpty() ||
-      mRenderedMeshIndexCount > 0;
+      mRenderedMeshIndexCount > 0 || !mPendingMeshCachePages.isEmpty() ||
+      !mMeshCacheReadsInFlight.isEmpty() ||
+      !mFullResolutionMeshGpuChunks.isEmpty();
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
@@ -1690,6 +1746,328 @@ void NativeViewport::uploadPendingPointCachePages() {
   update();
 }
 
+void NativeViewport::releaseFullResolutionMesh() {
+  for (const FullResolutionMeshGpuChunk &chunk :
+       std::as_const(mFullResolutionMeshGpuChunks)) {
+    if (chunk.indexBuffer != 0) {
+      glDeleteBuffers(1, &chunk.indexBuffer);
+    }
+    if (chunk.vertexBuffer != 0) {
+      glDeleteBuffers(1, &chunk.vertexBuffer);
+    }
+    if (chunk.vertexArray != 0) {
+      glDeleteVertexArrays(1, &chunk.vertexArray);
+    }
+  }
+  mFullResolutionMeshGpuChunks.clear();
+  mMeshCacheResidentBytes = 0;
+  mUploadedFullResolutionMeshTriangleCount = 0;
+  mDrawnFullResolutionMeshTriangleCount = 0;
+}
+
+void NativeViewport::updateMeshCacheSelection(
+    const QMatrix4x4 &viewProjection) {
+  if (!pagedMeshAvailable()) {
+    mDesiredMeshCacheNodes.clear();
+    return;
+  }
+  ++mMeshCacheFrameSerial;
+  const bool interacting =
+      mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
+      (mViewSnapAnimation != nullptr &&
+       mViewSnapAnimation->state() == QAbstractAnimation::Running);
+  const float refinementThresholdPixels = interacting ? 180.0F : 34.0F;
+  const qsizetype byteBudget = static_cast<qsizetype>(
+      static_cast<long double>(mMeshCacheGpuBudgetBytes) * 0.85L);
+  const QVector3D eye = cameraPosition();
+  const float viewportHeight =
+      std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
+  const auto projectedPixels = [&](const MeshCacheNode &node) {
+    const QVector3D center =
+        (node.boundsMinimum + node.boundsMaximum) * 0.5F;
+    const float radius =
+        std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
+                 mSceneRadius * 1.0e-6F);
+    if (mOrthographic) {
+      return radius / std::max(mDistance, 1.0e-5F) * viewportHeight * 2.0F;
+    }
+    const float distance =
+        std::max((center - eye).length() - radius, mSceneRadius * 1.0e-5F);
+    return radius / distance * viewportHeight / std::tan(radians(22.5F));
+  };
+  const auto visible = [&](const MeshCacheNode &node) {
+    return node.isValid() &&
+           boundsIntersectView(node.boundsMinimum, node.boundsMaximum,
+                               viewProjection);
+  };
+  const auto pageBytes = [](const MeshCacheNode &node) {
+    return static_cast<qsizetype>(std::min<qint64>(
+        node.byteCount(), std::numeric_limits<qsizetype>::max()));
+  };
+
+  QSet<int> selected;
+  QVector<int> refinable;
+  const MeshCacheNode &root = mMeshCache.nodes.at(mMeshCache.rootNode);
+  qsizetype selectedBytes = 0;
+  if (visible(root)) {
+    selected.insert(root.id);
+    refinable.append(root.id);
+    selectedBytes = pageBytes(root);
+  }
+  while (!refinable.isEmpty()) {
+    qsizetype bestPosition = -1;
+    float bestPriority = refinementThresholdPixels;
+    for (qsizetype position = 0; position < refinable.size(); ++position) {
+      const MeshCacheNode &candidate =
+          mMeshCache.nodes.at(refinable.at(position));
+      const float priority = projectedPixels(candidate);
+      if (priority > bestPriority) {
+        bestPriority = priority;
+        bestPosition = position;
+      }
+    }
+    if (bestPosition < 0) {
+      break;
+    }
+    const int nodeId = refinable.takeAt(bestPosition);
+    const MeshCacheNode &node = mMeshCache.nodes.at(nodeId);
+    QVector<int> visibleChildren;
+    qsizetype childBytes = 0;
+    for (const int childId : node.children) {
+      const MeshCacheNode &child = mMeshCache.nodes.at(childId);
+      if (!visible(child)) {
+        continue;
+      }
+      visibleChildren.append(childId);
+      childBytes += pageBytes(child);
+    }
+    if (visibleChildren.isEmpty()) {
+      continue;
+    }
+    const qsizetype withoutParent = selectedBytes - pageBytes(node);
+    if (withoutParent + childBytes > byteBudget) {
+      continue;
+    }
+    selected.remove(nodeId);
+    selectedBytes = withoutParent + childBytes;
+    for (const int childId : std::as_const(visibleChildren)) {
+      selected.insert(childId);
+      if (!mMeshCache.nodes.at(childId).isLeaf()) {
+        refinable.append(childId);
+      }
+    }
+  }
+  mDesiredMeshCacheNodes = std::move(selected);
+  requestMissingMeshCachePages();
+}
+
+void NativeViewport::requestMissingMeshCachePages() {
+  if (!pagedMeshAvailable()) {
+    return;
+  }
+  const auto isResident = [this](const int nodeId) {
+    return std::any_of(mFullResolutionMeshGpuChunks.cbegin(),
+                       mFullResolutionMeshGpuChunks.cend(),
+                       [nodeId](const FullResolutionMeshGpuChunk &chunk) {
+                         return chunk.nodeId == nodeId;
+                       });
+  };
+  QSet<int> needed;
+  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+    int nodeId = desired;
+    while (nodeId >= 0 && !isResident(nodeId)) {
+      if (!mMeshCacheReadsInFlight.contains(nodeId) &&
+          !mMeshCacheFailedNodes.contains(nodeId)) {
+        needed.insert(nodeId);
+      }
+      nodeId = mMeshCache.nodes.at(nodeId).parent;
+    }
+  }
+  QVector<int> ordered = needed.values();
+  std::sort(ordered.begin(), ordered.end(), [this](const int left,
+                                                   const int right) {
+    const MeshCacheNode &a = mMeshCache.nodes.at(left);
+    const MeshCacheNode &b = mMeshCache.nodes.at(right);
+    if (a.depth != b.depth) {
+      return a.depth < b.depth;
+    }
+    return a.byteCount() < b.byteCount();
+  });
+  constexpr qsizetype kMaximumReadsInFlight = 2;
+  for (const int nodeId : std::as_const(ordered)) {
+    if (mMeshCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
+      break;
+    }
+    mMeshCacheReadsInFlight.insert(nodeId);
+    const int generation = mSceneGeneration;
+    const MeshCacheIndex cache = mMeshCache;
+    auto *watcher = new QFutureWatcher<MeshCachePage>(this);
+    connect(watcher, &QFutureWatcher<MeshCachePage>::finished, this,
+            [this, watcher, generation, nodeId]() {
+              MeshCachePage page = watcher->result();
+              watcher->deleteLater();
+              if (generation != mSceneGeneration) {
+                return;
+              }
+              mMeshCacheReadsInFlight.remove(nodeId);
+              if (page.isValid()) {
+                mPendingMeshCachePages.append(std::move(page));
+              } else {
+                mMeshCacheFailedNodes.insert(nodeId);
+                mMeshCacheError = page.error;
+              }
+              updateFrameRefreshPolicy();
+              update();
+            });
+    watcher->setFuture(QtConcurrent::run(
+        [cache, nodeId]() { return MeshCache::readNode(cache, nodeId); }));
+  }
+}
+
+void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
+  const auto isResident = [this](const int nodeId) {
+    return std::any_of(mFullResolutionMeshGpuChunks.cbegin(),
+                       mFullResolutionMeshGpuChunks.cend(),
+                       [nodeId](const FullResolutionMeshGpuChunk &chunk) {
+                         return chunk.nodeId == nodeId;
+                       });
+  };
+  QSet<int> protectedNodes;
+  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+    int nodeId = desired;
+    while (nodeId >= 0) {
+      if (isResident(nodeId)) {
+        protectedNodes.insert(nodeId);
+        break;
+      }
+      nodeId = mMeshCache.nodes.at(nodeId).parent;
+    }
+  }
+  while (!mFullResolutionMeshGpuChunks.isEmpty() &&
+         mMeshCacheResidentBytes + requiredBytes >
+             mMeshCacheGpuBudgetBytes) {
+    qsizetype victim = -1;
+    quint64 oldest = std::numeric_limits<quint64>::max();
+    for (qsizetype index = 0;
+         index < mFullResolutionMeshGpuChunks.size(); ++index) {
+      const FullResolutionMeshGpuChunk &chunk =
+          mFullResolutionMeshGpuChunks.at(index);
+      if (!protectedNodes.contains(chunk.nodeId) &&
+          chunk.lastUsedFrame < oldest) {
+        victim = index;
+        oldest = chunk.lastUsedFrame;
+      }
+    }
+    if (victim < 0) {
+      for (qsizetype index = 0;
+           index < mFullResolutionMeshGpuChunks.size(); ++index) {
+        const FullResolutionMeshGpuChunk &chunk =
+            mFullResolutionMeshGpuChunks.at(index);
+        if (chunk.lastUsedFrame < oldest) {
+          victim = index;
+          oldest = chunk.lastUsedFrame;
+        }
+      }
+    }
+    if (victim < 0) {
+      break;
+    }
+    const FullResolutionMeshGpuChunk chunk =
+        mFullResolutionMeshGpuChunks.takeAt(victim);
+    if (chunk.indexBuffer != 0) {
+      glDeleteBuffers(1, &chunk.indexBuffer);
+    }
+    if (chunk.vertexBuffer != 0) {
+      glDeleteBuffers(1, &chunk.vertexBuffer);
+    }
+    if (chunk.vertexArray != 0) {
+      glDeleteVertexArrays(1, &chunk.vertexArray);
+    }
+    mMeshCacheResidentBytes -= chunk.byteCount;
+  }
+}
+
+void NativeViewport::uploadPendingMeshCachePages() {
+  if (mFullResolutionMeshClearPending) {
+    releaseFullResolutionMesh();
+    mFullResolutionMeshClearPending = false;
+  }
+  if (mPendingMeshCachePages.isEmpty() || mMeshProgram == nullptr ||
+      !mMeshProgram->isLinked()) {
+    return;
+  }
+  MeshCachePage page = mPendingMeshCachePages.takeFirst();
+  const bool alreadyResident = std::any_of(
+      mFullResolutionMeshGpuChunks.cbegin(),
+      mFullResolutionMeshGpuChunks.cend(),
+      [&page](const FullResolutionMeshGpuChunk &chunk) {
+        return chunk.nodeId == page.nodeId;
+      });
+  if (!alreadyResident && page.nodeId >= 0 &&
+      page.nodeId < mMeshCache.nodes.size()) {
+    const qsizetype vertexBytes =
+        page.vertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
+    const qsizetype indexBytes =
+        page.indices.size() * static_cast<qsizetype>(sizeof(quint32));
+    const qsizetype byteCount = vertexBytes + indexBytes;
+    evictMeshCacheUntilFits(byteCount);
+    FullResolutionMeshGpuChunk gpuChunk;
+    gpuChunk.nodeId = page.nodeId;
+    gpuChunk.indexCount = static_cast<GLsizei>(page.indices.size());
+    gpuChunk.byteCount = byteCount;
+    gpuChunk.lastUsedFrame = mMeshCacheFrameSerial;
+    const MeshCacheNode &node = mMeshCache.nodes.at(page.nodeId);
+    gpuChunk.boundsMinimum = node.boundsMinimum;
+    gpuChunk.boundsMaximum = node.boundsMaximum;
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    glGenVertexArrays(1, &gpuChunk.vertexArray);
+    glGenBuffers(1, &gpuChunk.vertexBuffer);
+    glGenBuffers(1, &gpuChunk.indexBuffer);
+    glBindVertexArray(gpuChunk.vertexArray);
+    glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, vertexBytes, page.vertices.constData(),
+                 GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+                          nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(
+        1, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+        reinterpret_cast<const void *>(offsetof(MeshVertex, red)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(
+        2, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+        reinterpret_cast<const void *>(offsetof(MeshVertex, normalX)));
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpuChunk.indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, page.indices.constData(),
+                 GL_STATIC_DRAW);
+    const GLenum uploadError = glGetError();
+    if (uploadError == GL_NO_ERROR) {
+      mMeshCacheResidentBytes += byteCount;
+      mFullResolutionMeshGpuChunks.append(gpuChunk);
+    } else {
+      glDeleteBuffers(1, &gpuChunk.indexBuffer);
+      glDeleteBuffers(1, &gpuChunk.vertexBuffer);
+      glDeleteVertexArrays(1, &gpuChunk.vertexArray);
+      mMeshCacheFailedNodes.insert(page.nodeId);
+      mMeshCacheError =
+          QStringLiteral("GPU memory could not accept mesh-cache node %1.")
+              .arg(page.nodeId);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+  }
+  mUploadedFullResolutionMeshTriangleCount = 0;
+  for (const FullResolutionMeshGpuChunk &chunk :
+       std::as_const(mFullResolutionMeshGpuChunks)) {
+    mUploadedFullResolutionMeshTriangleCount += chunk.indexCount / 3;
+  }
+  requestMissingMeshCachePages();
+  updateFrameRefreshPolicy();
+  update();
+}
+
 void NativeViewport::uploadPendingMesh() {
   if (!mMeshUploadPending || !mMeshVertexBuffer.isCreated() ||
       !mMeshIndexBuffer.isCreated()) {
@@ -1807,8 +2185,12 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
 }
 
 void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
-  if (mRenderedMeshIndexCount < 3 || mMeshProgram == nullptr ||
-      !mMeshProgram->isLinked() || !mMeshIndexBuffer.isCreated()) {
+  mInteractionLodActive = false;
+  mProgressiveUploadActive = false;
+  mDrawnFullResolutionMeshTriangleCount = 0;
+  if ((mRenderedMeshIndexCount < 3 &&
+       mFullResolutionMeshGpuChunks.isEmpty()) ||
+      mMeshProgram == nullptr || !mMeshProgram->isLinked()) {
     return;
   }
 
@@ -1819,7 +2201,7 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   mMeshProgram->bind();
   mMeshProgram->setUniformValue("viewProjection", viewProjection);
   mMeshProgram->setUniformValue("cameraPosition", cameraPosition());
-  {
+  if (mRenderedMeshIndexCount >= 3 && mMeshIndexBuffer.isCreated()) {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
     mMeshIndexBuffer.bind();
     glDrawElements(GL_TRIANGLES,
@@ -1827,6 +2209,52 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
                    GL_UNSIGNED_INT, nullptr);
     mMeshIndexBuffer.release();
   }
+  const auto residentChunk = [this](const int nodeId)
+      -> FullResolutionMeshGpuChunk * {
+    const auto iterator = std::find_if(
+        mFullResolutionMeshGpuChunks.begin(),
+        mFullResolutionMeshGpuChunks.end(),
+        [nodeId](const FullResolutionMeshGpuChunk &chunk) {
+          return chunk.nodeId == nodeId;
+        });
+    return iterator == mFullResolutionMeshGpuChunks.end() ? nullptr
+                                                           : &(*iterator);
+  };
+  QSet<int> drawNodes;
+  bool desiredMissing = false;
+  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+    int nodeId = desired;
+    FullResolutionMeshGpuChunk *chunk = residentChunk(nodeId);
+    if (chunk == nullptr) {
+      desiredMissing = true;
+    }
+    while (chunk == nullptr && nodeId >= 0 && pagedMeshAvailable()) {
+      nodeId = mMeshCache.nodes.at(nodeId).parent;
+      chunk = nodeId >= 0 ? residentChunk(nodeId) : nullptr;
+    }
+    if (chunk != nullptr) {
+      drawNodes.insert(chunk->nodeId);
+    }
+  }
+  bool hierarchicalLod = false;
+  for (const int nodeId : std::as_const(drawNodes)) {
+    FullResolutionMeshGpuChunk *chunk = residentChunk(nodeId);
+    if (chunk == nullptr) {
+      continue;
+    }
+    chunk->lastUsedFrame = mMeshCacheFrameSerial;
+    hierarchicalLod =
+        hierarchicalLod ||
+        (pagedMeshAvailable() && !mMeshCache.nodes.at(nodeId).isLeaf());
+    glBindVertexArray(chunk->vertexArray);
+    glDrawElements(GL_TRIANGLES, chunk->indexCount, GL_UNSIGNED_INT, nullptr);
+    mDrawnFullResolutionMeshTriangleCount += chunk->indexCount / 3;
+  }
+  glBindVertexArray(0);
+  mInteractionLodActive = hierarchicalLod;
+  mProgressiveUploadActive =
+      desiredMissing || !mMeshCacheReadsInFlight.isEmpty() ||
+      !mPendingMeshCachePages.isEmpty();
   mMeshProgram->release();
 }
 
@@ -2494,6 +2922,23 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
   } else if (!mSceneLoadMessage.isEmpty()) {
     count = mSceneLoadMessage;
+  } else if (pagedMeshAvailable()) {
+    count = QStringLiteral(
+                "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | "
+                "GPU LOD 缓存 %6 | 只读")
+                .arg(formatCount(mMeshCache.fullVertexCount),
+                     formatCount(mMeshCache.fullFaceCount),
+                     formatCount(mMeshCache.renderableTriangleCount),
+                     mProgressiveUploadActive
+                         ? QStringLiteral("磁盘分页")
+                         : mInteractionLodActive
+                               ? QStringLiteral("层级 Mesh LOD")
+                               : QStringLiteral("叶级细节"),
+                     formatCount(mDrawnFullResolutionMeshTriangleCount),
+                     formatCount(mUploadedFullResolutionMeshTriangleCount));
+    if (!mMeshCacheError.isEmpty()) {
+      count += QStringLiteral(" | 分页错误");
+    }
   } else if (mPreviewOnlyScene) {
     count = QStringLiteral("%1 点 | %2 | GPU 驻留 %3 / %4 | 只读")
                 .arg(formatCount(mPreviewPointCount),
@@ -2593,7 +3038,8 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 
   const QString renderer =
       mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
-          ? QStringLiteral("三角网格")
+          ? pagedMeshAvailable() ? QStringLiteral("分页三角网格")
+                                 : QStringLiteral("三角网格")
           : mRenderMode == RenderMode::Gaussians &&
                     gaussianRenderingAvailable()
                 ? QStringLiteral("高斯 DC SH")

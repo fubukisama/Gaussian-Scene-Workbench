@@ -71,6 +71,9 @@ public:
   [[nodiscard]] bool hasEditableScene() const;
   [[nodiscard]] bool gaussianRenderingAvailable() const;
   [[nodiscard]] bool meshRenderingAvailable() const;
+  [[nodiscard]] qsizetype residentMeshTriangleCount() const {
+    return mUploadedFullResolutionMeshTriangleCount;
+  }
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
   [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
@@ -130,6 +133,18 @@ private:
     QVector3D boundsMaximum;
   };
 
+  struct FullResolutionMeshGpuChunk {
+    int nodeId = -1;
+    GLuint vertexArray = 0;
+    GLuint vertexBuffer = 0;
+    GLuint indexBuffer = 0;
+    GLsizei indexCount = 0;
+    qsizetype byteCount = 0;
+    quint64 lastUsedFrame = 0;
+    QVector3D boundsMinimum;
+    QVector3D boundsMaximum;
+  };
+
   struct StoredCameraView {
     QVector3D target;
     float yawDegrees = 0.0F;
@@ -139,6 +154,7 @@ private:
   };
 
   [[nodiscard]] QVector3D cameraPosition() const;
+  [[nodiscard]] bool pagedMeshAvailable() const;
   [[nodiscard]] QMatrix4x4 viewMatrix() const;
   [[nodiscard]] QMatrix4x4 projectionMatrix() const;
   [[nodiscard]] QMatrix4x4 viewProjectionMatrix() const;
@@ -159,6 +175,11 @@ private:
   void uploadPendingPointCachePages();
   void evictPointCacheUntilFits(qsizetype requiredBytes);
   void releaseFullResolutionPointCloud();
+  void updateMeshCacheSelection(const QMatrix4x4 &viewProjection);
+  void requestMissingMeshCachePages();
+  void uploadPendingMeshCachePages();
+  void evictMeshCacheUntilFits(qsizetype requiredBytes);
+  void releaseFullResolutionMesh();
   void uploadPendingMesh();
   void synchronizeGaussianRenderingAvailability(bool previousAvailability);
   void applyPendingTrainingGpuPreview();
@@ -192,6 +213,9 @@ private:
   qsizetype mRenderedPointCount = 0;
   qsizetype mFullResolutionPointCount = 0;
   qsizetype mUploadedFullResolutionPointCount = 0;
+  qsizetype mFullResolutionMeshTriangleCount = 0;
+  qsizetype mUploadedFullResolutionMeshTriangleCount = 0;
+  qsizetype mDrawnFullResolutionMeshTriangleCount = 0;
   qsizetype mRenderedMeshIndexCount = 0;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
@@ -220,6 +244,7 @@ private:
   bool mInteractionLodActive = false;
   bool mProgressiveUploadActive = false;
   bool mFullResolutionPointClearPending = false;
+  bool mFullResolutionMeshClearPending = false;
   int mSceneGeneration = 0;
   int mCameraTrajectoryGeneration = 0;
   RenderMode mRenderMode = RenderMode::Points;
@@ -246,6 +271,16 @@ private:
   qsizetype mPointCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
   quint64 mPointCacheFrameSerial = 0;
   QString mPointCacheError;
+  MeshCacheIndex mMeshCache;
+  QSet<int> mDesiredMeshCacheNodes;
+  QSet<int> mMeshCacheReadsInFlight;
+  QSet<int> mMeshCacheFailedNodes;
+  QVector<MeshCachePage> mPendingMeshCachePages;
+  QVector<FullResolutionMeshGpuChunk> mFullResolutionMeshGpuChunks;
+  qsizetype mMeshCacheResidentBytes = 0;
+  qsizetype mMeshCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
+  quint64 mMeshCacheFrameSerial = 0;
+  QString mMeshCacheError;
   QVector<MeshVertex> mPendingMeshVertices;
   QVector<quint32> mPendingMeshIndices;
   CameraTrajectory mCameraTrajectory;
