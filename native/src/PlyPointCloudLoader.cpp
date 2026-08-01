@@ -1,18 +1,23 @@
 #include "PlyPointCloudLoader.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QStringList>
+#include <QTemporaryFile>
 #include <QtEndian>
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <optional>
+#include <system_error>
 
 namespace gsw {
 
@@ -24,6 +29,9 @@ constexpr qint64 kMaximumMeshVertexCount = 5'000'000;
 constexpr qint64 kMaximumMeshPreviewFaces = 2'000'000;
 constexpr qint64 kMaximumMeshPreviewTriangles = 5'000'000;
 constexpr qsizetype kFullResolutionPointChunkSize = 1'000'000;
+constexpr qsizetype kAsciiSpoolBufferPoints = 262'144;
+constexpr qint64 kStaleAsciiSpoolMilliseconds =
+    24LL * 60LL * 60LL * 1000LL;
 
 enum class PlyFormat {
   Unknown,
@@ -55,6 +63,104 @@ struct ElementDefinition {
   QString name;
   qint64 count = 0;
   QVector<PropertyDefinition> properties;
+};
+
+bool isAsciiWhitespace(const char value) {
+  return value == ' ' || value == '\t' || value == '\r' || value == '\n' ||
+         value == '\v' || value == '\f';
+}
+
+class BufferedAsciiScalarReader final {
+public:
+  BufferedAsciiScalarReader(QFile &file, const qint64 offset) : mFile(file) {
+    constexpr qsizetype kBufferBytes = 8 * 1024 * 1024;
+    mBuffer.resize(kBufferBytes);
+    if (!mFile.seek(offset)) {
+      mFailed = true;
+    } else {
+      refill();
+    }
+  }
+
+  [[nodiscard]] bool next(double &value) {
+    while (true) {
+      while (mPosition < mSize &&
+             isAsciiWhitespace(mBuffer.at(mPosition))) {
+        ++mPosition;
+      }
+      if (mPosition < mSize) {
+        break;
+      }
+      if (mAtEnd || !refill()) {
+        return false;
+      }
+    }
+
+    while (true) {
+      qsizetype tokenEnd = mPosition;
+      while (tokenEnd < mSize &&
+             !isAsciiWhitespace(mBuffer.at(tokenEnd))) {
+        ++tokenEnd;
+      }
+      if (tokenEnd < mSize || mAtEnd) {
+        const char *tokenBegin = mBuffer.constData() + mPosition;
+        const char *tokenLimit = mBuffer.constData() + tokenEnd;
+        const bool explicitPositive =
+            tokenBegin < tokenLimit && *tokenBegin == '+';
+        const char *numberBegin = tokenBegin + (explicitPositive ? 1 : 0);
+        if (numberBegin >= tokenLimit) {
+          return false;
+        }
+        const auto parsed = std::from_chars(numberBegin, tokenLimit, value,
+                                            std::chars_format::general);
+        if (parsed.ec != std::errc() || parsed.ptr != tokenLimit) {
+          return false;
+        }
+        mPosition = tokenEnd;
+        return true;
+      }
+      if (!refill()) {
+        return false;
+      }
+    }
+  }
+
+private:
+  bool refill() {
+    if (mFailed || mAtEnd) {
+      return false;
+    }
+    const qsizetype remaining = mSize - mPosition;
+    if (remaining >= mBuffer.size()) {
+      mFailed = true;
+      return false;
+    }
+    if (remaining > 0 && mPosition > 0) {
+      std::memmove(mBuffer.data(), mBuffer.constData() + mPosition,
+                   static_cast<std::size_t>(remaining));
+    }
+    mPosition = 0;
+    mSize = remaining;
+    const qint64 read = mFile.read(mBuffer.data() + mSize,
+                                   mBuffer.size() - mSize);
+    if (read < 0) {
+      mFailed = true;
+      return false;
+    }
+    if (read == 0) {
+      mAtEnd = true;
+      return remaining > 0;
+    }
+    mSize += static_cast<qsizetype>(read);
+    return true;
+  }
+
+  QFile &mFile;
+  QByteArray mBuffer;
+  qsizetype mPosition = 0;
+  qsizetype mSize = 0;
+  bool mAtEnd = false;
+  bool mFailed = false;
 };
 
 struct PlyHeader {
@@ -693,6 +799,221 @@ quint8 packedColor(const double value, const ScalarType type) {
       std::clamp(qRound(normalizedColor(value, type) * 255.0F), 0, 255));
 }
 
+bool writePointSpoolBatch(QIODevice &spool,
+                          QVector<PointPreviewVertex> &vertices,
+                          QString &error) {
+  const char *data = reinterpret_cast<const char *>(vertices.constData());
+  qint64 remaining =
+      vertices.size() * static_cast<qint64>(sizeof(PointPreviewVertex));
+  while (remaining > 0) {
+    const qint64 written = spool.write(data, remaining);
+    if (written <= 0) {
+      error = QStringLiteral("Unable to write the temporary ASCII point spool: %1")
+                  .arg(spool.errorString());
+      return false;
+    }
+    data += written;
+    remaining -= written;
+  }
+  vertices.clear();
+  return true;
+}
+
+bool loadAsciiPointCache(
+    QFile &file, const ElementDefinition &vertexElement, const int xIndex,
+    const int yIndex, const int zIndex, const int redIndex,
+    const int greenIndex, const int blueIndex,
+    const bool sphericalHarmonicColor, PointCloudData &result) {
+  const qint64 vertexDataOffset = file.pos();
+  const QFileInfo sourceBefore(file.fileName());
+  QDir cacheDirectory(
+      PointCloudCache::cacheDirectoryForSource(file.fileName()));
+  if (!cacheDirectory.mkpath(QStringLiteral("."))) {
+    result.error = QStringLiteral("Unable to create the point-cache directory %1.")
+                       .arg(cacheDirectory.absolutePath());
+    return false;
+  }
+  cacheDirectory.setNameFilters(
+      {QStringLiteral("gsw-ascii-spool-*.bin")});
+  const qint64 staleSpoolCutoff =
+      QDateTime::currentMSecsSinceEpoch() - kStaleAsciiSpoolMilliseconds;
+  for (const QFileInfo &entry : cacheDirectory.entryInfoList(QDir::Files)) {
+    if (entry.lastModified().toMSecsSinceEpoch() < staleSpoolCutoff) {
+      QFile::remove(entry.absoluteFilePath());
+    }
+  }
+
+  QTemporaryFile spool(cacheDirectory.filePath(
+      QStringLiteral("gsw-ascii-spool-XXXXXX.bin")));
+  spool.setAutoRemove(true);
+  if (!spool.open()) {
+    result.error = QStringLiteral("Unable to create the temporary ASCII point spool: %1")
+                       .arg(spool.errorString());
+    return false;
+  }
+
+  QVector<PointPreviewVertex> spoolBuffer;
+  spoolBuffer.reserve(kAsciiSpoolBufferPoints);
+  bool hasFiniteBounds = false;
+  qint64 finitePointCount = 0;
+  const auto appendPoint = [&](const double x, const double y, const double z,
+                               const double red, const double green,
+                               const double blue) -> bool {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+      return true;
+    }
+    PointPreviewVertex vertex;
+    vertex.x = static_cast<float>(x);
+    vertex.y = static_cast<float>(y);
+    vertex.z = static_cast<float>(z);
+    if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) ||
+        !std::isfinite(vertex.z)) {
+      return true;
+    }
+    if (redIndex >= 0 && greenIndex >= 0 && blueIndex >= 0 &&
+        std::isfinite(red) && std::isfinite(green) &&
+        std::isfinite(blue)) {
+      if (sphericalHarmonicColor) {
+        vertex.red = static_cast<quint8>(std::clamp(
+            qRound((0.5 + kSphericalHarmonicDc * red) * 255.0), 0, 255));
+        vertex.green = static_cast<quint8>(std::clamp(
+            qRound((0.5 + kSphericalHarmonicDc * green) * 255.0), 0, 255));
+        vertex.blue = static_cast<quint8>(std::clamp(
+            qRound((0.5 + kSphericalHarmonicDc * blue) * 255.0), 0, 255));
+      } else {
+        vertex.red = packedColor(
+            red, vertexElement.properties.at(redIndex).valueType);
+        vertex.green = packedColor(
+            green, vertexElement.properties.at(greenIndex).valueType);
+        vertex.blue = packedColor(
+            blue, vertexElement.properties.at(blueIndex).valueType);
+      }
+    }
+    const QVector3D position(vertex.x, vertex.y, vertex.z);
+    if (!hasFiniteBounds) {
+      result.boundsMinimum = position;
+      result.boundsMaximum = position;
+      hasFiniteBounds = true;
+    } else {
+      result.boundsMinimum.setX(
+          std::min(result.boundsMinimum.x(), position.x()));
+      result.boundsMinimum.setY(
+          std::min(result.boundsMinimum.y(), position.y()));
+      result.boundsMinimum.setZ(
+          std::min(result.boundsMinimum.z(), position.z()));
+      result.boundsMaximum.setX(
+          std::max(result.boundsMaximum.x(), position.x()));
+      result.boundsMaximum.setY(
+          std::max(result.boundsMaximum.y(), position.y()));
+      result.boundsMaximum.setZ(
+          std::max(result.boundsMaximum.z(), position.z()));
+    }
+    spoolBuffer.append(vertex);
+    ++finitePointCount;
+    return spoolBuffer.size() < kAsciiSpoolBufferPoints ||
+           writePointSpoolBatch(spool, spoolBuffer, result.error);
+  };
+
+  BufferedAsciiScalarReader reader(file, vertexDataOffset);
+  for (qint64 recordIndex = 0; recordIndex < vertexElement.count;
+       ++recordIndex) {
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+    double red = 0.0;
+    double green = 0.0;
+    double blue = 0.0;
+    for (qsizetype propertyIndex = 0;
+         propertyIndex < vertexElement.properties.size(); ++propertyIndex) {
+      double value = 0.0;
+      if (!reader.next(value)) {
+        result.error =
+            QStringLiteral(
+                "ASCII PLY vertex %1 has an invalid or missing value.")
+                .arg(recordIndex);
+        return false;
+      }
+      const int property = static_cast<int>(propertyIndex);
+      if (property == xIndex) {
+        x = value;
+      } else if (property == yIndex) {
+        y = value;
+      } else if (property == zIndex) {
+        z = value;
+      } else if (property == redIndex) {
+        red = value;
+      } else if (property == greenIndex) {
+        green = value;
+      } else if (property == blueIndex) {
+        blue = value;
+      }
+    }
+    if (!appendPoint(x, y, z, red, green, blue)) {
+      return false;
+    }
+  }
+
+  if (!hasFiniteBounds || finitePointCount <= 0) {
+    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    return false;
+  }
+  if ((!spoolBuffer.isEmpty() &&
+       !writePointSpoolBatch(spool, spoolBuffer, result.error)) ||
+      !spool.flush() || !spool.seek(0)) {
+    if (result.error.isEmpty()) {
+      result.error =
+          QStringLiteral("Unable to finalize the temporary ASCII point spool.");
+    }
+    return false;
+  }
+  const QFileInfo sourceAfter(file.fileName());
+  if (sourceAfter.size() != sourceBefore.size() ||
+      sourceAfter.lastModified().toMSecsSinceEpoch() !=
+          sourceBefore.lastModified().toMSecsSinceEpoch()) {
+    result.error = QStringLiteral(
+        "The source point cloud changed while it was being read.");
+    return false;
+  }
+
+  PointCloudCacheBuilder cacheBuilder(file.fileName(), result.boundsMinimum,
+                                      result.boundsMaximum);
+  if (!cacheBuilder.begin(&result.error)) {
+    return false;
+  }
+  QVector<PointPreviewVertex> readBuffer(kAsciiSpoolBufferPoints);
+  qint64 sourceIndex = 0;
+  while (sourceIndex < finitePointCount) {
+    const qint64 requestedPoints = std::min<qint64>(
+        readBuffer.size(), finitePointCount - sourceIndex);
+    const qint64 requestedBytes =
+        requestedPoints * static_cast<qint64>(sizeof(PointPreviewVertex));
+    const qint64 readBytes = spool.read(
+        reinterpret_cast<char *>(readBuffer.data()), requestedBytes);
+    if (readBytes != requestedBytes) {
+      result.error = QStringLiteral("The temporary ASCII point spool is truncated.");
+      return false;
+    }
+    for (qint64 index = 0; index < requestedPoints; ++index) {
+      if (!cacheBuilder.append(readBuffer.at(static_cast<qsizetype>(index)),
+                               sourceIndex + index, &result.error)) {
+        return false;
+      }
+    }
+    sourceIndex += requestedPoints;
+  }
+  result.pointCache = cacheBuilder.finish(&result.error);
+  if (!result.pointCache.isValid()) {
+    if (result.error.isEmpty()) {
+      result.error = QStringLiteral("Unable to build the point-cache index.");
+    }
+    return false;
+  }
+  result.boundsMinimum = result.pointCache.boundsMinimum;
+  result.boundsMaximum = result.pointCache.boundsMaximum;
+  result.previewOnly = true;
+  return true;
+}
+
 bool loadFullResolutionPointPreview(
     QFile &file, const PlyHeader &header, const ElementDefinition &vertexElement,
     const int xIndex, const int yIndex, const int zIndex, const int redIndex,
@@ -717,16 +1038,21 @@ bool loadFullResolutionPointPreview(
         "be the first non-empty PLY element.");
     return false;
   }
-  if (header.format == PlyFormat::Ascii ||
-      std::any_of(vertexElement.properties.cbegin(),
+  if (std::any_of(vertexElement.properties.cbegin(),
                   vertexElement.properties.cend(),
                   [](const PropertyDefinition &property) {
                     return property.isList;
                   })) {
     result.error = QStringLiteral(
-        "Full-resolution large-cloud preview currently requires fixed-width "
-        "binary PLY vertex records.");
+        "Full-resolution large-cloud preview requires scalar PLY vertex "
+        "properties.");
     return false;
+  }
+
+  if (header.format == PlyFormat::Ascii) {
+    return loadAsciiPointCache(file, vertexElement, xIndex, yIndex, zIndex,
+                               redIndex, greenIndex, blueIndex,
+                               sphericalHarmonicColor, result);
   }
 
   QVector<qsizetype> offsets;

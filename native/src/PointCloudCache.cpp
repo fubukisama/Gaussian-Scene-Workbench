@@ -225,9 +225,13 @@ bool PointCloudCacheIndex::isValid() const {
 }
 
 QString PointCloudCache::indexPathForSource(const QString &sourcePath) {
-  return QDir(cacheRootForSource(sourcePath))
+  return QDir(cacheDirectoryForSource(sourcePath))
       .filePath(QStringLiteral("%1.json")
                     .arg(QString::fromLatin1(sourceKey(sourcePath))));
+}
+
+QString PointCloudCache::cacheDirectoryForSource(const QString &sourcePath) {
+  return cacheRootForSource(sourcePath);
 }
 
 PointCloudCacheIndex PointCloudCache::loadForSource(
@@ -353,6 +357,8 @@ struct PointCloudCacheBuilder::Impl {
   QVector<QVector<PointPreviewVertex>> reservoirs;
   QVector<QVector<PointPreviewVertex>> bucketBuffers;
   QVector<QString> bucketPaths;
+  qint64 sourceSize = 0;
+  qint64 sourceModifiedMilliseconds = 0;
   bool started = false;
   bool finished = false;
 
@@ -444,6 +450,10 @@ bool PointCloudCacheBuilder::begin(QString *errorMessage) {
     }
     return false;
   }
+
+  mImpl->sourceSize = source.size();
+  mImpl->sourceModifiedMilliseconds =
+      source.lastModified().toMSecsSinceEpoch();
 
   mImpl->nodes.resize(kNodeCount);
   mImpl->reservoirs.resize(kInternalNodeCount);
@@ -544,13 +554,20 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
     }
   }
   const QFileInfo source(mImpl->sourcePath);
+  if (error.isEmpty() &&
+      (source.size() != mImpl->sourceSize ||
+       source.lastModified().toMSecsSinceEpoch() !=
+           mImpl->sourceModifiedMilliseconds)) {
+    error = QStringLiteral(
+        "The source point cloud changed while its cache was being built.");
+  }
   const QString key = QString::fromLatin1(sourceKey(mImpl->sourcePath));
   const QString dataFileName =
       QStringLiteral("%1-v%2-%3-%4-%5.bin")
           .arg(key)
           .arg(PointCloudCacheIndex::CurrentFormatVersion)
-          .arg(source.size())
-          .arg(source.lastModified().toMSecsSinceEpoch())
+          .arg(mImpl->sourceSize)
+          .arg(mImpl->sourceModifiedMilliseconds)
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   const QString dataPath = QDir(mImpl->cacheRoot).filePath(dataFileName);
   QSaveFile data(dataPath);
@@ -587,6 +604,15 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
     error = QStringLiteral("Unable to publish point-cache data: %1")
                 .arg(data.errorString());
   }
+  const QFileInfo completedSource(mImpl->sourcePath);
+  if (error.isEmpty() &&
+      (completedSource.size() != mImpl->sourceSize ||
+       completedSource.lastModified().toMSecsSinceEpoch() !=
+           mImpl->sourceModifiedMilliseconds)) {
+    QFile::remove(dataPath);
+    error = QStringLiteral(
+        "The source point cloud changed while its cache was being built.");
+  }
   if (!error.isEmpty()) {
     if (errorMessage != nullptr) {
       *errorMessage = error;
@@ -598,8 +624,8 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
   result.indexPath = PointCloudCache::indexPathForSource(mImpl->sourcePath);
   result.dataPath = dataPath;
   result.sourcePath = mImpl->sourcePath;
-  result.sourceSize = source.size();
-  result.sourceModifiedMilliseconds = source.lastModified().toMSecsSinceEpoch();
+  result.sourceSize = mImpl->sourceSize;
+  result.sourceModifiedMilliseconds = mImpl->sourceModifiedMilliseconds;
   result.boundsMinimum = mImpl->boundsMinimum;
   result.boundsMaximum = mImpl->boundsMaximum;
   result.nodes = mImpl->nodes;

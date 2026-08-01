@@ -26,6 +26,7 @@ private slots:
   void parsesGaussianPlyHeader();
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsOversizedBinaryPointCloudAtFullResolution();
+  void loadsOversizedAsciiPointCloudIntoDiskCache();
   void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsBinaryBigEndianMesh();
@@ -326,6 +327,64 @@ void WorkspaceDocumentTests::loadsOversizedBinaryPointCloudAtFullResolution() {
       gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
   QVERIFY2(reused.isValid(), qPrintable(reused.error));
   QCOMPARE(reused.pointCache.dataPath, cacheDataPath);
+}
+
+void WorkspaceDocumentTests::loadsOversizedAsciiPointCloudIntoDiskCache() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString plyPath =
+      QDir(temporary.path()).filePath(QStringLiteral("large-ascii.ply"));
+  QFile file(plyPath);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  constexpr int pointCount = 300'000;
+  QByteArray payload =
+      "ply\n"
+      "format ascii 1.0\n"
+      "element vertex 300000\n"
+      "property float x\n"
+      "property float y\n"
+      "property float z\n"
+      "property uchar red\n"
+      "property uchar green\n"
+      "property uchar blue\n"
+      "end_header\n";
+  const std::array<QByteArray, 4> records = {
+      "+0.000000 0.000000 0.000000 10 20 30\n",
+      "1e0\t2.000000 3.000000 11 21 31\n",
+      "2.000000 4.000000 6.000000 12 22 32\n",
+      "3.000000 6.000000 9.000000 13 23 33\n"};
+  payload.reserve(12 * 1024 * 1024);
+  for (int index = 0; index < pointCount; ++index) {
+    payload.append(records.at(static_cast<std::size_t>(index % 4)));
+  }
+  QVERIFY(payload.size() > 8 * 1024 * 1024);
+  QCOMPARE(file.write(payload), payload.size());
+  file.close();
+
+  const gsw::PointCloudData data =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.previewOnly);
+  QVERIFY(data.pointCache.isValid());
+  QCOMPARE(data.previewPointCount(), pointCount);
+  QCOMPARE(data.boundsMinimum, QVector3D(0.0F, 0.0F, 0.0F));
+  QCOMPARE(data.boundsMaximum, QVector3D(3.0F, 6.0F, 9.0F));
+  const gsw::PointCloudCachePage rootPage =
+      gsw::PointCloudCache::readNode(data.pointCache,
+                                     data.pointCache.rootNode);
+  QVERIFY2(rootPage.isValid(), qPrintable(rootPage.error));
+  QCOMPARE(rootPage.vertices.size(), 32'768);
+  QVERIFY(std::any_of(
+      rootPage.vertices.cbegin(), rootPage.vertices.cend(),
+      [](const gsw::PointPreviewVertex &vertex) { return vertex.red == 10; }));
+  QVERIFY(std::any_of(
+      rootPage.vertices.cbegin(), rootPage.vertices.cend(),
+      [](const gsw::PointPreviewVertex &vertex) { return vertex.blue == 33; }));
+
+  const gsw::PointCloudData reused =
+      gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
+  QVERIFY2(reused.isValid(), qPrintable(reused.error));
+  QCOMPARE(reused.pointCache.dataPath, data.pointCache.dataPath);
 }
 
 void WorkspaceDocumentTests::buildsAndInvalidatesDiskResidentPointOctree() {

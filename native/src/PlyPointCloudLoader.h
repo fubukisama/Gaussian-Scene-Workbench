@@ -73,7 +73,7 @@ struct PointCloudData {
 class PlyPointCloudLoader final {
 public:
   static constexpr qsizetype DefaultMaximumPreviewPoints = 1'500'000;
-  static constexpr qint64 DefaultMaximumEditablePoints = 50'000'000;
+  static constexpr qint64 DefaultMaximumEditablePoints = 10'000'000;
 
   [[nodiscard]] static PointCloudData load(
       const QString &filePath,

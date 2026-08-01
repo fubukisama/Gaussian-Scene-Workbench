@@ -73,6 +73,8 @@ public:
       const QString &sourcePath, QString *errorMessage = nullptr);
   [[nodiscard]] static PointCloudCachePage readNode(
       const PointCloudCacheIndex &index, int nodeId);
+  [[nodiscard]] static QString cacheDirectoryForSource(
+      const QString &sourcePath);
   [[nodiscard]] static QString indexPathForSource(const QString &sourcePath);
 };
 
