@@ -11,7 +11,7 @@ The application is being rebuilt as a fully native Qt 6/C++ desktop program on t
 
 - Current version: `0.3.1-native-preview`
 - Updated: `2026-08-02`
-- Current native slice: guarded COLMAP reconstruction and training, an adaptive coordinate-aware infinite reference grid, screen-space Gaussian preview with point fallback, Blender-style object Move/Rotate/Scale/Transform gizmos with free trackball, full-source rectangle/lasso/brush selection, delete/transform undo-redo, and lossless cropped PLY export.
+- Current native slice: guarded COLMAP reconstruction and training, an adaptive coordinate-aware infinite reference grid with depth-occluded XYZ axes and selection bounds, screen-space Gaussian preview with point fallback, Blender-style object Move/Rotate/Scale/Transform gizmos with free trackball, full-source rectangle/lasso/brush selection, delete/transform undo-redo, and lossless cropped PLY export.
 - Renderer metric: honest CPU submission time; GPU/SIBR timing remains a tracked parity item.
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)

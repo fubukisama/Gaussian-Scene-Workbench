@@ -216,6 +216,16 @@ private:
     QVector3D boundsMaximum;
   };
 
+  struct DepthOverlayVertex final {
+    float x = 0.0F;
+    float y = 0.0F;
+    float z = 0.0F;
+    float red = 1.0F;
+    float green = 1.0F;
+    float blue = 1.0F;
+    float alpha = 1.0F;
+  };
+
   struct StoredCameraView {
     QVector3D target;
     float yawDegrees = 0.0F;
@@ -276,7 +286,11 @@ private:
   void drawTrainingPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
-  void drawReferenceAxes(QPainter &painter, const QMatrix4x4 &viewProjection);
+  void drawDepthAwareReferenceAxes(const QMatrix4x4 &viewProjection);
+  void drawDepthAwareModelBounds(const QMatrix4x4 &modelViewProjection);
+  void drawDepthAwareLines(const QVector<DepthOverlayVertex> &vertices,
+                           const QMatrix4x4 &viewProjection,
+                           float logicalLineWidth);
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
@@ -361,6 +375,7 @@ private:
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
   bool mGridShaderReady = false;
+  bool mDepthOverlayShaderReady = false;
   bool mPreviewOnlyScene = false;
   bool mInteractionLodActive = false;
   bool mProgressiveUploadActive = false;
@@ -447,13 +462,16 @@ private:
   QOpenGLShaderProgram *mMeshProgram = nullptr;
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
   QOpenGLShaderProgram *mGridProgram = nullptr;
+  QOpenGLShaderProgram *mDepthOverlayProgram = nullptr;
   QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};
+  QOpenGLBuffer mDepthOverlayBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLVertexArrayObject mPointVertexArray;
   QOpenGLVertexArrayObject mMeshVertexArray;
   QOpenGLVertexArrayObject mGaussianVertexArray;
   QOpenGLVertexArrayObject mGridVertexArray;
+  QOpenGLVertexArrayObject mDepthOverlayVertexArray;
   TrainingGpuPreviewBuffer mTrainingGpuPreview;
   TrainingGpuPreviewCapability mTrainingGpuPreviewCapability;
   std::optional<TrainingGpuPreviewDescriptor>

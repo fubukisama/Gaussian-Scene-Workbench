@@ -245,12 +245,14 @@ NativeViewport::~NativeViewport() {
     releaseFullResolutionPointCloud();
     releaseFullResolutionMesh();
     releaseMeshTexture();
+    mDepthOverlayVertexArray.destroy();
     mGridVertexArray.destroy();
     mGaussianVertexArray.destroy();
     mMeshVertexArray.destroy();
     mPointVertexArray.destroy();
     mMeshIndexBuffer.destroy();
     mMeshVertexBuffer.destroy();
+    mDepthOverlayBuffer.destroy();
     mPointBuffer.destroy();
     doneCurrent();
   }
@@ -1185,6 +1187,61 @@ void main() {
     mGridVertexArray.create();
   }
 
+  mDepthOverlayProgram = new QOpenGLShaderProgram(this);
+  const bool depthOverlayVertexCompiled =
+      mDepthOverlayProgram->addShaderFromSourceCode(
+          QOpenGLShader::Vertex,
+          R"GLSL(#version 130
+in vec3 position;
+in vec4 color;
+uniform mat4 viewProjection;
+out vec4 vertexColor;
+
+void main() {
+  gl_Position = viewProjection * vec4(position, 1.0);
+  vertexColor = color;
+}
+)GLSL");
+  const bool depthOverlayFragmentCompiled =
+      mDepthOverlayProgram->addShaderFromSourceCode(
+          QOpenGLShader::Fragment,
+          R"GLSL(#version 130
+in vec4 vertexColor;
+out vec4 fragmentColor;
+
+void main() {
+  fragmentColor = vertexColor;
+}
+)GLSL");
+  mDepthOverlayProgram->bindAttributeLocation("position", 0);
+  mDepthOverlayProgram->bindAttributeLocation("color", 1);
+  mDepthOverlayShaderReady =
+      depthOverlayVertexCompiled && depthOverlayFragmentCompiled &&
+      mDepthOverlayProgram->link();
+  if (!mDepthOverlayShaderReady && mSceneLoadMessage.isEmpty()) {
+    mSceneLoadMessage = QStringLiteral("OpenGL depth-overlay shader failed: %1")
+                            .arg(mDepthOverlayProgram->log());
+  }
+  if (mDepthOverlayShaderReady) {
+    mDepthOverlayBuffer.create();
+    mDepthOverlayBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    mDepthOverlayVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(
+        &mDepthOverlayVertexArray);
+    mDepthOverlayBuffer.bind();
+    mDepthOverlayProgram->bind();
+    mDepthOverlayProgram->enableAttributeArray(0);
+    mDepthOverlayProgram->setAttributeBuffer(
+        0, GL_FLOAT, offsetof(DepthOverlayVertex, x), 3,
+        sizeof(DepthOverlayVertex));
+    mDepthOverlayProgram->enableAttributeArray(1);
+    mDepthOverlayProgram->setAttributeBuffer(
+        1, GL_FLOAT, offsetof(DepthOverlayVertex, red), 4,
+        sizeof(DepthOverlayVertex));
+    mDepthOverlayProgram->release();
+    mDepthOverlayBuffer.release();
+  }
+
   mTrainingGpuPreviewCapability =
       TrainingGpuPreviewBuffer::probe(QOpenGLContext::currentContext());
 
@@ -1348,6 +1405,8 @@ void NativeViewport::paintGL() {
   updateMeshCacheSelection(modelViewProjection);
   uploadPendingMeshCachePages();
   drawInfiniteGrid(viewProjection);
+  drawDepthAwareReferenceAxes(viewProjection);
+  drawDepthAwareModelBounds(modelViewProjection);
   if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
     drawMesh(modelViewProjection);
   } else if (mTrainingGpuPreview.hasFrame() &&
@@ -1362,7 +1421,6 @@ void NativeViewport::paintGL() {
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
-  drawReferenceAxes(painter, viewProjection);
   drawCameraTrajectory(painter, modelViewProjection);
   drawSelectionGesture(painter);
   drawModelSelection(painter, modelViewProjection);
@@ -2781,7 +2839,10 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   }
 
   const qreal ratio = devicePixelRatioF();
-  glDisable(GL_DEPTH_TEST);
+  // Keep sorted Gaussian blending, but respect depth already written by the
+  // physical reference axes and selection bounds. Gaussian fragments still do
+  // not write depth, so their back-to-front compositing remains unchanged.
+  glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_FALSE);
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -4329,31 +4390,137 @@ NativeViewport::projectPoint(const QVector3D &point,
                  (1.0F - (normalized.y() * 0.5F + 0.5F)) * height());
 }
 
-void NativeViewport::drawReferenceAxes(QPainter &painter,
-                                       const QMatrix4x4 &viewProjection) {
+void NativeViewport::drawDepthAwareLines(
+    const QVector<DepthOverlayVertex> &vertices,
+    const QMatrix4x4 &viewProjection, const float logicalLineWidth) {
+  if (vertices.isEmpty() || !mDepthOverlayShaderReady ||
+      mDepthOverlayProgram == nullptr ||
+      !mDepthOverlayProgram->isLinked() ||
+      !mDepthOverlayBuffer.isCreated() ||
+      !mDepthOverlayVertexArray.isCreated()) {
+    return;
+  }
+
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glEnable(GL_MULTISAMPLE);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glLineWidth(std::max(
+      1.0F, logicalLineWidth * static_cast<float>(devicePixelRatioF())));
+
+  mDepthOverlayProgram->bind();
+  mDepthOverlayProgram->setUniformValue("viewProjection", viewProjection);
+  {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(
+        &mDepthOverlayVertexArray);
+    mDepthOverlayBuffer.bind();
+    const qsizetype vertexBytes =
+        vertices.size() * static_cast<qsizetype>(sizeof(DepthOverlayVertex));
+    mDepthOverlayBuffer.allocate(vertices.constData(),
+                                 static_cast<int>(vertexBytes));
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
+    mDepthOverlayBuffer.release();
+  }
+  mDepthOverlayProgram->release();
+  glLineWidth(1.0F);
+  glDisable(GL_BLEND);
+}
+
+void NativeViewport::drawDepthAwareReferenceAxes(
+    const QMatrix4x4 &viewProjection) {
   const float axisLength = std::max(3.0F, mSceneRadius);
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
   const QVector3D originLocal = gridOrigin(plane);
-  const auto origin = projectPoint(originLocal, viewProjection);
-  const auto xAxis = projectPoint(
-      originLocal + QVector3D(axisLength, 0.0F, 0.0F), viewProjection);
-  const auto yAxis = projectPoint(
-      originLocal + QVector3D(0.0F, axisLength, 0.0F), viewProjection);
-  const auto zAxis = projectPoint(
-      originLocal + QVector3D(0.0F, 0.0F, axisLength), viewProjection);
-  if (origin.has_value() && xAxis.has_value()) {
-    painter.setPen(QPen(QColor(214, 91, 91), 2.0));
-    painter.drawLine(*origin, *xAxis);
+
+  QVector<DepthOverlayVertex> vertices;
+  vertices.reserve(6);
+  const auto appendLine = [&vertices](const QVector3D &start,
+                                      const QVector3D &end,
+                                      const QVector3D &color) {
+    vertices.append({start.x(), start.y(), start.z(), color.x(), color.y(),
+                     color.z(), 1.0F});
+    vertices.append({end.x(), end.y(), end.z(), color.x(), color.y(),
+                     color.z(), 1.0F});
+  };
+  appendLine(originLocal,
+             originLocal + QVector3D(axisLength, 0.0F, 0.0F),
+             QVector3D(214.0F / 255.0F, 91.0F / 255.0F, 91.0F / 255.0F));
+  appendLine(originLocal,
+             originLocal + QVector3D(0.0F, axisLength, 0.0F),
+             QVector3D(89.0F / 255.0F, 139.0F / 255.0F,
+                       222.0F / 255.0F));
+  appendLine(originLocal,
+             originLocal + QVector3D(0.0F, 0.0F, axisLength),
+             QVector3D(91.0F / 255.0F, 191.0F / 255.0F,
+                       137.0F / 255.0F));
+  drawDepthAwareLines(vertices, viewProjection, 2.0F);
+}
+
+void NativeViewport::drawDepthAwareModelBounds(
+    const QMatrix4x4 &modelViewProjection) {
+  if (!mModelSelected || !selectableModelAvailable()) {
+    return;
   }
-  if (origin.has_value() && yAxis.has_value()) {
-    painter.setPen(QPen(QColor(89, 139, 222), 2.0));
-    painter.drawLine(*origin, *yAxis);
+
+  const QVector3D minimum = modelBoundsMinimum();
+  const QVector3D maximum = modelBoundsMaximum();
+  std::array<QVector3D, 8> corners;
+  std::array<std::optional<QPointF>, 8> projected;
+  for (int corner = 0; corner < 8; ++corner) {
+    corners[static_cast<std::size_t>(corner)] = QVector3D(
+        (corner & 1) != 0 ? maximum.x() : minimum.x(),
+        (corner & 2) != 0 ? maximum.y() : minimum.y(),
+        (corner & 4) != 0 ? maximum.z() : minimum.z());
+    projected[static_cast<std::size_t>(corner)] = projectPoint(
+        corners[static_cast<std::size_t>(corner)], modelViewProjection);
   }
-  if (origin.has_value() && zAxis.has_value()) {
-    painter.setPen(QPen(QColor(91, 191, 137), 2.0));
-    painter.drawLine(*origin, *zAxis);
+  constexpr std::array<std::array<int, 2>, 12> edges = {
+      std::array<int, 2>{0, 1}, {0, 2}, {0, 4}, {1, 3}, {1, 5}, {2, 3},
+      {2, 6},              {3, 7}, {4, 5}, {4, 6}, {5, 7}, {6, 7}};
+  constexpr qreal dashPixels = 8.0;
+  constexpr qreal gapPixels = 5.0;
+  constexpr int maximumDashesPerEdge = 256;
+  const QVector3D color(1.0F, 166.0F / 255.0F, 64.0F / 255.0F);
+
+  QVector<DepthOverlayVertex> vertices;
+  vertices.reserve(384);
+  const auto appendLine = [&vertices, &color](const QVector3D &start,
+                                              const QVector3D &end) {
+    vertices.append({start.x(), start.y(), start.z(), color.x(), color.y(),
+                     color.z(), 1.0F});
+    vertices.append({end.x(), end.y(), end.z(), color.x(), color.y(),
+                     color.z(), 1.0F});
+  };
+  for (const auto &edge : edges) {
+    const QVector3D &start = corners[static_cast<std::size_t>(edge[0])];
+    const QVector3D &end = corners[static_cast<std::size_t>(edge[1])];
+    const auto &screenStart = projected[static_cast<std::size_t>(edge[0])];
+    const auto &screenEnd = projected[static_cast<std::size_t>(edge[1])];
+    if (!screenStart.has_value() || !screenEnd.has_value()) {
+      continue;
+    }
+    const qreal screenLength = QLineF(*screenStart, *screenEnd).length();
+    if (!std::isfinite(screenLength) || screenLength <= 0.5) {
+      continue;
+    }
+    const qreal basePattern = dashPixels + gapPixels;
+    const qreal pattern =
+        std::max(basePattern,
+                 screenLength / static_cast<qreal>(maximumDashesPerEdge));
+    const qreal dash = pattern * (dashPixels / basePattern);
+    const QVector3D delta = end - start;
+    for (qreal offset = 0.0; offset < screenLength; offset += pattern) {
+      const qreal dashEnd = std::min(offset + dash, screenLength);
+      const float startRatio = static_cast<float>(offset / screenLength);
+      const float endRatio = static_cast<float>(dashEnd / screenLength);
+      appendLine(start + delta * startRatio, start + delta * endRatio);
+    }
   }
+  drawDepthAwareLines(vertices, modelViewProjection, 1.8F);
 }
 
 void NativeViewport::drawCameraTrajectory(QPainter &painter,
@@ -4395,33 +4562,9 @@ void NativeViewport::drawModelSelection(
   if (!mModelSelected || !selectableModelAvailable()) {
     return;
   }
-  const QVector3D minimum = modelBoundsMinimum();
-  const QVector3D maximum = modelBoundsMaximum();
-  std::array<std::optional<QPointF>, 8> projected;
-  for (int corner = 0; corner < 8; ++corner) {
-    const QVector3D point((corner & 1) != 0 ? maximum.x() : minimum.x(),
-                          (corner & 2) != 0 ? maximum.y() : minimum.y(),
-                          (corner & 4) != 0 ? maximum.z() : minimum.z());
-    projected[static_cast<std::size_t>(corner)] =
-        projectPoint(point, modelViewProjection);
-  }
-  constexpr std::array<std::array<int, 2>, 12> edges = {
-      std::array<int, 2>{0, 1}, {0, 2}, {0, 4}, {1, 3}, {1, 5}, {2, 3},
-      {2, 6},              {3, 7}, {4, 5}, {4, 6}, {5, 7}, {6, 7}};
 
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
-  painter.setBrush(Qt::NoBrush);
-  painter.setPen(QPen(QColor(255, 166, 64, 235), 1.8, Qt::DashLine,
-                      Qt::RoundCap, Qt::RoundJoin));
-  for (const auto &edge : edges) {
-    const auto &start = projected[static_cast<std::size_t>(edge[0])];
-    const auto &end = projected[static_cast<std::size_t>(edge[1])];
-    if (start.has_value() && end.has_value()) {
-      painter.drawLine(*start, *end);
-    }
-  }
-
   const auto center = projectPoint(mSceneCenter, modelViewProjection);
   if (center.has_value()) {
     if (mModelDragActive && mMode == InteractionMode::Rotate) {

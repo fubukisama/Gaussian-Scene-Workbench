@@ -241,7 +241,8 @@ int main(int argc, char *argv[]) {
           gsw::NativeViewport::ReferencePlaneMode::ModelBase);
       QObject::connect(
           viewport, &gsw::NativeViewport::sceneLoaded, &application,
-          [&application, &window, viewport, &smokeTestCompleted,
+          [&application, &window, viewport, smokeScenePath,
+           &smokeTestCompleted,
            &smokeTestFailureCode](const qint64 sourceVertexCount,
                                  const qsizetype, const qint64 sourceFaceCount,
                                  const qsizetype) {
@@ -254,8 +255,8 @@ int main(int argc, char *argv[]) {
                           : 300;
             QTimer::singleShot(
                 settleMilliseconds, &application,
-                [&application, &window, viewport, sourceVertexCount,
-                 sourceFaceCount,
+                [&application, &window, viewport, smokeScenePath,
+                 sourceVertexCount, sourceFaceCount,
                  &smokeTestCompleted, &smokeTestFailureCode]() {
                   const QImage frame = viewport->grabFramebuffer();
                   const QRect sampleRect(
@@ -275,6 +276,32 @@ int main(int argc, char *argv[]) {
                       }
                     }
                   }
+                  const QRect centerOcclusionRect(
+                      frame.width() / 2 - 5, frame.height() / 2 - 5, 11, 11);
+                  int centerAxisTintPixels = 0;
+                  for (int y = centerOcclusionRect.top();
+                       y <= centerOcclusionRect.bottom(); ++y) {
+                    for (int x = centerOcclusionRect.left();
+                         x <= centerOcclusionRect.right(); ++x) {
+                      const QColor pixel = frame.pixelColor(x, y);
+                      const bool redAxis =
+                          pixel.red() > 90 && pixel.red() - pixel.green() > 40 &&
+                          pixel.red() - pixel.blue() > 40;
+                      const bool greenAxis =
+                          pixel.green() > 90 && pixel.green() - pixel.red() > 40 &&
+                          pixel.green() - pixel.blue() > 35;
+                      const bool blueAxis =
+                          pixel.blue() > 90 && pixel.blue() - pixel.red() > 40 &&
+                          pixel.blue() - pixel.green() > 40;
+                      if (redAxis || greenAxis || blueAxis) {
+                        ++centerAxisTintPixels;
+                      }
+                    }
+                  }
+                  const bool depthOcclusionReady =
+                      !qEnvironmentVariableIsSet(
+                          "GSW_EXPECT_DEPTH_OCCLUSION") ||
+                      centerAxisTintPixels <= 3;
                   const bool pagedMeshReady =
                       sourceFaceCount <= 0 ||
                       !qEnvironmentVariableIsSet(
@@ -399,6 +426,7 @@ int main(int argc, char *argv[]) {
                             .lengthSquared() > 1.0e-8F;
                     smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
+                                       depthOcclusionReady &&
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
@@ -407,12 +435,17 @@ int main(int argc, char *argv[]) {
                                         modelScaleReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
-                    frame.save(QDir::temp().filePath(QStringLiteral(
-                        "gsw-reference-axes-smoke.png")));
+                    frame.save(QDir::temp().filePath(
+                        QStringLiteral("gsw-%1-smoke.png")
+                            .arg(QFileInfo(smokeScenePath)
+                                     .completeBaseName())));
                   }
                   qInfo() << "Reference-axes smoke:" << "vertices"
                           << sourceVertexCount << "green-pixels"
                           << greenAxisPixels << "required" << 30
+                          << "center-axis-tint-pixels"
+                          << centerAxisTintPixels << "occlusion-ready"
+                          << depthOcclusionReady
                           << "resident-mesh-triangles"
                           << viewport->residentMeshTriangleCount()
                           << "mesh-texture-ready"
