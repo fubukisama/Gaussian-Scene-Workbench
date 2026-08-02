@@ -11,8 +11,11 @@
 namespace gsw {
 
 namespace {
-constexpr qreal kHandleSizeRatio = 0.20;
-constexpr qreal kAxisExtentRatio = 0.80;
+constexpr qreal kHandleSizeRatio = 0.18;
+constexpr qreal kAxisExtentRatio = 0.78;
+constexpr qreal kProjectionCubeRatio = 0.30;
+constexpr qreal kConeLengthToHitRadius = 1.70;
+constexpr qreal kCollapsedAxisProjection = 0.16;
 
 NavigationAxis axisDirection(const int axisIndex, const bool positive) {
   static constexpr std::array<NavigationAxis, 6> directions = {
@@ -51,9 +54,9 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   qreal buttonGap = std::clamp(fontHeight * 0.25, 4.0, 8.0);
   qreal projectionLabelHeight = std::clamp(fontHeight * 1.25, 20.0, 30.0);
   qreal projectionLabelGap = std::clamp(fontHeight * 0.20, 3.0, 6.0);
-  const qreal requiredHeight =
-      layout.radius * 2.0 + projectionLabelHeight + projectionLabelGap +
-      buttonSize * 3.0 + buttonGap * 3.0;
+  const qreal requiredHeight = layout.radius * 2.0 + projectionLabelHeight +
+                               projectionLabelGap + buttonSize * 3.0 +
+                               buttonGap * 3.0;
   const qreal availableHeight =
       std::max(1.0, viewportSize.height() - margin * 2.0);
   if (requiredHeight > availableHeight) {
@@ -65,10 +68,10 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
     projectionLabelGap *= fit;
   }
   layout.lineWidth = std::clamp(layout.radius / 20.0, 2.0, 3.4);
-  layout.center = QPointF(viewportSize.width() - margin - layout.radius,
-                          viewportSize.height() - margin -
-                              projectionLabelHeight - projectionLabelGap -
-                              layout.radius);
+  layout.center =
+      QPointF(viewportSize.width() - margin - layout.radius,
+              viewportSize.height() - margin - projectionLabelHeight -
+                  projectionLabelGap - layout.radius);
   layout.rotateBounds = QRectF(layout.center.x() - layout.radius,
                                layout.center.y() - layout.radius,
                                layout.radius * 2.0, layout.radius * 2.0);
@@ -82,11 +85,11 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   buttonCenterY -= buttonSize + buttonGap;
   layout.cameraButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
 
-  const qreal projectionCubeSize = std::max(20.0, layout.radius * 0.54);
-  layout.projectionCube =
-      QRectF(layout.center.x() - projectionCubeSize * 0.5,
-             layout.center.y() - projectionCubeSize * 0.5,
-             projectionCubeSize, projectionCubeSize);
+  const qreal projectionCubeSize =
+      std::clamp(layout.radius * kProjectionCubeRatio, 14.0, 20.0);
+  layout.projectionCube = QRectF(layout.center.x() - projectionCubeSize * 0.5,
+                                 layout.center.y() - projectionCubeSize * 0.5,
+                                 projectionCubeSize, projectionCubeSize);
   const qreal projectionLabelWidth =
       std::max(layout.radius * 1.35, fontHeight * 3.0);
   layout.projectionLabel =
@@ -96,6 +99,9 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
   const qreal handleBaseRadius = layout.radius * kHandleSizeRatio;
   const qreal axisExtent = layout.radius * kAxisExtentRatio;
+  const qreal cubeHalfDiagonal = std::hypot(layout.projectionCube.width(),
+                                            layout.projectionCube.height()) *
+                                 0.5;
   int handleIndex = 0;
   for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
     const QVector3D viewAxis =
@@ -110,13 +116,27 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
       handle.axisIndex = axisIndex;
       handle.positive = positive;
       handle.depth = viewAxis.z() * sign;
-      handle.center =
-          layout.center + QPointF(viewAxis.x() * sign * axisExtent,
-                                  -viewAxis.y() * sign * axisExtent);
       const qreal depthScale =
           (static_cast<qreal>(handle.depth) + 1.0) * 0.08 + 0.92;
       handle.radius = handleBaseRadius * depthScale;
-      handle.hidden = projectedLength < 1.0e-4 && handle.depth < 0.0F;
+      handle.hidden = projectedLength < kCollapsedAxisProjection;
+      if (projectedLength < 1.0e-4) {
+        handle.center = layout.center;
+        continue;
+      }
+
+      const QPointF projectedDirection(
+          static_cast<qreal>(viewAxis.x()) / projectedLength,
+          -static_cast<qreal>(viewAxis.y()) / projectedLength);
+      const qreal minimumExtent =
+          cubeHalfDiagonal +
+          std::max(handle.radius, handle.radius * kConeLengthToHitRadius) +
+          std::max(2.0, layout.lineWidth);
+      const qreal projectedExtent =
+          std::max(axisExtent * projectedLength, minimumExtent);
+      handle.center = layout.center + projectedDirection *
+                                          static_cast<qreal>(sign) *
+                                          projectedExtent;
     }
   }
   return layout;
@@ -149,9 +169,28 @@ NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
     if (handle.hidden) {
       continue;
     }
-    const QPointF delta = position - handle.center;
-    const qreal distanceSquared = QPointF::dotProduct(delta, delta);
-    if (distanceSquared < bestDistanceSquared) {
+    const QPointF axisDelta = handle.center - layout.center;
+    const qreal axisDistance = std::hypot(axisDelta.x(), axisDelta.y());
+    if (axisDistance < 1.0) {
+      continue;
+    }
+    const QPointF direction(axisDelta.x() / axisDistance,
+                            axisDelta.y() / axisDistance);
+    const QPointF perpendicular(-direction.y(), direction.x());
+    const qreal coneLength = std::max(8.0, handle.radius * 1.70);
+    const qreal coneHalfWidth = std::max(4.0, handle.radius * 0.72);
+    const QPointF fromTip = position - handle.center;
+    const qreal inward = -QPointF::dotProduct(fromTip, direction);
+    const qreal lateral = std::abs(QPointF::dotProduct(fromTip, perpendicular));
+    constexpr qreal hitSlop = 3.0;
+    const qreal normalizedInward = std::clamp(inward / coneLength, 0.0, 1.0);
+    const qreal permittedHalfWidth = coneHalfWidth * normalizedInward + hitSlop;
+    if (inward >= -hitSlop && inward <= coneLength + hitSlop &&
+        lateral <= permittedHalfWidth) {
+      const qreal distanceSquared = QPointF::dotProduct(fromTip, fromTip);
+      if (distanceSquared >= bestDistanceSquared) {
+        continue;
+      }
       bestDistanceSquared = distanceSquared;
       bestAxis = handle.axis;
     }

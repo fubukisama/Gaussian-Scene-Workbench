@@ -21,6 +21,7 @@
 #include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
 #include <QSizePolicy>
 #include <QTimer>
 #include <QToolTip>
@@ -108,6 +109,86 @@ QString navigationAxisLabel(const NavigationAxis axis) {
     return {};
   }
   return {};
+}
+
+struct NavigationCubeFaceProjection final {
+  QPolygonF polygon;
+  qreal depth = 0.0;
+  int axisIndex = 0;
+};
+
+std::vector<NavigationCubeFaceProjection>
+projectNavigationCube(const QMatrix4x4 &viewMatrix, const QRectF &bounds) {
+  std::array<QPointF, 8> projectedCorners;
+  qreal maximumProjectedExtent = 0.0;
+  for (int index = 0; index < 8; ++index) {
+    const QVector3D corner((index & 1) != 0 ? 1.0F : -1.0F,
+                           (index & 2) != 0 ? 1.0F : -1.0F,
+                           (index & 4) != 0 ? 1.0F : -1.0F);
+    const QVector3D viewCorner =
+        (viewMatrix * QVector4D(corner, 0.0F)).toVector3D();
+    projectedCorners[static_cast<std::size_t>(index)] =
+        QPointF(viewCorner.x(), -viewCorner.y());
+    maximumProjectedExtent =
+        std::max({maximumProjectedExtent,
+                  std::abs(static_cast<qreal>(viewCorner.x())),
+                  std::abs(static_cast<qreal>(viewCorner.y()))});
+  }
+
+  if (maximumProjectedExtent < 1.0e-4) {
+    return {};
+  }
+  const qreal fitExtent =
+      std::max(1.0, std::min(bounds.width(), bounds.height()) * 0.5 - 1.0);
+  const qreal scale = fitExtent / maximumProjectedExtent;
+  for (QPointF &corner : projectedCorners) {
+    corner = bounds.center() + corner * scale;
+  }
+
+  static constexpr std::array<std::array<int, 4>, 6> faceCorners = {{
+      {{0, 4, 6, 2}},
+      {{1, 3, 7, 5}},
+      {{0, 1, 5, 4}},
+      {{2, 6, 7, 3}},
+      {{0, 2, 3, 1}},
+      {{4, 5, 7, 6}},
+  }};
+
+  std::vector<NavigationCubeFaceProjection> faces;
+  faces.reserve(3);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    const int axisIndex = faceIndex / 2;
+    const float sign = (faceIndex % 2) == 0 ? -1.0F : 1.0F;
+    QVector3D normal;
+    if (axisIndex == 0) {
+      normal.setX(sign);
+    } else if (axisIndex == 1) {
+      normal.setY(sign);
+    } else {
+      normal.setZ(sign);
+    }
+    const qreal depth = static_cast<qreal>(
+        (viewMatrix * QVector4D(normal, 0.0F)).toVector3D().z());
+    if (depth <= 1.0e-4) {
+      continue;
+    }
+
+    NavigationCubeFaceProjection face;
+    face.depth = depth;
+    face.axisIndex = axisIndex;
+    for (const int cornerIndex :
+         faceCorners[static_cast<std::size_t>(faceIndex)]) {
+      face.polygon <<
+          projectedCorners[static_cast<std::size_t>(cornerIndex)];
+    }
+    faces.push_back(std::move(face));
+  }
+  std::sort(faces.begin(), faces.end(),
+            [](const NavigationCubeFaceProjection &left,
+               const NavigationCubeFaceProjection &right) {
+              return left.depth < right.depth;
+            });
+  return faces;
 }
 
 float shortestEquivalentAngle(const float current, float target) {
@@ -3380,8 +3461,10 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
   QString tooltip;
   switch (hit.part) {
   case NavigationGizmoPart::Rotate:
-    tooltip = QStringLiteral("拖动环绕视图；单击 %1 轴吸附到正交视图")
-                  .arg(navigationAxisLabel(hit.axis));
+    tooltip = hit.axis == NavigationAxis::None
+                  ? QStringLiteral("拖动环绕视图")
+                  : QStringLiteral("拖动环绕视图；单击 %1 轴吸附视角")
+                        .arg(navigationAxisLabel(hit.axis));
     setCursor(Qt::OpenHandCursor);
     break;
   case NavigationGizmoPart::Zoom:
@@ -5545,61 +5628,141 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
         return left->depth < right->depth;
       });
 
+  const auto handleHighlighted = [this](const NavigationAxisHandle &handle) {
+    return (mNavigationHover.part == NavigationGizmoPart::Rotate &&
+            mNavigationHover.axis == handle.axis) ||
+           (mNavigationInteractionActive &&
+            mNavigationPress.part == NavigationGizmoPart::Rotate &&
+            mNavigationPress.axis == handle.axis);
+  };
+  const qreal cubeHalfExtent = layout.projectionCube.width() * 0.5;
+
   for (const NavigationAxisHandle *handle : orderedHandles) {
-    if (!handle->positive || handle->hidden) {
+    if (handle->hidden) {
       continue;
     }
-    const QColor axisColor = navigationAxisColor(handle->axisIndex);
-    const qreal colorAmount =
-        (static_cast<qreal>(handle->depth) + 1.0) * 0.25 + 0.5;
-    painter.setPen(QPen(mixColor(viewportColor, axisColor, colorAmount),
-                        layout.lineWidth, Qt::SolidLine, Qt::RoundCap));
-    QLineF axisLine(layout.center, handle->center);
-    if (axisLine.length() > handle->radius) {
-      axisLine.setLength(axisLine.length() - handle->radius * 0.72);
+    const QPointF delta = handle->center - layout.center;
+    const qreal distance = std::hypot(delta.x(), delta.y());
+    if (distance < 1.0) {
+      continue;
     }
-    painter.drawLine(axisLine);
+    const QPointF direction(delta.x() / distance, delta.y() / distance);
+    const qreal cubeExit = cubeHalfExtent / std::max(std::abs(direction.x()),
+                                                     std::abs(direction.y())) +
+                           1.0;
+    const qreal coneLength = std::max(8.0, handle->radius * 1.70);
+    const QPointF lineStart = layout.center + direction * cubeExit;
+    const QPointF lineEnd = handle->center - direction * coneLength;
+    if (QLineF(lineStart, lineEnd).length() < 1.0) {
+      continue;
+    }
+
+    QColor lineColor;
+    qreal lineWidth = layout.lineWidth;
+    if (handle->positive) {
+      const QColor axisColor = navigationAxisColor(handle->axisIndex);
+      const qreal colorAmount = std::clamp(
+          0.78 + static_cast<qreal>(handle->depth) * 0.12, 0.68, 0.92);
+      lineColor = mixColor(viewportColor, axisColor, colorAmount);
+    } else {
+      lineColor = QColor(170, 176, 182, 178);
+      lineWidth *= 0.72;
+    }
+    if (handleHighlighted(*handle)) {
+      lineColor = mixColor(lineColor, QColor(255, 255, 255), 0.34);
+      lineWidth *= 1.18;
+    }
+    const QPointF shadowOffset(1.0, 1.2);
+    painter.setPen(QPen(QColor(0, 0, 0, 135), lineWidth + 1.1, Qt::SolidLine,
+                        Qt::RoundCap));
+    painter.drawLine(lineStart + shadowOffset, lineEnd + shadowOffset);
+    painter.setPen(QPen(lineColor, lineWidth, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(lineStart, lineEnd);
   }
 
   QFont axisFont = painter.font();
   axisFont.setBold(true);
-  axisFont.setPixelSize(std::max(11, qRound(layout.radius * 0.30)));
+  axisFont.setPixelSize(std::clamp(qRound(layout.radius * 0.24), 11, 14));
   painter.setFont(axisFont);
 
   for (const NavigationAxisHandle *handle : orderedHandles) {
     if (handle->hidden) {
       continue;
     }
+    const QPointF delta = handle->center - layout.center;
+    const qreal distance = std::hypot(delta.x(), delta.y());
+    if (distance < 1.0) {
+      continue;
+    }
+    const QPointF direction(delta.x() / distance, delta.y() / distance);
+    const QPointF perpendicular(-direction.y(), direction.x());
+    const qreal coneLength = std::max(8.0, handle->radius * 1.70);
+    const qreal coneHalfWidth = std::max(4.0, handle->radius * 0.72);
+    const QPointF coneBase = handle->center - direction * coneLength;
+    QPolygonF cone;
+    cone << handle->center << coneBase + perpendicular * coneHalfWidth
+         << coneBase - perpendicular * coneHalfWidth;
+
     const QColor axisColor = navigationAxisColor(handle->axisIndex);
-    const bool highlighted =
-        (mNavigationHover.part == NavigationGizmoPart::Rotate &&
-         mNavigationHover.axis == handle->axis) ||
-        (mNavigationInteractionActive &&
-         mNavigationPress.part == NavigationGizmoPart::Rotate &&
-         mNavigationPress.axis == handle->axis);
+    const bool highlighted = handleHighlighted(*handle);
 
     QColor fill;
     if (handle->positive) {
-      const qreal amount =
-          (static_cast<qreal>(handle->depth) + 1.0) * 0.25 + 0.5;
+      const qreal amount = std::clamp(
+          0.82 + static_cast<qreal>(handle->depth) * 0.10, 0.72, 0.94);
       fill = mixColor(viewportColor, axisColor, amount);
     } else {
-      fill = mixColor(viewportColor, axisColor, 0.25);
-      fill.setAlphaF(
-          std::clamp(static_cast<qreal>(handle->depth) + 1.0, 0.22, 1.0));
+      fill = QColor(178, 184, 190, 205);
+    }
+    if (highlighted) {
+      fill = mixColor(fill, QColor(255, 255, 255), 0.26);
     }
 
-    painter.setBrush(fill);
-    painter.setPen(QPen(highlighted ? QColor(255, 255, 255, 230) : fill,
-                        std::max(1.0, layout.lineWidth * 0.55)));
-    painter.drawEllipse(handle->center, handle->radius, handle->radius);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 125));
+    painter.drawPolygon(cone.translated(1.0, 1.2));
 
-    if (handle->positive || highlighted) {
-      painter.setPen(highlighted ? QColor(255, 255, 255)
-                                 : QColor(11, 13, 15, 225));
-      const QRectF textRect(handle->center.x() - handle->radius * 1.35,
-                            handle->center.y() - handle->radius * 1.2,
-                            handle->radius * 2.7, handle->radius * 2.4);
+    QColor brightFace = mixColor(fill, QColor(255, 255, 255), 0.28);
+    QColor darkFace = mixColor(QColor(21, 24, 28), fill, 0.68);
+    const qreal lightSide =
+        QPointF::dotProduct(perpendicular, QPointF(-0.55, -0.84));
+    if (lightSide < 0.0) {
+      std::swap(brightFace, darkFace);
+    }
+    QPolygonF firstFace;
+    firstFace << handle->center << coneBase + perpendicular * coneHalfWidth
+              << coneBase;
+    QPolygonF secondFace;
+    secondFace << handle->center << coneBase
+               << coneBase - perpendicular * coneHalfWidth;
+    painter.setBrush(brightFace);
+    painter.drawPolygon(firstFace);
+    painter.setBrush(darkFace);
+    painter.drawPolygon(secondFace);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(highlighted ? QColor(255, 255, 255, 235)
+                                    : mixColor(darkFace, fill, 0.58),
+                        std::max(1.0, layout.lineWidth * 0.52), Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.drawPolygon(cone);
+    painter.setPen(QPen(QColor(255, 255, 255, handle->positive ? 92 : 55),
+                        std::max(0.8, layout.lineWidth * 0.32), Qt::SolidLine,
+                        Qt::RoundCap));
+    painter.drawLine(handle->center, coneBase);
+
+    if (handle->positive) {
+      const qreal labelSize = static_cast<qreal>(axisFont.pixelSize());
+      const QPointF labelCenter =
+          handle->center + direction * (labelSize * 0.62 + 2.0);
+      const QRectF textRect(labelCenter.x() - labelSize,
+                            labelCenter.y() - labelSize * 0.70, labelSize * 2.0,
+                            labelSize * 1.40);
+      painter.setPen(QColor(0, 0, 0, 185));
+      painter.drawText(textRect.translated(1.0, 1.0), Qt::AlignCenter,
+                       navigationAxisLabel(handle->axis));
+      painter.setPen(highlighted
+                         ? QColor(255, 255, 255)
+                         : mixColor(axisColor, QColor(255, 255, 255), 0.30));
       painter.drawText(textRect, Qt::AlignCenter,
                        navigationAxisLabel(handle->axis));
     }
@@ -5609,29 +5772,41 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
       mNavigationHover.part == NavigationGizmoPart::Projection ||
       (mNavigationInteractionActive &&
        mNavigationPress.part == NavigationGizmoPart::Projection);
-  if (projectionActive) {
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(0, 0, 0, 108));
-    painter.drawRoundedRect(layout.projectionLabel.adjusted(-3.0, 0.0, 3.0,
-                                                            0.0),
-                            4.0, 4.0);
+  const std::vector<NavigationCubeFaceProjection> cubeFaces =
+      projectNavigationCube(viewMatrix(), layout.projectionCube);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(QColor(0, 0, 0, 125));
+  for (const NavigationCubeFaceProjection &face : cubeFaces) {
+    painter.drawPolygon(face.polygon.translated(1.2, 1.5));
   }
-  painter.setPen(QPen(projectionActive ? QColor(255, 255, 255)
-                                       : QColor(218, 222, 226, 235),
-                      std::max(1.2, layout.lineWidth * 0.58)));
-  painter.setBrush(mOrthographic ? QColor(104, 174, 230)
-                                 : QColor(205, 211, 218));
-  painter.drawRoundedRect(layout.projectionCube, 2.5, 2.5);
+  const QColor cubeBase =
+      mOrthographic ? QColor(112, 174, 224) : QColor(211, 217, 224);
+  for (const NavigationCubeFaceProjection &face : cubeFaces) {
+    const qreal facing = std::clamp(face.depth, 0.0, 1.0);
+    QColor faceColor =
+        mixColor(QColor(61, 68, 76), cubeBase, 0.57 + facing * 0.38);
+    faceColor = mixColor(faceColor, navigationAxisColor(face.axisIndex),
+                         mOrthographic ? 0.055 : 0.035);
+    if (projectionActive) {
+      faceColor = mixColor(faceColor, QColor(255, 255, 255), 0.20);
+    }
+    painter.setBrush(faceColor);
+    painter.setPen(QPen(projectionActive ? QColor(255, 255, 255, 245)
+                                         : QColor(52, 59, 66, 235),
+                        std::max(1.0, layout.lineWidth * 0.48), Qt::SolidLine,
+                        Qt::SquareCap, Qt::MiterJoin));
+    painter.drawPolygon(face.polygon);
+  }
   QFont projectionFont = painter.font();
   projectionFont.setBold(false);
   projectionFont.setPixelSize(
-      std::max(10, qRound(layout.projectionLabel.height() * 0.68)));
+      std::clamp(qRound(layout.projectionLabel.height() * 0.56), 10, 14));
   painter.setFont(projectionFont);
   painter.setPen(projectionActive ? QColor(255, 255, 255)
                                   : QColor(205, 210, 216, 225));
   painter.drawText(layout.projectionLabel, Qt::AlignCenter,
-                   mOrthographic ? QStringLiteral("Iso")
-                                 : QStringLiteral("Persp"));
+                   mOrthographic ? QStringLiteral("≡  Iso")
+                                 : QStringLiteral("≡  Persp"));
 
   const auto drawButtonBackground =
       [this, &painter](const QRectF &rect, const NavigationGizmoPart part) {
