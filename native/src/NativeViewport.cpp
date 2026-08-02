@@ -5772,6 +5772,15 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
       mNavigationHover.part == NavigationGizmoPart::Projection ||
       (mNavigationInteractionActive &&
        mNavigationPress.part == NavigationGizmoPart::Projection);
+  if (projectionActive) {
+    const QRectF targetFeedback =
+        layout.projectionHitArea.adjusted(1.0, 1.0, -1.0, -1.0);
+    painter.setPen(QPen(QColor(230, 236, 242, 150),
+                        std::max(1.0, layout.lineWidth * 0.42), Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(132, 166, 196, 34));
+    painter.drawEllipse(targetFeedback);
+  }
   const std::vector<NavigationCubeFaceProjection> cubeFaces =
       projectNavigationCube(viewMatrix(), layout.projectionCube);
   painter.setPen(Qt::NoPen);

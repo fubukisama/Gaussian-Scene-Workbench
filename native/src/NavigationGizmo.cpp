@@ -12,8 +12,8 @@ namespace gsw {
 
 namespace {
 constexpr qreal kHandleSizeRatio = 0.18;
-constexpr qreal kAxisExtentRatio = 0.78;
-constexpr qreal kProjectionCubeRatio = 0.30;
+constexpr qreal kAxisExtentRatio = 0.90;
+constexpr qreal kProjectionCubeRatio = 0.44;
 constexpr qreal kConeLengthToHitRadius = 1.70;
 constexpr qreal kCollapsedAxisProjection = 0.16;
 
@@ -41,6 +41,16 @@ QRectF buttonRect(const qreal right, const qreal centerY,
                   const qreal buttonSize) {
   return QRectF(right - buttonSize, centerY - buttonSize * 0.5, buttonSize,
                 buttonSize);
+}
+
+bool ellipseContains(const QRectF &bounds, const QPointF &position) {
+  if (bounds.width() <= 0.0 || bounds.height() <= 0.0) {
+    return false;
+  }
+  const QPointF delta = position - bounds.center();
+  const qreal normalizedX = delta.x() / (bounds.width() * 0.5);
+  const qreal normalizedY = delta.y() / (bounds.height() * 0.5);
+  return normalizedX * normalizedX + normalizedY * normalizedY <= 1.0;
 }
 } // namespace
 
@@ -86,10 +96,16 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   layout.cameraButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
 
   const qreal projectionCubeSize =
-      std::clamp(layout.radius * kProjectionCubeRatio, 14.0, 20.0);
+      std::clamp(layout.radius * kProjectionCubeRatio, 20.0, 25.0);
   layout.projectionCube = QRectF(layout.center.x() - projectionCubeSize * 0.5,
                                  layout.center.y() - projectionCubeSize * 0.5,
                                  projectionCubeSize, projectionCubeSize);
+  const qreal projectionHitSize = std::clamp(
+      projectionCubeSize + std::max(12.0, layout.radius * 0.18), 34.0, 42.0);
+  layout.projectionHitArea =
+      QRectF(layout.center.x() - projectionHitSize * 0.5,
+             layout.center.y() - projectionHitSize * 0.5, projectionHitSize,
+             projectionHitSize);
   const qreal projectionLabelWidth =
       std::max(layout.radius * 1.35, fontHeight * 3.0);
   layout.projectionLabel =
@@ -99,9 +115,7 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
   const qreal handleBaseRadius = layout.radius * kHandleSizeRatio;
   const qreal axisExtent = layout.radius * kAxisExtentRatio;
-  const qreal cubeHalfDiagonal = std::hypot(layout.projectionCube.width(),
-                                            layout.projectionCube.height()) *
-                                 0.5;
+  const qreal projectionHitRadius = layout.projectionHitArea.width() * 0.5;
   int handleIndex = 0;
   for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
     const QVector3D viewAxis =
@@ -129,9 +143,9 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
           static_cast<qreal>(viewAxis.x()) / projectedLength,
           -static_cast<qreal>(viewAxis.y()) / projectedLength);
       const qreal minimumExtent =
-          cubeHalfDiagonal +
+          projectionHitRadius +
           std::max(handle.radius, handle.radius * kConeLengthToHitRadius) +
-          std::max(2.0, layout.lineWidth);
+          std::max(4.0, layout.lineWidth * 1.5);
       const qreal projectedExtent =
           std::max(axisExtent * projectedLength, minimumExtent);
       handle.center = layout.center + projectedDirection *
@@ -144,7 +158,7 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
 NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
                                           const QPointF &position) {
-  if (layout.projectionCube.contains(position) ||
+  if (ellipseContains(layout.projectionHitArea, position) ||
       layout.projectionLabel.contains(position)) {
     return {NavigationGizmoPart::Projection, NavigationAxis::None};
   }

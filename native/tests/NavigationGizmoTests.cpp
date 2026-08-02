@@ -66,6 +66,20 @@ void NavigationGizmoTests::exposesUnityStyleProjectionControl() {
 
   QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionCube.center()).part,
            NavigationGizmoPart::Projection);
+  QCOMPARE(hitTestNavigationGizmo(
+               layout, layout.projectionCube.topLeft() + QPointF(1.0, 1.0))
+               .part,
+           NavigationGizmoPart::Projection);
+  const QPointF enlargedTargetEdge(layout.projectionHitArea.right() - 1.0,
+                                   layout.projectionHitArea.center().y());
+  QVERIFY(!layout.projectionCube.contains(enlargedTargetEdge));
+  QCOMPARE(hitTestNavigationGizmo(layout, enlargedTargetEdge).part,
+           NavigationGizmoPart::Projection);
+  const QPointF freeOrbitCorner =
+      layout.projectionHitArea.topLeft() + QPointF(1.0, 1.0);
+  QCOMPARE(hitTestNavigationGizmo(layout, freeOrbitCorner),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate,
+                               NavigationAxis::None}));
   QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionLabel.center()).part,
            NavigationGizmoPart::Projection);
   QCOMPARE(hitTestNavigationGizmo(layout,
@@ -82,10 +96,12 @@ void NavigationGizmoTests::keepsAxisHandlesClearOfProjectionCube() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
 
-  QVERIFY(layout.projectionCube.width() <= layout.radius * 0.36);
-  const qreal cubeHalfDiagonal = std::hypot(layout.projectionCube.width(),
-                                            layout.projectionCube.height()) *
-                                 0.5;
+  QVERIFY(layout.projectionCube.width() >= layout.radius * 0.40);
+  QVERIFY(layout.projectionCube.width() <= layout.radius * 0.48);
+  QVERIFY(layout.projectionHitArea.contains(layout.projectionCube));
+  QVERIFY(layout.projectionHitArea.width() >=
+          layout.projectionCube.width() + 10.0);
+  const qreal projectionHitRadius = layout.projectionHitArea.width() * 0.5;
   for (const NavigationAxisHandle &handle : layout.handles) {
     if (handle.hidden) {
       continue;
@@ -95,14 +111,16 @@ void NavigationGizmoTests::keepsAxisHandlesClearOfProjectionCube() {
       continue;
     }
     constexpr qreal coneLengthToHandleRadius = 1.70;
-    QVERIFY2(distance >= cubeHalfDiagonal +
-                             handle.radius * coneLengthToHandleRadius + 2.0,
-             "A visible direction handle overlaps the projection cube");
+    const qreal coneLength =
+        std::max(8.0, handle.radius * coneLengthToHandleRadius);
+    QVERIFY2(distance >= projectionHitRadius + coneLength + 4.0,
+             "A visible direction handle overlaps the projection hit target");
     QCOMPARE(hitTestNavigationGizmo(layout, handle.center),
              (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}));
     const QPointF direction = (handle.center - layout.center) / distance;
-    const QPointF coneBase =
-        handle.center - direction * handle.radius * coneLengthToHandleRadius;
+    const QPointF coneBase = handle.center - direction * coneLength;
+    QVERIFY(QLineF(layout.center, coneBase).length() >=
+            projectionHitRadius + 4.0);
     const NavigationGizmoHit coneBaseHit =
         hitTestNavigationGizmo(layout, coneBase);
     QVERIFY2(coneBaseHit ==
@@ -150,6 +168,7 @@ void NavigationGizmoTests::keepsNavigationButtonsInsideViewport() {
   QVERIFY(viewport.contains(layout.panButton));
   QVERIFY(viewport.contains(layout.cameraButton));
   QVERIFY(viewport.contains(layout.projectionCube));
+  QVERIFY(viewport.contains(layout.projectionHitArea));
   QVERIFY(viewport.contains(layout.projectionLabel));
 }
 

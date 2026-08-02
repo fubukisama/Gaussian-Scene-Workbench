@@ -50,6 +50,7 @@ struct NavigationGizmoLayout {
   QRectF panButton;
   QRectF cameraButton;
   QRectF projectionCube;
+  QRectF projectionHitArea;
   QRectF projectionLabel;
   std::array<NavigationAxisHandle, 6> handles;
 };
