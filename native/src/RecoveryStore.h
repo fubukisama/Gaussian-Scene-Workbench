@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QList>
+#include <QQuaternion>
 #include <QString>
 #include <QVector3D>
 
@@ -18,6 +19,7 @@ struct RecoveryWorkspace {
   QString datasetPath;
   QString scenePath;
   QVector3D sceneTranslation;
+  QQuaternion sceneRotation;
   QDateTime updatedUtc;
 
   [[nodiscard]] bool isValid() const {

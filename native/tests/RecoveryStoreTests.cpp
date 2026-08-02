@@ -6,6 +6,7 @@
 #include <QTest>
 
 #include <algorithm>
+#include <cmath>
 
 class RecoveryStoreTests final : public QObject {
   Q_OBJECT
@@ -39,6 +40,8 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
   checkpoint.datasetPath =
       QDir(started->rootPath).filePath(QStringLiteral("dataset"));
   checkpoint.sceneTranslation = QVector3D(2.0F, -1.0F, 0.5F);
+  checkpoint.sceneRotation = QQuaternion::fromAxisAndAngle(
+      QVector3D(0.0F, 0.0F, 1.0F), 42.0F);
   QVERIFY2(store.checkpoint(checkpoint, &error), qPrintable(error));
 
   const QList<gsw::RecoveryWorkspace> recovered =
@@ -51,6 +54,10 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
            QDir::cleanPath(checkpoint.datasetPath));
   QCOMPARE(recovered.constFirst().sceneTranslation,
            checkpoint.sceneTranslation);
+  QVERIFY(1.0F - std::abs(QQuaternion::dotProduct(
+                      recovered.constFirst().sceneRotation.normalized(),
+                      checkpoint.sceneRotation.normalized())) <
+          1.0e-6F);
   QVERIFY(QFileInfo::exists(QDir(recovered.constFirst().rootPath)
                                 .filePath(QStringLiteral("frame.jpg"))));
 

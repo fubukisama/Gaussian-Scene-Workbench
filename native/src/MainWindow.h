@@ -215,6 +215,7 @@ private:
   QAction *mShowCamerasAction = nullptr;
   QAction *mInspectAction = nullptr;
   QAction *mMoveModelAction = nullptr;
+  QAction *mRotateModelAction = nullptr;
   QAction *mRectangleAction = nullptr;
   QAction *mLassoAction = nullptr;
   QAction *mBrushAction = nullptr;

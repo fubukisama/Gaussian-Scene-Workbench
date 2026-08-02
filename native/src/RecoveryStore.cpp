@@ -10,6 +10,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 
 namespace gsw {
 namespace {
@@ -54,6 +55,40 @@ QVector3D translationFromJson(const QJsonValue &value) {
                    static_cast<float>(translation.at(2).toDouble()));
 }
 
+QJsonArray rotationJson(const QQuaternion &rotation) {
+  QQuaternion normalized = rotation;
+  if (!std::isfinite(normalized.scalar()) || !std::isfinite(normalized.x()) ||
+      !std::isfinite(normalized.y()) || !std::isfinite(normalized.z()) ||
+      normalized.lengthSquared() <= 1.0e-12F) {
+    normalized = {};
+  } else {
+    normalized.normalize();
+  }
+  if (normalized.scalar() < 0.0F) {
+    normalized = QQuaternion(-normalized.scalar(), -normalized.x(),
+                             -normalized.y(), -normalized.z());
+  }
+  return {normalized.scalar(), normalized.x(), normalized.y(), normalized.z()};
+}
+
+QQuaternion rotationFromJson(const QJsonValue &value) {
+  const QJsonArray rotation = value.toArray();
+  if (rotation.size() != 4) {
+    return {};
+  }
+  QQuaternion parsed(static_cast<float>(rotation.at(0).toDouble()),
+                      static_cast<float>(rotation.at(1).toDouble()),
+                      static_cast<float>(rotation.at(2).toDouble()),
+                      static_cast<float>(rotation.at(3).toDouble()));
+  if (!std::isfinite(parsed.scalar()) || !std::isfinite(parsed.x()) ||
+      !std::isfinite(parsed.y()) || !std::isfinite(parsed.z()) ||
+      parsed.lengthSquared() <= 1.0e-12F) {
+    return {};
+  }
+  parsed.normalize();
+  return parsed;
+}
+
 std::optional<RecoveryWorkspace>
 readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
   QFile stateFile(
@@ -93,6 +128,8 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       optionalAbsolutePath(root.value(QStringLiteral("scenePath")).toString());
   workspace.sceneTranslation =
       translationFromJson(root.value(QStringLiteral("sceneTranslation")));
+  workspace.sceneRotation =
+      rotationFromJson(root.value(QStringLiteral("sceneRotation")));
   workspace.updatedUtc = QDateTime::fromString(
       root.value(QStringLiteral("updatedUtc")).toString(), Qt::ISODate);
   if (!workspace.isValid() || !workspace.updatedUtc.isValid()) {
@@ -212,6 +249,8 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
               optionalAbsolutePath(workspace.scenePath));
   root.insert(QStringLiteral("sceneTranslation"),
               translationJson(workspace.sceneTranslation));
+  root.insert(QStringLiteral("sceneRotation"),
+              rotationJson(workspace.sceneRotation));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
 

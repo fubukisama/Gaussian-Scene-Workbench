@@ -1054,18 +1054,28 @@ void MainWindow::createActions() {
   mMoveModelAction->setCheckable(true);
   mMoveModelAction->setShortcut(QKeySequence(QStringLiteral("G")));
   mMoveModelAction->setToolTip(
-      QStringLiteral("自由移动整个模型 (G)，Ctrl+左键旋转视角"));
+      QStringLiteral("Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附"));
   mEditModeActionGroup->addAction(mMoveModelAction);
   connect(mMoveModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForMove);
+
+  mRotateModelAction = new QAction(QStringLiteral("旋转模型"), this);
+  mRotateModelAction->setObjectName(QStringLiteral("rotateModelAction"));
+  mRotateModelAction->setCheckable(true);
+  mRotateModelAction->setShortcut(QKeySequence(QStringLiteral("R")));
+  mRotateModelAction->setToolTip(
+      QStringLiteral("Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转"));
+  mEditModeActionGroup->addAction(mRotateModelAction);
+  connect(mRotateModelAction, &QAction::triggered, mViewport,
+          &NativeViewport::selectModelForRotate);
 
   mRectangleAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
                   QStringLiteral("框选"), this);
   mRectangleAction->setCheckable(true);
-  mRectangleAction->setShortcut(QKeySequence(QStringLiteral("R")));
+  mRectangleAction->setShortcut(QKeySequence(QStringLiteral("Shift+R")));
   mRectangleAction->setToolTip(
-      QStringLiteral("矩形选择 (R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+      QStringLiteral("矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mRectangleAction);
   connect(mRectangleAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
@@ -1273,6 +1283,7 @@ void MainWindow::createMenus() {
   sceneMenu->addSeparator();
   sceneMenu->addAction(mInspectAction);
   sceneMenu->addAction(mMoveModelAction);
+  sceneMenu->addAction(mRotateModelAction);
   sceneMenu->addAction(mRectangleAction);
   sceneMenu->addAction(mLassoAction);
   sceneMenu->addAction(mBrushAction);
@@ -1399,6 +1410,7 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
   mSelectionToolbar->addAction(mMoveModelAction);
+  mSelectionToolbar->addAction(mRotateModelAction);
   mSelectionToolbar->addAction(mRectangleAction);
   mSelectionToolbar->addAction(mLassoAction);
   mSelectionToolbar->addAction(mBrushAction);
@@ -1479,9 +1491,9 @@ void MainWindow::createProjectDock() {
         selection.first()->data(0, Qt::UserRole + 1).toString();
     if (kind == QStringLiteral("scene") && mModelReady &&
         !mProcessSupervisor.isRunning()) {
-      mViewport->selectModelForMove();
+      mViewport->selectModel();
       statusBar()->showMessage(
-          QStringLiteral("模型已选中：左键拖动可自由移动，Ctrl+左键旋转视角"),
+          QStringLiteral("模型已选中：G 移动，R 旋转，再按 R 轨迹球自由旋转"),
           6000);
     }
   });
@@ -1584,7 +1596,7 @@ void MainWindow::createInspectorDock() {
   sceneForm->addRow(QStringLiteral("尺寸"), mSceneSizeValue);
   sceneForm->addRow(QStringLiteral("范围"), mSceneBoundsValue);
   sceneForm->addRow(QStringLiteral("显示变换"), mDisplayShiftValue);
-  sceneForm->addRow(QStringLiteral("模型位移"), mSceneTransformValue);
+  sceneForm->addRow(QStringLiteral("模型变换"), mSceneTransformValue);
   sceneForm->addRow(QStringLiteral("基准面"), mReferencePlaneValue);
   layout->addLayout(sceneForm);
   layout->addStretch(1);
@@ -1884,8 +1896,8 @@ void MainWindow::connectServices() {
           } else {
             mViewport->setScene(mWorkspace.scenePath(),
                                 mWorkspace.sceneMetadata().vertexCount);
-            mViewport->setModelTranslation(
-                workspaceTranslationForViewport());
+            mViewport->setModelTransform(workspaceTranslationForViewport(),
+                                         mWorkspace.sceneRotation());
           }
         }
 
@@ -2188,8 +2200,8 @@ void MainWindow::connectServices() {
             if (!mWorkspace.scenePath().isEmpty() &&
                 pathsReferToSameLocation(mViewport->scenePath(),
                                           mWorkspace.scenePath())) {
-              mViewport->setModelTranslation(
-                  workspaceTranslationForViewport());
+              mViewport->setModelTransform(workspaceTranslationForViewport(),
+                                           mWorkspace.sceneRotation());
             }
             updateInspector();
             updateActionAvailability();
@@ -2283,6 +2295,8 @@ void MainWindow::connectServices() {
                 mode == NativeViewport::InteractionMode::Inspect);
             mMoveModelAction->setChecked(
                 mode == NativeViewport::InteractionMode::Move);
+            mRotateModelAction->setChecked(
+                mode == NativeViewport::InteractionMode::Rotate);
             mRectangleAction->setChecked(
                 mode == NativeViewport::InteractionMode::Rectangle);
             mLassoAction->setChecked(
@@ -2294,24 +2308,26 @@ void MainWindow::connectServices() {
   connect(
       mViewport, &NativeViewport::modelInteractionStateChanged, this,
       [this](const bool available, const bool selected, const bool,
-             const bool, const QVector3D &) {
+              const bool, const QVector3D &, const QQuaternion &) {
         mModelReady = available;
         mModelSelected = selected;
         updateEditActions();
         updateInspector();
       });
   connect(mViewport, &NativeViewport::modelTransformCommitted, this,
-          [this](const QVector3D &translation) {
+          [this](const QVector3D &translation,
+                 const QQuaternion &rotation) {
             if (mWorkspace.scenePath().isEmpty() ||
                 !pathsReferToSameLocation(mViewport->scenePath(),
                                           mWorkspace.scenePath())) {
               return;
             }
             QString error;
-            if (!mWorkspace.setSceneTranslation(
-                    viewportTranslationForWorkspace(translation), &error)) {
+            if (!mWorkspace.setSceneTransform(
+                    viewportTranslationForWorkspace(translation), rotation,
+                    &error)) {
               appendTaskEvent(
-                  QStringLiteral("模型位移未能写入工程：%1").arg(error));
+                  QStringLiteral("模型变换未能写入工程：%1").arg(error));
             }
           });
   connect(mViewport, &NativeViewport::selectionBusyChanged, this,
@@ -2569,6 +2585,7 @@ void MainWindow::updateEditActions() {
   }
   mInspectAction->setEnabled(modelInteractive || pointInteractive);
   mMoveModelAction->setEnabled(modelInteractive);
+  mRotateModelAction->setEnabled(modelInteractive);
   mRectangleAction->setEnabled(pointInteractive);
   mLassoAction->setEnabled(pointInteractive);
   mBrushAction->setEnabled(pointInteractive);
@@ -2710,6 +2727,7 @@ void MainWindow::checkpointCurrentRecovery() {
   mCurrentRecovery->datasetPath = mWorkspace.datasetPath();
   mCurrentRecovery->scenePath = mWorkspace.scenePath();
   mCurrentRecovery->sceneTranslation = mWorkspace.sceneTranslation();
+  mCurrentRecovery->sceneRotation = mWorkspace.sceneRotation();
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
@@ -2973,10 +2991,11 @@ bool MainWindow::restoreRecoveryWorkspace(
   }
   if (!workspace.scenePath.isEmpty()) {
     QString transformError;
-    if (!mWorkspace.setSceneTranslation(workspace.sceneTranslation,
-                                        &transformError)) {
+    if (!mWorkspace.setSceneTransform(workspace.sceneTranslation,
+                                      workspace.sceneRotation,
+                                      &transformError)) {
       appendTaskEvent(
-          QStringLiteral("恢复工程的模型位移失败：%1").arg(transformError));
+          QStringLiteral("恢复工程的模型变换失败：%1").arg(transformError));
     }
   }
   if (!mRecoveryBlocked) {
@@ -4578,19 +4597,20 @@ void MainWindow::updateWorkspaceUi() {
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setScene(mLiveTrainingPreviewPath,
                         mLiveTrainingGaussianCount);
-    mViewport->setModelTranslation({});
+    mViewport->setModelTransform({}, {});
   } else if (!mLiveReconstructionPreviewPath.isEmpty() &&
              QFileInfo::exists(mLiveReconstructionPreviewPath) &&
              pathsReferToSameLocation(mWorkspace.datasetPath(),
                                       mLiveReconstructionDatasetPath)) {
     mViewport->setScene(mLiveReconstructionPreviewPath,
                         mLiveReconstructionPointCount);
-    mViewport->setModelTranslation({});
+    mViewport->setModelTransform({}, {});
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   } else {
     mViewport->setScene(mWorkspace.scenePath(),
                         mWorkspace.sceneMetadata().vertexCount);
-    mViewport->setModelTranslation(workspaceTranslationForViewport());
+    mViewport->setModelTransform(workspaceTranslationForViewport(),
+                                 mWorkspace.sceneRotation());
   }
   mProjectStatus->setText(
       projectName +
@@ -4778,20 +4798,35 @@ void MainWindow::updateInspector() {
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
   const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
-  const QVector3D translation = mWorkspace.sceneTranslation();
+  QVector3D translation = mWorkspace.sceneTranslation();
+  QQuaternion rotation = mWorkspace.sceneRotation();
+  if (!mWorkspace.scenePath().isEmpty() &&
+      pathsReferToSameLocation(mViewport->scenePath(),
+                               mWorkspace.scenePath())) {
+    translation = viewportTranslationForWorkspace(mViewport->modelTranslation());
+    rotation = mViewport->modelRotation();
+  }
+  const QVector3D euler = rotation.toEulerAngles();
+  const QString rotationText =
+      QStringLiteral("旋转 X %1° | Y %2° | Z %3°")
+          .arg(euler.x(), 0, 'f', 2)
+          .arg(euler.y(), 0, 'f', 2)
+          .arg(euler.z(), 0, 'f', 2);
   if (coordinates.valid) {
     mSceneTransformValue->setText(
-        QStringLiteral("X %1 | Y %2 | Z %3%4")
+        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4%5")
             .arg(formatSceneLength(translation.x(), coordinates),
-                 formatSceneLength(translation.y(), coordinates),
-                 formatSceneLength(translation.z(), coordinates),
-                 mModelSelected ? QStringLiteral(" · 已选中") : QString()));
+                  formatSceneLength(translation.y(), coordinates),
+                  formatSceneLength(translation.z(), coordinates),
+                  rotationText,
+                  mModelSelected ? QStringLiteral(" · 已选中") : QString()));
   } else {
     mSceneTransformValue->setText(
-        QStringLiteral("X %1 | Y %2 | Z %3%4")
+        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4%5")
             .arg(translation.x(), 0, 'g', 7)
             .arg(translation.y(), 0, 'g', 7)
             .arg(translation.z(), 0, 'g', 7)
+            .arg(rotationText)
             .arg(mModelSelected ? QStringLiteral(" · 已选中") : QString()));
   }
   if (coordinates.valid) {

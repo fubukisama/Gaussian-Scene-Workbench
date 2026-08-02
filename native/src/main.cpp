@@ -300,14 +300,18 @@ int main(int argc, char *argv[]) {
                   const auto *moveModelAction =
                       window.findChild<QAction *>(
                           QStringLiteral("moveModelAction"));
+                  const auto *rotateModelAction =
+                      window.findChild<QAction *>(
+                          QStringLiteral("rotateModelAction"));
                   const bool modelSelectionAvailable =
                       viewport->selectableModelAvailable() &&
                       moveModelAction != nullptr &&
-                      moveModelAction->isEnabled();
-                  viewport->selectModelForMove();
+                      moveModelAction->isEnabled() &&
+                      rotateModelAction != nullptr &&
+                      rotateModelAction->isEnabled();
+                  viewport->selectModel();
                   const bool modelSelectionReady =
-                      modelSelectionAvailable && viewport->modelSelected() &&
-                      moveModelAction->isChecked();
+                      modelSelectionAvailable && viewport->modelSelected();
                   const QPointF dragStart(viewport->width() * 0.5,
                                           viewport->height() * 0.5);
                   const QPointF dragEnd = dragStart + QPointF(28.0, -18.0);
@@ -315,29 +319,68 @@ int main(int argc, char *argv[]) {
                       viewport->mapToGlobal(dragStart.toPoint());
                   const QPointF globalDragEnd =
                       viewport->mapToGlobal(dragEnd.toPoint());
-                  QMouseEvent modelPress(
-                      QEvent::MouseButtonPress, dragStart, dragStart,
-                      globalDragStart, Qt::LeftButton, Qt::LeftButton,
+                  QMouseEvent hoverStart(
+                      QEvent::MouseMove, dragStart, dragStart,
+                      globalDragStart, Qt::NoButton, Qt::NoButton,
                       Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport, &hoverStart);
+                  viewport->selectModelForMove();
                   QMouseEvent modelMove(
                       QEvent::MouseMove, dragEnd, dragEnd, globalDragEnd,
-                      Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-                  QMouseEvent modelRelease(
-                      QEvent::MouseButtonRelease, dragEnd, dragEnd,
-                      globalDragEnd, Qt::LeftButton, Qt::NoButton,
+                      Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                  QMouseEvent modelConfirm(
+                      QEvent::MouseButtonPress, dragEnd, dragEnd,
+                      globalDragEnd, Qt::LeftButton, Qt::LeftButton,
                       Qt::NoModifier);
-                  QCoreApplication::sendEvent(viewport, &modelPress);
                   QCoreApplication::sendEvent(viewport, &modelMove);
-                  QCoreApplication::sendEvent(viewport, &modelRelease);
+                  QCoreApplication::sendEvent(viewport, &modelConfirm);
                   const bool modelMoveReady =
                       modelSelectionReady &&
                       viewport->modelTranslation().lengthSquared() > 1.0e-8F;
-                  smokeTestCompleted = sourceVertexCount > 0 &&
+                  viewport->selectModelForRotate();
+                  const QPointF rotateEnd = dragEnd + QPointF(44.0, 36.0);
+                  const QPointF globalRotateEnd =
+                      viewport->mapToGlobal(rotateEnd.toPoint());
+                  QMouseEvent modelRotate(
+                      QEvent::MouseMove, rotateEnd, rotateEnd,
+                      globalRotateEnd, Qt::NoButton, Qt::NoButton,
+                      Qt::NoModifier);
+                  QMouseEvent rotationConfirm(
+                      QEvent::MouseButtonPress, rotateEnd, rotateEnd,
+                      globalRotateEnd, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+                   QCoreApplication::sendEvent(viewport, &modelRotate);
+                   QCoreApplication::sendEvent(viewport, &rotationConfirm);
+                   const QQuaternion viewRotation = viewport->modelRotation();
+                   const bool modelRotateReady = !viewRotation.isIdentity();
+                   viewport->selectModelForRotate();
+                   viewport->selectModelForRotate();
+                   const QPointF trackballEnd =
+                       rotateEnd + QPointF(-31.0, 47.0);
+                   const QPointF globalTrackballEnd =
+                       viewport->mapToGlobal(trackballEnd.toPoint());
+                   QMouseEvent modelTrackball(
+                       QEvent::MouseMove, trackballEnd, trackballEnd,
+                       globalTrackballEnd, Qt::NoButton, Qt::NoButton,
+                       Qt::NoModifier);
+                   QMouseEvent trackballConfirm(
+                       QEvent::MouseButtonPress, trackballEnd, trackballEnd,
+                       globalTrackballEnd, Qt::LeftButton, Qt::LeftButton,
+                       Qt::NoModifier);
+                   QCoreApplication::sendEvent(viewport, &modelTrackball);
+                   QCoreApplication::sendEvent(viewport, &trackballConfirm);
+                   const bool modelTrackballReady =
+                       std::abs(QQuaternion::dotProduct(
+                                    viewRotation.normalized(),
+                                    viewport->modelRotation().normalized())) <
+                       0.99999F;
+                   smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
-                                       modelSelectionReady && modelMoveReady;
+                                       modelSelectionReady && modelMoveReady &&
+                                       modelRotateReady && modelTrackballReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -355,8 +398,10 @@ int main(int argc, char *argv[]) {
                           << "coordinate-report-ready"
                           << coordinateReportReady
                           << "model-selection-ready"
-                          << modelSelectionReady << "model-move-ready"
-                          << modelMoveReady;
+                           << modelSelectionReady << "model-move-ready"
+                           << modelMoveReady << "model-rotate-ready"
+                           << modelRotateReady << "model-trackball-ready"
+                           << modelTrackballReady;
                   application.exit(smokeTestFailureCode);
                 });
           });

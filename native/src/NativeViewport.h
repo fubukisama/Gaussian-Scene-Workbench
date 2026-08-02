@@ -2,6 +2,7 @@
 
 #include "CameraTrajectory.h"
 #include "FrameRateCounter.h"
+#include "ModelInteraction.h"
 #include "NavigationGizmo.h"
 #include "PlyPointCloudLoader.h"
 #include "SceneEditModel.h"
@@ -17,6 +18,7 @@
 #include <QPoint>
 #include <QPointF>
 #include <QPolygonF>
+#include <QQuaternion>
 #include <QRectF>
 #include <QSet>
 #include <QString>
@@ -29,6 +31,7 @@ class QPainter;
 class QOpenGLShaderProgram;
 class QEnterEvent;
 class QEvent;
+class QKeyEvent;
 class QWheelEvent;
 class QVariantAnimation;
 class QTimer;
@@ -45,6 +48,7 @@ public:
   enum class InteractionMode {
     Inspect,
     Move,
+    Rotate,
     Select,
     Rectangle,
     Lasso,
@@ -66,7 +70,11 @@ public:
   void setScene(const QString &scenePath, qint64 gaussianCount);
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
+  void selectModel();
   void selectModelForMove();
+  void selectModelForRotate();
+  void setModelTransform(const QVector3D &translation,
+                         const QQuaternion &rotation);
   void setModelTranslation(const QVector3D &translation);
   void setRenderMode(RenderMode mode);
   void setReferencePlaneMode(ReferencePlaneMode mode);
@@ -107,6 +115,10 @@ public:
   [[nodiscard]] QString scenePath() const { return mScenePath; }
   [[nodiscard]] QVector3D modelTranslation() const {
     return mModelTranslation;
+  }
+  [[nodiscard]] QQuaternion modelRotation() const { return mModelRotation; }
+  [[nodiscard]] bool modelTransformActive() const {
+    return mModelDragActive;
   }
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
   [[nodiscard]] bool selectableModelAvailable() const;
@@ -150,8 +162,10 @@ signals:
   void interactionModeChanged(gsw::NativeViewport::InteractionMode mode);
   void modelInteractionStateChanged(bool available, bool selected,
                                     bool canUndo, bool canRedo,
-                                    const QVector3D &translation);
-  void modelTransformCommitted(const QVector3D &translation);
+                                    const QVector3D &translation,
+                                    const QQuaternion &rotation);
+  void modelTransformCommitted(const QVector3D &translation,
+                               const QQuaternion &rotation);
 
 protected:
   void initializeGL() override;
@@ -163,6 +177,8 @@ protected:
   void mouseMoveEvent(QMouseEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *event) override;
   void wheelEvent(QWheelEvent *event) override;
+  void keyPressEvent(QKeyEvent *event) override;
+  void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
   struct FullResolutionGpuChunk {
@@ -194,6 +210,14 @@ private:
     float pitchDegrees = 0.0F;
     float distance = 0.0F;
     bool orthographic = false;
+  };
+
+  enum class TransformConstraintKind { None, Axis, Plane };
+
+  struct TransformConstraint final {
+    TransformConstraintKind kind = TransformConstraintKind::None;
+    int axis = -1;
+    bool local = false;
   };
 
   [[nodiscard]] QVector3D cameraPosition() const;
@@ -255,10 +279,19 @@ private:
   void panCamera(const QPoint &delta);
   void toggleCameraView();
   void leaveCameraView();
-  bool beginModelDrag(const QPointF &position);
-  void updateModelDrag(const QPointF &position);
-  void finishModelDrag();
-  void commitModelTranslation();
+  void beginModelTransform(InteractionMode mode, bool trackball = false);
+  void updateModelTransform(const QPointF &position,
+                            Qt::KeyboardModifiers modifiers);
+  void finishModelTransform(bool commit);
+  void applyTransformConstraint(int axis, bool plane);
+  void updateTransformNumericInput(int key, const QString &text);
+  [[nodiscard]] QVector3D transformConstraintAxis() const;
+  [[nodiscard]] QString transformConstraintLabel() const;
+  [[nodiscard]] QString transformStatusText() const;
+  [[nodiscard]] float transformSnapStep(bool fine) const;
+  [[nodiscard]] float projectedModelRadius(const QPointF &center) const;
+  [[nodiscard]] QPointF currentPointerPosition() const;
+  void commitModelTransform();
   void resetModelTransformHistory();
   void notifyModelInteractionState();
   [[nodiscard]] bool canUndoModelTransform() const;
@@ -317,10 +350,20 @@ private:
   SceneCoordinateInfo mSceneCoordinates;
   QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
-  QVector3D mModelDragStartTranslation = QVector3D(0.0F, 0.0F, 0.0F);
+  QQuaternion mModelRotation;
+  RigidModelTransform mModelDragStartTransform;
   QVector3D mModelDragStartIntersection = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mModelDragPlaneNormal = QVector3D(0.0F, 0.0F, 1.0F);
-  QVector<QVector3D> mModelTransformHistory;
+  QPointF mModelTransformStartPosition;
+  QPointF mModelTransformCurrentPosition;
+  QPointF mModelTransformScreenCenter;
+  QPointF mPointerPosition;
+  float mModelRotationRadiusPixels = 96.0F;
+  bool mTrackballRotation = false;
+  TransformConstraint mTransformConstraint;
+  QString mTransformNumericInput;
+  Qt::KeyboardModifiers mTransformModifiers = Qt::NoModifier;
+  QVector<RigidModelTransform> mModelTransformHistory;
   qsizetype mModelTransformHistoryIndex = 0;
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;

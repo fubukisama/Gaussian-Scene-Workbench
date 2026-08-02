@@ -14,6 +14,7 @@
 #include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QFutureWatcher>
+#include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
 #include <QOpenGLShaderProgram>
@@ -121,7 +122,9 @@ QString modeLabel(const NativeViewport::InteractionMode mode) {
   case NativeViewport::InteractionMode::Inspect:
     return QStringLiteral("查看");
   case NativeViewport::InteractionMode::Move:
-    return QStringLiteral("自由移动");
+    return QStringLiteral("移动模型");
+  case NativeViewport::InteractionMode::Rotate:
+    return QStringLiteral("旋转模型");
   case NativeViewport::InteractionMode::Select:
     return QStringLiteral("选择");
   case NativeViewport::InteractionMode::Rectangle:
@@ -139,6 +142,7 @@ QString modeLabel(const NativeViewport::InteractionMode mode) {
 bool isTrimInteractionMode(const NativeViewport::InteractionMode mode) {
   switch (mode) {
   case NativeViewport::InteractionMode::Move:
+  case NativeViewport::InteractionMode::Rotate:
   case NativeViewport::InteractionMode::Select:
   case NativeViewport::InteractionMode::Rectangle:
   case NativeViewport::InteractionMode::Lasso:
@@ -155,6 +159,9 @@ Qt::CursorShape defaultInteractionCursor(
     const NativeViewport::InteractionMode mode) {
   if (mode == NativeViewport::InteractionMode::Move) {
     return Qt::SizeAllCursor;
+  }
+  if (mode == NativeViewport::InteractionMode::Rotate) {
+    return Qt::CrossCursor;
   }
   return mode == NativeViewport::InteractionMode::Rectangle ||
                  mode == NativeViewport::InteractionMode::Lasso ||
@@ -283,7 +290,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mSelectionGestureActive = false;
   mModelSelected = false;
   mModelDragActive = false;
-  if (mMode == InteractionMode::Move) {
+  if (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate) {
     mMode = InteractionMode::Inspect;
     setCursor(defaultInteractionCursor(mMode));
     emit interactionModeChanged(mMode);
@@ -350,6 +357,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mPendingMeshIndices.squeeze();
   mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   mModelTranslation = {};
+  mModelRotation = {};
   resetModelTransformHistory();
   mSceneRadius = 4.0F;
   mEditModel.reset(0);
@@ -387,14 +395,24 @@ void NativeViewport::setShowCameras(const bool enabled) {
 }
 
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
-  if (mode == InteractionMode::Move && !selectableModelAvailable()) {
+  if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate) &&
+      !selectableModelAvailable()) {
     return;
+  }
+  if (mode == InteractionMode::Move) {
+    selectModelForMove();
+    return;
+  }
+  if (mode == InteractionMode::Rotate) {
+    selectModelForRotate();
+    return;
+  }
+  if (mModelDragActive) {
+    finishModelTransform(false);
   }
   const InteractionMode previousMode = mMode;
   mMode = mode;
-  if (mMode == InteractionMode::Move) {
-    mModelSelected = true;
-  } else if (mMode != InteractionMode::Inspect) {
+  if (mMode != InteractionMode::Inspect) {
     mModelSelected = false;
   }
   mModelDragActive = false;
@@ -410,7 +428,7 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
   update();
 }
 
-void NativeViewport::selectModelForMove() {
+void NativeViewport::selectModel() {
   if (mSelectionBusy || !selectableModelAvailable()) {
     return;
   }
@@ -420,23 +438,71 @@ void NativeViewport::selectModelForMove() {
     notifyEditState();
   }
   mModelSelected = true;
-  setInteractionMode(InteractionMode::Move);
+  if (mMode != InteractionMode::Inspect) {
+    const InteractionMode previousMode = mMode;
+    mMode = InteractionMode::Inspect;
+    mModelDragActive = false;
+    mSelectionGestureActive = false;
+    mSelectionPath.clear();
+    mBrushCursorVisible = false;
+    mTemporaryOrbitActive = false;
+    setCursor(defaultInteractionCursor(mMode));
+    if (previousMode != mMode) {
+      emit interactionModeChanged(mMode);
+    }
+  }
+  notifyModelInteractionState();
+  update();
 }
 
-void NativeViewport::setModelTranslation(const QVector3D &translation) {
+void NativeViewport::selectModelForMove() {
+  selectModel();
+  if (mModelSelected) {
+    beginModelTransform(InteractionMode::Move);
+  }
+}
+
+void NativeViewport::selectModelForRotate() {
+  if (mModelDragActive && mMode == InteractionMode::Rotate) {
+    if (!mTrackballRotation) {
+      mModelRotation = mModelDragStartTransform.rotation;
+      mTrackballRotation = true;
+      mTransformConstraint = {};
+      mTransformNumericInput.clear();
+      updateModelTransform(mModelTransformCurrentPosition,
+                           mTransformModifiers);
+      update();
+    }
+    return;
+  }
+  selectModel();
+  if (mModelSelected) {
+    beginModelTransform(InteractionMode::Rotate);
+  }
+}
+
+void NativeViewport::setModelTransform(const QVector3D &translation,
+                                       const QQuaternion &rotation) {
+  const QQuaternion normalizedRotation = normalizedModelRotation(rotation);
   const float comparisonScale =
       std::max({1.0F, mModelTranslation.length(), translation.length()});
   if (!std::isfinite(translation.x()) || !std::isfinite(translation.y()) ||
       !std::isfinite(translation.z()) ||
-      (mModelTranslation - translation).lengthSquared() <=
-          comparisonScale * comparisonScale * 1.0e-12F) {
+      ((mModelTranslation - translation).lengthSquared() <=
+           comparisonScale * comparisonScale * 1.0e-12F &&
+       rotationsEquivalent(mModelRotation, normalizedRotation))) {
     return;
   }
   mModelTranslation = translation;
+  mModelRotation = normalizedRotation;
   resetModelTransformHistory();
   notifyEditState();
   notifyModelInteractionState();
   update();
+}
+
+void NativeViewport::setModelTranslation(const QVector3D &translation) {
+  setModelTransform(translation, mModelRotation);
 }
 
 void NativeViewport::setRenderMode(const RenderMode mode) {
@@ -486,14 +552,16 @@ void NativeViewport::clearSelection() {
   if (mSelectionBusy) {
     return;
   }
+  if (mModelDragActive) {
+    finishModelTransform(false);
+    return;
+  }
   mEditModel.clearSelection();
   const bool clearedModel = mModelSelected;
-  if (mModelDragActive) {
-    mModelTranslation = mModelDragStartTranslation;
-  }
   mModelSelected = false;
   mModelDragActive = false;
-  if (clearedModel && mMode == InteractionMode::Move) {
+  if (clearedModel &&
+      (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate)) {
     setInteractionMode(InteractionMode::Inspect);
   }
   rebuildRenderedVertices();
@@ -525,12 +593,15 @@ void NativeViewport::undoEdit() {
   if (mSelectionBusy) {
     return;
   }
-  if ((mMode == InteractionMode::Move || !mEditModel.canUndo()) &&
+  if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+       !mEditModel.canUndo()) &&
       canUndoModelTransform()) {
     --mModelTransformHistoryIndex;
-    mModelTranslation =
+    const RigidModelTransform &transform =
         mModelTransformHistory.at(mModelTransformHistoryIndex);
-    emit modelTransformCommitted(mModelTranslation);
+    mModelTranslation = transform.translation;
+    mModelRotation = transform.rotation;
+    emit modelTransformCommitted(mModelTranslation, mModelRotation);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -548,12 +619,15 @@ void NativeViewport::redoEdit() {
   if (mSelectionBusy) {
     return;
   }
-  if ((mMode == InteractionMode::Move || !mEditModel.canRedo()) &&
+  if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+       !mEditModel.canRedo()) &&
       canRedoModelTransform()) {
     ++mModelTransformHistoryIndex;
-    mModelTranslation =
+    const RigidModelTransform &transform =
         mModelTransformHistory.at(mModelTransformHistoryIndex);
-    emit modelTransformCommitted(mModelTranslation);
+    mModelTranslation = transform.translation;
+    mModelRotation = transform.rotation;
+    emit modelTransformCommitted(mModelTranslation, mModelRotation);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -762,6 +836,7 @@ layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 textureCoordinate;
 layout(location = 4) in float textureWeight;
 uniform mat4 viewProjection;
+uniform mat4 model;
 out vec3 vertexColor;
 out vec3 worldPosition;
 out vec3 worldNormal;
@@ -770,8 +845,8 @@ out float vertexTextureWeight;
 void main() {
   gl_Position = viewProjection * vec4(position, 1.0);
   vertexColor = color;
-  worldPosition = position;
-  worldNormal = normal;
+  worldPosition = (model * vec4(position, 1.0)).xyz;
+  worldNormal = mat3(model) * normal;
   vertexTextureCoordinate = textureCoordinate;
   vertexTextureWeight = textureWeight;
 }
@@ -1582,7 +1657,12 @@ void NativeViewport::rebuildRenderedVertices() {
     mPendingVertices.append(renderedVertex);
   }
   if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
-    const QVector3D forward = (mTarget - cameraPosition()).normalized();
+    QVector3D forward = (mTarget - cameraPosition()).normalized();
+    bool invertible = false;
+    const QMatrix4x4 inverseModel = modelMatrix().inverted(&invertible);
+    if (invertible) {
+      forward = inverseModel.mapVector(forward).normalized();
+    }
     std::sort(mPendingVertices.begin(), mPendingVertices.end(),
               [&forward](const PointCloudVertex &left,
                          const PointCloudVertex &right) {
@@ -1635,19 +1715,27 @@ bool NativeViewport::canRedoModelTransform() const {
 }
 
 void NativeViewport::resetModelTransformHistory() {
-  mModelTransformHistory = {mModelTranslation};
+  mModelTransformHistory = {
+      RigidModelTransform{mModelTranslation, mModelRotation}};
   mModelTransformHistoryIndex = 0;
 }
 
-void NativeViewport::commitModelTranslation() {
-  if ((mModelTranslation - mModelDragStartTranslation).lengthSquared() <=
-      1.0e-12F) {
+void NativeViewport::commitModelTransform() {
+  const float translationScale = std::max(
+      {1.0F, mModelTranslation.length(),
+       mModelDragStartTransform.translation.length()});
+  if ((mModelTranslation - mModelDragStartTransform.translation)
+              .lengthSquared() <=
+          translationScale * translationScale * 1.0e-12F &&
+      rotationsEquivalent(mModelRotation,
+                          mModelDragStartTransform.rotation)) {
     return;
   }
   mModelTransformHistory.resize(mModelTransformHistoryIndex + 1);
-  mModelTransformHistory.append(mModelTranslation);
+  mModelTransformHistory.append(
+      RigidModelTransform{mModelTranslation, mModelRotation});
   mModelTransformHistoryIndex = mModelTransformHistory.size() - 1;
-  emit modelTransformCommitted(mModelTranslation);
+  emit modelTransformCommitted(mModelTranslation, mModelRotation);
   notifyEditState();
   notifyModelInteractionState();
 }
@@ -1655,7 +1743,7 @@ void NativeViewport::commitModelTranslation() {
 void NativeViewport::notifyModelInteractionState() {
   emit modelInteractionStateChanged(
       selectableModelAvailable(), mModelSelected, canUndoModelTransform(),
-      canRedoModelTransform(), mModelTranslation);
+      canRedoModelTransform(), mModelTranslation, mModelRotation);
 }
 
 void NativeViewport::uploadPendingPointCloud() {
@@ -1708,9 +1796,8 @@ void NativeViewport::updatePointCacheSelection(
   const float viewportHeight =
       std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
   const auto projectedPixels = [&](const PointCloudCacheNode &node) {
-    const QVector3D center =
-        (node.boundsMinimum + node.boundsMaximum) * 0.5F +
-        mModelTranslation;
+    const QVector3D center = modelMatrix().map(
+        (node.boundsMinimum + node.boundsMaximum) * 0.5F);
     const float radius =
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
                  mSceneRadius * 1.0e-6F);
@@ -2095,9 +2182,8 @@ void NativeViewport::updateMeshCacheSelection(
   const float viewportHeight =
       std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
   const auto projectedPixels = [&](const MeshCacheNode &node) {
-    const QVector3D center =
-        (node.boundsMinimum + node.boundsMaximum) * 0.5F +
-        mModelTranslation;
+    const QVector3D center = modelMatrix().map(
+        (node.boundsMinimum + node.boundsMaximum) * 0.5F);
     const float radius =
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
                  mSceneRadius * 1.0e-6F);
@@ -2522,9 +2608,9 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   glDisable(GL_CULL_FACE);
   mMeshProgram->bind();
   mMeshProgram->setUniformValue("viewProjection", viewProjection);
+  mMeshProgram->setUniformValue("model", modelMatrix());
   mMeshProgram->setUniformValue("selected", mModelSelected ? 1.0F : 0.0F);
-  mMeshProgram->setUniformValue("cameraPosition",
-                                cameraPosition() - mModelTranslation);
+  mMeshProgram->setUniformValue("cameraPosition", cameraPosition());
   const bool textureEnabled =
       mMeshHasTextureCoordinates && mMeshTextureReady && mMeshTexture != 0;
   mMeshProgram->setUniformValue("albedoTexture", 0);
@@ -2758,6 +2844,7 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
 }
 
 void NativeViewport::enterEvent(QEnterEvent *event) {
+  mPointerPosition = event->position();
   if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
@@ -2782,6 +2869,61 @@ void NativeViewport::leaveEvent(QEvent *event) {
 }
 
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
+  mPointerPosition = event->position();
+  if (mModelDragActive) {
+    if (event->button() == Qt::LeftButton) {
+      updateModelTransform(event->position(), event->modifiers());
+      finishModelTransform(true);
+      event->accept();
+      return;
+    }
+    if (event->button() == Qt::RightButton) {
+      finishModelTransform(false);
+      event->accept();
+      return;
+    }
+    if (event->button() == Qt::MiddleButton && !mTrackballRotation) {
+      const QVector3D pivot =
+          mSceneCenter + mModelDragStartTransform.translation;
+      const auto center = projectPoint(pivot, viewProjectionMatrix());
+      int closestAxis = -1;
+      qreal closestDistance = std::numeric_limits<qreal>::max();
+      if (center.has_value()) {
+        for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
+          QVector3D axis;
+          axis[axisIndex] = 1.0F;
+          const auto endpoint = projectPoint(
+              pivot + axis * std::max(mSceneRadius, 1.0F),
+              viewProjectionMatrix());
+          if (!endpoint.has_value()) {
+            continue;
+          }
+          const QPointF direction = *endpoint - *center;
+          const qreal lengthSquared = direction.x() * direction.x() +
+                                      direction.y() * direction.y();
+          if (lengthSquared <= 1.0e-8) {
+            continue;
+          }
+          const QPointF offset = event->position() - *center;
+          const qreal projection =
+              (offset.x() * direction.x() + offset.y() * direction.y()) /
+              lengthSquared;
+          const QPointF nearest = *center + direction * projection;
+          const qreal distance = QLineF(nearest, event->position()).length();
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestAxis = axisIndex;
+          }
+        }
+      }
+      if (closestAxis >= 0) {
+        applyTransformConstraint(
+            closestAxis, event->modifiers().testFlag(Qt::ShiftModifier));
+      }
+      event->accept();
+      return;
+    }
+  }
   updateNavigationGizmoHover(event->position());
   if (isTrimInteractionMode(mMode) &&
       isTemporaryOrbitShortcut(event->button(), event->modifiers())) {
@@ -2819,24 +2961,18 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
   }
 
   if (event->button() == Qt::LeftButton &&
-      (mMode == InteractionMode::Inspect ||
-       mMode == InteractionMode::Move) &&
+      mMode == InteractionMode::Inspect &&
       selectableModelAvailable()) {
     const bool hit = modelHitAt(event->position());
     if (hit) {
-      selectModelForMove();
-      mPressedButtons = event->buttons();
-      mLastMousePosition = event->position().toPoint();
-      beginModelDrag(event->position());
-      notifyModelInteractionState();
-      update();
+      selectModel();
       event->accept();
       return;
     }
-    if (mMode == InteractionMode::Move) {
+    if (mModelSelected) {
       mModelSelected = false;
-      setInteractionMode(InteractionMode::Inspect);
       notifyModelInteractionState();
+      update();
     }
   }
 
@@ -2863,6 +2999,12 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
+  mPointerPosition = event->position();
+  if (mModelDragActive) {
+    updateModelTransform(event->position(), event->modifiers());
+    event->accept();
+    return;
+  }
   if (mNavigationInteractionActive) {
     updateNavigationGizmoInteraction(event->position().toPoint());
     event->accept();
@@ -2872,11 +3014,6 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
   if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
-  }
-  if (mModelDragActive) {
-    updateModelDrag(event->position());
-    event->accept();
-    return;
   }
   if (mSelectionGestureActive) {
     mSelectionCurrent = event->position();
@@ -2931,13 +3068,6 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton && mNavigationInteractionActive) {
     finishNavigationGizmoInteraction();
-    mPressedButtons = event->buttons();
-    event->accept();
-    return;
-  }
-
-  if (event->button() == Qt::LeftButton && mModelDragActive) {
-    finishModelDrag();
     mPressedButtons = event->buttons();
     event->accept();
     return;
@@ -3191,6 +3321,106 @@ QVector3D NativeViewport::cameraPosition() const {
   return mTarget + frame.cameraOffsetDirection * mDistance;
 }
 
+void NativeViewport::keyPressEvent(QKeyEvent *event) {
+  if (!mModelDragActive) {
+    if (event->key() == Qt::Key_Escape && mModelSelected) {
+      clearSelection();
+      event->accept();
+      return;
+    }
+    if (event->key() == Qt::Key_G && mModelSelected) {
+      beginModelTransform(InteractionMode::Move);
+      event->accept();
+      return;
+    }
+    if (event->key() == Qt::Key_R && mModelSelected) {
+      beginModelTransform(InteractionMode::Rotate);
+      event->accept();
+      return;
+    }
+    QOpenGLWidget::keyPressEvent(event);
+    return;
+  }
+
+  mTransformModifiers = event->modifiers();
+  switch (event->key()) {
+  case Qt::Key_Escape:
+    finishModelTransform(false);
+    event->accept();
+    return;
+  case Qt::Key_Return:
+  case Qt::Key_Enter:
+    finishModelTransform(true);
+    event->accept();
+    return;
+  case Qt::Key_G:
+    if (mMode != InteractionMode::Move) {
+      finishModelTransform(false);
+      beginModelTransform(InteractionMode::Move);
+    }
+    event->accept();
+    return;
+  case Qt::Key_R:
+    if (mMode != InteractionMode::Rotate) {
+      finishModelTransform(false);
+      beginModelTransform(InteractionMode::Rotate);
+    } else if (!mTrackballRotation) {
+      mModelRotation = mModelDragStartTransform.rotation;
+      mTrackballRotation = true;
+      mTransformConstraint = {};
+      mTransformNumericInput.clear();
+      updateModelTransform(mModelTransformCurrentPosition,
+                           mTransformModifiers);
+    }
+    event->accept();
+    return;
+  case Qt::Key_X:
+  case Qt::Key_Y:
+  case Qt::Key_Z:
+    applyTransformConstraint(
+        event->key() == Qt::Key_X ? 0 : event->key() == Qt::Key_Y ? 1 : 2,
+        event->modifiers().testFlag(Qt::ShiftModifier));
+    event->accept();
+    return;
+  case Qt::Key_0:
+  case Qt::Key_1:
+  case Qt::Key_2:
+  case Qt::Key_3:
+  case Qt::Key_4:
+  case Qt::Key_5:
+  case Qt::Key_6:
+  case Qt::Key_7:
+  case Qt::Key_8:
+  case Qt::Key_9:
+  case Qt::Key_Minus:
+  case Qt::Key_Period:
+  case Qt::Key_Comma:
+  case Qt::Key_Backspace:
+  case Qt::Key_Delete:
+    updateTransformNumericInput(event->key(), event->text());
+    event->accept();
+    return;
+  case Qt::Key_Control:
+  case Qt::Key_Shift:
+    updateModelTransform(mModelTransformCurrentPosition, event->modifiers());
+    event->accept();
+    return;
+  default:
+    break;
+  }
+  QOpenGLWidget::keyPressEvent(event);
+}
+
+void NativeViewport::keyReleaseEvent(QKeyEvent *event) {
+  if (mModelDragActive &&
+      (event->key() == Qt::Key_Control || event->key() == Qt::Key_Shift)) {
+    updateModelTransform(mModelTransformCurrentPosition, event->modifiers());
+    event->accept();
+    return;
+  }
+  QOpenGLWidget::keyReleaseEvent(event);
+}
+
 QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
   if (!mSceneCoordinates.valid) {
     return referenceGridOrigin();
@@ -3253,9 +3483,8 @@ QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
 }
 
 QMatrix4x4 NativeViewport::modelMatrix() const {
-  QMatrix4x4 model;
-  model.translate(mModelTranslation);
-  return model;
+  return RigidModelTransform{mModelTranslation, mModelRotation}
+      .matrix(mSceneCenter);
 }
 
 QVector3D NativeViewport::modelBoundsMinimum() const {
@@ -3285,67 +3514,380 @@ bool NativeViewport::modelHitAt(const QPointF &position) const {
   if (!worldRay.has_value()) {
     return false;
   }
-  WorldRay localRay = *worldRay;
-  localRay.origin -= mModelTranslation;
+  const std::optional<WorldRay> localRay =
+      rayInModelSpace(*worldRay, modelMatrix());
+  if (!localRay.has_value()) {
+    return false;
+  }
   const float padding = std::max(mSceneRadius * 0.015F, 1.0e-4F);
   const QVector3D paddingVector(padding, padding, padding);
-  return rayAabbDistance(localRay, modelBoundsMinimum() - paddingVector,
-                         modelBoundsMaximum() + paddingVector)
+  return rayAabbDistance(*localRay, modelBoundsMinimum() - paddingVector,
+                          modelBoundsMaximum() + paddingVector)
       .has_value();
 }
 
-bool NativeViewport::beginModelDrag(const QPointF &position) {
-  if (!mModelSelected || !modelHitAt(position)) {
-    return false;
+QPointF NativeViewport::currentPointerPosition() const {
+  if (!mPointerPosition.isNull() && mPointerPosition.x() >= 0.0 &&
+      mPointerPosition.y() >= 0.0 &&
+      mPointerPosition.x() <= width() && mPointerPosition.y() <= height()) {
+    return mPointerPosition;
   }
-  const std::optional<WorldRay> ray =
-      screenRay(position, size(), viewProjectionMatrix());
-  QVector3D normal = mTarget - cameraPosition();
-  if (!ray.has_value() || normal.lengthSquared() <= 1.0e-12F) {
-    return false;
-  }
-  normal.normalize();
-  const auto intersection = rayPlaneIntersection(
-      *ray, transformedSceneCenter(), normal);
-  if (!intersection.has_value()) {
-    return false;
-  }
-  mModelDragActive = true;
-  mModelDragStartTranslation = mModelTranslation;
-  mModelDragStartIntersection = *intersection;
-  mModelDragPlaneNormal = normal;
-  setCursor(Qt::ClosedHandCursor);
-  return true;
+  return QPointF(width() * 0.5, height() * 0.5);
 }
 
-void NativeViewport::updateModelDrag(const QPointF &position) {
-  if (!mModelDragActive) {
+float NativeViewport::projectedModelRadius(const QPointF &center) const {
+  const QVector3D minimum = modelBoundsMinimum();
+  const QVector3D maximum = modelBoundsMaximum();
+  const QMatrix4x4 modelViewProjection =
+      viewProjectionMatrix() * modelMatrix();
+  qreal radius = 0.0;
+  for (int corner = 0; corner < 8; ++corner) {
+    const QVector3D point((corner & 1) != 0 ? maximum.x() : minimum.x(),
+                          (corner & 2) != 0 ? maximum.y() : minimum.y(),
+                          (corner & 4) != 0 ? maximum.z() : minimum.z());
+    const auto projected = projectPoint(point, modelViewProjection);
+    if (projected.has_value()) {
+      radius = std::max(radius, QLineF(center, *projected).length());
+    }
+  }
+  const qreal maximumRadius =
+      std::max<qreal>(56.0, std::min(width(), height()) * 0.42);
+  return static_cast<float>(std::clamp(radius, 56.0, maximumRadius));
+}
+
+void NativeViewport::beginModelTransform(const InteractionMode mode,
+                                         const bool trackball) {
+  if (!mModelSelected || !selectableModelAvailable() ||
+      (mode != InteractionMode::Move && mode != InteractionMode::Rotate)) {
     return;
   }
-  const std::optional<WorldRay> ray =
-      screenRay(position, size(), viewProjectionMatrix());
-  if (!ray.has_value()) {
-    return;
+  if (mModelDragActive) {
+    finishModelTransform(false);
   }
-  const auto intersection = rayPlaneIntersection(
-      *ray, mSceneCenter + mModelDragStartTranslation,
-      mModelDragPlaneNormal);
-  if (!intersection.has_value()) {
-    return;
+  const InteractionMode previousMode = mMode;
+  mMode = mode;
+  mModelDragActive = true;
+  mTrackballRotation = mode == InteractionMode::Rotate && trackball;
+  mTransformConstraint = {};
+  mTransformNumericInput.clear();
+  mTransformModifiers = Qt::NoModifier;
+  mModelDragStartTransform = {mModelTranslation, mModelRotation};
+  mModelTransformStartPosition = currentPointerPosition();
+  mModelTransformCurrentPosition = mModelTransformStartPosition;
+  mModelDragPlaneNormal = mTarget - cameraPosition();
+  if (mModelDragPlaneNormal.lengthSquared() <= 1.0e-12F) {
+    mModelDragPlaneNormal = QVector3D(0.0F, 0.0F, -1.0F);
+  } else {
+    mModelDragPlaneNormal.normalize();
   }
-  mModelTranslation =
-      mModelDragStartTranslation + *intersection - mModelDragStartIntersection;
+  const QVector3D pivot =
+      mSceneCenter + mModelDragStartTransform.translation;
+  const auto center = projectPoint(pivot, viewProjectionMatrix());
+  mModelTransformScreenCenter =
+      center.value_or(QPointF(width() * 0.5, height() * 0.5));
+  mModelRotationRadiusPixels =
+      projectedModelRadius(mModelTransformScreenCenter);
+  const auto startRay = screenRay(mModelTransformStartPosition, size(),
+                                  viewProjectionMatrix());
+  const auto intersection =
+      startRay.has_value()
+          ? rayPlaneIntersection(*startRay, pivot, mModelDragPlaneNormal)
+          : std::nullopt;
+  mModelDragStartIntersection = intersection.value_or(pivot);
+  setFocus(Qt::ShortcutFocusReason);
+  setCursor(defaultInteractionCursor(mMode));
+  setToolTip({});
+  if (previousMode != mMode) {
+    emit interactionModeChanged(mMode);
+  }
+  notifyModelInteractionState();
   update();
 }
 
-void NativeViewport::finishModelDrag() {
+QVector3D NativeViewport::transformConstraintAxis() const {
+  if (mTransformConstraint.axis < 0 || mTransformConstraint.axis > 2) {
+    return {};
+  }
+  QVector3D axis;
+  axis[mTransformConstraint.axis] = 1.0F;
+  if (mTransformConstraint.local) {
+    axis = mModelDragStartTransform.rotation.rotatedVector(axis);
+  }
+  return axis.normalized();
+}
+
+QString NativeViewport::transformConstraintLabel() const {
+  if (mTransformConstraint.kind == TransformConstraintKind::None ||
+      mTransformConstraint.axis < 0 || mTransformConstraint.axis > 2) {
+    return QStringLiteral("自由");
+  }
+  static const std::array<QString, 3> labels = {
+      QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
+  const QString space = mTransformConstraint.local
+                            ? QStringLiteral("局部")
+                            : QStringLiteral("全局");
+  return mTransformConstraint.kind == TransformConstraintKind::Plane
+             ? QStringLiteral("%1 %2 平面").arg(space, labels.at(
+                                                          mTransformConstraint.axis))
+             : QStringLiteral("%1 %2 轴").arg(space, labels.at(
+                                                        mTransformConstraint.axis));
+}
+
+float NativeViewport::transformSnapStep(const bool fine) const {
+  const ReferenceGridScale scale = referenceGridScale(
+      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const float coarse = std::max(scale.displayMajorStep * 0.1F,
+                                scale.minimumStep);
+  return fine ? coarse * 0.1F : coarse;
+}
+
+void NativeViewport::updateModelTransform(
+    const QPointF &position, const Qt::KeyboardModifiers modifiers) {
   if (!mModelDragActive) {
     return;
+  }
+  mModelTransformCurrentPosition = position;
+  mTransformModifiers = modifiers;
+  const QVector3D pivot =
+      mSceneCenter + mModelDragStartTransform.translation;
+  const auto startRay = screenRay(mModelTransformStartPosition, size(),
+                                  viewProjectionMatrix());
+  const auto currentRay =
+      screenRay(position, size(), viewProjectionMatrix());
+  bool numericReady = false;
+  const double numericValue = mTransformNumericInput.toDouble(&numericReady);
+  const bool precision = modifiers.testFlag(Qt::ShiftModifier);
+  const bool snap = modifiers.testFlag(Qt::ControlModifier);
+
+  if (mMode == InteractionMode::Move) {
+    QVector3D delta;
+    const QVector3D axis = transformConstraintAxis();
+    if (startRay.has_value() && currentRay.has_value() &&
+        mTransformConstraint.kind == TransformConstraintKind::Axis) {
+      const auto startParameter = rayAxisParameter(*startRay, pivot, axis);
+      const auto currentParameter = rayAxisParameter(*currentRay, pivot, axis);
+      if (startParameter.has_value() && currentParameter.has_value()) {
+        delta = axis * (*currentParameter - *startParameter);
+      }
+    } else if (startRay.has_value() && currentRay.has_value()) {
+      const QVector3D normal =
+          mTransformConstraint.kind == TransformConstraintKind::Plane
+              ? axis
+              : mModelDragPlaneNormal;
+      const auto start = rayPlaneIntersection(*startRay, pivot, normal);
+      const auto current = rayPlaneIntersection(*currentRay, pivot, normal);
+      if (start.has_value() && current.has_value()) {
+        delta = *current - *start;
+      }
+    }
+    if (precision) {
+      delta *= 0.1F;
+    }
+    if (numericReady && std::isfinite(numericValue)) {
+      QVector3D direction = delta;
+      if (mTransformConstraint.kind == TransformConstraintKind::Axis) {
+        direction = axis;
+      } else if (direction.lengthSquared() <= 1.0e-12F) {
+        const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+        direction = QVector3D::crossProduct(mModelDragPlaneNormal,
+                                            frame.upDirection);
+      }
+      if (direction.lengthSquared() > 1.0e-12F) {
+        delta = direction.normalized() * static_cast<float>(numericValue);
+      }
+    }
+    if (snap) {
+      const float step = transformSnapStep(precision);
+      if (mTransformConstraint.kind == TransformConstraintKind::Axis) {
+        const float amount = QVector3D::dotProduct(delta, axis);
+        delta = axis * (std::round(amount / step) * step);
+      } else if (mTransformConstraint.kind == TransformConstraintKind::Plane &&
+                 mTransformConstraint.local) {
+        QVector3D snapped;
+        for (int component = 0; component < 3; ++component) {
+          if (component == mTransformConstraint.axis) {
+            continue;
+          }
+          QVector3D localAxis;
+          localAxis[component] = 1.0F;
+          localAxis = mModelDragStartTransform.rotation.rotatedVector(localAxis)
+                          .normalized();
+          const float amount = QVector3D::dotProduct(delta, localAxis);
+          snapped += localAxis * (std::round(amount / step) * step);
+        }
+        delta = snapped;
+      } else {
+        for (int component = 0; component < 3; ++component) {
+          delta[component] = std::round(delta[component] / step) * step;
+        }
+        if (mTransformConstraint.kind == TransformConstraintKind::Plane &&
+            mTransformConstraint.axis >= 0) {
+          delta[mTransformConstraint.axis] = 0.0F;
+        }
+      }
+    }
+    mModelTranslation = mModelDragStartTransform.translation + delta;
+    mModelRotation = mModelDragStartTransform.rotation;
+  } else if (mMode == InteractionMode::Rotate) {
+    QQuaternion deltaRotation;
+    if (mTrackballRotation) {
+      deltaRotation = trackballRotationDelta(
+          mModelTransformStartPosition, position, mModelTransformScreenCenter,
+          mModelRotationRadiusPixels, viewMatrix());
+      QVector3D rotationAxis;
+      float angle = 0.0F;
+      deltaRotation.getAxisAndAngle(&rotationAxis, &angle);
+      if (numericReady && std::isfinite(numericValue)) {
+        angle = static_cast<float>(numericValue);
+      } else if (precision) {
+        angle *= 0.1F;
+      }
+      if (snap) {
+        const float step = precision ? 1.0F : 5.0F;
+        angle = std::round(angle / step) * step;
+      }
+      if (rotationAxis.lengthSquared() > 1.0e-12F) {
+        deltaRotation =
+            QQuaternion::fromAxisAndAngle(rotationAxis.normalized(), angle);
+      }
+    } else {
+      QVector3D axis = transformConstraintAxis();
+      if (axis.lengthSquared() <= 1.0e-12F) {
+        axis = cameraPosition() - pivot;
+        if (axis.lengthSquared() <= 1.0e-12F) {
+          axis = QVector3D(0.0F, 0.0F, 1.0F);
+        }
+        axis.normalize();
+      }
+      float angle = 0.0F;
+      if (numericReady && std::isfinite(numericValue)) {
+        angle = static_cast<float>(numericValue);
+      } else if (startRay.has_value() && currentRay.has_value() &&
+                 mTransformConstraint.kind != TransformConstraintKind::None) {
+        const auto start = rayPlaneIntersection(*startRay, pivot, axis);
+        const auto current = rayPlaneIntersection(*currentRay, pivot, axis);
+        if (start.has_value() && current.has_value()) {
+          angle = signedAngleDegrees(*start - pivot, *current - pivot, axis);
+        }
+      } else {
+        const QPointF start =
+            mModelTransformStartPosition - mModelTransformScreenCenter;
+        const QPointF current = position - mModelTransformScreenCenter;
+        const float startAngle = std::atan2(static_cast<float>(-start.y()),
+                                            static_cast<float>(start.x()));
+        const float currentAngle = std::atan2(static_cast<float>(-current.y()),
+                                              static_cast<float>(current.x()));
+        angle = (currentAngle - startAngle) * 180.0F / kPi;
+      }
+      if (precision) {
+        angle *= 0.1F;
+      }
+      if (snap) {
+        const float step = precision ? 1.0F : 5.0F;
+        angle = std::round(angle / step) * step;
+      }
+      deltaRotation = QQuaternion::fromAxisAndAngle(axis, angle);
+    }
+    mModelTranslation = mModelDragStartTransform.translation;
+    mModelRotation = normalizedModelRotation(
+        deltaRotation * mModelDragStartTransform.rotation);
+  }
+  notifyModelInteractionState();
+  update();
+}
+
+void NativeViewport::finishModelTransform(const bool commit) {
+  if (!mModelDragActive) {
+    return;
+  }
+  if (!commit) {
+    mModelTranslation = mModelDragStartTransform.translation;
+    mModelRotation = mModelDragStartTransform.rotation;
   }
   mModelDragActive = false;
+  mTrackballRotation = false;
+  mTransformConstraint = {};
+  mTransformNumericInput.clear();
+  const InteractionMode previousMode = mMode;
+  mMode = InteractionMode::Inspect;
   setCursor(defaultInteractionCursor(mMode));
-  commitModelTranslation();
+  setToolTip({});
+  if (previousMode != mMode) {
+    emit interactionModeChanged(mMode);
+  }
+  if (commit) {
+    commitModelTransform();
+  }
+  notifyModelInteractionState();
   update();
+}
+
+void NativeViewport::applyTransformConstraint(const int axis,
+                                              const bool plane) {
+  if (!mModelDragActive || axis < 0 || axis > 2 || mTrackballRotation) {
+    return;
+  }
+  const TransformConstraintKind requested =
+      plane && mMode == InteractionMode::Move
+          ? TransformConstraintKind::Plane
+          : TransformConstraintKind::Axis;
+  if (mTransformConstraint.kind != requested ||
+      mTransformConstraint.axis != axis) {
+    mTransformConstraint = {requested, axis, false};
+  } else if (!mTransformConstraint.local) {
+    mTransformConstraint.local = true;
+  } else {
+    mTransformConstraint = {};
+  }
+  updateModelTransform(mModelTransformCurrentPosition, mTransformModifiers);
+}
+
+void NativeViewport::updateTransformNumericInput(const int key,
+                                                 const QString &text) {
+  if (!mModelDragActive) {
+    return;
+  }
+  if (key == Qt::Key_Backspace) {
+    if (!mTransformNumericInput.isEmpty()) {
+      mTransformNumericInput.chop(1);
+    }
+  } else if (key == Qt::Key_Delete) {
+    mTransformNumericInput.clear();
+  } else if (key == Qt::Key_Minus && mTransformNumericInput.isEmpty()) {
+    mTransformNumericInput = QStringLiteral("-");
+  } else if ((key == Qt::Key_Period || key == Qt::Key_Comma) &&
+             !mTransformNumericInput.contains(QLatin1Char('.'))) {
+    mTransformNumericInput += mTransformNumericInput.isEmpty()
+                                  ? QStringLiteral("0.")
+                                  : QStringLiteral(".");
+  } else if (text.size() == 1 && text.front().isDigit()) {
+    mTransformNumericInput += text;
+  }
+  updateModelTransform(mModelTransformCurrentPosition, mTransformModifiers);
+}
+
+QString NativeViewport::transformStatusText() const {
+  if (!mModelDragActive) {
+    return {};
+  }
+  const QString operation =
+      mMode == InteractionMode::Move
+          ? QStringLiteral("G 移动")
+          : mTrackballRotation ? QStringLiteral("R R 轨迹球旋转")
+                               : QStringLiteral("R 旋转");
+  QString modifiers;
+  if (mTransformModifiers.testFlag(Qt::ControlModifier)) {
+    modifiers += QStringLiteral(" · 吸附");
+  }
+  if (mTransformModifiers.testFlag(Qt::ShiftModifier)) {
+    modifiers += QStringLiteral(" · 精细");
+  }
+  const QString numeric = mTransformNumericInput.isEmpty()
+                              ? QString()
+                              : QStringLiteral(" · 输入 %1")
+                                    .arg(mTransformNumericInput);
+  return QStringLiteral("%1 · %2%3%4 · 左键/Enter 确认 · 右键/Esc 取消")
+      .arg(operation, transformConstraintLabel(), numeric, modifiers);
 }
 
 std::optional<QPointF>
@@ -3458,13 +4000,37 @@ void NativeViewport::drawModelSelection(
 
   const auto center = projectPoint(mSceneCenter, modelViewProjection);
   if (center.has_value()) {
+    if (mModelDragActive && mMode == InteractionMode::Rotate) {
+      painter.setPen(QPen(QColor(255, 173, 66, 205), 1.7,
+                          Qt::DashLine, Qt::RoundCap));
+      painter.setBrush(Qt::NoBrush);
+      painter.drawEllipse(*center, mModelRotationRadiusPixels,
+                          mModelRotationRadiusPixels);
+    }
+    if (mModelDragActive &&
+        mTransformConstraint.kind != TransformConstraintKind::None) {
+      const QVector3D pivot =
+          mSceneCenter + mModelDragStartTransform.translation;
+      const QVector3D axis = transformConstraintAxis();
+      const float extent = std::max(mSceneRadius * 3.0F, 1.0F);
+      const auto start =
+          projectPoint(pivot - axis * extent, viewProjectionMatrix());
+      const auto end =
+          projectPoint(pivot + axis * extent, viewProjectionMatrix());
+      if (start.has_value() && end.has_value()) {
+        painter.setPen(QPen(navigationAxisColor(mTransformConstraint.axis),
+                            2.2, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(*start, *end);
+      }
+    }
     painter.setPen(QPen(QColor(255, 187, 84, 245), 1.5));
     painter.setBrush(QColor(255, 166, 64, 72));
     painter.drawEllipse(*center, 6.0, 6.0);
-    const QString hint = mModelDragActive
-                             ? QStringLiteral("正在自由移动模型")
-                             : QStringLiteral(
-                                   "模型已选中 · 左键拖动 · Ctrl+左键旋转");
+    const QString hint =
+        mModelDragActive
+            ? transformStatusText()
+            : QStringLiteral(
+                  "模型已选中 · G 移动 · R 旋转 · R R 轨迹球");
     const QFontMetrics metrics(painter.font());
     const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
     QRectF badge(QPointF(center->x() + 12.0, center->y() - 12.0),
