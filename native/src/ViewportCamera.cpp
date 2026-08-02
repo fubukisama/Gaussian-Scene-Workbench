@@ -1,6 +1,8 @@
 #include "ViewportCamera.h"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gsw {
 
@@ -118,6 +120,86 @@ float clampViewportDistance(const float distance, const float sceneRadius) {
     return limits.minimumDistance;
   }
   return std::clamp(distance, limits.minimumDistance, limits.maximumDistance);
+}
+
+std::optional<ViewportCameraFrame>
+viewportFrameForPoints(const std::span<const QVector3D> points,
+                       const OrbitAngles angles, const float aspectRatio,
+                       const bool orthographic, const float margin) {
+  if (points.empty() || !std::isfinite(aspectRatio) || aspectRatio <= 0.0F ||
+      !std::isfinite(margin) || margin < 1.0F) {
+    return std::nullopt;
+  }
+
+  QVector3D minimum(std::numeric_limits<float>::max(),
+                    std::numeric_limits<float>::max(),
+                    std::numeric_limits<float>::max());
+  QVector3D maximum(std::numeric_limits<float>::lowest(),
+                    std::numeric_limits<float>::lowest(),
+                    std::numeric_limits<float>::lowest());
+  for (const QVector3D &point : points) {
+    if (!std::isfinite(point.x()) || !std::isfinite(point.y()) ||
+        !std::isfinite(point.z())) {
+      return std::nullopt;
+    }
+    minimum.setX(std::min(minimum.x(), point.x()));
+    minimum.setY(std::min(minimum.y(), point.y()));
+    minimum.setZ(std::min(minimum.z(), point.z()));
+    maximum.setX(std::max(maximum.x(), point.x()));
+    maximum.setY(std::max(maximum.y(), point.y()));
+    maximum.setZ(std::max(maximum.z(), point.z()));
+  }
+
+  const QVector3D target = (minimum + maximum) * 0.5F;
+  float radius = 0.0F;
+  for (const QVector3D &point : points) {
+    radius = std::max(radius, (point - target).length());
+  }
+  const float safeRadius = std::max(radius, 1.0e-4F);
+  // Capping an extremely wide viewport is conservative. Do not raise a very
+  // narrow aspect ratio: doing so would underestimate its horizontal fit.
+  const float safeAspect = std::min(aspectRatio, 20.0F);
+  const float safeMargin = std::clamp(margin, 1.0F, 2.0F);
+  const float verticalTangent = std::tan(radians(23.0F));
+  const float horizontalTangent = verticalTangent * safeAspect;
+
+  const OrbitFrame frame = orbitFrame(angles);
+  const QVector3D forward = -frame.cameraOffsetDirection;
+  QVector3D right =
+      QVector3D::crossProduct(forward, frame.upDirection);
+  if (right.lengthSquared() <= 1.0e-12F) {
+    return std::nullopt;
+  }
+  right.normalize();
+
+  const float nearPadding = std::max(safeRadius * 0.02F, 1.0e-4F);
+  float distance = nearPadding;
+  for (const QVector3D &point : points) {
+    const QVector3D offset = point - target;
+    const float horizontal =
+        std::abs(QVector3D::dotProduct(offset, right));
+    const float vertical =
+        std::abs(QVector3D::dotProduct(offset, frame.upDirection));
+    const float forwardOffset = QVector3D::dotProduct(offset, forward);
+
+    const float horizontalFit =
+        horizontal * safeMargin / horizontalTangent;
+    const float verticalFit = vertical * safeMargin / verticalTangent;
+    distance = std::max(distance, -forwardOffset + nearPadding);
+    if (orthographic) {
+      distance = std::max({distance, horizontalFit, verticalFit});
+    } else {
+      distance = std::max(
+          {distance, horizontalFit - forwardOffset,
+           verticalFit - forwardOffset});
+    }
+  }
+
+  if (!std::isfinite(distance)) {
+    return std::nullopt;
+  }
+  return ViewportCameraFrame{target, std::max(distance, nearPadding),
+                             safeRadius};
 }
 
 ReferenceGridScale referenceGridScale(const float cameraDistance,

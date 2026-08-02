@@ -477,6 +477,42 @@ void NativeViewport::selectModel() {
   update();
 }
 
+bool NativeViewport::focusModel() {
+  if (mSelectionBusy || !selectableModelAvailable()) {
+    return false;
+  }
+  if (mModelDragActive) {
+    finishModelTransform(false);
+  }
+  selectModel();
+  if (!mModelSelected) {
+    return false;
+  }
+
+  const std::array<QVector3D, 8> corners =
+      transformedModelBoundsCorners();
+  const float aspectRatio =
+      height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
+                   : 1.0F;
+  const std::optional<ViewportCameraFrame> frame = viewportFrameForPoints(
+      corners, {mYawDegrees, mPitchDegrees}, aspectRatio, mOrthographic);
+  if (!frame.has_value()) {
+    return false;
+  }
+
+  mViewSnapAnimation->stop();
+  leaveCameraView();
+  mTarget = frame->target;
+  mDistance = clampViewportDistance(frame->distance, frame->radius);
+  mCameraManipulated = false;
+  setFocus(Qt::ShortcutFocusReason);
+  if (!mPreviewVertices.isEmpty()) {
+    rebuildRenderedVertices();
+  }
+  update();
+  return true;
+}
+
 void NativeViewport::selectModelForMove() {
   selectModel();
   if (mModelSelected) {
@@ -584,8 +620,9 @@ void NativeViewport::resetCamera() {
   mTarget = transformedSceneCenter();
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
+  const float radius = transformedSceneRadius();
   mDistance = clampViewportDistance(
-      std::max(mSceneRadius * 2.8F, 0.1F), mSceneRadius);
+      std::max(radius * 2.8F, 0.1F), radius);
   mOrthographic = false;
   mCameraViewActive = false;
   mStoredCameraView.reset();
@@ -3324,7 +3361,7 @@ void NativeViewport::wheelEvent(QWheelEvent *event) {
   leaveCameraView();
   const float steps = static_cast<float>(event->angleDelta().y()) / 120.0F;
   mDistance = clampViewportDistance(
-      mDistance * std::pow(0.84F, steps), mSceneRadius);
+      mDistance * std::pow(0.84F, steps), transformedSceneRadius());
   update();
   event->accept();
 }
@@ -3353,7 +3390,8 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     break;
   case NavigationGizmoPart::Zoom:
     {
-      const ViewportZoomLimits limits = viewportZoomLimits(mSceneRadius);
+      const ViewportZoomLimits limits =
+          viewportZoomLimits(transformedSceneRadius());
       tooltip = QStringLiteral("上下拖动缩放视图（%1 – %2）")
                     .arg(formatViewportDistance(limits.minimumDistance),
                          formatViewportDistance(limits.maximumDistance));
@@ -3421,7 +3459,7 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
   case NavigationGizmoPart::Zoom:
     mDistance = clampViewportDistance(
         mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
-        mSceneRadius);
+        transformedSceneRadius());
     break;
   case NavigationGizmoPart::Pan:
     panCamera(delta);
@@ -3490,7 +3528,8 @@ void NativeViewport::toggleCameraView() {
     mYawDegrees = mStoredCameraView->yawDegrees;
     mPitchDegrees = mStoredCameraView->pitchDegrees;
     mDistance =
-        clampViewportDistance(mStoredCameraView->distance, mSceneRadius);
+        clampViewportDistance(mStoredCameraView->distance,
+                              transformedSceneRadius());
     mOrthographic = mStoredCameraView->orthographic;
     mCameraViewActive = false;
     mStoredCameraView.reset();
@@ -3733,8 +3772,32 @@ QVector3D NativeViewport::modelBoundsMaximum() const {
   return mSceneCenter + QVector3D(mSceneRadius, mSceneRadius, mSceneRadius);
 }
 
+std::array<QVector3D, 8>
+NativeViewport::transformedModelBoundsCorners() const {
+  const QVector3D minimum = modelBoundsMinimum();
+  const QVector3D maximum = modelBoundsMaximum();
+  const QMatrix4x4 transform = modelMatrix();
+  std::array<QVector3D, 8> corners;
+  for (int corner = 0; corner < 8; ++corner) {
+    const QVector3D point((corner & 1) != 0 ? maximum.x() : minimum.x(),
+                          (corner & 2) != 0 ? maximum.y() : minimum.y(),
+                          (corner & 4) != 0 ? maximum.z() : minimum.z());
+    corners[static_cast<std::size_t>(corner)] = transform.map(point);
+  }
+  return corners;
+}
+
 QVector3D NativeViewport::transformedSceneCenter() const {
   return mSceneCenter + mModelTranslation;
+}
+
+float NativeViewport::transformedSceneRadius() const {
+  const QVector3D center = transformedSceneCenter();
+  float radius = 0.0F;
+  for (const QVector3D &corner : transformedModelBoundsCorners()) {
+    radius = std::max(radius, (corner - center).length());
+  }
+  return std::max(radius, 1.0e-4F);
 }
 
 bool NativeViewport::modelHitAt(const QPointF &position) {

@@ -2,6 +2,7 @@
 
 #include <QtTest>
 
+#include <array>
 #include <limits>
 
 using namespace gsw;
@@ -16,6 +17,8 @@ private slots:
   void wrapsAnglesAfterCompleteTurns();
   void usesZAsWorldUpAxis();
   void keepsCameraFrameContinuousAcrossPoles();
+  void framesModelBoundsAtCurrentOrbit();
+  void rejectsInvalidFocusBounds();
   void selectsScreenParallelGridForAxisOrthographicViews();
   void keepsWorldGroundGridForPerspectiveViews();
   void clampsZoomToSceneAwareFiniteLimits();
@@ -86,6 +89,72 @@ void ViewportCameraTests::keepsCameraFrameContinuousAcrossPoles() {
                                      after.upDirection)) < 1.0e-5F);
   QVERIFY(qAbs(after.cameraOffsetDirection.length() - 1.0F) < 1.0e-5F);
   QVERIFY(qAbs(after.upDirection.length() - 1.0F) < 1.0e-5F);
+}
+
+void ViewportCameraTests::framesModelBoundsAtCurrentOrbit() {
+  const std::array<QVector3D, 8> points = {
+      QVector3D(-6.0F, -2.0F, -1.0F), QVector3D(6.0F, -2.0F, -1.0F),
+      QVector3D(-6.0F, 2.0F, -1.0F),  QVector3D(6.0F, 2.0F, -1.0F),
+      QVector3D(-6.0F, -2.0F, 1.0F),  QVector3D(6.0F, -2.0F, 1.0F),
+      QVector3D(-6.0F, 2.0F, 1.0F),   QVector3D(6.0F, 2.0F, 1.0F),
+  };
+  constexpr OrbitAngles angles{42.0F, 24.0F};
+  constexpr float aspectRatio = 16.0F / 9.0F;
+  constexpr float margin = 1.08F;
+  const std::optional<ViewportCameraFrame> result =
+      viewportFrameForPoints(points, angles, aspectRatio, false, margin);
+
+  QVERIFY(result.has_value());
+  QCOMPARE(result->target, QVector3D());
+  QVERIFY(result->distance > 0.0F);
+  QVERIFY(result->distance < result->radius * 2.8F);
+
+  const OrbitFrame orbit = orbitFrame(angles);
+  const QVector3D forward = -orbit.cameraOffsetDirection;
+  const QVector3D right =
+      QVector3D::crossProduct(forward, orbit.upDirection).normalized();
+  constexpr float verticalTangent = 0.4244748F;
+  const float horizontalTangent = verticalTangent * aspectRatio;
+  for (const QVector3D &point : points) {
+    const QVector3D offset = point - result->target;
+    const float depth = result->distance +
+                        QVector3D::dotProduct(offset, forward);
+    QVERIFY(depth > 0.0F);
+    const float normalizedX =
+        std::abs(QVector3D::dotProduct(offset, right)) /
+        (depth * horizontalTangent);
+    const float normalizedY =
+        std::abs(QVector3D::dotProduct(offset, orbit.upDirection)) /
+        (depth * verticalTangent);
+    QVERIFY(normalizedX <= 1.0F / margin + 1.0e-4F);
+    QVERIFY(normalizedY <= 1.0F / margin + 1.0e-4F);
+  }
+
+  constexpr float portraitAspect = 0.5F;
+  const std::optional<ViewportCameraFrame> orthographic =
+      viewportFrameForPoints(points, angles, portraitAspect, true, margin);
+  QVERIFY(orthographic.has_value());
+  const float orthographicHalfWidth =
+      orthographic->distance * verticalTangent * portraitAspect;
+  const float orthographicHalfHeight =
+      orthographic->distance * verticalTangent;
+  for (const QVector3D &point : points) {
+    const QVector3D offset = point - orthographic->target;
+    QVERIFY(std::abs(QVector3D::dotProduct(offset, right)) <=
+            orthographicHalfWidth / margin + 1.0e-4F);
+    QVERIFY(std::abs(
+                QVector3D::dotProduct(offset, orbit.upDirection)) <=
+            orthographicHalfHeight / margin + 1.0e-4F);
+  }
+}
+
+void ViewportCameraTests::rejectsInvalidFocusBounds() {
+  QVERIFY(!viewportFrameForPoints({}, {}, 1.0F, false).has_value());
+  const std::array<QVector3D, 1> invalid = {QVector3D(
+      std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F)};
+  QVERIFY(!viewportFrameForPoints(invalid, {}, 1.0F, false).has_value());
+  const std::array<QVector3D, 1> valid = {QVector3D()};
+  QVERIFY(!viewportFrameForPoints(valid, {}, 0.0F, false).has_value());
 }
 
 void ViewportCameraTests::selectsScreenParallelGridForAxisOrthographicViews() {

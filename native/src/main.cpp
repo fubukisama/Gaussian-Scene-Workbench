@@ -325,6 +325,11 @@ int main(int argc, char *argv[]) {
                   const bool coordinateReportReady =
                       coordinateReportAction != nullptr &&
                       coordinateReportAction->isEnabled();
+                  auto *findModelAction = window.findChild<QAction *>(
+                      QStringLiteral("findModelAction"));
+                  const auto *selectionToolbar =
+                      window.findChild<QToolBar *>(
+                          QStringLiteral("selectionToolbar"));
                   const auto *moveModelAction =
                       window.findChild<QAction *>(
                           QStringLiteral("moveModelAction"));
@@ -366,7 +371,36 @@ int main(int argc, char *argv[]) {
                   const bool preciseModelPickReady =
                       sourceFaceCount > 0 ? precisePickSelected
                                           : !precisePickSelected;
-                  viewport->selectModel();
+                  viewport->clearSelection();
+                  const float distanceBeforeFind = viewport->viewDistance();
+                  if (findModelAction != nullptr) {
+                    findModelAction->trigger();
+                  }
+                  const bool findModelReady =
+                      findModelAction != nullptr &&
+                      findModelAction->isEnabled() &&
+                      selectionToolbar != nullptr &&
+                      selectionToolbar->isVisible() &&
+                      selectionToolbar->actions().contains(findModelAction) &&
+                      viewport->modelSelected() &&
+                      (viewport->viewTarget() - coordinates.localCenter())
+                              .lengthSquared() <
+                          1.0e-6F &&
+                      viewport->viewDistance() < distanceBeforeFind;
+                  viewport->repaint();
+                  const QImage focusedModelFrame =
+                      viewport->grabFramebuffer();
+                  if (!focusedModelFrame.isNull()) {
+                    focusedModelFrame.save(QDir::temp().filePath(
+                        QStringLiteral("gsw-find-model-focus-smoke.png")));
+                  }
+                  window.repaint();
+                  const QImage focusedWindowFrame =
+                      window.grab().toImage();
+                  if (!focusedWindowFrame.isNull()) {
+                    focusedWindowFrame.save(QDir::temp().filePath(
+                        QStringLiteral("gsw-find-model-window-smoke.png")));
+                  }
                   const bool modelSelectionReady =
                       modelSelectionAvailable && viewport->modelSelected();
                   viewport->setModelGizmoMode(gsw::TransformGizmoMode::Move);
@@ -502,6 +536,7 @@ int main(int argc, char *argv[]) {
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
                                         preciseModelPickReady &&
+                                        findModelReady &&
                                         orientationControlReady &&
                                         modelSelectionReady && modelMoveReady &&
                                         modelRotateReady && modelTrackballReady &&
@@ -529,6 +564,7 @@ int main(int argc, char *argv[]) {
                           << coordinateReportReady
                           << "precise-model-pick-ready"
                           << preciseModelPickReady
+                          << "find-model-ready" << findModelReady
                           << "orientation-control-ready"
                           << orientationControlReady
                           << "model-selection-ready"
@@ -782,6 +818,8 @@ int main(int argc, char *argv[]) {
               QStringLiteral("environmentAction"));
           QAction *resetCamera = window.findChild<QAction *>(
               QStringLiteral("resetCameraAction"));
+          QAction *findModel = window.findChild<QAction *>(
+              QStringLiteral("findModelAction"));
           const QToolBar *mainToolbar = window.findChild<QToolBar *>(
               QStringLiteral("mainToolbar"));
           const QToolBar *renderToolbar = window.findChild<QToolBar *>(
@@ -873,6 +911,8 @@ int main(int argc, char *argv[]) {
               !renderToolbar->isVisible() &&
               !selectionToolbar->isVisible() && !editToolbar->isVisible() &&
               environment != nullptr && resetCamera != nullptr &&
+              findModel != nullptr && !findModel->isEnabled() &&
+              selectionToolbar->actions().contains(findModel) &&
               !mainToolbar->actions().contains(environment) &&
               !mainToolbar->actions().contains(resetCamera) &&
               projectDock != nullptr && inspectorDock != nullptr &&

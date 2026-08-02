@@ -1049,6 +1049,21 @@ void MainWindow::createActions() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
   });
 
+  mFindModelAction = new QAction(QStringLiteral("查找模型"), this);
+  mFindModelAction->setObjectName(QStringLiteral("findModelAction"));
+  mFindModelAction->setShortcut(QKeySequence(QStringLiteral("F")));
+  mFindModelAction->setToolTip(
+      QStringLiteral("自动选中模型并按完整范围拉近视角 (F)"));
+  connect(mFindModelAction, &QAction::triggered, this, [this]() {
+    if (mViewport->focusModel()) {
+      statusBar()->showMessage(
+          QStringLiteral("已找到并聚焦模型；G 移动，R 旋转，S 缩放"),
+          4500);
+    } else {
+      statusBar()->showMessage(QStringLiteral("当前没有可查找的模型"), 3500);
+    }
+  });
+
   mMoveModelAction = new QAction(QStringLiteral("移动模型"), this);
   mMoveModelAction->setObjectName(QStringLiteral("moveModelAction"));
   mMoveModelAction->setCheckable(true);
@@ -1290,6 +1305,7 @@ void MainWindow::createMenus() {
   QMenu *sceneMenu = menuBar()->addMenu(QStringLiteral("场景"));
   sceneMenu->addAction(mImportSceneAction);
   sceneMenu->addAction(actions().at(4));
+  sceneMenu->addAction(mFindModelAction);
   sceneMenu->addSeparator();
   sceneMenu->addAction(mInspectAction);
   sceneMenu->addAction(mMoveModelAction);
@@ -1420,6 +1436,8 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
+  mSelectionToolbar->addAction(mFindModelAction);
+  mSelectionToolbar->addSeparator();
   mSelectionToolbar->addAction(mRectangleAction);
   mSelectionToolbar->addAction(mLassoAction);
   mSelectionToolbar->addAction(mBrushAction);
@@ -1521,6 +1539,8 @@ void MainWindow::createProjectDock() {
             } else if (kind == QStringLiteral("reconstruction")) {
               menu.addAction(mClearReconstructionAction);
             } else if (kind == QStringLiteral("scene")) {
+              menu.addAction(mFindModelAction);
+              menu.addSeparator();
               menu.addAction(mClearSceneAction);
             } else if (kind == QStringLiteral("tasks")) {
               menu.addAction(mClearTasksAction);
@@ -2583,6 +2603,7 @@ void MainWindow::updateEditActions() {
   const bool baseInteractive = !mSelectionBusy && !mRecoveryBlocked &&
                                !mProcessSupervisor.isRunning();
   const bool modelInteractive = baseInteractive && mModelReady;
+  const bool modelNavigationAvailable = !mSelectionBusy && mModelReady;
   const bool pointInteractive = baseInteractive && mSceneReady;
   const bool anyScene = mModelReady || mSceneReady;
   if (mInspectAction == nullptr) {
@@ -2598,6 +2619,7 @@ void MainWindow::updateEditActions() {
     mEditToolbar->setVisible(anyScene);
   }
   mInspectAction->setEnabled(modelInteractive || pointInteractive);
+  mFindModelAction->setEnabled(modelNavigationAvailable);
   mMoveModelAction->setEnabled(modelInteractive);
   mRotateModelAction->setEnabled(modelInteractive);
   mScaleModelAction->setEnabled(modelInteractive);

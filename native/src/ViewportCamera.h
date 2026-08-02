@@ -4,6 +4,9 @@
 #include <QString>
 #include <QVector3D>
 
+#include <optional>
+#include <span>
+
 namespace gsw {
 
 struct OrbitAngles {
@@ -23,6 +26,12 @@ enum class ReferenceGridPlane { XY, XZ, YZ };
 struct ViewportZoomLimits {
   float minimumDistance = 0.001F;
   float maximumDistance = 100.0F;
+};
+
+struct ViewportCameraFrame final {
+  QVector3D target;
+  float distance = 1.0F;
+  float radius = 1.0F;
 };
 
 struct ReferenceGridScale {
@@ -58,6 +67,11 @@ referenceGridPlane(OrbitAngles angles, bool orthographic);
 [[nodiscard]] ViewportZoomLimits viewportZoomLimits(float sceneRadius);
 
 [[nodiscard]] float clampViewportDistance(float distance, float sceneRadius);
+
+[[nodiscard]] std::optional<ViewportCameraFrame>
+viewportFrameForPoints(std::span<const QVector3D> points,
+                       OrbitAngles angles, float aspectRatio,
+                       bool orthographic, float margin = 1.08F);
 
 [[nodiscard]] ReferenceGridScale referenceGridScale(float cameraDistance,
                                                     int viewportPixelHeight);

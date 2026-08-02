@@ -25,6 +25,7 @@
 #include <QString>
 #include <QVector3D>
 
+#include <array>
 #include <optional>
 
 class QMouseEvent;
@@ -73,6 +74,7 @@ public:
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
   void selectModel();
+  [[nodiscard]] bool focusModel();
   void selectModelForMove();
   void selectModelForRotate();
   void selectModelForScale();
@@ -138,6 +140,8 @@ public:
     return mModelDragActive;
   }
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
+  [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
+  [[nodiscard]] float viewDistance() const { return mDistance; }
   [[nodiscard]] bool selectableModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
@@ -259,7 +263,10 @@ private:
   [[nodiscard]] QMatrix4x4 modelMatrix() const;
   [[nodiscard]] QVector3D modelBoundsMinimum() const;
   [[nodiscard]] QVector3D modelBoundsMaximum() const;
+  [[nodiscard]] std::array<QVector3D, 8>
+  transformedModelBoundsCorners() const;
   [[nodiscard]] QVector3D transformedSceneCenter() const;
+  [[nodiscard]] float transformedSceneRadius() const;
   [[nodiscard]] bool modelHitAt(const QPointF &position);
   [[nodiscard]] std::optional<bool>
   modelGeometryHitAt(const QPointF &position);
