@@ -27,6 +27,8 @@ Camera metadata is optional. When a scene is loaded, the desktop searches the sc
 
 Rectangle, lasso, and brush selection operate on every source vertex even when display rendering is sampled. The brush shows its exact screen-space radius, persists the chosen size, and uses the same visible-only filter and original-index edit model; GPU ID picking remains pending.
 
+Object selection keeps the source-accurate bounds only as a broad-phase check, then renders the currently resident point, Gaussian-center, or mesh primitives into a small device-pixel-aware GPU mask around the pointer. Empty volume inside a loose scan AABB therefore no longer selects the model. Selected bounds use subdued corner brackets while idle and expand to the complete dashed box only during an active transform, so the coordinate extent stays truthful without covering the viewport.
+
 Crop export supports ASCII and binary little-/big-endian point/Gaussian PLY files. It copies retained vertex records without re-encoding custom Gaussian fields, updates the vertex count, writes atomically, and refuses indexed mesh PLY files whose face indices would become invalid.
 
 COLMAP is an external native dependency and is never assumed to live on the system drive. The application checks the saved path, `COLMAP_PATH`/`COLMAP_EXE`, repository-local tool folders, the newest semantic version under `<application-drive>:\Tools\COLMAP`, legacy locations, and `PATH`; if none exists, the reconstruction dialog requires the user to select `colmap.exe` before a task can start. Official COLMAP 4.1.0 CUDA has been exercised through the complete native worker pipeline; see `docs/COLMAP_SETUP.md`.

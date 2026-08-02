@@ -4,6 +4,8 @@
 #include <QMatrix4x4>
 #include <QTest>
 
+#include <array>
+
 using namespace gsw;
 
 class ModelInteractionTests final : public QObject {
@@ -17,6 +19,7 @@ private slots:
   void buildsPivotedTrsTransformAndInversePickRay();
   void computesStableAxisAndTrackballRotations();
   void laysOutAndHitsTransformGizmos();
+  void mapsPreciseModelPickNeighborhood();
 };
 
 void ModelInteractionTests::unprojectsViewportCentre() {
@@ -203,6 +206,22 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
   QCOMPARE(hitTestTransformToolStrip(tools, tools.buttons[3].center()), 3);
   QCOMPARE(hitTestTransformToolStrip(tools, tools.orientationButton.center()),
            4);
+}
+
+void ModelInteractionTests::mapsPreciseModelPickNeighborhood() {
+  const auto mapping = modelPickViewport(QPointF(100.0, 50.0),
+                                         QSize(800, 600), 2.0, 6.0);
+  QVERIFY(mapping.has_value());
+  QCOMPARE(mapping->framebufferSize, QSize(25, 25));
+  QCOMPARE(mapping->sourceViewportSize, QSize(1600, 1200));
+  QCOMPARE(mapping->sampleCenter, QPoint(12, 12));
+  QCOMPARE(mapping->viewportOrigin, QPoint(-188, -1087));
+
+  std::array<quint8, 25> empty{};
+  QVERIFY(!modelPickBufferHasCoverage(empty));
+  empty.at(12) = 255;
+  QVERIFY(modelPickBufferHasCoverage(empty));
+  QVERIFY(!modelPickViewport(QPointF(), QSize(), 1.0).has_value());
 }
 
 void ModelInteractionTests::computesStableAxisAndTrackballRotations() {

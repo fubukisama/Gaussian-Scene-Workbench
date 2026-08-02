@@ -1,12 +1,14 @@
 #pragma once
 
 #include <QMatrix4x4>
+#include <QPoint>
 #include <QPointF>
 #include <QQuaternion>
 #include <QSize>
 #include <QVector3D>
 
 #include <optional>
+#include <span>
 
 namespace gsw {
 
@@ -24,6 +26,17 @@ struct ModelTransform final {
 
   [[nodiscard]] bool isValid() const;
   [[nodiscard]] QMatrix4x4 matrix(const QVector3D &pivot) const;
+};
+
+struct ModelPickViewport final {
+  QSize framebufferSize;
+  QSize sourceViewportSize;
+  QPoint viewportOrigin;
+  QPoint sampleCenter;
+
+  [[nodiscard]] bool isValid() const {
+    return !framebufferSize.isEmpty() && !sourceViewportSize.isEmpty();
+  }
 };
 
 [[nodiscard]] QQuaternion
@@ -53,6 +66,13 @@ rayPlaneIntersection(const WorldRay &ray, const QVector3D &planePoint,
 
 [[nodiscard]] std::optional<WorldRay>
 rayInModelSpace(const WorldRay &worldRay, const QMatrix4x4 &modelMatrix);
+
+[[nodiscard]] std::optional<ModelPickViewport>
+modelPickViewport(const QPointF &screenPosition, const QSize &viewportSize,
+                  qreal devicePixelRatio, qreal tolerancePixels = 6.0);
+
+[[nodiscard]] bool
+modelPickBufferHasCoverage(std::span<const quint8> redSamples);
 
 [[nodiscard]] std::optional<float>
 rayAxisParameter(const WorldRay &ray, const QVector3D &axisOrigin,

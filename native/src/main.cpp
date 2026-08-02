@@ -341,6 +341,30 @@ int main(int argc, char *argv[]) {
                       rotateModelAction->isEnabled() &&
                       scaleModelAction != nullptr &&
                       scaleModelAction->isEnabled();
+                  const QPointF precisePickPosition =
+                      QPointF(viewport->width() * 0.5,
+                              viewport->height() * 0.5) +
+                      (sourceFaceCount > 0 ? QPointF() : QPointF(120.0, 0.0));
+                  const QPointF globalPrecisePickPosition =
+                      viewport->mapToGlobal(precisePickPosition.toPoint());
+                  QMouseEvent precisePickPress(
+                      QEvent::MouseButtonPress, precisePickPosition,
+                      precisePickPosition, globalPrecisePickPosition,
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                  QMouseEvent precisePickRelease(
+                      QEvent::MouseButtonRelease, precisePickPosition,
+                      precisePickPosition, globalPrecisePickPosition,
+                      Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport, &precisePickPress);
+                  QCoreApplication::sendEvent(viewport, &precisePickRelease);
+                  const bool precisePickSelected = viewport->modelSelected();
+                  // Mesh fixtures cover the viewport centre.  The point-only
+                  // fixture contains only the eight AABB corners; one corner
+                  // lies on the diagonal view ray, so sample a nearby empty
+                  // position that remains well inside the projected box.
+                  const bool preciseModelPickReady =
+                      sourceFaceCount > 0 ? precisePickSelected
+                                          : !precisePickSelected;
                   viewport->selectModel();
                   const bool modelSelectionReady =
                       modelSelectionAvailable && viewport->modelSelected();
@@ -439,6 +463,7 @@ int main(int argc, char *argv[]) {
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
+                                        preciseModelPickReady &&
                                         modelSelectionReady && modelMoveReady &&
                                         modelRotateReady && modelTrackballReady &&
                                         modelScaleReady;
@@ -463,6 +488,8 @@ int main(int argc, char *argv[]) {
                           << coordinateMetadataReady
                           << "coordinate-report-ready"
                           << coordinateReportReady
+                          << "precise-model-pick-ready"
+                          << preciseModelPickReady
                           << "model-selection-ready"
                            << modelSelectionReady << "model-move-ready"
                            << modelMoveReady << "model-rotate-ready"

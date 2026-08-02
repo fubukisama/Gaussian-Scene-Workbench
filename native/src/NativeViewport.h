@@ -253,7 +253,9 @@ private:
   [[nodiscard]] QVector3D modelBoundsMinimum() const;
   [[nodiscard]] QVector3D modelBoundsMaximum() const;
   [[nodiscard]] QVector3D transformedSceneCenter() const;
-  [[nodiscard]] bool modelHitAt(const QPointF &position) const;
+  [[nodiscard]] bool modelHitAt(const QPointF &position);
+  [[nodiscard]] std::optional<bool>
+  modelGeometryHitAt(const QPointF &position);
   [[nodiscard]] std::optional<QPointF>
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
@@ -376,6 +378,7 @@ private:
   bool mMeshShaderReady = false;
   bool mGridShaderReady = false;
   bool mDepthOverlayShaderReady = false;
+  bool mModelPickShaderReady = false;
   bool mPreviewOnlyScene = false;
   bool mInteractionLodActive = false;
   bool mProgressiveUploadActive = false;
@@ -463,6 +466,7 @@ private:
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
   QOpenGLShaderProgram *mGridProgram = nullptr;
   QOpenGLShaderProgram *mDepthOverlayProgram = nullptr;
+  QOpenGLShaderProgram *mModelPickProgram = nullptr;
   QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
   QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};

@@ -296,6 +296,12 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  set_tests_properties(native_dense_grid_point_scene PROPERTIES
+    ENVIRONMENT
+      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
   set_tests_properties(native_textured_paged_mesh_scene PROPERTIES
     ENVIRONMENT
       "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=3;GSW_MESH_RESIDENT_FACE_LIMIT=3;GSW_EXPECT_MESH_TEXTURE=1"

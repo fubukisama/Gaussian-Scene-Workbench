@@ -7,7 +7,7 @@
   "runtime": "Qt 6.8 / C++20",
   "renderer": "Native OpenGL world-fixed infinite grid, depth-occluded XYZ and selection overlays, plus screen-space Gaussian preview with point fallback; higher-order SH and tile renderer pending",
   "reconstruction": "Guarded native COLMAP 4.1-compatible presets with newest-version discovery, CUDA-tested execution, cancellation, and sparse-model validation",
-  "editing": "Object-level point/mesh/Gaussian picking with Blender-style Move/Rotate/Scale/Transform gizmos, spacious screen-layered combined handles, guarded ring/trackball hit zones, direct axis/plane/view handles, modal G/R/RR/S transforms, snapping, numeric entry, exact cancel, transform undo/redo, recovery-safe TRS persistence, and full-source rectangle/lasso/brush trimming",
+  "editing": "GPU-refined point/mesh/Gaussian object picking with empty-AABB rejection and compact idle corner bounds, Blender-style Move/Rotate/Scale/Transform gizmos, spacious screen-layered combined handles, guarded ring/trackball hit zones, direct axis/plane/view handles, modal G/R/RR/S transforms, snapping, numeric entry, exact cancel, transform undo/redo, recovery-safe TRS persistence, and full-source rectangle/lasso/brush trimming",
   "computeBackendIncluded": true,
   "featureGate": "NATIVE_PARITY.md",
   "legacyWebRuntimeIncluded": false

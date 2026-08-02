@@ -17,6 +17,7 @@
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QOpenGLFramebufferObject>
 #include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QPainterPath>
@@ -34,6 +35,7 @@
 #include <cstddef>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace gsw {
 
@@ -1240,6 +1242,49 @@ void main() {
         sizeof(DepthOverlayVertex));
     mDepthOverlayProgram->release();
     mDepthOverlayBuffer.release();
+  }
+
+  // Selection first uses the inexpensive model AABB as a broad phase, then
+  // renders only real model primitives into a tiny offscreen mask around the
+  // pointer.  Keeping this shader independent from the display shaders makes
+  // the result deterministic for black points, textured meshes and selected
+  // color tinting alike.
+  mModelPickProgram = new QOpenGLShaderProgram(this);
+  const bool modelPickVertexCompiled =
+      mModelPickProgram->addShaderFromSourceCode(
+          QOpenGLShader::Vertex,
+          R"GLSL(#version 130
+in vec3 position;
+uniform mat4 viewProjection;
+uniform float pointSize;
+
+void main() {
+  gl_Position = viewProjection * vec4(position, 1.0);
+  gl_PointSize = pointSize;
+}
+)GLSL");
+  const bool modelPickFragmentCompiled =
+      mModelPickProgram->addShaderFromSourceCode(
+          QOpenGLShader::Fragment,
+          R"GLSL(#version 130
+uniform bool pointPrimitive;
+out vec4 fragmentColor;
+
+void main() {
+  if (pointPrimitive &&
+      length(gl_PointCoord - vec2(0.5)) * 2.0 > 1.0) {
+    discard;
+  }
+  fragmentColor = vec4(1.0, 0.0, 0.0, 1.0);
+}
+)GLSL");
+  mModelPickProgram->bindAttributeLocation("position", 0);
+  mModelPickShaderReady =
+      modelPickVertexCompiled && modelPickFragmentCompiled &&
+      mModelPickProgram->link();
+  if (!mModelPickShaderReady && mSceneLoadMessage.isEmpty()) {
+    mSceneLoadMessage = QStringLiteral("OpenGL model-pick shader failed: %1")
+                            .arg(mModelPickProgram->log());
   }
 
   mTrainingGpuPreviewCapability =
@@ -3694,7 +3739,7 @@ QVector3D NativeViewport::transformedSceneCenter() const {
   return mSceneCenter + mModelTranslation;
 }
 
-bool NativeViewport::modelHitAt(const QPointF &position) const {
+bool NativeViewport::modelHitAt(const QPointF &position) {
   if (!selectableModelAvailable()) {
     return false;
   }
@@ -3710,9 +3755,229 @@ bool NativeViewport::modelHitAt(const QPointF &position) const {
   }
   const float padding = std::max(mSceneRadius * 0.015F, 1.0e-4F);
   const QVector3D paddingVector(padding, padding, padding);
-  return rayAabbDistance(*localRay, modelBoundsMinimum() - paddingVector,
-                          modelBoundsMaximum() + paddingVector)
-      .has_value();
+  if (!rayAabbDistance(*localRay, modelBoundsMinimum() - paddingVector,
+                       modelBoundsMaximum() + paddingVector)
+           .has_value()) {
+    return false;
+  }
+
+  // The AABB is deliberately only a cheap broad phase.  Large scans often
+  // contain irregular silhouettes and empty volume, so selecting everything
+  // inside that box makes camera navigation frustrating.  A successful GPU
+  // mask pass accepts only pixels covered by real model primitives.
+  return modelGeometryHitAt(position).value_or(true);
+}
+
+std::optional<bool>
+NativeViewport::modelGeometryHitAt(const QPointF &position) {
+  if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
+      !mModelPickProgram->isLinked() || context() == nullptr ||
+      !context()->isValid()) {
+    return std::nullopt;
+  }
+  const auto mapping =
+      modelPickViewport(position, size(), devicePixelRatioF(), 6.0);
+  if (!mapping.has_value()) {
+    return std::nullopt;
+  }
+
+  makeCurrent();
+  if (QOpenGLContext::currentContext() != context()) {
+    return std::nullopt;
+  }
+
+  GLint previousDrawFramebuffer = 0;
+  GLint previousReadFramebuffer = 0;
+  GLint previousViewport[4] = {0, 0, 0, 0};
+  GLint previousProgram = 0;
+  GLint previousVertexArray = 0;
+  GLint previousArrayBuffer = 0;
+  GLint previousPixelPackBuffer = 0;
+  GLint previousReadBuffer = GL_BACK;
+  GLint previousPackAlignment = 4;
+  GLint previousDepthFunction = GL_LESS;
+  GLfloat previousClearColor[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+  GLboolean previousDepthMask = GL_TRUE;
+  GLboolean previousColorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFramebuffer);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+  glGetIntegerv(GL_VIEWPORT, previousViewport);
+  glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
+  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
+  glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &previousPixelPackBuffer);
+  glGetIntegerv(GL_READ_BUFFER, &previousReadBuffer);
+  glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
+  glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunction);
+  glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
+  glGetBooleanv(GL_DEPTH_WRITEMASK, &previousDepthMask);
+  glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+
+  const GLboolean blendEnabled = glIsEnabled(GL_BLEND);
+  const GLboolean cullEnabled = glIsEnabled(GL_CULL_FACE);
+  const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+  const GLboolean ditherEnabled = glIsEnabled(GL_DITHER);
+  const GLboolean multisampleEnabled = glIsEnabled(GL_MULTISAMPLE);
+  const GLboolean pointSizeEnabled = glIsEnabled(GL_PROGRAM_POINT_SIZE);
+  const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+  const GLboolean stencilEnabled = glIsEnabled(GL_STENCIL_TEST);
+
+  std::optional<bool> result;
+  {
+    QOpenGLFramebufferObjectFormat format;
+    format.setAttachment(QOpenGLFramebufferObject::Depth);
+    format.setInternalTextureFormat(GL_RGBA8);
+    format.setSamples(0);
+    QOpenGLFramebufferObject framebuffer(mapping->framebufferSize, format);
+    if (framebuffer.isValid() && framebuffer.bind()) {
+      glViewport(mapping->viewportOrigin.x(), mapping->viewportOrigin.y(),
+                 mapping->sourceViewportSize.width(),
+                 mapping->sourceViewportSize.height());
+      glDisable(GL_BLEND);
+      glDisable(GL_CULL_FACE);
+      glDisable(GL_DITHER);
+      glDisable(GL_MULTISAMPLE);
+      glDisable(GL_SCISSOR_TEST);
+      glDisable(GL_STENCIL_TEST);
+      glEnable(GL_DEPTH_TEST);
+      glEnable(GL_PROGRAM_POINT_SIZE);
+      glDepthFunc(GL_LESS);
+      glDepthMask(GL_TRUE);
+      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+      const QMatrix4x4 modelViewProjection =
+          viewProjectionMatrix() * modelMatrix();
+      const float pointSize = std::max(
+          3.0F, 3.0F * static_cast<float>(devicePixelRatioF()));
+      bool drewPrimitives = false;
+      mModelPickProgram->bind();
+      mModelPickProgram->setUniformValue("viewProjection",
+                                         modelViewProjection);
+      mModelPickProgram->setUniformValue("pointSize", pointSize);
+
+      if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
+        mModelPickProgram->setUniformValue("pointPrimitive", false);
+        if (mRenderedMeshIndexCount >= 3 &&
+            mMeshVertexArray.isCreated() && mMeshIndexBuffer.isCreated()) {
+          glBindVertexArray(mMeshVertexArray.objectId());
+          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mMeshIndexBuffer.bufferId());
+          glDrawElements(GL_TRIANGLES,
+                         static_cast<GLsizei>(mRenderedMeshIndexCount),
+                         GL_UNSIGNED_INT, nullptr);
+          drewPrimitives = true;
+        }
+        for (const FullResolutionMeshGpuChunk &chunk :
+             std::as_const(mFullResolutionMeshGpuChunks)) {
+          if (chunk.vertexArray == 0 || chunk.indexCount < 3) {
+            continue;
+          }
+          glBindVertexArray(chunk.vertexArray);
+          glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT,
+                         nullptr);
+          drewPrimitives = true;
+        }
+      } else if (mTrainingGpuPreview.hasFrame() &&
+                 mRenderMode == RenderMode::Points) {
+        const GLuint vertexArray = mTrainingGpuPreview.activeVertexArray();
+        const GLsizei pointCount = mTrainingGpuPreview.pointCount();
+        if (vertexArray != 0 && pointCount > 0) {
+          mModelPickProgram->setUniformValue("pointPrimitive", true);
+          glBindVertexArray(vertexArray);
+          glVertexAttribDivisor(0, 0);
+          glDrawArrays(GL_POINTS, 0, pointCount);
+          glVertexAttribDivisor(0, 1);
+          drewPrimitives = true;
+        }
+      } else if (mRenderMode == RenderMode::Gaussians &&
+                 gaussianRenderingAvailable()) {
+        const bool livePreview = mTrainingGpuPreview.hasFrame();
+        const GLuint vertexArray =
+            livePreview ? mTrainingGpuPreview.activeVertexArray()
+                        : mGaussianVertexArray.objectId();
+        const GLsizei pointCount = static_cast<GLsizei>(
+            livePreview ? mTrainingGpuPreview.pointCount()
+                        : mRenderedPointCount);
+        if (vertexArray != 0 && pointCount > 0) {
+          mModelPickProgram->setUniformValue("pointPrimitive", true);
+          glBindVertexArray(vertexArray);
+          glVertexAttribDivisor(0, 0);
+          glDrawArrays(GL_POINTS, 0, pointCount);
+          glVertexAttribDivisor(0, 1);
+          drewPrimitives = true;
+        }
+      } else {
+        mModelPickProgram->setUniformValue("pointPrimitive", true);
+        if (mRenderedPointCount > 0 && mPointVertexArray.isCreated()) {
+          glBindVertexArray(mPointVertexArray.objectId());
+          glDrawArrays(GL_POINTS, 0,
+                       static_cast<GLsizei>(mRenderedPointCount));
+          drewPrimitives = true;
+        }
+        for (const FullResolutionGpuChunk &chunk :
+             std::as_const(mFullResolutionPointGpuChunks)) {
+          if (chunk.vertexArray == 0 || chunk.pointCount <= 0) {
+            continue;
+          }
+          glBindVertexArray(chunk.vertexArray);
+          glDrawArrays(GL_POINTS, 0, chunk.pointCount);
+          drewPrimitives = true;
+        }
+      }
+
+      glBindVertexArray(0);
+      mModelPickProgram->release();
+      if (drewPrimitives) {
+        const qsizetype sampleCount =
+            static_cast<qsizetype>(mapping->framebufferSize.width()) *
+            mapping->framebufferSize.height();
+        std::vector<quint8> samples(static_cast<std::size_t>(sampleCount));
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(0, 0, mapping->framebufferSize.width(),
+                     mapping->framebufferSize.height(), GL_RED,
+                     GL_UNSIGNED_BYTE, samples.data());
+        result = modelPickBufferHasCoverage(samples);
+      }
+    }
+  }
+
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
+                    static_cast<GLuint>(previousDrawFramebuffer));
+  glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                    static_cast<GLuint>(previousReadFramebuffer));
+  glReadBuffer(static_cast<GLenum>(previousReadBuffer));
+  glViewport(previousViewport[0], previousViewport[1], previousViewport[2],
+             previousViewport[3]);
+  glClearColor(previousClearColor[0], previousClearColor[1],
+               previousClearColor[2], previousClearColor[3]);
+  glDepthFunc(static_cast<GLenum>(previousDepthFunction));
+  glDepthMask(previousDepthMask);
+  glColorMask(previousColorMask[0], previousColorMask[1],
+              previousColorMask[2], previousColorMask[3]);
+  glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
+  glUseProgram(static_cast<GLuint>(previousProgram));
+  glBindVertexArray(static_cast<GLuint>(previousVertexArray));
+  glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousArrayBuffer));
+  glBindBuffer(GL_PIXEL_PACK_BUFFER,
+               static_cast<GLuint>(previousPixelPackBuffer));
+
+  const auto restoreCapability = [this](const GLenum capability,
+                                        const GLboolean enabled) {
+    enabled == GL_TRUE ? glEnable(capability) : glDisable(capability);
+  };
+  restoreCapability(GL_BLEND, blendEnabled);
+  restoreCapability(GL_CULL_FACE, cullEnabled);
+  restoreCapability(GL_DEPTH_TEST, depthEnabled);
+  restoreCapability(GL_DITHER, ditherEnabled);
+  restoreCapability(GL_MULTISAMPLE, multisampleEnabled);
+  restoreCapability(GL_PROGRAM_POINT_SIZE, pointSizeEnabled);
+  restoreCapability(GL_SCISSOR_TEST, scissorEnabled);
+  restoreCapability(GL_STENCIL_TEST, stencilEnabled);
+  doneCurrent();
+  return result;
 }
 
 QPointF NativeViewport::currentPointerPosition() const {
@@ -4495,12 +4760,14 @@ void NativeViewport::drawDepthAwareModelBounds(
 
   QVector<DepthOverlayVertex> vertices;
   vertices.reserve(384);
-  const auto appendLine = [&vertices, &color](const QVector3D &start,
-                                              const QVector3D &end) {
+  const float alpha = mModelDragActive ? 0.9F : 0.68F;
+  const auto appendLine = [&vertices, &color, alpha](
+                              const QVector3D &start,
+                              const QVector3D &end) {
     vertices.append({start.x(), start.y(), start.z(), color.x(), color.y(),
-                     color.z(), 1.0F});
+                     color.z(), alpha});
     vertices.append({end.x(), end.y(), end.z(), color.x(), color.y(),
-                     color.z(), 1.0F});
+                     color.z(), alpha});
   };
   for (const auto &edge : edges) {
     const QVector3D &start = corners[static_cast<std::size_t>(edge[0])];
@@ -4514,12 +4781,32 @@ void NativeViewport::drawDepthAwareModelBounds(
     if (!std::isfinite(screenLength) || screenLength <= 0.5) {
       continue;
     }
+    const QVector3D delta = end - start;
+    if (!mModelDragActive) {
+      // Preserve the truthful full-data bounds, but show only compact corner
+      // brackets while idle.  A large scan can have a very loose AABB; full
+      // edge lines then dominate the scene even though the box itself is no
+      // longer a click target.
+      constexpr qreal cornerPixels = 26.0;
+      constexpr qreal maximumCornerFraction = 0.2;
+      constexpr qreal minimumMiddleGapPixels = 10.0;
+      const qreal bracketPixels =
+          std::min(cornerPixels, screenLength * maximumCornerFraction);
+      if (screenLength <= bracketPixels * 2.0 + minimumMiddleGapPixels) {
+        appendLine(start, end);
+      } else {
+        const float bracketRatio =
+            static_cast<float>(bracketPixels / screenLength);
+        appendLine(start, start + delta * bracketRatio);
+        appendLine(end - delta * bracketRatio, end);
+      }
+      continue;
+    }
     const qreal basePattern = dashPixels + gapPixels;
     const qreal pattern =
         std::max(basePattern,
                  screenLength / static_cast<qreal>(maximumDashesPerEdge));
     const qreal dash = pattern * (dashPixels / basePattern);
-    const QVector3D delta = end - start;
     for (qreal offset = 0.0; offset < screenLength; offset += pattern) {
       const qreal dashEnd = std::min(offset + dash, screenLength);
       const float startRatio = static_cast<float>(offset / screenLength);
@@ -4527,7 +4814,8 @@ void NativeViewport::drawDepthAwareModelBounds(
       appendLine(start + delta * startRatio, start + delta * endRatio);
     }
   }
-  drawDepthAwareLines(vertices, modelViewProjection, 1.8F);
+  drawDepthAwareLines(vertices, modelViewProjection,
+                      mModelDragActive ? 1.8F : 1.35F);
 }
 
 void NativeViewport::drawCameraTrajectory(QPainter &painter,

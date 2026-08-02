@@ -223,6 +223,39 @@ std::optional<WorldRay> rayInModelSpace(const WorldRay &worldRay,
   return localRay;
 }
 
+std::optional<ModelPickViewport>
+modelPickViewport(const QPointF &screenPosition, const QSize &viewportSize,
+                  const qreal devicePixelRatio,
+                  const qreal tolerancePixels) {
+  if (viewportSize.isEmpty() || !std::isfinite(screenPosition.x()) ||
+      !std::isfinite(screenPosition.y()) ||
+      !std::isfinite(devicePixelRatio) || devicePixelRatio <= 0.0 ||
+      !std::isfinite(tolerancePixels) || tolerancePixels <= 0.0) {
+    return std::nullopt;
+  }
+  const int physicalWidth =
+      std::max(1, qRound(viewportSize.width() * devicePixelRatio));
+  const int physicalHeight =
+      std::max(1, qRound(viewportSize.height() * devicePixelRatio));
+  const int radius =
+      std::clamp(qCeil(tolerancePixels * devicePixelRatio), 1, 96);
+  const int diameter = radius * 2 + 1;
+  const int clickX = std::clamp(
+      qRound(screenPosition.x() * devicePixelRatio), 0, physicalWidth - 1);
+  const int clickYFromTop = std::clamp(
+      qRound(screenPosition.y() * devicePixelRatio), 0, physicalHeight - 1);
+  const int clickY = physicalHeight - 1 - clickYFromTop;
+  return ModelPickViewport{QSize(diameter, diameter),
+                           QSize(physicalWidth, physicalHeight),
+                           QPoint(radius - clickX, radius - clickY),
+                           QPoint(radius, radius)};
+}
+
+bool modelPickBufferHasCoverage(const std::span<const quint8> redSamples) {
+  return std::any_of(redSamples.begin(), redSamples.end(),
+                     [](const quint8 sample) { return sample != 0; });
+}
+
 std::optional<float> rayAxisParameter(const WorldRay &ray,
                                       const QVector3D &axisOrigin,
                                       const QVector3D &axisDirection) {
