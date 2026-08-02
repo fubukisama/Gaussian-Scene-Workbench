@@ -61,6 +61,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MediaProjectBootstrap.h
   src/MeshCache.cpp
   src/MeshCache.h
+  src/ModelInteraction.cpp
+  src/ModelInteraction.h
   src/NavigationGizmo.cpp
   src/NavigationGizmo.h
   src/NativeViewport.cpp
@@ -335,7 +337,8 @@ if(BUILD_TESTING)
       src/RecoveryStore.h
     )
     target_include_directories(gsw_recovery_store_tests PRIVATE src)
-    target_link_libraries(gsw_recovery_store_tests PRIVATE Qt6::Core Qt6::Test)
+    target_link_libraries(gsw_recovery_store_tests PRIVATE
+      Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)
       target_compile_options(gsw_recovery_store_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -449,7 +452,8 @@ if(BUILD_TESTING)
       src/WorkspaceDocument.h
     )
     target_include_directories(gsw_workspace_scene_format_tests PRIVATE src)
-    target_link_libraries(gsw_workspace_scene_format_tests PRIVATE Qt6::Core Qt6::Test)
+    target_link_libraries(gsw_workspace_scene_format_tests PRIVATE
+      Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)
       target_compile_options(gsw_workspace_scene_format_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -499,6 +503,23 @@ if(BUILD_TESTING)
       target_compile_options(gsw_viewport_camera_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME viewport_camera COMMAND gsw_viewport_camera_tests)
+
+    qt_add_executable(gsw_model_interaction_tests
+      tests/ModelInteractionTests.cpp
+      src/ModelInteraction.cpp
+      src/ModelInteraction.h
+    )
+    target_include_directories(gsw_model_interaction_tests PRIVATE src)
+    target_link_libraries(gsw_model_interaction_tests PRIVATE
+      Qt6::Core
+      Qt6::Gui
+      Qt6::Test
+    )
+    if(MSVC)
+      target_compile_options(gsw_model_interaction_tests PRIVATE
+        /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME model_interaction COMMAND gsw_model_interaction_tests)
 
     qt_add_executable(gsw_frame_rate_counter_tests
       tests/FrameRateCounterTests.cpp

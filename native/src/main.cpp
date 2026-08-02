@@ -297,11 +297,47 @@ int main(int argc, char *argv[]) {
                   const bool coordinateReportReady =
                       coordinateReportAction != nullptr &&
                       coordinateReportAction->isEnabled();
+                  const auto *moveModelAction =
+                      window.findChild<QAction *>(
+                          QStringLiteral("moveModelAction"));
+                  const bool modelSelectionAvailable =
+                      viewport->selectableModelAvailable() &&
+                      moveModelAction != nullptr &&
+                      moveModelAction->isEnabled();
+                  viewport->selectModelForMove();
+                  const bool modelSelectionReady =
+                      modelSelectionAvailable && viewport->modelSelected() &&
+                      moveModelAction->isChecked();
+                  const QPointF dragStart(viewport->width() * 0.5,
+                                          viewport->height() * 0.5);
+                  const QPointF dragEnd = dragStart + QPointF(28.0, -18.0);
+                  const QPointF globalDragStart =
+                      viewport->mapToGlobal(dragStart.toPoint());
+                  const QPointF globalDragEnd =
+                      viewport->mapToGlobal(dragEnd.toPoint());
+                  QMouseEvent modelPress(
+                      QEvent::MouseButtonPress, dragStart, dragStart,
+                      globalDragStart, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+                  QMouseEvent modelMove(
+                      QEvent::MouseMove, dragEnd, dragEnd, globalDragEnd,
+                      Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                  QMouseEvent modelRelease(
+                      QEvent::MouseButtonRelease, dragEnd, dragEnd,
+                      globalDragEnd, Qt::LeftButton, Qt::NoButton,
+                      Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport, &modelPress);
+                  QCoreApplication::sendEvent(viewport, &modelMove);
+                  QCoreApplication::sendEvent(viewport, &modelRelease);
+                  const bool modelMoveReady =
+                      modelSelectionReady &&
+                      viewport->modelTranslation().lengthSquared() > 1.0e-8F;
                   smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
-                                       coordinateReportReady;
+                                       coordinateReportReady &&
+                                       modelSelectionReady && modelMoveReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -317,7 +353,10 @@ int main(int argc, char *argv[]) {
                           << "coordinate-metadata-ready"
                           << coordinateMetadataReady
                           << "coordinate-report-ready"
-                          << coordinateReportReady;
+                          << coordinateReportReady
+                          << "model-selection-ready"
+                          << modelSelectionReady << "model-move-ready"
+                          << modelMoveReady;
                   application.exit(smokeTestFailureCode);
                 });
           });

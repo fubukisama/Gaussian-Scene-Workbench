@@ -42,7 +42,16 @@ class NativeViewport final : public QOpenGLWidget,
   Q_OBJECT
 
 public:
-  enum class InteractionMode { Inspect, Select, Rectangle, Lasso, Brush, Crop };
+  enum class InteractionMode {
+    Inspect,
+    Move,
+    Select,
+    Rectangle,
+    Lasso,
+    Brush,
+    Crop
+  };
+  Q_ENUM(InteractionMode)
 
   enum class RenderMode { Points, Mesh, Gaussians };
   Q_ENUM(RenderMode)
@@ -57,6 +66,8 @@ public:
   void setScene(const QString &scenePath, qint64 gaussianCount);
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
+  void selectModelForMove();
+  void setModelTranslation(const QVector3D &translation);
   void setRenderMode(RenderMode mode);
   void setReferencePlaneMode(ReferencePlaneMode mode);
   void setVisibleOnlySelection(bool enabled);
@@ -94,6 +105,11 @@ public:
     return mSceneCoordinates;
   }
   [[nodiscard]] QString scenePath() const { return mScenePath; }
+  [[nodiscard]] QVector3D modelTranslation() const {
+    return mModelTranslation;
+  }
+  [[nodiscard]] bool modelSelected() const { return mModelSelected; }
+  [[nodiscard]] bool selectableModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
@@ -131,6 +147,11 @@ signals:
                                const QString &error);
   void trainingGpuPreviewStateChanged(bool active, const QString &mode,
                                       const QString &detail);
+  void interactionModeChanged(gsw::NativeViewport::InteractionMode mode);
+  void modelInteractionStateChanged(bool available, bool selected,
+                                    bool canUndo, bool canRedo,
+                                    const QVector3D &translation);
+  void modelTransformCommitted(const QVector3D &translation);
 
 protected:
   void initializeGL() override;
@@ -182,6 +203,11 @@ private:
   [[nodiscard]] QMatrix4x4 viewMatrix() const;
   [[nodiscard]] QMatrix4x4 projectionMatrix() const;
   [[nodiscard]] QMatrix4x4 viewProjectionMatrix() const;
+  [[nodiscard]] QMatrix4x4 modelMatrix() const;
+  [[nodiscard]] QVector3D modelBoundsMinimum() const;
+  [[nodiscard]] QVector3D modelBoundsMaximum() const;
+  [[nodiscard]] QVector3D transformedSceneCenter() const;
+  [[nodiscard]] bool modelHitAt(const QPointF &position) const;
   [[nodiscard]] std::optional<QPointF>
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
@@ -218,6 +244,8 @@ private:
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
+  void drawModelSelection(QPainter &painter,
+                          const QMatrix4x4 &modelViewProjection);
   void drawOverlay(QPainter &painter);
   void drawAxisGizmo(QPainter &painter);
   [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
@@ -227,6 +255,14 @@ private:
   void panCamera(const QPoint &delta);
   void toggleCameraView();
   void leaveCameraView();
+  bool beginModelDrag(const QPointF &position);
+  void updateModelDrag(const QPointF &position);
+  void finishModelDrag();
+  void commitModelTranslation();
+  void resetModelTransformHistory();
+  void notifyModelInteractionState();
+  [[nodiscard]] bool canUndoModelTransform() const;
+  [[nodiscard]] bool canRedoModelTransform() const;
 
   QString mProjectLabel;
   QString mScenePath;
@@ -252,6 +288,8 @@ private:
   QPointF mBrushCursorPosition;
   qreal mBrushRadius = 32.0;
   bool mSelectionGestureActive = false;
+  bool mModelSelected = false;
+  bool mModelDragActive = false;
   bool mBrushCursorVisible = false;
   bool mVisibleOnlySelection = true;
   bool mSelectionBusy = false;
@@ -278,6 +316,12 @@ private:
   ReferencePlaneMode mReferencePlaneMode = ReferencePlaneMode::ModelBase;
   SceneCoordinateInfo mSceneCoordinates;
   QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
+  QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
+  QVector3D mModelDragStartTranslation = QVector3D(0.0F, 0.0F, 0.0F);
+  QVector3D mModelDragStartIntersection = QVector3D(0.0F, 0.0F, 0.0F);
+  QVector3D mModelDragPlaneNormal = QVector3D(0.0F, 0.0F, 1.0F);
+  QVector<QVector3D> mModelTransformHistory;
+  qsizetype mModelTransformHistoryIndex = 0;
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;

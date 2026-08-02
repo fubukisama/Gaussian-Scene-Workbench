@@ -38,6 +38,7 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
   gsw::RecoveryWorkspace checkpoint = *started;
   checkpoint.datasetPath =
       QDir(started->rootPath).filePath(QStringLiteral("dataset"));
+  checkpoint.sceneTranslation = QVector3D(2.0F, -1.0F, 0.5F);
   QVERIFY2(store.checkpoint(checkpoint, &error), qPrintable(error));
 
   const QList<gsw::RecoveryWorkspace> recovered =
@@ -48,6 +49,8 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
   QCOMPARE(recovered.constFirst().displayName, QStringLiteral("现场重建"));
   QCOMPARE(recovered.constFirst().datasetPath,
            QDir::cleanPath(checkpoint.datasetPath));
+  QCOMPARE(recovered.constFirst().sceneTranslation,
+           checkpoint.sceneTranslation);
   QVERIFY(QFileInfo::exists(QDir(recovered.constFirst().rootPath)
                                 .filePath(QStringLiteral("frame.jpg"))));
 

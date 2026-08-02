@@ -1547,6 +1547,9 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
       source.setDatasetPath(working.filePath(QStringLiteral("images")), &error),
       qPrintable(error));
   QVERIFY2(source.setScenePath(plyPath, &error), qPrintable(error));
+  const QVector3D sceneTranslation(1.25F, -2.5F, 0.75F);
+  QVERIFY2(source.setSceneTranslation(sceneTranslation, &error),
+           qPrintable(error));
   const QString projectPath =
       root.filePath(QStringLiteral("saved/test.gsw.json"));
   QVERIFY2(source.save(projectPath, &error), qPrintable(error));
@@ -1572,6 +1575,15 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
            QStringLiteral("images"));
   QCOMPARE(projectJson.value(QStringLiteral("scenePath")).toString(),
            QStringLiteral("models/scene.ply"));
+  const QJsonArray translation =
+      projectJson.value(QStringLiteral("sceneTransform"))
+          .toObject()
+          .value(QStringLiteral("translation"))
+          .toArray();
+  QCOMPARE(translation.size(), 3);
+  QCOMPARE(translation.at(0).toDouble(), 1.25);
+  QCOMPARE(translation.at(1).toDouble(), -2.5);
+  QCOMPARE(translation.at(2).toDouble(), 0.75);
 
   gsw::WorkspaceDocument restored;
   QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
@@ -1581,6 +1593,7 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
                                        "saved/test.files/images"))));
   QCOMPARE(restored.scenePath(), QDir::cleanPath(root.filePath(QStringLiteral(
                                      "saved/test.files/models/scene.ply"))));
+  QCOMPARE(restored.sceneTranslation(), sceneTranslation);
   QCOMPARE(restored.imageCount(), 1);
   QCOMPARE(restored.sceneMetadata().vertexCount, 2);
 }

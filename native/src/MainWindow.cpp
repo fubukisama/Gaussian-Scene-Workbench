@@ -77,6 +77,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 namespace gsw {
@@ -1048,6 +1049,16 @@ void MainWindow::createActions() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
   });
 
+  mMoveModelAction = new QAction(QStringLiteral("移动模型"), this);
+  mMoveModelAction->setObjectName(QStringLiteral("moveModelAction"));
+  mMoveModelAction->setCheckable(true);
+  mMoveModelAction->setShortcut(QKeySequence(QStringLiteral("G")));
+  mMoveModelAction->setToolTip(
+      QStringLiteral("自由移动整个模型 (G)，Ctrl+左键旋转视角"));
+  mEditModeActionGroup->addAction(mMoveModelAction);
+  connect(mMoveModelAction, &QAction::triggered, mViewport,
+          &NativeViewport::selectModelForMove);
+
   mRectangleAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
                   QStringLiteral("框选"), this);
@@ -1118,16 +1129,16 @@ void MainWindow::createActions() {
           &NativeViewport::deleteSelection);
 
   mUndoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
-                                QStringLiteral("撤销删除"), this);
+                                QStringLiteral("撤销编辑"), this);
   mUndoEditAction->setShortcut(QKeySequence::Undo);
-  mUndoEditAction->setToolTip(QStringLiteral("撤销删除 (Ctrl+Z)"));
+  mUndoEditAction->setToolTip(QStringLiteral("撤销上一次编辑 (Ctrl+Z)"));
   connect(mUndoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::undoEdit);
 
   mRedoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
-                                QStringLiteral("重做删除"), this);
+                                QStringLiteral("重做编辑"), this);
   mRedoEditAction->setShortcut(QKeySequence::Redo);
-  mRedoEditAction->setToolTip(QStringLiteral("重做删除 (Ctrl+Y)"));
+  mRedoEditAction->setToolTip(QStringLiteral("重做上一次编辑 (Ctrl+Y)"));
   connect(mRedoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::redoEdit);
 
@@ -1261,6 +1272,7 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(actions().at(4));
   sceneMenu->addSeparator();
   sceneMenu->addAction(mInspectAction);
+  sceneMenu->addAction(mMoveModelAction);
   sceneMenu->addAction(mRectangleAction);
   sceneMenu->addAction(mLassoAction);
   sceneMenu->addAction(mBrushAction);
@@ -1386,6 +1398,7 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
+  mSelectionToolbar->addAction(mMoveModelAction);
   mSelectionToolbar->addAction(mRectangleAction);
   mSelectionToolbar->addAction(mLassoAction);
   mSelectionToolbar->addAction(mBrushAction);
@@ -1461,6 +1474,15 @@ void MainWindow::createProjectDock() {
     const QString path = selection.first()->data(0, Qt::UserRole).toString();
     if (!path.isEmpty()) {
       statusBar()->showMessage(QDir::toNativeSeparators(path), 5000);
+    }
+    const QString kind =
+        selection.first()->data(0, Qt::UserRole + 1).toString();
+    if (kind == QStringLiteral("scene") && mModelReady &&
+        !mProcessSupervisor.isRunning()) {
+      mViewport->selectModelForMove();
+      statusBar()->showMessage(
+          QStringLiteral("模型已选中：左键拖动可自由移动，Ctrl+左键旋转视角"),
+          6000);
     }
   });
   connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
@@ -1551,6 +1573,7 @@ void MainWindow::createInspectorDock() {
   mSceneBoundsValue = createValueLabel(panel);
   mDisplayShiftValue = createValueLabel(panel);
   mReferencePlaneValue = createValueLabel(panel);
+  mSceneTransformValue = createValueLabel(panel);
   sceneForm->addRow(QStringLiteral("文件"), mSceneValue);
   sceneForm->addRow(QStringLiteral("数量"), mGaussianCountValue);
   sceneForm->addRow(QStringLiteral("格式"), mPlyFormatValue);
@@ -1561,6 +1584,7 @@ void MainWindow::createInspectorDock() {
   sceneForm->addRow(QStringLiteral("尺寸"), mSceneSizeValue);
   sceneForm->addRow(QStringLiteral("范围"), mSceneBoundsValue);
   sceneForm->addRow(QStringLiteral("显示变换"), mDisplayShiftValue);
+  sceneForm->addRow(QStringLiteral("模型位移"), mSceneTransformValue);
   sceneForm->addRow(QStringLiteral("基准面"), mReferencePlaneValue);
   layout->addLayout(sceneForm);
   layout->addStretch(1);
@@ -1860,6 +1884,8 @@ void MainWindow::connectServices() {
           } else {
             mViewport->setScene(mWorkspace.scenePath(),
                                 mWorkspace.sceneMetadata().vertexCount);
+            mViewport->setModelTranslation(
+                workspaceTranslationForViewport());
           }
         }
 
@@ -2159,6 +2185,12 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
           [this]() {
+            if (!mWorkspace.scenePath().isEmpty() &&
+                pathsReferToSameLocation(mViewport->scenePath(),
+                                          mWorkspace.scenePath())) {
+              mViewport->setModelTranslation(
+                  workspaceTranslationForViewport());
+            }
             updateInspector();
             updateActionAvailability();
           });
@@ -2241,6 +2273,46 @@ void MainWindow::connectServices() {
             mCanRedoEdit = canRedo;
             mSceneReady = sceneReady;
             updateEditActions();
+          });
+  connect(mViewport, &NativeViewport::interactionModeChanged, this,
+          [this](const NativeViewport::InteractionMode mode) {
+            if (mInspectAction == nullptr) {
+              return;
+            }
+            mInspectAction->setChecked(
+                mode == NativeViewport::InteractionMode::Inspect);
+            mMoveModelAction->setChecked(
+                mode == NativeViewport::InteractionMode::Move);
+            mRectangleAction->setChecked(
+                mode == NativeViewport::InteractionMode::Rectangle);
+            mLassoAction->setChecked(
+                mode == NativeViewport::InteractionMode::Lasso);
+            mBrushAction->setChecked(
+                mode == NativeViewport::InteractionMode::Brush);
+            updateEditActions();
+          });
+  connect(
+      mViewport, &NativeViewport::modelInteractionStateChanged, this,
+      [this](const bool available, const bool selected, const bool,
+             const bool, const QVector3D &) {
+        mModelReady = available;
+        mModelSelected = selected;
+        updateEditActions();
+        updateInspector();
+      });
+  connect(mViewport, &NativeViewport::modelTransformCommitted, this,
+          [this](const QVector3D &translation) {
+            if (mWorkspace.scenePath().isEmpty() ||
+                !pathsReferToSameLocation(mViewport->scenePath(),
+                                          mWorkspace.scenePath())) {
+              return;
+            }
+            QString error;
+            if (!mWorkspace.setSceneTranslation(
+                    viewportTranslationForWorkspace(translation), &error)) {
+              appendTaskEvent(
+                  QStringLiteral("模型位移未能写入工程：%1").arg(error));
+            }
           });
   connect(mViewport, &NativeViewport::selectionBusyChanged, this,
           [this](const bool busy) {
@@ -2478,40 +2550,52 @@ void MainWindow::fitWindowToScreen() {
 }
 
 void MainWindow::updateEditActions() {
-  const bool interactive = mSceneReady && !mSelectionBusy &&
-                           !mRecoveryBlocked && !mProcessSupervisor.isRunning();
+  const bool baseInteractive = !mSelectionBusy && !mRecoveryBlocked &&
+                               !mProcessSupervisor.isRunning();
+  const bool modelInteractive = baseInteractive && mModelReady;
+  const bool pointInteractive = baseInteractive && mSceneReady;
+  const bool anyScene = mModelReady || mSceneReady;
   if (mInspectAction == nullptr) {
     return;
   }
   if (mRenderToolbar != nullptr) {
-    mRenderToolbar->setVisible(mSceneReady);
+    mRenderToolbar->setVisible(anyScene);
   }
   if (mSelectionToolbar != nullptr) {
-    mSelectionToolbar->setVisible(mSceneReady);
+    mSelectionToolbar->setVisible(anyScene);
   }
   if (mEditToolbar != nullptr) {
-    mEditToolbar->setVisible(mSceneReady);
+    mEditToolbar->setVisible(anyScene);
   }
-  mInspectAction->setEnabled(interactive);
-  mRectangleAction->setEnabled(interactive);
-  mLassoAction->setEnabled(interactive);
-  mBrushAction->setEnabled(interactive);
+  mInspectAction->setEnabled(modelInteractive || pointInteractive);
+  mMoveModelAction->setEnabled(modelInteractive);
+  mRectangleAction->setEnabled(pointInteractive);
+  mLassoAction->setEnabled(pointInteractive);
+  mBrushAction->setEnabled(pointInteractive);
   if (mBrushRadiusSpin != nullptr) {
-    mBrushRadiusSpin->setEnabled(interactive && mBrushAction->isChecked());
+    mBrushRadiusSpin->setEnabled(pointInteractive &&
+                                 mBrushAction->isChecked());
   }
-  mVisibleOnlyAction->setEnabled(interactive);
-  mClearSelectionAction->setEnabled(interactive && mSelectedPointCount > 0);
-  mInvertSelectionAction->setEnabled(interactive);
-  mDeleteSelectionAction->setEnabled(interactive && mSelectedPointCount > 0);
-  mUndoEditAction->setEnabled(interactive && mCanUndoEdit);
-  mRedoEditAction->setEnabled(interactive && mCanRedoEdit);
-  mExportCropAction->setEnabled(interactive && mDeletedPointCount > 0);
+  mVisibleOnlyAction->setEnabled(pointInteractive);
+  mClearSelectionAction->setEnabled(
+      baseInteractive && (mModelSelected || mSelectedPointCount > 0));
+  mInvertSelectionAction->setEnabled(pointInteractive);
+  mDeleteSelectionAction->setEnabled(pointInteractive &&
+                                     mSelectedPointCount > 0);
+  mUndoEditAction->setEnabled(baseInteractive && mCanUndoEdit);
+  mRedoEditAction->setEnabled(baseInteractive && mCanRedoEdit);
+  mExportCropAction->setEnabled(pointInteractive && mDeletedPointCount > 0);
   if (mEditStatus != nullptr) {
-    mEditStatus->setVisible(mSceneReady || mSelectionBusy);
-    mEditStatus->setText(mSelectionBusy ? QStringLiteral("正在计算选择")
-                                        : QStringLiteral("选择 %1 | 删除 %2")
-                                              .arg(mSelectedPointCount)
-                                              .arg(mDeletedPointCount));
+    mEditStatus->setVisible(anyScene || mSelectionBusy);
+    if (mSelectionBusy) {
+      mEditStatus->setText(QStringLiteral("正在计算选择"));
+    } else if (mModelSelected) {
+      mEditStatus->setText(QStringLiteral("模型已选 | 自由移动"));
+    } else {
+      mEditStatus->setText(QStringLiteral("选择 %1 | 删除 %2")
+                               .arg(mSelectedPointCount)
+                               .arg(mDeletedPointCount));
+    }
   }
 }
 
@@ -2625,6 +2709,7 @@ void MainWindow::checkpointCurrentRecovery() {
   mCurrentRecovery->projectFilePath = mWorkspace.projectFilePath();
   mCurrentRecovery->datasetPath = mWorkspace.datasetPath();
   mCurrentRecovery->scenePath = mWorkspace.scenePath();
+  mCurrentRecovery->sceneTranslation = mWorkspace.sceneTranslation();
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
@@ -2885,6 +2970,14 @@ bool MainWindow::restoreRecoveryWorkspace(
       !mWorkspace.setScenePath(workspace.scenePath, &attachError)) {
     appendTaskEvent(
         QStringLiteral("恢复工程的场景未能自动关联：%1").arg(attachError));
+  }
+  if (!workspace.scenePath.isEmpty()) {
+    QString transformError;
+    if (!mWorkspace.setSceneTranslation(workspace.sceneTranslation,
+                                        &transformError)) {
+      appendTaskEvent(
+          QStringLiteral("恢复工程的模型位移失败：%1").arg(transformError));
+    }
   }
   if (!mRecoveryBlocked) {
     QString trainingRecoveryError;
@@ -4485,16 +4578,19 @@ void MainWindow::updateWorkspaceUi() {
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setScene(mLiveTrainingPreviewPath,
                         mLiveTrainingGaussianCount);
+    mViewport->setModelTranslation({});
   } else if (!mLiveReconstructionPreviewPath.isEmpty() &&
              QFileInfo::exists(mLiveReconstructionPreviewPath) &&
              pathsReferToSameLocation(mWorkspace.datasetPath(),
                                       mLiveReconstructionDatasetPath)) {
     mViewport->setScene(mLiveReconstructionPreviewPath,
                         mLiveReconstructionPointCount);
+    mViewport->setModelTranslation({});
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   } else {
     mViewport->setScene(mWorkspace.scenePath(),
                         mWorkspace.sceneMetadata().vertexCount);
+    mViewport->setModelTranslation(workspaceTranslationForViewport());
   }
   mProjectStatus->setText(
       projectName +
@@ -4587,6 +4683,7 @@ void MainWindow::rebuildProjectTree() {
       scene, {mWorkspace.scenePath().isEmpty()
                   ? QStringLiteral("未导入")
                   : QFileInfo(mWorkspace.scenePath()).fileName()});
+  sceneState->setData(0, Qt::UserRole, mWorkspace.scenePath());
   sceneState->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
   if (mCameraCount > 0) {
     auto *cameras = new QTreeWidgetItem(
@@ -4628,6 +4725,27 @@ void MainWindow::rebuildProjectTree() {
   scene->setExpanded(true);
 }
 
+QVector3D MainWindow::workspaceTranslationForViewport() const {
+  const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  const double scale = coordinates.valid &&
+                               std::isfinite(coordinates.displayScale) &&
+                               coordinates.displayScale > 0.0
+                           ? coordinates.displayScale
+                           : 1.0;
+  return mWorkspace.sceneTranslation() * static_cast<float>(scale);
+}
+
+QVector3D MainWindow::viewportTranslationForWorkspace(
+    const QVector3D &translation) const {
+  const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  const double scale = coordinates.valid &&
+                               std::isfinite(coordinates.displayScale) &&
+                               coordinates.displayScale > 0.0
+                           ? coordinates.displayScale
+                           : 1.0;
+  return translation / static_cast<float>(scale);
+}
+
 void MainWindow::updateInspector() {
   mProjectNameValue->setText(mWorkspace.hasProject() ? mWorkspace.projectName()
                                                      : QStringLiteral("-"));
@@ -4660,6 +4778,22 @@ void MainWindow::updateInspector() {
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
   const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  const QVector3D translation = mWorkspace.sceneTranslation();
+  if (coordinates.valid) {
+    mSceneTransformValue->setText(
+        QStringLiteral("X %1 | Y %2 | Z %3%4")
+            .arg(formatSceneLength(translation.x(), coordinates),
+                 formatSceneLength(translation.y(), coordinates),
+                 formatSceneLength(translation.z(), coordinates),
+                 mModelSelected ? QStringLiteral(" · 已选中") : QString()));
+  } else {
+    mSceneTransformValue->setText(
+        QStringLiteral("X %1 | Y %2 | Z %3%4")
+            .arg(translation.x(), 0, 'g', 7)
+            .arg(translation.y(), 0, 'g', 7)
+            .arg(translation.z(), 0, 'g', 7)
+            .arg(mModelSelected ? QStringLiteral(" · 已选中") : QString()));
+  }
   if (coordinates.valid) {
     mCoordinateSystemValue->setText(
         coordinates.coordinateReferenceSystem.isEmpty()

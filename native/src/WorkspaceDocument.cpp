@@ -5,11 +5,15 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QSet>
 #include <QUuid>
+
+#include <algorithm>
+#include <cmath>
 
 namespace gsw {
 
@@ -85,6 +89,31 @@ void assignError(QString *target, const QString &message) {
   if (target != nullptr) {
     *target = message;
   }
+}
+
+bool finiteVector(const QVector3D &value) {
+  return std::isfinite(value.x()) && std::isfinite(value.y()) &&
+         std::isfinite(value.z());
+}
+
+QJsonObject sceneTransformJson(const QVector3D &translation) {
+  return {{QStringLiteral("translation"),
+           QJsonArray{translation.x(), translation.y(), translation.z()}}};
+}
+
+QVector3D sceneTranslationFromJson(const QJsonValue &value) {
+  if (!value.isObject()) {
+    return {};
+  }
+  const QJsonArray translation =
+      value.toObject().value(QStringLiteral("translation")).toArray();
+  if (translation.size() != 3) {
+    return {};
+  }
+  const QVector3D parsed(static_cast<float>(translation.at(0).toDouble()),
+                         static_cast<float>(translation.at(1).toDouble()),
+                         static_cast<float>(translation.at(2).toDouble()));
+  return finiteVector(parsed) ? parsed : QVector3D();
 }
 
 constexpr auto kDataMigrationMarker = ".gsw-data-migration.json";
@@ -275,6 +304,9 @@ QString WorkspaceDocument::rootPath() const { return mRootPath; }
 QString WorkspaceDocument::projectFilePath() const { return mProjectFilePath; }
 QString WorkspaceDocument::datasetPath() const { return mDatasetPath; }
 QString WorkspaceDocument::scenePath() const { return mScenePath; }
+QVector3D WorkspaceDocument::sceneTranslation() const {
+  return mSceneTranslation;
+}
 qint64 WorkspaceDocument::imageCount() const { return mImageCount; }
 PlyMetadata WorkspaceDocument::sceneMetadata() const { return mSceneMetadata; }
 bool WorkspaceDocument::hasPendingDataMigration() const {
@@ -313,6 +345,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mSceneTranslation = {};
   mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
@@ -338,6 +371,7 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mSceneTranslation = {};
   mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
@@ -389,6 +423,8 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
       resolvePortablePath(root.value(QStringLiteral("datasetPath")).toString());
   mScenePath =
       resolvePortablePath(root.value(QStringLiteral("scenePath")).toString());
+  mSceneTranslation = sceneTranslationFromJson(
+      root.value(QStringLiteral("sceneTransform")));
   const QString storedPendingDataRoot =
       root.value(QStringLiteral("pendingDataRoot")).toString();
   mPendingDataRoot =
@@ -493,6 +529,8 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
               portablePathForRoot(savedDatasetPath, savedRootPath));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(savedScenePath, savedRootPath));
+  root.insert(QStringLiteral("sceneTransform"),
+              sceneTransformJson(mSceneTranslation));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
@@ -599,6 +637,8 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
               portablePathForRoot(mDatasetPath, mRootPath));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
+  root.insert(QStringLiteral("sceneTransform"),
+              sceneTransformJson(mSceneTranslation));
   if (!pendingDataRoot.isEmpty()) {
     QString relativePendingRoot;
     root.insert(QStringLiteral("pendingDataRoot"),
@@ -654,6 +694,8 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
               portablePathForRoot(mDatasetPath, mRootPath));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
+  root.insert(QStringLiteral("sceneTransform"),
+              sceneTransformJson(mSceneTranslation));
   if (!mPendingDataRoot.isEmpty()) {
     root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);
   }
@@ -764,8 +806,34 @@ bool WorkspaceDocument::setScenePath(const QString &path,
   if (!metadata.valid) {
     return false;
   }
-  mScenePath = normalizedAbsolutePath(path);
+  const QString normalizedPath = normalizedAbsolutePath(path);
+  if (mScenePath.isEmpty() || !pathsEqual(mScenePath, normalizedPath)) {
+    mSceneTranslation = {};
+  }
+  mScenePath = normalizedPath;
   mSceneMetadata = metadata;
+  setModified(true);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::setSceneTranslation(const QVector3D &translation,
+                                            QString *errorMessage) {
+  if (!hasProject()) {
+    assignError(errorMessage, tr("No project is open."));
+    return false;
+  }
+  if (!finiteVector(translation)) {
+    assignError(errorMessage, tr("Scene translation must be finite."));
+    return false;
+  }
+  const float comparisonScale =
+      std::max({1.0F, mSceneTranslation.length(), translation.length()});
+  if ((mSceneTranslation - translation).lengthSquared() <=
+      comparisonScale * comparisonScale * 1.0e-12F) {
+    return true;
+  }
+  mSceneTranslation = translation;
   setModified(true);
   emit changed();
   return true;
@@ -809,6 +877,7 @@ bool WorkspaceDocument::clearImportedData(
   const QString previousScenePath = mScenePath;
   const qint64 previousImageCount = mImageCount;
   const PlyMetadata previousSceneMetadata = mSceneMetadata;
+  const QVector3D previousSceneTranslation = mSceneTranslation;
   const bool previousModified = mModified;
   QString stagedDatasetPath;
   QString stagingRoot;
@@ -849,6 +918,7 @@ bool WorkspaceDocument::clearImportedData(
   if (clearScene) {
     mScenePath.clear();
     mSceneMetadata = {};
+    mSceneTranslation = {};
   }
 
   QString saveError;
@@ -864,6 +934,7 @@ bool WorkspaceDocument::clearImportedData(
     mScenePath = previousScenePath;
     mImageCount = previousImageCount;
     mSceneMetadata = previousSceneMetadata;
+    mSceneTranslation = previousSceneTranslation;
     setModified(previousModified);
     bool restored = true;
     if (!stagedDatasetPath.isEmpty()) {

@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVector3D>
 
 namespace gsw {
 
@@ -52,6 +53,7 @@ public:
   [[nodiscard]] QString projectFilePath() const;
   [[nodiscard]] QString datasetPath() const;
   [[nodiscard]] QString scenePath() const;
+  [[nodiscard]] QVector3D sceneTranslation() const;
   [[nodiscard]] qint64 imageCount() const;
   [[nodiscard]] PlyMetadata sceneMetadata() const;
   [[nodiscard]] bool hasPendingDataMigration() const;
@@ -70,6 +72,8 @@ public:
   [[nodiscard]] QByteArray recoveryManifestJson() const;
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
   bool setScenePath(const QString &path, QString *errorMessage = nullptr);
+  bool setSceneTranslation(const QVector3D &translation,
+                           QString *errorMessage = nullptr);
   bool clearImportedData(const ImportCleanupOptions &options,
                          ImportCleanupResult *result = nullptr,
                          QString *errorMessage = nullptr);
@@ -94,6 +98,7 @@ private:
   QString mProjectFilePath;
   QString mDatasetPath;
   QString mScenePath;
+  QVector3D mSceneTranslation;
   QString mPendingDataRoot;
   qint64 mImageCount = 0;
   PlyMetadata mSceneMetadata;

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
@@ -37,6 +38,20 @@ bool pathInside(const QString &root, const QString &candidate) {
 
 QString optionalAbsolutePath(const QString &path) {
   return path.isEmpty() ? QString() : normalizedAbsolutePath(path);
+}
+
+QJsonArray translationJson(const QVector3D &translation) {
+  return {translation.x(), translation.y(), translation.z()};
+}
+
+QVector3D translationFromJson(const QJsonValue &value) {
+  const QJsonArray translation = value.toArray();
+  if (translation.size() != 3) {
+    return {};
+  }
+  return QVector3D(static_cast<float>(translation.at(0).toDouble()),
+                   static_cast<float>(translation.at(1).toDouble()),
+                   static_cast<float>(translation.at(2).toDouble()));
 }
 
 std::optional<RecoveryWorkspace>
@@ -76,6 +91,8 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       optionalAbsolutePath(root.value(QStringLiteral("datasetPath")).toString());
   workspace.scenePath =
       optionalAbsolutePath(root.value(QStringLiteral("scenePath")).toString());
+  workspace.sceneTranslation =
+      translationFromJson(root.value(QStringLiteral("sceneTranslation")));
   workspace.updatedUtc = QDateTime::fromString(
       root.value(QStringLiteral("updatedUtc")).toString(), Qt::ISODate);
   if (!workspace.isValid() || !workspace.updatedUtc.isValid()) {
@@ -193,6 +210,8 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
               optionalAbsolutePath(workspace.datasetPath));
   root.insert(QStringLiteral("scenePath"),
               optionalAbsolutePath(workspace.scenePath));
+  root.insert(QStringLiteral("sceneTranslation"),
+              translationJson(workspace.sceneTranslation));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
 

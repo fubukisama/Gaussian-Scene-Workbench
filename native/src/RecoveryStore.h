@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QList>
 #include <QString>
+#include <QVector3D>
 
 #include <optional>
 
@@ -16,6 +17,7 @@ struct RecoveryWorkspace {
   QString projectFilePath;
   QString datasetPath;
   QString scenePath;
+  QVector3D sceneTranslation;
   QDateTime updatedUtc;
 
   [[nodiscard]] bool isValid() const {

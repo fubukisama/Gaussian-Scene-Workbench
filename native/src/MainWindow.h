@@ -139,6 +139,9 @@ private:
   void updateWorkspaceUi();
   void rebuildProjectTree();
   void updateInspector();
+  [[nodiscard]] QVector3D workspaceTranslationForViewport() const;
+  [[nodiscard]] QVector3D viewportTranslationForWorkspace(
+      const QVector3D &translation) const;
   void appendLog(const QString &text);
   void appendTaskEvent(const QString &text);
   void showError(const QString &title, const QString &message);
@@ -181,6 +184,7 @@ private:
   QLabel *mSceneBoundsValue = nullptr;
   QLabel *mDisplayShiftValue = nullptr;
   QLabel *mReferencePlaneValue = nullptr;
+  QLabel *mSceneTransformValue = nullptr;
   QLabel *mProjectStatus = nullptr;
   QLabel *mRendererStatus = nullptr;
   QLabel *mEditStatus = nullptr;
@@ -210,6 +214,7 @@ private:
   QAction *mPointRenderAction = nullptr;
   QAction *mShowCamerasAction = nullptr;
   QAction *mInspectAction = nullptr;
+  QAction *mMoveModelAction = nullptr;
   QAction *mRectangleAction = nullptr;
   QAction *mLassoAction = nullptr;
   QAction *mBrushAction = nullptr;
@@ -252,6 +257,8 @@ private:
   qint64 mLiveReconstructionPointCount = 0;
   int mLastReconstructionPreviewIteration = -1;
   bool mSceneReady = false;
+  bool mModelReady = false;
+  bool mModelSelected = false;
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;
   bool mCanRedoEdit = false;
