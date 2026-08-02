@@ -5,7 +5,7 @@
   "releaseDate": "2026-08-02",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
-  "renderer": "Native OpenGL world-fixed infinite grid with stable oblique-orthographic ground-plane selection and persistent orthographic orbit/pan/zoom, depth-occluded XYZ and selection overlays, projection-aware find-and-frame navigation for transformed resident or disk-paged models, plus screen-space Gaussian preview with point fallback; higher-order SH and tile renderer pending",
+  "renderer": "Native OpenGL world-fixed infinite grid with stable oblique-orthographic ground-plane selection, persistent projection navigation, and Unity-style direction/projection controls, depth-occluded XYZ and selection overlays, projection-aware find-and-frame navigation for transformed resident or disk-paged models, plus screen-space Gaussian preview with point fallback; higher-order SH and tile renderer pending",
   "reconstruction": "Guarded native COLMAP 4.1-compatible presets with newest-version discovery, CUDA-tested execution, cancellation, and sparse-model validation",
   "editing": "GPU-refined point/mesh/Gaussian object picking with empty-AABB rejection and compact idle corner bounds, Blender-style Move/Rotate/Scale/Transform gizmos, explicit global/local Move/Rotate orientation plus shear-safe locked-local Scale/Transform feedback, spacious screen-layered combined handles, guarded ring/trackball hit zones, direct axis/plane/view handles, modal G/R/RR/S transforms, snapping, numeric entry, exact cancel, transform undo/redo, recovery-safe TRS persistence, and full-source rectangle/lasso/brush trimming",
   "computeBackendIncluded": true,

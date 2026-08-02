@@ -11,6 +11,7 @@ class NavigationGizmoTests final : public QObject {
 private slots:
   void projectsAxesAndHidesAlignedBackHandle();
   void selectsNearestAxisInsideRotationCircle();
+  void exposesUnityStyleProjectionControl();
   void mapsSixAxisViews();
   void keepsNavigationButtonsInsideViewport();
 };
@@ -54,6 +55,22 @@ void NavigationGizmoTests::selectsNearestAxisInsideRotationCircle() {
            NavigationGizmoPart::None);
 }
 
+void NavigationGizmoTests::exposesUnityStyleProjectionControl() {
+  const NavigationGizmoLayout layout =
+      navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
+
+  QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionCube.center()).part,
+           NavigationGizmoPart::Projection);
+  QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionLabel.center()).part,
+           NavigationGizmoPart::Projection);
+  QCOMPARE(hitTestNavigationGizmo(
+               layout,
+               layout.center + QPointF(layout.radius * 0.62,
+                                       layout.radius * 0.18))
+               .part,
+           NavigationGizmoPart::Rotate);
+}
+
 void NavigationGizmoTests::mapsSixAxisViews() {
   QCOMPARE(navigationAxisViewAngles(NavigationAxis::PositiveX),
            std::optional<OrbitAngles>({90.0F, 0.0F}));
@@ -77,7 +94,8 @@ void NavigationGizmoTests::keepsNavigationButtonsInsideViewport() {
   QVERIFY(viewport.contains(layout.zoomButton));
   QVERIFY(viewport.contains(layout.panButton));
   QVERIFY(viewport.contains(layout.cameraButton));
-  QVERIFY(viewport.contains(layout.projectionButton));
+  QVERIFY(viewport.contains(layout.projectionCube));
+  QVERIFY(viewport.contains(layout.projectionLabel));
 }
 
 QTEST_GUILESS_MAIN(NavigationGizmoTests)

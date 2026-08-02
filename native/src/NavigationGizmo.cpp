@@ -49,8 +49,11 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   const qreal margin = std::clamp(fontHeight * 0.65, 10.0, 18.0);
   qreal buttonSize = std::clamp(fontHeight * 1.7, 28.0, 44.0);
   qreal buttonGap = std::clamp(fontHeight * 0.25, 4.0, 8.0);
+  qreal projectionLabelHeight = std::clamp(fontHeight * 1.25, 20.0, 30.0);
+  qreal projectionLabelGap = std::clamp(fontHeight * 0.20, 3.0, 6.0);
   const qreal requiredHeight =
-      layout.radius * 2.0 + buttonSize * 4.0 + buttonGap * 4.0;
+      layout.radius * 2.0 + projectionLabelHeight + projectionLabelGap +
+      buttonSize * 3.0 + buttonGap * 3.0;
   const qreal availableHeight =
       std::max(1.0, viewportSize.height() - margin * 2.0);
   if (requiredHeight > availableHeight) {
@@ -58,10 +61,14 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
     layout.radius *= fit;
     buttonSize *= fit;
     buttonGap *= fit;
+    projectionLabelHeight *= fit;
+    projectionLabelGap *= fit;
   }
   layout.lineWidth = std::clamp(layout.radius / 20.0, 2.0, 3.4);
   layout.center = QPointF(viewportSize.width() - margin - layout.radius,
-                          viewportSize.height() - margin - layout.radius);
+                          viewportSize.height() - margin -
+                              projectionLabelHeight - projectionLabelGap -
+                              layout.radius);
   layout.rotateBounds = QRectF(layout.center.x() - layout.radius,
                                layout.center.y() - layout.radius,
                                layout.radius * 2.0, layout.radius * 2.0);
@@ -74,8 +81,18 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   layout.panButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
   buttonCenterY -= buttonSize + buttonGap;
   layout.cameraButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
-  buttonCenterY -= buttonSize + buttonGap;
-  layout.projectionButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
+
+  const qreal projectionCubeSize = std::max(20.0, layout.radius * 0.54);
+  layout.projectionCube =
+      QRectF(layout.center.x() - projectionCubeSize * 0.5,
+             layout.center.y() - projectionCubeSize * 0.5,
+             projectionCubeSize, projectionCubeSize);
+  const qreal projectionLabelWidth =
+      std::max(layout.radius * 1.35, fontHeight * 3.0);
+  layout.projectionLabel =
+      QRectF(layout.center.x() - projectionLabelWidth * 0.5,
+             layout.center.y() + layout.radius + projectionLabelGap,
+             projectionLabelWidth, projectionLabelHeight);
 
   const qreal handleBaseRadius = layout.radius * kHandleSizeRatio;
   const qreal axisExtent = layout.radius * kAxisExtentRatio;
@@ -107,6 +124,10 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
 NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
                                           const QPointF &position) {
+  if (layout.projectionCube.contains(position) ||
+      layout.projectionLabel.contains(position)) {
+    return {NavigationGizmoPart::Projection, NavigationAxis::None};
+  }
   if (layout.zoomButton.contains(position)) {
     return {NavigationGizmoPart::Zoom, NavigationAxis::None};
   }
@@ -116,10 +137,6 @@ NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
   if (layout.cameraButton.contains(position)) {
     return {NavigationGizmoPart::Camera, NavigationAxis::None};
   }
-  if (layout.projectionButton.contains(position)) {
-    return {NavigationGizmoPart::Projection, NavigationAxis::None};
-  }
-
   const QPointF centerDelta = position - layout.center;
   if (QPointF::dotProduct(centerDelta, centerDelta) >
       layout.radius * layout.radius) {

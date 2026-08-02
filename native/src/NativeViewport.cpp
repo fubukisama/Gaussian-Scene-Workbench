@@ -3179,6 +3179,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     mNavigationInteractionActive = true;
     mNavigationDragging = false;
     mNavigationPress = mNavigationHover;
+    mNavigationPressModifiers = event->modifiers();
     mNavigationPressPosition = event->position().toPoint();
     mLastMousePosition = mNavigationPressPosition;
     mPressedButtons = Qt::NoButton;
@@ -3406,8 +3407,10 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
                                  : Qt::ForbiddenCursor);
     break;
   case NavigationGizmoPart::Projection:
-    tooltip = mOrthographic ? QStringLiteral("切换到透视视图")
-                            : QStringLiteral("切换到正交视图");
+    tooltip =
+        mOrthographic
+            ? QStringLiteral("中心方块 / Iso：切换到透视；Shift+单击恢复默认透视")
+            : QStringLiteral("中心方块 / Persp：切换到正交；Shift+单击恢复默认透视");
     setCursor(Qt::PointingHandCursor);
     break;
   case NavigationGizmoPart::None:
@@ -3463,10 +3466,13 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
 
 void NativeViewport::finishNavigationGizmoInteraction() {
   const NavigationGizmoHit pressed = mNavigationPress;
+  const Qt::KeyboardModifiers pressedModifiers =
+      mNavigationPressModifiers;
   const bool dragged = mNavigationDragging;
   mNavigationInteractionActive = false;
   mNavigationDragging = false;
   mNavigationPress = {};
+  mNavigationPressModifiers = Qt::NoModifier;
 
   if (!dragged) {
     if (pressed.part == NavigationGizmoPart::Rotate) {
@@ -3474,9 +3480,13 @@ void NativeViewport::finishNavigationGizmoInteraction() {
     } else if (pressed.part == NavigationGizmoPart::Camera) {
       toggleCameraView();
     } else if (pressed.part == NavigationGizmoPart::Projection) {
-      leaveCameraView();
-      mOrthographic = !mOrthographic;
-      update();
+      if (pressedModifiers.testFlag(Qt::ShiftModifier)) {
+        resetCamera();
+      } else {
+        leaveCameraView();
+        mOrthographic = !mOrthographic;
+        update();
+      }
     }
   } else if (mRenderMode == RenderMode::Gaussians &&
              gaussianRenderingAvailable()) {
@@ -3494,7 +3504,6 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
 
   mViewSnapAnimation->stop();
   leaveCameraView();
-  mOrthographic = true;
   const float targetYaw =
       shortestEquivalentAngle(mYawDegrees, target->yawDegrees);
   mViewSnapAnimation->setStartValue(QPointF(mYawDegrees, mPitchDegrees));
@@ -5596,6 +5605,34 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
     }
   }
 
+  const bool projectionActive =
+      mNavigationHover.part == NavigationGizmoPart::Projection ||
+      (mNavigationInteractionActive &&
+       mNavigationPress.part == NavigationGizmoPart::Projection);
+  if (projectionActive) {
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 108));
+    painter.drawRoundedRect(layout.projectionLabel.adjusted(-3.0, 0.0, 3.0,
+                                                            0.0),
+                            4.0, 4.0);
+  }
+  painter.setPen(QPen(projectionActive ? QColor(255, 255, 255)
+                                       : QColor(218, 222, 226, 235),
+                      std::max(1.2, layout.lineWidth * 0.58)));
+  painter.setBrush(mOrthographic ? QColor(104, 174, 230)
+                                 : QColor(205, 211, 218));
+  painter.drawRoundedRect(layout.projectionCube, 2.5, 2.5);
+  QFont projectionFont = painter.font();
+  projectionFont.setBold(false);
+  projectionFont.setPixelSize(
+      std::max(10, qRound(layout.projectionLabel.height() * 0.68)));
+  painter.setFont(projectionFont);
+  painter.setPen(projectionActive ? QColor(255, 255, 255)
+                                  : QColor(205, 210, 216, 225));
+  painter.drawText(layout.projectionLabel, Qt::AlignCenter,
+                   mOrthographic ? QStringLiteral("Iso")
+                                 : QStringLiteral("Persp"));
+
   const auto drawButtonBackground =
       [this, &painter](const QRectF &rect, const NavigationGizmoPart part) {
         const bool active =
@@ -5670,27 +5707,6 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
                         cameraBody.bottom() - cameraHeight * 0.18);
   painter.drawPolygon(cameraLens);
 
-  drawButtonBackground(layout.projectionButton,
-                       NavigationGizmoPart::Projection);
-  painter.setPen(QPen(mOrthographic ? QColor(114, 190, 255) : iconColor,
-                      iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  const QRectF projectionIcon = layout.projectionButton.adjusted(
-      layout.projectionButton.width() * 0.27,
-      layout.projectionButton.height() * 0.27,
-      -layout.projectionButton.width() * 0.27,
-      -layout.projectionButton.height() * 0.27);
-  if (mOrthographic) {
-    painter.drawRect(projectionIcon);
-  } else {
-    QPolygonF trapezoid;
-    trapezoid << QPointF(projectionIcon.left() + projectionIcon.width() * 0.18,
-                         projectionIcon.top())
-              << QPointF(projectionIcon.right() - projectionIcon.width() * 0.18,
-                         projectionIcon.top())
-              << QPointF(projectionIcon.right(), projectionIcon.bottom())
-              << QPointF(projectionIcon.left(), projectionIcon.bottom());
-    painter.drawPolygon(trapezoid);
-  }
   painter.restore();
 }
 

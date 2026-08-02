@@ -142,6 +142,9 @@ public:
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
+  [[nodiscard]] OrbitAngles viewOrbitAngles() const {
+    return {mYawDegrees, mPitchDegrees};
+  }
   [[nodiscard]] bool orthographicProjection() const { return mOrthographic; }
   [[nodiscard]] bool selectableModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
@@ -386,6 +389,7 @@ private:
   bool mTemporaryOrbitActive = false;
   bool mNavigationInteractionActive = false;
   bool mNavigationDragging = false;
+  Qt::KeyboardModifiers mNavigationPressModifiers = Qt::NoModifier;
   bool mOrthographic = false;
   bool mCameraViewActive = false;
   bool mShowCameras = false;
