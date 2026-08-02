@@ -10,6 +10,7 @@ namespace {
 constexpr float kPi = 3.14159265358979323846F;
 constexpr float kMinimumGridStep = 0.001F;
 constexpr float kMaximumGridStep = 1000000.0F;
+constexpr float kAxisViewAlignmentThreshold = 0.9995F;
 
 float radians(const float degrees) { return degrees * kPi / 180.0F; }
 
@@ -91,6 +92,15 @@ ReferenceGridPlane referenceGridPlane(const OrbitAngles angles,
   const float absoluteX = std::abs(viewNormal.x());
   const float absoluteY = std::abs(viewNormal.y());
   const float absoluteZ = std::abs(viewNormal.z());
+  const float dominantAxis = std::max({absoluteX, absoluteY, absoluteZ});
+
+  // Toggling projection preserves an arbitrary orbit angle. Keep that view on
+  // the world ground plane; only axis-snapped orthographic views use a
+  // screen-parallel principal plane.
+  if (dominantAxis < kAxisViewAlignmentThreshold) {
+    return ReferenceGridPlane::XY;
+  }
+
   if (absoluteX >= absoluteY && absoluteX >= absoluteZ) {
     return ReferenceGridPlane::YZ;
   }

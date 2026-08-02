@@ -20,6 +20,7 @@ private slots:
   void framesModelBoundsAtCurrentOrbit();
   void rejectsInvalidFocusBounds();
   void selectsScreenParallelGridForAxisOrthographicViews();
+  void keepsWorldGroundGridForObliqueOrthographicViews();
   void keepsWorldGroundGridForPerspectiveViews();
   void clampsZoomToSceneAwareFiniteLimits();
   void keepsGridStepsOnConcreteDecimalScales();
@@ -169,6 +170,17 @@ void ViewportCameraTests::selectsScreenParallelGridForAxisOrthographicViews() {
   QCOMPARE(referenceGridPlane({0.0F, 90.0F}, true),
            ReferenceGridPlane::XY);
   QCOMPARE(referenceGridPlane({0.0F, -90.0F}, true),
+           ReferenceGridPlane::XY);
+}
+
+void ViewportCameraTests::keepsWorldGroundGridForObliqueOrthographicViews() {
+  QCOMPARE(referenceGridPlane({42.0F, 24.0F}, true),
+           ReferenceGridPlane::XY);
+  QCOMPARE(referenceGridPlane({-137.0F, -31.0F}, true),
+           ReferenceGridPlane::XY);
+  QCOMPARE(referenceGridPlane({0.0F, 1.0F}, true),
+           ReferenceGridPlane::XZ);
+  QCOMPARE(referenceGridPlane({0.0F, 4.0F}, true),
            ReferenceGridPlane::XY);
 }
 
