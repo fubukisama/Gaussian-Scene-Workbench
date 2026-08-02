@@ -156,6 +156,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-infinite-grid"),
       QStringLiteral("Verify the adaptive all-axis infinite reference grid."));
   parser.addOption(infiniteGridSmokeTestOption);
+  QCommandLineOption orthographicNavigationSmokeTestOption(
+      QStringLiteral("smoke-test-orthographic-navigation"),
+      QStringLiteral("Verify navigation preserves orthographic projection."));
+  parser.addOption(orthographicNavigationSmokeTestOption);
   QCommandLineOption referenceAxesSmokeTestOption(
       QStringLiteral("smoke-test-reference-axes"),
       QStringLiteral("Verify reference axes remain visible after scene load."));
@@ -189,6 +193,8 @@ int main(int argc, char *argv[]) {
       parser.isSet(exitConfirmationSmokeTestOption);
   const bool infiniteGridSmokeTest =
       parser.isSet(infiniteGridSmokeTestOption);
+  const bool orthographicNavigationSmokeTest =
+      parser.isSet(orthographicNavigationSmokeTestOption);
   const bool referenceAxesSmokeTest =
       parser.isSet(referenceAxesSmokeTestOption);
   const bool gpuPreviewInteropProbe =
@@ -196,6 +202,7 @@ int main(int argc, char *argv[]) {
   const bool smokeTest = parser.isSet(smokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
                          exitConfirmationSmokeTest || infiniteGridSmokeTest ||
+                         orthographicNavigationSmokeTest ||
                          referenceAxesSmokeTest || gpuPreviewInteropProbe;
   if (projectPath.isEmpty() && !parser.positionalArguments().isEmpty()) {
     projectPath = parser.positionalArguments().first();
@@ -596,6 +603,91 @@ int main(int argc, char *argv[]) {
                            application.exit(smokeTestFailureCode);
                          });
     }
+  } else if (orthographicNavigationSmokeTest) {
+    QTimer::singleShot(
+        450, &application,
+        [&application, &window, &smokeTestCompleted,
+         &smokeTestFailureCode]() {
+          auto *viewport =
+              qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+          if (viewport == nullptr) {
+            smokeTestFailureCode = 2;
+            application.exit(smokeTestFailureCode);
+            return;
+          }
+
+          const auto drag = [viewport](const Qt::MouseButton button,
+                                       const QPointF &start,
+                                       const QPointF &finish) {
+            const QPointF globalStart =
+                viewport->mapToGlobal(start.toPoint());
+            const QPointF globalFinish =
+                viewport->mapToGlobal(finish.toPoint());
+            QMouseEvent press(QEvent::MouseButtonPress, start, start,
+                              globalStart, button, button, Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, finish, finish, globalFinish,
+                             Qt::NoButton, button, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, finish, finish,
+                                globalFinish, button, Qt::NoButton,
+                                Qt::NoModifier);
+            QCoreApplication::sendEvent(viewport, &press);
+            QCoreApplication::sendEvent(viewport, &move);
+            QCoreApplication::sendEvent(viewport, &release);
+          };
+
+          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+          const bool axisViewIsOrthographic =
+              viewport->orthographicProjection();
+          const QPointF canvasStart(viewport->width() * 0.50,
+                                    viewport->height() * 0.45);
+          drag(Qt::LeftButton, canvasStart,
+               canvasStart + QPointF(32.0, -24.0));
+          const bool canvasOrbitKeepsOrthographic =
+              viewport->orthographicProjection();
+
+          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+          const gsw::NavigationGizmoLayout gizmo =
+              gsw::navigationGizmoLayout(
+                  QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
+                  QFontMetricsF(viewport->font()).height());
+          drag(Qt::LeftButton, gizmo.center,
+               gizmo.center + QPointF(30.0, -18.0));
+          const bool gizmoOrbitKeepsOrthographic =
+              viewport->orthographicProjection();
+
+          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+          drag(Qt::MiddleButton, canvasStart,
+               canvasStart + QPointF(-28.0, 20.0));
+          const QPointF globalCanvasStart =
+              viewport->mapToGlobal(canvasStart.toPoint());
+          QWheelEvent zoom(canvasStart, globalCanvasStart, QPoint(),
+                           QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                           Qt::NoScrollPhase, false);
+          QCoreApplication::sendEvent(viewport, &zoom);
+          const bool panZoomKeepOrthographic =
+              viewport->orthographicProjection();
+
+          smokeTestCompleted =
+              axisViewIsOrthographic && canvasOrbitKeepsOrthographic &&
+              gizmoOrbitKeepsOrthographic && panZoomKeepOrthographic;
+          if (!axisViewIsOrthographic) {
+            smokeTestFailureCode = 3;
+          } else if (!canvasOrbitKeepsOrthographic) {
+            smokeTestFailureCode = 4;
+          } else if (!gizmoOrbitKeepsOrthographic) {
+            smokeTestFailureCode = 5;
+          } else if (!panZoomKeepOrthographic) {
+            smokeTestFailureCode = 6;
+          } else {
+            smokeTestFailureCode = 0;
+          }
+          qInfo() << "Orthographic-navigation smoke:"
+                  << "axis-view" << axisViewIsOrthographic
+                  << "canvas-orbit" << canvasOrbitKeepsOrthographic
+                  << "gizmo-orbit" << gizmoOrbitKeepsOrthographic
+                  << "pan-zoom" << panZoomKeepOrthographic;
+          application.exit(smokeTestFailureCode);
+        });
   } else if (infiniteGridSmokeTest) {
     QTimer::singleShot(
         450, &application, [&window]() {

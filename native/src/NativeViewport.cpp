@@ -3293,12 +3293,7 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
   if (pan) {
     panCamera(delta);
   } else if (mPressedButtons.testFlag(Qt::LeftButton)) {
-    mViewSnapAnimation->stop();
-    mOrthographic = false;
-    const OrbitAngles angles =
-        orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
-    mYawDegrees = angles.yawDegrees;
-    mPitchDegrees = angles.pitchDegrees;
+    orbitCamera(delta);
   }
 
   update();
@@ -3437,9 +3432,6 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
         mNavigationPress.part == NavigationGizmoPart::Pan) {
       leaveCameraView();
     }
-    if (mNavigationPress.part == NavigationGizmoPart::Rotate) {
-      mOrthographic = false;
-    }
   }
 
   const QPoint delta = current - mLastMousePosition;
@@ -3450,10 +3442,7 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
 
   switch (mNavigationPress.part) {
   case NavigationGizmoPart::Rotate: {
-    const OrbitAngles angles =
-        orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
-    mYawDegrees = angles.yawDegrees;
-    mPitchDegrees = angles.pitchDegrees;
+    orbitCamera(delta);
     break;
   }
   case NavigationGizmoPart::Zoom:
@@ -3511,6 +3500,14 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
   mViewSnapAnimation->setStartValue(QPointF(mYawDegrees, mPitchDegrees));
   mViewSnapAnimation->setEndValue(QPointF(targetYaw, target->pitchDegrees));
   mViewSnapAnimation->start();
+}
+
+void NativeViewport::orbitCamera(const QPoint &delta) {
+  mViewSnapAnimation->stop();
+  const OrbitAngles angles =
+      orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
+  mYawDegrees = angles.yawDegrees;
+  mPitchDegrees = angles.pitchDegrees;
 }
 
 void NativeViewport::panCamera(const QPoint &delta) {

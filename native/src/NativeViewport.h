@@ -142,6 +142,7 @@ public:
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
+  [[nodiscard]] bool orthographicProjection() const { return mOrthographic; }
   [[nodiscard]] bool selectableModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
@@ -320,6 +321,7 @@ private:
   void updateNavigationGizmoHover(const QPointF &position);
   void updateNavigationGizmoInteraction(const QPoint &current);
   void finishNavigationGizmoInteraction();
+  void orbitCamera(const QPoint &delta);
   void panCamera(const QPoint &delta);
   void toggleCameraView();
   void leaveCameraView();

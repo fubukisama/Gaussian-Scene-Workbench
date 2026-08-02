@@ -251,6 +251,10 @@ if(BUILD_TESTING)
     COMMAND GaussianSceneWorkbench --smoke-test-infinite-grid
   )
   add_test(
+    NAME native_persistent_orthographic_navigation
+    COMMAND GaussianSceneWorkbench --smoke-test-orthographic-navigation
+  )
+  add_test(
     NAME native_reference_axes_with_scene
     COMMAND GaussianSceneWorkbench
       --smoke-test-reference-axes
@@ -280,6 +284,7 @@ if(BUILD_TESTING)
     native_adaptive_display_layout
     native_exit_confirmation
     native_infinite_reference_grid
+    native_persistent_orthographic_navigation
     native_reference_axes_with_scene
     native_dense_grid_point_scene
     native_paged_mesh_scene
