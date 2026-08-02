@@ -17,6 +17,7 @@
 #include <QIcon>
 #include <QImage>
 #include <QLabel>
+#include <QKeyEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -368,6 +369,43 @@ int main(int argc, char *argv[]) {
                   viewport->selectModel();
                   const bool modelSelectionReady =
                       modelSelectionAvailable && viewport->modelSelected();
+                  viewport->setModelGizmoMode(gsw::TransformGizmoMode::Move);
+                  const bool globalOrientationReady =
+                      !viewport->modelGizmoOrientationLocked() &&
+                      !viewport->modelGizmoUsesLocalOrientation();
+                  viewport->setModelGizmoMode(gsw::TransformGizmoMode::Scale);
+                  const bool lockedOrientationReady =
+                      viewport->modelGizmoOrientationLocked() &&
+                      viewport->modelGizmoUsesLocalOrientation();
+                  viewport->repaint();
+                  const QImage lockedOrientationFrame =
+                      viewport->grabFramebuffer();
+                  if (!lockedOrientationFrame.isNull()) {
+                    lockedOrientationFrame.save(QDir::temp().filePath(
+                        QStringLiteral(
+                            "gsw-transform-orientation-locked-smoke.png")));
+                  }
+                  QKeyEvent lockedOrientationToggle(
+                      QEvent::KeyPress, Qt::Key_Comma, Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport,
+                                              &lockedOrientationToggle);
+                  viewport->setModelGizmoMode(gsw::TransformGizmoMode::Move);
+                  const bool lockedToggleIgnored =
+                      !viewport->modelGizmoUsesLocalOrientation();
+                  QKeyEvent localOrientationToggle(
+                      QEvent::KeyPress, Qt::Key_Comma, Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport,
+                                              &localOrientationToggle);
+                  const bool localOrientationReady =
+                      viewport->modelGizmoUsesLocalOrientation();
+                  QKeyEvent restoreGlobalOrientation(
+                      QEvent::KeyPress, Qt::Key_Comma, Qt::NoModifier);
+                  QCoreApplication::sendEvent(viewport,
+                                              &restoreGlobalOrientation);
+                  const bool orientationControlReady =
+                      globalOrientationReady && lockedOrientationReady &&
+                      lockedToggleIgnored && localOrientationReady &&
+                      !viewport->modelGizmoUsesLocalOrientation();
                   viewport->setModelGizmoMode(
                       gsw::TransformGizmoMode::Transform);
                   viewport->repaint();
@@ -464,6 +502,7 @@ int main(int argc, char *argv[]) {
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
                                         preciseModelPickReady &&
+                                        orientationControlReady &&
                                         modelSelectionReady && modelMoveReady &&
                                         modelRotateReady && modelTrackballReady &&
                                         modelScaleReady;
@@ -490,6 +529,8 @@ int main(int argc, char *argv[]) {
                           << coordinateReportReady
                           << "precise-model-pick-ready"
                           << preciseModelPickReady
+                          << "orientation-control-ready"
+                          << orientationControlReady
                           << "model-selection-ready"
                            << modelSelectionReady << "model-move-ready"
                            << modelMoveReady << "model-rotate-ready"

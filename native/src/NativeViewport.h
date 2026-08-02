@@ -127,6 +127,13 @@ public:
   [[nodiscard]] TransformGizmoMode modelGizmoMode() const {
     return mTransformGizmoMode;
   }
+  [[nodiscard]] bool modelGizmoOrientationLocked() const {
+    return transformOrientationLocked(mTransformGizmoMode);
+  }
+  [[nodiscard]] bool modelGizmoUsesLocalOrientation() const {
+    return transformUsesLocalOrientation(mTransformGizmoMode,
+                                         mTransformGizmoLocal);
+  }
   [[nodiscard]] bool modelTransformActive() const {
     return mModelDragActive;
   }
@@ -327,6 +334,7 @@ private:
   void beginTransformGizmoDrag(const TransformGizmoHandle &handle,
                                const QPointF &position,
                                Qt::KeyboardModifiers modifiers);
+  void toggleTransformGizmoOrientation();
   void activateTransformToolAt(int toolIndex);
   [[nodiscard]] QString
   transformGizmoHandleDescription(const TransformGizmoHandle &handle) const;

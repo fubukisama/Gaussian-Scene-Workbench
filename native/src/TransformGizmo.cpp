@@ -203,6 +203,16 @@ TransformGizmoHandle planeHandleAt(const TransformGizmoLayout &layout,
 
 } // namespace
 
+bool transformOrientationLocked(const TransformGizmoMode mode) {
+  return mode == TransformGizmoMode::Scale ||
+         mode == TransformGizmoMode::Transform;
+}
+
+bool transformUsesLocalOrientation(const TransformGizmoMode mode,
+                                   const bool localPreference) {
+  return transformOrientationLocked(mode) || localPreference;
+}
+
 TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
                                           const QQuaternion &orientation,
                                           const QMatrix4x4 &viewProjection,
@@ -491,8 +501,10 @@ TransformToolStripLayout transformToolStripLayout(const QSizeF &viewportSize,
         QRectF(left, top + index * (buttonSize + gap), buttonSize, buttonSize);
   }
   const qreal orientationTop = top + 4.0 * (buttonSize + gap) + gap * 1.5;
+  const qreal orientationHeight =
+      std::clamp(fontHeight * 1.65, 28.0, 38.0);
   layout.orientationButton =
-      QRectF(left, orientationTop, buttonSize, buttonSize * 0.62);
+      QRectF(left, orientationTop, buttonSize, orientationHeight);
   layout.background = QRectF(
       left - gap, top - gap, buttonSize + gap * 2.0,
       orientationTop + layout.orientationButton.height() - top + gap * 2.0);

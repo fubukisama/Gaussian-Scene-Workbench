@@ -19,6 +19,7 @@ private slots:
   void buildsPivotedTrsTransformAndInversePickRay();
   void computesStableAxisAndTrackballRotations();
   void laysOutAndHitsTransformGizmos();
+  void modelsTransformOrientationLocking();
   void mapsPreciseModelPickNeighborhood();
 };
 
@@ -222,6 +223,24 @@ void ModelInteractionTests::mapsPreciseModelPickNeighborhood() {
   empty.at(12) = 255;
   QVERIFY(modelPickBufferHasCoverage(empty));
   QVERIFY(!modelPickViewport(QPointF(), QSize(), 1.0).has_value());
+}
+
+void ModelInteractionTests::modelsTransformOrientationLocking() {
+  QVERIFY(!transformOrientationLocked(TransformGizmoMode::Move));
+  QVERIFY(!transformOrientationLocked(TransformGizmoMode::Rotate));
+  QVERIFY(transformOrientationLocked(TransformGizmoMode::Scale));
+  QVERIFY(transformOrientationLocked(TransformGizmoMode::Transform));
+
+  QVERIFY(!transformUsesLocalOrientation(TransformGizmoMode::Move, false));
+  QVERIFY(transformUsesLocalOrientation(TransformGizmoMode::Move, true));
+  QVERIFY(transformUsesLocalOrientation(TransformGizmoMode::Scale, false));
+  QVERIFY(
+      transformUsesLocalOrientation(TransformGizmoMode::Transform, false));
+
+  const TransformToolStripLayout tools =
+      transformToolStripLayout(QSizeF(1280.0, 720.0), 16.0);
+  QVERIFY(tools.orientationButton.height() >= 28.0);
+  QVERIFY(tools.background.contains(tools.orientationButton));
 }
 
 void ModelInteractionTests::computesStableAxisAndTrackballRotations() {

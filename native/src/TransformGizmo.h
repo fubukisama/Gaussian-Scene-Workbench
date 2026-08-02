@@ -15,6 +15,13 @@ namespace gsw {
 
 enum class TransformGizmoMode { Move, Rotate, Scale, Transform };
 
+[[nodiscard]] bool
+transformOrientationLocked(TransformGizmoMode mode);
+
+[[nodiscard]] bool
+transformUsesLocalOrientation(TransformGizmoMode mode,
+                              bool localPreference);
+
 enum class TransformGizmoHandleKind {
   None,
   MoveAxis,

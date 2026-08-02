@@ -23,6 +23,7 @@
 #include <QPainterPath>
 #include <QSizePolicy>
 #include <QTimer>
+#include <QToolTip>
 #include <QVariantAnimation>
 #include <QVector2D>
 #include <QVector4D>
@@ -3554,10 +3555,7 @@ void NativeViewport::keyPressEvent(QKeyEvent *event) {
       return;
     }
     if (event->key() == Qt::Key_Comma && mModelSelected) {
-      mTransformGizmoLocal = !mTransformGizmoLocal;
-      setToolTip(mTransformGizmoLocal ? QStringLiteral("局部坐标系")
-                                      : QStringLiteral("全局坐标系"));
-      update();
+      toggleTransformGizmoOrientation();
       event->accept();
       return;
     }
@@ -4017,10 +4015,8 @@ TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
   // scale and combined tools therefore use that basis even when move/rotate
   // are configured for world orientation; this avoids silently introducing
   // an unrepresentable shear into the persisted TRS transform.
-  const bool forceLocal = mTransformGizmoMode == TransformGizmoMode::Scale ||
-                          mTransformGizmoMode == TransformGizmoMode::Transform;
   const QQuaternion orientation =
-      mTransformGizmoLocal || forceLocal ? mModelRotation : QQuaternion();
+      modelGizmoUsesLocalOrientation() ? mModelRotation : QQuaternion();
   const qreal fontHeight = QFontMetricsF(font()).height();
   const qreal radius =
       mTransformGizmoMode == TransformGizmoMode::Transform
@@ -4094,16 +4090,17 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
     if (tool < 4) {
       setToolTip(descriptions.at(static_cast<std::size_t>(tool)));
     } else {
-      const bool forceLocal =
-          mTransformGizmoMode == TransformGizmoMode::Scale ||
-          mTransformGizmoMode == TransformGizmoMode::Transform;
-      setToolTip(forceLocal
-                     ? QStringLiteral("缩放使用局部坐标，防止产生剪切；移动/旋转偏好为 %1")
-                           .arg(mTransformGizmoLocal ? QStringLiteral("局部")
-                                                    : QStringLiteral("全局"))
+      setToolTip(modelGizmoOrientationLocked()
+                     ? mTransformGizmoMode == TransformGizmoMode::Scale
+                           ? QStringLiteral(
+                                 "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切")
+                           : QStringLiteral(
+                                 "局部锁定：组合工具包含缩放；切换到移动或旋转工具后可选择全局坐标")
                      : QStringLiteral("切换全局/局部坐标系（,）"));
     }
-    setCursor(Qt::PointingHandCursor);
+    setCursor(tool == 4 && modelGizmoOrientationLocked()
+                  ? Qt::ArrowCursor
+                  : Qt::PointingHandCursor);
   } else if (handle.isValid()) {
     setToolTip(transformGizmoHandleDescription(handle) +
                QStringLiteral(" · Ctrl 吸附 · Shift 精细"));
@@ -4133,13 +4130,28 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
   update();
 }
 
+void NativeViewport::toggleTransformGizmoOrientation() {
+  QString message;
+  if (modelGizmoOrientationLocked()) {
+    message = mTransformGizmoMode == TransformGizmoMode::Scale
+                  ? QStringLiteral(
+                        "局部锁定：缩放只使用模型自身轴，避免产生剪切")
+                  : QStringLiteral(
+                        "局部锁定：请切换到移动或旋转工具后再选择全局坐标");
+  } else {
+    mTransformGizmoLocal = !mTransformGizmoLocal;
+    message = mTransformGizmoLocal ? QStringLiteral("已切换到局部坐标系")
+                                   : QStringLiteral("已切换到全局坐标系");
+  }
+  setToolTip(message);
+  QToolTip::showText(mapToGlobal(currentPointerPosition().toPoint()), message,
+                     this);
+  update();
+}
+
 void NativeViewport::activateTransformToolAt(const int toolIndex) {
   if (toolIndex == 4) {
-    mTransformGizmoLocal = !mTransformGizmoLocal;
-    mTransformGizmoHover = {};
-    mTransformToolHover = -1;
-    updateTransformGizmoHover(mPointerPosition);
-    update();
+    toggleTransformGizmoOrientation();
     return;
   }
   if (toolIndex < 0 || toolIndex > 3 || !selectableModelAvailable()) {
@@ -4190,9 +4202,7 @@ void NativeViewport::beginTransformGizmoDrag(
   if (!mModelDragActive) {
     return;
   }
-  const bool local = mTransformGizmoLocal ||
-                     mTransformGizmoMode == TransformGizmoMode::Scale ||
-                     mTransformGizmoMode == TransformGizmoMode::Transform ||
+  const bool local = modelGizmoUsesLocalOrientation() ||
                      operation == InteractionMode::Scale;
   switch (handle.kind) {
   case TransformGizmoHandleKind::MoveAxis:
@@ -5160,21 +5170,26 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
     }
   }
 
-  const bool forceLocal = mTransformGizmoMode == TransformGizmoMode::Scale ||
-                          mTransformGizmoMode == TransformGizmoMode::Transform;
-  const bool local = mTransformGizmoLocal || forceLocal;
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(mTransformToolHover == 4 ? QColor(62, 67, 72, 235)
-                                            : QColor(34, 38, 41, 210));
+  const bool locked = modelGizmoOrientationLocked();
+  const bool local = modelGizmoUsesLocalOrientation();
+  painter.setPen(locked ? QPen(QColor(76, 81, 85, 185), 1.0)
+                        : QPen(Qt::NoPen));
+  painter.setBrush(locked ? QColor(28, 31, 34, 205)
+                          : mTransformToolHover == 4
+                                ? QColor(62, 67, 72, 235)
+                                : QColor(34, 38, 41, 210));
   painter.drawRoundedRect(layout.orientationButton, 4.0, 4.0);
   QFont small = painter.font();
   if (small.pointSizeF() > 0.0) {
     small.setPointSizeF(std::max(8.0, small.pointSizeF() - 1.0));
   }
   painter.setFont(small);
-  painter.setPen(forceLocal ? QColor(255, 201, 106) : QColor(220, 225, 228));
+  painter.setPen(locked ? QColor(157, 164, 169)
+                        : QColor(220, 225, 228));
   painter.drawText(layout.orientationButton, Qt::AlignCenter,
-                   local ? QStringLiteral("局部") : QStringLiteral("全局"));
+                   locked ? QStringLiteral("局部\n锁定")
+                          : local ? QStringLiteral("局部")
+                                  : QStringLiteral("全局"));
   painter.restore();
 }
 
