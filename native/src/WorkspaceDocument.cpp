@@ -120,14 +120,38 @@ bool rotationsEquivalent(const QQuaternion &left, const QQuaternion &right) {
          1.0e-6F;
 }
 
+QVector3D normalizedScale(const QVector3D &scale) {
+  if (!finiteVector(scale) || std::abs(scale.x()) < 1.0e-4F ||
+      std::abs(scale.y()) < 1.0e-4F || std::abs(scale.z()) < 1.0e-4F) {
+    return QVector3D(1.0F, 1.0F, 1.0F);
+  }
+  return QVector3D(std::clamp(scale.x(), -1.0e4F, 1.0e4F),
+                   std::clamp(scale.y(), -1.0e4F, 1.0e4F),
+                   std::clamp(scale.z(), -1.0e4F, 1.0e4F));
+}
+
+bool scalesEquivalent(const QVector3D &left, const QVector3D &right) {
+  const QVector3D a = normalizedScale(left);
+  const QVector3D b = normalizedScale(right);
+  const float magnitude =
+      std::max({1.0F, std::abs(a.x()), std::abs(a.y()), std::abs(a.z()),
+                std::abs(b.x()), std::abs(b.y()), std::abs(b.z())});
+  return (a - b).lengthSquared() <= magnitude * magnitude * 1.0e-12F;
+}
+
 QJsonObject sceneTransformJson(const QVector3D &translation,
-                               const QQuaternion &rotation) {
+                               const QQuaternion &rotation,
+                               const QVector3D &scale) {
   const QQuaternion normalized = normalizedRotation(rotation);
+  const QVector3D normalizedSceneScale = normalizedScale(scale);
   return {{QStringLiteral("translation"),
            QJsonArray{translation.x(), translation.y(), translation.z()}},
           {QStringLiteral("rotation"),
            QJsonArray{normalized.scalar(), normalized.x(), normalized.y(),
-                      normalized.z()}}};
+                      normalized.z()}},
+          {QStringLiteral("scale"),
+           QJsonArray{normalizedSceneScale.x(), normalizedSceneScale.y(),
+                      normalizedSceneScale.z()}}};
 }
 
 QQuaternion sceneRotationFromJson(const QJsonValue &value) {
@@ -159,6 +183,21 @@ QVector3D sceneTranslationFromJson(const QJsonValue &value) {
                          static_cast<float>(translation.at(1).toDouble()),
                          static_cast<float>(translation.at(2).toDouble()));
   return finiteVector(parsed) ? parsed : QVector3D();
+}
+
+QVector3D sceneScaleFromJson(const QJsonValue &value) {
+  if (!value.isObject()) {
+    return QVector3D(1.0F, 1.0F, 1.0F);
+  }
+  const QJsonArray scale =
+      value.toObject().value(QStringLiteral("scale")).toArray();
+  if (scale.size() != 3) {
+    return QVector3D(1.0F, 1.0F, 1.0F);
+  }
+  return normalizedScale(
+      QVector3D(static_cast<float>(scale.at(0).toDouble()),
+                static_cast<float>(scale.at(1).toDouble()),
+                static_cast<float>(scale.at(2).toDouble())));
 }
 
 constexpr auto kDataMigrationMarker = ".gsw-data-migration.json";
@@ -353,6 +392,7 @@ QVector3D WorkspaceDocument::sceneTranslation() const {
   return mSceneTranslation;
 }
 QQuaternion WorkspaceDocument::sceneRotation() const { return mSceneRotation; }
+QVector3D WorkspaceDocument::sceneScale() const { return mSceneScale; }
 qint64 WorkspaceDocument::imageCount() const { return mImageCount; }
 PlyMetadata WorkspaceDocument::sceneMetadata() const { return mSceneMetadata; }
 bool WorkspaceDocument::hasPendingDataMigration() const {
@@ -393,6 +433,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mScenePath.clear();
   mSceneTranslation = {};
   mSceneRotation = {};
+  mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
@@ -420,6 +461,7 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mScenePath.clear();
   mSceneTranslation = {};
   mSceneRotation = {};
+  mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   mPendingDataRoot.clear();
   mImageCount = 0;
   mSceneMetadata = {};
@@ -475,6 +517,8 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
       root.value(QStringLiteral("sceneTransform")));
   mSceneRotation =
       sceneRotationFromJson(root.value(QStringLiteral("sceneTransform")));
+  mSceneScale =
+      sceneScaleFromJson(root.value(QStringLiteral("sceneTransform")));
   const QString storedPendingDataRoot =
       root.value(QStringLiteral("pendingDataRoot")).toString();
   mPendingDataRoot =
@@ -580,7 +624,8 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(savedScenePath, savedRootPath));
   root.insert(QStringLiteral("sceneTransform"),
-              sceneTransformJson(mSceneTranslation, mSceneRotation));
+              sceneTransformJson(mSceneTranslation, mSceneRotation,
+                                 mSceneScale));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
@@ -688,7 +733,8 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
   root.insert(QStringLiteral("sceneTransform"),
-              sceneTransformJson(mSceneTranslation, mSceneRotation));
+              sceneTransformJson(mSceneTranslation, mSceneRotation,
+                                 mSceneScale));
   if (!pendingDataRoot.isEmpty()) {
     QString relativePendingRoot;
     root.insert(QStringLiteral("pendingDataRoot"),
@@ -745,7 +791,8 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
   root.insert(QStringLiteral("sceneTransform"),
-              sceneTransformJson(mSceneTranslation, mSceneRotation));
+              sceneTransformJson(mSceneTranslation, mSceneRotation,
+                                 mSceneScale));
   if (!mPendingDataRoot.isEmpty()) {
     root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);
   }
@@ -860,6 +907,7 @@ bool WorkspaceDocument::setScenePath(const QString &path,
   if (mScenePath.isEmpty() || !pathsEqual(mScenePath, normalizedPath)) {
     mSceneTranslation = {};
     mSceneRotation = {};
+    mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   }
   mScenePath = normalizedPath;
   mSceneMetadata = metadata;
@@ -870,12 +918,20 @@ bool WorkspaceDocument::setScenePath(const QString &path,
 
 bool WorkspaceDocument::setSceneTranslation(const QVector3D &translation,
                                              QString *errorMessage) {
-  return setSceneTransform(translation, mSceneRotation, errorMessage);
+  return setSceneTransform(translation, mSceneRotation, mSceneScale,
+                           errorMessage);
 }
 
 bool WorkspaceDocument::setSceneTransform(const QVector3D &translation,
-                                          const QQuaternion &rotation,
-                                          QString *errorMessage) {
+                                           const QQuaternion &rotation,
+                                           QString *errorMessage) {
+  return setSceneTransform(translation, rotation, mSceneScale, errorMessage);
+}
+
+bool WorkspaceDocument::setSceneTransform(const QVector3D &translation,
+                                           const QQuaternion &rotation,
+                                           const QVector3D &scale,
+                                           QString *errorMessage) {
   if (!hasProject()) {
     assignError(errorMessage, tr("No project is open."));
     return false;
@@ -888,16 +944,25 @@ bool WorkspaceDocument::setSceneTransform(const QVector3D &translation,
     assignError(errorMessage, tr("Scene rotation must be a finite quaternion."));
     return false;
   }
+  if (!finiteVector(scale) || std::abs(scale.x()) < 1.0e-4F ||
+      std::abs(scale.y()) < 1.0e-4F || std::abs(scale.z()) < 1.0e-4F) {
+    assignError(errorMessage,
+                tr("Scene scale must contain finite, non-zero values."));
+    return false;
+  }
   const QQuaternion normalized = normalizedRotation(rotation);
+  const QVector3D normalizedSceneScale = normalizedScale(scale);
   const float comparisonScale =
       std::max({1.0F, mSceneTranslation.length(), translation.length()});
   if ((mSceneTranslation - translation).lengthSquared() <=
-          comparisonScale * comparisonScale * 1.0e-12F &&
-      rotationsEquivalent(mSceneRotation, normalized)) {
+      comparisonScale * comparisonScale * 1.0e-12F &&
+      rotationsEquivalent(mSceneRotation, normalized) &&
+      scalesEquivalent(mSceneScale, normalizedSceneScale)) {
     return true;
   }
   mSceneTranslation = translation;
   mSceneRotation = normalized;
+  mSceneScale = normalizedSceneScale;
   setModified(true);
   emit changed();
   return true;
@@ -943,6 +1008,7 @@ bool WorkspaceDocument::clearImportedData(
   const PlyMetadata previousSceneMetadata = mSceneMetadata;
   const QVector3D previousSceneTranslation = mSceneTranslation;
   const QQuaternion previousSceneRotation = mSceneRotation;
+  const QVector3D previousSceneScale = mSceneScale;
   const bool previousModified = mModified;
   QString stagedDatasetPath;
   QString stagingRoot;
@@ -985,6 +1051,7 @@ bool WorkspaceDocument::clearImportedData(
     mSceneMetadata = {};
     mSceneTranslation = {};
     mSceneRotation = {};
+    mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   }
 
   QString saveError;
@@ -1002,6 +1069,7 @@ bool WorkspaceDocument::clearImportedData(
     mSceneMetadata = previousSceneMetadata;
     mSceneTranslation = previousSceneTranslation;
     mSceneRotation = previousSceneRotation;
+    mSceneScale = previousSceneScale;
     setModified(previousModified);
     bool restored = true;
     if (!stagedDatasetPath.isEmpty()) {

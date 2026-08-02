@@ -41,18 +41,22 @@ bool WorldRay::isValid() const {
          direction.lengthSquared() > 1.0e-12F;
 }
 
-bool RigidModelTransform::isValid() const {
+bool ModelTransform::isValid() const {
   return finiteVector(translation) && finiteQuaternion(rotation) &&
-         rotation.lengthSquared() > 1.0e-12F;
+         rotation.lengthSquared() > 1.0e-12F && finiteVector(scale) &&
+         std::abs(scale.x()) >= 1.0e-4F &&
+         std::abs(scale.y()) >= 1.0e-4F &&
+         std::abs(scale.z()) >= 1.0e-4F;
 }
 
-QMatrix4x4 RigidModelTransform::matrix(const QVector3D &pivot) const {
+QMatrix4x4 ModelTransform::matrix(const QVector3D &pivot) const {
   QMatrix4x4 result;
   if (!isValid() || !finiteVector(pivot)) {
     return result;
   }
   result.translate(pivot + translation);
   result.rotate(normalizedModelRotation(rotation));
+  result.scale(normalizedModelScale(scale));
   result.translate(-pivot);
   return result;
 }
@@ -78,6 +82,31 @@ bool rotationsEquivalent(const QQuaternion &left, const QQuaternion &right,
   const float dot = std::abs(QQuaternion::dotProduct(a, b));
   return std::isfinite(dot) &&
          1.0F - std::clamp(dot, 0.0F, 1.0F) <= std::max(tolerance, 0.0F);
+}
+
+QVector3D normalizedModelScale(const QVector3D &scale) {
+  if (!finiteVector(scale) || std::abs(scale.x()) < 1.0e-4F ||
+      std::abs(scale.y()) < 1.0e-4F || std::abs(scale.z()) < 1.0e-4F) {
+    return QVector3D(1.0F, 1.0F, 1.0F);
+  }
+  QVector3D normalized = scale;
+  for (int component = 0; component < 3; ++component) {
+    normalized[component] =
+        std::clamp(normalized[component], -1.0e4F, 1.0e4F);
+  }
+  return normalized;
+}
+
+bool scalesEquivalent(const QVector3D &left, const QVector3D &right,
+                      const float tolerance) {
+  const QVector3D a = normalizedModelScale(left);
+  const QVector3D b = normalizedModelScale(right);
+  const float comparisonScale =
+      std::max({1.0F, std::abs(a.x()), std::abs(a.y()), std::abs(a.z()),
+                std::abs(b.x()), std::abs(b.y()), std::abs(b.z())});
+  return (a - b).lengthSquared() <=
+         comparisonScale * comparisonScale *
+             std::max(tolerance, 0.0F) * std::max(tolerance, 0.0F);
 }
 
 std::optional<WorldRay>

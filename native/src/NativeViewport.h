@@ -8,6 +8,7 @@
 #include "SceneEditModel.h"
 #include "ScreenSpaceSelection.h"
 #include "TrainingGpuPreviewBuffer.h"
+#include "TransformGizmo.h"
 
 #include <QImage>
 #include <QMatrix4x4>
@@ -49,6 +50,7 @@ public:
     Inspect,
     Move,
     Rotate,
+    Scale,
     Select,
     Rectangle,
     Lasso,
@@ -73,8 +75,12 @@ public:
   void selectModel();
   void selectModelForMove();
   void selectModelForRotate();
+  void selectModelForScale();
+  void setModelGizmoMode(TransformGizmoMode mode);
   void setModelTransform(const QVector3D &translation,
-                         const QQuaternion &rotation);
+                         const QQuaternion &rotation,
+                         const QVector3D &scale =
+                             QVector3D(1.0F, 1.0F, 1.0F));
   void setModelTranslation(const QVector3D &translation);
   void setRenderMode(RenderMode mode);
   void setReferencePlaneMode(ReferencePlaneMode mode);
@@ -117,6 +123,10 @@ public:
     return mModelTranslation;
   }
   [[nodiscard]] QQuaternion modelRotation() const { return mModelRotation; }
+  [[nodiscard]] QVector3D modelScale() const { return mModelScale; }
+  [[nodiscard]] TransformGizmoMode modelGizmoMode() const {
+    return mTransformGizmoMode;
+  }
   [[nodiscard]] bool modelTransformActive() const {
     return mModelDragActive;
   }
@@ -163,9 +173,11 @@ signals:
   void modelInteractionStateChanged(bool available, bool selected,
                                     bool canUndo, bool canRedo,
                                     const QVector3D &translation,
-                                    const QQuaternion &rotation);
+                                    const QQuaternion &rotation,
+                                    const QVector3D &scale);
   void modelTransformCommitted(const QVector3D &translation,
-                               const QQuaternion &rotation);
+                               const QQuaternion &rotation,
+                               const QVector3D &scale);
 
 protected:
   void initializeGL() override;
@@ -270,6 +282,8 @@ private:
   void drawSelectionGesture(QPainter &painter);
   void drawModelSelection(QPainter &painter,
                           const QMatrix4x4 &modelViewProjection);
+  void drawModelTransformGizmo(QPainter &painter);
+  void drawTransformToolStrip(QPainter &painter);
   void drawOverlay(QPainter &painter);
   void drawAxisGizmo(QPainter &painter);
   [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
@@ -291,6 +305,15 @@ private:
   [[nodiscard]] float transformSnapStep(bool fine) const;
   [[nodiscard]] float projectedModelRadius(const QPointF &center) const;
   [[nodiscard]] QPointF currentPointerPosition() const;
+  [[nodiscard]] TransformGizmoLayout modelTransformGizmo() const;
+  [[nodiscard]] TransformToolStripLayout transformToolStrip() const;
+  void updateTransformGizmoHover(const QPointF &position);
+  void beginTransformGizmoDrag(const TransformGizmoHandle &handle,
+                               const QPointF &position,
+                               Qt::KeyboardModifiers modifiers);
+  void activateTransformToolAt(int toolIndex);
+  [[nodiscard]] QString
+  transformGizmoHandleDescription(const TransformGizmoHandle &handle) const;
   void commitModelTransform();
   void resetModelTransformHistory();
   void notifyModelInteractionState();
@@ -351,7 +374,8 @@ private:
   QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
   QQuaternion mModelRotation;
-  RigidModelTransform mModelDragStartTransform;
+  QVector3D mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
+  ModelTransform mModelDragStartTransform;
   QVector3D mModelDragStartIntersection = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mModelDragPlaneNormal = QVector3D(0.0F, 0.0F, 1.0F);
   QPointF mModelTransformStartPosition;
@@ -360,10 +384,16 @@ private:
   QPointF mPointerPosition;
   float mModelRotationRadiusPixels = 96.0F;
   bool mTrackballRotation = false;
+  bool mTransformGizmoDragActive = false;
+  bool mTransformGizmoLocal = false;
+  TransformGizmoMode mTransformGizmoMode = TransformGizmoMode::Move;
+  TransformGizmoHandle mTransformGizmoHover;
+  TransformGizmoHandle mTransformGizmoPress;
+  int mTransformToolHover = -1;
   TransformConstraint mTransformConstraint;
   QString mTransformNumericInput;
   Qt::KeyboardModifiers mTransformModifiers = Qt::NoModifier;
-  QVector<RigidModelTransform> mModelTransformHistory;
+  QVector<ModelTransform> mModelTransformHistory;
   qsizetype mModelTransformHistoryIndex = 0;
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;

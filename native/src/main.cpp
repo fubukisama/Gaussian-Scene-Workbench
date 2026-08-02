@@ -303,12 +303,17 @@ int main(int argc, char *argv[]) {
                   const auto *rotateModelAction =
                       window.findChild<QAction *>(
                           QStringLiteral("rotateModelAction"));
+                  const auto *scaleModelAction =
+                      window.findChild<QAction *>(
+                          QStringLiteral("scaleModelAction"));
                   const bool modelSelectionAvailable =
                       viewport->selectableModelAvailable() &&
                       moveModelAction != nullptr &&
                       moveModelAction->isEnabled() &&
                       rotateModelAction != nullptr &&
-                      rotateModelAction->isEnabled();
+                      rotateModelAction->isEnabled() &&
+                      scaleModelAction != nullptr &&
+                      scaleModelAction->isEnabled();
                   viewport->selectModel();
                   const bool modelSelectionReady =
                       modelSelectionAvailable && viewport->modelSelected();
@@ -373,14 +378,33 @@ int main(int argc, char *argv[]) {
                        std::abs(QQuaternion::dotProduct(
                                     viewRotation.normalized(),
                                     viewport->modelRotation().normalized())) <
-                       0.99999F;
-                   smokeTestCompleted = sourceVertexCount > 0 &&
+                        0.99999F;
+                    viewport->selectModelForScale();
+                    const QPointF scaleEnd =
+                        trackballEnd + QPointF(54.0, -32.0);
+                    const QPointF globalScaleEnd =
+                        viewport->mapToGlobal(scaleEnd.toPoint());
+                    QMouseEvent modelScale(
+                        QEvent::MouseMove, scaleEnd, scaleEnd,
+                        globalScaleEnd, Qt::NoButton, Qt::NoButton,
+                        Qt::NoModifier);
+                    QMouseEvent scaleConfirm(
+                        QEvent::MouseButtonPress, scaleEnd, scaleEnd,
+                        globalScaleEnd, Qt::LeftButton, Qt::LeftButton,
+                        Qt::NoModifier);
+                    QCoreApplication::sendEvent(viewport, &modelScale);
+                    QCoreApplication::sendEvent(viewport, &scaleConfirm);
+                    const bool modelScaleReady =
+                        (viewport->modelScale() - QVector3D(1.0F, 1.0F, 1.0F))
+                            .lengthSquared() > 1.0e-8F;
+                    smokeTestCompleted = sourceVertexCount > 0 &&
                                        greenAxisPixels >= 30 &&
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
                                        coordinateReportReady &&
-                                       modelSelectionReady && modelMoveReady &&
-                                       modelRotateReady && modelTrackballReady;
+                                        modelSelectionReady && modelMoveReady &&
+                                        modelRotateReady && modelTrackballReady &&
+                                        modelScaleReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(QStringLiteral(
@@ -400,8 +424,9 @@ int main(int argc, char *argv[]) {
                           << "model-selection-ready"
                            << modelSelectionReady << "model-move-ready"
                            << modelMoveReady << "model-rotate-ready"
-                           << modelRotateReady << "model-trackball-ready"
-                           << modelTrackballReady;
+                            << modelRotateReady << "model-trackball-ready"
+                            << modelTrackballReady << "model-scale-ready"
+                            << modelScaleReady;
                   application.exit(smokeTestFailureCode);
                 });
           });

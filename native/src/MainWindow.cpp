@@ -1069,6 +1069,16 @@ void MainWindow::createActions() {
   connect(mRotateModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForRotate);
 
+  mScaleModelAction = new QAction(QStringLiteral("缩放模型"), this);
+  mScaleModelAction->setObjectName(QStringLiteral("scaleModelAction"));
+  mScaleModelAction->setCheckable(true);
+  mScaleModelAction->setShortcut(QKeySequence(QStringLiteral("S")));
+  mScaleModelAction->setToolTip(
+      QStringLiteral("Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附"));
+  mEditModeActionGroup->addAction(mScaleModelAction);
+  connect(mScaleModelAction, &QAction::triggered, mViewport,
+          &NativeViewport::selectModelForScale);
+
   mRectangleAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
                   QStringLiteral("框选"), this);
@@ -1284,6 +1294,7 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mInspectAction);
   sceneMenu->addAction(mMoveModelAction);
   sceneMenu->addAction(mRotateModelAction);
+  sceneMenu->addAction(mScaleModelAction);
   sceneMenu->addAction(mRectangleAction);
   sceneMenu->addAction(mLassoAction);
   sceneMenu->addAction(mBrushAction);
@@ -1409,8 +1420,6 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
-  mSelectionToolbar->addAction(mMoveModelAction);
-  mSelectionToolbar->addAction(mRotateModelAction);
   mSelectionToolbar->addAction(mRectangleAction);
   mSelectionToolbar->addAction(mLassoAction);
   mSelectionToolbar->addAction(mBrushAction);
@@ -1897,7 +1906,8 @@ void MainWindow::connectServices() {
             mViewport->setScene(mWorkspace.scenePath(),
                                 mWorkspace.sceneMetadata().vertexCount);
             mViewport->setModelTransform(workspaceTranslationForViewport(),
-                                         mWorkspace.sceneRotation());
+                                         mWorkspace.sceneRotation(),
+                                         mWorkspace.sceneScale());
           }
         }
 
@@ -2201,7 +2211,8 @@ void MainWindow::connectServices() {
                 pathsReferToSameLocation(mViewport->scenePath(),
                                           mWorkspace.scenePath())) {
               mViewport->setModelTransform(workspaceTranslationForViewport(),
-                                           mWorkspace.sceneRotation());
+                                           mWorkspace.sceneRotation(),
+                                           mWorkspace.sceneScale());
             }
             updateInspector();
             updateActionAvailability();
@@ -2297,6 +2308,8 @@ void MainWindow::connectServices() {
                 mode == NativeViewport::InteractionMode::Move);
             mRotateModelAction->setChecked(
                 mode == NativeViewport::InteractionMode::Rotate);
+            mScaleModelAction->setChecked(
+                mode == NativeViewport::InteractionMode::Scale);
             mRectangleAction->setChecked(
                 mode == NativeViewport::InteractionMode::Rectangle);
             mLassoAction->setChecked(
@@ -2308,7 +2321,8 @@ void MainWindow::connectServices() {
   connect(
       mViewport, &NativeViewport::modelInteractionStateChanged, this,
       [this](const bool available, const bool selected, const bool,
-              const bool, const QVector3D &, const QQuaternion &) {
+              const bool, const QVector3D &, const QQuaternion &,
+              const QVector3D &) {
         mModelReady = available;
         mModelSelected = selected;
         updateEditActions();
@@ -2316,7 +2330,7 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::modelTransformCommitted, this,
           [this](const QVector3D &translation,
-                 const QQuaternion &rotation) {
+                 const QQuaternion &rotation, const QVector3D &scale) {
             if (mWorkspace.scenePath().isEmpty() ||
                 !pathsReferToSameLocation(mViewport->scenePath(),
                                           mWorkspace.scenePath())) {
@@ -2325,7 +2339,7 @@ void MainWindow::connectServices() {
             QString error;
             if (!mWorkspace.setSceneTransform(
                     viewportTranslationForWorkspace(translation), rotation,
-                    &error)) {
+                    scale, &error)) {
               appendTaskEvent(
                   QStringLiteral("模型变换未能写入工程：%1").arg(error));
             }
@@ -2586,6 +2600,7 @@ void MainWindow::updateEditActions() {
   mInspectAction->setEnabled(modelInteractive || pointInteractive);
   mMoveModelAction->setEnabled(modelInteractive);
   mRotateModelAction->setEnabled(modelInteractive);
+  mScaleModelAction->setEnabled(modelInteractive);
   mRectangleAction->setEnabled(pointInteractive);
   mLassoAction->setEnabled(pointInteractive);
   mBrushAction->setEnabled(pointInteractive);
@@ -2728,6 +2743,7 @@ void MainWindow::checkpointCurrentRecovery() {
   mCurrentRecovery->scenePath = mWorkspace.scenePath();
   mCurrentRecovery->sceneTranslation = mWorkspace.sceneTranslation();
   mCurrentRecovery->sceneRotation = mWorkspace.sceneRotation();
+  mCurrentRecovery->sceneScale = mWorkspace.sceneScale();
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
@@ -2993,6 +3009,7 @@ bool MainWindow::restoreRecoveryWorkspace(
     QString transformError;
     if (!mWorkspace.setSceneTransform(workspace.sceneTranslation,
                                       workspace.sceneRotation,
+                                      workspace.sceneScale,
                                       &transformError)) {
       appendTaskEvent(
           QStringLiteral("恢复工程的模型变换失败：%1").arg(transformError));
@@ -4610,7 +4627,8 @@ void MainWindow::updateWorkspaceUi() {
     mViewport->setScene(mWorkspace.scenePath(),
                         mWorkspace.sceneMetadata().vertexCount);
     mViewport->setModelTransform(workspaceTranslationForViewport(),
-                                 mWorkspace.sceneRotation());
+                                 mWorkspace.sceneRotation(),
+                                 mWorkspace.sceneScale());
   }
   mProjectStatus->setText(
       projectName +
@@ -4800,11 +4818,13 @@ void MainWindow::updateInspector() {
   const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
   QVector3D translation = mWorkspace.sceneTranslation();
   QQuaternion rotation = mWorkspace.sceneRotation();
+  QVector3D scale = mWorkspace.sceneScale();
   if (!mWorkspace.scenePath().isEmpty() &&
       pathsReferToSameLocation(mViewport->scenePath(),
                                mWorkspace.scenePath())) {
     translation = viewportTranslationForWorkspace(mViewport->modelTranslation());
     rotation = mViewport->modelRotation();
+    scale = mViewport->modelScale();
   }
   const QVector3D euler = rotation.toEulerAngles();
   const QString rotationText =
@@ -4812,21 +4832,26 @@ void MainWindow::updateInspector() {
           .arg(euler.x(), 0, 'f', 2)
           .arg(euler.y(), 0, 'f', 2)
           .arg(euler.z(), 0, 'f', 2);
+  const QString scaleText = QStringLiteral("缩放 X %1 | Y %2 | Z %3")
+                                .arg(scale.x(), 0, 'g', 6)
+                                .arg(scale.y(), 0, 'g', 6)
+                                .arg(scale.z(), 0, 'g', 6);
   if (coordinates.valid) {
     mSceneTransformValue->setText(
-        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4%5")
+        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
             .arg(formatSceneLength(translation.x(), coordinates),
                   formatSceneLength(translation.y(), coordinates),
                   formatSceneLength(translation.z(), coordinates),
-                  rotationText,
+                  rotationText, scaleText,
                   mModelSelected ? QStringLiteral(" · 已选中") : QString()));
   } else {
     mSceneTransformValue->setText(
-        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4%5")
+        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
             .arg(translation.x(), 0, 'g', 7)
             .arg(translation.y(), 0, 'g', 7)
             .arg(translation.z(), 0, 'g', 7)
             .arg(rotationText)
+            .arg(scaleText)
             .arg(mModelSelected ? QStringLiteral(" · 已选中") : QString()));
   }
   if (coordinates.valid) {

@@ -1,4 +1,5 @@
 #include "ModelInteraction.h"
+#include "TransformGizmo.h"
 
 #include <QMatrix4x4>
 #include <QTest>
@@ -13,8 +14,9 @@ private slots:
   void intersectsTranslatedBoundsAndRejectsEmptySpace();
   void intersectsViewPlaneForFreeMovement();
   void rejectsParallelViewPlaneRay();
-  void buildsPivotedRigidTransformAndInversePickRay();
+  void buildsPivotedTrsTransformAndInversePickRay();
   void computesStableAxisAndTrackballRotations();
+  void laysOutAndHitsTransformGizmos();
 };
 
 void ModelInteractionTests::unprojectsViewportCentre() {
@@ -63,15 +65,21 @@ void ModelInteractionTests::rejectsParallelViewPlaneRay() {
                .has_value());
 }
 
-void ModelInteractionTests::buildsPivotedRigidTransformAndInversePickRay() {
-  const RigidModelTransform transform{
+void ModelInteractionTests::buildsPivotedTrsTransformAndInversePickRay() {
+  const ModelTransform transform{
       QVector3D(3.0F, -2.0F, 1.0F),
-      QQuaternion::fromAxisAndAngle(QVector3D(0.0F, 0.0F, 1.0F), 90.0F)};
+      QQuaternion::fromAxisAndAngle(QVector3D(0.0F, 0.0F, 1.0F), 90.0F),
+      QVector3D(2.0F, 3.0F, 4.0F)};
   const QVector3D pivot(5.0F, 0.0F, 0.0F);
   const QMatrix4x4 matrix = transform.matrix(pivot);
   const QVector3D transformedPivot = matrix.map(pivot);
   QVERIFY((transformedPivot - (pivot + transform.translation)).length() <
           1.0e-5F);
+  const QVector3D transformedX =
+      matrix.map(pivot + QVector3D(1.0F, 0.0F, 0.0F));
+  QVERIFY((transformedX -
+           (pivot + transform.translation + QVector3D(0.0F, 2.0F, 0.0F)))
+              .length() < 1.0e-4F);
 
   const WorldRay localExpected{QVector3D(5.0F, 0.0F, 10.0F),
                                QVector3D(0.0F, 0.0F, -1.0F)};
@@ -82,6 +90,48 @@ void ModelInteractionTests::buildsPivotedRigidTransformAndInversePickRay() {
   QVERIFY(local.has_value());
   QVERIFY((local->origin - localExpected.origin).length() < 1.0e-4F);
   QVERIFY((local->direction - localExpected.direction).length() < 1.0e-5F);
+}
+
+void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0.0F, 0.0F, 10.0F), QVector3D(),
+              QVector3D(0.0F, 1.0F, 0.0F));
+  QMatrix4x4 projection;
+  projection.perspective(50.0F, 1.0F, 0.1F, 100.0F);
+  const TransformGizmoLayout layout = transformGizmoLayout(
+      QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
+      84.0);
+  QVERIFY(layout.valid);
+  QVERIFY(layout.axes[0].visible);
+  QVERIFY(layout.axes[1].visible);
+  const TransformGizmoHandle scaleAxis = hitTestTransformGizmo(
+      layout, layout.axes[0].endpoint, TransformGizmoMode::Scale);
+  QCOMPARE(scaleAxis.kind, TransformGizmoHandleKind::ScaleAxis);
+  QCOMPARE(scaleAxis.axis, 0);
+  const QPointF movePoint =
+      layout.axes[0].line.p1() +
+      (layout.axes[0].line.p2() - layout.axes[0].line.p1()) * 0.55;
+  const TransformGizmoHandle moveAxis = hitTestTransformGizmo(
+      layout, movePoint, TransformGizmoMode::Move);
+  QCOMPARE(moveAxis.kind, TransformGizmoHandleKind::MoveAxis);
+  QCOMPARE(moveAxis.axis, 0);
+  const TransformGizmoHandle uniform = hitTestTransformGizmo(
+      layout, layout.center, TransformGizmoMode::Scale);
+  QCOMPARE(uniform.kind, TransformGizmoHandleKind::ScaleUniform);
+  QCOMPARE(uniform.axis, -1);
+  const TransformGizmoHandle viewRotation = hitTestTransformGizmo(
+      layout, layout.viewRing.constFirst(), TransformGizmoMode::Rotate);
+  QCOMPARE(viewRotation.kind, TransformGizmoHandleKind::RotateView);
+  const TransformGizmoHandle trackball = hitTestTransformGizmo(
+      layout, layout.center + QPointF(18.0, 21.0),
+      TransformGizmoMode::Rotate);
+  QCOMPARE(trackball.kind, TransformGizmoHandleKind::RotateTrackball);
+
+  const TransformToolStripLayout tools =
+      transformToolStripLayout(QSizeF(1280.0, 720.0), 16.0);
+  QCOMPARE(hitTestTransformToolStrip(tools, tools.buttons[3].center()), 3);
+  QCOMPARE(hitTestTransformToolStrip(tools, tools.orientationButton.center()),
+           4);
 }
 
 void ModelInteractionTests::computesStableAxisAndTrackballRotations() {

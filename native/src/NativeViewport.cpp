@@ -125,6 +125,8 @@ QString modeLabel(const NativeViewport::InteractionMode mode) {
     return QStringLiteral("移动模型");
   case NativeViewport::InteractionMode::Rotate:
     return QStringLiteral("旋转模型");
+  case NativeViewport::InteractionMode::Scale:
+    return QStringLiteral("缩放模型");
   case NativeViewport::InteractionMode::Select:
     return QStringLiteral("选择");
   case NativeViewport::InteractionMode::Rectangle:
@@ -143,6 +145,7 @@ bool isTrimInteractionMode(const NativeViewport::InteractionMode mode) {
   switch (mode) {
   case NativeViewport::InteractionMode::Move:
   case NativeViewport::InteractionMode::Rotate:
+  case NativeViewport::InteractionMode::Scale:
   case NativeViewport::InteractionMode::Select:
   case NativeViewport::InteractionMode::Rectangle:
   case NativeViewport::InteractionMode::Lasso:
@@ -162,6 +165,9 @@ Qt::CursorShape defaultInteractionCursor(
   }
   if (mode == NativeViewport::InteractionMode::Rotate) {
     return Qt::CrossCursor;
+  }
+  if (mode == NativeViewport::InteractionMode::Scale) {
+    return Qt::SizeFDiagCursor;
   }
   return mode == NativeViewport::InteractionMode::Rectangle ||
                  mode == NativeViewport::InteractionMode::Lasso ||
@@ -290,7 +296,12 @@ void NativeViewport::setScene(const QString &scenePath,
   mSelectionGestureActive = false;
   mModelSelected = false;
   mModelDragActive = false;
-  if (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate) {
+  mTransformGizmoDragActive = false;
+  mTransformGizmoHover = {};
+  mTransformGizmoPress = {};
+  mTransformToolHover = -1;
+  if (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+      mMode == InteractionMode::Scale) {
     mMode = InteractionMode::Inspect;
     setCursor(defaultInteractionCursor(mMode));
     emit interactionModeChanged(mMode);
@@ -358,6 +369,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
   mModelTranslation = {};
   mModelRotation = {};
+  mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
   resetModelTransformHistory();
   mSceneRadius = 4.0F;
   mEditModel.reset(0);
@@ -395,7 +407,8 @@ void NativeViewport::setShowCameras(const bool enabled) {
 }
 
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
-  if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate) &&
+  if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate ||
+       mode == InteractionMode::Scale) &&
       !selectableModelAvailable()) {
     return;
   }
@@ -405,6 +418,10 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
   }
   if (mode == InteractionMode::Rotate) {
     selectModelForRotate();
+    return;
+  }
+  if (mode == InteractionMode::Scale) {
+    selectModelForScale();
     return;
   }
   if (mModelDragActive) {
@@ -458,6 +475,7 @@ void NativeViewport::selectModel() {
 void NativeViewport::selectModelForMove() {
   selectModel();
   if (mModelSelected) {
+    mTransformGizmoMode = TransformGizmoMode::Move;
     beginModelTransform(InteractionMode::Move);
   }
 }
@@ -477,24 +495,48 @@ void NativeViewport::selectModelForRotate() {
   }
   selectModel();
   if (mModelSelected) {
+    mTransformGizmoMode = TransformGizmoMode::Rotate;
     beginModelTransform(InteractionMode::Rotate);
   }
 }
 
+void NativeViewport::selectModelForScale() {
+  selectModel();
+  if (mModelSelected) {
+    mTransformGizmoMode = TransformGizmoMode::Scale;
+    beginModelTransform(InteractionMode::Scale);
+  }
+}
+
+void NativeViewport::setModelGizmoMode(const TransformGizmoMode mode) {
+  if (mModelDragActive) {
+    finishModelTransform(false);
+  }
+  mTransformGizmoMode = mode;
+  mTransformGizmoHover = {};
+  mTransformGizmoPress = {};
+  setCursor(defaultInteractionCursor(mMode));
+  update();
+}
+
 void NativeViewport::setModelTransform(const QVector3D &translation,
-                                       const QQuaternion &rotation) {
+                                       const QQuaternion &rotation,
+                                       const QVector3D &scale) {
   const QQuaternion normalizedRotation = normalizedModelRotation(rotation);
+  const QVector3D normalizedScale = normalizedModelScale(scale);
   const float comparisonScale =
       std::max({1.0F, mModelTranslation.length(), translation.length()});
   if (!std::isfinite(translation.x()) || !std::isfinite(translation.y()) ||
       !std::isfinite(translation.z()) ||
       ((mModelTranslation - translation).lengthSquared() <=
            comparisonScale * comparisonScale * 1.0e-12F &&
-       rotationsEquivalent(mModelRotation, normalizedRotation))) {
+       rotationsEquivalent(mModelRotation, normalizedRotation) &&
+       scalesEquivalent(mModelScale, normalizedScale))) {
     return;
   }
   mModelTranslation = translation;
   mModelRotation = normalizedRotation;
+  mModelScale = normalizedScale;
   resetModelTransformHistory();
   notifyEditState();
   notifyModelInteractionState();
@@ -502,7 +544,7 @@ void NativeViewport::setModelTransform(const QVector3D &translation,
 }
 
 void NativeViewport::setModelTranslation(const QVector3D &translation) {
-  setModelTransform(translation, mModelRotation);
+  setModelTransform(translation, mModelRotation, mModelScale);
 }
 
 void NativeViewport::setRenderMode(const RenderMode mode) {
@@ -560,8 +602,12 @@ void NativeViewport::clearSelection() {
   const bool clearedModel = mModelSelected;
   mModelSelected = false;
   mModelDragActive = false;
+  mTransformGizmoDragActive = false;
+  mTransformGizmoHover = {};
+  mTransformGizmoPress = {};
   if (clearedModel &&
-      (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate)) {
+      (mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+       mMode == InteractionMode::Scale)) {
     setInteractionMode(InteractionMode::Inspect);
   }
   rebuildRenderedVertices();
@@ -594,14 +640,17 @@ void NativeViewport::undoEdit() {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+       mMode == InteractionMode::Scale ||
        !mEditModel.canUndo()) &&
       canUndoModelTransform()) {
     --mModelTransformHistoryIndex;
-    const RigidModelTransform &transform =
+    const ModelTransform &transform =
         mModelTransformHistory.at(mModelTransformHistoryIndex);
     mModelTranslation = transform.translation;
     mModelRotation = transform.rotation;
-    emit modelTransformCommitted(mModelTranslation, mModelRotation);
+    mModelScale = transform.scale;
+    emit modelTransformCommitted(mModelTranslation, mModelRotation,
+                                 mModelScale);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -620,14 +669,17 @@ void NativeViewport::redoEdit() {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
+       mMode == InteractionMode::Scale ||
        !mEditModel.canRedo()) &&
       canRedoModelTransform()) {
     ++mModelTransformHistoryIndex;
-    const RigidModelTransform &transform =
+    const ModelTransform &transform =
         mModelTransformHistory.at(mModelTransformHistoryIndex);
     mModelTranslation = transform.translation;
     mModelRotation = transform.rotation;
-    emit modelTransformCommitted(mModelTranslation, mModelRotation);
+    mModelScale = transform.scale;
+    emit modelTransformCommitted(mModelTranslation, mModelRotation,
+                                 mModelScale);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -846,7 +898,7 @@ void main() {
   gl_Position = viewProjection * vec4(position, 1.0);
   vertexColor = color;
   worldPosition = (model * vec4(position, 1.0)).xyz;
-  worldNormal = mat3(model) * normal;
+  worldNormal = transpose(inverse(mat3(model))) * normal;
   vertexTextureCoordinate = textureCoordinate;
   vertexTextureWeight = textureWeight;
 }
@@ -1314,8 +1366,10 @@ void NativeViewport::paintGL() {
   drawCameraTrajectory(painter, modelViewProjection);
   drawSelectionGesture(painter);
   drawModelSelection(painter, modelViewProjection);
+  drawModelTransformGizmo(painter);
 
   drawOverlay(painter);
+  drawTransformToolStrip(painter);
   drawAxisGizmo(painter);
   painter.end();
 }
@@ -1659,9 +1713,10 @@ void NativeViewport::rebuildRenderedVertices() {
   if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     QVector3D forward = (mTarget - cameraPosition()).normalized();
     bool invertible = false;
-    const QMatrix4x4 inverseModel = modelMatrix().inverted(&invertible);
+    const QMatrix4x4 model = modelMatrix();
+    (void)model.inverted(&invertible);
     if (invertible) {
-      forward = inverseModel.mapVector(forward).normalized();
+      forward = model.transposed().mapVector(forward).normalized();
     }
     std::sort(mPendingVertices.begin(), mPendingVertices.end(),
               [&forward](const PointCloudVertex &left,
@@ -1716,7 +1771,7 @@ bool NativeViewport::canRedoModelTransform() const {
 
 void NativeViewport::resetModelTransformHistory() {
   mModelTransformHistory = {
-      RigidModelTransform{mModelTranslation, mModelRotation}};
+      ModelTransform{mModelTranslation, mModelRotation, mModelScale}};
   mModelTransformHistoryIndex = 0;
 }
 
@@ -1728,14 +1783,15 @@ void NativeViewport::commitModelTransform() {
               .lengthSquared() <=
           translationScale * translationScale * 1.0e-12F &&
       rotationsEquivalent(mModelRotation,
-                          mModelDragStartTransform.rotation)) {
+                          mModelDragStartTransform.rotation) &&
+      scalesEquivalent(mModelScale, mModelDragStartTransform.scale)) {
     return;
   }
   mModelTransformHistory.resize(mModelTransformHistoryIndex + 1);
   mModelTransformHistory.append(
-      RigidModelTransform{mModelTranslation, mModelRotation});
+      ModelTransform{mModelTranslation, mModelRotation, mModelScale});
   mModelTransformHistoryIndex = mModelTransformHistory.size() - 1;
-  emit modelTransformCommitted(mModelTranslation, mModelRotation);
+  emit modelTransformCommitted(mModelTranslation, mModelRotation, mModelScale);
   notifyEditState();
   notifyModelInteractionState();
 }
@@ -1743,7 +1799,7 @@ void NativeViewport::commitModelTransform() {
 void NativeViewport::notifyModelInteractionState() {
   emit modelInteractionStateChanged(
       selectableModelAvailable(), mModelSelected, canUndoModelTransform(),
-      canRedoModelTransform(), mModelTranslation, mModelRotation);
+      canRedoModelTransform(), mModelTranslation, mModelRotation, mModelScale);
 }
 
 void NativeViewport::uploadPendingPointCloud() {
@@ -1798,7 +1854,10 @@ void NativeViewport::updatePointCacheSelection(
   const auto projectedPixels = [&](const PointCloudCacheNode &node) {
     const QVector3D center = modelMatrix().map(
         (node.boundsMinimum + node.boundsMaximum) * 0.5F);
-    const float radius =
+    const float maximumScale =
+        std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
+                  std::abs(mModelScale.z())});
+    const float radius = maximumScale *
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
                  mSceneRadius * 1.0e-6F);
     if (mOrthographic) {
@@ -2184,7 +2243,10 @@ void NativeViewport::updateMeshCacheSelection(
   const auto projectedPixels = [&](const MeshCacheNode &node) {
     const QVector3D center = modelMatrix().map(
         (node.boundsMinimum + node.boundsMaximum) * 0.5F);
-    const float radius =
+    const float maximumScale =
+        std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
+                  std::abs(mModelScale.z())});
+    const float radius = maximumScale *
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
                  mSceneRadius * 1.0e-6F);
     if (mOrthographic) {
@@ -2865,6 +2927,14 @@ void NativeViewport::leaveEvent(QEvent *event) {
     setCursor(defaultInteractionCursor(mMode));
     update();
   }
+  if (!mModelDragActive &&
+      (mTransformGizmoHover.isValid() || mTransformToolHover >= 0)) {
+    mTransformGizmoHover = {};
+    mTransformToolHover = -1;
+    setToolTip({});
+    setCursor(defaultInteractionCursor(mMode));
+    update();
+  }
   QOpenGLWidget::leaveEvent(event);
 }
 
@@ -2922,6 +2992,24 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
       }
       event->accept();
       return;
+    }
+  }
+  if (event->button() == Qt::LeftButton && selectableModelAvailable()) {
+    const int tool = hitTestTransformToolStrip(transformToolStrip(),
+                                               event->position());
+    if (tool >= 0) {
+      activateTransformToolAt(tool);
+      event->accept();
+      return;
+    }
+    if (mModelSelected) {
+      const TransformGizmoHandle handle = hitTestTransformGizmo(
+          modelTransformGizmo(), event->position(), mTransformGizmoMode);
+      if (handle.isValid()) {
+        beginTransformGizmoDrag(handle, event->position(), event->modifiers());
+        event->accept();
+        return;
+      }
     }
   }
   updateNavigationGizmoHover(event->position());
@@ -3027,7 +3115,15 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     return;
   }
   if (mPressedButtons == Qt::NoButton) {
-    updateNavigationGizmoHover(event->position());
+    updateTransformGizmoHover(event->position());
+    if (mTransformToolHover >= 0 || mTransformGizmoHover.isValid()) {
+      if (mNavigationHover.part != NavigationGizmoPart::None) {
+        mNavigationHover = {};
+        update();
+      }
+    } else {
+      updateNavigationGizmoHover(event->position());
+    }
     if (mMode == InteractionMode::Brush) {
       update();
       event->accept();
@@ -3066,6 +3162,14 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && mTransformGizmoDragActive) {
+    updateModelTransform(event->position(), event->modifiers());
+    finishModelTransform(true);
+    updateTransformGizmoHover(event->position());
+    mPressedButtons = event->buttons();
+    event->accept();
+    return;
+  }
   if (event->button() == Qt::LeftButton && mNavigationInteractionActive) {
     finishNavigationGizmoInteraction();
     mPressedButtons = event->buttons();
@@ -3338,6 +3442,19 @@ void NativeViewport::keyPressEvent(QKeyEvent *event) {
       event->accept();
       return;
     }
+    if (event->key() == Qt::Key_S && mModelSelected) {
+      beginModelTransform(InteractionMode::Scale);
+      event->accept();
+      return;
+    }
+    if (event->key() == Qt::Key_Comma && mModelSelected) {
+      mTransformGizmoLocal = !mTransformGizmoLocal;
+      setToolTip(mTransformGizmoLocal ? QStringLiteral("局部坐标系")
+                                      : QStringLiteral("全局坐标系"));
+      update();
+      event->accept();
+      return;
+    }
     QOpenGLWidget::keyPressEvent(event);
     return;
   }
@@ -3371,6 +3488,13 @@ void NativeViewport::keyPressEvent(QKeyEvent *event) {
       mTransformNumericInput.clear();
       updateModelTransform(mModelTransformCurrentPosition,
                            mTransformModifiers);
+    }
+    event->accept();
+    return;
+  case Qt::Key_S:
+    if (mMode != InteractionMode::Scale) {
+      finishModelTransform(false);
+      beginModelTransform(InteractionMode::Scale);
     }
     event->accept();
     return;
@@ -3465,8 +3589,12 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
   const float modelDistance =
       (transformedSceneCenter() - cameraPosition()).length();
+  const float transformedRadius =
+      mSceneRadius *
+      std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
+                std::abs(mModelScale.z())});
   const float farPlane =
-      std::max(100.0F, modelDistance + mSceneRadius * 12.0F);
+      std::max(100.0F, modelDistance + transformedRadius * 12.0F);
   if (mOrthographic) {
     const float halfHeight =
         std::max(0.05F, mDistance * std::tan(radians(23.0F)));
@@ -3483,7 +3611,7 @@ QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
 }
 
 QMatrix4x4 NativeViewport::modelMatrix() const {
-  return RigidModelTransform{mModelTranslation, mModelRotation}
+  return ModelTransform{mModelTranslation, mModelRotation, mModelScale}
       .matrix(mSceneCenter);
 }
 
@@ -3555,10 +3683,221 @@ float NativeViewport::projectedModelRadius(const QPointF &center) const {
   return static_cast<float>(std::clamp(radius, 56.0, maximumRadius));
 }
 
+TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
+  if (!mModelSelected || !selectableModelAvailable()) {
+    return {};
+  }
+  // A diagonal scale is defined in the object's local basis. The standalone
+  // scale and combined tools therefore use that basis even when move/rotate
+  // are configured for world orientation; this avoids silently introducing
+  // an unrepresentable shear into the persisted TRS transform.
+  const bool forceLocal = mTransformGizmoMode == TransformGizmoMode::Scale ||
+                          mTransformGizmoMode == TransformGizmoMode::Transform;
+  const QQuaternion orientation =
+      mTransformGizmoLocal || forceLocal ? mModelRotation : QQuaternion();
+  return transformGizmoLayout(
+      transformedSceneCenter(), orientation, viewProjectionMatrix(),
+      QSizeF(width(), height()),
+      std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0, 104.0));
+}
+
+TransformToolStripLayout NativeViewport::transformToolStrip() const {
+  return transformToolStripLayout(QSizeF(width(), height()),
+                                  QFontMetricsF(font()).height());
+}
+
+QString NativeViewport::transformGizmoHandleDescription(
+    const TransformGizmoHandle &handle) const {
+  static const std::array<QString, 3> axes = {
+      QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
+  const QString axis = handle.axis >= 0 && handle.axis < 3
+                           ? axes.at(static_cast<std::size_t>(handle.axis))
+                           : QString();
+  switch (handle.kind) {
+  case TransformGizmoHandleKind::MoveAxis:
+    return QStringLiteral("沿 %1 轴移动").arg(axis);
+  case TransformGizmoHandleKind::MovePlane:
+    return QStringLiteral("在垂直于 %1 轴的平面移动").arg(axis);
+  case TransformGizmoHandleKind::MoveView:
+    return QStringLiteral("沿视图平面自由移动");
+  case TransformGizmoHandleKind::RotateAxis:
+    return QStringLiteral("绕 %1 轴旋转").arg(axis);
+  case TransformGizmoHandleKind::RotateView:
+    return QStringLiteral("绕视图轴旋转");
+  case TransformGizmoHandleKind::RotateTrackball:
+    return QStringLiteral("自由轨迹球旋转");
+  case TransformGizmoHandleKind::ScaleAxis:
+    return QStringLiteral("沿局部 %1 轴缩放").arg(axis);
+  case TransformGizmoHandleKind::ScalePlane:
+    return QStringLiteral("在局部 %1 平面的双轴缩放").arg(axis);
+  case TransformGizmoHandleKind::ScaleUniform:
+    return QStringLiteral("等比缩放");
+  case TransformGizmoHandleKind::None:
+    return {};
+  }
+  return {};
+}
+
+void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
+  if (mModelDragActive) {
+    return;
+  }
+  const int tool = selectableModelAvailable()
+                       ? hitTestTransformToolStrip(transformToolStrip(), position)
+                       : -1;
+  TransformGizmoHandle handle;
+  if (tool < 0 && mModelSelected) {
+    handle = hitTestTransformGizmo(modelTransformGizmo(), position,
+                                   mTransformGizmoMode);
+  }
+  if (tool == mTransformToolHover && handle == mTransformGizmoHover) {
+    return;
+  }
+  mTransformToolHover = tool;
+  mTransformGizmoHover = handle;
+
+  if (tool >= 0) {
+    static const std::array<QString, 4> descriptions = {
+        QStringLiteral("移动工具（G）"), QStringLiteral("旋转工具（R）"),
+        QStringLiteral("缩放工具（S）"),
+        QStringLiteral("组合变换工具")};
+    if (tool < 4) {
+      setToolTip(descriptions.at(static_cast<std::size_t>(tool)));
+    } else {
+      const bool forceLocal =
+          mTransformGizmoMode == TransformGizmoMode::Scale ||
+          mTransformGizmoMode == TransformGizmoMode::Transform;
+      setToolTip(forceLocal
+                     ? QStringLiteral("缩放使用局部坐标，防止产生剪切；移动/旋转偏好为 %1")
+                           .arg(mTransformGizmoLocal ? QStringLiteral("局部")
+                                                    : QStringLiteral("全局"))
+                     : QStringLiteral("切换全局/局部坐标系（,）"));
+    }
+    setCursor(Qt::PointingHandCursor);
+  } else if (handle.isValid()) {
+    setToolTip(transformGizmoHandleDescription(handle) +
+               QStringLiteral(" · Ctrl 吸附 · Shift 精细"));
+    switch (handle.kind) {
+    case TransformGizmoHandleKind::MoveAxis:
+    case TransformGizmoHandleKind::MovePlane:
+    case TransformGizmoHandleKind::MoveView:
+      setCursor(Qt::SizeAllCursor);
+      break;
+    case TransformGizmoHandleKind::RotateAxis:
+    case TransformGizmoHandleKind::RotateView:
+    case TransformGizmoHandleKind::RotateTrackball:
+      setCursor(Qt::OpenHandCursor);
+      break;
+    case TransformGizmoHandleKind::ScaleAxis:
+    case TransformGizmoHandleKind::ScalePlane:
+    case TransformGizmoHandleKind::ScaleUniform:
+      setCursor(Qt::SizeFDiagCursor);
+      break;
+    case TransformGizmoHandleKind::None:
+      break;
+    }
+  } else {
+    setToolTip({});
+    setCursor(defaultInteractionCursor(mMode));
+  }
+  update();
+}
+
+void NativeViewport::activateTransformToolAt(const int toolIndex) {
+  if (toolIndex == 4) {
+    mTransformGizmoLocal = !mTransformGizmoLocal;
+    mTransformGizmoHover = {};
+    mTransformToolHover = -1;
+    updateTransformGizmoHover(mPointerPosition);
+    update();
+    return;
+  }
+  if (toolIndex < 0 || toolIndex > 3 || !selectableModelAvailable()) {
+    return;
+  }
+  if (!mModelSelected) {
+    selectModel();
+  }
+  static const std::array<TransformGizmoMode, 4> modes = {
+      TransformGizmoMode::Move, TransformGizmoMode::Rotate,
+      TransformGizmoMode::Scale, TransformGizmoMode::Transform};
+  setModelGizmoMode(modes.at(static_cast<std::size_t>(toolIndex)));
+  updateTransformGizmoHover(mPointerPosition);
+}
+
+void NativeViewport::beginTransformGizmoDrag(
+    const TransformGizmoHandle &handle, const QPointF &position,
+    const Qt::KeyboardModifiers modifiers) {
+  if (!handle.isValid() || !mModelSelected || !selectableModelAvailable()) {
+    return;
+  }
+  mPointerPosition = position;
+  InteractionMode operation = InteractionMode::Inspect;
+  bool trackball = false;
+  switch (handle.kind) {
+  case TransformGizmoHandleKind::MoveAxis:
+  case TransformGizmoHandleKind::MovePlane:
+  case TransformGizmoHandleKind::MoveView:
+    operation = InteractionMode::Move;
+    break;
+  case TransformGizmoHandleKind::RotateAxis:
+  case TransformGizmoHandleKind::RotateView:
+    operation = InteractionMode::Rotate;
+    break;
+  case TransformGizmoHandleKind::RotateTrackball:
+    operation = InteractionMode::Rotate;
+    trackball = true;
+    break;
+  case TransformGizmoHandleKind::ScaleAxis:
+  case TransformGizmoHandleKind::ScalePlane:
+  case TransformGizmoHandleKind::ScaleUniform:
+    operation = InteractionMode::Scale;
+    break;
+  case TransformGizmoHandleKind::None:
+    return;
+  }
+  beginModelTransform(operation, trackball);
+  if (!mModelDragActive) {
+    return;
+  }
+  const bool local = mTransformGizmoLocal ||
+                     mTransformGizmoMode == TransformGizmoMode::Scale ||
+                     mTransformGizmoMode == TransformGizmoMode::Transform ||
+                     operation == InteractionMode::Scale;
+  switch (handle.kind) {
+  case TransformGizmoHandleKind::MoveAxis:
+  case TransformGizmoHandleKind::RotateAxis:
+  case TransformGizmoHandleKind::ScaleAxis:
+    mTransformConstraint = {TransformConstraintKind::Axis, handle.axis, local};
+    break;
+  case TransformGizmoHandleKind::MovePlane:
+  case TransformGizmoHandleKind::ScalePlane:
+    mTransformConstraint = {TransformConstraintKind::Plane, handle.axis, local};
+    break;
+  case TransformGizmoHandleKind::MoveView:
+  case TransformGizmoHandleKind::RotateView:
+  case TransformGizmoHandleKind::RotateTrackball:
+  case TransformGizmoHandleKind::ScaleUniform:
+  case TransformGizmoHandleKind::None:
+    mTransformConstraint = {};
+    break;
+  }
+  mTransformModifiers = modifiers;
+  mTransformGizmoDragActive = true;
+  mTransformGizmoPress = handle;
+  mTransformGizmoHover = handle;
+  setCursor(operation == InteractionMode::Rotate
+                ? Qt::ClosedHandCursor
+                : defaultInteractionCursor(operation));
+  setToolTip(transformGizmoHandleDescription(handle));
+  update();
+}
+
 void NativeViewport::beginModelTransform(const InteractionMode mode,
                                          const bool trackball) {
   if (!mModelSelected || !selectableModelAvailable() ||
-      (mode != InteractionMode::Move && mode != InteractionMode::Rotate)) {
+      (mode != InteractionMode::Move && mode != InteractionMode::Rotate &&
+       mode != InteractionMode::Scale)) {
     return;
   }
   if (mModelDragActive) {
@@ -3571,7 +3910,7 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
   mTransformConstraint = {};
   mTransformNumericInput.clear();
   mTransformModifiers = Qt::NoModifier;
-  mModelDragStartTransform = {mModelTranslation, mModelRotation};
+  mModelDragStartTransform = {mModelTranslation, mModelRotation, mModelScale};
   mModelTransformStartPosition = currentPointerPosition();
   mModelTransformCurrentPosition = mModelTransformStartPosition;
   mModelDragPlaneNormal = mTarget - cameraPosition();
@@ -3728,6 +4067,7 @@ void NativeViewport::updateModelTransform(
     }
     mModelTranslation = mModelDragStartTransform.translation + delta;
     mModelRotation = mModelDragStartTransform.rotation;
+    mModelScale = mModelDragStartTransform.scale;
   } else if (mMode == InteractionMode::Rotate) {
     QQuaternion deltaRotation;
     if (mTrackballRotation) {
@@ -3791,6 +4131,83 @@ void NativeViewport::updateModelTransform(
     mModelTranslation = mModelDragStartTransform.translation;
     mModelRotation = normalizedModelRotation(
         deltaRotation * mModelDragStartTransform.rotation);
+    mModelScale = mModelDragStartTransform.scale;
+  } else if (mMode == InteractionMode::Scale) {
+    const QPointF startOffset =
+        mModelTransformStartPosition - mModelTransformScreenCenter;
+    const QPointF currentOffset = position - mModelTransformScreenCenter;
+    const qreal startRadius = std::hypot(startOffset.x(), startOffset.y());
+    const qreal currentRadius =
+        std::hypot(currentOffset.x(), currentOffset.y());
+    float factor = startRadius > 4.0
+                       ? static_cast<float>(currentRadius / startRadius)
+                       : std::exp(static_cast<float>(
+                             (mModelTransformStartPosition.y() - position.y()) /
+                             180.0));
+
+    if (mTransformConstraint.kind == TransformConstraintKind::Axis &&
+        mTransformConstraint.axis >= 0) {
+      const TransformGizmoLayout startLayout = transformGizmoLayout(
+          pivot, mModelDragStartTransform.rotation, viewProjectionMatrix(),
+          QSizeF(width(), height()),
+          std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0, 104.0));
+      const TransformGizmoAxisLayout &axisLayout =
+          startLayout.axes[static_cast<std::size_t>(mTransformConstraint.axis)];
+      if (startLayout.valid && axisLayout.visible) {
+        QPointF direction = axisLayout.endpoint - startLayout.center;
+        const qreal length = std::hypot(direction.x(), direction.y());
+        if (length > 1.0) {
+          direction /= length;
+          const qreal startAmount = startOffset.x() * direction.x() +
+                                    startOffset.y() * direction.y();
+          const qreal currentAmount = currentOffset.x() * direction.x() +
+                                      currentOffset.y() * direction.y();
+          if (std::abs(startAmount) > 4.0) {
+            factor = static_cast<float>(currentAmount / startAmount);
+          }
+        }
+      }
+    }
+    if (numericReady && std::isfinite(numericValue)) {
+      factor = static_cast<float>(numericValue);
+    } else {
+      if (precision) {
+        factor = 1.0F + (factor - 1.0F) * 0.1F;
+      }
+      if (snap) {
+        const float step = precision ? 0.01F : 0.1F;
+        factor = 1.0F + std::round((factor - 1.0F) / step) * step;
+      }
+    }
+    if (!std::isfinite(factor)) {
+      factor = 1.0F;
+    }
+    if (std::abs(factor) < 1.0e-4F) {
+      factor = factor < 0.0F ? -1.0e-4F : 1.0e-4F;
+    }
+    factor = std::clamp(factor, -1.0e4F, 1.0e4F);
+
+    QVector3D factors(1.0F, 1.0F, 1.0F);
+    if (mTransformConstraint.kind == TransformConstraintKind::Axis &&
+        mTransformConstraint.axis >= 0) {
+      factors[mTransformConstraint.axis] = factor;
+    } else if (mTransformConstraint.kind == TransformConstraintKind::Plane &&
+               mTransformConstraint.axis >= 0) {
+      for (int component = 0; component < 3; ++component) {
+        if (component != mTransformConstraint.axis) {
+          factors[component] = factor;
+        }
+      }
+    } else {
+      factors = QVector3D(factor, factor, factor);
+    }
+    QVector3D scaled(
+        mModelDragStartTransform.scale.x() * factors.x(),
+        mModelDragStartTransform.scale.y() * factors.y(),
+        mModelDragStartTransform.scale.z() * factors.z());
+    mModelTranslation = mModelDragStartTransform.translation;
+    mModelRotation = mModelDragStartTransform.rotation;
+    mModelScale = normalizedModelScale(scaled);
   }
   notifyModelInteractionState();
   update();
@@ -3803,8 +4220,11 @@ void NativeViewport::finishModelTransform(const bool commit) {
   if (!commit) {
     mModelTranslation = mModelDragStartTransform.translation;
     mModelRotation = mModelDragStartTransform.rotation;
+    mModelScale = mModelDragStartTransform.scale;
   }
   mModelDragActive = false;
+  mTransformGizmoDragActive = false;
+  mTransformGizmoPress = {};
   mTrackballRotation = false;
   mTransformConstraint = {};
   mTransformNumericInput.clear();
@@ -3828,12 +4248,14 @@ void NativeViewport::applyTransformConstraint(const int axis,
     return;
   }
   const TransformConstraintKind requested =
-      plane && mMode == InteractionMode::Move
+      plane && (mMode == InteractionMode::Move ||
+                mMode == InteractionMode::Scale)
           ? TransformConstraintKind::Plane
           : TransformConstraintKind::Axis;
   if (mTransformConstraint.kind != requested ||
       mTransformConstraint.axis != axis) {
-    mTransformConstraint = {requested, axis, false};
+    mTransformConstraint = {requested, axis,
+                            mMode == InteractionMode::Scale};
   } else if (!mTransformConstraint.local) {
     mTransformConstraint.local = true;
   } else {
@@ -3873,8 +4295,10 @@ QString NativeViewport::transformStatusText() const {
   const QString operation =
       mMode == InteractionMode::Move
           ? QStringLiteral("G 移动")
-          : mTrackballRotation ? QStringLiteral("R R 轨迹球旋转")
-                               : QStringLiteral("R 旋转");
+          : mMode == InteractionMode::Scale
+                ? QStringLiteral("S 缩放")
+                : mTrackballRotation ? QStringLiteral("R R 轨迹球旋转")
+                                     : QStringLiteral("R 旋转");
   QString modifiers;
   if (mTransformModifiers.testFlag(Qt::ControlModifier)) {
     modifiers += QStringLiteral(" · 吸附");
@@ -4030,7 +4454,7 @@ void NativeViewport::drawModelSelection(
         mModelDragActive
             ? transformStatusText()
             : QStringLiteral(
-                  "模型已选中 · G 移动 · R 旋转 · R R 轨迹球");
+                  "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
     const QFontMetrics metrics(painter.font());
     const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
     QRectF badge(QPointF(center->x() + 12.0, center->y() - 12.0),
@@ -4047,6 +4471,253 @@ void NativeViewport::drawModelSelection(
     painter.setPen(QColor(255, 203, 122));
     painter.drawText(badge, Qt::AlignCenter, hint);
   }
+  painter.restore();
+}
+
+void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
+  const TransformGizmoLayout layout = modelTransformGizmo();
+  if (!layout.valid) {
+    return;
+  }
+  const bool drawMove = mTransformGizmoMode == TransformGizmoMode::Move ||
+                        mTransformGizmoMode == TransformGizmoMode::Transform;
+  const bool drawRotate = mTransformGizmoMode == TransformGizmoMode::Rotate ||
+                          mTransformGizmoMode == TransformGizmoMode::Transform;
+  const bool drawScale = mTransformGizmoMode == TransformGizmoMode::Scale ||
+                         mTransformGizmoMode == TransformGizmoMode::Transform;
+  const auto highlighted = [this](const TransformGizmoHandleKind kind,
+                                  const int axis) {
+    const TransformGizmoHandle candidate{kind, axis};
+    return (mTransformGizmoPress.isValid() ? mTransformGizmoPress
+                                           : mTransformGizmoHover) == candidate;
+  };
+  const auto displayColor = [&highlighted](const int axis,
+                                           const TransformGizmoHandleKind kind) {
+    return highlighted(kind, axis) ? QColor(255, 224, 118)
+                                    : navigationAxisColor(axis);
+  };
+
+  painter.save();
+  painter.setRenderHint(QPainter::Antialiasing, true);
+
+  if (drawRotate) {
+    for (int axis = 0; axis < 3; ++axis) {
+      const QPolygonF &ring =
+          layout.axes[static_cast<std::size_t>(axis)].rotationRing;
+      if (ring.size() < 3) {
+        continue;
+      }
+      QColor color = displayColor(axis, TransformGizmoHandleKind::RotateAxis);
+      color.setAlpha(highlighted(TransformGizmoHandleKind::RotateAxis, axis)
+                         ? 255
+                         : 205);
+      painter.setPen(QPen(
+          color,
+          layout.lineWidth +
+              (highlighted(TransformGizmoHandleKind::RotateAxis, axis) ? 1.4
+                                                                       : 0.0),
+          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+      painter.setBrush(Qt::NoBrush);
+      painter.drawPolygon(ring);
+    }
+    const bool viewHighlight =
+        highlighted(TransformGizmoHandleKind::RotateView, -1);
+    painter.setPen(QPen(viewHighlight ? QColor(255, 224, 118)
+                                     : QColor(225, 229, 232, 220),
+                        layout.lineWidth + (viewHighlight ? 1.2 : 0.0),
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolygon(layout.viewRing);
+    if (highlighted(TransformGizmoHandleKind::RotateTrackball, -1)) {
+      painter.setPen(QPen(QColor(255, 224, 118, 210), 1.4, Qt::DashLine));
+      painter.setBrush(QColor(255, 224, 118, 24));
+      painter.drawEllipse(layout.trackballBounds);
+    }
+  }
+
+  if (drawMove || drawScale) {
+    const TransformGizmoHandleKind planeKind =
+        drawMove ? TransformGizmoHandleKind::MovePlane
+                 : TransformGizmoHandleKind::ScalePlane;
+    for (int excludedAxis = 0; excludedAxis < 3; ++excludedAxis) {
+      const QPolygonF &plane =
+          layout.planeHandles[static_cast<std::size_t>(excludedAxis)];
+      if (plane.size() < 3) {
+        continue;
+      }
+      const int firstAxis = (excludedAxis + 1) % 3;
+      const int secondAxis = (excludedAxis + 2) % 3;
+      QColor color = mixColor(navigationAxisColor(firstAxis),
+                              navigationAxisColor(secondAxis), 0.5);
+      const bool active = highlighted(planeKind, excludedAxis);
+      if (active) {
+        color = QColor(255, 224, 118);
+      }
+      QColor fill = color;
+      fill.setAlpha(active ? 105 : 42);
+      color.setAlpha(active ? 245 : 165);
+      painter.setPen(QPen(color, active ? 2.0 : 1.1));
+      painter.setBrush(fill);
+      painter.drawPolygon(plane);
+    }
+  }
+
+  for (int axis = 0; axis < 3; ++axis) {
+    const TransformGizmoAxisLayout &axisLayout =
+        layout.axes[static_cast<std::size_t>(axis)];
+    if (!axisLayout.visible) {
+      continue;
+    }
+    const TransformGizmoHandleKind lineKind =
+        drawMove ? TransformGizmoHandleKind::MoveAxis
+                 : TransformGizmoHandleKind::ScaleAxis;
+    const bool active = highlighted(lineKind, axis) ||
+                        highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
+    const QColor color = active ? QColor(255, 224, 118)
+                                : navigationAxisColor(axis);
+    painter.setPen(QPen(color, layout.lineWidth + (active ? 1.3 : 0.0),
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(color);
+    painter.drawLine(axisLayout.line);
+
+    if (drawMove) {
+      const QPointF origin = axisLayout.line.p1();
+      const QPointF fullEnd = axisLayout.line.p2();
+      const QPointF arrowTip =
+          mTransformGizmoMode == TransformGizmoMode::Transform
+              ? origin + (fullEnd - origin) * 0.70
+              : fullEnd;
+      QPointF direction = arrowTip - origin;
+      const qreal length = std::hypot(direction.x(), direction.y());
+      if (length > 1.0) {
+        direction /= length;
+        const QPointF normal(-direction.y(), direction.x());
+        QPolygonF arrow;
+        arrow << arrowTip
+              << arrowTip - direction * 11.0 + normal * 5.0
+              << arrowTip - direction * 11.0 - normal * 5.0;
+        painter.drawPolygon(arrow);
+      }
+    }
+    if (drawScale) {
+      const bool scaleActive =
+          highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
+      painter.setPen(QPen(scaleActive ? QColor(255, 224, 118) : color,
+                          scaleActive ? 2.1 : 1.4));
+      painter.setBrush(scaleActive ? QColor(255, 224, 118) : color);
+      painter.drawRect(axisLayout.scaleHandle);
+    }
+  }
+
+  if (mTransformGizmoMode == TransformGizmoMode::Move ||
+      mTransformGizmoMode == TransformGizmoMode::Transform) {
+    const bool active = highlighted(TransformGizmoHandleKind::MoveView, -1);
+    painter.setPen(QPen(active ? QColor(255, 224, 118)
+                              : QColor(228, 232, 234),
+                        active ? 2.2 : 1.5));
+    painter.setBrush(active ? QColor(255, 224, 118, 155)
+                            : QColor(48, 53, 57, 220));
+    painter.drawEllipse(layout.centerHandle);
+  } else if (mTransformGizmoMode == TransformGizmoMode::Scale) {
+    const bool active = highlighted(TransformGizmoHandleKind::ScaleUniform, -1);
+    const QPointF center = layout.center;
+    QPolygonF diamond;
+    diamond << center + QPointF(0.0, -9.0)
+            << center + QPointF(9.0, 0.0)
+            << center + QPointF(0.0, 9.0)
+            << center + QPointF(-9.0, 0.0);
+    painter.setPen(QPen(active ? QColor(255, 224, 118)
+                              : QColor(228, 232, 234),
+                        active ? 2.2 : 1.5));
+    painter.setBrush(active ? QColor(255, 224, 118, 190)
+                            : QColor(48, 53, 57, 230));
+    painter.drawPolygon(diamond);
+  }
+  painter.restore();
+}
+
+void NativeViewport::drawTransformToolStrip(QPainter &painter) {
+  if (!selectableModelAvailable()) {
+    return;
+  }
+  const TransformToolStripLayout layout = transformToolStrip();
+  static const std::array<TransformGizmoMode, 4> modes = {
+      TransformGizmoMode::Move, TransformGizmoMode::Rotate,
+      TransformGizmoMode::Scale, TransformGizmoMode::Transform};
+  painter.save();
+  painter.setRenderHint(QPainter::Antialiasing, true);
+  painter.setPen(QPen(QColor(63, 68, 72, 220), 1.0));
+  painter.setBrush(QColor(24, 27, 30, 232));
+  painter.drawRoundedRect(layout.background, 6.0, 6.0);
+
+  for (int index = 0; index < 4; ++index) {
+    const QRectF rect = layout.buttons[static_cast<std::size_t>(index)];
+    const bool active =
+        mTransformGizmoMode == modes.at(static_cast<std::size_t>(index));
+    const bool hover = mTransformToolHover == index;
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(active ? QColor(70, 116, 183, 245)
+                            : hover ? QColor(62, 67, 72, 235)
+                                    : QColor(34, 38, 41, 210));
+    painter.drawRoundedRect(rect, 4.0, 4.0);
+    painter.setPen(QPen(QColor(238, 241, 243), 2.0, Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(238, 241, 243));
+    const QPointF center = rect.center();
+    const qreal radius = rect.width() * 0.26;
+    if (index == 0 || index == 3) {
+      painter.drawLine(center + QPointF(-radius, 0.0),
+                       center + QPointF(radius, 0.0));
+      painter.drawLine(center + QPointF(0.0, -radius),
+                       center + QPointF(0.0, radius));
+      painter.drawLine(center + QPointF(-radius * 0.72, radius * 0.72),
+                       center + QPointF(radius * 0.72, -radius * 0.72));
+      constexpr qreal head = 4.0;
+      painter.drawLine(center + QPointF(radius, 0.0),
+                       center + QPointF(radius - head, -head));
+      painter.drawLine(center + QPointF(radius, 0.0),
+                       center + QPointF(radius - head, head));
+      painter.drawLine(center + QPointF(0.0, -radius),
+                       center + QPointF(-head, -radius + head));
+      painter.drawLine(center + QPointF(0.0, -radius),
+                       center + QPointF(head, -radius + head));
+    }
+    if (index == 1 || index == 3) {
+      const QRectF ring(center - QPointF(radius, radius),
+                        QSizeF(radius * 2.0, radius * 2.0));
+      painter.setBrush(Qt::NoBrush);
+      painter.drawArc(ring, 30 * 16, 285 * 16);
+      painter.setBrush(QColor(238, 241, 243));
+      QPolygonF arrow;
+      arrow << ring.topRight() + QPointF(-1.0, 2.0)
+            << ring.topRight() + QPointF(-7.0, 0.0)
+            << ring.topRight() + QPointF(-2.0, 7.0);
+      painter.drawPolygon(arrow);
+    }
+    if (index == 2 || index == 3) {
+      const QPointF start = center + QPointF(-radius * 0.65, radius * 0.65);
+      const QPointF end = center + QPointF(radius * 0.68, -radius * 0.68);
+      painter.drawLine(start, end);
+      painter.setBrush(QColor(238, 241, 243));
+      painter.drawRect(QRectF(end - QPointF(4.0, 4.0), QSizeF(8.0, 8.0)));
+    }
+  }
+
+  const bool forceLocal = mTransformGizmoMode == TransformGizmoMode::Scale ||
+                          mTransformGizmoMode == TransformGizmoMode::Transform;
+  const bool local = mTransformGizmoLocal || forceLocal;
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(mTransformToolHover == 4 ? QColor(62, 67, 72, 235)
+                                            : QColor(34, 38, 41, 210));
+  painter.drawRoundedRect(layout.orientationButton, 4.0, 4.0);
+  QFont small = painter.font();
+  if (small.pointSizeF() > 0.0) {
+    small.setPointSizeF(std::max(8.0, small.pointSizeF() - 1.0));
+  }
+  painter.setFont(small);
+  painter.setPen(forceLocal ? QColor(255, 201, 106) : QColor(220, 225, 228));
+  painter.drawText(layout.orientationButton, Qt::AlignCenter,
+                   local ? QStringLiteral("局部") : QStringLiteral("全局"));
   painter.restore();
 }
 

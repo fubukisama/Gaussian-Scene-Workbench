@@ -56,6 +56,7 @@ public:
   [[nodiscard]] QString scenePath() const;
   [[nodiscard]] QVector3D sceneTranslation() const;
   [[nodiscard]] QQuaternion sceneRotation() const;
+  [[nodiscard]] QVector3D sceneScale() const;
   [[nodiscard]] qint64 imageCount() const;
   [[nodiscard]] PlyMetadata sceneMetadata() const;
   [[nodiscard]] bool hasPendingDataMigration() const;
@@ -78,6 +79,10 @@ public:
                            QString *errorMessage = nullptr);
   bool setSceneTransform(const QVector3D &translation,
                          const QQuaternion &rotation,
+                         QString *errorMessage = nullptr);
+  bool setSceneTransform(const QVector3D &translation,
+                         const QQuaternion &rotation,
+                         const QVector3D &scale,
                          QString *errorMessage = nullptr);
   bool clearImportedData(const ImportCleanupOptions &options,
                          ImportCleanupResult *result = nullptr,
@@ -105,6 +110,7 @@ private:
   QString mScenePath;
   QVector3D mSceneTranslation;
   QQuaternion mSceneRotation;
+  QVector3D mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   QString mPendingDataRoot;
   qint64 mImageCount = 0;
   PlyMetadata mSceneMetadata;

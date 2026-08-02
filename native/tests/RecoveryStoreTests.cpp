@@ -42,6 +42,7 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
   checkpoint.sceneTranslation = QVector3D(2.0F, -1.0F, 0.5F);
   checkpoint.sceneRotation = QQuaternion::fromAxisAndAngle(
       QVector3D(0.0F, 0.0F, 1.0F), 42.0F);
+  checkpoint.sceneScale = QVector3D(1.25F, 0.8F, 2.0F);
   QVERIFY2(store.checkpoint(checkpoint, &error), qPrintable(error));
 
   const QList<gsw::RecoveryWorkspace> recovered =
@@ -58,6 +59,7 @@ void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
                       recovered.constFirst().sceneRotation.normalized(),
                       checkpoint.sceneRotation.normalized())) <
           1.0e-6F);
+  QCOMPARE(recovered.constFirst().sceneScale, checkpoint.sceneScale);
   QVERIFY(QFileInfo::exists(QDir(recovered.constFirst().rootPath)
                                 .filePath(QStringLiteral("frame.jpg"))));
 

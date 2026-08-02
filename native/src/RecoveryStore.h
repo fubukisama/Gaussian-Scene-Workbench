@@ -20,6 +20,7 @@ struct RecoveryWorkspace {
   QString scenePath;
   QVector3D sceneTranslation;
   QQuaternion sceneRotation;
+  QVector3D sceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   QDateTime updatedUtc;
 
   [[nodiscard]] bool isValid() const {

@@ -10,8 +10,8 @@
 The application is being rebuilt as a fully native Qt 6/C++ desktop program on the [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3) branch. This target does not embed HTML, a browser engine, Electron, Node.js, or a local web server.
 
 - Current version: `0.3.1-native-preview`
-- Updated: `2026-07-20`
-- Current native slice: guarded COLMAP reconstruction and training, a world-fixed infinite reference grid, screen-space Gaussian preview with point fallback, full-source rectangle/lasso/brush selection, delete undo/redo, and lossless cropped PLY export.
+- Updated: `2026-08-02`
+- Current native slice: guarded COLMAP reconstruction and training, an adaptive coordinate-aware infinite reference grid, screen-space Gaussian preview with point fallback, Blender-style object Move/Rotate/Scale/Transform gizmos with free trackball, full-source rectangle/lasso/brush selection, delete/transform undo-redo, and lossless cropped PLY export.
 - Renderer metric: honest CPU submission time; GPU/SIBR timing remains a tracked parity item.
 - Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
 - Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)

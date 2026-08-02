@@ -97,6 +97,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingTelemetry.h
   src/TrainingOutputLocator.cpp
   src/TrainingOutputLocator.h
+  src/TransformGizmo.cpp
+  src/TransformGizmo.h
   src/UntitledWorkspaceStorage.cpp
   src/UntitledWorkspaceStorage.h
   src/ViewportCamera.cpp
@@ -508,6 +510,8 @@ if(BUILD_TESTING)
       tests/ModelInteractionTests.cpp
       src/ModelInteraction.cpp
       src/ModelInteraction.h
+      src/TransformGizmo.cpp
+      src/TransformGizmo.h
     )
     target_include_directories(gsw_model_interaction_tests PRIVATE src)
     target_link_libraries(gsw_model_interaction_tests PRIVATE

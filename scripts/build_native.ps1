@@ -4,6 +4,7 @@ param(
   [string]$QtRoot = "",
   [string]$CMakeRoot = "",
   [string]$BuildDirectory = "",
+  [string]$PackageDirectoryName = "Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64",
   [switch]$Clean,
   [switch]$Package,
   [string]$SigningCertificateThumbprint = "",
@@ -610,7 +611,10 @@ if ($Package) {
   if (-not (Test-Path -LiteralPath $WinDeployQt)) {
     throw "windeployqt was not found: $WinDeployQt"
   }
-  $PackageRoot = Join-Path $NativeRoot "dist\Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64"
+  if ($PackageDirectoryName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+    throw "PackageDirectoryName must be a single safe directory name."
+  }
+  $PackageRoot = Join-Path (Join-Path $NativeRoot "dist") $PackageDirectoryName
   if (Test-Path -LiteralPath $PackageRoot) {
     Remove-DirectoryWithRetry -Path $PackageRoot -AllowedParent (Join-Path $NativeRoot "dist")
   }

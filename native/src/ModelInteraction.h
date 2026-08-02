@@ -17,9 +17,10 @@ struct WorldRay final {
   [[nodiscard]] bool isValid() const;
 };
 
-struct RigidModelTransform final {
+struct ModelTransform final {
   QVector3D translation;
   QQuaternion rotation;
+  QVector3D scale = QVector3D(1.0F, 1.0F, 1.0F);
 
   [[nodiscard]] bool isValid() const;
   [[nodiscard]] QMatrix4x4 matrix(const QVector3D &pivot) const;
@@ -31,6 +32,12 @@ normalizedModelRotation(const QQuaternion &rotation);
 [[nodiscard]] bool rotationsEquivalent(const QQuaternion &left,
                                        const QQuaternion &right,
                                        float tolerance = 1.0e-6F);
+
+[[nodiscard]] QVector3D normalizedModelScale(const QVector3D &scale);
+
+[[nodiscard]] bool scalesEquivalent(const QVector3D &left,
+                                    const QVector3D &right,
+                                    float tolerance = 1.0e-6F);
 
 [[nodiscard]] std::optional<WorldRay>
 screenRay(const QPointF &screenPosition, const QSize &viewportSize,

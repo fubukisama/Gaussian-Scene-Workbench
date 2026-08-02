@@ -54,7 +54,7 @@ The next internal services will follow the same proven separation visible in Lic
 - Adaptive DPI/manual UI scale, dock layout persistence, and compact professional workspace.
 - Project creation/open/save, dataset import, PLY metadata and point import, task logs, environment checks, and supervised 3DGS training launch.
 - Native OpenGL point preview with deterministic sampling and explicit separation from future SIBR splat metrics.
-- Object-level point/Mesh/Gaussian picking plus Blender-style modal rigid transforms (`G`, `R`, `R R`, global/local axis and plane constraints, snapping, precision, numeric entry, confirm/cancel) through one non-destructive, source-coordinate and recovery-safe model matrix; full-source rectangle/lasso/brush selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export.
+- Object-level point/Mesh/Gaussian picking plus a Blender-style Move/Rotate/Scale/Transform gizmo strip and modal transforms (`G`, `R`, `R R`, `S`, axis/plane/view handles, free trackball, snapping, precision, numeric entry, confirm/cancel) through one non-destructive, source-coordinate and recovery-safe pivoted TRS matrix; full-source rectangle/lasso/brush selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export.
 
 ### 0.3.x renderer integration
 

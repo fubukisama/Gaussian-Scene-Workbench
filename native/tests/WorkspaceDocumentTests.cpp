@@ -1550,8 +1550,10 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
   const QVector3D sceneTranslation(1.25F, -2.5F, 0.75F);
   const QQuaternion sceneRotation = QQuaternion::fromEulerAngles(
       QVector3D(12.0F, -24.0F, 37.0F));
-  QVERIFY2(source.setSceneTransform(sceneTranslation, sceneRotation, &error),
-            qPrintable(error));
+  const QVector3D sceneScale(1.5F, 0.75F, 2.25F);
+  QVERIFY2(source.setSceneTransform(sceneTranslation, sceneRotation, sceneScale,
+                                    &error),
+           qPrintable(error));
   const QString projectPath =
       root.filePath(QStringLiteral("saved/test.gsw.json"));
   QVERIFY2(source.save(projectPath, &error), qPrintable(error));
@@ -1592,6 +1594,14 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
           .value(QStringLiteral("rotation"))
           .toArray();
   QCOMPARE(rotation.size(), 4);
+  const QJsonArray scale = projectJson.value(QStringLiteral("sceneTransform"))
+                               .toObject()
+                               .value(QStringLiteral("scale"))
+                               .toArray();
+  QCOMPARE(scale.size(), 3);
+  QCOMPARE(scale.at(0).toDouble(), 1.5);
+  QCOMPARE(scale.at(1).toDouble(), 0.75);
+  QCOMPARE(scale.at(2).toDouble(), 2.25);
 
   gsw::WorkspaceDocument restored;
   QVERIFY2(restored.load(projectPath, &error), qPrintable(error));
@@ -1606,6 +1616,7 @@ void WorkspaceDocumentTests::savesAndLoadsPortableProject() {
                       restored.sceneRotation().normalized(),
                       sceneRotation.normalized())) <
           1.0e-6F);
+  QCOMPARE(restored.sceneScale(), sceneScale);
   QCOMPARE(restored.imageCount(), 1);
   QCOMPARE(restored.sceneMetadata().vertexCount, 2);
 }

@@ -55,6 +55,33 @@ QVector3D translationFromJson(const QJsonValue &value) {
                    static_cast<float>(translation.at(2).toDouble()));
 }
 
+QJsonArray scaleJson(const QVector3D &scale) {
+  QVector3D normalized = scale;
+  for (int component = 0; component < 3; ++component) {
+    if (!std::isfinite(normalized[component]) ||
+        std::abs(normalized[component]) < 1.0e-4F) {
+      return {1.0, 1.0, 1.0};
+    }
+    normalized[component] =
+        std::clamp(normalized[component], -1.0e4F, 1.0e4F);
+  }
+  return {normalized.x(), normalized.y(), normalized.z()};
+}
+
+QVector3D scaleFromJson(const QJsonValue &value) {
+  const QJsonArray scale = value.toArray();
+  if (scale.size() != 3) {
+    return QVector3D(1.0F, 1.0F, 1.0F);
+  }
+  const QJsonArray normalized = scaleJson(
+      QVector3D(static_cast<float>(scale.at(0).toDouble()),
+                static_cast<float>(scale.at(1).toDouble()),
+                static_cast<float>(scale.at(2).toDouble())));
+  return QVector3D(static_cast<float>(normalized.at(0).toDouble()),
+                   static_cast<float>(normalized.at(1).toDouble()),
+                   static_cast<float>(normalized.at(2).toDouble()));
+}
+
 QJsonArray rotationJson(const QQuaternion &rotation) {
   QQuaternion normalized = rotation;
   if (!std::isfinite(normalized.scalar()) || !std::isfinite(normalized.x()) ||
@@ -130,6 +157,8 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       translationFromJson(root.value(QStringLiteral("sceneTranslation")));
   workspace.sceneRotation =
       rotationFromJson(root.value(QStringLiteral("sceneRotation")));
+  workspace.sceneScale =
+      scaleFromJson(root.value(QStringLiteral("sceneScale")));
   workspace.updatedUtc = QDateTime::fromString(
       root.value(QStringLiteral("updatedUtc")).toString(), Qt::ISODate);
   if (!workspace.isValid() || !workspace.updatedUtc.isValid()) {
@@ -251,6 +280,7 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
               translationJson(workspace.sceneTranslation));
   root.insert(QStringLiteral("sceneRotation"),
               rotationJson(workspace.sceneRotation));
+  root.insert(QStringLiteral("sceneScale"), scaleJson(workspace.sceneScale));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
 
