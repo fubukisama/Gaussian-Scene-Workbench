@@ -344,6 +344,15 @@ int main(int argc, char *argv[]) {
                   viewport->selectModel();
                   const bool modelSelectionReady =
                       modelSelectionAvailable && viewport->modelSelected();
+                  viewport->setModelGizmoMode(
+                      gsw::TransformGizmoMode::Transform);
+                  viewport->repaint();
+                  const QImage transformGizmoFrame =
+                      viewport->grabFramebuffer();
+                  if (!transformGizmoFrame.isNull()) {
+                    transformGizmoFrame.save(QDir::temp().filePath(
+                        QStringLiteral("gsw-transform-gizmo-smoke.png")));
+                  }
                   const QPointF dragStart(viewport->width() * 0.5,
                                           viewport->height() * 0.5);
                   const QPointF dragEnd = dragStart + QPointF(28.0, -18.0);

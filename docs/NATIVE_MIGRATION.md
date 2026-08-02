@@ -54,7 +54,7 @@ The next internal services will follow the same proven separation visible in Lic
 - Adaptive DPI/manual UI scale, dock layout persistence, and compact professional workspace.
 - Project creation/open/save, dataset import, PLY metadata and point import, task logs, environment checks, and supervised 3DGS training launch.
 - Native OpenGL point preview with deterministic sampling and explicit separation from future SIBR splat metrics.
-- Object-level point/Mesh/Gaussian picking, depth-occluded world axes and selection bounds, plus a Blender-style Move/Rotate/Scale/Transform gizmo strip and modal transforms (`G`, `R`, `R R`, `S`, axis/plane/view handles, free trackball, snapping, precision, numeric entry, confirm/cancel) through one non-destructive, source-coordinate and recovery-safe pivoted TRS matrix; full-source rectangle/lasso/brush selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export.
+- Object-level point/Mesh/Gaussian picking, depth-occluded world axes and selection bounds, plus a Blender-style Move/Rotate/Scale/Transform gizmo strip and modal transforms (`G`, `R`, `R R`, `S`, axis/plane/view handles, free trackball, snapping, precision, numeric entry, confirm/cancel) through one non-destructive, source-coordinate and recovery-safe pivoted TRS matrix. The combined gizmo separates centre/plane, move, scale, axis-rotation, and view-rotation controls into constant-screen-space bands with guarded hit priorities, and places its shortcut hint outside the active controls; full-source rectangle/lasso/brush selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export remain available.
 
 ### 0.3.x renderer integration
 

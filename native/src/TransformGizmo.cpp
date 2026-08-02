@@ -114,7 +114,14 @@ QPolygonF screenCircle(const QPointF &center, const qreal radius,
 bool scaleHandleContains(const TransformGizmoAxisLayout &axis,
                          const QPointF &position) {
   return axis.visible &&
-         axis.scaleHandle.adjusted(-2.0, -2.0, 2.0, 2.0).contains(position);
+         axis.scaleHandle.adjusted(-3.0, -3.0, 3.0, 3.0).contains(position);
+}
+
+bool moveHandleContains(const TransformGizmoAxisLayout &axis,
+                        const QPointF &position) {
+  return axis.visible && axis.moveArrow.size() >= 3 &&
+         (axis.moveArrow.containsPoint(position, Qt::OddEvenFill) ||
+          pointPolylineDistance(position, axis.moveArrow, true) <= 3.0);
 }
 
 TransformGizmoHandle closestAxisLine(const TransformGizmoLayout &layout,
@@ -129,7 +136,10 @@ TransformGizmoHandle closestAxisLine(const TransformGizmoLayout &layout,
     if (!axisLayout.visible) {
       continue;
     }
-    const qreal distance = distanceToLineSegment(position, axisLayout.line);
+    const QLineF line = kind == TransformGizmoHandleKind::MoveAxis
+                            ? axisLayout.moveLine
+                            : axisLayout.scaleLine;
+    const qreal distance = distanceToLineSegment(position, line);
     if (distance <= bestDistance) {
       bestDistance = distance;
       bestAxis = axis;
@@ -139,9 +149,24 @@ TransformGizmoHandle closestAxisLine(const TransformGizmoLayout &layout,
                        : TransformGizmoHandle{};
 }
 
+TransformGizmoHandle moveArrowAt(const TransformGizmoLayout &layout,
+                                 const QPointF &position) {
+  for (int axis = 0; axis < 3; ++axis) {
+    if (moveHandleContains(layout.axes[static_cast<std::size_t>(axis)],
+                           position)) {
+      return {TransformGizmoHandleKind::MoveAxis, axis};
+    }
+  }
+  return {};
+}
+
 TransformGizmoHandle closestRotationRing(const TransformGizmoLayout &layout,
                                          const QPointF &position,
                                          const qreal tolerance) {
+  const qreal centerDistance = QLineF(layout.center, position).length();
+  if (centerDistance < layout.rotationHitInnerRadius) {
+    return {};
+  }
   qreal bestDistance = tolerance;
   int bestAxis = -1;
   for (int axis = 0; axis < 3; ++axis) {
@@ -182,6 +207,7 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
                                           const QQuaternion &orientation,
                                           const QMatrix4x4 &viewProjection,
                                           const QSizeF &viewportSize,
+                                          const TransformGizmoMode mode,
                                           const qreal radiusPixels) {
   TransformGizmoLayout layout;
   const auto projectedCenter =
@@ -196,8 +222,18 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
   }
 
   layout.center = projectedCenter->screen;
-  layout.radius = std::clamp(radiusPixels, 58.0, 118.0);
+  const bool combined = mode == TransformGizmoMode::Transform;
+  layout.radius = std::clamp(radiusPixels, 58.0, combined ? 176.0 : 128.0);
   layout.lineWidth = std::clamp(layout.radius / 36.0, 1.8, 3.2);
+  const qreal moveExtent = layout.radius * (combined ? 0.43 : 0.86);
+  const qreal scaleExtent = layout.radius * (combined ? 0.67 : 0.86);
+  const qreal rotationExtent = layout.radius * (combined ? 0.84 : 0.78);
+  const qreal viewRingRadius = layout.radius * (combined ? 1.0 : 1.04);
+  const qreal centerClearance = combined ? 15.0 : 13.0;
+  layout.rotationHitInnerRadius = combined ? layout.radius * 0.72 : 0.0;
+  layout.trackballInnerRadius = combined ? layout.radius * 0.29 : 14.0;
+  layout.trackballOuterRadius =
+      layout.radius * (combined ? 0.41 : 0.68);
   const auto worldAtCenter =
       unprojectPoint(layout.center, projectedCenter->normalizedDepth,
                      inverseViewProjection, viewportSize);
@@ -229,13 +265,13 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
         layout.axes[static_cast<std::size_t>(axis)];
     axisLayout.direction =
         normalizedOrientation.rotatedVector(unitAxis(axis)).normalized();
-    const auto endpoint =
+    const auto directionSample =
         projectPoint(pivot + axisLayout.direction * worldRadius * 0.86F,
                      viewProjection, viewportSize);
-    if (!endpoint.has_value()) {
+    if (!directionSample.has_value()) {
       continue;
     }
-    QPointF screenDirection = endpoint->screen - layout.center;
+    QPointF screenDirection = directionSample->screen - layout.center;
     const qreal length = std::hypot(screenDirection.x(), screenDirection.y());
     if (!std::isfinite(length) || length < 7.0) {
       continue;
@@ -243,11 +279,30 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
     screenDirection /= length;
     screenDirections[static_cast<std::size_t>(axis)] = screenDirection;
     axisLayout.visible = true;
-    axisLayout.endpoint = endpoint->screen;
-    axisLayout.line =
-        QLineF(layout.center + screenDirection * 13.0, endpoint->screen);
+    axisLayout.moveEndpoint = layout.center + screenDirection * moveExtent;
+    axisLayout.scaleEndpoint = layout.center + screenDirection * scaleExtent;
+    axisLayout.moveLine = QLineF(
+        layout.center + screenDirection * centerClearance,
+        axisLayout.moveEndpoint);
+    const qreal scaleLineStart =
+        combined ? moveExtent + 15.0 : centerClearance;
+    axisLayout.scaleLine = QLineF(
+        layout.center + screenDirection * scaleLineStart,
+        axisLayout.scaleEndpoint - screenDirection * (combined ? 8.5 : 0.0));
+    const QPointF normal(-screenDirection.y(), screenDirection.x());
+    const qreal arrowLength = combined ? 12.0 : 11.0;
+    const qreal arrowHalfWidth = combined ? 6.0 : 5.0;
+    axisLayout.moveArrow
+        << axisLayout.moveEndpoint
+        << axisLayout.moveEndpoint - screenDirection * arrowLength +
+               normal * arrowHalfWidth
+        << axisLayout.moveEndpoint - screenDirection * arrowLength -
+               normal * arrowHalfWidth;
+    const qreal scaleHandleSize = combined ? 15.0 : 12.0;
     axisLayout.scaleHandle =
-        QRectF(endpoint->screen - QPointF(6.0, 6.0), QSizeF(12.0, 12.0));
+        QRectF(axisLayout.scaleEndpoint -
+                   QPointF(scaleHandleSize * 0.5, scaleHandleSize * 0.5),
+               QSizeF(scaleHandleSize, scaleHandleSize));
   }
 
   for (int excludedAxis = 0; excludedAxis < 3; ++excludedAxis) {
@@ -261,10 +316,12 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
     const QPointF second =
         screenDirections[static_cast<std::size_t>(secondAxis)];
     QPolygonF polygon;
-    polygon << layout.center + first * 18.0 + second * 18.0
-            << layout.center + first * 35.0 + second * 18.0
-            << layout.center + first * 35.0 + second * 35.0
-            << layout.center + first * 18.0 + second * 35.0;
+    const qreal inner = combined ? 22.0 : 18.0;
+    const qreal outer = combined ? 40.0 : 35.0;
+    polygon << layout.center + first * inner + second * inner
+            << layout.center + first * outer + second * inner
+            << layout.center + first * outer + second * outer
+            << layout.center + first * inner + second * outer;
     if (polygonArea(polygon) >= 24.0) {
       layout.planeHandles[static_cast<std::size_t>(excludedAxis)] = polygon;
     }
@@ -287,7 +344,8 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
       const QVector3D point =
           pivot + (firstDirection * static_cast<float>(std::cos(angle)) +
                    secondDirection * static_cast<float>(std::sin(angle))) *
-                      worldRadius * 0.78F;
+                      worldRadius * static_cast<float>(rotationExtent /
+                                                       layout.radius);
       const auto projected = projectPoint(point, viewProjection, viewportSize);
       if (!projected.has_value()) {
         complete = false;
@@ -300,13 +358,17 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
     }
   }
 
-  layout.viewRing = screenCircle(layout.center, layout.radius * 1.04);
+  layout.viewRing = screenCircle(layout.center, viewRingRadius);
+  const qreal centerHandleSize = combined ? 24.0 : 20.0;
   layout.centerHandle =
-      QRectF(layout.center - QPointF(10.0, 10.0), QSizeF(20.0, 20.0));
-  const qreal trackballRadius = layout.radius * 0.68;
+      QRectF(layout.center -
+                 QPointF(centerHandleSize * 0.5, centerHandleSize * 0.5),
+             QSizeF(centerHandleSize, centerHandleSize));
   layout.trackballBounds =
-      QRectF(layout.center - QPointF(trackballRadius, trackballRadius),
-             QSizeF(trackballRadius * 2.0, trackballRadius * 2.0));
+      QRectF(layout.center - QPointF(layout.trackballOuterRadius,
+                                    layout.trackballOuterRadius),
+             QSizeF(layout.trackballOuterRadius * 2.0,
+                    layout.trackballOuterRadius * 2.0));
   layout.valid = true;
   return layout;
 }
@@ -353,24 +415,33 @@ TransformGizmoHandle hitTestTransformGizmo(const TransformGizmoLayout &layout,
           plane.isValid()) {
         return plane;
       }
+    } else if (const TransformGizmoHandle axis = closestAxisLine(
+                   layout, position, TransformGizmoHandleKind::ScaleAxis,
+                   axisTolerance);
+               axis.isValid()) {
+      return axis;
     }
   }
 
   if (mode == TransformGizmoMode::Move ||
       mode == TransformGizmoMode::Transform) {
+    if (layout.centerHandle.adjusted(-2.0, -2.0, 2.0, 2.0).contains(position)) {
+      return {TransformGizmoHandleKind::MoveView, -1};
+    }
     if (const TransformGizmoHandle plane = planeHandleAt(
             layout, position, TransformGizmoHandleKind::MovePlane);
         plane.isValid()) {
       return plane;
+    }
+    if (const TransformGizmoHandle arrow = moveArrowAt(layout, position);
+        arrow.isValid()) {
+      return arrow;
     }
     if (const TransformGizmoHandle axis =
             closestAxisLine(layout, position,
                             TransformGizmoHandleKind::MoveAxis, axisTolerance);
         axis.isValid()) {
       return axis;
-    }
-    if (layout.centerHandle.adjusted(-2.0, -2.0, 2.0, 2.0).contains(position)) {
-      return {TransformGizmoHandleKind::MoveView, -1};
     }
   }
 
@@ -386,7 +457,8 @@ TransformGizmoHandle hitTestTransformGizmo(const TransformGizmoLayout &layout,
       return {TransformGizmoHandleKind::RotateView, -1};
     }
     const qreal distance = QLineF(layout.center, position).length();
-    if (distance <= layout.radius * 0.68 && distance >= 14.0) {
+    if (distance <= layout.trackballOuterRadius &&
+        distance >= layout.trackballInnerRadius) {
       return {TransformGizmoHandleKind::RotateTrackball, -1};
     }
   }
@@ -444,6 +516,47 @@ int hitTestTransformToolStrip(const TransformToolStripLayout &layout,
     }
   }
   return layout.orientationButton.contains(position) ? 4 : -1;
+}
+
+QRectF transformGizmoHintRect(const TransformGizmoLayout &layout,
+                              const QSizeF &hintSize,
+                              const QSizeF &viewportSize, const qreal gap,
+                              const qreal margin) {
+  if (!layout.valid || hintSize.isEmpty() || viewportSize.isEmpty()) {
+    return {};
+  }
+  const QRectF viewport(QPointF(), viewportSize);
+  const QRectF available = viewport.adjusted(margin, margin, -margin, -margin);
+  const QRectF gizmoBounds =
+      layout.viewRing.boundingRect().adjusted(-gap, -gap, gap, gap);
+  const std::array<QRectF, 4> candidates = {
+      QRectF(QPointF(layout.center.x() - hintSize.width() * 0.5,
+                     gizmoBounds.top() - hintSize.height()),
+             hintSize),
+      QRectF(QPointF(gizmoBounds.right(),
+                     layout.center.y() - hintSize.height() * 0.5),
+             hintSize),
+      QRectF(QPointF(gizmoBounds.left() - hintSize.width(),
+                     layout.center.y() - hintSize.height() * 0.5),
+             hintSize),
+      QRectF(QPointF(layout.center.x() - hintSize.width() * 0.5,
+                     gizmoBounds.bottom()),
+             hintSize)};
+  for (const QRectF &candidate : candidates) {
+    if (available.contains(candidate) && !candidate.intersects(gizmoBounds)) {
+      return candidate;
+    }
+  }
+
+  QRectF fallback = candidates.front();
+  const qreal maximumLeft =
+      std::max(available.left(), available.right() - fallback.width());
+  const qreal maximumTop =
+      std::max(available.top(), available.bottom() - fallback.height());
+  fallback.moveLeft(
+      std::clamp(fallback.left(), available.left(), maximumLeft));
+  fallback.moveTop(std::clamp(fallback.top(), available.top(), maximumTop));
+  return fallback;
 }
 
 } // namespace gsw

@@ -3756,10 +3756,14 @@ TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
                           mTransformGizmoMode == TransformGizmoMode::Transform;
   const QQuaternion orientation =
       mTransformGizmoLocal || forceLocal ? mModelRotation : QQuaternion();
+  const qreal fontHeight = QFontMetricsF(font()).height();
+  const qreal radius =
+      mTransformGizmoMode == TransformGizmoMode::Transform
+          ? std::clamp(fontHeight * 7.2, 132.0, 168.0)
+          : std::clamp(fontHeight * 4.8, 70.0, 104.0);
   return transformGizmoLayout(
       transformedSceneCenter(), orientation, viewProjectionMatrix(),
-      QSizeF(width(), height()),
-      std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0, 104.0));
+      QSizeF(width(), height()), mTransformGizmoMode, radius);
 }
 
 TransformToolStripLayout NativeViewport::transformToolStrip() const {
@@ -4210,12 +4214,15 @@ void NativeViewport::updateModelTransform(
         mTransformConstraint.axis >= 0) {
       const TransformGizmoLayout startLayout = transformGizmoLayout(
           pivot, mModelDragStartTransform.rotation, viewProjectionMatrix(),
-          QSizeF(width(), height()),
-          std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0, 104.0));
+          QSizeF(width(), height()), mTransformGizmoMode,
+          mTransformGizmoMode == TransformGizmoMode::Transform
+              ? std::clamp(QFontMetricsF(font()).height() * 7.2, 132.0, 168.0)
+              : std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0,
+                           104.0));
       const TransformGizmoAxisLayout &axisLayout =
           startLayout.axes[static_cast<std::size_t>(mTransformConstraint.axis)];
       if (startLayout.valid && axisLayout.visible) {
-        QPointF direction = axisLayout.endpoint - startLayout.center;
+        QPointF direction = axisLayout.scaleEndpoint - startLayout.center;
         const qreal length = std::hypot(direction.x(), direction.y());
         if (length > 1.0) {
           direction /= length;
@@ -4600,14 +4607,9 @@ void NativeViewport::drawModelSelection(
                   "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
     const QFontMetrics metrics(painter.font());
     const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
-    QRectF badge(QPointF(center->x() + 12.0, center->y() - 12.0),
-                 QSizeF(textBounds.size()));
-    const qreal maximumTop =
-        std::max<qreal>(8.0, height() - badge.height() - 8.0);
-    const qreal maximumLeft =
-        std::max<qreal>(8.0, width() - badge.width() - 8.0);
-    badge.moveTop(std::clamp(badge.top(), 8.0, maximumTop));
-    badge.moveLeft(std::clamp(badge.left(), 8.0, maximumLeft));
+    const QRectF badge = transformGizmoHintRect(
+        modelTransformGizmo(), QSizeF(textBounds.size()),
+        QSizeF(width(), height()));
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(38, 31, 23, 225));
     painter.drawRoundedRect(badge, 5.0, 5.0);
@@ -4650,18 +4652,39 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
       if (ring.size() < 3) {
         continue;
       }
+      const bool ringHighlight =
+          highlighted(TransformGizmoHandleKind::RotateAxis, axis);
       QColor color = displayColor(axis, TransformGizmoHandleKind::RotateAxis);
-      color.setAlpha(highlighted(TransformGizmoHandleKind::RotateAxis, axis)
-                         ? 255
-                         : 205);
-      painter.setPen(QPen(
-          color,
-          layout.lineWidth +
-              (highlighted(TransformGizmoHandleKind::RotateAxis, axis) ? 1.4
-                                                                       : 0.0),
-          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
       painter.setBrush(Qt::NoBrush);
-      painter.drawPolygon(ring);
+      const qreal ringWidth =
+          layout.lineWidth + (ringHighlight ? 1.4 : 0.0);
+      if (mTransformGizmoMode == TransformGizmoMode::Transform) {
+        QColor contextColor = color;
+        contextColor.setAlpha(ringHighlight ? 135 : 62);
+        painter.setPen(QPen(contextColor, ringWidth, Qt::SolidLine,
+                            Qt::RoundCap, Qt::RoundJoin));
+        painter.drawPolygon(ring);
+
+        color.setAlpha(ringHighlight ? 255 : 215);
+        painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
+                            Qt::RoundJoin));
+        for (qsizetype index = 0; index < ring.size(); ++index) {
+          const QPointF &start =
+              ring.at((index + ring.size() - 1) % ring.size());
+          const QPointF &end = ring.at(index);
+          if (QLineF(layout.center, start).length() >=
+                  layout.rotationHitInnerRadius &&
+              QLineF(layout.center, end).length() >=
+                  layout.rotationHitInnerRadius) {
+            painter.drawLine(start, end);
+          }
+        }
+      } else {
+        color.setAlpha(ringHighlight ? 255 : 205);
+        painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
+                            Qt::RoundJoin));
+        painter.drawPolygon(ring);
+      }
     }
     const bool viewHighlight =
         highlighted(TransformGizmoHandleKind::RotateView, -1);
@@ -4674,7 +4697,18 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     if (highlighted(TransformGizmoHandleKind::RotateTrackball, -1)) {
       painter.setPen(QPen(QColor(255, 224, 118, 210), 1.4, Qt::DashLine));
       painter.setBrush(QColor(255, 224, 118, 24));
-      painter.drawEllipse(layout.trackballBounds);
+      QPainterPath trackball;
+      trackball.setFillRule(Qt::OddEvenFill);
+      trackball.addEllipse(layout.trackballBounds);
+      if (layout.trackballInnerRadius > 0.0) {
+        const QRectF inner(
+            layout.center - QPointF(layout.trackballInnerRadius,
+                                    layout.trackballInnerRadius),
+            QSizeF(layout.trackballInnerRadius * 2.0,
+                   layout.trackballInnerRadius * 2.0));
+        trackball.addEllipse(inner);
+      }
+      painter.drawPath(trackball);
     }
   }
 
@@ -4711,43 +4745,35 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     if (!axisLayout.visible) {
       continue;
     }
-    const TransformGizmoHandleKind lineKind =
-        drawMove ? TransformGizmoHandleKind::MoveAxis
-                 : TransformGizmoHandleKind::ScaleAxis;
-    const bool active = highlighted(lineKind, axis) ||
-                        highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
-    const QColor color = active ? QColor(255, 224, 118)
-                                : navigationAxisColor(axis);
-    painter.setPen(QPen(color, layout.lineWidth + (active ? 1.3 : 0.0),
-                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(color);
-    painter.drawLine(axisLayout.line);
-
     if (drawMove) {
-      const QPointF origin = axisLayout.line.p1();
-      const QPointF fullEnd = axisLayout.line.p2();
-      const QPointF arrowTip =
-          mTransformGizmoMode == TransformGizmoMode::Transform
-              ? origin + (fullEnd - origin) * 0.70
-              : fullEnd;
-      QPointF direction = arrowTip - origin;
-      const qreal length = std::hypot(direction.x(), direction.y());
-      if (length > 1.0) {
-        direction /= length;
-        const QPointF normal(-direction.y(), direction.x());
-        QPolygonF arrow;
-        arrow << arrowTip
-              << arrowTip - direction * 11.0 + normal * 5.0
-              << arrowTip - direction * 11.0 - normal * 5.0;
-        painter.drawPolygon(arrow);
-      }
+      const bool moveActive =
+          highlighted(TransformGizmoHandleKind::MoveAxis, axis);
+      const QColor moveColor = moveActive ? QColor(255, 224, 118)
+                                          : navigationAxisColor(axis);
+      painter.setPen(QPen(moveColor,
+                          layout.lineWidth + (moveActive ? 1.3 : 0.0),
+                          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+      painter.setBrush(moveColor);
+      painter.drawLine(axisLayout.moveLine);
+      painter.drawPolygon(axisLayout.moveArrow);
     }
     if (drawScale) {
       const bool scaleActive =
           highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
-      painter.setPen(QPen(scaleActive ? QColor(255, 224, 118) : color,
-                          scaleActive ? 2.1 : 1.4));
-      painter.setBrush(scaleActive ? QColor(255, 224, 118) : color);
+      QColor scaleColor = scaleActive ? QColor(255, 224, 118)
+                                      : navigationAxisColor(axis);
+      if (mTransformGizmoMode == TransformGizmoMode::Transform &&
+          !scaleActive) {
+        scaleColor.setAlpha(190);
+      }
+      painter.setPen(QPen(
+          scaleColor, scaleActive ? 2.2 : 1.45,
+          mTransformGizmoMode == TransformGizmoMode::Transform
+              ? Qt::DashLine
+              : Qt::SolidLine,
+          Qt::RoundCap, Qt::RoundJoin));
+      painter.setBrush(scaleColor);
+      painter.drawLine(axisLayout.scaleLine);
       painter.drawRect(axisLayout.scaleHandle);
     }
   }

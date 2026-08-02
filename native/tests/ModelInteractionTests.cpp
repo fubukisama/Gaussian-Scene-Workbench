@@ -98,34 +98,105 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
               QVector3D(0.0F, 1.0F, 0.0F));
   QMatrix4x4 projection;
   projection.perspective(50.0F, 1.0F, 0.1F, 100.0F);
-  const TransformGizmoLayout layout = transformGizmoLayout(
+  const TransformGizmoLayout moveLayout = transformGizmoLayout(
       QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
-      84.0);
-  QVERIFY(layout.valid);
-  QVERIFY(layout.axes[0].visible);
-  QVERIFY(layout.axes[1].visible);
-  const TransformGizmoHandle scaleAxis = hitTestTransformGizmo(
-      layout, layout.axes[0].endpoint, TransformGizmoMode::Scale);
-  QCOMPARE(scaleAxis.kind, TransformGizmoHandleKind::ScaleAxis);
-  QCOMPARE(scaleAxis.axis, 0);
-  const QPointF movePoint =
-      layout.axes[0].line.p1() +
-      (layout.axes[0].line.p2() - layout.axes[0].line.p1()) * 0.55;
+      TransformGizmoMode::Move, 84.0);
+  QVERIFY(moveLayout.valid);
+  QVERIFY(moveLayout.axes[0].visible);
+  QVERIFY(moveLayout.axes[1].visible);
+  const QPointF movePoint = moveLayout.axes[0].moveLine.center();
   const TransformGizmoHandle moveAxis = hitTestTransformGizmo(
-      layout, movePoint, TransformGizmoMode::Move);
+      moveLayout, movePoint, TransformGizmoMode::Move);
   QCOMPARE(moveAxis.kind, TransformGizmoHandleKind::MoveAxis);
   QCOMPARE(moveAxis.axis, 0);
+
+  const TransformGizmoLayout scaleLayout = transformGizmoLayout(
+      QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
+      TransformGizmoMode::Scale, 84.0);
+  const TransformGizmoHandle scaleAxis = hitTestTransformGizmo(
+      scaleLayout, scaleLayout.axes[0].scaleHandle.center(),
+      TransformGizmoMode::Scale);
+  QCOMPARE(scaleAxis.kind, TransformGizmoHandleKind::ScaleAxis);
+  QCOMPARE(scaleAxis.axis, 0);
   const TransformGizmoHandle uniform = hitTestTransformGizmo(
-      layout, layout.center, TransformGizmoMode::Scale);
+      scaleLayout, scaleLayout.center, TransformGizmoMode::Scale);
   QCOMPARE(uniform.kind, TransformGizmoHandleKind::ScaleUniform);
   QCOMPARE(uniform.axis, -1);
+
+  const TransformGizmoLayout rotateLayout = transformGizmoLayout(
+      QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
+      TransformGizmoMode::Rotate, 84.0);
   const TransformGizmoHandle viewRotation = hitTestTransformGizmo(
-      layout, layout.viewRing.constFirst(), TransformGizmoMode::Rotate);
+      rotateLayout, rotateLayout.viewRing.constFirst(),
+      TransformGizmoMode::Rotate);
   QCOMPARE(viewRotation.kind, TransformGizmoHandleKind::RotateView);
   const TransformGizmoHandle trackball = hitTestTransformGizmo(
-      layout, layout.center + QPointF(18.0, 21.0),
+      rotateLayout, rotateLayout.center + QPointF(18.0, 21.0),
       TransformGizmoMode::Rotate);
   QCOMPARE(trackball.kind, TransformGizmoHandleKind::RotateTrackball);
+
+  const TransformGizmoLayout combined = transformGizmoLayout(
+      QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
+      TransformGizmoMode::Transform, 148.0);
+  QVERIFY(combined.valid);
+  const TransformGizmoAxisLayout &combinedX = combined.axes[0];
+  const qreal moveDistance =
+      QLineF(combined.center, combinedX.moveEndpoint).length();
+  const qreal scaleDistance =
+      QLineF(combined.center, combinedX.scaleEndpoint).length();
+  QVERIFY2(scaleDistance - moveDistance >= 28.0,
+           "Combined move and scale handles must have separate screen zones");
+  QVERIFY2(combined.rotationHitInnerRadius - scaleDistance >= 6.0,
+           "Rotation hits must stay outside the scale-handle zone");
+  QCOMPARE(hitTestTransformGizmo(combined,
+                                 combinedX.moveArrow.boundingRect().center(),
+                                 TransformGizmoMode::Transform),
+           (TransformGizmoHandle{TransformGizmoHandleKind::MoveAxis, 0}));
+  QCOMPARE(hitTestTransformGizmo(combined, combinedX.scaleHandle.center(),
+                                 TransformGizmoMode::Transform),
+           (TransformGizmoHandle{TransformGizmoHandleKind::ScaleAxis, 0}));
+  QCOMPARE(hitTestTransformGizmo(combined, combinedX.scaleLine.center(),
+                                 TransformGizmoMode::Transform),
+           (TransformGizmoHandle{TransformGizmoHandleKind::ScaleAxis, 0}));
+  QCOMPARE(hitTestTransformGizmo(combined, combined.center,
+                                 TransformGizmoMode::Transform),
+           (TransformGizmoHandle{TransformGizmoHandleKind::MoveView, -1}));
+
+  const qreal trackballDistance =
+      (combined.trackballInnerRadius + combined.trackballOuterRadius) * 0.5;
+  const QPointF trackballPoint =
+      combined.center + QPointF(-trackballDistance * 0.707,
+                                trackballDistance * 0.707);
+  QCOMPARE(hitTestTransformGizmo(combined, trackballPoint,
+                                 TransformGizmoMode::Transform),
+           (TransformGizmoHandle{TransformGizmoHandleKind::RotateTrackball,
+                                 -1}));
+
+  QPointF outerAxisRingPoint;
+  qreal outerAxisRingDistance = 0.0;
+  for (const QPointF &point : combinedX.rotationRing) {
+    const qreal distance = QLineF(combined.center, point).length();
+    if (distance > outerAxisRingDistance) {
+      outerAxisRingDistance = distance;
+      outerAxisRingPoint = point;
+    }
+  }
+  QVERIFY(outerAxisRingDistance > scaleDistance + 18.0);
+  QCOMPARE(hitTestTransformGizmo(combined, outerAxisRingPoint,
+                                 TransformGizmoMode::Transform)
+               .kind,
+           TransformGizmoHandleKind::RotateAxis);
+  QCOMPARE(hitTestTransformGizmo(combined, combined.viewRing.constFirst(),
+                                 TransformGizmoMode::Transform)
+               .kind,
+           TransformGizmoHandleKind::RotateView);
+
+  const QRectF hint = transformGizmoHintRect(
+      combined, QSizeF(330.0, 30.0), QSizeF(800.0, 800.0));
+  QVERIFY(!hint.isEmpty());
+  QVERIFY(QRectF(QPointF(), QSizeF(800.0, 800.0)).contains(hint));
+  QVERIFY(!hint.intersects(combined.viewRing.boundingRect().adjusted(
+      -12.0, -12.0, 12.0, 12.0)));
 
   const TransformToolStripLayout tools =
       transformToolStripLayout(QSizeF(1280.0, 720.0), 16.0);

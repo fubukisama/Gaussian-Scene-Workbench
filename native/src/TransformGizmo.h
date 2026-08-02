@@ -42,8 +42,11 @@ struct TransformGizmoHandle final {
 
 struct TransformGizmoAxisLayout final {
   QVector3D direction;
-  QLineF line;
-  QPointF endpoint;
+  QLineF moveLine;
+  QLineF scaleLine;
+  QPointF moveEndpoint;
+  QPointF scaleEndpoint;
+  QPolygonF moveArrow;
   QRectF scaleHandle;
   QPolygonF rotationRing;
   bool visible = false;
@@ -54,6 +57,9 @@ struct TransformGizmoLayout final {
   QPointF center;
   qreal radius = 84.0;
   qreal lineWidth = 2.2;
+  qreal rotationHitInnerRadius = 0.0;
+  qreal trackballInnerRadius = 14.0;
+  qreal trackballOuterRadius = 0.0;
   std::array<TransformGizmoAxisLayout, 3> axes;
   std::array<QPolygonF, 3> planeHandles;
   QPolygonF viewRing;
@@ -70,7 +76,9 @@ struct TransformToolStripLayout final {
 [[nodiscard]] TransformGizmoLayout
 transformGizmoLayout(const QVector3D &pivot, const QQuaternion &orientation,
                      const QMatrix4x4 &viewProjection,
-                     const QSizeF &viewportSize, qreal radiusPixels = 84.0);
+                     const QSizeF &viewportSize,
+                     TransformGizmoMode mode = TransformGizmoMode::Move,
+                     qreal radiusPixels = 84.0);
 
 [[nodiscard]] TransformGizmoHandle
 hitTestTransformGizmo(const TransformGizmoLayout &layout,
@@ -86,5 +94,10 @@ transformToolStripLayout(const QSizeF &viewportSize, qreal fontHeight);
 [[nodiscard]] int
 hitTestTransformToolStrip(const TransformToolStripLayout &layout,
                           const QPointF &position);
+
+[[nodiscard]] QRectF
+transformGizmoHintRect(const TransformGizmoLayout &layout,
+                       const QSizeF &hintSize, const QSizeF &viewportSize,
+                       qreal gap = 12.0, qreal margin = 8.0);
 
 } // namespace gsw
