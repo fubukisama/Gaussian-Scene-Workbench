@@ -2,7 +2,7 @@
   "product": "Gaussian Scene Workbench",
   "appUserModelId": "Fubukisama.GaussianSceneWorkbench.Native",
   "version": "0.3.1-native-preview",
-  "releaseDate": "2026-08-02",
+  "releaseDate": "2026-09-05",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
   "renderer": "Native OpenGL world-fixed infinite grid with stable oblique-orthographic ground-plane selection, persistent projection navigation, and a constant-footprint camera-projected Unity-style 3D orientation cube with an independent circular center target, outer-ring shaded direction cones, and non-overlapping hit regions, depth-occluded XYZ and selection overlays, projection-aware find-and-frame navigation for transformed resident or disk-paged models, plus screen-space Gaussian preview with point fallback; higher-order SH and tile renderer pending",

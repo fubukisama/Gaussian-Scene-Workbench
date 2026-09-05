@@ -310,6 +310,13 @@ int main(int argc, char *argv[]) {
                       !qEnvironmentVariableIsSet(
                           "GSW_EXPECT_DEPTH_OCCLUSION") ||
                       centerAxisTintPixels <= 3;
+                  // The compact marker sits entirely behind this solid box.
+                  // Its former scene-radius Z line extended above the box;
+                  // visibility now belongs to the unoccluded zoom smoke.
+                  const bool axisVisibilityReady =
+                      qEnvironmentVariableIsSet("GSW_EXPECT_DEPTH_OCCLUSION")
+                          ? greenAxisPixels == 0
+                          : greenAxisPixels >= 30;
                   const bool pagedMeshReady =
                       sourceFaceCount <= 0 ||
                       !qEnvironmentVariableIsSet(
@@ -537,7 +544,7 @@ int main(int argc, char *argv[]) {
                         (viewport->modelScale() - QVector3D(1.0F, 1.0F, 1.0F))
                             .lengthSquared() > 1.0e-8F;
                     smokeTestCompleted = sourceVertexCount > 0 &&
-                                       greenAxisPixels >= 30 &&
+                                       axisVisibilityReady &&
                                        depthOcclusionReady &&
                                        pagedMeshReady && meshTextureReady &&
                                        coordinateMetadataReady &&
@@ -557,7 +564,8 @@ int main(int argc, char *argv[]) {
                   }
                   qInfo() << "Reference-axes smoke:" << "vertices"
                           << sourceVertexCount << "green-pixels"
-                          << greenAxisPixels << "required" << 30
+                          << greenAxisPixels << "axis-visibility-ready"
+                          << axisVisibilityReady
                           << "center-axis-tint-pixels"
                           << centerAxisTintPixels << "occlusion-ready"
                           << depthOcclusionReady
@@ -730,6 +738,53 @@ int main(int argc, char *argv[]) {
           if (!orientationFrame.isNull()) {
             orientationFrame.save(QDir::temp().filePath(
                 QStringLiteral("gsw-unity-orientation-smoke.png")));
+          }
+          // A real framebuffer regression: the central Z marker must retain
+          // a legible footprint when zoomed out, in either projection mode.
+          const auto markerPixels = [](const QImage &frame) {
+            int greenPixels = 0;
+            const QRect region = QRect(frame.width() / 2 - 150,
+                                        frame.height() / 2 - 150, 300, 300)
+                                     .intersected(frame.rect());
+            for (int y = region.top(); y <= region.bottom(); ++y) {
+              for (int x = region.left(); x <= region.right(); ++x) {
+                const QColor color = frame.pixelColor(x, y);
+                if (color.green() > 100 && color.green() - color.red() > 35 &&
+                    color.green() - color.blue() > 25) {
+                  ++greenPixels;
+                }
+              }
+            }
+            return greenPixels;
+          };
+          const int nearMarkerPixels = markerPixels(orientationFrame);
+          const QPointF zoomPosition(viewport->width() * 0.5,
+                                      viewport->height() * 0.5);
+          QWheelEvent farZoom(zoomPosition,
+                               viewport->mapToGlobal(zoomPosition.toPoint()),
+                               QPoint(), QPoint(0, -24 * 120), Qt::NoButton,
+                               Qt::NoModifier, Qt::NoScrollPhase, false);
+          QCoreApplication::sendEvent(viewport, &farZoom);
+          const QImage farFrame = viewport->grabFramebuffer();
+          farFrame.save(QDir::temp().filePath(
+              QStringLiteral("gsw-reference-axis-far.png")));
+          const int farMarkerPixels = markerPixels(farFrame);
+          drag(Qt::LeftButton, gizmo.projectionLabel.center(),
+               gizmo.projectionLabel.center(), Qt::NoModifier);
+          const QImage orthoFrame = viewport->grabFramebuffer();
+          orthoFrame.save(QDir::temp().filePath(
+              QStringLiteral("gsw-reference-axis-ortho.png")));
+          const int orthoMarkerPixels = markerPixels(orthoFrame);
+          const bool markerReadable = nearMarkerPixels >= 60 &&
+                                      farMarkerPixels >= 60 &&
+                                      orthoMarkerPixels >= 60 &&
+                                      farMarkerPixels >= nearMarkerPixels / 2;
+          qInfo() << "Reference-marker readability:" << markerReadable
+                  << "near" << nearMarkerPixels << "far" << farMarkerPixels
+                  << "orthographic" << orthoMarkerPixels;
+          if (!markerReadable) {
+            smokeTestCompleted = false;
+            smokeTestFailureCode = 11;
           }
           application.exit(smokeTestFailureCode);
         });

@@ -3115,13 +3115,13 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
     mGridProgram->setUniformValue(
         "lineColor",
         QVector4D(grid.axisUColor.x(), grid.axisUColor.y(),
-                  grid.axisUColor.z(), 0.86F));
+                  grid.axisUColor.z(), 0.48F));
     glDrawArrays(GL_LINES, 0, 4);
     mGridProgram->setUniformValue("drawAxis", 2);
     mGridProgram->setUniformValue(
         "lineColor",
         QVector4D(grid.axisVColor.x(), grid.axisVColor.y(),
-                  grid.axisVColor.z(), 0.86F));
+                  grid.axisVColor.z(), 0.48F));
     glDrawArrays(GL_LINES, 0, 4);
   }
   mGridProgram->release();
@@ -4826,7 +4826,8 @@ NativeViewport::projectPoint(const QVector3D &point,
 
 void NativeViewport::drawDepthAwareLines(
     const QVector<DepthOverlayVertex> &vertices,
-    const QMatrix4x4 &viewProjection, const float logicalLineWidth) {
+    const QMatrix4x4 &viewProjection, const float logicalLineWidth,
+    const GLenum primitiveMode) {
   if (vertices.isEmpty() || !mDepthOverlayShaderReady ||
       mDepthOverlayProgram == nullptr ||
       !mDepthOverlayProgram->isLinked() ||
@@ -4836,7 +4837,10 @@ void NativeViewport::drawDepthAwareLines(
   }
 
   glEnable(GL_DEPTH_TEST);
-  glDepthFunc(GL_LESS);
+  // The marker is the first scene-depth pass. Its coplanar bevel/outline
+  // layers use painter order to avoid depth-quantization stripes, but still
+  // write their true depth for all subsequently drawn model geometry.
+  glDepthFunc(primitiveMode == GL_TRIANGLES ? GL_ALWAYS : GL_LESS);
   glDepthMask(GL_TRUE);
   glDisable(GL_CULL_FACE);
   glEnable(GL_BLEND);
@@ -4855,43 +4859,25 @@ void NativeViewport::drawDepthAwareLines(
         vertices.size() * static_cast<qsizetype>(sizeof(DepthOverlayVertex));
     mDepthOverlayBuffer.allocate(vertices.constData(),
                                  static_cast<int>(vertexBytes));
-    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
+    glDrawArrays(primitiveMode, 0, static_cast<GLsizei>(vertices.size()));
     mDepthOverlayBuffer.release();
   }
   mDepthOverlayProgram->release();
+  glDepthFunc(GL_LESS);
   glLineWidth(1.0F);
   glDisable(GL_BLEND);
 }
 
 void NativeViewport::drawDepthAwareReferenceAxes(
     const QMatrix4x4 &viewProjection) {
-  const float axisLength = std::max(3.0F, mSceneRadius);
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
-  const QVector3D originLocal = gridOrigin(plane);
-
-  QVector<DepthOverlayVertex> vertices;
-  vertices.reserve(6);
-  const auto appendLine = [&vertices](const QVector3D &start,
-                                      const QVector3D &end,
-                                      const QVector3D &color) {
-    vertices.append({start.x(), start.y(), start.z(), color.x(), color.y(),
-                     color.z(), 1.0F});
-    vertices.append({end.x(), end.y(), end.z(), color.x(), color.y(),
-                     color.z(), 1.0F});
-  };
-  appendLine(originLocal,
-             originLocal + QVector3D(axisLength, 0.0F, 0.0F),
-             QVector3D(214.0F / 255.0F, 91.0F / 255.0F, 91.0F / 255.0F));
-  appendLine(originLocal,
-             originLocal + QVector3D(0.0F, axisLength, 0.0F),
-             QVector3D(89.0F / 255.0F, 139.0F / 255.0F,
-                       222.0F / 255.0F));
-  appendLine(originLocal,
-             originLocal + QVector3D(0.0F, 0.0F, axisLength),
-             QVector3D(91.0F / 255.0F, 191.0F / 255.0F,
-                       137.0F / 255.0F));
-  drawDepthAwareLines(vertices, viewProjection, 2.0F);
+  const float uiScale = static_cast<float>(QFontMetricsF(font()).height() / 18.0);
+  const auto vertices = referenceAxisGeometry(
+      viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale);
+  // Triangle strokes keep their intended width even on drivers that clamp
+  // glLineWidth to one pixel. Their NDC Z still participates in model occlusion.
+  drawDepthAwareLines(vertices, QMatrix4x4(), 1.0F, GL_TRIANGLES);
 }
 
 void NativeViewport::drawDepthAwareModelBounds(

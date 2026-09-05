@@ -1,4 +1,5 @@
 #include "ViewportCamera.h"
+#include "ReferenceAxisGeometry.h"
 
 #include <QtTest>
 
@@ -28,6 +29,8 @@ private slots:
   void keepsColoredAxesInsideRenderedGridCoverage();
   void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
+  void keepsReferenceMarkerReadableAcrossZoomAndProjection();
+  void hidesReferenceMarkerOutsideView();
 };
 
 void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
@@ -250,6 +253,67 @@ void ViewportCameraTests::formatsGridScaleWithReadableMetricUnits() {
   QCOMPARE(formatMetricDistance(0.5F), QStringLiteral("50 cm"));
   QCOMPARE(formatMetricDistance(1.0F), QStringLiteral("1 m"));
   QCOMPARE(formatMetricDistance(250.0F), QStringLiteral("250 m"));
+}
+
+void ViewportCameraTests::keepsReferenceMarkerReadableAcrossZoomAndProjection() {
+  const QSizeF viewport(800.0, 600.0);
+  for (const bool orthographic : {false, true}) {
+    QVector<ReferenceAxisVertex> baseline;
+    for (const float distance : {0.02F, 12.0F, 1200.0F, 1.0e6F}) {
+      const OrbitFrame frame = orbitFrame({42.0F, 24.0F});
+      QMatrix4x4 view;
+      view.lookAt(frame.cameraOffsetDirection * distance, QVector3D(),
+                   frame.upDirection);
+      QMatrix4x4 projection;
+      if (orthographic) {
+        projection.ortho(-distance * 0.56F, distance * 0.56F,
+                          -distance * 0.42F, distance * 0.42F,
+                          distance * 0.0001F, distance * 10.0F);
+      } else {
+        projection.perspective(46.0F, 4.0F / 3.0F, distance * 0.0001F,
+                                distance * 10.0F);
+      }
+      const auto vertices = referenceAxisGeometry(projection * view, {}, viewport);
+      QVERIFY(!vertices.isEmpty());
+      float minY = 1.0F;
+      float maxY = -1.0F;
+      for (const auto &vertex : vertices) {
+        QVERIFY(std::isfinite(vertex.x) && std::isfinite(vertex.y));
+        QVERIFY(vertex.z > -1.0F && vertex.z < 1.0F);
+        minY = std::min(minY, vertex.y);
+        maxY = std::max(maxY, vertex.y);
+      }
+      const float pixelHeight = (maxY - minY) * 300.0F;
+      QVERIFY(pixelHeight >= 75.0F && pixelHeight <= 180.0F);
+      if (baseline.isEmpty()) {
+        baseline = vertices;
+      } else {
+        QCOMPARE(vertices.size(), baseline.size());
+        for (qsizetype i = 0; i < vertices.size(); ++i) {
+          QVERIFY(std::abs(vertices[i].x - baseline[i].x) < 0.0001F);
+          QVERIFY(std::abs(vertices[i].y - baseline[i].y) < 0.0001F);
+        }
+      }
+    }
+  }
+}
+
+void ViewportCameraTests::hidesReferenceMarkerOutsideView() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0, 0, 10), {}, QVector3D(0, 1, 0));
+  QMatrix4x4 projection;
+  projection.perspective(46.0F, 4.0F / 3.0F, 0.01F, 100.0F);
+  const QMatrix4x4 vp = projection * view;
+  QVERIFY(referenceAxisGeometry(vp, QVector3D(0, 0, 20), {800, 600}).isEmpty());
+  QVERIFY(referenceAxisGeometry(vp, QVector3D(1000, 0, 0), {800, 600}).isEmpty());
+  QVERIFY(referenceAxisGeometry(vp, {}, {0, 0}).isEmpty());
+  // Axis-aligned orthographic/perspective views hide the foreshortened axis
+  // without discarding the readable pair and origin collar.
+  const auto aligned = referenceAxisGeometry(vp, {}, {800, 600});
+  QVERIFY(!aligned.isEmpty());
+  for (const auto &vertex : aligned) {
+    QVERIFY(std::isfinite(vertex.x) && std::isfinite(vertex.y));
+  }
 }
 
 QTEST_GUILESS_MAIN(ViewportCameraTests)

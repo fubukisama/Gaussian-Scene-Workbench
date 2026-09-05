@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ReferenceAxisGeometry.h"
+
 #include "CameraTrajectory.h"
 #include "FrameRateCounter.h"
 #include "ModelInteraction.h"
@@ -231,15 +233,7 @@ private:
     QVector3D boundsMaximum;
   };
 
-  struct DepthOverlayVertex final {
-    float x = 0.0F;
-    float y = 0.0F;
-    float z = 0.0F;
-    float red = 1.0F;
-    float green = 1.0F;
-    float blue = 1.0F;
-    float alpha = 1.0F;
-  };
+  using DepthOverlayVertex = ReferenceAxisVertex;
 
   struct StoredCameraView {
     QVector3D target;
@@ -310,7 +304,8 @@ private:
   void drawDepthAwareModelBounds(const QMatrix4x4 &modelViewProjection);
   void drawDepthAwareLines(const QVector<DepthOverlayVertex> &vertices,
                            const QMatrix4x4 &viewProjection,
-                           float logicalLineWidth);
+                           float logicalLineWidth,
+                           GLenum primitiveMode = GL_LINES);
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);

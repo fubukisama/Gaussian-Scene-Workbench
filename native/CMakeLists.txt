@@ -75,6 +75,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ProcessSupervisor.h
   src/RecoveryStore.cpp
   src/RecoveryStore.h
+  src/ReferenceAxisGeometry.cpp
+  src/ReferenceAxisGeometry.h
   src/ReconstructionDialog.cpp
   src/ReconstructionDialog.h
   src/SceneEditModel.cpp
@@ -503,6 +505,8 @@ if(BUILD_TESTING)
 
     qt_add_executable(gsw_viewport_camera_tests
       tests/ViewportCameraTests.cpp
+      src/ReferenceAxisGeometry.cpp
+      src/ReferenceAxisGeometry.h
       src/ViewportCamera.cpp
       src/ViewportCamera.h
     )
