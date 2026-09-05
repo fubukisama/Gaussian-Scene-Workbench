@@ -739,8 +739,8 @@ int main(int argc, char *argv[]) {
             orientationFrame.save(QDir::temp().filePath(
                 QStringLiteral("gsw-unity-orientation-smoke.png")));
           }
-          // A real framebuffer regression: the central Z marker must retain
-          // a legible footprint when zoomed out, in either projection mode.
+          // A real framebuffer regression: shrink with distance, but retain
+          // a legible footprint in both projection modes.
           const auto markerPixels = [](const QImage &frame) {
             int greenPixels = 0;
             const QRect region = QRect(frame.width() / 2 - 150,
@@ -760,9 +760,18 @@ int main(int argc, char *argv[]) {
           const int nearMarkerPixels = markerPixels(orientationFrame);
           const QPointF zoomPosition(viewport->width() * 0.5,
                                       viewport->height() * 0.5);
+          QWheelEvent midZoom(zoomPosition,
+                               viewport->mapToGlobal(zoomPosition.toPoint()),
+                               QPoint(), QPoint(0, -6 * 120), Qt::NoButton,
+                               Qt::NoModifier, Qt::NoScrollPhase, false);
+          QCoreApplication::sendEvent(viewport, &midZoom);
+          const QImage midFrame = viewport->grabFramebuffer();
+          midFrame.save(QDir::temp().filePath(
+              QStringLiteral("gsw-reference-axis-mid.png")));
+          const int midMarkerPixels = markerPixels(midFrame);
           QWheelEvent farZoom(zoomPosition,
                                viewport->mapToGlobal(zoomPosition.toPoint()),
-                               QPoint(), QPoint(0, -24 * 120), Qt::NoButton,
+                               QPoint(), QPoint(0, -18 * 120), Qt::NoButton,
                                Qt::NoModifier, Qt::NoScrollPhase, false);
           QCoreApplication::sendEvent(viewport, &farZoom);
           const QImage farFrame = viewport->grabFramebuffer();
@@ -778,9 +787,11 @@ int main(int argc, char *argv[]) {
           const bool markerReadable = nearMarkerPixels >= 60 &&
                                       farMarkerPixels >= 60 &&
                                       orthoMarkerPixels >= 60 &&
-                                      farMarkerPixels >= nearMarkerPixels / 2;
-          qInfo() << "Reference-marker readability:" << markerReadable
-                  << "near" << nearMarkerPixels << "far" << farMarkerPixels
+                                      nearMarkerPixels > midMarkerPixels * 1.2 &&
+                                      midMarkerPixels > farMarkerPixels * 1.2;
+          qInfo() << "Reference-marker distance/readability:" << markerReadable
+                  << "near" << nearMarkerPixels << "mid" << midMarkerPixels
+                  << "far" << farMarkerPixels
                   << "orthographic" << orthoMarkerPixels;
           if (!markerReadable) {
             smokeTestCompleted = false;

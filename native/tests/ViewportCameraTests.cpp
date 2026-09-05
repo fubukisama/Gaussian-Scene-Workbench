@@ -4,6 +4,8 @@
 #include <QtTest>
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 using namespace gsw;
@@ -30,6 +32,7 @@ private slots:
   void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
   void keepsReferenceMarkerReadableAcrossZoomAndProjection();
+  void keepsReferenceMarkerConsistentAcrossSceneUnits();
   void hidesReferenceMarkerOutsideView();
 };
 
@@ -258,8 +261,9 @@ void ViewportCameraTests::formatsGridScaleWithReadableMetricUnits() {
 void ViewportCameraTests::keepsReferenceMarkerReadableAcrossZoomAndProjection() {
   const QSizeF viewport(800.0, 600.0);
   for (const bool orthographic : {false, true}) {
-    QVector<ReferenceAxisVertex> baseline;
-    for (const float distance : {0.02F, 12.0F, 1200.0F, 1.0e6F}) {
+    float previousHeight = 1000.0F;
+    float nearHeight = 0.0F;
+    for (const float distance : {0.02F, 12.0F, 24.0F, 48.0F, 1200.0F, 1.0e6F}) {
       const OrbitFrame frame = orbitFrame({42.0F, 24.0F});
       QMatrix4x4 view;
       view.lookAt(frame.cameraOffsetDirection * distance, QVector3D(),
@@ -284,7 +288,40 @@ void ViewportCameraTests::keepsReferenceMarkerReadableAcrossZoomAndProjection() 
         maxY = std::max(maxY, vertex.y);
       }
       const float pixelHeight = (maxY - minY) * 300.0F;
-      QVERIFY(pixelHeight >= 75.0F && pixelHeight <= 180.0F);
+      QVERIFY(pixelHeight >= 40.0F && pixelHeight <= 230.0F);
+      QVERIFY2(pixelHeight < previousHeight, "Zooming out must visibly shrink the marker");
+      if (distance == 0.02F) {
+        nearHeight = pixelHeight;
+      } else if (distance == 24.0F || distance == 48.0F) {
+        QVERIFY2(previousHeight - pixelHeight > 10.0F,
+                 "Ordinary zoom must retain a meaningful distance cue");
+      }
+      previousHeight = pixelHeight;
+    }
+    QVERIFY(nearHeight > previousHeight * 2.0F);
+  }
+}
+
+void ViewportCameraTests::keepsReferenceMarkerConsistentAcrossSceneUnits() {
+  for (const bool orthographic : {false, true}) {
+    QVector<ReferenceAxisVertex> baseline;
+    for (const float unitScale : {0.001F, 1.0F, 1000.0F}) {
+      const float distance = 12.0F * unitScale;
+      const OrbitFrame frame = orbitFrame({42.0F, 24.0F});
+      QMatrix4x4 view;
+      view.lookAt(frame.cameraOffsetDirection * distance, {}, frame.upDirection);
+      QMatrix4x4 projection;
+      if (orthographic) {
+        projection.ortho(-distance * 0.56F, distance * 0.56F,
+                         -distance * 0.42F, distance * 0.42F,
+                         distance * 0.0001F, distance * 10.0F);
+      } else {
+        projection.perspective(46.0F, 4.0F / 3.0F, distance * 0.0001F,
+                               distance * 10.0F);
+      }
+      const auto vertices = referenceAxisGeometry(
+          projection * view, {}, {800, 600}, 1.0F, 1.2F * unitScale);
+      QVERIFY(!vertices.isEmpty());
       if (baseline.isEmpty()) {
         baseline = vertices;
       } else {

@@ -4873,8 +4873,12 @@ void NativeViewport::drawDepthAwareReferenceAxes(
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
   const float uiScale = static_cast<float>(QFontMetricsF(font()).height() / 18.0);
+  // Use source scene extent, not view distance or adaptive grid spacing: a
+  // camera zoom must not cancel its own size cue or jump at grid-level changes.
+  const float referenceLength = std::max(mSceneRadius * 0.3F, 1.0e-6F);
   const auto vertices = referenceAxisGeometry(
-      viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale);
+      viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale,
+      referenceLength);
   // Triangle strokes keep their intended width even on drivers that clamp
   // glLineWidth to one pixel. Their NDC Z still participates in model occlusion.
   drawDepthAwareLines(vertices, QMatrix4x4(), 1.0F, GL_TRIANGLES);

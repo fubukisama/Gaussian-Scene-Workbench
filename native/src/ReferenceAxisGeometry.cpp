@@ -125,11 +125,11 @@ private:
 QVector<ReferenceAxisVertex>
 referenceAxisGeometry(const QMatrix4x4 &viewProjection,
                       const QVector3D &origin, const QSizeF &viewport,
-                      const float uiScale) {
+                      const float uiScale, const float referenceLength) {
   if (viewport.width() < 64.0 || viewport.height() < 64.0) {
     return {};
   }
-  const float scale = std::isfinite(uiScale)
+  const float density = std::isfinite(uiScale)
                           ? std::clamp(uiScale, 0.85F, 1.4F)
                           : 1.0F;
   const QVector4D originClip = viewProjection * QVector4D(origin, 1.0F);
@@ -153,8 +153,22 @@ referenceAxisGeometry(const QMatrix4x4 &viewProjection,
   if (!std::isfinite(pixelsPerUnit) || pixelsPerUnit <= 1.0e-12) {
     return {};
   }
+  // Start from a fixed scene-space reference, so zoom produces a visible
+  // near/large -> far/small response in either projection. Smooth limits keep
+  // the distant marker readable and prevent a close-up from filling the view;
+  // unlike a hard clamp, neither boundary introduces a sudden size plateau.
+  const double nominalLength = std::isfinite(referenceLength) && referenceLength > 0
+                                   ? referenceLength : 1.2;
+  const double projectedLength = pixelsPerUnit * nominalLength / density;
+  const double responsivePixels = 28.0 + 96.0 *
+      (projectedLength / (projectedLength + 72.0));
   const float targetPixels = static_cast<float>(std::min(
-      76.0 * scale, std::min(viewport.width(), viewport.height()) * 0.18));
+      responsivePixels * density,
+      std::min(viewport.width(), viewport.height()) * 0.22));
+  // Let the artwork breathe with distance as well, while keeping text and
+  // arrowheads above a readable minimum instead of shrinking to hairlines.
+  const float scale = density * std::clamp(
+      std::sqrt(targetPixels / (76.0F * density)), 0.8F, 1.18F);
   float worldLength = static_cast<float>(targetPixels / pixelsPerUnit);
   // One common world length preserves real axis foreshortening. Refine it for
   // perspective, where arrow tips may be closer to the camera than the origin.
