@@ -739,12 +739,12 @@ int main(int argc, char *argv[]) {
             orientationFrame.save(QDir::temp().filePath(
                 QStringLiteral("gsw-unity-orientation-smoke.png")));
           }
-          // A real framebuffer regression: shrink with distance, but retain
-          // a legible footprint in both projection modes.
+          // Zoom-in must keep enlarging the real shaft, including beyond the
+          // old saturation region. Distant real-world axes may become subpixel.
           const auto markerPixels = [](const QImage &frame) {
             int greenPixels = 0;
-            const QRect region = QRect(frame.width() / 2 - 150,
-                                        frame.height() / 2 - 150, 300, 300)
+            const QRect region = QRect(frame.width() / 2 - 150, 0,
+                                        300, frame.height())
                                      .intersected(frame.rect());
             for (int y = region.top(); y <= region.bottom(); ++y) {
               for (int x = region.left(); x <= region.right(); ++x) {
@@ -760,6 +760,24 @@ int main(int argc, char *argv[]) {
           const int nearMarkerPixels = markerPixels(orientationFrame);
           const QPointF zoomPosition(viewport->width() * 0.5,
                                       viewport->height() * 0.5);
+          const auto zoomReferenceAxis = [&](const int steps) {
+            QWheelEvent event(zoomPosition,
+                viewport->mapToGlobal(zoomPosition.toPoint()), QPoint(),
+                QPoint(0, steps * 120), Qt::NoButton, Qt::NoModifier,
+                Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(viewport, &event);
+          };
+          zoomReferenceAxis(4);
+          const QImage closeFrame = viewport->grabFramebuffer();
+          closeFrame.save(QDir::temp().filePath(
+              QStringLiteral("gsw-reference-axis-close.png")));
+          const int closeMarkerPixels = markerPixels(closeFrame);
+          zoomReferenceAxis(4);
+          const QImage closerFrame = viewport->grabFramebuffer();
+          closerFrame.save(QDir::temp().filePath(
+              QStringLiteral("gsw-reference-axis-closer.png")));
+          const int closerMarkerPixels = markerPixels(closerFrame);
+          zoomReferenceAxis(-8);
           QWheelEvent midZoom(zoomPosition,
                                viewport->mapToGlobal(zoomPosition.toPoint()),
                                QPoint(), QPoint(0, -6 * 120), Qt::NoButton,
@@ -784,16 +802,18 @@ int main(int argc, char *argv[]) {
           orthoFrame.save(QDir::temp().filePath(
               QStringLiteral("gsw-reference-axis-ortho.png")));
           const int orthoMarkerPixels = markerPixels(orthoFrame);
-          const bool markerReadable = nearMarkerPixels >= 60 &&
-                                      farMarkerPixels >= 60 &&
-                                      orthoMarkerPixels >= 60 &&
-                                      nearMarkerPixels > midMarkerPixels * 1.2 &&
-                                      midMarkerPixels > farMarkerPixels * 1.2;
-          qInfo() << "Reference-marker distance/readability:" << markerReadable
+          const bool physicalAxisScaling = nearMarkerPixels >= 60 &&
+                                      closeMarkerPixels > nearMarkerPixels * 1.5 &&
+                                      closerMarkerPixels > closeMarkerPixels * 1.5 &&
+                                      nearMarkerPixels > midMarkerPixels * 1.5 &&
+                                      farMarkerPixels < nearMarkerPixels / 10 &&
+                                      orthoMarkerPixels < nearMarkerPixels / 10;
+          qInfo() << "Reference-axis physical scaling:" << physicalAxisScaling
+                  << "close" << closeMarkerPixels << "closer" << closerMarkerPixels
                   << "near" << nearMarkerPixels << "mid" << midMarkerPixels
                   << "far" << farMarkerPixels
                   << "orthographic" << orthoMarkerPixels;
-          if (!markerReadable) {
+          if (!physicalAxisScaling) {
             smokeTestCompleted = false;
             smokeTestFailureCode = 11;
           }

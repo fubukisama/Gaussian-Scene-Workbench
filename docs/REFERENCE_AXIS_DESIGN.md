@@ -1,6 +1,6 @@
 # Central reference-axis visual design
 
-The scene origin has a compact, distance-responsive marker: bevel-highlighted shafts,
+The scene origin has fixed-world-length axes: bevel-highlighted shafts,
 two-tone arrowheads, upright outlined XYZ letters, and a small neutral origin
 collar. Long grid axes are subdued so the marker carries the visual emphasis.
 The existing X-red, Y-blue, Z-green convention is preserved.
@@ -13,44 +13,55 @@ This is an original implementation; it does not copy their code or assets.
 ## Rendering behavior
 
 - The reference length is 30% of the source scene radius, independent of camera
-  distance and adaptive grid spacing. Projection turns this into a screen length;
-  a smooth response approaches 28 logical pixels at extreme distance and 124
-  close up (at normal UI scale, also limited to 22% of the smaller viewport side).
-  It visibly shrinks during zoom-out without abrupt hard-clamp plateaus or jumps
-  when the grid changes level. This replaces the previous fixed 76-pixel footprint.
-- One common world length is refined for perspective so real foreshortening is
-  preserved instead of stretching all axes to the same apparent length. Shafts,
-  arrowheads, letters, and the collar also scale moderately with distance, with
-  a legibility floor for their thickness and lettering.
+  distance, FOV, UI scale, viewport size, and adaptive grid spacing. Each true
+  endpoint is exactly `origin + axis * referenceLength`; projection alone sets
+  its screen position. There is no minimum or maximum pixel length, saturation
+  curve, or viewport-fitting correction. The previous bounded scaling approach
+  was incorrect because it suppressed genuine length changes during close zoom.
+- In perspective, a transverse shaft doubles its projected length when camera
+  distance halves. Oblique shafts keep their real perspective foreshortening.
+  In orthographic projection the length follows the orthographic view extent;
+  changing camera distance alone does not change projected length.
+- Only stroke width, arrowhead artwork, and labels use readable screen sizes.
+  Crowded far-away tips/letters are omitted without stretching the shaft, and
+  the origin collar shrinks with tiny axes. At extreme distance the real marker
+  can become subpixel; the separate corner navigation gizmo remains available.
+- Homogeneous frustum clipping preserves visible shafts when an endpoint leaves
+  the screen or crosses the near plane, even if the origin is offscreen. A clipped
+  endpoint does not receive a fake arrowhead or a label pinned to the viewport edge.
 - Shafts, bevels, arrow faces, letters, and the origin collar are triangles.
   Their width is independent of the driver's supported `glLineWidth` range.
 - Projected vertices retain scene depth. The marker writes depth before model
   rendering, so points, meshes, and Gaussian compositing can cover rear parts.
   Coplanar decoration layers are drawn in order to avoid depth stripes.
 - A view-aligned arrow collapses before its tip and letter crowd the origin.
-  Offscreen or behind-camera origins do not produce floating labels.
-- The marker is an orientation aid, not a ruler or a transform handle. Its
-  apparent length is decorative; numeric size still comes from the grid and
-  the imported model's source units. No source data or coordinates are changed.
+  Offscreen or behind-camera endpoints do not produce floating labels.
+- The axes are not transform handles. Their lengths use the scene's source units;
+  the numeric grid remains the labeled scale reference. No source data or
+  coordinates are changed.
 
 ## Verification
 
-- Geometry checks cover perspective and orthographic views from distances
-  0.02 to 1,000,000: monotonically decreasing size, meaningful ordinary-zoom
-  changes, bounded visibility, and finite scene depth. Changing scene units
-  and camera distance together preserves the appearance.
-- Native framebuffer checks compare the default view, 6 and 24 zoom-out steps,
-  and the same distant orthographic view. On the desktop OpenGL run, the central
-  green marker occupied 260, 179, 128, and 128 classified pixels respectively.
+- Geometry checks verify emitted arrow-tip vertices against exact world endpoint
+  projections at camera distances 12, 6, and 3, across UI densities: projected
+  lengths are 1:2:4, including lengths exceeding the previous size caps.
+- Tests also cover near-plane/screen-edge clipping, offscreen origins with visible
+  shafts, no far-distance pixel-length floor, fixed-extent orthographic behavior,
+  finite depth from 0.02 to 1,000,000, and equivalent mm/m scene representations.
+- Native framebuffer checks zoom in 4 steps and then another 4, as well as zooming
+  out 6 and 24 steps and switching distant projection. On desktop OpenGL the green
+  marker occupies 336, 651, and 1339 classified pixels during the zoom-in sequence;
+  the 6-step zoom-out yields 161 and both extreme-distance views yield 0.
 - The solid-box mesh fixture fully occludes the compact marker. Its check now
   expects zero visible green-marker pixels rather than the old long Z line
   projecting out of the box; the unoccluded zoom check verifies visibility.
-- Visual review uses same-density near/middle/far captures. The revised arrow
-  faces remain solid and antialiased, lettering is legible, and no large
-  background panel is added. The center marker is no longer screen-size invariant.
+- Visual review uses same-density default/close/closer captures. The arrow faces
+  remain solid and antialiased; endpoints keep moving outwards as the camera
+  approaches instead of saturating at a small fraction of the viewport.
 
 Local review artifacts are generated under
-`native/build-unity-gizmo/axis-distance-qa/`:
-`central-axis-distance-comparison.png`, `gsw-unity-orientation-smoke.png`,
+`native/build-unity-gizmo/axis-world-length-qa/`:
+`central-axis-physical-zoom.png`, `gsw-unity-orientation-smoke.png`,
+`gsw-reference-axis-close.png`, `gsw-reference-axis-closer.png`,
 `gsw-reference-axis-mid.png`, `gsw-reference-axis-far.png`, and
 `gsw-reference-axis-ortho.png`.

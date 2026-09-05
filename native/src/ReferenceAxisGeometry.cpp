@@ -26,12 +26,57 @@ std::optional<ScreenPoint> project(const QVector4D &clip,
   }
   const QVector3D ndc = clip.toVector3DAffine();
   if (!std::isfinite(ndc.x()) || !std::isfinite(ndc.y()) ||
-      !std::isfinite(ndc.z()) || ndc.z() <= -1.0F || ndc.z() >= 1.0F) {
+      !std::isfinite(ndc.z()) || ndc.z() < -1.00001F || ndc.z() > 1.00001F) {
     return std::nullopt;
   }
   return ScreenPoint{QPointF((ndc.x() * 0.5 + 0.5) * viewport.width(),
                              (0.5 - ndc.y() * 0.5) * viewport.height()),
-                      ndc.z()};
+                      std::clamp(ndc.z(), -1.0F, 1.0F)};
+}
+
+struct ClippedAxis {
+  ScreenPoint start;
+  ScreenPoint end;
+  bool startsAtOrigin;
+  bool endsAtTip;
+};
+
+std::optional<ClippedAxis> clipAxis(const QVector4D &start,
+                                   const QVector4D &end,
+                                   const QSizeF &viewport) {
+  // Clip in homogeneous space before division: at close distances a true
+  // endpoint can leave the viewport or cross behind the near plane. Keep the
+  // visible shaft, without moving the endpoint or inventing an edge arrow.
+  double enter = 0.0;
+  double leave = 1.0;
+  for (int axis = 0; axis < 3; ++axis) {
+    for (const double sign : {-1.0, 1.0}) {
+      const double a = start.w() + sign * start[axis];
+      const double b = end.w() + sign * end[axis];
+      if (!std::isfinite(a) || !std::isfinite(b) || (a < 0.0 && b < 0.0)) {
+        return std::nullopt;
+      }
+      if ((a < 0.0) != (b < 0.0)) {
+        const double crossing = a / (a - b);
+        if (a < 0.0) {
+          enter = std::max(enter, crossing);
+        } else {
+          leave = std::min(leave, crossing);
+        }
+      }
+    }
+  }
+  if (enter > leave) {
+    return std::nullopt;
+  }
+  const auto first = project(start + (end - start) * static_cast<float>(enter),
+                             viewport);
+  const auto last = project(start + (end - start) * static_cast<float>(leave),
+                            viewport);
+  if (!first || !last) {
+    return std::nullopt;
+  }
+  return ClippedAxis{*first, *last, enter == 0.0, leave == 1.0};
 }
 
 class GeometryBuilder {
@@ -129,102 +174,66 @@ referenceAxisGeometry(const QMatrix4x4 &viewProjection,
   if (viewport.width() < 64.0 || viewport.height() < 64.0) {
     return {};
   }
-  const float density = std::isfinite(uiScale)
-                          ? std::clamp(uiScale, 0.85F, 1.4F)
-                          : 1.0F;
+  const float scale = std::isfinite(uiScale)
+                         ? std::clamp(uiScale, 0.85F, 1.4F)
+                         : 1.0F;
   const QVector4D originClip = viewProjection * QVector4D(origin, 1.0F);
   const auto center = project(originClip, viewport);
-  if (!center || !QRectF(QPointF(), viewport).contains(center->pixel)) {
-    return {};
-  }
-
-  // The projection derivative gives pixels/world-unit without subtracting
-  // nearly coincident float coordinates when the view is very far away.
-  double pixelsPerUnit = 0.0;
-  for (int axis = 0; axis < 3; ++axis) {
-    const QVector4D column = viewProjection.column(axis);
-    const double w = originClip.w();
-    const double dx = (column.x() * w - originClip.x() * column.w()) /
-                      (w * w) * viewport.width() * 0.5;
-    const double dy = (column.y() * w - originClip.y() * column.w()) /
-                      (w * w) * viewport.height() * 0.5;
-    pixelsPerUnit = std::max(pixelsPerUnit, std::hypot(dx, dy));
-  }
-  if (!std::isfinite(pixelsPerUnit) || pixelsPerUnit <= 1.0e-12) {
-    return {};
-  }
-  // Start from a fixed scene-space reference, so zoom produces a visible
-  // near/large -> far/small response in either projection. Smooth limits keep
-  // the distant marker readable and prevent a close-up from filling the view;
-  // unlike a hard clamp, neither boundary introduces a sudden size plateau.
-  const double nominalLength = std::isfinite(referenceLength) && referenceLength > 0
-                                   ? referenceLength : 1.2;
-  const double projectedLength = pixelsPerUnit * nominalLength / density;
-  const double responsivePixels = 28.0 + 96.0 *
-      (projectedLength / (projectedLength + 72.0));
-  const float targetPixels = static_cast<float>(std::min(
-      responsivePixels * density,
-      std::min(viewport.width(), viewport.height()) * 0.22));
-  // Let the artwork breathe with distance as well, while keeping text and
-  // arrowheads above a readable minimum instead of shrinking to hairlines.
-  const float scale = density * std::clamp(
-      std::sqrt(targetPixels / (76.0F * density)), 0.8F, 1.18F);
-  float worldLength = static_cast<float>(targetPixels / pixelsPerUnit);
-  // One common world length preserves real axis foreshortening. Refine it for
-  // perspective, where arrow tips may be closer to the camera than the origin.
-  for (int pass = 0; pass < 3; ++pass) {
-    qreal longest = 0.0;
-    for (int axis = 0; axis < 3; ++axis) {
-      const auto tip = project(originClip + viewProjection.column(axis) *
-                                               worldLength,
-                                viewport);
-      if (tip) {
-        const QPointF delta = tip->pixel - center->pixel;
-        longest = std::max(longest, std::hypot(delta.x(), delta.y()));
-      }
-    }
-    if (longest < 1.0 || !std::isfinite(longest)) {
-      return {};
-    }
-    worldLength *= static_cast<float>(targetPixels / longest);
-  }
+  // The endpoint is always origin + axis * referenceLength, regardless of
+  // distance, FOV, viewport dimensions or UI scale. Never fit it to pixels.
+  const float worldLength = std::isfinite(referenceLength) && referenceLength > 0
+                                ? referenceLength : 1.2F;
 
   const std::array<QVector4D, 3> colors = {
       QVector4D(0.94F, 0.36F, 0.38F, 1.0F),
       QVector4D(0.32F, 0.58F, 0.96F, 1.0F),
       QVector4D(0.38F, 0.83F, 0.57F, 1.0F)};
   GeometryBuilder builder(viewport);
+  qreal longestVisibleAxis = 0.0;
   for (int axis = 0; axis < 3; ++axis) {
-    const auto tip = project(originClip + viewProjection.column(axis) *
-                                             worldLength,
-                              viewport);
-    if (!tip) {
+    const auto segment = clipAxis(originClip,
+        originClip + viewProjection.column(axis) * worldLength, viewport);
+    if (!segment) {
       continue;
     }
-    const QPointF delta = tip->pixel - center->pixel;
+    const ScreenPoint &tip = segment->end;
+    const QPointF delta = tip.pixel - segment->start.pixel;
     const qreal length = std::hypot(delta.x(), delta.y());
-    if (length < 18.0 * scale) {
-      continue; // A view-aligned arrow must not become a lump over the origin.
+    longestVisibleAxis = std::max(longestVisibleAxis, length);
+    if (length < 0.01) {
+      continue;
     }
+    const bool drawTip = segment->endsAtTip && length >= 18.0 * scale;
     const QPointF direction = delta / length;
     const QPointF side(-direction.y(), direction.x());
     const auto along = [&](const qreal pixels) {
-      return ScreenPoint{center->pixel + direction * pixels,
-                         center->depth + static_cast<float>(pixels / length) *
-                                             (tip->depth - center->depth)};
+      return ScreenPoint{segment->start.pixel + direction * pixels,
+                         segment->start.depth + static_cast<float>(pixels / length) *
+                                             (tip.depth - segment->start.depth)};
     };
-    const ScreenPoint start = along(5.0 * scale);
-    const ScreenPoint base = along(length - 11.0 * scale);
+    const ScreenPoint start = along(segment->startsAtOrigin
+                                       ? std::min(5.0 * scale, length * 0.15) : 0.0);
+    const ScreenPoint base = along(drawTip ? length - 11.0 * scale : length);
     const QVector4D color = colors[static_cast<std::size_t>(axis)];
     const QVector4D light = color * 0.66F + QVector4D(1, 1, 1, 1) * 0.34F;
     const QVector4D dark(color.x() * 0.48F, color.y() * 0.48F,
                          color.z() * 0.48F, 1.0F);
+    if (length < 18.0 * scale) {
+      // At long distances retain the actual short shaft, not a minimum-length
+      // replacement arrow. Drop cramped tips/letters instead of moving them.
+      builder.stroke(start, tip,
+                     static_cast<float>(std::min(1.5 * scale, length * 0.3)), color);
+      continue;
+    }
     builder.stroke(start, base, 4.2F * scale, kOutline);
     builder.stroke(start, base, 2.2F * scale, color);
     builder.stroke({start.pixel - side * (0.45 * scale), start.depth},
                     {base.pixel - side * (0.45 * scale), base.depth},
                     0.65F * scale, light);
 
+    if (!drawTip) {
+      continue;
+    }
     const ScreenPoint left{base.pixel + side * (4.8 * scale), base.depth};
     const ScreenPoint right{base.pixel - side * (4.8 * scale), base.depth};
     const ScreenPoint outerBase = along(length - 12.0 * scale);
@@ -233,17 +242,21 @@ referenceAxisGeometry(const QMatrix4x4 &viewProjection,
                       {outerBase.pixel - side * (6.0 * scale), outerBase.depth},
                       kOutline);
     const bool lightOnLeft = QPointF::dotProduct(side, QPointF(-0.5, -0.85)) > 0;
-    builder.triangle(*tip, left, base, lightOnLeft ? light : dark);
-    builder.triangle(*tip, base, right, lightOnLeft ? dark : light);
-    builder.letter(axis, {tip->pixel + direction * (12.0 * scale), tip->depth},
+    builder.triangle(tip, left, base, lightOnLeft ? light : dark);
+    builder.triangle(tip, base, right, lightOnLeft ? dark : light);
+    builder.letter(axis, {tip.pixel + direction * (12.0 * scale), tip.depth},
                     scale, light);
   }
   // A small machined-looking origin collar, with a dark centre and a single
   // bright centre pin. It is decorative, not a selection/transform handle.
-  builder.disc(*center, 5.4F * scale, kOutline);
-  builder.disc(*center, 4.1F * scale, QVector4D(0.65F, 0.72F, 0.77F, 1.0F));
-  builder.disc(*center, 2.8F * scale, QVector4D(0.07F, 0.10F, 0.12F, 1.0F));
-  builder.disc(*center, 1.05F * scale, QVector4D(0.91F, 0.94F, 0.96F, 1.0F));
+  if (center && QRectF(QPointF(), viewport).contains(center->pixel)) {
+    const float collarScale = std::min(
+        scale, static_cast<float>(longestVisibleAxis / 45.0));
+    builder.disc(*center, 5.4F * collarScale, kOutline);
+    builder.disc(*center, 4.1F * collarScale, QVector4D(0.65F, 0.72F, 0.77F, 1.0F));
+    builder.disc(*center, 2.8F * collarScale, QVector4D(0.07F, 0.10F, 0.12F, 1.0F));
+    builder.disc(*center, 1.05F * collarScale, QVector4D(0.91F, 0.94F, 0.96F, 1.0F));
+  }
   return builder.vertices;
 }
 

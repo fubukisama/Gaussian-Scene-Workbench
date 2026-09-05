@@ -3,8 +3,8 @@
 
 #include <QtTest>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -31,7 +31,9 @@ private slots:
   void keepsColoredAxesInsideRenderedGridCoverage();
   void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
-  void keepsReferenceMarkerReadableAcrossZoomAndProjection();
+  void keepsReferenceAxesAtExactWorldLength();
+  void clipsReferenceAxesWithoutResizing();
+  void keepsOrthographicAxisLengthIndependentOfCameraDistance();
   void keepsReferenceMarkerConsistentAcrossSceneUnits();
   void hidesReferenceMarkerOutsideView();
 };
@@ -258,47 +260,109 @@ void ViewportCameraTests::formatsGridScaleWithReadableMetricUnits() {
   QCOMPARE(formatMetricDistance(250.0F), QStringLiteral("250 m"));
 }
 
-void ViewportCameraTests::keepsReferenceMarkerReadableAcrossZoomAndProjection() {
+void ViewportCameraTests::keepsReferenceAxesAtExactWorldLength() {
   const QSizeF viewport(800.0, 600.0);
   for (const bool orthographic : {false, true}) {
-    float previousHeight = 1000.0F;
-    float nearHeight = 0.0F;
-    for (const float distance : {0.02F, 12.0F, 24.0F, 48.0F, 1200.0F, 1.0e6F}) {
+    for (const float density : {0.85F, 1.0F, 1.4F}) {
+      float previousLength = 0.0F;
+      for (const float distance : {12.0F, 6.0F, 3.0F}) {
+        QMatrix4x4 view;
+        view.lookAt(QVector3D(0, 0, distance), {}, QVector3D(0, 1, 0));
+        QMatrix4x4 projection;
+        if (orthographic) {
+          projection.ortho(-distance * 0.56F, distance * 0.56F,
+                           -distance * 0.42F, distance * 0.42F, 0.01F, 100.0F);
+        } else {
+          projection.perspective(46.0F, 4.0F / 3.0F, 0.01F, 100.0F);
+        }
+        const QMatrix4x4 vp = projection * view;
+        const auto vertices = referenceAxisGeometry(vp, {}, viewport, density, 1.2F);
+        QVERIFY(!vertices.isEmpty());
+        for (const QVector3D endpoint : {QVector3D(1.2F, 0, 0), QVector3D(0, 1.2F, 0)}) {
+          const QVector3D expected = (vp * QVector4D(endpoint, 1)).toVector3DAffine();
+          // Verify actual emitted arrow-tip vertices, not merely a monotonic
+          // size trend (which incorrectly accepted the old saturation curve).
+          QVERIFY(std::any_of(vertices.cbegin(), vertices.cend(), [&](const auto &v) {
+            return (QVector3D(v.x, v.y, v.z) - expected).length() < 0.00001F;
+          }));
+        }
+        const float pixelLength = (vp * QVector4D(1.2F, 0, 0, 1)).toVector3DAffine().x() * 400.0F;
+        if (previousLength > 0.0F) {
+          QVERIFY(std::abs(pixelLength / previousLength - 2.0F) < 0.0001F);
+        }
+        previousLength = pixelLength;
+      }
+      QVERIFY(previousLength > 250.0F); // Beyond both former pixel-size caps.
+    }
+  }
+}
+
+void ViewportCameraTests::clipsReferenceAxesWithoutResizing() {
+  for (const bool orthographic : {false, true}) {
+    for (const float distance : {0.02F, 12.0F, 1200.0F, 1.0e6F}) {
       const OrbitFrame frame = orbitFrame({42.0F, 24.0F});
       QMatrix4x4 view;
-      view.lookAt(frame.cameraOffsetDirection * distance, QVector3D(),
-                   frame.upDirection);
+      view.lookAt(frame.cameraOffsetDirection * distance, {}, frame.upDirection);
       QMatrix4x4 projection;
       if (orthographic) {
         projection.ortho(-distance * 0.56F, distance * 0.56F,
-                          -distance * 0.42F, distance * 0.42F,
-                          distance * 0.0001F, distance * 10.0F);
+                         -distance * 0.42F, distance * 0.42F,
+                         distance * 0.0001F, distance * 10.0F);
       } else {
         projection.perspective(46.0F, 4.0F / 3.0F, distance * 0.0001F,
-                                distance * 10.0F);
+                               distance * 10.0F);
       }
-      const auto vertices = referenceAxisGeometry(projection * view, {}, viewport);
+      const auto vertices = referenceAxisGeometry(projection * view, {}, {800, 600});
       QVERIFY(!vertices.isEmpty());
-      float minY = 1.0F;
-      float maxY = -1.0F;
-      for (const auto &vertex : vertices) {
-        QVERIFY(std::isfinite(vertex.x) && std::isfinite(vertex.y));
-        QVERIFY(vertex.z > -1.0F && vertex.z < 1.0F);
-        minY = std::min(minY, vertex.y);
-        maxY = std::max(maxY, vertex.y);
+      float extent = 0.0F;
+      for (const auto &v : vertices) {
+        QVERIFY(std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z));
+        QVERIFY(v.z >= -1.0F && v.z <= 1.0F);
+        QVERIFY(std::abs(v.x) < 1.1F && std::abs(v.y) < 1.1F);
+        extent = std::max({extent, std::abs(v.x), std::abs(v.y)});
       }
-      const float pixelHeight = (maxY - minY) * 300.0F;
-      QVERIFY(pixelHeight >= 40.0F && pixelHeight <= 230.0F);
-      QVERIFY2(pixelHeight < previousHeight, "Zooming out must visibly shrink the marker");
       if (distance == 0.02F) {
-        nearHeight = pixelHeight;
-      } else if (distance == 24.0F || distance == 48.0F) {
-        QVERIFY2(previousHeight - pixelHeight > 10.0F,
-                 "Ordinary zoom must retain a meaningful distance cue");
+        QVERIFY2(extent > 0.99F, "Close-up shafts must extend to the viewport edge");
+      } else if (distance >= 1200.0F) {
+        QVERIFY2(extent < 0.004F, "Distant axes must not be expanded to a minimum pixel length");
       }
-      previousHeight = pixelHeight;
     }
-    QVERIFY(nearHeight > previousHeight * 2.0F);
+  }
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0, 0, 10), {}, QVector3D(0, 1, 0));
+  QMatrix4x4 projection;
+  projection.ortho(-2, 2, -2, 2, 0.01F, 100.0F);
+  // An offscreen origin does not discard an axis crossing the visible scene.
+  const auto crossing = referenceAxisGeometry(projection * view, {-5, 0, 0}, {800, 600}, 1, 10);
+  QVERIFY(!crossing.isEmpty());
+  float minX = 1.0F;
+  float maxX = -1.0F;
+  for (const auto &v : crossing) {
+    minX = std::min(minX, v.x);
+    maxX = std::max(maxX, v.x);
+    QVERIFY(std::abs(v.y) < 0.01F); // Shaft only, no fake arrow on the clip edge.
+  }
+  QVERIFY(minX < -0.99F && maxX > 0.99F);
+}
+
+void ViewportCameraTests::keepsOrthographicAxisLengthIndependentOfCameraDistance() {
+  QMatrix4x4 projection;
+  projection.ortho(-4, 4, -3, 3, 0.01F, 100.0F);
+  QVector<ReferenceAxisVertex> baseline;
+  for (const float distance : {3.0F, 6.0F, 12.0F}) {
+    QMatrix4x4 view;
+    view.lookAt(QVector3D(0, 0, distance), {}, QVector3D(0, 1, 0));
+    const auto vertices = referenceAxisGeometry(projection * view, {}, {800, 600});
+    if (baseline.isEmpty()) {
+      baseline = vertices;
+      QVERIFY(!baseline.isEmpty());
+    } else {
+      QCOMPARE(vertices.size(), baseline.size());
+      for (qsizetype i = 0; i < vertices.size(); ++i) {
+        QCOMPARE(vertices[i].x, baseline[i].x);
+        QCOMPARE(vertices[i].y, baseline[i].y);
+      }
+    }
   }
 }
 

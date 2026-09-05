@@ -12,9 +12,9 @@ struct ReferenceAxisVertex {
   float red, green, blue, alpha;
 };
 
-// Distance-responsive decoration anchored to the real reference origin, with
-// soft screen-size limits for legibility. referenceLength is in scene units
-// and must not depend on camera distance or the adaptive grid step. Positions
+// Fixed-world-length axes anchored to the real reference origin. Only stroke
+// width and endpoint lettering use screen-space sizing. referenceLength is in
+// scene units and must not depend on camera distance or adaptive grid spacing. Positions
 // are NDC, including the original scene depth; render with an identity matrix
 // and depth writes so opaque geometry and Gaussian compositing can occlude it.
 [[nodiscard]] QVector<ReferenceAxisVertex>
