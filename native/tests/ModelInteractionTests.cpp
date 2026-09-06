@@ -18,6 +18,8 @@ private slots:
   void rejectsParallelViewPlaneRay();
   void buildsPivotedTrsTransformAndInversePickRay();
   void computesStableAxisAndTrackballRotations();
+  void rotatesEdgeOnAxesInBothProjections();
+  void preservesFaceOnPlaneRotation();
   void laysOutAndHitsTransformGizmos();
   void modelsTransformOrientationLocking();
   void mapsPreciseModelPickNeighborhood();
@@ -94,6 +96,74 @@ void ModelInteractionTests::buildsPivotedTrsTransformAndInversePickRay() {
   QVERIFY(local.has_value());
   QVERIFY((local->origin - localExpected.origin).length() < 1.0e-4F);
   QVERIFY((local->direction - localExpected.direction).length() < 1.0e-5F);
+}
+
+void ModelInteractionTests::rotatesEdgeOnAxesInBothProjections() {
+  constexpr float radius = 84.0F;
+  const float expected = 32.0F / radius * 180.0F / 3.14159265F;
+  for (const bool orthographic : {false, true}) {
+    for (int component = 0; component < 3; ++component) {
+      for (const float tilt : {-0.01F, 0.0F, 0.01F, 0.5F}) {
+        for (const bool local : {false, true}) {
+          QVector3D axis;
+          axis[component] = 1.0F;
+          QVector3D camera;
+          camera[(component + 1) % 3] = 10.0F;
+          camera += axis * tilt;
+          if (local) {
+            const auto orientation = QQuaternion::fromEulerAngles(23, 37, 11);
+            axis = orientation.rotatedVector(axis);
+            camera = orientation.rotatedVector(camera);
+          }
+          QMatrix4x4 view;
+          view.lookAt(camera, {}, axis);
+          QMatrix4x4 projection;
+          if (orthographic) {
+            projection.ortho(-4, 4, -3, 3, 0.01F, 100.0F);
+          } else {
+            projection.perspective(46, 4.0F / 3.0F, 0.01F, 100.0F);
+          }
+          const QMatrix4x4 vp = projection * view;
+          const QPointF start(440, 300);
+          const auto drag = [&](const QPointF &delta) {
+            return axisRotationDragDegrees(start, start + delta, {}, axis,
+                                           vp, {800, 600}, radius);
+          };
+          QVERIFY(std::abs(drag({32, 0}) - expected) < 0.01F);
+          QVERIFY(std::abs(drag({16, 0}) - expected * 0.5F) < 0.01F);
+          QVERIFY(std::abs(drag({-32, 0}) + expected) < 0.01F);
+          QVERIFY(std::abs(drag({0, 32})) < 0.01F);
+          QVERIFY(std::abs(drag({0, 0})) < 0.01F);
+          // The fallback remains continuous over several turns, not atan2's
+          // +/-180-degree discontinuity or a frozen edge-on ray intersection.
+          QVERIFY(std::abs(drag({640, 0}) - expected * 20.0F) < 0.01F);
+        }
+      }
+    }
+  }
+}
+
+void ModelInteractionTests::preservesFaceOnPlaneRotation() {
+  for (const bool orthographic : {false, true}) {
+    for (const float side : {-1.0F, 1.0F}) {
+      QMatrix4x4 view;
+      view.lookAt(QVector3D(0, 0, 10 * side), {}, QVector3D(0, 1, 0));
+      QMatrix4x4 projection;
+      if (orthographic) {
+        projection.ortho(-4, 4, -3, 3, 0.01F, 100.0F);
+      } else {
+        projection.perspective(46, 4.0F / 3.0F, 0.01F, 100.0F);
+      }
+      const QMatrix4x4 vp = projection * view;
+      const float angle = axisRotationDragDegrees(
+          {460, 300}, {400, 240}, {}, {0, 0, 1}, vp, {800, 600}, 84);
+      QVERIFY(std::abs(angle - side * 90.0F) < 0.01F);
+      QCOMPARE(axisRotationDragDegrees({460, 300}, {400, 240}, {}, {},
+                                       vp, {800, 600}, 84), 0.0F);
+      QCOMPARE(axisRotationDragDegrees({460, 300}, {400, 240}, {}, {0, 0, 1},
+                                       vp, {800, 600}, 0), 0.0F);
+    }
+  }
 }
 
 void ModelInteractionTests::laysOutAndHitsTransformGizmos() {

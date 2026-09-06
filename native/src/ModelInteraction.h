@@ -82,6 +82,15 @@ rayAxisParameter(const WorldRay &ray, const QVector3D &axisOrigin,
                                        const QVector3D &to,
                                        const QVector3D &axis);
 
+// Axis-constrained mouse rotation. Near edge-on planes use a screen tangent
+// fixed by the camera/axis, so parallel ray-plane intersections cannot freeze
+// rotation. radiusPixels sets drag sensitivity, not the model's world scale.
+[[nodiscard]] float axisRotationDragDegrees(
+    const QPointF &startPosition, const QPointF &currentPosition,
+    const QVector3D &pivot, const QVector3D &axis,
+    const QMatrix4x4 &viewProjection, const QSize &viewportSize,
+    float radiusPixels);
+
 [[nodiscard]] QQuaternion
 trackballRotationDelta(const QPointF &startPosition,
                        const QPointF &currentPosition,

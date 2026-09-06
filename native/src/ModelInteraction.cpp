@@ -295,6 +295,67 @@ float signedAngleDegrees(const QVector3D &from, const QVector3D &to,
          3.14159265358979323846F;
 }
 
+float axisRotationDragDegrees(
+    const QPointF &startPosition, const QPointF &currentPosition,
+    const QVector3D &pivot, const QVector3D &axisDirection,
+    const QMatrix4x4 &viewProjection, const QSize &viewportSize,
+    const float radiusPixels) {
+  if (!finiteVector(pivot) || !finiteVector(axisDirection) ||
+      axisDirection.lengthSquared() <= 1.0e-12F || viewportSize.isEmpty() ||
+      !std::isfinite(startPosition.x()) || !std::isfinite(startPosition.y()) ||
+      !std::isfinite(currentPosition.x()) || !std::isfinite(currentPosition.y()) ||
+      !std::isfinite(radiusPixels) || radiusPixels <= 1.0F) {
+    return 0.0F;
+  }
+  const QVector3D axis = axisDirection.normalized();
+  const QVector4D clip = viewProjection * QVector4D(pivot, 1.0F);
+  if (!std::isfinite(clip.w()) || clip.w() <= 1.0e-7F) {
+    return 0.0F;
+  }
+  const QPointF center((clip.x() / clip.w() * 0.5 + 0.5) * viewportSize.width(),
+                       (0.5 - clip.y() / clip.w() * 0.5) * viewportSize.height());
+  const auto centerRay = screenRay(center, viewportSize, viewProjection);
+  if (!centerRay) {
+    return 0.0F;
+  }
+  const QVector3D towardCamera = -centerRay->direction;
+  const float facing = std::abs(QVector3D::dotProduct(axis, towardCamera));
+  // Do not wait for an exact zero denominator. Thin, almost edge-on ellipses
+  // are ill-conditioned as well. The camera and starting ray are fixed during
+  // a gesture; above/below the horizon use the same tangent and drag direction.
+  const auto startRay = screenRay(startPosition, viewportSize, viewProjection);
+  if (facing >= 0.2F && startRay &&
+      std::abs(QVector3D::dotProduct(startRay->direction, axis)) >= 0.1F) {
+    const auto currentRay = screenRay(currentPosition, viewportSize, viewProjection);
+    const auto start = rayPlaneIntersection(*startRay, pivot, axis);
+    const auto current = currentRay
+        ? rayPlaneIntersection(*currentRay, pivot, axis) : std::nullopt;
+    if (start && current && (*start - pivot).lengthSquared() > 1.0e-12F &&
+        (*current - pivot).lengthSquared() > 1.0e-12F) {
+      return signedAngleDegrees(*start - pivot, *current - pivot, axis);
+    }
+  }
+
+  // The front of the rotation ring moves along axis x towardCamera. Project
+  // that tangent at the pivot using a derivative, avoiding subtraction of
+  // large scene coordinates. Never divide by the edge-on plane denominator.
+  const QVector3D tangent = QVector3D::crossProduct(axis, towardCamera);
+  const QVector4D direction = viewProjection * QVector4D(tangent, 0.0F);
+  const double w = clip.w();
+  QPointF screenTangent(
+      (direction.x() * w - clip.x() * direction.w()) / (w * w) * viewportSize.width(),
+      -(direction.y() * w - clip.y() * direction.w()) / (w * w) * viewportSize.height());
+  const qreal length = std::hypot(screenTangent.x(), screenTangent.y());
+  if (!std::isfinite(length) || length <= 1.0e-12) {
+    return 0.0F;
+  }
+  screenTangent /= length;
+  const double radians = QPointF::dotProduct(currentPosition - startPosition,
+                                              screenTangent) / radiusPixels;
+  return std::isfinite(radians) ? static_cast<float>(radians * 180.0 / 3.141592653589793)
+                               : 0.0F;
+}
+
 QQuaternion trackballRotationDelta(const QPointF &startPosition,
                                     const QPointF &currentPosition,
                                     const QPointF &screenCenter,

@@ -26,6 +26,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QVariantAnimation>
 #include <QWheelEvent>
 #include <QWidget>
 
@@ -543,6 +544,92 @@ int main(int argc, char *argv[]) {
                     const bool modelScaleReady =
                         (viewport->modelScale() - QVector3D(1.0F, 1.0F, 1.0F))
                             .lengthSquared() > 1.0e-8F;
+                    bool edgeOnRotationReady = true;
+                    for (const bool orthographic : {false, true}) {
+                    for (const bool ringDrag : {true, false}) {
+                      viewport->setModelTransform({}, {});
+                      edgeOnRotationReady &= viewport->focusModel();
+                      viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+                      if (auto *animation = viewport->findChild<QVariantAnimation *>()) {
+                        animation->setCurrentTime(animation->duration());
+                      }
+                      viewport->setModelGizmoMode(gsw::TransformGizmoMode::Rotate);
+                      const QPointF start(viewport->width() * 0.5 + 45.0,
+                                          viewport->height() * 0.5);
+                      const QPointF end = start + QPointF(32.0, 0.0);
+                      const auto mouse = [&](QEvent::Type type, QPointF point,
+                                             Qt::MouseButton button, Qt::MouseButtons buttons,
+                                             Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                        QMouseEvent event(type, point, point,
+                            viewport->mapToGlobal(point.toPoint()), button, buttons, modifiers);
+                        QCoreApplication::sendEvent(viewport, &event);
+                      };
+                      if (viewport->orthographicProjection() != orthographic) {
+                        const auto navigation = gsw::navigationGizmoLayout(
+                            QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
+                            QFontMetricsF(viewport->font()).height());
+                        mouse(QEvent::MouseButtonPress, navigation.projectionCube.center(),
+                              Qt::LeftButton, Qt::LeftButton);
+                        mouse(QEvent::MouseButtonRelease, navigation.projectionCube.center(),
+                              Qt::LeftButton, Qt::NoButton);
+                      }
+                      mouse(QEvent::MouseMove, start, Qt::NoButton, Qt::NoButton);
+                      if (ringDrag) {
+                        mouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+                      } else {
+                        viewport->selectModelForRotate();
+                        QKeyEvent z(QEvent::KeyPress, Qt::Key_Z, Qt::NoModifier);
+                        QCoreApplication::sendEvent(viewport, &z);
+                      }
+                      const bool active = viewport->modelTransformActive();
+                      mouse(QEvent::MouseMove, end, Qt::NoButton,
+                            ringDrag ? Qt::LeftButton : Qt::NoButton);
+                      QVector3D axis;
+                      float angle = 0.0F;
+                      viewport->modelRotation().getAxisAndAngle(&axis, &angle);
+                      const bool rotated = active && std::abs(angle) > 1.0F && std::abs(axis.z()) > 0.99F &&
+                                           viewport->orthographicProjection() == orthographic;
+                      edgeOnRotationReady &= rotated;
+                      qInfo() << "Edge-on Z rotation:" << "ortho" << orthographic
+                              << "ring" << ringDrag << "active" << active
+                              << "pitch" << viewport->viewOrbitAngles().pitchDegrees
+                              << "angle" << angle << "axis" << axis << "ready" << rotated;
+                      if (ringDrag) {
+                        viewport->grabFramebuffer().save(QDir::temp().filePath(
+                            orthographic ? QStringLiteral("gsw-edge-on-z-rotation-ortho.png")
+                                         : QStringLiteral("gsw-edge-on-z-rotation.png")));
+                      }
+                      const QQuaternion dragged = viewport->modelRotation();
+                      mouse(QEvent::MouseMove, end, Qt::NoButton,
+                            ringDrag ? Qt::LeftButton : Qt::NoButton, Qt::ShiftModifier);
+                      edgeOnRotationReady &= gsw::rotationsEquivalent(viewport->modelRotation(),
+                          QQuaternion::fromAxisAndAngle(axis, angle * 0.1F));
+                      mouse(QEvent::MouseMove, end, Qt::NoButton,
+                            ringDrag ? Qt::LeftButton : Qt::NoButton, Qt::ControlModifier);
+                      edgeOnRotationReady &= gsw::rotationsEquivalent(viewport->modelRotation(),
+                          QQuaternion::fromAxisAndAngle(axis, std::round(angle / 5.0F) * 5.0F));
+                      if (ringDrag) {
+                        mouse(QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+                        edgeOnRotationReady &= !viewport->modelTransformActive();
+                        edgeOnRotationReady &= gsw::rotationsEquivalent(viewport->modelRotation(), dragged);
+                        viewport->undoEdit();
+                        edgeOnRotationReady &= viewport->modelRotation().isIdentity();
+                        viewport->redoEdit();
+                        edgeOnRotationReady &= gsw::rotationsEquivalent(viewport->modelRotation(), dragged);
+                      } else {
+                        QKeyEvent four(QEvent::KeyPress, Qt::Key_4, Qt::NoModifier, QStringLiteral("4"));
+                        QKeyEvent five(QEvent::KeyPress, Qt::Key_5, Qt::NoModifier, QStringLiteral("5"));
+                        QCoreApplication::sendEvent(viewport, &four);
+                        QCoreApplication::sendEvent(viewport, &five);
+                        edgeOnRotationReady &= gsw::rotationsEquivalent(viewport->modelRotation(),
+                            QQuaternion::fromAxisAndAngle(QVector3D(0, 0, 1), 45.0F));
+                      QKeyEvent cancel(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+                      QCoreApplication::sendEvent(viewport, &cancel);
+                        edgeOnRotationReady &= viewport->modelRotation().isIdentity();
+                      }
+                    }
+                    }
+                    qInfo() << "Edge-on rotation controls/undo:" << edgeOnRotationReady;
                     smokeTestCompleted = sourceVertexCount > 0 &&
                                        axisVisibilityReady &&
                                        depthOcclusionReady &&
@@ -554,7 +641,7 @@ int main(int argc, char *argv[]) {
                                         orientationControlReady &&
                                         modelSelectionReady && modelMoveReady &&
                                         modelRotateReady && modelTrackballReady &&
-                                        modelScaleReady;
+                                        modelScaleReady && edgeOnRotationReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(

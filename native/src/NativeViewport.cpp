@@ -4378,6 +4378,11 @@ void NativeViewport::beginTransformGizmoDrag(
   mTransformGizmoDragActive = true;
   mTransformGizmoPress = handle;
   mTransformGizmoHover = handle;
+  if (handle.kind == TransformGizmoHandleKind::RotateAxis) {
+    const auto layout = modelTransformGizmo();
+    mModelRotationRadiusPixels = static_cast<float>(layout.radius *
+        (mTransformGizmoMode == TransformGizmoMode::Transform ? 0.84 : 0.78));
+  }
   setCursor(operation == InteractionMode::Rotate
                 ? Qt::ClosedHandCursor
                 : defaultInteractionCursor(operation));
@@ -4594,13 +4599,10 @@ void NativeViewport::updateModelTransform(
       float angle = 0.0F;
       if (numericReady && std::isfinite(numericValue)) {
         angle = static_cast<float>(numericValue);
-      } else if (startRay.has_value() && currentRay.has_value() &&
-                 mTransformConstraint.kind != TransformConstraintKind::None) {
-        const auto start = rayPlaneIntersection(*startRay, pivot, axis);
-        const auto current = rayPlaneIntersection(*currentRay, pivot, axis);
-        if (start.has_value() && current.has_value()) {
-          angle = signedAngleDegrees(*start - pivot, *current - pivot, axis);
-        }
+      } else if (mTransformConstraint.kind != TransformConstraintKind::None) {
+        angle = axisRotationDragDegrees(
+            mModelTransformStartPosition, position, pivot, axis,
+            viewProjectionMatrix(), size(), mModelRotationRadiusPixels);
       } else {
         const QPointF start =
             mModelTransformStartPosition - mModelTransformScreenCenter;
