@@ -21,9 +21,123 @@ private slots:
   void rotatesEdgeOnAxesInBothProjections();
   void preservesFaceOnPlaneRotation();
   void laysOutAndHitsTransformGizmos();
+  void scalesTransformHandlesWithViewDistance();
+  void projectsWorldAxesAndPlanes();
+  void scalesOrthographicHandlesAndRejectsStaleHitAreas();
+  void keepsClippedRotationRingInteractive();
   void modelsTransformOrientationLocking();
   void mapsPreciseModelPickNeighborhood();
 };
+
+void ModelInteractionTests::scalesTransformHandlesWithViewDistance() {
+  QMatrix4x4 projection;
+  projection.perspective(50.0F, 1.0F, 0.1F, 1000.0F);
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Rotate,
+                          TransformGizmoMode::Scale, TransformGizmoMode::Transform}) {
+    qreal previousDiameter = 0.0;
+    qreal previousAxisLength = 0.0;
+    std::array<qreal, 5> previousParts{};
+    for (const float distance : {32.0F, 16.0F, 8.0F, 4.0F, 2.0F}) {
+      QMatrix4x4 view;
+      view.lookAt(QVector3D(0, 0, distance), QVector3D(), QVector3D(0, 1, 0));
+      const auto layout = transformGizmoLayout(
+          QVector3D(), QQuaternion(), projection * view, QSizeF(800, 800), mode, 1.0);
+      QVERIFY(layout.valid);
+      const qreal diameter = layout.centerHandle.width();
+      const qreal axisLength = QLineF(layout.center, layout.axes[0].moveEndpoint).length();
+      const std::array<qreal, 5> parts{
+          layout.axes[0].moveArrow.boundingRect().width(),
+          layout.axes[0].scaleHandle.width(), layout.planeHandles[2].boundingRect().width(),
+          layout.viewRing.boundingRect().width(), layout.trackballBounds.width()};
+      if (previousDiameter > 0.0) {
+        QVERIFY2(std::abs(diameter / previousDiameter - 2.0) < 0.001,
+                 "Center handles must double when the camera distance halves, without pixel clamps");
+        QVERIFY(std::abs(axisLength / previousAxisLength - 2.0) < 0.001);
+        for (std::size_t part = 0; part < parts.size(); ++part) {
+          QVERIFY(std::abs(parts[part] / previousParts[part] - 2.0) < 0.001);
+        }
+      }
+      previousDiameter = diameter;
+      previousAxisLength = axisLength;
+      previousParts = parts;
+    }
+  }
+}
+
+void ModelInteractionTests::projectsWorldAxesAndPlanes() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0, 0, 10), QVector3D(), QVector3D(0, 1, 0));
+  QMatrix4x4 projection;
+  projection.perspective(50, 1, 0.1F, 100);
+  const QMatrix4x4 vp = projection * view;
+  const auto project = [&vp](const QVector3D &point) {
+    const QVector3D ndc = (vp * QVector4D(point, 1)).toVector3DAffine();
+    return QPointF((ndc.x() + 1) * 400, (1 - ndc.y()) * 400);
+  };
+  const QQuaternion orientation = QQuaternion::fromAxisAndAngle(0, 1, 0, 45);
+  const auto layout = transformGizmoLayout({}, orientation, vp, {800, 800},
+                                           TransformGizmoMode::Move, 1.0);
+  const QVector3D x = orientation.rotatedVector(QVector3D(1, 0, 0));
+  const QVector3D y = orientation.rotatedVector(QVector3D(0, 1, 0));
+  QVERIFY(QLineF(layout.axes[0].moveEndpoint, project(x * 0.86F)).length() < 0.001);
+  QVERIFY(!layout.planeHandles[2].isEmpty());
+  QVERIFY(QLineF(layout.planeHandles[2].constFirst(),
+                 project((x + y) * (18.0F / 84.0F))).length() < 0.001);
+}
+
+void ModelInteractionTests::scalesOrthographicHandlesAndRejectsStaleHitAreas() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0, 0, 10), {}, QVector3D(0, 1, 0));
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Rotate,
+                          TransformGizmoMode::Scale, TransformGizmoMode::Transform}) {
+    qreal previousRadius = 0;
+    for (const float extent : {16.0F, 8.0F, 4.0F, 2.0F, 1.0F}) {
+      QMatrix4x4 projection;
+      projection.ortho(-extent, extent, -extent, extent, 0.1F, 100.0F);
+      const auto layout = transformGizmoLayout({}, {}, projection * view, {800, 800}, mode, 1);
+      QVERIFY(layout.valid);
+      QVERIFY(std::abs(layout.radius - 400.0 / extent) < 0.001);
+      if (previousRadius > 0) {
+        QVERIFY(std::abs(layout.radius / previousRadius - 2.0) < 0.001);
+      }
+      previousRadius = layout.radius;
+      if (mode == TransformGizmoMode::Scale || mode == TransformGizmoMode::Transform) {
+        QCOMPARE(hitTestTransformGizmo(layout, layout.axes[0].scaleHandle.center(), mode),
+                 (TransformGizmoHandle{TransformGizmoHandleKind::ScaleAxis, 0}));
+      } else if (mode == TransformGizmoMode::Move) {
+        QCOMPARE(hitTestTransformGizmo(layout, layout.axes[0].moveArrow.boundingRect().center(), mode),
+                 (TransformGizmoHandle{TransformGizmoHandleKind::MoveAxis, 0}));
+      } else {
+        QCOMPARE(hitTestTransformGizmo(layout, layout.viewRing.constFirst(), mode).kind,
+                 TransformGizmoHandleKind::RotateView);
+      }
+    }
+  }
+  QMatrix4x4 projection;
+  projection.ortho(-150, 150, -150, 150, 0.1F, 100);
+  const auto tiny = transformGizmoLayout({}, {}, projection * view, {800, 800},
+                                         TransformGizmoMode::Move, 1);
+  QVERIFY(!hitTestTransformGizmo(tiny, tiny.center + QPointF(2, 2),
+                                 TransformGizmoMode::Move).isValid());
+  QCOMPARE(hitTestTransformGizmo(tiny, tiny.axes[0].moveEndpoint,
+                                 TransformGizmoMode::Move).kind,
+           TransformGizmoHandleKind::MoveAxis);
+}
+
+void ModelInteractionTests::keepsClippedRotationRingInteractive() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(0, 0, 0.5F), {}, QVector3D(0, 1, 0));
+  QMatrix4x4 projection;
+  projection.perspective(90, 1, 0.1F, 100);
+  const auto layout = transformGizmoLayout({}, {}, projection * view, {800, 800},
+                                           TransformGizmoMode::Rotate, 1);
+  QVERIFY(layout.valid);
+  // The X ring crosses the near plane; its visible lower/upper arc must not
+  // disappear just because some other samples lie behind the camera.
+  QCOMPARE(hitTestTransformGizmo(layout, layout.center + QPointF(0, 100),
+                                 TransformGizmoMode::Rotate),
+           (TransformGizmoHandle{TransformGizmoHandleKind::RotateAxis, 0}));
+}
 
 void ModelInteractionTests::unprojectsViewportCentre() {
   QMatrix4x4 view;
@@ -174,7 +288,7 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
   projection.perspective(50.0F, 1.0F, 0.1F, 100.0F);
   const TransformGizmoLayout moveLayout = transformGizmoLayout(
       QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
-      TransformGizmoMode::Move, 84.0);
+      TransformGizmoMode::Move, 0.979246F);
   QVERIFY(moveLayout.valid);
   QVERIFY(moveLayout.axes[0].visible);
   QVERIFY(moveLayout.axes[1].visible);
@@ -186,7 +300,7 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
 
   const TransformGizmoLayout scaleLayout = transformGizmoLayout(
       QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
-      TransformGizmoMode::Scale, 84.0);
+      TransformGizmoMode::Scale, 0.979246F);
   const TransformGizmoHandle scaleAxis = hitTestTransformGizmo(
       scaleLayout, scaleLayout.axes[0].scaleHandle.center(),
       TransformGizmoMode::Scale);
@@ -199,7 +313,7 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
 
   const TransformGizmoLayout rotateLayout = transformGizmoLayout(
       QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
-      TransformGizmoMode::Rotate, 84.0);
+      TransformGizmoMode::Rotate, 0.979246F);
   const TransformGizmoHandle viewRotation = hitTestTransformGizmo(
       rotateLayout, rotateLayout.viewRing.constFirst(),
       TransformGizmoMode::Rotate);
@@ -211,7 +325,7 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
 
   const TransformGizmoLayout combined = transformGizmoLayout(
       QVector3D(), QQuaternion(), projection * view, QSizeF(800.0, 800.0),
-      TransformGizmoMode::Transform, 148.0);
+      TransformGizmoMode::Transform, 1.725338F);
   QVERIFY(combined.valid);
   const TransformGizmoAxisLayout &combinedX = combined.axes[0];
   const qreal moveDistance =

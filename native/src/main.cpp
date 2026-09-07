@@ -630,6 +630,69 @@ int main(int argc, char *argv[]) {
                     }
                     }
                     qInfo() << "Edge-on rotation controls/undo:" << edgeOnRotationReady;
+                    bool gizmoZoomReady = true;
+                    for (const bool orthographic : {false, true}) {
+                      for (const auto mode : {gsw::TransformGizmoMode::Rotate,
+                                              gsw::TransformGizmoMode::Transform}) {
+                        viewport->setModelTransform({}, {});
+                        gizmoZoomReady &= viewport->focusModel();
+                        viewport->setModelGizmoMode(mode);
+                        if (viewport->orthographicProjection() != orthographic) {
+                          const auto navigation = gsw::navigationGizmoLayout(
+                              {}, viewport->size(), QFontMetricsF(viewport->font()).height());
+                          const QPointF point = navigation.projectionCube.center();
+                          for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+                            QMouseEvent event(type, point, point, viewport->mapToGlobal(point.toPoint()),
+                                Qt::LeftButton, type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
+                                Qt::NoModifier);
+                            QCoreApplication::sendEvent(viewport, &event);
+                          }
+                        }
+                        const QPointF center(viewport->width() * 0.5, viewport->height() * 0.5);
+                        qreal previousRadius = 0;
+                        float previousDistance = 0;
+                        int sample = 0;
+                        // Keep the sampled outer ring inside the viewport;
+                        // overflowing at closer ranges is correct world-size behavior.
+                        for (const int steps : {-8, 3, 3, 2}) {
+                          QWheelEvent zoom(center, viewport->mapToGlobal(center.toPoint()), {},
+                              QPoint(0, steps * 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                          QCoreApplication::sendEvent(viewport, &zoom);
+                          // Measure the actual UI hit target, through hover feedback, not a
+                          // parallel copy of the layout calculation. This catches a viewport
+                          // caller accidentally reintroducing distance-compensated sizing.
+                          int first = -1, last = -1;
+                          for (int offset = 1; offset < viewport->width() * 0.45; ++offset) {
+                            const QPointF point = center + QPointF(offset, 0);
+                            QMouseEvent hover(QEvent::MouseMove, point, point,
+                                viewport->mapToGlobal(point.toPoint()), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                            QCoreApplication::sendEvent(viewport, &hover);
+                            if (viewport->toolTip().startsWith(QStringLiteral("绕视图轴旋转"))) {
+                              if (first < 0) first = offset;
+                              last = offset;
+                            }
+                          }
+                          const qreal radius = (first + last) * 0.5;
+                          const float distance = viewport->viewDistance();
+                          bool ready = first > 0 && viewport->orthographicProjection() == orthographic;
+                          if (previousRadius > 0) {
+                            ready &= std::abs(radius / previousRadius - previousDistance / distance) < 0.03;
+                          }
+                          gizmoZoomReady &= ready;
+                          qInfo() << "World-size gizmo zoom:" << "ortho" << orthographic
+                                  << "combined" << (mode == gsw::TransformGizmoMode::Transform)
+                                  << "sample" << sample << "distance" << distance
+                                  << "hit-radius" << radius << "ready" << ready;
+                          viewport->grabFramebuffer().save(QDir::temp().filePath(
+                              QStringLiteral("gsw-model-gizmo-%1-%2-%3.png")
+                                  .arg(orthographic ? "ortho" : "persp")
+                                  .arg(mode == gsw::TransformGizmoMode::Transform ? "combined" : "rotate")
+                                  .arg(sample++)));
+                          previousRadius = radius;
+                          previousDistance = distance;
+                        }
+                      }
+                    }
                     smokeTestCompleted = sourceVertexCount > 0 &&
                                        axisVisibilityReady &&
                                        depthOcclusionReady &&
@@ -641,7 +704,7 @@ int main(int argc, char *argv[]) {
                                         orientationControlReady &&
                                         modelSelectionReady && modelMoveReady &&
                                         modelRotateReady && modelTrackballReady &&
-                                        modelScaleReady && edgeOnRotationReady;
+                                        modelScaleReady && edgeOnRotationReady && gizmoZoomReady;
                   smokeTestFailureCode = smokeTestCompleted ? 0 : 5;
                   if (!frame.isNull()) {
                     frame.save(QDir::temp().filePath(

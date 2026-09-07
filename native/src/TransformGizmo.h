@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QLineF>
+#include <QList>
 #include <QMatrix4x4>
 #include <QPointF>
 #include <QPolygonF>
@@ -56,16 +57,17 @@ struct TransformGizmoAxisLayout final {
   QPolygonF moveArrow;
   QRectF scaleHandle;
   QPolygonF rotationRing;
+  QList<QLineF> rotationSegments;
   bool visible = false;
 };
 
 struct TransformGizmoLayout final {
   bool valid = false;
   QPointF center;
-  qreal radius = 84.0;
+  qreal radius = 0.0; // Projected world radius, in logical pixels; never clamped.
   qreal lineWidth = 2.2;
   qreal rotationHitInnerRadius = 0.0;
-  qreal trackballInnerRadius = 14.0;
+  qreal trackballInnerRadius = 0.0;
   qreal trackballOuterRadius = 0.0;
   std::array<TransformGizmoAxisLayout, 3> axes;
   std::array<QPolygonF, 3> planeHandles;
@@ -85,7 +87,7 @@ transformGizmoLayout(const QVector3D &pivot, const QQuaternion &orientation,
                      const QMatrix4x4 &viewProjection,
                      const QSizeF &viewportSize,
                      TransformGizmoMode mode = TransformGizmoMode::Move,
-                     qreal radiusPixels = 84.0);
+                     qreal worldRadius = 1.0);
 
 [[nodiscard]] TransformGizmoHandle
 hitTestTransformGizmo(const TransformGizmoLayout &layout,

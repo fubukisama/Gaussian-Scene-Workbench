@@ -333,7 +333,7 @@ private:
   [[nodiscard]] QString transformConstraintLabel() const;
   [[nodiscard]] QString transformStatusText() const;
   [[nodiscard]] float transformSnapStep(bool fine) const;
-  [[nodiscard]] float projectedModelRadius(const QPointF &center) const;
+  [[nodiscard]] float modelGizmoWorldRadius() const;
   [[nodiscard]] QPointF currentPointerPosition() const;
   [[nodiscard]] TransformGizmoLayout modelTransformGizmo() const;
   [[nodiscard]] TransformToolStripLayout transformToolStrip() const;

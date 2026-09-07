@@ -4139,24 +4139,11 @@ QPointF NativeViewport::currentPointerPosition() const {
   return QPointF(width() * 0.5, height() * 0.5);
 }
 
-float NativeViewport::projectedModelRadius(const QPointF &center) const {
-  const QVector3D minimum = modelBoundsMinimum();
-  const QVector3D maximum = modelBoundsMaximum();
-  const QMatrix4x4 modelViewProjection =
-      viewProjectionMatrix() * modelMatrix();
-  qreal radius = 0.0;
-  for (int corner = 0; corner < 8; ++corner) {
-    const QVector3D point((corner & 1) != 0 ? maximum.x() : minimum.x(),
-                          (corner & 2) != 0 ? maximum.y() : minimum.y(),
-                          (corner & 4) != 0 ? maximum.z() : minimum.z());
-    const auto projected = projectPoint(point, modelViewProjection);
-    if (projected.has_value()) {
-      radius = std::max(radius, QLineF(center, *projected).length());
-    }
-  }
-  const qreal maximumRadius =
-      std::max<qreal>(56.0, std::min(width(), height()) * 0.42);
-  return static_cast<float>(std::clamp(radius, 56.0, maximumRadius));
+float NativeViewport::modelGizmoWorldRadius() const {
+  // Source bounds provide a stable unit reference. Neither camera zoom nor
+  // the transform being edited may resize the handles in world space.
+  return mSceneRadius *
+         (mTransformGizmoMode == TransformGizmoMode::Transform ? 0.5F : 0.3F);
 }
 
 TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
@@ -4169,14 +4156,9 @@ TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
   // an unrepresentable shear into the persisted TRS transform.
   const QQuaternion orientation =
       modelGizmoUsesLocalOrientation() ? mModelRotation : QQuaternion();
-  const qreal fontHeight = QFontMetricsF(font()).height();
-  const qreal radius =
-      mTransformGizmoMode == TransformGizmoMode::Transform
-          ? std::clamp(fontHeight * 7.2, 132.0, 168.0)
-          : std::clamp(fontHeight * 4.8, 70.0, 104.0);
   return transformGizmoLayout(
       transformedSceneCenter(), orientation, viewProjectionMatrix(),
-      QSizeF(width(), height()), mTransformGizmoMode, radius);
+      QSizeF(width(), height()), mTransformGizmoMode, modelGizmoWorldRadius());
 }
 
 TransformToolStripLayout NativeViewport::transformToolStrip() const {
@@ -4421,8 +4403,7 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
   const auto center = projectPoint(pivot, viewProjectionMatrix());
   mModelTransformScreenCenter =
       center.value_or(QPointF(width() * 0.5, height() * 0.5));
-  mModelRotationRadiusPixels =
-      projectedModelRadius(mModelTransformScreenCenter);
+  mModelRotationRadiusPixels = static_cast<float>(modelTransformGizmo().radius);
   const auto startRay = screenRay(mModelTransformStartPosition, size(),
                                   viewProjectionMatrix());
   const auto intersection =
@@ -4643,11 +4624,7 @@ void NativeViewport::updateModelTransform(
         mTransformConstraint.axis >= 0) {
       const TransformGizmoLayout startLayout = transformGizmoLayout(
           pivot, mModelDragStartTransform.rotation, viewProjectionMatrix(),
-          QSizeF(width(), height()), mTransformGizmoMode,
-          mTransformGizmoMode == TransformGizmoMode::Transform
-              ? std::clamp(QFontMetricsF(font()).height() * 7.2, 132.0, 168.0)
-              : std::clamp(QFontMetricsF(font()).height() * 4.8, 70.0,
-                           104.0));
+          QSizeF(width(), height()), mTransformGizmoMode, modelGizmoWorldRadius());
       const TransformGizmoAxisLayout &axisLayout =
           startLayout.axes[static_cast<std::size_t>(mTransformConstraint.axis)];
       if (startLayout.valid && axisLayout.visible) {
@@ -5041,7 +5018,8 @@ void NativeViewport::drawModelSelection(
     }
     painter.setPen(QPen(QColor(255, 187, 84, 245), 1.5));
     painter.setBrush(QColor(255, 166, 64, 72));
-    painter.drawEllipse(*center, 6.0, 6.0);
+    const qreal pivotRadius = modelTransformGizmo().centerHandle.width() * 0.3;
+    painter.drawEllipse(*center, pivotRadius, pivotRadius);
     const QString hint =
         mModelDragActive
             ? transformStatusText()
@@ -5089,9 +5067,9 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
 
   if (drawRotate) {
     for (int axis = 0; axis < 3; ++axis) {
-      const QPolygonF &ring =
-          layout.axes[static_cast<std::size_t>(axis)].rotationRing;
-      if (ring.size() < 3) {
+      const auto &ring =
+          layout.axes[static_cast<std::size_t>(axis)].rotationSegments;
+      if (ring.isEmpty()) {
         continue;
       }
       const bool ringHighlight =
@@ -5105,15 +5083,14 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
         contextColor.setAlpha(ringHighlight ? 135 : 62);
         painter.setPen(QPen(contextColor, ringWidth, Qt::SolidLine,
                             Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPolygon(ring);
+        painter.drawLines(ring);
 
         color.setAlpha(ringHighlight ? 255 : 215);
         painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
                             Qt::RoundJoin));
-        for (qsizetype index = 0; index < ring.size(); ++index) {
-          const QPointF &start =
-              ring.at((index + ring.size() - 1) % ring.size());
-          const QPointF &end = ring.at(index);
+        for (const QLineF &segment : ring) {
+          const QPointF start = segment.p1();
+          const QPointF end = segment.p2();
           if (QLineF(layout.center, start).length() >=
                   layout.rotationHitInnerRadius &&
               QLineF(layout.center, end).length() >=
@@ -5125,7 +5102,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
         color.setAlpha(ringHighlight ? 255 : 205);
         painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
                             Qt::RoundJoin));
-        painter.drawPolygon(ring);
+        painter.drawLines(ring);
       }
     }
     const bool viewHighlight =
@@ -5233,10 +5210,11 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     const bool active = highlighted(TransformGizmoHandleKind::ScaleUniform, -1);
     const QPointF center = layout.center;
     QPolygonF diamond;
-    diamond << center + QPointF(0.0, -9.0)
-            << center + QPointF(9.0, 0.0)
-            << center + QPointF(0.0, 9.0)
-            << center + QPointF(-9.0, 0.0);
+    const qreal extent = layout.centerHandle.width() * 0.5;
+    diamond << center + QPointF(0.0, -extent)
+            << center + QPointF(extent, 0.0)
+            << center + QPointF(0.0, extent)
+            << center + QPointF(-extent, 0.0);
     painter.setPen(QPen(active ? QColor(255, 224, 118)
                               : QColor(228, 232, 234),
                         active ? 2.2 : 1.5));
