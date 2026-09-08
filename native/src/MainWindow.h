@@ -38,6 +38,7 @@ public:
   explicit MainWindow(QWidget *parent = nullptr);
   ~MainWindow() override;
   bool openProjectFile(const QString &filePath);
+  bool importSceneFile(const QString &filePath);
   void offerStartupRecovery();
 
 protected:

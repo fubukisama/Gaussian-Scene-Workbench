@@ -11,6 +11,8 @@
 #include "ScreenSpaceSelection.h"
 #include "TrainingGpuPreviewBuffer.h"
 #include "TransformGizmo.h"
+#include "SceneObject.h"
+#include <memory>
 
 #include <QImage>
 #include <QMatrix4x4>
@@ -73,6 +75,10 @@ public:
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
+  void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
+  bool activateSceneObject(const QString &id);
+  [[nodiscard]] QString activeSceneId() const { return mScene->id; }
+  [[nodiscard]] qsizetype sceneObjectCount() const { return mSceneStates.size(); }
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
   void selectModel();
@@ -104,30 +110,31 @@ public:
   [[nodiscard]] bool saveCroppedScene(const QString &filePath,
                                       QString *errorMessage = nullptr);
   [[nodiscard]] bool hasUnsavedSceneEdits() const;
+  void discardSceneEdits();
   [[nodiscard]] bool hasEditableScene() const;
   [[nodiscard]] bool gaussianRenderingAvailable() const;
   [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
-    return mUploadedFullResolutionMeshTriangleCount;
+    return mScene->mUploadedFullResolutionMeshTriangleCount;
   }
   [[nodiscard]] bool meshTextureAvailable() const {
-    return mMeshTextureReady;
+    return mScene->mMeshTextureReady;
   }
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
-  [[nodiscard]] RenderMode renderMode() const { return mRenderMode; }
+  [[nodiscard]] RenderMode renderMode() const { return mScene->mRenderMode; }
   [[nodiscard]] ReferencePlaneMode referencePlaneMode() const {
     return mReferencePlaneMode;
   }
   [[nodiscard]] const SceneCoordinateInfo &sceneCoordinates() const {
-    return mSceneCoordinates;
+    return mScene->mSceneCoordinates;
   }
-  [[nodiscard]] QString scenePath() const { return mScenePath; }
+  [[nodiscard]] QString scenePath() const { return mScene->mScenePath; }
   [[nodiscard]] QVector3D modelTranslation() const {
-    return mModelTranslation;
+    return mScene->mModelTranslation;
   }
-  [[nodiscard]] QQuaternion modelRotation() const { return mModelRotation; }
-  [[nodiscard]] QVector3D modelScale() const { return mModelScale; }
+  [[nodiscard]] QQuaternion modelRotation() const { return mScene->mModelRotation; }
+  [[nodiscard]] QVector3D modelScale() const { return mScene->mModelScale; }
   [[nodiscard]] TransformGizmoMode modelGizmoMode() const {
     return mTransformGizmoMode;
   }
@@ -164,6 +171,7 @@ public:
   }
 
 signals:
+  void activeSceneObjectChanged(const QString &id);
   void frameMetricsChanged(double framesPerSecond,
                            double averageFrameMilliseconds);
   void sceneLoadStarted(const QString &scenePath);
@@ -233,6 +241,89 @@ private:
     QVector3D boundsMaximum;
   };
 
+  struct SceneState final {
+    QString id;
+    QVector3D sourceTranslation;
+    bool buffersInitialized = false;
+    QVector3D sortedForward;
+    bool sortDirectionValid = false;
+    QString mScenePath;
+    QString mRequestedScenePath;
+    QString mSceneLoadMessage;
+    qint64 mGaussianCount = 0;
+    qint64 mSourceFaceCount = 0;
+    qsizetype mPreviewPointCount = 0;
+    qsizetype mPreviewTriangleCount = 0;
+    qsizetype mRenderedPointCount = 0;
+    qsizetype mFullResolutionPointCount = 0;
+    qsizetype mUploadedFullResolutionPointCount = 0;
+    qsizetype mFullResolutionMeshTriangleCount = 0;
+    qsizetype mUploadedFullResolutionMeshTriangleCount = 0;
+    qsizetype mDrawnFullResolutionMeshTriangleCount = 0;
+    qsizetype mRenderedMeshIndexCount = 0;
+    bool mSelectionBusy = false;
+    bool mHasGaussianAttributes = false;
+    bool mHasMesh = false;
+    bool mPreviewOnlyScene = false;
+    bool mProgressiveUploadActive = false;
+    bool mFullResolutionPointClearPending = false;
+    bool mFullResolutionMeshClearPending = false;
+    int mSceneGeneration = 0;
+    int mCameraTrajectoryGeneration = 0;
+    RenderMode mRenderMode = RenderMode::Points;
+    SceneCoordinateInfo mSceneCoordinates;
+    QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
+    QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
+    QQuaternion mModelRotation;
+    QVector3D mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
+    QVector<ModelTransform> mModelTransformHistory;
+    qsizetype mModelTransformHistoryIndex = 0;
+    float mSceneRadius = 4.0F;
+    QVector<PointPosition> mSourcePositions;
+    QVector<PointCloudVertex> mPreviewVertices;
+    QVector<PointCloudVertex> mPendingVertices;
+    PointCloudCacheIndex mPointCache;
+    QSet<int> mDesiredPointCacheNodes;
+    QSet<int> mPointCacheReadsInFlight;
+    QSet<int> mPointCacheFailedNodes;
+    QVector<PointCloudCachePage> mPendingPointCachePages;
+    QVector<FullResolutionGpuChunk> mFullResolutionPointGpuChunks;
+    qsizetype mPointCacheResidentBytes = 0;
+    quint64 mPointCacheFrameSerial = 0;
+    QString mPointCacheError;
+    MeshCacheIndex mMeshCache;
+    QSet<int> mDesiredMeshCacheNodes;
+    QSet<int> mMeshCacheReadsInFlight;
+    QSet<int> mMeshCacheFailedNodes;
+    QVector<MeshCachePage> mPendingMeshCachePages;
+    QVector<FullResolutionMeshGpuChunk> mFullResolutionMeshGpuChunks;
+    qsizetype mMeshCacheResidentBytes = 0;
+    quint64 mMeshCacheFrameSerial = 0;
+    QString mMeshCacheError;
+    QString mMeshTexturePath;
+    QString mMeshTextureError;
+    QImage mPendingMeshTexture;
+    QSize mMeshTextureSize;
+    bool mMeshHasTextureCoordinates = false;
+    bool mMeshTextureUploadPending = false;
+    bool mMeshTextureClearPending = false;
+    bool mMeshTextureReady = false;
+    GLuint mMeshTexture = 0;
+    QVector<MeshVertex> mPendingMeshVertices;
+    QVector<quint32> mPendingMeshIndices;
+    CameraTrajectory mCameraTrajectory;
+    CameraTrajectoryGeometry mCameraGeometry;
+    SceneEditModel mEditModel;
+    bool mPointUploadPending = false;
+    bool mMeshUploadPending = false;
+    QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
+    QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
+    QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};
+    QOpenGLVertexArrayObject mPointVertexArray;
+    QOpenGLVertexArrayObject mMeshVertexArray;
+    QOpenGLVertexArrayObject mGaussianVertexArray;
+  };
+
   using DepthOverlayVertex = ReferenceAxisVertex;
 
   struct StoredCameraView {
@@ -267,7 +358,8 @@ private:
   [[nodiscard]] float transformedSceneRadius() const;
   [[nodiscard]] bool modelHitAt(const QPointF &position);
   [[nodiscard]] std::optional<bool>
-  modelGeometryHitAt(const QPointF &position);
+  modelGeometryHitAt(const QPointF &position, float *hitDepth = nullptr);
+  [[nodiscard]] QString sceneObjectAt(const QPointF &position);
   [[nodiscard]] std::optional<QPointF>
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
@@ -351,21 +443,18 @@ private:
   [[nodiscard]] bool canUndoModelTransform() const;
   [[nodiscard]] bool canRedoModelTransform() const;
 
+  std::shared_ptr<SceneState> mScene = std::make_shared<SceneState>();
+  QList<std::shared_ptr<SceneState>> mSceneStates;
+  QMatrix4x4 mLayerDisplayTransform;
+  QMatrix4x4 mCollectionProjection;
+  bool mRenderingInactiveScene = false;
+  void initializeSceneBuffers();
+  void releaseSceneBuffers();
+  void drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection);
+  [[nodiscard]] QMatrix4x4 sceneDisplayTransform(const SceneState &from,
+                                               const SceneState &to) const;
+  void publishActiveSceneState();
   QString mProjectLabel;
-  QString mScenePath;
-  QString mRequestedScenePath;
-  QString mSceneLoadMessage;
-  qint64 mGaussianCount = 0;
-  qint64 mSourceFaceCount = 0;
-  qsizetype mPreviewPointCount = 0;
-  qsizetype mPreviewTriangleCount = 0;
-  qsizetype mRenderedPointCount = 0;
-  qsizetype mFullResolutionPointCount = 0;
-  qsizetype mUploadedFullResolutionPointCount = 0;
-  qsizetype mFullResolutionMeshTriangleCount = 0;
-  qsizetype mUploadedFullResolutionMeshTriangleCount = 0;
-  qsizetype mDrawnFullResolutionMeshTriangleCount = 0;
-  qsizetype mRenderedMeshIndexCount = 0;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
   Qt::MouseButtons mPressedButtons = Qt::NoButton;
@@ -379,7 +468,6 @@ private:
   bool mModelDragActive = false;
   bool mBrushCursorVisible = false;
   bool mVisibleOnlySelection = true;
-  bool mSelectionBusy = false;
   bool mCameraManipulated = false;
   bool mTemporaryOrbitActive = false;
   bool mNavigationInteractionActive = false;
@@ -388,27 +476,13 @@ private:
   bool mOrthographic = false;
   bool mCameraViewActive = false;
   bool mShowCameras = false;
-  bool mHasGaussianAttributes = false;
-  bool mHasMesh = false;
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
   bool mGridShaderReady = false;
   bool mDepthOverlayShaderReady = false;
   bool mModelPickShaderReady = false;
-  bool mPreviewOnlyScene = false;
   bool mInteractionLodActive = false;
-  bool mProgressiveUploadActive = false;
-  bool mFullResolutionPointClearPending = false;
-  bool mFullResolutionMeshClearPending = false;
-  int mSceneGeneration = 0;
-  int mCameraTrajectoryGeneration = 0;
-  RenderMode mRenderMode = RenderMode::Points;
   ReferencePlaneMode mReferencePlaneMode = ReferencePlaneMode::ModelBase;
-  SceneCoordinateInfo mSceneCoordinates;
-  QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
-  QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
-  QQuaternion mModelRotation;
-  QVector3D mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
   ModelTransform mModelDragStartTransform;
   QVector3D mModelDragStartIntersection = QVector3D(0.0F, 0.0F, 0.0F);
   QVector3D mModelDragPlaneNormal = QVector3D(0.0F, 0.0F, 1.0F);
@@ -427,69 +501,23 @@ private:
   TransformConstraint mTransformConstraint;
   QString mTransformNumericInput;
   Qt::KeyboardModifiers mTransformModifiers = Qt::NoModifier;
-  QVector<ModelTransform> mModelTransformHistory;
-  qsizetype mModelTransformHistoryIndex = 0;
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;
   float mDistance = 12.0F;
-  float mSceneRadius = 4.0F;
   NavigationGizmoHit mNavigationHover;
   NavigationGizmoHit mNavigationPress;
   QPoint mNavigationPressPosition;
   std::optional<StoredCameraView> mStoredCameraView;
-  QVector<PointPosition> mSourcePositions;
-  QVector<PointCloudVertex> mPreviewVertices;
-  QVector<PointCloudVertex> mPendingVertices;
-  PointCloudCacheIndex mPointCache;
-  QSet<int> mDesiredPointCacheNodes;
-  QSet<int> mPointCacheReadsInFlight;
-  QSet<int> mPointCacheFailedNodes;
-  QVector<PointCloudCachePage> mPendingPointCachePages;
-  QVector<FullResolutionGpuChunk> mFullResolutionPointGpuChunks;
-  qsizetype mPointCacheResidentBytes = 0;
   qsizetype mPointCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
-  quint64 mPointCacheFrameSerial = 0;
-  QString mPointCacheError;
-  MeshCacheIndex mMeshCache;
-  QSet<int> mDesiredMeshCacheNodes;
-  QSet<int> mMeshCacheReadsInFlight;
-  QSet<int> mMeshCacheFailedNodes;
-  QVector<MeshCachePage> mPendingMeshCachePages;
-  QVector<FullResolutionMeshGpuChunk> mFullResolutionMeshGpuChunks;
-  qsizetype mMeshCacheResidentBytes = 0;
   qsizetype mMeshCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
-  quint64 mMeshCacheFrameSerial = 0;
-  QString mMeshCacheError;
-  QString mMeshTexturePath;
-  QString mMeshTextureError;
-  QImage mPendingMeshTexture;
-  QSize mMeshTextureSize;
-  bool mMeshHasTextureCoordinates = false;
-  bool mMeshTextureUploadPending = false;
-  bool mMeshTextureClearPending = false;
-  bool mMeshTextureReady = false;
-  GLuint mMeshTexture = 0;
-  QVector<MeshVertex> mPendingMeshVertices;
-  QVector<quint32> mPendingMeshIndices;
-  CameraTrajectory mCameraTrajectory;
-  CameraTrajectoryGeometry mCameraGeometry;
-  SceneEditModel mEditModel;
-  bool mPointUploadPending = false;
-  bool mMeshUploadPending = false;
   QOpenGLShaderProgram *mPointProgram = nullptr;
   QOpenGLShaderProgram *mMeshProgram = nullptr;
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
   QOpenGLShaderProgram *mGridProgram = nullptr;
   QOpenGLShaderProgram *mDepthOverlayProgram = nullptr;
   QOpenGLShaderProgram *mModelPickProgram = nullptr;
-  QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
-  QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
-  QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};
   QOpenGLBuffer mDepthOverlayBuffer{QOpenGLBuffer::VertexBuffer};
-  QOpenGLVertexArrayObject mPointVertexArray;
-  QOpenGLVertexArrayObject mMeshVertexArray;
-  QOpenGLVertexArrayObject mGaussianVertexArray;
   QOpenGLVertexArrayObject mGridVertexArray;
   QOpenGLVertexArrayObject mDepthOverlayVertexArray;
   TrainingGpuPreviewBuffer mTrainingGpuPreview;

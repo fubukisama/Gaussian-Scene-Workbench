@@ -1,6 +1,7 @@
 #include "AppTheme.h"
 #include "MainWindow.h"
 #include "NativeViewport.h"
+#include "MultiSceneSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -165,6 +166,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-reference-axes"),
       QStringLiteral("Verify reference axes remain visible after scene load."));
   parser.addOption(referenceAxesSmokeTestOption);
+  QCommandLineOption multiSceneSmokeTestOption(
+      QStringLiteral("smoke-test-multi-scene"),
+      QStringLiteral("Verify multi-object import, rendering, selection and persistence."));
+  parser.addOption(multiSceneSmokeTestOption);
   QCommandLineOption smokeSceneOption(
       QStringLiteral("smoke-scene"),
       QStringLiteral("Scene PLY used by viewport smoke tests."),
@@ -201,6 +206,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
                          exitConfirmationSmokeTest || infiniteGridSmokeTest ||
                          orthographicNavigationSmokeTest ||
@@ -217,7 +223,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (gpuPreviewInteropProbe) {
+  if (parser.isSet(multiSceneSmokeTestOption)) {
+    QTimer::singleShot(650, &application, [&] {
+      smokeTestCompleted = gsw::runMultiSceneSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (gpuPreviewInteropProbe) {
     QTimer::singleShot(
         650, &application,
         [&application, &window, &smokeTestCompleted,

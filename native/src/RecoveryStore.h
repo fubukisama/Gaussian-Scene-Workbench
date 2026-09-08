@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QList>
+#include <QJsonObject>
 #include <QQuaternion>
 #include <QString>
 #include <QVector3D>
@@ -18,6 +19,7 @@ struct RecoveryWorkspace {
   QString projectFilePath;
   QString datasetPath;
   QString scenePath;
+  QJsonObject sceneCollection;
   QVector3D sceneTranslation;
   QQuaternion sceneRotation;
   QVector3D sceneScale = QVector3D(1.0F, 1.0F, 1.0F);

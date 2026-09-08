@@ -1516,8 +1516,13 @@ void MainWindow::createProjectDock() {
     }
     const QString kind =
         selection.first()->data(0, Qt::UserRole + 1).toString();
-    if (kind == QStringLiteral("scene") && mModelReady &&
+    if (kind == QStringLiteral("scene") &&
         !mProcessSupervisor.isRunning()) {
+      const QString id = selection.first()->data(0, Qt::UserRole + 2).toString();
+      if (!id.isEmpty() && id != mWorkspace.activeSceneId()) {
+        if (!confirmDiscardSceneEdits()) { rebuildProjectTree(); return; }
+        mWorkspace.activateSceneObject(id);
+      }
       mViewport->selectModel();
       statusBar()->showMessage(
           QStringLiteral("模型已选中：G 移动，R 旋转，再按 R 轨迹球自由旋转"),
@@ -2225,6 +2230,8 @@ void MainWindow::connectServices() {
                       .arg(previewVertexCount));
             }
           });
+  connect(mViewport, &NativeViewport::activeSceneObjectChanged, this,
+          [this](const QString &id) { mWorkspace.activateSceneObject(id); });
   connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
           [this]() {
             if (!mWorkspace.scenePath().isEmpty() &&
@@ -2718,6 +2725,7 @@ bool MainWindow::confirmDiscardSceneEdits(const bool exiting) {
   if (answer == QMessageBox::Save) {
     return exportCroppedScene();
   }
+  if (answer == QMessageBox::Discard) mViewport->discardSceneEdits();
   return answer == QMessageBox::Discard;
 }
 
@@ -2766,6 +2774,7 @@ void MainWindow::checkpointCurrentRecovery() {
   mCurrentRecovery->sceneTranslation = mWorkspace.sceneTranslation();
   mCurrentRecovery->sceneRotation = mWorkspace.sceneRotation();
   mCurrentRecovery->sceneScale = mWorkspace.sceneScale();
+  mCurrentRecovery->sceneCollection = mWorkspace.sceneCollectionJson();
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
@@ -3036,6 +3045,10 @@ bool MainWindow::restoreRecoveryWorkspace(
       appendTaskEvent(
           QStringLiteral("恢复工程的模型变换失败：%1").arg(transformError));
     }
+  }
+  if (!workspace.sceneCollection.isEmpty()) {
+    mWorkspace.restoreSceneCollection(workspace.sceneCollection);
+    updateWorkspaceUi();
   }
   if (!mRecoveryBlocked) {
     QString trainingRecoveryError;
@@ -4133,19 +4146,46 @@ void MainWindow::importScene() {
   if (!ensureProjectForDataAction(QStringLiteral("导入 PLY 场景/网格"))) {
     return;
   }
-  if (!confirmDiscardSceneEdits()) {
-    return;
-  }
   const QString filePath = QFileDialog::getOpenFileName(
       this, QStringLiteral("导入 PLY 场景/网格"), mWorkspace.rootPath(),
       QStringLiteral("PLY 场景与网格 (*.ply);;所有文件 (*.*)"));
   if (filePath.isEmpty()) {
     return;
   }
+  importSceneFile(filePath);
+}
+
+bool MainWindow::importSceneFile(const QString &filePath) {
+  if (filePath.isEmpty() || !ensureProjectRecoveryReady() ||
+      !ensureProjectForDataAction(QStringLiteral("导入 PLY 场景/网格"))) return false;
+  bool append = false;
+  if (!mWorkspace.sceneObjects().isEmpty()) {
+    QMessageBox choice(QMessageBox::Question, QStringLiteral("选择导入方式"),
+        QStringLiteral("场景中已有 %1 个对象。\n\n"
+                       "同时导入：保留现有对象，在同一场景中加入新数据。\n"
+                       "覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n"
+                       "两种方式都不会删除或改写原始文件。")
+            .arg(mWorkspace.sceneObjects().size()).arg(QFileInfo(mWorkspace.scenePath()).fileName()),
+        QMessageBox::NoButton, this);
+    choice.setObjectName(QStringLiteral("sceneImportChoiceDialog"));
+    auto *add = choice.addButton(QStringLiteral("同时导入"), QMessageBox::AcceptRole);
+    auto *replace = choice.addButton(QStringLiteral("覆盖当前"), QMessageBox::DestructiveRole);
+    auto *cancel = choice.addButton(QMessageBox::Cancel);
+    add->setObjectName(QStringLiteral("appendSceneButton"));
+    replace->setObjectName(QStringLiteral("replaceSceneButton"));
+    cancel->setObjectName(QStringLiteral("cancelSceneImportButton"));
+    choice.setDefaultButton(add);
+    choice.setEscapeButton(cancel);
+    choice.exec();
+    if (choice.clickedButton() != add && choice.clickedButton() != replace) return false;
+    append = choice.clickedButton() == add;
+  }
+  if (!confirmDiscardSceneEdits()) return false;
   QString error;
-  if (!mWorkspace.setScenePath(filePath, &error)) {
+  if (!(append ? mWorkspace.addScenePath(filePath, &error)
+               : mWorkspace.setScenePath(filePath, &error))) {
     showError(QStringLiteral("无法导入场景"), error);
-    return;
+    return false;
   }
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   const QString sceneType =
@@ -4160,6 +4200,9 @@ void MainWindow::importScene() {
   appendTaskEvent(QStringLiteral("已读取场景元数据：%1 个顶点%2，%3")
                       .arg(metadata.vertexCount)
                       .arg(faceDetail, sceneType));
+  appendTaskEvent(append ? QStringLiteral("已同时导入：现有对象全部保留。")
+                        : QStringLiteral("已导入到当前对象槽位，源文件保持不变。"));
+  return true;
 }
 
 void MainWindow::clearDatasetImport() {
@@ -4646,11 +4689,7 @@ void MainWindow::updateWorkspaceUi() {
     mViewport->setModelTransform({}, {});
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   } else {
-    mViewport->setScene(mWorkspace.scenePath(),
-                        mWorkspace.sceneMetadata().vertexCount);
-    mViewport->setModelTransform(workspaceTranslationForViewport(),
-                                 mWorkspace.sceneRotation(),
-                                 mWorkspace.sceneScale());
+    mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
   }
   mProjectStatus->setText(
       projectName +
@@ -4705,6 +4744,7 @@ void MainWindow::updateActionAvailability() {
 }
 
 void MainWindow::rebuildProjectTree() {
+  const QSignalBlocker blocker(mProjectTree);
   mProjectTree->clear();
   const QString projectName = mWorkspace.hasProject()
                                   ? mWorkspace.projectName()
@@ -4739,12 +4779,17 @@ void MainWindow::rebuildProjectTree() {
   scene->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogDetailedView));
   scene->setData(0, Qt::UserRole, mWorkspace.scenePath());
   scene->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
-  auto *sceneState = new QTreeWidgetItem(
-      scene, {mWorkspace.scenePath().isEmpty()
-                  ? QStringLiteral("未导入")
-                  : QFileInfo(mWorkspace.scenePath()).fileName()});
-  sceneState->setData(0, Qt::UserRole, mWorkspace.scenePath());
-  sceneState->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
+  if (mWorkspace.sceneObjects().isEmpty()) {
+    new QTreeWidgetItem(scene, {QStringLiteral("未导入")});
+  }
+  for (const auto &object : mWorkspace.sceneObjects()) {
+    auto *item = new QTreeWidgetItem(scene, {QFileInfo(object.path).fileName()});
+    item->setData(0, Qt::UserRole, object.path);
+    item->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
+    item->setData(0, Qt::UserRole + 2, object.id);
+    item->setToolTip(0, QDir::toNativeSeparators(object.path));
+    if (object.id == mWorkspace.activeSceneId()) mProjectTree->setCurrentItem(item);
+  }
   if (mCameraCount > 0) {
     auto *cameras = new QTreeWidgetItem(
         scene,

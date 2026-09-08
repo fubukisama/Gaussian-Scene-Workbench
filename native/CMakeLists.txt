@@ -57,6 +57,9 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
   src/MainWindow.h
+  src/MultiSceneSmokeTest.cpp
+  src/MultiSceneSmokeTest.h
+  src/SceneObject.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
   src/MeshCache.cpp
@@ -295,6 +298,13 @@ if(BUILD_TESTING)
     TIMEOUT 15
     ENVIRONMENT
       "QT_OPENGL=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
+  add_test(NAME native_multi_scene_import
+    COMMAND GaussianSceneWorkbench --smoke-test-multi-scene)
+  set_tests_properties(native_multi_scene_import PROPERTIES
+    TIMEOUT 40
+    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   set_tests_properties(native_paged_mesh_scene PROPERTIES

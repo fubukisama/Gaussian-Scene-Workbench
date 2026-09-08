@@ -1,4 +1,6 @@
 #include "NativeViewport.h"
+#include <QScopedValueRollback>
+#include <QSignalBlocker>
 
 #include "ModelInteraction.h"
 #include "NavigationGizmo.h"
@@ -294,7 +296,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
           });
   connect(mViewSnapAnimation, &QVariantAnimation::finished, this, [this]() {
     mYawDegrees = std::remainder(mYawDegrees, 360.0F);
-    if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+    if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
       rebuildRenderedVertices();
     }
     update();
@@ -310,9 +312,9 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
           QOverload<>::of(&NativeViewport::update));
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
-    if (mRenderedPointCount <= 0 && mFullResolutionPointCount <= 0 &&
-        mRenderedMeshIndexCount <= 0 &&
-        mFullResolutionMeshTriangleCount <= 0 &&
+    if (mScene->mRenderedPointCount <= 0 && mScene->mFullResolutionPointCount <= 0 &&
+        mScene->mRenderedMeshIndexCount <= 0 &&
+        mScene->mFullResolutionMeshTriangleCount <= 0 &&
         !mTrainingGpuPreview.attached()) {
       return;
     }
@@ -326,20 +328,137 @@ NativeViewport::~NativeViewport() {
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
     mTrainingGpuPreview.release();
-    releaseFullResolutionPointCloud();
-    releaseFullResolutionMesh();
-    releaseMeshTexture();
+    releaseSceneBuffers();
+    for (const auto &scene : mSceneStates) {
+      if (scene == mScene) continue;
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, scene);
+      releaseSceneBuffers();
+    }
     mDepthOverlayVertexArray.destroy();
     mGridVertexArray.destroy();
-    mGaussianVertexArray.destroy();
-    mMeshVertexArray.destroy();
-    mPointVertexArray.destroy();
-    mMeshIndexBuffer.destroy();
-    mMeshVertexBuffer.destroy();
     mDepthOverlayBuffer.destroy();
-    mPointBuffer.destroy();
     doneCurrent();
   }
+}
+
+void NativeViewport::releaseSceneBuffers() {
+  releaseFullResolutionPointCloud();
+  releaseFullResolutionMesh();
+  releaseMeshTexture();
+  mScene->mGaussianVertexArray.destroy();
+  mScene->mMeshVertexArray.destroy();
+  mScene->mPointVertexArray.destroy();
+  mScene->mMeshIndexBuffer.destroy();
+  mScene->mMeshVertexBuffer.destroy();
+  mScene->mPointBuffer.destroy();
+  mScene->buffersInitialized = false;
+}
+
+QMatrix4x4 NativeViewport::sceneDisplayTransform(const SceneState &from,
+                                                const SceneState &to) const {
+  QMatrix4x4 mapping;
+  if (!from.mSceneCoordinates.valid || !to.mSceneCoordinates.valid) return mapping;
+  // displayShift is added to global XYZ, not the global position of local
+  // zero. Convert that zero through the public inverse to preserve the sign.
+  mapping.translate(to.mSceneCoordinates.localFromGlobal(
+      from.mSceneCoordinates.globalFromLocal(QVector3D())));
+  mapping.scale(static_cast<float>(to.mSceneCoordinates.displayScale /
+                                    from.mSceneCoordinates.displayScale));
+  return mapping;
+}
+
+void NativeViewport::publishActiveSceneState() {
+  emit selectionBusyChanged(mScene->mSelectionBusy);
+  emit sceneCoordinatesChanged();
+  emit renderModeChanged(mScene->mRenderMode);
+  emit meshRenderingAvailabilityChanged(meshRenderingAvailable());
+  emit gaussianRenderingAvailabilityChanged(gaussianRenderingAvailable());
+  emit cameraTrajectoryChanged(cameraCount(), mScene->mCameraTrajectory.invalidCameraCount(),
+      mScene->mCameraGeometry.decimated, mScene->mCameraTrajectory.sourcePath(),
+      mScene->mCameraTrajectory.error());
+  notifyEditState();
+  notifyModelInteractionState();
+  updateFrameRefreshPolicy();
+  update();
+}
+
+void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
+                                    const QString &activeId) {
+  if (mScene->id != activeId && mModelDragActive) finishModelTransform(false);
+  const auto oldActive = mScene;
+  const QVector3D oldTarget = mTarget;
+  const float oldDistance = mDistance;
+  QList<std::shared_ptr<SceneState>> retained;
+  std::shared_ptr<SceneState> active;
+  bool changedSource = false;
+  {
+    QSignalBlocker signalBlocker(this);
+    for (const auto &object : objects) {
+      auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+          [&](const auto &state) { return state->id == object.id; });
+      auto state = found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
+      state->id = object.id;
+      retained.append(state);
+      const bool isActive = object.id == activeId;
+      if (isActive) active = state;
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+      QScopedValueRollback<bool> background(mRenderingInactiveScene, !isActive);
+      if (state->mRequestedScenePath != object.path) {
+        changedSource |= isActive;
+        setScene(object.path, object.vertexCount);
+      }
+      state->sourceTranslation = object.translation;
+      setModelTransform(object.translation * static_cast<float>(state->mSceneCoordinates.displayScale),
+                        object.rotation, object.scale);
+    }
+    if (context() != nullptr && context()->isValid()) {
+      makeCurrent();
+      for (const auto &removed : mSceneStates) {
+        if (retained.contains(removed)) continue;
+        QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, removed);
+        releaseSceneBuffers();
+      }
+      doneCurrent();
+    }
+    mSceneStates = retained;
+    mScene = active ? active : !retained.isEmpty() ? retained.first() : std::make_shared<SceneState>();
+    if (oldActive != mScene && !changedSource && !retained.isEmpty()) {
+      const QMatrix4x4 mapping = sceneDisplayTransform(*oldActive, *mScene);
+      mTarget = mapping.map(oldTarget);
+      mDistance = oldDistance * mapping.mapVector(QVector3D(1, 0, 0)).length();
+    }
+  }
+  if (oldActive != mScene || changedSource) {
+    mSelectionGestureActive = false;
+    mSelectionPath.clear();
+    mPressedButtons = Qt::NoButton;
+    mCameraViewActive = false;
+    mStoredCameraView.reset();
+    mModelSelected = !objects.isEmpty();
+    mTransformGizmoHover = {};
+    publishActiveSceneState();
+  }
+  update();
+}
+
+bool NativeViewport::activateSceneObject(const QString &id) {
+  if (id == mScene->id) { selectModel(); return true; }
+  const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+      [&](const auto &state) { return state->id == id; });
+  if (found == mSceneStates.cend() || mScene->mSelectionBusy || hasUnsavedSceneEdits()) return false;
+  if (mModelDragActive) finishModelTransform(false);
+  const auto next = *found;
+  const QMatrix4x4 mapping = sceneDisplayTransform(*mScene, *next);
+  mTarget = mapping.map(mTarget);
+  mDistance *= mapping.mapVector(QVector3D(1, 0, 0)).length();
+  mScene = next;
+  mCameraViewActive = false;
+  mStoredCameraView.reset();
+  mTransformGizmoHover = {};
+  selectModel();
+  emit activeSceneObjectChanged(id);
+  publishActiveSceneState();
+  return true;
 }
 
 void NativeViewport::setTrainingGpuPreviewDescriptor(
@@ -367,16 +486,17 @@ void NativeViewport::setProjectLabel(const QString &label) {
 
 void NativeViewport::setScene(const QString &scenePath,
                               const qint64 gaussianCount) {
-  mGaussianCount = gaussianCount;
-  if (mRequestedScenePath == scenePath) {
+  if (mSceneStates.isEmpty()) mSceneStates.append(mScene);
+  mScene->mGaussianCount = gaussianCount;
+  if (mScene->mRequestedScenePath == scenePath) {
     reloadCameraTrajectory(scenePath, false);
     update();
     return;
   }
 
-  ++mSceneGeneration;
-  if (mSelectionBusy) {
-    mSelectionBusy = false;
+  ++mScene->mSceneGeneration;
+  if (mScene->mSelectionBusy) {
+    mScene->mSelectionBusy = false;
     emit selectionBusyChanged(false);
   }
   mSelectionGestureActive = false;
@@ -395,72 +515,73 @@ void NativeViewport::setScene(const QString &scenePath,
   mSelectionPath.clear();
   mBrushCursorVisible = false;
   mTemporaryOrbitActive = false;
-  mRequestedScenePath = scenePath;
-  mScenePath = scenePath;
-  mSourceFaceCount = 0;
-  mPreviewPointCount = 0;
-  mPreviewTriangleCount = 0;
-  mRenderedPointCount = 0;
-  mFullResolutionPointCount = 0;
-  mUploadedFullResolutionPointCount = 0;
-  mFullResolutionMeshTriangleCount = 0;
-  mUploadedFullResolutionMeshTriangleCount = 0;
-  mDrawnFullResolutionMeshTriangleCount = 0;
-  mRenderedMeshIndexCount = 0;
+  mScene->mRequestedScenePath = scenePath;
+  mScene->mScenePath = scenePath;
+  mScene->mSourceFaceCount = 0;
+  mScene->mPreviewPointCount = 0;
+  mScene->mPreviewTriangleCount = 0;
+  mScene->mRenderedPointCount = 0;
+  mScene->mFullResolutionPointCount = 0;
+  mScene->mUploadedFullResolutionPointCount = 0;
+  mScene->mFullResolutionMeshTriangleCount = 0;
+  mScene->mUploadedFullResolutionMeshTriangleCount = 0;
+  mScene->mDrawnFullResolutionMeshTriangleCount = 0;
+  mScene->mRenderedMeshIndexCount = 0;
   updateFrameRefreshPolicy();
   const bool gaussianAvailabilityChanged = gaussianRenderingAvailable();
   const bool meshAvailabilityChanged = meshRenderingAvailable();
-  const bool renderModeChangedToPoints = mRenderMode != RenderMode::Points;
-  mHasGaussianAttributes = false;
-  mHasMesh = false;
-  mPreviewOnlyScene = false;
-  mRenderMode = RenderMode::Points;
-  const bool hadSceneCoordinates = mSceneCoordinates.valid;
-  mSceneCoordinates = {};
-  mSceneLoadMessage.clear();
-  mSourcePositions.clear();
-  mSourcePositions.squeeze();
-  mPreviewVertices.clear();
-  mPreviewVertices.squeeze();
-  mPendingVertices.clear();
-  mPendingVertices.squeeze();
-  mPointCache = {};
-  mDesiredPointCacheNodes.clear();
-  mPointCacheReadsInFlight.clear();
-  mPointCacheFailedNodes.clear();
-  mPendingPointCachePages.clear();
-  mPendingPointCachePages.squeeze();
-  mPointCacheError.clear();
-  mFullResolutionPointClearPending = true;
-  mMeshCache = {};
-  mDesiredMeshCacheNodes.clear();
-  mMeshCacheReadsInFlight.clear();
-  mMeshCacheFailedNodes.clear();
-  mPendingMeshCachePages.clear();
-  mPendingMeshCachePages.squeeze();
-  mMeshCacheError.clear();
-  mFullResolutionMeshClearPending = true;
-  mMeshTexturePath.clear();
-  mMeshTextureError.clear();
-  mPendingMeshTexture = {};
-  mMeshTextureSize = {};
-  mMeshHasTextureCoordinates = false;
-  mMeshTextureUploadPending = false;
-  mMeshTextureClearPending = true;
-  mMeshTextureReady = false;
-  mPendingMeshVertices.clear();
-  mPendingMeshVertices.squeeze();
-  mPendingMeshIndices.clear();
-  mPendingMeshIndices.squeeze();
-  mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
-  mModelTranslation = {};
-  mModelRotation = {};
-  mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
+  const bool renderModeChangedToPoints = mScene->mRenderMode != RenderMode::Points;
+  mScene->mHasGaussianAttributes = false;
+  mScene->mHasMesh = false;
+  mScene->mPreviewOnlyScene = false;
+  mScene->mRenderMode = RenderMode::Points;
+  const bool hadSceneCoordinates = mScene->mSceneCoordinates.valid;
+  mScene->mSceneCoordinates = {};
+  mScene->mSceneLoadMessage.clear();
+  mScene->mSourcePositions.clear();
+  mScene->mSourcePositions.squeeze();
+  mScene->mPreviewVertices.clear();
+  mScene->mPreviewVertices.squeeze();
+  mScene->mPendingVertices.clear();
+  mScene->mPendingVertices.squeeze();
+  mScene->mPointCache = {};
+  mScene->mDesiredPointCacheNodes.clear();
+  mScene->mPointCacheReadsInFlight.clear();
+  mScene->mPointCacheFailedNodes.clear();
+  mScene->mPendingPointCachePages.clear();
+  mScene->mPendingPointCachePages.squeeze();
+  mScene->mPointCacheError.clear();
+  mScene->mFullResolutionPointClearPending = true;
+  mScene->mMeshCache = {};
+  mScene->mDesiredMeshCacheNodes.clear();
+  mScene->mMeshCacheReadsInFlight.clear();
+  mScene->mMeshCacheFailedNodes.clear();
+  mScene->mPendingMeshCachePages.clear();
+  mScene->mPendingMeshCachePages.squeeze();
+  mScene->mMeshCacheError.clear();
+  mScene->mFullResolutionMeshClearPending = true;
+  mScene->mMeshTexturePath.clear();
+  mScene->mMeshTextureError.clear();
+  mScene->mPendingMeshTexture = {};
+  mScene->mMeshTextureSize = {};
+  mScene->mMeshHasTextureCoordinates = false;
+  mScene->mMeshTextureUploadPending = false;
+  mScene->mMeshTextureClearPending = true;
+  mScene->mMeshTextureReady = false;
+  mScene->mPendingMeshVertices.clear();
+  mScene->mPendingMeshVertices.squeeze();
+  mScene->mPendingMeshIndices.clear();
+  mScene->mPendingMeshIndices.squeeze();
+  mScene->mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
+  mScene->sourceTranslation = {};
+  mScene->mModelTranslation = {};
+  mScene->mModelRotation = {};
+  mScene->mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
   resetModelTransformHistory();
-  mSceneRadius = 4.0F;
-  mEditModel.reset(0);
-  mPointUploadPending = true;
-  mMeshUploadPending = true;
+  mScene->mSceneRadius = 4.0F;
+  mScene->mEditModel.reset(0);
+  mScene->mPointUploadPending = true;
+  mScene->mMeshUploadPending = true;
   notifyEditState();
   notifyModelInteractionState();
   if (gaussianAvailabilityChanged) {
@@ -470,13 +591,13 @@ void NativeViewport::setScene(const QString &scenePath,
     emit meshRenderingAvailabilityChanged(false);
   }
   if (renderModeChangedToPoints) {
-    emit renderModeChanged(mRenderMode);
+    emit renderModeChanged(mScene->mRenderMode);
   }
   if (hadSceneCoordinates) {
     emit sceneCoordinatesChanged();
   }
   reloadCameraTrajectory(scenePath, true);
-  resetCamera();
+  if (!mRenderingInactiveScene) resetCamera();
   if (scenePath.isEmpty()) {
     return;
   }
@@ -532,11 +653,11 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
 }
 
 void NativeViewport::selectModel() {
-  if (mSelectionBusy || !selectableModelAvailable()) {
+  if (mScene->mSelectionBusy || !selectableModelAvailable()) {
     return;
   }
-  if (mEditModel.selectedCount() > 0) {
-    mEditModel.clearSelection();
+  if (mScene->mEditModel.selectedCount() > 0) {
+    mScene->mEditModel.clearSelection();
     rebuildRenderedVertices();
     notifyEditState();
   }
@@ -559,7 +680,7 @@ void NativeViewport::selectModel() {
 }
 
 bool NativeViewport::focusModel() {
-  if (mSelectionBusy || !selectableModelAvailable()) {
+  if (mScene->mSelectionBusy || !selectableModelAvailable()) {
     return false;
   }
   if (mModelDragActive) {
@@ -587,7 +708,7 @@ bool NativeViewport::focusModel() {
   mDistance = clampViewportDistance(frame->distance, frame->radius);
   mCameraManipulated = false;
   setFocus(Qt::ShortcutFocusReason);
-  if (!mPreviewVertices.isEmpty()) {
+  if (!mScene->mPreviewVertices.isEmpty()) {
     rebuildRenderedVertices();
   }
   update();
@@ -605,7 +726,7 @@ void NativeViewport::selectModelForMove() {
 void NativeViewport::selectModelForRotate() {
   if (mModelDragActive && mMode == InteractionMode::Rotate) {
     if (!mTrackballRotation) {
-      mModelRotation = mModelDragStartTransform.rotation;
+      mScene->mModelRotation = mModelDragStartTransform.rotation;
       mTrackballRotation = true;
       mTransformConstraint = {};
       mTransformNumericInput.clear();
@@ -647,18 +768,19 @@ void NativeViewport::setModelTransform(const QVector3D &translation,
   const QQuaternion normalizedRotation = normalizedModelRotation(rotation);
   const QVector3D normalizedScale = normalizedModelScale(scale);
   const float comparisonScale =
-      std::max({1.0F, mModelTranslation.length(), translation.length()});
+      std::max({1.0F, mScene->mModelTranslation.length(), translation.length()});
   if (!std::isfinite(translation.x()) || !std::isfinite(translation.y()) ||
       !std::isfinite(translation.z()) ||
-      ((mModelTranslation - translation).lengthSquared() <=
+      ((mScene->mModelTranslation - translation).lengthSquared() <=
            comparisonScale * comparisonScale * 1.0e-12F &&
-       rotationsEquivalent(mModelRotation, normalizedRotation) &&
-       scalesEquivalent(mModelScale, normalizedScale))) {
+       rotationsEquivalent(mScene->mModelRotation, normalizedRotation) &&
+       scalesEquivalent(mScene->mModelScale, normalizedScale))) {
     return;
   }
-  mModelTranslation = translation;
-  mModelRotation = normalizedRotation;
-  mModelScale = normalizedScale;
+  mScene->mModelTranslation = translation;
+  mScene->mModelRotation = normalizedRotation;
+  mScene->mModelScale = normalizedScale;
+  mScene->sortDirectionValid = false;
   resetModelTransformHistory();
   notifyEditState();
   notifyModelInteractionState();
@@ -666,7 +788,7 @@ void NativeViewport::setModelTransform(const QVector3D &translation,
 }
 
 void NativeViewport::setModelTranslation(const QVector3D &translation) {
-  setModelTransform(translation, mModelRotation, mModelScale);
+  setModelTransform(translation, mScene->mModelRotation, mScene->mModelScale);
 }
 
 void NativeViewport::setRenderMode(const RenderMode mode) {
@@ -676,12 +798,12 @@ void NativeViewport::setRenderMode(const RenderMode mode) {
   if (mode == RenderMode::Mesh && !meshRenderingAvailable()) {
     return;
   }
-  if (mRenderMode == mode) {
+  if (mScene->mRenderMode == mode) {
     return;
   }
-  mRenderMode = mode;
+  mScene->mRenderMode = mode;
   rebuildRenderedVertices();
-  emit renderModeChanged(mRenderMode);
+  emit renderModeChanged(mScene->mRenderMode);
   update();
 }
 
@@ -707,21 +829,21 @@ void NativeViewport::resetCamera() {
   mOrthographic = false;
   mCameraViewActive = false;
   mStoredCameraView.reset();
-  if (!mPreviewVertices.isEmpty()) {
+  if (!mScene->mPreviewVertices.isEmpty()) {
     rebuildRenderedVertices();
   }
   update();
 }
 
 void NativeViewport::clearSelection() {
-  if (mSelectionBusy) {
+  if (mScene->mSelectionBusy) {
     return;
   }
   if (mModelDragActive) {
     finishModelTransform(false);
     return;
   }
-  mEditModel.clearSelection();
+  mScene->mEditModel.clearSelection();
   const bool clearedModel = mModelSelected;
   mModelSelected = false;
   mModelDragActive = false;
@@ -740,17 +862,17 @@ void NativeViewport::clearSelection() {
 }
 
 void NativeViewport::invertSelection() {
-  if (mSelectionBusy || !hasEditableScene()) {
+  if (mScene->mSelectionBusy || !hasEditableScene()) {
     return;
   }
-  mEditModel.invertSelection();
+  mScene->mEditModel.invertSelection();
   rebuildRenderedVertices();
   notifyEditState();
   update();
 }
 
 void NativeViewport::deleteSelection() {
-  if (mSelectionBusy || mEditModel.deleteSelection() == 0) {
+  if (mScene->mSelectionBusy || mScene->mEditModel.deleteSelection() == 0) {
     return;
   }
   rebuildRenderedVertices();
@@ -759,27 +881,27 @@ void NativeViewport::deleteSelection() {
 }
 
 void NativeViewport::undoEdit() {
-  if (mSelectionBusy) {
+  if (mScene->mSelectionBusy) {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
        mMode == InteractionMode::Scale ||
-       !mEditModel.canUndo()) &&
+       !mScene->mEditModel.canUndo()) &&
       canUndoModelTransform()) {
-    --mModelTransformHistoryIndex;
+    --mScene->mModelTransformHistoryIndex;
     const ModelTransform &transform =
-        mModelTransformHistory.at(mModelTransformHistoryIndex);
-    mModelTranslation = transform.translation;
-    mModelRotation = transform.rotation;
-    mModelScale = transform.scale;
-    emit modelTransformCommitted(mModelTranslation, mModelRotation,
-                                 mModelScale);
+        mScene->mModelTransformHistory.at(mScene->mModelTransformHistoryIndex);
+    mScene->mModelTranslation = transform.translation;
+    mScene->mModelRotation = transform.rotation;
+    mScene->mModelScale = transform.scale;
+    emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation,
+                                 mScene->mModelScale);
     notifyEditState();
     notifyModelInteractionState();
     update();
     return;
   }
-  if (mEditModel.undo() == 0) {
+  if (mScene->mEditModel.undo() == 0) {
     return;
   }
   rebuildRenderedVertices();
@@ -788,27 +910,27 @@ void NativeViewport::undoEdit() {
 }
 
 void NativeViewport::redoEdit() {
-  if (mSelectionBusy) {
+  if (mScene->mSelectionBusy) {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
        mMode == InteractionMode::Scale ||
-       !mEditModel.canRedo()) &&
+       !mScene->mEditModel.canRedo()) &&
       canRedoModelTransform()) {
-    ++mModelTransformHistoryIndex;
+    ++mScene->mModelTransformHistoryIndex;
     const ModelTransform &transform =
-        mModelTransformHistory.at(mModelTransformHistoryIndex);
-    mModelTranslation = transform.translation;
-    mModelRotation = transform.rotation;
-    mModelScale = transform.scale;
-    emit modelTransformCommitted(mModelTranslation, mModelRotation,
-                                 mModelScale);
+        mScene->mModelTransformHistory.at(mScene->mModelTransformHistoryIndex);
+    mScene->mModelTranslation = transform.translation;
+    mScene->mModelRotation = transform.rotation;
+    mScene->mModelScale = transform.scale;
+    emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation,
+                                 mScene->mModelScale);
     notifyEditState();
     notifyModelInteractionState();
     update();
     return;
   }
-  if (mEditModel.redo() == 0) {
+  if (mScene->mEditModel.redo() == 0) {
     return;
   }
   rebuildRenderedVertices();
@@ -819,29 +941,37 @@ void NativeViewport::redoEdit() {
 bool NativeViewport::saveCroppedScene(const QString &filePath,
                                       QString *errorMessage) {
   if (!PlyPointCloudLoader::writeFiltered(
-          mScenePath, filePath, mEditModel.deletedBits(), errorMessage)) {
+          mScene->mScenePath, filePath, mScene->mEditModel.deletedBits(), errorMessage)) {
     return false;
   }
-  mEditModel.markExported();
+  mScene->mEditModel.markExported();
   notifyEditState();
   return true;
 }
 
 bool NativeViewport::hasUnsavedSceneEdits() const {
-  return mEditModel.hasUnsavedChanges();
+  return mScene->mEditModel.hasUnsavedChanges();
+}
+
+void NativeViewport::discardSceneEdits() {
+  if (mScene->mSelectionBusy) return;
+  mScene->mEditModel.reset(mScene->mEditModel.pointCount());
+  rebuildRenderedVertices();
+  notifyEditState();
+  update();
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mPreviewOnlyScene && !mHasMesh && !mScenePath.isEmpty() &&
-         mEditModel.pointCount() > 0;
+  return !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
+         mScene->mEditModel.pointCount() > 0;
 }
 
 bool NativeViewport::selectableModelAvailable() const {
-  return !mScenePath.isEmpty() && mSceneLoadMessage.isEmpty() &&
-         (mPreviewPointCount > 0 || mPreviewTriangleCount > 0 ||
-          mRenderedPointCount > 0 || mRenderedMeshIndexCount > 0 ||
-          mFullResolutionPointCount > 0 ||
-          mFullResolutionMeshTriangleCount > 0);
+  return !mScene->mScenePath.isEmpty() && mScene->mSceneLoadMessage.isEmpty() &&
+         (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
+          mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
+          mScene->mFullResolutionPointCount > 0 ||
+          mScene->mFullResolutionMeshTriangleCount > 0);
 }
 
 void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
@@ -855,19 +985,19 @@ void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
 
 double NativeViewport::referencePlaneElevation() const {
   return mReferencePlaneMode == ReferencePlaneMode::ModelBase &&
-                 mSceneCoordinates.valid
-             ? mSceneCoordinates.globalMinimum.z
+                 mScene->mSceneCoordinates.valid
+             ? mScene->mSceneCoordinates.globalMinimum.z
              : 0.0;
 }
 
 QString NativeViewport::referencePlaneDescription() const {
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero ||
-      !mSceneCoordinates.valid) {
+      !mScene->mSceneCoordinates.valid) {
     return QStringLiteral("世界坐标 Z=0");
   }
   return QStringLiteral("模型底部 Z=%1")
-      .arg(formatSceneCoordinate(mSceneCoordinates.globalMinimum.z,
-                                 mSceneCoordinates));
+      .arg(formatSceneCoordinate(mScene->mSceneCoordinates.globalMinimum.z,
+                                 mScene->mSceneCoordinates));
 }
 
 namespace {
@@ -897,20 +1027,21 @@ bool boundsIntersectView(const QVector3D &minimum, const QVector3D &maximum,
 } // namespace
 
 bool NativeViewport::gaussianRenderingAvailable() const {
-  return (mHasGaussianAttributes || mTrainingGpuPreview.attached()) &&
+  return (mScene->mHasGaussianAttributes ||
+          (!mRenderingInactiveScene && mTrainingGpuPreview.attached())) &&
          mGaussianShaderReady;
 }
 
 bool NativeViewport::pagedMeshAvailable() const {
-  return mMeshCache.formatVersion == MeshCacheIndex::CurrentFormatVersion &&
-         mMeshCache.rootNode >= 0 &&
-         mMeshCache.rootNode < mMeshCache.nodes.size() &&
-         mMeshCache.nodes.at(mMeshCache.rootNode).isValid();
+  return mScene->mMeshCache.formatVersion == MeshCacheIndex::CurrentFormatVersion &&
+         mScene->mMeshCache.rootNode >= 0 &&
+         mScene->mMeshCache.rootNode < mScene->mMeshCache.nodes.size() &&
+         mScene->mMeshCache.nodes.at(mScene->mMeshCache.rootNode).isValid();
 }
 
 bool NativeViewport::meshRenderingAvailable() const {
-  return mHasMesh && mMeshShaderReady &&
-         (mRenderedMeshIndexCount > 0 || pagedMeshAvailable());
+  return mScene->mHasMesh && mMeshShaderReady &&
+         (mScene->mRenderedMeshIndexCount > 0 || pagedMeshAvailable());
 }
 
 bool NativeViewport::infiniteGridRenderingAvailable() const {
@@ -918,11 +1049,11 @@ bool NativeViewport::infiniteGridRenderingAvailable() const {
 }
 
 bool NativeViewport::camerasAvailable() const {
-  return !mCameraTrajectory.cameras().isEmpty();
+  return !mScene->mCameraTrajectory.cameras().isEmpty();
 }
 
 qsizetype NativeViewport::cameraCount() const {
-  return mCameraTrajectory.cameras().size();
+  return mScene->mCameraTrajectory.cameras().size();
 }
 
 void NativeViewport::initializeGL() {
@@ -997,7 +1128,7 @@ void main() {
   const bool pointShaderReady =
       vertexCompiled && fragmentCompiled && mPointProgram->link();
   if (!pointShaderReady) {
-    mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1")
+    mScene->mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1")
                             .arg(mPointProgram->log());
   }
 
@@ -1062,8 +1193,8 @@ void main() {
 )GLSL");
   mMeshShaderReady = meshVertexCompiled && meshFragmentCompiled &&
                      mMeshProgram->link();
-  if (!mMeshShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage = QStringLiteral("OpenGL mesh shader failed: %1")
+  if (!mMeshShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
+    mScene->mSceneLoadMessage = QStringLiteral("OpenGL mesh shader failed: %1")
                             .arg(mMeshProgram->log());
   }
 
@@ -1202,8 +1333,8 @@ void main() {
 )GLSL");
   mGaussianShaderReady = pointShaderReady && gaussianVertexCompiled &&
                          gaussianFragmentCompiled && mGaussianProgram->link();
-  if (!mGaussianShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage = QStringLiteral("OpenGL Gaussian shader failed: %1")
+  if (!mGaussianShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
+    mScene->mSceneLoadMessage = QStringLiteral("OpenGL Gaussian shader failed: %1")
                             .arg(mGaussianProgram->log());
   }
 
@@ -1299,8 +1430,8 @@ void main() {
 )GLSL");
   mGridShaderReady =
       gridVertexCompiled && gridFragmentCompiled && mGridProgram->link();
-  if (!mGridShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage =
+  if (!mGridShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
+    mScene->mSceneLoadMessage =
         QStringLiteral("OpenGL reference-grid shader failed: %1")
             .arg(mGridProgram->log());
   }
@@ -1339,8 +1470,8 @@ void main() {
   mDepthOverlayShaderReady =
       depthOverlayVertexCompiled && depthOverlayFragmentCompiled &&
       mDepthOverlayProgram->link();
-  if (!mDepthOverlayShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage = QStringLiteral("OpenGL depth-overlay shader failed: %1")
+  if (!mDepthOverlayShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
+    mScene->mSceneLoadMessage = QStringLiteral("OpenGL depth-overlay shader failed: %1")
                             .arg(mDepthOverlayProgram->log());
   }
   if (mDepthOverlayShaderReady) {
@@ -1401,21 +1532,42 @@ void main() {
   mModelPickShaderReady =
       modelPickVertexCompiled && modelPickFragmentCompiled &&
       mModelPickProgram->link();
-  if (!mModelPickShaderReady && mSceneLoadMessage.isEmpty()) {
-    mSceneLoadMessage = QStringLiteral("OpenGL model-pick shader failed: %1")
+  if (!mModelPickShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
+    mScene->mSceneLoadMessage = QStringLiteral("OpenGL model-pick shader failed: %1")
                             .arg(mModelPickProgram->log());
   }
 
   mTrainingGpuPreviewCapability =
       TrainingGpuPreviewBuffer::probe(QOpenGLContext::currentContext());
 
-  if (pointShaderReady) {
-    mPointBuffer.create();
-    mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+  initializeSceneBuffers();
 
-    mPointVertexArray.create();
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
-    mPointBuffer.bind();
+  if (meshRenderingAvailable()) {
+    emit meshRenderingAvailabilityChanged(true);
+    if (mScene->mRenderMode != RenderMode::Mesh) {
+      mScene->mRenderMode = RenderMode::Mesh;
+      emit renderModeChanged(mScene->mRenderMode);
+    }
+  } else if (gaussianRenderingAvailable()) {
+    emit gaussianRenderingAvailabilityChanged(true);
+    if (mScene->mRenderMode != RenderMode::Gaussians) {
+      mScene->mRenderMode = RenderMode::Gaussians;
+      rebuildRenderedVertices();
+      emit renderModeChanged(mScene->mRenderMode);
+    }
+  }
+}
+
+void NativeViewport::initializeSceneBuffers() {
+  if (mScene->buffersInitialized) return;
+  mScene->buffersInitialized = true;
+  if ((mPointProgram != nullptr && mPointProgram->isLinked())) {
+    mScene->mPointBuffer.create();
+    mScene->mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+
+    mScene->mPointVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mPointVertexArray);
+    mScene->mPointBuffer.bind();
     mPointProgram->bind();
     mPointProgram->enableAttributeArray(0);
     mPointProgram->setAttributeBuffer(0, GL_FLOAT,
@@ -1426,18 +1578,18 @@ void main() {
                                       offsetof(PointCloudVertex, red), 3,
                                       sizeof(PointCloudVertex));
     mPointProgram->release();
-    mPointBuffer.release();
+    mScene->mPointBuffer.release();
   }
 
   if (mMeshShaderReady) {
-    mMeshVertexBuffer.create();
-    mMeshVertexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    mMeshIndexBuffer.create();
-    mMeshIndexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    mScene->mMeshVertexBuffer.create();
+    mScene->mMeshVertexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    mScene->mMeshIndexBuffer.create();
+    mScene->mMeshIndexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
 
-    mMeshVertexArray.create();
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
-    mMeshVertexBuffer.bind();
+    mScene->mMeshVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mMeshVertexArray);
+    mScene->mMeshVertexBuffer.bind();
     mMeshProgram->bind();
     mMeshProgram->enableAttributeArray(0);
     mMeshProgram->setAttributeBuffer(0, GL_FLOAT, offsetof(MeshVertex, x), 3,
@@ -1456,13 +1608,13 @@ void main() {
         4, GL_FLOAT, offsetof(MeshVertex, textureWeight), 1,
         sizeof(MeshVertex));
     mMeshProgram->release();
-    mMeshVertexBuffer.release();
+    mScene->mMeshVertexBuffer.release();
   }
 
-  if (pointShaderReady && mGaussianShaderReady) {
-    mGaussianVertexArray.create();
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
-    mPointBuffer.bind();
+  if ((mPointProgram != nullptr && mPointProgram->isLinked()) && mGaussianShaderReady) {
+    mScene->mGaussianVertexArray.create();
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
+    mScene->mPointBuffer.bind();
     mGaussianProgram->bind();
     mGaussianProgram->enableAttributeArray(0);
     mGaussianProgram->setAttributeBuffer(0, GL_FLOAT,
@@ -1488,23 +1640,9 @@ void main() {
       glVertexAttribDivisor(attribute, 1);
     }
     mGaussianProgram->release();
-    mPointBuffer.release();
+    mScene->mPointBuffer.release();
   }
 
-  if (meshRenderingAvailable()) {
-    emit meshRenderingAvailabilityChanged(true);
-    if (mRenderMode != RenderMode::Mesh) {
-      mRenderMode = RenderMode::Mesh;
-      emit renderModeChanged(mRenderMode);
-    }
-  } else if (gaussianRenderingAvailable()) {
-    emit gaussianRenderingAvailabilityChanged(true);
-    if (mRenderMode != RenderMode::Gaussians) {
-      mRenderMode = RenderMode::Gaussians;
-      rebuildRenderedVertices();
-      emit renderModeChanged(mRenderMode);
-    }
-  }
 }
 
 void NativeViewport::resizeGL(const int width, const int height) {
@@ -1527,19 +1665,19 @@ void NativeViewport::paintGL() {
         gpuPreviewError);
   }
   if (previewChanged && mTrainingGpuPreview.attached()) {
-    if (mTrainingGpuPreview.hasFrame()) {
+    if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())) {
       const QVector3D previewCenter = mTrainingGpuPreview.sceneCenter();
       const float previewRadius = mTrainingGpuPreview.sceneRadius();
       if (std::isfinite(previewCenter.x()) &&
           std::isfinite(previewCenter.y()) &&
           std::isfinite(previewCenter.z()) && std::isfinite(previewRadius) &&
           previewRadius > 0.0F) {
-        mSceneCenter = previewCenter;
-        mSceneRadius = std::max(previewRadius, 1.0e-4F);
+        mScene->mSceneCenter = previewCenter;
+        mScene->mSceneRadius = std::max(previewRadius, 1.0e-4F);
         rebuildCameraGeometry();
         if (!mTrainingGpuPreviewCameraFramed) {
           mTrainingGpuPreviewCameraFramed = true;
-          resetCamera();
+          if (!mRenderingInactiveScene) resetCamera();
         }
       }
     }
@@ -1556,31 +1694,39 @@ void NativeViewport::paintGL() {
         QStringLiteral("共享显存预览已结束"));
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  uploadPendingPointCloud();
-  uploadPendingMeshTexture();
-  uploadPendingMesh();
-
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
+  mCollectionProjection = projection;
   const QMatrix4x4 viewProjection = projection * view;
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
-  updatePointCacheSelection(modelViewProjection);
-  uploadPendingPointCachePages();
-  updateMeshCacheSelection(modelViewProjection);
-  uploadPendingMeshCachePages();
   drawInfiniteGrid(viewProjection);
   drawDepthAwareReferenceAxes(viewProjection);
   drawDepthAwareModelBounds(modelViewProjection);
-  if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
-    drawMesh(modelViewProjection);
-  } else if (mTrainingGpuPreview.hasFrame() &&
-             mRenderMode == RenderMode::Points) {
-    drawTrainingPointCloud(modelViewProjection);
-  } else if (mRenderMode == RenderMode::Gaussians &&
-             gaussianRenderingAvailable()) {
-    drawGaussianCloud(view * modelMatrix(), projection);
-  } else {
-    drawPointCloud(modelViewProjection);
+  const auto active = mScene;
+  auto ordered = mSceneStates;
+  if (ordered.isEmpty()) ordered.append(active);
+  // Opaque objects share depth. Draw transparent objects back-to-front at the
+  // object level, using the existing per-object Gaussian renderer.
+  std::stable_sort(ordered.begin(), ordered.end(), [&](const auto &left, const auto &right) {
+    const bool leftTransparent = left->mRenderMode == RenderMode::Gaussians;
+    const bool rightTransparent = right->mRenderMode == RenderMode::Gaussians;
+    if (leftTransparent != rightTransparent) return !leftTransparent;
+    const auto distance = [&](const auto &state) {
+      return (sceneDisplayTransform(*state, *active).map(state->mSceneCenter + state->mModelTranslation) -
+              cameraPosition()).lengthSquared();
+    };
+    return leftTransparent && distance(left) > distance(right);
+  });
+  for (const auto &state : ordered) {
+    const bool inactive = state != active;
+    QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
+    QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, inactive);
+    QScopedValueRollback<bool> selectionScope(mModelSelected, !inactive && mModelSelected);
+    QScopedValueRollback<QMatrix4x4> displayScope(
+        mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
+    QSignalBlocker signalBlocker(this);
+    if (!inactive) signalBlocker.unblock();
+    drawSceneGeometry(view, projection);
   }
 
   QPainter painter(this);
@@ -1594,6 +1740,36 @@ void NativeViewport::paintGL() {
   drawTransformToolStrip(painter);
   drawAxisGizmo(painter);
   painter.end();
+}
+
+void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
+  initializeSceneBuffers();
+  if (mScene->mRenderMode == RenderMode::Gaussians) {
+    const QVector3D forward = modelMatrix().transposed().mapVector(
+        (mTarget - cameraPosition()).normalized()).normalized();
+    if (!mScene->sortDirectionValid ||
+        (forward - mScene->sortedForward).lengthSquared() > 1.0e-8F) {
+      rebuildRenderedVertices();
+    }
+  }
+  uploadPendingPointCloud();
+  uploadPendingMeshTexture();
+  uploadPendingMesh();
+  const QMatrix4x4 modelViewProjection = projection * view * modelMatrix();
+  updatePointCacheSelection(modelViewProjection);
+  uploadPendingPointCachePages();
+  updateMeshCacheSelection(modelViewProjection);
+  uploadPendingMeshCachePages();
+  if (mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
+    drawMesh(modelViewProjection);
+  } else if (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame() &&
+             mScene->mRenderMode == RenderMode::Points) {
+    drawTrainingPointCloud(modelViewProjection);
+  } else if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+    drawGaussianCloud(view * modelMatrix(), projection);
+  } else {
+    drawPointCloud(modelViewProjection);
+  }
 }
 
 void NativeViewport::applyPendingTrainingGpuPreview() {
@@ -1648,9 +1824,9 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
   synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
   mTrainingGpuPreviewError.clear();
   mTrainingGpuPreviewCameraFramed = false;
-  if (mRenderMode != RenderMode::Gaussians) {
-    mRenderMode = RenderMode::Gaussians;
-    emit renderModeChanged(mRenderMode);
+  if (mScene->mRenderMode != RenderMode::Gaussians) {
+    mScene->mRenderMode = RenderMode::Gaussians;
+    emit renderModeChanged(mScene->mRenderMode);
   }
   emit trainingGpuPreviewStateChanged(
       true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
@@ -1659,9 +1835,9 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
 
 void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
                                             const bool clearExisting) {
-  const int generation = ++mCameraTrajectoryGeneration;
+  const int generation = ++mScene->mCameraTrajectoryGeneration;
   if (clearExisting || scenePath.isEmpty()) {
-    mCameraTrajectory = {};
+    mScene->mCameraTrajectory = {};
     rebuildCameraGeometry();
     emit cameraTrajectoryChanged(0, 0, false, QString(), QString());
   }
@@ -1671,19 +1847,26 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
 
   auto *watcher = new QFutureWatcher<CameraTrajectory>(this);
   connect(watcher, &QFutureWatcher<CameraTrajectory>::finished, this,
-          [this, watcher, scenePath, generation]() {
+          [this, watcher, scenePath, generation , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            const auto targetScene = weakScene.lock();
+            if (!targetScene) { watcher->deleteLater(); return; }
+            const bool foreground = targetScene == mScene;
+            QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, targetScene);
+            QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
+            QSignalBlocker sceneSignals(this);
+            if (foreground) sceneSignals.unblock();
             CameraTrajectory trajectory = watcher->result();
             watcher->deleteLater();
-            if (generation != mCameraTrajectoryGeneration ||
-                scenePath != mRequestedScenePath) {
+            if (generation != mScene->mCameraTrajectoryGeneration ||
+                scenePath != mScene->mRequestedScenePath) {
               return;
             }
-            mCameraTrajectory = std::move(trajectory);
+            mScene->mCameraTrajectory = std::move(trajectory);
             rebuildCameraGeometry();
             emit cameraTrajectoryChanged(
-                cameraCount(), mCameraTrajectory.invalidCameraCount(),
-                mCameraGeometry.decimated, mCameraTrajectory.sourcePath(),
-                mCameraTrajectory.error());
+                cameraCount(), mScene->mCameraTrajectory.invalidCameraCount(),
+                mScene->mCameraGeometry.decimated, mScene->mCameraTrajectory.sourcePath(),
+                mScene->mCameraTrajectory.error());
             update();
           });
   watcher->setFuture(QtConcurrent::run(
@@ -1691,54 +1874,63 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
 }
 
 void NativeViewport::rebuildCameraGeometry() {
-  mCameraGeometry = mCameraTrajectory.geometry(mSceneRadius);
-  if (!mSceneCoordinates.valid ||
-      (!mSceneCoordinates.automaticDisplayShift &&
-       mSceneCoordinates.displayScale == 1.0)) {
+  mScene->mCameraGeometry = mScene->mCameraTrajectory.geometry(mScene->mSceneRadius);
+  if (!mScene->mSceneCoordinates.valid ||
+      (!mScene->mSceneCoordinates.automaticDisplayShift &&
+       mScene->mSceneCoordinates.displayScale == 1.0)) {
     return;
   }
   const auto transformSegments = [this](QList<CameraLineSegment> &segments) {
     for (CameraLineSegment &segment : segments) {
-      segment.start = mSceneCoordinates.localFromGlobal(
+      segment.start = mScene->mSceneCoordinates.localFromGlobal(
           {segment.start.x(), segment.start.y(), segment.start.z()});
-      segment.end = mSceneCoordinates.localFromGlobal(
+      segment.end = mScene->mSceneCoordinates.localFromGlobal(
           {segment.end.x(), segment.end.y(), segment.end.z()});
     }
   };
-  transformSegments(mCameraGeometry.frustums);
-  transformSegments(mCameraGeometry.path);
+  transformSegments(mScene->mCameraGeometry.frustums);
+  transformSegments(mScene->mCameraGeometry.path);
 }
 
 void NativeViewport::startSceneLoad(const QString &scenePath) {
-  mSceneLoadMessage = QStringLiteral("正在读取 PLY 场景...");
+  mScene->mSceneLoadMessage = QStringLiteral("正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
-  const int generation = mSceneGeneration;
+  const int generation = mScene->mSceneGeneration;
 
   auto *watcher = new QFutureWatcher<PointCloudData>(this);
   connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
-          [this, watcher, scenePath, generation]() {
+          [this, watcher, scenePath, generation , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            const auto targetScene = weakScene.lock();
+            if (!targetScene) { watcher->deleteLater(); return; }
+            const bool foreground = targetScene == mScene;
+            QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, targetScene);
+            QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
+            QSignalBlocker sceneSignals(this);
+            if (foreground) sceneSignals.unblock();
             PointCloudData data = watcher->result();
             watcher->deleteLater();
-            if (scenePath != mRequestedScenePath ||
-                generation != mSceneGeneration) {
+            if (scenePath != mScene->mRequestedScenePath ||
+                generation != mScene->mSceneGeneration) {
               return;
             }
             if (!data.isValid()) {
-              mSceneLoadMessage = data.error;
+              mScene->mSceneLoadMessage = data.error;
               emit sceneLoadFailed(scenePath, data.error);
               update();
               return;
             }
 
-            mSceneCoordinates = data.coordinates;
-            mSceneCenter = data.center();
-            mTarget = mSceneCenter;
-            mSceneRadius = data.radius();
+            mScene->mSceneCoordinates = data.coordinates;
+            mScene->mModelTranslation = mScene->sourceTranslation *
+                static_cast<float>(data.coordinates.displayScale);
+            mScene->mSceneCenter = data.center();
+            if (!mRenderingInactiveScene) mTarget = mScene->mSceneCenter;
+            mScene->mSceneRadius = data.radius();
             rebuildCameraGeometry();
             const bool loadedHasMesh = data.hasMesh();
-            mPreviewPointCount = data.previewPointCount();
-            mSourceFaceCount = data.sourceFaceCount;
-            mPreviewTriangleCount = data.meshCache.isValid()
+            mScene->mPreviewPointCount = data.previewPointCount();
+            mScene->mSourceFaceCount = data.sourceFaceCount;
+            mScene->mPreviewTriangleCount = data.meshCache.isValid()
                                         ? static_cast<qsizetype>(
                                               std::min<qint64>(
                                                   data.meshCache
@@ -1746,79 +1938,80 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
                                                   std::numeric_limits<
                                                       qsizetype>::max()))
                                         : data.meshIndices.size() / 3;
-            mRenderedMeshIndexCount = data.meshIndices.size();
-            mSourcePositions = std::move(data.sourcePositions);
-            mPreviewVertices = std::move(data.vertices);
-            mPreviewOnlyScene = data.previewOnly;
-            mPointCache = std::move(data.pointCache);
-            mMeshCache = std::move(data.meshCache);
-            mMeshTexturePath = std::move(data.meshTexturePath);
-            mMeshTextureError = std::move(data.meshTextureError);
-            mPendingMeshTexture = std::move(data.meshTextureImage);
-            mMeshHasTextureCoordinates =
+            mScene->mRenderedMeshIndexCount = data.meshIndices.size();
+            mScene->mSourcePositions = std::move(data.sourcePositions);
+            mScene->mPreviewVertices = std::move(data.vertices);
+            mScene->mPreviewOnlyScene = data.previewOnly;
+            mScene->mPointCache = std::move(data.pointCache);
+            mScene->mMeshCache = std::move(data.meshCache);
+            mScene->mMeshTexturePath = std::move(data.meshTexturePath);
+            mScene->mMeshTextureError = std::move(data.meshTextureError);
+            mScene->mPendingMeshTexture = std::move(data.meshTextureImage);
+            mScene->mMeshHasTextureCoordinates =
                 data.meshHasTextureCoordinates ||
-                mMeshCache.hasTextureCoordinates;
-            mMeshTextureUploadPending =
-                mMeshHasTextureCoordinates && !mPendingMeshTexture.isNull();
-            mMeshTextureClearPending = true;
-            mMeshTextureReady = false;
-            if (!mMeshTextureError.isEmpty()) {
+                mScene->mMeshCache.hasTextureCoordinates;
+            mScene->mMeshTextureUploadPending =
+                mScene->mMeshHasTextureCoordinates && !mScene->mPendingMeshTexture.isNull();
+            mScene->mMeshTextureClearPending = true;
+            mScene->mMeshTextureReady = false;
+            if (!mScene->mMeshTextureError.isEmpty()) {
               qWarning().noquote()
                   << QStringLiteral("[mesh-texture] %1")
-                         .arg(mMeshTextureError);
+                         .arg(mScene->mMeshTextureError);
             }
-            mDesiredPointCacheNodes.clear();
-            mPointCacheReadsInFlight.clear();
-            mPointCacheFailedNodes.clear();
-            mPendingPointCachePages.clear();
-            mFullResolutionPointCount =
-                mPointCache.isValid() ? mPreviewPointCount : 0;
-            mUploadedFullResolutionPointCount = 0;
-            mFullResolutionPointClearPending = true;
-            mDesiredMeshCacheNodes.clear();
-            mMeshCacheReadsInFlight.clear();
-            mMeshCacheFailedNodes.clear();
-            mPendingMeshCachePages.clear();
-            mFullResolutionMeshTriangleCount =
+            mScene->mDesiredPointCacheNodes.clear();
+            mScene->mPointCacheReadsInFlight.clear();
+            mScene->mPointCacheFailedNodes.clear();
+            mScene->mPendingPointCachePages.clear();
+            mScene->mFullResolutionPointCount =
+                mScene->mPointCache.isValid() ? mScene->mPreviewPointCount : 0;
+            mScene->mUploadedFullResolutionPointCount = 0;
+            mScene->mFullResolutionPointClearPending = true;
+            mScene->mDesiredMeshCacheNodes.clear();
+            mScene->mMeshCacheReadsInFlight.clear();
+            mScene->mMeshCacheFailedNodes.clear();
+            mScene->mPendingMeshCachePages.clear();
+            mScene->mFullResolutionMeshTriangleCount =
                 pagedMeshAvailable()
                     ? static_cast<qsizetype>(std::min<qint64>(
-                          mMeshCache.renderableTriangleCount,
+                          mScene->mMeshCache.renderableTriangleCount,
                           std::numeric_limits<qsizetype>::max()))
                     : 0;
-            mUploadedFullResolutionMeshTriangleCount = 0;
-            mFullResolutionMeshClearPending = true;
-            mPendingMeshVertices = std::move(data.meshVertices);
-            mPendingMeshIndices = std::move(data.meshIndices);
-            mMeshUploadPending = true;
-            mHasMesh = loadedHasMesh;
-            mEditModel.reset(
-                mHasMesh || mPreviewOnlyScene ? 0 : mSourcePositions.size());
+            mScene->mUploadedFullResolutionMeshTriangleCount = 0;
+            mScene->mFullResolutionMeshClearPending = true;
+            mScene->mPendingMeshVertices = std::move(data.meshVertices);
+            mScene->mPendingMeshIndices = std::move(data.meshIndices);
+            mScene->mMeshUploadPending = true;
+            mScene->mHasMesh = loadedHasMesh;
+            mScene->mEditModel.reset(
+                mScene->mHasMesh || mScene->mPreviewOnlyScene ? 0 : mScene->mSourcePositions.size());
             const bool wasAvailable = gaussianRenderingAvailable();
             // The out-of-core cache intentionally stores only exact XYZ/RGB
             // centers. Do not expose Gaussian mode until scale, rotation, and
             // opacity also have a paged representation.
-            mHasGaussianAttributes =
-                data.hasGaussianAttributes && !mPreviewOnlyScene;
+            mScene->mHasGaussianAttributes =
+                data.hasGaussianAttributes && !mScene->mPreviewOnlyScene;
             const bool isAvailable = gaussianRenderingAvailable();
             if (isAvailable != wasAvailable) {
               emit gaussianRenderingAvailabilityChanged(isAvailable);
             }
             const RenderMode loadedMode =
-                mHasMesh && mMeshShaderReady
+                mScene->mHasMesh && mMeshShaderReady
                     ? RenderMode::Mesh
                     : isAvailable ? RenderMode::Gaussians : RenderMode::Points;
-            if (mRenderMode != loadedMode) {
-              mRenderMode = loadedMode;
-              emit renderModeChanged(mRenderMode);
+            if (mScene->mRenderMode != loadedMode) {
+              mScene->mRenderMode = loadedMode;
+              emit renderModeChanged(mScene->mRenderMode);
             }
-            mSceneLoadMessage.clear();
-            resetCamera();
+            mScene->mSceneLoadMessage.clear();
+            if (!mRenderingInactiveScene) resetCamera();
+            else rebuildRenderedVertices();
             updateFrameRefreshPolicy();
             notifyEditState();
             notifyModelInteractionState();
             emit meshRenderingAvailabilityChanged(meshRenderingAvailable());
-            emit sceneLoaded(data.sourceVertexCount, mPreviewPointCount,
-                             data.sourceFaceCount, mPreviewTriangleCount);
+            emit sceneLoaded(data.sourceVertexCount, mScene->mPreviewPointCount,
+                             data.sourceFaceCount, mScene->mPreviewTriangleCount);
             emit sceneCoordinatesChanged();
           });
   watcher->setFuture(QtConcurrent::run(
@@ -1827,18 +2020,18 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
 
 void NativeViewport::startSelection(const ScreenSelectionRequest &request,
                                     const SelectionOperation operation) {
-  if (mSelectionBusy || !hasEditableScene()) {
+  if (mScene->mSelectionBusy || !hasEditableScene()) {
     return;
   }
 
-  mSelectionBusy = true;
+  mScene->mSelectionBusy = true;
   emit selectionBusyChanged(true);
   notifyEditState();
   update();
 
-  const int generation = mSceneGeneration;
-  const QVector<PointPosition> positions = mSourcePositions;
-  const QBitArray deleted = mEditModel.deletedBits();
+  const int generation = mScene->mSceneGeneration;
+  const QVector<PointPosition> positions = mScene->mSourcePositions;
+  const QBitArray deleted = mScene->mEditModel.deletedBits();
   const QMatrix4x4 viewProjection = viewProjectionMatrix() * modelMatrix();
   const QSize viewportSize = size();
   ScreenSelectionRequest selection = request;
@@ -1846,14 +2039,21 @@ void NativeViewport::startSelection(const ScreenSelectionRequest &request,
 
   auto *watcher = new QFutureWatcher<QVector<quint32>>(this);
   connect(watcher, &QFutureWatcher<QVector<quint32>>::finished, this,
-          [this, watcher, generation, operation]() {
+          [this, watcher, generation, operation , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            const auto targetScene = weakScene.lock();
+            if (!targetScene) { watcher->deleteLater(); return; }
+            const bool foreground = targetScene == mScene;
+            QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, targetScene);
+            QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
+            QSignalBlocker sceneSignals(this);
+            if (foreground) sceneSignals.unblock();
             const QVector<quint32> matches = watcher->result();
             watcher->deleteLater();
-            if (generation != mSceneGeneration) {
+            if (generation != mScene->mSceneGeneration) {
               return;
             }
-            mSelectionBusy = false;
-            mEditModel.applySelection(matches, operation);
+            mScene->mSelectionBusy = false;
+            mScene->mEditModel.applySelection(matches, operation);
             rebuildRenderedVertices();
             notifyEditState();
             emit selectionBusyChanged(false);
@@ -1913,11 +2113,11 @@ void NativeViewport::finishSelectionGesture(
 }
 
 void NativeViewport::rebuildRenderedVertices() {
-  mPendingVertices.clear();
-  mPendingVertices.reserve(mPreviewVertices.size());
-  const QBitArray &selected = mEditModel.selectedBits();
-  const QBitArray &deleted = mEditModel.deletedBits();
-  for (const PointCloudVertex &sourceVertex : mPreviewVertices) {
+  mScene->mPendingVertices.clear();
+  mScene->mPendingVertices.reserve(mScene->mPreviewVertices.size());
+  const QBitArray &selected = mScene->mEditModel.selectedBits();
+  const QBitArray &deleted = mScene->mEditModel.deletedBits();
+  for (const PointCloudVertex &sourceVertex : mScene->mPreviewVertices) {
     const qsizetype sourceIndex =
         static_cast<qsizetype>(sourceVertex.sourceIndex);
     if (sourceIndex >= deleted.size() || deleted.testBit(sourceIndex)) {
@@ -1930,9 +2130,9 @@ void NativeViewport::rebuildRenderedVertices() {
       renderedVertex.blue = 0.16F;
       renderedVertex.opacity = std::max(renderedVertex.opacity, 0.85F);
     }
-    mPendingVertices.append(renderedVertex);
+    mScene->mPendingVertices.append(renderedVertex);
   }
-  if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+  if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     QVector3D forward = (mTarget - cameraPosition()).normalized();
     bool invertible = false;
     const QMatrix4x4 model = modelMatrix();
@@ -1940,7 +2140,9 @@ void NativeViewport::rebuildRenderedVertices() {
     if (invertible) {
       forward = model.transposed().mapVector(forward).normalized();
     }
-    std::sort(mPendingVertices.begin(), mPendingVertices.end(),
+    mScene->sortedForward = forward;
+    mScene->sortDirectionValid = true;
+    std::sort(mScene->mPendingVertices.begin(), mScene->mPendingVertices.end(),
               [&forward](const PointCloudVertex &left,
                          const PointCloudVertex &right) {
                 const float leftDepth = left.x * forward.x() +
@@ -1955,18 +2157,21 @@ void NativeViewport::rebuildRenderedVertices() {
                 return leftDepth > rightDepth;
               });
   }
-  mRenderedPointCount = mPendingVertices.size();
-  mPointUploadPending = true;
+  mScene->mRenderedPointCount = mScene->mPendingVertices.size();
+  mScene->mPointUploadPending = true;
   updateFrameRefreshPolicy();
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
-  const bool shouldRefreshContinuously =
-      mRenderedPointCount > 0 || !mPendingPointCachePages.isEmpty() ||
-      mRenderedMeshIndexCount > 0 || mMeshTextureUploadPending ||
-      !mPendingMeshCachePages.isEmpty() ||
-      !mMeshCacheReadsInFlight.isEmpty() ||
-      !mFullResolutionMeshGpuChunks.isEmpty();
+  const auto needsRefresh = [](const auto &scene) {
+    return scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
+        !scene->mPendingPointCachePages.isEmpty() || !scene->mPointCacheReadsInFlight.isEmpty() ||
+        !scene->mFullResolutionPointGpuChunks.isEmpty() || scene->mRenderedMeshIndexCount > 0 ||
+        scene->mMeshTextureUploadPending || !scene->mPendingMeshCachePages.isEmpty() ||
+        !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty();
+  };
+  const bool shouldRefreshContinuously = needsRefresh(mScene) ||
+      std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), needsRefresh);
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
@@ -1975,45 +2180,45 @@ void NativeViewport::updateFrameRefreshPolicy() {
 }
 
 void NativeViewport::notifyEditState() {
-  emit editStateChanged(mEditModel.selectedCount(), mEditModel.deletedCount(),
-                        mEditModel.canUndo() || canUndoModelTransform(),
-                        mEditModel.canRedo() || canRedoModelTransform(),
-                        hasEditableScene(), mEditModel.hasUnsavedChanges());
+  emit editStateChanged(mScene->mEditModel.selectedCount(), mScene->mEditModel.deletedCount(),
+                        mScene->mEditModel.canUndo() || canUndoModelTransform(),
+                        mScene->mEditModel.canRedo() || canRedoModelTransform(),
+                        hasEditableScene(), mScene->mEditModel.hasUnsavedChanges());
 }
 
 bool NativeViewport::canUndoModelTransform() const {
-  return mModelTransformHistoryIndex > 0 &&
-         mModelTransformHistoryIndex < mModelTransformHistory.size();
+  return mScene->mModelTransformHistoryIndex > 0 &&
+         mScene->mModelTransformHistoryIndex < mScene->mModelTransformHistory.size();
 }
 
 bool NativeViewport::canRedoModelTransform() const {
-  return !mModelTransformHistory.isEmpty() &&
-         mModelTransformHistoryIndex + 1 < mModelTransformHistory.size();
+  return !mScene->mModelTransformHistory.isEmpty() &&
+         mScene->mModelTransformHistoryIndex + 1 < mScene->mModelTransformHistory.size();
 }
 
 void NativeViewport::resetModelTransformHistory() {
-  mModelTransformHistory = {
-      ModelTransform{mModelTranslation, mModelRotation, mModelScale}};
-  mModelTransformHistoryIndex = 0;
+  mScene->mModelTransformHistory = {
+      ModelTransform{mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale}};
+  mScene->mModelTransformHistoryIndex = 0;
 }
 
 void NativeViewport::commitModelTransform() {
   const float translationScale = std::max(
-      {1.0F, mModelTranslation.length(),
+      {1.0F, mScene->mModelTranslation.length(),
        mModelDragStartTransform.translation.length()});
-  if ((mModelTranslation - mModelDragStartTransform.translation)
+  if ((mScene->mModelTranslation - mModelDragStartTransform.translation)
               .lengthSquared() <=
           translationScale * translationScale * 1.0e-12F &&
-      rotationsEquivalent(mModelRotation,
+      rotationsEquivalent(mScene->mModelRotation,
                           mModelDragStartTransform.rotation) &&
-      scalesEquivalent(mModelScale, mModelDragStartTransform.scale)) {
+      scalesEquivalent(mScene->mModelScale, mModelDragStartTransform.scale)) {
     return;
   }
-  mModelTransformHistory.resize(mModelTransformHistoryIndex + 1);
-  mModelTransformHistory.append(
-      ModelTransform{mModelTranslation, mModelRotation, mModelScale});
-  mModelTransformHistoryIndex = mModelTransformHistory.size() - 1;
-  emit modelTransformCommitted(mModelTranslation, mModelRotation, mModelScale);
+  mScene->mModelTransformHistory.resize(mScene->mModelTransformHistoryIndex + 1);
+  mScene->mModelTransformHistory.append(
+      ModelTransform{mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale});
+  mScene->mModelTransformHistoryIndex = mScene->mModelTransformHistory.size() - 1;
+  emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale);
   notifyEditState();
   notifyModelInteractionState();
 }
@@ -2021,28 +2226,28 @@ void NativeViewport::commitModelTransform() {
 void NativeViewport::notifyModelInteractionState() {
   emit modelInteractionStateChanged(
       selectableModelAvailable(), mModelSelected, canUndoModelTransform(),
-      canRedoModelTransform(), mModelTranslation, mModelRotation, mModelScale);
+      canRedoModelTransform(), mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale);
 }
 
 void NativeViewport::uploadPendingPointCloud() {
-  if (!mPointUploadPending || !mPointBuffer.isCreated()) {
+  if (!mScene->mPointUploadPending || !mScene->mPointBuffer.isCreated()) {
     return;
   }
-  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
-  mPointBuffer.bind();
-  const qsizetype byteCount = mPendingVertices.size() *
+  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mPointVertexArray);
+  mScene->mPointBuffer.bind();
+  const qsizetype byteCount = mScene->mPendingVertices.size() *
                               static_cast<qsizetype>(sizeof(PointCloudVertex));
-  mPointBuffer.allocate(
-      mPendingVertices.isEmpty() ? nullptr : mPendingVertices.constData(),
+  mScene->mPointBuffer.allocate(
+      mScene->mPendingVertices.isEmpty() ? nullptr : mScene->mPendingVertices.constData(),
       static_cast<int>(byteCount));
-  mPointBuffer.release();
-  mPendingVertices.clear();
-  mPointUploadPending = false;
+  mScene->mPointBuffer.release();
+  mScene->mPendingVertices.clear();
+  mScene->mPointUploadPending = false;
 }
 
 void NativeViewport::releaseFullResolutionPointCloud() {
   for (const FullResolutionGpuChunk &chunk :
-       std::as_const(mFullResolutionPointGpuChunks)) {
+       std::as_const(mScene->mFullResolutionPointGpuChunks)) {
     if (chunk.buffer != 0) {
       glDeleteBuffers(1, &chunk.buffer);
     }
@@ -2050,25 +2255,25 @@ void NativeViewport::releaseFullResolutionPointCloud() {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
   }
-  mFullResolutionPointGpuChunks.clear();
-  mPointCacheResidentBytes = 0;
-  mUploadedFullResolutionPointCount = 0;
+  mScene->mFullResolutionPointGpuChunks.clear();
+  mScene->mPointCacheResidentBytes = 0;
+  mScene->mUploadedFullResolutionPointCount = 0;
 }
 
 void NativeViewport::updatePointCacheSelection(
     const QMatrix4x4 &viewProjection) {
-  if (!mPreviewOnlyScene || !mPointCache.isValid()) {
-    mDesiredPointCacheNodes.clear();
+  if (!mScene->mPreviewOnlyScene || !mScene->mPointCache.isValid()) {
+    mScene->mDesiredPointCacheNodes.clear();
     return;
   }
-  ++mPointCacheFrameSerial;
+  ++mScene->mPointCacheFrameSerial;
   const bool interacting =
       mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
       (mViewSnapAnimation != nullptr &&
        mViewSnapAnimation->state() == QAbstractAnimation::Running);
   const float refinementThresholdPixels = interacting ? 140.0F : 28.0F;
   const qsizetype pointBudget = static_cast<qsizetype>(
-      (static_cast<long double>(mPointCacheGpuBudgetBytes) * 0.85L) /
+      (static_cast<long double>((mPointCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) * 0.85L) /
       sizeof(PointPreviewVertex));
   const QVector3D eye = cameraPosition();
   const float viewportHeight =
@@ -2077,16 +2282,16 @@ void NativeViewport::updatePointCacheSelection(
     const QVector3D center = modelMatrix().map(
         (node.boundsMinimum + node.boundsMaximum) * 0.5F);
     const float maximumScale =
-        std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
-                  std::abs(mModelScale.z())});
+        std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
+                  std::abs(mScene->mModelScale.z())});
     const float radius = maximumScale *
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
-                 mSceneRadius * 1.0e-6F);
+                 mScene->mSceneRadius * 1.0e-6F);
     if (mOrthographic) {
       return radius / std::max(mDistance, 1.0e-5F) * viewportHeight * 2.0F;
     }
     const float distance =
-        std::max((center - eye).length() - radius, mSceneRadius * 1.0e-5F);
+        std::max((center - eye).length() - radius, mScene->mSceneRadius * 1.0e-5F);
     return radius / distance * viewportHeight / std::tan(radians(22.5F));
   };
   const auto visible = [&](const PointCloudCacheNode &node) {
@@ -2098,7 +2303,7 @@ void NativeViewport::updatePointCacheSelection(
   QSet<int> selected;
   QVector<int> refinable;
   const PointCloudCacheNode &root =
-      mPointCache.nodes.at(mPointCache.rootNode);
+      mScene->mPointCache.nodes.at(mScene->mPointCache.rootNode);
   qsizetype selectedPoints = 0;
   if (visible(root)) {
     selected.insert(root.id);
@@ -2110,7 +2315,7 @@ void NativeViewport::updatePointCacheSelection(
     float bestPriority = refinementThresholdPixels;
     for (qsizetype position = 0; position < refinable.size(); ++position) {
       const PointCloudCacheNode &candidate =
-          mPointCache.nodes.at(refinable.at(position));
+          mScene->mPointCache.nodes.at(refinable.at(position));
       const float priority = projectedPixels(candidate);
       if (priority > bestPriority) {
         bestPriority = priority;
@@ -2121,11 +2326,11 @@ void NativeViewport::updatePointCacheSelection(
       break;
     }
     const int nodeId = refinable.takeAt(bestPosition);
-    const PointCloudCacheNode &node = mPointCache.nodes.at(nodeId);
+    const PointCloudCacheNode &node = mScene->mPointCache.nodes.at(nodeId);
     QVector<int> visibleChildren;
     qsizetype childPoints = 0;
     for (const int childId : node.children) {
-      const PointCloudCacheNode &child = mPointCache.nodes.at(childId);
+      const PointCloudCacheNode &child = mScene->mPointCache.nodes.at(childId);
       if (!visible(child) || child.pointCount <= 0) {
         continue;
       }
@@ -2144,42 +2349,42 @@ void NativeViewport::updatePointCacheSelection(
     selectedPoints = withoutParent + childPoints;
     for (const int childId : std::as_const(visibleChildren)) {
       selected.insert(childId);
-      if (!mPointCache.nodes.at(childId).isLeaf()) {
+      if (!mScene->mPointCache.nodes.at(childId).isLeaf()) {
         refinable.append(childId);
       }
     }
   }
-  mDesiredPointCacheNodes = std::move(selected);
+  mScene->mDesiredPointCacheNodes = std::move(selected);
   requestMissingPointCachePages();
 }
 
 void NativeViewport::requestMissingPointCachePages() {
-  if (!mPointCache.isValid()) {
+  if (!mScene->mPointCache.isValid()) {
     return;
   }
   const auto isResident = [this](const int nodeId) {
-    return std::any_of(mFullResolutionPointGpuChunks.cbegin(),
-                       mFullResolutionPointGpuChunks.cend(),
+    return std::any_of(mScene->mFullResolutionPointGpuChunks.cbegin(),
+                       mScene->mFullResolutionPointGpuChunks.cend(),
                        [nodeId](const FullResolutionGpuChunk &chunk) {
                          return chunk.nodeId == nodeId;
                        });
   };
   QSet<int> needed;
-  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredPointCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0 && !isResident(nodeId)) {
-      if (!mPointCacheReadsInFlight.contains(nodeId) &&
-          !mPointCacheFailedNodes.contains(nodeId)) {
+      if (!mScene->mPointCacheReadsInFlight.contains(nodeId) &&
+          !mScene->mPointCacheFailedNodes.contains(nodeId)) {
         needed.insert(nodeId);
       }
-      nodeId = mPointCache.nodes.at(nodeId).parent;
+      nodeId = mScene->mPointCache.nodes.at(nodeId).parent;
     }
   }
   QVector<int> ordered = needed.values();
   std::sort(ordered.begin(), ordered.end(), [this](const int left,
                                                    const int right) {
-    const PointCloudCacheNode &a = mPointCache.nodes.at(left);
-    const PointCloudCacheNode &b = mPointCache.nodes.at(right);
+    const PointCloudCacheNode &a = mScene->mPointCache.nodes.at(left);
+    const PointCloudCacheNode &b = mScene->mPointCache.nodes.at(right);
     if (a.depth != b.depth) {
       return a.depth < b.depth;
     }
@@ -2187,26 +2392,33 @@ void NativeViewport::requestMissingPointCachePages() {
   });
   constexpr qsizetype kMaximumReadsInFlight = 2;
   for (const int nodeId : std::as_const(ordered)) {
-    if (mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
+    if (mScene->mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
       break;
     }
-    mPointCacheReadsInFlight.insert(nodeId);
-    const int generation = mSceneGeneration;
-    const PointCloudCacheIndex cache = mPointCache;
+    mScene->mPointCacheReadsInFlight.insert(nodeId);
+    const int generation = mScene->mSceneGeneration;
+    const PointCloudCacheIndex cache = mScene->mPointCache;
     auto *watcher = new QFutureWatcher<PointCloudCachePage>(this);
     connect(watcher, &QFutureWatcher<PointCloudCachePage>::finished, this,
-            [this, watcher, generation, nodeId]() {
+            [this, watcher, generation, nodeId , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            const auto targetScene = weakScene.lock();
+            if (!targetScene) { watcher->deleteLater(); return; }
+            const bool foreground = targetScene == mScene;
+            QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, targetScene);
+            QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
+            QSignalBlocker sceneSignals(this);
+            if (foreground) sceneSignals.unblock();
               PointCloudCachePage page = watcher->result();
               watcher->deleteLater();
-              if (generation != mSceneGeneration) {
+              if (generation != mScene->mSceneGeneration) {
                 return;
               }
-              mPointCacheReadsInFlight.remove(nodeId);
+              mScene->mPointCacheReadsInFlight.remove(nodeId);
               if (page.isValid()) {
-                mPendingPointCachePages.append(std::move(page));
+                mScene->mPendingPointCachePages.append(std::move(page));
               } else {
-                mPointCacheFailedNodes.insert(nodeId);
-                mPointCacheError = page.error;
+                mScene->mPointCacheFailedNodes.insert(nodeId);
+                mScene->mPointCacheError = page.error;
               }
               updateFrameRefreshPolicy();
               update();
@@ -2218,32 +2430,32 @@ void NativeViewport::requestMissingPointCachePages() {
 
 void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
   const auto isResident = [this](const int nodeId) {
-    return std::any_of(mFullResolutionPointGpuChunks.cbegin(),
-                       mFullResolutionPointGpuChunks.cend(),
+    return std::any_of(mScene->mFullResolutionPointGpuChunks.cbegin(),
+                       mScene->mFullResolutionPointGpuChunks.cend(),
                        [nodeId](const FullResolutionGpuChunk &chunk) {
                          return chunk.nodeId == nodeId;
                        });
   };
   QSet<int> protectedNodes;
-  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredPointCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0) {
       if (isResident(nodeId)) {
         protectedNodes.insert(nodeId);
         break;
       }
-      nodeId = mPointCache.nodes.at(nodeId).parent;
+      nodeId = mScene->mPointCache.nodes.at(nodeId).parent;
     }
   }
-  while (!mFullResolutionPointGpuChunks.isEmpty() &&
-         mPointCacheResidentBytes + requiredBytes >
-             mPointCacheGpuBudgetBytes) {
+  while (!mScene->mFullResolutionPointGpuChunks.isEmpty() &&
+         mScene->mPointCacheResidentBytes + requiredBytes >
+             (mPointCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) {
     qsizetype victim = -1;
     quint64 oldest = std::numeric_limits<quint64>::max();
     for (qsizetype index = 0;
-         index < mFullResolutionPointGpuChunks.size(); ++index) {
+         index < mScene->mFullResolutionPointGpuChunks.size(); ++index) {
       const FullResolutionGpuChunk &chunk =
-          mFullResolutionPointGpuChunks.at(index);
+          mScene->mFullResolutionPointGpuChunks.at(index);
       if (!protectedNodes.contains(chunk.nodeId) &&
           chunk.lastUsedFrame < oldest) {
         victim = index;
@@ -2252,9 +2464,9 @@ void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
     }
     if (victim < 0) {
       for (qsizetype index = 0;
-           index < mFullResolutionPointGpuChunks.size(); ++index) {
+           index < mScene->mFullResolutionPointGpuChunks.size(); ++index) {
         const FullResolutionGpuChunk &chunk =
-            mFullResolutionPointGpuChunks.at(index);
+            mScene->mFullResolutionPointGpuChunks.at(index);
         if (chunk.lastUsedFrame < oldest) {
           victim = index;
           oldest = chunk.lastUsedFrame;
@@ -2265,35 +2477,35 @@ void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
       break;
     }
     const FullResolutionGpuChunk chunk =
-        mFullResolutionPointGpuChunks.takeAt(victim);
+        mScene->mFullResolutionPointGpuChunks.takeAt(victim);
     if (chunk.buffer != 0) {
       glDeleteBuffers(1, &chunk.buffer);
     }
     if (chunk.vertexArray != 0) {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
-    mPointCacheResidentBytes -= chunk.byteCount;
+    mScene->mPointCacheResidentBytes -= chunk.byteCount;
   }
 }
 
 void NativeViewport::uploadPendingPointCachePages() {
-  if (mFullResolutionPointClearPending) {
+  if (mScene->mFullResolutionPointClearPending) {
     releaseFullResolutionPointCloud();
-    mFullResolutionPointClearPending = false;
+    mScene->mFullResolutionPointClearPending = false;
   }
-  if (mPendingPointCachePages.isEmpty() || mPointProgram == nullptr ||
+  if (mScene->mPendingPointCachePages.isEmpty() || mPointProgram == nullptr ||
       !mPointProgram->isLinked()) {
     return;
   }
-  PointCloudCachePage page = mPendingPointCachePages.takeFirst();
+  PointCloudCachePage page = mScene->mPendingPointCachePages.takeFirst();
   const bool alreadyResident = std::any_of(
-      mFullResolutionPointGpuChunks.cbegin(),
-      mFullResolutionPointGpuChunks.cend(),
+      mScene->mFullResolutionPointGpuChunks.cbegin(),
+      mScene->mFullResolutionPointGpuChunks.cend(),
       [&page](const FullResolutionGpuChunk &chunk) {
         return chunk.nodeId == page.nodeId;
       });
   if (!alreadyResident && page.nodeId >= 0 &&
-      page.nodeId < mPointCache.nodes.size()) {
+      page.nodeId < mScene->mPointCache.nodes.size()) {
     const qsizetype byteCount =
         page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
     evictPointCacheUntilFits(byteCount);
@@ -2301,8 +2513,8 @@ void NativeViewport::uploadPendingPointCachePages() {
     gpuChunk.nodeId = page.nodeId;
     gpuChunk.pointCount = static_cast<GLsizei>(page.vertices.size());
     gpuChunk.byteCount = byteCount;
-    gpuChunk.lastUsedFrame = mPointCacheFrameSerial;
-    const PointCloudCacheNode &node = mPointCache.nodes.at(page.nodeId);
+    gpuChunk.lastUsedFrame = mScene->mPointCacheFrameSerial;
+    const PointCloudCacheNode &node = mScene->mPointCache.nodes.at(page.nodeId);
     gpuChunk.boundsMinimum = node.boundsMinimum;
     gpuChunk.boundsMaximum = node.boundsMaximum;
     while (glGetError() != GL_NO_ERROR) {
@@ -2322,23 +2534,23 @@ void NativeViewport::uploadPendingPointCachePages() {
       glVertexAttribPointer(
           1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
           reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
-      mPointCacheResidentBytes += byteCount;
-      mFullResolutionPointGpuChunks.append(gpuChunk);
+      mScene->mPointCacheResidentBytes += byteCount;
+      mScene->mFullResolutionPointGpuChunks.append(gpuChunk);
     } else {
       glDeleteBuffers(1, &gpuChunk.buffer);
       glDeleteVertexArrays(1, &gpuChunk.vertexArray);
-      mPointCacheFailedNodes.insert(page.nodeId);
-      mPointCacheError = QStringLiteral(
+      mScene->mPointCacheFailedNodes.insert(page.nodeId);
+      mScene->mPointCacheError = QStringLiteral(
           "GPU memory could not accept point-cache node %1.")
                              .arg(page.nodeId);
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
   }
-  mUploadedFullResolutionPointCount = 0;
+  mScene->mUploadedFullResolutionPointCount = 0;
   for (const FullResolutionGpuChunk &chunk :
-       std::as_const(mFullResolutionPointGpuChunks)) {
-    mUploadedFullResolutionPointCount += chunk.pointCount;
+       std::as_const(mScene->mFullResolutionPointGpuChunks)) {
+    mScene->mUploadedFullResolutionPointCount += chunk.pointCount;
   }
   requestMissingPointCachePages();
   updateFrameRefreshPolicy();
@@ -2347,7 +2559,7 @@ void NativeViewport::uploadPendingPointCachePages() {
 
 void NativeViewport::releaseFullResolutionMesh() {
   for (const FullResolutionMeshGpuChunk &chunk :
-       std::as_const(mFullResolutionMeshGpuChunks)) {
+       std::as_const(mScene->mFullResolutionMeshGpuChunks)) {
     if (chunk.indexBuffer != 0) {
       glDeleteBuffers(1, &chunk.indexBuffer);
     }
@@ -2358,61 +2570,61 @@ void NativeViewport::releaseFullResolutionMesh() {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
   }
-  mFullResolutionMeshGpuChunks.clear();
-  mMeshCacheResidentBytes = 0;
-  mUploadedFullResolutionMeshTriangleCount = 0;
-  mDrawnFullResolutionMeshTriangleCount = 0;
+  mScene->mFullResolutionMeshGpuChunks.clear();
+  mScene->mMeshCacheResidentBytes = 0;
+  mScene->mUploadedFullResolutionMeshTriangleCount = 0;
+  mScene->mDrawnFullResolutionMeshTriangleCount = 0;
 }
 
 void NativeViewport::releaseMeshTexture() {
-  if (mMeshTexture != 0) {
-    glDeleteTextures(1, &mMeshTexture);
-    mMeshTexture = 0;
+  if (mScene->mMeshTexture != 0) {
+    glDeleteTextures(1, &mScene->mMeshTexture);
+    mScene->mMeshTexture = 0;
   }
-  mMeshTextureReady = false;
-  mMeshTextureSize = {};
+  mScene->mMeshTextureReady = false;
+  mScene->mMeshTextureSize = {};
 }
 
 void NativeViewport::uploadPendingMeshTexture() {
-  if (mMeshTextureClearPending) {
+  if (mScene->mMeshTextureClearPending) {
     releaseMeshTexture();
-    mMeshTextureClearPending = false;
+    mScene->mMeshTextureClearPending = false;
   }
-  if (!mMeshTextureUploadPending) {
+  if (!mScene->mMeshTextureUploadPending) {
     return;
   }
-  mMeshTextureUploadPending = false;
-  if (!mMeshHasTextureCoordinates || mPendingMeshTexture.isNull()) {
-    mPendingMeshTexture = {};
+  mScene->mMeshTextureUploadPending = false;
+  if (!mScene->mMeshHasTextureCoordinates || mScene->mPendingMeshTexture.isNull()) {
+    mScene->mPendingMeshTexture = {};
     return;
   }
 
   GLint maximumTextureSize = 0;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
-  QImage image = mPendingMeshTexture;
+  QImage image = mScene->mPendingMeshTexture;
   if (maximumTextureSize > 0 &&
       (image.width() > maximumTextureSize ||
        image.height() > maximumTextureSize)) {
     image = image.scaled(maximumTextureSize, maximumTextureSize,
                          Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    mMeshTextureError =
+    mScene->mMeshTextureError =
         QStringLiteral("Texture was reduced to the GPU limit of %1 px.")
             .arg(maximumTextureSize);
   }
   image = image.convertToFormat(QImage::Format_RGBA8888)
               .mirrored(false, true);
-  mPendingMeshTexture = {};
+  mScene->mPendingMeshTexture = {};
   if (image.isNull()) {
-    mMeshTextureError = QStringLiteral(
+    mScene->mMeshTextureError = QStringLiteral(
         "The mesh texture could not be converted for OpenGL.");
     return;
   }
 
   while (glGetError() != GL_NO_ERROR) {
   }
-  glGenTextures(1, &mMeshTexture);
+  glGenTextures(1, &mScene->mMeshTexture);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, mMeshTexture);
+  glBindTexture(GL_TEXTURE_2D, mScene->mMeshTexture);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
@@ -2433,32 +2645,32 @@ void NativeViewport::uploadPendingMeshTexture() {
   glGenerateMipmap(GL_TEXTURE_2D);
   const GLenum uploadError = glGetError();
   glBindTexture(GL_TEXTURE_2D, 0);
-  if (uploadError != GL_NO_ERROR || mMeshTexture == 0) {
-    glDeleteTextures(1, &mMeshTexture);
-    mMeshTexture = 0;
-    mMeshTextureError = QStringLiteral(
+  if (uploadError != GL_NO_ERROR || mScene->mMeshTexture == 0) {
+    glDeleteTextures(1, &mScene->mMeshTexture);
+    mScene->mMeshTexture = 0;
+    mScene->mMeshTextureError = QStringLiteral(
         "GPU memory could not accept the mesh texture.");
     return;
   }
-  mMeshTextureSize = image.size();
-  mMeshTextureReady = true;
+  mScene->mMeshTextureSize = image.size();
+  mScene->mMeshTextureReady = true;
   updateFrameRefreshPolicy();
 }
 
 void NativeViewport::updateMeshCacheSelection(
     const QMatrix4x4 &viewProjection) {
   if (!pagedMeshAvailable()) {
-    mDesiredMeshCacheNodes.clear();
+    mScene->mDesiredMeshCacheNodes.clear();
     return;
   }
-  ++mMeshCacheFrameSerial;
+  ++mScene->mMeshCacheFrameSerial;
   const bool interacting =
       mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
       (mViewSnapAnimation != nullptr &&
        mViewSnapAnimation->state() == QAbstractAnimation::Running);
   const float refinementThresholdPixels = interacting ? 180.0F : 34.0F;
   const qsizetype byteBudget = static_cast<qsizetype>(
-      static_cast<long double>(mMeshCacheGpuBudgetBytes) * 0.85L);
+      static_cast<long double>((mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) * 0.85L);
   const QVector3D eye = cameraPosition();
   const float viewportHeight =
       std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
@@ -2466,16 +2678,16 @@ void NativeViewport::updateMeshCacheSelection(
     const QVector3D center = modelMatrix().map(
         (node.boundsMinimum + node.boundsMaximum) * 0.5F);
     const float maximumScale =
-        std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
-                  std::abs(mModelScale.z())});
+        std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
+                  std::abs(mScene->mModelScale.z())});
     const float radius = maximumScale *
         std::max((node.boundsMaximum - node.boundsMinimum).length() * 0.5F,
-                 mSceneRadius * 1.0e-6F);
+                 mScene->mSceneRadius * 1.0e-6F);
     if (mOrthographic) {
       return radius / std::max(mDistance, 1.0e-5F) * viewportHeight * 2.0F;
     }
     const float distance =
-        std::max((center - eye).length() - radius, mSceneRadius * 1.0e-5F);
+        std::max((center - eye).length() - radius, mScene->mSceneRadius * 1.0e-5F);
     return radius / distance * viewportHeight / std::tan(radians(22.5F));
   };
   const auto visible = [&](const MeshCacheNode &node) {
@@ -2490,7 +2702,7 @@ void NativeViewport::updateMeshCacheSelection(
 
   QSet<int> selected;
   QVector<int> refinable;
-  const MeshCacheNode &root = mMeshCache.nodes.at(mMeshCache.rootNode);
+  const MeshCacheNode &root = mScene->mMeshCache.nodes.at(mScene->mMeshCache.rootNode);
   qsizetype selectedBytes = 0;
   if (visible(root)) {
     selected.insert(root.id);
@@ -2502,7 +2714,7 @@ void NativeViewport::updateMeshCacheSelection(
     float bestPriority = refinementThresholdPixels;
     for (qsizetype position = 0; position < refinable.size(); ++position) {
       const MeshCacheNode &candidate =
-          mMeshCache.nodes.at(refinable.at(position));
+          mScene->mMeshCache.nodes.at(refinable.at(position));
       const float priority = projectedPixels(candidate);
       if (priority > bestPriority) {
         bestPriority = priority;
@@ -2513,11 +2725,11 @@ void NativeViewport::updateMeshCacheSelection(
       break;
     }
     const int nodeId = refinable.takeAt(bestPosition);
-    const MeshCacheNode &node = mMeshCache.nodes.at(nodeId);
+    const MeshCacheNode &node = mScene->mMeshCache.nodes.at(nodeId);
     QVector<int> visibleChildren;
     qsizetype childBytes = 0;
     for (const int childId : node.children) {
-      const MeshCacheNode &child = mMeshCache.nodes.at(childId);
+      const MeshCacheNode &child = mScene->mMeshCache.nodes.at(childId);
       if (!visible(child)) {
         continue;
       }
@@ -2535,12 +2747,12 @@ void NativeViewport::updateMeshCacheSelection(
     selectedBytes = withoutParent + childBytes;
     for (const int childId : std::as_const(visibleChildren)) {
       selected.insert(childId);
-      if (!mMeshCache.nodes.at(childId).isLeaf()) {
+      if (!mScene->mMeshCache.nodes.at(childId).isLeaf()) {
         refinable.append(childId);
       }
     }
   }
-  mDesiredMeshCacheNodes = std::move(selected);
+  mScene->mDesiredMeshCacheNodes = std::move(selected);
   requestMissingMeshCachePages();
 }
 
@@ -2549,28 +2761,28 @@ void NativeViewport::requestMissingMeshCachePages() {
     return;
   }
   const auto isResident = [this](const int nodeId) {
-    return std::any_of(mFullResolutionMeshGpuChunks.cbegin(),
-                       mFullResolutionMeshGpuChunks.cend(),
+    return std::any_of(mScene->mFullResolutionMeshGpuChunks.cbegin(),
+                       mScene->mFullResolutionMeshGpuChunks.cend(),
                        [nodeId](const FullResolutionMeshGpuChunk &chunk) {
                          return chunk.nodeId == nodeId;
                        });
   };
   QSet<int> needed;
-  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredMeshCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0 && !isResident(nodeId)) {
-      if (!mMeshCacheReadsInFlight.contains(nodeId) &&
-          !mMeshCacheFailedNodes.contains(nodeId)) {
+      if (!mScene->mMeshCacheReadsInFlight.contains(nodeId) &&
+          !mScene->mMeshCacheFailedNodes.contains(nodeId)) {
         needed.insert(nodeId);
       }
-      nodeId = mMeshCache.nodes.at(nodeId).parent;
+      nodeId = mScene->mMeshCache.nodes.at(nodeId).parent;
     }
   }
   QVector<int> ordered = needed.values();
   std::sort(ordered.begin(), ordered.end(), [this](const int left,
                                                    const int right) {
-    const MeshCacheNode &a = mMeshCache.nodes.at(left);
-    const MeshCacheNode &b = mMeshCache.nodes.at(right);
+    const MeshCacheNode &a = mScene->mMeshCache.nodes.at(left);
+    const MeshCacheNode &b = mScene->mMeshCache.nodes.at(right);
     if (a.depth != b.depth) {
       return a.depth < b.depth;
     }
@@ -2578,26 +2790,33 @@ void NativeViewport::requestMissingMeshCachePages() {
   });
   constexpr qsizetype kMaximumReadsInFlight = 2;
   for (const int nodeId : std::as_const(ordered)) {
-    if (mMeshCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
+    if (mScene->mMeshCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
       break;
     }
-    mMeshCacheReadsInFlight.insert(nodeId);
-    const int generation = mSceneGeneration;
-    const MeshCacheIndex cache = mMeshCache;
+    mScene->mMeshCacheReadsInFlight.insert(nodeId);
+    const int generation = mScene->mSceneGeneration;
+    const MeshCacheIndex cache = mScene->mMeshCache;
     auto *watcher = new QFutureWatcher<MeshCachePage>(this);
     connect(watcher, &QFutureWatcher<MeshCachePage>::finished, this,
-            [this, watcher, generation, nodeId]() {
+            [this, watcher, generation, nodeId , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            const auto targetScene = weakScene.lock();
+            if (!targetScene) { watcher->deleteLater(); return; }
+            const bool foreground = targetScene == mScene;
+            QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, targetScene);
+            QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
+            QSignalBlocker sceneSignals(this);
+            if (foreground) sceneSignals.unblock();
               MeshCachePage page = watcher->result();
               watcher->deleteLater();
-              if (generation != mSceneGeneration) {
+              if (generation != mScene->mSceneGeneration) {
                 return;
               }
-              mMeshCacheReadsInFlight.remove(nodeId);
+              mScene->mMeshCacheReadsInFlight.remove(nodeId);
               if (page.isValid()) {
-                mPendingMeshCachePages.append(std::move(page));
+                mScene->mPendingMeshCachePages.append(std::move(page));
               } else {
-                mMeshCacheFailedNodes.insert(nodeId);
-                mMeshCacheError = page.error;
+                mScene->mMeshCacheFailedNodes.insert(nodeId);
+                mScene->mMeshCacheError = page.error;
               }
               updateFrameRefreshPolicy();
               update();
@@ -2609,32 +2828,32 @@ void NativeViewport::requestMissingMeshCachePages() {
 
 void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
   const auto isResident = [this](const int nodeId) {
-    return std::any_of(mFullResolutionMeshGpuChunks.cbegin(),
-                       mFullResolutionMeshGpuChunks.cend(),
+    return std::any_of(mScene->mFullResolutionMeshGpuChunks.cbegin(),
+                       mScene->mFullResolutionMeshGpuChunks.cend(),
                        [nodeId](const FullResolutionMeshGpuChunk &chunk) {
                          return chunk.nodeId == nodeId;
                        });
   };
   QSet<int> protectedNodes;
-  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredMeshCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0) {
       if (isResident(nodeId)) {
         protectedNodes.insert(nodeId);
         break;
       }
-      nodeId = mMeshCache.nodes.at(nodeId).parent;
+      nodeId = mScene->mMeshCache.nodes.at(nodeId).parent;
     }
   }
-  while (!mFullResolutionMeshGpuChunks.isEmpty() &&
-         mMeshCacheResidentBytes + requiredBytes >
-             mMeshCacheGpuBudgetBytes) {
+  while (!mScene->mFullResolutionMeshGpuChunks.isEmpty() &&
+         mScene->mMeshCacheResidentBytes + requiredBytes >
+             (mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) {
     qsizetype victim = -1;
     quint64 oldest = std::numeric_limits<quint64>::max();
     for (qsizetype index = 0;
-         index < mFullResolutionMeshGpuChunks.size(); ++index) {
+         index < mScene->mFullResolutionMeshGpuChunks.size(); ++index) {
       const FullResolutionMeshGpuChunk &chunk =
-          mFullResolutionMeshGpuChunks.at(index);
+          mScene->mFullResolutionMeshGpuChunks.at(index);
       if (!protectedNodes.contains(chunk.nodeId) &&
           chunk.lastUsedFrame < oldest) {
         victim = index;
@@ -2643,9 +2862,9 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
     }
     if (victim < 0) {
       for (qsizetype index = 0;
-           index < mFullResolutionMeshGpuChunks.size(); ++index) {
+           index < mScene->mFullResolutionMeshGpuChunks.size(); ++index) {
         const FullResolutionMeshGpuChunk &chunk =
-            mFullResolutionMeshGpuChunks.at(index);
+            mScene->mFullResolutionMeshGpuChunks.at(index);
         if (chunk.lastUsedFrame < oldest) {
           victim = index;
           oldest = chunk.lastUsedFrame;
@@ -2656,7 +2875,7 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
       break;
     }
     const FullResolutionMeshGpuChunk chunk =
-        mFullResolutionMeshGpuChunks.takeAt(victim);
+        mScene->mFullResolutionMeshGpuChunks.takeAt(victim);
     if (chunk.indexBuffer != 0) {
       glDeleteBuffers(1, &chunk.indexBuffer);
     }
@@ -2666,28 +2885,28 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
     if (chunk.vertexArray != 0) {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
-    mMeshCacheResidentBytes -= chunk.byteCount;
+    mScene->mMeshCacheResidentBytes -= chunk.byteCount;
   }
 }
 
 void NativeViewport::uploadPendingMeshCachePages() {
-  if (mFullResolutionMeshClearPending) {
+  if (mScene->mFullResolutionMeshClearPending) {
     releaseFullResolutionMesh();
-    mFullResolutionMeshClearPending = false;
+    mScene->mFullResolutionMeshClearPending = false;
   }
-  if (mPendingMeshCachePages.isEmpty() || mMeshProgram == nullptr ||
+  if (mScene->mPendingMeshCachePages.isEmpty() || mMeshProgram == nullptr ||
       !mMeshProgram->isLinked()) {
     return;
   }
-  MeshCachePage page = mPendingMeshCachePages.takeFirst();
+  MeshCachePage page = mScene->mPendingMeshCachePages.takeFirst();
   const bool alreadyResident = std::any_of(
-      mFullResolutionMeshGpuChunks.cbegin(),
-      mFullResolutionMeshGpuChunks.cend(),
+      mScene->mFullResolutionMeshGpuChunks.cbegin(),
+      mScene->mFullResolutionMeshGpuChunks.cend(),
       [&page](const FullResolutionMeshGpuChunk &chunk) {
         return chunk.nodeId == page.nodeId;
       });
   if (!alreadyResident && page.nodeId >= 0 &&
-      page.nodeId < mMeshCache.nodes.size()) {
+      page.nodeId < mScene->mMeshCache.nodes.size()) {
     const qsizetype vertexBytes =
         page.vertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
     const qsizetype indexBytes =
@@ -2698,8 +2917,8 @@ void NativeViewport::uploadPendingMeshCachePages() {
     gpuChunk.nodeId = page.nodeId;
     gpuChunk.indexCount = static_cast<GLsizei>(page.indices.size());
     gpuChunk.byteCount = byteCount;
-    gpuChunk.lastUsedFrame = mMeshCacheFrameSerial;
-    const MeshCacheNode &node = mMeshCache.nodes.at(page.nodeId);
+    gpuChunk.lastUsedFrame = mScene->mMeshCacheFrameSerial;
+    const MeshCacheNode &node = mScene->mMeshCache.nodes.at(page.nodeId);
     gpuChunk.boundsMinimum = node.boundsMinimum;
     gpuChunk.boundsMaximum = node.boundsMaximum;
     while (glGetError() != GL_NO_ERROR) {
@@ -2735,24 +2954,24 @@ void NativeViewport::uploadPendingMeshCachePages() {
                  GL_STATIC_DRAW);
     const GLenum uploadError = glGetError();
     if (uploadError == GL_NO_ERROR) {
-      mMeshCacheResidentBytes += byteCount;
-      mFullResolutionMeshGpuChunks.append(gpuChunk);
+      mScene->mMeshCacheResidentBytes += byteCount;
+      mScene->mFullResolutionMeshGpuChunks.append(gpuChunk);
     } else {
       glDeleteBuffers(1, &gpuChunk.indexBuffer);
       glDeleteBuffers(1, &gpuChunk.vertexBuffer);
       glDeleteVertexArrays(1, &gpuChunk.vertexArray);
-      mMeshCacheFailedNodes.insert(page.nodeId);
-      mMeshCacheError =
+      mScene->mMeshCacheFailedNodes.insert(page.nodeId);
+      mScene->mMeshCacheError =
           QStringLiteral("GPU memory could not accept mesh-cache node %1.")
               .arg(page.nodeId);
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
   }
-  mUploadedFullResolutionMeshTriangleCount = 0;
+  mScene->mUploadedFullResolutionMeshTriangleCount = 0;
   for (const FullResolutionMeshGpuChunk &chunk :
-       std::as_const(mFullResolutionMeshGpuChunks)) {
-    mUploadedFullResolutionMeshTriangleCount += chunk.indexCount / 3;
+       std::as_const(mScene->mFullResolutionMeshGpuChunks)) {
+    mScene->mUploadedFullResolutionMeshTriangleCount += chunk.indexCount / 3;
   }
   requestMissingMeshCachePages();
   updateFrameRefreshPolicy();
@@ -2760,32 +2979,32 @@ void NativeViewport::uploadPendingMeshCachePages() {
 }
 
 void NativeViewport::uploadPendingMesh() {
-  if (!mMeshUploadPending || !mMeshVertexBuffer.isCreated() ||
-      !mMeshIndexBuffer.isCreated()) {
+  if (!mScene->mMeshUploadPending || !mScene->mMeshVertexBuffer.isCreated() ||
+      !mScene->mMeshIndexBuffer.isCreated()) {
     return;
   }
 
-  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
-  mMeshVertexBuffer.bind();
+  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mMeshVertexArray);
+  mScene->mMeshVertexBuffer.bind();
   const qsizetype vertexBytes =
-      mPendingMeshVertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
-  mMeshVertexBuffer.allocate(
-      mPendingMeshVertices.isEmpty() ? nullptr
-                                     : mPendingMeshVertices.constData(),
+      mScene->mPendingMeshVertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
+  mScene->mMeshVertexBuffer.allocate(
+      mScene->mPendingMeshVertices.isEmpty() ? nullptr
+                                     : mScene->mPendingMeshVertices.constData(),
       static_cast<int>(vertexBytes));
-  mMeshVertexBuffer.release();
+  mScene->mMeshVertexBuffer.release();
 
-  mMeshIndexBuffer.bind();
+  mScene->mMeshIndexBuffer.bind();
   const qsizetype indexBytes =
-      mPendingMeshIndices.size() * static_cast<qsizetype>(sizeof(quint32));
-  mMeshIndexBuffer.allocate(
-      mPendingMeshIndices.isEmpty() ? nullptr : mPendingMeshIndices.constData(),
+      mScene->mPendingMeshIndices.size() * static_cast<qsizetype>(sizeof(quint32));
+  mScene->mMeshIndexBuffer.allocate(
+      mScene->mPendingMeshIndices.isEmpty() ? nullptr : mScene->mPendingMeshIndices.constData(),
       static_cast<int>(indexBytes));
-  mMeshIndexBuffer.release();
+  mScene->mMeshIndexBuffer.release();
 
-  mPendingMeshVertices.clear();
-  mPendingMeshIndices.clear();
-  mMeshUploadPending = false;
+  mScene->mPendingMeshVertices.clear();
+  mScene->mPendingMeshIndices.clear();
+  mScene->mMeshUploadPending = false;
 }
 
 void NativeViewport::synchronizeGaussianRenderingAvailability(
@@ -2794,18 +3013,18 @@ void NativeViewport::synchronizeGaussianRenderingAvailability(
   if (available != previousAvailability) {
     emit gaussianRenderingAvailabilityChanged(available);
   }
-  if (!available && mRenderMode == RenderMode::Gaussians) {
-    mRenderMode = RenderMode::Points;
+  if (!available && mScene->mRenderMode == RenderMode::Gaussians) {
+    mScene->mRenderMode = RenderMode::Points;
     rebuildRenderedVertices();
-    emit renderModeChanged(mRenderMode);
+    emit renderModeChanged(mScene->mRenderMode);
   }
 }
 
 void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   mInteractionLodActive = false;
-  mProgressiveUploadActive = false;
-  if ((mRenderedPointCount <= 0 &&
-       mFullResolutionPointGpuChunks.isEmpty()) ||
+  mScene->mProgressiveUploadActive = false;
+  if ((mScene->mRenderedPointCount <= 0 &&
+       mScene->mFullResolutionPointGpuChunks.isEmpty()) ||
       mPointProgram == nullptr ||
       !mPointProgram->isLinked()) {
     return;
@@ -2821,32 +3040,32 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
       "pointSize",
       pointPreviewDiameterPixels(static_cast<float>(devicePixelRatioF())));
   {
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mPointVertexArray);
-    if (mRenderedPointCount > 0) {
-      glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mRenderedPointCount));
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mPointVertexArray);
+    if (mScene->mRenderedPointCount > 0) {
+      glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mScene->mRenderedPointCount));
     }
   }
   const auto residentChunk = [this](const int nodeId)
       -> FullResolutionGpuChunk * {
     const auto iterator = std::find_if(
-        mFullResolutionPointGpuChunks.begin(),
-        mFullResolutionPointGpuChunks.end(),
+        mScene->mFullResolutionPointGpuChunks.begin(),
+        mScene->mFullResolutionPointGpuChunks.end(),
         [nodeId](const FullResolutionGpuChunk &chunk) {
           return chunk.nodeId == nodeId;
         });
-    return iterator == mFullResolutionPointGpuChunks.end() ? nullptr
+    return iterator == mScene->mFullResolutionPointGpuChunks.end() ? nullptr
                                                             : &(*iterator);
   };
   QSet<int> drawNodes;
   bool desiredMissing = false;
-  for (const int desired : std::as_const(mDesiredPointCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredPointCacheNodes)) {
     int nodeId = desired;
     FullResolutionGpuChunk *chunk = residentChunk(nodeId);
     if (chunk == nullptr) {
       desiredMissing = true;
     }
-    while (chunk == nullptr && nodeId >= 0 && mPointCache.isValid()) {
-      nodeId = mPointCache.nodes.at(nodeId).parent;
+    while (chunk == nullptr && nodeId >= 0 && mScene->mPointCache.isValid()) {
+      nodeId = mScene->mPointCache.nodes.at(nodeId).parent;
       chunk = nodeId >= 0 ? residentChunk(nodeId) : nullptr;
     }
     if (chunk != nullptr) {
@@ -2859,18 +3078,18 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
     if (chunk == nullptr) {
       continue;
     }
-    chunk->lastUsedFrame = mPointCacheFrameSerial;
+    chunk->lastUsedFrame = mScene->mPointCacheFrameSerial;
     hierarchicalLod =
         hierarchicalLod ||
-        (mPointCache.isValid() &&
-         mPointCache.nodes.at(nodeId).depth < PointCloudCacheIndex::OctreeDepth);
+        (mScene->mPointCache.isValid() &&
+         mScene->mPointCache.nodes.at(nodeId).depth < PointCloudCacheIndex::OctreeDepth);
     glBindVertexArray(chunk->vertexArray);
     glDrawArrays(GL_POINTS, 0, chunk->pointCount);
   }
   mInteractionLodActive = hierarchicalLod;
-  mProgressiveUploadActive =
-      desiredMissing || !mPointCacheReadsInFlight.isEmpty() ||
-      !mPendingPointCachePages.isEmpty();
+  mScene->mProgressiveUploadActive =
+      desiredMissing || !mScene->mPointCacheReadsInFlight.isEmpty() ||
+      !mScene->mPendingPointCachePages.isEmpty();
   glBindVertexArray(0);
   mPointProgram->release();
   glDisable(GL_BLEND);
@@ -2878,10 +3097,10 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
 
 void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   mInteractionLodActive = false;
-  mProgressiveUploadActive = false;
-  mDrawnFullResolutionMeshTriangleCount = 0;
-  if ((mRenderedMeshIndexCount < 3 &&
-       mFullResolutionMeshGpuChunks.isEmpty()) ||
+  mScene->mProgressiveUploadActive = false;
+  mScene->mDrawnFullResolutionMeshTriangleCount = 0;
+  if ((mScene->mRenderedMeshIndexCount < 3 &&
+       mScene->mFullResolutionMeshGpuChunks.isEmpty()) ||
       mMeshProgram == nullptr || !mMeshProgram->isLinked()) {
     return;
   }
@@ -2896,40 +3115,40 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   mMeshProgram->setUniformValue("selected", mModelSelected ? 1.0F : 0.0F);
   mMeshProgram->setUniformValue("cameraPosition", cameraPosition());
   const bool textureEnabled =
-      mMeshHasTextureCoordinates && mMeshTextureReady && mMeshTexture != 0;
+      mScene->mMeshHasTextureCoordinates && mScene->mMeshTextureReady && mScene->mMeshTexture != 0;
   mMeshProgram->setUniformValue("albedoTexture", 0);
   mMeshProgram->setUniformValue("textureEnabled", textureEnabled);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, textureEnabled ? mMeshTexture : 0);
-  if (mRenderedMeshIndexCount >= 3 && mMeshIndexBuffer.isCreated()) {
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mMeshVertexArray);
-    mMeshIndexBuffer.bind();
+  glBindTexture(GL_TEXTURE_2D, textureEnabled ? mScene->mMeshTexture : 0);
+  if (mScene->mRenderedMeshIndexCount >= 3 && mScene->mMeshIndexBuffer.isCreated()) {
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mMeshVertexArray);
+    mScene->mMeshIndexBuffer.bind();
     glDrawElements(GL_TRIANGLES,
-                   static_cast<GLsizei>(mRenderedMeshIndexCount),
+                   static_cast<GLsizei>(mScene->mRenderedMeshIndexCount),
                    GL_UNSIGNED_INT, nullptr);
-    mMeshIndexBuffer.release();
+    mScene->mMeshIndexBuffer.release();
   }
   const auto residentChunk = [this](const int nodeId)
       -> FullResolutionMeshGpuChunk * {
     const auto iterator = std::find_if(
-        mFullResolutionMeshGpuChunks.begin(),
-        mFullResolutionMeshGpuChunks.end(),
+        mScene->mFullResolutionMeshGpuChunks.begin(),
+        mScene->mFullResolutionMeshGpuChunks.end(),
         [nodeId](const FullResolutionMeshGpuChunk &chunk) {
           return chunk.nodeId == nodeId;
         });
-    return iterator == mFullResolutionMeshGpuChunks.end() ? nullptr
+    return iterator == mScene->mFullResolutionMeshGpuChunks.end() ? nullptr
                                                            : &(*iterator);
   };
   QSet<int> drawNodes;
   bool desiredMissing = false;
-  for (const int desired : std::as_const(mDesiredMeshCacheNodes)) {
+  for (const int desired : std::as_const(mScene->mDesiredMeshCacheNodes)) {
     int nodeId = desired;
     FullResolutionMeshGpuChunk *chunk = residentChunk(nodeId);
     if (chunk == nullptr) {
       desiredMissing = true;
     }
     while (chunk == nullptr && nodeId >= 0 && pagedMeshAvailable()) {
-      nodeId = mMeshCache.nodes.at(nodeId).parent;
+      nodeId = mScene->mMeshCache.nodes.at(nodeId).parent;
       chunk = nodeId >= 0 ? residentChunk(nodeId) : nullptr;
     }
     if (chunk != nullptr) {
@@ -2942,19 +3161,19 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
     if (chunk == nullptr) {
       continue;
     }
-    chunk->lastUsedFrame = mMeshCacheFrameSerial;
+    chunk->lastUsedFrame = mScene->mMeshCacheFrameSerial;
     hierarchicalLod =
         hierarchicalLod ||
-        (pagedMeshAvailable() && !mMeshCache.nodes.at(nodeId).isLeaf());
+        (pagedMeshAvailable() && !mScene->mMeshCache.nodes.at(nodeId).isLeaf());
     glBindVertexArray(chunk->vertexArray);
     glDrawElements(GL_TRIANGLES, chunk->indexCount, GL_UNSIGNED_INT, nullptr);
-    mDrawnFullResolutionMeshTriangleCount += chunk->indexCount / 3;
+    mScene->mDrawnFullResolutionMeshTriangleCount += chunk->indexCount / 3;
   }
   glBindVertexArray(0);
   mInteractionLodActive = hierarchicalLod;
-  mProgressiveUploadActive =
-      desiredMissing || !mMeshCacheReadsInFlight.isEmpty() ||
-      !mPendingMeshCachePages.isEmpty();
+  mScene->mProgressiveUploadActive =
+      desiredMissing || !mScene->mMeshCacheReadsInFlight.isEmpty() ||
+      !mScene->mPendingMeshCachePages.isEmpty();
   glBindTexture(GL_TEXTURE_2D, 0);
   mMeshProgram->release();
 }
@@ -2994,9 +3213,9 @@ void NativeViewport::drawTrainingPointCloud(
 
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
-  const bool livePreview = mTrainingGpuPreview.hasFrame();
+  const bool livePreview = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame());
   const qsizetype drawCount =
-      livePreview ? mTrainingGpuPreview.pointCount() : mRenderedPointCount;
+      livePreview ? mTrainingGpuPreview.pointCount() : mScene->mRenderedPointCount;
   if (drawCount <= 0 || mGaussianProgram == nullptr ||
       !mGaussianProgram->isLinked()) {
     return;
@@ -3024,7 +3243,7 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                           static_cast<GLsizei>(drawCount));
     glBindVertexArray(0);
   } else {
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGaussianVertexArray);
+    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
   }
@@ -3179,7 +3398,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     }
     if (event->button() == Qt::MiddleButton && !mTrackballRotation) {
       const QVector3D pivot =
-          mSceneCenter + mModelDragStartTransform.translation;
+          mScene->mSceneCenter + mModelDragStartTransform.translation;
       const auto center = projectPoint(pivot, viewProjectionMatrix());
       int closestAxis = -1;
       qreal closestDistance = std::numeric_limits<qreal>::max();
@@ -3188,7 +3407,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
           QVector3D axis;
           axis[axisIndex] = 1.0F;
           const auto endpoint = projectPoint(
-              pivot + axis * std::max(mSceneRadius, 1.0F),
+              pivot + axis * std::max(mScene->mSceneRadius, 1.0F),
               viewProjectionMatrix());
           if (!endpoint.has_value()) {
             continue;
@@ -3276,8 +3495,14 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
 
   if (event->button() == Qt::LeftButton &&
       mMode == InteractionMode::Inspect &&
-      selectableModelAvailable()) {
-    const bool hit = modelHitAt(event->position());
+      (selectableModelAvailable() || mSceneStates.size() > 1)) {
+    bool hit = false;
+    if (mSceneStates.size() > 1) {
+      const QString id = sceneObjectAt(event->position());
+      hit = !id.isEmpty() && activateSceneObject(id);
+    } else {
+      hit = modelHitAt(event->position());
+    }
     if (hit) {
       selectModel();
       event->accept();
@@ -3296,7 +3521,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
   }
-  if (event->button() == Qt::LeftButton && !mSelectionBusy &&
+  if (event->button() == Qt::LeftButton && !mScene->mSelectionBusy &&
       (mMode == InteractionMode::Rectangle || mMode == InteractionMode::Lasso ||
        mMode == InteractionMode::Brush) &&
       hasEditableScene()) {
@@ -3415,7 +3640,7 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
   mPressedButtons = event->buttons();
   if (mCameraManipulated && mPressedButtons == Qt::NoButton) {
     mCameraManipulated = false;
-    if (mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
+    if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
       rebuildRenderedVertices();
       update();
     }
@@ -3564,14 +3789,14 @@ void NativeViewport::finishNavigationGizmoInteraction() {
       toggleCameraView();
     } else if (pressed.part == NavigationGizmoPart::Projection) {
       if (pressedModifiers.testFlag(Qt::ShiftModifier)) {
-        resetCamera();
+        if (!mRenderingInactiveScene) resetCamera();
       } else {
         leaveCameraView();
         mOrthographic = !mOrthographic;
         update();
       }
     }
-  } else if (mRenderMode == RenderMode::Gaussians &&
+  } else if (mScene->mRenderMode == RenderMode::Gaussians &&
              gaussianRenderingAvailable()) {
     rebuildRenderedVertices();
   }
@@ -3629,7 +3854,7 @@ void NativeViewport::toggleCameraView() {
     return;
   }
 
-  const CameraPose &camera = mCameraTrajectory.cameras().constFirst();
+  const CameraPose &camera = mScene->mCameraTrajectory.cameras().constFirst();
   const QVector3D forward = camera.forward.normalized();
   if (forward.lengthSquared() < 1.0e-6F) {
     return;
@@ -3714,7 +3939,7 @@ void NativeViewport::keyPressEvent(QKeyEvent *event) {
       finishModelTransform(false);
       beginModelTransform(InteractionMode::Rotate);
     } else if (!mTrackballRotation) {
-      mModelRotation = mModelDragStartTransform.rotation;
+      mScene->mModelRotation = mModelDragStartTransform.rotation;
       mTrackballRotation = true;
       mTransformConstraint = {};
       mTransformNumericInput.clear();
@@ -3778,13 +4003,13 @@ void NativeViewport::keyReleaseEvent(QKeyEvent *event) {
 }
 
 QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
-  if (!mSceneCoordinates.valid) {
+  if (!mScene->mSceneCoordinates.valid) {
     return referenceGridOrigin();
   }
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero) {
-    return mSceneCoordinates.localFromGlobal({0.0, 0.0, 0.0});
+    return mScene->mSceneCoordinates.localFromGlobal({0.0, 0.0, 0.0});
   }
-  const QVector3D minimum = mSceneCoordinates.localMinimum();
+  const QVector3D minimum = mScene->mSceneCoordinates.localMinimum();
   switch (plane) {
   case ReferenceGridPlane::XY:
     return QVector3D(0.0F, 0.0F, minimum.z());
@@ -3797,12 +4022,12 @@ QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
 }
 
 QString NativeViewport::formatViewportDistance(const float localDistance) const {
-  if (!mSceneCoordinates.valid) {
+  if (!mScene->mSceneCoordinates.valid) {
     return formatMetricDistance(localDistance);
   }
   const double sourceDistance =
-      static_cast<double>(localDistance) / mSceneCoordinates.displayScale;
-  return formatSceneLength(sourceDistance, mSceneCoordinates);
+      static_cast<double>(localDistance) / mScene->mSceneCoordinates.displayScale;
+  return formatSceneLength(sourceDistance, mScene->mSceneCoordinates);
 }
 
 QMatrix4x4 NativeViewport::viewMatrix() const {
@@ -3814,6 +4039,7 @@ QMatrix4x4 NativeViewport::viewMatrix() const {
 }
 
 QMatrix4x4 NativeViewport::projectionMatrix() const {
+  if (mRenderingInactiveScene) return mCollectionProjection;
   QMatrix4x4 projection;
   const float aspect =
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
@@ -3822,11 +4048,19 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   const float modelDistance =
       (transformedSceneCenter() - cameraPosition()).length();
   const float transformedRadius =
-      mSceneRadius *
-      std::max({std::abs(mModelScale.x()), std::abs(mModelScale.y()),
-                std::abs(mModelScale.z())});
-  const float farPlane =
-      std::max(100.0F, modelDistance + transformedRadius * 12.0F);
+      mScene->mSceneRadius *
+      std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
+                std::abs(mScene->mModelScale.z())});
+  float farPlane = std::max(100.0F, modelDistance + transformedRadius * 12.0F);
+  for (const auto &state : mSceneStates) {
+    const auto mapping = sceneDisplayTransform(*state, *mScene);
+    const float radius = state->mSceneRadius *
+        std::max({std::abs(state->mModelScale.x()), std::abs(state->mModelScale.y()),
+                  std::abs(state->mModelScale.z())}) *
+        mapping.mapVector(QVector3D(1, 0, 0)).length();
+    farPlane = std::max(farPlane, (mapping.map(state->mSceneCenter + state->mModelTranslation) -
+                                  cameraPosition()).length() + radius * 12);
+  }
   if (mOrthographic) {
     const float halfHeight =
         std::max(0.05F, mDistance * std::tan(radians(23.0F)));
@@ -3843,22 +4077,22 @@ QMatrix4x4 NativeViewport::viewProjectionMatrix() const {
 }
 
 QMatrix4x4 NativeViewport::modelMatrix() const {
-  return ModelTransform{mModelTranslation, mModelRotation, mModelScale}
-      .matrix(mSceneCenter);
+  return mLayerDisplayTransform * ModelTransform{mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale}
+      .matrix(mScene->mSceneCenter);
 }
 
 QVector3D NativeViewport::modelBoundsMinimum() const {
-  if (mSceneCoordinates.valid) {
-    return mSceneCoordinates.localMinimum();
+  if (mScene->mSceneCoordinates.valid) {
+    return mScene->mSceneCoordinates.localMinimum();
   }
-  return mSceneCenter - QVector3D(mSceneRadius, mSceneRadius, mSceneRadius);
+  return mScene->mSceneCenter - QVector3D(mScene->mSceneRadius, mScene->mSceneRadius, mScene->mSceneRadius);
 }
 
 QVector3D NativeViewport::modelBoundsMaximum() const {
-  if (mSceneCoordinates.valid) {
-    return mSceneCoordinates.localMaximum();
+  if (mScene->mSceneCoordinates.valid) {
+    return mScene->mSceneCoordinates.localMaximum();
   }
-  return mSceneCenter + QVector3D(mSceneRadius, mSceneRadius, mSceneRadius);
+  return mScene->mSceneCenter + QVector3D(mScene->mSceneRadius, mScene->mSceneRadius, mScene->mSceneRadius);
 }
 
 std::array<QVector3D, 8>
@@ -3877,7 +4111,7 @@ NativeViewport::transformedModelBoundsCorners() const {
 }
 
 QVector3D NativeViewport::transformedSceneCenter() const {
-  return mSceneCenter + mModelTranslation;
+  return mScene->mSceneCenter + mScene->mModelTranslation;
 }
 
 float NativeViewport::transformedSceneRadius() const {
@@ -3903,7 +4137,7 @@ bool NativeViewport::modelHitAt(const QPointF &position) {
   if (!localRay.has_value()) {
     return false;
   }
-  const float padding = std::max(mSceneRadius * 0.015F, 1.0e-4F);
+  const float padding = std::max(mScene->mSceneRadius * 0.015F, 1.0e-4F);
   const QVector3D paddingVector(padding, padding, padding);
   if (!rayAabbDistance(*localRay, modelBoundsMinimum() - paddingVector,
                        modelBoundsMaximum() + paddingVector)
@@ -3918,8 +4152,29 @@ bool NativeViewport::modelHitAt(const QPointF &position) {
   return modelGeometryHitAt(position).value_or(true);
 }
 
+QString NativeViewport::sceneObjectAt(const QPointF &position) {
+  const auto active = mScene;
+  mCollectionProjection = projectionMatrix();
+  QString bestId;
+  float nearestDepth = 1.0F;
+  for (const auto &state : mSceneStates) {
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+    QScopedValueRollback<QMatrix4x4> display(mLayerDisplayTransform,
+                                             sceneDisplayTransform(*state, *active));
+    if (!selectableModelAvailable()) continue;
+    float depth = 1.0F;
+    const auto hit = modelGeometryHitAt(position, &depth);
+    if (hit.value_or(false) && depth < nearestDepth) {
+      nearestDepth = depth;
+      bestId = state->id;
+    }
+  }
+  return bestId;
+}
+
 std::optional<bool>
-NativeViewport::modelGeometryHitAt(const QPointF &position) {
+NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth) {
   if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
       !mModelPickProgram->isLinked() || context() == nullptr ||
       !context()->isValid()) {
@@ -4007,19 +4262,19 @@ NativeViewport::modelGeometryHitAt(const QPointF &position) {
                                          modelViewProjection);
       mModelPickProgram->setUniformValue("pointSize", pointSize);
 
-      if (mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
+      if (mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
         mModelPickProgram->setUniformValue("pointPrimitive", false);
-        if (mRenderedMeshIndexCount >= 3 &&
-            mMeshVertexArray.isCreated() && mMeshIndexBuffer.isCreated()) {
-          glBindVertexArray(mMeshVertexArray.objectId());
-          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mMeshIndexBuffer.bufferId());
+        if (mScene->mRenderedMeshIndexCount >= 3 &&
+            mScene->mMeshVertexArray.isCreated() && mScene->mMeshIndexBuffer.isCreated()) {
+          glBindVertexArray(mScene->mMeshVertexArray.objectId());
+          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mScene->mMeshIndexBuffer.bufferId());
           glDrawElements(GL_TRIANGLES,
-                         static_cast<GLsizei>(mRenderedMeshIndexCount),
+                         static_cast<GLsizei>(mScene->mRenderedMeshIndexCount),
                          GL_UNSIGNED_INT, nullptr);
           drewPrimitives = true;
         }
         for (const FullResolutionMeshGpuChunk &chunk :
-             std::as_const(mFullResolutionMeshGpuChunks)) {
+             std::as_const(mScene->mFullResolutionMeshGpuChunks)) {
           if (chunk.vertexArray == 0 || chunk.indexCount < 3) {
             continue;
           }
@@ -4028,8 +4283,8 @@ NativeViewport::modelGeometryHitAt(const QPointF &position) {
                          nullptr);
           drewPrimitives = true;
         }
-      } else if (mTrainingGpuPreview.hasFrame() &&
-                 mRenderMode == RenderMode::Points) {
+      } else if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) &&
+                 mScene->mRenderMode == RenderMode::Points) {
         const GLuint vertexArray = mTrainingGpuPreview.activeVertexArray();
         const GLsizei pointCount = mTrainingGpuPreview.pointCount();
         if (vertexArray != 0 && pointCount > 0) {
@@ -4040,15 +4295,15 @@ NativeViewport::modelGeometryHitAt(const QPointF &position) {
           glVertexAttribDivisor(0, 1);
           drewPrimitives = true;
         }
-      } else if (mRenderMode == RenderMode::Gaussians &&
+      } else if (mScene->mRenderMode == RenderMode::Gaussians &&
                  gaussianRenderingAvailable()) {
-        const bool livePreview = mTrainingGpuPreview.hasFrame();
+        const bool livePreview = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame());
         const GLuint vertexArray =
             livePreview ? mTrainingGpuPreview.activeVertexArray()
-                        : mGaussianVertexArray.objectId();
+                        : mScene->mGaussianVertexArray.objectId();
         const GLsizei pointCount = static_cast<GLsizei>(
             livePreview ? mTrainingGpuPreview.pointCount()
-                        : mRenderedPointCount);
+                        : mScene->mRenderedPointCount);
         if (vertexArray != 0 && pointCount > 0) {
           mModelPickProgram->setUniformValue("pointPrimitive", true);
           glBindVertexArray(vertexArray);
@@ -4059,14 +4314,14 @@ NativeViewport::modelGeometryHitAt(const QPointF &position) {
         }
       } else {
         mModelPickProgram->setUniformValue("pointPrimitive", true);
-        if (mRenderedPointCount > 0 && mPointVertexArray.isCreated()) {
-          glBindVertexArray(mPointVertexArray.objectId());
+        if (mScene->mRenderedPointCount > 0 && mScene->mPointVertexArray.isCreated()) {
+          glBindVertexArray(mScene->mPointVertexArray.objectId());
           glDrawArrays(GL_POINTS, 0,
-                       static_cast<GLsizei>(mRenderedPointCount));
+                       static_cast<GLsizei>(mScene->mRenderedPointCount));
           drewPrimitives = true;
         }
         for (const FullResolutionGpuChunk &chunk :
-             std::as_const(mFullResolutionPointGpuChunks)) {
+             std::as_const(mScene->mFullResolutionPointGpuChunks)) {
           if (chunk.vertexArray == 0 || chunk.pointCount <= 0) {
             continue;
           }
@@ -4090,6 +4345,16 @@ NativeViewport::modelGeometryHitAt(const QPointF &position) {
                      mapping->framebufferSize.height(), GL_RED,
                      GL_UNSIGNED_BYTE, samples.data());
         result = modelPickBufferHasCoverage(samples);
+        if (hitDepth != nullptr && result.value_or(false)) {
+          std::vector<float> depths(static_cast<std::size_t>(sampleCount), 1.0F);
+          glReadPixels(0, 0, mapping->framebufferSize.width(),
+                       mapping->framebufferSize.height(), GL_DEPTH_COMPONENT,
+                       GL_FLOAT, depths.data());
+          *hitDepth = 1.0F;
+          for (std::size_t index = 0; index < samples.size(); ++index) {
+            if (samples[index] != 0) *hitDepth = std::min(*hitDepth, depths[index]);
+          }
+        }
       }
     }
   }
@@ -4142,7 +4407,7 @@ QPointF NativeViewport::currentPointerPosition() const {
 float NativeViewport::modelGizmoWorldRadius() const {
   // Source bounds provide a stable unit reference. Neither camera zoom nor
   // the transform being edited may resize the handles in world space.
-  return mSceneRadius *
+  return mScene->mSceneRadius *
          (mTransformGizmoMode == TransformGizmoMode::Transform ? 0.5F : 0.3F);
 }
 
@@ -4155,7 +4420,7 @@ TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
   // are configured for world orientation; this avoids silently introducing
   // an unrepresentable shear into the persisted TRS transform.
   const QQuaternion orientation =
-      modelGizmoUsesLocalOrientation() ? mModelRotation : QQuaternion();
+      modelGizmoUsesLocalOrientation() ? mScene->mModelRotation : QQuaternion();
   return transformGizmoLayout(
       transformedSceneCenter(), orientation, viewProjectionMatrix(),
       QSizeF(width(), height()), mTransformGizmoMode, modelGizmoWorldRadius());
@@ -4389,7 +4654,7 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
   mTransformConstraint = {};
   mTransformNumericInput.clear();
   mTransformModifiers = Qt::NoModifier;
-  mModelDragStartTransform = {mModelTranslation, mModelRotation, mModelScale};
+  mModelDragStartTransform = {mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale};
   mModelTransformStartPosition = currentPointerPosition();
   mModelTransformCurrentPosition = mModelTransformStartPosition;
   mModelDragPlaneNormal = mTarget - cameraPosition();
@@ -4399,7 +4664,7 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
     mModelDragPlaneNormal.normalize();
   }
   const QVector3D pivot =
-      mSceneCenter + mModelDragStartTransform.translation;
+      mScene->mSceneCenter + mModelDragStartTransform.translation;
   const auto center = projectPoint(pivot, viewProjectionMatrix());
   mModelTransformScreenCenter =
       center.value_or(QPointF(width() * 0.5, height() * 0.5));
@@ -4466,7 +4731,7 @@ void NativeViewport::updateModelTransform(
   mModelTransformCurrentPosition = position;
   mTransformModifiers = modifiers;
   const QVector3D pivot =
-      mSceneCenter + mModelDragStartTransform.translation;
+      mScene->mSceneCenter + mModelDragStartTransform.translation;
   const auto startRay = screenRay(mModelTransformStartPosition, size(),
                                   viewProjectionMatrix());
   const auto currentRay =
@@ -4543,9 +4808,9 @@ void NativeViewport::updateModelTransform(
         }
       }
     }
-    mModelTranslation = mModelDragStartTransform.translation + delta;
-    mModelRotation = mModelDragStartTransform.rotation;
-    mModelScale = mModelDragStartTransform.scale;
+    mScene->mModelTranslation = mModelDragStartTransform.translation + delta;
+    mScene->mModelRotation = mModelDragStartTransform.rotation;
+    mScene->mModelScale = mModelDragStartTransform.scale;
   } else if (mMode == InteractionMode::Rotate) {
     QQuaternion deltaRotation;
     if (mTrackballRotation) {
@@ -4603,10 +4868,10 @@ void NativeViewport::updateModelTransform(
       }
       deltaRotation = QQuaternion::fromAxisAndAngle(axis, angle);
     }
-    mModelTranslation = mModelDragStartTransform.translation;
-    mModelRotation = normalizedModelRotation(
+    mScene->mModelTranslation = mModelDragStartTransform.translation;
+    mScene->mModelRotation = normalizedModelRotation(
         deltaRotation * mModelDragStartTransform.rotation);
-    mModelScale = mModelDragStartTransform.scale;
+    mScene->mModelScale = mModelDragStartTransform.scale;
   } else if (mMode == InteractionMode::Scale) {
     const QPointF startOffset =
         mModelTransformStartPosition - mModelTransformScreenCenter;
@@ -4679,9 +4944,9 @@ void NativeViewport::updateModelTransform(
         mModelDragStartTransform.scale.x() * factors.x(),
         mModelDragStartTransform.scale.y() * factors.y(),
         mModelDragStartTransform.scale.z() * factors.z());
-    mModelTranslation = mModelDragStartTransform.translation;
-    mModelRotation = mModelDragStartTransform.rotation;
-    mModelScale = normalizedModelScale(scaled);
+    mScene->mModelTranslation = mModelDragStartTransform.translation;
+    mScene->mModelRotation = mModelDragStartTransform.rotation;
+    mScene->mModelScale = normalizedModelScale(scaled);
   }
   notifyModelInteractionState();
   update();
@@ -4692,9 +4957,9 @@ void NativeViewport::finishModelTransform(const bool commit) {
     return;
   }
   if (!commit) {
-    mModelTranslation = mModelDragStartTransform.translation;
-    mModelRotation = mModelDragStartTransform.rotation;
-    mModelScale = mModelDragStartTransform.scale;
+    mScene->mModelTranslation = mModelDragStartTransform.translation;
+    mScene->mModelRotation = mModelDragStartTransform.rotation;
+    mScene->mModelScale = mModelDragStartTransform.scale;
   }
   mModelDragActive = false;
   mTransformGizmoDragActive = false;
@@ -4854,7 +5119,7 @@ void NativeViewport::drawDepthAwareReferenceAxes(
   const float uiScale = static_cast<float>(QFontMetricsF(font()).height() / 18.0);
   // Use source scene extent, not view distance or adaptive grid spacing: a
   // camera zoom must not cancel its own size cue or jump at grid-level changes.
-  const float referenceLength = std::max(mSceneRadius * 0.3F, 1.0e-6F);
+  const float referenceLength = std::max(mScene->mSceneRadius * 0.3F, 1.0e-6F);
   const auto vertices = referenceAxisGeometry(
       viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale,
       referenceLength);
@@ -4976,10 +5241,10 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
   painter.setBrush(Qt::NoBrush);
   painter.setPen(QPen(QColor(109, 160, 255, 205), 1.8, Qt::SolidLine,
                       Qt::RoundCap, Qt::RoundJoin));
-  drawSegments(mCameraGeometry.path);
+  drawSegments(mScene->mCameraGeometry.path);
   painter.setPen(QPen(QColor(84, 209, 122, 220), 1.25, Qt::SolidLine,
                       Qt::RoundCap, Qt::RoundJoin));
-  drawSegments(mCameraGeometry.frustums);
+  drawSegments(mScene->mCameraGeometry.frustums);
   painter.restore();
 }
 
@@ -4991,7 +5256,7 @@ void NativeViewport::drawModelSelection(
 
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
-  const auto center = projectPoint(mSceneCenter, modelViewProjection);
+  const auto center = projectPoint(mScene->mSceneCenter, modelViewProjection);
   if (center.has_value()) {
     if (mModelDragActive && mMode == InteractionMode::Rotate) {
       painter.setPen(QPen(QColor(255, 173, 66, 205), 1.7,
@@ -5003,9 +5268,9 @@ void NativeViewport::drawModelSelection(
     if (mModelDragActive &&
         mTransformConstraint.kind != TransformConstraintKind::None) {
       const QVector3D pivot =
-          mSceneCenter + mModelDragStartTransform.translation;
+          mScene->mSceneCenter + mModelDragStartTransform.translation;
       const QVector3D axis = transformConstraintAxis();
-      const float extent = std::max(mSceneRadius * 3.0F, 1.0F);
+      const float extent = std::max(mScene->mSceneRadius * 3.0F, 1.0F);
       const auto start =
           projectPoint(pivot - axis * extent, viewProjectionMatrix());
       const auto end =
@@ -5371,103 +5636,103 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   painter.setPen(Qt::NoPen);
   painter.setBrush(QColor(17, 19, 21, 225));
 
-  const QString sceneName = mTrainingGpuPreview.hasFrame()
-                                ? mRenderMode == RenderMode::Points
+  const QString sceneName = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())
+                                ? mScene->mRenderMode == RenderMode::Points
                                       ? QStringLiteral("训练中 · 点云增密预览")
                                       : QStringLiteral("训练中 · GPU 实时预览")
-                                : mScenePath.isEmpty()
+                                : mScene->mScenePath.isEmpty()
                                       ? QStringLiteral("未载入场景")
-                                      : QFileInfo(mScenePath).fileName();
+                                      : QFileInfo(mScene->mScenePath).fileName();
   const QString project =
       mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
   QString count;
-  if (mTrainingGpuPreview.hasFrame()) {
-    count = mRenderMode == RenderMode::Points
+  if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())) {
+    count = mScene->mRenderMode == RenderMode::Points
                 ? QStringLiteral("迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())
                       .arg(formatCount(mTrainingGpuPreview.pointCount()))
                 : QStringLiteral("迭代 %1 | %2 高斯 | 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
-  } else if (!mSceneLoadMessage.isEmpty()) {
-    count = mSceneLoadMessage;
+  } else if (!mScene->mSceneLoadMessage.isEmpty()) {
+    count = mScene->mSceneLoadMessage;
   } else if (pagedMeshAvailable()) {
     count = QStringLiteral(
                 "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | "
                 "GPU LOD 缓存 %6 | 只读")
-                .arg(formatCount(mMeshCache.fullVertexCount),
-                     formatCount(mMeshCache.fullFaceCount),
-                     formatCount(mMeshCache.renderableTriangleCount),
-                     mProgressiveUploadActive
+                .arg(formatCount(mScene->mMeshCache.fullVertexCount),
+                     formatCount(mScene->mMeshCache.fullFaceCount),
+                     formatCount(mScene->mMeshCache.renderableTriangleCount),
+                     mScene->mProgressiveUploadActive
                          ? QStringLiteral("磁盘分页")
                          : mInteractionLodActive
                                ? QStringLiteral("层级 Mesh LOD")
                                : QStringLiteral("叶级细节"),
-                     formatCount(mDrawnFullResolutionMeshTriangleCount),
-                     formatCount(mUploadedFullResolutionMeshTriangleCount));
-    if (!mMeshCacheError.isEmpty()) {
+                     formatCount(mScene->mDrawnFullResolutionMeshTriangleCount),
+                     formatCount(mScene->mUploadedFullResolutionMeshTriangleCount));
+    if (!mScene->mMeshCacheError.isEmpty()) {
       count += QStringLiteral(" | 分页错误");
     }
-  } else if (mPreviewOnlyScene) {
+  } else if (mScene->mPreviewOnlyScene) {
     count = QStringLiteral("%1 点 | %2 | GPU 驻留 %3 / %4 | 只读")
-                .arg(formatCount(mPreviewPointCount),
-                     mProgressiveUploadActive
+                .arg(formatCount(mScene->mPreviewPointCount),
+                     mScene->mProgressiveUploadActive
                          ? QStringLiteral("磁盘分页")
                          : mInteractionLodActive
                                ? QStringLiteral("八叉树 LOD")
                                : QStringLiteral("叶级细节"),
-                     formatCount(mUploadedFullResolutionPointCount),
+                     formatCount(mScene->mUploadedFullResolutionPointCount),
                      formatCount(mPointCacheGpuBudgetBytes /
                                  sizeof(PointPreviewVertex)));
-    if (!mPointCacheError.isEmpty()) {
+    if (!mScene->mPointCacheError.isEmpty()) {
       count += QStringLiteral(" | 分页错误");
     }
-  } else if (mSourceFaceCount > 0 && mPreviewTriangleCount > 0) {
+  } else if (mScene->mSourceFaceCount > 0 && mScene->mPreviewTriangleCount > 0) {
     count = QStringLiteral("%1 顶点 | %2 面 | %3 预览三角形")
-                .arg(formatCount(mGaussianCount),
-                     formatCount(mSourceFaceCount),
-                     formatCount(mPreviewTriangleCount));
-  } else if (mGaussianCount > 0 && mPreviewPointCount > 0 &&
-             mGaussianCount != mPreviewPointCount) {
+                .arg(formatCount(mScene->mGaussianCount),
+                     formatCount(mScene->mSourceFaceCount),
+                     formatCount(mScene->mPreviewTriangleCount));
+  } else if (mScene->mGaussianCount > 0 && mScene->mPreviewPointCount > 0 &&
+             mScene->mGaussianCount != mScene->mPreviewPointCount) {
     count = QStringLiteral("%1 %2 | 预览 %3")
-                .arg(formatCount(mGaussianCount),
-                     mHasGaussianAttributes ? QStringLiteral("高斯")
+                .arg(formatCount(mScene->mGaussianCount),
+                     mScene->mHasGaussianAttributes ? QStringLiteral("高斯")
                                             : QStringLiteral("点"),
-                     formatCount(mPreviewPointCount));
-  } else if (mGaussianCount > 0) {
+                     formatCount(mScene->mPreviewPointCount));
+  } else if (mScene->mGaussianCount > 0) {
     count = QStringLiteral("%1 %2").arg(
-        formatCount(mGaussianCount),
-        mHasGaussianAttributes ? QStringLiteral("高斯") : QStringLiteral("点"));
+        formatCount(mScene->mGaussianCount),
+        mScene->mHasGaussianAttributes ? QStringLiteral("高斯") : QStringLiteral("点"));
   } else {
     count = QStringLiteral("场景数据待载入");
   }
-  if (mHasMesh) {
-    if (mMeshTextureReady && mMeshTextureSize.isValid()) {
+  if (mScene->mHasMesh) {
+    if (mScene->mMeshTextureReady && mScene->mMeshTextureSize.isValid()) {
       count += QStringLiteral(" | 贴图 %1 · %2×%3")
-                   .arg(QFileInfo(mMeshTexturePath).fileName())
-                   .arg(mMeshTextureSize.width())
-                   .arg(mMeshTextureSize.height());
-    } else if (mMeshHasTextureCoordinates) {
+                   .arg(QFileInfo(mScene->mMeshTexturePath).fileName())
+                   .arg(mScene->mMeshTextureSize.width())
+                   .arg(mScene->mMeshTextureSize.height());
+    } else if (mScene->mMeshHasTextureCoordinates) {
       count += QStringLiteral(" | UV · 顶点色回退");
     } else {
       count += QStringLiteral(" | 顶点色");
     }
-    if (!mMeshTextureError.isEmpty()) {
+    if (!mScene->mMeshTextureError.isEmpty()) {
       count += QStringLiteral(" | 贴图警告");
     }
   }
   if (mShowCameras) {
     count += QStringLiteral(" | 相机 %1%2")
                  .arg(formatCount(cameraCount()),
-                      mCameraGeometry.decimated ? QStringLiteral("（抽稀）")
+                      mScene->mCameraGeometry.decimated ? QStringLiteral("（抽稀）")
                                                 : QString());
   }
-  if (mSelectionBusy) {
+  if (mScene->mSelectionBusy) {
     count += QStringLiteral(" | 正在计算选择");
-  } else if (mEditModel.selectedCount() > 0 || mEditModel.deletedCount() > 0) {
+  } else if (mScene->mEditModel.selectedCount() > 0 || mScene->mEditModel.deletedCount() > 0) {
     count += QStringLiteral(" | 已选 %1 | 已删 %2")
-                 .arg(formatCount(mEditModel.selectedCount()),
-                      formatCount(mEditModel.deletedCount()));
+                 .arg(formatCount(mScene->mEditModel.selectedCount()),
+                      formatCount(mScene->mEditModel.deletedCount()));
   }
   QFont compactFont = font();
   if (compactFont.pointSizeF() > 0.0) {
@@ -5485,7 +5750,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const int lineGap = 1;
   const int badgeHeight = (std::max)(22, lineHeight + 6);
   const QString mode =
-      mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
+      mScene->mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
   const int modeWidth = metrics.horizontalAdvance(mode) + 18;
   const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);
   const int widthHint =
@@ -5521,10 +5786,10 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                    metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
 
   const QString renderer =
-      mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
+      mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
           ? pagedMeshAvailable() ? QStringLiteral("分页三角网格")
                                  : QStringLiteral("三角网格")
-          : mRenderMode == RenderMode::Gaussians &&
+          : mScene->mRenderMode == RenderMode::Gaussians &&
                     gaussianRenderingAvailable()
                 ? QStringLiteral("高斯 DC SH")
                 : QStringLiteral("点预览");

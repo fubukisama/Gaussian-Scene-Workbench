@@ -1,5 +1,8 @@
 #pragma once
 
+#include "SceneObject.h"
+#include <QJsonObject>
+
 #include <QByteArray>
 #include <QObject>
 #include <QQuaternion>
@@ -59,6 +62,12 @@ public:
   [[nodiscard]] QVector3D sceneScale() const;
   [[nodiscard]] qint64 imageCount() const;
   [[nodiscard]] PlyMetadata sceneMetadata() const;
+  [[nodiscard]] QList<SceneObject> sceneObjects() const;
+  [[nodiscard]] QString activeSceneId() const { return mActiveSceneId; }
+  [[nodiscard]] QJsonObject sceneCollectionJson(const QString &rootPath = {}) const;
+  void restoreSceneCollection(const QJsonObject &state);
+  bool addScenePath(const QString &path, QString *errorMessage = nullptr);
+  bool activateSceneObject(const QString &id);
   [[nodiscard]] bool hasPendingDataMigration() const;
   [[nodiscard]] bool isDatasetManaged() const;
   [[nodiscard]] bool hasManagedReconstructionData() const;
@@ -102,12 +111,15 @@ signals:
 private:
   void setModified(bool modified);
   QString resolvePortablePath(const QString &storedPath) const;
+  void storeActiveScene();
 
   QString mProjectName;
   QString mRootPath;
   QString mProjectFilePath;
   QString mDatasetPath;
   QString mScenePath;
+  QList<SceneObject> mSceneObjects;
+  QString mActiveSceneId;
   QVector3D mSceneTranslation;
   QQuaternion mSceneRotation;
   QVector3D mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);

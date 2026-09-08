@@ -431,6 +431,8 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mSceneObjects.clear();
+  mActiveSceneId.clear();
   mSceneTranslation = {};
   mSceneRotation = {};
   mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
@@ -459,6 +461,8 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mScenePath.clear();
+  mSceneObjects.clear();
+  mActiveSceneId.clear();
   mSceneTranslation = {};
   mSceneRotation = {};
   mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
@@ -529,6 +533,7 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
                 QDir(projectDirectory).filePath(storedPendingDataRoot));
   mImageCount = countDatasetImages(mDatasetPath);
   mSceneMetadata = inspectPly(mScenePath);
+  restoreSceneCollection(root.value(QStringLiteral("sceneCollection")).toObject());
   setModified(false);
   emit changed();
   return true;
@@ -626,6 +631,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   root.insert(QStringLiteral("sceneTransform"),
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
+  root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(savedRootPath));
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
@@ -665,6 +671,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   mProjectFilePath = targetPath;
   mDatasetPath = savedDatasetPath;
   mScenePath = savedScenePath;
+  restoreSceneCollection(root.value(QStringLiteral("sceneCollection")).toObject());
   mPendingDataRoot.clear();
   setModified(false);
   emit changed();
@@ -735,6 +742,7 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
   root.insert(QStringLiteral("sceneTransform"),
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
+  root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(mRootPath));
   if (!pendingDataRoot.isEmpty()) {
     QString relativePendingRoot;
     root.insert(QStringLiteral("pendingDataRoot"),
@@ -793,6 +801,7 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
   root.insert(QStringLiteral("sceneTransform"),
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
+  root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(mRootPath));
   if (!mPendingDataRoot.isEmpty()) {
     root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);
   }
@@ -862,15 +871,19 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
 
   const QString oldDatasetPath = mDatasetPath;
   const QString oldScenePath = mScenePath;
+  const auto oldCollection = sceneCollectionJson();
+  const auto migratedCollection = sceneCollectionJson(targetDataRoot);
   mRootPath = normalizedAbsolutePath(targetDataRoot);
   mDatasetPath = remapManagedPath(oldDatasetPath, oldRootPath, mRootPath);
   mScenePath = remapManagedPath(oldScenePath, oldRootPath, mRootPath);
+  restoreSceneCollection(migratedCollection);
   mPendingDataRoot.clear();
 
   if (!saveManifest({}, errorMessage)) {
     mRootPath = oldRootPath;
     mDatasetPath = oldDatasetPath;
     mScenePath = oldScenePath;
+    restoreSceneCollection(oldCollection);
     mPendingDataRoot = targetDataRoot;
     if (publishedByThisCall) {
       QDir(targetDataRoot).removeRecursively();
@@ -897,6 +910,117 @@ bool WorkspaceDocument::setDatasetPath(const QString &path,
   return true;
 }
 
+QList<SceneObject> WorkspaceDocument::sceneObjects() const {
+  QList<SceneObject> result = mSceneObjects;
+  for (auto &object : result) {
+    if (object.id == mActiveSceneId) {
+      object.path = mScenePath;
+      object.translation = mSceneTranslation;
+      object.rotation = mSceneRotation;
+      object.scale = mSceneScale;
+      object.vertexCount = mSceneMetadata.vertexCount;
+    }
+  }
+  return result;
+}
+
+void WorkspaceDocument::storeActiveScene() {
+  mSceneObjects = sceneObjects();
+}
+
+QJsonObject WorkspaceDocument::sceneCollectionJson(const QString &rootPath) const {
+  const QString targetRoot = rootPath.isEmpty() ? mRootPath : rootPath;
+  QJsonArray objects;
+  for (const auto &object : sceneObjects()) {
+    objects.append(QJsonObject{
+        {QStringLiteral("id"), object.id},
+        {QStringLiteral("path"), portablePathForRoot(
+             remapManagedPath(object.path, mRootPath, targetRoot), targetRoot)},
+        {QStringLiteral("transform"), sceneTransformJson(object.translation, object.rotation, object.scale)},
+        {QStringLiteral("vertexCount"), object.vertexCount}});
+  }
+  return {{QStringLiteral("objects"), objects},
+          {QStringLiteral("activeId"), mActiveSceneId}};
+}
+
+void WorkspaceDocument::restoreSceneCollection(const QJsonObject &state) {
+  mSceneObjects.clear();
+  mActiveSceneId.clear();
+  QSet<QString> ids;
+  for (const auto &value : state.value(QStringLiteral("objects")).toArray()) {
+    const QJsonObject item = value.toObject();
+    SceneObject object;
+    object.path = resolvePortablePath(item.value(QStringLiteral("path")).toString());
+    if (object.path.isEmpty()) continue;
+    object.id = item.value(QStringLiteral("id")).toString();
+    if (object.id.isEmpty() || ids.contains(object.id)) {
+      object.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+    ids.insert(object.id);
+    object.translation = sceneTranslationFromJson(item.value(QStringLiteral("transform")));
+    object.rotation = sceneRotationFromJson(item.value(QStringLiteral("transform")));
+    object.scale = sceneScaleFromJson(item.value(QStringLiteral("transform")));
+    object.vertexCount = item.value(QStringLiteral("vertexCount")).toInteger();
+    mSceneObjects.append(object);
+  }
+  if (mSceneObjects.isEmpty() && !mScenePath.isEmpty() && state.isEmpty()) {
+    mSceneObjects.append({QUuid::createUuid().toString(QUuid::WithoutBraces),
+                          mScenePath, mSceneTranslation, mSceneRotation, mSceneScale,
+                          mSceneMetadata.vertexCount});
+  }
+  const QString requestedId = state.value(QStringLiteral("activeId")).toString();
+  if (!mSceneObjects.isEmpty()) {
+    const auto found = std::find_if(mSceneObjects.cbegin(), mSceneObjects.cend(),
+        [&](const SceneObject &object) { return object.id == requestedId; });
+    const auto &active = found == mSceneObjects.cend() ? mSceneObjects.constFirst() : *found;
+    mActiveSceneId = active.id;
+    mScenePath = active.path;
+    mSceneTranslation = active.translation;
+    mSceneRotation = active.rotation;
+    mSceneScale = active.scale;
+    mSceneMetadata = inspectPly(active.path);
+  } else {
+    mScenePath.clear();
+    mSceneMetadata = {};
+    mSceneTranslation = {};
+    mSceneRotation = {};
+    mSceneScale = {1, 1, 1};
+  }
+}
+
+bool WorkspaceDocument::activateSceneObject(const QString &id) {
+  if (id == mActiveSceneId) return true;
+  storeActiveScene();
+  const auto found = std::find_if(mSceneObjects.cbegin(), mSceneObjects.cend(),
+      [&](const SceneObject &object) { return object.id == id; });
+  if (found == mSceneObjects.cend()) return false;
+  mActiveSceneId = found->id;
+  mScenePath = found->path;
+  mSceneTranslation = found->translation;
+  mSceneRotation = found->rotation;
+  mSceneScale = found->scale;
+  mSceneMetadata = inspectPly(mScenePath);
+  setModified(true);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage) {
+  const PlyMetadata metadata = inspectPly(path, errorMessage);
+  if (!metadata.valid) return false;
+  storeActiveScene();
+  mActiveSceneId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  mScenePath = normalizedAbsolutePath(path);
+  mSceneTranslation = {};
+  mSceneRotation = {};
+  mSceneScale = {1, 1, 1};
+  mSceneMetadata = metadata;
+  mSceneObjects.append({mActiveSceneId, mScenePath, {}, {}, {1, 1, 1}, metadata.vertexCount});
+  setModified(true);
+  emit changed();
+  return true;
+}
+
 bool WorkspaceDocument::setScenePath(const QString &path,
                                      QString *errorMessage) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);
@@ -911,6 +1035,11 @@ bool WorkspaceDocument::setScenePath(const QString &path,
   }
   mScenePath = normalizedPath;
   mSceneMetadata = metadata;
+  if (mActiveSceneId.isEmpty()) {
+    mActiveSceneId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    mSceneObjects.append({mActiveSceneId, mScenePath});
+  }
+  storeActiveScene();
   setModified(true);
   emit changed();
   return true;
@@ -993,6 +1122,13 @@ bool WorkspaceDocument::clearImportedData(
   }
 
   const bool managedDataset = clearDataset && isDatasetManaged();
+  for (const auto &object : sceneObjects()) {
+    if (managedDataset && relativePathInside(mDatasetPath, object.path) &&
+        !(clearScene && object.id == mActiveSceneId)) {
+      assignError(errorMessage, tr("Another scene is stored in this dataset. Remove its association first."));
+      return false;
+    }
+  }
   if (managedDataset && !clearScene && !mScenePath.isEmpty() &&
       relativePathInside(mDatasetPath, mScenePath)) {
     assignError(errorMessage,
@@ -1004,6 +1140,7 @@ bool WorkspaceDocument::clearImportedData(
 
   const QString previousDatasetPath = mDatasetPath;
   const QString previousScenePath = mScenePath;
+  const auto previousCollection = sceneCollectionJson();
   const qint64 previousImageCount = mImageCount;
   const PlyMetadata previousSceneMetadata = mSceneMetadata;
   const QVector3D previousSceneTranslation = mSceneTranslation;
@@ -1047,6 +1184,9 @@ bool WorkspaceDocument::clearImportedData(
     mImageCount = 0;
   }
   if (clearScene) {
+    storeActiveScene();
+    mSceneObjects.removeIf([&](const SceneObject &object) { return object.id == mActiveSceneId; });
+    mActiveSceneId.clear();
     mScenePath.clear();
     mSceneMetadata = {};
     mSceneTranslation = {};
@@ -1054,6 +1194,7 @@ bool WorkspaceDocument::clearImportedData(
     mSceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   }
 
+  if (clearScene) restoreSceneCollection(sceneCollectionJson());
   QString saveError;
   bool committed = true;
   if (!mProjectFilePath.isEmpty()) {
@@ -1070,6 +1211,7 @@ bool WorkspaceDocument::clearImportedData(
     mSceneTranslation = previousSceneTranslation;
     mSceneRotation = previousSceneRotation;
     mSceneScale = previousSceneScale;
+    restoreSceneCollection(previousCollection);
     setModified(previousModified);
     bool restored = true;
     if (!stagedDatasetPath.isEmpty()) {

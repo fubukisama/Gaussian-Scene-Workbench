@@ -52,6 +52,7 @@ private slots:
   void exportsFilteredAsciiPlyWithOriginalFields();
   void exportsFilteredBinaryPlyWithoutReencoding();
   void createsUntitledProjectWithoutAProjectFile();
+  void preservesIndependentSceneObjectsAcrossImportAndSave();
   void serializesCurrentUnsavedStateForRecovery();
   void savesRecoverableManifestWithoutMovingActiveWorkspace();
   void finalizesPendingMigrationWithDataWrittenAfterManifestSave();
@@ -72,6 +73,69 @@ private slots:
   void reloadsCameraSidecarAfterRepair();
   void decimatesLargeCameraVisualization();
 };
+
+void WorkspaceDocumentTests::preservesIndependentSceneObjectsAcrossImportAndSave() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath("working");
+  QVERIFY(QDir().mkpath(working));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.createUntitled(working, "Multiple objects", &error));
+  QStringList files;
+  for (const auto &name : {"one.ply", "two.ply", "three.ply"}) {
+    QFile file(QDir(working).filePath(name));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n");
+    files.append(file.fileName());
+  }
+  QVERIFY(document.setScenePath(files[0], &error));
+  const QString firstId = document.activeSceneId();
+  QVERIFY(document.setSceneTransform({4, 5, 6}, QQuaternion::fromAxisAndAngle(0, 0, 1, 30),
+                                      {2, 3, 4}, &error));
+  QVERIFY(document.addScenePath(files[1], &error));
+  const QString secondId = document.activeSceneId();
+  QVERIFY(firstId != secondId);
+  QCOMPARE(document.sceneObjects().size(), 2);
+  QCOMPARE(document.sceneObjects()[0].translation, QVector3D(4, 5, 6));
+  QCOMPARE(document.sceneObjects()[0].scale, QVector3D(2, 3, 4));
+  QVERIFY(document.setSceneTransform({7, 8, 9}, {}, {1, 1, 1}, &error));
+  QVERIFY(!document.setScenePath(QDir(working).filePath("missing.ply"), &error));
+  QCOMPARE(document.sceneObjects().size(), 2);
+  QCOMPARE(document.scenePath(), files[1]);
+  QVERIFY(document.activateSceneObject(firstId));
+  QVERIFY(document.setScenePath(files[2], &error));
+  QCOMPARE(document.sceneObjects().size(), 2);
+  QCOMPARE(document.sceneObjects()[1].translation, QVector3D(7, 8, 9));
+  QCOMPARE(document.sceneTranslation(), QVector3D());
+  const QString saved = QDir(temporary.path()).filePath("multi.gsw");
+  QVERIFY2(document.saveManifest(saved, &error), qPrintable(error));
+  QVERIFY2(document.finalizeDataMigration(&error), qPrintable(error));
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(saved, &error), qPrintable(error));
+  QCOMPARE(reopened.sceneObjects().size(), 2);
+  QCOMPARE(reopened.activeSceneId(), firstId);
+  QCOMPARE(QFileInfo(reopened.sceneObjects()[0].path).fileName(), QString("three.ply"));
+  for (const auto &object : reopened.sceneObjects()) QVERIFY(QFileInfo::exists(object.path));
+  QVERIFY(reopened.activateSceneObject(secondId));
+  QCOMPARE(reopened.sceneTranslation(), QVector3D(7, 8, 9));
+  const QString copied = QDir(temporary.path()).filePath("copied.gsw");
+  QVERIFY2(reopened.save(copied, &error), qPrintable(error));
+  gsw::WorkspaceDocument copiedDocument;
+  QVERIFY(copiedDocument.load(copied, &error));
+  QCOMPARE(copiedDocument.sceneObjects().size(), 2);
+  QCOMPARE(copiedDocument.activeSceneId(), secondId);
+  QCOMPARE(copiedDocument.sceneTranslation(), QVector3D(7, 8, 9));
+  const auto recovery = QJsonDocument::fromJson(copiedDocument.recoveryManifestJson()).object();
+  QCOMPARE(recovery["sceneCollection"].toObject()["objects"].toArray().size(), 2);
+  gsw::ImportCleanupOptions cleanup;
+  cleanup.clearDataset = false;
+  cleanup.clearScene = true;
+  QVERIFY(copiedDocument.clearImportedData(cleanup, nullptr, &error));
+  QCOMPARE(copiedDocument.sceneObjects().size(), 1);
+  QCOMPARE(copiedDocument.activeSceneId(), firstId);
+  for (const auto &file : files) QVERIFY(QFileInfo::exists(file));
+}
 
 void WorkspaceDocumentTests::locatesNewestCompletedTrainingScene() {
   QTemporaryDir temporary;
