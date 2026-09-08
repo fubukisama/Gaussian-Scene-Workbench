@@ -1021,6 +1021,49 @@ bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage)
   return true;
 }
 
+bool WorkspaceDocument::setSceneObjectTransforms(const QList<SceneObject> &objects,
+                                                 QString *errorMessage) {
+  if (!hasProject()) {
+    assignError(errorMessage, tr("No project is open."));
+    return false;
+  }
+  auto updated = sceneObjects();
+  QSet<QString> seen;
+  for (const auto &change : objects) {
+    auto found = std::find_if(updated.begin(), updated.end(),
+        [&](const auto &object) { return object.id == change.id; });
+    if (found == updated.end() || seen.contains(change.id) ||
+        !std::isfinite(change.translation.x()) || !std::isfinite(change.translation.y()) ||
+        !std::isfinite(change.translation.z()) ||
+        !std::isfinite(change.rotation.scalar()) || !std::isfinite(change.rotation.x()) ||
+        !std::isfinite(change.rotation.y()) || !std::isfinite(change.rotation.z()) ||
+        change.rotation.lengthSquared() < 1.0e-12F ||
+        !std::isfinite(change.scale.x()) || !std::isfinite(change.scale.y()) ||
+        !std::isfinite(change.scale.z()) || std::abs(change.scale.x()) < 1.0e-4F ||
+        std::abs(change.scale.y()) < 1.0e-4F || std::abs(change.scale.z()) < 1.0e-4F ||
+        std::abs(change.scale.x()) > 1.0e4F || std::abs(change.scale.y()) > 1.0e4F ||
+        std::abs(change.scale.z()) > 1.0e4F) {
+      assignError(errorMessage, tr("Invalid object or transform in group operation."));
+      return false;
+    }
+    seen.insert(change.id);
+    found->translation = change.translation;
+    found->rotation = normalizedRotation(change.rotation);
+    found->scale = change.scale;
+  }
+  if (objects.isEmpty()) return true;
+  mSceneObjects = updated;
+  for (const auto &object : updated) {
+    if (object.id != mActiveSceneId) continue;
+    mSceneTranslation = object.translation;
+    mSceneRotation = object.rotation;
+    mSceneScale = object.scale;
+  }
+  setModified(true);
+  emit changed();
+  return true;
+}
+
 bool WorkspaceDocument::setScenePath(const QString &path,
                                      QString *errorMessage) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);

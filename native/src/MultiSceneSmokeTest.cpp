@@ -11,11 +11,13 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QImage>
+#include <QKeyEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QWheelEvent>
 
 #include <functional>
@@ -137,6 +139,105 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   QApplication::sendEvent(viewport, &release);
   if (!check(document->activeSceneId() == first && viewport->activeSceneId() == first,
              "geometry click activates the old model")) return false;
+  const auto key = [&](int code, const QString &text = {}, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QKeyEvent event(QEvent::KeyPress, code, modifiers, text);
+    QApplication::sendEvent(viewport, &event);
+  };
+  const QPointF blue = footprint(frame, false).center / viewport->devicePixelRatioF();
+  const auto click = [&](const QPointF &point, Qt::KeyboardModifiers modifiers) {
+    QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()),
+                      Qt::LeftButton, Qt::LeftButton, modifiers);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, viewport->mapToGlobal(point.toPoint()),
+                    Qt::LeftButton, Qt::NoButton, modifiers);
+    QApplication::sendEvent(viewport, &down);
+    QApplication::sendEvent(viewport, &up);
+  };
+  click(blue, Qt::ControlModifier);
+  if (!check(viewport->selectedModelCount() == 2, "Ctrl click adds another model")) return false;
+  click(blue, Qt::ControlModifier);
+  if (!check(viewport->selectedModelCount() == 1 && viewport->selectedSceneIds().contains(first),
+             "Ctrl click removes just the clicked model")) return false;
+  key(Qt::Key_A, "a", Qt::ControlModifier);
+  if (!check(viewport->selectedModelCount() == 2, "Ctrl+A selects all models")) return false;
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  if (!check(tree != nullptr, "project tree available")) return false;
+  const auto treeClick = [&](const QString &id, Qt::KeyboardModifiers modifiers) {
+    for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+      if ((*it)->data(0, Qt::UserRole + 2).toString() != id) continue;
+      tree->scrollToItem(*it);
+      const QPointF point = tree->visualItemRect(*it).center();
+      QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point.toPoint()),
+                        Qt::LeftButton, Qt::LeftButton, modifiers);
+      QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point.toPoint()),
+                      Qt::LeftButton, Qt::NoButton, modifiers);
+      QApplication::sendEvent(tree->viewport(), &down);
+      QApplication::sendEvent(tree->viewport(), &up);
+      return;
+    }
+  };
+  treeClick(first, Qt::NoModifier);
+  treeClick(second, Qt::ShiftModifier);
+  if (!check(viewport->selectedModelCount() == 2 && tree->selectedItems().size() == 2,
+             "Shift tree range selection survives active-object changes")) return false;
+  treeClick(second, Qt::ControlModifier);
+  if (!check(viewport->selectedModelCount() == 1 && viewport->selectedSceneIds().contains(first),
+             "Ctrl tree click removes only one model")) return false;
+  treeClick(second, Qt::ControlModifier);
+  if (!check(viewport->selectedModelCount() == 2, "Ctrl tree click adds one model")) return false;
+  if (!capture.isEmpty()) viewport->grabFramebuffer().save(capture + ".selected.png");
+  const auto close = [](QVector3D actual, QVector3D expected) { return (actual - expected).length() < 0.001F; };
+  key(Qt::Key_G); key(Qt::Key_X); key(Qt::Key_2, "2"); key(Qt::Key_Return);
+  if (!check(close(document->sceneObjects()[0].translation, {2,0,0}) &&
+             close(document->sceneObjects()[1].translation, {2,0,0}), "G X moves both models")) return false;
+  viewport->undoEdit();
+  if (!check(close(document->sceneObjects()[0].translation, {}) &&
+             close(document->sceneObjects()[1].translation, {}), "one undo restores entire group")) return false;
+  viewport->redoEdit();
+  if (!check(close(document->sceneObjects()[0].translation, {2,0,0}) &&
+             close(document->sceneObjects()[1].translation, {2,0,0}), "one redo restores entire group")) return false;
+  viewport->undoEdit();
+  key(Qt::Key_R); key(Qt::Key_Z); key(Qt::Key_9, "9"); key(Qt::Key_0, "0"); key(Qt::Key_Return);
+  if (!check(close(document->sceneObjects()[0].translation, {3,-3,0}) &&
+             close(document->sceneObjects()[1].translation, {-3,3,0}) &&
+             rotationsEquivalent(document->sceneObjects()[0].rotation, document->sceneObjects()[1].rotation),
+             "R Z rotates around a shared pivot, preserving relative positions")) return false;
+  viewport->undoEdit();
+  key(Qt::Key_S); key(Qt::Key_2, "2"); key(Qt::Key_Return);
+  if (!check(close(document->sceneObjects()[0].translation, {-3,0,0}) &&
+             close(document->sceneObjects()[1].translation, {3,0,0}) &&
+             close(document->sceneObjects()[0].scale, {2,2,2}) && close(document->sceneObjects()[1].scale, {2,2,2}),
+             "S scales the group around its shared pivot")) return false;
+  viewport->undoEdit();
+  key(Qt::Key_G); key(Qt::Key_X); key(Qt::Key_8, "8"); key(Qt::Key_Escape);
+  if (!check(close(viewport->modelTranslation(), {}) && close(document->sceneObjects()[0].translation, {}) &&
+             close(document->sceneObjects()[1].translation, {}), "Esc cancels entire group without persisting")) return false;
+  viewport->activateSceneObject(first);
+  if (!check(close(viewport->modelTranslation(), {}), "cancel restored first runtime transform")) return false;
+  viewport->activateSceneObject(second);
+  if (!check(close(viewport->modelTranslation(), {}), "cancel restored second runtime transform")) return false;
+  const auto unitTransforms = document->sceneObjects();
+  auto smallTransforms = unitTransforms;
+  smallTransforms[0].scale = {0.03F, 0.03F, 0.03F};
+  smallTransforms[1].scale = {0.06F, 0.06F, 0.06F};
+  if (!document->setSceneObjectTransforms(smallTransforms, &error) ||
+      !viewport->setSceneSelection({first, second}, first)) return false;
+  key(Qt::Key_S); key(Qt::Key_0, "0"); key(Qt::Key_Period, ".");
+  key(Qt::Key_0, "0"); key(Qt::Key_0, "0"); key(Qt::Key_0, "0"); key(Qt::Key_1, "1"); key(Qt::Key_Return);
+  if (!check(document->sceneObjects()[0].scale.x() >= 1.0e-4F &&
+             document->sceneObjects()[0].scale.x() < 1.001e-4F &&
+             std::abs(document->sceneObjects()[1].scale.x() / document->sceneObjects()[0].scale.x() - 2.0F) < 1.0e-5F,
+             "minimum scale clamps the common factor without resetting members")) return false;
+  auto largeTransforms = unitTransforms;
+  largeTransforms[0].scale = {3000, 3000, 3000};
+  largeTransforms[1].scale = {1500, 1500, 1500};
+  if (!document->setSceneObjectTransforms(largeTransforms, &error)) return false;
+  key(Qt::Key_S); key(Qt::Key_1, "1"); key(Qt::Key_0, "0"); key(Qt::Key_Return);
+  if (!check(document->sceneObjects()[0].scale.x() <= 10000 && document->sceneObjects()[0].scale.x() > 9999 &&
+             std::abs(document->sceneObjects()[0].scale.x() / document->sceneObjects()[1].scale.x() - 2.0F) < 1.0e-5F,
+             "maximum scale preserves proportions for every selected member")) return false;
+  if (!document->setSceneObjectTransforms(unitTransforms, &error)) return false;
+  // Reset to the first object for the independent replacement checks below.
+  viewport->activateSceneObject(first);
   document->setSceneTransform({0, 0, 2}, QQuaternion::fromAxisAndAngle(0, 0, 1, 25), {1, 1, 1}, &error);
   if (!check(document->sceneObjects()[1].translation.isNull(), "independent transforms")) return false;
   const auto before = document->sceneCollectionJson();
@@ -158,6 +259,27 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   document->setScenePath(files[0], &error);
   if (!check(waitUntil([&] { return viewport->scenePath() == files[0] && viewport->meshRenderingAvailable(); }),
              "rapid replacement preserves the latest source")) return false;
+  if (!check(chooseImport(2, "appendSceneButton") && waitUntil([&] { return viewport->meshRenderingAvailable(); }),
+             "third object imported for partial-selection regression")) return false;
+  const QString third = document->activeSceneId();
+  if (!check(viewport->setSceneSelection({first, second}, first), "select two out of three")) return false;
+  key(Qt::Key_G); key(Qt::Key_X); key(Qt::Key_2, "2"); key(Qt::Key_Return);
+  if (!check(close(document->sceneObjects()[0].translation, {2,0,0}) &&
+             close(document->sceneObjects()[1].translation, {2,0,0}) &&
+             close(document->sceneObjects()[2].translation, {}), "unselected third object stays unchanged")) return false;
+  viewport->activateSceneObject(third);
+  viewport->undoEdit();
+  if (!check(close(document->sceneObjects()[0].translation, {}) &&
+             close(document->sceneObjects()[1].translation, {}) && close(viewport->modelTranslation(), {}),
+             "group undo works after changing the selection")) return false;
+  viewport->redoEdit();
+  if (!check(close(document->sceneObjects()[0].translation, {2,0,0}) &&
+             close(document->sceneObjects()[1].translation, {2,0,0}) && close(viewport->modelTranslation(), {}),
+             "group redo works after changing the selection")) return false;
+  if (!check(document->saveManifest(saved, &error) && document->load(saved, &error) &&
+             close(document->sceneObjects()[0].translation, {2,0,0}) &&
+             close(document->sceneObjects()[1].translation, {2,0,0}) &&
+             close(document->sceneObjects()[2].translation, {}), "group transforms survive save/reopen")) return false;
   // Cleanup test project before deleting its temporary fixture directory.
   document->createUntitled(temporary.path(), "Empty", &error);
   if (!check(viewport->sceneObjectCount() == 0, "clearing project releases every layer")) return false;
@@ -213,7 +335,7 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   if (!check((footprint(frame, false).center - beforeSwitch).manhattanLength() < 3,
              "changing automatic coordinate shift does not move the image")) return false;
   viewport->setSceneObjects({}, {});
-  qInfo() << "MULTI_SCENE PASS: append, same-frame rendering, geometry picking, independent transforms, cancel, replace, save/reopen, async replacement, mixed point/Gaussian layers with large XYZ";
+  qInfo() << "MULTI_SCENE PASS: append, same-frame rendering, Ctrl/Shift multiselection, shared-pivot group transforms, atomic cancel/undo/redo, unselected isolation, save/reopen, async replacement, mixed point/Gaussian layers with large XYZ";
   return true;
 }
 }

@@ -55,6 +55,7 @@
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
@@ -72,6 +73,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QtConcurrent>
@@ -1500,34 +1502,32 @@ void MainWindow::createProjectDock() {
   mProjectTree->setHeaderHidden(true);
   mProjectTree->setAlternatingRowColors(false);
   mProjectTree->setUniformRowHeights(true);
-  mProjectTree->setSelectionMode(QAbstractItemView::SingleSelection);
+  mProjectTree->setObjectName(QStringLiteral("projectTree"));
+  mProjectTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+  mProjectTree->setToolTip(QStringLiteral("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
 
   connect(mProjectTree, &QTreeWidget::itemSelectionChanged, this, [this]() {
     const QList<QTreeWidgetItem *> selection = mProjectTree->selectedItems();
-    if (selection.isEmpty()) {
-      return;
+    if (mProcessSupervisor.isRunning() || mSelectionBusy) { syncProjectTreeSelection(); return; }
+    QStringList ids;
+    for (const auto *item : selection) {
+      const QString id = item->data(0, Qt::UserRole + 2).toString();
+      if (!id.isEmpty()) ids.append(id);
     }
-    const QString path = selection.first()->data(0, Qt::UserRole).toString();
-    if (!path.isEmpty()) {
-      statusBar()->showMessage(QDir::toNativeSeparators(path), 5000);
+    const auto *current = mProjectTree->currentItem();
+    const QString active = current ? current->data(0, Qt::UserRole + 2).toString() : QString();
+    QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
+    if (!ids.isEmpty() && (!ids.contains(mWorkspace.activeSceneId()) ||
+                          (ids.contains(active) && active != mWorkspace.activeSceneId())) &&
+        !confirmDiscardSceneEdits()) {
+      syncProjectTreeSelection(); return;
     }
-    const QString kind =
-        selection.first()->data(0, Qt::UserRole + 1).toString();
-    if (kind == QStringLiteral("scene") &&
-        !mProcessSupervisor.isRunning()) {
-      const QString id = selection.first()->data(0, Qt::UserRole + 2).toString();
-      if (!id.isEmpty() && id != mWorkspace.activeSceneId()) {
-        if (!confirmDiscardSceneEdits()) { rebuildProjectTree(); return; }
-        mWorkspace.activateSceneObject(id);
-      }
-      mViewport->selectModel();
-      statusBar()->showMessage(
-          QStringLiteral("模型已选中：G 移动，R 旋转，再按 R 轨迹球自由旋转"),
-          6000);
-    }
+    if (!mViewport->setSceneSelection(ids, active)) syncProjectTreeSelection();
+    statusBar()->showMessage(QStringLiteral("已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放")
+                                .arg(ids.size()), 6000);
   });
   connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
           [this](const QPoint &position) {
@@ -1537,7 +1537,13 @@ void MainWindow::createProjectDock() {
             }
             const QString kind =
                 item->data(0, Qt::UserRole + 1).toString();
-            mProjectTree->setCurrentItem(item);
+            if (!item->isSelected()) mProjectTree->setCurrentItem(item);
+            else if (kind == QStringLiteral("scene") && !mProcessSupervisor.isRunning() && !mSelectionBusy) {
+              const QString id = item->data(0, Qt::UserRole + 2).toString();
+              QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
+              if (id != mViewport->activeSceneId() && confirmDiscardSceneEdits())
+                mViewport->setSceneSelection(mViewport->selectedSceneIds(), id);
+            }
             QMenu menu(mProjectTree);
             if (kind == QStringLiteral("dataset")) {
               menu.addAction(mClearDatasetAction);
@@ -2231,7 +2237,19 @@ void MainWindow::connectServices() {
             }
           });
   connect(mViewport, &NativeViewport::activeSceneObjectChanged, this,
-          [this](const QString &id) { mWorkspace.activateSceneObject(id); });
+          [this](const QString &id) {
+            QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
+            mWorkspace.activateSceneObject(id);
+          });
+  connect(mViewport, &NativeViewport::sceneSelectionChanged, this,
+          [this]() { syncProjectTreeSelection(); updateEditActions(); updateInspector(); });
+  connect(mViewport, &NativeViewport::sceneTransformsCommitted, this,
+          [this](const QList<SceneObject> &objects) {
+            QString error;
+            if (!mWorkspace.setSceneObjectTransforms(objects, &error)) {
+              appendTaskEvent(QStringLiteral("整组变换未能写入工程：%1").arg(error));
+            }
+          });
   connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
           [this]() {
             if (!mWorkspace.scenePath().isEmpty() &&
@@ -4744,6 +4762,7 @@ void MainWindow::updateActionAvailability() {
 }
 
 void MainWindow::rebuildProjectTree() {
+  if (mPreserveProjectTree) { syncProjectTreeSelection(); return; }
   const QSignalBlocker blocker(mProjectTree);
   mProjectTree->clear();
   const QString projectName = mWorkspace.hasProject()
@@ -4788,7 +4807,8 @@ void MainWindow::rebuildProjectTree() {
     item->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
     item->setData(0, Qt::UserRole + 2, object.id);
     item->setToolTip(0, QDir::toNativeSeparators(object.path));
-    if (object.id == mWorkspace.activeSceneId()) mProjectTree->setCurrentItem(item);
+    if (object.id == mWorkspace.activeSceneId())
+      mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
   }
   if (mCameraCount > 0) {
     auto *cameras = new QTreeWidgetItem(
@@ -4828,6 +4848,21 @@ void MainWindow::rebuildProjectTree() {
   root->setExpanded(true);
   dataset->setExpanded(true);
   scene->setExpanded(true);
+  syncProjectTreeSelection();
+}
+
+void MainWindow::syncProjectTreeSelection() {
+  if (!mProjectTree || !mViewport) return;
+  const QSignalBlocker blocker(mProjectTree);
+  const QStringList ids = mViewport->selectedSceneIds();
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    auto *item = *it;
+    const QString id = item->data(0, Qt::UserRole + 2).toString();
+    item->setSelected(!id.isEmpty() && ids.contains(id));
+    if (!mPreserveProjectTree && id == mViewport->activeSceneId()) {
+      mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
+    }
+  }
 }
 
 QVector3D MainWindow::workspaceTranslationForViewport() const {
@@ -4903,6 +4938,9 @@ void MainWindow::updateInspector() {
                                 .arg(scale.x(), 0, 'g', 6)
                                 .arg(scale.y(), 0, 'g', 6)
                                 .arg(scale.z(), 0, 'g', 6);
+  const QString selectionText = mViewport->selectedModelCount() > 1
+      ? QStringLiteral("\n已选中 %1 个模型 · 上方为当前模型属性").arg(mViewport->selectedModelCount())
+      : mModelSelected ? QStringLiteral(" · 已选中") : QString();
   if (coordinates.valid) {
     mSceneTransformValue->setText(
         QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
@@ -4910,7 +4948,7 @@ void MainWindow::updateInspector() {
                   formatSceneLength(translation.y(), coordinates),
                   formatSceneLength(translation.z(), coordinates),
                   rotationText, scaleText,
-                  mModelSelected ? QStringLiteral(" · 已选中") : QString()));
+                  selectionText));
   } else {
     mSceneTransformValue->setText(
         QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
@@ -4919,7 +4957,7 @@ void MainWindow::updateInspector() {
             .arg(translation.z(), 0, 'g', 7)
             .arg(rotationText)
             .arg(scaleText)
-            .arg(mModelSelected ? QStringLiteral(" · 已选中") : QString()));
+            .arg(selectionText));
   }
   if (coordinates.valid) {
     mCoordinateSystemValue->setText(

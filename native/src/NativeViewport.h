@@ -77,6 +77,10 @@ public:
   void setScene(const QString &scenePath, qint64 gaussianCount);
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
   bool activateSceneObject(const QString &id);
+  bool setSceneSelection(const QStringList &ids, const QString &activeId = {});
+  void selectAllModels();
+  [[nodiscard]] QStringList selectedSceneIds() const;
+  [[nodiscard]] qsizetype selectedModelCount() const { return mSelectedSceneIds.size(); }
   [[nodiscard]] QString activeSceneId() const { return mScene->id; }
   [[nodiscard]] qsizetype sceneObjectCount() const { return mSceneStates.size(); }
   void setShowCameras(bool enabled);
@@ -139,9 +143,11 @@ public:
     return mTransformGizmoMode;
   }
   [[nodiscard]] bool modelGizmoOrientationLocked() const {
+    if (mSelectedSceneIds.size() > 1) return mTransformGizmoMode == TransformGizmoMode::Scale;
     return transformOrientationLocked(mTransformGizmoMode);
   }
   [[nodiscard]] bool modelGizmoUsesLocalOrientation() const {
+    if (mSelectedSceneIds.size() > 1) return mTransformGizmoLocal;
     return transformUsesLocalOrientation(mTransformGizmoMode,
                                          mTransformGizmoLocal);
   }
@@ -171,6 +177,8 @@ public:
   }
 
 signals:
+  void sceneSelectionChanged(const QStringList &ids, const QString &activeId);
+  void sceneTransformsCommitted(const QList<SceneObject> &objects);
   void activeSceneObjectChanged(const QString &id);
   void frameMetricsChanged(double framesPerSecond,
                            double averageFrameMilliseconds);
@@ -218,6 +226,24 @@ protected:
   void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
+  [[nodiscard]] QVector<QVector3D> selectionBoundsCorners() const;
+  [[nodiscard]] QVector3D selectionPivot() const;
+  [[nodiscard]] QList<SceneObject> selectedTransforms() const;
+  void applySceneTransforms(const QList<SceneObject> &objects, bool notify);
+  void notifySceneSelection();
+  void applyGroupTransform(const QVector3D &translation, const QQuaternion &rotation,
+                           float factor);
+  struct TransformCommand {
+    QList<SceneObject> before;
+    QList<SceneObject> after;
+  };
+  QSet<QString> mSelectedSceneIds;
+  QList<SceneObject> mTransformDragBefore;
+  QList<TransformCommand> mTransformHistory;
+  qsizetype mTransformHistoryIndex = 0;
+  QVector3D mGroupPivot;
+  QVector3D mGroupPreviewPivot;
+  float mGroupGizmoRadius = 1.0F;
   struct FullResolutionGpuChunk {
     int nodeId = -1;
     GLuint vertexArray = 0;
@@ -276,8 +302,6 @@ private:
     QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
     QQuaternion mModelRotation;
     QVector3D mModelScale = QVector3D(1.0F, 1.0F, 1.0F);
-    QVector<ModelTransform> mModelTransformHistory;
-    qsizetype mModelTransformHistoryIndex = 0;
     float mSceneRadius = 4.0F;
     QVector<PointPosition> mSourcePositions;
     QVector<PointCloudVertex> mPreviewVertices;

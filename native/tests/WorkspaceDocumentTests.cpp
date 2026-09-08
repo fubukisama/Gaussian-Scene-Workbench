@@ -16,6 +16,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <bit>
@@ -53,6 +54,7 @@ private slots:
   void exportsFilteredBinaryPlyWithoutReencoding();
   void createsUntitledProjectWithoutAProjectFile();
   void preservesIndependentSceneObjectsAcrossImportAndSave();
+  void commitsObjectTransformsAtomically();
   void serializesCurrentUnsavedStateForRecovery();
   void savesRecoverableManifestWithoutMovingActiveWorkspace();
   void finalizesPendingMigrationWithDataWrittenAfterManifestSave();
@@ -135,6 +137,60 @@ void WorkspaceDocumentTests::preservesIndependentSceneObjectsAcrossImportAndSave
   QCOMPARE(copiedDocument.sceneObjects().size(), 1);
   QCOMPARE(copiedDocument.activeSceneId(), firstId);
   for (const auto &file : files) QVERIFY(QFileInfo::exists(file));
+}
+
+void WorkspaceDocumentTests::commitsObjectTransformsAtomically() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  gsw::WorkspaceDocument document;
+  QString error;
+  const QString working = QDir(temporary.path()).filePath("working");
+  QVERIFY(QDir().mkpath(working));
+  QVERIFY(document.createUntitled(working, "Group transforms", &error));
+  for (int i = 0; i < 3; ++i) {
+    QFile file(QDir(temporary.path()).filePath(QString("group-%1.ply").arg(i)));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n");
+    file.close();
+    QVERIFY(document.addScenePath(file.fileName(), &error));
+  }
+  const auto originals = document.sceneObjects();
+  auto changes = originals.mid(1);
+  changes[0].translation = {5, 6, 7};
+  changes[1].translation = {-2, 3, 4};
+  changes[0].rotation = changes[1].rotation = QQuaternion::fromAxisAndAngle(0, 0, 1, 40);
+  changes[0].scale = {2, 3, 4};
+  changes[1].scale = {3, 3, 3};
+  QSignalSpy changed(&document, &gsw::WorkspaceDocument::changed);
+  QVERIFY(document.setSceneObjectTransforms(changes, &error));
+  QCOMPARE(changed.count(), 1);
+  QCOMPARE(document.sceneObjects()[0].translation, originals[0].translation);
+  QCOMPARE(document.sceneObjects()[1].translation, changes[0].translation);
+  QCOMPARE(document.sceneTranslation(), changes[1].translation);
+  const auto committed = document.sceneCollectionJson();
+  for (int invalid = 0; invalid < 4; ++invalid) {
+    auto bad = changes;
+    bad[0].translation = {99, 99, 99};
+    if (invalid == 0) bad[1].id = "missing-object";
+    if (invalid == 1) bad[1].id = bad[0].id;
+    if (invalid == 2) bad[1].scale = {0, 1, 1};
+    if (invalid == 3) bad[1].scale = {1.0e5F, 1, 1};
+    QVERIFY(!document.setSceneObjectTransforms(bad, &error));
+    QCOMPARE(document.sceneCollectionJson(), committed);
+    QCOMPARE(changed.count(), 1);
+  }
+  QVERIFY(document.setSceneObjectTransforms({}, &error));
+  QCOMPARE(changed.count(), 1);
+  const QString saved = QDir(temporary.path()).filePath("group.gsw.json");
+  QVERIFY2(document.saveManifest(saved, &error), qPrintable(error));
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(saved, &error), qPrintable(error));
+  for (int i = 0; i < 2; ++i) {
+    QCOMPARE(reopened.sceneObjects()[i + 1].translation, changes[i].translation);
+    QCOMPARE(reopened.sceneObjects()[i + 1].scale, changes[i].scale);
+    QVERIFY(std::abs(QQuaternion::dotProduct(reopened.sceneObjects()[i + 1].rotation,
+                                            changes[i].rotation)) > 0.99999F);
+  }
 }
 
 void WorkspaceDocumentTests::locatesNewestCompletedTrainingScene() {

@@ -384,7 +384,14 @@ void NativeViewport::publishActiveSceneState() {
 
 void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
                                     const QString &activeId) {
-  if (mScene->id != activeId && mModelDragActive) finishModelTransform(false);
+  const bool collectionChanged = objects.size() != mSceneStates.size() ||
+      std::any_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
+        return std::none_of(mSceneStates.cbegin(), mSceneStates.cend(), [&](const auto &state) {
+          return state->id == object.id && state->mRequestedScenePath == object.path;
+        });
+      });
+  if ((mScene->id != activeId || collectionChanged) && mModelDragActive) finishModelTransform(false);
+  if (collectionChanged) resetModelTransformHistory();
   const auto oldActive = mScene;
   const QVector3D oldTarget = mTarget;
   const float oldDistance = mDistance;
@@ -435,19 +442,57 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     mCameraViewActive = false;
     mStoredCameraView.reset();
     mModelSelected = !objects.isEmpty();
+    mSelectedSceneIds.clear();
+    if (mModelSelected) mSelectedSceneIds.insert(mScene->id);
     mTransformGizmoHover = {};
     publishActiveSceneState();
+    notifySceneSelection();
   }
+  QSet<QString> existing;
+  for (const auto &state : mSceneStates) existing.insert(state->id);
+  mSelectedSceneIds.intersect(existing);
   update();
 }
 
 bool NativeViewport::activateSceneObject(const QString &id) {
-  if (id == mScene->id) { selectModel(); return true; }
+  return setSceneSelection({id}, id);
+}
+
+QStringList NativeViewport::selectedSceneIds() const {
+  QStringList result;
+  for (const auto &state : mSceneStates) {
+    if (mSelectedSceneIds.contains(state->id)) result.append(state->id);
+  }
+  return result;
+}
+
+void NativeViewport::notifySceneSelection() {
+  emit sceneSelectionChanged(selectedSceneIds(), mScene->id);
+}
+
+void NativeViewport::selectAllModels() {
+  QStringList ids;
+  for (const auto &state : mSceneStates) {
+    if (state->mSceneLoadMessage.isEmpty() &&
+        (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0)) ids.append(state->id);
+  }
+  setSceneSelection(ids, mScene->id);
+}
+
+bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &activeId) {
+  QSet<QString> selected;
+  for (const auto &state : mSceneStates) {
+    if (ids.contains(state->id)) selected.insert(state->id);
+  }
+  QString id = selected.contains(activeId) ? activeId :
+      selected.contains(mScene->id) ? mScene->id : selected.isEmpty() ? mScene->id : *selected.cbegin();
   const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
       [&](const auto &state) { return state->id == id; });
-  if (found == mSceneStates.cend() || mScene->mSelectionBusy || hasUnsavedSceneEdits()) return false;
+  if (found == mSceneStates.cend() || mScene->mSelectionBusy ||
+      (id != mScene->id && hasUnsavedSceneEdits())) return false;
   if (mModelDragActive) finishModelTransform(false);
   const auto next = *found;
+  const bool activeChanged = next != mScene;
   const QMatrix4x4 mapping = sceneDisplayTransform(*mScene, *next);
   mTarget = mapping.map(mTarget);
   mDistance *= mapping.mapVector(QVector3D(1, 0, 0)).length();
@@ -455,9 +500,12 @@ bool NativeViewport::activateSceneObject(const QString &id) {
   mCameraViewActive = false;
   mStoredCameraView.reset();
   mTransformGizmoHover = {};
-  selectModel();
-  emit activeSceneObjectChanged(id);
+  mSelectedSceneIds = selected;
+  mModelSelected = !selected.isEmpty();
+  if (mModelSelected) selectModel();
+  if (activeChanged) emit activeSceneObjectChanged(id);
   publishActiveSceneState();
+  notifySceneSelection();
   return true;
 }
 
@@ -614,6 +662,7 @@ void NativeViewport::setShowCameras(const bool enabled) {
 }
 
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
+  if (isTrimInteractionMode(mode) && mSelectedSceneIds.size() > 1) return;
   if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate ||
        mode == InteractionMode::Scale) &&
       !selectableModelAvailable()) {
@@ -638,6 +687,8 @@ void NativeViewport::setInteractionMode(const InteractionMode mode) {
   mMode = mode;
   if (mMode != InteractionMode::Inspect) {
     mModelSelected = false;
+    mSelectedSceneIds.clear();
+    notifySceneSelection();
   }
   mModelDragActive = false;
   mSelectionGestureActive = false;
@@ -662,6 +713,7 @@ void NativeViewport::selectModel() {
     notifyEditState();
   }
   mModelSelected = true;
+  mSelectedSceneIds.insert(mScene->id);
   if (mMode != InteractionMode::Inspect) {
     const InteractionMode previousMode = mMode;
     mMode = InteractionMode::Inspect;
@@ -676,6 +728,7 @@ void NativeViewport::selectModel() {
     }
   }
   notifyModelInteractionState();
+  notifySceneSelection();
   update();
 }
 
@@ -691,8 +744,7 @@ bool NativeViewport::focusModel() {
     return false;
   }
 
-  const std::array<QVector3D, 8> corners =
-      transformedModelBoundsCorners();
+  const QVector<QVector3D> corners = selectionBoundsCorners();
   const float aspectRatio =
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
                    : 1.0F;
@@ -846,6 +898,8 @@ void NativeViewport::clearSelection() {
   mScene->mEditModel.clearSelection();
   const bool clearedModel = mModelSelected;
   mModelSelected = false;
+  mSelectedSceneIds.clear();
+  notifySceneSelection();
   mModelDragActive = false;
   mTransformGizmoDragActive = false;
   mTransformGizmoHover = {};
@@ -888,14 +942,9 @@ void NativeViewport::undoEdit() {
        mMode == InteractionMode::Scale ||
        !mScene->mEditModel.canUndo()) &&
       canUndoModelTransform()) {
-    --mScene->mModelTransformHistoryIndex;
-    const ModelTransform &transform =
-        mScene->mModelTransformHistory.at(mScene->mModelTransformHistoryIndex);
-    mScene->mModelTranslation = transform.translation;
-    mScene->mModelRotation = transform.rotation;
-    mScene->mModelScale = transform.scale;
-    emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation,
-                                 mScene->mModelScale);
+    --mTransformHistoryIndex;
+    const auto transforms = mTransformHistory.at(mTransformHistoryIndex).before;
+    applySceneTransforms(transforms, true);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -917,14 +966,8 @@ void NativeViewport::redoEdit() {
        mMode == InteractionMode::Scale ||
        !mScene->mEditModel.canRedo()) &&
       canRedoModelTransform()) {
-    ++mScene->mModelTransformHistoryIndex;
-    const ModelTransform &transform =
-        mScene->mModelTransformHistory.at(mScene->mModelTransformHistoryIndex);
-    mScene->mModelTranslation = transform.translation;
-    mScene->mModelRotation = transform.rotation;
-    mScene->mModelScale = transform.scale;
-    emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation,
-                                 mScene->mModelScale);
+    const auto transforms = mTransformHistory.at(mTransformHistoryIndex++).after;
+    applySceneTransforms(transforms, true);
     notifyEditState();
     notifyModelInteractionState();
     update();
@@ -962,7 +1005,7 @@ void NativeViewport::discardSceneEdits() {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
+  return mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
          mScene->mEditModel.pointCount() > 0;
 }
 
@@ -1701,8 +1744,15 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
   drawInfiniteGrid(viewProjection);
   drawDepthAwareReferenceAxes(viewProjection);
-  drawDepthAwareModelBounds(modelViewProjection);
   const auto active = mScene;
+  for (const auto &state : mSceneStates) {
+    if (!mSelectedSceneIds.contains(state->id)) continue;
+    QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
+    QScopedValueRollback<bool> selectionScope(mModelSelected, true);
+    QScopedValueRollback<QMatrix4x4> displayScope(
+        mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
+    drawDepthAwareModelBounds(viewProjection * modelMatrix());
+  }
   auto ordered = mSceneStates;
   if (ordered.isEmpty()) ordered.append(active);
   // Opaque objects share depth. Draw transparent objects back-to-front at the
@@ -1721,7 +1771,7 @@ void NativeViewport::paintGL() {
     const bool inactive = state != active;
     QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
     QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, inactive);
-    QScopedValueRollback<bool> selectionScope(mModelSelected, !inactive && mModelSelected);
+    QScopedValueRollback<bool> selectionScope(mModelSelected, mSelectedSceneIds.contains(state->id) && mModelSelected);
     QScopedValueRollback<QMatrix4x4> displayScope(
         mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
     QSignalBlocker signalBlocker(this);
@@ -2187,40 +2237,132 @@ void NativeViewport::notifyEditState() {
 }
 
 bool NativeViewport::canUndoModelTransform() const {
-  return mScene->mModelTransformHistoryIndex > 0 &&
-         mScene->mModelTransformHistoryIndex < mScene->mModelTransformHistory.size();
+  return mTransformHistoryIndex > 0 && mTransformHistoryIndex <= mTransformHistory.size();
 }
 
 bool NativeViewport::canRedoModelTransform() const {
-  return !mScene->mModelTransformHistory.isEmpty() &&
-         mScene->mModelTransformHistoryIndex + 1 < mScene->mModelTransformHistory.size();
+  return mTransformHistoryIndex < mTransformHistory.size();
 }
 
 void NativeViewport::resetModelTransformHistory() {
-  mScene->mModelTransformHistory = {
-      ModelTransform{mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale}};
-  mScene->mModelTransformHistoryIndex = 0;
+  mTransformHistory.clear();
+  mTransformHistoryIndex = 0;
 }
 
 void NativeViewport::commitModelTransform() {
-  const float translationScale = std::max(
-      {1.0F, mScene->mModelTranslation.length(),
-       mModelDragStartTransform.translation.length()});
-  if ((mScene->mModelTranslation - mModelDragStartTransform.translation)
-              .lengthSquared() <=
-          translationScale * translationScale * 1.0e-12F &&
-      rotationsEquivalent(mScene->mModelRotation,
-                          mModelDragStartTransform.rotation) &&
-      scalesEquivalent(mScene->mModelScale, mModelDragStartTransform.scale)) {
-    return;
+  const auto after = selectedTransforms();
+  bool changed = false;
+  for (qsizetype i = 0; i < std::min(after.size(), mTransformDragBefore.size()); ++i) {
+    const auto &before = mTransformDragBefore[i];
+    changed |= (after[i].translation - before.translation).lengthSquared() > 1.0e-12F ||
+        !rotationsEquivalent(after[i].rotation, before.rotation) || !scalesEquivalent(after[i].scale, before.scale);
   }
-  mScene->mModelTransformHistory.resize(mScene->mModelTransformHistoryIndex + 1);
-  mScene->mModelTransformHistory.append(
-      ModelTransform{mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale});
-  mScene->mModelTransformHistoryIndex = mScene->mModelTransformHistory.size() - 1;
-  emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale);
+  if (!changed) return;
+  mTransformHistory.resize(mTransformHistoryIndex);
+  mTransformHistory.append({mTransformDragBefore, after});
+  if (mTransformHistory.size() > 64) mTransformHistory.removeFirst();
+  mTransformHistoryIndex = mTransformHistory.size();
+  applySceneTransforms(after, true);
   notifyEditState();
   notifyModelInteractionState();
+}
+
+QList<SceneObject> NativeViewport::selectedTransforms() const {
+  QList<SceneObject> result;
+  for (const auto &state : mSceneStates) {
+    if (!mSelectedSceneIds.contains(state->id)) continue;
+    result.append({state->id, state->mScenePath,
+        state->mModelTranslation / static_cast<float>(state->mSceneCoordinates.displayScale),
+        state->mModelRotation, state->mModelScale, state->mGaussianCount});
+  }
+  return result;
+}
+
+void NativeViewport::applySceneTransforms(const QList<SceneObject> &objects, const bool notify) {
+  for (const auto &object : objects) {
+    const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+        [&](const auto &state) { return state->id == object.id && state->mScenePath == object.path; });
+    if (found == mSceneStates.cend()) continue;
+    auto &state = **found;
+    state.sourceTranslation = object.translation;
+    state.mModelTranslation = object.translation * static_cast<float>(state.mSceneCoordinates.displayScale);
+    state.mModelRotation = object.rotation;
+    state.mModelScale = object.scale;
+    state.sortDirectionValid = false;
+  }
+  if (notify) {
+    if (objects.size() == 1 && objects[0].id == mScene->id) {
+      emit modelTransformCommitted(mScene->mModelTranslation, mScene->mModelRotation, mScene->mModelScale);
+    } else {
+      emit sceneTransformsCommitted(objects);
+    }
+  }
+  update();
+}
+
+QVector<QVector3D> NativeViewport::selectionBoundsCorners() const {
+  QVector<QVector3D> result;
+  for (const auto &state : mSceneStates) {
+    if (!mSelectedSceneIds.contains(state->id)) continue;
+    const QVector3D low = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMinimum() :
+        state->mSceneCenter - QVector3D(state->mSceneRadius, state->mSceneRadius, state->mSceneRadius);
+    const QVector3D high = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMaximum() :
+        state->mSceneCenter + QVector3D(state->mSceneRadius, state->mSceneRadius, state->mSceneRadius);
+    const QMatrix4x4 matrix = sceneDisplayTransform(*state, *mScene) *
+        ModelTransform{state->mModelTranslation, state->mModelRotation, state->mModelScale}.matrix(state->mSceneCenter);
+    for (int i = 0; i < 8; ++i) result.append(matrix.map(QVector3D(
+        i & 1 ? high.x() : low.x(), i & 2 ? high.y() : low.y(), i & 4 ? high.z() : low.z())));
+  }
+  return result;
+}
+
+QVector3D NativeViewport::selectionPivot() const {
+  if (mSelectedSceneIds.size() <= 1) return transformedSceneCenter();
+  if (mModelDragActive && mTransformDragBefore.size() > 1) return mGroupPreviewPivot;
+  const auto corners = selectionBoundsCorners();
+  if (corners.isEmpty()) return transformedSceneCenter();
+  QVector3D low = corners.first(), high = low;
+  for (const auto &corner : corners) {
+    for (int axis = 0; axis < 3; ++axis) {
+      low[axis] = std::min(low[axis], corner[axis]);
+      high[axis] = std::max(high[axis], corner[axis]);
+    }
+  }
+  return (low + high) * 0.5F;
+}
+
+void NativeViewport::applyGroupTransform(const QVector3D &translation,
+                                         const QQuaternion &rotation, const float factor) {
+  // Clamp the common factor, not each member separately: preserve the group's
+  // proportions even when one member reaches the supported scale limits.
+  double minimumFactor = 0.0, maximumFactor = 1.0e12;
+  for (const auto &before : mTransformDragBefore) {
+    for (int axis = 0; axis < 3; ++axis) {
+      const double magnitude = std::abs(static_cast<double>(before.scale[axis]));
+      minimumFactor = std::max(minimumFactor, static_cast<double>(1.0e-4F) / magnitude);
+      maximumFactor = std::min(maximumFactor, 1.0e4 / magnitude);
+    }
+  }
+  float lower = static_cast<float>(minimumFactor), upper = static_cast<float>(maximumFactor);
+  if (lower < minimumFactor) lower = std::nextafter(lower, std::numeric_limits<float>::infinity());
+  if (upper > maximumFactor) upper = std::nextafter(upper, 0.0F);
+  const float commonFactor = std::copysign(std::clamp(std::abs(factor), lower, upper), factor);
+  for (const auto &before : mTransformDragBefore) {
+    const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+        [&](const auto &state) { return state->id == before.id; });
+    if (found == mSceneStates.cend()) continue;
+    auto &state = **found;
+    const QMatrix4x4 mapping = sceneDisplayTransform(state, *mScene);
+    const QVector3D oldCenter = mapping.map(state.mSceneCenter + before.translation *
+        static_cast<float>(state.mSceneCoordinates.displayScale));
+    const QVector3D newCenter = mGroupPivot + translation +
+        rotation.rotatedVector((oldCenter - mGroupPivot) * commonFactor);
+    state.mModelTranslation = mapping.inverted().map(newCenter) - state.mSceneCenter;
+    state.mModelRotation = normalizedModelRotation(rotation * before.rotation);
+    state.mModelScale = normalizedModelScale(before.scale * commonFactor);
+    state.sortDirectionValid = false;
+  }
+  mGroupPreviewPivot = mGroupPivot + translation;
 }
 
 void NativeViewport::notifyModelInteractionState() {
@@ -3446,7 +3588,8 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
       event->accept();
       return;
     }
-    if (mModelSelected) {
+    if (mModelSelected && !event->modifiers().testFlag(Qt::ControlModifier) &&
+        !event->modifiers().testFlag(Qt::ShiftModifier)) {
       const TransformGizmoHandle handle = hitTestTransformGizmo(
           modelTransformGizmo(), event->position(), mTransformGizmoMode);
       if (handle.isValid()) {
@@ -3496,23 +3639,19 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton &&
       mMode == InteractionMode::Inspect &&
       (selectableModelAvailable() || mSceneStates.size() > 1)) {
-    bool hit = false;
-    if (mSceneStates.size() > 1) {
-      const QString id = sceneObjectAt(event->position());
-      hit = !id.isEmpty() && activateSceneObject(id);
-    } else {
-      hit = modelHitAt(event->position());
-    }
-    if (hit) {
-      selectModel();
+    const QString id = mSceneStates.size() > 1 ? sceneObjectAt(event->position()) :
+        modelHitAt(event->position()) ? mScene->id : QString();
+    const bool toggle = event->modifiers().testFlag(Qt::ControlModifier);
+    const bool extend = event->modifiers().testFlag(Qt::ShiftModifier);
+    if (!id.isEmpty() || (mSceneStates.size() == 1 && modelHitAt(event->position()))) {
+      QStringList ids = (toggle || extend) ? selectedSceneIds() : QStringList();
+      if (toggle && ids.contains(id)) ids.removeAll(id);
+      else if (!ids.contains(id)) ids.append(id);
+      setSceneSelection(ids, id);
       event->accept();
       return;
     }
-    if (mModelSelected) {
-      mModelSelected = false;
-      notifyModelInteractionState();
-      update();
-    }
+    if (!toggle && !extend && mModelSelected) clearSelection();
   }
 
   mPressedButtons = event->buttons();
@@ -3887,6 +4026,12 @@ QVector3D NativeViewport::cameraPosition() const {
 
 void NativeViewport::keyPressEvent(QKeyEvent *event) {
   if (!mModelDragActive) {
+    if (event->key() == Qt::Key_A && event->modifiers().testFlag(Qt::ControlModifier) &&
+        mMode == InteractionMode::Inspect) {
+      selectAllModels();
+      event->accept();
+      return;
+    }
     if (event->key() == Qt::Key_Escape && mModelSelected) {
       clearSelection();
       event->accept();
@@ -4407,6 +4552,14 @@ QPointF NativeViewport::currentPointerPosition() const {
 float NativeViewport::modelGizmoWorldRadius() const {
   // Source bounds provide a stable unit reference. Neither camera zoom nor
   // the transform being edited may resize the handles in world space.
+  if (mSelectedSceneIds.size() > 1) {
+    if (mModelDragActive) return mGroupGizmoRadius;
+    float radius = 0.0F;
+    const auto pivot = selectionPivot();
+    for (const auto &corner : selectionBoundsCorners()) radius = std::max(radius, (corner - pivot).length());
+    return std::max(1.0e-4F, radius) *
+        (mTransformGizmoMode == TransformGizmoMode::Transform ? 0.5F : 0.3F);
+  }
   return mScene->mSceneRadius *
          (mTransformGizmoMode == TransformGizmoMode::Transform ? 0.5F : 0.3F);
 }
@@ -4421,9 +4574,20 @@ TransformGizmoLayout NativeViewport::modelTransformGizmo() const {
   // an unrepresentable shear into the persisted TRS transform.
   const QQuaternion orientation =
       modelGizmoUsesLocalOrientation() ? mScene->mModelRotation : QQuaternion();
-  return transformGizmoLayout(
-      transformedSceneCenter(), orientation, viewProjectionMatrix(),
+  auto layout = transformGizmoLayout(
+      selectionPivot(), orientation, viewProjectionMatrix(),
       QSizeF(width(), height()), mTransformGizmoMode, modelGizmoWorldRadius());
+  if (mSelectedSceneIds.size() > 1) {
+    for (auto &axis : layout.axes) {
+      axis.scaleHandle = {};
+      axis.scaleLine = {};
+      if (mTransformGizmoMode == TransformGizmoMode::Scale) axis.visible = false;
+    }
+    if (mTransformGizmoMode == TransformGizmoMode::Scale) {
+      for (auto &plane : layout.planeHandles) plane.clear();
+    }
+  }
+  return layout;
 }
 
 TransformToolStripLayout NativeViewport::transformToolStrip() const {
@@ -4489,7 +4653,9 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
     if (tool < 4) {
       setToolTip(descriptions.at(static_cast<std::size_t>(tool)));
     } else {
-      setToolTip(modelGizmoOrientationLocked()
+      setToolTip(mSelectedSceneIds.size() > 1 && modelGizmoOrientationLocked()
+                     ? QStringLiteral("多选采用等比缩放，保持模型之间的比例；无需选择缩放坐标系")
+                     : modelGizmoOrientationLocked()
                      ? mTransformGizmoMode == TransformGizmoMode::Scale
                            ? QStringLiteral(
                                  "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切")
@@ -4532,7 +4698,9 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
 void NativeViewport::toggleTransformGizmoOrientation() {
   QString message;
   if (modelGizmoOrientationLocked()) {
-    message = mTransformGizmoMode == TransformGizmoMode::Scale
+    message = mSelectedSceneIds.size() > 1
+                  ? QStringLiteral("多选采用等比缩放，保持模型之间的比例")
+                  : mTransformGizmoMode == TransformGizmoMode::Scale
                   ? QStringLiteral(
                         "局部锁定：缩放只使用模型自身轴，避免产生剪切")
                   : QStringLiteral(
@@ -4572,6 +4740,9 @@ void NativeViewport::beginTransformGizmoDrag(
   if (!handle.isValid() || !mModelSelected || !selectableModelAvailable()) {
     return;
   }
+  if (mSelectedSceneIds.size() > 1 &&
+      (handle.kind == TransformGizmoHandleKind::ScaleAxis ||
+       handle.kind == TransformGizmoHandleKind::ScalePlane)) return;
   mPointerPosition = position;
   InteractionMode operation = InteractionMode::Inspect;
   bool trackball = false;
@@ -4647,6 +4818,10 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
   if (mModelDragActive) {
     finishModelTransform(false);
   }
+  mGroupPivot = selectionPivot();
+  mGroupPreviewPivot = mGroupPivot;
+  mGroupGizmoRadius = modelGizmoWorldRadius();
+  mTransformDragBefore = selectedTransforms();
   const InteractionMode previousMode = mMode;
   mMode = mode;
   mModelDragActive = true;
@@ -4664,6 +4839,7 @@ void NativeViewport::beginModelTransform(const InteractionMode mode,
     mModelDragPlaneNormal.normalize();
   }
   const QVector3D pivot =
+      mTransformDragBefore.size() > 1 ? mGroupPivot :
       mScene->mSceneCenter + mModelDragStartTransform.translation;
   const auto center = projectPoint(pivot, viewProjectionMatrix());
   mModelTransformScreenCenter =
@@ -4731,6 +4907,7 @@ void NativeViewport::updateModelTransform(
   mModelTransformCurrentPosition = position;
   mTransformModifiers = modifiers;
   const QVector3D pivot =
+      mTransformDragBefore.size() > 1 ? mGroupPivot :
       mScene->mSceneCenter + mModelDragStartTransform.translation;
   const auto startRay = screenRay(mModelTransformStartPosition, size(),
                                   viewProjectionMatrix());
@@ -4811,6 +4988,7 @@ void NativeViewport::updateModelTransform(
     mScene->mModelTranslation = mModelDragStartTransform.translation + delta;
     mScene->mModelRotation = mModelDragStartTransform.rotation;
     mScene->mModelScale = mModelDragStartTransform.scale;
+    if (mTransformDragBefore.size() > 1) applyGroupTransform(delta, {}, 1.0F);
   } else if (mMode == InteractionMode::Rotate) {
     QQuaternion deltaRotation;
     if (mTrackballRotation) {
@@ -4872,6 +5050,7 @@ void NativeViewport::updateModelTransform(
     mScene->mModelRotation = normalizedModelRotation(
         deltaRotation * mModelDragStartTransform.rotation);
     mScene->mModelScale = mModelDragStartTransform.scale;
+    if (mTransformDragBefore.size() > 1) applyGroupTransform({}, deltaRotation, 1.0F);
   } else if (mMode == InteractionMode::Scale) {
     const QPointF startOffset =
         mModelTransformStartPosition - mModelTransformScreenCenter;
@@ -4947,6 +5126,7 @@ void NativeViewport::updateModelTransform(
     mScene->mModelTranslation = mModelDragStartTransform.translation;
     mScene->mModelRotation = mModelDragStartTransform.rotation;
     mScene->mModelScale = normalizedModelScale(scaled);
+    if (mTransformDragBefore.size() > 1) applyGroupTransform({}, {}, factor);
   }
   notifyModelInteractionState();
   update();
@@ -4957,9 +5137,7 @@ void NativeViewport::finishModelTransform(const bool commit) {
     return;
   }
   if (!commit) {
-    mScene->mModelTranslation = mModelDragStartTransform.translation;
-    mScene->mModelRotation = mModelDragStartTransform.rotation;
-    mScene->mModelScale = mModelDragStartTransform.scale;
+    applySceneTransforms(mTransformDragBefore, false);
   }
   mModelDragActive = false;
   mTransformGizmoDragActive = false;
@@ -4977,6 +5155,7 @@ void NativeViewport::finishModelTransform(const bool commit) {
   if (commit) {
     commitModelTransform();
   }
+  mTransformDragBefore.clear();
   notifyModelInteractionState();
   update();
 }
@@ -4984,6 +5163,10 @@ void NativeViewport::finishModelTransform(const bool commit) {
 void NativeViewport::applyTransformConstraint(const int axis,
                                               const bool plane) {
   if (!mModelDragActive || axis < 0 || axis > 2 || mTrackballRotation) {
+    return;
+  }
+  if (mSelectedSceneIds.size() > 1 && mMode == InteractionMode::Scale) {
+    setToolTip(QStringLiteral("多选时使用整体等比缩放，避免对不同朝向的模型产生剪切"));
     return;
   }
   const TransformConstraintKind requested =
@@ -5256,7 +5439,8 @@ void NativeViewport::drawModelSelection(
 
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
-  const auto center = projectPoint(mScene->mSceneCenter, modelViewProjection);
+  Q_UNUSED(modelViewProjection);
+  const auto center = projectPoint(selectionPivot(), viewProjectionMatrix());
   if (center.has_value()) {
     if (mModelDragActive && mMode == InteractionMode::Rotate) {
       painter.setPen(QPen(QColor(255, 173, 66, 205), 1.7,
@@ -5268,6 +5452,7 @@ void NativeViewport::drawModelSelection(
     if (mModelDragActive &&
         mTransformConstraint.kind != TransformConstraintKind::None) {
       const QVector3D pivot =
+          mTransformDragBefore.size() > 1 ? mGroupPivot :
           mScene->mSceneCenter + mModelDragStartTransform.translation;
       const QVector3D axis = transformConstraintAxis();
       const float extent = std::max(mScene->mSceneRadius * 3.0F, 1.0F);
@@ -5288,8 +5473,10 @@ void NativeViewport::drawModelSelection(
     const QString hint =
         mModelDragActive
             ? transformStatusText()
-            : QStringLiteral(
-                  "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
+            : mSelectedSceneIds.size() > 1
+                  ? QStringLiteral("已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放")
+                        .arg(mSelectedSceneIds.size())
+                  : QStringLiteral("模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
     const QFontMetrics metrics(painter.font());
     const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
     const QRectF badge = transformGizmoHintRect(
@@ -5457,8 +5644,10 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
               : Qt::SolidLine,
           Qt::RoundCap, Qt::RoundJoin));
       painter.setBrush(scaleColor);
-      painter.drawLine(axisLayout.scaleLine);
-      painter.drawRect(axisLayout.scaleHandle);
+      if (!axisLayout.scaleHandle.isEmpty()) {
+        painter.drawLine(axisLayout.scaleLine);
+        painter.drawRect(axisLayout.scaleHandle);
+      }
     }
   }
 
@@ -5574,7 +5763,8 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
   painter.setPen(locked ? QColor(157, 164, 169)
                         : QColor(220, 225, 228));
   painter.drawText(layout.orientationButton, Qt::AlignCenter,
-                   locked ? QStringLiteral("局部\n锁定")
+                   locked && mSelectedSceneIds.size() > 1 ? QStringLiteral("等比\n缩放")
+                          : locked ? QStringLiteral("局部\n锁定")
                           : local ? QStringLiteral("局部")
                                   : QStringLiteral("全局"));
   painter.restore();

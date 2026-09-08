@@ -139,6 +139,7 @@ private:
   void startTraining();
   void updateWorkspaceUi();
   void rebuildProjectTree();
+  void syncProjectTreeSelection();
   void updateInspector();
   [[nodiscard]] QVector3D workspaceTranslationForViewport() const;
   [[nodiscard]] QVector3D viewportTranslationForWorkspace(
@@ -263,6 +264,7 @@ private:
   bool mSceneReady = false;
   bool mModelReady = false;
   bool mModelSelected = false;
+  bool mPreserveProjectTree = false;
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;
   bool mCanRedoEdit = false;

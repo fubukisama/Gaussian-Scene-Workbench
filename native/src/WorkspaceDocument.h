@@ -68,6 +68,8 @@ public:
   void restoreSceneCollection(const QJsonObject &state);
   bool addScenePath(const QString &path, QString *errorMessage = nullptr);
   bool activateSceneObject(const QString &id);
+  bool setSceneObjectTransforms(const QList<SceneObject> &objects,
+                                QString *errorMessage = nullptr);
   [[nodiscard]] bool hasPendingDataMigration() const;
   [[nodiscard]] bool isDatasetManaged() const;
   [[nodiscard]] bool hasManagedReconstructionData() const;
