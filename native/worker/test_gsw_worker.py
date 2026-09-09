@@ -253,6 +253,73 @@ class WorkerTests(unittest.TestCase):
             )
             self.assertEqual(imported.read_bytes(), b"video frame")
 
+    def test_display_name_mapping_matches_native_and_keeps_legacy_ids(self):
+        self.assertEqual(gsw_worker.managed_storage_name("C0001"), "C0001")
+        self.assertEqual(gsw_worker.managed_storage_name("古墳"),
+                         "gsw-name-9ef848e8ef90f11004579e9b88311dd37bcf489879905717312efe48f3ccdbaf")
+        self.assertEqual(gsw_worker.managed_storage_name("foo/bar"),
+                         "gsw-name-cc5d46bdb4991c6eae3eb739c9c8a7a46fe9654fab79c47b4fe48383b5b25e1c")
+        names = ["古墳", "日本語 第１回", " <b>📷</b> ", "../outside", "CON", "C:\\Windows",
+                 ' /:*?"<>|\\. ', "foo/bar", "foo?bar", "capture\n", "墓" * 40000]
+        identifiers = [gsw_worker.managed_storage_name(name) for name in names]
+        self.assertEqual(len(set(identifiers)), len(names))
+        for identifier in identifiers:
+            self.assertEqual(gsw_worker.validate_scene_name(identifier), identifier)
+            self.assertNotEqual(gsw_worker.managed_storage_name(identifier), identifier)
+        for name in ("", " \t\n　"):
+            with self.assertRaises(ValueError):
+                gsw_worker.managed_storage_name(name)
+
+    def test_unicode_import_metadata_is_transactional_and_recoverable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.import_configuration(root)
+            name = '古墳 / 調査:*?"<>|📷 '
+            config["displayName"] = name
+            config["scene"] = gsw_worker.managed_storage_name(name)
+            backend = SafeNameImportBackend()
+            with mock.patch.object(gsw_worker, "import_backend", return_value=backend), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gsw_worker.run_import(config), 0)
+                self.assertEqual(gsw_worker.run_import_recovery(config), 0)
+            final = Path(config["datasetRoot"]) / config["scene"]
+            original = (final / ".gsw-name.json").read_bytes()
+            self.assertEqual(json.loads(original)["displayName"], name)
+            self.assertEqual(json.loads(original)["storageName"], config["scene"])
+            with mock.patch.object(gsw_worker, "import_backend", return_value=backend):
+                with self.assertRaises(FileExistsError):
+                    gsw_worker.run_import(config)
+            config["overwrite"] = True
+            with mock.patch.object(gsw_worker, "import_backend", return_value=FakeImportBackend(error="interrupted")), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gsw_worker.run_import(config), 1)
+            self.assertEqual((final / ".gsw-name.json").read_bytes(), original)
+            with mock.patch.object(gsw_worker, "import_backend", return_value=FakeImportBackend(imported_bytes=b"replacement")), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gsw_worker.run_import(config), 0)
+            self.assertEqual((final / ".gsw-name.json").read_bytes(), original)
+            self.assertEqual((final / "images/frame.jpg").read_bytes(), b"replacement")
+
+    def test_display_metadata_cannot_redirect_storage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.import_configuration(Path(temporary))
+            config["displayName"] = "../outside"
+            for scene in ("capture", "../outside", "C:\\outside"):
+                config["scene"] = scene
+                with self.assertRaises(ValueError):
+                    gsw_worker.resolve_import_location(config)
+
+    def test_training_preserves_arbitrary_output_display_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.configuration(root)
+            config["outputDisplayName"] = "古墳 📷 / 学習"
+            config["outputScene"] = gsw_worker.managed_storage_name(config["outputDisplayName"])
+            output = Path(config["outputRoot"]) / config["outputScene"]
+            output.mkdir(parents=True)
+            backend = FakeBackend()
+            with mock.patch.object(gsw_worker, "import_backend", return_value=backend), mock.patch.object(gsw_worker.threading, "Thread"), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gsw_worker.run_training(config), 0)
+            self.assertEqual(backend.call[0][1], config["outputScene"])
+            self.assertEqual(json.loads((output / ".gsw-name.json").read_text(encoding="utf-8"))["displayName"], config["outputDisplayName"])
+
     def test_run_import_bounds_staging_name_for_maximum_scene_length(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

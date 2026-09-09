@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "DatasetImportPlan.h"
+#include "ManagedName.h"
 
 #include <QDir>
 #include <QDirIterator>
@@ -30,29 +31,6 @@ const QSet<QString> kVideoExtensions = {
     QStringLiteral("webm"), QStringLiteral("m4v"),
 };
 
-bool isSafeSceneName(const QString &name) {
-  static const QRegularExpression pattern(
-      QStringLiteral("^[A-Za-z0-9_.-]+$"));
-  static const QSet<QString> reservedWindowsNames = {
-      QStringLiteral("CON"),  QStringLiteral("PRN"),  QStringLiteral("AUX"),
-      QStringLiteral("NUL"),  QStringLiteral("COM1"), QStringLiteral("COM2"),
-      QStringLiteral("COM3"), QStringLiteral("COM4"), QStringLiteral("COM5"),
-      QStringLiteral("COM6"), QStringLiteral("COM7"), QStringLiteral("COM8"),
-      QStringLiteral("COM9"), QStringLiteral("LPT1"), QStringLiteral("LPT2"),
-      QStringLiteral("LPT3"), QStringLiteral("LPT4"), QStringLiteral("LPT5"),
-      QStringLiteral("LPT6"), QStringLiteral("LPT7"), QStringLiteral("LPT8"),
-      QStringLiteral("LPT9"),
-  };
-
-  if (name.isEmpty() || name.size() > 120 || name.startsWith(QLatin1Char('.')) ||
-      name.endsWith(QLatin1Char('.')) || name.contains(QStringLiteral("..")) ||
-      !pattern.match(name).hasMatch()) {
-    return false;
-  }
-  const QString deviceBaseName = name.section(QLatin1Char('.'), 0, 0).toUpper();
-  return !reservedWindowsNames.contains(deviceBaseName);
-}
-
 QString deduplicationKey(const QFileInfo &fileInfo) {
   QString path = fileInfo.canonicalFilePath();
   if (path.isEmpty()) {
@@ -74,7 +52,7 @@ DatasetImportPlan::create(const DatasetImportRequest &request,
     errorMessage->clear();
   }
 
-  if (!isSafeSceneName(request.sceneName)) {
+  if (request.sceneName.trimmed().isEmpty()) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("Invalid scene name");
     }
@@ -193,7 +171,7 @@ qsizetype DatasetImportPlan::videoCount() const { return mVideoCount; }
 qint64 DatasetImportPlan::totalBytes() const { return mTotalBytes; }
 
 QString DatasetImportPlan::managedDatasetPath(const QString &datasetRoot) const {
-  return QDir(datasetRoot).filePath(mSceneName);
+  return QDir(datasetRoot).filePath(managedStorageName(mSceneName));
 }
 
 bool DatasetImportPlan::writeWorkerConfiguration(
@@ -229,7 +207,8 @@ bool DatasetImportPlan::writeWorkerConfiguration(
       {QStringLiteral("projectRoot"),
        QDir::cleanPath(QFileInfo(datasetRoot).absolutePath())},
       {QStringLiteral("datasetRoot"), absoluteCleanPath(datasetRoot)},
-      {QStringLiteral("scene"), mSceneName},
+      {QStringLiteral("scene"), managedStorageName(mSceneName)},
+      {QStringLiteral("displayName"), mSceneName},
       {QStringLiteral("fps"), mFramesPerSecond},
       {QStringLiteral("overwrite"), mOverwrite},
       {QStringLiteral("files"), files},

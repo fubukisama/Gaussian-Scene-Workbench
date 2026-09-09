@@ -5,6 +5,7 @@
 ## Current preview
 
 - Simplified Chinese, English and Japanese UI: choose View → Language to switch immediately, without restarting or interrupting running tasks. The preference is remembered; model, camera, selection, dialog parameters and training curves are preserved. New/changed features must maintain all three catalogs and live text bindings, and pass the build-time translation gate. See [localization and terminology](../docs/LOCALIZATION.md).
+- Scene and training-output display names support all scripts, spaces, emoji and punctuation, without the former 120-character limit. Blank names are rejected. Names are preserved in project data while safe ASCII storage identifiers protect backend paths; import name metadata participates in the atomic publish/rollback transaction.
 - Native Qt Widgets application with a GPU-backed OpenGL viewport.
 - Dockable project tree, inspector, task queue, and process log.
 - Multi-model selection: Ctrl-click toggles objects in the tree/viewport, Shift selects a tree range or adds a viewport object, and Ctrl+A selects all loaded models. Selected objects share a G/R/RR/S transform gizmo and group-bounds pivot, with atomic cancel/undo/redo and per-object persistence. F frames the whole selection. Group scaling is uniform to preserve relative shape; point trimming and export remain single-object operations. See [multi-object controls](../docs/MULTI_SCENE_IMPORT.md#同时选中与整组变换).

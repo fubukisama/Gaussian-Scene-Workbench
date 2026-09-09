@@ -6,6 +6,7 @@
 #include "ReconstructionDialog.h"
 #include "TrainingMonitorWidget.h"
 #include "WorkspaceDocument.h"
+#include "ManagedName.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -20,6 +21,7 @@
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QProgressBar>
@@ -58,7 +60,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(languageMenu->actions()[i]->data().toString() == AppLanguage::supported()[i], "stable locale identifiers");
     check(languageMenu->actions()[i]->text() == AppLanguage::displayName(AppLanguage::supported()[i]), "autonyms");
   }
-  const QString name = QStringLiteral("Test_工程_日本語");
+  const QString name = QStringLiteral("古墳 / 日本語:*?\"<>|📷 ");
   TrainingDialog training(QCoreApplication::applicationDirPath(), name,
                           QCoreApplication::applicationDirPath(), true, true, &window);
   const auto configuration = training.configuration();
@@ -91,6 +93,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // A custom iteration count catches accidental preset resets caused by
   // currentTextChanged signals when combo captions are translated.
   training.findChild<QSpinBox *>()->setValue(12345);
+  training.findChild<QLineEdit *>(QStringLiteral("trainingOutputNameEdit"))->setText(name);
   const auto editedConfiguration = training.configuration();
   auto *viewport = qobject_cast<NativeViewport *>(window.centralWidget());
   auto *document = window.findChild<WorkspaceDocument *>();
@@ -100,6 +103,21 @@ bool runLanguageSmokeTest(MainWindow &window) {
   if (!viewport || !document || !supervisor || !monitor || !tree) return false;
   QTemporaryDir temporary;
   if (!temporary.isValid()) return false;
+  const auto media = QDir(temporary.path()).filePath(QStringLiteral("images/frame.jpg"));
+  check(QDir().mkpath(QFileInfo(media).absolutePath()), "create media fixture directory");
+  QImage photo(8, 8, QImage::Format_RGB32);
+  photo.fill(Qt::red);
+  check(photo.save(media), "create photo fixture");
+  DatasetImportDialog namedImport(temporary.path(), name, {media}, temporary.path(), true, &window);
+  QMetaObject::invokeMethod(&namedImport, "accept", Qt::DirectConnection);
+  check(namedImport.result() == QDialog::Accepted && namedImport.validatedPlan().has_value(), "arbitrary name accepted by import dialog");
+  if (namedImport.validatedPlan()) {
+    check(namedImport.validatedPlan()->sceneName() == name, "import display name preserved exactly");
+    check(QFileInfo(namedImport.validatedPlan()->managedDatasetPath(temporary.path())).fileName() ==
+          managedStorageName(name), "import path encoded safely");
+  }
+  check(training.configuration().outputScene == name && training.configuration().outputStorageName == managedStorageName(name),
+        "training display and storage names separated");
   QFile ply(QDir(temporary.path()).filePath(QStringLiteral("点云_日本語.ply")));
   if (!ply.open(QIODevice::WriteOnly)) return false;
   ply.write("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nend_header\n-1 -1 0\n1 -1 0\n0 1 0\n0 0 1\n");

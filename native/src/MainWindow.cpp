@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ManagedName.h"
 #include "AppLanguage.h"
 
 #include "AppTheme.h"
@@ -1607,6 +1608,11 @@ void MainWindow::createInspectorDock() {
   datasetForm->setHorizontalSpacing(12);
   datasetForm->setVerticalSpacing(7);
   mDatasetValue = createValueLabel(panel);
+  mDatasetNameValue = createValueLabel(panel);
+  mDatasetNameValue->setObjectName(QStringLiteral("datasetNameValue"));
+  mDatasetNameValue->setTextFormat(Qt::PlainText);
+  datasetForm->addRow(QCoreApplication::translate("Workbench", "名称"), mDatasetNameValue);
+  AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mDatasetNameValue)), AppLanguage::source("名称"));
   mImageCountValue = createValueLabel(panel);
   datasetForm->addRow(QCoreApplication::translate("Workbench", "目录"), mDatasetValue);
   AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mDatasetValue)), AppLanguage::source("目录"));
@@ -4630,7 +4636,8 @@ void MainWindow::startTraining() {
                       QDir::cleanPath(mWorkspace.datasetPath()));
   workerConfig.insert(QStringLiteral("outputRoot"),
                       QDir::cleanPath(config.outputRoot));
-  workerConfig.insert(QStringLiteral("outputScene"), config.outputScene);
+  workerConfig.insert(QStringLiteral("outputScene"), config.outputStorageName);
+  workerConfig.insert(QStringLiteral("outputDisplayName"), config.outputScene);
   workerConfig.insert(QStringLiteral("scene"),
                       QStringLiteral("native-project"));
   workerConfig.insert(QStringLiteral("backend"), config.backend);
@@ -4654,11 +4661,11 @@ void MainWindow::startTraining() {
     return;
   }
 
-  const QString taskName = QCoreApplication::translate("Workbench", "%1 训练 | %2 | %3 次迭代")
+  const QString taskName = config.outputScene + QStringLiteral(" | ") + QCoreApplication::translate("Workbench", "%1 训练 | %2 | %3 次迭代")
                                .arg(config.backend.toUpper(), config.quality)
                                .arg(config.iterations);
   const QString outputDirectory =
-      QDir(config.outputRoot).filePath(config.outputScene);
+      QDir(config.outputRoot).filePath(config.outputStorageName);
   QString recoveryRecordError;
   if (!saveActiveTrainingJob(
           mWorkspace.rootPath(),
@@ -4851,6 +4858,11 @@ void MainWindow::rebuildProjectTree() {
   root->setData(0, Qt::UserRole, mWorkspace.rootPath());
 
   auto *dataset = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "数据集")});
+  if (!mWorkspace.datasetPath().isEmpty()) {
+    dataset->setText(0, QCoreApplication::translate("Workbench", "数据集") + QStringLiteral(" · ") +
+        managedDisplayName(mWorkspace.datasetPath()));
+    dataset->setToolTip(0, QDir::toNativeSeparators(mWorkspace.datasetPath()));
+  }
   dataset->setIcon(0, style()->standardIcon(QStyle::SP_DirOpenIcon));
   dataset->setData(0, Qt::UserRole, mWorkspace.datasetPath());
   dataset->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
@@ -4971,6 +4983,8 @@ void MainWindow::updateInspector() {
       mWorkspace.isUntitled() ? QCoreApplication::translate("Workbench", "尚未保存（首次保存时选择位置）")
                               : compactPath(mWorkspace.rootPath()));
   mDatasetValue->setText(compactPath(mWorkspace.datasetPath()));
+  mDatasetNameValue->setText(mWorkspace.datasetPath().isEmpty() ? QStringLiteral("-")
+      : managedDisplayName(mWorkspace.datasetPath()));
   mImageCountValue->setText(
       mWorkspace.datasetPath().isEmpty()
           ? QStringLiteral("-")

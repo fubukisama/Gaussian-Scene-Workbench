@@ -93,26 +93,8 @@ QString suggestedMediaProjectName(const QStringList &sourcePaths) {
 }
 
 QString suggestedMediaSceneName(const QStringList &sourcePaths) {
-  QString value = sourceLabel(sourcePaths).trimmed();
-  value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]+")),
-                QStringLiteral("_"));
-  while (value.contains(QStringLiteral(".."))) {
-    value.replace(QStringLiteral(".."), QStringLiteral("_"));
-  }
-  while (value.startsWith(QLatin1Char('.')) ||
-         value.endsWith(QLatin1Char('.'))) {
-    if (value.startsWith(QLatin1Char('.'))) {
-      value.remove(0, 1);
-    }
-    if (value.endsWith(QLatin1Char('.'))) {
-      value.chop(1);
-    }
-  }
-  if (value.isEmpty() || isReservedWindowsName(value) ||
-      !value.contains(QRegularExpression(QStringLiteral("[A-Za-z0-9]")))) {
-    return QStringLiteral("dataset");
-  }
-  return value.left(120);
+  const QString value = sourceLabel(sourcePaths);
+  return value.trimmed().isEmpty() ? QStringLiteral("dataset") : value;
 }
 
 } // namespace gsw

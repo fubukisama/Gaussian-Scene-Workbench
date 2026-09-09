@@ -21,9 +21,12 @@ QA example: `"Gaussian Scene Workbench.exe" --smoke-test-language --language ja_
 
 ## Terminology
 
+Scene and training-output names accept arbitrary Unicode text, spaces and symbols (including characters forbidden in Windows filenames). Only blank names are rejected. `ManagedName.h` maps display names to backend-safe ASCII storage identifiers; matching Python validation must stay in sync. Legacy safe ASCII names keep their paths, except the reserved `gsw-name-` namespace. Names requiring encoding use that prefix plus the full SHA-256 of the exact UTF-8 name. Do not trim, case-fold, translate or sanitize the display name. `.gsw-name.json` retains the original name alongside the dataset and travels with project migration/backup; import publishes it in the same transaction as the data. Existing job configurations without display metadata remain supported. Actual export filenames still obey operating-system filesystem rules.
+
 | 简体中文 | English | 日本語 |
 | --- | --- | --- |
 | 工程 / 数据集 | Project / Dataset | プロジェクト / データセット |
+| 显示名称 / 存储标识 | Display Name / Storage Identifier | 表示名 / 保存用識別子 |
 | 点云 | Point Cloud | 点群 |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
 | 网格 / 三角网格 | Mesh / Triangle Mesh | メッシュ / 三角形メッシュ |

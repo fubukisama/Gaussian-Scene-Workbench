@@ -177,6 +177,7 @@ private:
   QLabel *mProjectNameValue = nullptr;
   QLabel *mProjectRootValue = nullptr;
   QLabel *mDatasetValue = nullptr;
+  QLabel *mDatasetNameValue = nullptr;
   QLabel *mImageCountValue = nullptr;
   QLabel *mSceneValue = nullptr;
   QLabel *mGaussianCountValue = nullptr;

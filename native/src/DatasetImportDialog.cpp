@@ -20,6 +20,7 @@
 #include <QSet>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <limits>
 
 namespace gsw {
 namespace {
@@ -86,10 +87,12 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   form->setHorizontalSpacing(14);
   form->setVerticalSpacing(9);
 
-  mSceneName = new QLineEdit(suggestedSceneName.trimmed(), this);
+  mSceneName = new QLineEdit(suggestedSceneName, this);
+  mSceneName->setMaxLength(std::numeric_limits<int>::max());
   mSceneName->setObjectName(QStringLiteral("datasetImportSceneEdit"));
   mSceneName->setClearButtonEnabled(true);
-  AppLanguage::bind(mSceneName, "placeholderText", AppLanguage::source("仅允许英文、数字、点、下划线和连字符"));
+  AppLanguage::bind(mSceneName, "placeholderText", AppLanguage::source("支持任意文字、空格和符号"));
+  AppLanguage::bind(mSceneName, "toolTip", AppLanguage::source("显示名称将完整保留；软件自动生成安全的存储目录名。"));
   form->addRow(QCoreApplication::translate("Workbench", "场景名称"), mSceneName);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mSceneName)), AppLanguage::source("场景名称"));
 
@@ -194,7 +197,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
 DatasetImportRequest DatasetImportDialog::request() const {
   DatasetImportRequest result;
-  result.sceneName = mSceneName->text().trimmed();
+  result.sceneName = mSceneName->text();
   result.framesPerSecond = mFramesPerSecond->value();
   result.overwrite = mOverwrite->isChecked();
   result.sourcePaths.reserve(mSourceList->count());
@@ -211,7 +214,7 @@ const std::optional<DatasetImportPlan> &DatasetImportDialog::validatedPlan() con
 
 void DatasetImportDialog::accept() {
   const DatasetImportRequest importRequest = request();
-  if (importRequest.sceneName.isEmpty()) {
+  if (importRequest.sceneName.trimmed().isEmpty()) {
     QMessageBox::critical(this, QCoreApplication::translate("Workbench", "场景名称为空"),
                           QCoreApplication::translate("Workbench", "请输入托管数据集的场景名称。"));
     mSceneName->setFocus();
@@ -230,7 +233,7 @@ void DatasetImportDialog::accept() {
   QApplication::restoreOverrideCursor();
   if (!mValidatedPlan.has_value()) {
     const QString message = error == QStringLiteral("Invalid scene name")
-                                ? QCoreApplication::translate("Workbench", "场景名称需为 1–120 个英文字母、数字、点、下划线或连字符；点不能位于开头或结尾、不能连续出现，且不能使用 Windows 保留名。")
+                                ? QCoreApplication::translate("Workbench", "请输入名称，名称不能仅包含空白字符。")
                             : error == QStringLiteral("No supported image or video files were found")
                                 ? QCoreApplication::translate("Workbench", "所选来源中没有找到支持的照片或视频文件。")
                                 : error;

@@ -244,6 +244,35 @@ def validate_scene_name(name):
     return scene
 
 
+def managed_storage_name(display_name):
+    """Map display data to an ASCII-only directory, matching ManagedName.h."""
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValueError("Display name must not be blank")
+    try:
+        legacy = validate_scene_name(display_name)
+    except ValueError:
+        legacy = None
+    if legacy is not None and not legacy.lower().startswith("gsw-name-"):
+        return legacy
+    return "gsw-name-" + hashlib.sha256(display_name.encode("utf-8")).hexdigest()
+
+
+def validated_display_name(config, display_key, storage_key):
+    storage_name = validate_scene_name(config.get(storage_key))
+    if display_key not in config:
+        return storage_name  # Previous native job configurations remain readable.
+    display_name = config[display_key]
+    if managed_storage_name(display_name) != storage_name:
+        raise ValueError("Display name does not match its storage identifier")
+    return display_name
+
+
+def write_name_metadata(directory, display_name, storage_name):
+    write_import_journal(Path(directory) / ".gsw-name.json", {
+        "version": 1, "displayName": display_name, "storageName": storage_name,
+    })
+
+
 def resolve_project_dataset_roots(config):
     raw_project_root = Path(str(config.get("projectRoot") or ""))
     raw_dataset_root = Path(str(config.get("datasetRoot") or ""))
@@ -264,6 +293,7 @@ def resolve_project_dataset_roots(config):
 
 def resolve_import_location(config):
     project_root, dataset_root = resolve_project_dataset_roots(config)
+    validated_display_name(config, "displayName", "scene")
     return project_root, dataset_root, validate_scene_name(config.get("scene"))
 
 
@@ -753,6 +783,10 @@ def _run_import_locked(config, server, dataset_root, scene):
         if not staging_path.is_dir():
             raise RuntimeError("Backend import did not create staging dataset: {}".format(staging_path))
 
+        # Publish the name with the data, so rollback, migration and recovery
+        # cannot leave a successfully imported dataset without its display name.
+        write_name_metadata(staging_path, validated_display_name(config, "displayName", "scene"), scene)
+
         finalizing = ("running", "finalizing", 99)
         if previous_status != finalizing:
             emit_status(*finalizing)
@@ -898,6 +932,7 @@ def run_import_project_recovery(config):
 
 
 def run_training(config):
+    display_name = validated_display_name(config, "outputDisplayName", "outputScene")
     server = import_backend(config["repositoryRoot"])
     server.OUTPUT_DIR = Path(config["outputRoot"]).resolve()
     server.TRAIN_JOBS_DIR = Path(config["jobStore"]).resolve()
@@ -928,6 +963,11 @@ def run_training(config):
     cancel_thread.start()
 
     state, error = stream_job(server.TRAIN_LOCK, server.TRAIN_JOBS, job_id)
+
+    output_path = _lexical_absolute(server.OUTPUT_DIR / config["outputScene"])
+    _ensure_within_root(output_path, server.OUTPUT_DIR, direct_child=True)
+    if output_path.is_dir() and not _is_reparse_point(output_path):
+        write_name_metadata(output_path, display_name, config["outputScene"])
 
     if state == "done":
         print("[worker] Training completed successfully.")

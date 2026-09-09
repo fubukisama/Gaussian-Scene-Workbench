@@ -15,6 +15,7 @@ struct TrainingConfiguration {
   QString quality;
   QString outputRoot;
   QString outputScene;
+  QString outputStorageName;
   int iterations = 7000;
   int resolution = 8;
   bool runColmap = true;

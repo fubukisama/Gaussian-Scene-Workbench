@@ -1,6 +1,7 @@
 #include "AppLanguage.h"
 #include <QCoreApplication>
 #include "TrainingDialog.h"
+#include "ManagedName.h"
 
 #include "ColmapSupport.h"
 
@@ -21,21 +22,9 @@
 #include <QSet>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <limits>
 
 namespace gsw {
-
-namespace {
-QString safeSceneName(QString value) {
-  value = value.trimmed().toLower();
-  value.replace(QRegularExpression(QStringLiteral("[^a-z0-9_.-]+")), QStringLiteral("-"));
-  value.replace(QRegularExpression(QStringLiteral("^-+|-+$")), QString());
-  if (value.isEmpty()) {
-    value = QStringLiteral("scene");
-  }
-  return value + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss"));
-}
-
-} // namespace
 
 TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projectName,
                                const QString &defaultOutputRoot,
@@ -95,8 +84,11 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(QCoreApplication::translate("Workbench", "训练分辨率"), mResolution);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mResolution)), AppLanguage::source("训练分辨率"));
 
-  mOutputScene = new QLineEdit(safeSceneName(projectName), this);
-  AppLanguage::bind(mOutputScene, "placeholderText", AppLanguage::source("仅允许英文、数字、点、下划线和连字符"));
+  mOutputScene = new QLineEdit(projectName + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss")), this);
+  mOutputScene->setObjectName(QStringLiteral("trainingOutputNameEdit"));
+  mOutputScene->setMaxLength(std::numeric_limits<int>::max());
+  AppLanguage::bind(mOutputScene, "placeholderText", AppLanguage::source("支持任意文字、空格和符号"));
+  AppLanguage::bind(mOutputScene, "toolTip", AppLanguage::source("显示名称将完整保留；软件自动生成安全的存储目录名。"));
   form->addRow(QCoreApplication::translate("Workbench", "输出名称"), mOutputScene);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mOutputScene)), AppLanguage::source("输出名称"));
 
@@ -148,7 +140,8 @@ TrainingConfiguration TrainingDialog::configuration() const {
   result.backend = mBackend->currentData().toString();
   result.quality = mQuality->currentData().toString();
   result.outputRoot = QDir::cleanPath(mOutputRoot->text().trimmed());
-  result.outputScene = mOutputScene->text().trimmed();
+  result.outputScene = mOutputScene->text();
+  result.outputStorageName = managedStorageName(result.outputScene);
   result.iterations = mIterations->value();
   result.resolution = mResolution->currentData().toInt();
   result.runColmap = mRunColmap->isChecked();
@@ -165,28 +158,10 @@ void TrainingDialog::accept() {
   }
 
   const TrainingConfiguration config = configuration();
-  static const QRegularExpression validSceneName(QStringLiteral("^[A-Za-z0-9_.-]+$"));
-  static const QSet<QString> windowsDeviceNames = {
-      QStringLiteral("CON"),  QStringLiteral("PRN"),  QStringLiteral("AUX"),
-      QStringLiteral("NUL"),  QStringLiteral("COM1"), QStringLiteral("COM2"),
-      QStringLiteral("COM3"), QStringLiteral("COM4"), QStringLiteral("COM5"),
-      QStringLiteral("COM6"), QStringLiteral("COM7"), QStringLiteral("COM8"),
-      QStringLiteral("COM9"), QStringLiteral("LPT1"), QStringLiteral("LPT2"),
-      QStringLiteral("LPT3"), QStringLiteral("LPT4"), QStringLiteral("LPT5"),
-      QStringLiteral("LPT6"), QStringLiteral("LPT7"), QStringLiteral("LPT8"),
-      QStringLiteral("LPT9")};
-  const QString deviceBase =
-      config.outputScene.section(QLatin1Char('.'), 0, 0).toUpper();
-  if (!validSceneName.match(config.outputScene).hasMatch() ||
-      config.outputScene.size() > 120 ||
-      config.outputScene.startsWith(QLatin1Char('.')) ||
-      config.outputScene.endsWith(QLatin1Char('.')) ||
-      config.outputScene.contains(QStringLiteral("..")) ||
-      windowsDeviceNames.contains(deviceBase)) {
+  if (config.outputScene.trimmed().isEmpty()) {
     QMessageBox::critical(
         this, QCoreApplication::translate("Workbench", "输出名称无效"),
-        QCoreApplication::translate("Workbench", "输出名称必须是安全的 Windows 文件夹名，且只能包含英文字母、"
-                       "数字、点、下划线和连字符。"));
+        QCoreApplication::translate("Workbench", "请输入名称，名称不能仅包含空白字符。"));
     return;
   }
   if (config.outputRoot.isEmpty() ||
@@ -196,7 +171,7 @@ void TrainingDialog::accept() {
     return;
   }
 
-  const QDir target(QDir(config.outputRoot).filePath(config.outputScene));
+  const QDir target(QDir(config.outputRoot).filePath(config.outputStorageName));
   const bool outputContainsData = target.exists() &&
                                   !target.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty();
   if (outputContainsData && !config.overwrite) {

@@ -1,4 +1,5 @@
 #include "DatasetImportPlan.h"
+#include "ManagedName.h"
 #include "MediaProjectBootstrap.h"
 #include "UntitledWorkspaceStorage.h"
 
@@ -30,8 +31,10 @@ private slots:
   void disambiguatesRelativePathsFromSameNamedDirectories();
   void keepsFileNamesForLooseFileSelections();
   void rejectsRequestsWithoutSupportedMedia();
-  void rejectsUnsafeWindowsSceneNames_data();
-  void rejectsUnsafeWindowsSceneNames();
+  void acceptsUnrestrictedDisplayNames_data();
+  void acceptsUnrestrictedDisplayNames();
+  void rejectsBlankDisplayNames();
+  void nameMappingIsStableAndCollisionResistant();
   void fallsBackToSystemTempWhenNoDataDriveIsAvailable();
   void suggestsSceneNamesFromFoldersAndVideos();
   void usesMeaningfulParentForGenericImageFolders();
@@ -241,7 +244,7 @@ void DatasetImportPlanTests::rejectsRequestsWithoutSupportedMedia() {
   QVERIFY(error.contains(QStringLiteral("video"), Qt::CaseInsensitive));
 }
 
-void DatasetImportPlanTests::rejectsUnsafeWindowsSceneNames_data() {
+void DatasetImportPlanTests::acceptsUnrestrictedDisplayNames_data() {
   QTest::addColumn<QString>("sceneName");
   QTest::newRow("current-directory") << QStringLiteral(".");
   QTest::newRow("reserved-con") << QStringLiteral("CON");
@@ -250,9 +253,16 @@ void DatasetImportPlanTests::rejectsUnsafeWindowsSceneNames_data() {
   QTest::newRow("reserved-lpt-port") << QStringLiteral("lpt9");
   QTest::newRow("trailing-dot") << QStringLiteral("capture.");
   QTest::newRow("excessive-length") << QString(121, QLatin1Char('a'));
+  QTest::newRow("chinese-japanese") << QStringLiteral("古墳・測量 第１回");
+  QTest::newRow("punctuation") << QStringLiteral(" /:*?\"<>|\\. ");
+  QTest::newRow("emoji") << QString::fromUtf8("古墳 🏛️📷🙂");
+  QTest::newRow("traversal") << QStringLiteral("../outside");
+  QTest::newRow("absolute") << QStringLiteral("C:\\Windows\\CON");
+  QTest::newRow("line-break") << QStringLiteral("capture\n");
+  QTest::newRow("very-long") << QString(40000, QChar(0x5893));
 }
 
-void DatasetImportPlanTests::rejectsUnsafeWindowsSceneNames() {
+void DatasetImportPlanTests::acceptsUnrestrictedDisplayNames() {
   QFETCH(QString, sceneName);
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -264,8 +274,47 @@ void DatasetImportPlanTests::rejectsUnsafeWindowsSceneNames() {
   request.sourcePaths = {imagePath};
 
   QString error;
-  QVERIFY(!DatasetImportPlan::create(request, &error).has_value());
-  QVERIFY(!error.isEmpty());
+  const auto plan = DatasetImportPlan::create(request, &error);
+  QVERIFY2(plan.has_value(), qPrintable(error));
+  QCOMPARE(plan->sceneName(), sceneName);
+  const auto datasetRoot = QDir(temporary.path()).filePath(QStringLiteral("datasets"));
+  const auto path = plan->managedDatasetPath(datasetRoot);
+  QCOMPARE(QFileInfo(path).absolutePath(), datasetRoot);
+  QCOMPARE(QFileInfo(path).fileName(), managedStorageName(sceneName));
+  QVERIFY(QFileInfo(path).fileName().size() <= 120);
+  const auto configPath = QDir(temporary.path()).filePath(QStringLiteral("job.json"));
+  QVERIFY(plan->writeWorkerConfiguration(configPath, temporary.path(), datasetRoot, &error));
+  QFile configuration(configPath);
+  QVERIFY(configuration.open(QIODevice::ReadOnly));
+  const auto data = QJsonDocument::fromJson(configuration.readAll()).object();
+  QCOMPARE(data.value(QStringLiteral("displayName")).toString(), sceneName);
+  QCOMPARE(data.value(QStringLiteral("scene")).toString(), managedStorageName(sceneName));
+  QVERIFY(QDir().mkpath(path));
+  QVERIFY(writeBytes(QDir(path).filePath(QStringLiteral(".gsw-name.json")), QJsonDocument(QJsonObject{
+      {QStringLiteral("version"), 1}, {QStringLiteral("storageName"), managedStorageName(sceneName)},
+      {QStringLiteral("displayName"), sceneName}}).toJson()));
+  QCOMPARE(managedDisplayName(path), sceneName);
+}
+
+void DatasetImportPlanTests::rejectsBlankDisplayNames() {
+  for (const QString &name : {QString(), QStringLiteral(" \t\n　")}) {
+    DatasetImportRequest request;
+    request.sceneName = name;
+    QString error;
+    QVERIFY(!DatasetImportPlan::create(request, &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(managedStorageName(name).isEmpty());
+  }
+}
+
+void DatasetImportPlanTests::nameMappingIsStableAndCollisionResistant() {
+  QCOMPARE(managedStorageName(QStringLiteral("C0001")), QStringLiteral("C0001"));
+  QCOMPARE(managedStorageName(QStringLiteral("古墳")), QStringLiteral("gsw-name-9ef848e8ef90f11004579e9b88311dd37bcf489879905717312efe48f3ccdbaf"));
+  QCOMPARE(managedStorageName(QStringLiteral("foo/bar")), QStringLiteral("gsw-name-cc5d46bdb4991c6eae3eb739c9c8a7a46fe9654fab79c47b4fe48383b5b25e1c"));
+  QVERIFY(managedStorageName(QStringLiteral("foo/bar")) != managedStorageName(QStringLiteral("foo?bar")));
+  const auto encoded = managedStorageName(QStringLiteral("古墳"));
+  QVERIFY(managedStorageName(encoded) != encoded); // Cannot impersonate an encoded display name.
+  QVERIFY(managedStorageName(encoded.toUpper()) != encoded);
 }
 
 void DatasetImportPlanTests::fallsBackToSystemTempWhenNoDataDriveIsAvailable() {
@@ -305,6 +354,9 @@ void DatasetImportPlanTests::suggestsSceneNamesFromFoldersAndVideos() {
   QCOMPARE(suggestedMediaSceneName(
                {root.filePath(QStringLiteral("room-capture"))}),
            QStringLiteral("room-capture"));
+  const auto unicode = root.filePath(QStringLiteral("古墳 調査 📷"));
+  QVERIFY(QDir().mkpath(unicode));
+  QCOMPARE(suggestedMediaSceneName({unicode}), QStringLiteral("古墳 調査 📷"));
 }
 
 void DatasetImportPlanTests::usesMeaningfulParentForGenericImageFolders() {

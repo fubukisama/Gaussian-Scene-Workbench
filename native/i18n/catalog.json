@@ -5339,6 +5339,21 @@
     "en_US": "Cannot switch language. Check the language resources and write permission for the configuration directory.",
     "ja_JP": "言語を切り替えられません。言語リソースと設定ディレクトリの書き込み権限を確認してください。"
   },
+  "支持任意文字、空格和符号": {
+    "zh_CN": "支持任意文字、空格和符号",
+    "en_US": "Any script, spaces and symbols are supported",
+    "ja_JP": "任意の文字・空白・記号を使用できます"
+  },
+  "显示名称将完整保留；软件自动生成安全的存储目录名。": {
+    "zh_CN": "显示名称将完整保留；软件自动生成安全的存储目录名。",
+    "en_US": "The display name is preserved exactly; a safe storage directory name is generated automatically.",
+    "ja_JP": "表示名はそのまま保持され、保存用の安全なディレクトリ名が自動生成されます。"
+  },
+  "请输入名称，名称不能仅包含空白字符。": {
+    "zh_CN": "请输入名称，名称不能仅包含空白字符。",
+    "en_US": "Enter a name. The name cannot contain only whitespace.",
+    "ja_JP": "名前を入力してください。空白のみの名前は使用できません。"
+  },
   "Loss": {
     "zh_CN": "损失",
     "en_US": "Loss",

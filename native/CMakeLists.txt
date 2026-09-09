@@ -52,6 +52,7 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/DatasetImportDialog.cpp
   src/DatasetImportDialog.h
   src/DatasetImportPlan.cpp
+  src/ManagedName.h
   src/DatasetImportPlan.h
   src/DurableArtifactStore.cpp
   src/DurableArtifactStore.h
