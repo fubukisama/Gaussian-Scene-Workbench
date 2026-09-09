@@ -40,10 +40,15 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 等比缩放 | Uniform Scale | 均等スケール |
 | 全局 / 局部 | Global / Local | グローバル / ローカル |
 | 轨迹球 / 吸附 | Trackball / Snap | トラックボール / スナップ |
+| 锁定编辑工具 / 操作手柄 | Lock Editing Tools / Gizmo | 編集ツールをロック / ギズモ |
 | 坐标系 | Coordinate System | 座標系 |
 | 透视 / 正交 | Perspective / Orthographic | 透視投影 / 平行投影 |
 | 包围盒 | Bounding Box | バウンディングボックス |
 | 快照 / 恢复 | Snapshot / Recovery | スナップショット / リカバリー |
+
+## Editing guard
+
+**Lock Editing Tools** is a persistent view preference, available beside **Inspect** in the selection toolbar and in the **View** menu (`Ctrl+Shift+L`). Locking cancels uncommitted transforms and selection gestures, hides transform handles, the transform strip, model bounds and model-selection tint, and disables transform/trim/delete/undo/redo actions. It preserves committed transforms, selection, gizmo mode and undo history. Camera orbit/pan/zoom, axis views and Find Model remain available; viewport geometry clicks navigate without changing selection. Unlocking restores the tools in Inspect mode without resuming an unfinished edit. The action and locked-state labels update immediately in all three languages without changing the lock state. This is a viewport editing guard, not a project/file permission lock: explicit import, project-tree selection and background processing remain available.
 
 ## References
 

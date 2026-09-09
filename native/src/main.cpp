@@ -103,11 +103,12 @@ int main(int argc, char *argv[]) {
   QCoreApplication::setApplicationName(QStringLiteral("Gaussian Scene Workbench"));
   QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Scene Workbench Native"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
-  if (application.arguments().contains(
-          QStringLiteral("--smoke-test-display-layout")) ||
-      application.arguments().contains(QStringLiteral("--smoke-test-language"))) {
-    // The layout smoke test validates the default dock arrangement. Isolate
-    // it from the interactive app's persisted geometry and scale settings.
+  const QStringList smokeArguments = application.arguments();
+  if (std::any_of(smokeArguments.cbegin(), smokeArguments.cend(), [](const QString &argument) {
+        return argument.startsWith(QStringLiteral("--smoke-test"));
+      })) {
+    // All GUI smoke tests must be independent of the user's edit lock/layout
+    // preferences and must never write test state into interactive settings.
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(
         QSettings::IniFormat, QSettings::UserScope,

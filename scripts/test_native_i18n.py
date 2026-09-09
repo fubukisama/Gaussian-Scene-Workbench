@@ -43,6 +43,15 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(i18n.decode_literals(i18n.CALL.search(text)[1]), 'Value %1')
         self.assertIn('Value %1', i18n.validate({}, {'Value %1': [('ui.cpp', 1, False)]})[0])
 
+    def test_edit_lock_translations_and_shortcut(self):
+        catalog = i18n.load_catalog()
+        for source in ('锁定编辑工具', '工具已锁定', '已找到并聚焦模型；编辑工具保持锁定'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            self.assertEqual(len(set(catalog[source].values())), 3)
+        tooltip = next(key for key in catalog if key.startswith('锁定/解锁编辑工具'))
+        for text in catalog[tooltip].values():
+            self.assertIn('Ctrl+Shift+L', text)
+
 
 if __name__ == '__main__':
     unittest.main()

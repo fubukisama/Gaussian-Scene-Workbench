@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QSettings>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -128,6 +129,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
   viewport->selectModelForRotate();
   viewport->setAxisView(NavigationAxis::PositiveZ);
   waitUntil([] { return false; }, 400);
+  auto *lockTools = window.findChild<QAction *>(QStringLiteral("lockEditToolsAction"));
+  if (!lockTools) return false;
+  lockTools->setChecked(true);
+  check(viewport->editToolsLocked() && !viewport->modelTransformActive(), "lock cancels modal edit");
+  const QStringList lockTexts = {QStringLiteral("锁定编辑工具"), QStringLiteral("Lock Editing Tools"), QStringLiteral("編集ツールをロック")};
   auto *root = tree->topLevelItem(0);
   if (root && root->childCount() > 0) root->child(0)->setExpanded(false);
   const auto treeState = [&] {
@@ -191,6 +197,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
+    check(lockTools->text() == lockTexts[next] && lockTools->isChecked() && viewport->editToolsLocked() &&
+          QSettings().value(QStringLiteral("view/editToolsLocked")).toBool(),
+          "lock label switches language without unlocking tools or changing preference");
     check(QCoreApplication::translate("Workbench", "点云") == pointTexts[next], "updated terminology");
     check(languageMenu->actions()[next]->isChecked(), "language action checked");
     check(window.findChildren<QAction *>().size() == actionCount, "no duplicate actions");

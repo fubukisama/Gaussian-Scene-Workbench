@@ -5354,6 +5354,26 @@
     "en_US": "Enter a name. The name cannot contain only whitespace.",
     "ja_JP": "名前を入力してください。空白のみの名前は使用できません。"
   },
+  "锁定编辑工具": {
+    "zh_CN": "锁定编辑工具",
+    "en_US": "Lock Editing Tools",
+    "ja_JP": "編集ツールをロック"
+  },
+  "工具已锁定": {
+    "zh_CN": "工具已锁定",
+    "en_US": "Tools Locked",
+    "ja_JP": "ツールロック中"
+  },
+  "锁定/解锁编辑工具 (Ctrl+Shift+L)：隐藏操作手柄，禁用变换、选择与删除工具；仍可旋转、平移和缩放视角。": {
+    "zh_CN": "锁定/解锁编辑工具 (Ctrl+Shift+L)：隐藏操作手柄，禁用变换、选择与删除工具；仍可旋转、平移和缩放视角。",
+    "en_US": "Lock/unlock editing tools (Ctrl+Shift+L): hide gizmos and disable transform, selection and deletion tools; camera orbit, pan and zoom remain available.",
+    "ja_JP": "編集ツールのロック切替 (Ctrl+Shift+L)：ギズモを非表示にし、トランスフォーム・選択・削除ツールを無効にします。視点の回転・パン・ズームは引き続き使用できます。"
+  },
+  "已找到并聚焦模型；编辑工具保持锁定": {
+    "zh_CN": "已找到并聚焦模型；编辑工具保持锁定",
+    "en_US": "Model found and framed; editing tools remain locked",
+    "ja_JP": "モデルを選択範囲にフレーム表示しました。編集ツールはロックされたままです"
+  },
   "Loss": {
     "zh_CN": "损失",
     "en_US": "Loss",

@@ -1039,6 +1039,23 @@ void MainWindow::createActions() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
   });
 
+  mLockEditToolsAction = AppLanguage::text(new QAction(this), AppLanguage::source("锁定编辑工具"));
+  mLockEditToolsAction->setObjectName(QStringLiteral("lockEditToolsAction"));
+  mLockEditToolsAction->setCheckable(true);
+  mLockEditToolsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
+  AppLanguage::bind(mLockEditToolsAction, "toolTip", AppLanguage::source("锁定/解锁编辑工具 (Ctrl+Shift+L)：隐藏操作手柄，禁用变换、选择与删除工具；仍可旋转、平移和缩放视角。"));
+  mLockEditToolsAction->setChecked(
+      QSettings().value(QStringLiteral("view/editToolsLocked"), false).toBool());
+  mViewport->setEditToolsLocked(mLockEditToolsAction->isChecked());
+  connect(mLockEditToolsAction, &QAction::toggled, mViewport,
+          &NativeViewport::setEditToolsLocked);
+  connect(mViewport, &NativeViewport::editToolsLockedChanged, this, [this](bool locked) {
+    const QSignalBlocker blocker(mLockEditToolsAction);
+    mLockEditToolsAction->setChecked(locked);
+    QSettings().setValue(QStringLiteral("view/editToolsLocked"), locked);
+    updateEditActions();
+  });
+
   mFindModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "查找模型"), this), AppLanguage::source("查找模型"));
   mFindModelAction->setObjectName(QStringLiteral("findModelAction"));
   mFindModelAction->setShortcut(QKeySequence(QStringLiteral("F")));
@@ -1046,7 +1063,9 @@ void MainWindow::createActions() {
   connect(mFindModelAction, &QAction::triggered, this, [this]() {
     if (mViewport->focusModel()) {
       statusBar()->showMessage(
-          QCoreApplication::translate("Workbench", "已找到并聚焦模型；G 移动，R 旋转，S 缩放"),
+          mViewport->editToolsLocked()
+              ? QCoreApplication::translate("Workbench", "已找到并聚焦模型；编辑工具保持锁定")
+              : QCoreApplication::translate("Workbench", "已找到并聚焦模型；G 移动，R 旋转，S 缩放"),
           4500);
     } else {
       statusBar()->showMessage(QCoreApplication::translate("Workbench", "当前没有可查找的模型"), 3500);
@@ -1301,6 +1320,8 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mExportCoordinateReportAction);
 
   QMenu *viewMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图")), AppLanguage::source("视图"), "title");
+  viewMenu->addAction(mLockEditToolsAction);
+  viewMenu->addSeparator();
   auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
   auto *languageGroup = new QActionGroup(languageMenu);
@@ -1441,6 +1462,7 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
+  mSelectionToolbar->addAction(mLockEditToolsAction);
   mSelectionToolbar->addAction(mFindModelAction);
   mSelectionToolbar->addSeparator();
   mSelectionToolbar->addAction(mRectangleAction);
@@ -2649,7 +2671,8 @@ void MainWindow::fitWindowToScreen() {
 
 void MainWindow::updateEditActions() {
   const bool baseInteractive = !mSelectionBusy && !mRecoveryBlocked &&
-                               !mProcessSupervisor.isRunning();
+                               !mProcessSupervisor.isRunning() &&
+                               !mViewport->editToolsLocked();
   const bool modelInteractive = baseInteractive && mModelReady;
   const bool modelNavigationAvailable = !mSelectionBusy && mModelReady;
   const bool pointInteractive = baseInteractive && mSceneReady;
@@ -2666,7 +2689,7 @@ void MainWindow::updateEditActions() {
   if (mEditToolbar != nullptr) {
     mEditToolbar->setVisible(anyScene);
   }
-  mInspectAction->setEnabled(modelInteractive || pointInteractive);
+  mInspectAction->setEnabled(modelNavigationAvailable || pointInteractive);
   mFindModelAction->setEnabled(modelNavigationAvailable);
   mMoveModelAction->setEnabled(modelInteractive);
   mRotateModelAction->setEnabled(modelInteractive);
@@ -2693,7 +2716,9 @@ void MainWindow::updateEditActions() {
 void MainWindow::updateEditStatus() {
   if (mEditStatus != nullptr) {
     mEditStatus->setVisible(mModelReady || mSceneReady || mSelectionBusy);
-    if (mSelectionBusy) {
+    if (mViewport->editToolsLocked()) {
+      mEditStatus->setText(QCoreApplication::translate("Workbench", "工具已锁定"));
+    } else if (mSelectionBusy) {
       mEditStatus->setText(QCoreApplication::translate("Workbench", "正在计算选择"));
     } else if (mModelSelected) {
       mEditStatus->setText(QCoreApplication::translate("Workbench", "模型已选 | 自由移动"));

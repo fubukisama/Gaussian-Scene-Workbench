@@ -662,7 +662,28 @@ void NativeViewport::setShowCameras(const bool enabled) {
   update();
 }
 
+void NativeViewport::setEditToolsLocked(const bool locked) {
+  if (mEditToolsLocked == locked) return;
+  mEditToolsLocked = locked;
+  // Roll back an uncommitted drag before entering navigation-only mode.
+  // Keep the selection, gizmo mode and undo history for the next edit session.
+  if (locked) {
+    ++mSelectionRequestEpoch;
+    setInteractionMode(InteractionMode::Inspect);
+  }
+  mTransformGizmoHover = {};
+  mTransformGizmoPress = {};
+  mTransformToolHover = -1;
+  mPressedButtons = Qt::NoButton;
+  setToolTip({});
+  QToolTip::hideText();
+  setCursor(defaultInteractionCursor(mMode));
+  emit editToolsLockedChanged(locked);
+  update();
+}
+
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
+  if (mEditToolsLocked && mode != InteractionMode::Inspect) return;
   if (isTrimInteractionMode(mode) && mSelectedSceneIds.size() > 1) return;
   if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate ||
        mode == InteractionMode::Scale) &&
@@ -769,6 +790,7 @@ bool NativeViewport::focusModel() {
 }
 
 void NativeViewport::selectModelForMove() {
+  if (mEditToolsLocked) return;
   selectModel();
   if (mModelSelected) {
     mTransformGizmoMode = TransformGizmoMode::Move;
@@ -777,6 +799,7 @@ void NativeViewport::selectModelForMove() {
 }
 
 void NativeViewport::selectModelForRotate() {
+  if (mEditToolsLocked) return;
   if (mModelDragActive && mMode == InteractionMode::Rotate) {
     if (!mTrackballRotation) {
       mScene->mModelRotation = mModelDragStartTransform.rotation;
@@ -797,6 +820,7 @@ void NativeViewport::selectModelForRotate() {
 }
 
 void NativeViewport::selectModelForScale() {
+  if (mEditToolsLocked) return;
   selectModel();
   if (mModelSelected) {
     mTransformGizmoMode = TransformGizmoMode::Scale;
@@ -805,6 +829,7 @@ void NativeViewport::selectModelForScale() {
 }
 
 void NativeViewport::setModelGizmoMode(const TransformGizmoMode mode) {
+  if (mEditToolsLocked) return;
   if (mModelDragActive) {
     finishModelTransform(false);
   }
@@ -917,6 +942,7 @@ void NativeViewport::clearSelection() {
 }
 
 void NativeViewport::invertSelection() {
+  if (mEditToolsLocked) return;
   if (mScene->mSelectionBusy || !hasEditableScene()) {
     return;
   }
@@ -927,6 +953,7 @@ void NativeViewport::invertSelection() {
 }
 
 void NativeViewport::deleteSelection() {
+  if (mEditToolsLocked) return;
   if (mScene->mSelectionBusy || mScene->mEditModel.deleteSelection() == 0) {
     return;
   }
@@ -936,6 +963,7 @@ void NativeViewport::deleteSelection() {
 }
 
 void NativeViewport::undoEdit() {
+  if (mEditToolsLocked) return;
   if (mScene->mSelectionBusy) {
     return;
   }
@@ -960,6 +988,7 @@ void NativeViewport::undoEdit() {
 }
 
 void NativeViewport::redoEdit() {
+  if (mEditToolsLocked) return;
   if (mScene->mSelectionBusy) {
     return;
   }
@@ -1772,7 +1801,8 @@ void NativeViewport::paintGL() {
     const bool inactive = state != active;
     QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
     QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, inactive);
-    QScopedValueRollback<bool> selectionScope(mModelSelected, mSelectedSceneIds.contains(state->id) && mModelSelected);
+    QScopedValueRollback<bool> selectionScope(mModelSelected,
+        !mEditToolsLocked && mSelectedSceneIds.contains(state->id) && mModelSelected);
     QScopedValueRollback<QMatrix4x4> displayScope(
         mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
     QSignalBlocker signalBlocker(this);
@@ -2071,7 +2101,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
 
 void NativeViewport::startSelection(const ScreenSelectionRequest &request,
                                     const SelectionOperation operation) {
-  if (mScene->mSelectionBusy || !hasEditableScene()) {
+  if (mEditToolsLocked || mScene->mSelectionBusy || !hasEditableScene()) {
     return;
   }
 
@@ -2090,7 +2120,8 @@ void NativeViewport::startSelection(const ScreenSelectionRequest &request,
 
   auto *watcher = new QFutureWatcher<QVector<quint32>>(this);
   connect(watcher, &QFutureWatcher<QVector<quint32>>::finished, this,
-          [this, watcher, generation, operation , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+          [this, watcher, generation, operation, epoch = mSelectionRequestEpoch,
+           weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
             const bool foreground = targetScene == mScene;
@@ -2104,7 +2135,8 @@ void NativeViewport::startSelection(const ScreenSelectionRequest &request,
               return;
             }
             mScene->mSelectionBusy = false;
-            mScene->mEditModel.applySelection(matches, operation);
+            if (epoch == mSelectionRequestEpoch && !mEditToolsLocked)
+              mScene->mEditModel.applySelection(matches, operation);
             rebuildRenderedVertices();
             notifyEditState();
             emit selectionBusyChanged(false);
@@ -3578,7 +3610,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
       return;
     }
   }
-  if (event->button() == Qt::LeftButton && selectableModelAvailable()) {
+  if (!mEditToolsLocked && event->button() == Qt::LeftButton && selectableModelAvailable()) {
     const int tool = hitTestTransformToolStrip(transformToolStrip(),
                                                event->position());
     if (tool >= 0) {
@@ -3634,7 +3666,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     return;
   }
 
-  if (event->button() == Qt::LeftButton &&
+  if (!mEditToolsLocked && event->button() == Qt::LeftButton &&
       mMode == InteractionMode::Inspect &&
       (selectableModelAvailable() || mSceneStates.size() > 1)) {
     const QString id = mSceneStates.size() > 1 ? sceneObjectAt(event->position()) :
@@ -4023,6 +4055,12 @@ QVector3D NativeViewport::cameraPosition() const {
 }
 
 void NativeViewport::keyPressEvent(QKeyEvent *event) {
+  if (mEditToolsLocked) {
+    // Do not let edit shortcuts change mode, selection, or transform state.
+    // Unhandled keys still reach window-level navigation and lock actions.
+    QOpenGLWidget::keyPressEvent(event);
+    return;
+  }
   if (!mModelDragActive) {
     if (event->key() == Qt::Key_A && event->modifiers().testFlag(Qt::ControlModifier) &&
         mMode == InteractionMode::Inspect) {
@@ -4626,7 +4664,7 @@ QString NativeViewport::transformGizmoHandleDescription(
 }
 
 void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
-  if (mModelDragActive) {
+  if (mEditToolsLocked || mModelDragActive) {
     return;
   }
   const int tool = selectableModelAvailable()
@@ -4692,6 +4730,7 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
 }
 
 void NativeViewport::toggleTransformGizmoOrientation() {
+  if (mEditToolsLocked) return;
   QString message;
   if (modelGizmoOrientationLocked()) {
     message = mSelectedSceneIds.size() > 1
@@ -4711,6 +4750,7 @@ void NativeViewport::toggleTransformGizmoOrientation() {
 }
 
 void NativeViewport::activateTransformToolAt(const int toolIndex) {
+  if (mEditToolsLocked) return;
   if (toolIndex == 4) {
     toggleTransformGizmoOrientation();
     return;
@@ -4731,6 +4771,7 @@ void NativeViewport::activateTransformToolAt(const int toolIndex) {
 void NativeViewport::beginTransformGizmoDrag(
     const TransformGizmoHandle &handle, const QPointF &position,
     const Qt::KeyboardModifiers modifiers) {
+  if (mEditToolsLocked) return;
   if (!handle.isValid() || !mModelSelected || !selectableModelAvailable()) {
     return;
   }
@@ -4804,7 +4845,7 @@ void NativeViewport::beginTransformGizmoDrag(
 
 void NativeViewport::beginModelTransform(const InteractionMode mode,
                                          const bool trackball) {
-  if (!mModelSelected || !selectableModelAvailable() ||
+  if (mEditToolsLocked || !mModelSelected || !selectableModelAvailable() ||
       (mode != InteractionMode::Move && mode != InteractionMode::Rotate &&
        mode != InteractionMode::Scale)) {
     return;
@@ -5307,7 +5348,7 @@ void NativeViewport::drawDepthAwareReferenceAxes(
 
 void NativeViewport::drawDepthAwareModelBounds(
     const QMatrix4x4 &modelViewProjection) {
-  if (!mModelSelected || !selectableModelAvailable()) {
+  if (mEditToolsLocked || !mModelSelected || !selectableModelAvailable()) {
     return;
   }
 
@@ -5427,7 +5468,7 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
 
 void NativeViewport::drawModelSelection(
     QPainter &painter, const QMatrix4x4 &modelViewProjection) {
-  if (!mModelSelected || !selectableModelAvailable()) {
+  if (mEditToolsLocked || !mModelSelected || !selectableModelAvailable()) {
     return;
   }
 
@@ -5486,6 +5527,7 @@ void NativeViewport::drawModelSelection(
 }
 
 void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
+  if (mEditToolsLocked) return;
   const TransformGizmoLayout layout = modelTransformGizmo();
   if (!layout.valid) {
     return;
@@ -5674,7 +5716,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
 }
 
 void NativeViewport::drawTransformToolStrip(QPainter &painter) {
-  if (!selectableModelAvailable()) {
+  if (mEditToolsLocked || !selectableModelAvailable()) {
     return;
   }
   const TransformToolStripLayout layout = transformToolStrip();
@@ -5933,6 +5975,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const int lineGap = 1;
   const int badgeHeight = (std::max)(22, lineHeight + 6);
   const QString mode =
+      mEditToolsLocked ? QCoreApplication::translate("Workbench", "工具已锁定") :
       mScene->mSelectionBusy ? QCoreApplication::translate("Workbench", "选择处理中") : modeLabel(mMode);
   const int modeWidth = metrics.horizontalAdvance(mode) + 18;
   const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);

@@ -4,6 +4,7 @@
 #include "WorkspaceDocument.h"
 
 #include <QAbstractButton>
+#include <QAction>
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
@@ -14,6 +15,7 @@
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
@@ -90,6 +92,95 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   if (!check(window.importSceneFile(files[0]), "first import")) return false;
   const QString first = document->activeSceneId();
   if (!check(waitUntil([&] { return viewport->meshRenderingAvailable(); }), "first mesh load")) return false;
+  // Exercise the actual editing guard with a loaded model, including a modal
+  // edit already in flight. Settings are isolated by the smoke-test launcher.
+  auto *lockTools = window.findChild<QAction *>("lockEditToolsAction");
+  if (!check(lockTools && !lockTools->isChecked(), "editing initially unlocked")) return false;
+  const auto sendKey = [&](int code, const QString &text = {}, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QKeyEvent event(QEvent::KeyPress, code, modifiers, text);
+    QApplication::sendEvent(viewport, &event);
+  };
+  (void)viewport->focusModel();
+  viewport->setModelGizmoMode(TransformGizmoMode::Transform);
+  const auto originalCollection = document->sceneCollectionJson();
+  const auto originalSelection = viewport->selectedSceneIds();
+  sendKey(Qt::Key_G); sendKey(Qt::Key_X); sendKey(Qt::Key_2, "2");
+  if (!check(viewport->modelTransformActive() && !viewport->modelTranslation().isNull(),
+             "pending transform changes preview")) return false;
+  const auto gizmoBeforeLock = viewport->modelGizmoMode();
+  lockTools->setChecked(true);
+  if (!check(viewport->editToolsLocked() && !viewport->modelTransformActive() &&
+             viewport->modelTranslation().isNull(), "lock rolls back uncommitted transform")) return false;
+  if (!check(viewport->selectedSceneIds() == originalSelection &&
+             viewport->modelGizmoMode() == gizmoBeforeLock, "lock preserves selection and gizmo mode")) return false;
+  if (!check(document->sceneCollectionJson() == originalCollection &&
+             QSettings().value("view/editToolsLocked").toBool(), "lock leaves document unchanged and persists preference")) return false;
+  for (const char *name : {"moveModelAction", "rotateModelAction", "scaleModelAction"}) {
+    auto *action = window.findChild<QAction *>(name);
+    if (!check(action && !action->isEnabled(), "transform action disabled while locked")) return false;
+    action->trigger();
+  }
+  auto *findModel = window.findChild<QAction *>("findModelAction");
+  if (!check(findModel && findModel->isEnabled(), "Find Model stays enabled")) return false;
+  findModel->trigger();
+  for (int code : {Qt::Key_G, Qt::Key_R, Qt::Key_S, Qt::Key_Delete, Qt::Key_Escape}) sendKey(code);
+  sendKey(Qt::Key_A, "a", Qt::ControlModifier);
+  viewport->selectModelForMove(); viewport->selectModelForRotate(); viewport->selectModelForScale();
+  viewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
+  viewport->setModelGizmoMode(TransformGizmoMode::Rotate);
+  viewport->deleteSelection(); viewport->invertSelection(); viewport->undoEdit(); viewport->redoEdit();
+  if (!check(!viewport->modelTransformActive() && viewport->selectedSceneIds() == originalSelection &&
+             viewport->modelGizmoMode() == gizmoBeforeLock &&
+             document->sceneCollectionJson() == originalCollection, "keys and direct edit entry points are blocked")) return false;
+  const auto drag = [&](const QPointF &start, const QPointF &delta, Qt::MouseButton button) {
+    const QPointF end = start + delta;
+    QMouseEvent down(QEvent::MouseButtonPress, start, viewport->mapToGlobal(start.toPoint()), button, button, Qt::NoModifier);
+    QMouseEvent move(QEvent::MouseMove, end, viewport->mapToGlobal(end.toPoint()), Qt::NoButton, button, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, end, viewport->mapToGlobal(end.toPoint()), button, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(viewport, &down);
+    QApplication::sendEvent(viewport, &move);
+    QApplication::sendEvent(viewport, &up);
+  };
+  const QPointF inspectCenter = viewport->rect().center();
+  const auto oldAngles = viewport->viewOrbitAngles();
+  drag(inspectCenter, {40, 20}, Qt::LeftButton);
+  if (!check(viewport->viewOrbitAngles() != oldAngles && !viewport->modelTransformActive() &&
+             viewport->selectedSceneIds() == originalSelection,
+             "drag through hidden center gizmo orbits without editing or deselecting")) return false;
+  const auto oldTarget = viewport->viewTarget();
+  drag(inspectCenter, {20, -10}, Qt::RightButton);
+  if (!check(viewport->viewTarget() != oldTarget, "locked view still pans")) return false;
+  const float oldDistance = viewport->viewDistance();
+  QWheelEvent inspectZoom(inspectCenter, viewport->mapToGlobal(inspectCenter.toPoint()), {}, {0, 120},
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+  QApplication::sendEvent(viewport, &inspectZoom);
+  if (!check(viewport->viewDistance() != oldDistance && document->sceneCollectionJson() == originalCollection,
+             "locked view zooms without changing model transforms")) return false;
+  // Model-selection visuals (including gizmos/bounds/tint) must be absent,
+  // rather than merely having inactive hit targets over the inspected model.
+  const QImage lockedFrame = viewport->grabFramebuffer();
+  viewport->clearSelection();
+  const QImage unselectedFrame = viewport->grabFramebuffer();
+  const QRect body(10, 90, lockedFrame.width() - 20, lockedFrame.height() - 200);
+  if (!check(lockedFrame.copy(body) == unselectedFrame.copy(body), "lock hides selection overlays and tint")) return false;
+  viewport->setSceneSelection(originalSelection, first);
+  lockTools->setChecked(false);
+  if (!check(!viewport->editToolsLocked() && !QSettings().value("view/editToolsLocked").toBool() &&
+             viewport->modelSelected() && viewport->modelGizmoMode() == gizmoBeforeLock,
+             "unlock restores selected model and tool mode")) return false;
+  sendKey(Qt::Key_G); sendKey(Qt::Key_X); sendKey(Qt::Key_2, "2"); sendKey(Qt::Key_Return);
+  const auto movedCollection = document->sceneCollectionJson();
+  if (!check(movedCollection != originalCollection, "editing works again after unlock")) return false;
+  lockTools->setChecked(true);
+  viewport->undoEdit();
+  if (!check(document->sceneCollectionJson() == movedCollection, "lock also blocks undo of committed transforms")) return false;
+  lockTools->setChecked(false);
+  viewport->undoEdit();
+  if (!check(document->sceneCollectionJson() == originalCollection, "unlock retains undo history")) return false;
+  // Restore the ordinary import test's unselected viewport.
+  viewport->clearSelection();
+  viewport->resetCamera();
+  qInfo() << "EDIT_LOCK PASS: cancel, input guard, navigation, clean rendering, persistence and undo";
   bool dialogSeen = false;
   const auto chooseImport = [&](int index, const QString &buttonName) {
     dialogSeen = false;

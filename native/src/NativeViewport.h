@@ -85,6 +85,8 @@ public:
   [[nodiscard]] qsizetype sceneObjectCount() const { return mSceneStates.size(); }
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
+  void setEditToolsLocked(bool locked);
+  [[nodiscard]] bool editToolsLocked() const { return mEditToolsLocked; }
   void selectModel();
   [[nodiscard]] bool focusModel();
   void selectModelForMove();
@@ -203,6 +205,7 @@ signals:
   void trainingGpuPreviewStateChanged(bool active, const QString &mode,
                                       const QString &detail);
   void interactionModeChanged(gsw::NativeViewport::InteractionMode mode);
+  void editToolsLockedChanged(bool locked);
   void modelInteractionStateChanged(bool available, bool selected,
                                     bool canUndo, bool canRedo,
                                     const QVector3D &translation,
@@ -489,6 +492,8 @@ private:
   qreal mBrushRadius = 32.0;
   bool mSelectionGestureActive = false;
   bool mModelSelected = false;
+  bool mEditToolsLocked = false;
+  quint64 mSelectionRequestEpoch = 0;
   bool mModelDragActive = false;
   bool mBrushCursorVisible = false;
   bool mVisibleOnlySelection = true;
