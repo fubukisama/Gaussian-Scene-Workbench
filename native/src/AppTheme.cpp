@@ -144,6 +144,13 @@ int AppTheme::scaled(const int value, const int scalePercent) {
 void AppTheme::apply(QApplication &application, const int scalePercent, const bool persist) {
   const int scale = clampScale(scalePercent);
   QFont font(QStringLiteral("Microsoft YaHei UI"));
+  const QString language = application.property("gswUiLanguage").toString();
+  if (language == QStringLiteral("ja_JP")) {
+    font.setFamilies({QStringLiteral("Yu Gothic UI"), QStringLiteral("Meiryo"),
+                      QStringLiteral("Microsoft YaHei UI")});
+  } else if (language == QStringLiteral("en_US")) {
+    font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI")});
+  }
   font.setPointSizeF(10.0 * scale / 100.0);
   font.setStyleStrategy(QFont::PreferAntialias);
   application.setFont(font);

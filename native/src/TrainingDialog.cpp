@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "TrainingDialog.h"
 
 #include "ColmapSupport.h"
@@ -40,7 +41,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
                                const bool hasSparseReconstruction,
                                const bool twoDgsAvailable, QWidget *parent)
     : QDialog(parent), mDatasetPath(datasetPath) {
-  setWindowTitle(QStringLiteral("训练设置"));
+  setWindowTitle(QCoreApplication::translate("Workbench", "训练设置"));
   setModal(true);
   setMinimumWidth(520);
 
@@ -57,68 +58,68 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   datasetValue->setObjectName(QStringLiteral("mutedLabel"));
   datasetValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
   datasetValue->setWordWrap(true);
-  form->addRow(QStringLiteral("数据集"), datasetValue);
+  form->addRow(QCoreApplication::translate("Workbench", "数据集"), datasetValue);
 
   mBackend = new QComboBox(this);
   mBackend->addItem(QStringLiteral("3D Gaussian Splatting"), QStringLiteral("3dgs"));
   if (twoDgsAvailable) {
     mBackend->addItem(QStringLiteral("2D Gaussian Splatting"), QStringLiteral("2dgs"));
   }
-  form->addRow(QStringLiteral("方法"), mBackend);
+  form->addRow(QCoreApplication::translate("Workbench", "方法"), mBackend);
 
   mQuality = new QComboBox(this);
-  mQuality->addItem(QStringLiteral("快速预览"), QStringLiteral("quick"));
-  mQuality->addItem(QStringLiteral("标准"), QStringLiteral("full"));
-  mQuality->addItem(QStringLiteral("高质量"), QStringLiteral("quality"));
-  mQuality->addItem(QStringLiteral("最高质量"), QStringLiteral("max_quality"));
-  form->addRow(QStringLiteral("质量预设"), mQuality);
+  mQuality->addItem(QCoreApplication::translate("Workbench", "快速预览"), QStringLiteral("quick"));
+  mQuality->addItem(QCoreApplication::translate("Workbench", "标准"), QStringLiteral("full"));
+  mQuality->addItem(QCoreApplication::translate("Workbench", "高质量"), QStringLiteral("quality"));
+  mQuality->addItem(QCoreApplication::translate("Workbench", "最高质量"), QStringLiteral("max_quality"));
+  form->addRow(QCoreApplication::translate("Workbench", "质量预设"), mQuality);
 
   mIterations = new QSpinBox(this);
   mIterations->setRange(1000, 200000);
   mIterations->setSingleStep(1000);
-  form->addRow(QStringLiteral("迭代次数"), mIterations);
+  form->addRow(QCoreApplication::translate("Workbench", "迭代次数"), mIterations);
 
   mResolution = new QComboBox(this);
   for (const int resolution : {1, 2, 4, 8}) {
     mResolution->addItem(QStringLiteral("1/%1").arg(resolution), resolution);
   }
-  form->addRow(QStringLiteral("训练分辨率"), mResolution);
+  form->addRow(QCoreApplication::translate("Workbench", "训练分辨率"), mResolution);
 
   mOutputScene = new QLineEdit(safeSceneName(projectName), this);
-  mOutputScene->setPlaceholderText(QStringLiteral("仅允许英文、数字、点、下划线和连字符"));
-  form->addRow(QStringLiteral("输出名称"), mOutputScene);
+  mOutputScene->setPlaceholderText(QCoreApplication::translate("Workbench", "仅允许英文、数字、点、下划线和连字符"));
+  form->addRow(QCoreApplication::translate("Workbench", "输出名称"), mOutputScene);
 
   auto *outputRow = new QWidget(this);
   auto *outputLayout = new QHBoxLayout(outputRow);
   outputLayout->setContentsMargins(0, 0, 0, 0);
   outputLayout->setSpacing(6);
   mOutputRoot = new QLineEdit(QDir::toNativeSeparators(defaultOutputRoot), outputRow);
-  auto *browseButton = new QPushButton(QStringLiteral("浏览..."), outputRow);
-  browseButton->setToolTip(QStringLiteral("选择训练输出目录"));
+  auto *browseButton = new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), outputRow);
+  browseButton->setToolTip(QCoreApplication::translate("Workbench", "选择训练输出目录"));
   outputLayout->addWidget(mOutputRoot, 1);
   outputLayout->addWidget(browseButton);
-  form->addRow(QStringLiteral("输出目录"), outputRow);
+  form->addRow(QCoreApplication::translate("Workbench", "输出目录"), outputRow);
 
-  mRunColmap = new QCheckBox(QStringLiteral("训练前运行 COLMAP 重建"), this);
+  mRunColmap = new QCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this);
   mRunColmap->setChecked(!hasSparseReconstruction);
   form->addRow(QString(), mRunColmap);
 
-  mOverwrite = new QCheckBox(QStringLiteral("允许覆盖同名输出"), this);
+  mOverwrite = new QCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this);
   mOverwrite->setChecked(false);
   form->addRow(QString(), mOverwrite);
 
   rootLayout->addLayout(form);
 
   auto *note = new QLabel(
-      QStringLiteral("输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"),
+      QCoreApplication::translate("Workbench", "输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"),
       this);
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
   rootLayout->addWidget(note);
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-  buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-  auto *startButton = buttons->addButton(QStringLiteral("开始训练"), QDialogButtonBox::AcceptRole);
+  buttons->button(QDialogButtonBox::Cancel)->setText(QCoreApplication::translate("Workbench", "取消"));
+  auto *startButton = buttons->addButton(QCoreApplication::translate("Workbench", "开始训练"), QDialogButtonBox::AcceptRole);
   startButton->setDefault(true);
   rootLayout->addWidget(buttons);
 
@@ -146,8 +147,8 @@ TrainingConfiguration TrainingDialog::configuration() const {
 void TrainingDialog::accept() {
   if (!datasetContainsImages()) {
     QMessageBox::critical(
-        this, QStringLiteral("数据集不可训练"),
-        QStringLiteral("所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。"));
+        this, QCoreApplication::translate("Workbench", "数据集不可训练"),
+        QCoreApplication::translate("Workbench", "所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。"));
     return;
   }
 
@@ -171,15 +172,15 @@ void TrainingDialog::accept() {
       config.outputScene.contains(QStringLiteral("..")) ||
       windowsDeviceNames.contains(deviceBase)) {
     QMessageBox::critical(
-        this, QStringLiteral("输出名称无效"),
-        QStringLiteral("输出名称必须是安全的 Windows 文件夹名，且只能包含英文字母、"
+        this, QCoreApplication::translate("Workbench", "输出名称无效"),
+        QCoreApplication::translate("Workbench", "输出名称必须是安全的 Windows 文件夹名，且只能包含英文字母、"
                        "数字、点、下划线和连字符。"));
     return;
   }
   if (config.outputRoot.isEmpty() ||
       (!QFileInfo::exists(config.outputRoot) && !QDir().mkpath(config.outputRoot))) {
-    QMessageBox::critical(this, QStringLiteral("输出目录不可用"),
-                          QStringLiteral("无法创建或访问指定的输出目录。"));
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "输出目录不可用"),
+                          QCoreApplication::translate("Workbench", "无法创建或访问指定的输出目录。"));
     return;
   }
 
@@ -187,14 +188,14 @@ void TrainingDialog::accept() {
   const bool outputContainsData = target.exists() &&
                                   !target.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty();
   if (outputContainsData && !config.overwrite) {
-    QMessageBox::critical(this, QStringLiteral("输出已存在"),
-                          QStringLiteral("同名输出目录已有数据。请更改名称，或明确启用覆盖。"));
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "输出已存在"),
+                          QCoreApplication::translate("Workbench", "同名输出目录已有数据。请更改名称，或明确启用覆盖。"));
     return;
   }
   if (outputContainsData && config.overwrite) {
     const auto answer = QMessageBox::warning(
-        this, QStringLiteral("确认覆盖训练输出"),
-        QStringLiteral("训练开始后会删除以下目录中的现有数据：\n%1")
+        this, QCoreApplication::translate("Workbench", "确认覆盖训练输出"),
+        QCoreApplication::translate("Workbench", "训练开始后会删除以下目录中的现有数据：\n%1")
             .arg(QDir::toNativeSeparators(target.absolutePath())),
         QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
     if (answer != QMessageBox::Yes) {
@@ -226,7 +227,7 @@ void TrainingDialog::applyPreset() {
 
 void TrainingDialog::chooseOutputRoot() {
   const QString directory = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("选择训练输出目录"), mOutputRoot->text());
+      this, QCoreApplication::translate("Workbench", "选择训练输出目录"), mOutputRoot->text());
   if (!directory.isEmpty()) {
     mOutputRoot->setText(QDir::toNativeSeparators(directory));
   }

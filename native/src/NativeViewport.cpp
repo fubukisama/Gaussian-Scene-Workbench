@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "NativeViewport.h"
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
@@ -206,23 +207,23 @@ float shortestEquivalentAngle(const float current, float target) {
 QString modeLabel(const NativeViewport::InteractionMode mode) {
   switch (mode) {
   case NativeViewport::InteractionMode::Inspect:
-    return QStringLiteral("查看");
+    return QCoreApplication::translate("Workbench", "查看");
   case NativeViewport::InteractionMode::Move:
-    return QStringLiteral("移动模型");
+    return QCoreApplication::translate("Workbench", "移动模型");
   case NativeViewport::InteractionMode::Rotate:
-    return QStringLiteral("旋转模型");
+    return QCoreApplication::translate("Workbench", "旋转模型");
   case NativeViewport::InteractionMode::Scale:
-    return QStringLiteral("缩放模型");
+    return QCoreApplication::translate("Workbench", "缩放模型");
   case NativeViewport::InteractionMode::Select:
-    return QStringLiteral("选择");
+    return QCoreApplication::translate("Workbench", "选择");
   case NativeViewport::InteractionMode::Rectangle:
-    return QStringLiteral("框选");
+    return QCoreApplication::translate("Workbench", "框选");
   case NativeViewport::InteractionMode::Lasso:
-    return QStringLiteral("套索");
+    return QCoreApplication::translate("Workbench", "套索");
   case NativeViewport::InteractionMode::Brush:
-    return QStringLiteral("笔刷");
+    return QCoreApplication::translate("Workbench", "笔刷");
   case NativeViewport::InteractionMode::Crop:
-    return QStringLiteral("裁剪");
+    return QCoreApplication::translate("Workbench", "裁剪");
   }
   return {};
 }
@@ -1036,9 +1037,9 @@ double NativeViewport::referencePlaneElevation() const {
 QString NativeViewport::referencePlaneDescription() const {
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero ||
       !mScene->mSceneCoordinates.valid) {
-    return QStringLiteral("世界坐标 Z=0");
+    return QCoreApplication::translate("Workbench", "世界坐标 Z=0");
   }
-  return QStringLiteral("模型底部 Z=%1")
+  return QCoreApplication::translate("Workbench", "模型底部 Z=%1")
       .arg(formatSceneCoordinate(mScene->mSceneCoordinates.globalMinimum.z,
                                  mScene->mSceneCoordinates));
 }
@@ -1171,7 +1172,7 @@ void main() {
   const bool pointShaderReady =
       vertexCompiled && fragmentCompiled && mPointProgram->link();
   if (!pointShaderReady) {
-    mScene->mSceneLoadMessage = QStringLiteral("OpenGL point shader failed: %1")
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "OpenGL point shader failed: %1")
                             .arg(mPointProgram->log());
   }
 
@@ -1237,7 +1238,7 @@ void main() {
   mMeshShaderReady = meshVertexCompiled && meshFragmentCompiled &&
                      mMeshProgram->link();
   if (!mMeshShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
-    mScene->mSceneLoadMessage = QStringLiteral("OpenGL mesh shader failed: %1")
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "OpenGL mesh shader failed: %1")
                             .arg(mMeshProgram->log());
   }
 
@@ -1377,7 +1378,7 @@ void main() {
   mGaussianShaderReady = pointShaderReady && gaussianVertexCompiled &&
                          gaussianFragmentCompiled && mGaussianProgram->link();
   if (!mGaussianShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
-    mScene->mSceneLoadMessage = QStringLiteral("OpenGL Gaussian shader failed: %1")
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "OpenGL Gaussian shader failed: %1")
                             .arg(mGaussianProgram->log());
   }
 
@@ -1475,7 +1476,7 @@ void main() {
       gridVertexCompiled && gridFragmentCompiled && mGridProgram->link();
   if (!mGridShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
     mScene->mSceneLoadMessage =
-        QStringLiteral("OpenGL reference-grid shader failed: %1")
+        QCoreApplication::translate("Workbench", "OpenGL reference-grid shader failed: %1")
             .arg(mGridProgram->log());
   }
   if (mGridShaderReady) {
@@ -1514,7 +1515,7 @@ void main() {
       depthOverlayVertexCompiled && depthOverlayFragmentCompiled &&
       mDepthOverlayProgram->link();
   if (!mDepthOverlayShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
-    mScene->mSceneLoadMessage = QStringLiteral("OpenGL depth-overlay shader failed: %1")
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "OpenGL depth-overlay shader failed: %1")
                             .arg(mDepthOverlayProgram->log());
   }
   if (mDepthOverlayShaderReady) {
@@ -1576,7 +1577,7 @@ void main() {
       modelPickVertexCompiled && modelPickFragmentCompiled &&
       mModelPickProgram->link();
   if (!mModelPickShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
-    mScene->mSceneLoadMessage = QStringLiteral("OpenGL model-pick shader failed: %1")
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "OpenGL model-pick shader failed: %1")
                             .arg(mModelPickProgram->log());
   }
 
@@ -1704,7 +1705,7 @@ void NativeViewport::paintGL() {
       gpuPreviewError != mTrainingGpuPreviewError) {
     mTrainingGpuPreviewError = gpuPreviewError;
     emit trainingGpuPreviewStateChanged(
-        mTrainingGpuPreview.attached(), QStringLiteral("GPU 共享显存"),
+        mTrainingGpuPreview.attached(), QCoreApplication::translate("Workbench", "GPU 共享显存"),
         gpuPreviewError);
   }
   if (previewChanged && mTrainingGpuPreview.attached()) {
@@ -1726,15 +1727,15 @@ void NativeViewport::paintGL() {
     }
     mTrainingGpuPreviewError.clear();
     emit trainingGpuPreviewStateChanged(
-        true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
-        QStringLiteral("迭代 %1 · %2 个高斯")
+        true, QCoreApplication::translate("Workbench", "GPU 共享显存 · 零 CPU 拷贝"),
+        QCoreApplication::translate("Workbench", "迭代 %1 · %2 个高斯")
             .arg(mTrainingGpuPreview.iteration())
             .arg(mTrainingGpuPreview.pointCount()));
   } else if (previewChanged && !mTrainingGpuPreview.attached()) {
     mTrainingGpuPreviewTimer->stop();
     emit trainingGpuPreviewStateChanged(
-        false, QStringLiteral("PLY 检查点回退"),
-        QStringLiteral("共享显存预览已结束"));
+        false, QCoreApplication::translate("Workbench", "PLY 检查点回退"),
+        QCoreApplication::translate("Workbench", "共享显存预览已结束"));
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   const QMatrix4x4 view = viewMatrix();
@@ -1833,8 +1834,8 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     mTrainingGpuPreviewCameraFramed = false;
     if (wasAttached) {
       emit trainingGpuPreviewStateChanged(
-          false, QStringLiteral("PLY 检查点回退"),
-          QStringLiteral("训练任务已停止"));
+          false, QCoreApplication::translate("Workbench", "PLY 检查点回退"),
+          QCoreApplication::translate("Workbench", "训练任务已停止"));
     }
   }
   if (!mPendingTrainingGpuPreviewDescriptor.has_value()) {
@@ -1853,10 +1854,10 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     const QString detail =
         descriptor.state == TrainingGpuPreviewState::Failed
             ? descriptor.error
-            : QStringLiteral("训练共享显存发布器已关闭");
+            : QCoreApplication::translate("Workbench", "训练共享显存发布器已关闭");
     if (wasAttached || descriptor.state == TrainingGpuPreviewState::Failed) {
       emit trainingGpuPreviewStateChanged(
-          false, QStringLiteral("PLY 检查点回退"), detail);
+          false, QCoreApplication::translate("Workbench", "PLY 检查点回退"), detail);
     }
     return;
   }
@@ -1868,7 +1869,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     mTrainingGpuPreviewTimer->stop();
     mTrainingGpuPreviewError = error;
     emit trainingGpuPreviewStateChanged(
-        false, QStringLiteral("PLY 检查点回退"), error);
+        false, QCoreApplication::translate("Workbench", "PLY 检查点回退"), error);
     return;
   }
   synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
@@ -1879,8 +1880,8 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     emit renderModeChanged(mScene->mRenderMode);
   }
   emit trainingGpuPreviewStateChanged(
-      true, QStringLiteral("GPU 共享显存 · 零 CPU 拷贝"),
-      QStringLiteral("已连接 %1，等待首帧").arg(descriptor.device));
+      true, QCoreApplication::translate("Workbench", "GPU 共享显存 · 零 CPU 拷贝"),
+      QCoreApplication::translate("Workbench", "已连接 %1，等待首帧").arg(descriptor.device));
 }
 
 void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
@@ -1943,7 +1944,7 @@ void NativeViewport::rebuildCameraGeometry() {
 }
 
 void NativeViewport::startSceneLoad(const QString &scenePath) {
-  mScene->mSceneLoadMessage = QStringLiteral("正在读取 PLY 场景...");
+  mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
   const int generation = mScene->mSceneGeneration;
 
@@ -2682,8 +2683,7 @@ void NativeViewport::uploadPendingPointCachePages() {
       glDeleteBuffers(1, &gpuChunk.buffer);
       glDeleteVertexArrays(1, &gpuChunk.vertexArray);
       mScene->mPointCacheFailedNodes.insert(page.nodeId);
-      mScene->mPointCacheError = QStringLiteral(
-          "GPU memory could not accept point-cache node %1.")
+      mScene->mPointCacheError = QCoreApplication::translate("Workbench", "GPU memory could not accept point-cache node %1.")
                              .arg(page.nodeId);
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -2750,15 +2750,14 @@ void NativeViewport::uploadPendingMeshTexture() {
     image = image.scaled(maximumTextureSize, maximumTextureSize,
                          Qt::KeepAspectRatio, Qt::SmoothTransformation);
     mScene->mMeshTextureError =
-        QStringLiteral("Texture was reduced to the GPU limit of %1 px.")
+        QCoreApplication::translate("Workbench", "Texture was reduced to the GPU limit of %1 px.")
             .arg(maximumTextureSize);
   }
   image = image.convertToFormat(QImage::Format_RGBA8888)
               .mirrored(false, true);
   mScene->mPendingMeshTexture = {};
   if (image.isNull()) {
-    mScene->mMeshTextureError = QStringLiteral(
-        "The mesh texture could not be converted for OpenGL.");
+    mScene->mMeshTextureError = QCoreApplication::translate("Workbench", "The mesh texture could not be converted for OpenGL.");
     return;
   }
 
@@ -2790,8 +2789,7 @@ void NativeViewport::uploadPendingMeshTexture() {
   if (uploadError != GL_NO_ERROR || mScene->mMeshTexture == 0) {
     glDeleteTextures(1, &mScene->mMeshTexture);
     mScene->mMeshTexture = 0;
-    mScene->mMeshTextureError = QStringLiteral(
-        "GPU memory could not accept the mesh texture.");
+    mScene->mMeshTextureError = QCoreApplication::translate("Workbench", "GPU memory could not accept the mesh texture.");
     return;
   }
   mScene->mMeshTextureSize = image.size();
@@ -3104,7 +3102,7 @@ void NativeViewport::uploadPendingMeshCachePages() {
       glDeleteVertexArrays(1, &gpuChunk.vertexArray);
       mScene->mMeshCacheFailedNodes.insert(page.nodeId);
       mScene->mMeshCacheError =
-          QStringLiteral("GPU memory could not accept mesh-cache node %1.")
+          QCoreApplication::translate("Workbench", "GPU memory could not accept mesh-cache node %1.")
               .arg(page.nodeId);
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -3609,7 +3607,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     mPressedButtons = event->buttons();
     mLastMousePosition = event->position().toPoint();
     setCursor(Qt::ClosedHandCursor);
-    setToolTip(QStringLiteral("Ctrl + 左键：旋转视角"));
+    setToolTip(QCoreApplication::translate("Workbench", "Ctrl + 左键：旋转视角"));
     update();
     event->accept();
     return;
@@ -3826,8 +3824,8 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
   switch (hit.part) {
   case NavigationGizmoPart::Rotate:
     tooltip = hit.axis == NavigationAxis::None
-                  ? QStringLiteral("拖动环绕视图")
-                  : QStringLiteral("拖动环绕视图；单击 %1 轴吸附视角")
+                  ? QCoreApplication::translate("Workbench", "拖动环绕视图")
+                  : QCoreApplication::translate("Workbench", "拖动环绕视图；单击 %1 轴吸附视角")
                         .arg(navigationAxisLabel(hit.axis));
     setCursor(Qt::OpenHandCursor);
     break;
@@ -3835,29 +3833,29 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
     {
       const ViewportZoomLimits limits =
           viewportZoomLimits(transformedSceneRadius());
-      tooltip = QStringLiteral("上下拖动缩放视图（%1 – %2）")
+      tooltip = QCoreApplication::translate("Workbench", "上下拖动缩放视图（%1 – %2）")
                     .arg(formatViewportDistance(limits.minimumDistance),
                          formatViewportDistance(limits.maximumDistance));
     }
     setCursor(Qt::SizeVerCursor);
     break;
   case NavigationGizmoPart::Pan:
-    tooltip = QStringLiteral("拖动平移视图");
+    tooltip = QCoreApplication::translate("Workbench", "拖动平移视图");
     setCursor(Qt::OpenHandCursor);
     break;
   case NavigationGizmoPart::Camera:
     tooltip = camerasAvailable()
-                  ? (mCameraViewActive ? QStringLiteral("返回用户视图")
-                                       : QStringLiteral("切换到场景相机视图"))
-                  : QStringLiteral("当前场景没有可用相机");
+                  ? (mCameraViewActive ? QCoreApplication::translate("Workbench", "返回用户视图")
+                                       : QCoreApplication::translate("Workbench", "切换到场景相机视图"))
+                  : QCoreApplication::translate("Workbench", "当前场景没有可用相机");
     setCursor(camerasAvailable() ? Qt::PointingHandCursor
                                  : Qt::ForbiddenCursor);
     break;
   case NavigationGizmoPart::Projection:
     tooltip =
         mOrthographic
-            ? QStringLiteral("中心方块 / Iso：切换到透视；Shift+单击恢复默认透视")
-            : QStringLiteral("中心方块 / Persp：切换到正交；Shift+单击恢复默认透视");
+            ? QCoreApplication::translate("Workbench", "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视")
+            : QCoreApplication::translate("Workbench", "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视");
     setCursor(Qt::PointingHandCursor);
     break;
   case NavigationGizmoPart::None:
@@ -4604,23 +4602,23 @@ QString NativeViewport::transformGizmoHandleDescription(
                            : QString();
   switch (handle.kind) {
   case TransformGizmoHandleKind::MoveAxis:
-    return QStringLiteral("沿 %1 轴移动").arg(axis);
+    return QCoreApplication::translate("Workbench", "沿 %1 轴移动").arg(axis);
   case TransformGizmoHandleKind::MovePlane:
-    return QStringLiteral("在垂直于 %1 轴的平面移动").arg(axis);
+    return QCoreApplication::translate("Workbench", "在垂直于 %1 轴的平面移动").arg(axis);
   case TransformGizmoHandleKind::MoveView:
-    return QStringLiteral("沿视图平面自由移动");
+    return QCoreApplication::translate("Workbench", "沿视图平面自由移动");
   case TransformGizmoHandleKind::RotateAxis:
-    return QStringLiteral("绕 %1 轴旋转").arg(axis);
+    return QCoreApplication::translate("Workbench", "绕 %1 轴旋转").arg(axis);
   case TransformGizmoHandleKind::RotateView:
-    return QStringLiteral("绕视图轴旋转");
+    return QCoreApplication::translate("Workbench", "绕视图轴旋转");
   case TransformGizmoHandleKind::RotateTrackball:
-    return QStringLiteral("自由轨迹球旋转");
+    return QCoreApplication::translate("Workbench", "自由轨迹球旋转");
   case TransformGizmoHandleKind::ScaleAxis:
-    return QStringLiteral("沿局部 %1 轴缩放").arg(axis);
+    return QCoreApplication::translate("Workbench", "沿局部 %1 轴缩放").arg(axis);
   case TransformGizmoHandleKind::ScalePlane:
-    return QStringLiteral("在局部 %1 平面的双轴缩放").arg(axis);
+    return QCoreApplication::translate("Workbench", "在局部 %1 平面的双轴缩放").arg(axis);
   case TransformGizmoHandleKind::ScaleUniform:
-    return QStringLiteral("等比缩放");
+    return QCoreApplication::translate("Workbench", "等比缩放");
   case TransformGizmoHandleKind::None:
     return {};
   }
@@ -4647,28 +4645,26 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
 
   if (tool >= 0) {
     static const std::array<QString, 4> descriptions = {
-        QStringLiteral("移动工具（G）"), QStringLiteral("旋转工具（R）"),
-        QStringLiteral("缩放工具（S）"),
-        QStringLiteral("组合变换工具")};
+        QCoreApplication::translate("Workbench", "移动工具（G）"), QCoreApplication::translate("Workbench", "旋转工具（R）"),
+        QCoreApplication::translate("Workbench", "缩放工具（S）"),
+        QCoreApplication::translate("Workbench", "组合变换工具")};
     if (tool < 4) {
       setToolTip(descriptions.at(static_cast<std::size_t>(tool)));
     } else {
       setToolTip(mSelectedSceneIds.size() > 1 && modelGizmoOrientationLocked()
-                     ? QStringLiteral("多选采用等比缩放，保持模型之间的比例；无需选择缩放坐标系")
+                     ? QCoreApplication::translate("Workbench", "多选采用等比缩放，保持模型之间的比例；无需选择缩放坐标系")
                      : modelGizmoOrientationLocked()
                      ? mTransformGizmoMode == TransformGizmoMode::Scale
-                           ? QStringLiteral(
-                                 "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切")
-                           : QStringLiteral(
-                                 "局部锁定：组合工具包含缩放；切换到移动或旋转工具后可选择全局坐标")
-                     : QStringLiteral("切换全局/局部坐标系（,）"));
+                           ? QCoreApplication::translate("Workbench", "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切")
+                           : QCoreApplication::translate("Workbench", "局部锁定：组合工具包含缩放；切换到移动或旋转工具后可选择全局坐标")
+                     : QCoreApplication::translate("Workbench", "切换全局/局部坐标系（,）"));
     }
     setCursor(tool == 4 && modelGizmoOrientationLocked()
                   ? Qt::ArrowCursor
                   : Qt::PointingHandCursor);
   } else if (handle.isValid()) {
     setToolTip(transformGizmoHandleDescription(handle) +
-               QStringLiteral(" · Ctrl 吸附 · Shift 精细"));
+               QCoreApplication::translate("Workbench", " · Ctrl 吸附 · Shift 精细"));
     switch (handle.kind) {
     case TransformGizmoHandleKind::MoveAxis:
     case TransformGizmoHandleKind::MovePlane:
@@ -4699,16 +4695,14 @@ void NativeViewport::toggleTransformGizmoOrientation() {
   QString message;
   if (modelGizmoOrientationLocked()) {
     message = mSelectedSceneIds.size() > 1
-                  ? QStringLiteral("多选采用等比缩放，保持模型之间的比例")
+                  ? QCoreApplication::translate("Workbench", "多选采用等比缩放，保持模型之间的比例")
                   : mTransformGizmoMode == TransformGizmoMode::Scale
-                  ? QStringLiteral(
-                        "局部锁定：缩放只使用模型自身轴，避免产生剪切")
-                  : QStringLiteral(
-                        "局部锁定：请切换到移动或旋转工具后再选择全局坐标");
+                  ? QCoreApplication::translate("Workbench", "局部锁定：缩放只使用模型自身轴，避免产生剪切")
+                  : QCoreApplication::translate("Workbench", "局部锁定：请切换到移动或旋转工具后再选择全局坐标");
   } else {
     mTransformGizmoLocal = !mTransformGizmoLocal;
-    message = mTransformGizmoLocal ? QStringLiteral("已切换到局部坐标系")
-                                   : QStringLiteral("已切换到全局坐标系");
+    message = mTransformGizmoLocal ? QCoreApplication::translate("Workbench", "已切换到局部坐标系")
+                                   : QCoreApplication::translate("Workbench", "已切换到全局坐标系");
   }
   setToolTip(message);
   QToolTip::showText(mapToGlobal(currentPointerPosition().toPoint()), message,
@@ -4877,17 +4871,17 @@ QVector3D NativeViewport::transformConstraintAxis() const {
 QString NativeViewport::transformConstraintLabel() const {
   if (mTransformConstraint.kind == TransformConstraintKind::None ||
       mTransformConstraint.axis < 0 || mTransformConstraint.axis > 2) {
-    return QStringLiteral("自由");
+    return QCoreApplication::translate("Workbench", "自由");
   }
   static const std::array<QString, 3> labels = {
       QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
   const QString space = mTransformConstraint.local
-                            ? QStringLiteral("局部")
-                            : QStringLiteral("全局");
+                            ? QCoreApplication::translate("Workbench", "局部")
+                            : QCoreApplication::translate("Workbench", "全局");
   return mTransformConstraint.kind == TransformConstraintKind::Plane
-             ? QStringLiteral("%1 %2 平面").arg(space, labels.at(
+             ? QCoreApplication::translate("Workbench", "%1 %2 平面").arg(space, labels.at(
                                                           mTransformConstraint.axis))
-             : QStringLiteral("%1 %2 轴").arg(space, labels.at(
+             : QCoreApplication::translate("Workbench", "%1 %2 轴").arg(space, labels.at(
                                                         mTransformConstraint.axis));
 }
 
@@ -5166,7 +5160,7 @@ void NativeViewport::applyTransformConstraint(const int axis,
     return;
   }
   if (mSelectedSceneIds.size() > 1 && mMode == InteractionMode::Scale) {
-    setToolTip(QStringLiteral("多选时使用整体等比缩放，避免对不同朝向的模型产生剪切"));
+    setToolTip(QCoreApplication::translate("Workbench", "多选时使用整体等比缩放，避免对不同朝向的模型产生剪切"));
     return;
   }
   const TransformConstraintKind requested =
@@ -5216,23 +5210,23 @@ QString NativeViewport::transformStatusText() const {
   }
   const QString operation =
       mMode == InteractionMode::Move
-          ? QStringLiteral("G 移动")
+          ? QCoreApplication::translate("Workbench", "G 移动")
           : mMode == InteractionMode::Scale
-                ? QStringLiteral("S 缩放")
-                : mTrackballRotation ? QStringLiteral("R R 轨迹球旋转")
-                                     : QStringLiteral("R 旋转");
+                ? QCoreApplication::translate("Workbench", "S 缩放")
+                : mTrackballRotation ? QCoreApplication::translate("Workbench", "R R 轨迹球旋转")
+                                     : QCoreApplication::translate("Workbench", "R 旋转");
   QString modifiers;
   if (mTransformModifiers.testFlag(Qt::ControlModifier)) {
-    modifiers += QStringLiteral(" · 吸附");
+    modifiers += QCoreApplication::translate("Workbench", " · 吸附");
   }
   if (mTransformModifiers.testFlag(Qt::ShiftModifier)) {
-    modifiers += QStringLiteral(" · 精细");
+    modifiers += QCoreApplication::translate("Workbench", " · 精细");
   }
   const QString numeric = mTransformNumericInput.isEmpty()
                               ? QString()
-                              : QStringLiteral(" · 输入 %1")
+                              : QCoreApplication::translate("Workbench", " · 输入 %1")
                                     .arg(mTransformNumericInput);
-  return QStringLiteral("%1 · %2%3%4 · 左键/Enter 确认 · 右键/Esc 取消")
+  return QCoreApplication::translate("Workbench", "%1 · %2%3%4 · 左键/Enter 确认 · 右键/Esc 取消")
       .arg(operation, transformConstraintLabel(), numeric, modifiers);
 }
 
@@ -5474,9 +5468,9 @@ void NativeViewport::drawModelSelection(
         mModelDragActive
             ? transformStatusText()
             : mSelectedSceneIds.size() > 1
-                  ? QStringLiteral("已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放")
+                  ? QCoreApplication::translate("Workbench", "已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放")
                         .arg(mSelectedSceneIds.size())
-                  : QStringLiteral("模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
+                  : QCoreApplication::translate("Workbench", "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
     const QFontMetrics metrics(painter.font());
     const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
     const QRectF badge = transformGizmoHintRect(
@@ -5763,10 +5757,10 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
   painter.setPen(locked ? QColor(157, 164, 169)
                         : QColor(220, 225, 228));
   painter.drawText(layout.orientationButton, Qt::AlignCenter,
-                   locked && mSelectedSceneIds.size() > 1 ? QStringLiteral("等比\n缩放")
-                          : locked ? QStringLiteral("局部\n锁定")
-                          : local ? QStringLiteral("局部")
-                                  : QStringLiteral("全局"));
+                   locked && mSelectedSceneIds.size() > 1 ? QCoreApplication::translate("Workbench", "等比\n缩放")
+                          : locked ? QCoreApplication::translate("Workbench", "局部\n锁定")
+                          : local ? QCoreApplication::translate("Workbench", "局部")
+                                  : QCoreApplication::translate("Workbench", "全局"));
   painter.restore();
 }
 
@@ -5828,99 +5822,98 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 
   const QString sceneName = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())
                                 ? mScene->mRenderMode == RenderMode::Points
-                                      ? QStringLiteral("训练中 · 点云增密预览")
-                                      : QStringLiteral("训练中 · GPU 实时预览")
+                                      ? QCoreApplication::translate("Workbench", "训练中 · 点云增密预览")
+                                      : QCoreApplication::translate("Workbench", "训练中 · GPU 实时预览")
                                 : mScene->mScenePath.isEmpty()
-                                      ? QStringLiteral("未载入场景")
+                                      ? QCoreApplication::translate("Workbench", "未载入场景")
                                       : QFileInfo(mScene->mScenePath).fileName();
   const QString project =
-      mProjectLabel.isEmpty() ? QStringLiteral("未打开工程") : mProjectLabel;
+      mProjectLabel.isEmpty() ? QCoreApplication::translate("Workbench", "未打开工程") : mProjectLabel;
   QString count;
   if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())) {
     count = mScene->mRenderMode == RenderMode::Points
-                ? QStringLiteral("迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存")
+                ? QCoreApplication::translate("Workbench", "迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())
                       .arg(formatCount(mTrainingGpuPreview.pointCount()))
-                : QStringLiteral("迭代 %1 | %2 高斯 | 共享 GPU 显存")
+                : QCoreApplication::translate("Workbench", "迭代 %1 | %2 高斯 | 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
   } else if (!mScene->mSceneLoadMessage.isEmpty()) {
     count = mScene->mSceneLoadMessage;
   } else if (pagedMeshAvailable()) {
-    count = QStringLiteral(
-                "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | "
+    count = QCoreApplication::translate("Workbench", "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | "
                 "GPU LOD 缓存 %6 | 只读")
                 .arg(formatCount(mScene->mMeshCache.fullVertexCount),
                      formatCount(mScene->mMeshCache.fullFaceCount),
                      formatCount(mScene->mMeshCache.renderableTriangleCount),
                      mScene->mProgressiveUploadActive
-                         ? QStringLiteral("磁盘分页")
+                         ? QCoreApplication::translate("Workbench", "磁盘分页")
                          : mInteractionLodActive
-                               ? QStringLiteral("层级 Mesh LOD")
-                               : QStringLiteral("叶级细节"),
+                               ? QCoreApplication::translate("Workbench", "层级 Mesh LOD")
+                               : QCoreApplication::translate("Workbench", "叶级细节"),
                      formatCount(mScene->mDrawnFullResolutionMeshTriangleCount),
                      formatCount(mScene->mUploadedFullResolutionMeshTriangleCount));
     if (!mScene->mMeshCacheError.isEmpty()) {
-      count += QStringLiteral(" | 分页错误");
+      count += QCoreApplication::translate("Workbench", " | 分页错误");
     }
   } else if (mScene->mPreviewOnlyScene) {
-    count = QStringLiteral("%1 点 | %2 | GPU 驻留 %3 / %4 | 只读")
+    count = QCoreApplication::translate("Workbench", "%1 点 | %2 | GPU 驻留 %3 / %4 | 只读")
                 .arg(formatCount(mScene->mPreviewPointCount),
                      mScene->mProgressiveUploadActive
-                         ? QStringLiteral("磁盘分页")
+                         ? QCoreApplication::translate("Workbench", "磁盘分页")
                          : mInteractionLodActive
-                               ? QStringLiteral("八叉树 LOD")
-                               : QStringLiteral("叶级细节"),
+                               ? QCoreApplication::translate("Workbench", "八叉树 LOD")
+                               : QCoreApplication::translate("Workbench", "叶级细节"),
                      formatCount(mScene->mUploadedFullResolutionPointCount),
                      formatCount(mPointCacheGpuBudgetBytes /
                                  sizeof(PointPreviewVertex)));
     if (!mScene->mPointCacheError.isEmpty()) {
-      count += QStringLiteral(" | 分页错误");
+      count += QCoreApplication::translate("Workbench", " | 分页错误");
     }
   } else if (mScene->mSourceFaceCount > 0 && mScene->mPreviewTriangleCount > 0) {
-    count = QStringLiteral("%1 顶点 | %2 面 | %3 预览三角形")
+    count = QCoreApplication::translate("Workbench", "%1 顶点 | %2 面 | %3 预览三角形")
                 .arg(formatCount(mScene->mGaussianCount),
                      formatCount(mScene->mSourceFaceCount),
                      formatCount(mScene->mPreviewTriangleCount));
   } else if (mScene->mGaussianCount > 0 && mScene->mPreviewPointCount > 0 &&
              mScene->mGaussianCount != mScene->mPreviewPointCount) {
-    count = QStringLiteral("%1 %2 | 预览 %3")
+    count = QCoreApplication::translate("Workbench", "%1 %2 | 预览 %3")
                 .arg(formatCount(mScene->mGaussianCount),
-                     mScene->mHasGaussianAttributes ? QStringLiteral("高斯")
-                                            : QStringLiteral("点"),
+                     mScene->mHasGaussianAttributes ? QCoreApplication::translate("Workbench", "高斯")
+                                            : QCoreApplication::translate("Workbench", "点"),
                      formatCount(mScene->mPreviewPointCount));
   } else if (mScene->mGaussianCount > 0) {
     count = QStringLiteral("%1 %2").arg(
         formatCount(mScene->mGaussianCount),
-        mScene->mHasGaussianAttributes ? QStringLiteral("高斯") : QStringLiteral("点"));
+        mScene->mHasGaussianAttributes ? QCoreApplication::translate("Workbench", "高斯") : QCoreApplication::translate("Workbench", "点"));
   } else {
-    count = QStringLiteral("场景数据待载入");
+    count = QCoreApplication::translate("Workbench", "场景数据待载入");
   }
   if (mScene->mHasMesh) {
     if (mScene->mMeshTextureReady && mScene->mMeshTextureSize.isValid()) {
-      count += QStringLiteral(" | 贴图 %1 · %2×%3")
+      count += QCoreApplication::translate("Workbench", " | 贴图 %1 · %2×%3")
                    .arg(QFileInfo(mScene->mMeshTexturePath).fileName())
                    .arg(mScene->mMeshTextureSize.width())
                    .arg(mScene->mMeshTextureSize.height());
     } else if (mScene->mMeshHasTextureCoordinates) {
-      count += QStringLiteral(" | UV · 顶点色回退");
+      count += QCoreApplication::translate("Workbench", " | UV · 顶点色回退");
     } else {
-      count += QStringLiteral(" | 顶点色");
+      count += QCoreApplication::translate("Workbench", " | 顶点色");
     }
     if (!mScene->mMeshTextureError.isEmpty()) {
-      count += QStringLiteral(" | 贴图警告");
+      count += QCoreApplication::translate("Workbench", " | 贴图警告");
     }
   }
   if (mShowCameras) {
-    count += QStringLiteral(" | 相机 %1%2")
+    count += QCoreApplication::translate("Workbench", " | 相机 %1%2")
                  .arg(formatCount(cameraCount()),
-                      mScene->mCameraGeometry.decimated ? QStringLiteral("（抽稀）")
+                      mScene->mCameraGeometry.decimated ? QCoreApplication::translate("Workbench", "（抽稀）")
                                                 : QString());
   }
   if (mScene->mSelectionBusy) {
-    count += QStringLiteral(" | 正在计算选择");
+    count += QCoreApplication::translate("Workbench", " | 正在计算选择");
   } else if (mScene->mEditModel.selectedCount() > 0 || mScene->mEditModel.deletedCount() > 0) {
-    count += QStringLiteral(" | 已选 %1 | 已删 %2")
+    count += QCoreApplication::translate("Workbench", " | 已选 %1 | 已删 %2")
                  .arg(formatCount(mScene->mEditModel.selectedCount()),
                       formatCount(mScene->mEditModel.deletedCount()));
   }
@@ -5940,7 +5933,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const int lineGap = 1;
   const int badgeHeight = (std::max)(22, lineHeight + 6);
   const QString mode =
-      mScene->mSelectionBusy ? QStringLiteral("选择处理中") : modeLabel(mMode);
+      mScene->mSelectionBusy ? QCoreApplication::translate("Workbench", "选择处理中") : modeLabel(mMode);
   const int modeWidth = metrics.horizontalAdvance(mode) + 18;
   const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);
   const int widthHint =
@@ -5977,12 +5970,12 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 
   const QString renderer =
       mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
-          ? pagedMeshAvailable() ? QStringLiteral("分页三角网格")
-                                 : QStringLiteral("三角网格")
+          ? pagedMeshAvailable() ? QCoreApplication::translate("Workbench", "分页三角网格")
+                                 : QCoreApplication::translate("Workbench", "三角网格")
           : mScene->mRenderMode == RenderMode::Gaussians &&
                     gaussianRenderingAvailable()
-                ? QStringLiteral("高斯 DC SH")
-                : QStringLiteral("点预览");
+                ? QCoreApplication::translate("Workbench", "高斯 DC SH")
+                : QCoreApplication::translate("Workbench", "点预览");
 
   const ReferenceGridScale gridScale = referenceGridScale(
       mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
@@ -5996,8 +5989,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                 .arg(averageFrameMilliseconds, 0, 'f', 1)
           : QStringLiteral("FPS —");
   const QString statusText =
-      QStringLiteral(
-          "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6")
+      QCoreApplication::translate("Workbench", "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6")
           .arg(formatViewportDistance(gridScale.displayMajorStep),
                formatViewportDistance(mDistance),
                formatViewportDistance(gridScale.minimumStep),

@@ -8,6 +8,8 @@ The render-performance meter is a JavaScript adaptation of the rolling frame-tim
 
 ## Native Qt 6 Preview
 
+The native executable also embeds Qt base Chinese and Japanese translation catalogs for standard Qt controls. Their upstream sources and license notices are available in the Qt translations module: https://code.qt.io/cgit/qt/qttranslations.git/ . Workbench-specific Chinese, English and Japanese messages are original project translations; CloudCompare, Metashape and Blender are terminology references only.
+
 The `native/` application dynamically links Qt 6.8 Core, Gui, Widgets, OpenGL, OpenGLWidgets, Network, and SVG modules. Open-source Qt modules are available under the GNU Lesser General Public License v3 and/or the alternative licenses stated by each Qt module. The application does not statically link Qt, and deployed Qt DLLs can be replaced by the user.
 
 - Qt licensing: https://www.qt.io/licensing/open-source-lgpl-obligations

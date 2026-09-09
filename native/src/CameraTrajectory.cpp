@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "CameraTrajectory.h"
 
 #include <QDir>
@@ -143,27 +144,27 @@ CameraTrajectory CameraTrajectory::loadForScene(const QString &scenePath) {
 
   const QFileInfo sourceInfo(trajectory.mSourcePath);
   if (sourceInfo.size() > kMaximumCameraFileSize) {
-    trajectory.mError = QStringLiteral("cameras.json 过大，已跳过加载（上限 64 MiB）。");
+    trajectory.mError = QCoreApplication::translate("Workbench", "cameras.json 过大，已跳过加载（上限 64 MiB）。");
     return trajectory;
   }
 
   QFile source(trajectory.mSourcePath);
   if (!source.open(QIODevice::ReadOnly)) {
     trajectory.mError =
-        QStringLiteral("无法读取 cameras.json：%1").arg(source.errorString());
+        QCoreApplication::translate("Workbench", "无法读取 cameras.json：%1").arg(source.errorString());
     return trajectory;
   }
   QJsonParseError parseError;
   const QJsonDocument document =
       QJsonDocument::fromJson(source.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError) {
-    trajectory.mError = QStringLiteral("cameras.json 格式无效：%1（偏移 %2）")
+    trajectory.mError = QCoreApplication::translate("Workbench", "cameras.json 格式无效：%1（偏移 %2）")
                             .arg(parseError.errorString())
                             .arg(parseError.offset);
     return trajectory;
   }
   if (!document.isArray()) {
-    trajectory.mError = QStringLiteral("cameras.json 顶层必须是相机数组。");
+    trajectory.mError = QCoreApplication::translate("Workbench", "cameras.json 顶层必须是相机数组。");
     return trajectory;
   }
 
@@ -179,7 +180,7 @@ CameraTrajectory CameraTrajectory::loadForScene(const QString &scenePath) {
   }
   if (!cameras.isEmpty() && trajectory.mCameras.isEmpty()) {
     trajectory.mError =
-        QStringLiteral("cameras.json 未包含可用相机位姿，请检查 position 与 rotation 字段。");
+        QCoreApplication::translate("Workbench", "cameras.json 未包含可用相机位姿，请检查 position 与 rotation 字段。");
   }
   return trajectory;
 }

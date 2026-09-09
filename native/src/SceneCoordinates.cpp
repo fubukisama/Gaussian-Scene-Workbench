@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "SceneCoordinates.h"
 
 #include <QDir>
@@ -259,7 +260,7 @@ QString sceneLengthUnitSymbol(const SceneLengthUnit unit) {
 QString sceneLengthUnitDescription(const SceneCoordinateInfo &coordinates) {
   if (!coordinates.unitDeclared ||
       coordinates.unit == SceneLengthUnit::Unknown) {
-    return QStringLiteral("未声明（原始单位 u）");
+    return QCoreApplication::translate("Workbench", "未声明（原始单位 u）");
   }
   return sceneLengthUnitSymbol(coordinates.unit);
 }
@@ -362,11 +363,11 @@ bool writeSceneCoordinateReport(
     QString *errorMessage) {
   QString error;
   if (!coordinates.valid) {
-    error = QStringLiteral("当前场景没有可导出的坐标范围。");
+    error = QCoreApplication::translate("Workbench", "当前场景没有可导出的坐标范围。");
   }
   QSaveFile file(destinationPath);
   if (error.isEmpty() && !file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-    error = QStringLiteral("无法创建坐标报告：%1").arg(file.errorString());
+    error = QCoreApplication::translate("Workbench", "无法创建坐标报告：%1").arg(file.errorString());
   }
 
   const SceneCoordinate3D center = coordinates.globalCenter();
@@ -429,12 +430,12 @@ bool writeSceneCoordinateReport(
     const QByteArray payload =
         QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (file.write(payload) != payload.size()) {
-      error = QStringLiteral("无法写入坐标报告：%1").arg(file.errorString());
+      error = QCoreApplication::translate("Workbench", "无法写入坐标报告：%1").arg(file.errorString());
     }
   }
 
   if (error.isEmpty() && !file.commit()) {
-    error = QStringLiteral("无法完成坐标报告：%1").arg(file.errorString());
+    error = QCoreApplication::translate("Workbench", "无法完成坐标报告：%1").arg(file.errorString());
   } else if (!error.isEmpty()) {
     file.cancelWriting();
   }

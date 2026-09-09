@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "DatasetImportPlan.h"
 
 #include <QDir>
@@ -83,7 +84,7 @@ DatasetImportPlan::create(const DatasetImportRequest &request,
   if (!std::isfinite(request.framesPerSecond) ||
       request.framesPerSecond <= 0.0) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Frames per second must be finite and greater than zero");
+      *errorMessage = QCoreApplication::translate("Workbench", "Frames per second must be finite and greater than zero");
     }
     return std::nullopt;
   }
@@ -205,7 +206,7 @@ bool DatasetImportPlan::writeWorkerConfiguration(
   const QFileInfo configInfo(configPath);
   if (!QDir().mkpath(configInfo.absolutePath())) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Could not create the worker configuration directory");
+      *errorMessage = QCoreApplication::translate("Workbench", "Could not create the worker configuration directory");
     }
     return false;
   }

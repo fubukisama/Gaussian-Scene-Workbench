@@ -12,6 +12,8 @@ on:
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/*native_i18n.py"
+      - "docs/LOCALIZATION.md"
       - "scripts/bootstrap_3dgs_editor.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
@@ -32,6 +34,8 @@ on:
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/*native_i18n.py"
+      - "docs/LOCALIZATION.md"
       - "scripts/bootstrap_3dgs_editor.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
@@ -128,6 +132,7 @@ jobs:
           Copy-Item docs/WINDOWS_APPLICATION_CONTROL.md native/artifact/WINDOWS_APPLICATION_CONTROL.md
           Copy-Item LICENSE native/artifact/LICENSE
           Copy-Item THIRD_PARTY_LICENSES.md native/artifact/THIRD_PARTY_LICENSES.md
+          Copy-Item docs/LOCALIZATION.md native/artifact/LOCALIZATION.md
 
       - name: Stage native compute backend
         shell: pwsh

@@ -123,8 +123,7 @@ QString findUntitledWorkspaceBase(
   }
 
   if (errorMessage != nullptr) {
-    *errorMessage = QStringLiteral(
-        "找不到可写的临时工作区。已检查非系统盘和当前用户临时目录；"
+    *errorMessage = QCoreApplication::translate("Workbench", "找不到可写的临时工作区。已检查非系统盘和当前用户临时目录；"
         "也可通过 GSW_UNTITLED_ROOT 指定位置。");
   }
   return {};

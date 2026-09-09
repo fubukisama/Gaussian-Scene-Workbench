@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "PlyPointCloudLoader.h"
 
 #include <QDateTime>
@@ -389,7 +390,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     if (firstLine) {
       firstLine = false;
       if (line != QStringLiteral("ply")) {
-        error = QStringLiteral("The selected file is not a PLY file.");
+        error = QCoreApplication::translate("Workbench", "The selected file is not a PLY file.");
         return false;
       }
       continue;
@@ -433,7 +434,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
       } else if (parts.at(1) == QStringLiteral("binary_big_endian")) {
         header.format = PlyFormat::BinaryBigEndian;
       } else {
-        error = QStringLiteral("Unsupported PLY format: %1").arg(parts.at(1));
+        error = QCoreApplication::translate("Workbench", "Unsupported PLY format: %1").arg(parts.at(1));
         return false;
       }
       continue;
@@ -442,7 +443,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
       bool ok = false;
       const qint64 count = parts.at(2).toLongLong(&ok);
       if (!ok || count < 0) {
-        error = QStringLiteral("Invalid PLY element count: %1").arg(parts.at(2));
+        error = QCoreApplication::translate("Workbench", "Invalid PLY element count: %1").arg(parts.at(2));
         return false;
       }
       header.elements.append({parts.at(1), count, {}});
@@ -467,7 +468,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
           (property.isList &&
            (property.listCountType == ScalarType::Invalid ||
             !isIntegralType(property.listCountType)))) {
-        error = QStringLiteral("Unsupported PLY property declaration: %1").arg(line);
+        error = QCoreApplication::translate("Workbench", "Unsupported PLY property declaration: %1").arg(line);
         return false;
       }
       currentElement->properties.append(property);
@@ -475,14 +476,14 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     }
     if (parts.first() == QStringLiteral("end_header")) {
       if (header.format == PlyFormat::Unknown) {
-        error = QStringLiteral("The PLY header does not declare a supported format.");
+        error = QCoreApplication::translate("Workbench", "The PLY header does not declare a supported format.");
         return false;
       }
       return true;
     }
   }
 
-  error = QStringLiteral("The PLY header is incomplete or too large.");
+  error = QCoreApplication::translate("Workbench", "The PLY header is incomplete or too large.");
   return false;
 }
 
@@ -522,11 +523,9 @@ void loadMeshTexture(const QString &sourcePath, const PlyHeader &header,
   result.meshTexturePath = resolveMeshTexturePath(sourcePath, header);
   if (result.meshTexturePath.isEmpty()) {
     result.meshTextureError = header.textureFiles.isEmpty()
-                                  ? QStringLiteral(
-                                        "The mesh contains UV coordinates but "
+                                  ? QCoreApplication::translate("Workbench", "The mesh contains UV coordinates but "
                                         "does not declare a texture image.")
-                                  : QStringLiteral(
-                                        "The PLY-declared texture image could "
+                                  : QCoreApplication::translate("Workbench", "The PLY-declared texture image could "
                                         "not be found beside the mesh.");
     return;
   }
@@ -535,7 +534,7 @@ void loadMeshTexture(const QString &sourcePath, const PlyHeader &header,
   result.meshTextureImage = reader.read();
   if (result.meshTextureImage.isNull()) {
     result.meshTextureError =
-        QStringLiteral("Unable to decode mesh texture %1: %2")
+        QCoreApplication::translate("Workbench", "Unable to decode mesh texture %1: %2")
             .arg(QFileInfo(result.meshTexturePath).fileName(), reader.errorString());
     result.meshTexturePath.clear();
   }
@@ -594,12 +593,12 @@ std::optional<qint64> binaryListCount(const QByteArray &bytes,
 bool appendExactBytes(QFile &file, const qint64 byteCount, QByteArray &record,
                       QString &error) {
   if (byteCount < 0 || byteCount > kMaximumRecordBytes) {
-    error = QStringLiteral("PLY record is too large to process safely.");
+    error = QCoreApplication::translate("Workbench", "PLY record is too large to process safely.");
     return false;
   }
   const QByteArray bytes = file.read(byteCount);
   if (bytes.size() != byteCount) {
-    error = QStringLiteral("Unexpected end of binary PLY data while exporting.");
+    error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY data while exporting.");
     return false;
   }
   record.append(bytes);
@@ -621,21 +620,21 @@ bool readBinaryRawRecord(QFile &file, const ElementDefinition &element,
     const qsizetype countBytes = scalarByteSize(property.listCountType);
     const QByteArray rawCount = file.read(countBytes);
     if (rawCount.size() != countBytes) {
-      error = QStringLiteral("Unexpected end of binary PLY list data while exporting.");
+      error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY list data while exporting.");
       return false;
     }
     record.append(rawCount);
     const std::optional<qint64> count =
         binaryListCount(rawCount, property.listCountType, format);
     if (!count.has_value() || *count < 0) {
-      error = QStringLiteral("PLY list counts must use a non-negative integer type.");
+      error = QCoreApplication::translate("Workbench", "PLY list counts must use a non-negative integer type.");
       return false;
     }
     const qint64 valueSize = scalarByteSize(property.valueType);
     if (valueSize <= 0 || *count > kMaximumRecordBytes / valueSize ||
         !appendExactBytes(file, *count * valueSize, record, error)) {
       if (error.isEmpty()) {
-        error = QStringLiteral("PLY list record is too large to process safely.");
+        error = QCoreApplication::translate("Workbench", "PLY list record is too large to process safely.");
       }
       return false;
     }
@@ -649,14 +648,14 @@ bool readAsciiRawRecord(QFile &file, QByteArray &record, QString &error) {
     const QByteArray line = file.readLine();
     record.append(line);
     if (record.size() > kMaximumRecordBytes) {
-      error = QStringLiteral("ASCII PLY record is too large to process safely.");
+      error = QCoreApplication::translate("Workbench", "ASCII PLY record is too large to process safely.");
       return false;
     }
     if (!line.trimmed().isEmpty()) {
       return true;
     }
   }
-  error = QStringLiteral("Unexpected end of ASCII PLY data while exporting.");
+  error = QCoreApplication::translate("Workbench", "Unexpected end of ASCII PLY data while exporting.");
   return false;
 }
 
@@ -664,7 +663,7 @@ bool writeBytes(QIODevice &destination, const QByteArray &bytes, QString &error)
   if (destination.write(bytes) == bytes.size()) {
     return true;
   }
-  error = QStringLiteral("Unable to write the cropped PLY file.");
+  error = QCoreApplication::translate("Workbench", "Unable to write the cropped PLY file.");
   return false;
 }
 
@@ -889,7 +888,7 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
   QByteArray rawLine;
   do {
     if (file.atEnd()) {
-      error = QStringLiteral("Unexpected end of ASCII PLY data.");
+      error = QCoreApplication::translate("Workbench", "Unexpected end of ASCII PLY data.");
       return false;
     }
     rawLine = file.readLine().trimmed();
@@ -907,13 +906,13 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
       ++tokenIndex;
     }
     if (tokenIndex >= tokens.size()) {
-      error = QStringLiteral("ASCII PLY record has fewer values than its header declares.");
+      error = QCoreApplication::translate("Workbench", "ASCII PLY record has fewer values than its header declares.");
       return false;
     }
     bool ok = false;
     const double first = tokens.at(tokenIndex++).toDouble(&ok);
     if (!ok) {
-      error = QStringLiteral("ASCII PLY record contains an invalid number.");
+      error = QCoreApplication::translate("Workbench", "ASCII PLY record contains an invalid number.");
       return false;
     }
     if (!property.isList) {
@@ -921,12 +920,12 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
       continue;
     }
     if (!std::isfinite(first) || first < 0.0 || std::floor(first) != first) {
-      error = QStringLiteral("ASCII PLY list length is invalid.");
+      error = QCoreApplication::translate("Workbench", "ASCII PLY list length is invalid.");
       return false;
     }
     const qint64 listCount = static_cast<qint64>(first);
     if (listCount > 100'000'000 || tokenIndex + listCount > tokens.size()) {
-      error = QStringLiteral("ASCII PLY list property is truncated.");
+      error = QCoreApplication::translate("Workbench", "ASCII PLY list property is truncated.");
       return false;
     }
     QVector<double> &items = listValues[propertyIndex];
@@ -934,7 +933,7 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
     for (qint64 index = 0; index < listCount; ++index) {
       const double value = tokens.at(tokenIndex++).toDouble(&ok);
       if (!ok) {
-        error = QStringLiteral("ASCII PLY list contains an invalid number.");
+        error = QCoreApplication::translate("Workbench", "ASCII PLY list contains an invalid number.");
         return false;
       }
       items.append(value);
@@ -955,24 +954,24 @@ bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
     if (!property.isList) {
       if (!readBinaryScalar(file, property.valueType, format,
                             values[propertyIndex])) {
-        error = QStringLiteral("Unexpected end of binary PLY data.");
+        error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY data.");
         return false;
       }
       continue;
     }
     double countValue = 0.0;
     if (!readBinaryScalar(file, property.listCountType, format, countValue)) {
-      error = QStringLiteral("Unexpected end of binary PLY list data.");
+      error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY list data.");
       return false;
     }
     if (!std::isfinite(countValue) || countValue < 0.0 ||
         std::floor(countValue) != countValue) {
-      error = QStringLiteral("Invalid binary PLY list length.");
+      error = QCoreApplication::translate("Workbench", "Invalid binary PLY list length.");
       return false;
     }
     const qint64 listCount = static_cast<qint64>(countValue);
     if (listCount > 100'000'000) {
-      error = QStringLiteral("Invalid binary PLY list length.");
+      error = QCoreApplication::translate("Workbench", "Invalid binary PLY list length.");
       return false;
     }
     QVector<double> &items = listValues[propertyIndex];
@@ -980,7 +979,7 @@ bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
     for (qint64 index = 0; index < listCount; ++index) {
       double value = 0.0;
       if (!readBinaryScalar(file, property.valueType, format, value)) {
-        error = QStringLiteral("Unexpected end of binary PLY list data.");
+        error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY list data.");
         return false;
       }
       items.append(value);
@@ -1040,7 +1039,7 @@ bool writePointSpoolBatch(QIODevice &spool,
   while (remaining > 0) {
     const qint64 written = spool.write(data, remaining);
     if (written <= 0) {
-      error = QStringLiteral("Unable to write the temporary ASCII point spool: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to write the temporary ASCII point spool: %1")
                   .arg(spool.errorString());
       return false;
     }
@@ -1087,8 +1086,7 @@ bool loadOutOfCoreMesh(
       });
   if (vertexIterator == header.elements.cend() ||
       faceIterator == header.elements.cend() || vertexIterator > faceIterator) {
-    result.error = QStringLiteral(
-        "Out-of-core mesh loading requires the PLY vertex element before "
+    result.error = QCoreApplication::translate("Workbench", "Out-of-core mesh loading requires the PLY vertex element before "
         "the face element.");
     return false;
   }
@@ -1133,7 +1131,7 @@ bool loadOutOfCoreMesh(
           double value = 0.0;
           if (!readScalar(property.valueType, value)) {
             result.error =
-                QStringLiteral("PLY %1 record %2 has a missing scalar value.")
+                QCoreApplication::translate("Workbench", "PLY %1 record %2 has a missing scalar value.")
                     .arg(element.name)
                     .arg(recordIndex);
             return false;
@@ -1153,7 +1151,7 @@ bool loadOutOfCoreMesh(
                            std::max<qsizetype>(
                                1, scalarByteSize(property.valueType)))) {
           result.error =
-              QStringLiteral("PLY %1 record %2 has an invalid list count.")
+              QCoreApplication::translate("Workbench", "PLY %1 record %2 has an invalid list count.")
                   .arg(element.name)
                   .arg(recordIndex);
           return false;
@@ -1174,15 +1172,14 @@ bool loadOutOfCoreMesh(
           double value = 0.0;
           if (!readScalar(property.valueType, value)) {
             result.error =
-                QStringLiteral("PLY %1 record %2 has truncated list data.")
+                QCoreApplication::translate("Workbench", "PLY %1 record %2 has truncated list data.")
                     .arg(element.name)
                     .arg(recordIndex);
             return false;
           }
           if (collectTextureCoordinates) {
             if (!std::isfinite(value)) {
-              result.error = QStringLiteral(
-                  "PLY mesh face contains a non-finite texture coordinate.");
+              result.error = QCoreApplication::translate("Workbench", "PLY mesh face contains a non-finite texture coordinate.");
               return false;
             }
             faceTextureCoordinates.append(value);
@@ -1196,8 +1193,7 @@ bool loadOutOfCoreMesh(
               value >= static_cast<double>(vertexElement.count) ||
               value > static_cast<double>(
                           std::numeric_limits<quint32>::max())) {
-            result.error = QStringLiteral(
-                               "PLY mesh face contains an invalid vertex "
+            result.error = QCoreApplication::translate("Workbench", "PLY mesh face contains an invalid vertex "
                                "index: %1.")
                                .arg(value, 0, 'g', 16);
             return false;
@@ -1212,8 +1208,7 @@ bool loadOutOfCoreMesh(
         if (!coordinateTracker.observeAndMap(
                 vertexValues.at(xIndex), vertexValues.at(yIndex),
                 vertexValues.at(zIndex), localPosition)) {
-          result.error = QStringLiteral(
-              "PLY mesh vertex %1 contains a non-finite coordinate.")
+          result.error = QCoreApplication::translate("Workbench", "PLY mesh vertex %1 contains a non-finite coordinate.")
                              .arg(recordIndex);
           return false;
         }
@@ -1254,8 +1249,7 @@ bool loadOutOfCoreMesh(
             faceTextureCoordinatesProperty >= 0 &&
             faceTextureCoordinates.size() == faceIndices.size() * 2;
         if (!faceTextureCoordinates.isEmpty() && !textured) {
-          result.error = QStringLiteral(
-              "PLY face texcoord lists must contain one UV pair per corner.");
+          result.error = QCoreApplication::translate("Workbench", "PLY face texcoord lists must contain one UV pair per corner.");
           return false;
         }
         for (qsizetype index = 1; index + 1 < faceIndices.size(); ++index) {
@@ -1295,7 +1289,7 @@ bool loadOutOfCoreMesh(
     }
   }
   if (!verticesFinished) {
-    result.error = QStringLiteral("The PLY mesh vertex table was not read.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY mesh vertex table was not read.");
     return false;
   }
   result.coordinates = coordinateTracker.info();
@@ -1304,7 +1298,7 @@ bool loadOutOfCoreMesh(
                                     &result.error);
   if (!result.meshCache.isValid()) {
     if (result.error.isEmpty()) {
-      result.error = QStringLiteral("Unable to build the mesh-cache index.");
+      result.error = QCoreApplication::translate("Workbench", "Unable to build the mesh-cache index.");
     }
     return false;
   }
@@ -1332,7 +1326,7 @@ bool loadAsciiPointCache(
   QDir cacheDirectory(
       PointCloudCache::cacheDirectoryForSource(file.fileName()));
   if (!cacheDirectory.mkpath(QStringLiteral("."))) {
-    result.error = QStringLiteral("Unable to create the point-cache directory %1.")
+    result.error = QCoreApplication::translate("Workbench", "Unable to create the point-cache directory %1.")
                        .arg(cacheDirectory.absolutePath());
     return false;
   }
@@ -1350,7 +1344,7 @@ bool loadAsciiPointCache(
       QStringLiteral("gsw-ascii-spool-XXXXXX.bin")));
   spool.setAutoRemove(true);
   if (!spool.open()) {
-    result.error = QStringLiteral("Unable to create the temporary ASCII point spool: %1")
+    result.error = QCoreApplication::translate("Workbench", "Unable to create the temporary ASCII point spool: %1")
                        .arg(spool.errorString());
     return false;
   }
@@ -1431,8 +1425,7 @@ bool loadAsciiPointCache(
       double value = 0.0;
       if (!reader.next(value)) {
         result.error =
-            QStringLiteral(
-                "ASCII PLY vertex %1 has an invalid or missing value.")
+            QCoreApplication::translate("Workbench", "ASCII PLY vertex %1 has an invalid or missing value.")
                 .arg(recordIndex);
         return false;
       }
@@ -1457,7 +1450,7 @@ bool loadAsciiPointCache(
   }
 
   if (!hasFiniteBounds || finitePointCount <= 0) {
-    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY file contains no finite vertices.");
     return false;
   }
   result.coordinates = coordinateTracker.info();
@@ -1466,7 +1459,7 @@ bool loadAsciiPointCache(
       !spool.flush() || !spool.seek(0)) {
     if (result.error.isEmpty()) {
       result.error =
-          QStringLiteral("Unable to finalize the temporary ASCII point spool.");
+          QCoreApplication::translate("Workbench", "Unable to finalize the temporary ASCII point spool.");
     }
     return false;
   }
@@ -1474,8 +1467,7 @@ bool loadAsciiPointCache(
   if (sourceAfter.size() != sourceBefore.size() ||
       sourceAfter.lastModified().toMSecsSinceEpoch() !=
           sourceBefore.lastModified().toMSecsSinceEpoch()) {
-    result.error = QStringLiteral(
-        "The source point cloud changed while it was being read.");
+    result.error = QCoreApplication::translate("Workbench", "The source point cloud changed while it was being read.");
     return false;
   }
 
@@ -1495,7 +1487,7 @@ bool loadAsciiPointCache(
     const qint64 readBytes = spool.read(
         reinterpret_cast<char *>(readBuffer.data()), requestedBytes);
     if (readBytes != requestedBytes) {
-      result.error = QStringLiteral("The temporary ASCII point spool is truncated.");
+      result.error = QCoreApplication::translate("Workbench", "The temporary ASCII point spool is truncated.");
       return false;
     }
     for (qint64 index = 0; index < requestedPoints; ++index) {
@@ -1509,7 +1501,7 @@ bool loadAsciiPointCache(
   result.pointCache = cacheBuilder.finish(&result.error);
   if (!result.pointCache.isValid()) {
     if (result.error.isEmpty()) {
-      result.error = QStringLiteral("Unable to build the point-cache index.");
+      result.error = QCoreApplication::translate("Workbench", "Unable to build the point-cache index.");
     }
     return false;
   }
@@ -1542,8 +1534,7 @@ bool loadFullResolutionPointPreview(
       header.elements.cbegin(), header.elements.cend(),
       [](const ElementDefinition &element) { return element.count > 0; });
   if (firstNonEmpty == header.elements.cend() || &(*firstNonEmpty) != &vertexElement) {
-    result.error = QStringLiteral(
-        "Full-resolution large-cloud preview requires the vertex element to "
+    result.error = QCoreApplication::translate("Workbench", "Full-resolution large-cloud preview requires the vertex element to "
         "be the first non-empty PLY element.");
     return false;
   }
@@ -1552,8 +1543,7 @@ bool loadFullResolutionPointPreview(
                   [](const PropertyDefinition &property) {
                     return property.isList;
                   })) {
-    result.error = QStringLiteral(
-        "Full-resolution large-cloud preview requires scalar PLY vertex "
+    result.error = QCoreApplication::translate("Workbench", "Full-resolution large-cloud preview requires scalar PLY vertex "
         "properties.");
     return false;
   }
@@ -1573,7 +1563,7 @@ bool loadFullResolutionPointPreview(
     recordBytes += scalarByteSize(property.valueType);
   }
   if (recordBytes <= 0 || recordBytes > kMaximumRecordBytes) {
-    result.error = QStringLiteral("The binary PLY vertex record is too large.");
+    result.error = QCoreApplication::translate("Workbench", "The binary PLY vertex record is too large.");
     return false;
   }
 
@@ -1594,8 +1584,7 @@ bool loadFullResolutionPointPreview(
         static_cast<qint64>(requestedRecords) * recordBytes;
     const QByteArray bytes = file.read(requestedBytes);
     if (bytes.size() != requestedBytes) {
-      result.error = QStringLiteral(
-          "Unexpected end of binary PLY data while reading the large cloud.");
+      result.error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY data while reading the large cloud.");
       return false;
     }
     const auto *raw = reinterpret_cast<const uchar *>(bytes.constData());
@@ -1634,7 +1623,7 @@ bool loadFullResolutionPointPreview(
     sourceFirstVertex += requestedRecords;
   }
   if (!hasFiniteBounds) {
-    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY file contains no finite vertices.");
     return false;
   }
   result.coordinates = coordinateTracker.info();
@@ -1644,7 +1633,7 @@ bool loadFullResolutionPointPreview(
       result.coordinates);
   if (!cacheBuilder.begin(&result.error) || !file.seek(vertexDataOffset)) {
     if (result.error.isEmpty()) {
-      result.error = QStringLiteral("Unable to rewind the PLY for cache construction.");
+      result.error = QCoreApplication::translate("Workbench", "Unable to rewind the PLY for cache construction.");
     }
     return false;
   }
@@ -1657,8 +1646,7 @@ bool loadFullResolutionPointPreview(
         static_cast<qint64>(requestedRecords) * recordBytes;
     const QByteArray bytes = file.read(requestedBytes);
     if (bytes.size() != requestedBytes) {
-      result.error = QStringLiteral(
-          "Unexpected end of binary PLY data while building its point cache.");
+      result.error = QCoreApplication::translate("Workbench", "Unexpected end of binary PLY data while building its point cache.");
       return false;
     }
     const auto *raw = reinterpret_cast<const uchar *>(bytes.constData());
@@ -1707,7 +1695,7 @@ bool loadFullResolutionPointPreview(
   result.pointCache = cacheBuilder.finish(&result.error);
   if (!result.pointCache.isValid()) {
     if (result.error.isEmpty()) {
-      result.error = QStringLiteral("Unable to build the point-cache index.");
+      result.error = QCoreApplication::translate("Workbench", "Unable to build the point-cache index.");
     }
     return false;
   }
@@ -1732,8 +1720,7 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
   for (const double value : faceIndices) {
     if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value ||
         value >= static_cast<double>(sourceVertexCount)) {
-      result.error = QStringLiteral(
-          "PLY mesh face contains an invalid vertex index: %1.")
+      result.error = QCoreApplication::translate("Workbench", "PLY mesh face contains an invalid vertex index: %1.")
                          .arg(value, 0, 'g', 16);
       return false;
     }
@@ -1743,8 +1730,7 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
   const bool textured = hasTextureCoordinateProperty &&
                         faceTextureCoordinates.size() == indices.size() * 2;
   if (!faceTextureCoordinates.isEmpty() && !textured) {
-    result.error = QStringLiteral(
-        "PLY face texcoord lists must contain one UV pair per corner.");
+    result.error = QCoreApplication::translate("Workbench", "PLY face texcoord lists must contain one UV pair per corner.");
     return false;
   }
   if (textured &&
@@ -1753,8 +1739,7 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
                   [](const double coordinate) {
                     return !std::isfinite(coordinate);
                   })) {
-    result.error = QStringLiteral(
-        "PLY mesh face contains a non-finite texture coordinate.");
+    result.error = QCoreApplication::translate("Workbench", "PLY mesh face contains a non-finite texture coordinate.");
     return false;
   }
 
@@ -1799,8 +1784,7 @@ bool finitePosition(const PointPosition &position) {
 bool finalizeMeshGeometry(PointCloudData &result) {
   if (result.meshCornerTextureCoordinates.size() != result.meshIndices.size() ||
       result.meshCornerTextured.size() != result.meshIndices.size()) {
-    result.error = QStringLiteral(
-        "The mesh corner-attribute stream does not match its index stream.");
+    result.error = QCoreApplication::translate("Workbench", "The mesh corner-attribute stream does not match its index stream.");
     return false;
   }
 
@@ -1979,13 +1963,13 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     residentMeshFaceLimit = faceLimitOverride;
   }
   if (maximumPreviewPoints <= 0) {
-    result.error = QStringLiteral("The point preview limit must be greater than zero.");
+    result.error = QCoreApplication::translate("Workbench", "The point preview limit must be greater than zero.");
     return result;
   }
 
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly)) {
-    result.error = QStringLiteral("Unable to open PLY file %1: %2")
+    result.error = QCoreApplication::translate("Workbench", "Unable to open PLY file %1: %2")
                        .arg(QFileInfo(filePath).fileName(), file.errorString());
     return result;
   }
@@ -1999,18 +1983,17 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       header.elements.cbegin(), header.elements.cend(),
       [](const ElementDefinition &element) { return element.name == QStringLiteral("vertex"); });
   if (vertexElementIterator == header.elements.cend() || vertexElementIterator->count <= 0) {
-    result.error = QStringLiteral("The PLY file does not contain any vertices.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY file does not contain any vertices.");
     return result;
   }
   const ElementDefinition &vertexElement = *vertexElementIterator;
   result.sourceVertexCount = vertexElement.count;
   if (maximumEditablePoints <= 0) {
-    result.error = QStringLiteral("The editable point limit must be greater than zero.");
+    result.error = QCoreApplication::translate("Workbench", "The editable point limit must be greater than zero.");
     return result;
   }
   if (maximumResidentMeshVertices <= 0 || maximumResidentMeshFaces <= 0) {
-    result.error = QStringLiteral(
-        "The resident mesh vertex and face limits must be greater than zero.");
+    result.error = QCoreApplication::translate("Workbench", "The resident mesh vertex and face limits must be greater than zero.");
     return result;
   }
 
@@ -2034,8 +2017,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         !isIntegralType(faceElementIterator->properties
                             .at(faceVertexIndicesProperty)
                             .valueType)) {
-      result.error = QStringLiteral(
-          "The PLY face element must contain an integral list property named "
+      result.error = QCoreApplication::translate("Workbench", "The PLY face element must contain an integral list property named "
           "vertex_indices or vertex_index.");
       return result;
     }
@@ -2048,8 +2030,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         !faceElementIterator->properties
              .at(faceTextureCoordinatesProperty)
              .isList) {
-      result.error = QStringLiteral(
-          "The PLY face texcoord property must be a scalar list.");
+      result.error = QCoreApplication::translate("Workbench", "The PLY face texcoord property must be a scalar list.");
       return result;
     }
   }
@@ -2064,7 +2045,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       vertexElement.properties.at(xIndex).isList ||
       vertexElement.properties.at(yIndex).isList ||
       vertexElement.properties.at(zIndex).isList) {
-    result.error = QStringLiteral("The PLY vertex element must contain scalar x, y, and z properties.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY vertex element must contain scalar x, y, and z properties.");
     return result;
   }
   const bool sourceUsesFloat64 =
@@ -2128,8 +2109,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   }
 
   if (vertexElement.count > std::numeric_limits<quint32>::max()) {
-    result.error = QStringLiteral(
-        "Editable PLY point clouds currently support up to %1 vertices; "
+    result.error = QCoreApplication::translate("Workbench", "Editable PLY point clouds currently support up to %1 vertices; "
         "use a fixed-width binary PLY for full-resolution read-only preview.")
                        .arg(std::numeric_limits<quint32>::max());
     return result;
@@ -2210,13 +2190,12 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   }
 
   if (!hasFiniteBounds || result.vertices.isEmpty()) {
-    result.error = QStringLiteral("The PLY file contains no finite vertices.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY file contains no finite vertices.");
     return result;
   }
   result.coordinates = coordinateTracker.info();
   if (containsMeshFaces && !finalizeMeshGeometry(result)) {
-    result.error = QStringLiteral(
-        "The PLY declares mesh faces but contains no renderable triangles.");
+    result.error = QCoreApplication::translate("Workbench", "The PLY declares mesh faces but contains no renderable triangles.");
   }
   return result;
 }
@@ -2230,12 +2209,12 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
   const QString destinationAbsolute =
       QDir::cleanPath(QFileInfo(destinationFilePath).absoluteFilePath());
   if (sourceAbsolute.compare(destinationAbsolute, Qt::CaseInsensitive) == 0) {
-    error = QStringLiteral("Choose a new file name; cropped export cannot overwrite its source PLY.");
+    error = QCoreApplication::translate("Workbench", "Choose a new file name; cropped export cannot overwrite its source PLY.");
   }
 
   QFile source(sourceFilePath);
   if (error.isEmpty() && !source.open(QIODevice::ReadOnly)) {
-    error = QStringLiteral("Unable to open source PLY: %1").arg(source.errorString());
+    error = QCoreApplication::translate("Workbench", "Unable to open source PLY: %1").arg(source.errorString());
   }
 
   PlyHeader header;
@@ -2249,10 +2228,10 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
         return element.name == QStringLiteral("vertex");
       });
   if (error.isEmpty() && vertexElementIterator == header.elements.cend()) {
-    error = QStringLiteral("The source PLY does not contain a vertex element.");
+    error = QCoreApplication::translate("Workbench", "The source PLY does not contain a vertex element.");
   }
   if (error.isEmpty() && vertexElementIterator->count != deletedVertices.size()) {
-    error = QStringLiteral("The edit state no longer matches the source PLY vertex count.");
+    error = QCoreApplication::translate("Workbench", "The edit state no longer matches the source PLY vertex count.");
   }
   if (error.isEmpty()) {
     const bool hasIndexedFaces = std::any_of(
@@ -2274,8 +2253,7 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
               });
         });
     if (hasIndexedFaces) {
-      error = QStringLiteral(
-          "This PLY contains indexed mesh faces. Native crop export currently supports point and Gaussian PLY files only.");
+      error = QCoreApplication::translate("Workbench", "This PLY contains indexed mesh faces. Native crop export currently supports point and Gaussian PLY files only.");
     }
   }
 
@@ -2285,15 +2263,15 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
       deletedCount += deletedVertices.testBit(index) ? 1 : 0;
     }
     if (deletedCount == 0) {
-      error = QStringLiteral("No deleted vertices are available to export.");
+      error = QCoreApplication::translate("Workbench", "No deleted vertices are available to export.");
     } else if (deletedCount >= deletedVertices.size()) {
-      error = QStringLiteral("A cropped PLY must retain at least one vertex.");
+      error = QCoreApplication::translate("Workbench", "A cropped PLY must retain at least one vertex.");
     }
   }
 
   QSaveFile destination(destinationFilePath);
   if (error.isEmpty() && !destination.open(QIODevice::WriteOnly)) {
-    error = QStringLiteral("Unable to create cropped PLY: %1").arg(destination.errorString());
+    error = QCoreApplication::translate("Workbench", "Unable to create cropped PLY: %1").arg(destination.errorString());
   }
 
   if (error.isEmpty()) {
@@ -2346,7 +2324,7 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
   while (error.isEmpty() && !source.atEnd()) {
     const QByteArray trailing = source.read(1024 * 1024);
     if (trailing.isEmpty() && source.error() != QFileDevice::NoError) {
-      error = QStringLiteral("Unable to read trailing PLY data: %1").arg(source.errorString());
+      error = QCoreApplication::translate("Workbench", "Unable to read trailing PLY data: %1").arg(source.errorString());
       break;
     }
     if (!writeBytes(destination, trailing, error)) {
@@ -2356,7 +2334,7 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
 
   bool succeeded = error.isEmpty();
   if (succeeded && !destination.commit()) {
-    error = QStringLiteral("Unable to finalize cropped PLY: %1").arg(destination.errorString());
+    error = QCoreApplication::translate("Workbench", "Unable to finalize cropped PLY: %1").arg(destination.errorString());
     succeeded = false;
   } else if (!succeeded) {
     destination.cancelWriting();

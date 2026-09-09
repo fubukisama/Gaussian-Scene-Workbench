@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "ProcessSupervisor.h"
 
 #include <QJsonDocument>
@@ -182,7 +183,7 @@ ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
   connect(&mProcess, &QProcess::started, this, [this]() {
     if (!attachProcessToJob()) {
       emit outputReady(
-          tr("Warning: the task could not be attached to the shutdown job; "
+          QCoreApplication::translate("Workbench", "Warning: the task could not be attached to the shutdown job; "
              "process-tree cleanup will use the PID fallback.\n"));
     }
     emit taskStarted(mActiveTask);
@@ -190,7 +191,7 @@ ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
   });
   connect(&mProcess, &QProcess::errorOccurred, this, [this](const QProcess::ProcessError error) {
     if (error == QProcess::FailedToStart) {
-      emit outputReady(tr("Failed to start process: %1\n").arg(mProcess.errorString()));
+      emit outputReady(QCoreApplication::translate("Workbench", "Failed to start process: %1\n").arg(mProcess.errorString()));
       const QString failedTask = mActiveTask;
       mActiveTask.clear();
       mAcceptsCancelCommand = false;
@@ -253,11 +254,11 @@ void ProcessSupervisor::stop() {
   mStopRequested = true;
   const qint64 processId = mProcess.processId();
   if (mAcceptsCancelCommand) {
-    emit outputReady(tr("Requesting graceful task cancellation...\n"));
+    emit outputReady(QCoreApplication::translate("Workbench", "Requesting graceful task cancellation...\n"));
     mProcess.write("cancel\n");
     mProcess.waitForBytesWritten(500);
   } else {
-    emit outputReady(tr("Terminating the task process tree...\n"));
+    emit outputReady(QCoreApplication::translate("Workbench", "Terminating the task process tree...\n"));
 #ifdef Q_OS_WIN
     terminateAndReleaseProcessJob();
     if (mProcess.state() != QProcess::NotRunning) {
@@ -281,7 +282,7 @@ void ProcessSupervisor::stop() {
     if (!isRunning() || mProcess.processId() != processId) {
       return;
     }
-    emit outputReady(tr("Task did not stop in time; terminating its process tree.\n"));
+    emit outputReady(QCoreApplication::translate("Workbench", "Task did not stop in time; terminating its process tree.\n"));
 #ifdef Q_OS_WIN
     terminateAndReleaseProcessJob();
     if (mProcess.state() != QProcess::NotRunning) {

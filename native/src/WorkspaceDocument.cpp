@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "WorkspaceDocument.h"
 
 #include <QDateTime>
@@ -211,7 +212,7 @@ bool writeDataMigrationMarker(const QString &dataRoot,
   QSaveFile marker(markerPath);
   if (!marker.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QObject::tr("Unable to create data migration marker: %1")
+                QCoreApplication::translate("Workbench", "Unable to create data migration marker: %1")
                     .arg(marker.errorString()));
     return false;
   }
@@ -226,13 +227,13 @@ bool writeDataMigrationMarker(const QString &dataRoot,
   if (marker.write(serialized) != serialized.size()) {
     marker.cancelWriting();
     assignError(errorMessage,
-                QObject::tr("Unable to write data migration marker: %1")
+                QCoreApplication::translate("Workbench", "Unable to write data migration marker: %1")
                     .arg(marker.errorString()));
     return false;
   }
   if (!marker.commit()) {
     assignError(errorMessage,
-                QObject::tr("Unable to commit data migration marker: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit data migration marker: %1")
                     .arg(marker.errorString()));
     return false;
   }
@@ -267,7 +268,7 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
                        QString *errorMessage) {
   if (!QDir().mkpath(targetRoot)) {
     assignError(errorMessage,
-                QObject::tr("Unable to create project data directory: %1")
+                QCoreApplication::translate("Workbench", "Unable to create project data directory: %1")
                     .arg(targetRoot));
     return false;
   }
@@ -293,7 +294,7 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
     if (sourceInfo.isSymLink()) {
       assignError(
           errorMessage,
-          QObject::tr("Project data contains an unsupported symbolic link: %1")
+          QCoreApplication::translate("Workbench", "Project data contains an unsupported symbolic link: %1")
               .arg(sourcePath));
       return false;
     }
@@ -302,7 +303,7 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
     if (sourceInfo.isDir()) {
       if (!QDir().mkpath(targetPath)) {
         assignError(errorMessage,
-                    QObject::tr("Unable to create project data directory: %1")
+                    QCoreApplication::translate("Workbench", "Unable to create project data directory: %1")
                         .arg(targetPath));
         return false;
       }
@@ -312,7 +313,7 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
         !QFile::copy(sourcePath, targetPath)) {
       assignError(
           errorMessage,
-          QObject::tr("Unable to copy project data: %1").arg(sourcePath));
+          QCoreApplication::translate("Workbench", "Unable to copy project data: %1").arg(sourcePath));
       return false;
     }
   }
@@ -419,7 +420,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   const QFileInfo rootInfo(rootPath);
   if (!rootInfo.exists() || !rootInfo.isDir()) {
     assignError(errorMessage,
-                tr("Project directory does not exist: %1").arg(rootPath));
+                QCoreApplication::translate("Workbench", "Project directory does not exist: %1").arg(rootPath));
     return false;
   }
 
@@ -451,12 +452,12 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   if (!rootInfo.exists() || !rootInfo.isDir()) {
     assignError(
         errorMessage,
-        tr("Temporary project directory does not exist: %1").arg(workingRoot));
+        QCoreApplication::translate("Workbench", "Temporary project directory does not exist: %1").arg(workingRoot));
     return false;
   }
 
   mRootPath = normalizedAbsolutePath(workingRoot);
-  mProjectName = displayName.trimmed().isEmpty() ? tr("Untitled Project")
+  mProjectName = displayName.trimmed().isEmpty() ? QCoreApplication::translate("Workbench", "Untitled Project")
                                                  : displayName.trimmed();
   mProjectFilePath.clear();
   mDatasetPath.clear();
@@ -478,7 +479,7 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                tr("Unable to open project: %1").arg(file.errorString()));
+                QCoreApplication::translate("Workbench", "Unable to open project: %1").arg(file.errorString()));
     return false;
   }
 
@@ -487,7 +488,7 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
       QJsonDocument::fromJson(file.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                tr("Invalid project file: %1").arg(parseError.errorString()));
+                QCoreApplication::translate("Workbench", "Invalid project file: %1").arg(parseError.errorString()));
     return false;
   }
 
@@ -496,7 +497,7 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   if (schemaVersion != 1) {
     assignError(
         errorMessage,
-        tr("Unsupported project schema version: %1").arg(schemaVersion));
+        QCoreApplication::translate("Workbench", "Unsupported project schema version: %1").arg(schemaVersion));
     return false;
   }
 
@@ -541,20 +542,20 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
 
 bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
 
   const QString targetPath =
       filePath.isEmpty() ? mProjectFilePath : normalizedAbsolutePath(filePath);
   if (targetPath.isEmpty()) {
-    assignError(errorMessage, tr("A project file path is required."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "A project file path is required."));
     return false;
   }
 
   const QFileInfo targetInfo(targetPath);
   if (!QFileInfo(targetInfo.absolutePath()).isDir()) {
-    assignError(errorMessage, tr("Project save directory does not exist: %1")
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Project save directory does not exist: %1")
                                   .arg(targetInfo.absolutePath()));
     return false;
   }
@@ -573,13 +574,13 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     const QString targetDataRoot = projectDataRootForFile(targetPath);
     if (!pathsEqual(oldRootPath, targetDataRoot)) {
       if (relativePathInside(oldRootPath, targetDataRoot)) {
-        assignError(errorMessage, tr("Choose a project file outside the "
+        assignError(errorMessage, QCoreApplication::translate("Workbench", "Choose a project file outside the "
                                      "current working data directory."));
         return false;
       }
       if (QFileInfo::exists(targetDataRoot)) {
         assignError(errorMessage,
-                    tr("Project data directory already exists: %1")
+                    QCoreApplication::translate("Workbench", "Project data directory already exists: %1")
                         .arg(targetDataRoot));
         return false;
       }
@@ -599,7 +600,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
       if (!QDir().rename(stagingRoot, targetDataRoot)) {
         QDir(stagingRoot).removeRecursively();
         assignError(errorMessage,
-                    tr("Unable to finalize project data directory: %1")
+                    QCoreApplication::translate("Workbench", "Unable to finalize project data directory: %1")
                         .arg(targetDataRoot));
         return false;
       }
@@ -641,7 +642,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
       QDir(savedRootPath).removeRecursively();
     }
     assignError(errorMessage,
-                tr("Unable to save project: %1").arg(output.errorString()));
+                QCoreApplication::translate("Workbench", "Unable to save project: %1").arg(output.errorString()));
     return false;
   }
   const QByteArray serialized =
@@ -653,7 +654,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     }
     assignError(
         errorMessage,
-        tr("Unable to write project file: %1").arg(output.errorString()));
+        QCoreApplication::translate("Workbench", "Unable to write project file: %1").arg(output.errorString()));
     return false;
   }
   if (!output.commit()) {
@@ -662,7 +663,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
     }
     assignError(
         errorMessage,
-        tr("Unable to commit project file: %1").arg(output.errorString()));
+        QCoreApplication::translate("Workbench", "Unable to commit project file: %1").arg(output.errorString()));
     return false;
   }
 
@@ -681,20 +682,20 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
 bool WorkspaceDocument::saveManifest(const QString &filePath,
                                      QString *errorMessage) {
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
 
   const QString targetPath =
       filePath.isEmpty() ? mProjectFilePath : normalizedAbsolutePath(filePath);
   if (targetPath.isEmpty()) {
-    assignError(errorMessage, tr("A project file path is required."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "A project file path is required."));
     return false;
   }
 
   const QFileInfo targetInfo(targetPath);
   if (!QFileInfo(targetInfo.absolutePath()).isDir()) {
-    assignError(errorMessage, tr("Project save directory does not exist: %1")
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Project save directory does not exist: %1")
                                   .arg(targetInfo.absolutePath()));
     return false;
   }
@@ -707,13 +708,13 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
     pendingDataRoot = projectDataRootForFile(targetPath);
     if (!pathsEqual(mRootPath, pendingDataRoot)) {
       if (relativePathInside(mRootPath, pendingDataRoot)) {
-        assignError(errorMessage, tr("Choose a project file outside the "
+        assignError(errorMessage, QCoreApplication::translate("Workbench", "Choose a project file outside the "
                                      "current working data directory."));
         return false;
       }
       if (QFileInfo::exists(pendingDataRoot)) {
         assignError(errorMessage,
-                    tr("Project data directory already exists: %1")
+                    QCoreApplication::translate("Workbench", "Project data directory already exists: %1")
                         .arg(pendingDataRoot));
         return false;
       }
@@ -757,7 +758,7 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
   QSaveFile output(targetPath);
   if (!output.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                tr("Unable to save project: %1").arg(output.errorString()));
+                QCoreApplication::translate("Workbench", "Unable to save project: %1").arg(output.errorString()));
     return false;
   }
   const QByteArray serialized =
@@ -766,13 +767,13 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
     output.cancelWriting();
     assignError(
         errorMessage,
-        tr("Unable to write project file: %1").arg(output.errorString()));
+        QCoreApplication::translate("Workbench", "Unable to write project file: %1").arg(output.errorString()));
     return false;
   }
   if (!output.commit()) {
     assignError(
         errorMessage,
-        tr("Unable to commit project file: %1").arg(output.errorString()));
+        QCoreApplication::translate("Workbench", "Unable to commit project file: %1").arg(output.errorString()));
     return false;
   }
 
@@ -817,14 +818,14 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
   if (mProjectFilePath.isEmpty()) {
     assignError(
         errorMessage,
-        tr("A project file is required before migrating project data."));
+        QCoreApplication::translate("Workbench", "A project file is required before migrating project data."));
     return false;
   }
 
   const QString oldRootPath = mRootPath;
   const QString targetDataRoot = mPendingDataRoot;
   if (relativePathInside(oldRootPath, targetDataRoot)) {
-    assignError(errorMessage, tr("Choose a project file outside the current "
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Choose a project file outside the current "
                                  "working data directory."));
     return false;
   }
@@ -835,7 +836,7 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
                                     oldRootPath)) {
       assignError(
           errorMessage,
-          tr("Project data directory already exists and does not belong to "
+          QCoreApplication::translate("Workbench", "Project data directory already exists and does not belong to "
              "this pending save: %1")
               .arg(targetDataRoot));
       return false;
@@ -862,7 +863,7 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
     if (!QDir().rename(stagingRoot, targetDataRoot)) {
       QDir(stagingRoot).removeRecursively();
       assignError(errorMessage,
-                  tr("Unable to finalize project data directory: %1")
+                  QCoreApplication::translate("Workbench", "Unable to finalize project data directory: %1")
                       .arg(targetDataRoot));
       return false;
     }
@@ -900,7 +901,7 @@ bool WorkspaceDocument::setDatasetPath(const QString &path,
   const QFileInfo info(path);
   if (!info.exists() || !info.isDir()) {
     assignError(errorMessage,
-                tr("Dataset directory does not exist: %1").arg(path));
+                QCoreApplication::translate("Workbench", "Dataset directory does not exist: %1").arg(path));
     return false;
   }
   mDatasetPath = normalizedAbsolutePath(path);
@@ -1024,7 +1025,7 @@ bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage)
 bool WorkspaceDocument::setSceneObjectTransforms(const QList<SceneObject> &objects,
                                                  QString *errorMessage) {
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
   auto updated = sceneObjects();
@@ -1043,7 +1044,7 @@ bool WorkspaceDocument::setSceneObjectTransforms(const QList<SceneObject> &objec
         std::abs(change.scale.y()) < 1.0e-4F || std::abs(change.scale.z()) < 1.0e-4F ||
         std::abs(change.scale.x()) > 1.0e4F || std::abs(change.scale.y()) > 1.0e4F ||
         std::abs(change.scale.z()) > 1.0e4F) {
-      assignError(errorMessage, tr("Invalid object or transform in group operation."));
+      assignError(errorMessage, QCoreApplication::translate("Workbench", "Invalid object or transform in group operation."));
       return false;
     }
     seen.insert(change.id);
@@ -1105,21 +1106,21 @@ bool WorkspaceDocument::setSceneTransform(const QVector3D &translation,
                                            const QVector3D &scale,
                                            QString *errorMessage) {
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
   if (!finiteVector(translation)) {
-    assignError(errorMessage, tr("Scene translation must be finite."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Scene translation must be finite."));
     return false;
   }
   if (!finiteQuaternion(rotation)) {
-    assignError(errorMessage, tr("Scene rotation must be a finite quaternion."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Scene rotation must be a finite quaternion."));
     return false;
   }
   if (!finiteVector(scale) || std::abs(scale.x()) < 1.0e-4F ||
       std::abs(scale.y()) < 1.0e-4F || std::abs(scale.z()) < 1.0e-4F) {
     assignError(errorMessage,
-                tr("Scene scale must contain finite, non-zero values."));
+                QCoreApplication::translate("Workbench", "Scene scale must contain finite, non-zero values."));
     return false;
   }
   const QQuaternion normalized = normalizedRotation(rotation);
@@ -1147,12 +1148,12 @@ bool WorkspaceDocument::clearImportedData(
     *result = {};
   }
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
   if (hasPendingDataMigration()) {
     assignError(errorMessage,
-                tr("Finish the pending project data migration before "
+                QCoreApplication::translate("Workbench", "Finish the pending project data migration before "
                    "cleaning imported data."));
     return false;
   }
@@ -1160,7 +1161,7 @@ bool WorkspaceDocument::clearImportedData(
   const bool clearDataset = options.clearDataset && !mDatasetPath.isEmpty();
   const bool clearScene = options.clearScene && !mScenePath.isEmpty();
   if (!clearDataset && !clearScene) {
-    assignError(errorMessage, tr("There is no selected imported data to clear."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "There is no selected imported data to clear."));
     return false;
   }
 
@@ -1168,14 +1169,14 @@ bool WorkspaceDocument::clearImportedData(
   for (const auto &object : sceneObjects()) {
     if (managedDataset && relativePathInside(mDatasetPath, object.path) &&
         !(clearScene && object.id == mActiveSceneId)) {
-      assignError(errorMessage, tr("Another scene is stored in this dataset. Remove its association first."));
+      assignError(errorMessage, QCoreApplication::translate("Workbench", "Another scene is stored in this dataset. Remove its association first."));
       return false;
     }
   }
   if (managedDataset && !clearScene && !mScenePath.isEmpty() &&
       relativePathInside(mDatasetPath, mScenePath)) {
     assignError(errorMessage,
-                tr("The current scene is stored inside the managed dataset. "
+                QCoreApplication::translate("Workbench", "The current scene is stored inside the managed dataset. "
                    "Clear the scene association as well, or move the scene "
                    "outside the dataset first."));
     return false;
@@ -1203,7 +1204,7 @@ bool WorkspaceDocument::clearImportedData(
                                    QUuid::WithoutBraces)));
     if (!QDir().mkpath(stagingRoot)) {
       assignError(errorMessage,
-                  tr("Unable to prepare the managed dataset cleanup area: %1")
+                  QCoreApplication::translate("Workbench", "Unable to prepare the managed dataset cleanup area: %1")
                       .arg(stagingRoot));
       return false;
     }
@@ -1216,7 +1217,7 @@ bool WorkspaceDocument::clearImportedData(
     if (!QDir().rename(mDatasetPath, stagedDatasetPath)) {
       QDir().rmdir(stagingRoot);
       assignError(errorMessage,
-                  tr("Unable to stage the managed dataset for cleanup: %1")
+                  QCoreApplication::translate("Workbench", "Unable to stage the managed dataset for cleanup: %1")
                       .arg(mDatasetPath));
       return false;
     }
@@ -1267,8 +1268,8 @@ bool WorkspaceDocument::clearImportedData(
     assignError(
         errorMessage,
         restored
-            ? tr("Unable to save the cleaned project state: %1").arg(saveError)
-            : tr("Unable to save the cleaned project state, and the managed "
+            ? QCoreApplication::translate("Workbench", "Unable to save the cleaned project state: %1").arg(saveError)
+            : QCoreApplication::translate("Workbench", "Unable to save the cleaned project state, and the managed "
                  "dataset could not be restored from %1: %2")
                   .arg(stagedDatasetPath, saveError));
     return false;
@@ -1302,29 +1303,29 @@ bool WorkspaceDocument::clearReconstructionData(
     *result = {};
   }
   if (!hasProject()) {
-    assignError(errorMessage, tr("No project is open."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
     return false;
   }
   if (hasPendingDataMigration()) {
     assignError(errorMessage,
-                tr("Finish the pending project data migration before "
+                QCoreApplication::translate("Workbench", "Finish the pending project data migration before "
                    "cleaning reconstruction data."));
     return false;
   }
   if (mDatasetPath.isEmpty()) {
-    assignError(errorMessage, tr("No dataset is attached."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No dataset is attached."));
     return false;
   }
   if (!isDatasetManaged()) {
     assignError(errorMessage,
-                tr("Reconstruction data belongs to an external linked "
+                QCoreApplication::translate("Workbench", "Reconstruction data belongs to an external linked "
                    "dataset and will not be modified."));
     return false;
   }
 
   const QStringList artifacts = reconstructionArtifactPaths(mDatasetPath);
   if (artifacts.isEmpty()) {
-    assignError(errorMessage, tr("No managed reconstruction data was found."));
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No managed reconstruction data was found."));
     return false;
   }
 
@@ -1337,7 +1338,7 @@ bool WorkspaceDocument::clearReconstructionData(
                                  QUuid::WithoutBraces)));
   if (!QDir().mkpath(stagingRoot)) {
     assignError(errorMessage,
-                tr("Unable to prepare the reconstruction cleanup area: %1")
+                QCoreApplication::translate("Workbench", "Unable to prepare the reconstruction cleanup area: %1")
                     .arg(stagingRoot));
     return false;
   }
@@ -1358,9 +1359,9 @@ bool WorkspaceDocument::clearReconstructionData(
       assignError(
           errorMessage,
           restored
-              ? tr("Unable to stage reconstruction data for cleanup: %1")
+              ? QCoreApplication::translate("Workbench", "Unable to stage reconstruction data for cleanup: %1")
                     .arg(artifact)
-              : tr("Unable to stage reconstruction data for cleanup, and "
+              : QCoreApplication::translate("Workbench", "Unable to stage reconstruction data for cleanup, and "
                    "some files could not be restored from: %1")
                     .arg(stagingRoot));
       return false;
@@ -1392,7 +1393,7 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
   metadata.fileSize = info.size();
   if (!file.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                tr("Unable to open PLY file: %1").arg(file.errorString()));
+                QCoreApplication::translate("Workbench", "Unable to open PLY file: %1").arg(file.errorString()));
     return metadata;
   }
 
@@ -1410,7 +1411,7 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
     if (firstLine) {
       firstLine = false;
       if (line != QStringLiteral("ply")) {
-        assignError(errorMessage, tr("The selected file is not a PLY file."));
+        assignError(errorMessage, QCoreApplication::translate("Workbench", "The selected file is not a PLY file."));
         return metadata;
       }
       continue;
@@ -1452,14 +1453,14 @@ PlyMetadata WorkspaceDocument::inspectPly(const QString &filePath,
 
   if (!foundEndHeader || metadata.format.isEmpty()) {
     assignError(errorMessage,
-                tr("The PLY header is incomplete or unsupported."));
+                QCoreApplication::translate("Workbench", "The PLY header is incomplete or unsupported."));
     return metadata;
   }
   if (metadata.format != QStringLiteral("ascii") &&
       metadata.format != QStringLiteral("binary_little_endian") &&
       metadata.format != QStringLiteral("binary_big_endian")) {
     assignError(errorMessage,
-                tr("Unsupported PLY format: %1").arg(metadata.format));
+                QCoreApplication::translate("Workbench", "Unsupported PLY format: %1").arg(metadata.format));
     return metadata;
   }
   metadata.valid = true;

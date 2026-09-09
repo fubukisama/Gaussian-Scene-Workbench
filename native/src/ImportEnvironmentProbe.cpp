@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "ImportEnvironmentProbe.h"
 
 #include <QDir>
@@ -20,11 +21,11 @@ ImportEnvironmentProbe::run(const QString &python, const QString &backendRoot,
   const QString script =
       QDir(backendRoot).filePath(QStringLiteral("native/worker/import_preflight.py"));
   if (!QFileInfo(python).isFile()) {
-    result.errorMessage = QStringLiteral("所选 Python 不存在：%1").arg(result.python);
+    result.errorMessage = QCoreApplication::translate("Workbench", "所选 Python 不存在：%1").arg(result.python);
     return result;
   }
   if (!QFileInfo(script).isFile()) {
-    result.errorMessage = QStringLiteral("安装目录缺少导入预检脚本：%1")
+    result.errorMessage = QCoreApplication::translate("Workbench", "安装目录缺少导入预检脚本：%1")
                               .arg(QDir::toNativeSeparators(script));
     return result;
   }
@@ -42,14 +43,14 @@ ImportEnvironmentProbe::run(const QString &python, const QString &backendRoot,
   process.setArguments(arguments);
   process.start();
   if (!process.waitForStarted(5000)) {
-    result.errorMessage = QStringLiteral("无法启动所选 Python：%1")
+    result.errorMessage = QCoreApplication::translate("Workbench", "无法启动所选 Python：%1")
                               .arg(process.errorString());
     return result;
   }
   if (!process.waitForFinished(timeoutMilliseconds)) {
     process.kill();
     process.waitForFinished(5000);
-    result.errorMessage = QStringLiteral("导入环境预检超时（%1 秒）。")
+    result.errorMessage = QCoreApplication::translate("Workbench", "导入环境预检超时（%1 秒）。")
                               .arg(timeoutMilliseconds / 1000);
     return result;
   }
@@ -65,7 +66,7 @@ ImportEnvironmentProbe::run(const QString &python, const QString &backendRoot,
     if (detail.isEmpty()) {
       detail = QString::fromUtf8(standardOutput).trimmed();
     }
-    result.errorMessage = QStringLiteral("导入环境预检未返回有效报告：%1")
+    result.errorMessage = QCoreApplication::translate("Workbench", "导入环境预检未返回有效报告：%1")
                               .arg(detail.isEmpty() ? parseError.errorString() : detail);
     return result;
   }
@@ -82,7 +83,7 @@ ImportEnvironmentProbe::run(const QString &python, const QString &backendRoot,
       detail = QString::fromUtf8(standardError).trimmed();
     }
     if (detail.isEmpty()) {
-      detail = QStringLiteral("预检进程退出代码 %1").arg(process.exitCode());
+      detail = QCoreApplication::translate("Workbench", "预检进程退出代码 %1").arg(process.exitCode());
     }
     result.errorMessage = detail;
   }

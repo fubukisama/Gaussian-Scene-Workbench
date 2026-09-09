@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "TrainingGpuPreviewProtocol.h"
 
 #include <QJsonDocument>
@@ -102,14 +103,14 @@ bool parseTrainingGpuPreviewDescriptor(
     const QByteArrayView payload, TrainingGpuPreviewDescriptor *descriptor,
     QString *errorMessage) {
   if (descriptor == nullptr) {
-    setError(errorMessage, QStringLiteral("Descriptor destination is null."));
+    setError(errorMessage, QCoreApplication::translate("Workbench", "Descriptor destination is null."));
     return false;
   }
   QJsonParseError parseError;
   const QJsonDocument document =
       QJsonDocument::fromJson(payload.toByteArray(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-    setError(errorMessage, QStringLiteral("GPU preview event is not valid JSON."));
+    setError(errorMessage, QCoreApplication::translate("Workbench", "GPU preview event is not valid JSON."));
     return false;
   }
   const QJsonObject object = document.object();
@@ -123,7 +124,7 @@ bool parseTrainingGpuPreviewDescriptor(
       type.toString() != QStringLiteral("gpu_preview") || !state.isString() ||
       !session.isString() || !safeSessionId(session.toString())) {
     setError(errorMessage,
-             QStringLiteral("GPU preview event header is invalid."));
+             QCoreApplication::translate("Workbench", "GPU preview event header is invalid."));
     return false;
   }
 
@@ -145,7 +146,7 @@ bool parseTrainingGpuPreviewDescriptor(
     return true;
   }
   if (stateName != QStringLiteral("ready")) {
-    setError(errorMessage, QStringLiteral("GPU preview state is unsupported."));
+    setError(errorMessage, QCoreApplication::translate("Workbench", "GPU preview state is unsupported."));
     return false;
   }
   parsed.state = TrainingGpuPreviewState::Ready;
@@ -154,7 +155,7 @@ bool parseTrainingGpuPreviewDescriptor(
   if (!parseExactInteger(object, QStringLiteral("producerPid"), &producerPid,
                          1) ||
       producerPid > std::numeric_limits<quint32>::max()) {
-    setError(errorMessage, QStringLiteral("GPU preview producer PID is invalid."));
+    setError(errorMessage, QCoreApplication::translate("Workbench", "GPU preview producer PID is invalid."));
     return false;
   }
   parsed.producerPid = static_cast<quint32>(producerPid);
@@ -170,14 +171,14 @@ bool parseTrainingGpuPreviewDescriptor(
   }
   if (!handleOk || parsed.memoryHandle == 0) {
     setError(errorMessage,
-             QStringLiteral("GPU preview memory handle is invalid."));
+             QCoreApplication::translate("Workbench", "GPU preview memory handle is invalid."));
     return false;
   }
   const QJsonValue handleType =
       object.value(QStringLiteral("memoryHandleType"));
   if (!handleType.isString()) {
     setError(errorMessage,
-             QStringLiteral("GPU preview memory handle type is invalid."));
+             QCoreApplication::translate("Workbench", "GPU preview memory handle type is invalid."));
     return false;
   }
   if (handleType.toString() == QStringLiteral("opaque_win32")) {
@@ -187,7 +188,7 @@ bool parseTrainingGpuPreviewDescriptor(
     parsed.memoryHandleType = TrainingGpuPreviewHandleType::OpaqueWin32Kmt;
   } else {
     setError(errorMessage,
-             QStringLiteral("GPU preview memory handle type is unsupported."));
+             QCoreApplication::translate("Workbench", "GPU preview memory handle type is unsupported."));
     return false;
   }
 
@@ -202,19 +203,19 @@ bool parseTrainingGpuPreviewDescriptor(
       !parseExactInteger(object, QStringLiteral("capacity"), &parsed.capacity,
                          1)) {
     setError(errorMessage,
-             QStringLiteral("GPU preview buffer geometry is invalid."));
+             QCoreApplication::translate("Workbench", "GPU preview buffer geometry is invalid."));
     return false;
   }
   if (parsed.slotCount != kTrainingGpuPreviewSlotCount ||
       parsed.strideBytes != kTrainingGpuPreviewStrideBytes) {
     setError(errorMessage,
-             QStringLiteral("GPU preview slot count or stride is incompatible."));
+             QCoreApplication::translate("Workbench", "GPU preview slot count or stride is incompatible."));
     return false;
   }
   if (!geometryIsSafe(parsed.capacity, parsed.slotBytes,
                       parsed.allocationBytes)) {
     setError(errorMessage,
-             QStringLiteral("GPU preview slot geometry is unsafe."));
+             QCoreApplication::translate("Workbench", "GPU preview slot geometry is unsafe."));
     return false;
   }
 
@@ -229,14 +230,14 @@ bool parseTrainingGpuPreviewDescriptor(
   if (!parseName(QStringLiteral("controlMapping"), &parsed.controlMapping) ||
       !parseName(QStringLiteral("frameEvent"), &parsed.frameEvent)) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control object name is invalid."));
+             QCoreApplication::translate("Workbench", "GPU preview control object name is invalid."));
     return false;
   }
   for (int index = 0; index < kTrainingGpuPreviewSlotCount; ++index) {
     QString eventName;
     if (!parseName(QStringLiteral("releaseEvent%1").arg(index), &eventName)) {
       setError(errorMessage,
-               QStringLiteral("GPU preview release event name is invalid."));
+               QCoreApplication::translate("Workbench", "GPU preview release event name is invalid."));
       return false;
     }
     parsed.releaseEvents.append(eventName);
@@ -256,7 +257,7 @@ bool parseTrainingGpuPreviewDescriptor(
                            &nodeMask) ||
         nodeMask > std::numeric_limits<quint32>::max()) {
       setError(errorMessage,
-               QStringLiteral("GPU preview device identity is invalid."));
+               QCoreApplication::translate("Workbench", "GPU preview device identity is invalid."));
       return false;
     }
     parsed.deviceLuid = deviceLuid.toString().toLower();
@@ -272,14 +273,14 @@ bool parseTrainingGpuPreviewControl(
   if (snapshot == nullptr ||
       bytes.size() < static_cast<qsizetype>(kTrainingGpuPreviewHeaderBytes)) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control block is too small."));
+             QCoreApplication::translate("Workbench", "GPU preview control block is too small."));
     return false;
   }
   if (QByteArrayView(bytes.data(), 8) != QByteArrayView("GSWGPU2\0", 8) ||
       readLe32(bytes, 8) != kTrainingGpuPreviewProtocolVersion ||
       readLe32(bytes, 12) != kTrainingGpuPreviewHeaderBytes) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control header is incompatible."));
+             QCoreApplication::translate("Workbench", "GPU preview control header is incompatible."));
     return false;
   }
   const quint32 sequence = readLe32(bytes, 16);
@@ -287,7 +288,7 @@ bool parseTrainingGpuPreviewControl(
       readLe32(bytes, kTrainingGpuPreviewTrailingSequenceOffset);
   if ((sequence & 1U) != 0U || sequence != trailingSequence) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control snapshot is not stable."));
+             QCoreApplication::translate("Workbench", "GPU preview control snapshot is not stable."));
     return false;
   }
   const quint32 stateValue = readLe32(bytes, 20);
@@ -296,7 +297,7 @@ bool parseTrainingGpuPreviewControl(
       readLe32(bytes, 24) != kTrainingGpuPreviewSlotCount ||
       readLe32(bytes, 28) != kTrainingGpuPreviewStrideBytes) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control geometry is incompatible."));
+             QCoreApplication::translate("Workbench", "GPU preview control geometry is incompatible."));
     return false;
   }
 
@@ -309,7 +310,7 @@ bool parseTrainingGpuPreviewControl(
   if (!geometryIsSafe(parsed.capacity, parsed.slotBytes,
                       parsed.allocationBytes)) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control geometry is unsafe."));
+             QCoreApplication::translate("Workbench", "GPU preview control geometry is unsafe."));
     return false;
   }
   parsed.slotSnapshots.reserve(kTrainingGpuPreviewSlotCount);
@@ -327,7 +328,7 @@ bool parseTrainingGpuPreviewControl(
     slot.sceneRadius = readLeFloat(bytes, offset + 44);
     if (slot.pointCount > parsed.capacity) {
       setError(errorMessage,
-               QStringLiteral("GPU preview point count exceeds capacity."));
+               QCoreApplication::translate("Workbench", "GPU preview point count exceeds capacity."));
       return false;
     }
     if (slot.generation > 0 &&
@@ -336,7 +337,7 @@ bool parseTrainingGpuPreviewControl(
          !std::isfinite(slot.sceneCenterZ) ||
          !std::isfinite(slot.sceneRadius) || slot.sceneRadius <= 0.0F)) {
       setError(errorMessage,
-               QStringLiteral("GPU preview scene bounds are invalid."));
+               QCoreApplication::translate("Workbench", "GPU preview scene bounds are invalid."));
       return false;
     }
     parsed.slotSnapshots.append(slot);

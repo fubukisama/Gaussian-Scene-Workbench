@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "MeshCache.h"
 
 #include <QCryptographicHash>
@@ -183,7 +184,7 @@ bool writeAll(QIODevice &device, const char *data, qint64 byteCount,
   while (byteCount > 0) {
     const qint64 written = device.write(data, byteCount);
     if (written <= 0) {
-      error = QStringLiteral("Unable to write the mesh cache: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to write the mesh cache: %1")
                   .arg(device.errorString());
       return false;
     }
@@ -197,7 +198,7 @@ bool readAll(QIODevice &device, char *data, qint64 byteCount, QString &error) {
   while (byteCount > 0) {
     const qint64 read = device.read(data, byteCount);
     if (read <= 0) {
-      error = QStringLiteral("The mesh-cache page is truncated: %1")
+      error = QCoreApplication::translate("Workbench", "The mesh-cache page is truncated: %1")
                   .arg(device.errorString());
       return false;
     }
@@ -271,7 +272,7 @@ MeshCacheIndex MeshCache::loadForSource(const QString &sourcePath,
       QJsonDocument::fromJson(indexFile.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The mesh-cache index is invalid.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The mesh-cache index is invalid.");
     }
     return {};
   }
@@ -347,7 +348,7 @@ MeshCacheIndex MeshCache::loadForSource(const QString &sourcePath,
           requested, Qt::CaseInsensitive) != 0 ||
       !result.isValid()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The mesh cache is stale or incomplete.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The mesh cache is stale or incomplete.");
     }
     return {};
   }
@@ -360,20 +361,20 @@ MeshCachePage MeshCache::readNode(const MeshCacheIndex &index,
   result.nodeId = nodeId;
   if (index.formatVersion != MeshCacheIndex::CurrentFormatVersion ||
       index.dataPath.isEmpty() || nodeId < 0 || nodeId >= index.nodes.size()) {
-    result.error = QStringLiteral("The requested mesh-cache node is invalid.");
+    result.error = QCoreApplication::translate("Workbench", "The requested mesh-cache node is invalid.");
     return result;
   }
   const MeshCacheNode &node = index.nodes.at(nodeId);
   if (!node.isValid() || node.vertexCount > std::numeric_limits<qsizetype>::max() ||
       node.indexCount > std::numeric_limits<qsizetype>::max()) {
-    result.error = QStringLiteral("The requested mesh-cache node is empty or too large.");
+    result.error = QCoreApplication::translate("Workbench", "The requested mesh-cache node is empty or too large.");
     return result;
   }
   QFile data(index.dataPath);
   if (!data.open(QIODevice::ReadOnly) || node.byteCount() > data.size() ||
       node.dataOffset > data.size() - node.byteCount() ||
       !data.seek(node.dataOffset)) {
-    result.error = QStringLiteral("Unable to open the mesh-cache data: %1")
+    result.error = QCoreApplication::translate("Workbench", "Unable to open the mesh-cache data: %1")
                        .arg(data.errorString());
     return result;
   }
@@ -449,7 +450,7 @@ struct MeshCacheBuilder::Impl {
     }
     QFile bucket(bucketPaths.at(leafCode));
     if (!bucket.open(QIODevice::WriteOnly | QIODevice::Append)) {
-      error = QStringLiteral("Unable to write mesh-cache bucket %1: %2")
+      error = QCoreApplication::translate("Workbench", "Unable to write mesh-cache bucket %1: %2")
                   .arg(leafCode)
                   .arg(bucket.errorString());
       return false;
@@ -596,15 +597,15 @@ bool MeshCacheBuilder::begin(QString *errorMessage) {
   const QFileInfo source(mImpl->sourcePath);
   QDir cacheRoot(mImpl->cacheRoot);
   if (mImpl->started || mImpl->finished) {
-    error = QStringLiteral("The mesh-cache builder has already been used.");
+    error = QCoreApplication::translate("Workbench", "The mesh-cache builder has already been used.");
   } else if (mImpl->sourceVertexCount <= 0 ||
              mImpl->sourceVertexCount >
                  static_cast<qint64>(std::numeric_limits<quint32>::max())) {
-    error = QStringLiteral("The mesh vertex count exceeds the 32-bit PLY index range.");
+    error = QCoreApplication::translate("Workbench", "The mesh vertex count exceeds the 32-bit PLY index range.");
   } else if (!source.isFile()) {
-    error = QStringLiteral("The source mesh no longer exists.");
+    error = QCoreApplication::translate("Workbench", "The source mesh no longer exists.");
   } else if (!cacheRoot.mkpath(QStringLiteral("."))) {
-    error = QStringLiteral("Unable to create the mesh-cache directory %1.")
+    error = QCoreApplication::translate("Workbench", "Unable to create the mesh-cache directory %1.")
                 .arg(mImpl->cacheRoot);
   }
   const QString key = QString::fromLatin1(sourceKey(mImpl->sourcePath));
@@ -625,7 +626,7 @@ bool MeshCacheBuilder::begin(QString *errorMessage) {
       QStringLiteral("mesh-%1-build-%2")
           .arg(key, QUuid::createUuid().toString(QUuid::WithoutBraces)));
   if (error.isEmpty() && !QDir().mkpath(mImpl->buildDirectory)) {
-    error = QStringLiteral("Unable to create temporary mesh-cache storage.");
+    error = QCoreApplication::translate("Workbench", "Unable to create temporary mesh-cache storage.");
   }
   if (!error.isEmpty()) {
     if (errorMessage != nullptr) {
@@ -644,7 +645,7 @@ bool MeshCacheBuilder::begin(QString *errorMessage) {
   mImpl->vertexFile.setFileName(mImpl->vertexPath);
   if (!mImpl->vertexFile.open(QIODevice::ReadWrite | QIODevice::Truncate)) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Unable to create the mesh vertex spool: %1")
+      *errorMessage = QCoreApplication::translate("Workbench", "Unable to create the mesh vertex spool: %1")
                           .arg(mImpl->vertexFile.errorString());
     }
     return false;
@@ -684,7 +685,7 @@ bool MeshCacheBuilder::appendVertex(const MeshVertex &vertex,
   if (!mImpl->started || mImpl->verticesFinished || mImpl->finished ||
       mImpl->appendedVertexCount >= mImpl->sourceVertexCount) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The mesh-cache vertex stream is not active.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The mesh-cache vertex stream is not active.");
     }
     return false;
   }
@@ -736,14 +737,14 @@ bool MeshCacheBuilder::finishVertices(QString *errorMessage) {
   }
   QString error;
   if (!mImpl->started || mImpl->verticesFinished || mImpl->finished) {
-    error = QStringLiteral("The mesh-cache vertex stream is not active.");
+    error = QCoreApplication::translate("Workbench", "The mesh-cache vertex stream is not active.");
   } else if (mImpl->appendedVertexCount != mImpl->sourceVertexCount) {
-    error = QStringLiteral("The mesh vertex spool is incomplete.");
+    error = QCoreApplication::translate("Workbench", "The mesh vertex spool is incomplete.");
   } else if (!mImpl->hasFiniteBounds) {
-    error = QStringLiteral("The mesh contains no finite vertices.");
+    error = QCoreApplication::translate("Workbench", "The mesh contains no finite vertices.");
   } else if (!mImpl->flushVertices(error) || !mImpl->vertexFile.flush()) {
     if (error.isEmpty()) {
-      error = QStringLiteral("Unable to finalize the mesh vertex spool.");
+      error = QCoreApplication::translate("Workbench", "Unable to finalize the mesh vertex spool.");
     }
   }
   const qint64 vertexBytes =
@@ -751,12 +752,12 @@ bool MeshCacheBuilder::finishVertices(QString *errorMessage) {
   const qint64 normalBytes =
       mImpl->sourceVertexCount * static_cast<qint64>(sizeof(PackedNormalSum));
   if (error.isEmpty() && mImpl->vertexFile.size() != vertexBytes) {
-    error = QStringLiteral("The mesh vertex spool has an unexpected size.");
+    error = QCoreApplication::translate("Workbench", "The mesh vertex spool has an unexpected size.");
   }
   if (error.isEmpty()) {
     mImpl->vertexMapping = mImpl->vertexFile.map(0, vertexBytes);
     if (mImpl->vertexMapping == nullptr) {
-      error = QStringLiteral("Unable to map the mesh vertex spool: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to map the mesh vertex spool: %1")
                   .arg(mImpl->vertexFile.errorString());
     }
   }
@@ -764,14 +765,14 @@ bool MeshCacheBuilder::finishVertices(QString *errorMessage) {
     mImpl->normalFile.setFileName(mImpl->normalPath);
     if (!mImpl->normalFile.open(QIODevice::ReadWrite | QIODevice::Truncate) ||
         !mImpl->normalFile.resize(normalBytes)) {
-      error = QStringLiteral("Unable to create the mesh normal spool: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to create the mesh normal spool: %1")
                   .arg(mImpl->normalFile.errorString());
     }
   }
   if (error.isEmpty()) {
     mImpl->normalMapping = mImpl->normalFile.map(0, normalBytes);
     if (mImpl->normalMapping == nullptr) {
-      error = QStringLiteral("Unable to map the mesh normal spool: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to map the mesh normal spool: %1")
                   .arg(mImpl->normalFile.errorString());
     }
   }
@@ -809,7 +810,7 @@ bool MeshCacheBuilder::appendTriangleInternal(
     const bool textured, QString *errorMessage) {
   if (!mImpl->verticesFinished || mImpl->finished) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The mesh-cache triangle stream is not active.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The mesh-cache triangle stream is not active.");
     }
     return false;
   }
@@ -818,8 +819,7 @@ bool MeshCacheBuilder::appendTriangleInternal(
        !std::isfinite(textureB.x()) || !std::isfinite(textureB.y()) ||
        !std::isfinite(textureC.x()) || !std::isfinite(textureC.y()))) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral(
-          "A textured mesh triangle contains a non-finite UV coordinate.");
+      *errorMessage = QCoreApplication::translate("Workbench", "A textured mesh triangle contains a non-finite UV coordinate.");
     }
     return false;
   }
@@ -827,7 +827,7 @@ bool MeshCacheBuilder::appendTriangleInternal(
       b >= static_cast<quint64>(mImpl->sourceVertexCount) ||
       c >= static_cast<quint64>(mImpl->sourceVertexCount)) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("A mesh face references a vertex outside the PLY vertex table.");
+      *errorMessage = QCoreApplication::translate("Workbench", "A mesh face references a vertex outside the PLY vertex table.");
     }
     return false;
   }
@@ -925,10 +925,10 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
   MeshCacheIndex result;
   QString error;
   if (!mImpl->verticesFinished || mImpl->finished) {
-    error = QStringLiteral("The mesh-cache builder is not ready to finish.");
+    error = QCoreApplication::translate("Workbench", "The mesh-cache builder is not ready to finish.");
   } else if (sourceFaceCount <= 0 || sourceTriangleCount <= 0 ||
              mImpl->renderableTriangleCount <= 0) {
-    error = QStringLiteral("The PLY mesh contains no renderable triangles.");
+    error = QCoreApplication::translate("Workbench", "The PLY mesh contains no renderable triangles.");
   }
   for (auto iterator = mImpl->bucketBuffers.begin();
        error.isEmpty() && iterator != mImpl->bucketBuffers.end(); ++iterator) {
@@ -941,7 +941,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
       (sourceBefore.size() != mImpl->sourceSize ||
        sourceBefore.lastModified().toMSecsSinceEpoch() !=
            mImpl->sourceModifiedMilliseconds)) {
-    error = QStringLiteral("The source mesh changed while its cache was being built.");
+    error = QCoreApplication::translate("Workbench", "The source mesh changed while its cache was being built.");
   }
   const QString key = QString::fromLatin1(sourceKey(mImpl->sourcePath));
   const QString dataFileName =
@@ -955,7 +955,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
   QSaveFile data(dataPath);
   data.setDirectWriteFallback(false);
   if (error.isEmpty() && !data.open(QIODevice::WriteOnly)) {
-    error = QStringLiteral("Unable to create mesh-cache data: %1")
+    error = QCoreApplication::translate("Workbench", "Unable to create mesh-cache data: %1")
                 .arg(data.errorString());
   }
 
@@ -975,7 +975,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
                                        kDepthOffsets.at(4)));
     if (!bucket.open(QIODevice::ReadOnly) ||
         bucket.size() % static_cast<qint64>(sizeof(TriangleRecord)) != 0) {
-      error = QStringLiteral("Unable to read a mesh-cache triangle bucket: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to read a mesh-cache triangle bucket: %1")
                   .arg(bucket.errorString());
       break;
     }
@@ -1025,7 +1025,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
     }
   }
   if (error.isEmpty() && !data.commit()) {
-    error = QStringLiteral("Unable to publish mesh-cache data: %1")
+    error = QCoreApplication::translate("Workbench", "Unable to publish mesh-cache data: %1")
                 .arg(data.errorString());
   }
   const QFileInfo sourceAfter(mImpl->sourcePath);
@@ -1034,7 +1034,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
        sourceAfter.lastModified().toMSecsSinceEpoch() !=
            mImpl->sourceModifiedMilliseconds)) {
     QFile::remove(dataPath);
-    error = QStringLiteral("The source mesh changed while its cache was being built.");
+    error = QCoreApplication::translate("Workbench", "The source mesh changed while its cache was being built.");
   }
   if (!error.isEmpty()) {
     if (errorMessage != nullptr) {
@@ -1120,7 +1120,7 @@ MeshCacheIndex MeshCacheBuilder::finish(const qint64 sourceFaceCount,
       !indexFile.commit()) {
     QFile::remove(dataPath);
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Unable to publish the mesh-cache index: %1")
+      *errorMessage = QCoreApplication::translate("Workbench", "Unable to publish the mesh-cache index: %1")
                           .arg(indexFile.errorString());
     }
     return {};

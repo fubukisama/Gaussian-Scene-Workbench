@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "DurableArtifactStore.h"
 
 #include <QCryptographicHash>
@@ -30,7 +31,7 @@ QString hashFile(const QString &path, QString *errorMessage) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to read artifact for hashing: %1")
+                QCoreApplication::translate("Workbench", "Unable to read artifact for hashing: %1")
                     .arg(file.errorString()));
     return {};
   }
@@ -40,7 +41,7 @@ QString hashFile(const QString &path, QString *errorMessage) {
     const QByteArray chunk = file.read(chunkSize);
     if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to hash artifact: %1")
+                  QCoreApplication::translate("Workbench", "Unable to hash artifact: %1")
                       .arg(file.errorString()));
       return {};
     }
@@ -55,7 +56,7 @@ bool writeIntegrityRecord(const DurableArtifact &artifact,
   record.setDirectWriteFallback(false);
   if (!record.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create artifact integrity record: "
+                QCoreApplication::translate("Workbench", "Unable to create artifact integrity record: "
                                "%1")
                     .arg(record.errorString()));
     return false;
@@ -71,14 +72,14 @@ bool writeIntegrityRecord(const DurableArtifact &artifact,
   if (record.write(serialized) != serialized.size()) {
     record.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write artifact integrity record: "
+                QCoreApplication::translate("Workbench", "Unable to write artifact integrity record: "
                                "%1")
                     .arg(record.errorString()));
     return false;
   }
   if (!record.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit artifact integrity record: "
+                QCoreApplication::translate("Workbench", "Unable to commit artifact integrity record: "
                                "%1")
                     .arg(record.errorString()));
     return false;
@@ -99,13 +100,13 @@ DurableArtifact DurableArtifactStore::publish(const QString &sourcePath,
   const QFileInfo sourceInfo(source);
   if (!sourceInfo.exists() || !sourceInfo.isFile()) {
     assignError(errorMessage,
-                QStringLiteral("Artifact source does not exist: %1")
+                QCoreApplication::translate("Workbench", "Artifact source does not exist: %1")
                     .arg(source));
     return {};
   }
   if (!QDir().mkpath(QFileInfo(destination).absolutePath())) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create artifact directory: %1")
+                QCoreApplication::translate("Workbench", "Unable to create artifact directory: %1")
                     .arg(QFileInfo(destination).absolutePath()));
     return {};
   }
@@ -125,7 +126,7 @@ DurableArtifact DurableArtifactStore::publish(const QString &sourcePath,
   QFile input(source);
   if (!input.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open artifact source: %1")
+                QCoreApplication::translate("Workbench", "Unable to open artifact source: %1")
                     .arg(input.errorString()));
     return {};
   }
@@ -133,7 +134,7 @@ DurableArtifact DurableArtifactStore::publish(const QString &sourcePath,
   output.setDirectWriteFallback(false);
   if (!output.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create durable artifact: %1")
+                QCoreApplication::translate("Workbench", "Unable to create durable artifact: %1")
                     .arg(output.errorString()));
     return {};
   }
@@ -146,14 +147,14 @@ DurableArtifact DurableArtifactStore::publish(const QString &sourcePath,
     if (chunk.isEmpty() && input.error() != QFileDevice::NoError) {
       output.cancelWriting();
       assignError(errorMessage,
-                  QStringLiteral("Unable to read artifact source: %1")
+                  QCoreApplication::translate("Workbench", "Unable to read artifact source: %1")
                       .arg(input.errorString()));
       return {};
     }
     if (output.write(chunk) != chunk.size()) {
       output.cancelWriting();
       assignError(errorMessage,
-                  QStringLiteral("Unable to write durable artifact: %1")
+                  QCoreApplication::translate("Workbench", "Unable to write durable artifact: %1")
                       .arg(output.errorString()));
       return {};
     }
@@ -171,14 +172,13 @@ DurableArtifact DurableArtifactStore::publish(const QString &sourcePath,
     output.cancelWriting();
     assignError(errorMessage,
                 verificationError.isEmpty()
-                    ? QStringLiteral(
-                          "Artifact source changed while it was being copied.")
+                    ? QCoreApplication::translate("Workbench", "Artifact source changed while it was being copied.")
                     : verificationError);
     return {};
   }
   if (!output.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to publish durable artifact: %1")
+                QCoreApplication::translate("Workbench", "Unable to publish durable artifact: %1")
                     .arg(output.errorString()));
     return {};
   }
@@ -199,7 +199,7 @@ bool DurableArtifactStore::verify(const QString &artifactPath,
   QFile record(integrityPath(artifact));
   if (!record.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Artifact integrity record is missing: %1")
+                QCoreApplication::translate("Workbench", "Artifact integrity record is missing: %1")
                     .arg(integrityPath(artifact)));
     return false;
   }
@@ -208,7 +208,7 @@ bool DurableArtifactStore::verify(const QString &artifactPath,
       QJsonDocument::fromJson(record.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Artifact integrity record is invalid: %1")
+                QCoreApplication::translate("Workbench", "Artifact integrity record is invalid: %1")
                     .arg(parseError.errorString()));
     return false;
   }
@@ -222,7 +222,7 @@ bool DurableArtifactStore::verify(const QString &artifactPath,
       expectedHash.size() != 64 || expectedSize < 0 ||
       !artifactInfo.isFile() || artifactInfo.size() != expectedSize) {
     assignError(errorMessage,
-                QStringLiteral("Artifact size or integrity metadata does not "
+                QCoreApplication::translate("Workbench", "Artifact size or integrity metadata does not "
                                "match."));
     return false;
   }
@@ -231,7 +231,7 @@ bool DurableArtifactStore::verify(const QString &artifactPath,
   if (actualHash != expectedHash) {
     assignError(errorMessage,
                 hashError.isEmpty()
-                    ? QStringLiteral("Artifact checksum does not match.")
+                    ? QCoreApplication::translate("Workbench", "Artifact checksum does not match.")
                     : hashError);
     return false;
   }

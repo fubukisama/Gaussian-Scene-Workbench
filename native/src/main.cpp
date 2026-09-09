@@ -1,4 +1,6 @@
 #include "AppTheme.h"
+#include "AppLanguage.h"
+#include "LanguageSmokeTest.h"
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "MultiSceneSmokeTest.h"
@@ -102,7 +104,8 @@ int main(int argc, char *argv[]) {
   QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Scene Workbench Native"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
   if (application.arguments().contains(
-          QStringLiteral("--smoke-test-display-layout"))) {
+          QStringLiteral("--smoke-test-display-layout")) ||
+      application.arguments().contains(QStringLiteral("--smoke-test-language"))) {
     // The layout smoke test validates the default dock arrangement. Isolate
     // it from the interactive app's persisted geometry and scale settings.
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -134,6 +137,13 @@ int main(int argc, char *argv[]) {
   parser.setApplicationDescription(QStringLiteral("Gaussian Scene Workbench native desktop application"));
   parser.addHelpOption();
   parser.addVersionOption();
+  QCommandLineOption languageOption(QStringLiteral("language"),
+      QStringLiteral("UI language: zh_CN, en_US or ja_JP (does not change saved preference)."),
+      QStringLiteral("locale"));
+  parser.addOption(languageOption);
+  QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
+      QStringLiteral("Verify the selected UI language and embedded translations."));
+  parser.addOption(languageSmokeOption);
   QCommandLineOption projectOption(
       {QStringLiteral("p"), QStringLiteral("project")},
       QStringLiteral("Open a .gsw.json project file."), QStringLiteral("file"));
@@ -188,6 +198,18 @@ int main(int argc, char *argv[]) {
   parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("Project file to open."), QStringLiteral("[project]"));
   parser.process(application);
 
+  QString languageOverride = parser.value(languageOption);
+  const auto arguments = application.arguments();
+  if (languageOverride.isEmpty() && std::any_of(arguments.cbegin(), arguments.cend(),
+      [](const QString &argument) { return argument.startsWith(QStringLiteral("--smoke-test")); })) {
+    languageOverride = QStringLiteral("zh_CN");
+  }
+  if (!gsw::AppLanguage::initialize(languageOverride)) {
+    qCritical() << "Invalid UI language or missing embedded translation catalog:" << languageOverride;
+    return 5;
+  }
+  gsw::AppTheme::apply(application, scalePercent, false);
+
   application.setProperty("gswInitialMediaSources",
                           parser.values(mediaSourceOption));
   gsw::MainWindow window;
@@ -206,6 +228,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
                          exitConfirmationSmokeTest || infiniteGridSmokeTest ||
@@ -223,7 +246,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(multiSceneSmokeTestOption)) {
+  if (parser.isSet(languageSmokeOption)) {
+    QTimer::singleShot(650, &application, [&] {
+      smokeTestCompleted = gsw::runLanguageSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(multiSceneSmokeTestOption)) {
     QTimer::singleShot(650, &application, [&] {
       smokeTestCompleted = gsw::runMultiSceneSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

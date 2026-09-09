@@ -31,12 +31,18 @@ if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja" AND GSW_MSVC_SHOWINCLUDES_PREFIX)
 endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
   resources.qrc
   src/AppTheme.cpp
   src/AppTheme.h
+  src/AppLanguage.cpp
+  src/AppLanguage.h
+  src/LanguageSmokeTest.cpp
+  src/LanguageSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -113,6 +119,31 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/main.cpp
 )
 
+# Catalog validation is part of every build, not an optional release step.
+set(GSW_I18N_DIR "${CMAKE_CURRENT_BINARY_DIR}/i18n")
+file(MAKE_DIRECTORY "${GSW_I18N_DIR}")
+file(GLOB GSW_I18N_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+set(GSW_I18N_QM)
+foreach(language zh_CN en_US ja_JP)
+  list(APPEND GSW_I18N_QM "${GSW_I18N_DIR}/workbench_${language}.qm")
+endforeach()
+add_custom_command(OUTPUT ${GSW_I18N_QM}
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py" --emit-ts "${GSW_I18N_DIR}"
+  COMMAND Qt6::lrelease "${GSW_I18N_DIR}/workbench_zh_CN.ts" -qm "${GSW_I18N_DIR}/workbench_zh_CN.qm"
+  COMMAND Qt6::lrelease "${GSW_I18N_DIR}/workbench_en_US.ts" -qm "${GSW_I18N_DIR}/workbench_en_US.qm"
+  COMMAND Qt6::lrelease "${GSW_I18N_DIR}/workbench_ja_JP.ts" -qm "${GSW_I18N_DIR}/workbench_ja_JP.qm"
+  DEPENDS ${GSW_I18N_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/i18n/catalog.json" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
+  VERBATIM)
+qt_add_resources(GaussianSceneWorkbench "workbench_languages"
+  PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+foreach(language zh_CN ja)
+  find_file(GSW_QTBASE_${language} NAMES "qtbase_${language}.qm"
+    HINTS "${Qt6_DIR}/../../../share/qt6/translations" "${Qt6_DIR}/../../../translations" REQUIRED)
+  set_source_files_properties("${GSW_QTBASE_${language}}" PROPERTIES QT_RESOURCE_ALIAS "qtbase_${language}.qm")
+  qt_add_resources(GaussianSceneWorkbench "qtbase_language_${language}"
+    PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+endforeach()
+
 if(WIN32)
   target_sources(GaussianSceneWorkbench PRIVATE assets/gsw-app-icon.rc)
   target_link_libraries(GaussianSceneWorkbench PRIVATE Shell32)
@@ -151,6 +182,15 @@ install(TARGETS GaussianSceneWorkbench
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
+  add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  foreach(language zh_CN en_US ja_JP)
+    add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
+    set_tests_properties(native_language_${language} PROPERTIES
+      TIMEOUT 25
+      ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_test(
     NAME native_application_launch

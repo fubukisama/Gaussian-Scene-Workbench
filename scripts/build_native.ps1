@@ -641,6 +641,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_APPLICATION_CONTROL.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\LOCALIZATION.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
     -DestinationRoot $PackageRoot

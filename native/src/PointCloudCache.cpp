@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "PointCloudCache.h"
 
 #include <QCryptographicHash>
@@ -119,7 +120,7 @@ bool writeAll(QIODevice &device, const char *data, qint64 byteCount,
   while (byteCount > 0) {
     const qint64 written = device.write(data, byteCount);
     if (written <= 0) {
-      error = QStringLiteral("Unable to write the point-cache payload: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to write the point-cache payload: %1")
                   .arg(device.errorString());
       return false;
     }
@@ -134,7 +135,7 @@ bool copyFileInto(QFile &source, QIODevice &destination, QString &error) {
   while (!source.atEnd()) {
     const QByteArray bytes = source.read(kCopyBlockBytes);
     if (bytes.isEmpty() && source.error() != QFileDevice::NoError) {
-      error = QStringLiteral("Unable to read a point-cache bucket: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to read a point-cache bucket: %1")
                   .arg(source.errorString());
       return false;
     }
@@ -252,7 +253,7 @@ PointCloudCacheIndex PointCloudCache::loadForSource(
       QJsonDocument::fromJson(indexFile.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The point-cache index is malformed.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The point-cache index is malformed.");
     }
     return {};
   }
@@ -323,18 +324,18 @@ PointCloudCachePage PointCloudCache::readNode(
   PointCloudCachePage result;
   result.nodeId = nodeId;
   if (!index.isValid() || nodeId < 0 || nodeId >= index.nodes.size()) {
-    result.error = QStringLiteral("Invalid point-cache node request.");
+    result.error = QCoreApplication::translate("Workbench", "Invalid point-cache node request.");
     return result;
   }
   const PointCloudCacheNode &node = index.nodes.at(nodeId);
   if (node.pointCount <= 0 ||
       node.pointCount > std::numeric_limits<qsizetype>::max()) {
-    result.error = QStringLiteral("The point-cache node is empty or too large.");
+    result.error = QCoreApplication::translate("Workbench", "The point-cache node is empty or too large.");
     return result;
   }
   QFile data(index.dataPath);
   if (!data.open(QIODevice::ReadOnly) || !data.seek(node.dataOffset)) {
-    result.error = QStringLiteral("Unable to open point-cache data: %1")
+    result.error = QCoreApplication::translate("Workbench", "Unable to open point-cache data: %1")
                        .arg(data.errorString());
     return result;
   }
@@ -345,7 +346,7 @@ PointCloudCachePage PointCloudCache::readNode(
       reinterpret_cast<char *>(result.vertices.data()), byteCount);
   if (read != byteCount) {
     result.vertices.clear();
-    result.error = QStringLiteral("The point-cache node is truncated.");
+    result.error = QCoreApplication::translate("Workbench", "The point-cache node is truncated.");
   }
   return result;
 }
@@ -374,7 +375,7 @@ struct PointCloudCacheBuilder::Impl {
     }
     QFile bucket(bucketPaths.at(leafCode));
     if (!bucket.open(QIODevice::WriteOnly | QIODevice::Append)) {
-      error = QStringLiteral("Unable to write point-cache bucket: %1")
+      error = QCoreApplication::translate("Workbench", "Unable to write point-cache bucket: %1")
                   .arg(bucket.errorString());
       return false;
     }
@@ -428,15 +429,15 @@ bool PointCloudCacheBuilder::begin(QString *errorMessage) {
   }
   QString error;
   if (mImpl->started || mImpl->finished) {
-    error = QStringLiteral("The point-cache builder has already been used.");
+    error = QCoreApplication::translate("Workbench", "The point-cache builder has already been used.");
   }
   const QFileInfo source(mImpl->sourcePath);
   QDir cacheRoot(mImpl->cacheRoot);
   if (error.isEmpty() && !source.isFile()) {
-    error = QStringLiteral("The source point cloud no longer exists.");
+    error = QCoreApplication::translate("Workbench", "The source point cloud no longer exists.");
   }
   if (error.isEmpty() && !cacheRoot.mkpath(QStringLiteral("."))) {
-    error = QStringLiteral("Unable to create the point-cache directory %1.")
+    error = QCoreApplication::translate("Workbench", "Unable to create the point-cache directory %1.")
                 .arg(mImpl->cacheRoot);
   }
   const QString key = QString::fromLatin1(sourceKey(mImpl->sourcePath));
@@ -456,7 +457,7 @@ bool PointCloudCacheBuilder::begin(QString *errorMessage) {
       QStringLiteral("%1-build-%2")
           .arg(key, QUuid::createUuid().toString(QUuid::WithoutBraces)));
   if (error.isEmpty() && !QDir().mkpath(mImpl->buildDirectory)) {
-    error = QStringLiteral("Unable to create temporary point-cache storage.");
+    error = QCoreApplication::translate("Workbench", "Unable to create temporary point-cache storage.");
   }
   if (!error.isEmpty()) {
     if (errorMessage != nullptr) {
@@ -503,7 +504,7 @@ bool PointCloudCacheBuilder::append(const PointPreviewVertex &vertex,
                                     QString *errorMessage) {
   if (!mImpl->started || mImpl->finished) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("The point-cache builder is not active.");
+      *errorMessage = QCoreApplication::translate("Workbench", "The point-cache builder is not active.");
     }
     return false;
   }
@@ -560,7 +561,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
   PointCloudCacheIndex result;
   QString error;
   if (!mImpl->started || mImpl->finished) {
-    error = QStringLiteral("The point-cache builder is not active.");
+    error = QCoreApplication::translate("Workbench", "The point-cache builder is not active.");
   }
   for (int leaf = 0; error.isEmpty() && leaf < kLeafCount; ++leaf) {
     if (!mImpl->flushBucket(leaf, error)) {
@@ -572,8 +573,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
       (source.size() != mImpl->sourceSize ||
        source.lastModified().toMSecsSinceEpoch() !=
            mImpl->sourceModifiedMilliseconds)) {
-    error = QStringLiteral(
-        "The source point cloud changed while its cache was being built.");
+    error = QCoreApplication::translate("Workbench", "The source point cloud changed while its cache was being built.");
   }
   const QString key = QString::fromLatin1(sourceKey(mImpl->sourcePath));
   const QString dataFileName =
@@ -587,7 +587,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
   QSaveFile data(dataPath);
   data.setDirectWriteFallback(false);
   if (error.isEmpty() && !data.open(QIODevice::WriteOnly)) {
-    error = QStringLiteral("Unable to create point-cache data: %1")
+    error = QCoreApplication::translate("Workbench", "Unable to create point-cache data: %1")
                 .arg(data.errorString());
   }
   for (PointCloudCacheNode &node : mImpl->nodes) {
@@ -606,7 +606,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
       const int leaf = node.id - kInternalNodeCount;
       QFile bucket(mImpl->bucketPaths.at(leaf));
       if (!bucket.open(QIODevice::ReadOnly)) {
-        error = QStringLiteral("Unable to read a completed point-cache bucket.");
+        error = QCoreApplication::translate("Workbench", "Unable to read a completed point-cache bucket.");
         continue;
       }
       node.pointCount =
@@ -615,7 +615,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
     }
   }
   if (error.isEmpty() && !data.commit()) {
-    error = QStringLiteral("Unable to publish point-cache data: %1")
+    error = QCoreApplication::translate("Workbench", "Unable to publish point-cache data: %1")
                 .arg(data.errorString());
   }
   const QFileInfo completedSource(mImpl->sourcePath);
@@ -624,8 +624,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
        completedSource.lastModified().toMSecsSinceEpoch() !=
            mImpl->sourceModifiedMilliseconds)) {
     QFile::remove(dataPath);
-    error = QStringLiteral(
-        "The source point cloud changed while its cache was being built.");
+    error = QCoreApplication::translate("Workbench", "The source point cloud changed while its cache was being built.");
   }
   if (!error.isEmpty()) {
     if (errorMessage != nullptr) {
@@ -691,7 +690,7 @@ PointCloudCacheIndex PointCloudCacheBuilder::finish(QString *errorMessage) {
     QFile::remove(dataPath);
     if (errorMessage != nullptr) {
       *errorMessage =
-          QStringLiteral("Unable to publish the point-cache index: %1")
+          QCoreApplication::translate("Workbench", "Unable to publish the point-cache index: %1")
               .arg(indexFile.errorString());
     }
     return {};

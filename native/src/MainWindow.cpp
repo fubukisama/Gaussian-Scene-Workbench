@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppLanguage.h"
 
 #include "AppTheme.h"
 #include "BackendLocator.h"
@@ -176,8 +177,8 @@ private:
     const QDockWidget::DockWidgetFeatures features = mDock->features();
     const bool canFloat = features.testFlag(QDockWidget::DockWidgetFloatable);
     const bool canClose = features.testFlag(QDockWidget::DockWidgetClosable);
-    const QString floatText = mDock->isFloating() ? QStringLiteral("停靠面板")
-                                                  : QStringLiteral("浮动面板");
+    const QString floatText = mDock->isFloating() ? QCoreApplication::translate("Workbench", "停靠面板")
+                                                  : QCoreApplication::translate("Workbench", "浮动面板");
     mFloatButton->setVisible(canFloat);
     mFloatButton->setEnabled(canFloat);
     mFloatButton->setToolTip(floatText);
@@ -187,8 +188,8 @@ private:
 
     mCloseButton->setVisible(canClose);
     mCloseButton->setEnabled(canClose);
-    mCloseButton->setToolTip(QStringLiteral("关闭面板"));
-    mCloseButton->setAccessibleName(QStringLiteral("关闭面板"));
+    mCloseButton->setToolTip(QCoreApplication::translate("Workbench", "关闭面板"));
+    mCloseButton->setAccessibleName(QCoreApplication::translate("Workbench", "关闭面板"));
     mCloseButton->setIcon(
         mDock->style()->standardIcon(QStyle::SP_TitleBarCloseButton));
   }
@@ -338,7 +339,7 @@ resolveTrainingPointCloud(const QString &outputDirectory,
                                         iteration, metadata};
     }
     lastError = inspectionError.isEmpty()
-                    ? QStringLiteral("PLY 缺少有效顶点或 3DGS 属性：%1")
+                    ? QCoreApplication::translate("Workbench", "PLY 缺少有效顶点或 3DGS 属性：%1")
                           .arg(QDir::toNativeSeparators(path))
                     : inspectionError;
   }
@@ -348,12 +349,12 @@ resolveTrainingPointCloud(const QString &outputDirectory,
       *errorMessage = lastError;
     } else if (expectedIteration.has_value()) {
       *errorMessage =
-          QStringLiteral("未找到第 %1 次迭代的 point_cloud.ply：%2")
+          QCoreApplication::translate("Workbench", "未找到第 %1 次迭代的 point_cloud.ply：%2")
               .arg(expectedIteration.value())
               .arg(QDir::toNativeSeparators(pointCloudRoot.absolutePath()));
     } else {
       *errorMessage =
-          QStringLiteral("尚未生成可用的 3DGS point_cloud.ply：%1")
+          QCoreApplication::translate("Workbench", "尚未生成可用的 3DGS point_cloud.ply：%1")
               .arg(QDir::toNativeSeparators(pointCloudRoot.absolutePath()));
     }
   }
@@ -382,20 +383,20 @@ std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
 
 QString workerStageLabel(const QString &stage) {
   static const QHash<QString, QString> labels = {
-      {QStringLiteral("queued"), QStringLiteral("排队")},
-      {QStringLiteral("preparing"), QStringLiteral("准备")},
-      {QStringLiteral("archiving"), QStringLiteral("归档原文件")},
-      {QStringLiteral("copying_images"), QStringLiteral("复制图像")},
-      {QStringLiteral("extracting_frames"), QStringLiteral("视频抽帧")},
-      {QStringLiteral("masks"), QStringLiteral("处理蒙版")},
-      {QStringLiteral("finalizing"), QStringLiteral("提交数据集")},
-      {QStringLiteral("environment"), QStringLiteral("检查环境")},
-      {QStringLiteral("prepare"), QStringLiteral("准备训练")},
-      {QStringLiteral("colmap"), QStringLiteral("COLMAP 重建")},
-      {QStringLiteral("train"), QStringLiteral("训练")},
-      {QStringLiteral("done"), QStringLiteral("完成")},
-      {QStringLiteral("failed"), QStringLiteral("失败")},
-      {QStringLiteral("cancelled"), QStringLiteral("已取消")},
+      {QStringLiteral("queued"), QCoreApplication::translate("Workbench", "排队")},
+      {QStringLiteral("preparing"), QCoreApplication::translate("Workbench", "准备")},
+      {QStringLiteral("archiving"), QCoreApplication::translate("Workbench", "归档原文件")},
+      {QStringLiteral("copying_images"), QCoreApplication::translate("Workbench", "复制图像")},
+      {QStringLiteral("extracting_frames"), QCoreApplication::translate("Workbench", "视频抽帧")},
+      {QStringLiteral("masks"), QCoreApplication::translate("Workbench", "处理蒙版")},
+      {QStringLiteral("finalizing"), QCoreApplication::translate("Workbench", "提交数据集")},
+      {QStringLiteral("environment"), QCoreApplication::translate("Workbench", "检查环境")},
+      {QStringLiteral("prepare"), QCoreApplication::translate("Workbench", "准备训练")},
+      {QStringLiteral("colmap"), QCoreApplication::translate("Workbench", "COLMAP 重建")},
+      {QStringLiteral("train"), QCoreApplication::translate("Workbench", "训练")},
+      {QStringLiteral("done"), QCoreApplication::translate("Workbench", "完成")},
+      {QStringLiteral("failed"), QCoreApplication::translate("Workbench", "失败")},
+      {QStringLiteral("cancelled"), QCoreApplication::translate("Workbench", "已取消")},
   };
   return labels.value(stage, stage);
 }
@@ -459,7 +460,7 @@ bool hasImportRecoveryArtifacts(const QString &datasetRoot) {
 QString backendUnavailableMessage(const QString &repositoryRoot,
                                   const QString &workerScript,
                                   const QString &pythonPath) {
-  const QString missing = QStringLiteral("<未发现>");
+  const QString missing = QCoreApplication::translate("Workbench", "<未发现>");
   const QString applicationDirectory =
       QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
   const QString backend = repositoryRoot.isEmpty()
@@ -483,12 +484,11 @@ QString backendUnavailableMessage(const QString &repositoryRoot,
   }
   if (candidates.size() > maximumDisplayedCandidates) {
     checkedCandidates.append(
-        QStringLiteral("  - …另有 %1 个候选路径")
+        QCoreApplication::translate("Workbench", "  - …另有 %1 个候选路径")
             .arg(candidates.size() - maximumDisplayedCandidates));
   }
 
-  return QStringLiteral(
-             "未找到可用的原生计算后端或 gaussian_splatting Python 环境。\n\n"
+  return QCoreApplication::translate("Workbench", "未找到可用的原生计算后端或 gaussian_splatting Python 环境。\n\n"
              "应用目录：%1\n"
              "后端目录：%2\n"
              "Worker：%3\n"
@@ -498,7 +498,7 @@ QString backendUnavailableMessage(const QString &repositoryRoot,
              "GSW_BACKEND_ROOT 和 GAUSSIAN_SPLATTING_CONDA_PREFIX。")
       .arg(applicationDirectory, backend, worker, python,
            checkedCandidates.isEmpty()
-               ? QStringLiteral("  - <无候选路径>")
+               ? QCoreApplication::translate("Workbench", "  - <无候选路径>")
                : checkedCandidates.join(QLatin1Char('\n')));
 }
 } // namespace
@@ -536,7 +536,7 @@ MainWindow::MainWindow(QWidget *parent)
   }
 
   setObjectName(QStringLiteral("mainWindow"));
-  setWindowTitle(QStringLiteral("Native Preview"));
+  setWindowTitle(QCoreApplication::translate("Workbench", "Native Preview"));
   setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks |
                  QMainWindow::AllowTabbedDocks);
   setMinimumSize(940, 620);
@@ -557,22 +557,22 @@ MainWindow::MainWindow(QWidget *parent)
   scheduleAutomaticUiScale();
   QString untitledError;
   const bool untitledReady =
-      beginUntitledProject(QStringLiteral("未命名工程"), &untitledError);
+      beginUntitledProject(QCoreApplication::translate("Workbench", "未命名工程"), &untitledError);
   updateWorkspaceUi();
-  appendTaskEvent(QStringLiteral("原生桌面预览版已启动。"));
+  appendTaskEvent(QCoreApplication::translate("Workbench", "原生桌面预览版已启动。"));
   if (untitledReady) {
     appendTaskEvent(
-        QStringLiteral("已建立未命名工程；可先导入和处理，稍后再保存。"));
+        QCoreApplication::translate("Workbench", "已建立未命名工程；可先导入和处理，稍后再保存。"));
   } else {
     appendTaskEvent(
-        QStringLiteral("无法建立未命名工程：%1").arg(untitledError));
+        QCoreApplication::translate("Workbench", "无法建立未命名工程：%1").arg(untitledError));
     QTimer::singleShot(0, this, [this, untitledError]() {
-      showError(QStringLiteral("无法准备临时工作区"), untitledError);
+      showError(QCoreApplication::translate("Workbench", "无法准备临时工作区"), untitledError);
     });
   }
   if (!recoveryBaseError.isEmpty()) {
     appendTaskEvent(
-        QStringLiteral("恢复存储检查提示：%1").arg(recoveryBaseError));
+        QCoreApplication::translate("Workbench", "恢复存储检查提示：%1").arg(recoveryBaseError));
   }
 
   mRecoveryCheckpointTimer = new QTimer(this);
@@ -604,8 +604,8 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 bool MainWindow::openProjectFile(const QString &filePath) {
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务仍在运行"),
-        QStringLiteral("请先停止或等待当前任务结束，再切换工程。"));
+        this, QCoreApplication::translate("Workbench", "任务仍在运行"),
+        QCoreApplication::translate("Workbench", "请先停止或等待当前任务结束，再切换工程。"));
     return false;
   }
   if (!confirmDiscardChanges()) {
@@ -615,7 +615,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
   QString error;
   if (!mWorkspace.load(filePath, &error)) {
     mSuppressSnapshots = false;
-    showError(QStringLiteral("无法打开工程"), error);
+    showError(QCoreApplication::translate("Workbench", "无法打开工程"), error);
     return false;
   }
   if (mCurrentRecovery.has_value() &&
@@ -624,23 +624,22 @@ bool MainWindow::openProjectFile(const QString &filePath) {
     QString discardError;
     if (!discardCurrentRecovery(&discardError)) {
       appendTaskEvent(
-          QStringLiteral("旧恢复工作区清理失败：%1").arg(discardError));
+          QCoreApplication::translate("Workbench", "旧恢复工作区清理失败：%1").arg(discardError));
     }
   }
   mRecoveryBlocked = true;
   updateWorkspaceUi();
-  statusBar()->showMessage(QStringLiteral("正在检查未完成的导入事务…"));
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在检查未完成的导入事务…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const bool recovered = recoverInterruptedProjectImports(&error);
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!recovered) {
     updateWorkspaceUi();
-    appendTaskEvent(QStringLiteral("工程已打开，但未完成的导入事务恢复失败：%1")
+    appendTaskEvent(QCoreApplication::translate("Workbench", "工程已打开，但未完成的导入事务恢复失败：%1")
                         .arg(error));
-    showError(QStringLiteral("无法恢复未完成的导入"),
-              QStringLiteral(
-                  "工程已打开，但数据集导入事务尚未恢复。请勿手动修改 datasets "
+    showError(QCoreApplication::translate("Workbench", "无法恢复未完成的导入"),
+              QCoreApplication::translate("Workbench", "工程已打开，但数据集导入事务尚未恢复。请勿手动修改 datasets "
                   "目录中的隐藏事务文件；修复后重新打开工程即可重试。\n\n%1")
                   .arg(error));
     mSuppressSnapshots = false;
@@ -650,25 +649,25 @@ bool MainWindow::openProjectFile(const QString &filePath) {
   QString trainingRecoveryError;
   if (!recoverInterruptedTraining(&trainingRecoveryError)) {
     appendTaskEvent(
-        QStringLiteral("工程已打开，但未完成训练的检查点恢复失败：%1")
+        QCoreApplication::translate("Workbench", "工程已打开，但未完成训练的检查点恢复失败：%1")
             .arg(trainingRecoveryError));
     QMessageBox::warning(
-        this, QStringLiteral("训练检查点恢复待处理"),
-        QStringLiteral("工程和训练输出仍保留在磁盘上，但未能自动关联最近的"
+        this, QCoreApplication::translate("Workbench", "训练检查点恢复待处理"),
+        QCoreApplication::translate("Workbench", "工程和训练输出仍保留在磁盘上，但未能自动关联最近的"
                        "完整检查点。\n\n%1")
             .arg(trainingRecoveryError));
   }
   if (mWorkspace.hasPendingDataMigration()) {
-    statusBar()->showMessage(QStringLiteral("正在完成上次中断的工程数据迁移…"));
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在完成上次中断的工程数据迁移…"));
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const bool migrated = finalizePendingProjectSave(&error);
     QApplication::restoreOverrideCursor();
     statusBar()->clearMessage();
     if (!migrated) {
       appendTaskEvent(
-          QStringLiteral("工程已打开，但待迁移数据尚未完成：%1").arg(error));
-      showError(QStringLiteral("工程数据迁移待恢复"),
-                QStringLiteral("工程清单已安全打开，当前数据仍保留在原工作区。"
+          QCoreApplication::translate("Workbench", "工程已打开，但待迁移数据尚未完成：%1").arg(error));
+      showError(QCoreApplication::translate("Workbench", "工程数据迁移待恢复"),
+                QCoreApplication::translate("Workbench", "工程清单已安全打开，当前数据仍保留在原工作区。"
                                "可修复目标位置后再次保存以重试迁移。\n\n%1")
                     .arg(error));
     }
@@ -702,9 +701,8 @@ bool MainWindow::openProjectFile(const QString &filePath) {
         if (sameManagedRoot && snapshotProject != currentProject) {
           const QMessageBox::StandardButton recoverSnapshot =
               QMessageBox::question(
-                  this, QStringLiteral("发现较新的自动恢复版本"),
-                  QStringLiteral(
-                      "检测到异常退出前保存的工程状态，与当前工程文件不同。"
+                  this, QCoreApplication::translate("Workbench", "发现较新的自动恢复版本"),
+                  QCoreApplication::translate("Workbench", "检测到异常退出前保存的工程状态，与当前工程文件不同。"
                       "是否将它恢复为一个新工程文件？\n\n快照时间：%1")
                       .arg(latest.createdUtc.toLocalTime().toString(
                           QStringLiteral("yyyy-MM-dd HH:mm:ss"))),
@@ -728,10 +726,10 @@ bool MainWindow::openProjectFile(const QString &filePath) {
                     latest, recoveredPath, &snapshotError) &&
                 mWorkspace.load(recoveredPath, &snapshotError)) {
               appendTaskEvent(
-                  QStringLiteral("已恢复异常退出前的自动快照：%1")
+                  QCoreApplication::translate("Workbench", "已恢复异常退出前的自动快照：%1")
                       .arg(QDir::toNativeSeparators(recoveredPath)));
             } else {
-              showError(QStringLiteral("无法恢复自动快照"),
+              showError(QCoreApplication::translate("Workbench", "无法恢复自动快照"),
                         snapshotError);
             }
           }
@@ -740,14 +738,14 @@ bool MainWindow::openProjectFile(const QString &filePath) {
     }
     if (!snapshotError.isEmpty()) {
       appendTaskEvent(
-          QStringLiteral("自动快照检查提示：%1").arg(snapshotError));
+          QCoreApplication::translate("Workbench", "自动快照检查提示：%1").arg(snapshotError));
     }
   }
   mSuppressSnapshots = false;
   snapshotCurrentProject();
   updateWorkspaceUi();
   appendTaskEvent(
-      QStringLiteral("已打开工程：%1").arg(QDir::toNativeSeparators(filePath)));
+      QCoreApplication::translate("Workbench", "已打开工程：%1").arg(QDir::toNativeSeparators(filePath)));
   return true;
 }
 
@@ -768,7 +766,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     QString discardError;
     if (!discardCurrentRecovery(&discardError)) {
       appendTaskEvent(
-          QStringLiteral("退出时恢复工作区清理失败，将保留供下次恢复：%1")
+          QCoreApplication::translate("Workbench", "退出时恢复工作区清理失败，将保留供下次恢复：%1")
               .arg(discardError));
     }
     mProcessSupervisor.shutdown();
@@ -783,7 +781,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
   if (mProcessSupervisor.isRunning()) {
     mClosePending = true;
-    statusBar()->showMessage(QStringLiteral("正在停止任务，完成后将关闭软件…"));
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在停止任务，完成后将关闭软件…"));
     mProcessSupervisor.stop();
     event->ignore();
     return;
@@ -797,7 +795,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   QString discardError;
   if (!discardCurrentRecovery(&discardError)) {
     appendTaskEvent(
-        QStringLiteral("退出时恢复工作区清理失败，将保留供下次恢复：%1")
+        QCoreApplication::translate("Workbench", "退出时恢复工作区清理失败，将保留供下次恢复：%1")
             .arg(discardError));
   }
   mProcessSupervisor.shutdown();
@@ -806,69 +804,68 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 void MainWindow::createActions() {
   mNewProjectAction = new QAction(style()->standardIcon(QStyle::SP_FileIcon),
-                                  QStringLiteral("新建工程"), this);
+                                  QCoreApplication::translate("Workbench", "新建工程"), this);
   mNewProjectAction->setObjectName(QStringLiteral("newProjectAction"));
   mNewProjectAction->setShortcut(QKeySequence::New);
-  mNewProjectAction->setToolTip(QStringLiteral("新建工程"));
+  mNewProjectAction->setToolTip(QCoreApplication::translate("Workbench", "新建工程"));
   connect(mNewProjectAction, &QAction::triggered, this,
           &MainWindow::newProject);
 
   mOpenProjectAction =
       new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton),
-                  QStringLiteral("打开工程"), this);
+                  QCoreApplication::translate("Workbench", "打开工程"), this);
   mOpenProjectAction->setShortcut(QKeySequence::Open);
-  mOpenProjectAction->setToolTip(QStringLiteral("打开工程"));
+  mOpenProjectAction->setToolTip(QCoreApplication::translate("Workbench", "打开工程"));
   connect(mOpenProjectAction, &QAction::triggered, this, [this]() {
     const QString filePath = QFileDialog::getOpenFileName(
-        this, QStringLiteral("打开 Gaussian Scene Workbench 工程"), {},
-        QStringLiteral(
-            "GSW Project (*.gsw.json);;JSON (*.json);;All files (*.*)"));
+        this, QCoreApplication::translate("Workbench", "打开 Gaussian Scene Workbench 工程"), {},
+        QCoreApplication::translate("Workbench", "GSW Project (*.gsw.json);;JSON (*.json);;All files (*.*)"));
     if (!filePath.isEmpty()) {
       openProjectFile(filePath);
     }
   });
 
   mSaveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
-                            QStringLiteral("保存工程"), this);
+                            QCoreApplication::translate("Workbench", "保存工程"), this);
   mSaveAction->setObjectName(QStringLiteral("saveProjectAction"));
   mSaveAction->setShortcut(QKeySequence::Save);
-  mSaveAction->setToolTip(QStringLiteral("保存工程"));
+  mSaveAction->setToolTip(QCoreApplication::translate("Workbench", "保存工程"));
   connect(mSaveAction, &QAction::triggered, this,
           [this]() { saveProject(false); });
 
-  mSaveAsAction = new QAction(QStringLiteral("工程另存为..."), this);
+  mSaveAsAction = new QAction(QCoreApplication::translate("Workbench", "工程另存为..."), this);
   mSaveAsAction->setObjectName(QStringLiteral("saveProjectAsAction"));
   mSaveAsAction->setShortcut(QKeySequence::SaveAs);
   connect(mSaveAsAction, &QAction::triggered, this,
           [this]() { saveProject(true); });
 
   mRecoveryCenterAction =
-      new QAction(QStringLiteral("恢复中心..."), this);
+      new QAction(QCoreApplication::translate("Workbench", "恢复中心..."), this);
   mRecoveryCenterAction->setObjectName(
       QStringLiteral("recoveryCenterAction"));
   mRecoveryCenterAction->setToolTip(
-      QStringLiteral("恢复异常退出时保留的未命名工程"));
+      QCoreApplication::translate("Workbench", "恢复异常退出时保留的未命名工程"));
   connect(mRecoveryCenterAction, &QAction::triggered, this,
           [this]() { showRecoveryCenter(false); });
 
   mSnapshotHistoryAction =
-      new QAction(QStringLiteral("版本历史..."), this);
+      new QAction(QCoreApplication::translate("Workbench", "版本历史..."), this);
   mSnapshotHistoryAction->setObjectName(
       QStringLiteral("snapshotHistoryAction"));
   mSnapshotHistoryAction->setToolTip(
-      QStringLiteral("查看并恢复工程自动快照"));
+      QCoreApplication::translate("Workbench", "查看并恢复工程自动快照"));
   connect(mSnapshotHistoryAction, &QAction::triggered, this,
           &MainWindow::showSnapshotHistory);
 
   mConfigureBackupAction =
-      new QAction(QStringLiteral("设置第二存储位置..."), this);
+      new QAction(QCoreApplication::translate("Workbench", "设置第二存储位置..."), this);
   mConfigureBackupAction->setObjectName(
       QStringLiteral("configureExternalBackupAction"));
   connect(mConfigureBackupAction, &QAction::triggered, this,
           &MainWindow::configureExternalBackup);
 
   mExternalBackupsAction =
-      new QAction(QStringLiteral("外部备份与恢复..."), this);
+      new QAction(QCoreApplication::translate("Workbench", "外部备份与恢复..."), this);
   mExternalBackupsAction->setObjectName(
       QStringLiteral("externalBackupsAction"));
   connect(mExternalBackupsAction, &QAction::triggered, this,
@@ -876,160 +873,159 @@ void MainWindow::createActions() {
 
   mImportDatasetAction =
       new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
-                  QStringLiteral("添加照片/视频..."), this);
+                  QCoreApplication::translate("Workbench", "添加照片/视频..."), this);
   mImportDatasetAction->setObjectName(QStringLiteral("importDatasetAction"));
   mImportDatasetAction->setToolTip(
-      QStringLiteral("直接选择照片或视频；视频会自动抽帧"));
+      QCoreApplication::translate("Workbench", "直接选择照片或视频；视频会自动抽帧"));
   connect(mImportDatasetAction, &QAction::triggered, this,
           &MainWindow::importDataset);
 
   mImportDatasetDirectoryAction =
       new QAction(style()->standardIcon(QStyle::SP_DirIcon),
-                  QStringLiteral("添加媒体目录..."), this);
+                  QCoreApplication::translate("Workbench", "添加媒体目录..."), this);
   mImportDatasetDirectoryAction->setObjectName(
       QStringLiteral("importDatasetDirectoryAction"));
   mImportDatasetDirectoryAction->setToolTip(
-      QStringLiteral("递归添加目录中的照片与视频"));
+      QCoreApplication::translate("Workbench", "递归添加目录中的照片与视频"));
   connect(mImportDatasetDirectoryAction, &QAction::triggered, this,
           &MainWindow::importDatasetDirectory);
 
   mAttachDatasetAction =
       new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
-                  QStringLiteral("关联已有数据集..."), this);
+                  QCoreApplication::translate("Workbench", "关联已有数据集..."), this);
   mAttachDatasetAction->setObjectName(QStringLiteral("attachDatasetAction"));
-  mAttachDatasetAction->setToolTip(QStringLiteral(
-      "直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
+  mAttachDatasetAction->setToolTip(QCoreApplication::translate("Workbench", "直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
   connect(mAttachDatasetAction, &QAction::triggered, this,
           &MainWindow::attachExistingDataset);
 
   mImportSceneAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QStringLiteral("导入 PLY 场景/网格"), this);
+                  QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), this);
   mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
   mImportSceneAction->setToolTip(
-      QStringLiteral("导入 PLY 点云、高斯场景或三角网格"));
+      QCoreApplication::translate("Workbench", "导入 PLY 点云、高斯场景或三角网格"));
   connect(mImportSceneAction, &QAction::triggered, this,
           &MainWindow::importScene);
 
   mClearDatasetAction =
       new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QStringLiteral("清理数据集..."), this);
+                  QCoreApplication::translate("Workbench", "清理数据集..."), this);
   mClearDatasetAction->setObjectName(QStringLiteral("clearDatasetAction"));
   mClearDatasetAction->setToolTip(
-      QStringLiteral("清理托管数据集，或仅解除外部数据集关联"));
+      QCoreApplication::translate("Workbench", "清理托管数据集，或仅解除外部数据集关联"));
   connect(mClearDatasetAction, &QAction::triggered, this,
           &MainWindow::clearDatasetImport);
 
   mClearReconstructionAction =
       new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QStringLiteral("清理重建结果..."), this);
+                  QCoreApplication::translate("Workbench", "清理重建结果..."), this);
   mClearReconstructionAction->setObjectName(
       QStringLiteral("clearReconstructionAction"));
   mClearReconstructionAction->setToolTip(
-      QStringLiteral("只清理托管数据集内的 COLMAP 结果，保留照片和场景"));
+      QCoreApplication::translate("Workbench", "只清理托管数据集内的 COLMAP 结果，保留照片和场景"));
   connect(mClearReconstructionAction, &QAction::triggered, this,
           &MainWindow::clearReconstructionImport);
 
   mClearSceneAction =
       new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QStringLiteral("卸载场景..."), this);
+                  QCoreApplication::translate("Workbench", "卸载场景..."), this);
   mClearSceneAction->setObjectName(QStringLiteral("clearSceneAction"));
   mClearSceneAction->setToolTip(
-      QStringLiteral("从当前工程卸载场景，不删除 PLY 或训练输出"));
+      QCoreApplication::translate("Workbench", "从当前工程卸载场景，不删除 PLY 或训练输出"));
   connect(mClearSceneAction, &QAction::triggered, this,
           &MainWindow::clearSceneImport);
 
   mClearTasksAction =
       new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QStringLiteral("清空任务记录..."), this);
+                  QCoreApplication::translate("Workbench", "清空任务记录..."), this);
   mClearTasksAction->setObjectName(QStringLiteral("clearTasksAction"));
   mClearTasksAction->setToolTip(
-      QStringLiteral("清空当前窗口中的任务表和日志，不删除任务输出"));
+      QCoreApplication::translate("Workbench", "清空当前窗口中的任务表和日志，不删除任务输出"));
   connect(mClearTasksAction, &QAction::triggered, this,
           &MainWindow::clearTaskHistory);
 
   auto *environmentAction =
       new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QStringLiteral("检查环境"), this);
+                  QCoreApplication::translate("Workbench", "检查环境"), this);
   environmentAction->setShortcut(QKeySequence(QStringLiteral("F6")));
-  environmentAction->setToolTip(QStringLiteral("检查训练与重建环境"));
+  environmentAction->setToolTip(QCoreApplication::translate("Workbench", "检查训练与重建环境"));
   connect(environmentAction, &QAction::triggered, this,
           &MainWindow::runEnvironmentCheck);
   environmentAction->setObjectName(QStringLiteral("environmentAction"));
 
   mReconstructAction =
       new QAction(style()->standardIcon(QStyle::SP_ComputerIcon),
-                  QStringLiteral("COLMAP 重建..."), this);
+                  QCoreApplication::translate("Workbench", "COLMAP 重建..."), this);
   mReconstructAction->setShortcut(QKeySequence(QStringLiteral("F7")));
-  mReconstructAction->setToolTip(QStringLiteral("计算相机位姿与稀疏点云 (F7)"));
+  mReconstructAction->setToolTip(QCoreApplication::translate("Workbench", "计算相机位姿与稀疏点云 (F7)"));
   mReconstructAction->setObjectName(QStringLiteral("reconstructAction"));
   connect(mReconstructAction, &QAction::triggered, this,
           &MainWindow::startReconstruction);
 
   mTrainAction = new QAction(style()->standardIcon(QStyle::SP_MediaPlay),
-                             QStringLiteral("开始训练..."), this);
-  mTrainAction->setToolTip(QStringLiteral("启动当前工程训练"));
+                             QCoreApplication::translate("Workbench", "开始训练..."), this);
+  mTrainAction->setToolTip(QCoreApplication::translate("Workbench", "启动当前工程训练"));
   connect(mTrainAction, &QAction::triggered, this, &MainWindow::startTraining);
 
   mStopAction = new QAction(style()->standardIcon(QStyle::SP_MediaStop),
-                            QStringLiteral("停止任务"), this);
-  mStopAction->setToolTip(QStringLiteral("停止当前任务"));
+                            QCoreApplication::translate("Workbench", "停止任务"), this);
+  mStopAction->setToolTip(QCoreApplication::translate("Workbench", "停止当前任务"));
   mStopAction->setEnabled(false);
   connect(mStopAction, &QAction::triggered, &mProcessSupervisor,
           &ProcessSupervisor::stop);
 
   auto *resetCameraAction =
       new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QStringLiteral("重置视图"), this);
+                  QCoreApplication::translate("Workbench", "重置视图"), this);
   resetCameraAction->setShortcut(QKeySequence(QStringLiteral("Home")));
-  resetCameraAction->setToolTip(QStringLiteral("重置视图"));
+  resetCameraAction->setToolTip(QCoreApplication::translate("Workbench", "重置视图"));
   connect(resetCameraAction, &QAction::triggered, mViewport,
           &NativeViewport::resetCamera);
   resetCameraAction->setObjectName(QStringLiteral("resetCameraAction"));
 
   mRenderModeActionGroup = new QActionGroup(this);
   mRenderModeActionGroup->setExclusive(true);
-  mGaussianRenderAction = new QAction(QStringLiteral("高斯"), this);
+  mGaussianRenderAction = new QAction(QCoreApplication::translate("Workbench", "高斯"), this);
   mGaussianRenderAction->setObjectName(QStringLiteral("gaussianRenderAction"));
   mGaussianRenderAction->setCheckable(true);
   mGaussianRenderAction->setEnabled(false);
   mGaussianRenderAction->setToolTip(
-      QStringLiteral("使用缩放、旋转与透明度显示屏幕空间高斯"));
+      QCoreApplication::translate("Workbench", "使用缩放、旋转与透明度显示屏幕空间高斯"));
   mRenderModeActionGroup->addAction(mGaussianRenderAction);
   connect(mGaussianRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
   });
 
-  mMeshRenderAction = new QAction(QStringLiteral("网格"), this);
+  mMeshRenderAction = new QAction(QCoreApplication::translate("Workbench", "网格"), this);
   mMeshRenderAction->setObjectName(QStringLiteral("meshRenderAction"));
   mMeshRenderAction->setCheckable(true);
   mMeshRenderAction->setEnabled(false);
   mMeshRenderAction->setToolTip(
-      QStringLiteral("显示 PLY 面拓扑三角化后的着色网格"));
+      QCoreApplication::translate("Workbench", "显示 PLY 面拓扑三角化后的着色网格"));
   mRenderModeActionGroup->addAction(mMeshRenderAction);
   connect(mMeshRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
   });
 
-  mPointRenderAction = new QAction(QStringLiteral("点云"), this);
+  mPointRenderAction = new QAction(QCoreApplication::translate("Workbench", "点云"), this);
   mPointRenderAction->setObjectName(QStringLiteral("pointRenderAction"));
   mPointRenderAction->setCheckable(true);
   mPointRenderAction->setChecked(true);
   mPointRenderAction->setToolTip(
-      QStringLiteral("显示静态点云或训练中持续增密的高斯中心点"));
+      QCoreApplication::translate("Workbench", "显示静态点云或训练中持续增密的高斯中心点"));
   mRenderModeActionGroup->addAction(mPointRenderAction);
   connect(mPointRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   });
 
-  mShowCamerasAction = new QAction(QStringLiteral("相机轨迹"), this);
+  mShowCamerasAction = new QAction(QCoreApplication::translate("Workbench", "相机轨迹"), this);
   mShowCamerasAction->setObjectName(QStringLiteral("showCamerasAction"));
   mShowCamerasAction->setCheckable(true);
   mShowCamerasAction->setChecked(
       QSettings().value(QStringLiteral("view/showCameras"), false).toBool());
   mShowCamerasAction->setEnabled(false);
   mShowCamerasAction->setToolTip(
-      QStringLiteral("显示 cameras.json 中的相机视锥和拍摄路径"));
+      QCoreApplication::translate("Workbench", "显示 cameras.json 中的相机视锥和拍摄路径"));
   mViewport->setShowCameras(mShowCamerasAction->isChecked());
   connect(mShowCamerasAction, &QAction::toggled, this,
           [this](const bool enabled) {
@@ -1041,68 +1037,68 @@ void MainWindow::createActions() {
   mEditModeActionGroup->setExclusive(true);
 
   mInspectAction = new QAction(style()->standardIcon(QStyle::SP_ArrowUp),
-                               QStringLiteral("查看"), this);
+                               QCoreApplication::translate("Workbench", "查看"), this);
   mInspectAction->setCheckable(true);
   mInspectAction->setChecked(true);
   mInspectAction->setShortcut(QKeySequence(QStringLiteral("V")));
-  mInspectAction->setToolTip(QStringLiteral("查看与导航 (V)"));
+  mInspectAction->setToolTip(QCoreApplication::translate("Workbench", "查看与导航 (V)"));
   mEditModeActionGroup->addAction(mInspectAction);
   connect(mInspectAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
   });
 
-  mFindModelAction = new QAction(QStringLiteral("查找模型"), this);
+  mFindModelAction = new QAction(QCoreApplication::translate("Workbench", "查找模型"), this);
   mFindModelAction->setObjectName(QStringLiteral("findModelAction"));
   mFindModelAction->setShortcut(QKeySequence(QStringLiteral("F")));
   mFindModelAction->setToolTip(
-      QStringLiteral("自动选中模型并按完整范围拉近视角 (F)"));
+      QCoreApplication::translate("Workbench", "自动选中模型并按完整范围拉近视角 (F)"));
   connect(mFindModelAction, &QAction::triggered, this, [this]() {
     if (mViewport->focusModel()) {
       statusBar()->showMessage(
-          QStringLiteral("已找到并聚焦模型；G 移动，R 旋转，S 缩放"),
+          QCoreApplication::translate("Workbench", "已找到并聚焦模型；G 移动，R 旋转，S 缩放"),
           4500);
     } else {
-      statusBar()->showMessage(QStringLiteral("当前没有可查找的模型"), 3500);
+      statusBar()->showMessage(QCoreApplication::translate("Workbench", "当前没有可查找的模型"), 3500);
     }
   });
 
-  mMoveModelAction = new QAction(QStringLiteral("移动模型"), this);
+  mMoveModelAction = new QAction(QCoreApplication::translate("Workbench", "移动模型"), this);
   mMoveModelAction->setObjectName(QStringLiteral("moveModelAction"));
   mMoveModelAction->setCheckable(true);
   mMoveModelAction->setShortcut(QKeySequence(QStringLiteral("G")));
   mMoveModelAction->setToolTip(
-      QStringLiteral("Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附"));
+      QCoreApplication::translate("Workbench", "Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附"));
   mEditModeActionGroup->addAction(mMoveModelAction);
   connect(mMoveModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForMove);
 
-  mRotateModelAction = new QAction(QStringLiteral("旋转模型"), this);
+  mRotateModelAction = new QAction(QCoreApplication::translate("Workbench", "旋转模型"), this);
   mRotateModelAction->setObjectName(QStringLiteral("rotateModelAction"));
   mRotateModelAction->setCheckable(true);
   mRotateModelAction->setShortcut(QKeySequence(QStringLiteral("R")));
   mRotateModelAction->setToolTip(
-      QStringLiteral("Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转"));
+      QCoreApplication::translate("Workbench", "Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转"));
   mEditModeActionGroup->addAction(mRotateModelAction);
   connect(mRotateModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForRotate);
 
-  mScaleModelAction = new QAction(QStringLiteral("缩放模型"), this);
+  mScaleModelAction = new QAction(QCoreApplication::translate("Workbench", "缩放模型"), this);
   mScaleModelAction->setObjectName(QStringLiteral("scaleModelAction"));
   mScaleModelAction->setCheckable(true);
   mScaleModelAction->setShortcut(QKeySequence(QStringLiteral("S")));
   mScaleModelAction->setToolTip(
-      QStringLiteral("Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附"));
+      QCoreApplication::translate("Workbench", "Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附"));
   mEditModeActionGroup->addAction(mScaleModelAction);
   connect(mScaleModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForScale);
 
   mRectangleAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QStringLiteral("框选"), this);
+                  QCoreApplication::translate("Workbench", "框选"), this);
   mRectangleAction->setCheckable(true);
   mRectangleAction->setShortcut(QKeySequence(QStringLiteral("Shift+R")));
   mRectangleAction->setToolTip(
-      QStringLiteral("矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+      QCoreApplication::translate("Workbench", "矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mRectangleAction);
   connect(mRectangleAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
@@ -1110,11 +1106,11 @@ void MainWindow::createActions() {
 
   mLassoAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
-                  QStringLiteral("套索"), this);
+                  QCoreApplication::translate("Workbench", "套索"), this);
   mLassoAction->setCheckable(true);
   mLassoAction->setShortcut(QKeySequence(QStringLiteral("L")));
   mLassoAction->setToolTip(
-      QStringLiteral("套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+      QCoreApplication::translate("Workbench", "套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mLassoAction);
   connect(mLassoAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Lasso);
@@ -1122,11 +1118,11 @@ void MainWindow::createActions() {
 
   mBrushAction =
       new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
-                  QStringLiteral("笔刷"), this);
+                  QCoreApplication::translate("Workbench", "笔刷"), this);
   mBrushAction->setCheckable(true);
   mBrushAction->setShortcut(QKeySequence(QStringLiteral("B")));
   mBrushAction->setToolTip(
-      QStringLiteral("连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+      QCoreApplication::translate("Workbench", "连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mBrushAction);
   connect(mBrushAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Brush);
@@ -1134,77 +1130,77 @@ void MainWindow::createActions() {
 
   mVisibleOnlyAction =
       new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton),
-                  QStringLiteral("仅选择可见点"), this);
+                  QCoreApplication::translate("Workbench", "仅选择可见点"), this);
   mVisibleOnlyAction->setCheckable(true);
   mVisibleOnlyAction->setChecked(true);
-  mVisibleOnlyAction->setToolTip(QStringLiteral("仅选择当前视角可见的点"));
+  mVisibleOnlyAction->setToolTip(QCoreApplication::translate("Workbench", "仅选择当前视角可见的点"));
   connect(mVisibleOnlyAction, &QAction::toggled, mViewport,
           &NativeViewport::setVisibleOnlySelection);
 
   mClearSelectionAction =
       new QAction(style()->standardIcon(QStyle::SP_DialogResetButton),
-                  QStringLiteral("清除选择"), this);
+                  QCoreApplication::translate("Workbench", "清除选择"), this);
   mClearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
-  mClearSelectionAction->setToolTip(QStringLiteral("清除选择 (Esc)"));
+  mClearSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "清除选择 (Esc)"));
   connect(mClearSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::clearSelection);
 
   mInvertSelectionAction =
       new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QStringLiteral("反选"), this);
+                  QCoreApplication::translate("Workbench", "反选"), this);
   mInvertSelectionAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
-  mInvertSelectionAction->setToolTip(QStringLiteral("反选未删除的点 (Ctrl+I)"));
+  mInvertSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "反选未删除的点 (Ctrl+I)"));
   connect(mInvertSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::invertSelection);
 
   mDeleteSelectionAction =
       new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QStringLiteral("删除所选"), this);
+                  QCoreApplication::translate("Workbench", "删除所选"), this);
   mDeleteSelectionAction->setShortcut(QKeySequence::Delete);
-  mDeleteSelectionAction->setToolTip(QStringLiteral("删除所选点 (Delete)"));
+  mDeleteSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "删除所选点 (Delete)"));
   connect(mDeleteSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::deleteSelection);
 
   mUndoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
-                                QStringLiteral("撤销编辑"), this);
+                                QCoreApplication::translate("Workbench", "撤销编辑"), this);
   mUndoEditAction->setShortcut(QKeySequence::Undo);
-  mUndoEditAction->setToolTip(QStringLiteral("撤销上一次编辑 (Ctrl+Z)"));
+  mUndoEditAction->setToolTip(QCoreApplication::translate("Workbench", "撤销上一次编辑 (Ctrl+Z)"));
   connect(mUndoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::undoEdit);
 
   mRedoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
-                                QStringLiteral("重做编辑"), this);
+                                QCoreApplication::translate("Workbench", "重做编辑"), this);
   mRedoEditAction->setShortcut(QKeySequence::Redo);
-  mRedoEditAction->setToolTip(QStringLiteral("重做上一次编辑 (Ctrl+Y)"));
+  mRedoEditAction->setToolTip(QCoreApplication::translate("Workbench", "重做上一次编辑 (Ctrl+Y)"));
   connect(mRedoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::redoEdit);
 
   mExportCropAction =
       new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
-                  QStringLiteral("裁剪另存为..."), this);
+                  QCoreApplication::translate("Workbench", "裁剪另存为..."), this);
   mExportCropAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
   mExportCropAction->setToolTip(
-      QStringLiteral("按原始顶点索引无损导出裁剪 PLY"));
+      QCoreApplication::translate("Workbench", "按原始顶点索引无损导出裁剪 PLY"));
   connect(mExportCropAction, &QAction::triggered, this,
           &MainWindow::exportCroppedScene);
 
   mExportCoordinateReportAction =
-      new QAction(QStringLiteral("导出坐标与尺寸报告..."), this);
+      new QAction(QCoreApplication::translate("Workbench", "导出坐标与尺寸报告..."), this);
   mExportCoordinateReportAction->setObjectName(
       QStringLiteral("exportCoordinateReportAction"));
   mExportCoordinateReportAction->setToolTip(
-      QStringLiteral("导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移"));
+      QCoreApplication::translate("Workbench", "导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移"));
   connect(mExportCoordinateReportAction, &QAction::triggered, this,
           &MainWindow::exportCoordinateReport);
 
   mReferencePlaneActionGroup = new QActionGroup(this);
   mReferencePlaneActionGroup->setExclusive(true);
   mModelBasePlaneAction =
-      new QAction(QStringLiteral("模型底部（推荐）"), this);
+      new QAction(QCoreApplication::translate("Workbench", "模型底部（推荐）"), this);
   mModelBasePlaneAction->setObjectName(
       QStringLiteral("modelBaseReferencePlaneAction"));
   mModelBasePlaneAction->setCheckable(true);
-  mWorldZeroPlaneAction = new QAction(QStringLiteral("世界坐标 Z=0"), this);
+  mWorldZeroPlaneAction = new QAction(QCoreApplication::translate("Workbench", "世界坐标 Z=0"), this);
   mWorldZeroPlaneAction->setObjectName(
       QStringLiteral("worldZeroReferencePlaneAction"));
   mWorldZeroPlaneAction->setCheckable(true);
@@ -1236,12 +1232,12 @@ void MainWindow::createActions() {
 
   updateEditActions();
 
-  auto *exitAction = new QAction(QStringLiteral("退出"), this);
+  auto *exitAction = new QAction(QCoreApplication::translate("Workbench", "退出"), this);
   exitAction->setShortcut(QKeySequence::Quit);
   connect(exitAction, &QAction::triggered, this, &QWidget::close);
   exitAction->setObjectName(QStringLiteral("exitAction"));
 
-  auto *resetLayoutAction = new QAction(QStringLiteral("重置工作区布局"), this);
+  auto *resetLayoutAction = new QAction(QCoreApplication::translate("Workbench", "重置工作区布局"), this);
   connect(resetLayoutAction, &QAction::triggered, this,
           &MainWindow::resetDockLayout);
   resetLayoutAction->setObjectName(QStringLiteral("resetLayoutAction"));
@@ -1256,7 +1252,7 @@ void MainWindow::createActions() {
 }
 
 void MainWindow::createMenus() {
-  QMenu *fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
+  QMenu *fileMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "文件"));
   fileMenu->addAction(actions().at(0));
   fileMenu->addAction(actions().at(1));
   fileMenu->addSeparator();
@@ -1272,7 +1268,7 @@ void MainWindow::createMenus() {
   fileMenu->addAction(mImportDatasetDirectoryAction);
   fileMenu->addAction(mAttachDatasetAction);
   fileMenu->addAction(mImportSceneAction);
-  QMenu *fileCleanupMenu = fileMenu->addMenu(QStringLiteral("清理"));
+  QMenu *fileCleanupMenu = fileMenu->addMenu(QCoreApplication::translate("Workbench", "清理"));
   fileCleanupMenu->addAction(mClearDatasetAction);
   fileCleanupMenu->addAction(mClearReconstructionAction);
   fileCleanupMenu->addAction(mClearSceneAction);
@@ -1280,7 +1276,7 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(actions().at(5));
 
-  QMenu *editMenu = menuBar()->addMenu(QStringLiteral("编辑"));
+  QMenu *editMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "编辑"));
   editMenu->addAction(mUndoEditAction);
   editMenu->addAction(mRedoEditAction);
   editMenu->addSeparator();
@@ -1288,11 +1284,11 @@ void MainWindow::createMenus() {
   editMenu->addAction(mInvertSelectionAction);
   editMenu->addAction(mDeleteSelectionAction);
 
-  QMenu *workflowMenu = menuBar()->addMenu(QStringLiteral("工作流"));
+  QMenu *workflowMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "工作流"));
   workflowMenu->addAction(mImportDatasetAction);
   workflowMenu->addAction(mImportDatasetDirectoryAction);
   QMenu *workflowCleanupMenu =
-      workflowMenu->addMenu(QStringLiteral("清理"));
+      workflowMenu->addMenu(QCoreApplication::translate("Workbench", "清理"));
   workflowCleanupMenu->addAction(mClearDatasetAction);
   workflowCleanupMenu->addAction(mClearReconstructionAction);
   workflowCleanupMenu->addAction(mClearSceneAction);
@@ -1304,7 +1300,7 @@ void MainWindow::createMenus() {
   workflowMenu->addAction(mTrainAction);
   workflowMenu->addAction(mStopAction);
 
-  QMenu *sceneMenu = menuBar()->addMenu(QStringLiteral("场景"));
+  QMenu *sceneMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景"));
   sceneMenu->addAction(mImportSceneAction);
   sceneMenu->addAction(actions().at(4));
   sceneMenu->addAction(mFindModelAction);
@@ -1321,14 +1317,40 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mExportCropAction);
   sceneMenu->addAction(mExportCoordinateReportAction);
 
-  QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
-  QMenu *renderMenu = viewMenu->addMenu(QStringLiteral("渲染模式"));
+  QMenu *viewMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图"));
+  auto *languageMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language"));
+  languageMenu->setObjectName(QStringLiteral("languageMenu"));
+  auto *languageGroup = new QActionGroup(languageMenu);
+  languageGroup->setExclusive(true);
+  for (const QString &language : AppLanguage::supported()) {
+    auto *action = languageMenu->addAction(AppLanguage::displayName(language));
+    action->setCheckable(true);
+    action->setData(language);
+    action->setChecked(language == AppLanguage::saved());
+    languageGroup->addAction(action);
+  }
+  connect(languageGroup, &QActionGroup::triggered, this, [this, languageGroup](QAction *action) {
+    const QString language = action->data().toString();
+    if (!AppLanguage::save(language)) {
+      for (auto *item : languageGroup->actions())
+        item->setChecked(item->data().toString() == AppLanguage::saved());
+      QMessageBox::warning(this, QCoreApplication::translate("Workbench", "语言设置"),
+                           QCoreApplication::translate("Workbench", "无法保存语言设置，请检查配置目录的写入权限。"));
+      return;
+    }
+    if (language != AppLanguage::current())
+      QMessageBox::information(this, QCoreApplication::translate("Workbench", "语言设置"),
+          QCoreApplication::translate("Workbench", "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。")
+              .arg(AppLanguage::displayName(language)));
+  });
+  viewMenu->addSeparator();
+  QMenu *renderMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式"));
   renderMenu->addAction(mGaussianRenderAction);
   renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
   viewMenu->addAction(mShowCamerasAction);
   QMenu *referencePlaneMenu =
-      viewMenu->addMenu(QStringLiteral("基准面网格"));
+      viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格"));
   referencePlaneMenu->addAction(mModelBasePlaneAction);
   referencePlaneMenu->addAction(mWorldZeroPlaneAction);
   viewMenu->addSeparator();
@@ -1338,19 +1360,19 @@ void MainWindow::createMenus() {
   viewMenu->addSeparator();
   viewMenu->addAction(actions().at(6));
 
-  QMenu *displayMenu = viewMenu->addMenu(QStringLiteral("显示与适配"));
+  QMenu *displayMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "显示与适配"));
   displayMenu->setObjectName(QStringLiteral("displaySettingsMenu"));
   mAutoScaleAction =
-      displayMenu->addAction(QStringLiteral("自动适配界面（推荐）"));
+      displayMenu->addAction(QCoreApplication::translate("Workbench", "自动适配界面（推荐）"));
   mAutoScaleAction->setObjectName(QStringLiteral("autoUiScaleAction"));
   mAutoScaleAction->setCheckable(true);
   mAutoScaleAction->setChecked(mAutomaticUiScale);
   mAutoScaleAction->setToolTip(
-      QStringLiteral("根据当前屏幕和窗口分辨率自动调整文字、控件与图标"));
+      QCoreApplication::translate("Workbench", "根据当前屏幕和窗口分辨率自动调整文字、控件与图标"));
   connect(mAutoScaleAction, &QAction::triggered, this,
           [this]() { setAutomaticUiScale(true, true); });
 
-  QMenu *scaleMenu = displayMenu->addMenu(QStringLiteral("手动界面比例"));
+  QMenu *scaleMenu = displayMenu->addMenu(QCoreApplication::translate("Workbench", "手动界面比例"));
   mScaleActionGroup = new QActionGroup(this);
   mScaleActionGroup->setExclusive(true);
   const QList<int> scales = {90, 100, 110, 125, 150};
@@ -1369,9 +1391,9 @@ void MainWindow::createMenus() {
           });
 
   displayMenu->addSeparator();
-  QMenu *resolutionMenu = displayMenu->addMenu(QStringLiteral("窗口分辨率"));
+  QMenu *resolutionMenu = displayMenu->addMenu(QCoreApplication::translate("Workbench", "窗口分辨率"));
   auto *fitWindowAction =
-      resolutionMenu->addAction(QStringLiteral("适合当前屏幕（自动）"));
+      resolutionMenu->addAction(QCoreApplication::translate("Workbench", "适合当前屏幕（自动）"));
   fitWindowAction->setObjectName(QStringLiteral("fitWindowToScreenAction"));
   connect(fitWindowAction, &QAction::triggered, this,
           &MainWindow::fitWindowToScreen);
@@ -1391,14 +1413,13 @@ void MainWindow::createMenus() {
             [this, resolution]() { applyWindowResolution(resolution); });
   }
 
-  QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("帮助"));
+  QMenu *helpMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "帮助"));
   auto *aboutAction =
-      helpMenu->addAction(QStringLiteral("关于 Gaussian Scene Workbench"));
+      helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"));
   connect(aboutAction, &QAction::triggered, this, [this]() {
     QMessageBox::about(
-        this, QStringLiteral("关于 Gaussian Scene Workbench"),
-        QStringLiteral(
-            "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>"
+        this, QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"),
+        QCoreApplication::translate("Workbench", "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>"
             "高斯场景研究工作台<br><br>"
             "Qt 6 原生桌面架构，构建日期 %1。<br>"
             "当前为原生桌面预览通道；稳定版仍保留在 main。")
@@ -1407,7 +1428,7 @@ void MainWindow::createMenus() {
 }
 
 void MainWindow::createToolBars() {
-  auto *mainToolbar = addToolBar(QStringLiteral("主工具"));
+  auto *mainToolbar = addToolBar(QCoreApplication::translate("Workbench", "主工具"));
   mainToolbar->setObjectName(QStringLiteral("mainToolbar"));
   mainToolbar->setMovable(false);
   mainToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -1423,7 +1444,7 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(mStopAction);
 
   addToolBarBreak(Qt::TopToolBarArea);
-  mRenderToolbar = addToolBar(QStringLiteral("渲染模式"));
+  mRenderToolbar = addToolBar(QCoreApplication::translate("Workbench", "渲染模式"));
   mRenderToolbar->setObjectName(QStringLiteral("renderToolbar"));
   mRenderToolbar->setMovable(false);
   mRenderToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -1433,7 +1454,7 @@ void MainWindow::createToolBars() {
   mRenderToolbar->addSeparator();
   mRenderToolbar->addAction(mShowCamerasAction);
 
-  mSelectionToolbar = addToolBar(QStringLiteral("选择模式"));
+  mSelectionToolbar = addToolBar(QCoreApplication::translate("Workbench", "选择模式"));
   mSelectionToolbar->setObjectName(QStringLiteral("selectionToolbar"));
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -1446,12 +1467,12 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->addAction(mVisibleOnlyAction);
   mSelectionToolbar->addSeparator();
   auto *brushRadiusLabel =
-      new QLabel(QStringLiteral("半径"), mSelectionToolbar);
+      new QLabel(QCoreApplication::translate("Workbench", "半径"), mSelectionToolbar);
   brushRadiusLabel->setObjectName(QStringLiteral("mutedLabel"));
   mSelectionToolbar->addWidget(brushRadiusLabel);
   mBrushRadiusSpin = new QSpinBox(mSelectionToolbar);
   mBrushRadiusSpin->setObjectName(QStringLiteral("brushRadiusSpin"));
-  mBrushRadiusSpin->setAccessibleName(QStringLiteral("笔刷半径"));
+  mBrushRadiusSpin->setAccessibleName(QCoreApplication::translate("Workbench", "笔刷半径"));
   mBrushRadiusSpin->setRange(4, 256);
   mBrushRadiusSpin->setSingleStep(4);
   mBrushRadiusSpin->setSuffix(QStringLiteral(" px"));
@@ -1471,7 +1492,7 @@ void MainWindow::createToolBars() {
           });
   mSelectionToolbar->addWidget(mBrushRadiusSpin);
 
-  mEditToolbar = addToolBar(QStringLiteral("编辑操作"));
+  mEditToolbar = addToolBar(QCoreApplication::translate("Workbench", "编辑操作"));
   mEditToolbar->setObjectName(QStringLiteral("editToolbar"));
   mEditToolbar->setMovable(false);
   mEditToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -1489,7 +1510,7 @@ void MainWindow::createToolBars() {
 }
 
 void MainWindow::createProjectDock() {
-  mProjectDock = new QDockWidget(QStringLiteral("工程"), this);
+  mProjectDock = new QDockWidget(QCoreApplication::translate("Workbench", "工程"), this);
   mProjectDock->setObjectName(QStringLiteral("projectDock"));
   mProjectDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                 Qt::RightDockWidgetArea);
@@ -1504,7 +1525,7 @@ void MainWindow::createProjectDock() {
   mProjectTree->setUniformRowHeights(true);
   mProjectTree->setObjectName(QStringLiteral("projectTree"));
   mProjectTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  mProjectTree->setToolTip(QStringLiteral("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
+  mProjectTree->setToolTip(QCoreApplication::translate("Workbench", "Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
@@ -1526,7 +1547,7 @@ void MainWindow::createProjectDock() {
       syncProjectTreeSelection(); return;
     }
     if (!mViewport->setSceneSelection(ids, active)) syncProjectTreeSelection();
-    statusBar()->showMessage(QStringLiteral("已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放")
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放")
                                 .arg(ids.size()), 6000);
   });
   connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
@@ -1563,7 +1584,7 @@ void MainWindow::createProjectDock() {
 }
 
 void MainWindow::createInspectorDock() {
-  mInspectorDock = new QDockWidget(QStringLiteral("属性"), this);
+  mInspectorDock = new QDockWidget(QCoreApplication::translate("Workbench", "属性"), this);
   mInspectorDock->setObjectName(QStringLiteral("inspectorDock"));
   mInspectorDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                   Qt::RightDockWidgetArea);
@@ -1582,7 +1603,7 @@ void MainWindow::createInspectorDock() {
   layout->setContentsMargins(12, 4, 12, 12);
   layout->setSpacing(8);
 
-  layout->addWidget(createSectionTitle(QStringLiteral("工程"), panel));
+  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "工程"), panel));
   auto *projectForm = new QFormLayout();
   projectForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   projectForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1592,11 +1613,11 @@ void MainWindow::createInspectorDock() {
   mProjectNameValue->setObjectName(QStringLiteral("projectNameValue"));
   mProjectRootValue = createValueLabel(panel);
   mProjectRootValue->setObjectName(QStringLiteral("projectRootValue"));
-  projectForm->addRow(QStringLiteral("名称"), mProjectNameValue);
-  projectForm->addRow(QStringLiteral("路径"), mProjectRootValue);
+  projectForm->addRow(QCoreApplication::translate("Workbench", "名称"), mProjectNameValue);
+  projectForm->addRow(QCoreApplication::translate("Workbench", "路径"), mProjectRootValue);
   layout->addLayout(projectForm);
 
-  layout->addWidget(createSectionTitle(QStringLiteral("数据集"), panel));
+  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "数据集"), panel));
   auto *datasetForm = new QFormLayout();
   datasetForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   datasetForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1604,11 +1625,11 @@ void MainWindow::createInspectorDock() {
   datasetForm->setVerticalSpacing(7);
   mDatasetValue = createValueLabel(panel);
   mImageCountValue = createValueLabel(panel);
-  datasetForm->addRow(QStringLiteral("目录"), mDatasetValue);
-  datasetForm->addRow(QStringLiteral("图像"), mImageCountValue);
+  datasetForm->addRow(QCoreApplication::translate("Workbench", "目录"), mDatasetValue);
+  datasetForm->addRow(QCoreApplication::translate("Workbench", "图像"), mImageCountValue);
   layout->addLayout(datasetForm);
 
-  layout->addWidget(createSectionTitle(QStringLiteral("场景"), panel));
+  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "场景"), panel));
   auto *sceneForm = new QFormLayout();
   sceneForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   sceneForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1626,18 +1647,18 @@ void MainWindow::createInspectorDock() {
   mDisplayShiftValue = createValueLabel(panel);
   mReferencePlaneValue = createValueLabel(panel);
   mSceneTransformValue = createValueLabel(panel);
-  sceneForm->addRow(QStringLiteral("文件"), mSceneValue);
-  sceneForm->addRow(QStringLiteral("数量"), mGaussianCountValue);
-  sceneForm->addRow(QStringLiteral("格式"), mPlyFormatValue);
-  sceneForm->addRow(QStringLiteral("相机"), mCameraCountValue);
-  sceneForm->addRow(QStringLiteral("坐标系"), mCoordinateSystemValue);
-  sceneForm->addRow(QStringLiteral("单位"), mSceneUnitValue);
-  sceneForm->addRow(QStringLiteral("中心"), mSceneCenterValue);
-  sceneForm->addRow(QStringLiteral("尺寸"), mSceneSizeValue);
-  sceneForm->addRow(QStringLiteral("范围"), mSceneBoundsValue);
-  sceneForm->addRow(QStringLiteral("显示变换"), mDisplayShiftValue);
-  sceneForm->addRow(QStringLiteral("模型变换"), mSceneTransformValue);
-  sceneForm->addRow(QStringLiteral("基准面"), mReferencePlaneValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "文件"), mSceneValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "数量"), mGaussianCountValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "格式"), mPlyFormatValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "相机"), mCameraCountValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "坐标系"), mCoordinateSystemValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "单位"), mSceneUnitValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "中心"), mSceneCenterValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "尺寸"), mSceneSizeValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "范围"), mSceneBoundsValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "显示变换"), mDisplayShiftValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "模型变换"), mSceneTransformValue);
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "基准面"), mReferencePlaneValue);
   layout->addLayout(sceneForm);
   layout->addStretch(1);
 
@@ -1647,7 +1668,7 @@ void MainWindow::createInspectorDock() {
 }
 
 void MainWindow::createTaskDock() {
-  mTaskDock = new QDockWidget(QStringLiteral("任务与日志"), this);
+  mTaskDock = new QDockWidget(QCoreApplication::translate("Workbench", "任务与日志"), this);
   mTaskDock->setObjectName(QStringLiteral("taskDock"));
   mTaskDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
   mTaskDock->setMinimumSize(0, 0);
@@ -1659,8 +1680,8 @@ void MainWindow::createTaskDock() {
   mTaskTabs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mTaskTable = new QTableWidget(0, 4, mTaskTabs);
   mTaskTable->setHorizontalHeaderLabels(
-      {QStringLiteral("状态"), QStringLiteral("任务"),
-       QStringLiteral("开始时间"), QStringLiteral("结果")});
+      {QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "任务"),
+       QCoreApplication::translate("Workbench", "开始时间"), QCoreApplication::translate("Workbench", "结果")});
   mTaskTable->setAlternatingRowColors(true);
   mTaskTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   mTaskTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1679,21 +1700,21 @@ void MainWindow::createTaskDock() {
   mConsole->setMaximumBlockCount(10000);
   mConsole->setLineWrapMode(QPlainTextEdit::NoWrap);
 
-  mTaskTabs->addTab(mTaskTable, QStringLiteral("任务"));
-  mTaskTabs->addTab(mTrainingMonitor, QStringLiteral("训练监视"));
-  mTaskTabs->addTab(mConsole, QStringLiteral("日志"));
+  mTaskTabs->addTab(mTaskTable, QCoreApplication::translate("Workbench", "任务"));
+  mTaskTabs->addTab(mTrainingMonitor, QCoreApplication::translate("Workbench", "训练监视"));
+  mTaskTabs->addTab(mConsole, QCoreApplication::translate("Workbench", "日志"));
   mTaskDock->setWidget(mTaskTabs);
   addDockWidget(Qt::BottomDockWidgetArea, mTaskDock);
 }
 
 void MainWindow::createStatusBar() {
-  mProjectStatus = new QLabel(QStringLiteral("未打开工程"), this);
+  mProjectStatus = new QLabel(QCoreApplication::translate("Workbench", "未打开工程"), this);
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
   mRendererStatus = new QLabel(
-      QStringLiteral("点预览 | 未载入场景 | FPS — (— ms)"), this);
+      QCoreApplication::translate("Workbench", "点预览 | 未载入场景 | FPS — (— ms)"), this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
-  mEditStatus = new QLabel(QStringLiteral("选择 0 | 删除 0"), this);
+  mEditStatus = new QLabel(QCoreApplication::translate("Workbench", "选择 0 | 删除 0"), this);
   mEditStatus->setObjectName(QStringLiteral("mutedLabel"));
   mScaleStatus = new QLabel(this);
   mScaleStatus->setObjectName(QStringLiteral("uiScaleStatus"));
@@ -1719,7 +1740,7 @@ void MainWindow::connectServices() {
             mActiveWorkerState.clear();
             mActiveTaskRow = mTaskTable->rowCount();
             mTaskTable->insertRow(mActiveTaskRow);
-            auto *state = new QTableWidgetItem(QStringLiteral("运行中"));
+            auto *state = new QTableWidgetItem(QCoreApplication::translate("Workbench", "运行中"));
             state->setForeground(QColor(102, 193, 168));
             mTaskTable->setItem(mActiveTaskRow, 0, state);
             mTaskTable->setItem(mActiveTaskRow, 1,
@@ -1752,7 +1773,7 @@ void MainWindow::connectServices() {
               mViewport->setScene(QString(), 0);
               mViewport->setRenderMode(NativeViewport::RenderMode::Points);
             }
-            appendTaskEvent(QStringLiteral("开始任务：%1").arg(taskName));
+            appendTaskEvent(QCoreApplication::translate("Workbench", "开始任务：%1").arg(taskName));
           });
   connect(&mProcessSupervisor, &ProcessSupervisor::outputReady, this,
           &MainWindow::appendLog);
@@ -1808,11 +1829,10 @@ void MainWindow::connectServices() {
                 }
                 appendTaskEvent(
                     colmapPreview
-                        ? QStringLiteral(
-                              "COLMAP 稀疏点云已更新：快照 %1 · %2 个点")
+                        ? QCoreApplication::translate("Workbench", "COLMAP 稀疏点云已更新：快照 %1 · %2 个点")
                               .arg(*lastPreviewIteration)
                               .arg(*livePreviewCount)
-                        : QStringLiteral("训练预览已更新：迭代 %1")
+                        : QCoreApplication::translate("Workbench", "训练预览已更新：迭代 %1")
                               .arg(*lastPreviewIteration));
               }
             }
@@ -1823,7 +1843,7 @@ void MainWindow::connectServices() {
             QString detail = workerStageLabel(status.stage);
             if (status.previewKind == QStringLiteral("colmap_sparse") &&
                 status.gaussianCount.has_value()) {
-              detail += QStringLiteral(" · 稀疏点 %1")
+              detail += QCoreApplication::translate("Workbench", " · 稀疏点 %1")
                             .arg(status.gaussianCount.value());
             }
             if (status.progressPercent.has_value()) {
@@ -1868,26 +1888,24 @@ void MainWindow::connectServices() {
             }
             statusBar()->clearMessage();
             appendTaskEvent(
-                QStringLiteral("导入事务恢复失败：%1").arg(recoveryError));
+                QCoreApplication::translate("Workbench", "导入事务恢复失败：%1").arg(recoveryError));
             showError(
-                QStringLiteral("无法恢复导入事务"),
-                QStringLiteral(
-                    "任务已结束，但无法确认数据集事务状态。为避免丢失数据，"
+                QCoreApplication::translate("Workbench", "无法恢复导入事务"),
+                QCoreApplication::translate("Workbench", "任务已结束，但无法确认数据集事务状态。为避免丢失数据，"
                     "软件不会自动关闭；请修复问题后重新打开工程。\n\n%1")
                     .arg(recoveryError));
           } else {
             effectiveSucceeded = succeeded || committed;
             if (committed && !succeeded) {
-              appendTaskEvent(QStringLiteral("导入进程虽已中断，但数据集提交已"
+              appendTaskEvent(QCoreApplication::translate("Workbench", "导入进程虽已中断，但数据集提交已"
                                              "完成；将保留并关联新数据集。"));
               if (mActiveTaskRow >= 0 &&
                   mActiveTaskRow < mTaskTable->rowCount()) {
                 mTaskTable->item(mActiveTaskRow, 3)
-                    ->setText(QStringLiteral("提交已确认"));
+                    ->setText(QCoreApplication::translate("Workbench", "提交已确认"));
               }
             } else if (!effectiveSucceeded) {
-              appendTaskEvent(QStringLiteral(
-                  "已清理未完成的导入事务；提交前的数据已恢复。"));
+              appendTaskEvent(QCoreApplication::translate("Workbench", "已清理未完成的导入事务；提交前的数据已恢复。"));
             }
           }
 
@@ -1895,7 +1913,7 @@ void MainWindow::connectServices() {
               !pathsReferToSameLocation(mWorkspace.rootPath(),
                                         pending.projectRoot)) {
             appendTaskEvent(
-                QStringLiteral("数据集已导入到原工程，但当前工程已切换，因此未"
+                QCoreApplication::translate("Workbench", "数据集已导入到原工程，但当前工程已切换，因此未"
                                "自动关联：%1")
                     .arg(QDir::toNativeSeparators(pending.datasetPath)));
           } else if (effectiveSucceeded) {
@@ -1904,10 +1922,9 @@ void MainWindow::connectServices() {
                     0 ||
                 !mWorkspace.setDatasetPath(pending.datasetPath, &error)) {
               showError(
-                  QStringLiteral("导入结果无效"),
+                  QCoreApplication::translate("Workbench", "导入结果无效"),
                   error.isEmpty()
-                      ? QStringLiteral(
-                            "导入任务完成，但目标数据集中没有可用图像：%1")
+                      ? QCoreApplication::translate("Workbench", "导入任务完成，但目标数据集中没有可用图像：%1")
                             .arg(QDir::toNativeSeparators(pending.datasetPath))
                       : error);
             } else {
@@ -1915,11 +1932,11 @@ void MainWindow::connectServices() {
               if (!mWorkspace.projectFilePath().isEmpty() &&
                   !mWorkspace.saveManifest({}, &saveError)) {
                 appendTaskEvent(
-                    QStringLiteral("数据集已导入，但工程自动保存失败：%1")
+                    QCoreApplication::translate("Workbench", "数据集已导入，但工程自动保存失败：%1")
                         .arg(saveError));
               }
               appendTaskEvent(
-                  QStringLiteral("当前数据集已切换到：%1")
+                  QCoreApplication::translate("Workbench", "当前数据集已切换到：%1")
                       .arg(QDir::toNativeSeparators(pending.datasetPath)));
             }
           }
@@ -1930,9 +1947,9 @@ void MainWindow::connectServices() {
           if (!mLiveReconstructionPreviewPath.isEmpty()) {
             completionDetail =
                 effectiveSucceeded
-                    ? QStringLiteral("稀疏点云已生成 · %1 个点")
+                    ? QCoreApplication::translate("Workbench", "稀疏点云已生成 · %1 个点")
                           .arg(mLiveReconstructionPointCount)
-                    : QStringLiteral("保留最后一个可用稀疏点云快照");
+                    : QCoreApplication::translate("Workbench", "保留最后一个可用稀疏点云快照");
           } else {
             mViewport->setScene(mWorkspace.scenePath(),
                                 mWorkspace.sceneMetadata().vertexCount);
@@ -1954,10 +1971,9 @@ void MainWindow::connectServices() {
                                           &resultError);
             if (!result.has_value()) {
               effectiveSucceeded = false;
-              completionDetail = QStringLiteral("训练输出无效");
-              showError(QStringLiteral("训练结果无效"),
-                        QStringLiteral(
-                            "训练进程已正常退出，但最终模型未通过校验。\n\n%1")
+              completionDetail = QCoreApplication::translate("Workbench", "训练输出无效");
+              showError(QCoreApplication::translate("Workbench", "训练结果无效"),
+                        QCoreApplication::translate("Workbench", "训练进程已正常退出，但最终模型未通过校验。\n\n%1")
                             .arg(resultError));
             } else {
               QString durableError;
@@ -1968,11 +1984,11 @@ void MainWindow::connectServices() {
               if (durable.has_value()) {
                 result = durable;
                 appendTaskEvent(
-                    QStringLiteral("训练检查点已通过校验并原子发布：%1")
+                    QCoreApplication::translate("Workbench", "训练检查点已通过校验并原子发布：%1")
                         .arg(QDir::toNativeSeparators(result->path)));
               } else {
                 appendTaskEvent(
-                    QStringLiteral("训练结果有效，但保护副本发布失败；"
+                    QCoreApplication::translate("Workbench", "训练结果有效，但保护副本发布失败；"
                                    "仍保留原始输出：%1")
                         .arg(durableError));
               }
@@ -1980,41 +1996,38 @@ void MainWindow::connectServices() {
             if (result.has_value() &&
                 !pathsReferToSameLocation(mWorkspace.rootPath(),
                                                  pending.projectRoot)) {
-              completionDetail = QStringLiteral("模型已生成（当前工程已切换）");
+              completionDetail = QCoreApplication::translate("Workbench", "模型已生成（当前工程已切换）");
               appendTaskEvent(
-                  QStringLiteral(
-                      "训练模型已生成，但当前工程已切换，未自动关联：%1")
+                  QCoreApplication::translate("Workbench", "训练模型已生成，但当前工程已切换，未自动关联：%1")
                       .arg(QDir::toNativeSeparators(result->path)));
             } else if (result.has_value()) {
               QString sceneError;
               if (!mWorkspace.setScenePath(result->path, &sceneError)) {
                 effectiveSucceeded = false;
-                completionDetail = QStringLiteral("模型关联失败");
-                showError(QStringLiteral("无法载入训练结果"), sceneError);
+                completionDetail = QCoreApplication::translate("Workbench", "模型关联失败");
+                showError(QCoreApplication::translate("Workbench", "无法载入训练结果"), sceneError);
               } else {
-                completionDetail = QStringLiteral("迭代 %1 · %2 个高斯")
+                completionDetail = QCoreApplication::translate("Workbench", "迭代 %1 · %2 个高斯")
                                        .arg(result->iteration)
                                        .arg(result->metadata.vertexCount);
                 QString saveError;
                 if (!mWorkspace.projectFilePath().isEmpty() &&
                     !mWorkspace.saveManifest({}, &saveError)) {
                   QMessageBox::warning(
-                      this, QStringLiteral("训练结果已载入，但工程未保存"),
-                      QStringLiteral(
-                          "模型已载入视口，但工程文件自动保存失败。\n\n%1")
+                      this, QCoreApplication::translate("Workbench", "训练结果已载入，但工程未保存"),
+                      QCoreApplication::translate("Workbench", "模型已载入视口，但工程文件自动保存失败。\n\n%1")
                           .arg(saveError));
                   appendTaskEvent(
-                      QStringLiteral("训练结果已载入，但工程自动保存失败：%1")
+                      QCoreApplication::translate("Workbench", "训练结果已载入，但工程自动保存失败：%1")
                           .arg(saveError));
                 }
                 appendTaskEvent(
-                    QStringLiteral(
-                        "训练结果已校验并载入：迭代 %1，%2 个高斯，%3")
+                    QCoreApplication::translate("Workbench", "训练结果已校验并载入：迭代 %1，%2 个高斯，%3")
                         .arg(result->iteration)
                         .arg(result->metadata.vertexCount)
                         .arg(QDir::toNativeSeparators(result->path)));
                 statusBar()->showMessage(
-                    QStringLiteral("%1 训练完成，模型已载入")
+                    QCoreApplication::translate("Workbench", "%1 训练完成，模型已载入")
                         .arg(pending.backend.toUpper()),
                     8000);
               }
@@ -2033,14 +2046,13 @@ void MainWindow::connectServices() {
                 partial = durable;
               } else {
                 appendTaskEvent(
-                    QStringLiteral("最近检查点有效，但保护副本发布失败：%1")
+                    QCoreApplication::translate("Workbench", "最近检查点有效，但保护副本发布失败：%1")
                         .arg(durableError));
               }
               completionDetail =
-                  QStringLiteral("保留迭代 %1").arg(partial->iteration);
+                  QCoreApplication::translate("Workbench", "保留迭代 %1").arg(partial->iteration);
               appendTaskEvent(
-                  QStringLiteral(
-                      "训练未完成，已保留最近可用检查点：迭代 %1，%2")
+                  QCoreApplication::translate("Workbench", "训练未完成，已保留最近可用检查点：迭代 %1，%2")
                       .arg(partial->iteration)
                       .arg(QDir::toNativeSeparators(partial->path)));
               if ((mClosePending || mWorkspace.hasPendingDataMigration()) &&
@@ -2048,14 +2060,14 @@ void MainWindow::connectServices() {
                                            pending.projectRoot)) {
                 QString sceneError;
                 if (mWorkspace.setScenePath(partial->path, &sceneError)) {
-                  completionDetail = QStringLiteral("保留迭代 %1 · 等待保存")
+                  completionDetail = QCoreApplication::translate("Workbench", "保留迭代 %1 · 等待保存")
                                          .arg(partial->iteration);
                   appendTaskEvent(
-                      QStringLiteral("退出前已将最近训练检查点关联到当前工程；"
+                      QCoreApplication::translate("Workbench", "退出前已将最近训练检查点关联到当前工程；"
                                      "请在保存确认中选择是否保留。"));
                 } else {
                   appendTaskEvent(
-                      QStringLiteral("无法将保留的训练检查点关联到工程：%1")
+                      QCoreApplication::translate("Workbench", "无法将保留的训练检查点关联到工程：%1")
                           .arg(sceneError));
                 }
               }
@@ -2065,7 +2077,7 @@ void MainWindow::connectServices() {
           if (!clearActiveTrainingJob(pending.projectRoot,
                                       &recoveryRecordError)) {
             appendTaskEvent(
-                QStringLiteral("训练已结束，但恢复标记清理失败：%1")
+                QCoreApplication::translate("Workbench", "训练已结束，但恢复标记清理失败：%1")
                     .arg(recoveryRecordError));
           }
         }
@@ -2078,32 +2090,32 @@ void MainWindow::connectServices() {
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
-          state->setText(effectiveSucceeded ? QStringLiteral("完成")
-                         : cancelled        ? QStringLiteral("已取消")
-                                            : QStringLiteral("失败"));
+          state->setText(effectiveSucceeded ? QCoreApplication::translate("Workbench", "完成")
+                         : cancelled        ? QCoreApplication::translate("Workbench", "已取消")
+                                            : QCoreApplication::translate("Workbench", "失败"));
           state->setForeground(effectiveSucceeded ? QColor(102, 193, 168)
                                : cancelled        ? QColor(218, 169, 82)
                                                   : QColor(211, 95, 95));
           if (!effectiveSucceeded) {
             mTaskTable->item(mActiveTaskRow, 3)
                 ->setText(!completionDetail.isEmpty() ? completionDetail
-                          : recoveryFailed ? QStringLiteral("事务恢复失败")
+                          : recoveryFailed ? QCoreApplication::translate("Workbench", "事务恢复失败")
                           : cancelled
-                              ? QStringLiteral("用户取消")
-                              : QStringLiteral("退出码 %1").arg(exitCode));
+                              ? QCoreApplication::translate("Workbench", "用户取消")
+                              : QCoreApplication::translate("Workbench", "退出码 %1").arg(exitCode));
           } else if (!completionDetail.isEmpty()) {
             mTaskTable->item(mActiveTaskRow, 3)->setText(completionDetail);
           }
         }
 
-        const QString outcome = effectiveSucceeded ? QStringLiteral("完成")
-                                : cancelled        ? QStringLiteral("取消")
-                                                   : QStringLiteral("失败");
-        appendTaskEvent(QStringLiteral("任务%1：%2").arg(outcome, taskName));
+        const QString outcome = effectiveSucceeded ? QCoreApplication::translate("Workbench", "完成")
+                                : cancelled        ? QCoreApplication::translate("Workbench", "取消")
+                                                   : QCoreApplication::translate("Workbench", "失败");
+        appendTaskEvent(QCoreApplication::translate("Workbench", "任务%1：%2").arg(outcome, taskName));
         if (!recoveryFailed && mWorkspace.hasPendingDataMigration()) {
           QString migrationError;
           statusBar()->showMessage(
-              QStringLiteral("任务已结束，正在完成工程数据迁移…"));
+              QCoreApplication::translate("Workbench", "任务已结束，正在完成工程数据迁移…"));
           QApplication::setOverrideCursor(Qt::WaitCursor);
           const bool migrated = finalizePendingProjectSave(&migrationError);
           QApplication::restoreOverrideCursor();
@@ -2111,16 +2123,15 @@ void MainWindow::connectServices() {
           if (!migrated) {
             mClosePending = false;
             mExitConfirmed = false;
-            completionDetail = QStringLiteral("工程迁移待恢复");
+            completionDetail = QCoreApplication::translate("Workbench", "工程迁移待恢复");
             if (mActiveTaskRow >= 0 &&
                 mActiveTaskRow < mTaskTable->rowCount()) {
               mTaskTable->item(mActiveTaskRow, 3)->setText(completionDetail);
             }
-            appendTaskEvent(QStringLiteral("任务已结束，但工程数据迁移失败：%1")
+            appendTaskEvent(QCoreApplication::translate("Workbench", "任务已结束，但工程数据迁移失败：%1")
                                 .arg(migrationError));
-            showError(QStringLiteral("无法完成工程数据迁移"),
-                      QStringLiteral(
-                          "任务结果仍保留在原工作区，工程清单也已保存。"
+            showError(QCoreApplication::translate("Workbench", "无法完成工程数据迁移"),
+                      QCoreApplication::translate("Workbench", "任务结果仍保留在原工作区，工程清单也已保存。"
                           "软件不会自动关闭；请修复目标位置后再次保存。\n\n%1")
                           .arg(migrationError));
           } else {
@@ -2153,12 +2164,12 @@ void MainWindow::connectServices() {
         } else {
           const QString mode =
               mRenderMode == NativeViewport::RenderMode::Mesh
-                  ? QStringLiteral("网格预览")
+                  ? QCoreApplication::translate("Workbench", "网格预览")
                   : mRenderMode == NativeViewport::RenderMode::Gaussians
-                        ? QStringLiteral("高斯预览")
-                        : QStringLiteral("点预览");
+                        ? QCoreApplication::translate("Workbench", "高斯预览")
+                        : QCoreApplication::translate("Workbench", "点预览");
           renderer = mWorkspace.scenePath().isEmpty()
-                         ? QStringLiteral("%1 | 未载入场景").arg(mode)
+                         ? QCoreApplication::translate("Workbench", "%1 | 未载入场景").arg(mode)
                          : mode;
         }
         const QString frameRate =
@@ -2192,7 +2203,7 @@ void MainWindow::connectServices() {
         mRendererStatus->style()->unpolish(mRendererStatus);
         mRendererStatus->style()->polish(mRendererStatus);
         if (stateChanged) {
-          appendTaskEvent(QStringLiteral("训练预览：%1%2")
+          appendTaskEvent(QCoreApplication::translate("Workbench", "训练预览：%1%2")
                               .arg(mode, detail.isEmpty()
                                              ? QString()
                                              : QStringLiteral(" · %1").arg(detail)));
@@ -2200,8 +2211,8 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this,
           [this](const QString &scenePath) {
-            mRendererStatus->setText(QStringLiteral("正在读取 PLY 场景"));
-            appendTaskEvent(QStringLiteral("读取场景：%1")
+            mRendererStatus->setText(QCoreApplication::translate("Workbench", "正在读取 PLY 场景"));
+            appendTaskEvent(QCoreApplication::translate("Workbench", "读取场景：%1")
                                 .arg(QDir::toNativeSeparators(scenePath)));
           });
   connect(mViewport, &NativeViewport::sceneLoaded, this,
@@ -2211,27 +2222,25 @@ void MainWindow::connectServices() {
                  const qsizetype previewTriangleCount) {
             const QString renderer =
                 mRenderMode == NativeViewport::RenderMode::Mesh
-                    ? QStringLiteral("网格预览")
+                    ? QCoreApplication::translate("Workbench", "网格预览")
                     : mRenderMode == NativeViewport::RenderMode::Gaussians
-                          ? QStringLiteral("高斯预览")
-                          : QStringLiteral("点预览");
+                          ? QCoreApplication::translate("Workbench", "高斯预览")
+                          : QCoreApplication::translate("Workbench", "点预览");
             const qsizetype previewPrimitiveCount =
                 sourceFaceCount > 0 ? previewTriangleCount
                                     : previewVertexCount;
-            mRendererStatus->setText(QStringLiteral("%1 | %2 个预览图元")
+            mRendererStatus->setText(QCoreApplication::translate("Workbench", "%1 | %2 个预览图元")
                                          .arg(renderer)
                                          .arg(previewPrimitiveCount));
             if (sourceFaceCount > 0) {
               appendTaskEvent(
-                  QStringLiteral(
-                      "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。")
+                  QCoreApplication::translate("Workbench", "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。")
                       .arg(sourceVertexCount)
                       .arg(sourceFaceCount)
                       .arg(previewTriangleCount));
             } else {
               appendTaskEvent(
-                  QStringLiteral(
-                      "场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。")
+                  QCoreApplication::translate("Workbench", "场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。")
                       .arg(sourceVertexCount)
                       .arg(previewVertexCount));
             }
@@ -2247,7 +2256,7 @@ void MainWindow::connectServices() {
           [this](const QList<SceneObject> &objects) {
             QString error;
             if (!mWorkspace.setSceneObjectTransforms(objects, &error)) {
-              appendTaskEvent(QStringLiteral("整组变换未能写入工程：%1").arg(error));
+              appendTaskEvent(QCoreApplication::translate("Workbench", "整组变换未能写入工程：%1").arg(error));
             }
           });
   connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
@@ -2274,8 +2283,8 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::sceneLoadFailed, this,
           [this](const QString &, const QString &message) {
-            mRendererStatus->setText(QStringLiteral("PLY 场景读取失败"));
-            appendTaskEvent(QStringLiteral("场景读取失败：%1").arg(message));
+            mRendererStatus->setText(QCoreApplication::translate("Workbench", "PLY 场景读取失败"));
+            appendTaskEvent(QCoreApplication::translate("Workbench", "场景读取失败：%1").arg(message));
           });
   connect(
       mViewport, &NativeViewport::cameraTrajectoryChanged, this,
@@ -2307,21 +2316,20 @@ void MainWindow::connectServices() {
                                        ? QStringLiteral("cameras.json")
                                        : QDir::toNativeSeparators(sourcePath);
           const QString message =
-              QStringLiteral(
-                  "相机轨迹未载入：%1。请检查 %2 是否为有效的标准 3DGS "
+              QCoreApplication::translate("Workbench", "相机轨迹未载入：%1。请检查 %2 是否为有效的标准 3DGS "
                   "cameras.json，修复后重新载入场景。")
                   .arg(error, location);
           appendTaskEvent(message);
           statusBar()->showMessage(message, 10000);
         } else if (cameraCount > 0) {
           QString message =
-              QStringLiteral("已载入相机轨迹：%1 个位姿").arg(cameraCount);
+              QCoreApplication::translate("Workbench", "已载入相机轨迹：%1 个位姿").arg(cameraCount);
           if (invalidCameraCount > 0) {
             message +=
-                QStringLiteral("，跳过 %1 个无效条目").arg(invalidCameraCount);
+                QCoreApplication::translate("Workbench", "，跳过 %1 个无效条目").arg(invalidCameraCount);
           }
           if (displayDecimated) {
-            message += QStringLiteral("，视口已自动抽稀");
+            message += QCoreApplication::translate("Workbench", "，视口已自动抽稀");
           }
           message += QStringLiteral("（%1）。")
                          .arg(QDir::toNativeSeparators(sourcePath));
@@ -2386,7 +2394,7 @@ void MainWindow::connectServices() {
                     viewportTranslationForWorkspace(translation), rotation,
                     scale, &error)) {
               appendTaskEvent(
-                  QStringLiteral("模型变换未能写入工程：%1").arg(error));
+                  QCoreApplication::translate("Workbench", "模型变换未能写入工程：%1").arg(error));
             }
           });
   connect(mViewport, &NativeViewport::selectionBusyChanged, this,
@@ -2576,13 +2584,13 @@ void MainWindow::updateScaleStatus() {
     return;
   }
   mScaleStatus->setText(QStringLiteral("%1 %2% · %3×%4")
-                            .arg(mAutomaticUiScale ? QStringLiteral("自动")
-                                                   : QStringLiteral("手动"))
+                            .arg(mAutomaticUiScale ? QCoreApplication::translate("Workbench", "自动")
+                                                   : QCoreApplication::translate("Workbench", "手动"))
                             .arg(mUiScalePercent)
                             .arg(width())
                             .arg(height()));
   mScaleStatus->setToolTip(
-      QStringLiteral("视图 > 显示与适配，可切换自动缩放或窗口分辨率"));
+      QCoreApplication::translate("Workbench", "视图 > 显示与适配，可切换自动缩放或窗口分辨率"));
 }
 
 void MainWindow::applyWindowResolution(const QSize &requestedSize) {
@@ -2603,7 +2611,7 @@ void MainWindow::applyWindowResolution(const QSize &requestedSize) {
        QPoint((available.width() - fitted.width()) / 2,
               (available.height() - fitted.height()) / 2));
   scheduleAutomaticUiScale();
-  statusBar()->showMessage(QStringLiteral("窗口已调整为 %1 × %2")
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "窗口已调整为 %1 × %2")
                                .arg(fitted.width())
                                .arg(fitted.height()),
                            3500);
@@ -2667,11 +2675,11 @@ void MainWindow::updateEditActions() {
   if (mEditStatus != nullptr) {
     mEditStatus->setVisible(anyScene || mSelectionBusy);
     if (mSelectionBusy) {
-      mEditStatus->setText(QStringLiteral("正在计算选择"));
+      mEditStatus->setText(QCoreApplication::translate("Workbench", "正在计算选择"));
     } else if (mModelSelected) {
-      mEditStatus->setText(QStringLiteral("模型已选 | 自由移动"));
+      mEditStatus->setText(QCoreApplication::translate("Workbench", "模型已选 | 自由移动"));
     } else {
-      mEditStatus->setText(QStringLiteral("选择 %1 | 删除 %2")
+      mEditStatus->setText(QCoreApplication::translate("Workbench", "选择 %1 | 删除 %2")
                                .arg(mSelectedPointCount)
                                .arg(mDeletedPointCount));
     }
@@ -2682,11 +2690,11 @@ bool MainWindow::confirmDiscardChanges(const bool exiting) {
   if (mWorkspace.isModified() || isWindowModified()) {
     const QMessageBox::StandardButton answer = QMessageBox::warning(
         this,
-        exiting ? QStringLiteral("退出前保存进度")
-                : QStringLiteral("工程尚未保存"),
-        exiting ? QStringLiteral("当前工程包含未保存的修改或最近保留的"
+        exiting ? QCoreApplication::translate("Workbench", "退出前保存进度")
+                : QCoreApplication::translate("Workbench", "工程尚未保存"),
+        exiting ? QCoreApplication::translate("Workbench", "当前工程包含未保存的修改或最近保留的"
                                  "任务进度。是否在退出前保存？")
-                : QStringLiteral("当前工程包含未保存的修改。"),
+                : QCoreApplication::translate("Workbench", "当前工程包含未保存的修改。"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
         QMessageBox::Save);
     if (answer == QMessageBox::Save && !saveProject(false)) {
@@ -2705,18 +2713,18 @@ bool MainWindow::confirmExit() {
   }
 
   QMessageBox prompt(
-      QMessageBox::Question, QStringLiteral("确认退出"),
-      QStringLiteral("确定要退出 Gaussian Scene Workbench Native 吗？"),
+      QMessageBox::Question, QCoreApplication::translate("Workbench", "确认退出"),
+      QCoreApplication::translate("Workbench", "确定要退出 Gaussian Scene Workbench Native 吗？"),
       QMessageBox::NoButton, this);
   prompt.setObjectName(QStringLiteral("exitConfirmationDialog"));
   prompt.setInformativeText(
-      QStringLiteral("退出前如有未保存进度，软件将继续询问是否保存。\n"
+      QCoreApplication::translate("Workbench", "退出前如有未保存进度，软件将继续询问是否保存。\n"
                      "退出后会停止当前软件启动的训练、COLMAP、"
                      "导入及其他后台进程。"));
   auto *exitButton =
-      prompt.addButton(QStringLiteral("退出"), QMessageBox::AcceptRole);
+      prompt.addButton(QCoreApplication::translate("Workbench", "退出"), QMessageBox::AcceptRole);
   auto *cancelButton =
-      prompt.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
+      prompt.addButton(QCoreApplication::translate("Workbench", "取消"), QMessageBox::RejectRole);
   prompt.setDefaultButton(cancelButton);
   prompt.setEscapeButton(cancelButton);
   prompt.exec();
@@ -2733,11 +2741,11 @@ bool MainWindow::confirmDiscardSceneEdits(const bool exiting) {
   }
   const QMessageBox::StandardButton answer = QMessageBox::warning(
       this,
-      exiting ? QStringLiteral("退出前导出裁剪进度")
-              : QStringLiteral("裁剪尚未导出"),
-      exiting ? QStringLiteral("当前场景包含尚未导出的删除操作。"
+      exiting ? QCoreApplication::translate("Workbench", "退出前导出裁剪进度")
+              : QCoreApplication::translate("Workbench", "裁剪尚未导出"),
+      exiting ? QCoreApplication::translate("Workbench", "当前场景包含尚未导出的删除操作。"
                                "是否在退出前导出？")
-              : QStringLiteral("当前场景包含尚未导出的删除操作。"),
+              : QCoreApplication::translate("Workbench", "当前场景包含尚未导出的删除操作。"),
       QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
       QMessageBox::Save);
   if (answer == QMessageBox::Save) {
@@ -2751,7 +2759,7 @@ bool MainWindow::beginUntitledProject(const QString &displayName,
                                       QString *errorMessage) {
   if (mRecoveryStore == nullptr) {
     if (errorMessage != nullptr && errorMessage->isEmpty()) {
-      *errorMessage = QStringLiteral("恢复工作区存储不可用。");
+      *errorMessage = QCoreApplication::translate("Workbench", "恢复工作区存储不可用。");
     }
     return false;
   }
@@ -2796,7 +2804,7 @@ void MainWindow::checkpointCurrentRecovery() {
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
-        QStringLiteral("自动恢复检查点保存失败：%1").arg(error));
+        QCoreApplication::translate("Workbench", "自动恢复检查点保存失败：%1").arg(error));
   }
 }
 
@@ -2819,7 +2827,7 @@ void MainWindow::snapshotCurrentProject() {
                maximumSnapshots, &error)
            .has_value()) {
     appendTaskEvent(
-        QStringLiteral("工程版本快照保存失败：%1").arg(error));
+        QCoreApplication::translate("Workbench", "工程版本快照保存失败：%1").arg(error));
   }
 }
 
@@ -2829,7 +2837,7 @@ bool MainWindow::discardCurrentRecovery(QString *errorMessage) {
   }
   if (mRecoveryStore == nullptr) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("恢复工作区存储不可用。");
+      *errorMessage = QCoreApplication::translate("Workbench", "恢复工作区存储不可用。");
     }
     return false;
   }
@@ -2866,8 +2874,8 @@ void MainWindow::offerStartupRecovery() {
 void MainWindow::showRecoveryCenter(const bool startupPrompt) {
   if (mRecoveryStore == nullptr) {
     if (!startupPrompt) {
-      QMessageBox::information(this, QStringLiteral("恢复中心"),
-                               QStringLiteral("恢复存储当前不可用。"));
+      QMessageBox::information(this, QCoreApplication::translate("Workbench", "恢复中心"),
+                               QCoreApplication::translate("Workbench", "恢复存储当前不可用。"));
     }
     return;
   }
@@ -2887,30 +2895,30 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
   if (candidates.isEmpty()) {
     if (!startupPrompt) {
       QMessageBox::information(
-          this, QStringLiteral("恢复中心"),
-          scanError.isEmpty() ? QStringLiteral("没有可恢复的异常退出工程。")
+          this, QCoreApplication::translate("Workbench", "恢复中心"),
+          scanError.isEmpty() ? QCoreApplication::translate("Workbench", "没有可恢复的异常退出工程。")
                               : scanError);
     }
     return;
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("工程恢复中心"));
+  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "工程恢复中心"));
   dialog.resize(820, 380);
   auto *layout = new QVBoxLayout(&dialog);
   auto *description = new QLabel(
       startupPrompt
-          ? QStringLiteral("检测到上次异常退出保留的工程。选择一项恢复，"
+          ? QCoreApplication::translate("Workbench", "检测到上次异常退出保留的工程。选择一项恢复，"
                            "或稍后从“文件 → 恢复中心”处理。")
-          : QStringLiteral("以下工程由异常退出保护保留。"),
+          : QCoreApplication::translate("Workbench", "以下工程由异常退出保护保留。"),
       &dialog);
   description->setWordWrap(true);
   layout->addWidget(description);
 
   auto *table = new QTableWidget(candidates.size(), 4, &dialog);
   table->setHorizontalHeaderLabels(
-      {QStringLiteral("更新时间"), QStringLiteral("名称"),
-       QStringLiteral("状态"), QStringLiteral("恢复位置")});
+      {QCoreApplication::translate("Workbench", "更新时间"), QCoreApplication::translate("Workbench", "名称"),
+       QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "恢复位置")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::SingleSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -2928,8 +2936,8 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
     table->setItem(
         static_cast<int>(row), 2,
         new QTableWidgetItem(candidate.projectFilePath.isEmpty()
-                                 ? QStringLiteral("未命名工程")
-                                 : QStringLiteral("保存迁移待恢复")));
+                                 ? QCoreApplication::translate("Workbench", "未命名工程")
+                                 : QCoreApplication::translate("Workbench", "保存迁移待恢复")));
     table->setItem(
         static_cast<int>(row), 3,
         new QTableWidgetItem(QDir::toNativeSeparators(candidate.rootPath)));
@@ -2939,13 +2947,13 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
 
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *recoverButton =
-      buttons->addButton(QStringLiteral("恢复所选工程"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选工程"),
                          QDialogButtonBox::AcceptRole);
   auto *discardButton =
-      buttons->addButton(QStringLiteral("永久删除所选"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "永久删除所选"),
                          QDialogButtonBox::DestructiveRole);
   auto *laterButton =
-      buttons->addButton(QStringLiteral("稍后处理"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "稍后处理"),
                          QDialogButtonBox::RejectRole);
   connect(recoverButton, &QPushButton::clicked, &dialog,
           [&dialog]() { dialog.done(1); });
@@ -2966,8 +2974,8 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
   }
   if (result == 2) {
     const QMessageBox::StandardButton confirmed = QMessageBox::warning(
-        this, QStringLiteral("永久删除恢复工程"),
-        QStringLiteral("将永久删除以下异常恢复数据：\n%1")
+        this, QCoreApplication::translate("Workbench", "永久删除恢复工程"),
+        QCoreApplication::translate("Workbench", "将永久删除以下异常恢复数据：\n%1")
             .arg(QDir::toNativeSeparators(selected.rootPath)),
         QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
     if (confirmed != QMessageBox::Yes) {
@@ -2975,11 +2983,11 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
     }
     QString discardError;
     if (!mRecoveryStore->discardWorkspace(selected, &discardError)) {
-      showError(QStringLiteral("无法删除恢复工程"), discardError);
+      showError(QCoreApplication::translate("Workbench", "无法删除恢复工程"), discardError);
       return;
     }
     appendTaskEvent(
-        QStringLiteral("已永久删除恢复工程：%1").arg(selected.displayName));
+        QCoreApplication::translate("Workbench", "已永久删除恢复工程：%1").arg(selected.displayName));
     showRecoveryCenter(false);
   }
 }
@@ -2997,7 +3005,7 @@ bool MainWindow::restoreRecoveryWorkspace(
       if (!mRecoveryStore->completeWorkspace(
               workspace, mWorkspace.rootPath(), &discardError)) {
         appendTaskEvent(
-            QStringLiteral("工程已恢复，但旧恢复目录清理失败：%1")
+            QCoreApplication::translate("Workbench", "工程已恢复，但旧恢复目录清理失败：%1")
                 .arg(discardError));
       }
     } else {
@@ -3005,7 +3013,7 @@ bool MainWindow::restoreRecoveryWorkspace(
       checkpointCurrentRecovery();
     }
     appendTaskEvent(
-        QStringLiteral("已从恢复中心恢复工程：%1")
+        QCoreApplication::translate("Workbench", "已从恢复中心恢复工程：%1")
             .arg(workspace.displayName));
     return true;
   }
@@ -3016,7 +3024,7 @@ bool MainWindow::restoreRecoveryWorkspace(
   QString createError;
   if (!mWorkspace.createUntitled(workspace.rootPath, workspace.displayName,
                                  &createError)) {
-    showError(QStringLiteral("无法恢复未命名工程"), createError);
+    showError(QCoreApplication::translate("Workbench", "无法恢复未命名工程"), createError);
     return false;
   }
   QString discardError;
@@ -3024,18 +3032,18 @@ bool MainWindow::restoreRecoveryWorkspace(
       mCurrentRecovery->sessionId != workspace.sessionId &&
       !discardCurrentRecovery(&discardError)) {
     appendTaskEvent(
-        QStringLiteral("旧恢复工作区清理失败：%1").arg(discardError));
+        QCoreApplication::translate("Workbench", "旧恢复工作区清理失败：%1").arg(discardError));
   }
   mCurrentRecovery = workspace;
   mRecoveryBlocked = true;
   QString importRecoveryError;
   if (!recoverInterruptedProjectImports(&importRecoveryError)) {
     appendTaskEvent(
-        QStringLiteral("未命名工程已恢复，但导入事务仍待处理：%1")
+        QCoreApplication::translate("Workbench", "未命名工程已恢复，但导入事务仍待处理：%1")
             .arg(importRecoveryError));
     QMessageBox::warning(
-        this, QStringLiteral("导入恢复待处理"),
-        QStringLiteral("工程数据已保留，但未完成的导入事务尚未恢复。"
+        this, QCoreApplication::translate("Workbench", "导入恢复待处理"),
+        QCoreApplication::translate("Workbench", "工程数据已保留，但未完成的导入事务尚未恢复。"
                        "修复 Python/worker 环境后，可重新启动软件再重试。\n\n%1")
             .arg(importRecoveryError));
   } else {
@@ -3046,13 +3054,13 @@ bool MainWindow::restoreRecoveryWorkspace(
       QFileInfo(workspace.datasetPath).isDir() &&
       !mWorkspace.setDatasetPath(workspace.datasetPath, &attachError)) {
     appendTaskEvent(
-        QStringLiteral("恢复工程的数据集未能自动关联：%1").arg(attachError));
+        QCoreApplication::translate("Workbench", "恢复工程的数据集未能自动关联：%1").arg(attachError));
   }
   if (!workspace.scenePath.isEmpty() &&
       QFileInfo(workspace.scenePath).isFile() &&
       !mWorkspace.setScenePath(workspace.scenePath, &attachError)) {
     appendTaskEvent(
-        QStringLiteral("恢复工程的场景未能自动关联：%1").arg(attachError));
+        QCoreApplication::translate("Workbench", "恢复工程的场景未能自动关联：%1").arg(attachError));
   }
   if (!workspace.scenePath.isEmpty()) {
     QString transformError;
@@ -3061,7 +3069,7 @@ bool MainWindow::restoreRecoveryWorkspace(
                                       workspace.sceneScale,
                                       &transformError)) {
       appendTaskEvent(
-          QStringLiteral("恢复工程的模型变换失败：%1").arg(transformError));
+          QCoreApplication::translate("Workbench", "恢复工程的模型变换失败：%1").arg(transformError));
     }
   }
   if (!workspace.sceneCollection.isEmpty()) {
@@ -3072,11 +3080,11 @@ bool MainWindow::restoreRecoveryWorkspace(
     QString trainingRecoveryError;
     if (!recoverInterruptedTraining(&trainingRecoveryError)) {
       appendTaskEvent(
-          QStringLiteral("未命名工程已恢复，但训练检查点仍待处理：%1")
+          QCoreApplication::translate("Workbench", "未命名工程已恢复，但训练检查点仍待处理：%1")
               .arg(trainingRecoveryError));
       QMessageBox::warning(
-          this, QStringLiteral("训练检查点恢复待处理"),
-          QStringLiteral("工程和训练输出仍保留在磁盘上，但未能自动关联最近的"
+          this, QCoreApplication::translate("Workbench", "训练检查点恢复待处理"),
+          QCoreApplication::translate("Workbench", "工程和训练输出仍保留在磁盘上，但未能自动关联最近的"
                          "完整检查点。\n\n%1")
               .arg(trainingRecoveryError));
     }
@@ -3084,15 +3092,15 @@ bool MainWindow::restoreRecoveryWorkspace(
   checkpointCurrentRecovery();
   updateWorkspaceUi();
   appendTaskEvent(
-      QStringLiteral("已恢复未命名工程：%1").arg(workspace.displayName));
+      QCoreApplication::translate("Workbench", "已恢复未命名工程：%1").arg(workspace.displayName));
   return true;
 }
 
 void MainWindow::showSnapshotHistory() {
   if (mRecoveryStore == nullptr ||
       mWorkspace.projectFilePath().isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("版本历史"),
-                             QStringLiteral("请先保存工程。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "版本历史"),
+                             QCoreApplication::translate("Workbench", "请先保存工程。"));
     return;
   }
   QString error;
@@ -3100,25 +3108,25 @@ void MainWindow::showSnapshotHistory() {
       mRecoveryStore->projectSnapshots(mWorkspace.rootPath(), &error);
   if (snapshots.isEmpty()) {
     QMessageBox::information(
-        this, QStringLiteral("版本历史"),
-        error.isEmpty() ? QStringLiteral("当前工程还没有自动快照。")
+        this, QCoreApplication::translate("Workbench", "版本历史"),
+        error.isEmpty() ? QCoreApplication::translate("Workbench", "当前工程还没有自动快照。")
                         : error);
     return;
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("工程版本历史"));
+  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "工程版本历史"));
   dialog.resize(720, 360);
   auto *layout = new QVBoxLayout(&dialog);
   auto *description = new QLabel(
-      QStringLiteral("自动快照保存工程状态并复用已校验的数据。恢复时会"
+      QCoreApplication::translate("Workbench", "自动快照保存工程状态并复用已校验的数据。恢复时会"
                      "创建新工程文件，不覆盖当前版本。"),
       &dialog);
   description->setWordWrap(true);
   layout->addWidget(description);
   auto *table = new QTableWidget(snapshots.size(), 2, &dialog);
   table->setHorizontalHeaderLabels(
-      {QStringLiteral("快照时间"), QStringLiteral("来源工程")});
+      {QCoreApplication::translate("Workbench", "快照时间"), QCoreApplication::translate("Workbench", "来源工程")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::SingleSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -3139,10 +3147,10 @@ void MainWindow::showSnapshotHistory() {
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *restoreButton =
-      buttons->addButton(QStringLiteral("恢复为新工程"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "恢复为新工程"),
                          QDialogButtonBox::AcceptRole);
   auto *cancelButton =
-      buttons->addButton(QStringLiteral("取消"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "取消"),
                          QDialogButtonBox::RejectRole);
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
@@ -3166,11 +3174,11 @@ void MainWindow::showSnapshotHistory() {
                                  QStringLiteral("yyyyMMdd-HHmmss"))));
   if (!mRecoveryStore->restoreProjectSnapshot(selected, restoredPath,
                                                &error)) {
-    showError(QStringLiteral("无法恢复工程快照"), error);
+    showError(QCoreApplication::translate("Workbench", "无法恢复工程快照"), error);
     return;
   }
   appendTaskEvent(
-      QStringLiteral("工程快照已恢复为：%1")
+      QCoreApplication::translate("Workbench", "工程快照已恢复为：%1")
           .arg(QDir::toNativeSeparators(restoredPath)));
   openProjectFile(restoredPath);
 }
@@ -3181,7 +3189,7 @@ void MainWindow::configureExternalBackup() {
           .value(QStringLiteral("recovery/externalBackupRoot"))
           .toString();
   const QString selected = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("选择第二存储位置"), current);
+      this, QCoreApplication::translate("Workbench", "选择第二存储位置"), current);
   if (selected.isEmpty()) {
     return;
   }
@@ -3192,8 +3200,8 @@ void MainWindow::configureExternalBackup() {
         pathsReferToSameLocation(projectStorage.rootPath(),
                                  backupStorage.rootPath())) {
       QMessageBox::warning(
-          this, QStringLiteral("请选择另一存储设备"),
-          QStringLiteral("所选位置与当前工程位于同一卷，无法防护整盘损坏。"
+          this, QCoreApplication::translate("Workbench", "请选择另一存储设备"),
+          QCoreApplication::translate("Workbench", "所选位置与当前工程位于同一卷，无法防护整盘损坏。"
                          "请选择另一块硬盘、移动存储、NAS 或网络共享。"));
       return;
     }
@@ -3201,7 +3209,7 @@ void MainWindow::configureExternalBackup() {
   QSettings().setValue(QStringLiteral("recovery/externalBackupRoot"),
                        QDir::cleanPath(QFileInfo(selected).absoluteFilePath()));
   appendTaskEvent(
-      QStringLiteral("第二存储位置已设置为：%1")
+      QCoreApplication::translate("Workbench", "第二存储位置已设置为：%1")
           .arg(QDir::toNativeSeparators(selected)));
   startExternalBackup(true);
 }
@@ -3209,8 +3217,8 @@ void MainWindow::configureExternalBackup() {
 void MainWindow::startExternalBackup(const bool interactive) {
   if (mExternalBackupRunning) {
     if (interactive) {
-      QMessageBox::information(this, QStringLiteral("外部备份"),
-                               QStringLiteral("外部备份正在运行。"));
+      QMessageBox::information(this, QCoreApplication::translate("Workbench", "外部备份"),
+                               QCoreApplication::translate("Workbench", "外部备份正在运行。"));
     }
     return;
   }
@@ -3229,8 +3237,8 @@ void MainWindow::startExternalBackup(const bool interactive) {
       mWorkspace.hasPendingDataMigration()) {
     if (interactive) {
       QMessageBox::information(
-          this, QStringLiteral("外部备份"),
-          QStringLiteral("请先完成工程保存和数据迁移。"));
+          this, QCoreApplication::translate("Workbench", "外部备份"),
+          QCoreApplication::translate("Workbench", "请先完成工程保存和数据迁移。"));
     }
     return;
   }
@@ -3241,8 +3249,8 @@ void MainWindow::startExternalBackup(const bool interactive) {
   const QString linkedScenePath = mWorkspace.scenePath();
   mExternalBackupRunning = true;
   statusBar()->showMessage(
-      QStringLiteral("正在后台创建去重外部备份…"));
-  appendTaskEvent(QStringLiteral("外部备份已开始：%1")
+      QCoreApplication::translate("Workbench", "正在后台创建去重外部备份…"));
+  appendTaskEvent(QCoreApplication::translate("Workbench", "外部备份已开始：%1")
                       .arg(QDir::toNativeSeparators(backupRoot)));
 
   auto *watcher = new QFutureWatcher<ExternalBackupTaskResult>(this);
@@ -3252,17 +3260,17 @@ void MainWindow::startExternalBackup(const bool interactive) {
             watcher->deleteLater();
             mExternalBackupRunning = false;
             if (!result.snapshot.has_value()) {
-              statusBar()->showMessage(QStringLiteral("外部备份失败"), 8000);
+              statusBar()->showMessage(QCoreApplication::translate("Workbench", "外部备份失败"), 8000);
               appendTaskEvent(
-                  QStringLiteral("外部备份失败：%1").arg(result.error));
+                  QCoreApplication::translate("Workbench", "外部备份失败：%1").arg(result.error));
               if (interactive) {
-                showError(QStringLiteral("无法完成外部备份"), result.error);
+                showError(QCoreApplication::translate("Workbench", "无法完成外部备份"), result.error);
               }
               return;
             }
-            statusBar()->showMessage(QStringLiteral("外部备份已完成"), 8000);
+            statusBar()->showMessage(QCoreApplication::translate("Workbench", "外部备份已完成"), 8000);
             appendTaskEvent(
-                QStringLiteral("外部备份已完成：%1 个文件，%2")
+                QCoreApplication::translate("Workbench", "外部备份已完成：%1 个文件，%2")
                     .arg(result.snapshot->fileCount)
                     .arg(formatFileSize(result.snapshot->totalBytes)));
           });
@@ -3292,20 +3300,20 @@ void MainWindow::showExternalBackups() {
   const QList<ExternalBackupSnapshot> backups = store.snapshots(&error);
   if (backups.isEmpty()) {
     QMessageBox::information(
-        this, QStringLiteral("外部备份与恢复"),
-        error.isEmpty() ? QStringLiteral("第二存储位置中还没有备份。")
+        this, QCoreApplication::translate("Workbench", "外部备份与恢复"),
+        error.isEmpty() ? QCoreApplication::translate("Workbench", "第二存储位置中还没有备份。")
                         : error);
     return;
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("外部备份与恢复"));
+  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "外部备份与恢复"));
   dialog.resize(780, 380);
   auto *layout = new QVBoxLayout(&dialog);
   auto *table = new QTableWidget(backups.size(), 4, &dialog);
   table->setHorizontalHeaderLabels(
-      {QStringLiteral("备份时间"), QStringLiteral("工程"),
-       QStringLiteral("文件数"), QStringLiteral("逻辑大小")});
+      {QCoreApplication::translate("Workbench", "备份时间"), QCoreApplication::translate("Workbench", "工程"),
+       QCoreApplication::translate("Workbench", "文件数"), QCoreApplication::translate("Workbench", "逻辑大小")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::SingleSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -3329,10 +3337,10 @@ void MainWindow::showExternalBackups() {
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *restoreButton =
-      buttons->addButton(QStringLiteral("恢复所选备份"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选备份"),
                          QDialogButtonBox::AcceptRole);
   auto *closeButton =
-      buttons->addButton(QStringLiteral("关闭"),
+      buttons->addButton(QCoreApplication::translate("Workbench", "关闭"),
                          QDialogButtonBox::RejectRole);
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::reject);
@@ -3343,7 +3351,7 @@ void MainWindow::showExternalBackups() {
 
   const ExternalBackupSnapshot selected = backups.at(table->currentRow());
   const QString destinationParent = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("选择备份恢复位置"));
+      this, QCoreApplication::translate("Workbench", "选择备份恢复位置"));
   if (destinationParent.isEmpty()) {
     return;
   }
@@ -3353,7 +3361,7 @@ void MainWindow::showExternalBackups() {
                         .arg(safeFileName(selected.projectName),
                              QDateTime::currentDateTime().toString(
                                  QStringLiteral("yyyyMMdd-HHmmss"))));
-  QProgressDialog progress(QStringLiteral("正在校验并恢复外部备份…"),
+  QProgressDialog progress(QCoreApplication::translate("Workbench", "正在校验并恢复外部备份…"),
                            QString(), 0, 0, this);
   progress.setWindowModality(Qt::WindowModal);
   progress.setCancelButton(nullptr);
@@ -3374,15 +3382,15 @@ void MainWindow::showExternalBackups() {
   watcher.waitForFinished();
   const QPair<bool, QString> restored = watcher.result();
   if (!restored.first) {
-    showError(QStringLiteral("无法恢复外部备份"), restored.second);
+    showError(QCoreApplication::translate("Workbench", "无法恢复外部备份"), restored.second);
     return;
   }
   appendTaskEvent(
-      QStringLiteral("外部备份已恢复到：%1")
+      QCoreApplication::translate("Workbench", "外部备份已恢复到：%1")
           .arg(QDir::toNativeSeparators(destination)));
   QMessageBox::information(
-      this, QStringLiteral("外部备份已恢复"),
-      QStringLiteral("恢复文件已写入：\n%1")
+      this, QCoreApplication::translate("Workbench", "外部备份已恢复"),
+      QCoreApplication::translate("Workbench", "恢复文件已写入：\n%1")
           .arg(QDir::toNativeSeparators(destination)));
 }
 
@@ -3396,28 +3404,28 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
   const bool taskRunning = mProcessSupervisor.isRunning();
   if (taskRunning && forceChoosePath && mWorkspace.hasPendingDataMigration()) {
     QMessageBox::information(
-        this, QStringLiteral("工程另存正在等待迁移"),
-        QStringLiteral("当前任务结束后会自动完成已选择位置的数据迁移。"
+        this, QCoreApplication::translate("Workbench", "工程另存正在等待迁移"),
+        QCoreApplication::translate("Workbench", "当前任务结束后会自动完成已选择位置的数据迁移。"
                        "迁移完成前可继续使用“保存工程”记录进度。"));
     return false;
   }
   if (!taskRunning && mWorkspace.hasPendingDataMigration()) {
     QString migrationError;
-    statusBar()->showMessage(QStringLiteral("正在完成工程数据迁移…"));
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在完成工程数据迁移…"));
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const bool migrated = finalizePendingProjectSave(&migrationError);
     QApplication::restoreOverrideCursor();
     statusBar()->clearMessage();
     if (!migrated) {
-      showError(QStringLiteral("无法完成工程数据迁移"), migrationError);
+      showError(QCoreApplication::translate("Workbench", "无法完成工程数据迁移"), migrationError);
       return false;
     }
   }
   QString target = mWorkspace.projectFilePath();
   if (forceChoosePath || target.isEmpty()) {
     target = QFileDialog::getSaveFileName(
-        this, QStringLiteral("保存工程"), suggestedProjectFilePath(),
-        QStringLiteral("GSW Project (*.gsw.json)"));
+        this, QCoreApplication::translate("Workbench", "保存工程"), suggestedProjectFilePath(),
+        QCoreApplication::translate("Workbench", "GSW Project (*.gsw.json)"));
     if (target.isEmpty()) {
       return false;
     }
@@ -3427,15 +3435,15 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
   }
   QString error;
   statusBar()->showMessage(taskRunning
-                               ? QStringLiteral("正在保存工程状态…")
-                               : QStringLiteral("正在保存工程与托管数据…"));
+                               ? QCoreApplication::translate("Workbench", "正在保存工程状态…")
+                               : QCoreApplication::translate("Workbench", "正在保存工程与托管数据…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const bool saved = taskRunning ? mWorkspace.saveManifest(target, &error)
                                  : mWorkspace.save(target, &error);
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!saved) {
-    showError(QStringLiteral("无法保存工程"), error);
+    showError(QCoreApplication::translate("Workbench", "无法保存工程"), error);
     return false;
   }
   if (!taskRunning && !mWorkspace.isUntitled() &&
@@ -3446,7 +3454,7 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
       QString discardError;
       if (!completeCurrentRecovery(mWorkspace.rootPath(), &discardError)) {
         appendTaskEvent(
-            QStringLiteral("已保存工程，但恢复工作区清理失败：%1")
+            QCoreApplication::translate("Workbench", "已保存工程，但恢复工作区清理失败：%1")
                 .arg(discardError));
       }
     }
@@ -3461,13 +3469,13 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
   if (taskRunning) {
     appendTaskEvent(
         mWorkspace.hasPendingDataMigration()
-            ? QStringLiteral("工程状态已保存：%1；后台任务继续运行，"
+            ? QCoreApplication::translate("Workbench", "工程状态已保存：%1；后台任务继续运行，"
                              "结束后将自动迁移托管数据。")
                   .arg(QDir::toNativeSeparators(target))
-            : QStringLiteral("工程状态已保存：%1；后台任务继续运行。")
+            : QCoreApplication::translate("Workbench", "工程状态已保存：%1；后台任务继续运行。")
                   .arg(QDir::toNativeSeparators(target)));
   } else {
-    appendTaskEvent(QStringLiteral("工程已保存：%1（数据：%2）")
+    appendTaskEvent(QCoreApplication::translate("Workbench", "工程已保存：%1（数据：%2）")
                         .arg(QDir::toNativeSeparators(target),
                              QDir::toNativeSeparators(mWorkspace.rootPath())));
   }
@@ -3487,11 +3495,11 @@ bool MainWindow::finalizePendingProjectSave(QString *errorMessage) {
     QString discardError;
     if (!completeCurrentRecovery(mWorkspace.rootPath(), &discardError)) {
       appendTaskEvent(
-          QStringLiteral("工程迁移完成，但恢复工作区清理失败：%1")
+          QCoreApplication::translate("Workbench", "工程迁移完成，但恢复工作区清理失败：%1")
               .arg(discardError));
     }
   }
-  appendTaskEvent(QStringLiteral("工程托管数据已迁移到：%1")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "工程托管数据已迁移到：%1")
                       .arg(QDir::toNativeSeparators(mWorkspace.rootPath())));
   return true;
 }
@@ -3523,7 +3531,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
       return false;
     }
     appendTaskEvent(
-        QStringLiteral("检测到上次训练被中断，但尚无完整检查点可恢复。"));
+        QCoreApplication::translate("Workbench", "检测到上次训练被中断，但尚无完整检查点可恢复。"));
     return true;
   }
 
@@ -3534,7 +3542,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
   if (!durable.has_value()) {
     if (errorMessage != nullptr) {
       *errorMessage =
-          QStringLiteral("最近检查点有效，但无法发布保护副本：%1")
+          QCoreApplication::translate("Workbench", "最近检查点有效，但无法发布保护副本：%1")
               .arg(resultError);
     }
     return false;
@@ -3564,7 +3572,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
   }
 
   appendTaskEvent(
-      QStringLiteral("已从中断训练恢复最近完整检查点：迭代 %1，%2")
+      QCoreApplication::translate("Workbench", "已从中断训练恢复最近完整检查点：迭代 %1，%2")
           .arg(checkpoint->iteration)
           .arg(QDir::toNativeSeparators(checkpoint->path)));
   return true;
@@ -3583,8 +3591,8 @@ bool MainWindow::exportCroppedScene() {
                        .filePath(sourceInfo.completeBaseName() +
                                  QStringLiteral("-cropped.ply"));
   target = QFileDialog::getSaveFileName(
-      this, QStringLiteral("裁剪另存为"), target,
-      QStringLiteral("PLY Scene (*.ply);;All files (*.*)"));
+      this, QCoreApplication::translate("Workbench", "裁剪另存为"), target,
+      QCoreApplication::translate("Workbench", "PLY Scene (*.ply);;All files (*.*)"));
   if (target.isEmpty()) {
     return false;
   }
@@ -3597,12 +3605,12 @@ bool MainWindow::exportCroppedScene() {
   const bool saved = mViewport->saveCroppedScene(target, &error);
   QApplication::restoreOverrideCursor();
   if (!saved) {
-    showError(QStringLiteral("无法导出裁剪场景"), error);
+    showError(QCoreApplication::translate("Workbench", "无法导出裁剪场景"), error);
     return false;
   }
-  appendTaskEvent(QStringLiteral("裁剪场景已导出：%1")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "裁剪场景已导出：%1")
                       .arg(QDir::toNativeSeparators(target)));
-  statusBar()->showMessage(QStringLiteral("裁剪场景已导出"), 5000);
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "裁剪场景已导出"), 5000);
   return true;
 }
 
@@ -3616,8 +3624,8 @@ bool MainWindow::exportCoordinateReport() {
   QString target = sourceInfo.dir().filePath(
       sourceInfo.completeBaseName() + QStringLiteral("-coordinates.json"));
   target = QFileDialog::getSaveFileName(
-      this, QStringLiteral("导出坐标与尺寸报告"), target,
-      QStringLiteral("JSON 坐标报告 (*.json);;CSV 坐标报告 (*.csv)"));
+      this, QCoreApplication::translate("Workbench", "导出坐标与尺寸报告"), target,
+      QCoreApplication::translate("Workbench", "JSON 坐标报告 (*.json);;CSV 坐标报告 (*.csv)"));
   if (target.isEmpty()) {
     return false;
   }
@@ -3636,12 +3644,12 @@ bool MainWindow::exportCoordinateReport() {
   if (!writeSceneCoordinateReport(
           target, sourcePath, coordinates,
           mViewport->referencePlaneElevation(), planeMode, &error)) {
-    showError(QStringLiteral("无法导出坐标报告"), error);
+    showError(QCoreApplication::translate("Workbench", "无法导出坐标报告"), error);
     return false;
   }
-  appendTaskEvent(QStringLiteral("坐标与尺寸报告已导出：%1")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "坐标与尺寸报告已导出：%1")
                       .arg(QDir::toNativeSeparators(target)));
-  statusBar()->showMessage(QStringLiteral("坐标与尺寸报告已导出"), 5000);
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "坐标与尺寸报告已导出"), 5000);
   return true;
 }
 
@@ -3650,9 +3658,8 @@ bool MainWindow::ensureProjectRecoveryReady() {
     return true;
   }
   QMessageBox::warning(
-      this, QStringLiteral("导入恢复待处理"),
-      QStringLiteral(
-          "工程中的未完成导入事务尚未安全恢复，因此保存、导入、重建、训练和"
+      this, QCoreApplication::translate("Workbench", "导入恢复待处理"),
+      QCoreApplication::translate("Workbench", "工程中的未完成导入事务尚未安全恢复，因此保存、导入、重建、训练和"
           "场景编辑暂时禁用。请修复 Python/worker 环境后重新打开工程。"));
   return false;
 }
@@ -3681,7 +3688,7 @@ bool MainWindow::recoverDatasetImport(const PendingDatasetImport &pending,
                  QIODevice::ReadOnly);
   if (!recovery.waitForStarted(5000)) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("无法启动导入恢复进程：%1")
+      *errorMessage = QCoreApplication::translate("Workbench", "无法启动导入恢复进程：%1")
                           .arg(recovery.errorString());
     }
     return false;
@@ -3690,8 +3697,7 @@ bool MainWindow::recoverDatasetImport(const PendingDatasetImport &pending,
     recovery.kill();
     recovery.waitForFinished(2000);
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral(
-          "导入恢复超时；另一个软件实例可能仍在处理同名数据集。");
+      *errorMessage = QCoreApplication::translate("Workbench", "导入恢复超时；另一个软件实例可能仍在处理同名数据集。");
     }
     return false;
   }
@@ -3741,7 +3747,7 @@ bool MainWindow::recoverDatasetImport(const PendingDatasetImport &pending,
       return true;
     }
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("导入恢复进程已退出，但未返回有效的事务状"
+      *errorMessage = QCoreApplication::translate("Workbench", "导入恢复进程已退出，但未返回有效的事务状"
                                      "态报告；worker 版本可能不兼容。");
     }
     return false;
@@ -3750,9 +3756,9 @@ bool MainWindow::recoverDatasetImport(const PendingDatasetImport &pending,
   if (errorMessage != nullptr) {
     const QString detail = output.trimmed();
     *errorMessage = detail.isEmpty()
-                        ? QStringLiteral("导入恢复失败，退出码 %1。")
+                        ? QCoreApplication::translate("Workbench", "导入恢复失败，退出码 %1。")
                               .arg(recovery.exitCode())
-                        : QStringLiteral("导入恢复失败：%1").arg(detail);
+                        : QCoreApplication::translate("Workbench", "导入恢复失败：%1").arg(detail);
   }
   return false;
 }
@@ -3780,7 +3786,7 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
       python.isEmpty()) {
     if (errorMessage != nullptr) {
       *errorMessage =
-          QStringLiteral("检测到未完成的导入事务。\n\n") +
+          QCoreApplication::translate("Workbench", "检测到未完成的导入事务。\n\n") +
           backendUnavailableMessage(repositoryRoot, workerScript, python);
     }
     return false;
@@ -3792,7 +3798,7 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
   configuration.setAutoRemove(true);
   if (!configuration.open()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("无法创建工程导入恢复配置：%1")
+      *errorMessage = QCoreApplication::translate("Workbench", "无法创建工程导入恢复配置：%1")
                           .arg(configuration.errorString());
     }
     return false;
@@ -3809,14 +3815,14 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
   if (configuration.write(payload) != payload.size() ||
       !configuration.flush()) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("无法写入工程导入恢复配置：%1")
+      *errorMessage = QCoreApplication::translate("Workbench", "无法写入工程导入恢复配置：%1")
                           .arg(configuration.errorString());
     }
     return false;
   }
   configuration.close();
 
-  const PendingDatasetImport pending{QStringLiteral("工程导入事务恢复"),
+  const PendingDatasetImport pending{QCoreApplication::translate("Workbench", "工程导入事务恢复"),
                                      datasetRoot,
                                      projectRoot,
                                      configuration.fileName(),
@@ -3835,7 +3841,7 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
     QString reloadError;
     if (!mWorkspace.load(mWorkspace.projectFilePath(), &reloadError)) {
       if (errorMessage != nullptr) {
-        *errorMessage = QStringLiteral("导入事务已恢复，但无法重新载入工程：%1")
+        *errorMessage = QCoreApplication::translate("Workbench", "导入事务已恢复，但无法重新载入工程：%1")
                             .arg(reloadError);
       }
       return false;
@@ -3843,7 +3849,7 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
   }
 
   if (committed && committedPaths.isEmpty()) {
-    appendTaskEvent(QStringLiteral("检测到已提交的数据集，但恢复报告未包含路径"
+    appendTaskEvent(QCoreApplication::translate("Workbench", "检测到已提交的数据集，但恢复报告未包含路径"
                                    "；请使用“关联已有数据集”确认结果。"));
   } else if (committedPaths.size() == 1) {
     const QString recoveredDataset =
@@ -3863,50 +3869,50 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
       if (!mWorkspace.projectFilePath().isEmpty() &&
           !mWorkspace.saveManifest({}, &saveError)) {
         appendTaskEvent(
-            QStringLiteral("已恢复并关联数据集，但工程自动保存失败：%1")
+            QCoreApplication::translate("Workbench", "已恢复并关联数据集，但工程自动保存失败：%1")
                 .arg(saveError));
       }
       appendTaskEvent(
-          QStringLiteral("已自动关联崩溃前完成提交的数据集：%1（%2 张图像）")
+          QCoreApplication::translate("Workbench", "已自动关联崩溃前完成提交的数据集：%1（%2 张图像）")
               .arg(QDir::toNativeSeparators(recoveredDataset))
               .arg(imageCount));
     } else {
       appendTaskEvent(
-          QStringLiteral("已保留提交完成的数据集，但无法自动关联：%1%2")
+          QCoreApplication::translate("Workbench", "已保留提交完成的数据集，但无法自动关联：%1%2")
               .arg(QDir::toNativeSeparators(recoveredDataset),
                    attachError.isEmpty()
                        ? QString()
                        : QStringLiteral("（%1）").arg(attachError)));
     }
   } else if (committedPaths.size() > 1) {
-    appendTaskEvent(QStringLiteral("已恢复 %1 "
+    appendTaskEvent(QCoreApplication::translate("Workbench", "已恢复 %1 "
                                    "个提交完成的数据集；为避免误选，请使用“关联"
                                    "已有数据集”选择当前数据集。")
                         .arg(committedPaths.size()));
   }
   appendTaskEvent(
-      QStringLiteral("已恢复工程中断的导入事务，并重新载入数据集状态。"));
+      QCoreApplication::translate("Workbench", "已恢复工程中断的导入事务，并重新载入数据集状态。"));
   return true;
 }
 
 void MainWindow::newProject() {
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务仍在运行"),
-        QStringLiteral("请先停止或等待当前任务结束，再新建工程。"));
+        this, QCoreApplication::translate("Workbench", "任务仍在运行"),
+        QCoreApplication::translate("Workbench", "请先停止或等待当前任务结束，再新建工程。"));
     return;
   }
   if (!confirmDiscardChanges()) {
     return;
   }
   QString error;
-  if (!beginUntitledProject(QStringLiteral("未命名工程"), &error)) {
-    showError(QStringLiteral("无法创建工程"), error);
+  if (!beginUntitledProject(QCoreApplication::translate("Workbench", "未命名工程"), &error)) {
+    showError(QCoreApplication::translate("Workbench", "无法创建工程"), error);
     return;
   }
   updateWorkspaceUi();
   appendTaskEvent(
-      QStringLiteral("已新建未命名工程；无需预先选择目录，可在任意阶段保存。"));
+      QCoreApplication::translate("Workbench", "已新建未命名工程；无需预先选择目录，可在任意阶段保存。"));
 }
 
 bool MainWindow::ensureProjectForDataAction(const QString &actionName) {
@@ -3915,8 +3921,8 @@ bool MainWindow::ensureProjectForDataAction(const QString &actionName) {
   }
 
   QString error;
-  if (!beginUntitledProject(QStringLiteral("未命名工程"), &error)) {
-    showError(QStringLiteral("无法准备%1").arg(actionName), error);
+  if (!beginUntitledProject(QCoreApplication::translate("Workbench", "未命名工程"), &error)) {
+    showError(QCoreApplication::translate("Workbench", "无法准备%1").arg(actionName), error);
     return false;
   }
   updateWorkspaceUi();
@@ -3929,8 +3935,8 @@ void MainWindow::importDataset() {
   }
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务繁忙"),
-        QStringLiteral("请等待当前任务结束后再导入媒体。"));
+        this, QCoreApplication::translate("Workbench", "任务繁忙"),
+        QCoreApplication::translate("Workbench", "请等待当前任务结束后再导入媒体。"));
     return;
   }
 
@@ -3940,8 +3946,8 @@ void MainWindow::importDataset() {
     qApp->setProperty("gswInitialMediaSources", QStringList{});
   } else {
     sourcePaths = QFileDialog::getOpenFileNames(
-        this, QStringLiteral("添加照片或视频"), mWorkspace.rootPath(),
-        QStringLiteral("照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff "
+        this, QCoreApplication::translate("Workbench", "添加照片或视频"), mWorkspace.rootPath(),
+        QCoreApplication::translate("Workbench", "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff "
                        "*.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;"
                        "照片 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;"
                        "视频 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)"));
@@ -3957,13 +3963,13 @@ void MainWindow::importDatasetDirectory() {
   }
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务繁忙"),
-        QStringLiteral("请等待当前任务结束后再导入媒体。"));
+        this, QCoreApplication::translate("Workbench", "任务繁忙"),
+        QCoreApplication::translate("Workbench", "请等待当前任务结束后再导入媒体。"));
     return;
   }
 
   const QString sourcePath = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("添加包含照片或视频的目录"), mWorkspace.rootPath(),
+      this, QCoreApplication::translate("Workbench", "添加包含照片或视频的目录"), mWorkspace.rootPath(),
       QFileDialog::ShowDirsOnly);
   if (!sourcePath.isEmpty()) {
     importDatasetSources({sourcePath});
@@ -3977,7 +3983,7 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
   }
 
   QString error;
-  if (!ensureProjectForDataAction(QStringLiteral("添加照片与视频"))) {
+  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "添加照片与视频"))) {
     return;
   }
 
@@ -3995,8 +4001,8 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
   const std::optional<DatasetImportPlan> &validatedPlan =
       dialog.validatedPlan();
   if (!validatedPlan.has_value()) {
-    showError(QStringLiteral("无法准备媒体导入"),
-              QStringLiteral("导入对话框未生成有效的媒体计划。"));
+    showError(QCoreApplication::translate("Workbench", "无法准备媒体导入"),
+              QCoreApplication::translate("Workbench", "导入对话框未生成有效的媒体计划。"));
     return;
   }
   const DatasetImportPlan &plan = *validatedPlan;
@@ -4009,27 +4015,27 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
       QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
-    showError(QStringLiteral("导入后端不可用"),
+    showError(QCoreApplication::translate("Workbench", "导入后端不可用"),
               backendUnavailableMessage(root, workerScript, python));
     return;
   }
 
-  statusBar()->showMessage(QStringLiteral("正在预检媒体导入环境…"));
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在预检媒体导入环境…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const ImportEnvironmentProbeResult preflight = ImportEnvironmentProbe::run(
       python, root, plan.videoCount() > 0, pythonProcessEnvironment(python));
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!preflight.ready) {
-    showError(QStringLiteral("媒体导入环境不可用"),
-              QStringLiteral("所选 Python：%1\n\n%2")
+    showError(QCoreApplication::translate("Workbench", "媒体导入环境不可用"),
+              QCoreApplication::translate("Workbench", "所选 Python：%1\n\n%2")
                   .arg(preflight.python, preflight.errorMessage));
     return;
   }
   appendTaskEvent(
       preflight.videoBackend.isEmpty()
-          ? QStringLiteral("媒体导入环境预检通过：%1").arg(preflight.python)
-          : QStringLiteral("媒体导入环境预检通过：%1（视频后端：%2）")
+          ? QCoreApplication::translate("Workbench", "媒体导入环境预检通过：%1").arg(preflight.python)
+          : QCoreApplication::translate("Workbench", "媒体导入环境预检通过：%1（视频后端：%2）")
                 .arg(preflight.python, preflight.videoBackend));
 
   const QString activeProjectRoot = comparablePath(mWorkspace.rootPath());
@@ -4045,12 +4051,12 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
                   .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
   if (!plan.writeWorkerConfiguration(configurationPath, root, datasetRoot,
                                      &error)) {
-    showError(QStringLiteral("无法保存导入任务"), error);
+    showError(QCoreApplication::translate("Workbench", "无法保存导入任务"), error);
     return;
   }
 
   const qsizetype mediaCount = plan.imageCount() + plan.videoCount();
-  const QString taskName = QStringLiteral("媒体导入 | %1 | %2 项")
+  const QString taskName = QCoreApplication::translate("Workbench", "媒体导入 | %1 | %2 项")
                                .arg(plan.sceneName())
                                .arg(mediaCount);
   const PendingDatasetImport pending{taskName,
@@ -4062,29 +4068,28 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
                                      root,
                                      QStringLiteral("import-recovery")};
 
-  statusBar()->showMessage(QStringLiteral("正在检查上次导入事务…"));
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在检查上次导入事务…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const bool recovered = recoverDatasetImport(pending, &error);
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!recovered) {
-    showError(QStringLiteral("无法恢复导入事务"), error);
+    showError(QCoreApplication::translate("Workbench", "无法恢复导入事务"), error);
     return;
   }
 
   if (QFileInfo::exists(managedDatasetPath) && !request.overwrite) {
     QFile::remove(configurationPath);
     QMessageBox::information(
-        this, QStringLiteral("数据集已存在"),
-        QStringLiteral(
-            "目标数据集已存在：\n%1\n\n请启用“覆盖同名托管数据集”后重试。")
+        this, QCoreApplication::translate("Workbench", "数据集已存在"),
+        QCoreApplication::translate("Workbench", "目标数据集已存在：\n%1\n\n请启用“覆盖同名托管数据集”后重试。")
             .arg(QDir::toNativeSeparators(managedDatasetPath)));
     return;
   }
   if (QFileInfo::exists(managedDatasetPath) && request.overwrite) {
     const QMessageBox::StandardButton answer = QMessageBox::warning(
-        this, QStringLiteral("确认覆盖托管数据集"),
-        QStringLiteral("导入成功后将分阶段替换以下数据集；最终提交前的失败或中"
+        this, QCoreApplication::translate("Workbench", "确认覆盖托管数据集"),
+        QCoreApplication::translate("Workbench", "导入成功后将分阶段替换以下数据集；最终提交前的失败或中"
                        "断会恢复旧数据，"
                        "提交完成后会保留新数据：\n%1")
             .arg(QDir::toNativeSeparators(managedDatasetPath)),
@@ -4104,12 +4109,12 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
   if (!started) {
     mPendingDatasetImport.reset();
     QFile::remove(configurationPath);
-    QMessageBox::information(this, QStringLiteral("任务繁忙"),
-                             QStringLiteral("请等待当前任务结束后再试。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "任务繁忙"),
+                             QCoreApplication::translate("Workbench", "请等待当前任务结束后再试。"));
     return;
   }
 
-  appendTaskEvent(QStringLiteral("导入配置已保存：%1")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "导入配置已保存：%1")
                       .arg(QDir::toNativeSeparators(configurationPath)));
 }
 
@@ -4117,13 +4122,13 @@ void MainWindow::attachExistingDataset() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!ensureProjectForDataAction(QStringLiteral("关联已有数据集"))) {
+  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "关联已有数据集"))) {
     return;
   }
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务繁忙"),
-        QStringLiteral("请等待当前任务结束后再关联数据集。"));
+        this, QCoreApplication::translate("Workbench", "任务繁忙"),
+        QCoreApplication::translate("Workbench", "请等待当前任务结束后再关联数据集。"));
     return;
   }
 
@@ -4131,7 +4136,7 @@ void MainWindow::attachExistingDataset() {
                                        ? mWorkspace.rootPath()
                                        : mWorkspace.datasetPath();
   const QString directory = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("关联已有图像 / COLMAP 数据集"), initialDirectory,
+      this, QCoreApplication::translate("Workbench", "关联已有图像 / COLMAP 数据集"), initialDirectory,
       QFileDialog::ShowDirsOnly);
   if (directory.isEmpty()) {
     return;
@@ -4139,20 +4144,18 @@ void MainWindow::attachExistingDataset() {
 
   const qint64 imageCount = WorkspaceDocument::countDatasetImages(directory);
   if (imageCount <= 0) {
-    showError(QStringLiteral("数据集没有可用图像"),
-              QStringLiteral(
-                  "未在所选目录或其 images/input 子目录中找到支持的图像。"));
+    showError(QCoreApplication::translate("Workbench", "数据集没有可用图像"),
+              QCoreApplication::translate("Workbench", "未在所选目录或其 images/input 子目录中找到支持的图像。"));
     return;
   }
 
   QString error;
   if (!mWorkspace.setDatasetPath(directory, &error)) {
-    showError(QStringLiteral("无法关联数据集"), error);
+    showError(QCoreApplication::translate("Workbench", "无法关联数据集"), error);
     return;
   }
   appendTaskEvent(
-      QStringLiteral(
-          "已关联现有数据集：%1（%2 张图像，原目录与 COLMAP 数据保持不变）")
+      QCoreApplication::translate("Workbench", "已关联现有数据集：%1（%2 张图像，原目录与 COLMAP 数据保持不变）")
           .arg(QDir::toNativeSeparators(directory))
           .arg(imageCount));
 }
@@ -4161,12 +4164,12 @@ void MainWindow::importScene() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!ensureProjectForDataAction(QStringLiteral("导入 PLY 场景/网格"))) {
+  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"))) {
     return;
   }
   const QString filePath = QFileDialog::getOpenFileName(
-      this, QStringLiteral("导入 PLY 场景/网格"), mWorkspace.rootPath(),
-      QStringLiteral("PLY 场景与网格 (*.ply);;所有文件 (*.*)"));
+      this, QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), mWorkspace.rootPath(),
+      QCoreApplication::translate("Workbench", "PLY 场景与网格 (*.ply);;所有文件 (*.*)"));
   if (filePath.isEmpty()) {
     return;
   }
@@ -4175,19 +4178,19 @@ void MainWindow::importScene() {
 
 bool MainWindow::importSceneFile(const QString &filePath) {
   if (filePath.isEmpty() || !ensureProjectRecoveryReady() ||
-      !ensureProjectForDataAction(QStringLiteral("导入 PLY 场景/网格"))) return false;
+      !ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"))) return false;
   bool append = false;
   if (!mWorkspace.sceneObjects().isEmpty()) {
-    QMessageBox choice(QMessageBox::Question, QStringLiteral("选择导入方式"),
-        QStringLiteral("场景中已有 %1 个对象。\n\n"
+    QMessageBox choice(QMessageBox::Question, QCoreApplication::translate("Workbench", "选择导入方式"),
+        QCoreApplication::translate("Workbench", "场景中已有 %1 个对象。\n\n"
                        "同时导入：保留现有对象，在同一场景中加入新数据。\n"
                        "覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n"
                        "两种方式都不会删除或改写原始文件。")
             .arg(mWorkspace.sceneObjects().size()).arg(QFileInfo(mWorkspace.scenePath()).fileName()),
         QMessageBox::NoButton, this);
     choice.setObjectName(QStringLiteral("sceneImportChoiceDialog"));
-    auto *add = choice.addButton(QStringLiteral("同时导入"), QMessageBox::AcceptRole);
-    auto *replace = choice.addButton(QStringLiteral("覆盖当前"), QMessageBox::DestructiveRole);
+    auto *add = choice.addButton(QCoreApplication::translate("Workbench", "同时导入"), QMessageBox::AcceptRole);
+    auto *replace = choice.addButton(QCoreApplication::translate("Workbench", "覆盖当前"), QMessageBox::DestructiveRole);
     auto *cancel = choice.addButton(QMessageBox::Cancel);
     add->setObjectName(QStringLiteral("appendSceneButton"));
     replace->setObjectName(QStringLiteral("replaceSceneButton"));
@@ -4202,24 +4205,24 @@ bool MainWindow::importSceneFile(const QString &filePath) {
   QString error;
   if (!(append ? mWorkspace.addScenePath(filePath, &error)
                : mWorkspace.setScenePath(filePath, &error))) {
-    showError(QStringLiteral("无法导入场景"), error);
+    showError(QCoreApplication::translate("Workbench", "无法导入场景"), error);
     return false;
   }
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   const QString sceneType =
       metadata.looksLikeGaussianSplat()
-          ? QStringLiteral("Gaussian Splat")
-          : metadata.looksLikeMesh() ? QStringLiteral("PLY 三角网格")
-                                     : QStringLiteral("PLY 点云");
+          ? QCoreApplication::translate("Workbench", "Gaussian Splat")
+          : metadata.looksLikeMesh() ? QCoreApplication::translate("Workbench", "PLY 三角网格")
+                                     : QCoreApplication::translate("Workbench", "PLY 点云");
   const QString faceDetail =
       metadata.looksLikeMesh()
-          ? QStringLiteral("，%1 个面").arg(metadata.faceCount)
+          ? QCoreApplication::translate("Workbench", "，%1 个面").arg(metadata.faceCount)
           : QString();
-  appendTaskEvent(QStringLiteral("已读取场景元数据：%1 个顶点%2，%3")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "已读取场景元数据：%1 个顶点%2，%3")
                       .arg(metadata.vertexCount)
                       .arg(faceDetail, sceneType));
-  appendTaskEvent(append ? QStringLiteral("已同时导入：现有对象全部保留。")
-                        : QStringLiteral("已导入到当前对象槽位，源文件保持不变。"));
+  appendTaskEvent(append ? QCoreApplication::translate("Workbench", "已同时导入：现有对象全部保留。")
+                        : QCoreApplication::translate("Workbench", "已导入到当前对象槽位，源文件保持不变。"));
   return true;
 }
 
@@ -4229,36 +4232,34 @@ void MainWindow::clearDatasetImport() {
   }
   if (mProcessSupervisor.isRunning()) {
     QMessageBox::information(
-        this, QStringLiteral("任务繁忙"),
-        QStringLiteral("请等待当前任务结束后再清理数据集。"));
+        this, QCoreApplication::translate("Workbench", "任务繁忙"),
+        QCoreApplication::translate("Workbench", "请等待当前任务结束后再清理数据集。"));
     return;
   }
   if (mWorkspace.hasPendingDataMigration()) {
     QMessageBox::information(
-        this, QStringLiteral("工程迁移尚未完成"),
-        QStringLiteral("请先保存工程并完成托管数据迁移，再执行清理。"));
+        this, QCoreApplication::translate("Workbench", "工程迁移尚未完成"),
+        QCoreApplication::translate("Workbench", "请先保存工程并完成托管数据迁移，再执行清理。"));
     return;
   }
 
   if (mWorkspace.datasetPath().isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("没有可清理的数据集"),
-                             QStringLiteral("当前工程尚未导入数据集。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "没有可清理的数据集"),
+                             QCoreApplication::translate("Workbench", "当前工程尚未导入数据集。"));
     return;
   }
 
   const bool managedDataset = mWorkspace.isDatasetManaged();
   const QString message =
       managedDataset
-          ? QStringLiteral(
-                "将永久删除工程托管的数据集副本及其重建结果，但保留工程"
+          ? QCoreApplication::translate("Workbench", "将永久删除工程托管的数据集副本及其重建结果，但保留工程"
                 "中的场景和训练输出：\n%1")
                 .arg(QDir::toNativeSeparators(mWorkspace.datasetPath()))
-          : QStringLiteral(
-                "将只解除当前外部数据集关联，不修改原目录中的照片或"
+          : QCoreApplication::translate("Workbench", "将只解除当前外部数据集关联，不修改原目录中的照片或"
                 "COLMAP 文件：\n%1")
                 .arg(QDir::toNativeSeparators(mWorkspace.datasetPath()));
   const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QStringLiteral("确认清理数据集"), message,
+      this, QCoreApplication::translate("Workbench", "确认清理数据集"), message,
       QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
   if (answer != QMessageBox::Yes) {
     return;
@@ -4270,27 +4271,27 @@ void MainWindow::clearDatasetImport() {
   const bool cleared = mWorkspace.clearImportedData({}, &result, &error);
   QApplication::restoreOverrideCursor();
   if (!cleared) {
-    showError(QStringLiteral("无法清理数据集"), error);
+    showError(QCoreApplication::translate("Workbench", "无法清理数据集"), error);
     return;
   }
 
   appendTaskEvent(
       managedDataset
-          ? QStringLiteral("已清理工程托管数据集与重建数据：%1")
+          ? QCoreApplication::translate("Workbench", "已清理工程托管数据集与重建数据：%1")
                 .arg(QDir::toNativeSeparators(result.previousDatasetPath))
-          : QStringLiteral("已解除外部数据集关联；原目录保持不变：%1")
+          : QCoreApplication::translate("Workbench", "已解除外部数据集关联；原目录保持不变：%1")
                 .arg(QDir::toNativeSeparators(result.previousDatasetPath)));
   if (!result.cleanupPendingPath.isEmpty()) {
     appendTaskEvent(
-        QStringLiteral("数据集已从工程解除，但有待清理的托管文件：%1")
+        QCoreApplication::translate("Workbench", "数据集已从工程解除，但有待清理的托管文件：%1")
             .arg(QDir::toNativeSeparators(result.cleanupPendingPath)));
     QMessageBox::warning(
-        this, QStringLiteral("部分文件等待清理"),
-        QStringLiteral("工程关联已清除，但部分托管文件可能正被其他程序"
+        this, QCoreApplication::translate("Workbench", "部分文件等待清理"),
+        QCoreApplication::translate("Workbench", "工程关联已清除，但部分托管文件可能正被其他程序"
                        "占用。关闭占用程序后可手动删除：\n%1")
             .arg(QDir::toNativeSeparators(result.cleanupPendingPath)));
   } else {
-    statusBar()->showMessage(QStringLiteral("数据集已清理"), 5000);
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "数据集已清理"), 5000);
   }
 }
 
@@ -4299,26 +4300,26 @@ void MainWindow::clearReconstructionImport() {
     return;
   }
   if (mWorkspace.datasetPath().isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("没有数据集"),
-                             QStringLiteral("当前工程尚未导入数据集。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "没有数据集"),
+                             QCoreApplication::translate("Workbench", "当前工程尚未导入数据集。"));
     return;
   }
   if (!mWorkspace.isDatasetManaged()) {
     QMessageBox::information(
-        this, QStringLiteral("外部重建数据保持不变"),
-        QStringLiteral("当前数据集是外部关联目录。为避免修改源文件，桌面端"
+        this, QCoreApplication::translate("Workbench", "外部重建数据保持不变"),
+        QCoreApplication::translate("Workbench", "当前数据集是外部关联目录。为避免修改源文件，桌面端"
                        "不会删除其中的 COLMAP 结果。请先将其作为托管数据集"
                        "导入，再执行单独清理。"));
     return;
   }
   if (!mWorkspace.hasManagedReconstructionData()) {
-    QMessageBox::information(this, QStringLiteral("没有重建结果"),
-                             QStringLiteral("未检测到可清理的 COLMAP 数据。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "没有重建结果"),
+                             QCoreApplication::translate("Workbench", "未检测到可清理的 COLMAP 数据。"));
     return;
   }
   const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QStringLiteral("确认清理重建结果"),
-      QStringLiteral("将删除 sparse、distorted、stereo、数据库和对齐缓存，"
+      this, QCoreApplication::translate("Workbench", "确认清理重建结果"),
+      QCoreApplication::translate("Workbench", "将删除 sparse、distorted、stereo、数据库和对齐缓存，"
                      "但保留导入照片、数据集关联与当前场景。\n%1")
           .arg(QDir::toNativeSeparators(mWorkspace.datasetPath())),
       QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
@@ -4332,7 +4333,7 @@ void MainWindow::clearReconstructionImport() {
   const bool cleared = mWorkspace.clearReconstructionData(&result, &error);
   QApplication::restoreOverrideCursor();
   if (!cleared) {
-    showError(QStringLiteral("无法清理重建结果"), error);
+    showError(QCoreApplication::translate("Workbench", "无法清理重建结果"), error);
     return;
   }
   mLiveReconstructionPreviewPath.clear();
@@ -4340,17 +4341,17 @@ void MainWindow::clearReconstructionImport() {
   mLiveReconstructionPointCount = 0;
   mLastReconstructionPreviewIteration = -1;
   updateWorkspaceUi();
-  appendTaskEvent(QStringLiteral("已单独清理 COLMAP 重建结果，照片与场景保持"
+  appendTaskEvent(QCoreApplication::translate("Workbench", "已单独清理 COLMAP 重建结果，照片与场景保持"
                                  "不变：%1")
                       .arg(QDir::toNativeSeparators(mWorkspace.datasetPath())));
   if (!result.cleanupPendingPath.isEmpty()) {
     QMessageBox::warning(
-        this, QStringLiteral("部分文件等待清理"),
-        QStringLiteral("重建结果已从数据集中移除，但部分暂存文件可能正被"
+        this, QCoreApplication::translate("Workbench", "部分文件等待清理"),
+        QCoreApplication::translate("Workbench", "重建结果已从数据集中移除，但部分暂存文件可能正被"
                        "占用。关闭占用程序后可手动删除：\n%1")
             .arg(QDir::toNativeSeparators(result.cleanupPendingPath)));
   } else {
-    statusBar()->showMessage(QStringLiteral("重建结果已清理"), 5000);
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "重建结果已清理"), 5000);
   }
 }
 
@@ -4359,8 +4360,8 @@ void MainWindow::clearSceneImport() {
     return;
   }
   if (mWorkspace.scenePath().isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("没有已载入场景"),
-                             QStringLiteral("当前工程尚未导入场景。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "没有已载入场景"),
+                             QCoreApplication::translate("Workbench", "当前工程尚未导入场景。"));
     return;
   }
   if (!confirmDiscardSceneEdits()) {
@@ -4368,8 +4369,8 @@ void MainWindow::clearSceneImport() {
   }
   const QString scenePath = mWorkspace.scenePath();
   const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QStringLiteral("确认卸载场景"),
-      QStringLiteral("只从当前工程和视口卸载场景，不删除 PLY 或训练输出：\n%1")
+      this, QCoreApplication::translate("Workbench", "确认卸载场景"),
+      QCoreApplication::translate("Workbench", "只从当前工程和视口卸载场景，不删除 PLY 或训练输出：\n%1")
           .arg(QDir::toNativeSeparators(scenePath)),
       QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
   if (answer != QMessageBox::Yes) {
@@ -4381,24 +4382,24 @@ void MainWindow::clearSceneImport() {
   ImportCleanupResult result;
   QString error;
   if (!mWorkspace.clearImportedData(options, &result, &error)) {
-    showError(QStringLiteral("无法卸载场景"), error);
+    showError(QCoreApplication::translate("Workbench", "无法卸载场景"), error);
     return;
   }
   appendTaskEvent(
-      QStringLiteral("已卸载场景关联；PLY 与训练输出保持不变：%1")
+      QCoreApplication::translate("Workbench", "已卸载场景关联；PLY 与训练输出保持不变：%1")
           .arg(QDir::toNativeSeparators(scenePath)));
-  statusBar()->showMessage(QStringLiteral("场景已卸载"), 5000);
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "场景已卸载"), 5000);
 }
 
 void MainWindow::clearTaskHistory() {
   if (mProcessSupervisor.isRunning()) {
-    QMessageBox::information(this, QStringLiteral("任务仍在运行"),
-                             QStringLiteral("请先等待或停止当前任务。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "任务仍在运行"),
+                             QCoreApplication::translate("Workbench", "请先等待或停止当前任务。"));
     return;
   }
   const QMessageBox::StandardButton answer = QMessageBox::question(
-      this, QStringLiteral("清空任务记录"),
-      QStringLiteral("将清空当前窗口中的任务表和日志，不会删除数据集、"
+      this, QCoreApplication::translate("Workbench", "清空任务记录"),
+      QCoreApplication::translate("Workbench", "将清空当前窗口中的任务表和日志，不会删除数据集、"
                      "场景或任何任务输出。"),
       QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
   if (answer != QMessageBox::Yes) {
@@ -4409,7 +4410,7 @@ void MainWindow::clearTaskHistory() {
   mActiveTaskRow = -1;
   rebuildProjectTree();
   updateActionAvailability();
-  statusBar()->showMessage(QStringLiteral("任务记录已清空"), 5000);
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "任务记录已清空"), 5000);
 }
 
 void MainWindow::runEnvironmentCheck() {
@@ -4419,19 +4420,19 @@ void MainWindow::runEnvironmentCheck() {
   const QString script =
       QDir(root).filePath(QStringLiteral("scripts/check_3dgs_env.ps1"));
   if (root.isEmpty() || !QFileInfo::exists(script)) {
-    showError(QStringLiteral("找不到环境检查脚本"),
-              QStringLiteral("请从完整源码目录运行原生应用。"));
+    showError(QCoreApplication::translate("Workbench", "找不到环境检查脚本"),
+              QCoreApplication::translate("Workbench", "请从完整源码目录运行原生应用。"));
     return;
   }
   const bool started = mProcessSupervisor.start(
-      QStringLiteral("环境检查"), QStringLiteral("powershell.exe"),
+      QCoreApplication::translate("Workbench", "环境检查"), QStringLiteral("powershell.exe"),
       {QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"),
        QStringLiteral("Bypass"), QStringLiteral("-File"),
        QDir::toNativeSeparators(script)},
       root);
   if (!started) {
-    QMessageBox::information(this, QStringLiteral("任务繁忙"),
-                             QStringLiteral("请等待当前任务结束后再试。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "任务繁忙"),
+                             QCoreApplication::translate("Workbench", "请等待当前任务结束后再试。"));
   }
 }
 
@@ -4440,8 +4441,8 @@ void MainWindow::startReconstruction() {
     return;
   }
   if (mWorkspace.datasetPath().isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("尚未导入数据集"),
-                             QStringLiteral("请先导入包含照片的图像数据集。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "尚未导入数据集"),
+                             QCoreApplication::translate("Workbench", "请先导入包含照片的图像数据集。"));
     return;
   }
   const QString root = BackendLocator::findRepositoryRoot(
@@ -4451,7 +4452,7 @@ void MainWindow::startReconstruction() {
       QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
-    showError(QStringLiteral("重建后端不可用"),
+    showError(QCoreApplication::translate("Workbench", "重建后端不可用"),
               backendUnavailableMessage(root, workerScript, python));
     return;
   }
@@ -4465,7 +4466,7 @@ void MainWindow::startReconstruction() {
   const QString jobsRoot =
       QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs"));
   if (!QDir().mkpath(jobsRoot)) {
-    showError(QStringLiteral("无法创建任务目录"),
+    showError(QCoreApplication::translate("Workbench", "无法创建任务目录"),
               QDir::toNativeSeparators(jobsRoot));
     return;
   }
@@ -4504,7 +4505,7 @@ void MainWindow::startReconstruction() {
       configFile.write(
           QJsonDocument(workerConfig).toJson(QJsonDocument::Indented)) < 0 ||
       !configFile.commit()) {
-    showError(QStringLiteral("无法保存重建任务"), configFile.errorString());
+    showError(QCoreApplication::translate("Workbench", "无法保存重建任务"), configFile.errorString());
     return;
   }
 
@@ -4523,10 +4524,10 @@ void MainWindow::startReconstruction() {
       root, environment, true);
   if (!started) {
     mPendingReconstruction.reset();
-    QMessageBox::information(this, QStringLiteral("任务繁忙"),
-                             QStringLiteral("请等待当前任务结束后再试。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "任务繁忙"),
+                             QCoreApplication::translate("Workbench", "请等待当前任务结束后再试。"));
   } else {
-    appendTaskEvent(QStringLiteral("重建配置已保存：%1")
+    appendTaskEvent(QCoreApplication::translate("Workbench", "重建配置已保存：%1")
                         .arg(QDir::toNativeSeparators(configPath)));
   }
 }
@@ -4537,8 +4538,8 @@ void MainWindow::startTraining() {
   }
   if (mWorkspace.datasetPath().isEmpty()) {
     QMessageBox::information(
-        this, QStringLiteral("尚未导入数据集"),
-        QStringLiteral("请先导入包含 COLMAP 数据的图像工程。"));
+        this, QCoreApplication::translate("Workbench", "尚未导入数据集"),
+        QCoreApplication::translate("Workbench", "请先导入包含 COLMAP 数据的图像工程。"));
     return;
   }
   const QString root = BackendLocator::findRepositoryRoot(
@@ -4548,7 +4549,7 @@ void MainWindow::startTraining() {
       QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
   const QString python = findTrainingPython(root);
   if (root.isEmpty() || !QFileInfo::exists(workerScript) || python.isEmpty()) {
-    showError(QStringLiteral("训练后端不可用"),
+    showError(QCoreApplication::translate("Workbench", "训练后端不可用"),
               backendUnavailableMessage(root, workerScript, python));
     return;
   }
@@ -4569,7 +4570,7 @@ void MainWindow::startTraining() {
   }
 
   statusBar()->showMessage(
-      QStringLiteral("正在预检 %1 训练环境…").arg(config.backend.toUpper()));
+      QCoreApplication::translate("Workbench", "正在预检 %1 训练环境…").arg(config.backend.toUpper()));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const TrainingEnvironmentProbeResult preflight =
       TrainingEnvironmentProbe::run(python, root, mWorkspace.datasetPath(),
@@ -4579,22 +4580,21 @@ void MainWindow::startTraining() {
   statusBar()->clearMessage();
   if (!preflight.ready) {
     const QString guidance =
-        preflight.policyBlocked &&
-                !preflight.errorMessage.contains(QStringLiteral("系统管理员"))
-            ? QStringLiteral("\n\n这是系统级企业应用控制限制，需要管理员允许或"
+        preflight.policyBlocked
+            ? QCoreApplication::translate("Workbench", "\n\n这是系统级企业应用控制限制，需要管理员允许或"
                              "签名被拦截的运行库；"
                              "桌面端不会绕过安全策略。")
             : QString();
-    showError(QStringLiteral("%1 训练环境不可用").arg(config.backend.toUpper()),
-              QStringLiteral("所选 Python：%1\n\n%2%3")
+    showError(QCoreApplication::translate("Workbench", "%1 训练环境不可用").arg(config.backend.toUpper()),
+              QCoreApplication::translate("Workbench", "所选 Python：%1\n\n%2%3")
                   .arg(preflight.python, preflight.errorMessage, guidance));
     return;
   }
-  appendTaskEvent(QStringLiteral("训练预检通过：%1 张图像，%2，CUDA：%3")
+  appendTaskEvent(QCoreApplication::translate("Workbench", "训练预检通过：%1 张图像，%2，CUDA：%3")
                       .arg(preflight.imageCount)
                       .arg(preflight.hasReconstruction
-                               ? QStringLiteral("已有稀疏重建")
-                               : QStringLiteral("将运行 COLMAP"))
+                               ? QCoreApplication::translate("Workbench", "已有稀疏重建")
+                               : QCoreApplication::translate("Workbench", "将运行 COLMAP"))
                       .arg(preflight.cudaDevice));
 
   const QString jobsRoot =
@@ -4602,7 +4602,7 @@ void MainWindow::startTraining() {
   const QString trainingJobStore =
       QDir(jobsRoot).filePath(QStringLiteral("training"));
   if (!QDir().mkpath(trainingJobStore)) {
-    showError(QStringLiteral("无法创建任务目录"),
+    showError(QCoreApplication::translate("Workbench", "无法创建任务目录"),
               QDir::toNativeSeparators(trainingJobStore));
     return;
   }
@@ -4636,11 +4636,11 @@ void MainWindow::startTraining() {
       configFile.write(
           QJsonDocument(workerConfig).toJson(QJsonDocument::Indented)) < 0 ||
       !configFile.commit()) {
-    showError(QStringLiteral("无法保存训练任务"), configFile.errorString());
+    showError(QCoreApplication::translate("Workbench", "无法保存训练任务"), configFile.errorString());
     return;
   }
 
-  const QString taskName = QStringLiteral("%1 训练 | %2 | %3 次迭代")
+  const QString taskName = QCoreApplication::translate("Workbench", "%1 训练 | %2 | %3 次迭代")
                                .arg(config.backend.toUpper(), config.quality)
                                .arg(config.iterations);
   const QString outputDirectory =
@@ -4650,7 +4650,7 @@ void MainWindow::startTraining() {
           mWorkspace.rootPath(),
           ActiveTrainingJob{configPath, outputDirectory},
           &recoveryRecordError)) {
-    showError(QStringLiteral("无法保存训练恢复信息"), recoveryRecordError);
+    showError(QCoreApplication::translate("Workbench", "无法保存训练恢复信息"), recoveryRecordError);
     return;
   }
   mPendingTraining = PendingTraining{
@@ -4669,12 +4669,12 @@ void MainWindow::startTraining() {
     QString clearError;
     if (!clearActiveTrainingJob(mWorkspace.rootPath(), &clearError)) {
       appendTaskEvent(
-          QStringLiteral("训练未启动，恢复标记清理失败：%1").arg(clearError));
+          QCoreApplication::translate("Workbench", "训练未启动，恢复标记清理失败：%1").arg(clearError));
     }
-    QMessageBox::information(this, QStringLiteral("任务繁忙"),
-                             QStringLiteral("请等待当前任务结束后再试。"));
+    QMessageBox::information(this, QCoreApplication::translate("Workbench", "任务繁忙"),
+                             QCoreApplication::translate("Workbench", "请等待当前任务结束后再试。"));
   } else {
-    appendTaskEvent(QStringLiteral("训练配置已保存：%1")
+    appendTaskEvent(QCoreApplication::translate("Workbench", "训练配置已保存：%1")
                         .arg(QDir::toNativeSeparators(configPath)));
   }
 }
@@ -4692,7 +4692,7 @@ void MainWindow::updateWorkspaceUi() {
   updateInspector();
   const QString projectName = mWorkspace.hasProject()
                                   ? mWorkspace.projectName()
-                                  : QStringLiteral("未打开工程");
+                                  : QCoreApplication::translate("Workbench", "未打开工程");
   mViewport->setProjectLabel(projectName);
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setScene(mLiveTrainingPreviewPath,
@@ -4713,9 +4713,9 @@ void MainWindow::updateWorkspaceUi() {
       projectName +
       (mWorkspace.isModified() ? QStringLiteral(" *") : QString()) +
       (mWorkspace.hasPendingDataMigration()
-           ? QStringLiteral(" · 数据迁移待完成")
+           ? QCoreApplication::translate("Workbench", " · 数据迁移待完成")
            : QString()) +
-      (mRecoveryBlocked ? QStringLiteral(" · 导入恢复待处理") : QString()));
+      (mRecoveryBlocked ? QCoreApplication::translate("Workbench", " · 导入恢复待处理") : QString()));
   setWindowTitle(QStringLiteral("%1[*]").arg(projectName));
   updateActionAvailability();
 }
@@ -4767,39 +4767,39 @@ void MainWindow::rebuildProjectTree() {
   mProjectTree->clear();
   const QString projectName = mWorkspace.hasProject()
                                   ? mWorkspace.projectName()
-                                  : QStringLiteral("未打开工程");
+                                  : QCoreApplication::translate("Workbench", "未打开工程");
   auto *root = new QTreeWidgetItem(mProjectTree, {projectName});
   root->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
   root->setData(0, Qt::UserRole, mWorkspace.rootPath());
 
-  auto *dataset = new QTreeWidgetItem(root, {QStringLiteral("数据集")});
+  auto *dataset = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "数据集")});
   dataset->setIcon(0, style()->standardIcon(QStyle::SP_DirOpenIcon));
   dataset->setData(0, Qt::UserRole, mWorkspace.datasetPath());
   dataset->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
   auto *datasetState = new QTreeWidgetItem(
       dataset, {mWorkspace.datasetPath().isEmpty()
-                    ? QStringLiteral("未导入")
-                    : QStringLiteral("图像 %1").arg(mWorkspace.imageCount())});
+                    ? QCoreApplication::translate("Workbench", "未导入")
+                    : QCoreApplication::translate("Workbench", "图像 %1").arg(mWorkspace.imageCount())});
   datasetState->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
 
-  auto *reconstruction = new QTreeWidgetItem(root, {QStringLiteral("重建")});
+  auto *reconstruction = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "重建")});
   reconstruction->setData(0, Qt::UserRole + 1,
                           QStringLiteral("reconstruction"));
   reconstruction->setIcon(
       0, style()->standardIcon(QStyle::SP_FileDialogContentsView));
   const bool hasSparse = hasRecognizedColmapScene(mWorkspace.datasetPath());
   auto *reconstructionState = new QTreeWidgetItem(
-      reconstruction, {hasSparse ? QStringLiteral("COLMAP sparse")
-                                 : QStringLiteral("未检测到稀疏重建")});
+      reconstruction, {hasSparse ? QCoreApplication::translate("Workbench", "COLMAP sparse")
+                                 : QCoreApplication::translate("Workbench", "未检测到稀疏重建")});
   reconstructionState->setData(0, Qt::UserRole + 1,
                                QStringLiteral("reconstruction"));
 
-  auto *scene = new QTreeWidgetItem(root, {QStringLiteral("场景")});
+  auto *scene = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "场景")});
   scene->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogDetailedView));
   scene->setData(0, Qt::UserRole, mWorkspace.scenePath());
   scene->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
   if (mWorkspace.sceneObjects().isEmpty()) {
-    new QTreeWidgetItem(scene, {QStringLiteral("未导入")});
+    new QTreeWidgetItem(scene, {QCoreApplication::translate("Workbench", "未导入")});
   }
   for (const auto &object : mWorkspace.sceneObjects()) {
     auto *item = new QTreeWidgetItem(scene, {QFileInfo(object.path).fileName()});
@@ -4813,33 +4813,33 @@ void MainWindow::rebuildProjectTree() {
   if (mCameraCount > 0) {
     auto *cameras = new QTreeWidgetItem(
         scene,
-        {QStringLiteral("相机位姿 %1%2")
+        {QCoreApplication::translate("Workbench", "相机位姿 %1%2")
              .arg(mCameraCount)
-             .arg(mCameraDisplayDecimated ? QStringLiteral("（抽稀显示）")
+             .arg(mCameraDisplayDecimated ? QCoreApplication::translate("Workbench", "（抽稀显示）")
                                           : QString())});
     cameras->setData(0, Qt::UserRole, mCameraSourcePath);
     cameras->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
     if (mInvalidCameraCount > 0) {
       cameras->setToolTip(
           0,
-          QStringLiteral("已跳过 %1 个无效相机条目").arg(mInvalidCameraCount));
+          QCoreApplication::translate("Workbench", "已跳过 %1 个无效相机条目").arg(mInvalidCameraCount));
     }
   } else if (!mCameraTrajectoryError.isEmpty()) {
     auto *cameras =
-        new QTreeWidgetItem(scene, {QStringLiteral("相机位姿不可用")});
+        new QTreeWidgetItem(scene, {QCoreApplication::translate("Workbench", "相机位姿不可用")});
     cameras->setData(0, Qt::UserRole, mCameraSourcePath);
     cameras->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
     cameras->setToolTip(0, mCameraTrajectoryError);
   }
 
-  auto *jobs = new QTreeWidgetItem(root, {QStringLiteral("任务")});
+  auto *jobs = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "任务")});
   jobs->setIcon(0, style()->standardIcon(QStyle::SP_ComputerIcon));
   jobs->setData(0, Qt::UserRole + 1, QStringLiteral("tasks"));
-  QString taskState = QStringLiteral("空闲");
+  QString taskState = QCoreApplication::translate("Workbench", "空闲");
   if (mProcessSupervisor.isRunning()) {
     taskState = mProcessSupervisor.activeTask();
   } else if (mTaskTable->rowCount() > 0) {
-    taskState = QStringLiteral("历史 %1 项").arg(mTaskTable->rowCount());
+    taskState = QCoreApplication::translate("Workbench", "历史 %1 项").arg(mTaskTable->rowCount());
   }
   auto *jobState = new QTreeWidgetItem(
       jobs, {taskState});
@@ -4890,19 +4890,19 @@ void MainWindow::updateInspector() {
   mProjectNameValue->setText(mWorkspace.hasProject() ? mWorkspace.projectName()
                                                      : QStringLiteral("-"));
   mProjectRootValue->setText(
-      mWorkspace.isUntitled() ? QStringLiteral("尚未保存（首次保存时选择位置）")
+      mWorkspace.isUntitled() ? QCoreApplication::translate("Workbench", "尚未保存（首次保存时选择位置）")
                               : compactPath(mWorkspace.rootPath()));
   mDatasetValue->setText(compactPath(mWorkspace.datasetPath()));
   mImageCountValue->setText(
       mWorkspace.datasetPath().isEmpty()
           ? QStringLiteral("-")
-          : QStringLiteral("%1 张").arg(mWorkspace.imageCount()));
+          : QCoreApplication::translate("Workbench", "%1 张").arg(mWorkspace.imageCount()));
   mSceneValue->setText(compactPath(mWorkspace.scenePath()));
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   mGaussianCountValue->setText(
       metadata.valid
           ? metadata.looksLikeMesh()
-                ? QStringLiteral("%1 顶点 | %2 面")
+                ? QCoreApplication::translate("Workbench", "%1 顶点 | %2 面")
                       .arg(metadata.vertexCount)
                       .arg(metadata.faceCount)
                 : QStringLiteral("%1").arg(metadata.vertexCount)
@@ -4911,10 +4911,10 @@ void MainWindow::updateInspector() {
                                ? QStringLiteral("%1 | %2 | %3")
                                      .arg(metadata.format,
                                           metadata.looksLikeGaussianSplat()
-                                              ? QStringLiteral("Gaussian Splat")
+                                              ? QCoreApplication::translate("Workbench", "Gaussian Splat")
                                               : metadata.looksLikeMesh()
-                                                    ? QStringLiteral("PLY 网格")
-                                                    : QStringLiteral("PLY 点云"),
+                                                    ? QCoreApplication::translate("Workbench", "PLY 网格")
+                                                    : QCoreApplication::translate("Workbench", "PLY 点云"),
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
   const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
@@ -4930,20 +4930,20 @@ void MainWindow::updateInspector() {
   }
   const QVector3D euler = rotation.toEulerAngles();
   const QString rotationText =
-      QStringLiteral("旋转 X %1° | Y %2° | Z %3°")
+      QCoreApplication::translate("Workbench", "旋转 X %1° | Y %2° | Z %3°")
           .arg(euler.x(), 0, 'f', 2)
           .arg(euler.y(), 0, 'f', 2)
           .arg(euler.z(), 0, 'f', 2);
-  const QString scaleText = QStringLiteral("缩放 X %1 | Y %2 | Z %3")
+  const QString scaleText = QCoreApplication::translate("Workbench", "缩放 X %1 | Y %2 | Z %3")
                                 .arg(scale.x(), 0, 'g', 6)
                                 .arg(scale.y(), 0, 'g', 6)
                                 .arg(scale.z(), 0, 'g', 6);
   const QString selectionText = mViewport->selectedModelCount() > 1
-      ? QStringLiteral("\n已选中 %1 个模型 · 上方为当前模型属性").arg(mViewport->selectedModelCount())
-      : mModelSelected ? QStringLiteral(" · 已选中") : QString();
+      ? QCoreApplication::translate("Workbench", "\n已选中 %1 个模型 · 上方为当前模型属性").arg(mViewport->selectedModelCount())
+      : mModelSelected ? QCoreApplication::translate("Workbench", " · 已选中") : QString();
   if (coordinates.valid) {
     mSceneTransformValue->setText(
-        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
+        QCoreApplication::translate("Workbench", "位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
             .arg(formatSceneLength(translation.x(), coordinates),
                   formatSceneLength(translation.y(), coordinates),
                   formatSceneLength(translation.z(), coordinates),
@@ -4951,7 +4951,7 @@ void MainWindow::updateInspector() {
                   selectionText));
   } else {
     mSceneTransformValue->setText(
-        QStringLiteral("位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
+        QCoreApplication::translate("Workbench", "位置 X %1 | Y %2 | Z %3\n%4\n%5%6")
             .arg(translation.x(), 0, 'g', 7)
             .arg(translation.y(), 0, 'g', 7)
             .arg(translation.z(), 0, 'g', 7)
@@ -4962,25 +4962,24 @@ void MainWindow::updateInspector() {
   if (coordinates.valid) {
     mCoordinateSystemValue->setText(
         coordinates.coordinateReferenceSystem.isEmpty()
-            ? QStringLiteral("未声明（局部/任意坐标）")
+            ? QCoreApplication::translate("Workbench", "未声明（局部/任意坐标）")
             : coordinates.coordinateReferenceSystem);
     mCoordinateSystemValue->setToolTip(
         coordinates.coordinateReferenceSystem);
     mSceneUnitValue->setText(
-        QStringLiteral("%1 | 源坐标 %2")
+        QCoreApplication::translate("Workbench", "%1 | 源坐标 %2")
             .arg(sceneLengthUnitDescription(coordinates),
                  coordinates.sourceUsesFloat64 ? QStringLiteral("float64")
                                                : QStringLiteral("float32")));
     mSceneUnitValue->setToolTip(
         coordinates.unitDeclared
-            ? QStringLiteral("单位由 PLY 元数据或同名 .prj 辅助信息识别。")
-            : QStringLiteral(
-                  "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。"));
+            ? QCoreApplication::translate("Workbench", "单位由 PLY 元数据或同名 .prj 辅助信息识别。")
+            : QCoreApplication::translate("Workbench", "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。"));
     mSceneCenterValue->setText(
         formatSceneVector(coordinates.globalCenter(), coordinates));
     mSceneSizeValue->setText(formatSceneSize(coordinates));
     mSceneBoundsValue->setText(
-        QStringLiteral("最小  %1\n最大  %2")
+        QCoreApplication::translate("Workbench", "最小  %1\n最大  %2")
             .arg(formatSceneVector(coordinates.globalMinimum, coordinates),
                  formatSceneVector(coordinates.globalMaximum, coordinates)));
     const SceneCoordinate3D shift = coordinates.displayShift;
@@ -4995,12 +4994,11 @@ void MainWindow::updateInspector() {
                        QString::number(shift.z, 'g', 12),
                        QString::number(coordinates.displayScale, 'g', 12),
                        coordinates.automaticDisplayShift
-                           ? QStringLiteral("（自动精度保护）")
+                           ? QCoreApplication::translate("Workbench", "（自动精度保护）")
                            : QString())
-            : QStringLiteral("无（原始坐标直接显示）"));
+            : QCoreApplication::translate("Workbench", "无（原始坐标直接显示）"));
     mDisplayShiftValue->setToolTip(
-        QStringLiteral(
-            "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。"));
+        QCoreApplication::translate("Workbench", "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。"));
     mReferencePlaneValue->setText(mViewport->referencePlaneDescription());
   } else {
     for (QLabel *label :
@@ -5016,23 +5014,23 @@ void MainWindow::updateInspector() {
                                    ? QStringLiteral("cameras.json")
                                    : QFileInfo(mCameraSourcePath).fileName();
     QStringList details;
-    details.append(QStringLiteral("%1 个").arg(mCameraCount));
+    details.append(QCoreApplication::translate("Workbench", "%1 个").arg(mCameraCount));
     if (mInvalidCameraCount > 0) {
-      details.append(QStringLiteral("跳过 %1").arg(mInvalidCameraCount));
+      details.append(QCoreApplication::translate("Workbench", "跳过 %1").arg(mInvalidCameraCount));
     }
     if (mCameraDisplayDecimated) {
-      details.append(QStringLiteral("抽稀显示"));
+      details.append(QCoreApplication::translate("Workbench", "抽稀显示"));
     }
     details.append(sourceName);
     mCameraCountValue->setText(details.join(QStringLiteral(" | ")));
     QString tooltip = QDir::toNativeSeparators(mCameraSourcePath);
     if (mInvalidCameraCount > 0) {
       tooltip +=
-          QStringLiteral("\n已跳过 %1 个无效相机条目").arg(mInvalidCameraCount);
+          QCoreApplication::translate("Workbench", "\n已跳过 %1 个无效相机条目").arg(mInvalidCameraCount);
     }
     mCameraCountValue->setToolTip(tooltip);
   } else if (!mCameraTrajectoryError.isEmpty()) {
-    mCameraCountValue->setText(QStringLiteral("不可用 | 查看日志"));
+    mCameraCountValue->setText(QCoreApplication::translate("Workbench", "不可用 | 查看日志"));
     mCameraCountValue->setToolTip(mCameraTrajectoryError);
   } else {
     mCameraCountValue->setText(QStringLiteral("-"));
@@ -5058,7 +5056,7 @@ void MainWindow::appendTaskEvent(const QString &text) {
 
 void MainWindow::showError(const QString &title, const QString &message) {
   QMessageBox::critical(this, title, message);
-  appendTaskEvent(QStringLiteral("错误：%1").arg(message));
+  appendTaskEvent(QCoreApplication::translate("Workbench", "错误：%1").arg(message));
 }
 
 QString MainWindow::findTrainingPython(const QString &repositoryRoot) const {

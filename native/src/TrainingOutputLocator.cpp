@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "TrainingOutputLocator.h"
 
 #include <QDir>
@@ -69,14 +70,14 @@ bool saveActiveTrainingJob(const QString &projectRoot,
                            QString *errorMessage) {
   if (projectRoot.isEmpty() || !job.isValid()) {
     assignError(errorMessage,
-                QStringLiteral("Active training recovery data is incomplete."));
+                QCoreApplication::translate("Workbench", "Active training recovery data is incomplete."));
     return false;
   }
 
   const QString markerPath = activeTrainingJobPath(projectRoot);
   if (!QDir().mkpath(QFileInfo(markerPath).absolutePath())) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create training recovery directory: "
+                QCoreApplication::translate("Workbench", "Unable to create training recovery directory: "
                                "%1")
                     .arg(QFileInfo(markerPath).absolutePath()));
     return false;
@@ -85,7 +86,7 @@ bool saveActiveTrainingJob(const QString &projectRoot,
   QSaveFile marker(markerPath);
   if (!marker.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create training recovery record: %1")
+                QCoreApplication::translate("Workbench", "Unable to create training recovery record: %1")
                     .arg(marker.errorString()));
     return false;
   }
@@ -100,13 +101,13 @@ bool saveActiveTrainingJob(const QString &projectRoot,
   if (marker.write(serialized) != serialized.size()) {
     marker.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write training recovery record: %1")
+                QCoreApplication::translate("Workbench", "Unable to write training recovery record: %1")
                     .arg(marker.errorString()));
     return false;
   }
   if (!marker.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit training recovery record: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit training recovery record: %1")
                     .arg(marker.errorString()));
     return false;
   }
@@ -124,7 +125,7 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
   }
   if (!marker.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open training recovery record: %1")
+                QCoreApplication::translate("Workbench", "Unable to open training recovery record: %1")
                     .arg(marker.errorString()));
     return {};
   }
@@ -134,14 +135,14 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
       QJsonDocument::fromJson(marker.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Invalid training recovery record: %1")
+                QCoreApplication::translate("Workbench", "Invalid training recovery record: %1")
                     .arg(parseError.errorString()));
     return {};
   }
   const QJsonObject root = document.object();
   if (root.value(QStringLiteral("version")).toInt() != 1) {
     assignError(errorMessage,
-                QStringLiteral("Unsupported training recovery record."));
+                QCoreApplication::translate("Workbench", "Unsupported training recovery record."));
     return {};
   }
 
@@ -150,7 +151,7 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
       root.value(QStringLiteral("outputSceneRoot")).toString()};
   if (!job.isValid()) {
     assignError(errorMessage,
-                QStringLiteral("Training recovery record is incomplete."));
+                QCoreApplication::translate("Workbench", "Training recovery record is incomplete."));
     return {};
   }
   job.configurationPath = normalizedAbsolutePath(job.configurationPath);
@@ -168,7 +169,7 @@ bool clearActiveTrainingJob(const QString &projectRoot,
     return true;
   }
   assignError(errorMessage,
-              QStringLiteral("Unable to remove training recovery record: %1")
+              QCoreApplication::translate("Workbench", "Unable to remove training recovery record: %1")
                   .arg(markerPath));
   return false;
 }

@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "TrainingGpuPreviewBuffer.h"
 
 #include <QByteArray>
@@ -63,23 +64,22 @@ TrainingGpuPreviewBuffer::probe(QOpenGLContext *context) {
   capability.renderer = rendererName(context);
 #ifndef Q_OS_WIN
   capability.detail =
-      QStringLiteral("GPU shared preview currently requires Windows.");
+      QCoreApplication::translate("Workbench", "GPU shared preview currently requires Windows.");
   return capability;
 #else
   if (context == nullptr || QOpenGLContext::currentContext() != context) {
     capability.detail =
-        QStringLiteral("No current OpenGL context is available.");
+        QCoreApplication::translate("Workbench", "No current OpenGL context is available.");
     return capability;
   }
   if (!requiredExtensionsAvailable(context)) {
-    capability.detail = QStringLiteral(
-        "OpenGL driver does not expose GL_EXT_memory_object and "
+    capability.detail = QCoreApplication::translate("Workbench", "OpenGL driver does not expose GL_EXT_memory_object and "
         "GL_EXT_memory_object_win32.");
     return capability;
   }
   if (!requiredFunctionsAvailable(context)) {
     capability.detail =
-        QStringLiteral("OpenGL external-memory entry points are unavailable.");
+        QCoreApplication::translate("Workbench", "OpenGL external-memory entry points are unavailable.");
     return capability;
   }
   capability.available = true;
@@ -123,7 +123,7 @@ bool TrainingGpuPreviewBuffer::loadExtensionFunctions(
 
 bool TrainingGpuPreviewBuffer::openControlObjects(QString *errorMessage) {
 #ifndef Q_OS_WIN
-  setError(errorMessage, QStringLiteral("Windows shared objects unavailable."));
+  setError(errorMessage, QCoreApplication::translate("Workbench", "Windows shared objects unavailable."));
   return false;
 #else
   const HANDLE mapping = OpenFileMappingW(
@@ -131,7 +131,7 @@ bool TrainingGpuPreviewBuffer::openControlObjects(QString *errorMessage) {
       reinterpret_cast<LPCWSTR>(mDescriptor.controlMapping.utf16()));
   if (mapping == nullptr) {
     setError(errorMessage,
-             QStringLiteral("OpenFileMappingW failed (%1).")
+             QCoreApplication::translate("Workbench", "OpenFileMappingW failed (%1).")
                  .arg(GetLastError()));
     return false;
   }
@@ -140,7 +140,7 @@ bool TrainingGpuPreviewBuffer::openControlObjects(QString *errorMessage) {
                                    kTrainingGpuPreviewControlBytes);
   if (view == nullptr) {
     setError(errorMessage,
-             QStringLiteral("MapViewOfFile failed (%1).").arg(GetLastError()));
+             QCoreApplication::translate("Workbench", "MapViewOfFile failed (%1).").arg(GetLastError()));
     return false;
   }
   mControlView = static_cast<const char *>(view);
@@ -174,7 +174,7 @@ bool TrainingGpuPreviewBuffer::openControlObjects(QString *errorMessage) {
 
 bool TrainingGpuPreviewBuffer::importMemory(QString *errorMessage) {
 #ifndef Q_OS_WIN
-  setError(errorMessage, QStringLiteral("Win32 memory import unavailable."));
+  setError(errorMessage, QCoreApplication::translate("Workbench", "Win32 memory import unavailable."));
   return false;
 #else
   HANDLE importedHandle = reinterpret_cast<HANDLE>(
@@ -187,7 +187,7 @@ bool TrainingGpuPreviewBuffer::importMemory(QString *errorMessage) {
                                   static_cast<DWORD>(mDescriptor.producerPid));
     if (producer == nullptr) {
       setError(errorMessage,
-               QStringLiteral("OpenProcess for GPU preview failed (%1).")
+               QCoreApplication::translate("Workbench", "OpenProcess for GPU preview failed (%1).")
                    .arg(GetLastError()));
       return false;
     }
@@ -198,7 +198,7 @@ bool TrainingGpuPreviewBuffer::importMemory(QString *errorMessage) {
     CloseHandle(producer);
     if (!duplicated || duplicate == nullptr) {
       setError(errorMessage,
-               QStringLiteral("DuplicateHandle for CUDA VMM failed (%1).")
+               QCoreApplication::translate("Workbench", "DuplicateHandle for CUDA VMM failed (%1).")
                    .arg(GetLastError()));
       return false;
     }
@@ -222,7 +222,7 @@ bool TrainingGpuPreviewBuffer::importMemory(QString *errorMessage) {
   GLenum error = glGetError();
   if (error != GL_NO_ERROR || mMemoryObject == 0) {
     setError(errorMessage,
-             QStringLiteral("OpenGL CUDA-memory import failed (GL 0x%1).")
+             QCoreApplication::translate("Workbench", "OpenGL CUDA-memory import failed (GL 0x%1).")
                  .arg(static_cast<uint>(error), 0, 16));
     return false;
   }
@@ -238,7 +238,7 @@ bool TrainingGpuPreviewBuffer::importMemory(QString *errorMessage) {
     error = glGetError();
     if (error != GL_NO_ERROR) {
       setError(errorMessage,
-               QStringLiteral("OpenGL shared buffer binding failed (GL 0x%1).")
+               QCoreApplication::translate("Workbench", "OpenGL shared buffer binding failed (GL 0x%1).")
                    .arg(static_cast<uint>(error), 0, 16));
       return false;
     }
@@ -270,13 +270,13 @@ bool TrainingGpuPreviewBuffer::attach(
   release();
   if (descriptor.state != TrainingGpuPreviewState::Ready) {
     setError(errorMessage,
-             QStringLiteral("GPU preview descriptor is not ready."));
+             QCoreApplication::translate("Workbench", "GPU preview descriptor is not ready."));
     return false;
   }
   QOpenGLContext *context = QOpenGLContext::currentContext();
   if (context == nullptr) {
     setError(errorMessage,
-             QStringLiteral("No current OpenGL context for GPU preview."));
+             QCoreApplication::translate("Workbench", "No current OpenGL context for GPU preview."));
     return false;
   }
   initializeOpenGLFunctions();
@@ -288,7 +288,7 @@ bool TrainingGpuPreviewBuffer::attach(
   if (!mDescriptor.deviceLuid.isEmpty()) {
     if (mGetUnsignedBytev == nullptr) {
       setError(errorMessage,
-               QStringLiteral("OpenGL device identity query is unavailable."));
+               QCoreApplication::translate("Workbench", "OpenGL device identity query is unavailable."));
       release();
       return false;
     }
@@ -305,7 +305,7 @@ bool TrainingGpuPreviewBuffer::attach(
                            Qt::CaseInsensitive) != 0 ||
         static_cast<quint32>(nodeMask) != mDescriptor.deviceNodeMask) {
       setError(errorMessage,
-               QStringLiteral("CUDA and OpenGL are using different GPUs."));
+               QCoreApplication::translate("Workbench", "CUDA and OpenGL are using different GPUs."));
       release();
       return false;
     }
@@ -328,12 +328,12 @@ bool TrainingGpuPreviewBuffer::readControl(
     QString *errorMessage) const {
 #ifndef Q_OS_WIN
   Q_UNUSED(snapshot)
-  setError(errorMessage, QStringLiteral("Windows control mapping unavailable."));
+  setError(errorMessage, QCoreApplication::translate("Workbench", "Windows control mapping unavailable."));
   return false;
 #else
   if (mControlView == nullptr) {
     setError(errorMessage,
-             QStringLiteral("GPU preview control mapping is not open."));
+             QCoreApplication::translate("Workbench", "GPU preview control mapping is not open."));
     return false;
   }
   QString lastError;
@@ -389,7 +389,7 @@ bool TrainingGpuPreviewBuffer::poll(QString *errorMessage) {
     shouldRead = true;
   } else if (eventResult != WAIT_TIMEOUT) {
     setError(errorMessage,
-             QStringLiteral("Waiting for GPU preview frame failed (%1).")
+             QCoreApplication::translate("Workbench", "Waiting for GPU preview frame failed (%1).")
                  .arg(GetLastError()));
     return false;
   }
@@ -405,7 +405,7 @@ bool TrainingGpuPreviewBuffer::poll(QString *errorMessage) {
       snapshot.slotBytes != mDescriptor.slotBytes ||
       snapshot.allocationBytes != mDescriptor.allocationBytes) {
     setError(errorMessage,
-             QStringLiteral("GPU preview descriptor/control geometry mismatch."));
+             QCoreApplication::translate("Workbench", "GPU preview descriptor/control geometry mismatch."));
     release();
     return false;
   }

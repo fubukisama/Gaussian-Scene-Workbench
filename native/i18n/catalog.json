@@ -1,0 +1,5347 @@
+{
+  "cameras.json 过大，已跳过加载（上限 64 MiB）。": {
+    "zh_CN": "cameras.json 过大，已跳过加载（上限 64 MiB）。",
+    "en_US": "cameras.json exceeds 64 MiB; loading skipped.",
+    "ja_JP": "cameras.json が上限の 64 MiB を超えたため、読み込みをスキップしました。"
+  },
+  "无法读取 cameras.json：%1": {
+    "zh_CN": "无法读取 cameras.json：%1",
+    "en_US": "Cannot read cameras.json: %1",
+    "ja_JP": "cameras.json を読み込めません: %1"
+  },
+  "cameras.json 格式无效：%1（偏移 %2）": {
+    "zh_CN": "cameras.json 格式无效：%1（偏移 %2）",
+    "en_US": "Invalid cameras.json: %1 (offset %2)",
+    "ja_JP": "cameras.json の形式が無効です: %1（オフセット %2）"
+  },
+  "cameras.json 顶层必须是相机数组。": {
+    "zh_CN": "cameras.json 顶层必须是相机数组。",
+    "en_US": "The top level of cameras.json must be a camera array.",
+    "ja_JP": "cameras.json の最上位要素はカメラ配列である必要があります。"
+  },
+  "cameras.json 未包含可用相机位姿，请检查 position 与 rotation 字段。": {
+    "zh_CN": "cameras.json 未包含可用相机位姿，请检查 position 与 rotation 字段。",
+    "en_US": "No usable camera poses in cameras.json. Check position and rotation.",
+    "ja_JP": "cameras.json に有効なカメラ姿勢がありません。position と rotation を確認してください。"
+  },
+  "添加照片与视频": {
+    "zh_CN": "添加照片与视频",
+    "en_US": "Add Photos and Videos",
+    "ja_JP": "写真と動画を追加"
+  },
+  "素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。": {
+    "zh_CN": "素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。",
+    "en_US": "Media selected. Photos will be copied to the untitled project; video frames will be extracted at the specified rate. Start processing now and choose a save location later.",
+    "ja_JP": "メディアを選択しました。写真は未保存プロジェクトにコピーし、動画は指定したフレームレートで抽出します。処理を開始してから保存先を選べます。"
+  },
+  "素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。": {
+    "zh_CN": "素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。",
+    "en_US": "Media selected. Photos will be copied to the project's managed dataset; video frames will be extracted at the specified rate.",
+    "ja_JP": "メディアを選択しました。写真はプロジェクトの管理対象データセットにコピーし、動画は指定したフレームレートで抽出します。"
+  },
+  "当前工程：未命名工程（尚未保存，首次保存时可选择位置）": {
+    "zh_CN": "当前工程：未命名工程（尚未保存，首次保存时可选择位置）",
+    "en_US": "Current project: Untitled (choose a location on first save)",
+    "ja_JP": "現在のプロジェクト: 無題（初回保存時に保存先を選択）"
+  },
+  "当前工程数据：%1": {
+    "zh_CN": "当前工程数据：%1",
+    "en_US": "Current project data: %1",
+    "ja_JP": "現在のプロジェクトデータ: %1"
+  },
+  "仅允许英文、数字、点、下划线和连字符": {
+    "zh_CN": "仅允许英文、数字、点、下划线和连字符",
+    "en_US": "ASCII letters, digits, periods, underscores and hyphens only",
+    "ja_JP": "英数字、ピリオド、アンダースコア、ハイフンのみ"
+  },
+  "场景名称": {
+    "zh_CN": "场景名称",
+    "en_US": "Scene name",
+    "ja_JP": "シーン名"
+  },
+  "视频抽帧帧率": {
+    "zh_CN": "视频抽帧帧率",
+    "en_US": "Video sampling rate",
+    "ja_JP": "動画の抽出フレームレート"
+  },
+  "视频抽帧": {
+    "zh_CN": "视频抽帧",
+    "en_US": "Extract video frames",
+    "ja_JP": "動画フレームを抽出"
+  },
+  "覆盖同名托管数据集（开始前会再次确认）": {
+    "zh_CN": "覆盖同名托管数据集（开始前会再次确认）",
+    "en_US": "Overwrite managed dataset with the same name (confirmation required)",
+    "ja_JP": "同名の管理対象データセットを上書き（開始前に確認）"
+  },
+  "媒体来源": {
+    "zh_CN": "媒体来源",
+    "en_US": "Media sources",
+    "ja_JP": "メディアソース"
+  },
+  "待导入媒体来源": {
+    "zh_CN": "待导入媒体来源",
+    "en_US": "Media sources to import",
+    "ja_JP": "インポートするメディアソース"
+  },
+  "继续添加照片/视频...": {
+    "zh_CN": "继续添加照片/视频...",
+    "en_US": "Add More Photos/Videos…",
+    "ja_JP": "写真・動画を追加…"
+  },
+  "继续添加目录...": {
+    "zh_CN": "继续添加目录...",
+    "en_US": "Add More Folders…",
+    "ja_JP": "フォルダーを追加…"
+  },
+  "移除所选": {
+    "zh_CN": "移除所选",
+    "en_US": "Remove Selected",
+    "ja_JP": "選択項目を除去"
+  },
+  "清空": {
+    "zh_CN": "清空",
+    "en_US": "Clear",
+    "ja_JP": "クリア"
+  },
+  "取消": {
+    "zh_CN": "取消",
+    "en_US": "Cancel",
+    "ja_JP": "キャンセル"
+  },
+  "添加到工程": {
+    "zh_CN": "添加到工程",
+    "en_US": "Add to Project",
+    "ja_JP": "プロジェクトに追加"
+  },
+  "场景名称为空": {
+    "zh_CN": "场景名称为空",
+    "en_US": "Scene name is empty",
+    "ja_JP": "シーン名が未入力です"
+  },
+  "请输入托管数据集的场景名称。": {
+    "zh_CN": "请输入托管数据集的场景名称。",
+    "en_US": "Enter a scene name for the managed dataset.",
+    "ja_JP": "管理対象データセットのシーン名を入力してください。"
+  },
+  "尚未添加媒体": {
+    "zh_CN": "尚未添加媒体",
+    "en_US": "No media added",
+    "ja_JP": "メディアが追加されていません"
+  },
+  "请添加照片、视频或包含媒体文件的目录。": {
+    "zh_CN": "请添加照片、视频或包含媒体文件的目录。",
+    "en_US": "Add photos, videos or a folder containing media.",
+    "ja_JP": "写真、動画、またはメディアを含むフォルダーを追加してください。"
+  },
+  "场景名称需为 1–120 个英文字母、数字、点、下划线或连字符；点不能位于开头或结尾、不能连续出现，且不能使用 Windows 保留名。": {
+    "zh_CN": "场景名称需为 1–120 个英文字母、数字、点、下划线或连字符；点不能位于开头或结尾、不能连续出现，且不能使用 Windows 保留名。",
+    "en_US": "Use 1–120 ASCII letters, digits, periods, underscores or hyphens. No leading, trailing or consecutive periods, or Windows reserved names.",
+    "ja_JP": "1～120 文字の英数字、ピリオド、アンダースコア、ハイフンを使用してください。先頭・末尾・連続するピリオド、および Windows の予約名は使用できません。"
+  },
+  "所选来源中没有找到支持的照片或视频文件。": {
+    "zh_CN": "所选来源中没有找到支持的照片或视频文件。",
+    "en_US": "No supported photos or videos were found in the selected sources.",
+    "ja_JP": "選択したソースに対応する写真・動画が見つかりません。"
+  },
+  "无法导入媒体": {
+    "zh_CN": "无法导入媒体",
+    "en_US": "Cannot import media",
+    "ja_JP": "メディアをインポートできません"
+  },
+  "选择照片或视频": {
+    "zh_CN": "选择照片或视频",
+    "en_US": "Select Photos or Videos",
+    "ja_JP": "写真または動画を選択"
+  },
+  "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;照片 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;视频 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)": {
+    "zh_CN": "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;照片 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;视频 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)",
+    "en_US": "Photos and Videos (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;Photos (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;Videos (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)",
+    "ja_JP": "写真と動画 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;写真 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;動画 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)"
+  },
+  "选择包含照片或视频的目录": {
+    "zh_CN": "选择包含照片或视频的目录",
+    "en_US": "Select a Folder Containing Photos or Videos",
+    "ja_JP": "写真または動画を含むフォルダーを選択"
+  },
+  "尚未添加媒体来源。": {
+    "zh_CN": "尚未添加媒体来源。",
+    "en_US": "No media sources added.",
+    "ja_JP": "メディアソースが追加されていません。"
+  },
+  "已添加 %1 个来源：%2 个文件、%3 个目录。目录会在开始导入时递归扫描。": {
+    "zh_CN": "已添加 %1 个来源：%2 个文件、%3 个目录。目录会在开始导入时递归扫描。",
+    "en_US": "%1 sources: %2 files, %3 folders. Folders will be scanned recursively when import starts.",
+    "ja_JP": "%1 個のソース: %2 ファイル、%3 フォルダー。開始時にフォルダーを再帰的に検索します。"
+  },
+  " 将覆盖同名托管数据集。": {
+    "zh_CN": " 将覆盖同名托管数据集。",
+    "en_US": " The managed dataset with the same name will be overwritten.",
+    "ja_JP": " 同名の管理対象データセットを上書きします。"
+  },
+  "所选 Python 不存在：%1": {
+    "zh_CN": "所选 Python 不存在：%1",
+    "en_US": "Selected Python does not exist: %1",
+    "ja_JP": "選択した Python が存在しません: %1"
+  },
+  "安装目录缺少导入预检脚本：%1": {
+    "zh_CN": "安装目录缺少导入预检脚本：%1",
+    "en_US": "Import preflight script missing from installation: %1",
+    "ja_JP": "インストール先にインポート事前診断スクリプトがありません: %1"
+  },
+  "无法启动所选 Python：%1": {
+    "zh_CN": "无法启动所选 Python：%1",
+    "en_US": "Cannot start selected Python: %1",
+    "ja_JP": "選択した Python を起動できません: %1"
+  },
+  "导入环境预检超时（%1 秒）。": {
+    "zh_CN": "导入环境预检超时（%1 秒）。",
+    "en_US": "Import environment preflight timed out (%1 s).",
+    "ja_JP": "インポート環境の事前診断がタイムアウトしました（%1 秒）。"
+  },
+  "导入环境预检未返回有效报告：%1": {
+    "zh_CN": "导入环境预检未返回有效报告：%1",
+    "en_US": "Import preflight returned no valid report: %1",
+    "ja_JP": "インポート事前診断から有効なレポートを取得できません: %1"
+  },
+  "预检进程退出代码 %1": {
+    "zh_CN": "预检进程退出代码 %1",
+    "en_US": "Preflight process exit code %1",
+    "ja_JP": "事前診断プロセスの終了コード: %1"
+  },
+  "停靠面板": {
+    "zh_CN": "停靠面板",
+    "en_US": "Dock Panel",
+    "ja_JP": "パネルをドッキング"
+  },
+  "浮动面板": {
+    "zh_CN": "浮动面板",
+    "en_US": "Float Panel",
+    "ja_JP": "パネルをフローティング"
+  },
+  "关闭面板": {
+    "zh_CN": "关闭面板",
+    "en_US": "Close Panel",
+    "ja_JP": "パネルを閉じる"
+  },
+  "PLY 缺少有效顶点或 3DGS 属性：%1": {
+    "zh_CN": "PLY 缺少有效顶点或 3DGS 属性：%1",
+    "en_US": "PLY lacks valid vertices or 3DGS attributes: %1",
+    "ja_JP": "PLY に有効な頂点または 3DGS 属性がありません: %1"
+  },
+  "未找到第 %1 次迭代的 point_cloud.ply：%2": {
+    "zh_CN": "未找到第 %1 次迭代的 point_cloud.ply：%2",
+    "en_US": "point_cloud.ply not found for iteration %1: %2",
+    "ja_JP": "反復 %1 の point_cloud.ply が見つかりません: %2"
+  },
+  "尚未生成可用的 3DGS point_cloud.ply：%1": {
+    "zh_CN": "尚未生成可用的 3DGS point_cloud.ply：%1",
+    "en_US": "No usable 3DGS point_cloud.ply has been generated: %1",
+    "ja_JP": "有効な 3DGS point_cloud.ply がまだ生成されていません: %1"
+  },
+  "排队": {
+    "zh_CN": "排队",
+    "en_US": "Queued",
+    "ja_JP": "待機"
+  },
+  "准备": {
+    "zh_CN": "准备",
+    "en_US": "Preparing",
+    "ja_JP": "準備"
+  },
+  "归档原文件": {
+    "zh_CN": "归档原文件",
+    "en_US": "Archiving originals",
+    "ja_JP": "元ファイルを保管"
+  },
+  "复制图像": {
+    "zh_CN": "复制图像",
+    "en_US": "Copying images",
+    "ja_JP": "画像をコピー"
+  },
+  "处理蒙版": {
+    "zh_CN": "处理蒙版",
+    "en_US": "Processing masks",
+    "ja_JP": "マスクを処理"
+  },
+  "提交数据集": {
+    "zh_CN": "提交数据集",
+    "en_US": "Committing dataset",
+    "ja_JP": "データセットを確定"
+  },
+  "检查环境": {
+    "zh_CN": "检查环境",
+    "en_US": "Checking environment",
+    "ja_JP": "環境を確認"
+  },
+  "准备训练": {
+    "zh_CN": "准备训练",
+    "en_US": "Preparing training",
+    "ja_JP": "学習を準備"
+  },
+  "COLMAP 重建": {
+    "zh_CN": "COLMAP 重建",
+    "en_US": "COLMAP Reconstruction",
+    "ja_JP": "COLMAP 再構成"
+  },
+  "训练": {
+    "zh_CN": "训练",
+    "en_US": "Training",
+    "ja_JP": "学習"
+  },
+  "完成": {
+    "zh_CN": "完成",
+    "en_US": "Completed",
+    "ja_JP": "完了"
+  },
+  "失败": {
+    "zh_CN": "失败",
+    "en_US": "Failed",
+    "ja_JP": "失敗"
+  },
+  "已取消": {
+    "zh_CN": "已取消",
+    "en_US": "Cancelled",
+    "ja_JP": "キャンセル済み"
+  },
+  "<未发现>": {
+    "zh_CN": "<未发现>",
+    "en_US": "<Not found>",
+    "ja_JP": "<見つかりません>"
+  },
+  "  - …另有 %1 个候选路径": {
+    "zh_CN": "  - …另有 %1 个候选路径",
+    "en_US": "  - …%1 more candidate paths",
+    "ja_JP": "  - …ほか %1 個の候補パス"
+  },
+  "未找到可用的原生计算后端或 gaussian_splatting Python 环境。\n\n应用目录：%1\n后端目录：%2\nWorker：%3\nPython：%4\n\n已检查的 Python 候选路径：\n%5\n\n请确认安装包目录完整；如使用自定义位置，可设置 GSW_BACKEND_ROOT 和 GAUSSIAN_SPLATTING_CONDA_PREFIX。": {
+    "zh_CN": "未找到可用的原生计算后端或 gaussian_splatting Python 环境。\n\n应用目录：%1\n后端目录：%2\nWorker：%3\nPython：%4\n\n已检查的 Python 候选路径：\n%5\n\n请确认安装包目录完整；如使用自定义位置，可设置 GSW_BACKEND_ROOT 和 GAUSSIAN_SPLATTING_CONDA_PREFIX。",
+    "en_US": "No usable native compute backend or gaussian_splatting Python environment found.\n\nApplication: %1\nBackend: %2\nWorker: %3\nPython: %4\n\nPython paths checked:\n%5\n\nCheck installation integrity. For custom locations, set GSW_BACKEND_ROOT and GAUSSIAN_SPLATTING_CONDA_PREFIX.",
+    "ja_JP": "有効なネイティブ計算バックエンドまたは gaussian_splatting Python 環境が見つかりません。\n\nアプリ: %1\nバックエンド: %2\nWorker: %3\nPython: %4\n\n確認した Python パス:\n%5\n\nインストール構成を確認してください。独自の場所を使う場合は GSW_BACKEND_ROOT と GAUSSIAN_SPLATTING_CONDA_PREFIX を設定してください。"
+  },
+  "  - <无候选路径>": {
+    "zh_CN": "  - <无候选路径>",
+    "en_US": "  - <No candidate paths>",
+    "ja_JP": "  - <候補パスなし>"
+  },
+  "未命名工程": {
+    "zh_CN": "未命名工程",
+    "en_US": "Untitled Project",
+    "ja_JP": "無題のプロジェクト"
+  },
+  "原生桌面预览版已启动。": {
+    "zh_CN": "原生桌面预览版已启动。",
+    "en_US": "Native desktop preview started.",
+    "ja_JP": "ネイティブデスクトッププレビューを起動しました。"
+  },
+  "已建立未命名工程；可先导入和处理，稍后再保存。": {
+    "zh_CN": "已建立未命名工程；可先导入和处理，稍后再保存。",
+    "en_US": "Untitled project created. Import and process now; save later.",
+    "ja_JP": "未保存プロジェクトを作成しました。先にインポート・処理を行い、後で保存できます。"
+  },
+  "无法建立未命名工程：%1": {
+    "zh_CN": "无法建立未命名工程：%1",
+    "en_US": "Cannot create untitled project: %1",
+    "ja_JP": "未保存プロジェクトを作成できません: %1"
+  },
+  "无法准备临时工作区": {
+    "zh_CN": "无法准备临时工作区",
+    "en_US": "Cannot prepare temporary workspace",
+    "ja_JP": "一時ワークスペースを準備できません"
+  },
+  "恢复存储检查提示：%1": {
+    "zh_CN": "恢复存储检查提示：%1",
+    "en_US": "Recovery storage check: %1",
+    "ja_JP": "復元ストレージの確認: %1"
+  },
+  "任务仍在运行": {
+    "zh_CN": "任务仍在运行",
+    "en_US": "Task still running",
+    "ja_JP": "タスク実行中"
+  },
+  "请先停止或等待当前任务结束，再切换工程。": {
+    "zh_CN": "请先停止或等待当前任务结束，再切换工程。",
+    "en_US": "Stop the current task or wait for it to finish before switching projects.",
+    "ja_JP": "現在のタスクを停止するか、完了を待ってからプロジェクトを切り替えてください。"
+  },
+  "无法打开工程": {
+    "zh_CN": "无法打开工程",
+    "en_US": "Cannot open project",
+    "ja_JP": "プロジェクトを開けません"
+  },
+  "旧恢复工作区清理失败：%1": {
+    "zh_CN": "旧恢复工作区清理失败：%1",
+    "en_US": "Failed to clean up old recovery workspace: %1",
+    "ja_JP": "古い復元ワークスペースを整理できません: %1"
+  },
+  "正在检查未完成的导入事务…": {
+    "zh_CN": "正在检查未完成的导入事务…",
+    "en_US": "Checking incomplete import transactions…",
+    "ja_JP": "未完了のインポート処理を確認中…"
+  },
+  "工程已打开，但未完成的导入事务恢复失败：%1": {
+    "zh_CN": "工程已打开，但未完成的导入事务恢复失败：%1",
+    "en_US": "Project opened, but import transaction recovery failed: %1",
+    "ja_JP": "プロジェクトは開きましたが、インポート処理の復元に失敗しました: %1"
+  },
+  "无法恢复未完成的导入": {
+    "zh_CN": "无法恢复未完成的导入",
+    "en_US": "Cannot recover incomplete import",
+    "ja_JP": "未完了のインポートを復元できません"
+  },
+  "工程已打开，但数据集导入事务尚未恢复。请勿手动修改 datasets 目录中的隐藏事务文件；修复后重新打开工程即可重试。\n\n%1": {
+    "zh_CN": "工程已打开，但数据集导入事务尚未恢复。请勿手动修改 datasets 目录中的隐藏事务文件；修复后重新打开工程即可重试。\n\n%1",
+    "en_US": "Project opened, but dataset import recovery is incomplete. Do not edit hidden transaction files in datasets manually. Repair the issue and reopen the project to retry.\n\n%1",
+    "ja_JP": "プロジェクトは開きましたが、データセットのインポート復元が未完了です。datasets 内の隠しトランザクションファイルを手動で変更しないでください。問題を修正後、プロジェクトを開き直して再試行してください。\n\n%1"
+  },
+  "工程已打开，但未完成训练的检查点恢复失败：%1": {
+    "zh_CN": "工程已打开，但未完成训练的检查点恢复失败：%1",
+    "en_US": "Project opened, but training checkpoint recovery failed: %1",
+    "ja_JP": "プロジェクトは開きましたが、学習チェックポイントの復元に失敗しました: %1"
+  },
+  "训练检查点恢复待处理": {
+    "zh_CN": "训练检查点恢复待处理",
+    "en_US": "Training checkpoint recovery pending",
+    "ja_JP": "学習チェックポイントの復元待ち"
+  },
+  "工程和训练输出仍保留在磁盘上，但未能自动关联最近的完整检查点。\n\n%1": {
+    "zh_CN": "工程和训练输出仍保留在磁盘上，但未能自动关联最近的完整检查点。\n\n%1",
+    "en_US": "Project and training outputs remain on disk, but the latest complete checkpoint could not be linked automatically.\n\n%1",
+    "ja_JP": "プロジェクトと学習出力はディスクに残っていますが、最新の完全なチェックポイントを自動で関連付けできませんでした。\n\n%1"
+  },
+  "正在完成上次中断的工程数据迁移…": {
+    "zh_CN": "正在完成上次中断的工程数据迁移…",
+    "en_US": "Completing interrupted project data migration…",
+    "ja_JP": "中断したプロジェクトデータの移行を再開中…"
+  },
+  "工程已打开，但待迁移数据尚未完成：%1": {
+    "zh_CN": "工程已打开，但待迁移数据尚未完成：%1",
+    "en_US": "Project opened, but data migration is incomplete: %1",
+    "ja_JP": "プロジェクトは開きましたが、データ移行は未完了です: %1"
+  },
+  "工程数据迁移待恢复": {
+    "zh_CN": "工程数据迁移待恢复",
+    "en_US": "Project data migration recovery pending",
+    "ja_JP": "プロジェクトデータ移行の復元待ち"
+  },
+  "工程清单已安全打开，当前数据仍保留在原工作区。可修复目标位置后再次保存以重试迁移。\n\n%1": {
+    "zh_CN": "工程清单已安全打开，当前数据仍保留在原工作区。可修复目标位置后再次保存以重试迁移。\n\n%1",
+    "en_US": "Project manifest opened safely. Data remains in the original workspace. Repair the destination and save again to retry migration.\n\n%1",
+    "ja_JP": "プロジェクトの管理ファイルは正常に開きました。データは元のワークスペースに残っています。移行先を修正して再保存すると移行を再試行できます。\n\n%1"
+  },
+  "发现较新的自动恢复版本": {
+    "zh_CN": "发现较新的自动恢复版本",
+    "en_US": "Newer auto-recovery version found",
+    "ja_JP": "新しい自動復元バージョンが見つかりました"
+  },
+  "检测到异常退出前保存的工程状态，与当前工程文件不同。是否将它恢复为一个新工程文件？\n\n快照时间：%1": {
+    "zh_CN": "检测到异常退出前保存的工程状态，与当前工程文件不同。是否将它恢复为一个新工程文件？\n\n快照时间：%1",
+    "en_US": "A saved pre-crash project state differs from the current file. Restore it as a new project file?\n\nSnapshot time: %1",
+    "ja_JP": "異常終了前に保存された状態が現在のプロジェクトファイルと異なります。新しいプロジェクトとして復元しますか？\n\nスナップショット時刻: %1"
+  },
+  "已恢复异常退出前的自动快照：%1": {
+    "zh_CN": "已恢复异常退出前的自动快照：%1",
+    "en_US": "Pre-crash automatic snapshot restored: %1",
+    "ja_JP": "異常終了前の自動スナップショットを復元しました: %1"
+  },
+  "无法恢复自动快照": {
+    "zh_CN": "无法恢复自动快照",
+    "en_US": "Cannot restore automatic snapshot",
+    "ja_JP": "自動スナップショットを復元できません"
+  },
+  "自动快照检查提示：%1": {
+    "zh_CN": "自动快照检查提示：%1",
+    "en_US": "Automatic snapshot check: %1",
+    "ja_JP": "自動スナップショットの確認: %1"
+  },
+  "已打开工程：%1": {
+    "zh_CN": "已打开工程：%1",
+    "en_US": "Project opened: %1",
+    "ja_JP": "プロジェクトを開きました: %1"
+  },
+  "退出时恢复工作区清理失败，将保留供下次恢复：%1": {
+    "zh_CN": "退出时恢复工作区清理失败，将保留供下次恢复：%1",
+    "en_US": "Recovery workspace cleanup failed on exit; retained for next recovery: %1",
+    "ja_JP": "終了時に復元ワークスペースを整理できなかったため、次回の復元用に保持します: %1"
+  },
+  "正在停止任务，完成后将关闭软件…": {
+    "zh_CN": "正在停止任务，完成后将关闭软件…",
+    "en_US": "Stopping tasks; the application will close when finished…",
+    "ja_JP": "タスクを停止中。完了後にアプリを終了します…"
+  },
+  "新建工程": {
+    "zh_CN": "新建工程",
+    "en_US": "New Project",
+    "ja_JP": "新規プロジェクト"
+  },
+  "打开工程": {
+    "zh_CN": "打开工程",
+    "en_US": "Open Project",
+    "ja_JP": "プロジェクトを開く"
+  },
+  "打开 Gaussian Scene Workbench 工程": {
+    "zh_CN": "打开 Gaussian Scene Workbench 工程",
+    "en_US": "Open Gaussian Scene Workbench Project",
+    "ja_JP": "Gaussian Scene Workbench プロジェクトを開く"
+  },
+  "保存工程": {
+    "zh_CN": "保存工程",
+    "en_US": "Save Project",
+    "ja_JP": "プロジェクトを保存"
+  },
+  "工程另存为...": {
+    "zh_CN": "工程另存为...",
+    "en_US": "Save Project As…",
+    "ja_JP": "名前を付けてプロジェクトを保存…"
+  },
+  "恢复中心...": {
+    "zh_CN": "恢复中心...",
+    "en_US": "Recovery Center…",
+    "ja_JP": "復元センター…"
+  },
+  "恢复异常退出时保留的未命名工程": {
+    "zh_CN": "恢复异常退出时保留的未命名工程",
+    "en_US": "Recover untitled projects retained after a crash",
+    "ja_JP": "異常終了後に保持された未保存プロジェクトを復元"
+  },
+  "版本历史...": {
+    "zh_CN": "版本历史...",
+    "en_US": "Version History…",
+    "ja_JP": "バージョン履歴…"
+  },
+  "查看并恢复工程自动快照": {
+    "zh_CN": "查看并恢复工程自动快照",
+    "en_US": "View and restore automatic project snapshots",
+    "ja_JP": "プロジェクトの自動スナップショットを表示・復元"
+  },
+  "设置第二存储位置...": {
+    "zh_CN": "设置第二存储位置...",
+    "en_US": "Set Secondary Storage…",
+    "ja_JP": "セカンダリストレージを設定…"
+  },
+  "外部备份与恢复...": {
+    "zh_CN": "外部备份与恢复...",
+    "en_US": "External Backup and Recovery…",
+    "ja_JP": "外部バックアップと復元…"
+  },
+  "添加照片/视频...": {
+    "zh_CN": "添加照片/视频...",
+    "en_US": "Add Photos/Videos…",
+    "ja_JP": "写真・動画を追加…"
+  },
+  "直接选择照片或视频；视频会自动抽帧": {
+    "zh_CN": "直接选择照片或视频；视频会自动抽帧",
+    "en_US": "Select photos or videos; frames are extracted automatically",
+    "ja_JP": "写真または動画を選択。動画フレームは自動抽出します"
+  },
+  "添加媒体目录...": {
+    "zh_CN": "添加媒体目录...",
+    "en_US": "Add Media Folder…",
+    "ja_JP": "メディアフォルダーを追加…"
+  },
+  "递归添加目录中的照片与视频": {
+    "zh_CN": "递归添加目录中的照片与视频",
+    "en_US": "Recursively add photos and videos from a folder",
+    "ja_JP": "フォルダー内の写真・動画を再帰的に追加"
+  },
+  "关联已有数据集...": {
+    "zh_CN": "关联已有数据集...",
+    "en_US": "Link Existing Dataset…",
+    "ja_JP": "既存のデータセットを関連付け…"
+  },
+  "直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件": {
+    "zh_CN": "直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件",
+    "en_US": "Link existing images/input and COLMAP sparse data without copying",
+    "ja_JP": "既存の images/input と COLMAP sparse をコピーせずに関連付け"
+  },
+  "导入 PLY 场景/网格": {
+    "zh_CN": "导入 PLY 场景/网格",
+    "en_US": "Import PLY Scene/Mesh",
+    "ja_JP": "PLY シーン・メッシュをインポート"
+  },
+  "导入 PLY 点云、高斯场景或三角网格": {
+    "zh_CN": "导入 PLY 点云、高斯场景或三角网格",
+    "en_US": "Import a PLY point cloud, Gaussian scene or triangle mesh",
+    "ja_JP": "PLY 点群、ガウシアンシーン、三角形メッシュをインポート"
+  },
+  "清理数据集...": {
+    "zh_CN": "清理数据集...",
+    "en_US": "Clean Up Dataset…",
+    "ja_JP": "データセットを整理…"
+  },
+  "清理托管数据集，或仅解除外部数据集关联": {
+    "zh_CN": "清理托管数据集，或仅解除外部数据集关联",
+    "en_US": "Remove a managed dataset, or unlink an external dataset",
+    "ja_JP": "管理対象データセットを削除、または外部データセットの関連付けを解除"
+  },
+  "清理重建结果...": {
+    "zh_CN": "清理重建结果...",
+    "en_US": "Clean Up Reconstruction…",
+    "ja_JP": "再構成結果を整理…"
+  },
+  "只清理托管数据集内的 COLMAP 结果，保留照片和场景": {
+    "zh_CN": "只清理托管数据集内的 COLMAP 结果，保留照片和场景",
+    "en_US": "Remove only managed COLMAP results; keep photos and scenes",
+    "ja_JP": "管理対象の COLMAP 結果のみ削除し、写真とシーンを保持"
+  },
+  "卸载场景...": {
+    "zh_CN": "卸载场景...",
+    "en_US": "Unload Scene…",
+    "ja_JP": "シーンをアンロード…"
+  },
+  "从当前工程卸载场景，不删除 PLY 或训练输出": {
+    "zh_CN": "从当前工程卸载场景，不删除 PLY 或训练输出",
+    "en_US": "Unload the scene without deleting PLY or training output",
+    "ja_JP": "PLY や学習出力を削除せずにシーンをアンロード"
+  },
+  "清空任务记录...": {
+    "zh_CN": "清空任务记录...",
+    "en_US": "Clear Task History…",
+    "ja_JP": "タスク履歴をクリア…"
+  },
+  "清空当前窗口中的任务表和日志，不删除任务输出": {
+    "zh_CN": "清空当前窗口中的任务表和日志，不删除任务输出",
+    "en_US": "Clear the task table and log without deleting outputs",
+    "ja_JP": "出力を削除せずにタスク一覧とログをクリア"
+  },
+  "检查训练与重建环境": {
+    "zh_CN": "检查训练与重建环境",
+    "en_US": "Check Training and Reconstruction Environment",
+    "ja_JP": "学習・再構成環境を確認"
+  },
+  "COLMAP 重建...": {
+    "zh_CN": "COLMAP 重建...",
+    "en_US": "COLMAP Reconstruction…",
+    "ja_JP": "COLMAP 再構成…"
+  },
+  "计算相机位姿与稀疏点云 (F7)": {
+    "zh_CN": "计算相机位姿与稀疏点云 (F7)",
+    "en_US": "Estimate camera poses and reconstruct a sparse point cloud (F7)",
+    "ja_JP": "カメラ姿勢推定と疎な点群の再構成（F7）"
+  },
+  "开始训练...": {
+    "zh_CN": "开始训练...",
+    "en_US": "Start Training…",
+    "ja_JP": "学習を開始…"
+  },
+  "启动当前工程训练": {
+    "zh_CN": "启动当前工程训练",
+    "en_US": "Start training for the current project",
+    "ja_JP": "現在のプロジェクトで学習を開始"
+  },
+  "停止任务": {
+    "zh_CN": "停止任务",
+    "en_US": "Stop Task",
+    "ja_JP": "タスクを停止"
+  },
+  "停止当前任务": {
+    "zh_CN": "停止当前任务",
+    "en_US": "Stop the current task",
+    "ja_JP": "現在のタスクを停止"
+  },
+  "重置视图": {
+    "zh_CN": "重置视图",
+    "en_US": "Reset View",
+    "ja_JP": "ビューをリセット"
+  },
+  "高斯": {
+    "zh_CN": "高斯",
+    "en_US": "Gaussians",
+    "ja_JP": "ガウシアン"
+  },
+  "使用缩放、旋转与透明度显示屏幕空间高斯": {
+    "zh_CN": "使用缩放、旋转与透明度显示屏幕空间高斯",
+    "en_US": "Render screen-space Gaussians with scale, rotation and opacity",
+    "ja_JP": "スケール・回転・不透明度を使ってスクリーン空間のガウシアンを描画"
+  },
+  "网格": {
+    "zh_CN": "网格",
+    "en_US": "Mesh",
+    "ja_JP": "メッシュ"
+  },
+  "显示 PLY 面拓扑三角化后的着色网格": {
+    "zh_CN": "显示 PLY 面拓扑三角化后的着色网格",
+    "en_US": "Display shaded triangles from PLY face topology",
+    "ja_JP": "PLY の面トポロジーを三角形化してシェーディング表示"
+  },
+  "点云": {
+    "zh_CN": "点云",
+    "en_US": "Point Cloud",
+    "ja_JP": "点群"
+  },
+  "显示静态点云或训练中持续增密的高斯中心点": {
+    "zh_CN": "显示静态点云或训练中持续增密的高斯中心点",
+    "en_US": "Display a static point cloud or Gaussian centers densified during training",
+    "ja_JP": "静的な点群、または学習中に高密度化するガウシアン中心点を表示"
+  },
+  "相机轨迹": {
+    "zh_CN": "相机轨迹",
+    "en_US": "Camera Trajectory",
+    "ja_JP": "カメラ軌跡"
+  },
+  "显示 cameras.json 中的相机视锥和拍摄路径": {
+    "zh_CN": "显示 cameras.json 中的相机视锥和拍摄路径",
+    "en_US": "Show camera frustums and capture path from cameras.json",
+    "ja_JP": "cameras.json のカメラ視錐台と撮影経路を表示"
+  },
+  "查看": {
+    "zh_CN": "查看",
+    "en_US": "View",
+    "ja_JP": "ビュー"
+  },
+  "查看与导航 (V)": {
+    "zh_CN": "查看与导航 (V)",
+    "en_US": "View and navigate (V)",
+    "ja_JP": "表示とナビゲーション（V）"
+  },
+  "查找模型": {
+    "zh_CN": "查找模型",
+    "en_US": "Frame Selected",
+    "ja_JP": "選択をフレームに収める"
+  },
+  "自动选中模型并按完整范围拉近视角 (F)": {
+    "zh_CN": "自动选中模型并按完整范围拉近视角 (F)",
+    "en_US": "Select the model and frame its full bounds (F)",
+    "ja_JP": "モデルを選択し、全体が収まるように表示（F）"
+  },
+  "已找到并聚焦模型；G 移动，R 旋转，S 缩放": {
+    "zh_CN": "已找到并聚焦模型；G 移动，R 旋转，S 缩放",
+    "en_US": "Model framed; G move, R rotate, S scale",
+    "ja_JP": "モデルを表示しました。G 移動、R 回転、S スケール"
+  },
+  "当前没有可查找的模型": {
+    "zh_CN": "当前没有可查找的模型",
+    "en_US": "No model available to frame",
+    "ja_JP": "表示対象のモデルがありません"
+  },
+  "移动模型": {
+    "zh_CN": "移动模型",
+    "en_US": "Move Model",
+    "ja_JP": "モデルを移動"
+  },
+  "Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附": {
+    "zh_CN": "Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附",
+    "en_US": "Blender-style modal move (G): X/Y/Z constraints, Shift+axis for plane lock, Ctrl to snap",
+    "ja_JP": "Blender 形式のモーダル移動（G）: X/Y/Z 軸制約、Shift+軸で平面固定、Ctrl でスナップ"
+  },
+  "旋转模型": {
+    "zh_CN": "旋转模型",
+    "en_US": "Rotate Model",
+    "ja_JP": "モデルを回転"
+  },
+  "Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转": {
+    "zh_CN": "Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转",
+    "en_US": "Blender-style rotate (R); press R again for trackball rotation",
+    "ja_JP": "Blender 形式の回転（R）。再度 R でトラックボール回転"
+  },
+  "缩放模型": {
+    "zh_CN": "缩放模型",
+    "en_US": "Scale Model",
+    "ja_JP": "モデルをスケール"
+  },
+  "Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附": {
+    "zh_CN": "Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附",
+    "en_US": "Blender-style scale (S): axis, plane and uniform scaling; Ctrl to snap",
+    "ja_JP": "Blender 形式のスケール（S）: 軸・平面・均等スケール、Ctrl でスナップ"
+  },
+  "框选": {
+    "zh_CN": "框选",
+    "en_US": "Box Select",
+    "ja_JP": "ボックス選択"
+  },
+  "矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转": {
+    "zh_CN": "矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转",
+    "en_US": "Box select (Shift+R), Shift to add, Alt to subtract, Ctrl+LMB to orbit",
+    "ja_JP": "ボックス選択（Shift+R）、Shift で追加、Alt で除外、Ctrl+左ドラッグでビュー回転"
+  },
+  "套索": {
+    "zh_CN": "套索",
+    "en_US": "Lasso",
+    "ja_JP": "投げ縄"
+  },
+  "套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转": {
+    "zh_CN": "套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转",
+    "en_US": "Lasso select (L), Shift to add, Alt to subtract, Ctrl+LMB to orbit",
+    "ja_JP": "投げ縄選択（L）、Shift で追加、Alt で除外、Ctrl+左ドラッグでビュー回転"
+  },
+  "笔刷": {
+    "zh_CN": "笔刷",
+    "en_US": "Brush",
+    "ja_JP": "ブラシ"
+  },
+  "连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转": {
+    "zh_CN": "连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转",
+    "en_US": "Brush select (B), Shift to add, Alt to subtract, Ctrl+LMB to orbit",
+    "ja_JP": "ブラシ選択（B）、Shift で追加、Alt で除外、Ctrl+左ドラッグでビュー回転"
+  },
+  "仅选择可见点": {
+    "zh_CN": "仅选择可见点",
+    "en_US": "Visible Points Only",
+    "ja_JP": "可視点のみ"
+  },
+  "仅选择当前视角可见的点": {
+    "zh_CN": "仅选择当前视角可见的点",
+    "en_US": "Select only points visible from the current view",
+    "ja_JP": "現在のビューから見える点のみを選択"
+  },
+  "清除选择": {
+    "zh_CN": "清除选择",
+    "en_US": "Deselect All",
+    "ja_JP": "選択を解除"
+  },
+  "清除选择 (Esc)": {
+    "zh_CN": "清除选择 (Esc)",
+    "en_US": "Deselect all (Esc)",
+    "ja_JP": "選択を解除（Esc）"
+  },
+  "反选": {
+    "zh_CN": "反选",
+    "en_US": "Invert Selection",
+    "ja_JP": "選択を反転"
+  },
+  "反选未删除的点 (Ctrl+I)": {
+    "zh_CN": "反选未删除的点 (Ctrl+I)",
+    "en_US": "Invert selection of undeleted points (Ctrl+I)",
+    "ja_JP": "未削除の点の選択を反転（Ctrl+I）"
+  },
+  "删除所选": {
+    "zh_CN": "删除所选",
+    "en_US": "Delete Selected",
+    "ja_JP": "選択項目を削除"
+  },
+  "删除所选点 (Delete)": {
+    "zh_CN": "删除所选点 (Delete)",
+    "en_US": "Delete selected points (Delete)",
+    "ja_JP": "選択した点を削除（Delete）"
+  },
+  "撤销编辑": {
+    "zh_CN": "撤销编辑",
+    "en_US": "Undo Edit",
+    "ja_JP": "編集を元に戻す"
+  },
+  "撤销上一次编辑 (Ctrl+Z)": {
+    "zh_CN": "撤销上一次编辑 (Ctrl+Z)",
+    "en_US": "Undo the last edit (Ctrl+Z)",
+    "ja_JP": "直前の編集を元に戻す（Ctrl+Z）"
+  },
+  "重做编辑": {
+    "zh_CN": "重做编辑",
+    "en_US": "Redo Edit",
+    "ja_JP": "編集をやり直す"
+  },
+  "重做上一次编辑 (Ctrl+Y)": {
+    "zh_CN": "重做上一次编辑 (Ctrl+Y)",
+    "en_US": "Redo the last edit (Ctrl+Y)",
+    "ja_JP": "直前の編集をやり直す（Ctrl+Y）"
+  },
+  "裁剪另存为...": {
+    "zh_CN": "裁剪另存为...",
+    "en_US": "Save Cropped As…",
+    "ja_JP": "トリミング結果を名前を付けて保存…"
+  },
+  "按原始顶点索引无损导出裁剪 PLY": {
+    "zh_CN": "按原始顶点索引无损导出裁剪 PLY",
+    "en_US": "Export cropped PLY losslessly using original vertex indices",
+    "ja_JP": "元の頂点インデックスを保持してトリミング済み PLY をロスレスで書き出す"
+  },
+  "导出坐标与尺寸报告...": {
+    "zh_CN": "导出坐标与尺寸报告...",
+    "en_US": "Export Coordinates and Dimensions…",
+    "ja_JP": "座標と寸法をエクスポート…"
+  },
+  "导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移": {
+    "zh_CN": "导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移",
+    "en_US": "Export original bounds, center, dimensions, units, CRS and display shift",
+    "ja_JP": "元の座標範囲・中心・寸法・単位・CRS・表示シフトをエクスポート"
+  },
+  "模型底部（推荐）": {
+    "zh_CN": "模型底部（推荐）",
+    "en_US": "Model Base (Recommended)",
+    "ja_JP": "モデル底面（推奨）"
+  },
+  "世界坐标 Z=0": {
+    "zh_CN": "世界坐标 Z=0",
+    "en_US": "World Z=0",
+    "ja_JP": "ワールド Z=0"
+  },
+  "退出": {
+    "zh_CN": "退出",
+    "en_US": "Exit",
+    "ja_JP": "終了"
+  },
+  "重置工作区布局": {
+    "zh_CN": "重置工作区布局",
+    "en_US": "Reset Workspace Layout",
+    "ja_JP": "ワークスペースのレイアウトをリセット"
+  },
+  "文件": {
+    "zh_CN": "文件",
+    "en_US": "File",
+    "ja_JP": "ファイル"
+  },
+  "清理": {
+    "zh_CN": "清理",
+    "en_US": "Clean Up",
+    "ja_JP": "整理"
+  },
+  "编辑": {
+    "zh_CN": "编辑",
+    "en_US": "Edit",
+    "ja_JP": "編集"
+  },
+  "工作流": {
+    "zh_CN": "工作流",
+    "en_US": "Workflow",
+    "ja_JP": "ワークフロー"
+  },
+  "场景": {
+    "zh_CN": "场景",
+    "en_US": "Scene",
+    "ja_JP": "シーン"
+  },
+  "视图": {
+    "zh_CN": "视图",
+    "en_US": "View",
+    "ja_JP": "ビュー"
+  },
+  "渲染模式": {
+    "zh_CN": "渲染模式",
+    "en_US": "Render Mode",
+    "ja_JP": "描画モード"
+  },
+  "基准面网格": {
+    "zh_CN": "基准面网格",
+    "en_US": "Reference Grid",
+    "ja_JP": "基準グリッド"
+  },
+  "显示与适配": {
+    "zh_CN": "显示与适配",
+    "en_US": "Display and Scaling",
+    "ja_JP": "表示と UI スケール"
+  },
+  "自动适配界面（推荐）": {
+    "zh_CN": "自动适配界面（推荐）",
+    "en_US": "Automatic UI Scaling (Recommended)",
+    "ja_JP": "UI スケールを自動調整（推奨）"
+  },
+  "根据当前屏幕和窗口分辨率自动调整文字、控件与图标": {
+    "zh_CN": "根据当前屏幕和窗口分辨率自动调整文字、控件与图标",
+    "en_US": "Adjust text, controls and icons to the current display and window resolution",
+    "ja_JP": "現在の画面・ウィンドウ解像度に合わせて文字・コントロール・アイコンを調整"
+  },
+  "手动界面比例": {
+    "zh_CN": "手动界面比例",
+    "en_US": "Manual UI Scale",
+    "ja_JP": "手動 UI スケール"
+  },
+  "窗口分辨率": {
+    "zh_CN": "窗口分辨率",
+    "en_US": "Window Resolution",
+    "ja_JP": "ウィンドウ解像度"
+  },
+  "适合当前屏幕（自动）": {
+    "zh_CN": "适合当前屏幕（自动）",
+    "en_US": "Fit Current Screen (Automatic)",
+    "ja_JP": "現在の画面に合わせる（自動）"
+  },
+  "帮助": {
+    "zh_CN": "帮助",
+    "en_US": "Help",
+    "ja_JP": "ヘルプ"
+  },
+  "关于 Gaussian Scene Workbench": {
+    "zh_CN": "关于 Gaussian Scene Workbench",
+    "en_US": "About Gaussian Scene Workbench",
+    "ja_JP": "Gaussian Scene Workbench について"
+  },
+  "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。": {
+    "zh_CN": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。",
+    "en_US": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>Gaussian scene research workbench<br><br>Qt 6 native desktop architecture, built %1.<br>Native desktop preview channel; the stable release remains on main.",
+    "ja_JP": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>ガウシアンシーン研究ワークベンチ<br><br>Qt 6 ネイティブデスクトップ構成、ビルド日 %1。<br>ネイティブデスクトップのプレビューチャンネルです。安定版は main にあります。"
+  },
+  "主工具": {
+    "zh_CN": "主工具",
+    "en_US": "Main Tools",
+    "ja_JP": "メインツール"
+  },
+  "选择模式": {
+    "zh_CN": "选择模式",
+    "en_US": "Selection Mode",
+    "ja_JP": "選択モード"
+  },
+  "半径": {
+    "zh_CN": "半径",
+    "en_US": "Radius",
+    "ja_JP": "半径"
+  },
+  "笔刷半径": {
+    "zh_CN": "笔刷半径",
+    "en_US": "Brush Radius",
+    "ja_JP": "ブラシ半径"
+  },
+  "编辑操作": {
+    "zh_CN": "编辑操作",
+    "en_US": "Edit Operations",
+    "ja_JP": "編集操作"
+  },
+  "工程": {
+    "zh_CN": "工程",
+    "en_US": "Project",
+    "ja_JP": "プロジェクト"
+  },
+  "Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型": {
+    "zh_CN": "Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型",
+    "en_US": "Ctrl-click to toggle models · Shift for range selection · Ctrl+A to select all",
+    "ja_JP": "Ctrl クリックでモデル選択切替 · Shift で範囲選択 · Ctrl+A で全選択"
+  },
+  "已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放": {
+    "zh_CN": "已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放",
+    "en_US": "%1 models selected: G move group · R rotate group · S uniform scale",
+    "ja_JP": "%1 モデル選択中: G 全体移動 · R 全体回転 · S 均等スケール"
+  },
+  "属性": {
+    "zh_CN": "属性",
+    "en_US": "Properties",
+    "ja_JP": "プロパティ"
+  },
+  "名称": {
+    "zh_CN": "名称",
+    "en_US": "Name",
+    "ja_JP": "名前"
+  },
+  "路径": {
+    "zh_CN": "路径",
+    "en_US": "Path",
+    "ja_JP": "パス"
+  },
+  "数据集": {
+    "zh_CN": "数据集",
+    "en_US": "Dataset",
+    "ja_JP": "データセット"
+  },
+  "目录": {
+    "zh_CN": "目录",
+    "en_US": "Directory",
+    "ja_JP": "ディレクトリ"
+  },
+  "图像": {
+    "zh_CN": "图像",
+    "en_US": "Images",
+    "ja_JP": "画像"
+  },
+  "数量": {
+    "zh_CN": "数量",
+    "en_US": "Count",
+    "ja_JP": "数"
+  },
+  "格式": {
+    "zh_CN": "格式",
+    "en_US": "Format",
+    "ja_JP": "形式"
+  },
+  "相机": {
+    "zh_CN": "相机",
+    "en_US": "Cameras",
+    "ja_JP": "カメラ"
+  },
+  "坐标系": {
+    "zh_CN": "坐标系",
+    "en_US": "Coordinate System",
+    "ja_JP": "座標系"
+  },
+  "单位": {
+    "zh_CN": "单位",
+    "en_US": "Units",
+    "ja_JP": "単位"
+  },
+  "中心": {
+    "zh_CN": "中心",
+    "en_US": "Center",
+    "ja_JP": "中心"
+  },
+  "尺寸": {
+    "zh_CN": "尺寸",
+    "en_US": "Dimensions",
+    "ja_JP": "寸法"
+  },
+  "范围": {
+    "zh_CN": "范围",
+    "en_US": "Bounds",
+    "ja_JP": "範囲"
+  },
+  "显示变换": {
+    "zh_CN": "显示变换",
+    "en_US": "Display Transform",
+    "ja_JP": "表示変換"
+  },
+  "模型变换": {
+    "zh_CN": "模型变换",
+    "en_US": "Model Transform",
+    "ja_JP": "モデル変換"
+  },
+  "基准面": {
+    "zh_CN": "基准面",
+    "en_US": "Reference Plane",
+    "ja_JP": "基準面"
+  },
+  "任务与日志": {
+    "zh_CN": "任务与日志",
+    "en_US": "Tasks and Log",
+    "ja_JP": "タスクとログ"
+  },
+  "状态": {
+    "zh_CN": "状态",
+    "en_US": "Status",
+    "ja_JP": "状態"
+  },
+  "任务": {
+    "zh_CN": "任务",
+    "en_US": "Task",
+    "ja_JP": "タスク"
+  },
+  "开始时间": {
+    "zh_CN": "开始时间",
+    "en_US": "Start Time",
+    "ja_JP": "開始時刻"
+  },
+  "结果": {
+    "zh_CN": "结果",
+    "en_US": "Result",
+    "ja_JP": "結果"
+  },
+  "训练监视": {
+    "zh_CN": "训练监视",
+    "en_US": "Training Monitor",
+    "ja_JP": "学習モニター"
+  },
+  "日志": {
+    "zh_CN": "日志",
+    "en_US": "Log",
+    "ja_JP": "ログ"
+  },
+  "未打开工程": {
+    "zh_CN": "未打开工程",
+    "en_US": "No project open",
+    "ja_JP": "プロジェクト未選択"
+  },
+  "点预览 | 未载入场景 | FPS — (— ms)": {
+    "zh_CN": "点预览 | 未载入场景 | FPS — (— ms)",
+    "en_US": "Point preview | No scene loaded | FPS — (— ms)",
+    "ja_JP": "点群プレビュー | シーン未読込 | FPS — (— ms)"
+  },
+  "选择 0 | 删除 0": {
+    "zh_CN": "选择 0 | 删除 0",
+    "en_US": "Selected 0 | Deleted 0",
+    "ja_JP": "選択 0 | 削除 0"
+  },
+  "运行中": {
+    "zh_CN": "运行中",
+    "en_US": "Running",
+    "ja_JP": "実行中"
+  },
+  "开始任务：%1": {
+    "zh_CN": "开始任务：%1",
+    "en_US": "Task started: %1",
+    "ja_JP": "タスク開始: %1"
+  },
+  "COLMAP 稀疏点云已更新：快照 %1 · %2 个点": {
+    "zh_CN": "COLMAP 稀疏点云已更新：快照 %1 · %2 个点",
+    "en_US": "COLMAP sparse point cloud updated: snapshot %1 · %2 points",
+    "ja_JP": "COLMAP の疎な点群を更新: スナップショット %1 · %2 点"
+  },
+  "训练预览已更新：迭代 %1": {
+    "zh_CN": "训练预览已更新：迭代 %1",
+    "en_US": "Training preview updated: iteration %1",
+    "ja_JP": "学習プレビューを更新: 反復 %1"
+  },
+  " · 稀疏点 %1": {
+    "zh_CN": " · 稀疏点 %1",
+    "en_US": " · Sparse points %1",
+    "ja_JP": " · 疎な点群 %1 点"
+  },
+  "导入事务恢复失败：%1": {
+    "zh_CN": "导入事务恢复失败：%1",
+    "en_US": "Import transaction recovery failed: %1",
+    "ja_JP": "インポート処理の復元に失敗しました: %1"
+  },
+  "无法恢复导入事务": {
+    "zh_CN": "无法恢复导入事务",
+    "en_US": "Cannot recover import transaction",
+    "ja_JP": "インポート処理を復元できません"
+  },
+  "任务已结束，但无法确认数据集事务状态。为避免丢失数据，软件不会自动关闭；请修复问题后重新打开工程。\n\n%1": {
+    "zh_CN": "任务已结束，但无法确认数据集事务状态。为避免丢失数据，软件不会自动关闭；请修复问题后重新打开工程。\n\n%1",
+    "en_US": "The task ended, but the dataset transaction state is unknown. To prevent data loss, the application will not close automatically. Repair the issue and reopen the project.\n\n%1",
+    "ja_JP": "タスクは終了しましたが、データセット処理の状態を確認できません。データ損失を防ぐため自動終了しません。問題を修正してプロジェクトを開き直してください。\n\n%1"
+  },
+  "导入进程虽已中断，但数据集提交已完成；将保留并关联新数据集。": {
+    "zh_CN": "导入进程虽已中断，但数据集提交已完成；将保留并关联新数据集。",
+    "en_US": "Import was interrupted, but dataset commit completed. The new dataset will be retained and linked.",
+    "ja_JP": "インポートは中断しましたが、データセットの確定は完了しています。新しいデータセットを保持して関連付けます。"
+  },
+  "提交已确认": {
+    "zh_CN": "提交已确认",
+    "en_US": "Commit confirmed",
+    "ja_JP": "確定を確認"
+  },
+  "已清理未完成的导入事务；提交前的数据已恢复。": {
+    "zh_CN": "已清理未完成的导入事务；提交前的数据已恢复。",
+    "en_US": "Incomplete import transaction cleaned up; previous data restored.",
+    "ja_JP": "未完了のインポート処理を整理し、確定前のデータを復元しました。"
+  },
+  "数据集已导入到原工程，但当前工程已切换，因此未自动关联：%1": {
+    "zh_CN": "数据集已导入到原工程，但当前工程已切换，因此未自动关联：%1",
+    "en_US": "Dataset imported into the original project but not linked because the active project changed: %1",
+    "ja_JP": "元のプロジェクトにインポートしましたが、プロジェクトが切り替わったため自動関連付けしませんでした: %1"
+  },
+  "导入结果无效": {
+    "zh_CN": "导入结果无效",
+    "en_US": "Invalid import result",
+    "ja_JP": "インポート結果が無効です"
+  },
+  "导入任务完成，但目标数据集中没有可用图像：%1": {
+    "zh_CN": "导入任务完成，但目标数据集中没有可用图像：%1",
+    "en_US": "Import completed, but the target dataset contains no usable images: %1",
+    "ja_JP": "インポートは完了しましたが、対象データセットに有効な画像がありません: %1"
+  },
+  "数据集已导入，但工程自动保存失败：%1": {
+    "zh_CN": "数据集已导入，但工程自动保存失败：%1",
+    "en_US": "Dataset imported, but automatic project save failed: %1",
+    "ja_JP": "データセットはインポートしましたが、プロジェクトの自動保存に失敗しました: %1"
+  },
+  "当前数据集已切换到：%1": {
+    "zh_CN": "当前数据集已切换到：%1",
+    "en_US": "Current dataset changed to: %1",
+    "ja_JP": "現在のデータセットを変更しました: %1"
+  },
+  "稀疏点云已生成 · %1 个点": {
+    "zh_CN": "稀疏点云已生成 · %1 个点",
+    "en_US": "Sparse point cloud generated · %1 points",
+    "ja_JP": "疎な点群を生成しました · %1 点"
+  },
+  "保留最后一个可用稀疏点云快照": {
+    "zh_CN": "保留最后一个可用稀疏点云快照",
+    "en_US": "Keeping the last usable sparse point cloud snapshot",
+    "ja_JP": "最後の有効な疎な点群スナップショットを保持"
+  },
+  "训练输出无效": {
+    "zh_CN": "训练输出无效",
+    "en_US": "Invalid training output",
+    "ja_JP": "学習出力が無効です"
+  },
+  "训练结果无效": {
+    "zh_CN": "训练结果无效",
+    "en_US": "Invalid training result",
+    "ja_JP": "学習結果が無効です"
+  },
+  "训练进程已正常退出，但最终模型未通过校验。\n\n%1": {
+    "zh_CN": "训练进程已正常退出，但最终模型未通过校验。\n\n%1",
+    "en_US": "Training exited normally, but final model validation failed.\n\n%1",
+    "ja_JP": "学習プロセスは正常終了しましたが、最終モデルの検証に失敗しました。\n\n%1"
+  },
+  "训练检查点已通过校验并原子发布：%1": {
+    "zh_CN": "训练检查点已通过校验并原子发布：%1",
+    "en_US": "Training checkpoint validated and atomically published: %1",
+    "ja_JP": "学習チェックポイントを検証し、アトミックに確定しました: %1"
+  },
+  "训练结果有效，但保护副本发布失败；仍保留原始输出：%1": {
+    "zh_CN": "训练结果有效，但保护副本发布失败；仍保留原始输出：%1",
+    "en_US": "Training result is valid, but protected-copy publication failed; original output retained: %1",
+    "ja_JP": "学習結果は有効ですが、保護コピーの確定に失敗しました。元の出力は保持しています: %1"
+  },
+  "模型已生成（当前工程已切换）": {
+    "zh_CN": "模型已生成（当前工程已切换）",
+    "en_US": "Model generated (active project changed)",
+    "ja_JP": "モデルを生成しました（現在のプロジェクトは変更済み）"
+  },
+  "训练模型已生成，但当前工程已切换，未自动关联：%1": {
+    "zh_CN": "训练模型已生成，但当前工程已切换，未自动关联：%1",
+    "en_US": "Training model generated but not linked because the active project changed: %1",
+    "ja_JP": "学習モデルを生成しましたが、プロジェクトが切り替わったため関連付けしませんでした: %1"
+  },
+  "模型关联失败": {
+    "zh_CN": "模型关联失败",
+    "en_US": "Model link failed",
+    "ja_JP": "モデルの関連付けに失敗"
+  },
+  "无法载入训练结果": {
+    "zh_CN": "无法载入训练结果",
+    "en_US": "Cannot load training result",
+    "ja_JP": "学習結果を読み込めません"
+  },
+  "迭代 %1 · %2 个高斯": {
+    "zh_CN": "迭代 %1 · %2 个高斯",
+    "en_US": "Iteration %1 · %2 Gaussians",
+    "ja_JP": "反復 %1 · %2 ガウシアン"
+  },
+  "训练结果已载入，但工程未保存": {
+    "zh_CN": "训练结果已载入，但工程未保存",
+    "en_US": "Training result loaded, project not saved",
+    "ja_JP": "学習結果を読み込みましたが、プロジェクトは未保存です"
+  },
+  "模型已载入视口，但工程文件自动保存失败。\n\n%1": {
+    "zh_CN": "模型已载入视口，但工程文件自动保存失败。\n\n%1",
+    "en_US": "Model loaded in the viewport, but automatic project save failed.\n\n%1",
+    "ja_JP": "モデルをビューポートに読み込みましたが、プロジェクトの自動保存に失敗しました。\n\n%1"
+  },
+  "训练结果已载入，但工程自动保存失败：%1": {
+    "zh_CN": "训练结果已载入，但工程自动保存失败：%1",
+    "en_US": "Training result loaded, but automatic project save failed: %1",
+    "ja_JP": "学習結果を読み込みましたが、プロジェクトの自動保存に失敗しました: %1"
+  },
+  "训练结果已校验并载入：迭代 %1，%2 个高斯，%3": {
+    "zh_CN": "训练结果已校验并载入：迭代 %1，%2 个高斯，%3",
+    "en_US": "Training result validated and loaded: iteration %1, %2 Gaussians, %3",
+    "ja_JP": "学習結果を検証して読み込みました: 反復 %1、%2 ガウシアン、%3"
+  },
+  "%1 训练完成，模型已载入": {
+    "zh_CN": "%1 训练完成，模型已载入",
+    "en_US": "%1 training completed; model loaded",
+    "ja_JP": "%1 の学習が完了し、モデルを読み込みました"
+  },
+  "最近检查点有效，但保护副本发布失败：%1": {
+    "zh_CN": "最近检查点有效，但保护副本发布失败：%1",
+    "en_US": "Latest checkpoint is valid, but protected-copy publication failed: %1",
+    "ja_JP": "最新のチェックポイントは有効ですが、保護コピーの確定に失敗しました: %1"
+  },
+  "保留迭代 %1": {
+    "zh_CN": "保留迭代 %1",
+    "en_US": "Retained iteration %1",
+    "ja_JP": "反復 %1 を保持"
+  },
+  "训练未完成，已保留最近可用检查点：迭代 %1，%2": {
+    "zh_CN": "训练未完成，已保留最近可用检查点：迭代 %1，%2",
+    "en_US": "Training incomplete; latest usable checkpoint retained: iteration %1, %2",
+    "ja_JP": "学習は未完了です。最後の有効なチェックポイントを保持しました: 反復 %1、%2"
+  },
+  "保留迭代 %1 · 等待保存": {
+    "zh_CN": "保留迭代 %1 · 等待保存",
+    "en_US": "Retained iteration %1 · Awaiting save",
+    "ja_JP": "反復 %1 を保持 · 保存待ち"
+  },
+  "退出前已将最近训练检查点关联到当前工程；请在保存确认中选择是否保留。": {
+    "zh_CN": "退出前已将最近训练检查点关联到当前工程；请在保存确认中选择是否保留。",
+    "en_US": "Latest training checkpoint linked before exit. Choose whether to keep it in the save confirmation.",
+    "ja_JP": "終了前に最新の学習チェックポイントを関連付けました。保存確認で保持するかを選んでください。"
+  },
+  "无法将保留的训练检查点关联到工程：%1": {
+    "zh_CN": "无法将保留的训练检查点关联到工程：%1",
+    "en_US": "Cannot link retained training checkpoint to project: %1",
+    "ja_JP": "保持した学習チェックポイントをプロジェクトに関連付けできません: %1"
+  },
+  "训练已结束，但恢复标记清理失败：%1": {
+    "zh_CN": "训练已结束，但恢复标记清理失败：%1",
+    "en_US": "Training ended, but recovery marker cleanup failed: %1",
+    "ja_JP": "学習は終了しましたが、復元マーカーの整理に失敗しました: %1"
+  },
+  "事务恢复失败": {
+    "zh_CN": "事务恢复失败",
+    "en_US": "Transaction recovery failed",
+    "ja_JP": "トランザクションの復元に失敗"
+  },
+  "用户取消": {
+    "zh_CN": "用户取消",
+    "en_US": "Cancelled by user",
+    "ja_JP": "ユーザーによるキャンセル"
+  },
+  "退出码 %1": {
+    "zh_CN": "退出码 %1",
+    "en_US": "Exit code %1",
+    "ja_JP": "終了コード %1"
+  },
+  "任务%1：%2": {
+    "zh_CN": "任务%1：%2",
+    "en_US": "Task %1: %2",
+    "ja_JP": "タスク %1: %2"
+  },
+  "任务已结束，正在完成工程数据迁移…": {
+    "zh_CN": "任务已结束，正在完成工程数据迁移…",
+    "en_US": "Task ended; completing project data migration…",
+    "ja_JP": "タスク終了。プロジェクトデータの移行を完了中…"
+  },
+  "工程迁移待恢复": {
+    "zh_CN": "工程迁移待恢复",
+    "en_US": "Project migration recovery pending",
+    "ja_JP": "プロジェクト移行の復元待ち"
+  },
+  "任务已结束，但工程数据迁移失败：%1": {
+    "zh_CN": "任务已结束，但工程数据迁移失败：%1",
+    "en_US": "Task ended, but project data migration failed: %1",
+    "ja_JP": "タスクは終了しましたが、プロジェクトデータの移行に失敗しました: %1"
+  },
+  "无法完成工程数据迁移": {
+    "zh_CN": "无法完成工程数据迁移",
+    "en_US": "Cannot complete project data migration",
+    "ja_JP": "プロジェクトデータの移行を完了できません"
+  },
+  "任务结果仍保留在原工作区，工程清单也已保存。软件不会自动关闭；请修复目标位置后再次保存。\n\n%1": {
+    "zh_CN": "任务结果仍保留在原工作区，工程清单也已保存。软件不会自动关闭；请修复目标位置后再次保存。\n\n%1",
+    "en_US": "Task results remain in the original workspace and the project manifest is saved. The application will not close automatically. Repair the destination and save again.\n\n%1",
+    "ja_JP": "タスク結果は元のワークスペースに残り、プロジェクトの管理ファイルも保存済みです。自動終了しません。移行先を修正して再保存してください。\n\n%1"
+  },
+  "网格预览": {
+    "zh_CN": "网格预览",
+    "en_US": "Mesh preview",
+    "ja_JP": "メッシュプレビュー"
+  },
+  "高斯预览": {
+    "zh_CN": "高斯预览",
+    "en_US": "Gaussian preview",
+    "ja_JP": "ガウシアンプレビュー"
+  },
+  "点预览": {
+    "zh_CN": "点预览",
+    "en_US": "Point preview",
+    "ja_JP": "点群プレビュー"
+  },
+  "%1 | 未载入场景": {
+    "zh_CN": "%1 | 未载入场景",
+    "en_US": "%1 | No scene loaded",
+    "ja_JP": "%1 | シーン未読込"
+  },
+  "训练预览：%1%2": {
+    "zh_CN": "训练预览：%1%2",
+    "en_US": "Training preview: %1%2",
+    "ja_JP": "学習プレビュー: %1%2"
+  },
+  "正在读取 PLY 场景": {
+    "zh_CN": "正在读取 PLY 场景",
+    "en_US": "Reading PLY scene",
+    "ja_JP": "PLY シーンを読み込み中"
+  },
+  "读取场景：%1": {
+    "zh_CN": "读取场景：%1",
+    "en_US": "Reading scene: %1",
+    "ja_JP": "シーンを読み込み中: %1"
+  },
+  "%1 | %2 个预览图元": {
+    "zh_CN": "%1 | %2 个预览图元",
+    "en_US": "%1 | %2 preview primitives",
+    "ja_JP": "%1 | %2 プレビュープリミティブ"
+  },
+  "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。": {
+    "zh_CN": "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。",
+    "en_US": "PLY mesh uploaded to GPU: %1 vertices, %2 faces, %3 triangles displayed.",
+    "ja_JP": "PLY メッシュを GPU に読み込みました: %1 頂点、%2 面、%3 三角形を表示。"
+  },
+  "场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。": {
+    "zh_CN": "场景已载入 GPU 预览：源数据 %1 个点，显示 %2 个点。",
+    "en_US": "Scene uploaded to GPU preview: %1 source points, %2 displayed points.",
+    "ja_JP": "GPU プレビューに読み込みました: 元データ %1 点、表示 %2 点。"
+  },
+  "整组变换未能写入工程：%1": {
+    "zh_CN": "整组变换未能写入工程：%1",
+    "en_US": "Group transform could not be saved to project: %1",
+    "ja_JP": "グループ変換をプロジェクトに保存できません: %1"
+  },
+  "PLY 场景读取失败": {
+    "zh_CN": "PLY 场景读取失败",
+    "en_US": "PLY scene load failed",
+    "ja_JP": "PLY シーンの読み込みに失敗"
+  },
+  "场景读取失败：%1": {
+    "zh_CN": "场景读取失败：%1",
+    "en_US": "Scene load failed: %1",
+    "ja_JP": "シーンの読み込みに失敗しました: %1"
+  },
+  "相机轨迹未载入：%1。请检查 %2 是否为有效的标准 3DGS cameras.json，修复后重新载入场景。": {
+    "zh_CN": "相机轨迹未载入：%1。请检查 %2 是否为有效的标准 3DGS cameras.json，修复后重新载入场景。",
+    "en_US": "Camera trajectory not loaded: %1. Check that %2 is a valid standard 3DGS cameras.json, then reload the scene.",
+    "ja_JP": "カメラ軌跡を読み込めません: %1。%2 が有効な標準 3DGS cameras.json であることを確認し、シーンを再読み込みしてください。"
+  },
+  "已载入相机轨迹：%1 个位姿": {
+    "zh_CN": "已载入相机轨迹：%1 个位姿",
+    "en_US": "Camera trajectory loaded: %1 poses",
+    "ja_JP": "カメラ軌跡を読み込みました: %1 姿勢"
+  },
+  "，跳过 %1 个无效条目": {
+    "zh_CN": "，跳过 %1 个无效条目",
+    "en_US": ", skipped %1 invalid entries",
+    "ja_JP": "、無効な %1 項目をスキップ"
+  },
+  "，视口已自动抽稀": {
+    "zh_CN": "，视口已自动抽稀",
+    "en_US": ", viewport display subsampled",
+    "ja_JP": "、ビューポート表示を間引き"
+  },
+  "模型变换未能写入工程：%1": {
+    "zh_CN": "模型变换未能写入工程：%1",
+    "en_US": "Model transform could not be saved to project: %1",
+    "ja_JP": "モデル変換をプロジェクトに保存できません: %1"
+  },
+  "自动": {
+    "zh_CN": "自动",
+    "en_US": "Auto",
+    "ja_JP": "自動"
+  },
+  "手动": {
+    "zh_CN": "手动",
+    "en_US": "Manual",
+    "ja_JP": "手動"
+  },
+  "视图 > 显示与适配，可切换自动缩放或窗口分辨率": {
+    "zh_CN": "视图 > 显示与适配，可切换自动缩放或窗口分辨率",
+    "en_US": "View > Display and Scaling: automatic scaling and window resolution",
+    "ja_JP": "ビュー > 表示と UI スケール: 自動スケールとウィンドウ解像度"
+  },
+  "窗口已调整为 %1 × %2": {
+    "zh_CN": "窗口已调整为 %1 × %2",
+    "en_US": "Window resized to %1 × %2",
+    "ja_JP": "ウィンドウを %1 × %2 に変更しました"
+  },
+  "正在计算选择": {
+    "zh_CN": "正在计算选择",
+    "en_US": "Computing selection",
+    "ja_JP": "選択を計算中"
+  },
+  "模型已选 | 自由移动": {
+    "zh_CN": "模型已选 | 自由移动",
+    "en_US": "Model selected | Free move",
+    "ja_JP": "モデル選択中 | 自由移動"
+  },
+  "选择 %1 | 删除 %2": {
+    "zh_CN": "选择 %1 | 删除 %2",
+    "en_US": "Selected %1 | Deleted %2",
+    "ja_JP": "選択 %1 | 削除 %2"
+  },
+  "退出前保存进度": {
+    "zh_CN": "退出前保存进度",
+    "en_US": "Save Progress Before Exit",
+    "ja_JP": "終了前に進捗を保存"
+  },
+  "工程尚未保存": {
+    "zh_CN": "工程尚未保存",
+    "en_US": "Project Not Saved",
+    "ja_JP": "プロジェクト未保存"
+  },
+  "当前工程包含未保存的修改或最近保留的任务进度。是否在退出前保存？": {
+    "zh_CN": "当前工程包含未保存的修改或最近保留的任务进度。是否在退出前保存？",
+    "en_US": "The project has unsaved changes or retained task progress. Save before exiting?",
+    "ja_JP": "未保存の変更または保持したタスク進捗があります。終了前に保存しますか？"
+  },
+  "当前工程包含未保存的修改。": {
+    "zh_CN": "当前工程包含未保存的修改。",
+    "en_US": "The project contains unsaved changes.",
+    "ja_JP": "プロジェクトに未保存の変更があります。"
+  },
+  "确认退出": {
+    "zh_CN": "确认退出",
+    "en_US": "Confirm Exit",
+    "ja_JP": "終了の確認"
+  },
+  "确定要退出 Gaussian Scene Workbench Native 吗？": {
+    "zh_CN": "确定要退出 Gaussian Scene Workbench Native 吗？",
+    "en_US": "Exit Gaussian Scene Workbench Native?",
+    "ja_JP": "Gaussian Scene Workbench Native を終了しますか？"
+  },
+  "退出前如有未保存进度，软件将继续询问是否保存。\n退出后会停止当前软件启动的训练、COLMAP、导入及其他后台进程。": {
+    "zh_CN": "退出前如有未保存进度，软件将继续询问是否保存。\n退出后会停止当前软件启动的训练、COLMAP、导入及其他后台进程。",
+    "en_US": "You will be asked to save any unsaved progress.\nExiting stops training, COLMAP, import and other background processes started by this application.",
+    "ja_JP": "未保存の進捗がある場合は保存を確認します。\n終了すると、このアプリが起動した学習・COLMAP・インポートなどのバックグラウンド処理を停止します。"
+  },
+  "退出前导出裁剪进度": {
+    "zh_CN": "退出前导出裁剪进度",
+    "en_US": "Export Crop Before Exit",
+    "ja_JP": "終了前にトリミング結果をエクスポート"
+  },
+  "裁剪尚未导出": {
+    "zh_CN": "裁剪尚未导出",
+    "en_US": "Crop Not Exported",
+    "ja_JP": "トリミング結果が未出力です"
+  },
+  "当前场景包含尚未导出的删除操作。是否在退出前导出？": {
+    "zh_CN": "当前场景包含尚未导出的删除操作。是否在退出前导出？",
+    "en_US": "The scene has unexported deletions. Export before exiting?",
+    "ja_JP": "シーンに未出力の削除操作があります。終了前にエクスポートしますか？"
+  },
+  "当前场景包含尚未导出的删除操作。": {
+    "zh_CN": "当前场景包含尚未导出的删除操作。",
+    "en_US": "The scene has unexported deletions.",
+    "ja_JP": "シーンに未出力の削除操作があります。"
+  },
+  "恢复工作区存储不可用。": {
+    "zh_CN": "恢复工作区存储不可用。",
+    "en_US": "Recovery workspace storage is unavailable.",
+    "ja_JP": "復元ワークスペースのストレージを利用できません。"
+  },
+  "自动恢复检查点保存失败：%1": {
+    "zh_CN": "自动恢复检查点保存失败：%1",
+    "en_US": "Failed to save auto-recovery checkpoint: %1",
+    "ja_JP": "自動復元チェックポイントの保存に失敗しました: %1"
+  },
+  "工程版本快照保存失败：%1": {
+    "zh_CN": "工程版本快照保存失败：%1",
+    "en_US": "Failed to save project version snapshot: %1",
+    "ja_JP": "プロジェクトのバージョンスナップショット保存に失敗しました: %1"
+  },
+  "恢复中心": {
+    "zh_CN": "恢复中心",
+    "en_US": "Recovery Center",
+    "ja_JP": "復元センター"
+  },
+  "恢复存储当前不可用。": {
+    "zh_CN": "恢复存储当前不可用。",
+    "en_US": "Recovery storage is currently unavailable.",
+    "ja_JP": "復元ストレージを現在利用できません。"
+  },
+  "没有可恢复的异常退出工程。": {
+    "zh_CN": "没有可恢复的异常退出工程。",
+    "en_US": "No crashed projects available for recovery.",
+    "ja_JP": "復元可能な異常終了プロジェクトはありません。"
+  },
+  "工程恢复中心": {
+    "zh_CN": "工程恢复中心",
+    "en_US": "Project Recovery Center",
+    "ja_JP": "プロジェクト復元センター"
+  },
+  "检测到上次异常退出保留的工程。选择一项恢复，或稍后从“文件 → 恢复中心”处理。": {
+    "zh_CN": "检测到上次异常退出保留的工程。选择一项恢复，或稍后从“文件 → 恢复中心”处理。",
+    "en_US": "Projects retained after an abnormal exit were found. Select one to recover, or use File → Recovery Center later.",
+    "ja_JP": "異常終了後に保持されたプロジェクトが見つかりました。復元する項目を選ぶか、後で「ファイル → 復元センター」を開いてください。"
+  },
+  "以下工程由异常退出保护保留。": {
+    "zh_CN": "以下工程由异常退出保护保留。",
+    "en_US": "The following projects were retained by crash protection.",
+    "ja_JP": "次のプロジェクトは異常終了保護によって保持されています。"
+  },
+  "更新时间": {
+    "zh_CN": "更新时间",
+    "en_US": "Last Updated",
+    "ja_JP": "更新日時"
+  },
+  "恢复位置": {
+    "zh_CN": "恢复位置",
+    "en_US": "Recovery Location",
+    "ja_JP": "復元場所"
+  },
+  "保存迁移待恢复": {
+    "zh_CN": "保存迁移待恢复",
+    "en_US": "Save migration recovery pending",
+    "ja_JP": "保存時移行の復元待ち"
+  },
+  "恢复所选工程": {
+    "zh_CN": "恢复所选工程",
+    "en_US": "Recover Selected Project",
+    "ja_JP": "選択したプロジェクトを復元"
+  },
+  "永久删除所选": {
+    "zh_CN": "永久删除所选",
+    "en_US": "Permanently Delete Selected",
+    "ja_JP": "選択項目を完全に削除"
+  },
+  "稍后处理": {
+    "zh_CN": "稍后处理",
+    "en_US": "Later",
+    "ja_JP": "後で"
+  },
+  "永久删除恢复工程": {
+    "zh_CN": "永久删除恢复工程",
+    "en_US": "Permanently Delete Recovery Project",
+    "ja_JP": "復元プロジェクトを完全に削除"
+  },
+  "将永久删除以下异常恢复数据：\n%1": {
+    "zh_CN": "将永久删除以下异常恢复数据：\n%1",
+    "en_US": "Permanently delete the following recovery data:\n%1",
+    "ja_JP": "次の復元データを完全に削除します:\n%1"
+  },
+  "无法删除恢复工程": {
+    "zh_CN": "无法删除恢复工程",
+    "en_US": "Cannot delete recovery project",
+    "ja_JP": "復元プロジェクトを削除できません"
+  },
+  "已永久删除恢复工程：%1": {
+    "zh_CN": "已永久删除恢复工程：%1",
+    "en_US": "Recovery project permanently deleted: %1",
+    "ja_JP": "復元プロジェクトを完全に削除しました: %1"
+  },
+  "工程已恢复，但旧恢复目录清理失败：%1": {
+    "zh_CN": "工程已恢复，但旧恢复目录清理失败：%1",
+    "en_US": "Project recovered, but old recovery directory cleanup failed: %1",
+    "ja_JP": "プロジェクトは復元しましたが、古い復元ディレクトリの整理に失敗しました: %1"
+  },
+  "已从恢复中心恢复工程：%1": {
+    "zh_CN": "已从恢复中心恢复工程：%1",
+    "en_US": "Project restored from Recovery Center: %1",
+    "ja_JP": "復元センターからプロジェクトを復元しました: %1"
+  },
+  "无法恢复未命名工程": {
+    "zh_CN": "无法恢复未命名工程",
+    "en_US": "Cannot recover untitled project",
+    "ja_JP": "未保存プロジェクトを復元できません"
+  },
+  "未命名工程已恢复，但导入事务仍待处理：%1": {
+    "zh_CN": "未命名工程已恢复，但导入事务仍待处理：%1",
+    "en_US": "Untitled project recovered; import transaction still pending: %1",
+    "ja_JP": "未保存プロジェクトを復元しました。インポート処理は未完了です: %1"
+  },
+  "导入恢复待处理": {
+    "zh_CN": "导入恢复待处理",
+    "en_US": "Import recovery pending",
+    "ja_JP": "インポートの復元待ち"
+  },
+  "工程数据已保留，但未完成的导入事务尚未恢复。修复 Python/worker 环境后，可重新启动软件再重试。\n\n%1": {
+    "zh_CN": "工程数据已保留，但未完成的导入事务尚未恢复。修复 Python/worker 环境后，可重新启动软件再重试。\n\n%1",
+    "en_US": "Project data retained, but import recovery is incomplete. Repair the Python/worker environment, restart the application and retry.\n\n%1",
+    "ja_JP": "プロジェクトデータは保持していますが、インポートの復元は未完了です。Python/worker 環境を修正し、アプリを再起動して再試行してください。\n\n%1"
+  },
+  "恢复工程的数据集未能自动关联：%1": {
+    "zh_CN": "恢复工程的数据集未能自动关联：%1",
+    "en_US": "Could not automatically link the recovered project's dataset: %1",
+    "ja_JP": "復元プロジェクトのデータセットを自動で関連付けできません: %1"
+  },
+  "恢复工程的场景未能自动关联：%1": {
+    "zh_CN": "恢复工程的场景未能自动关联：%1",
+    "en_US": "Could not automatically link the recovered project's scene: %1",
+    "ja_JP": "復元プロジェクトのシーンを自動で関連付けできません: %1"
+  },
+  "恢复工程的模型变换失败：%1": {
+    "zh_CN": "恢复工程的模型变换失败：%1",
+    "en_US": "Failed to restore project model transform: %1",
+    "ja_JP": "プロジェクトのモデル変換を復元できません: %1"
+  },
+  "未命名工程已恢复，但训练检查点仍待处理：%1": {
+    "zh_CN": "未命名工程已恢复，但训练检查点仍待处理：%1",
+    "en_US": "Untitled project recovered; training checkpoint still pending: %1",
+    "ja_JP": "未保存プロジェクトを復元しました。学習チェックポイントは処理待ちです: %1"
+  },
+  "已恢复未命名工程：%1": {
+    "zh_CN": "已恢复未命名工程：%1",
+    "en_US": "Untitled project recovered: %1",
+    "ja_JP": "未保存プロジェクトを復元しました: %1"
+  },
+  "版本历史": {
+    "zh_CN": "版本历史",
+    "en_US": "Version History",
+    "ja_JP": "バージョン履歴"
+  },
+  "请先保存工程。": {
+    "zh_CN": "请先保存工程。",
+    "en_US": "Save the project first.",
+    "ja_JP": "先にプロジェクトを保存してください。"
+  },
+  "当前工程还没有自动快照。": {
+    "zh_CN": "当前工程还没有自动快照。",
+    "en_US": "No automatic snapshots for this project yet.",
+    "ja_JP": "このプロジェクトには自動スナップショットがまだありません。"
+  },
+  "工程版本历史": {
+    "zh_CN": "工程版本历史",
+    "en_US": "Project Version History",
+    "ja_JP": "プロジェクトのバージョン履歴"
+  },
+  "自动快照保存工程状态并复用已校验的数据。恢复时会创建新工程文件，不覆盖当前版本。": {
+    "zh_CN": "自动快照保存工程状态并复用已校验的数据。恢复时会创建新工程文件，不覆盖当前版本。",
+    "en_US": "Automatic snapshots store project state and reuse verified data. Recovery creates a new project file without overwriting the current version.",
+    "ja_JP": "自動スナップショットはプロジェクト状態を保存し、検証済みデータを再利用します。復元時は現在のバージョンを上書きせず、新しいプロジェクトを作成します。"
+  },
+  "快照时间": {
+    "zh_CN": "快照时间",
+    "en_US": "Snapshot Time",
+    "ja_JP": "スナップショット日時"
+  },
+  "来源工程": {
+    "zh_CN": "来源工程",
+    "en_US": "Source Project",
+    "ja_JP": "元のプロジェクト"
+  },
+  "恢复为新工程": {
+    "zh_CN": "恢复为新工程",
+    "en_US": "Restore as New Project",
+    "ja_JP": "新しいプロジェクトとして復元"
+  },
+  "无法恢复工程快照": {
+    "zh_CN": "无法恢复工程快照",
+    "en_US": "Cannot restore project snapshot",
+    "ja_JP": "プロジェクトのスナップショットを復元できません"
+  },
+  "工程快照已恢复为：%1": {
+    "zh_CN": "工程快照已恢复为：%1",
+    "en_US": "Project snapshot restored as: %1",
+    "ja_JP": "プロジェクトのスナップショットを復元しました: %1"
+  },
+  "选择第二存储位置": {
+    "zh_CN": "选择第二存储位置",
+    "en_US": "Select Secondary Storage",
+    "ja_JP": "セカンダリストレージを選択"
+  },
+  "请选择另一存储设备": {
+    "zh_CN": "请选择另一存储设备",
+    "en_US": "Select Another Storage Device",
+    "ja_JP": "別のストレージデバイスを選択"
+  },
+  "所选位置与当前工程位于同一卷，无法防护整盘损坏。请选择另一块硬盘、移动存储、NAS 或网络共享。": {
+    "zh_CN": "所选位置与当前工程位于同一卷，无法防护整盘损坏。请选择另一块硬盘、移动存储、NAS 或网络共享。",
+    "en_US": "This location is on the same volume as the project and cannot protect against whole-drive failure. Choose another drive, removable storage, NAS or network share.",
+    "ja_JP": "この場所はプロジェクトと同じボリューム上にあり、ドライブ全体の故障に対応できません。別のドライブ、外付けストレージ、NAS、ネットワーク共有を選んでください。"
+  },
+  "第二存储位置已设置为：%1": {
+    "zh_CN": "第二存储位置已设置为：%1",
+    "en_US": "Secondary storage set to: %1",
+    "ja_JP": "セカンダリストレージを設定しました: %1"
+  },
+  "外部备份": {
+    "zh_CN": "外部备份",
+    "en_US": "External Backup",
+    "ja_JP": "外部バックアップ"
+  },
+  "外部备份正在运行。": {
+    "zh_CN": "外部备份正在运行。",
+    "en_US": "External backup is running.",
+    "ja_JP": "外部バックアップを実行中です。"
+  },
+  "请先完成工程保存和数据迁移。": {
+    "zh_CN": "请先完成工程保存和数据迁移。",
+    "en_US": "Complete project save and data migration first.",
+    "ja_JP": "先にプロジェクトの保存とデータ移行を完了してください。"
+  },
+  "正在后台创建去重外部备份…": {
+    "zh_CN": "正在后台创建去重外部备份…",
+    "en_US": "Creating deduplicated external backup in the background…",
+    "ja_JP": "重複排除した外部バックアップをバックグラウンドで作成中…"
+  },
+  "外部备份已开始：%1": {
+    "zh_CN": "外部备份已开始：%1",
+    "en_US": "External backup started: %1",
+    "ja_JP": "外部バックアップ開始: %1"
+  },
+  "外部备份失败": {
+    "zh_CN": "外部备份失败",
+    "en_US": "External Backup Failed",
+    "ja_JP": "外部バックアップに失敗"
+  },
+  "外部备份失败：%1": {
+    "zh_CN": "外部备份失败：%1",
+    "en_US": "External backup failed: %1",
+    "ja_JP": "外部バックアップに失敗しました: %1"
+  },
+  "无法完成外部备份": {
+    "zh_CN": "无法完成外部备份",
+    "en_US": "Cannot complete external backup",
+    "ja_JP": "外部バックアップを完了できません"
+  },
+  "外部备份已完成": {
+    "zh_CN": "外部备份已完成",
+    "en_US": "External backup completed",
+    "ja_JP": "外部バックアップが完了しました"
+  },
+  "外部备份已完成：%1 个文件，%2": {
+    "zh_CN": "外部备份已完成：%1 个文件，%2",
+    "en_US": "External backup completed: %1 files, %2",
+    "ja_JP": "外部バックアップが完了しました: %1 ファイル、%2"
+  },
+  "外部备份与恢复": {
+    "zh_CN": "外部备份与恢复",
+    "en_US": "External Backup and Recovery",
+    "ja_JP": "外部バックアップと復元"
+  },
+  "第二存储位置中还没有备份。": {
+    "zh_CN": "第二存储位置中还没有备份。",
+    "en_US": "No backups in secondary storage yet.",
+    "ja_JP": "セカンダリストレージにはまだバックアップがありません。"
+  },
+  "备份时间": {
+    "zh_CN": "备份时间",
+    "en_US": "Backup Time",
+    "ja_JP": "バックアップ日時"
+  },
+  "文件数": {
+    "zh_CN": "文件数",
+    "en_US": "Files",
+    "ja_JP": "ファイル数"
+  },
+  "逻辑大小": {
+    "zh_CN": "逻辑大小",
+    "en_US": "Logical Size",
+    "ja_JP": "論理サイズ"
+  },
+  "恢复所选备份": {
+    "zh_CN": "恢复所选备份",
+    "en_US": "Restore Selected Backup",
+    "ja_JP": "選択したバックアップを復元"
+  },
+  "关闭": {
+    "zh_CN": "关闭",
+    "en_US": "Close",
+    "ja_JP": "閉じる"
+  },
+  "选择备份恢复位置": {
+    "zh_CN": "选择备份恢复位置",
+    "en_US": "Select Backup Restore Location",
+    "ja_JP": "バックアップの復元先を選択"
+  },
+  "正在校验并恢复外部备份…": {
+    "zh_CN": "正在校验并恢复外部备份…",
+    "en_US": "Verifying and restoring external backup…",
+    "ja_JP": "外部バックアップを検証・復元中…"
+  },
+  "无法恢复外部备份": {
+    "zh_CN": "无法恢复外部备份",
+    "en_US": "Cannot restore external backup",
+    "ja_JP": "外部バックアップを復元できません"
+  },
+  "外部备份已恢复到：%1": {
+    "zh_CN": "外部备份已恢复到：%1",
+    "en_US": "External backup restored to: %1",
+    "ja_JP": "外部バックアップの復元先: %1"
+  },
+  "外部备份已恢复": {
+    "zh_CN": "外部备份已恢复",
+    "en_US": "External backup restored",
+    "ja_JP": "外部バックアップを復元しました"
+  },
+  "恢复文件已写入：\n%1": {
+    "zh_CN": "恢复文件已写入：\n%1",
+    "en_US": "Restored files written to:\n%1",
+    "ja_JP": "復元したファイルの保存先:\n%1"
+  },
+  "工程另存正在等待迁移": {
+    "zh_CN": "工程另存正在等待迁移",
+    "en_US": "Save As Awaiting Migration",
+    "ja_JP": "名前を付けて保存: 移行待ち"
+  },
+  "当前任务结束后会自动完成已选择位置的数据迁移。迁移完成前可继续使用“保存工程”记录进度。": {
+    "zh_CN": "当前任务结束后会自动完成已选择位置的数据迁移。迁移完成前可继续使用“保存工程”记录进度。",
+    "en_US": "Data migration to the chosen location will finish after the current task. Use Save Project to record progress while migration is pending.",
+    "ja_JP": "現在のタスク終了後に選択した場所へデータを移行します。移行待ちの間も「プロジェクトを保存」で進捗を記録できます。"
+  },
+  "正在完成工程数据迁移…": {
+    "zh_CN": "正在完成工程数据迁移…",
+    "en_US": "Completing project data migration…",
+    "ja_JP": "プロジェクトデータの移行を完了中…"
+  },
+  "正在保存工程状态…": {
+    "zh_CN": "正在保存工程状态…",
+    "en_US": "Saving project state…",
+    "ja_JP": "プロジェクト状態を保存中…"
+  },
+  "正在保存工程与托管数据…": {
+    "zh_CN": "正在保存工程与托管数据…",
+    "en_US": "Saving project and managed data…",
+    "ja_JP": "プロジェクトと管理対象データを保存中…"
+  },
+  "无法保存工程": {
+    "zh_CN": "无法保存工程",
+    "en_US": "Cannot save project",
+    "ja_JP": "プロジェクトを保存できません"
+  },
+  "已保存工程，但恢复工作区清理失败：%1": {
+    "zh_CN": "已保存工程，但恢复工作区清理失败：%1",
+    "en_US": "Project saved, but recovery workspace cleanup failed: %1",
+    "ja_JP": "プロジェクトを保存しましたが、復元ワークスペースの整理に失敗しました: %1"
+  },
+  "工程状态已保存：%1；后台任务继续运行，结束后将自动迁移托管数据。": {
+    "zh_CN": "工程状态已保存：%1；后台任务继续运行，结束后将自动迁移托管数据。",
+    "en_US": "Project state saved: %1; background task continues. Managed data will migrate after it finishes.",
+    "ja_JP": "プロジェクト状態を保存しました: %1。バックグラウンドタスクは継続し、完了後に管理対象データを移行します。"
+  },
+  "工程状态已保存：%1；后台任务继续运行。": {
+    "zh_CN": "工程状态已保存：%1；后台任务继续运行。",
+    "en_US": "Project state saved: %1; background task continues.",
+    "ja_JP": "プロジェクト状態を保存しました: %1。バックグラウンドタスクは継続します。"
+  },
+  "工程已保存：%1（数据：%2）": {
+    "zh_CN": "工程已保存：%1（数据：%2）",
+    "en_US": "Project saved: %1 (data: %2)",
+    "ja_JP": "プロジェクトを保存しました: %1（データ: %2）"
+  },
+  "工程迁移完成，但恢复工作区清理失败：%1": {
+    "zh_CN": "工程迁移完成，但恢复工作区清理失败：%1",
+    "en_US": "Project migration completed, but recovery workspace cleanup failed: %1",
+    "ja_JP": "プロジェクト移行は完了しましたが、復元ワークスペースの整理に失敗しました: %1"
+  },
+  "工程托管数据已迁移到：%1": {
+    "zh_CN": "工程托管数据已迁移到：%1",
+    "en_US": "Managed project data migrated to: %1",
+    "ja_JP": "管理対象プロジェクトデータの移行先: %1"
+  },
+  "检测到上次训练被中断，但尚无完整检查点可恢复。": {
+    "zh_CN": "检测到上次训练被中断，但尚无完整检查点可恢复。",
+    "en_US": "Interrupted training detected, but no complete checkpoint is available.",
+    "ja_JP": "中断した学習を検出しましたが、復元可能な完全なチェックポイントはありません。"
+  },
+  "最近检查点有效，但无法发布保护副本：%1": {
+    "zh_CN": "最近检查点有效，但无法发布保护副本：%1",
+    "en_US": "Latest checkpoint is valid, but its protected copy could not be published: %1",
+    "ja_JP": "最新のチェックポイントは有効ですが、保護コピーを確定できません: %1"
+  },
+  "已从中断训练恢复最近完整检查点：迭代 %1，%2": {
+    "zh_CN": "已从中断训练恢复最近完整检查点：迭代 %1，%2",
+    "en_US": "Latest complete checkpoint recovered from interrupted training: iteration %1, %2",
+    "ja_JP": "中断した学習から最新の完全なチェックポイントを復元しました: 反復 %1、%2"
+  },
+  "裁剪另存为": {
+    "zh_CN": "裁剪另存为",
+    "en_US": "Save Cropped As",
+    "ja_JP": "トリミング結果を名前を付けて保存"
+  },
+  "无法导出裁剪场景": {
+    "zh_CN": "无法导出裁剪场景",
+    "en_US": "Cannot export cropped scene",
+    "ja_JP": "トリミング済みシーンをエクスポートできません"
+  },
+  "裁剪场景已导出：%1": {
+    "zh_CN": "裁剪场景已导出：%1",
+    "en_US": "Cropped scene exported: %1",
+    "ja_JP": "トリミング済みシーンをエクスポートしました: %1"
+  },
+  "裁剪场景已导出": {
+    "zh_CN": "裁剪场景已导出",
+    "en_US": "Cropped scene exported",
+    "ja_JP": "トリミング済みシーンをエクスポートしました"
+  },
+  "导出坐标与尺寸报告": {
+    "zh_CN": "导出坐标与尺寸报告",
+    "en_US": "Export Coordinates and Dimensions",
+    "ja_JP": "座標と寸法をエクスポート"
+  },
+  "JSON 坐标报告 (*.json);;CSV 坐标报告 (*.csv)": {
+    "zh_CN": "JSON 坐标报告 (*.json);;CSV 坐标报告 (*.csv)",
+    "en_US": "JSON Coordinate Report (*.json);;CSV Coordinate Report (*.csv)",
+    "ja_JP": "JSON 座標レポート (*.json);;CSV 座標レポート (*.csv)"
+  },
+  "无法导出坐标报告": {
+    "zh_CN": "无法导出坐标报告",
+    "en_US": "Cannot export coordinate report",
+    "ja_JP": "座標レポートをエクスポートできません"
+  },
+  "坐标与尺寸报告已导出：%1": {
+    "zh_CN": "坐标与尺寸报告已导出：%1",
+    "en_US": "Coordinates and dimensions exported: %1",
+    "ja_JP": "座標と寸法をエクスポートしました: %1"
+  },
+  "坐标与尺寸报告已导出": {
+    "zh_CN": "坐标与尺寸报告已导出",
+    "en_US": "Coordinates and dimensions exported",
+    "ja_JP": "座標と寸法をエクスポートしました"
+  },
+  "工程中的未完成导入事务尚未安全恢复，因此保存、导入、重建、训练和场景编辑暂时禁用。请修复 Python/worker 环境后重新打开工程。": {
+    "zh_CN": "工程中的未完成导入事务尚未安全恢复，因此保存、导入、重建、训练和场景编辑暂时禁用。请修复 Python/worker 环境后重新打开工程。",
+    "en_US": "An incomplete import has not been safely recovered. Save, import, reconstruction, training and scene editing are temporarily disabled. Repair the Python/worker environment and reopen the project.",
+    "ja_JP": "未完了のインポートを安全に復元できていません。保存・インポート・再構成・学習・シーン編集を一時的に無効にしています。Python/worker 環境を修正してプロジェクトを開き直してください。"
+  },
+  "无法启动导入恢复进程：%1": {
+    "zh_CN": "无法启动导入恢复进程：%1",
+    "en_US": "Cannot start import recovery process: %1",
+    "ja_JP": "インポート復元プロセスを開始できません: %1"
+  },
+  "导入恢复超时；另一个软件实例可能仍在处理同名数据集。": {
+    "zh_CN": "导入恢复超时；另一个软件实例可能仍在处理同名数据集。",
+    "en_US": "Import recovery timed out; another instance may be processing the same dataset.",
+    "ja_JP": "インポート復元がタイムアウトしました。別のアプリインスタンスが同名のデータセットを処理している可能性があります。"
+  },
+  "导入恢复进程已退出，但未返回有效的事务状态报告；worker 版本可能不兼容。": {
+    "zh_CN": "导入恢复进程已退出，但未返回有效的事务状态报告；worker 版本可能不兼容。",
+    "en_US": "Import recovery exited without a valid transaction report; the worker version may be incompatible.",
+    "ja_JP": "インポート復元が有効な処理状態レポートを返さず終了しました。worker のバージョンが非互換の可能性があります。"
+  },
+  "导入恢复失败，退出码 %1。": {
+    "zh_CN": "导入恢复失败，退出码 %1。",
+    "en_US": "Import recovery failed with exit code %1.",
+    "ja_JP": "インポート復元に失敗しました。終了コード: %1。"
+  },
+  "导入恢复失败：%1": {
+    "zh_CN": "导入恢复失败：%1",
+    "en_US": "Import recovery failed: %1",
+    "ja_JP": "インポート復元に失敗しました: %1"
+  },
+  "检测到未完成的导入事务。\n\n": {
+    "zh_CN": "检测到未完成的导入事务。\n\n",
+    "en_US": "Incomplete import transaction detected.\n\n",
+    "ja_JP": "未完了のインポート処理を検出しました。\n\n"
+  },
+  "无法创建工程导入恢复配置：%1": {
+    "zh_CN": "无法创建工程导入恢复配置：%1",
+    "en_US": "Cannot create project import recovery configuration: %1",
+    "ja_JP": "プロジェクトのインポート復元設定を作成できません: %1"
+  },
+  "无法写入工程导入恢复配置：%1": {
+    "zh_CN": "无法写入工程导入恢复配置：%1",
+    "en_US": "Cannot write project import recovery configuration: %1",
+    "ja_JP": "プロジェクトのインポート復元設定を書き込めません: %1"
+  },
+  "工程导入事务恢复": {
+    "zh_CN": "工程导入事务恢复",
+    "en_US": "Project Import Recovery",
+    "ja_JP": "プロジェクトのインポート復元"
+  },
+  "导入事务已恢复，但无法重新载入工程：%1": {
+    "zh_CN": "导入事务已恢复，但无法重新载入工程：%1",
+    "en_US": "Import recovered, but project reload failed: %1",
+    "ja_JP": "インポートは復元しましたが、プロジェクトを再読み込みできません: %1"
+  },
+  "检测到已提交的数据集，但恢复报告未包含路径；请使用“关联已有数据集”确认结果。": {
+    "zh_CN": "检测到已提交的数据集，但恢复报告未包含路径；请使用“关联已有数据集”确认结果。",
+    "en_US": "A committed dataset was found, but the recovery report has no path. Use Link Existing Dataset to confirm the result.",
+    "ja_JP": "確定済みデータセットを検出しましたが、復元レポートにパスがありません。「既存のデータセットを関連付け」で結果を確認してください。"
+  },
+  "已恢复并关联数据集，但工程自动保存失败：%1": {
+    "zh_CN": "已恢复并关联数据集，但工程自动保存失败：%1",
+    "en_US": "Dataset recovered and linked, but automatic project save failed: %1",
+    "ja_JP": "データセットを復元・関連付けしましたが、プロジェクトの自動保存に失敗しました: %1"
+  },
+  "已自动关联崩溃前完成提交的数据集：%1（%2 张图像）": {
+    "zh_CN": "已自动关联崩溃前完成提交的数据集：%1（%2 张图像）",
+    "en_US": "Automatically linked dataset committed before the crash: %1 (%2 images)",
+    "ja_JP": "異常終了前に確定したデータセットを自動関連付けしました: %1（%2 画像）"
+  },
+  "已保留提交完成的数据集，但无法自动关联：%1%2": {
+    "zh_CN": "已保留提交完成的数据集，但无法自动关联：%1%2",
+    "en_US": "Committed dataset retained but automatic linking failed: %1%2",
+    "ja_JP": "確定済みデータセットを保持しましたが、自動関連付けに失敗しました: %1%2"
+  },
+  "已恢复 %1 个提交完成的数据集；为避免误选，请使用“关联已有数据集”选择当前数据集。": {
+    "zh_CN": "已恢复 %1 个提交完成的数据集；为避免误选，请使用“关联已有数据集”选择当前数据集。",
+    "en_US": "Recovered %1 committed datasets. Use Link Existing Dataset to choose the active dataset explicitly.",
+    "ja_JP": "確定済みデータセットを %1 個復元しました。誤選択を防ぐため「既存のデータセットを関連付け」で対象を選んでください。"
+  },
+  "已恢复工程中断的导入事务，并重新载入数据集状态。": {
+    "zh_CN": "已恢复工程中断的导入事务，并重新载入数据集状态。",
+    "en_US": "Interrupted import transactions recovered; dataset state reloaded.",
+    "ja_JP": "中断したインポート処理を復元し、データセット状態を再読み込みしました。"
+  },
+  "请先停止或等待当前任务结束，再新建工程。": {
+    "zh_CN": "请先停止或等待当前任务结束，再新建工程。",
+    "en_US": "Stop the current task or wait for it to finish before creating a project.",
+    "ja_JP": "現在のタスクを停止するか、完了を待ってからプロジェクトを作成してください。"
+  },
+  "无法创建工程": {
+    "zh_CN": "无法创建工程",
+    "en_US": "Cannot create project",
+    "ja_JP": "プロジェクトを作成できません"
+  },
+  "已新建未命名工程；无需预先选择目录，可在任意阶段保存。": {
+    "zh_CN": "已新建未命名工程；无需预先选择目录，可在任意阶段保存。",
+    "en_US": "Untitled project created. No directory required in advance; save at any stage.",
+    "ja_JP": "未保存プロジェクトを作成しました。事前のディレクトリ指定は不要で、任意の段階で保存できます。"
+  },
+  "无法准备%1": {
+    "zh_CN": "无法准备%1",
+    "en_US": "Cannot prepare %1",
+    "ja_JP": "%1 を準備できません"
+  },
+  "任务繁忙": {
+    "zh_CN": "任务繁忙",
+    "en_US": "Task Busy",
+    "ja_JP": "タスク実行中"
+  },
+  "请等待当前任务结束后再导入媒体。": {
+    "zh_CN": "请等待当前任务结束后再导入媒体。",
+    "en_US": "Wait for the current task to finish before importing media.",
+    "ja_JP": "現在のタスクが終了してからメディアをインポートしてください。"
+  },
+  "添加照片或视频": {
+    "zh_CN": "添加照片或视频",
+    "en_US": "Add Photos or Videos",
+    "ja_JP": "写真または動画を追加"
+  },
+  "添加包含照片或视频的目录": {
+    "zh_CN": "添加包含照片或视频的目录",
+    "en_US": "Add Folder Containing Photos or Videos",
+    "ja_JP": "写真または動画を含むフォルダーを追加"
+  },
+  "无法准备媒体导入": {
+    "zh_CN": "无法准备媒体导入",
+    "en_US": "Cannot prepare media import",
+    "ja_JP": "メディアのインポートを準備できません"
+  },
+  "导入对话框未生成有效的媒体计划。": {
+    "zh_CN": "导入对话框未生成有效的媒体计划。",
+    "en_US": "The import dialog did not produce a valid media plan.",
+    "ja_JP": "インポートダイアログで有効なメディア計画を生成できませんでした。"
+  },
+  "导入后端不可用": {
+    "zh_CN": "导入后端不可用",
+    "en_US": "Import Backend Unavailable",
+    "ja_JP": "インポートバックエンドを利用できません"
+  },
+  "正在预检媒体导入环境…": {
+    "zh_CN": "正在预检媒体导入环境…",
+    "en_US": "Checking media import environment…",
+    "ja_JP": "メディアのインポート環境を診断中…"
+  },
+  "媒体导入环境不可用": {
+    "zh_CN": "媒体导入环境不可用",
+    "en_US": "Media Import Environment Unavailable",
+    "ja_JP": "メディアのインポート環境を利用できません"
+  },
+  "所选 Python：%1\n\n%2": {
+    "zh_CN": "所选 Python：%1\n\n%2",
+    "en_US": "Selected Python: %1\n\n%2",
+    "ja_JP": "選択した Python: %1\n\n%2"
+  },
+  "媒体导入环境预检通过：%1": {
+    "zh_CN": "媒体导入环境预检通过：%1",
+    "en_US": "Media import preflight passed: %1",
+    "ja_JP": "メディアのインポート事前診断に合格しました: %1"
+  },
+  "媒体导入环境预检通过：%1（视频后端：%2）": {
+    "zh_CN": "媒体导入环境预检通过：%1（视频后端：%2）",
+    "en_US": "Media import preflight passed: %1 (video backend: %2)",
+    "ja_JP": "メディアのインポート事前診断に合格しました: %1（動画バックエンド: %2）"
+  },
+  "无法保存导入任务": {
+    "zh_CN": "无法保存导入任务",
+    "en_US": "Cannot save import task",
+    "ja_JP": "インポートタスクを保存できません"
+  },
+  "媒体导入 | %1 | %2 项": {
+    "zh_CN": "媒体导入 | %1 | %2 项",
+    "en_US": "Media Import | %1 | %2 items",
+    "ja_JP": "メディアインポート | %1 | %2 項目"
+  },
+  "正在检查上次导入事务…": {
+    "zh_CN": "正在检查上次导入事务…",
+    "en_US": "Checking previous import transaction…",
+    "ja_JP": "前回のインポート処理を確認中…"
+  },
+  "数据集已存在": {
+    "zh_CN": "数据集已存在",
+    "en_US": "Dataset Already Exists",
+    "ja_JP": "データセットは既に存在します"
+  },
+  "目标数据集已存在：\n%1\n\n请启用“覆盖同名托管数据集”后重试。": {
+    "zh_CN": "目标数据集已存在：\n%1\n\n请启用“覆盖同名托管数据集”后重试。",
+    "en_US": "The target dataset already exists:\n%1\n\nEnable Overwrite Managed Dataset and retry.",
+    "ja_JP": "対象データセットは既に存在します:\n%1\n\n「同名の管理対象データセットを上書き」を有効にして再試行してください。"
+  },
+  "确认覆盖托管数据集": {
+    "zh_CN": "确认覆盖托管数据集",
+    "en_US": "Confirm Dataset Overwrite",
+    "ja_JP": "データセット上書きの確認"
+  },
+  "导入成功后将分阶段替换以下数据集；最终提交前的失败或中断会恢复旧数据，提交完成后会保留新数据：\n%1": {
+    "zh_CN": "导入成功后将分阶段替换以下数据集；最终提交前的失败或中断会恢复旧数据，提交完成后会保留新数据：\n%1",
+    "en_US": "Successful import will replace this dataset in stages. Failures before final commit restore old data; after commit, new data is retained:\n%1",
+    "ja_JP": "インポート成功後、次のデータセットを段階的に置き換えます。最終確定前の失敗・中断では旧データを復元し、確定後は新データを保持します:\n%1"
+  },
+  "请等待当前任务结束后再试。": {
+    "zh_CN": "请等待当前任务结束后再试。",
+    "en_US": "Wait for the current task to finish and retry.",
+    "ja_JP": "現在のタスクが終了してから再試行してください。"
+  },
+  "导入配置已保存：%1": {
+    "zh_CN": "导入配置已保存：%1",
+    "en_US": "Import configuration saved: %1",
+    "ja_JP": "インポート設定を保存しました: %1"
+  },
+  "关联已有数据集": {
+    "zh_CN": "关联已有数据集",
+    "en_US": "Link Existing Dataset",
+    "ja_JP": "既存のデータセットを関連付け"
+  },
+  "请等待当前任务结束后再关联数据集。": {
+    "zh_CN": "请等待当前任务结束后再关联数据集。",
+    "en_US": "Wait for the current task to finish before linking a dataset.",
+    "ja_JP": "現在のタスクが終了してからデータセットを関連付けてください。"
+  },
+  "关联已有图像 / COLMAP 数据集": {
+    "zh_CN": "关联已有图像 / COLMAP 数据集",
+    "en_US": "Link Existing Image / COLMAP Dataset",
+    "ja_JP": "既存の画像 / COLMAP データセットを関連付け"
+  },
+  "数据集没有可用图像": {
+    "zh_CN": "数据集没有可用图像",
+    "en_US": "Dataset Has No Usable Images",
+    "ja_JP": "データセットに有効な画像がありません"
+  },
+  "未在所选目录或其 images/input 子目录中找到支持的图像。": {
+    "zh_CN": "未在所选目录或其 images/input 子目录中找到支持的图像。",
+    "en_US": "No supported images found in the selected directory or its images/input subdirectory.",
+    "ja_JP": "選択したディレクトリおよび images/input サブディレクトリに対応する画像がありません。"
+  },
+  "无法关联数据集": {
+    "zh_CN": "无法关联数据集",
+    "en_US": "Cannot link dataset",
+    "ja_JP": "データセットを関連付けできません"
+  },
+  "已关联现有数据集：%1（%2 张图像，原目录与 COLMAP 数据保持不变）": {
+    "zh_CN": "已关联现有数据集：%1（%2 张图像，原目录与 COLMAP 数据保持不变）",
+    "en_US": "Existing dataset linked: %1 (%2 images; source directory and COLMAP data unchanged)",
+    "ja_JP": "既存データセットを関連付けました: %1（%2 画像。元のディレクトリと COLMAP データは変更しません）"
+  },
+  "PLY 场景与网格 (*.ply);;所有文件 (*.*)": {
+    "zh_CN": "PLY 场景与网格 (*.ply);;所有文件 (*.*)",
+    "en_US": "PLY Scenes and Meshes (*.ply);;All Files (*.*)",
+    "ja_JP": "PLY シーンとメッシュ (*.ply);;すべてのファイル (*.*)"
+  },
+  "选择导入方式": {
+    "zh_CN": "选择导入方式",
+    "en_US": "Choose Import Mode",
+    "ja_JP": "インポート方法を選択"
+  },
+  "场景中已有 %1 个对象。\n\n同时导入：保留现有对象，在同一场景中加入新数据。\n覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n两种方式都不会删除或改写原始文件。": {
+    "zh_CN": "场景中已有 %1 个对象。\n\n同时导入：保留现有对象，在同一场景中加入新数据。\n覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n两种方式都不会删除或改写原始文件。",
+    "en_US": "The scene contains %1 objects.\n\nAdd alongside: retain existing objects and add the new data.\nReplace current: replace only “%2”; other objects stay unchanged.\n\nNeither option deletes or rewrites the original files.",
+    "ja_JP": "シーンには %1 個のオブジェクトがあります。\n\n追加: 既存のオブジェクトを保持して新しいデータを追加します。\n現在を置換: 「%2」のみ置き換え、他は保持します。\n\nどちらも元のファイルを削除・変更しません。"
+  },
+  "同时导入": {
+    "zh_CN": "同时导入",
+    "en_US": "Add Alongside",
+    "ja_JP": "追加"
+  },
+  "覆盖当前": {
+    "zh_CN": "覆盖当前",
+    "en_US": "Replace Current",
+    "ja_JP": "現在を置換"
+  },
+  "无法导入场景": {
+    "zh_CN": "无法导入场景",
+    "en_US": "Cannot import scene",
+    "ja_JP": "シーンをインポートできません"
+  },
+  "PLY 三角网格": {
+    "zh_CN": "PLY 三角网格",
+    "en_US": "PLY Triangle Mesh",
+    "ja_JP": "PLY 三角形メッシュ"
+  },
+  "PLY 点云": {
+    "zh_CN": "PLY 点云",
+    "en_US": "PLY Point Cloud",
+    "ja_JP": "PLY 点群"
+  },
+  "，%1 个面": {
+    "zh_CN": "，%1 个面",
+    "en_US": ", %1 faces",
+    "ja_JP": "、%1 面"
+  },
+  "已读取场景元数据：%1 个顶点%2，%3": {
+    "zh_CN": "已读取场景元数据：%1 个顶点%2，%3",
+    "en_US": "Scene metadata read: %1 vertices%2, %3",
+    "ja_JP": "シーンのメタデータを読み込みました: %1 頂点%2、%3"
+  },
+  "已同时导入：现有对象全部保留。": {
+    "zh_CN": "已同时导入：现有对象全部保留。",
+    "en_US": "Added alongside: all existing objects retained.",
+    "ja_JP": "追加しました。既存のオブジェクトはすべて保持しています。"
+  },
+  "已导入到当前对象槽位，源文件保持不变。": {
+    "zh_CN": "已导入到当前对象槽位，源文件保持不变。",
+    "en_US": "Imported into the current object slot; source file unchanged.",
+    "ja_JP": "現在のオブジェクトを置き換えてインポートしました。元のファイルは変更しません。"
+  },
+  "请等待当前任务结束后再清理数据集。": {
+    "zh_CN": "请等待当前任务结束后再清理数据集。",
+    "en_US": "Wait for the current task to finish before cleaning the dataset.",
+    "ja_JP": "現在のタスクが終了してからデータセットを整理してください。"
+  },
+  "工程迁移尚未完成": {
+    "zh_CN": "工程迁移尚未完成",
+    "en_US": "Project Migration Incomplete",
+    "ja_JP": "プロジェクトの移行が未完了です"
+  },
+  "请先保存工程并完成托管数据迁移，再执行清理。": {
+    "zh_CN": "请先保存工程并完成托管数据迁移，再执行清理。",
+    "en_US": "Save the project and complete managed data migration before cleanup.",
+    "ja_JP": "プロジェクトを保存し、管理対象データの移行を完了してから整理してください。"
+  },
+  "没有可清理的数据集": {
+    "zh_CN": "没有可清理的数据集",
+    "en_US": "No Dataset to Clean Up",
+    "ja_JP": "整理対象のデータセットがありません"
+  },
+  "当前工程尚未导入数据集。": {
+    "zh_CN": "当前工程尚未导入数据集。",
+    "en_US": "No dataset has been imported into this project.",
+    "ja_JP": "このプロジェクトにはデータセットがインポートされていません。"
+  },
+  "将永久删除工程托管的数据集副本及其重建结果，但保留工程中的场景和训练输出：\n%1": {
+    "zh_CN": "将永久删除工程托管的数据集副本及其重建结果，但保留工程中的场景和训练输出：\n%1",
+    "en_US": "Permanently delete the project's managed dataset copy and reconstruction results, retaining scenes and training outputs:\n%1",
+    "ja_JP": "シーンと学習出力を保持し、プロジェクトの管理対象データセットのコピーと再構成結果を完全に削除します:\n%1"
+  },
+  "将只解除当前外部数据集关联，不修改原目录中的照片或COLMAP 文件：\n%1": {
+    "zh_CN": "将只解除当前外部数据集关联，不修改原目录中的照片或COLMAP 文件：\n%1",
+    "en_US": "Only unlink the external dataset; source photos and COLMAP files will not be modified:\n%1",
+    "ja_JP": "外部データセットの関連付けのみ解除します。元の写真や COLMAP ファイルは変更しません:\n%1"
+  },
+  "确认清理数据集": {
+    "zh_CN": "确认清理数据集",
+    "en_US": "Confirm Dataset Cleanup",
+    "ja_JP": "データセット整理の確認"
+  },
+  "无法清理数据集": {
+    "zh_CN": "无法清理数据集",
+    "en_US": "Cannot clean up dataset",
+    "ja_JP": "データセットを整理できません"
+  },
+  "已清理工程托管数据集与重建数据：%1": {
+    "zh_CN": "已清理工程托管数据集与重建数据：%1",
+    "en_US": "Managed dataset and reconstruction data removed: %1",
+    "ja_JP": "管理対象データセットと再構成データを削除しました: %1"
+  },
+  "已解除外部数据集关联；原目录保持不变：%1": {
+    "zh_CN": "已解除外部数据集关联；原目录保持不变：%1",
+    "en_US": "External dataset unlinked; source directory unchanged: %1",
+    "ja_JP": "外部データセットの関連付けを解除しました。元のディレクトリは変更しません: %1"
+  },
+  "数据集已从工程解除，但有待清理的托管文件：%1": {
+    "zh_CN": "数据集已从工程解除，但有待清理的托管文件：%1",
+    "en_US": "Dataset unlinked; some managed files await cleanup: %1",
+    "ja_JP": "データセットの関連付けを解除しました。一部の管理対象ファイルは整理待ちです: %1"
+  },
+  "部分文件等待清理": {
+    "zh_CN": "部分文件等待清理",
+    "en_US": "Some Files Await Cleanup",
+    "ja_JP": "一部のファイルは整理待ちです"
+  },
+  "工程关联已清除，但部分托管文件可能正被其他程序占用。关闭占用程序后可手动删除：\n%1": {
+    "zh_CN": "工程关联已清除，但部分托管文件可能正被其他程序占用。关闭占用程序后可手动删除：\n%1",
+    "en_US": "Project links removed, but some managed files may be in use. Close the other application, then delete manually:\n%1",
+    "ja_JP": "関連付けを解除しましたが、一部の管理対象ファイルは使用中の可能性があります。使用中のアプリを閉じて手動で削除できます:\n%1"
+  },
+  "数据集已清理": {
+    "zh_CN": "数据集已清理",
+    "en_US": "Dataset cleaned up",
+    "ja_JP": "データセットを整理しました"
+  },
+  "没有数据集": {
+    "zh_CN": "没有数据集",
+    "en_US": "No Dataset",
+    "ja_JP": "データセットなし"
+  },
+  "外部重建数据保持不变": {
+    "zh_CN": "外部重建数据保持不变",
+    "en_US": "External Reconstruction Unchanged",
+    "ja_JP": "外部の再構成データは変更しません"
+  },
+  "当前数据集是外部关联目录。为避免修改源文件，桌面端不会删除其中的 COLMAP 结果。请先将其作为托管数据集导入，再执行单独清理。": {
+    "zh_CN": "当前数据集是外部关联目录。为避免修改源文件，桌面端不会删除其中的 COLMAP 结果。请先将其作为托管数据集导入，再执行单独清理。",
+    "en_US": "This dataset is linked externally. To protect source files, its COLMAP results will not be deleted. Import it as a managed dataset before cleaning reconstruction results separately.",
+    "ja_JP": "外部関連付けのデータセットです。元のファイルを保護するため COLMAP 結果は削除しません。管理対象データセットとしてインポートしてから、再構成結果を個別に整理してください。"
+  },
+  "没有重建结果": {
+    "zh_CN": "没有重建结果",
+    "en_US": "No Reconstruction Results",
+    "ja_JP": "再構成結果なし"
+  },
+  "未检测到可清理的 COLMAP 数据。": {
+    "zh_CN": "未检测到可清理的 COLMAP 数据。",
+    "en_US": "No COLMAP data available for cleanup.",
+    "ja_JP": "整理可能な COLMAP データがありません。"
+  },
+  "确认清理重建结果": {
+    "zh_CN": "确认清理重建结果",
+    "en_US": "Confirm Reconstruction Cleanup",
+    "ja_JP": "再構成結果整理の確認"
+  },
+  "将删除 sparse、distorted、stereo、数据库和对齐缓存，但保留导入照片、数据集关联与当前场景。\n%1": {
+    "zh_CN": "将删除 sparse、distorted、stereo、数据库和对齐缓存，但保留导入照片、数据集关联与当前场景。\n%1",
+    "en_US": "Delete sparse, distorted, stereo, database and alignment caches, keeping imported photos, dataset links and the current scene.\n%1",
+    "ja_JP": "インポート写真、データセットの関連付け、現在のシーンを保持し、sparse・distorted・stereo・データベース・アライメントキャッシュを削除します。\n%1"
+  },
+  "无法清理重建结果": {
+    "zh_CN": "无法清理重建结果",
+    "en_US": "Cannot clean up reconstruction",
+    "ja_JP": "再構成結果を整理できません"
+  },
+  "已单独清理 COLMAP 重建结果，照片与场景保持不变：%1": {
+    "zh_CN": "已单独清理 COLMAP 重建结果，照片与场景保持不变：%1",
+    "en_US": "COLMAP reconstruction removed; photos and scene unchanged: %1",
+    "ja_JP": "COLMAP 再構成結果を削除しました。写真とシーンは変更しません: %1"
+  },
+  "重建结果已从数据集中移除，但部分暂存文件可能正被占用。关闭占用程序后可手动删除：\n%1": {
+    "zh_CN": "重建结果已从数据集中移除，但部分暂存文件可能正被占用。关闭占用程序后可手动删除：\n%1",
+    "en_US": "Reconstruction removed, but some temporary files may be in use. Close the other application, then delete manually:\n%1",
+    "ja_JP": "再構成結果を削除しましたが、一部の一時ファイルは使用中の可能性があります。使用中のアプリを閉じて手動で削除できます:\n%1"
+  },
+  "重建结果已清理": {
+    "zh_CN": "重建结果已清理",
+    "en_US": "Reconstruction cleaned up",
+    "ja_JP": "再構成結果を整理しました"
+  },
+  "没有已载入场景": {
+    "zh_CN": "没有已载入场景",
+    "en_US": "No Scene Loaded",
+    "ja_JP": "シーン未読込"
+  },
+  "当前工程尚未导入场景。": {
+    "zh_CN": "当前工程尚未导入场景。",
+    "en_US": "No scene has been imported into this project.",
+    "ja_JP": "このプロジェクトにはシーンがインポートされていません。"
+  },
+  "确认卸载场景": {
+    "zh_CN": "确认卸载场景",
+    "en_US": "Confirm Scene Unload",
+    "ja_JP": "シーンのアンロード確認"
+  },
+  "只从当前工程和视口卸载场景，不删除 PLY 或训练输出：\n%1": {
+    "zh_CN": "只从当前工程和视口卸载场景，不删除 PLY 或训练输出：\n%1",
+    "en_US": "Unload the scene from the project and viewport only; PLY and training outputs will not be deleted:\n%1",
+    "ja_JP": "プロジェクトとビューポートからシーンをアンロードするだけです。PLY や学習出力は削除しません:\n%1"
+  },
+  "无法卸载场景": {
+    "zh_CN": "无法卸载场景",
+    "en_US": "Cannot unload scene",
+    "ja_JP": "シーンをアンロードできません"
+  },
+  "已卸载场景关联；PLY 与训练输出保持不变：%1": {
+    "zh_CN": "已卸载场景关联；PLY 与训练输出保持不变：%1",
+    "en_US": "Scene unlinked; PLY and training outputs unchanged: %1",
+    "ja_JP": "シーンの関連付けを解除しました。PLY と学習出力は変更しません: %1"
+  },
+  "场景已卸载": {
+    "zh_CN": "场景已卸载",
+    "en_US": "Scene unloaded",
+    "ja_JP": "シーンをアンロードしました"
+  },
+  "请先等待或停止当前任务。": {
+    "zh_CN": "请先等待或停止当前任务。",
+    "en_US": "Wait for or stop the current task first.",
+    "ja_JP": "先に現在のタスクの完了を待つか停止してください。"
+  },
+  "清空任务记录": {
+    "zh_CN": "清空任务记录",
+    "en_US": "Clear Task History",
+    "ja_JP": "タスク履歴をクリア"
+  },
+  "将清空当前窗口中的任务表和日志，不会删除数据集、场景或任何任务输出。": {
+    "zh_CN": "将清空当前窗口中的任务表和日志，不会删除数据集、场景或任何任务输出。",
+    "en_US": "Clear the task table and log in this window. Datasets, scenes and task outputs will not be deleted.",
+    "ja_JP": "このウィンドウのタスク一覧とログをクリアします。データセット、シーン、タスク出力は削除しません。"
+  },
+  "任务记录已清空": {
+    "zh_CN": "任务记录已清空",
+    "en_US": "Task history cleared",
+    "ja_JP": "タスク履歴をクリアしました"
+  },
+  "找不到环境检查脚本": {
+    "zh_CN": "找不到环境检查脚本",
+    "en_US": "Environment check script not found",
+    "ja_JP": "環境診断スクリプトが見つかりません"
+  },
+  "请从完整源码目录运行原生应用。": {
+    "zh_CN": "请从完整源码目录运行原生应用。",
+    "en_US": "Run the native application from a complete source directory.",
+    "ja_JP": "完全なソースディレクトリからネイティブアプリを実行してください。"
+  },
+  "环境检查": {
+    "zh_CN": "环境检查",
+    "en_US": "Environment Check",
+    "ja_JP": "環境診断"
+  },
+  "尚未导入数据集": {
+    "zh_CN": "尚未导入数据集",
+    "en_US": "No Dataset Imported",
+    "ja_JP": "データセット未読込"
+  },
+  "请先导入包含照片的图像数据集。": {
+    "zh_CN": "请先导入包含照片的图像数据集。",
+    "en_US": "Import an image dataset containing photos first.",
+    "ja_JP": "先に写真を含む画像データセットをインポートしてください。"
+  },
+  "重建后端不可用": {
+    "zh_CN": "重建后端不可用",
+    "en_US": "Reconstruction Backend Unavailable",
+    "ja_JP": "再構成バックエンドを利用できません"
+  },
+  "无法创建任务目录": {
+    "zh_CN": "无法创建任务目录",
+    "en_US": "Cannot create task directory",
+    "ja_JP": "タスクディレクトリを作成できません"
+  },
+  "无法保存重建任务": {
+    "zh_CN": "无法保存重建任务",
+    "en_US": "Cannot save reconstruction task",
+    "ja_JP": "再構成タスクを保存できません"
+  },
+  "重建配置已保存：%1": {
+    "zh_CN": "重建配置已保存：%1",
+    "en_US": "Reconstruction configuration saved: %1",
+    "ja_JP": "再構成設定を保存しました: %1"
+  },
+  "请先导入包含 COLMAP 数据的图像工程。": {
+    "zh_CN": "请先导入包含 COLMAP 数据的图像工程。",
+    "en_US": "Import an image project containing COLMAP data first.",
+    "ja_JP": "先に COLMAP データを含む画像プロジェクトをインポートしてください。"
+  },
+  "训练后端不可用": {
+    "zh_CN": "训练后端不可用",
+    "en_US": "Training Backend Unavailable",
+    "ja_JP": "学習バックエンドを利用できません"
+  },
+  "正在预检 %1 训练环境…": {
+    "zh_CN": "正在预检 %1 训练环境…",
+    "en_US": "Checking %1 training environment…",
+    "ja_JP": "%1 の学習環境を診断中…"
+  },
+  "系统管理员": {
+    "zh_CN": "系统管理员",
+    "en_US": "System Administrator",
+    "ja_JP": "システム管理者"
+  },
+  "\n\n这是系统级企业应用控制限制，需要管理员允许或签名被拦截的运行库；桌面端不会绕过安全策略。": {
+    "zh_CN": "\n\n这是系统级企业应用控制限制，需要管理员允许或签名被拦截的运行库；桌面端不会绕过安全策略。",
+    "en_US": "\n\nThis is an enterprise application-control restriction. An administrator must approve or sign the blocked runtime. The desktop application will not bypass security policies.",
+    "ja_JP": "\n\nこれは企業のアプリケーション制御による制限です。管理者によるランタイムの許可または署名が必要です。このアプリはセキュリティポリシーを回避しません。"
+  },
+  "%1 训练环境不可用": {
+    "zh_CN": "%1 训练环境不可用",
+    "en_US": "%1 Training Environment Unavailable",
+    "ja_JP": "%1 の学習環境を利用できません"
+  },
+  "所选 Python：%1\n\n%2%3": {
+    "zh_CN": "所选 Python：%1\n\n%2%3",
+    "en_US": "Selected Python: %1\n\n%2%3",
+    "ja_JP": "選択した Python: %1\n\n%2%3"
+  },
+  "训练预检通过：%1 张图像，%2，CUDA：%3": {
+    "zh_CN": "训练预检通过：%1 张图像，%2，CUDA：%3",
+    "en_US": "Training preflight passed: %1 images, %2, CUDA: %3",
+    "ja_JP": "学習事前診断に合格: %1 画像、%2、CUDA: %3"
+  },
+  "已有稀疏重建": {
+    "zh_CN": "已有稀疏重建",
+    "en_US": "Sparse reconstruction available",
+    "ja_JP": "疎な再構成データあり"
+  },
+  "将运行 COLMAP": {
+    "zh_CN": "将运行 COLMAP",
+    "en_US": "COLMAP will run",
+    "ja_JP": "COLMAP を実行予定"
+  },
+  "无法保存训练任务": {
+    "zh_CN": "无法保存训练任务",
+    "en_US": "Cannot save training task",
+    "ja_JP": "学習タスクを保存できません"
+  },
+  "%1 训练 | %2 | %3 次迭代": {
+    "zh_CN": "%1 训练 | %2 | %3 次迭代",
+    "en_US": "%1 Training | %2 | %3 iterations",
+    "ja_JP": "%1 学習 | %2 | %3 反復"
+  },
+  "无法保存训练恢复信息": {
+    "zh_CN": "无法保存训练恢复信息",
+    "en_US": "Cannot save training recovery information",
+    "ja_JP": "学習の復元情報を保存できません"
+  },
+  "训练未启动，恢复标记清理失败：%1": {
+    "zh_CN": "训练未启动，恢复标记清理失败：%1",
+    "en_US": "Training did not start; recovery marker cleanup failed: %1",
+    "ja_JP": "学習は開始していません。復元マーカーの整理に失敗しました: %1"
+  },
+  "训练配置已保存：%1": {
+    "zh_CN": "训练配置已保存：%1",
+    "en_US": "Training configuration saved: %1",
+    "ja_JP": "学習設定を保存しました: %1"
+  },
+  " · 数据迁移待完成": {
+    "zh_CN": " · 数据迁移待完成",
+    "en_US": " · Data migration pending",
+    "ja_JP": " · データ移行待ち"
+  },
+  " · 导入恢复待处理": {
+    "zh_CN": " · 导入恢复待处理",
+    "en_US": " · Import recovery pending",
+    "ja_JP": " · インポート復元待ち"
+  },
+  "未导入": {
+    "zh_CN": "未导入",
+    "en_US": "Not imported",
+    "ja_JP": "未読込"
+  },
+  "图像 %1": {
+    "zh_CN": "图像 %1",
+    "en_US": "Images %1",
+    "ja_JP": "画像 %1"
+  },
+  "重建": {
+    "zh_CN": "重建",
+    "en_US": "Reconstruction",
+    "ja_JP": "再構成"
+  },
+  "未检测到稀疏重建": {
+    "zh_CN": "未检测到稀疏重建",
+    "en_US": "No sparse reconstruction detected",
+    "ja_JP": "疎な再構成データがありません"
+  },
+  "相机位姿 %1%2": {
+    "zh_CN": "相机位姿 %1%2",
+    "en_US": "Camera poses %1%2",
+    "ja_JP": "カメラ姿勢 %1%2"
+  },
+  "（抽稀显示）": {
+    "zh_CN": "（抽稀显示）",
+    "en_US": " (subsampled display)",
+    "ja_JP": "（間引き表示）"
+  },
+  "已跳过 %1 个无效相机条目": {
+    "zh_CN": "已跳过 %1 个无效相机条目",
+    "en_US": "Skipped %1 invalid camera entries",
+    "ja_JP": "無効なカメラ項目を %1 件スキップ"
+  },
+  "相机位姿不可用": {
+    "zh_CN": "相机位姿不可用",
+    "en_US": "Camera poses unavailable",
+    "ja_JP": "カメラ姿勢なし"
+  },
+  "空闲": {
+    "zh_CN": "空闲",
+    "en_US": "Idle",
+    "ja_JP": "待機中"
+  },
+  "历史 %1 项": {
+    "zh_CN": "历史 %1 项",
+    "en_US": "History: %1 items",
+    "ja_JP": "履歴 %1 件"
+  },
+  "尚未保存（首次保存时选择位置）": {
+    "zh_CN": "尚未保存（首次保存时选择位置）",
+    "en_US": "Not saved (choose location on first save)",
+    "ja_JP": "未保存（初回保存時に保存先を選択）"
+  },
+  "%1 张": {
+    "zh_CN": "%1 张",
+    "en_US": "%1 images",
+    "ja_JP": "%1 画像"
+  },
+  "%1 顶点 | %2 面": {
+    "zh_CN": "%1 顶点 | %2 面",
+    "en_US": "%1 vertices | %2 faces",
+    "ja_JP": "%1 頂点 | %2 面"
+  },
+  "PLY 网格": {
+    "zh_CN": "PLY 网格",
+    "en_US": "PLY Mesh",
+    "ja_JP": "PLY メッシュ"
+  },
+  "旋转 X %1° | Y %2° | Z %3°": {
+    "zh_CN": "旋转 X %1° | Y %2° | Z %3°",
+    "en_US": "Rotation X %1° | Y %2° | Z %3°",
+    "ja_JP": "回転 X %1° | Y %2° | Z %3°"
+  },
+  "缩放 X %1 | Y %2 | Z %3": {
+    "zh_CN": "缩放 X %1 | Y %2 | Z %3",
+    "en_US": "Scale X %1 | Y %2 | Z %3",
+    "ja_JP": "スケール X %1 | Y %2 | Z %3"
+  },
+  "\n已选中 %1 个模型 · 上方为当前模型属性": {
+    "zh_CN": "\n已选中 %1 个模型 · 上方为当前模型属性",
+    "en_US": "\n%1 models selected · Values above belong to the active model",
+    "ja_JP": "\n%1 モデル選択中 · 上記の値はアクティブモデルの属性"
+  },
+  " · 已选中": {
+    "zh_CN": " · 已选中",
+    "en_US": " · Selected",
+    "ja_JP": " · 選択中"
+  },
+  "位置 X %1 | Y %2 | Z %3\n%4\n%5%6": {
+    "zh_CN": "位置 X %1 | Y %2 | Z %3\n%4\n%5%6",
+    "en_US": "Location X %1 | Y %2 | Z %3\n%4\n%5%6",
+    "ja_JP": "位置 X %1 | Y %2 | Z %3\n%4\n%5%6"
+  },
+  "未声明（局部/任意坐标）": {
+    "zh_CN": "未声明（局部/任意坐标）",
+    "en_US": "Undeclared (local/arbitrary coordinates)",
+    "ja_JP": "未指定（ローカル / 任意座標）"
+  },
+  "%1 | 源坐标 %2": {
+    "zh_CN": "%1 | 源坐标 %2",
+    "en_US": "%1 | Source coordinates %2",
+    "ja_JP": "%1 | 元座標 %2"
+  },
+  "单位由 PLY 元数据或同名 .prj 辅助信息识别。": {
+    "zh_CN": "单位由 PLY 元数据或同名 .prj 辅助信息识别。",
+    "en_US": "Units are read from PLY metadata or the matching .prj sidecar.",
+    "ja_JP": "単位は PLY メタデータまたは同名の .prj ファイルから取得します。"
+  },
+  "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。": {
+    "zh_CN": "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。",
+    "en_US": "PLY does not require a unit field. No unit is declared; values are shown in original units u, not assumed metres.",
+    "ja_JP": "PLY では単位の指定は必須ではありません。このファイルは単位未指定のため、メートルと仮定せず元の単位 u で表示します。"
+  },
+  "最小  %1\n最大  %2": {
+    "zh_CN": "最小  %1\n最大  %2",
+    "en_US": "Minimum  %1\nMaximum  %2",
+    "ja_JP": "最小  %1\n最大  %2"
+  },
+  "（自动精度保护）": {
+    "zh_CN": "（自动精度保护）",
+    "en_US": " (automatic precision protection)",
+    "ja_JP": "（自動精度保護）"
+  },
+  "无（原始坐标直接显示）": {
+    "zh_CN": "无（原始坐标直接显示）",
+    "en_US": "None (original coordinates displayed directly)",
+    "ja_JP": "なし（元の座標を直接表示）"
+  },
+  "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。": {
+    "zh_CN": "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。",
+    "en_US": "GPU display only: local = (global + T) × S. Source files and reports retain global coordinates.",
+    "ja_JP": "GPU 表示のみ: local = (global + T) × S。元ファイルとレポートは global 座標を保持します。"
+  },
+  "%1 个": {
+    "zh_CN": "%1 个",
+    "en_US": "%1",
+    "ja_JP": "%1"
+  },
+  "跳过 %1": {
+    "zh_CN": "跳过 %1",
+    "en_US": "Skipped %1",
+    "ja_JP": "%1 をスキップ"
+  },
+  "抽稀显示": {
+    "zh_CN": "抽稀显示",
+    "en_US": "Subsampled display",
+    "ja_JP": "間引き表示"
+  },
+  "\n已跳过 %1 个无效相机条目": {
+    "zh_CN": "\n已跳过 %1 个无效相机条目",
+    "en_US": "\nSkipped %1 invalid camera entries",
+    "ja_JP": "\n無効なカメラ項目を %1 件スキップ"
+  },
+  "不可用 | 查看日志": {
+    "zh_CN": "不可用 | 查看日志",
+    "en_US": "Unavailable | See log",
+    "ja_JP": "利用不可 | ログを確認"
+  },
+  "错误：%1": {
+    "zh_CN": "错误：%1",
+    "en_US": "Error: %1",
+    "ja_JP": "エラー: %1"
+  },
+  "选择": {
+    "zh_CN": "选择",
+    "en_US": "Select",
+    "ja_JP": "選択"
+  },
+  "裁剪": {
+    "zh_CN": "裁剪",
+    "en_US": "Trim",
+    "ja_JP": "トリミング"
+  },
+  "模型底部 Z=%1": {
+    "zh_CN": "模型底部 Z=%1",
+    "en_US": "Model base Z=%1",
+    "ja_JP": "モデル底面 Z=%1"
+  },
+  "GPU 共享显存": {
+    "zh_CN": "GPU 共享显存",
+    "en_US": "Shared GPU Memory",
+    "ja_JP": "GPU 共有メモリ"
+  },
+  "GPU 共享显存 · 零 CPU 拷贝": {
+    "zh_CN": "GPU 共享显存 · 零 CPU 拷贝",
+    "en_US": "Shared GPU memory · No CPU copy",
+    "ja_JP": "GPU 共有メモリ · CPU コピーなし"
+  },
+  "PLY 检查点回退": {
+    "zh_CN": "PLY 检查点回退",
+    "en_US": "PLY checkpoint fallback",
+    "ja_JP": "PLY チェックポイントへフォールバック"
+  },
+  "共享显存预览已结束": {
+    "zh_CN": "共享显存预览已结束",
+    "en_US": "Shared-memory preview ended",
+    "ja_JP": "共有メモリプレビューは終了しました"
+  },
+  "训练任务已停止": {
+    "zh_CN": "训练任务已停止",
+    "en_US": "Training task stopped",
+    "ja_JP": "学習タスクを停止しました"
+  },
+  "训练共享显存发布器已关闭": {
+    "zh_CN": "训练共享显存发布器已关闭",
+    "en_US": "Training shared-memory publisher closed",
+    "ja_JP": "学習の共有メモリ配信を終了しました"
+  },
+  "已连接 %1，等待首帧": {
+    "zh_CN": "已连接 %1，等待首帧",
+    "en_US": "Connected to %1; waiting for first frame",
+    "ja_JP": "%1 に接続済み、最初のフレームを待機中"
+  },
+  "正在读取 PLY 场景...": {
+    "zh_CN": "正在读取 PLY 场景...",
+    "en_US": "Reading PLY scene…",
+    "ja_JP": "PLY シーンを読み込み中…"
+  },
+  "Ctrl + 左键：旋转视角": {
+    "zh_CN": "Ctrl + 左键：旋转视角",
+    "en_US": "Ctrl + LMB: orbit view",
+    "ja_JP": "Ctrl + 左ドラッグ: ビューを回転"
+  },
+  "拖动环绕视图": {
+    "zh_CN": "拖动环绕视图",
+    "en_US": "Drag to orbit view",
+    "ja_JP": "ドラッグでビューを回転"
+  },
+  "拖动环绕视图；单击 %1 轴吸附视角": {
+    "zh_CN": "拖动环绕视图；单击 %1 轴吸附视角",
+    "en_US": "Drag to orbit; click %1 to align view",
+    "ja_JP": "ドラッグでビューを回転、%1 軸をクリックして軸方向に整列"
+  },
+  "上下拖动缩放视图（%1 – %2）": {
+    "zh_CN": "上下拖动缩放视图（%1 – %2）",
+    "en_US": "Drag vertically to zoom (%1 – %2)",
+    "ja_JP": "上下ドラッグでズーム（%1 – %2）"
+  },
+  "拖动平移视图": {
+    "zh_CN": "拖动平移视图",
+    "en_US": "Drag to pan view",
+    "ja_JP": "ドラッグでビューを平行移動"
+  },
+  "返回用户视图": {
+    "zh_CN": "返回用户视图",
+    "en_US": "Return to user view",
+    "ja_JP": "ユーザービューに戻る"
+  },
+  "切换到场景相机视图": {
+    "zh_CN": "切换到场景相机视图",
+    "en_US": "Switch to scene camera view",
+    "ja_JP": "シーンのカメラビューに切り替え"
+  },
+  "当前场景没有可用相机": {
+    "zh_CN": "当前场景没有可用相机",
+    "en_US": "No usable cameras in the scene",
+    "ja_JP": "シーンに有効なカメラがありません"
+  },
+  "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视": {
+    "zh_CN": "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视",
+    "en_US": "Center cube / Iso: perspective; Shift-click restores default perspective",
+    "ja_JP": "中心キューブ / Iso: 透視投影へ切替、Shift クリックで既定の透視ビュー"
+  },
+  "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视": {
+    "zh_CN": "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视",
+    "en_US": "Center cube / Persp: orthographic; Shift-click restores default perspective",
+    "ja_JP": "中心キューブ / Persp: 平行投影へ切替、Shift クリックで既定の透視ビュー"
+  },
+  "沿 %1 轴移动": {
+    "zh_CN": "沿 %1 轴移动",
+    "en_US": "Move along %1",
+    "ja_JP": "%1 軸に沿って移動"
+  },
+  "在垂直于 %1 轴的平面移动": {
+    "zh_CN": "在垂直于 %1 轴的平面移动",
+    "en_US": "Move on the plane perpendicular to %1",
+    "ja_JP": "%1 軸に垂直な平面上で移動"
+  },
+  "沿视图平面自由移动": {
+    "zh_CN": "沿视图平面自由移动",
+    "en_US": "Move freely on the view plane",
+    "ja_JP": "ビュー平面上で自由移動"
+  },
+  "绕 %1 轴旋转": {
+    "zh_CN": "绕 %1 轴旋转",
+    "en_US": "Rotate around %1",
+    "ja_JP": "%1 軸を中心に回転"
+  },
+  "绕视图轴旋转": {
+    "zh_CN": "绕视图轴旋转",
+    "en_US": "Rotate around the view axis",
+    "ja_JP": "視線軸を中心に回転"
+  },
+  "自由轨迹球旋转": {
+    "zh_CN": "自由轨迹球旋转",
+    "en_US": "Free trackball rotation",
+    "ja_JP": "自由トラックボール回転"
+  },
+  "沿局部 %1 轴缩放": {
+    "zh_CN": "沿局部 %1 轴缩放",
+    "en_US": "Scale along local %1",
+    "ja_JP": "ローカル %1 軸に沿ってスケール"
+  },
+  "在局部 %1 平面的双轴缩放": {
+    "zh_CN": "在局部 %1 平面的双轴缩放",
+    "en_US": "Scale on local %1 plane",
+    "ja_JP": "ローカル %1 平面上で 2 軸スケール"
+  },
+  "等比缩放": {
+    "zh_CN": "等比缩放",
+    "en_US": "Uniform Scale",
+    "ja_JP": "均等スケール"
+  },
+  "移动工具（G）": {
+    "zh_CN": "移动工具（G）",
+    "en_US": "Move Tool (G)",
+    "ja_JP": "移動ツール（G）"
+  },
+  "旋转工具（R）": {
+    "zh_CN": "旋转工具（R）",
+    "en_US": "Rotate Tool (R)",
+    "ja_JP": "回転ツール（R）"
+  },
+  "缩放工具（S）": {
+    "zh_CN": "缩放工具（S）",
+    "en_US": "Scale Tool (S)",
+    "ja_JP": "スケールツール（S）"
+  },
+  "组合变换工具": {
+    "zh_CN": "组合变换工具",
+    "en_US": "Combined Transform Tool",
+    "ja_JP": "統合トランスフォームツール"
+  },
+  "多选采用等比缩放，保持模型之间的比例；无需选择缩放坐标系": {
+    "zh_CN": "多选采用等比缩放，保持模型之间的比例；无需选择缩放坐标系",
+    "en_US": "Multi-selection uses uniform scaling to preserve relative proportions; no scale orientation is needed",
+    "ja_JP": "複数選択では相対比率を保持する均等スケールを使用するため、座標系の指定は不要です"
+  },
+  "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切": {
+    "zh_CN": "局部锁定：非等比缩放必须沿模型自身轴，避免产生剪切",
+    "en_US": "Local locked: non-uniform scale uses the model's own axes to avoid shear",
+    "ja_JP": "ローカル固定: 非均等スケールはモデル自身の軸を使用し、せん断を防ぎます"
+  },
+  "局部锁定：组合工具包含缩放；切换到移动或旋转工具后可选择全局坐标": {
+    "zh_CN": "局部锁定：组合工具包含缩放；切换到移动或旋转工具后可选择全局坐标",
+    "en_US": "Local locked: combined tool includes scaling; switch to Move or Rotate to use global orientation",
+    "ja_JP": "ローカル固定: 統合ツールはスケールを含みます。グローバル座標を使うには移動・回転に切り替えてください"
+  },
+  "切换全局/局部坐标系（,）": {
+    "zh_CN": "切换全局/局部坐标系（,）",
+    "en_US": "Toggle Global/Local orientation (,)",
+    "ja_JP": "グローバル / ローカル座標系を切替（,）"
+  },
+  " · Ctrl 吸附 · Shift 精细": {
+    "zh_CN": " · Ctrl 吸附 · Shift 精细",
+    "en_US": " · Ctrl snap · Shift precision",
+    "ja_JP": " · Ctrl スナップ · Shift 精密"
+  },
+  "多选采用等比缩放，保持模型之间的比例": {
+    "zh_CN": "多选采用等比缩放，保持模型之间的比例",
+    "en_US": "Multi-selection uses uniform scaling to preserve relative proportions",
+    "ja_JP": "複数選択ではモデル間の比率を保持する均等スケールを使用します"
+  },
+  "局部锁定：缩放只使用模型自身轴，避免产生剪切": {
+    "zh_CN": "局部锁定：缩放只使用模型自身轴，避免产生剪切",
+    "en_US": "Local locked: scaling uses model axes to avoid shear",
+    "ja_JP": "ローカル固定: モデル軸でスケールし、せん断を防ぎます"
+  },
+  "局部锁定：请切换到移动或旋转工具后再选择全局坐标": {
+    "zh_CN": "局部锁定：请切换到移动或旋转工具后再选择全局坐标",
+    "en_US": "Local locked: switch to Move or Rotate to choose Global",
+    "ja_JP": "ローカル固定: グローバル座標を選ぶには移動・回転に切り替えてください"
+  },
+  "已切换到局部坐标系": {
+    "zh_CN": "已切换到局部坐标系",
+    "en_US": "Switched to Local orientation",
+    "ja_JP": "ローカル座標系に切り替えました"
+  },
+  "已切换到全局坐标系": {
+    "zh_CN": "已切换到全局坐标系",
+    "en_US": "Switched to Global orientation",
+    "ja_JP": "グローバル座標系に切り替えました"
+  },
+  "自由": {
+    "zh_CN": "自由",
+    "en_US": "Free",
+    "ja_JP": "自由"
+  },
+  "局部": {
+    "zh_CN": "局部",
+    "en_US": "Local",
+    "ja_JP": "ローカル"
+  },
+  "全局": {
+    "zh_CN": "全局",
+    "en_US": "Global",
+    "ja_JP": "グローバル"
+  },
+  "%1 %2 平面": {
+    "zh_CN": "%1 %2 平面",
+    "en_US": "%1 %2 plane",
+    "ja_JP": "%1 %2 平面"
+  },
+  "%1 %2 轴": {
+    "zh_CN": "%1 %2 轴",
+    "en_US": "%1 %2 axis",
+    "ja_JP": "%1 %2 軸"
+  },
+  "多选时使用整体等比缩放，避免对不同朝向的模型产生剪切": {
+    "zh_CN": "多选时使用整体等比缩放，避免对不同朝向的模型产生剪切",
+    "en_US": "Group scaling is uniform to avoid shearing models with different orientations",
+    "ja_JP": "異なる向きのモデルにせん断が生じないよう、複数選択では均等スケールを使用します"
+  },
+  "G 移动": {
+    "zh_CN": "G 移动",
+    "en_US": "G Move",
+    "ja_JP": "G 移動"
+  },
+  "S 缩放": {
+    "zh_CN": "S 缩放",
+    "en_US": "S Scale",
+    "ja_JP": "S スケール"
+  },
+  "R R 轨迹球旋转": {
+    "zh_CN": "R R 轨迹球旋转",
+    "en_US": "R R Trackball",
+    "ja_JP": "R R トラックボール"
+  },
+  "R 旋转": {
+    "zh_CN": "R 旋转",
+    "en_US": "R Rotate",
+    "ja_JP": "R 回転"
+  },
+  " · 吸附": {
+    "zh_CN": " · 吸附",
+    "en_US": " · Snap",
+    "ja_JP": " · スナップ"
+  },
+  " · 精细": {
+    "zh_CN": " · 精细",
+    "en_US": " · Precision",
+    "ja_JP": " · 精密"
+  },
+  " · 输入 %1": {
+    "zh_CN": " · 输入 %1",
+    "en_US": " · Input %1",
+    "ja_JP": " · 入力 %1"
+  },
+  "%1 · %2%3%4 · 左键/Enter 确认 · 右键/Esc 取消": {
+    "zh_CN": "%1 · %2%3%4 · 左键/Enter 确认 · 右键/Esc 取消",
+    "en_US": "%1 · %2%3%4 · LMB/Enter confirm · RMB/Esc cancel",
+    "ja_JP": "%1 · %2%3%4 · 左クリック/Enter 確定 · 右クリック/Esc キャンセル"
+  },
+  "已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放": {
+    "zh_CN": "已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放",
+    "en_US": "%1 models selected · G move group · R shared-pivot rotation · S uniform scale",
+    "ja_JP": "%1 モデル選択中 · G 全体移動 · R 共通ピボット回転 · S 均等スケール"
+  },
+  "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放": {
+    "zh_CN": "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放",
+    "en_US": "Model selected · G move · R rotate · R R trackball · S scale",
+    "ja_JP": "モデル選択中 · G 移動 · R 回転 · R R トラックボール · S スケール"
+  },
+  "等比\n缩放": {
+    "zh_CN": "等比\n缩放",
+    "en_US": "Uniform\nScale",
+    "ja_JP": "均等\nスケール"
+  },
+  "局部\n锁定": {
+    "zh_CN": "局部\n锁定",
+    "en_US": "Local\nLocked",
+    "ja_JP": "ローカル\n固定"
+  },
+  "训练中 · 点云增密预览": {
+    "zh_CN": "训练中 · 点云增密预览",
+    "en_US": "Training · Densification preview",
+    "ja_JP": "学習中 · 点群の高密度化プレビュー"
+  },
+  "训练中 · GPU 实时预览": {
+    "zh_CN": "训练中 · GPU 实时预览",
+    "en_US": "Training · Live GPU preview",
+    "ja_JP": "学習中 · GPU ライブプレビュー"
+  },
+  "未载入场景": {
+    "zh_CN": "未载入场景",
+    "en_US": "No scene loaded",
+    "ja_JP": "シーン未読込"
+  },
+  "迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存": {
+    "zh_CN": "迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存",
+    "en_US": "Iteration %1 | %2 Gaussian centers (point cloud) | Shared GPU memory",
+    "ja_JP": "反復 %1 | %2 ガウシアン中心点（点群）| GPU 共有メモリ"
+  },
+  "迭代 %1 | %2 高斯 | 共享 GPU 显存": {
+    "zh_CN": "迭代 %1 | %2 高斯 | 共享 GPU 显存",
+    "en_US": "Iteration %1 | %2 Gaussians | Shared GPU memory",
+    "ja_JP": "反復 %1 | %2 ガウシアン | GPU 共有メモリ"
+  },
+  "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | GPU LOD 缓存 %6 | 只读": {
+    "zh_CN": "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | GPU LOD 缓存 %6 | 只读",
+    "en_US": "%1 vertices | %2 faces | %3 triangles | %4 | Drawing %5 | GPU LOD cache %6 | Read-only",
+    "ja_JP": "%1 頂点 | %2 面 | %3 三角形 | %4 | 描画中 %5 | GPU LOD キャッシュ %6 | 読み取り専用"
+  },
+  "磁盘分页": {
+    "zh_CN": "磁盘分页",
+    "en_US": "Disk Paging",
+    "ja_JP": "ディスクページング"
+  },
+  "层级 Mesh LOD": {
+    "zh_CN": "层级 Mesh LOD",
+    "en_US": "Hierarchical Mesh LOD",
+    "ja_JP": "階層メッシュ LOD"
+  },
+  "叶级细节": {
+    "zh_CN": "叶级细节",
+    "en_US": "Leaf-Level Detail",
+    "ja_JP": "リーフレベル詳細"
+  },
+  " | 分页错误": {
+    "zh_CN": " | 分页错误",
+    "en_US": " | Paging error",
+    "ja_JP": " | ページングエラー"
+  },
+  "%1 点 | %2 | GPU 驻留 %3 / %4 | 只读": {
+    "zh_CN": "%1 点 | %2 | GPU 驻留 %3 / %4 | 只读",
+    "en_US": "%1 points | %2 | GPU resident %3 / %4 | Read-only",
+    "ja_JP": "%1 点 | %2 | GPU 常駐 %3 / %4 | 読み取り専用"
+  },
+  "八叉树 LOD": {
+    "zh_CN": "八叉树 LOD",
+    "en_US": "Octree LOD",
+    "ja_JP": "オクトリー LOD"
+  },
+  "%1 顶点 | %2 面 | %3 预览三角形": {
+    "zh_CN": "%1 顶点 | %2 面 | %3 预览三角形",
+    "en_US": "%1 vertices | %2 faces | %3 preview triangles",
+    "ja_JP": "%1 頂点 | %2 面 | %3 プレビュー三角形"
+  },
+  "%1 %2 | 预览 %3": {
+    "zh_CN": "%1 %2 | 预览 %3",
+    "en_US": "%1 %2 | Preview %3",
+    "ja_JP": "%1 %2 | プレビュー %3"
+  },
+  "点": {
+    "zh_CN": "点",
+    "en_US": "points",
+    "ja_JP": "点"
+  },
+  "场景数据待载入": {
+    "zh_CN": "场景数据待载入",
+    "en_US": "Scene data awaiting load",
+    "ja_JP": "シーンデータの読み込み待ち"
+  },
+  " | 贴图 %1 · %2×%3": {
+    "zh_CN": " | 贴图 %1 · %2×%3",
+    "en_US": " | Texture %1 · %2×%3",
+    "ja_JP": " | テクスチャ %1 · %2×%3"
+  },
+  " | UV · 顶点色回退": {
+    "zh_CN": " | UV · 顶点色回退",
+    "en_US": " | UV · Vertex-color fallback",
+    "ja_JP": " | UV · 頂点カラーへフォールバック"
+  },
+  " | 顶点色": {
+    "zh_CN": " | 顶点色",
+    "en_US": " | Vertex colors",
+    "ja_JP": " | 頂点カラー"
+  },
+  " | 贴图警告": {
+    "zh_CN": " | 贴图警告",
+    "en_US": " | Texture warning",
+    "ja_JP": " | テクスチャ警告"
+  },
+  " | 相机 %1%2": {
+    "zh_CN": " | 相机 %1%2",
+    "en_US": " | Cameras %1%2",
+    "ja_JP": " | カメラ %1%2"
+  },
+  "（抽稀）": {
+    "zh_CN": "（抽稀）",
+    "en_US": " (subsampled)",
+    "ja_JP": "（間引き）"
+  },
+  " | 正在计算选择": {
+    "zh_CN": " | 正在计算选择",
+    "en_US": " | Computing selection",
+    "ja_JP": " | 選択を計算中"
+  },
+  " | 已选 %1 | 已删 %2": {
+    "zh_CN": " | 已选 %1 | 已删 %2",
+    "en_US": " | Selected %1 | Deleted %2",
+    "ja_JP": " | 選択 %1 | 削除 %2"
+  },
+  "选择处理中": {
+    "zh_CN": "选择处理中",
+    "en_US": "Processing Selection",
+    "ja_JP": "選択を処理中"
+  },
+  "分页三角网格": {
+    "zh_CN": "分页三角网格",
+    "en_US": "Paged Triangle Mesh",
+    "ja_JP": "ページング三角形メッシュ"
+  },
+  "三角网格": {
+    "zh_CN": "三角网格",
+    "en_US": "Triangle Mesh",
+    "ja_JP": "三角形メッシュ"
+  },
+  "高斯 DC SH": {
+    "zh_CN": "高斯 DC SH",
+    "en_US": "Gaussians DC SH",
+    "ja_JP": "ガウシアン DC SH"
+  },
+  "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6": {
+    "zh_CN": "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6",
+    "en_US": "Grid %1  ·  Distance %2  ·  Precision %3  ·  %4  |  %5  ·  %6",
+    "ja_JP": "グリッド %1  ·  視距離 %2  ·  精度 %3  ·  %4  |  %5  ·  %6"
+  },
+  "Warning: the task could not be attached to the shutdown job; process-tree cleanup will use the PID fallback.\n": {
+    "zh_CN": "警告：无法将任务关联到退出管理作业，将通过 PID 回退机制清理进程树。\n",
+    "en_US": "Warning: the task could not be attached to the shutdown job; process-tree cleanup will use the PID fallback.\n",
+    "ja_JP": "警告: タスクを終了管理ジョブに関連付けできません。PID による代替手段でプロセスツリーを終了します。\n"
+  },
+  "Failed to start process: %1\n": {
+    "zh_CN": "无法启动进程：%1\n",
+    "en_US": "Failed to start process: %1\n",
+    "ja_JP": "プロセスを起動できません: %1\n"
+  },
+  "Requesting graceful task cancellation...\n": {
+    "zh_CN": "正在请求安全取消任务…\n",
+    "en_US": "Requesting graceful task cancellation...\n",
+    "ja_JP": "タスクの安全なキャンセルを要求中…\n"
+  },
+  "Terminating the task process tree...\n": {
+    "zh_CN": "正在终止任务进程树…\n",
+    "en_US": "Terminating the task process tree...\n",
+    "ja_JP": "タスクのプロセスツリーを終了中…\n"
+  },
+  "Task did not stop in time; terminating its process tree.\n": {
+    "zh_CN": "任务未能及时停止，正在终止其进程树。\n",
+    "en_US": "Task did not stop in time; terminating its process tree.\n",
+    "ja_JP": "タスクが時間内に停止しないため、プロセスツリーを強制終了します。\n"
+  },
+  "COLMAP 稀疏重建": {
+    "zh_CN": "COLMAP 稀疏重建",
+    "en_US": "COLMAP Sparse Reconstruction",
+    "ja_JP": "COLMAP 疎な再構成"
+  },
+  "选择 E 盘上的 colmap.exe": {
+    "zh_CN": "选择 E 盘上的 colmap.exe",
+    "en_US": "Select colmap.exe on drive E",
+    "ja_JP": "ドライブ E の colmap.exe を選択"
+  },
+  "浏览...": {
+    "zh_CN": "浏览...",
+    "en_US": "Browse…",
+    "ja_JP": "参照…"
+  },
+  "选择 COLMAP 可执行文件": {
+    "zh_CN": "选择 COLMAP 可执行文件",
+    "en_US": "Select COLMAP executable",
+    "ja_JP": "COLMAP 実行ファイルを選択"
+  },
+  "标准": {
+    "zh_CN": "标准",
+    "en_US": "Standard",
+    "ja_JP": "標準"
+  },
+  "鲁棒（弱纹理/视角差异大）": {
+    "zh_CN": "鲁棒（弱纹理/视角差异大）",
+    "en_US": "Robust (low texture / wide viewpoint variation)",
+    "ja_JP": "ロバスト（低テクスチャ / 大きな視点差）"
+  },
+  "序列（视频帧/连续航拍）": {
+    "zh_CN": "序列（视频帧/连续航拍）",
+    "en_US": "Sequential (video frames / continuous aerial capture)",
+    "ja_JP": "シーケンシャル（動画フレーム / 連続空撮）"
+  },
+  "预设": {
+    "zh_CN": "预设",
+    "en_US": "Preset",
+    "ja_JP": "プリセット"
+  },
+  "穷举匹配": {
+    "zh_CN": "穷举匹配",
+    "en_US": "Exhaustive Matching",
+    "ja_JP": "総当たりマッチング"
+  },
+  "序列匹配": {
+    "zh_CN": "序列匹配",
+    "en_US": "Sequential Matching",
+    "ja_JP": "シーケンシャルマッチング"
+  },
+  "匹配方式": {
+    "zh_CN": "匹配方式",
+    "en_US": "Matching Method",
+    "ja_JP": "マッチング方法"
+  },
+  "OPENCV（常用相机）": {
+    "zh_CN": "OPENCV（常用相机）",
+    "en_US": "OPENCV (general cameras)",
+    "ja_JP": "OPENCV（一般的なカメラ）"
+  },
+  "PINHOLE（已校正）": {
+    "zh_CN": "PINHOLE（已校正）",
+    "en_US": "PINHOLE (undistorted)",
+    "ja_JP": "PINHOLE（歪み補正済み）"
+  },
+  "相机模型": {
+    "zh_CN": "相机模型",
+    "en_US": "Camera Model",
+    "ja_JP": "カメラモデル"
+  },
+  "原始分辨率": {
+    "zh_CN": "原始分辨率",
+    "en_US": "Original Resolution",
+    "ja_JP": "元の解像度"
+  },
+  "最长边 2400 px": {
+    "zh_CN": "最长边 2400 px",
+    "en_US": "Longest Edge 2400 px",
+    "ja_JP": "長辺 2400 px"
+  },
+  "最长边 1600 px": {
+    "zh_CN": "最长边 1600 px",
+    "en_US": "Longest Edge 1600 px",
+    "ja_JP": "長辺 1600 px"
+  },
+  "最长边 1200 px": {
+    "zh_CN": "最长边 1200 px",
+    "en_US": "Longest Edge 1200 px",
+    "ja_JP": "長辺 1200 px"
+  },
+  "特征分辨率": {
+    "zh_CN": "特征分辨率",
+    "en_US": "Feature Resolution",
+    "ja_JP": "特徴抽出の解像度"
+  },
+  "每图最大特征": {
+    "zh_CN": "每图最大特征",
+    "en_US": "Max Features per Image",
+    "ja_JP": "画像あたりの最大特徴点数"
+  },
+  " 分钟": {
+    "zh_CN": " 分钟",
+    "en_US": " min",
+    "ja_JP": " 分"
+  },
+  "不限时": {
+    "zh_CN": "不限时",
+    "en_US": "No time limit",
+    "ja_JP": "時間制限なし"
+  },
+  "Mapper 限时": {
+    "zh_CN": "Mapper 限时",
+    "en_US": "Mapper Time Limit",
+    "ja_JP": "Mapper の時間制限"
+  },
+  "使用 GPU 进行特征提取和匹配": {
+    "zh_CN": "使用 GPU 进行特征提取和匹配",
+    "en_US": "Use GPU for feature extraction and matching",
+    "ja_JP": "GPU で特徴抽出とマッチング"
+  },
+  "所有图像共用一套相机参数": {
+    "zh_CN": "所有图像共用一套相机参数",
+    "en_US": "Share one set of camera parameters across all images",
+    "ja_JP": "すべての画像で 1 組のカメラパラメーターを共有"
+  },
+  "重建前清理旧 COLMAP 缓存": {
+    "zh_CN": "重建前清理旧 COLMAP 缓存",
+    "en_US": "Clear old COLMAP cache before reconstruction",
+    "ja_JP": "再構成前に古い COLMAP キャッシュを削除"
+  },
+  "检测到已有重建或缓存。为避免误覆盖，必须明确启用清理后才能重新运行。": {
+    "zh_CN": "检测到已有重建或缓存。为避免误覆盖，必须明确启用清理后才能重新运行。",
+    "en_US": "Existing reconstruction or cache detected. Explicitly enable cleanup before rerunning to prevent accidental overwrite.",
+    "ja_JP": "既存の再構成データまたはキャッシュを検出しました。誤上書きを防ぐため、削除を明示的に有効にしてから再実行してください。"
+  },
+  "结果写入数据集的 sparse/0；混合图像尺寸会由后端自动关闭单相机模式。": {
+    "zh_CN": "结果写入数据集的 sparse/0；混合图像尺寸会由后端自动关闭单相机模式。",
+    "en_US": "Results are written to sparse/0 in the dataset. Mixed image sizes automatically disable the shared-camera mode.",
+    "ja_JP": "結果はデータセットの sparse/0 に保存します。画像サイズが混在する場合、共通カメラモードを自動で無効にします。"
+  },
+  "开始重建": {
+    "zh_CN": "开始重建",
+    "en_US": "Start Reconstruction",
+    "ja_JP": "再構成を開始"
+  },
+  "数据集没有图像": {
+    "zh_CN": "数据集没有图像",
+    "en_US": "Dataset Has No Images",
+    "ja_JP": "データセットに画像がありません"
+  },
+  "数据集根目录、input 或 images 目录中必须至少包含一张受支持的图像。": {
+    "zh_CN": "数据集根目录、input 或 images 目录中必须至少包含一张受支持的图像。",
+    "en_US": "The dataset root, input or images directory must contain at least one supported image.",
+    "ja_JP": "データセットのルート、input、images のいずれかに対応する画像が 1 枚以上必要です。"
+  },
+  "COLMAP 不可用": {
+    "zh_CN": "COLMAP 不可用",
+    "en_US": "COLMAP Unavailable",
+    "ja_JP": "COLMAP を利用できません"
+  },
+  "未找到有效的 colmap.exe。请选择迁移到 E 盘后的实际文件。": {
+    "zh_CN": "未找到有效的 colmap.exe。请选择迁移到 E 盘后的实际文件。",
+    "en_US": "No valid colmap.exe found. Select its actual location after migration to drive E.",
+    "ja_JP": "有効な colmap.exe がありません。ドライブ E へ移行後の実際のファイルを選択してください。"
+  },
+  "已有重建数据": {
+    "zh_CN": "已有重建数据",
+    "en_US": "Existing Reconstruction Data",
+    "ja_JP": "既存の再構成データ"
+  },
+  "请启用“重建前清理旧 COLMAP 缓存”，或取消本次重建。": {
+    "zh_CN": "请启用“重建前清理旧 COLMAP 缓存”，或取消本次重建。",
+    "en_US": "Enable Clear Old COLMAP Cache Before Reconstruction, or cancel reconstruction.",
+    "ja_JP": "「再構成前に古い COLMAP キャッシュを削除」を有効にするか、再構成をキャンセルしてください。"
+  },
+  "确认重新运行 COLMAP": {
+    "zh_CN": "确认重新运行 COLMAP",
+    "en_US": "Confirm COLMAP Rerun",
+    "ja_JP": "COLMAP 再実行の確認"
+  },
+  "开始后会替换以下数据集中的 distorted、sparse 和 stereo 缓存：\n%1": {
+    "zh_CN": "开始后会替换以下数据集中的 distorted、sparse 和 stereo 缓存：\n%1",
+    "en_US": "Starting replaces distorted, sparse and stereo caches in this dataset:\n%1",
+    "ja_JP": "開始すると、次のデータセットの distorted・sparse・stereo キャッシュを置き換えます:\n%1"
+  },
+  "选择 COLMAP": {
+    "zh_CN": "选择 COLMAP",
+    "en_US": "Select COLMAP",
+    "ja_JP": "COLMAP を選択"
+  },
+  "未声明（原始单位 u）": {
+    "zh_CN": "未声明（原始单位 u）",
+    "en_US": "Undeclared (original units u)",
+    "ja_JP": "未指定（元の単位 u）"
+  },
+  "当前场景没有可导出的坐标范围。": {
+    "zh_CN": "当前场景没有可导出的坐标范围。",
+    "en_US": "The current scene has no coordinate bounds to export.",
+    "ja_JP": "現在のシーンにはエクスポート可能な座標範囲がありません。"
+  },
+  "无法创建坐标报告：%1": {
+    "zh_CN": "无法创建坐标报告：%1",
+    "en_US": "Cannot create coordinate report: %1",
+    "ja_JP": "座標レポートを作成できません: %1"
+  },
+  "无法写入坐标报告：%1": {
+    "zh_CN": "无法写入坐标报告：%1",
+    "en_US": "Cannot write coordinate report: %1",
+    "ja_JP": "座標レポートを書き込めません: %1"
+  },
+  "无法完成坐标报告：%1": {
+    "zh_CN": "无法完成坐标报告：%1",
+    "en_US": "Cannot finalize coordinate report: %1",
+    "ja_JP": "座標レポートを確定できません: %1"
+  },
+  "训练设置": {
+    "zh_CN": "训练设置",
+    "en_US": "Training Settings",
+    "ja_JP": "学習設定"
+  },
+  "方法": {
+    "zh_CN": "方法",
+    "en_US": "Method",
+    "ja_JP": "手法"
+  },
+  "快速预览": {
+    "zh_CN": "快速预览",
+    "en_US": "Quick Preview",
+    "ja_JP": "クイックプレビュー"
+  },
+  "高质量": {
+    "zh_CN": "高质量",
+    "en_US": "High Quality",
+    "ja_JP": "高品質"
+  },
+  "最高质量": {
+    "zh_CN": "最高质量",
+    "en_US": "Ultra Quality",
+    "ja_JP": "最高品質"
+  },
+  "质量预设": {
+    "zh_CN": "质量预设",
+    "en_US": "Quality Preset",
+    "ja_JP": "品質プリセット"
+  },
+  "迭代次数": {
+    "zh_CN": "迭代次数",
+    "en_US": "Iterations",
+    "ja_JP": "反復回数"
+  },
+  "训练分辨率": {
+    "zh_CN": "训练分辨率",
+    "en_US": "Training Resolution",
+    "ja_JP": "学習解像度"
+  },
+  "输出名称": {
+    "zh_CN": "输出名称",
+    "en_US": "Output Name",
+    "ja_JP": "出力名"
+  },
+  "选择训练输出目录": {
+    "zh_CN": "选择训练输出目录",
+    "en_US": "Select Training Output Directory",
+    "ja_JP": "学習出力ディレクトリを選択"
+  },
+  "输出目录": {
+    "zh_CN": "输出目录",
+    "en_US": "Output Directory",
+    "ja_JP": "出力ディレクトリ"
+  },
+  "训练前运行 COLMAP 重建": {
+    "zh_CN": "训练前运行 COLMAP 重建",
+    "en_US": "Run COLMAP reconstruction before training",
+    "ja_JP": "学習前に COLMAP 再構成を実行"
+  },
+  "允许覆盖同名输出": {
+    "zh_CN": "允许覆盖同名输出",
+    "en_US": "Allow overwriting output with the same name",
+    "ja_JP": "同名の出力の上書きを許可"
+  },
+  "输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。": {
+    "zh_CN": "输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。",
+    "en_US": "Output defaults to the project drive. Disable COLMAP if sparse reconstruction exists; if the data is not trainable, the task will attempt recovery or reconstruction automatically.",
+    "ja_JP": "出力は既定でプロジェクトと同じドライブに保存します。疎な再構成データがあれば COLMAP を無効にできます。学習不能なデータの場合は復元または再構成を自動で試行します。"
+  },
+  "开始训练": {
+    "zh_CN": "开始训练",
+    "en_US": "Start Training",
+    "ja_JP": "学習を開始"
+  },
+  "数据集不可训练": {
+    "zh_CN": "数据集不可训练",
+    "en_US": "Dataset Not Trainable",
+    "ja_JP": "データセットで学習できません"
+  },
+  "所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。": {
+    "zh_CN": "所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。",
+    "en_US": "The selected directory must contain images or input with at least one image. Reimport the dataset root.",
+    "ja_JP": "選択したディレクトリ内の images または input に画像が 1 枚以上必要です。データセットのルートを再インポートしてください。"
+  },
+  "输出名称无效": {
+    "zh_CN": "输出名称无效",
+    "en_US": "Invalid Output Name",
+    "ja_JP": "出力名が無効です"
+  },
+  "输出名称必须是安全的 Windows 文件夹名，且只能包含英文字母、数字、点、下划线和连字符。": {
+    "zh_CN": "输出名称必须是安全的 Windows 文件夹名，且只能包含英文字母、数字、点、下划线和连字符。",
+    "en_US": "The output name must be a safe Windows folder name containing only ASCII letters, digits, periods, underscores and hyphens.",
+    "ja_JP": "出力名は Windows で有効なフォルダー名で、英数字・ピリオド・アンダースコア・ハイフンのみ使用できます。"
+  },
+  "输出目录不可用": {
+    "zh_CN": "输出目录不可用",
+    "en_US": "Output Directory Unavailable",
+    "ja_JP": "出力ディレクトリを利用できません"
+  },
+  "无法创建或访问指定的输出目录。": {
+    "zh_CN": "无法创建或访问指定的输出目录。",
+    "en_US": "Cannot create or access the selected output directory.",
+    "ja_JP": "指定した出力ディレクトリを作成またはアクセスできません。"
+  },
+  "输出已存在": {
+    "zh_CN": "输出已存在",
+    "en_US": "Output Already Exists",
+    "ja_JP": "出力は既に存在します"
+  },
+  "同名输出目录已有数据。请更改名称，或明确启用覆盖。": {
+    "zh_CN": "同名输出目录已有数据。请更改名称，或明确启用覆盖。",
+    "en_US": "An output directory with this name already contains data. Change the name or explicitly enable overwrite.",
+    "ja_JP": "同名の出力ディレクトリにデータが存在します。名前を変更するか、上書きを明示的に許可してください。"
+  },
+  "确认覆盖训练输出": {
+    "zh_CN": "确认覆盖训练输出",
+    "en_US": "Confirm Training Output Overwrite",
+    "ja_JP": "学習出力上書きの確認"
+  },
+  "训练开始后会删除以下目录中的现有数据：\n%1": {
+    "zh_CN": "训练开始后会删除以下目录中的现有数据：\n%1",
+    "en_US": "Starting training deletes existing data in this directory:\n%1",
+    "ja_JP": "学習を開始すると、次のディレクトリの既存データを削除します:\n%1"
+  },
+  "安装目录缺少训练预检脚本：%1": {
+    "zh_CN": "安装目录缺少训练预检脚本：%1",
+    "en_US": "Training preflight script missing from installation: %1",
+    "ja_JP": "インストール先に学習事前診断スクリプトがありません: %1"
+  },
+  "无法启动训练预检：%1": {
+    "zh_CN": "无法启动训练预检：%1",
+    "en_US": "Cannot start training preflight: %1",
+    "ja_JP": "学習の事前診断を開始できません: %1"
+  },
+  "训练环境预检超时（%1 秒）。": {
+    "zh_CN": "训练环境预检超时（%1 秒）。",
+    "en_US": "Training environment preflight timed out (%1 s).",
+    "ja_JP": "学習環境の事前診断がタイムアウトしました（%1 秒）。"
+  },
+  "训练环境预检未返回有效报告：%1": {
+    "zh_CN": "训练环境预检未返回有效报告：%1",
+    "en_US": "Training preflight returned no valid report: %1",
+    "ja_JP": "学習事前診断から有効なレポートを取得できません: %1"
+  },
+  "排队中": {
+    "zh_CN": "排队中",
+    "en_US": "Queued",
+    "ja_JP": "待機中"
+  },
+  "准备数据": {
+    "zh_CN": "准备数据",
+    "en_US": "Preparing Data",
+    "ja_JP": "データを準備中"
+  },
+  "相机解算 · 稀疏点云生成": {
+    "zh_CN": "相机解算 · 稀疏点云生成",
+    "en_US": "Camera Alignment · Sparse Point Cloud Reconstruction",
+    "ja_JP": "カメラアライメント · 疎な点群を再構成"
+  },
+  "训练中": {
+    "zh_CN": "训练中",
+    "en_US": "Training",
+    "ja_JP": "学習中"
+  },
+  "发布模型": {
+    "zh_CN": "发布模型",
+    "en_US": "Publishing Model",
+    "ja_JP": "モデルを確定中"
+  },
+  "等待训练采样…": {
+    "zh_CN": "等待训练采样…",
+    "en_US": "Waiting for training samples…",
+    "ja_JP": "学習サンプルを待機中…"
+  },
+  "尚未开始训练": {
+    "zh_CN": "尚未开始训练",
+    "en_US": "Training Not Started",
+    "ja_JP": "学習未開始"
+  },
+  "迭代": {
+    "zh_CN": "迭代",
+    "en_US": "Iteration",
+    "ja_JP": "反復"
+  },
+  "训练 PSNR": {
+    "zh_CN": "训练 PSNR",
+    "en_US": "Training PSNR",
+    "ja_JP": "学習 PSNR"
+  },
+  "高斯数量": {
+    "zh_CN": "高斯数量",
+    "en_US": "Gaussian Count",
+    "ja_JP": "ガウシアン数"
+  },
+  "速度": {
+    "zh_CN": "速度",
+    "en_US": "Speed",
+    "ja_JP": "速度"
+  },
+  "已用时": {
+    "zh_CN": "已用时",
+    "en_US": "Elapsed",
+    "ja_JP": "経過時間"
+  },
+  "预计剩余": {
+    "zh_CN": "预计剩余",
+    "en_US": "Remaining",
+    "ja_JP": "残り時間"
+  },
+  "启动中": {
+    "zh_CN": "启动中",
+    "en_US": "Starting",
+    "ja_JP": "起動中"
+  },
+  "稀疏点数": {
+    "zh_CN": "稀疏点数",
+    "en_US": "Sparse Point Count",
+    "ja_JP": "疎な点群の点数"
+  },
+  "已完成": {
+    "zh_CN": "已完成",
+    "en_US": "Completed",
+    "ja_JP": "完了"
+  },
+  "找不到可写的临时工作区。已检查非系统盘和当前用户临时目录；也可通过 GSW_UNTITLED_ROOT 指定位置。": {
+    "zh_CN": "找不到可写的临时工作区。已检查非系统盘和当前用户临时目录；也可通过 GSW_UNTITLED_ROOT 指定位置。",
+    "en_US": "No writable temporary workspace found. Non-system drives and the user temp directory were checked. Set GSW_UNTITLED_ROOT to specify another location.",
+    "ja_JP": "書き込み可能な一時ワークスペースが見つかりません。システム以外のドライブとユーザーの一時ディレクトリを確認しました。GSW_UNTITLED_ROOT で場所を指定できます。"
+  },
+  "Unable to create data migration marker: %1": {
+    "zh_CN": "无法创建数据迁移标记：%1",
+    "en_US": "Unable to create data migration marker: %1",
+    "ja_JP": "データ移行マーカーを作成できません: %1"
+  },
+  "Unable to write data migration marker: %1": {
+    "zh_CN": "无法写入数据迁移标记：%1",
+    "en_US": "Unable to write data migration marker: %1",
+    "ja_JP": "データ移行マーカーを書き込めません: %1"
+  },
+  "Unable to commit data migration marker: %1": {
+    "zh_CN": "无法提交数据迁移标记：%1",
+    "en_US": "Unable to commit data migration marker: %1",
+    "ja_JP": "データ移行マーカーを確定できません: %1"
+  },
+  "Unable to create project data directory: %1": {
+    "zh_CN": "无法创建工程数据目录：%1",
+    "en_US": "Unable to create project data directory: %1",
+    "ja_JP": "プロジェクトデータのディレクトリを作成できません: %1"
+  },
+  "Project data contains an unsupported symbolic link: %1": {
+    "zh_CN": "工程数据包含不支持的符号链接：%1",
+    "en_US": "Project data contains an unsupported symbolic link: %1",
+    "ja_JP": "プロジェクトデータに未対応のシンボリックリンクがあります: %1"
+  },
+  "Unable to copy project data: %1": {
+    "zh_CN": "无法复制工程数据：%1",
+    "en_US": "Unable to copy project data: %1",
+    "ja_JP": "プロジェクトデータをコピーできません: %1"
+  },
+  "Project directory does not exist: %1": {
+    "zh_CN": "工程目录不存在：%1",
+    "en_US": "Project directory does not exist: %1",
+    "ja_JP": "プロジェクトディレクトリが存在しません: %1"
+  },
+  "Temporary project directory does not exist: %1": {
+    "zh_CN": "临时工程目录不存在：%1",
+    "en_US": "Temporary project directory does not exist: %1",
+    "ja_JP": "一時プロジェクトディレクトリが存在しません: %1"
+  },
+  "Untitled Project": {
+    "zh_CN": "未命名工程",
+    "en_US": "Untitled Project",
+    "ja_JP": "無題のプロジェクト"
+  },
+  "Unable to open project: %1": {
+    "zh_CN": "无法打开工程：%1",
+    "en_US": "Unable to open project: %1",
+    "ja_JP": "プロジェクトを開けません: %1"
+  },
+  "Invalid project file: %1": {
+    "zh_CN": "工程文件无效：%1",
+    "en_US": "Invalid project file: %1",
+    "ja_JP": "プロジェクトファイルが無効です: %1"
+  },
+  "Unsupported project schema version: %1": {
+    "zh_CN": "不支持的工程格式版本：%1",
+    "en_US": "Unsupported project schema version: %1",
+    "ja_JP": "未対応のプロジェクト形式バージョンです: %1"
+  },
+  "No project is open.": {
+    "zh_CN": "尚未打开工程。",
+    "en_US": "No project is open.",
+    "ja_JP": "プロジェクトが開かれていません。"
+  },
+  "A project file path is required.": {
+    "zh_CN": "必须指定工程文件路径。",
+    "en_US": "A project file path is required.",
+    "ja_JP": "プロジェクトファイルのパスを指定してください。"
+  },
+  "Project save directory does not exist: %1": {
+    "zh_CN": "工程保存目录不存在：%1",
+    "en_US": "Project save directory does not exist: %1",
+    "ja_JP": "プロジェクトの保存先ディレクトリが存在しません: %1"
+  },
+  "Choose a project file outside the current working data directory.": {
+    "zh_CN": "请选择当前工作数据目录之外的工程文件位置。",
+    "en_US": "Choose a project file outside the current working data directory.",
+    "ja_JP": "現在の作業データディレクトリの外にプロジェクトファイルを保存してください。"
+  },
+  "Project data directory already exists: %1": {
+    "zh_CN": "工程数据目录已存在：%1",
+    "en_US": "Project data directory already exists: %1",
+    "ja_JP": "プロジェクトデータのディレクトリは既に存在します: %1"
+  },
+  "Unable to finalize project data directory: %1": {
+    "zh_CN": "无法完成工程数据目录迁移：%1",
+    "en_US": "Unable to finalize project data directory: %1",
+    "ja_JP": "プロジェクトデータディレクトリの移行を完了できません: %1"
+  },
+  "Unable to save project: %1": {
+    "zh_CN": "无法保存工程：%1",
+    "en_US": "Unable to save project: %1",
+    "ja_JP": "プロジェクトを保存できません: %1"
+  },
+  "Unable to write project file: %1": {
+    "zh_CN": "无法写入工程文件：%1",
+    "en_US": "Unable to write project file: %1",
+    "ja_JP": "プロジェクトファイルを書き込めません: %1"
+  },
+  "Unable to commit project file: %1": {
+    "zh_CN": "无法提交工程文件：%1",
+    "en_US": "Unable to commit project file: %1",
+    "ja_JP": "プロジェクトファイルを確定できません: %1"
+  },
+  "A project file is required before migrating project data.": {
+    "zh_CN": "迁移工程数据前必须先指定工程文件。",
+    "en_US": "A project file is required before migrating project data.",
+    "ja_JP": "プロジェクトデータを移行する前にプロジェクトファイルを指定してください。"
+  },
+  "Project data directory already exists and does not belong to this pending save: %1": {
+    "zh_CN": "工程数据目录已存在，且不属于本次待完成的保存：%1",
+    "en_US": "Project data directory already exists and does not belong to this pending save: %1",
+    "ja_JP": "プロジェクトデータのディレクトリが既に存在し、今回の保存には属していません: %1"
+  },
+  "Dataset directory does not exist: %1": {
+    "zh_CN": "数据集目录不存在：%1",
+    "en_US": "Dataset directory does not exist: %1",
+    "ja_JP": "データセットディレクトリが存在しません: %1"
+  },
+  "Invalid object or transform in group operation.": {
+    "zh_CN": "整组操作中存在无效对象或变换。",
+    "en_US": "Invalid object or transform in group operation.",
+    "ja_JP": "グループ操作に無効なオブジェクトまたは変換があります。"
+  },
+  "Scene translation must be finite.": {
+    "zh_CN": "场景位移必须为有限数值。",
+    "en_US": "Scene translation must be finite.",
+    "ja_JP": "シーンの移動量は有限値である必要があります。"
+  },
+  "Scene rotation must be a finite quaternion.": {
+    "zh_CN": "场景旋转必须为有限值四元数。",
+    "en_US": "Scene rotation must be a finite quaternion.",
+    "ja_JP": "シーンの回転は有限値のクォータニオンである必要があります。"
+  },
+  "Scene scale must contain finite, non-zero values.": {
+    "zh_CN": "场景缩放必须包含有限且非零的数值。",
+    "en_US": "Scene scale must contain finite, non-zero values.",
+    "ja_JP": "シーンのスケールは有限のゼロでない値である必要があります。"
+  },
+  "Finish the pending project data migration before cleaning imported data.": {
+    "zh_CN": "请先完成待处理的工程数据迁移，再清理导入数据。",
+    "en_US": "Finish the pending project data migration before cleaning imported data.",
+    "ja_JP": "保留中のプロジェクトデータ移行を完了してからインポートデータを整理してください。"
+  },
+  "There is no selected imported data to clear.": {
+    "zh_CN": "没有选中的可清理导入数据。",
+    "en_US": "There is no selected imported data to clear.",
+    "ja_JP": "整理対象のインポートデータが選択されていません。"
+  },
+  "Another scene is stored in this dataset. Remove its association first.": {
+    "zh_CN": "此数据集中还存有其他场景，请先解除其关联。",
+    "en_US": "Another scene is stored in this dataset. Remove its association first.",
+    "ja_JP": "このデータセットには別のシーンがあります。先に関連付けを解除してください。"
+  },
+  "The current scene is stored inside the managed dataset. Clear the scene association as well, or move the scene outside the dataset first.": {
+    "zh_CN": "当前场景位于托管数据集内。请同时解除场景关联，或先将场景移出数据集。",
+    "en_US": "The current scene is stored inside the managed dataset. Clear the scene association as well, or move the scene outside the dataset first.",
+    "ja_JP": "現在のシーンは管理対象データセット内にあります。シーンの関連付けも解除するか、先にデータセット外へ移動してください。"
+  },
+  "Unable to prepare the managed dataset cleanup area: %1": {
+    "zh_CN": "无法准备托管数据集清理区域：%1",
+    "en_US": "Unable to prepare the managed dataset cleanup area: %1",
+    "ja_JP": "管理対象データセットの整理領域を準備できません: %1"
+  },
+  "Unable to stage the managed dataset for cleanup: %1": {
+    "zh_CN": "无法暂存待清理的托管数据集：%1",
+    "en_US": "Unable to stage the managed dataset for cleanup: %1",
+    "ja_JP": "整理する管理対象データセットを一時領域に移せません: %1"
+  },
+  "Unable to save the cleaned project state: %1": {
+    "zh_CN": "无法保存清理后的工程状态：%1",
+    "en_US": "Unable to save the cleaned project state: %1",
+    "ja_JP": "整理後のプロジェクト状態を保存できません: %1"
+  },
+  "Unable to save the cleaned project state, and the managed dataset could not be restored from %1: %2": {
+    "zh_CN": "无法保存清理后的工程状态，且无法从 %1 恢复托管数据集：%2",
+    "en_US": "Unable to save the cleaned project state, and the managed dataset could not be restored from %1: %2",
+    "ja_JP": "整理後のプロジェクト状態を保存できず、%1 から管理対象データセットを復元できません: %2"
+  },
+  "Finish the pending project data migration before cleaning reconstruction data.": {
+    "zh_CN": "请先完成待处理的工程数据迁移，再清理重建数据。",
+    "en_US": "Finish the pending project data migration before cleaning reconstruction data.",
+    "ja_JP": "保留中のプロジェクトデータ移行を完了してから再構成データを整理してください。"
+  },
+  "No dataset is attached.": {
+    "zh_CN": "未关联数据集。",
+    "en_US": "No dataset is attached.",
+    "ja_JP": "データセットが関連付けられていません。"
+  },
+  "Reconstruction data belongs to an external linked dataset and will not be modified.": {
+    "zh_CN": "重建数据属于外部关联数据集，不会被修改。",
+    "en_US": "Reconstruction data belongs to an external linked dataset and will not be modified.",
+    "ja_JP": "再構成データは外部関連付けのデータセットに属するため変更しません。"
+  },
+  "No managed reconstruction data was found.": {
+    "zh_CN": "未找到托管重建数据。",
+    "en_US": "No managed reconstruction data was found.",
+    "ja_JP": "管理対象の再構成データが見つかりません。"
+  },
+  "Unable to prepare the reconstruction cleanup area: %1": {
+    "zh_CN": "无法准备重建清理区域：%1",
+    "en_US": "Unable to prepare the reconstruction cleanup area: %1",
+    "ja_JP": "再構成データの整理領域を準備できません: %1"
+  },
+  "Unable to stage reconstruction data for cleanup: %1": {
+    "zh_CN": "无法暂存待清理的重建数据：%1",
+    "en_US": "Unable to stage reconstruction data for cleanup: %1",
+    "ja_JP": "整理する再構成データを一時領域に移せません: %1"
+  },
+  "Unable to stage reconstruction data for cleanup, and some files could not be restored from: %1": {
+    "zh_CN": "无法暂存待清理的重建数据，且部分文件无法从以下位置恢复：%1",
+    "en_US": "Unable to stage reconstruction data for cleanup, and some files could not be restored from: %1",
+    "ja_JP": "再構成データを一時領域に移せず、一部のファイルを次の場所から復元できません: %1"
+  },
+  "Unable to open PLY file: %1": {
+    "zh_CN": "无法打开 PLY 文件：%1",
+    "en_US": "Unable to open PLY file: %1",
+    "ja_JP": "PLY ファイルを開けません: %1"
+  },
+  "The selected file is not a PLY file.": {
+    "zh_CN": "所选文件不是 PLY 文件。",
+    "en_US": "The selected file is not a PLY file.",
+    "ja_JP": "選択したファイルは PLY ファイルではありません。"
+  },
+  "The PLY header is incomplete or unsupported.": {
+    "zh_CN": "PLY 文件头不完整或不受支持。",
+    "en_US": "The PLY header is incomplete or unsupported.",
+    "ja_JP": "PLY ヘッダーが不完全、または未対応です。"
+  },
+  "Unsupported PLY format: %1": {
+    "zh_CN": "不支持的 PLY 格式：%1",
+    "en_US": "Unsupported PLY format: %1",
+    "ja_JP": "未対応の PLY 形式です: %1"
+  },
+  "Frames per second must be finite and greater than zero": {
+    "zh_CN": "每秒帧数必须为有限正数",
+    "en_US": "Frames per second must be finite and greater than zero",
+    "ja_JP": "毎秒のフレーム数には有限の正数を指定してください"
+  },
+  "Could not create the worker configuration directory": {
+    "zh_CN": "无法创建工作进程配置目录",
+    "en_US": "Could not create the worker configuration directory",
+    "ja_JP": "ワーカープロセスの設定ディレクトリを作成できません"
+  },
+  "Unable to read artifact for hashing: %1": {
+    "zh_CN": "无法读取文件以计算哈希值：%1",
+    "en_US": "Unable to read artifact for hashing: %1",
+    "ja_JP": "ハッシュ計算用のファイルを読み取れません: %1"
+  },
+  "Unable to hash artifact: %1": {
+    "zh_CN": "无法计算文件哈希值：%1",
+    "en_US": "Unable to hash artifact: %1",
+    "ja_JP": "ファイルのハッシュを計算できません: %1"
+  },
+  "Unable to create artifact integrity record: %1": {
+    "zh_CN": "无法创建文件完整性记录：%1",
+    "en_US": "Unable to create artifact integrity record: %1",
+    "ja_JP": "ファイルの整合性レコードを作成できません: %1"
+  },
+  "Unable to write artifact integrity record: %1": {
+    "zh_CN": "无法写入文件完整性记录：%1",
+    "en_US": "Unable to write artifact integrity record: %1",
+    "ja_JP": "ファイルの整合性レコードを書き込めません: %1"
+  },
+  "Unable to commit artifact integrity record: %1": {
+    "zh_CN": "无法提交文件完整性记录：%1",
+    "en_US": "Unable to commit artifact integrity record: %1",
+    "ja_JP": "ファイルの整合性レコードを確定できません: %1"
+  },
+  "Artifact source does not exist: %1": {
+    "zh_CN": "源文件不存在：%1",
+    "en_US": "Artifact source does not exist: %1",
+    "ja_JP": "ソースファイルが存在しません: %1"
+  },
+  "Unable to create artifact directory: %1": {
+    "zh_CN": "无法创建文件目录：%1",
+    "en_US": "Unable to create artifact directory: %1",
+    "ja_JP": "ファイルディレクトリを作成できません: %1"
+  },
+  "Unable to open artifact source: %1": {
+    "zh_CN": "无法打开源文件：%1",
+    "en_US": "Unable to open artifact source: %1",
+    "ja_JP": "ソースファイルを開けません: %1"
+  },
+  "Unable to create durable artifact: %1": {
+    "zh_CN": "无法创建持久化文件：%1",
+    "en_US": "Unable to create durable artifact: %1",
+    "ja_JP": "永続化ファイルを作成できません: %1"
+  },
+  "Unable to read artifact source: %1": {
+    "zh_CN": "无法读取源文件：%1",
+    "en_US": "Unable to read artifact source: %1",
+    "ja_JP": "ソースファイルを読み取れません: %1"
+  },
+  "Unable to write durable artifact: %1": {
+    "zh_CN": "无法写入持久化文件：%1",
+    "en_US": "Unable to write durable artifact: %1",
+    "ja_JP": "永続化ファイルを書き込めません: %1"
+  },
+  "Artifact source changed while it was being copied.": {
+    "zh_CN": "复制期间源文件发生了变化。",
+    "en_US": "Artifact source changed while it was being copied.",
+    "ja_JP": "コピー中にソースファイルが変更されました。"
+  },
+  "Unable to publish durable artifact: %1": {
+    "zh_CN": "无法发布持久化文件：%1",
+    "en_US": "Unable to publish durable artifact: %1",
+    "ja_JP": "永続化ファイルを確定できません: %1"
+  },
+  "Artifact integrity record is missing: %1": {
+    "zh_CN": "缺少文件完整性记录：%1",
+    "en_US": "Artifact integrity record is missing: %1",
+    "ja_JP": "ファイルの整合性レコードがありません: %1"
+  },
+  "Artifact integrity record is invalid: %1": {
+    "zh_CN": "文件完整性记录无效：%1",
+    "en_US": "Artifact integrity record is invalid: %1",
+    "ja_JP": "ファイルの整合性レコードが無効です: %1"
+  },
+  "Artifact size or integrity metadata does not match.": {
+    "zh_CN": "文件大小或完整性元数据不匹配。",
+    "en_US": "Artifact size or integrity metadata does not match.",
+    "ja_JP": "ファイルサイズまたは整合性メタデータが一致しません。"
+  },
+  "Artifact checksum does not match.": {
+    "zh_CN": "文件校验和不匹配。",
+    "en_US": "Artifact checksum does not match.",
+    "ja_JP": "ファイルのチェックサムが一致しません。"
+  },
+  "Unable to read backup source: %1": {
+    "zh_CN": "无法读取备份源：%1",
+    "en_US": "Unable to read backup source: %1",
+    "ja_JP": "バックアップ元を読み取れません: %1"
+  },
+  "Unable to hash backup source: %1": {
+    "zh_CN": "无法计算备份源哈希值：%1",
+    "en_US": "Unable to hash backup source: %1",
+    "ja_JP": "バックアップ元のハッシュを計算できません: %1"
+  },
+  "Unable to open backup source: %1": {
+    "zh_CN": "无法打开备份源：%1",
+    "en_US": "Unable to open backup source: %1",
+    "ja_JP": "バックアップ元を開けません: %1"
+  },
+  "Unable to create backup object: %1": {
+    "zh_CN": "无法创建备份对象：%1",
+    "en_US": "Unable to create backup object: %1",
+    "ja_JP": "バックアップオブジェクトを作成できません: %1"
+  },
+  "Unable to write backup object: %1": {
+    "zh_CN": "无法写入备份对象：%1",
+    "en_US": "Unable to write backup object: %1",
+    "ja_JP": "バックアップオブジェクトを書き込めません: %1"
+  },
+  "Unable to flush backup object: %1": {
+    "zh_CN": "无法将备份对象刷新到磁盘：%1",
+    "en_US": "Unable to flush backup object: %1",
+    "ja_JP": "バックアップオブジェクトをディスクにフラッシュできません: %1"
+  },
+  "Backup source changed while it was being copied.": {
+    "zh_CN": "复制期间备份源发生了变化。",
+    "en_US": "Backup source changed while it was being copied.",
+    "ja_JP": "コピー中にバックアップ元が変更されました。"
+  },
+  "Unable to publish backup object: %1": {
+    "zh_CN": "无法发布备份对象：%1",
+    "en_US": "Unable to publish backup object: %1",
+    "ja_JP": "バックアップオブジェクトを確定できません: %1"
+  },
+  "Unable to open backup manifest: %1": {
+    "zh_CN": "无法打开备份清单：%1",
+    "en_US": "Unable to open backup manifest: %1",
+    "ja_JP": "バックアップマニフェストを開けません: %1"
+  },
+  "Invalid backup manifest: %1": {
+    "zh_CN": "备份清单无效：%1",
+    "en_US": "Invalid backup manifest: %1",
+    "ja_JP": "バックアップマニフェストが無効です: %1"
+  },
+  "Unsupported backup manifest.": {
+    "zh_CN": "不支持此备份清单。",
+    "en_US": "Unsupported backup manifest.",
+    "ja_JP": "このバックアップマニフェストはサポートされていません。"
+  },
+  "Backup manifest is incomplete.": {
+    "zh_CN": "备份清单不完整。",
+    "en_US": "Backup manifest is incomplete.",
+    "ja_JP": "バックアップマニフェストが不完全です。"
+  },
+  "Project file or data directory is missing.": {
+    "zh_CN": "缺少工程文件或数据目录。",
+    "en_US": "Project file or data directory is missing.",
+    "ja_JP": "プロジェクトファイルまたはデータディレクトリがありません。"
+  },
+  "Choose a backup location outside the project data directory.": {
+    "zh_CN": "请选择工程数据目录之外的备份位置。",
+    "en_US": "Choose a backup location outside the project data directory.",
+    "ja_JP": "プロジェクトのデータディレクトリ外にバックアップ先を指定してください。"
+  },
+  "Unable to create external backup store: %1": {
+    "zh_CN": "无法创建外部备份存储：%1",
+    "en_US": "Unable to create external backup store: %1",
+    "ja_JP": "外部バックアップストレージを作成できません: %1"
+  },
+  "Unable to create backup manifest: %1": {
+    "zh_CN": "无法创建备份清单：%1",
+    "en_US": "Unable to create backup manifest: %1",
+    "ja_JP": "バックアップマニフェストを作成できません: %1"
+  },
+  "Unable to write backup manifest: %1": {
+    "zh_CN": "无法写入备份清单：%1",
+    "en_US": "Unable to write backup manifest: %1",
+    "ja_JP": "バックアップマニフェストを書き込めません: %1"
+  },
+  "Unable to commit backup manifest: %1": {
+    "zh_CN": "无法提交备份清单：%1",
+    "en_US": "Unable to commit backup manifest: %1",
+    "ja_JP": "バックアップマニフェストを確定できません: %1"
+  },
+  "Some external backups are invalid:\n%1": {
+    "zh_CN": "部分外部备份无效：\n%1",
+    "en_US": "Some external backups are invalid:\n%1",
+    "ja_JP": "一部の外部バックアップが無効です:\n%1"
+  },
+  "Backup snapshot identity mismatch.": {
+    "zh_CN": "备份快照标识不匹配。",
+    "en_US": "Backup snapshot identity mismatch.",
+    "ja_JP": "バックアップスナップショットの識別情報が一致しません。"
+  },
+  "Unable to create backup restore directory.": {
+    "zh_CN": "无法创建备份恢复目录。",
+    "en_US": "Unable to create backup restore directory.",
+    "ja_JP": "バックアップ復元ディレクトリを作成できません。"
+  },
+  "Backup manifest contains an invalid file.": {
+    "zh_CN": "备份清单包含无效文件。",
+    "en_US": "Backup manifest contains an invalid file.",
+    "ja_JP": "バックアップマニフェストに無効なファイルが含まれています。"
+  },
+  "Backup object checksum mismatch: %1": {
+    "zh_CN": "备份对象校验和不匹配：%1",
+    "en_US": "Backup object checksum mismatch: %1",
+    "ja_JP": "バックアップオブジェクトのチェックサムが一致しません: %1"
+  },
+  "Unable to create restored directory: %1": {
+    "zh_CN": "无法创建恢复目录：%1",
+    "en_US": "Unable to create restored directory: %1",
+    "ja_JP": "復元先ディレクトリを作成できません: %1"
+  },
+  "Unable to restore backup file: %1": {
+    "zh_CN": "无法恢复备份文件：%1",
+    "en_US": "Unable to restore backup file: %1",
+    "ja_JP": "バックアップファイルを復元できません: %1"
+  },
+  "Unable to write restored file: %1": {
+    "zh_CN": "无法写入恢复文件：%1",
+    "en_US": "Unable to write restored file: %1",
+    "ja_JP": "復元ファイルを書き込めません: %1"
+  },
+  "Unable to publish restored file: %1": {
+    "zh_CN": "无法发布恢复文件：%1",
+    "en_US": "Unable to publish restored file: %1",
+    "ja_JP": "復元ファイルを確定できません: %1"
+  },
+  "Unable to open restored project for link repair: %1": {
+    "zh_CN": "无法打开恢复的工程以修复链接：%1",
+    "en_US": "Unable to open restored project for link repair: %1",
+    "ja_JP": "リンク修復のために復元したプロジェクトを開けません: %1"
+  },
+  "Restored project JSON is invalid: %1": {
+    "zh_CN": "恢复的工程 JSON 无效：%1",
+    "en_US": "Restored project JSON is invalid: %1",
+    "ja_JP": "復元したプロジェクトの JSON が無効です: %1"
+  },
+  "Unable to repair restored project links: %1": {
+    "zh_CN": "无法修复恢复工程的链接：%1",
+    "en_US": "Unable to repair restored project links: %1",
+    "ja_JP": "復元したプロジェクトのリンクを修復できません: %1"
+  },
+  "Unable to write restored project links: %1": {
+    "zh_CN": "无法写入恢复工程的链接：%1",
+    "en_US": "Unable to write restored project links: %1",
+    "ja_JP": "復元したプロジェクトのリンクを書き込めません: %1"
+  },
+  "Unable to commit restored project links: %1": {
+    "zh_CN": "无法提交恢复工程的链接：%1",
+    "en_US": "Unable to commit restored project links: %1",
+    "ja_JP": "復元したプロジェクトのリンクを確定できません: %1"
+  },
+  "Native Preview": {
+    "zh_CN": "原生预览版",
+    "en_US": "Native Preview",
+    "ja_JP": "ネイティブプレビュー版"
+  },
+  "GSW Project (*.gsw.json);;JSON (*.json);;All files (*.*)": {
+    "zh_CN": "GSW 工程 (*.gsw.json);;JSON (*.json);;所有文件 (*.*)",
+    "en_US": "GSW Project (*.gsw.json);;JSON (*.json);;All files (*.*)",
+    "ja_JP": "GSW プロジェクト (*.gsw.json);;JSON (*.json);;すべてのファイル (*.*)"
+  },
+  "GSW Project (*.gsw.json)": {
+    "zh_CN": "GSW 工程 (*.gsw.json)",
+    "en_US": "GSW Project (*.gsw.json)",
+    "ja_JP": "GSW プロジェクト (*.gsw.json)"
+  },
+  "PLY Scene (*.ply);;All files (*.*)": {
+    "zh_CN": "PLY 场景 (*.ply);;所有文件 (*.*)",
+    "en_US": "PLY Scene (*.ply);;All files (*.*)",
+    "ja_JP": "PLY シーン (*.ply);;すべてのファイル (*.*)"
+  },
+  "Gaussian Splat": {
+    "zh_CN": "高斯点",
+    "en_US": "Gaussian Splat",
+    "ja_JP": "ガウシアンスプラット"
+  },
+  "COLMAP sparse": {
+    "zh_CN": "COLMAP 稀疏重建",
+    "en_US": "COLMAP sparse",
+    "ja_JP": "COLMAP 疎な再構築"
+  },
+  "Unable to write the mesh cache: %1": {
+    "zh_CN": "无法写入网格缓存：%1",
+    "en_US": "Unable to write the mesh cache: %1",
+    "ja_JP": "メッシュキャッシュを書き込めません: %1"
+  },
+  "The mesh-cache page is truncated: %1": {
+    "zh_CN": "网格缓存页被截断：%1",
+    "en_US": "The mesh-cache page is truncated: %1",
+    "ja_JP": "メッシュキャッシュページが途中で切れています: %1"
+  },
+  "The mesh-cache index is invalid.": {
+    "zh_CN": "网格缓存索引无效。",
+    "en_US": "The mesh-cache index is invalid.",
+    "ja_JP": "メッシュキャッシュのインデックスが無効です。"
+  },
+  "The mesh cache is stale or incomplete.": {
+    "zh_CN": "网格缓存已过期或不完整。",
+    "en_US": "The mesh cache is stale or incomplete.",
+    "ja_JP": "メッシュキャッシュが古いか不完全です。"
+  },
+  "The requested mesh-cache node is invalid.": {
+    "zh_CN": "请求的网格缓存节点无效。",
+    "en_US": "The requested mesh-cache node is invalid.",
+    "ja_JP": "要求されたメッシュキャッシュノードが無効です。"
+  },
+  "The requested mesh-cache node is empty or too large.": {
+    "zh_CN": "请求的网格缓存节点为空或过大。",
+    "en_US": "The requested mesh-cache node is empty or too large.",
+    "ja_JP": "要求されたメッシュキャッシュノードが空か大きすぎます。"
+  },
+  "Unable to open the mesh-cache data: %1": {
+    "zh_CN": "无法打开网格缓存数据：%1",
+    "en_US": "Unable to open the mesh-cache data: %1",
+    "ja_JP": "メッシュキャッシュデータを開けません: %1"
+  },
+  "Unable to write mesh-cache bucket %1: %2": {
+    "zh_CN": "无法写入网格缓存分桶 %1：%2",
+    "en_US": "Unable to write mesh-cache bucket %1: %2",
+    "ja_JP": "メッシュキャッシュのバケット %1 を書き込めません: %2"
+  },
+  "The mesh-cache builder has already been used.": {
+    "zh_CN": "网格缓存构建器已被使用。",
+    "en_US": "The mesh-cache builder has already been used.",
+    "ja_JP": "メッシュキャッシュビルダーは使用済みです。"
+  },
+  "The mesh vertex count exceeds the 32-bit PLY index range.": {
+    "zh_CN": "网格顶点数超出 PLY 32 位索引范围。",
+    "en_US": "The mesh vertex count exceeds the 32-bit PLY index range.",
+    "ja_JP": "メッシュの頂点数が PLY の32ビットインデックス範囲を超えています。"
+  },
+  "The source mesh no longer exists.": {
+    "zh_CN": "源网格已不存在。",
+    "en_US": "The source mesh no longer exists.",
+    "ja_JP": "ソースメッシュが存在しません。"
+  },
+  "Unable to create the mesh-cache directory %1.": {
+    "zh_CN": "无法创建网格缓存目录 %1。",
+    "en_US": "Unable to create the mesh-cache directory %1.",
+    "ja_JP": "メッシュキャッシュディレクトリ %1 を作成できません。"
+  },
+  "Unable to create temporary mesh-cache storage.": {
+    "zh_CN": "无法创建临时网格缓存存储。",
+    "en_US": "Unable to create temporary mesh-cache storage.",
+    "ja_JP": "メッシュキャッシュの一時ストレージを作成できません。"
+  },
+  "Unable to create the mesh vertex spool: %1": {
+    "zh_CN": "无法创建网格顶点暂存文件：%1",
+    "en_US": "Unable to create the mesh vertex spool: %1",
+    "ja_JP": "メッシュ頂点の一時ファイルを作成できません: %1"
+  },
+  "The mesh-cache vertex stream is not active.": {
+    "zh_CN": "网格缓存顶点流未激活。",
+    "en_US": "The mesh-cache vertex stream is not active.",
+    "ja_JP": "メッシュキャッシュの頂点ストリームが有効ではありません。"
+  },
+  "The mesh vertex spool is incomplete.": {
+    "zh_CN": "网格顶点暂存文件不完整。",
+    "en_US": "The mesh vertex spool is incomplete.",
+    "ja_JP": "メッシュ頂点の一時ファイルが不完全です。"
+  },
+  "The mesh contains no finite vertices.": {
+    "zh_CN": "网格中没有坐标为有限值的顶点。",
+    "en_US": "The mesh contains no finite vertices.",
+    "ja_JP": "メッシュに有限座標の頂点がありません。"
+  },
+  "Unable to finalize the mesh vertex spool.": {
+    "zh_CN": "无法完成网格顶点暂存文件写入。",
+    "en_US": "Unable to finalize the mesh vertex spool.",
+    "ja_JP": "メッシュ頂点の一時ファイルへの書き込みを完了できません。"
+  },
+  "The mesh vertex spool has an unexpected size.": {
+    "zh_CN": "网格顶点暂存文件大小异常。",
+    "en_US": "The mesh vertex spool has an unexpected size.",
+    "ja_JP": "メッシュ頂点の一時ファイルのサイズが不正です。"
+  },
+  "Unable to map the mesh vertex spool: %1": {
+    "zh_CN": "无法映射网格顶点暂存文件：%1",
+    "en_US": "Unable to map the mesh vertex spool: %1",
+    "ja_JP": "メッシュ頂点の一時ファイルをマッピングできません: %1"
+  },
+  "Unable to create the mesh normal spool: %1": {
+    "zh_CN": "无法创建网格法线暂存文件：%1",
+    "en_US": "Unable to create the mesh normal spool: %1",
+    "ja_JP": "メッシュ法線の一時ファイルを作成できません: %1"
+  },
+  "Unable to map the mesh normal spool: %1": {
+    "zh_CN": "无法映射网格法线暂存文件：%1",
+    "en_US": "Unable to map the mesh normal spool: %1",
+    "ja_JP": "メッシュ法線の一時ファイルをマッピングできません: %1"
+  },
+  "The mesh-cache triangle stream is not active.": {
+    "zh_CN": "网格缓存三角形流未激活。",
+    "en_US": "The mesh-cache triangle stream is not active.",
+    "ja_JP": "メッシュキャッシュの三角形ストリームが有効ではありません。"
+  },
+  "A textured mesh triangle contains a non-finite UV coordinate.": {
+    "zh_CN": "带纹理的网格三角形包含非有限 UV 坐标。",
+    "en_US": "A textured mesh triangle contains a non-finite UV coordinate.",
+    "ja_JP": "テクスチャ付きメッシュの三角形に非有限の UV 座標が含まれています。"
+  },
+  "A mesh face references a vertex outside the PLY vertex table.": {
+    "zh_CN": "网格面引用了 PLY 顶点表之外的顶点。",
+    "en_US": "A mesh face references a vertex outside the PLY vertex table.",
+    "ja_JP": "メッシュの面が PLY 頂点テーブルの範囲外の頂点を参照しています。"
+  },
+  "The mesh-cache builder is not ready to finish.": {
+    "zh_CN": "网格缓存构建器尚未就绪，无法完成。",
+    "en_US": "The mesh-cache builder is not ready to finish.",
+    "ja_JP": "メッシュキャッシュビルダーは完了できる状態ではありません。"
+  },
+  "The PLY mesh contains no renderable triangles.": {
+    "zh_CN": "PLY 网格中没有可渲染三角形。",
+    "en_US": "The PLY mesh contains no renderable triangles.",
+    "ja_JP": "PLY メッシュにレンダリング可能な三角形がありません。"
+  },
+  "The source mesh changed while its cache was being built.": {
+    "zh_CN": "构建缓存期间源网格发生了变化。",
+    "en_US": "The source mesh changed while its cache was being built.",
+    "ja_JP": "キャッシュ構築中にソースメッシュが変更されました。"
+  },
+  "Unable to create mesh-cache data: %1": {
+    "zh_CN": "无法创建网格缓存数据：%1",
+    "en_US": "Unable to create mesh-cache data: %1",
+    "ja_JP": "メッシュキャッシュデータを作成できません: %1"
+  },
+  "Unable to read a mesh-cache triangle bucket: %1": {
+    "zh_CN": "无法读取网格缓存三角形分桶：%1",
+    "en_US": "Unable to read a mesh-cache triangle bucket: %1",
+    "ja_JP": "メッシュキャッシュの三角形バケットを読み取れません: %1"
+  },
+  "Unable to publish mesh-cache data: %1": {
+    "zh_CN": "无法发布网格缓存数据：%1",
+    "en_US": "Unable to publish mesh-cache data: %1",
+    "ja_JP": "メッシュキャッシュデータを確定できません: %1"
+  },
+  "Unable to publish the mesh-cache index: %1": {
+    "zh_CN": "无法发布网格缓存索引：%1",
+    "en_US": "Unable to publish the mesh-cache index: %1",
+    "ja_JP": "メッシュキャッシュのインデックスを確定できません: %1"
+  },
+  "OpenGL point shader failed: %1": {
+    "zh_CN": "OpenGL 点渲染着色器失败：%1",
+    "en_US": "OpenGL point shader failed: %1",
+    "ja_JP": "OpenGL ポイントシェーダーに失敗しました: %1"
+  },
+  "OpenGL mesh shader failed: %1": {
+    "zh_CN": "OpenGL 网格着色器失败：%1",
+    "en_US": "OpenGL mesh shader failed: %1",
+    "ja_JP": "OpenGL メッシュシェーダーに失敗しました: %1"
+  },
+  "OpenGL Gaussian shader failed: %1": {
+    "zh_CN": "OpenGL 高斯着色器失败：%1",
+    "en_US": "OpenGL Gaussian shader failed: %1",
+    "ja_JP": "OpenGL ガウシアンシェーダーに失敗しました: %1"
+  },
+  "OpenGL reference-grid shader failed: %1": {
+    "zh_CN": "OpenGL 基准网格着色器失败：%1",
+    "en_US": "OpenGL reference-grid shader failed: %1",
+    "ja_JP": "OpenGL 基準グリッドシェーダーに失敗しました: %1"
+  },
+  "OpenGL depth-overlay shader failed: %1": {
+    "zh_CN": "OpenGL 深度叠加着色器失败：%1",
+    "en_US": "OpenGL depth-overlay shader failed: %1",
+    "ja_JP": "OpenGL 深度オーバーレイシェーダーに失敗しました: %1"
+  },
+  "OpenGL model-pick shader failed: %1": {
+    "zh_CN": "OpenGL 模型拾取着色器失败：%1",
+    "en_US": "OpenGL model-pick shader failed: %1",
+    "ja_JP": "OpenGL モデルピッキングシェーダーに失敗しました: %1"
+  },
+  "GPU memory could not accept point-cache node %1.": {
+    "zh_CN": "显存无法容纳点云缓存节点 %1。",
+    "en_US": "GPU memory could not accept point-cache node %1.",
+    "ja_JP": "GPU メモリに点群キャッシュノード %1 を格納できません。"
+  },
+  "Texture was reduced to the GPU limit of %1 px.": {
+    "zh_CN": "纹理已缩小至 GPU 上限 %1 px。",
+    "en_US": "Texture was reduced to the GPU limit of %1 px.",
+    "ja_JP": "テクスチャを GPU の上限である %1 px に縮小しました。"
+  },
+  "The mesh texture could not be converted for OpenGL.": {
+    "zh_CN": "无法将网格纹理转换为 OpenGL 格式。",
+    "en_US": "The mesh texture could not be converted for OpenGL.",
+    "ja_JP": "メッシュテクスチャを OpenGL 形式に変換できません。"
+  },
+  "GPU memory could not accept the mesh texture.": {
+    "zh_CN": "显存无法容纳网格纹理。",
+    "en_US": "GPU memory could not accept the mesh texture.",
+    "ja_JP": "GPU メモリにメッシュテクスチャを格納できません。"
+  },
+  "GPU memory could not accept mesh-cache node %1.": {
+    "zh_CN": "显存无法容纳网格缓存节点 %1。",
+    "en_US": "GPU memory could not accept mesh-cache node %1.",
+    "ja_JP": "GPU メモリにメッシュキャッシュノード %1 を格納できません。"
+  },
+  "Invalid PLY element count: %1": {
+    "zh_CN": "PLY 元素数量无效：%1",
+    "en_US": "Invalid PLY element count: %1",
+    "ja_JP": "PLY 要素数が無効です: %1"
+  },
+  "Unsupported PLY property declaration: %1": {
+    "zh_CN": "不支持的 PLY 属性声明：%1",
+    "en_US": "Unsupported PLY property declaration: %1",
+    "ja_JP": "サポートされていない PLY プロパティ宣言です: %1"
+  },
+  "The PLY header does not declare a supported format.": {
+    "zh_CN": "PLY 文件头未声明支持的格式。",
+    "en_US": "The PLY header does not declare a supported format.",
+    "ja_JP": "PLY ヘッダーに対応形式が宣言されていません。"
+  },
+  "The PLY header is incomplete or too large.": {
+    "zh_CN": "PLY 文件头不完整或过大。",
+    "en_US": "The PLY header is incomplete or too large.",
+    "ja_JP": "PLY ヘッダーが不完全か大きすぎます。"
+  },
+  "The mesh contains UV coordinates but does not declare a texture image.": {
+    "zh_CN": "网格包含 UV 坐标，但未声明纹理图像。",
+    "en_US": "The mesh contains UV coordinates but does not declare a texture image.",
+    "ja_JP": "メッシュに UV 座標がありますが、テクスチャ画像が宣言されていません。"
+  },
+  "The PLY-declared texture image could not be found beside the mesh.": {
+    "zh_CN": "在网格所在目录中找不到 PLY 声明的纹理图像。",
+    "en_US": "The PLY-declared texture image could not be found beside the mesh.",
+    "ja_JP": "メッシュと同じディレクトリに PLY 指定のテクスチャ画像が見つかりません。"
+  },
+  "Unable to decode mesh texture %1: %2": {
+    "zh_CN": "无法解码网格纹理 %1：%2",
+    "en_US": "Unable to decode mesh texture %1: %2",
+    "ja_JP": "メッシュテクスチャ %1 をデコードできません: %2"
+  },
+  "PLY record is too large to process safely.": {
+    "zh_CN": "PLY 记录过大，无法安全处理。",
+    "en_US": "PLY record is too large to process safely.",
+    "ja_JP": "PLY レコードが大きすぎるため、安全に処理できません。"
+  },
+  "Unexpected end of binary PLY data while exporting.": {
+    "zh_CN": "导出时二进制 PLY 数据意外结束。",
+    "en_US": "Unexpected end of binary PLY data while exporting.",
+    "ja_JP": "エクスポート中にバイナリ PLY データが予期せず終了しました。"
+  },
+  "Unexpected end of binary PLY list data while exporting.": {
+    "zh_CN": "导出时二进制 PLY 列表数据意外结束。",
+    "en_US": "Unexpected end of binary PLY list data while exporting.",
+    "ja_JP": "エクスポート中にバイナリ PLY リストデータが予期せず終了しました。"
+  },
+  "PLY list counts must use a non-negative integer type.": {
+    "zh_CN": "PLY 列表计数必须使用非负整数类型。",
+    "en_US": "PLY list counts must use a non-negative integer type.",
+    "ja_JP": "PLY リストの要素数には非負の整数型が必要です。"
+  },
+  "PLY list record is too large to process safely.": {
+    "zh_CN": "PLY 列表记录过大，无法安全处理。",
+    "en_US": "PLY list record is too large to process safely.",
+    "ja_JP": "PLY リストレコードが大きすぎるため、安全に処理できません。"
+  },
+  "ASCII PLY record is too large to process safely.": {
+    "zh_CN": "ASCII PLY 记录过大，无法安全处理。",
+    "en_US": "ASCII PLY record is too large to process safely.",
+    "ja_JP": "ASCII PLY レコードが大きすぎるため、安全に処理できません。"
+  },
+  "Unexpected end of ASCII PLY data while exporting.": {
+    "zh_CN": "导出时 ASCII PLY 数据意外结束。",
+    "en_US": "Unexpected end of ASCII PLY data while exporting.",
+    "ja_JP": "エクスポート中に ASCII PLY データが予期せず終了しました。"
+  },
+  "Unable to write the cropped PLY file.": {
+    "zh_CN": "无法写入裁剪后的 PLY 文件。",
+    "en_US": "Unable to write the cropped PLY file.",
+    "ja_JP": "トリミング後の PLY ファイルを書き込めません。"
+  },
+  "Unexpected end of ASCII PLY data.": {
+    "zh_CN": "ASCII PLY 数据意外结束。",
+    "en_US": "Unexpected end of ASCII PLY data.",
+    "ja_JP": "ASCII PLY データが予期せず終了しました。"
+  },
+  "ASCII PLY record has fewer values than its header declares.": {
+    "zh_CN": "ASCII PLY 记录的数值数量少于文件头声明。",
+    "en_US": "ASCII PLY record has fewer values than its header declares.",
+    "ja_JP": "ASCII PLY レコードの値の数がヘッダーの宣言より少なくなっています。"
+  },
+  "ASCII PLY record contains an invalid number.": {
+    "zh_CN": "ASCII PLY 记录包含无效数值。",
+    "en_US": "ASCII PLY record contains an invalid number.",
+    "ja_JP": "ASCII PLY レコードに無効な数値が含まれています。"
+  },
+  "ASCII PLY list length is invalid.": {
+    "zh_CN": "ASCII PLY 列表长度无效。",
+    "en_US": "ASCII PLY list length is invalid.",
+    "ja_JP": "ASCII PLY リストの長さが無効です。"
+  },
+  "ASCII PLY list property is truncated.": {
+    "zh_CN": "ASCII PLY 列表属性被截断。",
+    "en_US": "ASCII PLY list property is truncated.",
+    "ja_JP": "ASCII PLY リストプロパティが途中で切れています。"
+  },
+  "ASCII PLY list contains an invalid number.": {
+    "zh_CN": "ASCII PLY 列表包含无效数值。",
+    "en_US": "ASCII PLY list contains an invalid number.",
+    "ja_JP": "ASCII PLY リストに無効な数値が含まれています。"
+  },
+  "Unexpected end of binary PLY data.": {
+    "zh_CN": "二进制 PLY 数据意外结束。",
+    "en_US": "Unexpected end of binary PLY data.",
+    "ja_JP": "バイナリ PLY データが予期せず終了しました。"
+  },
+  "Unexpected end of binary PLY list data.": {
+    "zh_CN": "二进制 PLY 列表数据意外结束。",
+    "en_US": "Unexpected end of binary PLY list data.",
+    "ja_JP": "バイナリ PLY リストデータが予期せず終了しました。"
+  },
+  "Invalid binary PLY list length.": {
+    "zh_CN": "二进制 PLY 列表长度无效。",
+    "en_US": "Invalid binary PLY list length.",
+    "ja_JP": "バイナリ PLY リストの長さが無効です。"
+  },
+  "Unable to write the temporary ASCII point spool: %1": {
+    "zh_CN": "无法写入 ASCII 点数据暂存文件：%1",
+    "en_US": "Unable to write the temporary ASCII point spool: %1",
+    "ja_JP": "ASCII 点データの一時ファイルを書き込めません: %1"
+  },
+  "Out-of-core mesh loading requires the PLY vertex element before the face element.": {
+    "zh_CN": "网格磁盘分页加载要求 PLY 顶点元素位于面元素之前。",
+    "en_US": "Out-of-core mesh loading requires the PLY vertex element before the face element.",
+    "ja_JP": "メッシュのアウトオブコア読み込みには、PLY 頂点要素が面要素より前にある必要があります。"
+  },
+  "PLY %1 record %2 has a missing scalar value.": {
+    "zh_CN": "PLY %1 的记录 %2 缺少标量值。",
+    "en_US": "PLY %1 record %2 has a missing scalar value.",
+    "ja_JP": "PLY %1 のレコード %2 にスカラー値がありません。"
+  },
+  "PLY %1 record %2 has an invalid list count.": {
+    "zh_CN": "PLY %1 的记录 %2 列表计数无效。",
+    "en_US": "PLY %1 record %2 has an invalid list count.",
+    "ja_JP": "PLY %1 のレコード %2 のリスト要素数が無効です。"
+  },
+  "PLY %1 record %2 has truncated list data.": {
+    "zh_CN": "PLY %1 的记录 %2 列表数据被截断。",
+    "en_US": "PLY %1 record %2 has truncated list data.",
+    "ja_JP": "PLY %1 のレコード %2 のリストデータが途中で切れています。"
+  },
+  "PLY mesh face contains a non-finite texture coordinate.": {
+    "zh_CN": "PLY 网格面包含非有限纹理坐标。",
+    "en_US": "PLY mesh face contains a non-finite texture coordinate.",
+    "ja_JP": "PLY メッシュの面に非有限のテクスチャ座標が含まれています。"
+  },
+  "PLY mesh face contains an invalid vertex index: %1.": {
+    "zh_CN": "PLY 网格面包含无效顶点索引：%1。",
+    "en_US": "PLY mesh face contains an invalid vertex index: %1.",
+    "ja_JP": "PLY メッシュの面に無効な頂点インデックスがあります: %1。"
+  },
+  "PLY mesh vertex %1 contains a non-finite coordinate.": {
+    "zh_CN": "PLY 网格顶点 %1 包含非有限坐标。",
+    "en_US": "PLY mesh vertex %1 contains a non-finite coordinate.",
+    "ja_JP": "PLY メッシュ頂点 %1 に非有限の座標が含まれています。"
+  },
+  "PLY face texcoord lists must contain one UV pair per corner.": {
+    "zh_CN": "PLY 面的 texcoord 列表必须为每个面角提供一对 UV 坐标。",
+    "en_US": "PLY face texcoord lists must contain one UV pair per corner.",
+    "ja_JP": "PLY 面の texcoord リストには各コーナーの UV 座標ペアが必要です。"
+  },
+  "The PLY mesh vertex table was not read.": {
+    "zh_CN": "未读取 PLY 网格顶点表。",
+    "en_US": "The PLY mesh vertex table was not read.",
+    "ja_JP": "PLY メッシュの頂点テーブルが読み取られていません。"
+  },
+  "Unable to build the mesh-cache index.": {
+    "zh_CN": "无法构建网格缓存索引。",
+    "en_US": "Unable to build the mesh-cache index.",
+    "ja_JP": "メッシュキャッシュのインデックスを構築できません。"
+  },
+  "Unable to create the point-cache directory %1.": {
+    "zh_CN": "无法创建点云缓存目录 %1。",
+    "en_US": "Unable to create the point-cache directory %1.",
+    "ja_JP": "点群キャッシュディレクトリ %1 を作成できません。"
+  },
+  "Unable to create the temporary ASCII point spool: %1": {
+    "zh_CN": "无法创建 ASCII 点数据暂存文件：%1",
+    "en_US": "Unable to create the temporary ASCII point spool: %1",
+    "ja_JP": "ASCII 点データの一時ファイルを作成できません: %1"
+  },
+  "ASCII PLY vertex %1 has an invalid or missing value.": {
+    "zh_CN": "ASCII PLY 顶点 %1 的数值无效或缺失。",
+    "en_US": "ASCII PLY vertex %1 has an invalid or missing value.",
+    "ja_JP": "ASCII PLY 頂点 %1 の値が無効か欠落しています。"
+  },
+  "The PLY file contains no finite vertices.": {
+    "zh_CN": "PLY 文件中没有坐标为有限值的顶点。",
+    "en_US": "The PLY file contains no finite vertices.",
+    "ja_JP": "PLY ファイルに有限座標の頂点がありません。"
+  },
+  "Unable to finalize the temporary ASCII point spool.": {
+    "zh_CN": "无法完成 ASCII 点数据暂存文件写入。",
+    "en_US": "Unable to finalize the temporary ASCII point spool.",
+    "ja_JP": "ASCII 点データの一時ファイルへの書き込みを完了できません。"
+  },
+  "The source point cloud changed while it was being read.": {
+    "zh_CN": "读取期间源点云发生了变化。",
+    "en_US": "The source point cloud changed while it was being read.",
+    "ja_JP": "読み込み中にソース点群が変更されました。"
+  },
+  "The temporary ASCII point spool is truncated.": {
+    "zh_CN": "ASCII 点数据暂存文件被截断。",
+    "en_US": "The temporary ASCII point spool is truncated.",
+    "ja_JP": "ASCII 点データの一時ファイルが途中で切れています。"
+  },
+  "Unable to build the point-cache index.": {
+    "zh_CN": "无法构建点云缓存索引。",
+    "en_US": "Unable to build the point-cache index.",
+    "ja_JP": "点群キャッシュのインデックスを構築できません。"
+  },
+  "Full-resolution large-cloud preview requires the vertex element to be the first non-empty PLY element.": {
+    "zh_CN": "大规模点云全分辨率预览要求顶点元素是 PLY 中首个非空元素。",
+    "en_US": "Full-resolution large-cloud preview requires the vertex element to be the first non-empty PLY element.",
+    "ja_JP": "大規模点群のフル解像度プレビューには、頂点要素が PLY の最初の空でない要素である必要があります。"
+  },
+  "Full-resolution large-cloud preview requires scalar PLY vertex properties.": {
+    "zh_CN": "大规模点云全分辨率预览要求 PLY 顶点属性为标量。",
+    "en_US": "Full-resolution large-cloud preview requires scalar PLY vertex properties.",
+    "ja_JP": "大規模点群のフル解像度プレビューには、PLY 頂点プロパティがスカラーである必要があります。"
+  },
+  "The binary PLY vertex record is too large.": {
+    "zh_CN": "二进制 PLY 顶点记录过大。",
+    "en_US": "The binary PLY vertex record is too large.",
+    "ja_JP": "バイナリ PLY 頂点レコードが大きすぎます。"
+  },
+  "Unexpected end of binary PLY data while reading the large cloud.": {
+    "zh_CN": "读取大规模点云时二进制 PLY 数据意外结束。",
+    "en_US": "Unexpected end of binary PLY data while reading the large cloud.",
+    "ja_JP": "大規模点群の読み込み中にバイナリ PLY データが予期せず終了しました。"
+  },
+  "Unable to rewind the PLY for cache construction.": {
+    "zh_CN": "无法将 PLY 读取位置回到起点以构建缓存。",
+    "en_US": "Unable to rewind the PLY for cache construction.",
+    "ja_JP": "キャッシュ構築のために PLY の読み取り位置を先頭に戻せません。"
+  },
+  "Unexpected end of binary PLY data while building its point cache.": {
+    "zh_CN": "构建点云缓存时二进制 PLY 数据意外结束。",
+    "en_US": "Unexpected end of binary PLY data while building its point cache.",
+    "ja_JP": "点群キャッシュの構築中にバイナリ PLY データが予期せず終了しました。"
+  },
+  "The mesh corner-attribute stream does not match its index stream.": {
+    "zh_CN": "网格面角属性流与索引流不匹配。",
+    "en_US": "The mesh corner-attribute stream does not match its index stream.",
+    "ja_JP": "メッシュのコーナー属性ストリームとインデックスストリームが一致しません。"
+  },
+  "The point preview limit must be greater than zero.": {
+    "zh_CN": "点云预览上限必须大于零。",
+    "en_US": "The point preview limit must be greater than zero.",
+    "ja_JP": "点群プレビューの上限はゼロより大きい必要があります。"
+  },
+  "Unable to open PLY file %1: %2": {
+    "zh_CN": "无法打开 PLY 文件 %1：%2",
+    "en_US": "Unable to open PLY file %1: %2",
+    "ja_JP": "PLY ファイル %1 を開けません: %2"
+  },
+  "The PLY file does not contain any vertices.": {
+    "zh_CN": "PLY 文件中没有顶点。",
+    "en_US": "The PLY file does not contain any vertices.",
+    "ja_JP": "PLY ファイルに頂点がありません。"
+  },
+  "The editable point limit must be greater than zero.": {
+    "zh_CN": "可编辑点数上限必须大于零。",
+    "en_US": "The editable point limit must be greater than zero.",
+    "ja_JP": "編集可能な点数の上限はゼロより大きい必要があります。"
+  },
+  "The resident mesh vertex and face limits must be greater than zero.": {
+    "zh_CN": "常驻内存网格的顶点和面数上限必须大于零。",
+    "en_US": "The resident mesh vertex and face limits must be greater than zero.",
+    "ja_JP": "メモリ常駐メッシュの頂点数と面数の上限はゼロより大きい必要があります。"
+  },
+  "The PLY face element must contain an integral list property named vertex_indices or vertex_index.": {
+    "zh_CN": "PLY 面元素必须包含名为 vertex_indices 或 vertex_index 的整数列表属性。",
+    "en_US": "The PLY face element must contain an integral list property named vertex_indices or vertex_index.",
+    "ja_JP": "PLY 面要素には vertex_indices または vertex_index という整数リストプロパティが必要です。"
+  },
+  "The PLY face texcoord property must be a scalar list.": {
+    "zh_CN": "PLY 面的 texcoord 属性必须是标量列表。",
+    "en_US": "The PLY face texcoord property must be a scalar list.",
+    "ja_JP": "PLY 面の texcoord プロパティはスカラーリストである必要があります。"
+  },
+  "The PLY vertex element must contain scalar x, y, and z properties.": {
+    "zh_CN": "PLY 顶点元素必须包含 x、y 和 z 标量属性。",
+    "en_US": "The PLY vertex element must contain scalar x, y, and z properties.",
+    "ja_JP": "PLY 頂点要素には x、y、z のスカラープロパティが必要です。"
+  },
+  "Editable PLY point clouds currently support up to %1 vertices; use a fixed-width binary PLY for full-resolution read-only preview.": {
+    "zh_CN": "可编辑 PLY 点云当前最多支持 %1 个顶点；全分辨率只读预览请使用定长二进制 PLY。",
+    "en_US": "Editable PLY point clouds currently support up to %1 vertices; use a fixed-width binary PLY for full-resolution read-only preview.",
+    "ja_JP": "編集可能な PLY 点群は現在 %1 頂点まで対応しています。フル解像度の読み取り専用プレビューには固定長バイナリ PLY を使用してください。"
+  },
+  "The PLY declares mesh faces but contains no renderable triangles.": {
+    "zh_CN": "PLY 声明了网格面，但没有可渲染三角形。",
+    "en_US": "The PLY declares mesh faces but contains no renderable triangles.",
+    "ja_JP": "PLY にメッシュ面が宣言されていますが、レンダリング可能な三角形がありません。"
+  },
+  "Choose a new file name; cropped export cannot overwrite its source PLY.": {
+    "zh_CN": "请选择新文件名；裁剪导出不能覆盖源 PLY。",
+    "en_US": "Choose a new file name; cropped export cannot overwrite its source PLY.",
+    "ja_JP": "新しいファイル名を指定してください。トリミングのエクスポートでは元の PLY を上書きできません。"
+  },
+  "Unable to open source PLY: %1": {
+    "zh_CN": "无法打开源 PLY：%1",
+    "en_US": "Unable to open source PLY: %1",
+    "ja_JP": "ソース PLY を開けません: %1"
+  },
+  "The source PLY does not contain a vertex element.": {
+    "zh_CN": "源 PLY 不包含顶点元素。",
+    "en_US": "The source PLY does not contain a vertex element.",
+    "ja_JP": "ソース PLY に頂点要素がありません。"
+  },
+  "The edit state no longer matches the source PLY vertex count.": {
+    "zh_CN": "编辑状态与源 PLY 顶点数量已不匹配。",
+    "en_US": "The edit state no longer matches the source PLY vertex count.",
+    "ja_JP": "編集状態がソース PLY の頂点数と一致しなくなりました。"
+  },
+  "This PLY contains indexed mesh faces. Native crop export currently supports point and Gaussian PLY files only.": {
+    "zh_CN": "此 PLY 包含索引网格面。原生裁剪导出目前仅支持点云与高斯 PLY 文件。",
+    "en_US": "This PLY contains indexed mesh faces. Native crop export currently supports point and Gaussian PLY files only.",
+    "ja_JP": "この PLY にはインデックス付きのメッシュ面があります。ネイティブのトリミングエクスポートは現在、点群とガウシアン PLY ファイルのみ対応しています。"
+  },
+  "No deleted vertices are available to export.": {
+    "zh_CN": "没有可导出的已删除顶点。",
+    "en_US": "No deleted vertices are available to export.",
+    "ja_JP": "エクスポートできる削除済み頂点がありません。"
+  },
+  "A cropped PLY must retain at least one vertex.": {
+    "zh_CN": "裁剪后的 PLY 必须保留至少一个顶点。",
+    "en_US": "A cropped PLY must retain at least one vertex.",
+    "ja_JP": "トリミング後の PLY には少なくとも1つの頂点を残す必要があります。"
+  },
+  "Unable to create cropped PLY: %1": {
+    "zh_CN": "无法创建裁剪后的 PLY：%1",
+    "en_US": "Unable to create cropped PLY: %1",
+    "ja_JP": "トリミング後の PLY を作成できません: %1"
+  },
+  "Unable to read trailing PLY data: %1": {
+    "zh_CN": "无法读取 PLY 尾部数据：%1",
+    "en_US": "Unable to read trailing PLY data: %1",
+    "ja_JP": "PLY の末尾データを読み取れません: %1"
+  },
+  "Unable to finalize cropped PLY: %1": {
+    "zh_CN": "无法完成裁剪后的 PLY 写入：%1",
+    "en_US": "Unable to finalize cropped PLY: %1",
+    "ja_JP": "トリミング後の PLY への書き込みを完了できません: %1"
+  },
+  "Unable to write the point-cache payload: %1": {
+    "zh_CN": "无法写入点云缓存数据：%1",
+    "en_US": "Unable to write the point-cache payload: %1",
+    "ja_JP": "点群キャッシュデータを書き込めません: %1"
+  },
+  "Unable to read a point-cache bucket: %1": {
+    "zh_CN": "无法读取点云缓存分桶：%1",
+    "en_US": "Unable to read a point-cache bucket: %1",
+    "ja_JP": "点群キャッシュのバケットを読み取れません: %1"
+  },
+  "The point-cache index is malformed.": {
+    "zh_CN": "点云缓存索引格式错误。",
+    "en_US": "The point-cache index is malformed.",
+    "ja_JP": "点群キャッシュのインデックス形式が不正です。"
+  },
+  "Invalid point-cache node request.": {
+    "zh_CN": "点云缓存节点请求无效。",
+    "en_US": "Invalid point-cache node request.",
+    "ja_JP": "点群キャッシュノードの要求が無効です。"
+  },
+  "The point-cache node is empty or too large.": {
+    "zh_CN": "点云缓存节点为空或过大。",
+    "en_US": "The point-cache node is empty or too large.",
+    "ja_JP": "点群キャッシュノードが空か大きすぎます。"
+  },
+  "Unable to open point-cache data: %1": {
+    "zh_CN": "无法打开点云缓存数据：%1",
+    "en_US": "Unable to open point-cache data: %1",
+    "ja_JP": "点群キャッシュデータを開けません: %1"
+  },
+  "The point-cache node is truncated.": {
+    "zh_CN": "点云缓存节点被截断。",
+    "en_US": "The point-cache node is truncated.",
+    "ja_JP": "点群キャッシュノードが途中で切れています。"
+  },
+  "Unable to write point-cache bucket: %1": {
+    "zh_CN": "无法写入点云缓存分桶：%1",
+    "en_US": "Unable to write point-cache bucket: %1",
+    "ja_JP": "点群キャッシュのバケットを書き込めません: %1"
+  },
+  "The point-cache builder has already been used.": {
+    "zh_CN": "点云缓存构建器已被使用。",
+    "en_US": "The point-cache builder has already been used.",
+    "ja_JP": "点群キャッシュビルダーは使用済みです。"
+  },
+  "The source point cloud no longer exists.": {
+    "zh_CN": "源点云已不存在。",
+    "en_US": "The source point cloud no longer exists.",
+    "ja_JP": "ソース点群が存在しません。"
+  },
+  "Unable to create temporary point-cache storage.": {
+    "zh_CN": "无法创建临时点云缓存存储。",
+    "en_US": "Unable to create temporary point-cache storage.",
+    "ja_JP": "点群キャッシュの一時ストレージを作成できません。"
+  },
+  "The point-cache builder is not active.": {
+    "zh_CN": "点云缓存构建器未激活。",
+    "en_US": "The point-cache builder is not active.",
+    "ja_JP": "点群キャッシュビルダーが有効ではありません。"
+  },
+  "The source point cloud changed while its cache was being built.": {
+    "zh_CN": "构建缓存期间源点云发生了变化。",
+    "en_US": "The source point cloud changed while its cache was being built.",
+    "ja_JP": "キャッシュ構築中にソース点群が変更されました。"
+  },
+  "Unable to create point-cache data: %1": {
+    "zh_CN": "无法创建点云缓存数据：%1",
+    "en_US": "Unable to create point-cache data: %1",
+    "ja_JP": "点群キャッシュデータを作成できません: %1"
+  },
+  "Unable to read a completed point-cache bucket.": {
+    "zh_CN": "无法读取已完成的点云缓存分桶。",
+    "en_US": "Unable to read a completed point-cache bucket.",
+    "ja_JP": "完成済みの点群キャッシュバケットを読み取れません。"
+  },
+  "Unable to publish point-cache data: %1": {
+    "zh_CN": "无法发布点云缓存数据：%1",
+    "en_US": "Unable to publish point-cache data: %1",
+    "ja_JP": "点群キャッシュデータを確定できません: %1"
+  },
+  "Unable to publish the point-cache index: %1": {
+    "zh_CN": "无法发布点云缓存索引：%1",
+    "en_US": "Unable to publish the point-cache index: %1",
+    "ja_JP": "点群キャッシュのインデックスを確定できません: %1"
+  },
+  "COLMAP (colmap.exe);;Executable (*.exe);;All files (*.*)": {
+    "zh_CN": "COLMAP (colmap.exe);;可执行文件 (*.exe);;所有文件 (*.*)",
+    "en_US": "COLMAP (colmap.exe);;Executable (*.exe);;All files (*.*)",
+    "ja_JP": "COLMAP (colmap.exe);;実行ファイル (*.exe);;すべてのファイル (*.*)"
+  },
+  "Unable to open recovery state: %1": {
+    "zh_CN": "无法打开恢复状态：%1",
+    "en_US": "Unable to open recovery state: %1",
+    "ja_JP": "リカバリー状態を開けません: %1"
+  },
+  "Invalid recovery state: %1": {
+    "zh_CN": "恢复状态无效：%1",
+    "en_US": "Invalid recovery state: %1",
+    "ja_JP": "リカバリー状態が無効です: %1"
+  },
+  "Unsupported recovery state version.": {
+    "zh_CN": "不支持此恢复状态版本。",
+    "en_US": "Unsupported recovery state version.",
+    "ja_JP": "このリカバリー状態のバージョンはサポートされていません。"
+  },
+  "Recovery state is incomplete.": {
+    "zh_CN": "恢复状态不完整。",
+    "en_US": "Recovery state is incomplete.",
+    "ja_JP": "リカバリー状態が不完全です。"
+  },
+  "Unable to open project snapshot: %1": {
+    "zh_CN": "无法打开工程快照：%1",
+    "en_US": "Unable to open project snapshot: %1",
+    "ja_JP": "プロジェクトスナップショットを開けません: %1"
+  },
+  "Invalid project snapshot: %1": {
+    "zh_CN": "工程快照无效：%1",
+    "en_US": "Invalid project snapshot: %1",
+    "ja_JP": "プロジェクトスナップショットが無効です: %1"
+  },
+  "Unsupported project snapshot.": {
+    "zh_CN": "不支持此工程快照。",
+    "en_US": "Unsupported project snapshot.",
+    "ja_JP": "このプロジェクトスナップショットはサポートされていません。"
+  },
+  "Project snapshot is incomplete.": {
+    "zh_CN": "工程快照不完整。",
+    "en_US": "Project snapshot is incomplete.",
+    "ja_JP": "プロジェクトスナップショットが不完全です。"
+  },
+  "Unable to create recovery workspace base: %1": {
+    "zh_CN": "无法创建恢复工作区根目录：%1",
+    "en_US": "Unable to create recovery workspace base: %1",
+    "ja_JP": "リカバリーワークスペースのベースディレクトリを作成できません: %1"
+  },
+  "Recovery workspace is outside the catalog.": {
+    "zh_CN": "恢复工作区不在目录记录中。",
+    "en_US": "Recovery workspace is outside the catalog.",
+    "ja_JP": "リカバリーワークスペースがカタログ外にあります。"
+  },
+  "Unable to create recovery state directory.": {
+    "zh_CN": "无法创建恢复状态目录。",
+    "en_US": "Unable to create recovery state directory.",
+    "ja_JP": "リカバリー状態のディレクトリを作成できません。"
+  },
+  "Unable to create recovery state: %1": {
+    "zh_CN": "无法创建恢复状态：%1",
+    "en_US": "Unable to create recovery state: %1",
+    "ja_JP": "リカバリー状態を作成できません: %1"
+  },
+  "Unable to write recovery state: %1": {
+    "zh_CN": "无法写入恢复状态：%1",
+    "en_US": "Unable to write recovery state: %1",
+    "ja_JP": "リカバリー状態を書き込めません: %1"
+  },
+  "Unable to commit recovery state: %1": {
+    "zh_CN": "无法提交恢复状态：%1",
+    "en_US": "Unable to commit recovery state: %1",
+    "ja_JP": "リカバリー状態を確定できません: %1"
+  },
+  "Some recovery states are invalid:\n%1": {
+    "zh_CN": "部分恢复状态无效：\n%1",
+    "en_US": "Some recovery states are invalid:\n%1",
+    "ja_JP": "一部のリカバリー状態が無効です:\n%1"
+  },
+  "Refusing to discard a workspace outside the recovery catalog.": {
+    "zh_CN": "拒绝丢弃恢复目录记录之外的工作区。",
+    "en_US": "Refusing to discard a workspace outside the recovery catalog.",
+    "ja_JP": "リカバリーカタログ外のワークスペースは破棄できません。"
+  },
+  "Recovery workspace identity mismatch.": {
+    "zh_CN": "恢复工作区标识不匹配。",
+    "en_US": "Recovery workspace identity mismatch.",
+    "ja_JP": "リカバリーワークスペースの識別情報が一致しません。"
+  },
+  "Unable to discard recovery workspace: %1": {
+    "zh_CN": "无法丢弃恢复工作区：%1",
+    "en_US": "Unable to discard recovery workspace: %1",
+    "ja_JP": "リカバリーワークスペースを破棄できません: %1"
+  },
+  "Managed project root is not independent from the recovery workspace.": {
+    "zh_CN": "托管工程根目录与恢复工作区不是独立目录。",
+    "en_US": "Managed project root is not independent from the recovery workspace.",
+    "ja_JP": "管理対象プロジェクトのルートがリカバリーワークスペースから独立していません。"
+  },
+  "Unable to remove copied recovery metadata: %1": {
+    "zh_CN": "无法移除已复制的恢复元数据：%1",
+    "en_US": "Unable to remove copied recovery metadata: %1",
+    "ja_JP": "コピーしたリカバリーメタデータを削除できません: %1"
+  },
+  "Unable to open project for snapshot: %1": {
+    "zh_CN": "无法打开工程以创建快照：%1",
+    "en_US": "Unable to open project for snapshot: %1",
+    "ja_JP": "スナップショット作成用のプロジェクトを開けません: %1"
+  },
+  "Snapshot retention must be at least one.": {
+    "zh_CN": "快照至少保留一个。",
+    "en_US": "Snapshot retention must be at least one.",
+    "ja_JP": "スナップショットを少なくとも1つ保持する必要があります。"
+  },
+  "Unable to snapshot invalid project JSON: %1": {
+    "zh_CN": "工程 JSON 无效，无法创建快照：%1",
+    "en_US": "Unable to snapshot invalid project JSON: %1",
+    "ja_JP": "プロジェクト JSON が無効なためスナップショットを作成できません: %1"
+  },
+  "Unable to create project history directory: %1": {
+    "zh_CN": "无法创建工程历史记录目录：%1",
+    "en_US": "Unable to create project history directory: %1",
+    "ja_JP": "プロジェクト履歴ディレクトリを作成できません: %1"
+  },
+  "Unable to create project snapshot: %1": {
+    "zh_CN": "无法创建工程快照：%1",
+    "en_US": "Unable to create project snapshot: %1",
+    "ja_JP": "プロジェクトスナップショットを作成できません: %1"
+  },
+  "Unable to write project snapshot: %1": {
+    "zh_CN": "无法写入工程快照：%1",
+    "en_US": "Unable to write project snapshot: %1",
+    "ja_JP": "プロジェクトスナップショットを書き込めません: %1"
+  },
+  "Unable to commit project snapshot: %1": {
+    "zh_CN": "无法提交工程快照：%1",
+    "en_US": "Unable to commit project snapshot: %1",
+    "ja_JP": "プロジェクトスナップショットを確定できません: %1"
+  },
+  "Some project snapshots are invalid:\n%1": {
+    "zh_CN": "部分工程快照无效：\n%1",
+    "en_US": "Some project snapshots are invalid:\n%1",
+    "ja_JP": "一部のプロジェクトスナップショットが無効です:\n%1"
+  },
+  "Project snapshot identity mismatch.": {
+    "zh_CN": "工程快照标识不匹配。",
+    "en_US": "Project snapshot identity mismatch.",
+    "ja_JP": "プロジェクトスナップショットの識別情報が一致しません。"
+  },
+  "Unable to create snapshot restore directory.": {
+    "zh_CN": "无法创建快照恢复目录。",
+    "en_US": "Unable to create snapshot restore directory.",
+    "ja_JP": "スナップショットの復元ディレクトリを作成できません。"
+  },
+  "Unable to create restored project: %1": {
+    "zh_CN": "无法创建恢复后的工程：%1",
+    "en_US": "Unable to create restored project: %1",
+    "ja_JP": "復元先のプロジェクトを作成できません: %1"
+  },
+  "Unable to write restored project: %1": {
+    "zh_CN": "无法写入恢复后的工程：%1",
+    "en_US": "Unable to write restored project: %1",
+    "ja_JP": "復元先のプロジェクトを書き込めません: %1"
+  },
+  "Unable to commit restored project: %1": {
+    "zh_CN": "无法提交恢复后的工程：%1",
+    "en_US": "Unable to commit restored project: %1",
+    "ja_JP": "復元先のプロジェクトを確定できません: %1"
+  },
+  "GPU shared preview currently requires Windows.": {
+    "zh_CN": "共享显存预览目前需要 Windows。",
+    "en_US": "GPU shared preview currently requires Windows.",
+    "ja_JP": "GPU メモリ共有プレビューは現在 Windows が必要です。"
+  },
+  "No current OpenGL context is available.": {
+    "zh_CN": "当前没有可用的 OpenGL 上下文。",
+    "en_US": "No current OpenGL context is available.",
+    "ja_JP": "現在利用可能な OpenGL コンテキストがありません。"
+  },
+  "OpenGL driver does not expose GL_EXT_memory_object and GL_EXT_memory_object_win32.": {
+    "zh_CN": "OpenGL 驱动未提供 GL_EXT_memory_object 与 GL_EXT_memory_object_win32。",
+    "en_US": "OpenGL driver does not expose GL_EXT_memory_object and GL_EXT_memory_object_win32.",
+    "ja_JP": "OpenGL ドライバーが GL_EXT_memory_object と GL_EXT_memory_object_win32 を提供していません。"
+  },
+  "OpenGL external-memory entry points are unavailable.": {
+    "zh_CN": "OpenGL 外部内存入口函数不可用。",
+    "en_US": "OpenGL external-memory entry points are unavailable.",
+    "ja_JP": "OpenGL 外部メモリのエントリーポイントを利用できません。"
+  },
+  "Windows shared objects unavailable.": {
+    "zh_CN": "Windows 共享对象不可用。",
+    "en_US": "Windows shared objects unavailable.",
+    "ja_JP": "Windows 共有オブジェクトを利用できません。"
+  },
+  "OpenFileMappingW failed (%1).": {
+    "zh_CN": "OpenFileMappingW 失败（%1）。",
+    "en_US": "OpenFileMappingW failed (%1).",
+    "ja_JP": "OpenFileMappingW に失敗しました (%1)。"
+  },
+  "MapViewOfFile failed (%1).": {
+    "zh_CN": "MapViewOfFile 失败（%1）。",
+    "en_US": "MapViewOfFile failed (%1).",
+    "ja_JP": "MapViewOfFile に失敗しました (%1)。"
+  },
+  "Win32 memory import unavailable.": {
+    "zh_CN": "Win32 内存导入不可用。",
+    "en_US": "Win32 memory import unavailable.",
+    "ja_JP": "Win32 メモリインポートを利用できません。"
+  },
+  "OpenProcess for GPU preview failed (%1).": {
+    "zh_CN": "GPU 预览 OpenProcess 失败（%1）。",
+    "en_US": "OpenProcess for GPU preview failed (%1).",
+    "ja_JP": "GPU プレビューの OpenProcess に失敗しました (%1)。"
+  },
+  "DuplicateHandle for CUDA VMM failed (%1).": {
+    "zh_CN": "CUDA VMM 的 DuplicateHandle 失败（%1）。",
+    "en_US": "DuplicateHandle for CUDA VMM failed (%1).",
+    "ja_JP": "CUDA VMM の DuplicateHandle に失敗しました (%1)。"
+  },
+  "OpenGL CUDA-memory import failed (GL 0x%1).": {
+    "zh_CN": "OpenGL 导入 CUDA 内存失败（GL 0x%1）。",
+    "en_US": "OpenGL CUDA-memory import failed (GL 0x%1).",
+    "ja_JP": "OpenGL による CUDA メモリのインポートに失敗しました (GL 0x%1)。"
+  },
+  "OpenGL shared buffer binding failed (GL 0x%1).": {
+    "zh_CN": "OpenGL 共享缓冲区绑定失败（GL 0x%1）。",
+    "en_US": "OpenGL shared buffer binding failed (GL 0x%1).",
+    "ja_JP": "OpenGL 共有バッファーのバインドに失敗しました (GL 0x%1)。"
+  },
+  "GPU preview descriptor is not ready.": {
+    "zh_CN": "GPU 预览描述符尚未就绪。",
+    "en_US": "GPU preview descriptor is not ready.",
+    "ja_JP": "GPU プレビュー記述子の準備ができていません。"
+  },
+  "No current OpenGL context for GPU preview.": {
+    "zh_CN": "GPU 预览没有当前 OpenGL 上下文。",
+    "en_US": "No current OpenGL context for GPU preview.",
+    "ja_JP": "GPU プレビュー用の現在の OpenGL コンテキストがありません。"
+  },
+  "OpenGL device identity query is unavailable.": {
+    "zh_CN": "OpenGL 设备标识查询不可用。",
+    "en_US": "OpenGL device identity query is unavailable.",
+    "ja_JP": "OpenGL デバイス識別情報のクエリを利用できません。"
+  },
+  "CUDA and OpenGL are using different GPUs.": {
+    "zh_CN": "CUDA 与 OpenGL 正在使用不同的 GPU。",
+    "en_US": "CUDA and OpenGL are using different GPUs.",
+    "ja_JP": "CUDA と OpenGL が異なる GPU を使用しています。"
+  },
+  "Windows control mapping unavailable.": {
+    "zh_CN": "Windows 控制映射不可用。",
+    "en_US": "Windows control mapping unavailable.",
+    "ja_JP": "Windows 制御マッピングを利用できません。"
+  },
+  "GPU preview control mapping is not open.": {
+    "zh_CN": "GPU 预览控制映射尚未打开。",
+    "en_US": "GPU preview control mapping is not open.",
+    "ja_JP": "GPU プレビュー制御マッピングが開かれていません。"
+  },
+  "Waiting for GPU preview frame failed (%1).": {
+    "zh_CN": "等待 GPU 预览帧失败（%1）。",
+    "en_US": "Waiting for GPU preview frame failed (%1).",
+    "ja_JP": "GPU プレビューフレームの待機に失敗しました (%1)。"
+  },
+  "GPU preview descriptor/control geometry mismatch.": {
+    "zh_CN": "GPU 预览描述符与控制区布局不匹配。",
+    "en_US": "GPU preview descriptor/control geometry mismatch.",
+    "ja_JP": "GPU プレビュー記述子と制御領域のレイアウトが一致しません。"
+  },
+  "Descriptor destination is null.": {
+    "zh_CN": "描述符目标为空。",
+    "en_US": "Descriptor destination is null.",
+    "ja_JP": "記述子の出力先が null です。"
+  },
+  "GPU preview event is not valid JSON.": {
+    "zh_CN": "GPU 预览事件不是有效的 JSON。",
+    "en_US": "GPU preview event is not valid JSON.",
+    "ja_JP": "GPU プレビューイベントが有効な JSON ではありません。"
+  },
+  "GPU preview event header is invalid.": {
+    "zh_CN": "GPU 预览事件头无效。",
+    "en_US": "GPU preview event header is invalid.",
+    "ja_JP": "GPU プレビューイベントのヘッダーが無効です。"
+  },
+  "GPU preview state is unsupported.": {
+    "zh_CN": "不支持此 GPU 预览状态。",
+    "en_US": "GPU preview state is unsupported.",
+    "ja_JP": "この GPU プレビュー状態はサポートされていません。"
+  },
+  "GPU preview producer PID is invalid.": {
+    "zh_CN": "GPU 预览生产进程 PID 无效。",
+    "en_US": "GPU preview producer PID is invalid.",
+    "ja_JP": "GPU プレビュー生成プロセスの PID が無効です。"
+  },
+  "GPU preview memory handle is invalid.": {
+    "zh_CN": "GPU 预览内存句柄无效。",
+    "en_US": "GPU preview memory handle is invalid.",
+    "ja_JP": "GPU プレビューのメモリハンドルが無効です。"
+  },
+  "GPU preview memory handle type is invalid.": {
+    "zh_CN": "GPU 预览内存句柄类型无效。",
+    "en_US": "GPU preview memory handle type is invalid.",
+    "ja_JP": "GPU プレビューのメモリハンドル型が無効です。"
+  },
+  "GPU preview memory handle type is unsupported.": {
+    "zh_CN": "不支持此 GPU 预览内存句柄类型。",
+    "en_US": "GPU preview memory handle type is unsupported.",
+    "ja_JP": "この GPU プレビューのメモリハンドル型はサポートされていません。"
+  },
+  "GPU preview buffer geometry is invalid.": {
+    "zh_CN": "GPU 预览缓冲区布局无效。",
+    "en_US": "GPU preview buffer geometry is invalid.",
+    "ja_JP": "GPU プレビューバッファーのレイアウトが無効です。"
+  },
+  "GPU preview slot count or stride is incompatible.": {
+    "zh_CN": "GPU 预览槽数量或步长不兼容。",
+    "en_US": "GPU preview slot count or stride is incompatible.",
+    "ja_JP": "GPU プレビューのスロット数またはストライドに互換性がありません。"
+  },
+  "GPU preview slot geometry is unsafe.": {
+    "zh_CN": "GPU 预览槽布局不安全。",
+    "en_US": "GPU preview slot geometry is unsafe.",
+    "ja_JP": "GPU プレビュースロットのレイアウトが安全ではありません。"
+  },
+  "GPU preview control object name is invalid.": {
+    "zh_CN": "GPU 预览控制对象名称无效。",
+    "en_US": "GPU preview control object name is invalid.",
+    "ja_JP": "GPU プレビュー制御オブジェクト名が無効です。"
+  },
+  "GPU preview release event name is invalid.": {
+    "zh_CN": "GPU 预览释放事件名称无效。",
+    "en_US": "GPU preview release event name is invalid.",
+    "ja_JP": "GPU プレビュー解放イベント名が無効です。"
+  },
+  "GPU preview device identity is invalid.": {
+    "zh_CN": "GPU 预览设备标识无效。",
+    "en_US": "GPU preview device identity is invalid.",
+    "ja_JP": "GPU プレビューデバイスの識別情報が無効です。"
+  },
+  "GPU preview control block is too small.": {
+    "zh_CN": "GPU 预览控制块过小。",
+    "en_US": "GPU preview control block is too small.",
+    "ja_JP": "GPU プレビュー制御ブロックが小さすぎます。"
+  },
+  "GPU preview control header is incompatible.": {
+    "zh_CN": "GPU 预览控制头不兼容。",
+    "en_US": "GPU preview control header is incompatible.",
+    "ja_JP": "GPU プレビュー制御ヘッダーに互換性がありません。"
+  },
+  "GPU preview control snapshot is not stable.": {
+    "zh_CN": "GPU 预览控制快照不稳定。",
+    "en_US": "GPU preview control snapshot is not stable.",
+    "ja_JP": "GPU プレビュー制御スナップショットが安定していません。"
+  },
+  "GPU preview control geometry is incompatible.": {
+    "zh_CN": "GPU 预览控制区布局不兼容。",
+    "en_US": "GPU preview control geometry is incompatible.",
+    "ja_JP": "GPU プレビュー制御領域のレイアウトに互換性がありません。"
+  },
+  "GPU preview control geometry is unsafe.": {
+    "zh_CN": "GPU 预览控制区布局不安全。",
+    "en_US": "GPU preview control geometry is unsafe.",
+    "ja_JP": "GPU プレビュー制御領域のレイアウトが安全ではありません。"
+  },
+  "GPU preview point count exceeds capacity.": {
+    "zh_CN": "GPU 预览点数超出容量。",
+    "en_US": "GPU preview point count exceeds capacity.",
+    "ja_JP": "GPU プレビューの点数が容量を超えています。"
+  },
+  "GPU preview scene bounds are invalid.": {
+    "zh_CN": "GPU 预览场景边界无效。",
+    "en_US": "GPU preview scene bounds are invalid.",
+    "ja_JP": "GPU プレビューシーンの境界が無効です。"
+  },
+  "Active training recovery data is incomplete.": {
+    "zh_CN": "活动训练恢复数据不完整。",
+    "en_US": "Active training recovery data is incomplete.",
+    "ja_JP": "実行中の学習のリカバリーデータが不完全です。"
+  },
+  "Unable to create training recovery directory: %1": {
+    "zh_CN": "无法创建训练恢复目录：%1",
+    "en_US": "Unable to create training recovery directory: %1",
+    "ja_JP": "学習リカバリーディレクトリを作成できません: %1"
+  },
+  "Unable to create training recovery record: %1": {
+    "zh_CN": "无法创建训练恢复记录：%1",
+    "en_US": "Unable to create training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードを作成できません: %1"
+  },
+  "Unable to write training recovery record: %1": {
+    "zh_CN": "无法写入训练恢复记录：%1",
+    "en_US": "Unable to write training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードを書き込めません: %1"
+  },
+  "Unable to commit training recovery record: %1": {
+    "zh_CN": "无法提交训练恢复记录：%1",
+    "en_US": "Unable to commit training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードを確定できません: %1"
+  },
+  "Unable to open training recovery record: %1": {
+    "zh_CN": "无法打开训练恢复记录：%1",
+    "en_US": "Unable to open training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードを開けません: %1"
+  },
+  "Invalid training recovery record: %1": {
+    "zh_CN": "训练恢复记录无效：%1",
+    "en_US": "Invalid training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードが無効です: %1"
+  },
+  "Unsupported training recovery record.": {
+    "zh_CN": "不支持此训练恢复记录。",
+    "en_US": "Unsupported training recovery record.",
+    "ja_JP": "この学習リカバリーレコードはサポートされていません。"
+  },
+  "Training recovery record is incomplete.": {
+    "zh_CN": "训练恢复记录不完整。",
+    "en_US": "Training recovery record is incomplete.",
+    "ja_JP": "学習リカバリーレコードが不完全です。"
+  },
+  "Unable to remove training recovery record: %1": {
+    "zh_CN": "无法移除训练恢复记录：%1",
+    "en_US": "Unable to remove training recovery record: %1",
+    "ja_JP": "学習リカバリーレコードを削除できません: %1"
+  },
+  "语言 / Language": {
+    "zh_CN": "语言 / Language",
+    "en_US": "Language",
+    "ja_JP": "言語 / Language"
+  },
+  "语言设置": {
+    "zh_CN": "语言设置",
+    "en_US": "Language Settings",
+    "ja_JP": "言語設定"
+  },
+  "无法保存语言设置，请检查配置目录的写入权限。": {
+    "zh_CN": "无法保存语言设置，请检查配置目录的写入权限。",
+    "en_US": "Cannot save the language setting. Check write permission for the configuration directory.",
+    "ja_JP": "言語設定を保存できません。設定ディレクトリの書き込み権限を確認してください。"
+  },
+  "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。": {
+    "zh_CN": "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。",
+    "en_US": "Selected %1. This language will be applied on the next launch; your current project and running tasks will not be interrupted.",
+    "ja_JP": "%1 を選択しました。次回起動時に適用されます。現在のプロジェクトと実行中のタスクは中断されません。"
+  },
+  "Loss": {
+    "zh_CN": "损失",
+    "en_US": "Loss",
+    "ja_JP": "損失"
+  }
+}

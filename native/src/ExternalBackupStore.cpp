@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "ExternalBackupStore.h"
 
 #include <QCryptographicHash>
@@ -70,7 +71,7 @@ QString hashFile(const QString &path, QString *errorMessage) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to read backup source: %1")
+                QCoreApplication::translate("Workbench", "Unable to read backup source: %1")
                     .arg(file.errorString()));
     return {};
   }
@@ -80,7 +81,7 @@ QString hashFile(const QString &path, QString *errorMessage) {
     const QByteArray chunk = file.read(chunkSize);
     if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to hash backup source: %1")
+                  QCoreApplication::translate("Workbench", "Unable to hash backup source: %1")
                       .arg(file.errorString()));
       return {};
     }
@@ -94,7 +95,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
   QFile input(sourcePath);
   if (!input.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open backup source: %1")
+                QCoreApplication::translate("Workbench", "Unable to open backup source: %1")
                     .arg(input.errorString()));
     return {};
   }
@@ -103,7 +104,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
   temporary.setAutoRemove(false);
   if (!temporary.open()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create backup object: %1")
+                QCoreApplication::translate("Workbench", "Unable to create backup object: %1")
                     .arg(temporary.errorString()));
     return {};
   }
@@ -120,7 +121,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
       temporary.close();
       QFile::remove(temporaryPath);
       assignError(errorMessage,
-                  QStringLiteral("Unable to write backup object: %1")
+                  QCoreApplication::translate("Workbench", "Unable to write backup object: %1")
                       .arg(detail));
       return {};
     }
@@ -131,7 +132,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
     temporary.close();
     QFile::remove(temporaryPath);
     assignError(errorMessage,
-                QStringLiteral("Unable to flush backup object: %1")
+                QCoreApplication::translate("Workbench", "Unable to flush backup object: %1")
                     .arg(temporary.errorString()));
     return {};
   }
@@ -143,8 +144,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
     QFile::remove(temporaryPath);
     assignError(errorMessage,
                 verificationError.isEmpty()
-                    ? QStringLiteral(
-                          "Backup source changed while it was being copied.")
+                    ? QCoreApplication::translate("Workbench", "Backup source changed while it was being copied.")
                     : verificationError);
     return {};
   }
@@ -160,7 +160,7 @@ QString storeObject(const QString &sourcePath, const QString &objectsRoot,
   if (!temporary.rename(objectPath)) {
     QFile::remove(temporaryPath);
     assignError(errorMessage,
-                QStringLiteral("Unable to publish backup object: %1")
+                QCoreApplication::translate("Workbench", "Unable to publish backup object: %1")
                     .arg(objectPath));
     return {};
   }
@@ -173,7 +173,7 @@ readSnapshot(const QString &manifestPath, QJsonObject *manifestRoot,
   QFile manifest(manifestPath);
   if (!manifest.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open backup manifest: %1")
+                QCoreApplication::translate("Workbench", "Unable to open backup manifest: %1")
                     .arg(manifest.errorString()));
     return std::nullopt;
   }
@@ -182,7 +182,7 @@ readSnapshot(const QString &manifestPath, QJsonObject *manifestRoot,
       QJsonDocument::fromJson(manifest.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Invalid backup manifest: %1")
+                QCoreApplication::translate("Workbench", "Invalid backup manifest: %1")
                     .arg(parseError.errorString()));
     return std::nullopt;
   }
@@ -190,7 +190,7 @@ readSnapshot(const QString &manifestPath, QJsonObject *manifestRoot,
   if (root.value(QStringLiteral("schemaVersion")).toInt() != 1 ||
       !root.value(QStringLiteral("files")).isArray()) {
     assignError(errorMessage,
-                QStringLiteral("Unsupported backup manifest."));
+                QCoreApplication::translate("Workbench", "Unsupported backup manifest."));
     return std::nullopt;
   }
   ExternalBackupSnapshot snapshot;
@@ -209,7 +209,7 @@ readSnapshot(const QString &manifestPath, QJsonObject *manifestRoot,
       root.value(QStringLiteral("totalBytes")).toInteger();
   if (!snapshot.isValid()) {
     assignError(errorMessage,
-                QStringLiteral("Backup manifest is incomplete."));
+                QCoreApplication::translate("Workbench", "Backup manifest is incomplete."));
     return std::nullopt;
   }
   if (manifestRoot != nullptr) {
@@ -238,12 +238,12 @@ ExternalBackupStore::backupProject(const QString &projectFilePath,
   const QString dataRoot = normalizedAbsolutePath(projectDataRoot);
   if (!QFileInfo(projectFile).isFile() || !QFileInfo(dataRoot).isDir()) {
     assignError(errorMessage,
-                QStringLiteral("Project file or data directory is missing."));
+                QCoreApplication::translate("Workbench", "Project file or data directory is missing."));
     return std::nullopt;
   }
   if (pathInside(dataRoot, mBackupRoot)) {
     assignError(errorMessage,
-                QStringLiteral("Choose a backup location outside the project "
+                QCoreApplication::translate("Workbench", "Choose a backup location outside the project "
                                "data directory."));
     return std::nullopt;
   }
@@ -256,7 +256,7 @@ ExternalBackupStore::backupProject(const QString &projectFilePath,
       QDir(projectBackupRoot).filePath(QStringLiteral("snapshots"));
   if (!QDir().mkpath(objectsRoot) || !QDir().mkpath(snapshotsRoot)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create external backup store: %1")
+                QCoreApplication::translate("Workbench", "Unable to create external backup store: %1")
                     .arg(projectBackupRoot));
     return std::nullopt;
   }
@@ -369,7 +369,7 @@ ExternalBackupStore::backupProject(const QString &projectFilePath,
   output.setDirectWriteFallback(false);
   if (!output.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create backup manifest: %1")
+                QCoreApplication::translate("Workbench", "Unable to create backup manifest: %1")
                     .arg(output.errorString()));
     return std::nullopt;
   }
@@ -378,13 +378,13 @@ ExternalBackupStore::backupProject(const QString &projectFilePath,
   if (output.write(serialized) != serialized.size()) {
     output.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write backup manifest: %1")
+                QCoreApplication::translate("Workbench", "Unable to write backup manifest: %1")
                     .arg(output.errorString()));
     return std::nullopt;
   }
   if (!output.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit backup manifest: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit backup manifest: %1")
                     .arg(output.errorString()));
     return std::nullopt;
   }
@@ -424,7 +424,7 @@ ExternalBackupStore::snapshots(QString *errorMessage) const {
             });
   if (!invalid.isEmpty()) {
     assignError(errorMessage,
-                QStringLiteral("Some external backups are invalid:\n%1")
+                QCoreApplication::translate("Workbench", "Some external backups are invalid:\n%1")
                     .arg(invalid.join(QLatin1Char('\n'))));
   }
   return result;
@@ -443,7 +443,7 @@ bool ExternalBackupStore::restore(
       stored->snapshotId != snapshot.snapshotId) {
     if (stored.has_value()) {
       assignError(errorMessage,
-                  QStringLiteral("Backup snapshot identity mismatch."));
+                  QCoreApplication::translate("Workbench", "Backup snapshot identity mismatch."));
     }
     return false;
   }
@@ -452,7 +452,7 @@ bool ExternalBackupStore::restore(
   const QString destination = normalizedAbsolutePath(destinationRoot);
   if (!QDir().mkpath(destination)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create backup restore directory."));
+                QCoreApplication::translate("Workbench", "Unable to create backup restore directory."));
     return false;
   }
   const QString projectBackupRoot =
@@ -474,21 +474,21 @@ bool ExternalBackupStore::restore(
         !pathInside(destination, target) ||
         QFileInfo(object).size() != size) {
       assignError(errorMessage,
-                  QStringLiteral("Backup manifest contains an invalid file."));
+                  QCoreApplication::translate("Workbench", "Backup manifest contains an invalid file."));
       return false;
     }
     QString hashError;
     if (hashFile(object, &hashError) != sha256) {
       assignError(errorMessage,
                   hashError.isEmpty()
-                      ? QStringLiteral("Backup object checksum mismatch: %1")
+                      ? QCoreApplication::translate("Workbench", "Backup object checksum mismatch: %1")
                             .arg(object)
                       : hashError);
       return false;
     }
     if (!QDir().mkpath(QFileInfo(target).absolutePath())) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to create restored directory: %1")
+                  QCoreApplication::translate("Workbench", "Unable to create restored directory: %1")
                       .arg(QFileInfo(target).absolutePath()));
       return false;
     }
@@ -498,7 +498,7 @@ bool ExternalBackupStore::restore(
     if (!input.open(QIODevice::ReadOnly) ||
         !output.open(QIODevice::WriteOnly)) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to restore backup file: %1")
+                  QCoreApplication::translate("Workbench", "Unable to restore backup file: %1")
                       .arg(relative));
       return false;
     }
@@ -508,14 +508,14 @@ bool ExternalBackupStore::restore(
           output.write(chunk) != chunk.size()) {
         output.cancelWriting();
         assignError(errorMessage,
-                    QStringLiteral("Unable to write restored file: %1")
+                    QCoreApplication::translate("Workbench", "Unable to write restored file: %1")
                         .arg(relative));
         return false;
       }
     }
     if (!output.commit()) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to publish restored file: %1")
+                  QCoreApplication::translate("Workbench", "Unable to publish restored file: %1")
                       .arg(relative));
       return false;
     }
@@ -536,7 +536,7 @@ bool ExternalBackupStore::restore(
     QFile projectFile(restoredProject);
     if (!projectFile.open(QIODevice::ReadOnly)) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to open restored project for link "
+                  QCoreApplication::translate("Workbench", "Unable to open restored project for link "
                                  "repair: %1")
                       .arg(projectFile.errorString()));
       return false;
@@ -548,7 +548,7 @@ bool ExternalBackupStore::restore(
     if (parseError.error != QJsonParseError::NoError ||
         !projectDocument.isObject()) {
       assignError(errorMessage,
-                  QStringLiteral("Restored project JSON is invalid: %1")
+                  QCoreApplication::translate("Workbench", "Restored project JSON is invalid: %1")
                       .arg(parseError.errorString()));
       return false;
     }
@@ -567,7 +567,7 @@ bool ExternalBackupStore::restore(
     repairedProject.setDirectWriteFallback(false);
     if (!repairedProject.open(QIODevice::WriteOnly)) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to repair restored project links: %1")
+                  QCoreApplication::translate("Workbench", "Unable to repair restored project links: %1")
                       .arg(repairedProject.errorString()));
       return false;
     }
@@ -576,13 +576,13 @@ bool ExternalBackupStore::restore(
     if (repairedProject.write(repaired) != repaired.size()) {
       repairedProject.cancelWriting();
       assignError(errorMessage,
-                  QStringLiteral("Unable to write restored project links: %1")
+                  QCoreApplication::translate("Workbench", "Unable to write restored project links: %1")
                       .arg(repairedProject.errorString()));
       return false;
     }
     if (!repairedProject.commit()) {
       assignError(errorMessage,
-                  QStringLiteral("Unable to commit restored project links: %1")
+                  QCoreApplication::translate("Workbench", "Unable to commit restored project links: %1")
                       .arg(repairedProject.errorString()));
       return false;
     }

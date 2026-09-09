@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "DatasetImportDialog.h"
 
 #include <QApplication>
@@ -51,7 +52,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
     : QDialog(parent),
       mInitialDirectory(normalizedPath(initialDirectory)) {
   setObjectName(QStringLiteral("datasetImportDialog"));
-  setWindowTitle(QStringLiteral("添加照片与视频"));
+  setWindowTitle(QCoreApplication::translate("Workbench", "添加照片与视频"));
   setModal(true);
   setMinimumSize(640, 460);
 
@@ -61,8 +62,8 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
   auto *introduction = new QLabel(
       unsavedProject
-          ? QStringLiteral("素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。")
-          : QStringLiteral("素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。"),
+          ? QCoreApplication::translate("Workbench", "素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。")
+          : QCoreApplication::translate("Workbench", "素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。"),
       this);
   introduction->setObjectName(QStringLiteral("datasetImportIntroductionLabel"));
   introduction->setWordWrap(true);
@@ -70,8 +71,8 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
   auto *projectPath = new QLabel(
       unsavedProject
-          ? QStringLiteral("当前工程：未命名工程（尚未保存，首次保存时可选择位置）")
-          : QStringLiteral("当前工程数据：%1")
+          ? QCoreApplication::translate("Workbench", "当前工程：未命名工程（尚未保存，首次保存时可选择位置）")
+          : QCoreApplication::translate("Workbench", "当前工程数据：%1")
                 .arg(QDir::toNativeSeparators(projectRoot)),
       this);
   projectPath->setObjectName(QStringLiteral("datasetImportProjectPathLabel"));
@@ -88,33 +89,33 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mSceneName->setObjectName(QStringLiteral("datasetImportSceneEdit"));
   mSceneName->setClearButtonEnabled(true);
   mSceneName->setPlaceholderText(
-      QStringLiteral("仅允许英文、数字、点、下划线和连字符"));
-  form->addRow(QStringLiteral("场景名称"), mSceneName);
+      QCoreApplication::translate("Workbench", "仅允许英文、数字、点、下划线和连字符"));
+  form->addRow(QCoreApplication::translate("Workbench", "场景名称"), mSceneName);
 
   mFramesPerSecond = new QDoubleSpinBox(this);
   mFramesPerSecond->setObjectName(QStringLiteral("datasetImportFpsSpin"));
-  mFramesPerSecond->setAccessibleName(QStringLiteral("视频抽帧帧率"));
+  mFramesPerSecond->setAccessibleName(QCoreApplication::translate("Workbench", "视频抽帧帧率"));
   mFramesPerSecond->setRange(0.2, 10.0);
   mFramesPerSecond->setSingleStep(0.2);
   mFramesPerSecond->setDecimals(1);
   mFramesPerSecond->setValue(2.0);
   mFramesPerSecond->setSuffix(QStringLiteral(" FPS"));
   mFramesPerSecond->setKeyboardTracking(false);
-  form->addRow(QStringLiteral("视频抽帧"), mFramesPerSecond);
+  form->addRow(QCoreApplication::translate("Workbench", "视频抽帧"), mFramesPerSecond);
 
   mOverwrite = new QCheckBox(
-      QStringLiteral("覆盖同名托管数据集（开始前会再次确认）"), this);
+      QCoreApplication::translate("Workbench", "覆盖同名托管数据集（开始前会再次确认）"), this);
   mOverwrite->setObjectName(QStringLiteral("datasetImportOverwriteCheck"));
   form->addRow(QString(), mOverwrite);
   rootLayout->addLayout(form);
 
-  auto *sourceTitle = new QLabel(QStringLiteral("媒体来源"), this);
+  auto *sourceTitle = new QLabel(QCoreApplication::translate("Workbench", "媒体来源"), this);
   sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
   rootLayout->addWidget(sourceTitle);
 
   mSourceList = new QListWidget(this);
   mSourceList->setObjectName(QStringLiteral("datasetImportSourceList"));
-  mSourceList->setAccessibleName(QStringLiteral("待导入媒体来源"));
+  mSourceList->setAccessibleName(QCoreApplication::translate("Workbench", "待导入媒体来源"));
   mSourceList->setAlternatingRowColors(true);
   mSourceList->setSelectionMode(QAbstractItemView::ExtendedSelection);
   mSourceList->setMinimumHeight(190);
@@ -122,14 +123,14 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
   auto *sourceButtons = new QHBoxLayout();
   sourceButtons->setSpacing(6);
-  auto *addFilesButton = new QPushButton(QStringLiteral("继续添加照片/视频..."), this);
+  auto *addFilesButton = new QPushButton(QCoreApplication::translate("Workbench", "继续添加照片/视频..."), this);
   addFilesButton->setObjectName(QStringLiteral("datasetImportAddFilesButton"));
-  auto *addDirectoryButton = new QPushButton(QStringLiteral("继续添加目录..."), this);
+  auto *addDirectoryButton = new QPushButton(QCoreApplication::translate("Workbench", "继续添加目录..."), this);
   addDirectoryButton->setObjectName(
       QStringLiteral("datasetImportAddDirectoryButton"));
-  mRemoveButton = new QPushButton(QStringLiteral("移除所选"), this);
+  mRemoveButton = new QPushButton(QCoreApplication::translate("Workbench", "移除所选"), this);
   mRemoveButton->setObjectName(QStringLiteral("datasetImportRemoveButton"));
-  mClearButton = new QPushButton(QStringLiteral("清空"), this);
+  mClearButton = new QPushButton(QCoreApplication::translate("Workbench", "清空"), this);
   mClearButton->setObjectName(QStringLiteral("datasetImportClearButton"));
   sourceButtons->addWidget(addFilesButton);
   sourceButtons->addWidget(addDirectoryButton);
@@ -147,9 +148,9 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   buttons->setObjectName(QStringLiteral("datasetImportButtonBox"));
   auto *cancelButton = buttons->button(QDialogButtonBox::Cancel);
   cancelButton->setObjectName(QStringLiteral("datasetImportCancelButton"));
-  cancelButton->setText(QStringLiteral("取消"));
+  cancelButton->setText(QCoreApplication::translate("Workbench", "取消"));
   mImportButton =
-      buttons->addButton(QStringLiteral("添加到工程"), QDialogButtonBox::AcceptRole);
+      buttons->addButton(QCoreApplication::translate("Workbench", "添加到工程"), QDialogButtonBox::AcceptRole);
   mImportButton->setObjectName(QStringLiteral("datasetImportStartButton"));
   mImportButton->setDefault(true);
   rootLayout->addWidget(buttons);
@@ -200,15 +201,15 @@ const std::optional<DatasetImportPlan> &DatasetImportDialog::validatedPlan() con
 void DatasetImportDialog::accept() {
   const DatasetImportRequest importRequest = request();
   if (importRequest.sceneName.isEmpty()) {
-    QMessageBox::critical(this, QStringLiteral("场景名称为空"),
-                          QStringLiteral("请输入托管数据集的场景名称。"));
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "场景名称为空"),
+                          QCoreApplication::translate("Workbench", "请输入托管数据集的场景名称。"));
     mSceneName->setFocus();
     return;
   }
   if (importRequest.sourcePaths.isEmpty()) {
     QMessageBox::critical(
-        this, QStringLiteral("尚未添加媒体"),
-        QStringLiteral("请添加照片、视频或包含媒体文件的目录。"));
+        this, QCoreApplication::translate("Workbench", "尚未添加媒体"),
+        QCoreApplication::translate("Workbench", "请添加照片、视频或包含媒体文件的目录。"));
     return;
   }
 
@@ -218,11 +219,11 @@ void DatasetImportDialog::accept() {
   QApplication::restoreOverrideCursor();
   if (!mValidatedPlan.has_value()) {
     const QString message = error == QStringLiteral("Invalid scene name")
-                                ? QStringLiteral("场景名称需为 1–120 个英文字母、数字、点、下划线或连字符；点不能位于开头或结尾、不能连续出现，且不能使用 Windows 保留名。")
+                                ? QCoreApplication::translate("Workbench", "场景名称需为 1–120 个英文字母、数字、点、下划线或连字符；点不能位于开头或结尾、不能连续出现，且不能使用 Windows 保留名。")
                             : error == QStringLiteral("No supported image or video files were found")
-                                ? QStringLiteral("所选来源中没有找到支持的照片或视频文件。")
+                                ? QCoreApplication::translate("Workbench", "所选来源中没有找到支持的照片或视频文件。")
                                 : error;
-    QMessageBox::critical(this, QStringLiteral("无法导入媒体"), message);
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "无法导入媒体"), message);
     return;
   }
 
@@ -231,9 +232,8 @@ void DatasetImportDialog::accept() {
 
 void DatasetImportDialog::addFiles() {
   const QStringList paths = QFileDialog::getOpenFileNames(
-      this, QStringLiteral("选择照片或视频"), mInitialDirectory,
-      QStringLiteral(
-          "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;"
+      this, QCoreApplication::translate("Workbench", "选择照片或视频"), mInitialDirectory,
+      QCoreApplication::translate("Workbench", "照片与视频 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v);;"
           "照片 (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp);;"
           "视频 (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)"));
   if (paths.isEmpty()) {
@@ -245,7 +245,7 @@ void DatasetImportDialog::addFiles() {
 
 void DatasetImportDialog::addDirectory() {
   const QString path = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("选择包含照片或视频的目录"), mInitialDirectory,
+      this, QCoreApplication::translate("Workbench", "选择包含照片或视频的目录"), mInitialDirectory,
       QFileDialog::ShowDirsOnly);
   if (path.isEmpty()) {
     return;
@@ -307,14 +307,14 @@ void DatasetImportDialog::refreshSummary() {
   }
 
   if (mSourceList->count() == 0) {
-    mSummary->setText(QStringLiteral("尚未添加媒体来源。"));
+    mSummary->setText(QCoreApplication::translate("Workbench", "尚未添加媒体来源。"));
   } else {
-    QString text = QStringLiteral("已添加 %1 个来源：%2 个文件、%3 个目录。目录会在开始导入时递归扫描。")
+    QString text = QCoreApplication::translate("Workbench", "已添加 %1 个来源：%2 个文件、%3 个目录。目录会在开始导入时递归扫描。")
                        .arg(mSourceList->count())
                        .arg(fileCount)
                        .arg(directoryCount);
     if (mOverwrite->isChecked()) {
-      text += QStringLiteral(" 将覆盖同名托管数据集。");
+      text += QCoreApplication::translate("Workbench", " 将覆盖同名托管数据集。");
     }
     mSummary->setText(text);
   }

@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "TrainingMonitorWidget.h"
 
 #include <QFontMetrics>
@@ -39,22 +40,22 @@ QString formattedDuration(const double seconds) {
 
 QString stageLabel(const QString &stage) {
   if (stage == QStringLiteral("queued")) {
-    return QStringLiteral("排队中");
+    return QCoreApplication::translate("Workbench", "排队中");
   }
   if (stage == QStringLiteral("prepare") ||
       stage == QStringLiteral("preparing")) {
-    return QStringLiteral("准备数据");
+    return QCoreApplication::translate("Workbench", "准备数据");
   }
   if (stage == QStringLiteral("colmap")) {
-    return QStringLiteral("相机解算 · 稀疏点云生成");
+    return QCoreApplication::translate("Workbench", "相机解算 · 稀疏点云生成");
   }
   if (stage == QStringLiteral("train")) {
-    return QStringLiteral("训练中");
+    return QCoreApplication::translate("Workbench", "训练中");
   }
   if (stage == QStringLiteral("finalizing")) {
-    return QStringLiteral("发布模型");
+    return QCoreApplication::translate("Workbench", "发布模型");
   }
-  return stage.isEmpty() ? QStringLiteral("运行中") : stage;
+  return stage.isEmpty() ? QCoreApplication::translate("Workbench", "运行中") : stage;
 }
 
 QLabel *metricValue(QWidget *parent) {
@@ -117,7 +118,7 @@ protected:
     const QColor lossColor(91, 199, 170);
     const QColor psnrColor(226, 181, 91);
     painter.setPen(lossColor);
-    painter.drawText(QPointF(plot.left(), labelHeight), QStringLiteral("Loss"));
+    painter.drawText(QPointF(plot.left(), labelHeight), QCoreApplication::translate("Workbench", "Loss"));
     const QString psnrLabel = QStringLiteral("PSNR");
     painter.setPen(psnrColor);
     painter.drawText(QPointF(plot.right() - metrics.horizontalAdvance(psnrLabel),
@@ -126,7 +127,7 @@ protected:
 
     if (mSamples.size() < 2) {
       painter.setPen(QColor(126, 134, 139));
-      const QString waiting = QStringLiteral("等待训练采样…");
+      const QString waiting = QCoreApplication::translate("Workbench", "等待训练采样…");
       painter.drawText(plot, Qt::AlignCenter, waiting);
       return;
     }
@@ -202,11 +203,11 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   layout->setSpacing(6);
 
   auto *heading = new QHBoxLayout();
-  mTitle = new QLabel(QStringLiteral("尚未开始训练"), this);
+  mTitle = new QLabel(QCoreApplication::translate("Workbench", "尚未开始训练"), this);
   QFont titleFont = mTitle->font();
   titleFont.setBold(true);
   mTitle->setFont(titleFont);
-  mState = new QLabel(QStringLiteral("空闲"), this);
+  mState = new QLabel(QCoreApplication::translate("Workbench", "空闲"), this);
   mState->setObjectName(QStringLiteral("statusWarn"));
   heading->addWidget(mTitle, 1);
   heading->addWidget(mState);
@@ -228,14 +229,14 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mSpeed = metricValue(this);
   mElapsed = metricValue(this);
   mRemaining = metricValue(this);
-  addMetric(metrics, 0, QStringLiteral("迭代"), mIteration);
-  addMetric(metrics, 1, QStringLiteral("Loss"), mLoss);
-  addMetric(metrics, 2, QStringLiteral("训练 PSNR"), mPsnr);
+  addMetric(metrics, 0, QCoreApplication::translate("Workbench", "迭代"), mIteration);
+  addMetric(metrics, 1, QCoreApplication::translate("Workbench", "Loss"), mLoss);
+  addMetric(metrics, 2, QCoreApplication::translate("Workbench", "训练 PSNR"), mPsnr);
   mPrimitiveCountCaption =
-      addMetric(metrics, 3, QStringLiteral("高斯数量"), mGaussianCount);
-  addMetric(metrics, 4, QStringLiteral("速度"), mSpeed);
-  addMetric(metrics, 5, QStringLiteral("已用时"), mElapsed);
-  addMetric(metrics, 6, QStringLiteral("预计剩余"), mRemaining);
+      addMetric(metrics, 3, QCoreApplication::translate("Workbench", "高斯数量"), mGaussianCount);
+  addMetric(metrics, 4, QCoreApplication::translate("Workbench", "速度"), mSpeed);
+  addMetric(metrics, 5, QCoreApplication::translate("Workbench", "已用时"), mElapsed);
+  addMetric(metrics, 6, QCoreApplication::translate("Workbench", "预计剩余"), mRemaining);
   for (int column = 0; column < 7; ++column) {
     metrics->setColumnStretch(column, 1);
   }
@@ -250,8 +251,8 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
                                           const int expectedIterations) {
   mTelemetry.reset(expectedIterations);
   mTitle->setText(QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName));
-  mState->setText(QStringLiteral("启动中"));
-  mPrimitiveCountCaption->setText(QStringLiteral("高斯数量"));
+  mState->setText(QCoreApplication::translate("Workbench", "启动中"));
+  mPrimitiveCountCaption->setText(QCoreApplication::translate("Workbench", "高斯数量"));
   mProgress->setValue(0);
   refreshMetrics();
 }
@@ -262,8 +263,8 @@ void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mPrimitiveCountCaption->setText(
       status.previewKind == QStringLiteral("colmap_sparse") ||
               status.stage == QStringLiteral("colmap")
-          ? QStringLiteral("稀疏点数")
-          : QStringLiteral("高斯数量"));
+          ? QCoreApplication::translate("Workbench", "稀疏点数")
+          : QCoreApplication::translate("Workbench", "高斯数量"));
   if (status.progressPercent.has_value()) {
     mProgress->setValue(status.progressPercent.value());
   } else if (mTelemetry.iteration().has_value() &&
@@ -279,9 +280,9 @@ void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
 
 void TrainingMonitorWidget::finishTraining(const bool succeeded,
                                            const bool cancelled) {
-  mState->setText(succeeded ? QStringLiteral("已完成")
-                  : cancelled ? QStringLiteral("已取消")
-                              : QStringLiteral("失败"));
+  mState->setText(succeeded ? QCoreApplication::translate("Workbench", "已完成")
+                  : cancelled ? QCoreApplication::translate("Workbench", "已取消")
+                              : QCoreApplication::translate("Workbench", "失败"));
   if (succeeded) {
     mProgress->setValue(100);
   }

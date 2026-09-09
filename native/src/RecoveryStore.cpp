@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "RecoveryStore.h"
 
 #include <QDir>
@@ -122,7 +123,7 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       QDir(workspaceRoot).filePath(QString::fromLatin1(kRecoveryStatePath)));
   if (!stateFile.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open recovery state: %1")
+                QCoreApplication::translate("Workbench", "Unable to open recovery state: %1")
                     .arg(stateFile.errorString()));
     return std::nullopt;
   }
@@ -132,14 +133,14 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       QJsonDocument::fromJson(stateFile.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Invalid recovery state: %1")
+                QCoreApplication::translate("Workbench", "Invalid recovery state: %1")
                     .arg(parseError.errorString()));
     return std::nullopt;
   }
   const QJsonObject root = document.object();
   if (root.value(QStringLiteral("schemaVersion")).toInt() != 1) {
     assignError(errorMessage,
-                QStringLiteral("Unsupported recovery state version."));
+                QCoreApplication::translate("Workbench", "Unsupported recovery state version."));
     return std::nullopt;
   }
 
@@ -164,7 +165,7 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
       root.value(QStringLiteral("updatedUtc")).toString(), Qt::ISODate);
   if (!workspace.isValid() || !workspace.updatedUtc.isValid()) {
     assignError(errorMessage,
-                QStringLiteral("Recovery state is incomplete."));
+                QCoreApplication::translate("Workbench", "Recovery state is incomplete."));
     return std::nullopt;
   }
   return workspace;
@@ -176,7 +177,7 @@ readProjectSnapshot(const QString &snapshotPath, QJsonObject *project,
   QFile snapshotFile(snapshotPath);
   if (!snapshotFile.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open project snapshot: %1")
+                QCoreApplication::translate("Workbench", "Unable to open project snapshot: %1")
                     .arg(snapshotFile.errorString()));
     return std::nullopt;
   }
@@ -185,7 +186,7 @@ readProjectSnapshot(const QString &snapshotPath, QJsonObject *project,
       QJsonDocument::fromJson(snapshotFile.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Invalid project snapshot: %1")
+                QCoreApplication::translate("Workbench", "Invalid project snapshot: %1")
                     .arg(parseError.errorString()));
     return std::nullopt;
   }
@@ -193,7 +194,7 @@ readProjectSnapshot(const QString &snapshotPath, QJsonObject *project,
   if (root.value(QStringLiteral("schemaVersion")).toInt() != 1 ||
       !root.value(QStringLiteral("project")).isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Unsupported project snapshot."));
+                QCoreApplication::translate("Workbench", "Unsupported project snapshot."));
     return std::nullopt;
   }
   ProjectSnapshot snapshot;
@@ -206,7 +207,7 @@ readProjectSnapshot(const QString &snapshotPath, QJsonObject *project,
       root.value(QStringLiteral("createdUtc")).toString(), Qt::ISODate);
   if (!snapshot.isValid()) {
     assignError(errorMessage,
-                QStringLiteral("Project snapshot is incomplete."));
+                QCoreApplication::translate("Workbench", "Project snapshot is incomplete."));
     return std::nullopt;
   }
   if (project != nullptr) {
@@ -225,7 +226,7 @@ RecoveryStore::beginWorkspace(const QString &displayName,
                               QString *errorMessage) const {
   if (!QDir().mkpath(mWorkspaceBase)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create recovery workspace base: %1")
+                QCoreApplication::translate("Workbench", "Unable to create recovery workspace base: %1")
                     .arg(mWorkspaceBase));
     return std::nullopt;
   }
@@ -234,7 +235,7 @@ RecoveryStore::beginWorkspace(const QString &displayName,
   workspace.sessionId =
       QUuid::createUuid().toString(QUuid::WithoutBraces);
   workspace.displayName =
-      displayName.trimmed().isEmpty() ? QStringLiteral("Untitled Project")
+      displayName.trimmed().isEmpty() ? QCoreApplication::translate("Workbench", "Untitled Project")
                                       : displayName.trimmed();
   workspace.rootPath =
       QDir(mWorkspaceBase)
@@ -254,7 +255,7 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
       !pathInside(mWorkspaceBase, workspace.rootPath) ||
       !QFileInfo(workspace.rootPath).isDir()) {
     assignError(errorMessage,
-                QStringLiteral("Recovery workspace is outside the catalog."));
+                QCoreApplication::translate("Workbench", "Recovery workspace is outside the catalog."));
     return false;
   }
 
@@ -263,7 +264,7 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
           .filePath(QString::fromLatin1(kRecoveryStatePath));
   if (!QDir().mkpath(QFileInfo(statePath).absolutePath())) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create recovery state directory."));
+                QCoreApplication::translate("Workbench", "Unable to create recovery state directory."));
     return false;
   }
 
@@ -289,7 +290,7 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
   QSaveFile stateFile(statePath);
   if (!stateFile.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create recovery state: %1")
+                QCoreApplication::translate("Workbench", "Unable to create recovery state: %1")
                     .arg(stateFile.errorString()));
     return false;
   }
@@ -298,13 +299,13 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
   if (stateFile.write(serialized) != serialized.size()) {
     stateFile.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write recovery state: %1")
+                QCoreApplication::translate("Workbench", "Unable to write recovery state: %1")
                     .arg(stateFile.errorString()));
     return false;
   }
   if (!stateFile.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit recovery state: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit recovery state: %1")
                     .arg(stateFile.errorString()));
     return false;
   }
@@ -347,7 +348,7 @@ RecoveryStore::recoverableWorkspaces(QString *errorMessage) const {
             });
   if (!invalidStates.isEmpty()) {
     assignError(errorMessage,
-                QStringLiteral("Some recovery states are invalid:\n%1")
+                QCoreApplication::translate("Workbench", "Some recovery states are invalid:\n%1")
                     .arg(invalidStates.join(QLatin1Char('\n'))));
   }
   return result;
@@ -358,7 +359,7 @@ bool RecoveryStore::discardWorkspace(const RecoveryWorkspace &workspace,
   if (!workspace.isValid() ||
       !pathInside(mWorkspaceBase, workspace.rootPath)) {
     assignError(errorMessage,
-                QStringLiteral("Refusing to discard a workspace outside the "
+                QCoreApplication::translate("Workbench", "Refusing to discard a workspace outside the "
                                "recovery catalog."));
     return false;
   }
@@ -368,13 +369,13 @@ bool RecoveryStore::discardWorkspace(const RecoveryWorkspace &workspace,
   if (!stored.has_value() || stored->sessionId != workspace.sessionId) {
     assignError(errorMessage,
                 readError.isEmpty()
-                    ? QStringLiteral("Recovery workspace identity mismatch.")
+                    ? QCoreApplication::translate("Workbench", "Recovery workspace identity mismatch.")
                     : readError);
     return false;
   }
   if (!QDir(workspace.rootPath).removeRecursively()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to discard recovery workspace: %1")
+                QCoreApplication::translate("Workbench", "Unable to discard recovery workspace: %1")
                     .arg(workspace.rootPath));
     return false;
   }
@@ -388,7 +389,7 @@ bool RecoveryStore::completeWorkspace(
   if (!QFileInfo(managedRoot).isDir() ||
       pathInside(workspace.rootPath, managedRoot)) {
     assignError(errorMessage,
-                QStringLiteral("Managed project root is not independent from "
+                QCoreApplication::translate("Workbench", "Managed project root is not independent from "
                                "the recovery workspace."));
     return false;
   }
@@ -396,7 +397,7 @@ bool RecoveryStore::completeWorkspace(
       QDir(managedRoot).filePath(QString::fromLatin1(kRecoveryStatePath));
   if (QFileInfo::exists(copiedState) && !QFile::remove(copiedState)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to remove copied recovery metadata: %1")
+                QCoreApplication::translate("Workbench", "Unable to remove copied recovery metadata: %1")
                     .arg(copiedState));
     return false;
   }
@@ -409,7 +410,7 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
   QFile projectFile(projectFilePath);
   if (!projectFile.open(QIODevice::ReadOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to open project for snapshot: %1")
+                QCoreApplication::translate("Workbench", "Unable to open project for snapshot: %1")
                     .arg(projectFile.errorString()));
     return std::nullopt;
   }
@@ -424,7 +425,7 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
     const int maximumSnapshots, QString *errorMessage) const {
   if (maximumSnapshots < 1) {
     assignError(errorMessage,
-                QStringLiteral("Snapshot retention must be at least one."));
+                QCoreApplication::translate("Workbench", "Snapshot retention must be at least one."));
     return std::nullopt;
   }
   QJsonParseError parseError;
@@ -433,7 +434,7 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
   if (parseError.error != QJsonParseError::NoError ||
       !projectDocument.isObject()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to snapshot invalid project JSON: %1")
+                QCoreApplication::translate("Workbench", "Unable to snapshot invalid project JSON: %1")
                     .arg(parseError.errorString()));
     return std::nullopt;
   }
@@ -470,7 +471,7 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
           .filePath(QString::fromLatin1(kProjectHistoryPath));
   if (!QDir().mkpath(historyRoot)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create project history directory: "
+                QCoreApplication::translate("Workbench", "Unable to create project history directory: "
                                "%1")
                     .arg(historyRoot));
     return std::nullopt;
@@ -493,7 +494,7 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
   snapshotFile.setDirectWriteFallback(false);
   if (!snapshotFile.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create project snapshot: %1")
+                QCoreApplication::translate("Workbench", "Unable to create project snapshot: %1")
                     .arg(snapshotFile.errorString()));
     return std::nullopt;
   }
@@ -502,13 +503,13 @@ std::optional<ProjectSnapshot> RecoveryStore::createProjectSnapshot(
   if (snapshotFile.write(serialized) != serialized.size()) {
     snapshotFile.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write project snapshot: %1")
+                QCoreApplication::translate("Workbench", "Unable to write project snapshot: %1")
                     .arg(snapshotFile.errorString()));
     return std::nullopt;
   }
   if (!snapshotFile.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit project snapshot: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit project snapshot: %1")
                     .arg(snapshotFile.errorString()));
     return std::nullopt;
   }
@@ -562,7 +563,7 @@ RecoveryStore::projectSnapshots(const QString &projectDataRoot,
             });
   if (!invalidSnapshots.isEmpty()) {
     assignError(errorMessage,
-                QStringLiteral("Some project snapshots are invalid:\n%1")
+                QCoreApplication::translate("Workbench", "Some project snapshots are invalid:\n%1")
                     .arg(invalidSnapshots.join(QLatin1Char('\n'))));
   }
   return snapshots;
@@ -578,21 +579,21 @@ bool RecoveryStore::restoreProjectSnapshot(
       stored->snapshotId != snapshot.snapshotId) {
     if (stored.has_value()) {
       assignError(errorMessage,
-                  QStringLiteral("Project snapshot identity mismatch."));
+                  QCoreApplication::translate("Workbench", "Project snapshot identity mismatch."));
     }
     return false;
   }
   const QString target = normalizedAbsolutePath(targetProjectFilePath);
   if (!QDir().mkpath(QFileInfo(target).absolutePath())) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create snapshot restore directory."));
+                QCoreApplication::translate("Workbench", "Unable to create snapshot restore directory."));
     return false;
   }
   QSaveFile output(target);
   output.setDirectWriteFallback(false);
   if (!output.open(QIODevice::WriteOnly)) {
     assignError(errorMessage,
-                QStringLiteral("Unable to create restored project: %1")
+                QCoreApplication::translate("Workbench", "Unable to create restored project: %1")
                     .arg(output.errorString()));
     return false;
   }
@@ -601,13 +602,13 @@ bool RecoveryStore::restoreProjectSnapshot(
   if (output.write(serialized) != serialized.size()) {
     output.cancelWriting();
     assignError(errorMessage,
-                QStringLiteral("Unable to write restored project: %1")
+                QCoreApplication::translate("Workbench", "Unable to write restored project: %1")
                     .arg(output.errorString()));
     return false;
   }
   if (!output.commit()) {
     assignError(errorMessage,
-                QStringLiteral("Unable to commit restored project: %1")
+                QCoreApplication::translate("Workbench", "Unable to commit restored project: %1")
                     .arg(output.errorString()));
     return false;
   }
@@ -623,7 +624,7 @@ QByteArray RecoveryStore::projectSnapshotJson(
       stored->snapshotId != snapshot.snapshotId) {
     if (stored.has_value()) {
       assignError(errorMessage,
-                  QStringLiteral("Project snapshot identity mismatch."));
+                  QCoreApplication::translate("Workbench", "Project snapshot identity mismatch."));
     }
     return {};
   }
