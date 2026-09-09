@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "native/i18n/catalog.json"
 STRING = r'"(?:[^"\\]|\\.)*"'
 STRINGS = rf'(?:{STRING}\s*)+'
-CALL = re.compile(rf'(?:QCoreApplication::translate\(\s*"Workbench"\s*,\s*|\b(?:QObject::)?tr\(\s*|QStringLiteral\(\s*)({STRINGS})\)', re.S)
+CALL = re.compile(rf'(?:QCoreApplication::translate\(\s*"Workbench"\s*,\s*|AppLanguage::source\(\s*|\b(?:QObject::)?tr\(\s*|QStringLiteral\(\s*)({STRINGS})\)', re.S)
 HAN = re.compile(r'[\u3400-\u9fff]')
 # Language-independent names, protocol diagnostics mapped to localized messages,
 # and filesystem directory names. Never translate these by text matching.
@@ -98,7 +98,7 @@ def migrate_literals(entries):
         old = path.read_text(encoding='utf-8')
         def replace(match):
             source = decode_literals(match[1])
-            if source in entries and not match[0].startswith('QCoreApplication'):
+            if source in entries and not match[0].startswith(('QCoreApplication', 'AppLanguage::source')):
                 return 'QCoreApplication::translate("Workbench", ' + match[1].rstrip() + ')'
             return match[0]
         new = CALL.sub(replace, old)

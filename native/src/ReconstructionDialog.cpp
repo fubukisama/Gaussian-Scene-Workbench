@@ -1,3 +1,4 @@
+#include "AppLanguage.h"
 #include <QCoreApplication>
 #include "ReconstructionDialog.h"
 
@@ -29,7 +30,7 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
                                            QWidget *parent)
     : QDialog(parent), mDatasetPath(datasetPath),
       mHasExistingData(hasColmapWorkingData(datasetPath)) {
-  setWindowTitle(QCoreApplication::translate("Workbench", "COLMAP 稀疏重建"));
+  AppLanguage::bind(this, "windowTitle", AppLanguage::source("COLMAP 稀疏重建"));
   setModal(true);
   setMinimumWidth(580);
 
@@ -48,6 +49,7 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   datasetValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
   datasetValue->setWordWrap(true);
   form->addRow(QCoreApplication::translate("Workbench", "数据集"), datasetValue);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(datasetValue)), AppLanguage::source("数据集"));
 
   auto *executableRow = new QWidget(this);
   auto *executableLayout = new QHBoxLayout(executableRow);
@@ -58,30 +60,37 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
           .toString();
   mExecutable = new QLineEdit(
       findColmapExecutable(repositoryRoot, savedExecutable), executableRow);
-  mExecutable->setPlaceholderText(QCoreApplication::translate("Workbench", "选择 E 盘上的 colmap.exe"));
-  auto *browseButton = new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), executableRow);
-  browseButton->setToolTip(QCoreApplication::translate("Workbench", "选择 COLMAP 可执行文件"));
+  AppLanguage::bind(mExecutable, "placeholderText", AppLanguage::source("选择 E 盘上的 colmap.exe"));
+  auto *browseButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), executableRow), AppLanguage::source("浏览..."));
+  AppLanguage::bind(browseButton, "toolTip", AppLanguage::source("选择 COLMAP 可执行文件"));
   executableLayout->addWidget(mExecutable, 1);
   executableLayout->addWidget(browseButton);
   form->addRow(QStringLiteral("COLMAP"), executableRow);
 
   mPreset = new QComboBox(this);
   mPreset->addItem(QCoreApplication::translate("Workbench", "标准"), QStringLiteral("default"));
+  AppLanguage::bindComboItem(mPreset, mPreset->count() - 1, AppLanguage::source("标准"));
   mPreset->addItem(QCoreApplication::translate("Workbench", "鲁棒（弱纹理/视角差异大）"),
                    QStringLiteral("robust"));
+  AppLanguage::bindComboItem(mPreset, mPreset->count() - 1, AppLanguage::source("鲁棒（弱纹理/视角差异大）"));
   mPreset->addItem(QCoreApplication::translate("Workbench", "序列（视频帧/连续航拍）"),
                    QStringLiteral("sequential"));
+  AppLanguage::bindComboItem(mPreset, mPreset->count() - 1, AppLanguage::source("序列（视频帧/连续航拍）"));
   int savedPreset = mPreset->findData(
       settings.value(QStringLiteral("reconstruction/preset"),
                      QStringLiteral("default"))
           .toString());
   mPreset->setCurrentIndex(std::max(0, savedPreset));
   form->addRow(QCoreApplication::translate("Workbench", "预设"), mPreset);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mPreset)), AppLanguage::source("预设"));
 
   mMatching = new QComboBox(this);
   mMatching->addItem(QCoreApplication::translate("Workbench", "穷举匹配"), QStringLiteral("exhaustive"));
+  AppLanguage::bindComboItem(mMatching, mMatching->count() - 1, AppLanguage::source("穷举匹配"));
   mMatching->addItem(QCoreApplication::translate("Workbench", "序列匹配"), QStringLiteral("sequential"));
+  AppLanguage::bindComboItem(mMatching, mMatching->count() - 1, AppLanguage::source("序列匹配"));
   form->addRow(QCoreApplication::translate("Workbench", "匹配方式"), mMatching);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mMatching)), AppLanguage::source("匹配方式"));
 
   mCameraModel = new QComboBox(this);
   for (const auto &[label, value] :
@@ -96,44 +105,54 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
                   QStringLiteral("SIMPLE_RADIAL")}}) {
     mCameraModel->addItem(label, value);
   }
+  AppLanguage::bindComboItem(mCameraModel, 0, AppLanguage::source("OPENCV（常用相机）"));
+  AppLanguage::bindComboItem(mCameraModel, 1, AppLanguage::source("PINHOLE（已校正）"));
   const int savedCamera = mCameraModel->findData(
       settings.value(QStringLiteral("reconstruction/cameraModel"),
                      QStringLiteral("OPENCV"))
           .toString());
   mCameraModel->setCurrentIndex(std::max(0, savedCamera));
   form->addRow(QCoreApplication::translate("Workbench", "相机模型"), mCameraModel);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mCameraModel)), AppLanguage::source("相机模型"));
 
   mMaxImageSize = new QComboBox(this);
   mMaxImageSize->addItem(QCoreApplication::translate("Workbench", "原始分辨率"), -1);
+  AppLanguage::bindComboItem(mMaxImageSize, mMaxImageSize->count() - 1, AppLanguage::source("原始分辨率"));
   mMaxImageSize->addItem(QCoreApplication::translate("Workbench", "最长边 2400 px"), 2400);
+  AppLanguage::bindComboItem(mMaxImageSize, mMaxImageSize->count() - 1, AppLanguage::source("最长边 2400 px"));
   mMaxImageSize->addItem(QCoreApplication::translate("Workbench", "最长边 1600 px"), 1600);
+  AppLanguage::bindComboItem(mMaxImageSize, mMaxImageSize->count() - 1, AppLanguage::source("最长边 1600 px"));
   mMaxImageSize->addItem(QCoreApplication::translate("Workbench", "最长边 1200 px"), 1200);
+  AppLanguage::bindComboItem(mMaxImageSize, mMaxImageSize->count() - 1, AppLanguage::source("最长边 1200 px"));
   form->addRow(QCoreApplication::translate("Workbench", "特征分辨率"), mMaxImageSize);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mMaxImageSize)), AppLanguage::source("特征分辨率"));
 
   mMaxFeatures = new QSpinBox(this);
   mMaxFeatures->setRange(512, 50000);
   mMaxFeatures->setSingleStep(512);
   mMaxFeatures->setValue(8192);
   form->addRow(QCoreApplication::translate("Workbench", "每图最大特征"), mMaxFeatures);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mMaxFeatures)), AppLanguage::source("每图最大特征"));
 
   mRuntimeMinutes = new QSpinBox(this);
   mRuntimeMinutes->setRange(0, 1440);
-  mRuntimeMinutes->setSuffix(QCoreApplication::translate("Workbench", " 分钟"));
-  mRuntimeMinutes->setSpecialValueText(QCoreApplication::translate("Workbench", "不限时"));
+  AppLanguage::bind(mRuntimeMinutes, "suffix", AppLanguage::source(" 分钟"));
+  AppLanguage::bind(mRuntimeMinutes, "specialValueText", AppLanguage::source("不限时"));
   form->addRow(QCoreApplication::translate("Workbench", "Mapper 限时"), mRuntimeMinutes);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mRuntimeMinutes)), AppLanguage::source("Mapper 限时"));
 
-  mUseGpu = new QCheckBox(QCoreApplication::translate("Workbench", "使用 GPU 进行特征提取和匹配"), this);
+  mUseGpu = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "使用 GPU 进行特征提取和匹配"), this), AppLanguage::source("使用 GPU 进行特征提取和匹配"));
   mUseGpu->setChecked(
       settings.value(QStringLiteral("reconstruction/useGpu"), true).toBool());
   form->addRow(QString(), mUseGpu);
 
-  mSingleCamera = new QCheckBox(QCoreApplication::translate("Workbench", "所有图像共用一套相机参数"), this);
+  mSingleCamera = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "所有图像共用一套相机参数"), this), AppLanguage::source("所有图像共用一套相机参数"));
   mSingleCamera->setChecked(
       settings.value(QStringLiteral("reconstruction/singleCamera"), true)
           .toBool());
   form->addRow(QString(), mSingleCamera);
 
-  mReset = new QCheckBox(QCoreApplication::translate("Workbench", "重建前清理旧 COLMAP 缓存"), this);
+  mReset = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "重建前清理旧 COLMAP 缓存"), this), AppLanguage::source("重建前清理旧 COLMAP 缓存"));
   mReset->setChecked(!mHasExistingData);
   form->addRow(QString(), mReset);
 
@@ -149,9 +168,9 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   rootLayout->addWidget(note);
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-  buttons->button(QDialogButtonBox::Cancel)->setText(QCoreApplication::translate("Workbench", "取消"));
+  AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));
   auto *startButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "开始重建"), QDialogButtonBox::AcceptRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "开始重建"), QDialogButtonBox::AcceptRole), AppLanguage::source("开始重建"));
   startButton->setDefault(true);
   rootLayout->addWidget(buttons);
 
@@ -163,6 +182,11 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
           &ReconstructionDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, this,
           &ReconstructionDialog::reject);
+  AppLanguage::onChanged(note, [this, note]() {
+    note->setText(mHasExistingData
+        ? QCoreApplication::translate("Workbench", "检测到已有重建或缓存。为避免误覆盖，必须明确启用清理后才能重新运行。")
+        : QCoreApplication::translate("Workbench", "结果写入数据集的 sparse/0；混合图像尺寸会由后端自动关闭单相机模式。"));
+  });
   applyPreset();
 }
 

@@ -1,3 +1,4 @@
+#include "AppLanguage.h"
 #include <QCoreApplication>
 #include "DatasetImportDialog.h"
 
@@ -52,7 +53,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
     : QDialog(parent),
       mInitialDirectory(normalizedPath(initialDirectory)) {
   setObjectName(QStringLiteral("datasetImportDialog"));
-  setWindowTitle(QCoreApplication::translate("Workbench", "添加照片与视频"));
+  AppLanguage::bind(this, "windowTitle", AppLanguage::source("添加照片与视频"));
   setModal(true);
   setMinimumSize(640, 460);
 
@@ -88,13 +89,13 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mSceneName = new QLineEdit(suggestedSceneName.trimmed(), this);
   mSceneName->setObjectName(QStringLiteral("datasetImportSceneEdit"));
   mSceneName->setClearButtonEnabled(true);
-  mSceneName->setPlaceholderText(
-      QCoreApplication::translate("Workbench", "仅允许英文、数字、点、下划线和连字符"));
+  AppLanguage::bind(mSceneName, "placeholderText", AppLanguage::source("仅允许英文、数字、点、下划线和连字符"));
   form->addRow(QCoreApplication::translate("Workbench", "场景名称"), mSceneName);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mSceneName)), AppLanguage::source("场景名称"));
 
   mFramesPerSecond = new QDoubleSpinBox(this);
   mFramesPerSecond->setObjectName(QStringLiteral("datasetImportFpsSpin"));
-  mFramesPerSecond->setAccessibleName(QCoreApplication::translate("Workbench", "视频抽帧帧率"));
+  AppLanguage::bind(mFramesPerSecond, "accessibleName", AppLanguage::source("视频抽帧帧率"));
   mFramesPerSecond->setRange(0.2, 10.0);
   mFramesPerSecond->setSingleStep(0.2);
   mFramesPerSecond->setDecimals(1);
@@ -102,20 +103,21 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mFramesPerSecond->setSuffix(QStringLiteral(" FPS"));
   mFramesPerSecond->setKeyboardTracking(false);
   form->addRow(QCoreApplication::translate("Workbench", "视频抽帧"), mFramesPerSecond);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mFramesPerSecond)), AppLanguage::source("视频抽帧"));
 
-  mOverwrite = new QCheckBox(
-      QCoreApplication::translate("Workbench", "覆盖同名托管数据集（开始前会再次确认）"), this);
+  mOverwrite = AppLanguage::text(new QCheckBox(
+      QCoreApplication::translate("Workbench", "覆盖同名托管数据集（开始前会再次确认）"), this), AppLanguage::source("覆盖同名托管数据集（开始前会再次确认）"));
   mOverwrite->setObjectName(QStringLiteral("datasetImportOverwriteCheck"));
   form->addRow(QString(), mOverwrite);
   rootLayout->addLayout(form);
 
-  auto *sourceTitle = new QLabel(QCoreApplication::translate("Workbench", "媒体来源"), this);
+  auto *sourceTitle = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "媒体来源"), this), AppLanguage::source("媒体来源"));
   sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
   rootLayout->addWidget(sourceTitle);
 
   mSourceList = new QListWidget(this);
   mSourceList->setObjectName(QStringLiteral("datasetImportSourceList"));
-  mSourceList->setAccessibleName(QCoreApplication::translate("Workbench", "待导入媒体来源"));
+  AppLanguage::bind(mSourceList, "accessibleName", AppLanguage::source("待导入媒体来源"));
   mSourceList->setAlternatingRowColors(true);
   mSourceList->setSelectionMode(QAbstractItemView::ExtendedSelection);
   mSourceList->setMinimumHeight(190);
@@ -123,14 +125,14 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
 
   auto *sourceButtons = new QHBoxLayout();
   sourceButtons->setSpacing(6);
-  auto *addFilesButton = new QPushButton(QCoreApplication::translate("Workbench", "继续添加照片/视频..."), this);
+  auto *addFilesButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加照片/视频..."), this), AppLanguage::source("继续添加照片/视频..."));
   addFilesButton->setObjectName(QStringLiteral("datasetImportAddFilesButton"));
-  auto *addDirectoryButton = new QPushButton(QCoreApplication::translate("Workbench", "继续添加目录..."), this);
+  auto *addDirectoryButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加目录..."), this), AppLanguage::source("继续添加目录..."));
   addDirectoryButton->setObjectName(
       QStringLiteral("datasetImportAddDirectoryButton"));
-  mRemoveButton = new QPushButton(QCoreApplication::translate("Workbench", "移除所选"), this);
+  mRemoveButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "移除所选"), this), AppLanguage::source("移除所选"));
   mRemoveButton->setObjectName(QStringLiteral("datasetImportRemoveButton"));
-  mClearButton = new QPushButton(QCoreApplication::translate("Workbench", "清空"), this);
+  mClearButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "清空"), this), AppLanguage::source("清空"));
   mClearButton->setObjectName(QStringLiteral("datasetImportClearButton"));
   sourceButtons->addWidget(addFilesButton);
   sourceButtons->addWidget(addDirectoryButton);
@@ -148,9 +150,9 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   buttons->setObjectName(QStringLiteral("datasetImportButtonBox"));
   auto *cancelButton = buttons->button(QDialogButtonBox::Cancel);
   cancelButton->setObjectName(QStringLiteral("datasetImportCancelButton"));
-  cancelButton->setText(QCoreApplication::translate("Workbench", "取消"));
+  AppLanguage::text(cancelButton, AppLanguage::source("取消"));
   mImportButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "添加到工程"), QDialogButtonBox::AcceptRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "添加到工程"), QDialogButtonBox::AcceptRole), AppLanguage::source("添加到工程"));
   mImportButton->setObjectName(QStringLiteral("datasetImportStartButton"));
   mImportButton->setDefault(true);
   rootLayout->addWidget(buttons);
@@ -174,6 +176,15 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   connect(buttons, &QDialogButtonBox::rejected, this,
           &DatasetImportDialog::reject);
 
+  AppLanguage::onChanged(this, [this, introduction, projectPath, unsavedProject, projectRoot]() {
+    introduction->setText(unsavedProject
+        ? QCoreApplication::translate("Workbench", "素材已选好。照片会复制到未命名工程，视频会按指定帧率抽帧；可先处理，稍后再自由选择工程保存位置。")
+        : QCoreApplication::translate("Workbench", "素材已选好。照片会复制到当前工程的托管数据集，视频会按指定帧率抽帧。"));
+    projectPath->setText(unsavedProject
+        ? QCoreApplication::translate("Workbench", "当前工程：未命名工程（尚未保存，首次保存时可选择位置）")
+        : QCoreApplication::translate("Workbench", "当前工程数据：%1").arg(QDir::toNativeSeparators(projectRoot)));
+    refreshSummary();
+  });
   if (initialSourcePaths.isEmpty()) {
     refreshSummary();
   } else {

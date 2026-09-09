@@ -2,22 +2,22 @@
 
 ## Language switching
 
-Open **View → Language** (`视图 → 语言 / Language`, `ビュー → 言語 / Language`) and choose **简体中文**, **English**, or **日本語**. The choice is saved immediately and applied on the next application launch. Save your work and close normally when ready: language selection does not close the project, rebuild widgets, or interrupt processing and backup jobs.
+Open **View → Language** (`视图 → 语言 / Language`, `ビュー → 言語 / Language`) and choose **简体中文**, **English**, or **日本語**. The language changes immediately in the current window and is remembered for future launches. No restart or confirmation is needed. Switching refreshes text and fonts without reloading the model, resetting its transforms/camera/selection, or interrupting processing and backup jobs. Dock layout, active tabs, edited dialog parameters, training progress and curve samples are retained.
 
 The initial default is Simplified Chinese, independent of the Windows display language. Menus, panels, dialogs, viewport/transform hints, training-monitor labels, validation errors, and recovery/backup messages use the selected language. Qt file dialogs are used so their standard controls follow this choice too.
 
-User filenames, entered project/scene names, paths, project data, JSON/protocol identifiers, and third-party raw logs are not translated. Units (`mm`, `cm`, `m`, `dB`) and established identifiers (`PLY`, `COLMAP`, `CUDA`, `PSNR`) remain stable. Language changes never rename user data. Command-line help and developer-only smoke-test output remain English.
+User filenames, entered project/scene names, paths, project data, JSON/protocol identifiers, and third-party raw logs are not translated. Existing project/task names and historical log records keep their original text; current status labels and newly generated messages use the new language. Units (`mm`, `cm`, `m`, `dB`) and established identifiers (`PLY`, `COLMAP`, `CUDA`, `PSNR`) remain stable. Language changes never rename user data. Command-line help and developer-only smoke-test output remain English.
 
 ## Mandatory feature maintenance
 
-1. Use `QCoreApplication::translate("Workbench", "source text")` for UI text. Prefer complete sentences. Keep command identifiers and combo-box item data separate from labels; never use translated text for state, paths, object names or protocol keys.
+1. Use `QCoreApplication::translate("Workbench", "source text")` for dynamically formatted UI text. Bind persistent widget/action properties using `AppLanguage::text` / `AppLanguage::bind` with `AppLanguage::source("source text")`. Use `bindComboItem` for translated combo captions (it blocks signals so edited presets are not reset). Refresh dynamic labels and custom drawing with `AppLanguage::onChanged`; callbacks must change presentation only, never reload a scene or re-ingest telemetry. Connections are tied to the target QObject's lifetime. Never reverse-match rendered text to translate it. Prefer complete sentences and keep command/item identifiers separate from labels.
 2. Add/update `zh_CN`, `en_US`, and `ja_JP` in `native/i18n/catalog.json` in the same change. Source keys may be Chinese or English. Preserve placeholders, keyboard shortcuts, wildcard file filters and HTML markup. Update the glossary when introducing terms.
 3. Run `python scripts/native_i18n.py` and `python scripts/test_native_i18n.py`. Validation rejects missing entries/locales, duplicate keys, inconsistent placeholders, filters and markup. Literal auditing catches Chinese literals and English phrases in native implementation files; reviewers must also inspect short English labels and dynamically assembled UI text.
 4. Run the native CTest suite, including `native_language_zh_CN`, `native_language_en_US`, and `native_language_ja_JP`. Inspect all three languages for clipping when changing forms, toolbars or overlays. Package and verify the installed build before delivery.
 
 CMake runs validation, generates TS files in the build directory, compiles them with Qt Linguist `lrelease`, and embeds the QM catalogs. Qt base catalogs for Chinese and Japanese are embedded for standard controls. Qt Linguist Tools and Python 3 are build dependencies. Runtime translation is offline.
 
-QA example: `"Gaussian Scene Workbench.exe" --smoke-test-language --language ja_JP`. The language override does not modify the user's preference. Language smoke tests isolate their settings and verify actions, labels, Qt buttons, persistence, restart-only activation, and unchanged backend/preset/user-name data. Set `GSW_LANGUAGE_SCREENSHOT_DIR` to a non-system-drive directory for application-only QA images.
+QA example: `"Gaussian Scene Workbench.exe" --smoke-test-language --language ja_JP`. The language override does not modify the user's preference. Language smoke tests isolate their settings and cycle all three languages twice in one window. They verify live actions/dialogs, Qt buttons, persistence, camera/transforms/selection, telemetry samples and unchanged backend/preset/user-name data. Build-tree tests also keep a real test-owned worker process running during the switches. Set `GSW_LANGUAGE_SCREENSHOT_DIR` to a non-system-drive directory for application-only QA images.
 
 ## Terminology
 

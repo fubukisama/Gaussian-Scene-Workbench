@@ -27,6 +27,14 @@ public:
 
 private:
   void refreshMetrics();
+  void retranslateStatus();
+  QString mTaskTitle;
+  QString mLastStage;
+  bool mHasTraining = false;
+  bool mFinished = false;
+  bool mSucceeded = false;
+  bool mCancelled = false;
+  bool mSparsePreview = false;
 
   TrainingTelemetry mTelemetry;
   TrainingCurvesWidget *mCurves = nullptr;

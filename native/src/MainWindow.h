@@ -95,6 +95,7 @@ private:
   void fitWindowToScreen();
   void updateActionAvailability();
   void updateEditActions();
+  void updateEditStatus();
 
   bool confirmDiscardChanges(bool exiting = false);
   bool confirmDiscardSceneEdits(bool exiting = false);
@@ -138,6 +139,8 @@ private:
   void startReconstruction();
   void startTraining();
   void updateWorkspaceUi();
+  void retranslateUi();
+  void updateTaskLabels();
   void rebuildProjectTree();
   void syncProjectTreeSelection();
   void updateInspector();
@@ -246,6 +249,7 @@ private:
   std::optional<PendingTraining> mPendingTraining;
   std::optional<PendingReconstruction> mPendingReconstruction;
   QString mActiveWorkerState;
+  std::optional<WorkerStatus> mLastWorkerStatus;
   qsizetype mSelectedPointCount = 0;
   qsizetype mDeletedPointCount = 0;
   qsizetype mCameraCount = 0;

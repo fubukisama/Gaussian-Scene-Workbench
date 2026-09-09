@@ -5334,10 +5334,10 @@
     "en_US": "Cannot save the language setting. Check write permission for the configuration directory.",
     "ja_JP": "言語設定を保存できません。設定ディレクトリの書き込み権限を確認してください。"
   },
-  "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。": {
-    "zh_CN": "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。",
-    "en_US": "Selected %1. This language will be applied on the next launch; your current project and running tasks will not be interrupted.",
-    "ja_JP": "%1 を選択しました。次回起動時に適用されます。現在のプロジェクトと実行中のタスクは中断されません。"
+  "无法切换语言，请检查语言资源与配置目录的写入权限。": {
+    "zh_CN": "无法切换语言，请检查语言资源与配置目录的写入权限。",
+    "en_US": "Cannot switch language. Check the language resources and write permission for the configuration directory.",
+    "ja_JP": "言語を切り替えられません。言語リソースと設定ディレクトリの書き込み権限を確認してください。"
   },
   "Loss": {
     "zh_CN": "损失",

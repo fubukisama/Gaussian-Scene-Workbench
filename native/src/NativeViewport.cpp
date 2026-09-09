@@ -4644,7 +4644,7 @@ void NativeViewport::updateTransformGizmoHover(const QPointF &position) {
   mTransformGizmoHover = handle;
 
   if (tool >= 0) {
-    static const std::array<QString, 4> descriptions = {
+    const std::array<QString, 4> descriptions = {
         QCoreApplication::translate("Workbench", "移动工具（G）"), QCoreApplication::translate("Workbench", "旋转工具（R）"),
         QCoreApplication::translate("Workbench", "缩放工具（S）"),
         QCoreApplication::translate("Workbench", "组合变换工具")};

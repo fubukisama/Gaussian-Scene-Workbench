@@ -1,3 +1,4 @@
+#include "AppLanguage.h"
 #include <QCoreApplication>
 #include "TrainingDialog.h"
 
@@ -41,7 +42,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
                                const bool hasSparseReconstruction,
                                const bool twoDgsAvailable, QWidget *parent)
     : QDialog(parent), mDatasetPath(datasetPath) {
-  setWindowTitle(QCoreApplication::translate("Workbench", "训练设置"));
+  AppLanguage::bind(this, "windowTitle", AppLanguage::source("训练设置"));
   setModal(true);
   setMinimumWidth(520);
 
@@ -59,6 +60,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   datasetValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
   datasetValue->setWordWrap(true);
   form->addRow(QCoreApplication::translate("Workbench", "数据集"), datasetValue);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(datasetValue)), AppLanguage::source("数据集"));
 
   mBackend = new QComboBox(this);
   mBackend->addItem(QStringLiteral("3D Gaussian Splatting"), QStringLiteral("3dgs"));
@@ -66,60 +68,70 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
     mBackend->addItem(QStringLiteral("2D Gaussian Splatting"), QStringLiteral("2dgs"));
   }
   form->addRow(QCoreApplication::translate("Workbench", "方法"), mBackend);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mBackend)), AppLanguage::source("方法"));
 
   mQuality = new QComboBox(this);
   mQuality->addItem(QCoreApplication::translate("Workbench", "快速预览"), QStringLiteral("quick"));
+  AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("快速预览"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "标准"), QStringLiteral("full"));
+  AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("标准"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "高质量"), QStringLiteral("quality"));
+  AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("高质量"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "最高质量"), QStringLiteral("max_quality"));
+  AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("最高质量"));
   form->addRow(QCoreApplication::translate("Workbench", "质量预设"), mQuality);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mQuality)), AppLanguage::source("质量预设"));
 
   mIterations = new QSpinBox(this);
   mIterations->setRange(1000, 200000);
   mIterations->setSingleStep(1000);
   form->addRow(QCoreApplication::translate("Workbench", "迭代次数"), mIterations);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mIterations)), AppLanguage::source("迭代次数"));
 
   mResolution = new QComboBox(this);
   for (const int resolution : {1, 2, 4, 8}) {
     mResolution->addItem(QStringLiteral("1/%1").arg(resolution), resolution);
   }
   form->addRow(QCoreApplication::translate("Workbench", "训练分辨率"), mResolution);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mResolution)), AppLanguage::source("训练分辨率"));
 
   mOutputScene = new QLineEdit(safeSceneName(projectName), this);
-  mOutputScene->setPlaceholderText(QCoreApplication::translate("Workbench", "仅允许英文、数字、点、下划线和连字符"));
+  AppLanguage::bind(mOutputScene, "placeholderText", AppLanguage::source("仅允许英文、数字、点、下划线和连字符"));
   form->addRow(QCoreApplication::translate("Workbench", "输出名称"), mOutputScene);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mOutputScene)), AppLanguage::source("输出名称"));
 
   auto *outputRow = new QWidget(this);
   auto *outputLayout = new QHBoxLayout(outputRow);
   outputLayout->setContentsMargins(0, 0, 0, 0);
   outputLayout->setSpacing(6);
   mOutputRoot = new QLineEdit(QDir::toNativeSeparators(defaultOutputRoot), outputRow);
-  auto *browseButton = new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), outputRow);
-  browseButton->setToolTip(QCoreApplication::translate("Workbench", "选择训练输出目录"));
+  auto *browseButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), outputRow), AppLanguage::source("浏览..."));
+  AppLanguage::bind(browseButton, "toolTip", AppLanguage::source("选择训练输出目录"));
   outputLayout->addWidget(mOutputRoot, 1);
   outputLayout->addWidget(browseButton);
   form->addRow(QCoreApplication::translate("Workbench", "输出目录"), outputRow);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(outputRow)), AppLanguage::source("输出目录"));
 
-  mRunColmap = new QCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this);
+  mRunColmap = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this), AppLanguage::source("训练前运行 COLMAP 重建"));
   mRunColmap->setChecked(!hasSparseReconstruction);
   form->addRow(QString(), mRunColmap);
 
-  mOverwrite = new QCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this);
+  mOverwrite = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this), AppLanguage::source("允许覆盖同名输出"));
   mOverwrite->setChecked(false);
   form->addRow(QString(), mOverwrite);
 
   rootLayout->addLayout(form);
 
-  auto *note = new QLabel(
+  auto *note = AppLanguage::text(new QLabel(
       QCoreApplication::translate("Workbench", "输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"),
-      this);
+      this), AppLanguage::source("输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"));
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
   rootLayout->addWidget(note);
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-  buttons->button(QDialogButtonBox::Cancel)->setText(QCoreApplication::translate("Workbench", "取消"));
-  auto *startButton = buttons->addButton(QCoreApplication::translate("Workbench", "开始训练"), QDialogButtonBox::AcceptRole);
+  AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));
+  auto *startButton = AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "开始训练"), QDialogButtonBox::AcceptRole), AppLanguage::source("开始训练"));
   startButton->setDefault(true);
   rootLayout->addWidget(buttons);
 

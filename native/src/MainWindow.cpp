@@ -60,6 +60,8 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSet>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QStorageInfo>
@@ -126,6 +128,7 @@ public:
     });
     connect(mCloseButton, &QToolButton::clicked, mDock, &QWidget::close);
     updateActions();
+    AppLanguage::onChanged(this, [this]() { updateActions(); });
   }
 
   void applyScale(const int scalePercent) {
@@ -188,8 +191,8 @@ private:
 
     mCloseButton->setVisible(canClose);
     mCloseButton->setEnabled(canClose);
-    mCloseButton->setToolTip(QCoreApplication::translate("Workbench", "关闭面板"));
-    mCloseButton->setAccessibleName(QCoreApplication::translate("Workbench", "关闭面板"));
+    AppLanguage::bind(mCloseButton, "toolTip", AppLanguage::source("关闭面板"));
+    AppLanguage::bind(mCloseButton, "accessibleName", AppLanguage::source("关闭面板"));
     mCloseButton->setIcon(
         mDock->style()->standardIcon(QStyle::SP_TitleBarCloseButton));
   }
@@ -223,8 +226,8 @@ QLabel *createValueLabel(QWidget *parent = nullptr) {
   return label;
 }
 
-QLabel *createSectionTitle(const QString &text, QWidget *parent = nullptr) {
-  auto *label = new QLabel(text, parent);
+QLabel *createSectionTitle(const char *source, QWidget *parent = nullptr) {
+  auto *label = AppLanguage::text(new QLabel(parent), source);
   label->setObjectName(QStringLiteral("sectionTitle"));
   return label;
 }
@@ -382,7 +385,7 @@ std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
 }
 
 QString workerStageLabel(const QString &stage) {
-  static const QHash<QString, QString> labels = {
+  const QHash<QString, QString> labels = {
       {QStringLiteral("queued"), QCoreApplication::translate("Workbench", "排队")},
       {QStringLiteral("preparing"), QCoreApplication::translate("Workbench", "准备")},
       {QStringLiteral("archiving"), QCoreApplication::translate("Workbench", "归档原文件")},
@@ -536,7 +539,7 @@ MainWindow::MainWindow(QWidget *parent)
   }
 
   setObjectName(QStringLiteral("mainWindow"));
-  setWindowTitle(QCoreApplication::translate("Workbench", "Native Preview"));
+  AppLanguage::bind(this, "windowTitle", AppLanguage::source("Native Preview"));
   setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks |
                  QMainWindow::AllowTabbedDocks);
   setMinimumSize(940, 620);
@@ -582,6 +585,7 @@ MainWindow::MainWindow(QWidget *parent)
     snapshotCurrentProject();
   });
   mRecoveryCheckpointTimer->start();
+  AppLanguage::onChanged(this, [this]() { retranslateUi(); });
 }
 
 MainWindow::~MainWindow() {
@@ -803,19 +807,19 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 }
 
 void MainWindow::createActions() {
-  mNewProjectAction = new QAction(style()->standardIcon(QStyle::SP_FileIcon),
-                                  QCoreApplication::translate("Workbench", "新建工程"), this);
+  mNewProjectAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileIcon),
+                                  QCoreApplication::translate("Workbench", "新建工程"), this), AppLanguage::source("新建工程"));
   mNewProjectAction->setObjectName(QStringLiteral("newProjectAction"));
   mNewProjectAction->setShortcut(QKeySequence::New);
-  mNewProjectAction->setToolTip(QCoreApplication::translate("Workbench", "新建工程"));
+  AppLanguage::bind(mNewProjectAction, "toolTip", AppLanguage::source("新建工程"));
   connect(mNewProjectAction, &QAction::triggered, this,
           &MainWindow::newProject);
 
   mOpenProjectAction =
-      new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton),
-                  QCoreApplication::translate("Workbench", "打开工程"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton),
+                  QCoreApplication::translate("Workbench", "打开工程"), this), AppLanguage::source("打开工程"));
   mOpenProjectAction->setShortcut(QKeySequence::Open);
-  mOpenProjectAction->setToolTip(QCoreApplication::translate("Workbench", "打开工程"));
+  AppLanguage::bind(mOpenProjectAction, "toolTip", AppLanguage::source("打开工程"));
   connect(mOpenProjectAction, &QAction::triggered, this, [this]() {
     const QString filePath = QFileDialog::getOpenFileName(
         this, QCoreApplication::translate("Workbench", "打开 Gaussian Scene Workbench 工程"), {},
@@ -825,207 +829,194 @@ void MainWindow::createActions() {
     }
   });
 
-  mSaveAction = new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
-                            QCoreApplication::translate("Workbench", "保存工程"), this);
+  mSaveAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
+                            QCoreApplication::translate("Workbench", "保存工程"), this), AppLanguage::source("保存工程"));
   mSaveAction->setObjectName(QStringLiteral("saveProjectAction"));
   mSaveAction->setShortcut(QKeySequence::Save);
-  mSaveAction->setToolTip(QCoreApplication::translate("Workbench", "保存工程"));
+  AppLanguage::bind(mSaveAction, "toolTip", AppLanguage::source("保存工程"));
   connect(mSaveAction, &QAction::triggered, this,
           [this]() { saveProject(false); });
 
-  mSaveAsAction = new QAction(QCoreApplication::translate("Workbench", "工程另存为..."), this);
+  mSaveAsAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "工程另存为..."), this), AppLanguage::source("工程另存为..."));
   mSaveAsAction->setObjectName(QStringLiteral("saveProjectAsAction"));
   mSaveAsAction->setShortcut(QKeySequence::SaveAs);
   connect(mSaveAsAction, &QAction::triggered, this,
           [this]() { saveProject(true); });
 
   mRecoveryCenterAction =
-      new QAction(QCoreApplication::translate("Workbench", "恢复中心..."), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "恢复中心..."), this), AppLanguage::source("恢复中心..."));
   mRecoveryCenterAction->setObjectName(
       QStringLiteral("recoveryCenterAction"));
-  mRecoveryCenterAction->setToolTip(
-      QCoreApplication::translate("Workbench", "恢复异常退出时保留的未命名工程"));
+  AppLanguage::bind(mRecoveryCenterAction, "toolTip", AppLanguage::source("恢复异常退出时保留的未命名工程"));
   connect(mRecoveryCenterAction, &QAction::triggered, this,
           [this]() { showRecoveryCenter(false); });
 
   mSnapshotHistoryAction =
-      new QAction(QCoreApplication::translate("Workbench", "版本历史..."), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "版本历史..."), this), AppLanguage::source("版本历史..."));
   mSnapshotHistoryAction->setObjectName(
       QStringLiteral("snapshotHistoryAction"));
-  mSnapshotHistoryAction->setToolTip(
-      QCoreApplication::translate("Workbench", "查看并恢复工程自动快照"));
+  AppLanguage::bind(mSnapshotHistoryAction, "toolTip", AppLanguage::source("查看并恢复工程自动快照"));
   connect(mSnapshotHistoryAction, &QAction::triggered, this,
           &MainWindow::showSnapshotHistory);
 
   mConfigureBackupAction =
-      new QAction(QCoreApplication::translate("Workbench", "设置第二存储位置..."), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "设置第二存储位置..."), this), AppLanguage::source("设置第二存储位置..."));
   mConfigureBackupAction->setObjectName(
       QStringLiteral("configureExternalBackupAction"));
   connect(mConfigureBackupAction, &QAction::triggered, this,
           &MainWindow::configureExternalBackup);
 
   mExternalBackupsAction =
-      new QAction(QCoreApplication::translate("Workbench", "外部备份与恢复..."), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "外部备份与恢复..."), this), AppLanguage::source("外部备份与恢复..."));
   mExternalBackupsAction->setObjectName(
       QStringLiteral("externalBackupsAction"));
   connect(mExternalBackupsAction, &QAction::triggered, this,
           &MainWindow::showExternalBackups);
 
   mImportDatasetAction =
-      new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
-                  QCoreApplication::translate("Workbench", "添加照片/视频..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
+                  QCoreApplication::translate("Workbench", "添加照片/视频..."), this), AppLanguage::source("添加照片/视频..."));
   mImportDatasetAction->setObjectName(QStringLiteral("importDatasetAction"));
-  mImportDatasetAction->setToolTip(
-      QCoreApplication::translate("Workbench", "直接选择照片或视频；视频会自动抽帧"));
+  AppLanguage::bind(mImportDatasetAction, "toolTip", AppLanguage::source("直接选择照片或视频；视频会自动抽帧"));
   connect(mImportDatasetAction, &QAction::triggered, this,
           &MainWindow::importDataset);
 
   mImportDatasetDirectoryAction =
-      new QAction(style()->standardIcon(QStyle::SP_DirIcon),
-                  QCoreApplication::translate("Workbench", "添加媒体目录..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirIcon),
+                  QCoreApplication::translate("Workbench", "添加媒体目录..."), this), AppLanguage::source("添加媒体目录..."));
   mImportDatasetDirectoryAction->setObjectName(
       QStringLiteral("importDatasetDirectoryAction"));
-  mImportDatasetDirectoryAction->setToolTip(
-      QCoreApplication::translate("Workbench", "递归添加目录中的照片与视频"));
+  AppLanguage::bind(mImportDatasetDirectoryAction, "toolTip", AppLanguage::source("递归添加目录中的照片与视频"));
   connect(mImportDatasetDirectoryAction, &QAction::triggered, this,
           &MainWindow::importDatasetDirectory);
 
   mAttachDatasetAction =
-      new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
-                  QCoreApplication::translate("Workbench", "关联已有数据集..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
+                  QCoreApplication::translate("Workbench", "关联已有数据集..."), this), AppLanguage::source("关联已有数据集..."));
   mAttachDatasetAction->setObjectName(QStringLiteral("attachDatasetAction"));
-  mAttachDatasetAction->setToolTip(QCoreApplication::translate("Workbench", "直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
+  AppLanguage::bind(mAttachDatasetAction, "toolTip", AppLanguage::source("直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
   connect(mAttachDatasetAction, &QAction::triggered, this,
           &MainWindow::attachExistingDataset);
 
   mImportSceneAction =
-      new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+                  QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), this), AppLanguage::source("导入 PLY 场景/网格"));
   mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
-  mImportSceneAction->setToolTip(
-      QCoreApplication::translate("Workbench", "导入 PLY 点云、高斯场景或三角网格"));
+  AppLanguage::bind(mImportSceneAction, "toolTip", AppLanguage::source("导入 PLY 点云、高斯场景或三角网格"));
   connect(mImportSceneAction, &QAction::triggered, this,
           &MainWindow::importScene);
 
   mClearDatasetAction =
-      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "清理数据集..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QCoreApplication::translate("Workbench", "清理数据集..."), this), AppLanguage::source("清理数据集..."));
   mClearDatasetAction->setObjectName(QStringLiteral("clearDatasetAction"));
-  mClearDatasetAction->setToolTip(
-      QCoreApplication::translate("Workbench", "清理托管数据集，或仅解除外部数据集关联"));
+  AppLanguage::bind(mClearDatasetAction, "toolTip", AppLanguage::source("清理托管数据集，或仅解除外部数据集关联"));
   connect(mClearDatasetAction, &QAction::triggered, this,
           &MainWindow::clearDatasetImport);
 
   mClearReconstructionAction =
-      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "清理重建结果..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QCoreApplication::translate("Workbench", "清理重建结果..."), this), AppLanguage::source("清理重建结果..."));
   mClearReconstructionAction->setObjectName(
       QStringLiteral("clearReconstructionAction"));
-  mClearReconstructionAction->setToolTip(
-      QCoreApplication::translate("Workbench", "只清理托管数据集内的 COLMAP 结果，保留照片和场景"));
+  AppLanguage::bind(mClearReconstructionAction, "toolTip", AppLanguage::source("只清理托管数据集内的 COLMAP 结果，保留照片和场景"));
   connect(mClearReconstructionAction, &QAction::triggered, this,
           &MainWindow::clearReconstructionImport);
 
   mClearSceneAction =
-      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "卸载场景..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QCoreApplication::translate("Workbench", "卸载场景..."), this), AppLanguage::source("卸载场景..."));
   mClearSceneAction->setObjectName(QStringLiteral("clearSceneAction"));
-  mClearSceneAction->setToolTip(
-      QCoreApplication::translate("Workbench", "从当前工程卸载场景，不删除 PLY 或训练输出"));
+  AppLanguage::bind(mClearSceneAction, "toolTip", AppLanguage::source("从当前工程卸载场景，不删除 PLY 或训练输出"));
   connect(mClearSceneAction, &QAction::triggered, this,
           &MainWindow::clearSceneImport);
 
   mClearTasksAction =
-      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "清空任务记录..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QCoreApplication::translate("Workbench", "清空任务记录..."), this), AppLanguage::source("清空任务记录..."));
   mClearTasksAction->setObjectName(QStringLiteral("clearTasksAction"));
-  mClearTasksAction->setToolTip(
-      QCoreApplication::translate("Workbench", "清空当前窗口中的任务表和日志，不删除任务输出"));
+  AppLanguage::bind(mClearTasksAction, "toolTip", AppLanguage::source("清空当前窗口中的任务表和日志，不删除任务输出"));
   connect(mClearTasksAction, &QAction::triggered, this,
           &MainWindow::clearTaskHistory);
 
   auto *environmentAction =
-      new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QCoreApplication::translate("Workbench", "检查环境"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+                  QCoreApplication::translate("Workbench", "检查环境"), this), AppLanguage::source("检查环境"));
   environmentAction->setShortcut(QKeySequence(QStringLiteral("F6")));
-  environmentAction->setToolTip(QCoreApplication::translate("Workbench", "检查训练与重建环境"));
+  AppLanguage::bind(environmentAction, "toolTip", AppLanguage::source("检查训练与重建环境"));
   connect(environmentAction, &QAction::triggered, this,
           &MainWindow::runEnvironmentCheck);
   environmentAction->setObjectName(QStringLiteral("environmentAction"));
 
   mReconstructAction =
-      new QAction(style()->standardIcon(QStyle::SP_ComputerIcon),
-                  QCoreApplication::translate("Workbench", "COLMAP 重建..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ComputerIcon),
+                  QCoreApplication::translate("Workbench", "COLMAP 重建..."), this), AppLanguage::source("COLMAP 重建..."));
   mReconstructAction->setShortcut(QKeySequence(QStringLiteral("F7")));
-  mReconstructAction->setToolTip(QCoreApplication::translate("Workbench", "计算相机位姿与稀疏点云 (F7)"));
+  AppLanguage::bind(mReconstructAction, "toolTip", AppLanguage::source("计算相机位姿与稀疏点云 (F7)"));
   mReconstructAction->setObjectName(QStringLiteral("reconstructAction"));
   connect(mReconstructAction, &QAction::triggered, this,
           &MainWindow::startReconstruction);
 
-  mTrainAction = new QAction(style()->standardIcon(QStyle::SP_MediaPlay),
-                             QCoreApplication::translate("Workbench", "开始训练..."), this);
-  mTrainAction->setToolTip(QCoreApplication::translate("Workbench", "启动当前工程训练"));
+  mTrainAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPlay),
+                             QCoreApplication::translate("Workbench", "开始训练..."), this), AppLanguage::source("开始训练..."));
+  AppLanguage::bind(mTrainAction, "toolTip", AppLanguage::source("启动当前工程训练"));
   connect(mTrainAction, &QAction::triggered, this, &MainWindow::startTraining);
 
-  mStopAction = new QAction(style()->standardIcon(QStyle::SP_MediaStop),
-                            QCoreApplication::translate("Workbench", "停止任务"), this);
-  mStopAction->setToolTip(QCoreApplication::translate("Workbench", "停止当前任务"));
+  mStopAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaStop),
+                            QCoreApplication::translate("Workbench", "停止任务"), this), AppLanguage::source("停止任务"));
+  AppLanguage::bind(mStopAction, "toolTip", AppLanguage::source("停止当前任务"));
   mStopAction->setEnabled(false);
   connect(mStopAction, &QAction::triggered, &mProcessSupervisor,
           &ProcessSupervisor::stop);
 
   auto *resetCameraAction =
-      new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QCoreApplication::translate("Workbench", "重置视图"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+                  QCoreApplication::translate("Workbench", "重置视图"), this), AppLanguage::source("重置视图"));
   resetCameraAction->setShortcut(QKeySequence(QStringLiteral("Home")));
-  resetCameraAction->setToolTip(QCoreApplication::translate("Workbench", "重置视图"));
+  AppLanguage::bind(resetCameraAction, "toolTip", AppLanguage::source("重置视图"));
   connect(resetCameraAction, &QAction::triggered, mViewport,
           &NativeViewport::resetCamera);
   resetCameraAction->setObjectName(QStringLiteral("resetCameraAction"));
 
   mRenderModeActionGroup = new QActionGroup(this);
   mRenderModeActionGroup->setExclusive(true);
-  mGaussianRenderAction = new QAction(QCoreApplication::translate("Workbench", "高斯"), this);
+  mGaussianRenderAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "高斯"), this), AppLanguage::source("高斯"));
   mGaussianRenderAction->setObjectName(QStringLiteral("gaussianRenderAction"));
   mGaussianRenderAction->setCheckable(true);
   mGaussianRenderAction->setEnabled(false);
-  mGaussianRenderAction->setToolTip(
-      QCoreApplication::translate("Workbench", "使用缩放、旋转与透明度显示屏幕空间高斯"));
+  AppLanguage::bind(mGaussianRenderAction, "toolTip", AppLanguage::source("使用缩放、旋转与透明度显示屏幕空间高斯"));
   mRenderModeActionGroup->addAction(mGaussianRenderAction);
   connect(mGaussianRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
   });
 
-  mMeshRenderAction = new QAction(QCoreApplication::translate("Workbench", "网格"), this);
+  mMeshRenderAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "网格"), this), AppLanguage::source("网格"));
   mMeshRenderAction->setObjectName(QStringLiteral("meshRenderAction"));
   mMeshRenderAction->setCheckable(true);
   mMeshRenderAction->setEnabled(false);
-  mMeshRenderAction->setToolTip(
-      QCoreApplication::translate("Workbench", "显示 PLY 面拓扑三角化后的着色网格"));
+  AppLanguage::bind(mMeshRenderAction, "toolTip", AppLanguage::source("显示 PLY 面拓扑三角化后的着色网格"));
   mRenderModeActionGroup->addAction(mMeshRenderAction);
   connect(mMeshRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
   });
 
-  mPointRenderAction = new QAction(QCoreApplication::translate("Workbench", "点云"), this);
+  mPointRenderAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "点云"), this), AppLanguage::source("点云"));
   mPointRenderAction->setObjectName(QStringLiteral("pointRenderAction"));
   mPointRenderAction->setCheckable(true);
   mPointRenderAction->setChecked(true);
-  mPointRenderAction->setToolTip(
-      QCoreApplication::translate("Workbench", "显示静态点云或训练中持续增密的高斯中心点"));
+  AppLanguage::bind(mPointRenderAction, "toolTip", AppLanguage::source("显示静态点云或训练中持续增密的高斯中心点"));
   mRenderModeActionGroup->addAction(mPointRenderAction);
   connect(mPointRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   });
 
-  mShowCamerasAction = new QAction(QCoreApplication::translate("Workbench", "相机轨迹"), this);
+  mShowCamerasAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "相机轨迹"), this), AppLanguage::source("相机轨迹"));
   mShowCamerasAction->setObjectName(QStringLiteral("showCamerasAction"));
   mShowCamerasAction->setCheckable(true);
   mShowCamerasAction->setChecked(
       QSettings().value(QStringLiteral("view/showCameras"), false).toBool());
   mShowCamerasAction->setEnabled(false);
-  mShowCamerasAction->setToolTip(
-      QCoreApplication::translate("Workbench", "显示 cameras.json 中的相机视锥和拍摄路径"));
+  AppLanguage::bind(mShowCamerasAction, "toolTip", AppLanguage::source("显示 cameras.json 中的相机视锥和拍摄路径"));
   mViewport->setShowCameras(mShowCamerasAction->isChecked());
   connect(mShowCamerasAction, &QAction::toggled, this,
           [this](const bool enabled) {
@@ -1036,22 +1027,21 @@ void MainWindow::createActions() {
   mEditModeActionGroup = new QActionGroup(this);
   mEditModeActionGroup->setExclusive(true);
 
-  mInspectAction = new QAction(style()->standardIcon(QStyle::SP_ArrowUp),
-                               QCoreApplication::translate("Workbench", "查看"), this);
+  mInspectAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowUp),
+                               QCoreApplication::translate("Workbench", "查看"), this), AppLanguage::source("查看"));
   mInspectAction->setCheckable(true);
   mInspectAction->setChecked(true);
   mInspectAction->setShortcut(QKeySequence(QStringLiteral("V")));
-  mInspectAction->setToolTip(QCoreApplication::translate("Workbench", "查看与导航 (V)"));
+  AppLanguage::bind(mInspectAction, "toolTip", AppLanguage::source("查看与导航 (V)"));
   mEditModeActionGroup->addAction(mInspectAction);
   connect(mInspectAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
   });
 
-  mFindModelAction = new QAction(QCoreApplication::translate("Workbench", "查找模型"), this);
+  mFindModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "查找模型"), this), AppLanguage::source("查找模型"));
   mFindModelAction->setObjectName(QStringLiteral("findModelAction"));
   mFindModelAction->setShortcut(QKeySequence(QStringLiteral("F")));
-  mFindModelAction->setToolTip(
-      QCoreApplication::translate("Workbench", "自动选中模型并按完整范围拉近视角 (F)"));
+  AppLanguage::bind(mFindModelAction, "toolTip", AppLanguage::source("自动选中模型并按完整范围拉近视角 (F)"));
   connect(mFindModelAction, &QAction::triggered, this, [this]() {
     if (mViewport->focusModel()) {
       statusBar()->showMessage(
@@ -1062,145 +1052,137 @@ void MainWindow::createActions() {
     }
   });
 
-  mMoveModelAction = new QAction(QCoreApplication::translate("Workbench", "移动模型"), this);
+  mMoveModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "移动模型"), this), AppLanguage::source("移动模型"));
   mMoveModelAction->setObjectName(QStringLiteral("moveModelAction"));
   mMoveModelAction->setCheckable(true);
   mMoveModelAction->setShortcut(QKeySequence(QStringLiteral("G")));
-  mMoveModelAction->setToolTip(
-      QCoreApplication::translate("Workbench", "Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附"));
+  AppLanguage::bind(mMoveModelAction, "toolTip", AppLanguage::source("Blender 式模态移动 (G)：X/Y/Z 约束，Shift+轴锁定平面，Ctrl 吸附"));
   mEditModeActionGroup->addAction(mMoveModelAction);
   connect(mMoveModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForMove);
 
-  mRotateModelAction = new QAction(QCoreApplication::translate("Workbench", "旋转模型"), this);
+  mRotateModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "旋转模型"), this), AppLanguage::source("旋转模型"));
   mRotateModelAction->setObjectName(QStringLiteral("rotateModelAction"));
   mRotateModelAction->setCheckable(true);
   mRotateModelAction->setShortcut(QKeySequence(QStringLiteral("R")));
-  mRotateModelAction->setToolTip(
-      QCoreApplication::translate("Workbench", "Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转"));
+  AppLanguage::bind(mRotateModelAction, "toolTip", AppLanguage::source("Blender 式旋转 (R)，再次按 R 使用轨迹球自由旋转"));
   mEditModeActionGroup->addAction(mRotateModelAction);
   connect(mRotateModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForRotate);
 
-  mScaleModelAction = new QAction(QCoreApplication::translate("Workbench", "缩放模型"), this);
+  mScaleModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "缩放模型"), this), AppLanguage::source("缩放模型"));
   mScaleModelAction->setObjectName(QStringLiteral("scaleModelAction"));
   mScaleModelAction->setCheckable(true);
   mScaleModelAction->setShortcut(QKeySequence(QStringLiteral("S")));
-  mScaleModelAction->setToolTip(
-      QCoreApplication::translate("Workbench", "Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附"));
+  AppLanguage::bind(mScaleModelAction, "toolTip", AppLanguage::source("Blender 式缩放 (S)：轴向、平面与等比缩放，Ctrl 吸附"));
   mEditModeActionGroup->addAction(mScaleModelAction);
   connect(mScaleModelAction, &QAction::triggered, mViewport,
           &NativeViewport::selectModelForScale);
 
   mRectangleAction =
-      new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QCoreApplication::translate("Workbench", "框选"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+                  QCoreApplication::translate("Workbench", "框选"), this), AppLanguage::source("框选"));
   mRectangleAction->setCheckable(true);
   mRectangleAction->setShortcut(QKeySequence(QStringLiteral("Shift+R")));
-  mRectangleAction->setToolTip(
-      QCoreApplication::translate("Workbench", "矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+  AppLanguage::bind(mRectangleAction, "toolTip", AppLanguage::source("矩形选择 (Shift+R)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mRectangleAction);
   connect(mRectangleAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Rectangle);
   });
 
   mLassoAction =
-      new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
-                  QCoreApplication::translate("Workbench", "套索"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
+                  QCoreApplication::translate("Workbench", "套索"), this), AppLanguage::source("套索"));
   mLassoAction->setCheckable(true);
   mLassoAction->setShortcut(QKeySequence(QStringLiteral("L")));
-  mLassoAction->setToolTip(
-      QCoreApplication::translate("Workbench", "套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+  AppLanguage::bind(mLassoAction, "toolTip", AppLanguage::source("套索选择 (L)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mLassoAction);
   connect(mLassoAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Lasso);
   });
 
   mBrushAction =
-      new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
-                  QCoreApplication::translate("Workbench", "笔刷"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
+                  QCoreApplication::translate("Workbench", "笔刷"), this), AppLanguage::source("笔刷"));
   mBrushAction->setCheckable(true);
   mBrushAction->setShortcut(QKeySequence(QStringLiteral("B")));
-  mBrushAction->setToolTip(
-      QCoreApplication::translate("Workbench", "连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
+  AppLanguage::bind(mBrushAction, "toolTip", AppLanguage::source("连续笔刷选择 (B)，Shift 添加，Alt 减去，Ctrl+左键旋转"));
   mEditModeActionGroup->addAction(mBrushAction);
   connect(mBrushAction, &QAction::triggered, this, [this]() {
     mViewport->setInteractionMode(NativeViewport::InteractionMode::Brush);
   });
 
   mVisibleOnlyAction =
-      new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton),
-                  QCoreApplication::translate("Workbench", "仅选择可见点"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton),
+                  QCoreApplication::translate("Workbench", "仅选择可见点"), this), AppLanguage::source("仅选择可见点"));
   mVisibleOnlyAction->setCheckable(true);
   mVisibleOnlyAction->setChecked(true);
-  mVisibleOnlyAction->setToolTip(QCoreApplication::translate("Workbench", "仅选择当前视角可见的点"));
+  AppLanguage::bind(mVisibleOnlyAction, "toolTip", AppLanguage::source("仅选择当前视角可见的点"));
   connect(mVisibleOnlyAction, &QAction::toggled, mViewport,
           &NativeViewport::setVisibleOnlySelection);
 
   mClearSelectionAction =
-      new QAction(style()->standardIcon(QStyle::SP_DialogResetButton),
-                  QCoreApplication::translate("Workbench", "清除选择"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogResetButton),
+                  QCoreApplication::translate("Workbench", "清除选择"), this), AppLanguage::source("清除选择"));
   mClearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
-  mClearSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "清除选择 (Esc)"));
+  AppLanguage::bind(mClearSelectionAction, "toolTip", AppLanguage::source("清除选择 (Esc)"));
   connect(mClearSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::clearSelection);
 
   mInvertSelectionAction =
-      new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
-                  QCoreApplication::translate("Workbench", "反选"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+                  QCoreApplication::translate("Workbench", "反选"), this), AppLanguage::source("反选"));
   mInvertSelectionAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
-  mInvertSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "反选未删除的点 (Ctrl+I)"));
+  AppLanguage::bind(mInvertSelectionAction, "toolTip", AppLanguage::source("反选未删除的点 (Ctrl+I)"));
   connect(mInvertSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::invertSelection);
 
   mDeleteSelectionAction =
-      new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "删除所选"), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+                  QCoreApplication::translate("Workbench", "删除所选"), this), AppLanguage::source("删除所选"));
   mDeleteSelectionAction->setShortcut(QKeySequence::Delete);
-  mDeleteSelectionAction->setToolTip(QCoreApplication::translate("Workbench", "删除所选点 (Delete)"));
+  AppLanguage::bind(mDeleteSelectionAction, "toolTip", AppLanguage::source("删除所选点 (Delete)"));
   connect(mDeleteSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::deleteSelection);
 
-  mUndoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
-                                QCoreApplication::translate("Workbench", "撤销编辑"), this);
+  mUndoEditAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
+                                QCoreApplication::translate("Workbench", "撤销编辑"), this), AppLanguage::source("撤销编辑"));
   mUndoEditAction->setShortcut(QKeySequence::Undo);
-  mUndoEditAction->setToolTip(QCoreApplication::translate("Workbench", "撤销上一次编辑 (Ctrl+Z)"));
+  AppLanguage::bind(mUndoEditAction, "toolTip", AppLanguage::source("撤销上一次编辑 (Ctrl+Z)"));
   connect(mUndoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::undoEdit);
 
-  mRedoEditAction = new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
-                                QCoreApplication::translate("Workbench", "重做编辑"), this);
+  mRedoEditAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
+                                QCoreApplication::translate("Workbench", "重做编辑"), this), AppLanguage::source("重做编辑"));
   mRedoEditAction->setShortcut(QKeySequence::Redo);
-  mRedoEditAction->setToolTip(QCoreApplication::translate("Workbench", "重做上一次编辑 (Ctrl+Y)"));
+  AppLanguage::bind(mRedoEditAction, "toolTip", AppLanguage::source("重做上一次编辑 (Ctrl+Y)"));
   connect(mRedoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::redoEdit);
 
   mExportCropAction =
-      new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
-                  QCoreApplication::translate("Workbench", "裁剪另存为..."), this);
+      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
+                  QCoreApplication::translate("Workbench", "裁剪另存为..."), this), AppLanguage::source("裁剪另存为..."));
   mExportCropAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
-  mExportCropAction->setToolTip(
-      QCoreApplication::translate("Workbench", "按原始顶点索引无损导出裁剪 PLY"));
+  AppLanguage::bind(mExportCropAction, "toolTip", AppLanguage::source("按原始顶点索引无损导出裁剪 PLY"));
   connect(mExportCropAction, &QAction::triggered, this,
           &MainWindow::exportCroppedScene);
 
   mExportCoordinateReportAction =
-      new QAction(QCoreApplication::translate("Workbench", "导出坐标与尺寸报告..."), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "导出坐标与尺寸报告..."), this), AppLanguage::source("导出坐标与尺寸报告..."));
   mExportCoordinateReportAction->setObjectName(
       QStringLiteral("exportCoordinateReportAction"));
-  mExportCoordinateReportAction->setToolTip(
-      QCoreApplication::translate("Workbench", "导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移"));
+  AppLanguage::bind(mExportCoordinateReportAction, "toolTip", AppLanguage::source("导出原始坐标范围、中心、尺寸、单位、CRS 与显示偏移"));
   connect(mExportCoordinateReportAction, &QAction::triggered, this,
           &MainWindow::exportCoordinateReport);
 
   mReferencePlaneActionGroup = new QActionGroup(this);
   mReferencePlaneActionGroup->setExclusive(true);
   mModelBasePlaneAction =
-      new QAction(QCoreApplication::translate("Workbench", "模型底部（推荐）"), this);
+      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "模型底部（推荐）"), this), AppLanguage::source("模型底部（推荐）"));
   mModelBasePlaneAction->setObjectName(
       QStringLiteral("modelBaseReferencePlaneAction"));
   mModelBasePlaneAction->setCheckable(true);
-  mWorldZeroPlaneAction = new QAction(QCoreApplication::translate("Workbench", "世界坐标 Z=0"), this);
+  mWorldZeroPlaneAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "世界坐标 Z=0"), this), AppLanguage::source("世界坐标 Z=0"));
   mWorldZeroPlaneAction->setObjectName(
       QStringLiteral("worldZeroReferencePlaneAction"));
   mWorldZeroPlaneAction->setCheckable(true);
@@ -1232,12 +1214,12 @@ void MainWindow::createActions() {
 
   updateEditActions();
 
-  auto *exitAction = new QAction(QCoreApplication::translate("Workbench", "退出"), this);
+  auto *exitAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "退出"), this), AppLanguage::source("退出"));
   exitAction->setShortcut(QKeySequence::Quit);
   connect(exitAction, &QAction::triggered, this, &QWidget::close);
   exitAction->setObjectName(QStringLiteral("exitAction"));
 
-  auto *resetLayoutAction = new QAction(QCoreApplication::translate("Workbench", "重置工作区布局"), this);
+  auto *resetLayoutAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "重置工作区布局"), this), AppLanguage::source("重置工作区布局"));
   connect(resetLayoutAction, &QAction::triggered, this,
           &MainWindow::resetDockLayout);
   resetLayoutAction->setObjectName(QStringLiteral("resetLayoutAction"));
@@ -1252,7 +1234,7 @@ void MainWindow::createActions() {
 }
 
 void MainWindow::createMenus() {
-  QMenu *fileMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "文件"));
+  QMenu *fileMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "文件")), AppLanguage::source("文件"), "title");
   fileMenu->addAction(actions().at(0));
   fileMenu->addAction(actions().at(1));
   fileMenu->addSeparator();
@@ -1268,7 +1250,7 @@ void MainWindow::createMenus() {
   fileMenu->addAction(mImportDatasetDirectoryAction);
   fileMenu->addAction(mAttachDatasetAction);
   fileMenu->addAction(mImportSceneAction);
-  QMenu *fileCleanupMenu = fileMenu->addMenu(QCoreApplication::translate("Workbench", "清理"));
+  QMenu *fileCleanupMenu = AppLanguage::text(fileMenu->addMenu(QCoreApplication::translate("Workbench", "清理")), AppLanguage::source("清理"), "title");
   fileCleanupMenu->addAction(mClearDatasetAction);
   fileCleanupMenu->addAction(mClearReconstructionAction);
   fileCleanupMenu->addAction(mClearSceneAction);
@@ -1276,7 +1258,7 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(actions().at(5));
 
-  QMenu *editMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "编辑"));
+  QMenu *editMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "编辑")), AppLanguage::source("编辑"), "title");
   editMenu->addAction(mUndoEditAction);
   editMenu->addAction(mRedoEditAction);
   editMenu->addSeparator();
@@ -1284,11 +1266,11 @@ void MainWindow::createMenus() {
   editMenu->addAction(mInvertSelectionAction);
   editMenu->addAction(mDeleteSelectionAction);
 
-  QMenu *workflowMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "工作流"));
+  QMenu *workflowMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "工作流")), AppLanguage::source("工作流"), "title");
   workflowMenu->addAction(mImportDatasetAction);
   workflowMenu->addAction(mImportDatasetDirectoryAction);
   QMenu *workflowCleanupMenu =
-      workflowMenu->addMenu(QCoreApplication::translate("Workbench", "清理"));
+      AppLanguage::text(workflowMenu->addMenu(QCoreApplication::translate("Workbench", "清理")), AppLanguage::source("清理"), "title");
   workflowCleanupMenu->addAction(mClearDatasetAction);
   workflowCleanupMenu->addAction(mClearReconstructionAction);
   workflowCleanupMenu->addAction(mClearSceneAction);
@@ -1300,7 +1282,7 @@ void MainWindow::createMenus() {
   workflowMenu->addAction(mTrainAction);
   workflowMenu->addAction(mStopAction);
 
-  QMenu *sceneMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景"));
+  QMenu *sceneMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景")), AppLanguage::source("场景"), "title");
   sceneMenu->addAction(mImportSceneAction);
   sceneMenu->addAction(actions().at(4));
   sceneMenu->addAction(mFindModelAction);
@@ -1317,8 +1299,8 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mExportCropAction);
   sceneMenu->addAction(mExportCoordinateReportAction);
 
-  QMenu *viewMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图"));
-  auto *languageMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language"));
+  QMenu *viewMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图")), AppLanguage::source("视图"), "title");
+  auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
   auto *languageGroup = new QActionGroup(languageMenu);
   languageGroup->setExclusive(true);
@@ -1326,31 +1308,31 @@ void MainWindow::createMenus() {
     auto *action = languageMenu->addAction(AppLanguage::displayName(language));
     action->setCheckable(true);
     action->setData(language);
-    action->setChecked(language == AppLanguage::saved());
+    action->setChecked(language == AppLanguage::current());
     languageGroup->addAction(action);
   }
   connect(languageGroup, &QActionGroup::triggered, this, [this, languageGroup](QAction *action) {
     const QString language = action->data().toString();
-    if (!AppLanguage::save(language)) {
+    if (!AppLanguage::apply(language)) {
       for (auto *item : languageGroup->actions())
-        item->setChecked(item->data().toString() == AppLanguage::saved());
+        item->setChecked(item->data().toString() == AppLanguage::current());
       QMessageBox::warning(this, QCoreApplication::translate("Workbench", "语言设置"),
-                           QCoreApplication::translate("Workbench", "无法保存语言设置，请检查配置目录的写入权限。"));
+                           QCoreApplication::translate("Workbench", "无法切换语言，请检查语言资源与配置目录的写入权限。"));
       return;
     }
-    if (language != AppLanguage::current())
-      QMessageBox::information(this, QCoreApplication::translate("Workbench", "语言设置"),
-          QCoreApplication::translate("Workbench", "已选择 %1。下次启动时应用此语言；当前工程和正在运行的任务不会被中断。")
-              .arg(AppLanguage::displayName(language)));
+  });
+  AppLanguage::onChanged(languageGroup, [languageGroup]() {
+    for (auto *item : languageGroup->actions())
+      item->setChecked(item->data().toString() == AppLanguage::current());
   });
   viewMenu->addSeparator();
-  QMenu *renderMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式"));
+  QMenu *renderMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "title");
   renderMenu->addAction(mGaussianRenderAction);
   renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
   viewMenu->addAction(mShowCamerasAction);
   QMenu *referencePlaneMenu =
-      viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格"));
+      AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格")), AppLanguage::source("基准面网格"), "title");
   referencePlaneMenu->addAction(mModelBasePlaneAction);
   referencePlaneMenu->addAction(mWorldZeroPlaneAction);
   viewMenu->addSeparator();
@@ -1360,19 +1342,18 @@ void MainWindow::createMenus() {
   viewMenu->addSeparator();
   viewMenu->addAction(actions().at(6));
 
-  QMenu *displayMenu = viewMenu->addMenu(QCoreApplication::translate("Workbench", "显示与适配"));
+  QMenu *displayMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "显示与适配")), AppLanguage::source("显示与适配"), "title");
   displayMenu->setObjectName(QStringLiteral("displaySettingsMenu"));
   mAutoScaleAction =
-      displayMenu->addAction(QCoreApplication::translate("Workbench", "自动适配界面（推荐）"));
+      AppLanguage::text(displayMenu->addAction(QCoreApplication::translate("Workbench", "自动适配界面（推荐）")), AppLanguage::source("自动适配界面（推荐）"));
   mAutoScaleAction->setObjectName(QStringLiteral("autoUiScaleAction"));
   mAutoScaleAction->setCheckable(true);
   mAutoScaleAction->setChecked(mAutomaticUiScale);
-  mAutoScaleAction->setToolTip(
-      QCoreApplication::translate("Workbench", "根据当前屏幕和窗口分辨率自动调整文字、控件与图标"));
+  AppLanguage::bind(mAutoScaleAction, "toolTip", AppLanguage::source("根据当前屏幕和窗口分辨率自动调整文字、控件与图标"));
   connect(mAutoScaleAction, &QAction::triggered, this,
           [this]() { setAutomaticUiScale(true, true); });
 
-  QMenu *scaleMenu = displayMenu->addMenu(QCoreApplication::translate("Workbench", "手动界面比例"));
+  QMenu *scaleMenu = AppLanguage::text(displayMenu->addMenu(QCoreApplication::translate("Workbench", "手动界面比例")), AppLanguage::source("手动界面比例"), "title");
   mScaleActionGroup = new QActionGroup(this);
   mScaleActionGroup->setExclusive(true);
   const QList<int> scales = {90, 100, 110, 125, 150};
@@ -1391,9 +1372,9 @@ void MainWindow::createMenus() {
           });
 
   displayMenu->addSeparator();
-  QMenu *resolutionMenu = displayMenu->addMenu(QCoreApplication::translate("Workbench", "窗口分辨率"));
+  QMenu *resolutionMenu = AppLanguage::text(displayMenu->addMenu(QCoreApplication::translate("Workbench", "窗口分辨率")), AppLanguage::source("窗口分辨率"), "title");
   auto *fitWindowAction =
-      resolutionMenu->addAction(QCoreApplication::translate("Workbench", "适合当前屏幕（自动）"));
+      AppLanguage::text(resolutionMenu->addAction(QCoreApplication::translate("Workbench", "适合当前屏幕（自动）")), AppLanguage::source("适合当前屏幕（自动）"));
   fitWindowAction->setObjectName(QStringLiteral("fitWindowToScreenAction"));
   connect(fitWindowAction, &QAction::triggered, this,
           &MainWindow::fitWindowToScreen);
@@ -1413,9 +1394,9 @@ void MainWindow::createMenus() {
             [this, resolution]() { applyWindowResolution(resolution); });
   }
 
-  QMenu *helpMenu = menuBar()->addMenu(QCoreApplication::translate("Workbench", "帮助"));
+  QMenu *helpMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "帮助")), AppLanguage::source("帮助"), "title");
   auto *aboutAction =
-      helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"));
+      AppLanguage::text(helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench")), AppLanguage::source("关于 Gaussian Scene Workbench"));
   connect(aboutAction, &QAction::triggered, this, [this]() {
     QMessageBox::about(
         this, QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"),
@@ -1428,7 +1409,7 @@ void MainWindow::createMenus() {
 }
 
 void MainWindow::createToolBars() {
-  auto *mainToolbar = addToolBar(QCoreApplication::translate("Workbench", "主工具"));
+  auto *mainToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "主工具")), AppLanguage::source("主工具"), "windowTitle");
   mainToolbar->setObjectName(QStringLiteral("mainToolbar"));
   mainToolbar->setMovable(false);
   mainToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -1444,7 +1425,7 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(mStopAction);
 
   addToolBarBreak(Qt::TopToolBarArea);
-  mRenderToolbar = addToolBar(QCoreApplication::translate("Workbench", "渲染模式"));
+  mRenderToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "windowTitle");
   mRenderToolbar->setObjectName(QStringLiteral("renderToolbar"));
   mRenderToolbar->setMovable(false);
   mRenderToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -1454,7 +1435,7 @@ void MainWindow::createToolBars() {
   mRenderToolbar->addSeparator();
   mRenderToolbar->addAction(mShowCamerasAction);
 
-  mSelectionToolbar = addToolBar(QCoreApplication::translate("Workbench", "选择模式"));
+  mSelectionToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "选择模式")), AppLanguage::source("选择模式"), "windowTitle");
   mSelectionToolbar->setObjectName(QStringLiteral("selectionToolbar"));
   mSelectionToolbar->setMovable(false);
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -1467,12 +1448,12 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->addAction(mVisibleOnlyAction);
   mSelectionToolbar->addSeparator();
   auto *brushRadiusLabel =
-      new QLabel(QCoreApplication::translate("Workbench", "半径"), mSelectionToolbar);
+      AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "半径"), mSelectionToolbar), AppLanguage::source("半径"));
   brushRadiusLabel->setObjectName(QStringLiteral("mutedLabel"));
   mSelectionToolbar->addWidget(brushRadiusLabel);
   mBrushRadiusSpin = new QSpinBox(mSelectionToolbar);
   mBrushRadiusSpin->setObjectName(QStringLiteral("brushRadiusSpin"));
-  mBrushRadiusSpin->setAccessibleName(QCoreApplication::translate("Workbench", "笔刷半径"));
+  AppLanguage::bind(mBrushRadiusSpin, "accessibleName", AppLanguage::source("笔刷半径"));
   mBrushRadiusSpin->setRange(4, 256);
   mBrushRadiusSpin->setSingleStep(4);
   mBrushRadiusSpin->setSuffix(QStringLiteral(" px"));
@@ -1492,7 +1473,7 @@ void MainWindow::createToolBars() {
           });
   mSelectionToolbar->addWidget(mBrushRadiusSpin);
 
-  mEditToolbar = addToolBar(QCoreApplication::translate("Workbench", "编辑操作"));
+  mEditToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "编辑操作")), AppLanguage::source("编辑操作"), "windowTitle");
   mEditToolbar->setObjectName(QStringLiteral("editToolbar"));
   mEditToolbar->setMovable(false);
   mEditToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -1510,7 +1491,7 @@ void MainWindow::createToolBars() {
 }
 
 void MainWindow::createProjectDock() {
-  mProjectDock = new QDockWidget(QCoreApplication::translate("Workbench", "工程"), this);
+  mProjectDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "工程"), this), AppLanguage::source("工程"), "windowTitle");
   mProjectDock->setObjectName(QStringLiteral("projectDock"));
   mProjectDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                 Qt::RightDockWidgetArea);
@@ -1525,7 +1506,7 @@ void MainWindow::createProjectDock() {
   mProjectTree->setUniformRowHeights(true);
   mProjectTree->setObjectName(QStringLiteral("projectTree"));
   mProjectTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  mProjectTree->setToolTip(QCoreApplication::translate("Workbench", "Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
+  AppLanguage::bind(mProjectTree, "toolTip", AppLanguage::source("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
@@ -1584,7 +1565,7 @@ void MainWindow::createProjectDock() {
 }
 
 void MainWindow::createInspectorDock() {
-  mInspectorDock = new QDockWidget(QCoreApplication::translate("Workbench", "属性"), this);
+  mInspectorDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "属性"), this), AppLanguage::source("属性"), "windowTitle");
   mInspectorDock->setObjectName(QStringLiteral("inspectorDock"));
   mInspectorDock->setAllowedAreas(Qt::LeftDockWidgetArea |
                                   Qt::RightDockWidgetArea);
@@ -1603,7 +1584,7 @@ void MainWindow::createInspectorDock() {
   layout->setContentsMargins(12, 4, 12, 12);
   layout->setSpacing(8);
 
-  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "工程"), panel));
+  layout->addWidget(createSectionTitle(AppLanguage::source("工程"), panel));
   auto *projectForm = new QFormLayout();
   projectForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   projectForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1614,10 +1595,12 @@ void MainWindow::createInspectorDock() {
   mProjectRootValue = createValueLabel(panel);
   mProjectRootValue->setObjectName(QStringLiteral("projectRootValue"));
   projectForm->addRow(QCoreApplication::translate("Workbench", "名称"), mProjectNameValue);
+  AppLanguage::text(qobject_cast<QLabel *>(projectForm->labelForField(mProjectNameValue)), AppLanguage::source("名称"));
   projectForm->addRow(QCoreApplication::translate("Workbench", "路径"), mProjectRootValue);
+  AppLanguage::text(qobject_cast<QLabel *>(projectForm->labelForField(mProjectRootValue)), AppLanguage::source("路径"));
   layout->addLayout(projectForm);
 
-  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "数据集"), panel));
+  layout->addWidget(createSectionTitle(AppLanguage::source("数据集"), panel));
   auto *datasetForm = new QFormLayout();
   datasetForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   datasetForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1626,10 +1609,12 @@ void MainWindow::createInspectorDock() {
   mDatasetValue = createValueLabel(panel);
   mImageCountValue = createValueLabel(panel);
   datasetForm->addRow(QCoreApplication::translate("Workbench", "目录"), mDatasetValue);
+  AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mDatasetValue)), AppLanguage::source("目录"));
   datasetForm->addRow(QCoreApplication::translate("Workbench", "图像"), mImageCountValue);
+  AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mImageCountValue)), AppLanguage::source("图像"));
   layout->addLayout(datasetForm);
 
-  layout->addWidget(createSectionTitle(QCoreApplication::translate("Workbench", "场景"), panel));
+  layout->addWidget(createSectionTitle(AppLanguage::source("场景"), panel));
   auto *sceneForm = new QFormLayout();
   sceneForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   sceneForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -1648,17 +1633,29 @@ void MainWindow::createInspectorDock() {
   mReferencePlaneValue = createValueLabel(panel);
   mSceneTransformValue = createValueLabel(panel);
   sceneForm->addRow(QCoreApplication::translate("Workbench", "文件"), mSceneValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneValue)), AppLanguage::source("文件"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "数量"), mGaussianCountValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mGaussianCountValue)), AppLanguage::source("数量"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "格式"), mPlyFormatValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mPlyFormatValue)), AppLanguage::source("格式"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "相机"), mCameraCountValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mCameraCountValue)), AppLanguage::source("相机"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "坐标系"), mCoordinateSystemValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mCoordinateSystemValue)), AppLanguage::source("坐标系"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "单位"), mSceneUnitValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneUnitValue)), AppLanguage::source("单位"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "中心"), mSceneCenterValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneCenterValue)), AppLanguage::source("中心"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "尺寸"), mSceneSizeValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneSizeValue)), AppLanguage::source("尺寸"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "范围"), mSceneBoundsValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneBoundsValue)), AppLanguage::source("范围"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "显示变换"), mDisplayShiftValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mDisplayShiftValue)), AppLanguage::source("显示变换"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "模型变换"), mSceneTransformValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneTransformValue)), AppLanguage::source("模型变换"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "基准面"), mReferencePlaneValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mReferencePlaneValue)), AppLanguage::source("基准面"));
   layout->addLayout(sceneForm);
   layout->addStretch(1);
 
@@ -1668,7 +1665,7 @@ void MainWindow::createInspectorDock() {
 }
 
 void MainWindow::createTaskDock() {
-  mTaskDock = new QDockWidget(QCoreApplication::translate("Workbench", "任务与日志"), this);
+  mTaskDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "任务与日志"), this), AppLanguage::source("任务与日志"), "windowTitle");
   mTaskDock->setObjectName(QStringLiteral("taskDock"));
   mTaskDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
   mTaskDock->setMinimumSize(0, 0);
@@ -1703,18 +1700,26 @@ void MainWindow::createTaskDock() {
   mTaskTabs->addTab(mTaskTable, QCoreApplication::translate("Workbench", "任务"));
   mTaskTabs->addTab(mTrainingMonitor, QCoreApplication::translate("Workbench", "训练监视"));
   mTaskTabs->addTab(mConsole, QCoreApplication::translate("Workbench", "日志"));
+  AppLanguage::onChanged(mTaskTabs, [this]() {
+    mTaskTabs->setTabText(mTaskTabs->indexOf(mTaskTable), QCoreApplication::translate("Workbench", "任务"));
+    mTaskTabs->setTabText(mTaskTabs->indexOf(mTrainingMonitor), QCoreApplication::translate("Workbench", "训练监视"));
+    mTaskTabs->setTabText(mTaskTabs->indexOf(mConsole), QCoreApplication::translate("Workbench", "日志"));
+    mTaskTable->setHorizontalHeaderLabels({QCoreApplication::translate("Workbench", "状态"),
+        QCoreApplication::translate("Workbench", "任务"), QCoreApplication::translate("Workbench", "开始时间"),
+        QCoreApplication::translate("Workbench", "结果")});
+  });
   mTaskDock->setWidget(mTaskTabs);
   addDockWidget(Qt::BottomDockWidgetArea, mTaskDock);
 }
 
 void MainWindow::createStatusBar() {
-  mProjectStatus = new QLabel(QCoreApplication::translate("Workbench", "未打开工程"), this);
+  mProjectStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "未打开工程"), this), AppLanguage::source("未打开工程"));
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  mRendererStatus = new QLabel(
-      QCoreApplication::translate("Workbench", "点预览 | 未载入场景 | FPS — (— ms)"), this);
+  mRendererStatus = AppLanguage::text(new QLabel(
+      QCoreApplication::translate("Workbench", "点预览 | 未载入场景 | FPS — (— ms)"), this), AppLanguage::source("点预览 | 未载入场景 | FPS — (— ms)"));
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
-  mEditStatus = new QLabel(QCoreApplication::translate("Workbench", "选择 0 | 删除 0"), this);
+  mEditStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "选择 0 | 删除 0"), this), AppLanguage::source("选择 0 | 删除 0"));
   mEditStatus->setObjectName(QStringLiteral("mutedLabel"));
   mScaleStatus = new QLabel(this);
   mScaleStatus->setObjectName(QStringLiteral("uiScaleStatus"));
@@ -1738,9 +1743,11 @@ void MainWindow::connectServices() {
   connect(&mProcessSupervisor, &ProcessSupervisor::taskStarted, this,
           [this](const QString &taskName) {
             mActiveWorkerState.clear();
+            mLastWorkerStatus.reset();
             mActiveTaskRow = mTaskTable->rowCount();
             mTaskTable->insertRow(mActiveTaskRow);
             auto *state = new QTableWidgetItem(QCoreApplication::translate("Workbench", "运行中"));
+            state->setData(Qt::UserRole + 31, QStringLiteral("running"));
             state->setForeground(QColor(102, 193, 168));
             mTaskTable->setItem(mActiveTaskRow, 0, state);
             mTaskTable->setItem(mActiveTaskRow, 1,
@@ -1840,6 +1847,7 @@ void MainWindow::connectServices() {
                 mActiveTaskRow >= mTaskTable->rowCount()) {
               return;
             }
+            mLastWorkerStatus = status;
             QString detail = workerStageLabel(status.stage);
             if (status.previewKind == QStringLiteral("colmap_sparse") &&
                 status.gaussianCount.has_value()) {
@@ -2090,6 +2098,8 @@ void MainWindow::connectServices() {
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
+          state->setData(Qt::UserRole + 31, effectiveSucceeded ? QStringLiteral("done")
+              : cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed"));
           state->setText(effectiveSucceeded ? QCoreApplication::translate("Workbench", "完成")
                          : cancelled        ? QCoreApplication::translate("Workbench", "已取消")
                                             : QCoreApplication::translate("Workbench", "失败"));
@@ -2211,7 +2221,7 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this,
           [this](const QString &scenePath) {
-            mRendererStatus->setText(QCoreApplication::translate("Workbench", "正在读取 PLY 场景"));
+            AppLanguage::text(mRendererStatus, AppLanguage::source("正在读取 PLY 场景"));
             appendTaskEvent(QCoreApplication::translate("Workbench", "读取场景：%1")
                                 .arg(QDir::toNativeSeparators(scenePath)));
           });
@@ -2283,7 +2293,7 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::sceneLoadFailed, this,
           [this](const QString &, const QString &message) {
-            mRendererStatus->setText(QCoreApplication::translate("Workbench", "PLY 场景读取失败"));
+            AppLanguage::text(mRendererStatus, AppLanguage::source("PLY 场景读取失败"));
             appendTaskEvent(QCoreApplication::translate("Workbench", "场景读取失败：%1").arg(message));
           });
   connect(
@@ -2589,8 +2599,7 @@ void MainWindow::updateScaleStatus() {
                             .arg(mUiScalePercent)
                             .arg(width())
                             .arg(height()));
-  mScaleStatus->setToolTip(
-      QCoreApplication::translate("Workbench", "视图 > 显示与适配，可切换自动缩放或窗口分辨率"));
+  AppLanguage::bind(mScaleStatus, "toolTip", AppLanguage::source("视图 > 显示与适配，可切换自动缩放或窗口分辨率"));
 }
 
 void MainWindow::applyWindowResolution(const QSize &requestedSize) {
@@ -2672,8 +2681,12 @@ void MainWindow::updateEditActions() {
   mUndoEditAction->setEnabled(baseInteractive && mCanUndoEdit);
   mRedoEditAction->setEnabled(baseInteractive && mCanRedoEdit);
   mExportCropAction->setEnabled(pointInteractive && mDeletedPointCount > 0);
+  updateEditStatus();
+}
+
+void MainWindow::updateEditStatus() {
   if (mEditStatus != nullptr) {
-    mEditStatus->setVisible(anyScene || mSelectionBusy);
+    mEditStatus->setVisible(mModelReady || mSceneReady || mSelectionBusy);
     if (mSelectionBusy) {
       mEditStatus->setText(QCoreApplication::translate("Workbench", "正在计算选择"));
     } else if (mModelSelected) {
@@ -2903,7 +2916,7 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "工程恢复中心"));
+  AppLanguage::bind(&dialog, "windowTitle", AppLanguage::source("工程恢复中心"));
   dialog.resize(820, 380);
   auto *layout = new QVBoxLayout(&dialog);
   auto *description = new QLabel(
@@ -2947,14 +2960,14 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
 
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *recoverButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选工程"),
-                         QDialogButtonBox::AcceptRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选工程"),
+                         QDialogButtonBox::AcceptRole), AppLanguage::source("恢复所选工程"));
   auto *discardButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "永久删除所选"),
-                         QDialogButtonBox::DestructiveRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "永久删除所选"),
+                         QDialogButtonBox::DestructiveRole), AppLanguage::source("永久删除所选"));
   auto *laterButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "稍后处理"),
-                         QDialogButtonBox::RejectRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "稍后处理"),
+                         QDialogButtonBox::RejectRole), AppLanguage::source("稍后处理"));
   connect(recoverButton, &QPushButton::clicked, &dialog,
           [&dialog]() { dialog.done(1); });
   connect(discardButton, &QPushButton::clicked, &dialog,
@@ -3115,13 +3128,14 @@ void MainWindow::showSnapshotHistory() {
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "工程版本历史"));
+  AppLanguage::bind(&dialog, "windowTitle", AppLanguage::source("工程版本历史"));
   dialog.resize(720, 360);
   auto *layout = new QVBoxLayout(&dialog);
-  auto *description = new QLabel(
+  auto *description = AppLanguage::text(new QLabel(
       QCoreApplication::translate("Workbench", "自动快照保存工程状态并复用已校验的数据。恢复时会"
                      "创建新工程文件，不覆盖当前版本。"),
-      &dialog);
+      &dialog), AppLanguage::source("自动快照保存工程状态并复用已校验的数据。恢复时会"
+                     "创建新工程文件，不覆盖当前版本。"));
   description->setWordWrap(true);
   layout->addWidget(description);
   auto *table = new QTableWidget(snapshots.size(), 2, &dialog);
@@ -3147,11 +3161,11 @@ void MainWindow::showSnapshotHistory() {
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *restoreButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "恢复为新工程"),
-                         QDialogButtonBox::AcceptRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "恢复为新工程"),
+                         QDialogButtonBox::AcceptRole), AppLanguage::source("恢复为新工程"));
   auto *cancelButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "取消"),
-                         QDialogButtonBox::RejectRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "取消"),
+                         QDialogButtonBox::RejectRole), AppLanguage::source("取消"));
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
@@ -3307,7 +3321,7 @@ void MainWindow::showExternalBackups() {
   }
 
   QDialog dialog(this);
-  dialog.setWindowTitle(QCoreApplication::translate("Workbench", "外部备份与恢复"));
+  AppLanguage::bind(&dialog, "windowTitle", AppLanguage::source("外部备份与恢复"));
   dialog.resize(780, 380);
   auto *layout = new QVBoxLayout(&dialog);
   auto *table = new QTableWidget(backups.size(), 4, &dialog);
@@ -3337,11 +3351,11 @@ void MainWindow::showExternalBackups() {
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
   auto *restoreButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选备份"),
-                         QDialogButtonBox::AcceptRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选备份"),
+                         QDialogButtonBox::AcceptRole), AppLanguage::source("恢复所选备份"));
   auto *closeButton =
-      buttons->addButton(QCoreApplication::translate("Workbench", "关闭"),
-                         QDialogButtonBox::RejectRole);
+      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "关闭"),
+                         QDialogButtonBox::RejectRole), AppLanguage::source("关闭"));
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
@@ -4720,6 +4734,70 @@ void MainWindow::updateWorkspaceUi() {
   updateActionAvailability();
 }
 
+void MainWindow::updateTaskLabels() {
+  for (int row = 0; row < mTaskTable->rowCount(); ++row) {
+    auto *state = mTaskTable->item(row, 0);
+    if (!state) continue;
+    const QString key = state->data(Qt::UserRole + 31).toString();
+    if (!key.isEmpty()) state->setText(key == QStringLiteral("running")
+        ? QCoreApplication::translate("Workbench", "运行中") : workerStageLabel(key));
+  }
+  if (mActiveTaskRow >= 0 && mLastWorkerStatus && mActiveTaskRow < mTaskTable->rowCount()) {
+    const auto &status = *mLastWorkerStatus;
+    QString detail = workerStageLabel(status.stage);
+    if (status.previewKind == QStringLiteral("colmap_sparse") && status.gaussianCount)
+      detail += QCoreApplication::translate("Workbench", " · 稀疏点 %1").arg(*status.gaussianCount);
+    if (status.progressPercent) detail += QStringLiteral(" · %1%").arg(*status.progressPercent);
+    if (auto *item = mTaskTable->item(mActiveTaskRow, 3)) item->setText(detail);
+  }
+}
+
+void MainWindow::retranslateUi() {
+  // Presentation only. Do not call updateWorkspaceUi(): it can replace a live
+  // training scene and reset transforms. Preserve all tree interaction state.
+  const QSignalBlocker treeSignals(mProjectTree);
+  const int scroll = mProjectTree->verticalScrollBar()->value();
+  const int horizontalScroll = mProjectTree->horizontalScrollBar()->value();
+  const auto keyFor = [](QTreeWidgetItem *item) {
+    QStringList rows;
+    while (item) {
+      auto *parent = item->parent();
+      rows.prepend(QString::number(parent ? parent->indexOfChild(item) : 0));
+      item = parent;
+    }
+    return rows.join(QLatin1Char('/'));
+  };
+  QSet<QString> expanded;
+  QSet<QString> selected;
+  const QString current = keyFor(mProjectTree->currentItem());
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    if ((*it)->isExpanded()) expanded.insert(keyFor(*it));
+    if ((*it)->isSelected()) selected.insert(keyFor(*it));
+  }
+  rebuildProjectTree();
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    const QString key = keyFor(*it);
+    (*it)->setExpanded(expanded.contains(key));
+    (*it)->setSelected(selected.contains(key));
+    if (key == current) mProjectTree->setCurrentItem(*it, 0, QItemSelectionModel::NoUpdate);
+  }
+  mProjectTree->verticalScrollBar()->setValue(scroll);
+  mProjectTree->horizontalScrollBar()->setValue(horizontalScroll);
+  updateInspector();
+  updateTaskLabels();
+  updateEditStatus();
+  updateScaleStatus();
+  const QString name = mWorkspace.hasProject() ? mWorkspace.projectName()
+      : QCoreApplication::translate("Workbench", "未打开工程");
+  mProjectStatus->setText(name + (mWorkspace.isModified() ? QStringLiteral(" *") : QString())
+      + (mWorkspace.hasPendingDataMigration() ? QCoreApplication::translate("Workbench", " · 数据迁移待完成") : QString())
+      + (mRecoveryBlocked ? QCoreApplication::translate("Workbench", " · 导入恢复待处理") : QString()));
+  setWindowTitle(QStringLiteral("%1[*]").arg(name));
+  AppTheme::apply(*qApp, mUiScalePercent, false);
+  updateDockMetrics();
+  mViewport->update();
+}
+
 void MainWindow::updateActionAvailability() {
   const bool running = mProcessSupervisor.isRunning();
   const bool hasProject = mWorkspace.hasProject();
@@ -4997,8 +5075,7 @@ void MainWindow::updateInspector() {
                            ? QCoreApplication::translate("Workbench", "（自动精度保护）")
                            : QString())
             : QCoreApplication::translate("Workbench", "无（原始坐标直接显示）"));
-    mDisplayShiftValue->setToolTip(
-        QCoreApplication::translate("Workbench", "仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。"));
+    AppLanguage::bind(mDisplayShiftValue, "toolTip", AppLanguage::source("仅影响 GPU 显示：local = (global + T) × S；原始文件与报告仍使用 global 坐标。"));
     mReferencePlaneValue->setText(mViewport->referencePlaneDescription());
   } else {
     for (QLabel *label :

@@ -1,3 +1,4 @@
+#include "AppLanguage.h"
 #include <QCoreApplication>
 #include "TrainingMonitorWidget.h"
 
@@ -68,8 +69,8 @@ QLabel *metricValue(QWidget *parent) {
 }
 
 QLabel *addMetric(QGridLayout *layout, const int column,
-                  const QString &caption, QLabel *value) {
-  auto *captionLabel = new QLabel(caption, value->parentWidget());
+                  const char *source, QLabel *value) {
+  auto *captionLabel = AppLanguage::text(new QLabel(value->parentWidget()), source);
   captionLabel->setObjectName(QStringLiteral("mutedLabel"));
   layout->addWidget(captionLabel, 0, column);
   layout->addWidget(value, 1, column);
@@ -203,11 +204,11 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   layout->setSpacing(6);
 
   auto *heading = new QHBoxLayout();
-  mTitle = new QLabel(QCoreApplication::translate("Workbench", "尚未开始训练"), this);
+  mTitle = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "尚未开始训练"), this), AppLanguage::source("尚未开始训练"));
   QFont titleFont = mTitle->font();
   titleFont.setBold(true);
   mTitle->setFont(titleFont);
-  mState = new QLabel(QCoreApplication::translate("Workbench", "空闲"), this);
+  mState = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "空闲"), this), AppLanguage::source("空闲"));
   mState->setObjectName(QStringLiteral("statusWarn"));
   heading->addWidget(mTitle, 1);
   heading->addWidget(mState);
@@ -229,14 +230,14 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mSpeed = metricValue(this);
   mElapsed = metricValue(this);
   mRemaining = metricValue(this);
-  addMetric(metrics, 0, QCoreApplication::translate("Workbench", "迭代"), mIteration);
-  addMetric(metrics, 1, QCoreApplication::translate("Workbench", "Loss"), mLoss);
-  addMetric(metrics, 2, QCoreApplication::translate("Workbench", "训练 PSNR"), mPsnr);
+  addMetric(metrics, 0, AppLanguage::source("迭代"), mIteration);
+  addMetric(metrics, 1, AppLanguage::source("Loss"), mLoss);
+  addMetric(metrics, 2, AppLanguage::source("训练 PSNR"), mPsnr);
   mPrimitiveCountCaption =
-      addMetric(metrics, 3, QCoreApplication::translate("Workbench", "高斯数量"), mGaussianCount);
-  addMetric(metrics, 4, QCoreApplication::translate("Workbench", "速度"), mSpeed);
-  addMetric(metrics, 5, QCoreApplication::translate("Workbench", "已用时"), mElapsed);
-  addMetric(metrics, 6, QCoreApplication::translate("Workbench", "预计剩余"), mRemaining);
+      addMetric(metrics, 3, AppLanguage::source("高斯数量"), mGaussianCount);
+  addMetric(metrics, 4, AppLanguage::source("速度"), mSpeed);
+  addMetric(metrics, 5, AppLanguage::source("已用时"), mElapsed);
+  addMetric(metrics, 6, AppLanguage::source("预计剩余"), mRemaining);
   for (int column = 0; column < 7; ++column) {
     metrics->setColumnStretch(column, 1);
   }
@@ -244,13 +245,34 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
 
   mCurves = new TrainingCurvesWidget(this);
   layout->addWidget(mCurves, 1);
+  AppLanguage::onChanged(this, [this]() { retranslateStatus(); });
+}
+
+void TrainingMonitorWidget::retranslateStatus() {
+  if (mHasTraining) mTitle->setText(mTaskTitle);
+  if (mFinished) {
+    mState->setText(mSucceeded ? QCoreApplication::translate("Workbench", "已完成")
+        : mCancelled ? QCoreApplication::translate("Workbench", "已取消")
+                     : QCoreApplication::translate("Workbench", "失败"));
+  } else if (mHasTraining) {
+    mState->setText(mLastStage.isEmpty() ? QCoreApplication::translate("Workbench", "启动中") : stageLabel(mLastStage));
+  }
+  mPrimitiveCountCaption->setText(mSparsePreview ? QCoreApplication::translate("Workbench", "稀疏点数")
+                                                : QCoreApplication::translate("Workbench", "高斯数量"));
+  // Repaint existing samples; never ingest a status twice or reset telemetry.
+  refreshMetrics();
 }
 
 void TrainingMonitorWidget::beginTraining(const QString &taskName,
                                           const QString &backend,
                                           const int expectedIterations) {
   mTelemetry.reset(expectedIterations);
-  mTitle->setText(QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName));
+  mHasTraining = true;
+  mFinished = false;
+  mSparsePreview = false;
+  mLastStage.clear();
+  mTaskTitle = QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName);
+  mTitle->setText(mTaskTitle);
   mState->setText(QCoreApplication::translate("Workbench", "启动中"));
   mPrimitiveCountCaption->setText(QCoreApplication::translate("Workbench", "高斯数量"));
   mProgress->setValue(0);
@@ -259,6 +281,8 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
+  mLastStage = status.stage;
+  mSparsePreview = status.previewKind == QStringLiteral("colmap_sparse") || status.stage == QStringLiteral("colmap");
   mState->setText(stageLabel(status.stage));
   mPrimitiveCountCaption->setText(
       status.previewKind == QStringLiteral("colmap_sparse") ||
@@ -280,6 +304,9 @@ void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
 
 void TrainingMonitorWidget::finishTraining(const bool succeeded,
                                            const bool cancelled) {
+  mFinished = true;
+  mSucceeded = succeeded;
+  mCancelled = cancelled;
   mState->setText(succeeded ? QCoreApplication::translate("Workbench", "已完成")
                   : cancelled ? QCoreApplication::translate("Workbench", "已取消")
                               : QCoreApplication::translate("Workbench", "失败"));

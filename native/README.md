@@ -4,7 +4,7 @@
 
 ## Current preview
 
-- Simplified Chinese, English and Japanese UI: choose View → Language, then restart normally when ready. The preference is remembered without interrupting running tasks. New/changed features must maintain all three catalogs and pass the build-time translation gate. See [localization and terminology](../docs/LOCALIZATION.md).
+- Simplified Chinese, English and Japanese UI: choose View → Language to switch immediately, without restarting or interrupting running tasks. The preference is remembered; model, camera, selection, dialog parameters and training curves are preserved. New/changed features must maintain all three catalogs and live text bindings, and pass the build-time translation gate. See [localization and terminology](../docs/LOCALIZATION.md).
 - Native Qt Widgets application with a GPU-backed OpenGL viewport.
 - Dockable project tree, inspector, task queue, and process log.
 - Multi-model selection: Ctrl-click toggles objects in the tree/viewport, Shift selects a tree range or adds a viewport object, and Ctrl+A selects all loaded models. Selected objects share a G/R/RR/S transform gizmo and group-bounds pivot, with atomic cancel/undo/redo and per-object persistence. F frames the whole selection. Group scaling is uniform to preserve relative shape; point trimming and export remain single-object operations. See [multi-object controls](../docs/MULTI_SCENE_IMPORT.md#同时选中与整组变换).

@@ -38,6 +38,11 @@ class CatalogTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 i18n.load_catalog(path)
 
+    def test_live_source_keys_are_audited(self):
+        text = 'AppLanguage::source("Value " "%1")'
+        self.assertEqual(i18n.decode_literals(i18n.CALL.search(text)[1]), 'Value %1')
+        self.assertIn('Value %1', i18n.validate({}, {'Value %1': [('ui.cpp', 1, False)]})[0])
+
 
 if __name__ == '__main__':
     unittest.main()
