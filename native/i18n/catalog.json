@@ -5374,6 +5374,26 @@
     "en_US": "Model found and framed; editing tools remain locked",
     "ja_JP": "モデルを選択範囲にフレーム表示しました。編集ツールはロックされたままです"
   },
+  "观察轨迹球": {
+    "zh_CN": "观察轨迹球",
+    "en_US": "View Trackball",
+    "ja_JP": "ビュートラックボール"
+  },
+  "在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位": {
+    "zh_CN": "在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位",
+    "en_US": "Show the observation trackball while editing tools are locked; hiding it preserves navigation and double-click centering",
+    "ja_JP": "編集ツールのロック中にビュートラックボールを表示します。非表示でも視点操作とダブルクリックによる中心設定は使用できます"
+  },
+  "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心": {
+    "zh_CN": "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心",
+    "en_US": "View trackball: left-drag to rotate, Ctrl+left-drag to pan, Shift+left-drag or wheel to zoom; double-click the model surface to set the rotation center",
+    "ja_JP": "ビュートラックボール：左ドラッグで回転、Ctrl+左ドラッグでパン、Shift+左ドラッグまたはホイールでズーム。モデル表面をダブルクリックして回転中心を設定"
+  },
+  "未命中模型表面，旋转中心保持不变": {
+    "zh_CN": "未命中模型表面，旋转中心保持不变",
+    "en_US": "No model surface hit; rotation center unchanged",
+    "ja_JP": "モデル表面が見つかりません。回転中心は変更されません"
+  },
   "Loss": {
     "zh_CN": "损失",
     "en_US": "Loss",

@@ -221,6 +221,7 @@ private:
   QAction *mShowCamerasAction = nullptr;
   QAction *mInspectAction = nullptr;
   QAction *mLockEditToolsAction = nullptr;
+  QAction *mObservationTrackballAction = nullptr;
   QAction *mFindModelAction = nullptr;
   QAction *mMoveModelAction = nullptr;
   QAction *mRotateModelAction = nullptr;

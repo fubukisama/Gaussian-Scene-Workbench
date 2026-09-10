@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPoint>
+#include <QQuaternion>
 #include <QString>
 #include <QVector3D>
 
@@ -12,6 +13,7 @@ namespace gsw {
 struct OrbitAngles {
   float yawDegrees = 0.0F;
   float pitchDegrees = 0.0F;
+  float rollDegrees = 0.0F;
 
   [[nodiscard]] bool operator==(const OrbitAngles &) const = default;
 };
@@ -60,6 +62,10 @@ isTemporaryOrbitShortcut(Qt::MouseButton button,
                          Qt::KeyboardModifiers modifiers);
 
 [[nodiscard]] OrbitFrame orbitFrame(OrbitAngles angles);
+// Reconstruct all three camera axes, including at the poles. Used by the
+// observation trackball; model transforms are deliberately not involved.
+[[nodiscard]] OrbitAngles orbitAnglesAfterRotation(OrbitAngles current,
+                                                   const QQuaternion &rotation);
 
 [[nodiscard]] ReferenceGridPlane
 referenceGridPlane(OrbitAngles angles, bool orthographic);

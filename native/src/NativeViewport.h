@@ -87,6 +87,9 @@ public:
   void setInteractionMode(InteractionMode mode);
   void setEditToolsLocked(bool locked);
   [[nodiscard]] bool editToolsLocked() const { return mEditToolsLocked; }
+  void setShowObservationTrackball(bool visible);
+  [[nodiscard]] bool observationTrackballVisible() const;
+  [[nodiscard]] bool centerObservationAt(const QPointF &position);
   void selectModel();
   [[nodiscard]] bool focusModel();
   void selectModelForMove();
@@ -160,7 +163,7 @@ public:
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
   [[nodiscard]] OrbitAngles viewOrbitAngles() const {
-    return {mYawDegrees, mPitchDegrees};
+    return {mYawDegrees, mPitchDegrees, mRollDegrees};
   }
   [[nodiscard]] bool orthographicProjection() const { return mOrthographic; }
   [[nodiscard]] bool selectableModelAvailable() const;
@@ -222,6 +225,7 @@ protected:
   void enterEvent(QEnterEvent *event) override;
   void leaveEvent(QEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;
+  void mouseDoubleClickEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *event) override;
   void wheelEvent(QWheelEvent *event) override;
@@ -359,6 +363,7 @@ private:
     float pitchDegrees = 0.0F;
     float distance = 0.0F;
     bool orthographic = false;
+    float rollDegrees = 0.0F;
   };
 
   enum class TransformConstraintKind { None, Axis, Plane };
@@ -385,7 +390,9 @@ private:
   [[nodiscard]] float transformedSceneRadius() const;
   [[nodiscard]] bool modelHitAt(const QPointF &position);
   [[nodiscard]] std::optional<bool>
-  modelGeometryHitAt(const QPointF &position, float *hitDepth = nullptr);
+  modelGeometryHitAt(const QPointF &position, float *hitDepth = nullptr,
+                     QVector3D *hitWorldPosition = nullptr);
+  [[nodiscard]] std::optional<QVector3D> observationPointAt(const QPointF &position);
   [[nodiscard]] QString sceneObjectAt(const QPointF &position);
   [[nodiscard]] std::optional<QPointF>
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
@@ -434,6 +441,10 @@ private:
   void drawTransformToolStrip(QPainter &painter);
   void drawOverlay(QPainter &painter);
   void drawAxisGizmo(QPainter &painter);
+  void drawObservationTrackball(QPainter &painter);
+  [[nodiscard]] float observationTrackballRadius() const;
+  [[nodiscard]] int observationTrackballAxisAt(const QPointF &position) const;
+  void updateObservationRotation(const QPointF &position);
   [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
   void updateNavigationGizmoHover(const QPointF &position);
   void updateNavigationGizmoInteraction(const QPoint &current);
@@ -493,6 +504,14 @@ private:
   bool mSelectionGestureActive = false;
   bool mModelSelected = false;
   bool mEditToolsLocked = false;
+  bool mShowObservationTrackball = true;
+  bool mObservationDragActive = false;
+  int mObservationDragAxis = -1;
+  QPointF mObservationDragStart;
+  OrbitAngles mObservationDragAngles;
+  QMatrix4x4 mObservationDragView;
+  QMatrix4x4 mObservationDragProjection;
+  float mObservationDragRadius = 1.0F;
   quint64 mSelectionRequestEpoch = 0;
   bool mModelDragActive = false;
   bool mBrushCursorVisible = false;
@@ -533,6 +552,8 @@ private:
   QVector3D mTarget = QVector3D(0.0F, 0.0F, 0.0F);
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;
+  float mRollDegrees = 0.0F;
+  float mSnapStartRoll = 0.0F;
   float mDistance = 12.0F;
   NavigationGizmoHit mNavigationHover;
   NavigationGizmoHit mNavigationPress;

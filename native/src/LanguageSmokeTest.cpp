@@ -130,10 +130,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
   viewport->setAxisView(NavigationAxis::PositiveZ);
   waitUntil([] { return false; }, 400);
   auto *lockTools = window.findChild<QAction *>(QStringLiteral("lockEditToolsAction"));
+  auto *trackball = window.findChild<QAction *>(QStringLiteral("observationTrackballAction"));
+  if (!trackball) return false;
   if (!lockTools) return false;
   lockTools->setChecked(true);
   check(viewport->editToolsLocked() && !viewport->modelTransformActive(), "lock cancels modal edit");
   const QStringList lockTexts = {QStringLiteral("锁定编辑工具"), QStringLiteral("Lock Editing Tools"), QStringLiteral("編集ツールをロック")};
+  const QStringList trackballTexts = {QStringLiteral("观察轨迹球"), QStringLiteral("View Trackball"), QStringLiteral("ビュートラックボール")};
   auto *root = tree->topLevelItem(0);
   if (root && root->childCount() > 0) root->child(0)->setExpanded(false);
   const auto treeState = [&] {
@@ -197,6 +200,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
+    check(trackball->text() == trackballTexts[next] && trackball->isChecked() && viewport->observationTrackballVisible(),
+          "observation trackball translated and state retained");
     check(lockTools->text() == lockTexts[next] && lockTools->isChecked() && viewport->editToolsLocked() &&
           QSettings().value(QStringLiteral("view/editToolsLocked")).toBool(),
           "lock label switches language without unlocking tools or changing preference");
@@ -270,6 +275,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     QDir().mkpath(screenshotDirectory);
     check(window.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral(".png"))), "UI screenshot");
+    check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-viewport.png"))), "trackball screenshot");
   }
   qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   if (testProcess) supervisor->shutdown();

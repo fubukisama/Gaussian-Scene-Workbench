@@ -25,6 +25,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
+#include <QRadialGradient>
 #include <QSizePolicy>
 #include <QTimer>
 #include <QToolTip>
@@ -293,6 +294,9 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
             const QPointF angles = value.toPointF();
             mYawDegrees = static_cast<float>(angles.x());
             mPitchDegrees = static_cast<float>(angles.y());
+            mRollDegrees = mSnapStartRoll * (1.0F - static_cast<float>(
+                mViewSnapAnimation->easingCurve().valueForProgress(
+                    static_cast<qreal>(mViewSnapAnimation->currentTime()) / mViewSnapAnimation->duration())));
             update();
           });
   connect(mViewSnapAnimation, &QVariantAnimation::finished, this, [this]() {
@@ -665,6 +669,7 @@ void NativeViewport::setShowCameras(const bool enabled) {
 void NativeViewport::setEditToolsLocked(const bool locked) {
   if (mEditToolsLocked == locked) return;
   mEditToolsLocked = locked;
+  mObservationDragActive = false;
   // Roll back an uncommitted drag before entering navigation-only mode.
   // Keep the selection, gizmo mode and undo history for the next edit session.
   if (locked) {
@@ -682,7 +687,156 @@ void NativeViewport::setEditToolsLocked(const bool locked) {
   update();
 }
 
+void NativeViewport::setShowObservationTrackball(const bool visible) {
+  mShowObservationTrackball = visible;
+  update();
+}
+
+bool NativeViewport::observationTrackballVisible() const {
+  return mEditToolsLocked && mShowObservationTrackball &&
+         mMode == InteractionMode::Inspect && selectableModelAvailable();
+}
+
+float NativeViewport::observationTrackballRadius() const {
+  // A navigation guide, not a scene-space object. Metashape sizes its
+  // trackball relative to the viewport rather than changing model scale.
+  return std::max(1.0F, static_cast<float>(std::min(width(), height())) * 0.16F);
+}
+
+int NativeViewport::observationTrackballAxisAt(const QPointF &position) const {
+  if (!observationTrackballVisible()) return -1;
+  const QPointF center(width() * 0.5, height() * 0.5);
+  const float radius = observationTrackballRadius();
+  if (QLineF(center, position).length() < radius * 0.2F) return -1;
+  const QMatrix4x4 view = viewMatrix();
+  qreal best = 4.0;
+  int result = -1;
+  for (int axis = 0; axis < 3; ++axis) {
+    QPointF previous;
+    for (int step = 0; step <= 128; ++step) {
+      const float angle = step * (2.0F * kPi / 128.0F);
+      QVector3D world;
+      world[(axis + 1) % 3] = std::cos(angle);
+      world[(axis + 2) % 3] = std::sin(angle);
+      const QVector3D point = view.mapVector(world);
+      const QPointF screen = center + QPointF(point.x() * radius, -point.y() * radius);
+      if (step > 0 && point.z() > 0.05F) {
+        const QPointF segment = screen - previous;
+        const qreal length = QPointF::dotProduct(segment, segment);
+        const qreal t = length > 1.0e-8 ? std::clamp(QPointF::dotProduct(position - previous, segment) / length, 0.0, 1.0) : 0.0;
+        const qreal distance = QLineF(position, previous + segment * t).length();
+        if (distance < best) { best = distance; result = axis; }
+      }
+      previous = screen;
+    }
+  }
+  return result;
+}
+
+void NativeViewport::updateObservationRotation(const QPointF &position) {
+  if (!mObservationDragActive) return;
+  QQuaternion rotation;
+  if (mObservationDragAxis >= 0) {
+    QVector3D axis;
+    axis[mObservationDragAxis] = 1.0F;
+    const float angle = axisRotationDragDegrees(mObservationDragStart, position,
+        mTarget, axis, mObservationDragProjection, size(), mObservationDragRadius);
+    rotation = QQuaternion::fromAxisAndAngle(axis, -angle);
+  } else {
+    rotation = trackballRotationDelta(mObservationDragStart, position,
+        QPointF(width() * 0.5, height() * 0.5), mObservationDragRadius,
+        mObservationDragView).conjugated();
+  }
+  const OrbitAngles angles = orbitAnglesAfterRotation(mObservationDragAngles, rotation);
+  mYawDegrees = angles.yawDegrees;
+  mPitchDegrees = angles.pitchDegrees;
+  mRollDegrees = angles.rollDegrees;
+}
+
+std::optional<QVector3D> NativeViewport::observationPointAt(const QPointF &position) {
+  if (!rect().contains(position.toPoint())) return std::nullopt;
+  const auto active = mScene;
+  mCollectionProjection = projectionMatrix();
+  auto states = mSceneStates;
+  if (states.isEmpty()) states.append(active);
+  float nearestDepth = 1.0F;
+  std::optional<QVector3D> result;
+  for (const auto &state : states) {
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+    QScopedValueRollback<QMatrix4x4> display(mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
+    if (!selectableModelAvailable()) continue;
+    float depth = 1.0F;
+    QVector3D point;
+    if (modelGeometryHitAt(position, &depth, &point).value_or(false) && depth < nearestDepth &&
+        std::isfinite(point.x()) && std::isfinite(point.y()) && std::isfinite(point.z())) {
+      nearestDepth = depth;
+      result = point;
+    }
+  }
+  return result;
+}
+
+bool NativeViewport::centerObservationAt(const QPointF &position) {
+  if (!mEditToolsLocked || mMode != InteractionMode::Inspect) return false;
+  const auto point = observationPointAt(position);
+  if (!point.has_value()) {
+    QToolTip::showText(mapToGlobal(position.toPoint()),
+        QCoreApplication::translate("Workbench", "未命中模型表面，旋转中心保持不变"), this);
+    return false;
+  }
+  mViewSnapAnimation->stop();
+  leaveCameraView();
+  mObservationDragActive = false;
+  mPressedButtons = Qt::NoButton;
+  mTarget = *point;
+  // Recenter without modifying model transforms, projection or zoom scale.
+  mCameraManipulated = true;
+  update();
+  return true;
+}
+
+void NativeViewport::drawObservationTrackball(QPainter &painter) {
+  if (!observationTrackballVisible()) return;
+  const QPointF center(width() * 0.5, height() * 0.5);
+  const float radius = observationTrackballRadius();
+  const bool hover = QLineF(mPointerPosition, center).length() <= radius;
+  painter.save();
+  painter.setRenderHint(QPainter::Antialiasing, true);
+  QRadialGradient glass(center - QPointF(radius * 0.27F, radius * 0.3F), radius * 1.4F);
+  glass.setColorAt(0.0, QColor(227, 237, 245, hover ? 43 : 24));
+  glass.setColorAt(0.65, QColor(163, 178, 193, hover ? 27 : 14));
+  glass.setColorAt(1.0, QColor(89, 103, 117, hover ? 46 : 26));
+  painter.setBrush(glass);
+  painter.setPen(QPen(QColor(207, 218, 228, hover ? 130 : 75), 1.0));
+  painter.drawEllipse(center, radius, radius);
+  painter.setBrush(Qt::NoBrush);
+  const auto view = viewMatrix();
+  const int activeAxis = mObservationDragActive ? mObservationDragAxis : observationTrackballAxisAt(mPointerPosition);
+  for (int axis = 0; axis < 3; ++axis) {
+    QPointF previous;
+    for (int step = 0; step <= 128; ++step) {
+      const float angle = step * (2.0F * kPi / 128.0F);
+      QVector3D world;
+      world[(axis + 1) % 3] = std::cos(angle);
+      world[(axis + 2) % 3] = std::sin(angle);
+      const auto point = view.mapVector(world);
+      const QPointF screen = center + QPointF(point.x() * radius, -point.y() * radius);
+      QColor color = navigationAxisColor(axis);
+      color.setAlpha(point.z() < 0 ? 35 : activeAxis == axis ? 215 : hover ? 145 : 95);
+      painter.setPen(QPen(color, activeAxis == axis ? 1.6 : 0.9));
+      if (step > 0) painter.drawLine(previous, screen);
+      previous = screen;
+    }
+  }
+  painter.setPen(QPen(QColor(236, 240, 243, 185), 1.0));
+  painter.drawLine(center - QPointF(3, 0), center + QPointF(3, 0));
+  painter.drawLine(center - QPointF(0, 3), center + QPointF(0, 3));
+  painter.restore();
+}
+
 void NativeViewport::setInteractionMode(const InteractionMode mode) {
+  mObservationDragActive = false;
   if (mEditToolsLocked && mode != InteractionMode::Inspect) return;
   if (isTrimInteractionMode(mode) && mSelectedSceneIds.size() > 1) return;
   if ((mode == InteractionMode::Move || mode == InteractionMode::Rotate ||
@@ -755,6 +909,7 @@ void NativeViewport::selectModel() {
 }
 
 bool NativeViewport::focusModel() {
+  mObservationDragActive = false;
   if (mScene->mSelectionBusy || !selectableModelAvailable()) {
     return false;
   }
@@ -771,7 +926,7 @@ bool NativeViewport::focusModel() {
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
                    : 1.0F;
   const std::optional<ViewportCameraFrame> frame = viewportFrameForPoints(
-      corners, {mYawDegrees, mPitchDegrees}, aspectRatio, mOrthographic);
+      corners, viewOrbitAngles(), aspectRatio, mOrthographic);
   if (!frame.has_value()) {
     return false;
   }
@@ -897,10 +1052,12 @@ void NativeViewport::setBrushRadius(const int pixels) {
 }
 
 void NativeViewport::resetCamera() {
+  mObservationDragActive = false;
   mViewSnapAnimation->stop();
   mTarget = transformedSceneCenter();
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
+  mRollDegrees = 0.0F;
   const float radius = transformedSceneRadius();
   mDistance = clampViewportDistance(
       std::max(radius * 2.8F, 0.1F), radius);
@@ -1816,6 +1973,7 @@ void NativeViewport::paintGL() {
   drawSelectionGesture(painter);
   drawModelSelection(painter, modelViewProjection);
   drawModelTransformGizmo(painter);
+  drawObservationTrackball(painter);
 
   drawOverlay(painter);
   drawTransformToolStrip(painter);
@@ -3554,6 +3712,19 @@ void NativeViewport::leaveEvent(QEvent *event) {
   QOpenGLWidget::leaveEvent(event);
 }
 
+void NativeViewport::mouseDoubleClickEvent(QMouseEvent *event) {
+  if (mEditToolsLocked && event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+    mObservationDragActive = false;
+    mPressedButtons = Qt::NoButton;
+    const auto navigationHit = hitTestNavigationGizmo(navigationGizmo(), event->position());
+    if (navigationHit.part == NavigationGizmoPart::None && !mNavigationInteractionActive)
+      (void)centerObservationAt(event->position());
+    event->accept();
+    return;
+  }
+  QOpenGLWidget::mouseDoubleClickEvent(event);
+}
+
 void NativeViewport::mousePressEvent(QMouseEvent *event) {
   mPointerPosition = event->position();
   if (mModelDragActive) {
@@ -3686,6 +3857,18 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
 
   mPressedButtons = event->buttons();
   mLastMousePosition = event->position().toPoint();
+  if (mEditToolsLocked && mMode == InteractionMode::Inspect &&
+      event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+    mViewSnapAnimation->stop();
+    leaveCameraView();
+    mObservationDragActive = true;
+    mObservationDragStart = event->position();
+    mObservationDragAngles = viewOrbitAngles();
+    mObservationDragView = viewMatrix();
+    mObservationDragProjection = viewProjectionMatrix();
+    mObservationDragRadius = observationTrackballRadius();
+    mObservationDragAxis = observationTrackballAxisAt(event->position());
+  }
   if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
     mBrushCursorVisible = true;
@@ -3743,6 +3926,9 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
       }
     } else {
       updateNavigationGizmoHover(event->position());
+      if (observationTrackballVisible() && mNavigationHover.part == NavigationGizmoPart::None) {
+        setToolTip(QCoreApplication::translate("Workbench", "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心"));
+      }
     }
     if (mMode == InteractionMode::Brush) {
       update();
@@ -3761,11 +3947,28 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     leaveCameraView();
   }
 
+  if (mObservationDragActive) {
+    updateObservationRotation(event->position());
+    update();
+    event->accept();
+    return;
+  }
+  if (mEditToolsLocked && mPressedButtons.testFlag(Qt::LeftButton) &&
+      event->modifiers().testFlag(Qt::ShiftModifier) &&
+      !event->modifiers().testFlag(Qt::ControlModifier)) {
+    mDistance = clampViewportDistance(mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
+                                      transformedSceneRadius());
+    update();
+    event->accept();
+    return;
+  }
+
   const bool pan =
       !mTemporaryOrbitActive &&
       (mPressedButtons.testFlag(Qt::MiddleButton) ||
        mPressedButtons.testFlag(Qt::RightButton) ||
-       event->modifiers().testFlag(Qt::ShiftModifier));
+       (mEditToolsLocked ? event->modifiers().testFlag(Qt::ControlModifier)
+                         : event->modifiers().testFlag(Qt::ShiftModifier)));
   if (pan) {
     panCamera(delta);
   } else if (mPressedButtons.testFlag(Qt::LeftButton)) {
@@ -3777,6 +3980,11 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && mObservationDragActive) {
+    updateObservationRotation(event->position());
+    mObservationDragActive = false;
+    update();
+  }
   if (event->button() == Qt::LeftButton && mTransformGizmoDragActive) {
     updateModelTransform(event->position(), event->modifiers());
     finishModelTransform(true);
@@ -3974,6 +4182,7 @@ void NativeViewport::finishNavigationGizmoInteraction() {
 }
 
 void NativeViewport::setAxisView(const NavigationAxis axis) {
+  mObservationDragActive = false;
   const std::optional<OrbitAngles> target = navigationAxisViewAngles(axis);
   if (!target.has_value()) {
     return;
@@ -3984,6 +4193,7 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
   const float targetYaw =
       shortestEquivalentAngle(mYawDegrees, target->yawDegrees);
   mViewSnapAnimation->setStartValue(QPointF(mYawDegrees, mPitchDegrees));
+  mSnapStartRoll = mRollDegrees;
   mViewSnapAnimation->setEndValue(QPointF(targetYaw, target->pitchDegrees));
   mViewSnapAnimation->start();
 }
@@ -4010,6 +4220,7 @@ void NativeViewport::toggleCameraView() {
     mTarget = mStoredCameraView->target;
     mYawDegrees = mStoredCameraView->yawDegrees;
     mPitchDegrees = mStoredCameraView->pitchDegrees;
+    mRollDegrees = mStoredCameraView->rollDegrees;
     mDistance =
         clampViewportDistance(mStoredCameraView->distance,
                               transformedSceneRadius());
@@ -4030,7 +4241,8 @@ void NativeViewport::toggleCameraView() {
   }
 
   mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
-                                       mDistance, mOrthographic};
+                                       mDistance, mOrthographic, mRollDegrees};
+  mRollDegrees = 0.0F;
   const QVector3D cameraOffset = -forward;
   mPitchDegrees =
       std::asin(std::clamp(cameraOffset.z(), -1.0F, 1.0F)) * 180.0F / kPi;
@@ -4050,7 +4262,7 @@ void NativeViewport::leaveCameraView() {
 }
 
 QVector3D NativeViewport::cameraPosition() const {
-  const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+  const OrbitFrame frame = orbitFrame(viewOrbitAngles());
   return mTarget + frame.cameraOffsetDirection * mDistance;
 }
 
@@ -4213,7 +4425,7 @@ QString NativeViewport::formatViewportDistance(const float localDistance) const 
 
 QMatrix4x4 NativeViewport::viewMatrix() const {
   QMatrix4x4 view;
-  const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+  const OrbitFrame frame = orbitFrame(viewOrbitAngles());
   const QVector3D position = mTarget + frame.cameraOffsetDirection * mDistance;
   view.lookAt(position, mTarget, frame.upDirection);
   return view;
@@ -4355,7 +4567,8 @@ QString NativeViewport::sceneObjectAt(const QPointF &position) {
 }
 
 std::optional<bool>
-NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth) {
+NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
+                                  QVector3D *hitWorldPosition) {
   if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
       !mModelPickProgram->isLinked() || context() == nullptr ||
       !context()->isValid()) {
@@ -4526,14 +4739,44 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth) {
                      mapping->framebufferSize.height(), GL_RED,
                      GL_UNSIGNED_BYTE, samples.data());
         result = modelPickBufferHasCoverage(samples);
-        if (hitDepth != nullptr && result.value_or(false)) {
+        if ((hitDepth != nullptr || hitWorldPosition != nullptr) && result.value_or(false)) {
           std::vector<float> depths(static_cast<std::size_t>(sampleCount), 1.0F);
           glReadPixels(0, 0, mapping->framebufferSize.width(),
                        mapping->framebufferSize.height(), GL_DEPTH_COMPONENT,
                        GL_FLOAT, depths.data());
-          *hitDepth = 1.0F;
+          float bestDepth = 1.0F;
+          int nearestPixel = std::numeric_limits<int>::max();
+          std::size_t bestIndex = 0;
           for (std::size_t index = 0; index < samples.size(); ++index) {
-            if (samples[index] != 0) *hitDepth = std::min(*hitDepth, depths[index]);
+            if (samples[index] == 0 || !std::isfinite(depths[index]) || depths[index] >= 1.0F) continue;
+            const int x = static_cast<int>(index) % mapping->framebufferSize.width() - mapping->sampleCenter.x();
+            const int y = static_cast<int>(index) / mapping->framebufferSize.width() - mapping->sampleCenter.y();
+            const int pixelDistance = x * x + y * y;
+            // Surface navigation uses the closest covered pixel, not a
+            // foreground outlier at the edge of the point-picking tolerance.
+            if (hitWorldPosition ? pixelDistance < nearestPixel ||
+                    (pixelDistance == nearestPixel && depths[index] < bestDepth)
+                                 : depths[index] < bestDepth) {
+              nearestPixel = pixelDistance;
+              bestDepth = depths[index];
+              bestIndex = index;
+            }
+          }
+          if (hitDepth) *hitDepth = bestDepth;
+          if (hitWorldPosition && bestDepth < 1.0F) {
+            const float x = static_cast<float>(bestIndex % mapping->framebufferSize.width()) - mapping->viewportOrigin.x() + 0.5F;
+            const float y = static_cast<float>(bestIndex / mapping->framebufferSize.width()) - mapping->viewportOrigin.y() + 0.5F;
+            bool invertible = false;
+            const auto inverse = viewProjectionMatrix().inverted(&invertible);
+            const QVector4D point = inverse * QVector4D(
+                2.0F * x / mapping->sourceViewportSize.width() - 1.0F,
+                2.0F * y / mapping->sourceViewportSize.height() - 1.0F,
+                2.0F * bestDepth - 1.0F, 1.0F);
+            if (invertible && std::isfinite(point.w()) && std::abs(point.w()) > 1.0e-8F)
+              *hitWorldPosition = point.toVector3DAffine();
+            else result = false;
+          } else if (hitWorldPosition) {
+            result = false;
           }
         }
       }
@@ -4982,7 +5225,7 @@ void NativeViewport::updateModelTransform(
       if (mTransformConstraint.kind == TransformConstraintKind::Axis) {
         direction = axis;
       } else if (direction.lengthSquared() <= 1.0e-12F) {
-        const OrbitFrame frame = orbitFrame({mYawDegrees, mPitchDegrees});
+        const OrbitFrame frame = orbitFrame(viewOrbitAngles());
         direction = QVector3D::crossProduct(mModelDragPlaneNormal,
                                             frame.upDirection);
       }

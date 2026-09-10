@@ -59,6 +59,7 @@ OrbitAngles orbitAnglesAfterLeftDrag(const OrbitAngles current,
                   static_cast<float>(delta.x()) * kYawDegreesPerPixel),
       wrapDegrees(current.pitchDegrees +
                   static_cast<float>(delta.y()) * kPitchDegreesPerPixel),
+      current.rollDegrees,
   };
 }
 
@@ -76,10 +77,28 @@ OrbitFrame orbitFrame(const OrbitAngles angles) {
   const float sinPitch = std::sin(pitch);
   const float cosPitch = std::cos(pitch);
 
-  return {
-      QVector3D(cosPitch * sinYaw, cosPitch * cosYaw, sinPitch),
-      QVector3D(-sinPitch * sinYaw, -sinPitch * cosYaw, cosPitch),
-  };
+  const QVector3D offset(cosPitch * sinYaw, cosPitch * cosYaw, sinPitch);
+  const QVector3D up(-sinPitch * sinYaw, -sinPitch * cosYaw, cosPitch);
+  return {offset, QQuaternion::fromAxisAndAngle(offset, angles.rollDegrees).rotatedVector(up)};
+}
+
+OrbitAngles orbitAnglesAfterRotation(const OrbitAngles current,
+                                      const QQuaternion &rotation) {
+  if (!std::isfinite(rotation.scalar()) || !std::isfinite(rotation.x()) ||
+      !std::isfinite(rotation.y()) || !std::isfinite(rotation.z()) ||
+      rotation.lengthSquared() < 1.0e-12F) return current;
+  const auto before = orbitFrame(current);
+  const auto q = rotation.normalized();
+  const QVector3D offset = q.rotatedVector(before.cameraOffsetDirection).normalized();
+  const QVector3D up = q.rotatedVector(before.upDirection).normalized();
+  OrbitAngles result;
+  result.yawDegrees = offset.x() * offset.x() + offset.y() * offset.y() < 1.0e-10F
+      ? current.yawDegrees : std::atan2(offset.x(), offset.y()) * 180.0F / kPi;
+  result.pitchDegrees = std::asin(std::clamp(offset.z(), -1.0F, 1.0F)) * 180.0F / kPi;
+  const QVector3D baseUp = orbitFrame(result).upDirection;
+  result.rollDegrees = std::atan2(QVector3D::dotProduct(offset, QVector3D::crossProduct(baseUp, up)),
+                                  QVector3D::dotProduct(baseUp, up)) * 180.0F / kPi;
+  return result;
 }
 
 ReferenceGridPlane referenceGridPlane(const OrbitAngles angles,

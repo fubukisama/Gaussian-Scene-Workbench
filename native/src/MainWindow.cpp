@@ -1057,6 +1057,16 @@ void MainWindow::createActions() {
   });
 
   mFindModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "查找模型"), this), AppLanguage::source("查找模型"));
+  mObservationTrackballAction = AppLanguage::text(new QAction(this), AppLanguage::source("观察轨迹球"));
+  mObservationTrackballAction->setObjectName(QStringLiteral("observationTrackballAction"));
+  mObservationTrackballAction->setCheckable(true);
+  mObservationTrackballAction->setChecked(QSettings().value(QStringLiteral("view/showObservationTrackball"), true).toBool());
+  AppLanguage::bind(mObservationTrackballAction, "toolTip", AppLanguage::source("在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位"));
+  mViewport->setShowObservationTrackball(mObservationTrackballAction->isChecked());
+  connect(mObservationTrackballAction, &QAction::toggled, this, [this](bool visible) {
+    mViewport->setShowObservationTrackball(visible);
+    QSettings().setValue(QStringLiteral("view/showObservationTrackball"), visible);
+  });
   mFindModelAction->setObjectName(QStringLiteral("findModelAction"));
   mFindModelAction->setShortcut(QKeySequence(QStringLiteral("F")));
   AppLanguage::bind(mFindModelAction, "toolTip", AppLanguage::source("自动选中模型并按完整范围拉近视角 (F)"));
@@ -1321,6 +1331,7 @@ void MainWindow::createMenus() {
 
   QMenu *viewMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图")), AppLanguage::source("视图"), "title");
   viewMenu->addAction(mLockEditToolsAction);
+  viewMenu->addAction(mObservationTrackballAction);
   viewMenu->addSeparator();
   auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
@@ -1463,6 +1474,7 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   mSelectionToolbar->addAction(mInspectAction);
   mSelectionToolbar->addAction(mLockEditToolsAction);
+  mSelectionToolbar->addAction(mObservationTrackballAction);
   mSelectionToolbar->addAction(mFindModelAction);
   mSelectionToolbar->addSeparator();
   mSelectionToolbar->addAction(mRectangleAction);

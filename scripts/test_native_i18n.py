@@ -45,7 +45,8 @@ class CatalogTests(unittest.TestCase):
 
     def test_edit_lock_translations_and_shortcut(self):
         catalog = i18n.load_catalog()
-        for source in ('锁定编辑工具', '工具已锁定', '已找到并聚焦模型；编辑工具保持锁定'):
+        for source in ('锁定编辑工具', '工具已锁定', '已找到并聚焦模型；编辑工具保持锁定',
+                       '观察轨迹球', '未命中模型表面，旋转中心保持不变'):
             self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
             self.assertEqual(len(set(catalog[source].values())), 3)
         tooltip = next(key for key in catalog if key.startswith('锁定/解锁编辑工具'))

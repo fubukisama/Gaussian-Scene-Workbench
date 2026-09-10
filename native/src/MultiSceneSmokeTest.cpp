@@ -132,11 +132,12 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   if (!check(!viewport->modelTransformActive() && viewport->selectedSceneIds() == originalSelection &&
              viewport->modelGizmoMode() == gizmoBeforeLock &&
              document->sceneCollectionJson() == originalCollection, "keys and direct edit entry points are blocked")) return false;
-  const auto drag = [&](const QPointF &start, const QPointF &delta, Qt::MouseButton button) {
+  const auto drag = [&](const QPointF &start, const QPointF &delta, Qt::MouseButton button,
+                        Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
     const QPointF end = start + delta;
-    QMouseEvent down(QEvent::MouseButtonPress, start, viewport->mapToGlobal(start.toPoint()), button, button, Qt::NoModifier);
-    QMouseEvent move(QEvent::MouseMove, end, viewport->mapToGlobal(end.toPoint()), Qt::NoButton, button, Qt::NoModifier);
-    QMouseEvent up(QEvent::MouseButtonRelease, end, viewport->mapToGlobal(end.toPoint()), button, Qt::NoButton, Qt::NoModifier);
+    QMouseEvent down(QEvent::MouseButtonPress, start, viewport->mapToGlobal(start.toPoint()), button, button, modifiers);
+    QMouseEvent move(QEvent::MouseMove, end, viewport->mapToGlobal(end.toPoint()), Qt::NoButton, button, modifiers);
+    QMouseEvent up(QEvent::MouseButtonRelease, end, viewport->mapToGlobal(end.toPoint()), button, Qt::NoButton, modifiers);
     QApplication::sendEvent(viewport, &down);
     QApplication::sendEvent(viewport, &move);
     QApplication::sendEvent(viewport, &up);
@@ -177,10 +178,57 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   lockTools->setChecked(false);
   viewport->undoEdit();
   if (!check(document->sceneCollectionJson() == originalCollection, "unlock retains undo history")) return false;
+  // Pure observation: a real surface double-click changes only the camera's
+  // pivot. For this top view, the visible cube face is exactly source Z=1.
+  viewport->setAxisView(NavigationAxis::PositiveZ);
+  waitUntil([&] { return false; }, 400);
+  (void)viewport->focusModel();
+  lockTools->setChecked(true);
+  if (!check(viewport->observationTrackballVisible(), "trackball available only for pure observation")) return false;
+  const auto cameraBeforeCenter = viewport->viewOrbitAngles();
+  const float distanceBeforeCenter = viewport->viewDistance();
+  const bool projectionBeforeCenter = viewport->orthographicProjection();
+  const QPointF surfacePoint = QPointF(viewport->rect().center()) + QPointF(18, 12);
+  QMouseEvent doubleClick(QEvent::MouseButtonDblClick, surfacePoint,
+      viewport->mapToGlobal(surfacePoint.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(viewport, &doubleClick);
+  if (!check(std::abs(viewport->viewTarget().z() - 1.0F) < 0.02F &&
+             viewport->viewTarget().x() > -4 && viewport->viewTarget().x() < -2 &&
+             viewport->viewOrbitAngles() == cameraBeforeCenter && viewport->viewDistance() == distanceBeforeCenter &&
+             viewport->orthographicProjection() == projectionBeforeCenter &&
+             document->sceneCollectionJson() == originalCollection && viewport->selectedSceneIds() == originalSelection,
+             "double-click unprojects visible surface without changing model, zoom, projection or selection")) return false;
+  const auto centeredTarget = viewport->viewTarget();
+  if (!check(!viewport->centerObservationAt({-10, -10}) && viewport->viewTarget() == centeredTarget,
+             "miss leaves rotation center unchanged")) return false;
+  const auto modifierAngles = viewport->viewOrbitAngles();
+  drag(surfacePoint, {14, -9}, Qt::LeftButton, Qt::ControlModifier);
+  if (!check(viewport->viewTarget() != centeredTarget && viewport->viewOrbitAngles() == modifierAngles,
+             "Ctrl plus left drag pans without rotating")) return false;
+  const float modifierDistance = viewport->viewDistance();
+  const auto modifierTarget = viewport->viewTarget();
+  drag(surfacePoint, {0, 20}, Qt::LeftButton, Qt::ShiftModifier);
+  if (!check(viewport->viewDistance() != modifierDistance && viewport->viewTarget() == modifierTarget &&
+             viewport->viewOrbitAngles() == modifierAngles, "Shift plus left drag zooms without panning")) return false;
+  const QPointF ballCenter = viewport->rect().center();
+  const qreal radius = std::min(viewport->width(), viewport->height()) * 0.16;
+  const auto rollBefore = viewport->viewOrbitAngles();
+  drag(ballCenter + QPointF(radius * 1.5, 0), {-radius * 1.5, -radius * 1.5}, Qt::LeftButton);
+  if (!check(viewport->viewOrbitAngles() != rollBefore && std::abs(viewport->viewOrbitAngles().rollDegrees) > 1 &&
+             viewport->viewTarget() == modifierTarget && document->sceneCollectionJson() == originalCollection,
+             "outside trackball rolls camera around the chosen pivot")) return false;
+  auto *showTrackball = window.findChild<QAction *>("observationTrackballAction");
+  if (!check(showTrackball != nullptr, "trackball visibility action")) return false;
+  showTrackball->setChecked(false);
+  if (!check(!viewport->observationTrackballVisible() && viewport->editToolsLocked(), "hiding trackball does not unlock editing")) return false;
+  showTrackball->setChecked(true);
+  lockTools->setChecked(false);
+  if (!check(!viewport->observationTrackballVisible(), "model editing does not show observation trackball")) return false;
   // Restore the ordinary import test's unselected viewport.
   viewport->clearSelection();
   viewport->resetCamera();
   qInfo() << "EDIT_LOCK PASS: cancel, input guard, navigation, clean rendering, persistence and undo";
+  qInfo() << "OBSERVATION_NAVIGATION PASS: trackball, roll, surface-depth double-click, misses, visibility and model isolation";
   bool dialogSeen = false;
   const auto chooseImport = [&](int index, const QString &buttonName) {
     dialogSeen = false;
@@ -425,6 +473,21 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   frame = viewport->grabFramebuffer();
   if (!check((footprint(frame, false).center - beforeSwitch).manhattanLength() < 3,
              "changing automatic coordinate shift does not move the image")) return false;
+  lockTools->setChecked(true);
+  for (bool pickRed : {true, false}) {
+    // Refresh after recentering because both layers moved in screen space.
+    frame = viewport->grabFramebuffer();
+    const auto patch = footprint(frame, pickRed);
+    if (!check(patch.count > 100, "point/Gaussian patch visible for navigation pick")) return false;
+    const auto beforeActive = viewport->activeSceneId();
+    const auto beforeIds = viewport->selectedSceneIds();
+    const auto beforeData = document->sceneCollectionJson();
+    if (!check(viewport->centerObservationAt(patch.center / viewport->devicePixelRatioF()) &&
+               viewport->activeSceneId() == beforeActive && viewport->selectedSceneIds() == beforeIds &&
+               document->sceneCollectionJson() == beforeData,
+               "point/Gaussian double-click considers inactive layers without selecting or editing")) return false;
+  }
+  lockTools->setChecked(false);
   viewport->setSceneObjects({}, {});
   qInfo() << "MULTI_SCENE PASS: append, same-frame rendering, Ctrl/Shift multiselection, shared-pivot group transforms, atomic cancel/undo/redo, unselected isolation, save/reopen, async replacement, mixed point/Gaussian layers with large XYZ";
   return true;

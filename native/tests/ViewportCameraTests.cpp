@@ -20,6 +20,7 @@ private slots:
   void wrapsAnglesAfterCompleteTurns();
   void usesZAsWorldUpAxis();
   void keepsCameraFrameContinuousAcrossPoles();
+  void preservesTrackballCameraRollAndPoleContinuity();
   void framesModelBoundsAtCurrentOrbit();
   void rejectsInvalidFocusBounds();
   void selectsScreenParallelGridForAxisOrthographicViews();
@@ -98,6 +99,28 @@ void ViewportCameraTests::keepsCameraFrameContinuousAcrossPoles() {
                                      after.upDirection)) < 1.0e-5F);
   QVERIFY(qAbs(after.cameraOffsetDirection.length() - 1.0F) < 1.0e-5F);
   QVERIFY(qAbs(after.upDirection.length() - 1.0F) < 1.0e-5F);
+}
+
+void ViewportCameraTests::preservesTrackballCameraRollAndPoleContinuity() {
+  for (const OrbitAngles original : {OrbitAngles{42, 24, 35}, OrbitAngles{0, 90, -70},
+                                    OrbitAngles{12, -90, 125}, OrbitAngles{37, 150, -42}}) {
+    const auto before = orbitFrame(original);
+    for (const QVector3D axis : {QVector3D(1, 0, 0), QVector3D(0, 1, 0), QVector3D(0, 0, 1)}) {
+      const auto rotation = QQuaternion::fromAxisAndAngle(axis, 113.0F);
+      const auto actual = orbitFrame(orbitAnglesAfterRotation(original, rotation));
+      QVERIFY((actual.cameraOffsetDirection - rotation.rotatedVector(before.cameraOffsetDirection)).length() < 1.0e-5F);
+      QVERIFY((actual.upDirection - rotation.rotatedVector(before.upDirection)).length() < 1.0e-5F);
+      QVERIFY(std::abs(QVector3D::dotProduct(actual.cameraOffsetDirection, actual.upDirection)) < 1.0e-5F);
+    }
+  }
+  OrbitAngles state{42, 24, 18};
+  const auto original = orbitFrame(state);
+  for (int step = 0; step < 360; ++step)
+    state = orbitAnglesAfterRotation(state, QQuaternion::fromAxisAndAngle(1, 0, 0, 1));
+  QVERIFY((orbitFrame(state).upDirection - original.upDirection).length() < 1.0e-3F);
+  QVERIFY((orbitFrame(state).cameraOffsetDirection - original.cameraOffsetDirection).length() < 1.0e-3F);
+  QCOMPARE(orbitAnglesAfterLeftDrag({42, 24, 55}, {20, 30}).rollDegrees, 55.0F);
+  QCOMPARE(orbitAnglesAfterRotation(state, QQuaternion(0, 0, 0, 0)), state);
 }
 
 void ViewportCameraTests::framesModelBoundsAtCurrentOrbit() {
