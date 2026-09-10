@@ -700,7 +700,7 @@ bool NativeViewport::observationTrackballVisible() const {
 float NativeViewport::observationTrackballRadius() const {
   // A navigation guide, not a scene-space object. Metashape sizes its
   // trackball relative to the viewport rather than changing model scale.
-  return std::max(1.0F, static_cast<float>(std::min(width(), height())) * 0.16F);
+  return std::max(1.0F, static_cast<float>(std::min(width(), height())) * 0.12F);
 }
 
 int NativeViewport::observationTrackballAxisAt(const QPointF &position) const {

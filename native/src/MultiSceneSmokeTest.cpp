@@ -211,7 +211,7 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   if (!check(viewport->viewDistance() != modifierDistance && viewport->viewTarget() == modifierTarget &&
              viewport->viewOrbitAngles() == modifierAngles, "Shift plus left drag zooms without panning")) return false;
   const QPointF ballCenter = viewport->rect().center();
-  const qreal radius = std::min(viewport->width(), viewport->height()) * 0.16;
+  const qreal radius = std::min(viewport->width(), viewport->height()) * 0.12;
   const auto rollBefore = viewport->viewOrbitAngles();
   drag(ballCenter + QPointF(radius * 1.5, 0), {-radius * 1.5, -radius * 1.5}, Qt::LeftButton);
   if (!check(viewport->viewOrbitAngles() != rollBefore && std::abs(viewport->viewOrbitAngles().rollDegrees) > 1 &&
