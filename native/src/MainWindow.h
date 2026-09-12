@@ -117,6 +117,7 @@ private:
   bool saveProject(bool forceChoosePath = false);
   bool finalizePendingProjectSave(QString *errorMessage = nullptr);
   bool exportCroppedScene();
+  bool exportModel();
   bool exportCoordinateReport();
   bool ensureProjectRecoveryReady();
   bool recoverDatasetImport(const PendingDatasetImport &pending,
@@ -236,6 +237,7 @@ private:
   QAction *mUndoEditAction = nullptr;
   QAction *mRedoEditAction = nullptr;
   QAction *mExportCropAction = nullptr;
+  QAction *mExportModelAction = nullptr;
   QAction *mExportCoordinateReportAction = nullptr;
   QAction *mModelBasePlaneAction = nullptr;
   QAction *mWorldZeroPlaneAction = nullptr;

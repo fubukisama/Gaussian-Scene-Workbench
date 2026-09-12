@@ -10,8 +10,35 @@
 #include <QVector>
 #include <QVector2D>
 #include <QVector3D>
+#include <functional>
 
 namespace gsw {
+
+struct ModelExportOptions;
+struct ModelExportResult;
+
+struct PlySourceGeometry {
+  qint64 vertexCount = 0;
+  qint64 faceCount = 0;
+  bool gaussian = false;
+  bool normals = false;
+  bool colors = false;
+  bool textureCoordinates = false;
+  QString texturePath;
+};
+
+struct PlySourceVertex {
+  SceneCoordinate3D position;
+  QVector3D normal;
+  QVector3D color{0.72F, 0.75F, 0.78F};
+};
+
+struct PlyGeometryVisitor {
+  std::function<bool(const PlySourceGeometry &)> begin;
+  std::function<bool(qint64, const PlySourceVertex &)> vertex;
+  std::function<bool(const QVector<quint32> &, const QVector<QVector2D> &)> face;
+  std::function<bool(int)> cancelled;
+};
 
 struct PointCloudVertex {
   float x = 0.0F;
@@ -88,6 +115,12 @@ public:
   [[nodiscard]] static bool writeFiltered(
       const QString &sourceFilePath, const QString &destinationFilePath,
       const QBitArray &deletedVertices, QString *errorMessage = nullptr);
+
+  // Full source records, never the resident/LOD preview. Visitor false aborts.
+  [[nodiscard]] static bool visitSourceGeometry(const QString &sourcePath,
+      const PlyGeometryVisitor &visitor, QString &error);
+  [[nodiscard]] static ModelExportResult exportSourcePly(
+      const ModelExportOptions &options);
 };
 
 } // namespace gsw

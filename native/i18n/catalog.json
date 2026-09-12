@@ -5394,9 +5394,299 @@
     "en_US": "No model surface hit; rotation center unchanged",
     "ja_JP": "モデル表面が見つかりません。回転中心は変更されません"
   },
+  "导出模型...": {
+    "zh_CN": "导出模型...",
+    "en_US": "Export Model...",
+    "ja_JP": "モデルをエクスポート..."
+  },
+  "导出模型": {
+    "zh_CN": "导出模型",
+    "en_US": "Export Model",
+    "ja_JP": "モデルをエクスポート"
+  },
+  "导出模型文件（PLY / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)": {
+    "zh_CN": "导出模型文件（PLY / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)",
+    "en_US": "Export a model file (PLY / GLB / OBJ / STL / XYZ / CSV), separately from saving the project (Ctrl+E)",
+    "ja_JP": "プロジェクト保存とは別にモデルファイルをエクスポート（PLY / GLB / OBJ / STL / XYZ / CSV）(Ctrl+E)"
+  },
+  "正在导出完整模型数据...": {
+    "zh_CN": "正在导出完整模型数据...",
+    "en_US": "Exporting full-resolution model data...",
+    "ja_JP": "フル解像度のモデルデータをエクスポート中..."
+  },
+  "模型导出已取消，原有文件保持不变。": {
+    "zh_CN": "模型导出已取消，原有文件保持不变。",
+    "en_US": "Model export cancelled; existing files were not changed.",
+    "ja_JP": "モデルのエクスポートをキャンセルしました。既存のファイルは変更されていません。"
+  },
+  "无法导出模型": {
+    "zh_CN": "无法导出模型",
+    "en_US": "Unable to Export Model",
+    "ja_JP": "モデルをエクスポートできません"
+  },
+  "模型已导出：%1": {
+    "zh_CN": "模型已导出：%1",
+    "en_US": "Model exported: %1",
+    "ja_JP": "モデルをエクスポートしました：%1"
+  },
+  "模型导出完成": {
+    "zh_CN": "模型导出完成",
+    "en_US": "Model export complete",
+    "ja_JP": "モデルのエクスポートが完了しました"
+  },
+  "导出当前活动模型，不合并其他模型；使用完整源数据并应用裁剪结果，不受预览点数限制。": {
+    "zh_CN": "导出当前活动模型，不合并其他模型；使用完整源数据并应用裁剪结果，不受预览点数限制。",
+    "en_US": "Export the active model without merging other models. Use full source data with crop edits, regardless of the preview point limit.",
+    "ja_JP": "他のモデルを結合せず、アクティブなモデルをエクスポートします。プレビュー点数の制限に関係なく、トリミング結果を反映した元データ全体を使用します。"
+  },
+  "PLY（保留源属性）": {
+    "zh_CN": "PLY（保留源属性）",
+    "en_US": "PLY (preserve source attributes)",
+    "ja_JP": "PLY（元の属性を保持）"
+  },
+  "GLB（glTF 2.0）": {
+    "zh_CN": "GLB（glTF 2.0）",
+    "en_US": "GLB (glTF 2.0)",
+    "ja_JP": "GLB（glTF 2.0）"
+  },
+  "XYZ（坐标与颜色）": {
+    "zh_CN": "XYZ（坐标与颜色）",
+    "en_US": "XYZ (coordinates and colors)",
+    "ja_JP": "XYZ（座標と色）"
+  },
+  "CSV（坐标与颜色）": {
+    "zh_CN": "CSV（坐标与颜色）",
+    "en_US": "CSV (coordinates and colors)",
+    "ja_JP": "CSV（座標と色）"
+  },
+  "OBJ（网格与贴图）": {
+    "zh_CN": "OBJ（网格与贴图）",
+    "en_US": "OBJ (mesh and texture)",
+    "ja_JP": "OBJ（メッシュとテクスチャ）"
+  },
+  "STL（二进制三角网格）": {
+    "zh_CN": "STL（二进制三角网格）",
+    "en_US": "STL (binary triangle mesh)",
+    "ja_JP": "STL（バイナリ三角形メッシュ）"
+  },
+  "文件格式": {
+    "zh_CN": "文件格式",
+    "en_US": "File Format",
+    "ja_JP": "ファイル形式"
+  },
+  "原始坐标（不应用模型变换）": {
+    "zh_CN": "原始坐标（不应用模型变换）",
+    "en_US": "Source coordinates (without model transforms)",
+    "ja_JP": "元の座標（モデルのトランスフォームなし）"
+  },
+  "场景坐标（应用位移、旋转、缩放）": {
+    "zh_CN": "场景坐标（应用位移、旋转、缩放）",
+    "en_US": "Scene coordinates (apply translation, rotation and scale)",
+    "ja_JP": "シーン座標（移動・回転・スケールを適用）"
+  },
+  "导出坐标": {
+    "zh_CN": "导出坐标",
+    "en_US": "Export Coordinates",
+    "ja_JP": "エクスポート座標"
+  },
+  "选择位置...": {
+    "zh_CN": "选择位置...",
+    "en_US": "Choose Location...",
+    "ja_JP": "保存先を選択..."
+  },
+  "输出文件": {
+    "zh_CN": "输出文件",
+    "en_US": "Output File",
+    "ja_JP": "出力ファイル"
+  },
+  "导出": {
+    "zh_CN": "导出",
+    "en_US": "Export",
+    "ja_JP": "エクスポート"
+  },
+  "保留 PLY 顶点属性、网格拓扑与 UV；贴图复制到配套资源目录。原始文件不会被修改。": {
+    "zh_CN": "保留 PLY 顶点属性、网格拓扑与 UV；贴图复制到配套资源目录。原始文件不会被修改。",
+    "en_US": "Preserve PLY vertex attributes, mesh topology and UVs; copy textures to a companion asset directory. The original file is not modified.",
+    "ja_JP": "PLY の頂点属性、メッシュのトポロジー、UV を保持し、テクスチャを付属リソースフォルダーにコピーします。元のファイルは変更しません。"
+  },
+  "导出完整三角网格、颜色、法线与 UV，并生成 MTL 和贴图资源目录；不保存自定义顶点属性。": {
+    "zh_CN": "导出完整三角网格、颜色、法线与 UV，并生成 MTL 和贴图资源目录；不保存自定义顶点属性。",
+    "en_US": "Export the complete triangle mesh, colors, normals and UVs, with MTL and texture assets. Custom vertex attributes are not retained.",
+    "ja_JP": "三角形メッシュ全体、色、法線、UV と、MTL・テクスチャリソースをエクスポートします。カスタム頂点属性は保持しません。"
+  },
+  "STL 仅保存三角形几何，不包含颜色、贴图或单位信息；坐标使用源模型单位。": {
+    "zh_CN": "STL 仅保存三角形几何，不包含颜色、贴图或单位信息；坐标使用源模型单位。",
+    "en_US": "STL stores triangle geometry only, without colors, textures or unit metadata. Coordinates use source model units.",
+    "ja_JP": "STL は三角形のジオメトリのみを保存し、色、テクスチャ、単位情報は含みません。座標には元のモデルの単位を使用します。"
+  },
+  "GLB 保存完整网格或点云，嵌入颜色、法线、UV 与贴图；转换为 Y 向上和米制。未声明单位时按 1 单位 = 1 m 处理。单文件须小于 4 GiB。": {
+    "zh_CN": "GLB 保存完整网格或点云，嵌入颜色、法线、UV 与贴图；转换为 Y 向上和米制。未声明单位时按 1 单位 = 1 m 处理。单文件须小于 4 GiB。",
+    "en_US": "GLB stores the full mesh or point cloud with embedded colors, normals, UVs and textures, converted to Y-up and metres. Undeclared units are treated as 1 unit = 1 m. Each file must be smaller than 4 GiB.",
+    "ja_JP": "GLB はメッシュまたは点群全体と色・法線・UV・テクスチャを格納し、Y 軸上向き・メートル単位に変換します。単位が未指定の場合は 1 単位 = 1 m として扱います。1 ファイルは 4 GiB 未満である必要があります。"
+  },
+  "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性；坐标使用源模型单位。": {
+    "zh_CN": "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性；坐标使用源模型单位。",
+    "en_US": "Export X, Y, Z and RGB (0–255), without mesh faces, textures or other vertex attributes. Coordinates use source model units.",
+    "ja_JP": "X、Y、Z と RGB（0–255）をエクスポートし、メッシュの面、テクスチャ、その他の頂点属性は含みません。座標には元のモデルの単位を使用します。"
+  },
+  "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。": {
+    "zh_CN": "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。",
+    "en_US": "Warning: this format exports Gaussian centers and base colors only, without Gaussian scales, rotations, opacity or spherical-harmonic appearance.",
+    "ja_JP": "注意：この形式ではガウシアンの中心点と基本色のみをエクスポートし、ガウシアンのスケール、回転、不透明度、球面調和関数による外観は含みません。"
+  },
+  "请另选文件名，不能覆盖工程文件或已加载的模型源文件。": {
+    "zh_CN": "请另选文件名，不能覆盖工程文件或已加载的模型源文件。",
+    "en_US": "Choose another file name; project files and loaded model sources cannot be overwritten.",
+    "ja_JP": "別のファイル名を指定してください。プロジェクトファイルや読み込み済みモデルの元ファイルは上書きできません。"
+  },
+  "替换导出文件": {
+    "zh_CN": "替换导出文件",
+    "en_US": "Replace Export File",
+    "ja_JP": "エクスポートファイルを置換"
+  },
+  "文件已存在，是否替换？\n%1": {
+    "zh_CN": "文件已存在，是否替换？\n%1",
+    "en_US": "The file already exists. Replace it?\n%1",
+    "ja_JP": "ファイルは既に存在します。置き換えますか？\n%1"
+  },
+  "Choose a new file name; model export cannot overwrite its source.": {
+    "zh_CN": "请选择新文件名；模型导出不能覆盖源文件。",
+    "en_US": "Choose a new file name; model export cannot overwrite its source.",
+    "ja_JP": "新しいファイル名を指定してください。モデルの元ファイルは上書きできません。"
+  },
+  "The model transform is invalid.": {
+    "zh_CN": "模型变换无效。",
+    "en_US": "The model transform is invalid.",
+    "ja_JP": "モデルのトランスフォームが無効です。"
+  },
+  "Unable to create export files in the selected directory.": {
+    "zh_CN": "无法在所选目录中创建导出文件。",
+    "en_US": "Unable to create export files in the selected directory.",
+    "ja_JP": "選択したフォルダーにエクスポートファイルを作成できません。"
+  },
+  "Unable to write model data: %1": {
+    "zh_CN": "无法写入模型数据：%1",
+    "en_US": "Unable to write model data: %1",
+    "ja_JP": "モデルデータを書き込めません：%1"
+  },
+  "OBJ and STL export require mesh faces; point clouds cannot be exported as a surface mesh.": {
+    "zh_CN": "OBJ 和 STL 导出需要网格面；不能将点云直接导出为表面网格。",
+    "en_US": "OBJ and STL export require mesh faces; point clouds cannot be exported as a surface mesh.",
+    "ja_JP": "OBJ と STL のエクスポートにはメッシュの面が必要です。点群を直接サーフェスメッシュとしてエクスポートすることはできません。"
+  },
+  "The source texture is missing or the export asset directory cannot be created.": {
+    "zh_CN": "源贴图缺失，或无法创建导出资源目录。",
+    "en_US": "The source texture is missing or the export asset directory cannot be created.",
+    "ja_JP": "元のテクスチャが見つからないか、エクスポートリソースフォルダーを作成できません。"
+  },
+  "Unable to decode the model texture.": {
+    "zh_CN": "无法解码模型贴图。",
+    "en_US": "Unable to decode the model texture.",
+    "ja_JP": "モデルのテクスチャをデコードできません。"
+  },
+  "The model contains non-finite coordinates; export was not written.": {
+    "zh_CN": "模型包含非有限坐标，未写入导出文件。",
+    "en_US": "The model contains non-finite coordinates; export was not written.",
+    "ja_JP": "モデルに有限でない座標が含まれるため、エクスポートファイルを書き込みませんでした。"
+  },
+  "Unable to prepare model export assets.": {
+    "zh_CN": "无法准备模型导出资源。",
+    "en_US": "Unable to prepare model export assets.",
+    "ja_JP": "モデルのエクスポートリソースを準備できません。"
+  },
+  "No geometry remains to export.": {
+    "zh_CN": "没有可导出的剩余几何数据。",
+    "en_US": "No geometry remains to export.",
+    "ja_JP": "エクスポート可能なジオメトリが残っていません。"
+  },
+  "Unable to read temporary export geometry.": {
+    "zh_CN": "无法读取导出临时几何数据。",
+    "en_US": "Unable to read temporary export geometry.",
+    "ja_JP": "エクスポート用の一時ジオメトリを読み込めません。"
+  },
+  "The model exceeds the selected format's size limit. Use PLY or OBJ instead.": {
+    "zh_CN": "模型超出所选格式的大小限制，请改用 PLY 或 OBJ。",
+    "en_US": "The model exceeds the selected format's size limit. Use PLY or OBJ instead.",
+    "ja_JP": "モデルが選択した形式のサイズ制限を超えています。PLY または OBJ を使用してください。"
+  },
+  "Unable to encode GLB geometry.": {
+    "zh_CN": "无法编码 GLB 几何数据。",
+    "en_US": "Unable to encode GLB geometry.",
+    "ja_JP": "GLB ジオメトリをエンコードできません。"
+  },
+  "Unable to encode STL coordinates.": {
+    "zh_CN": "无法编码 STL 坐标。",
+    "en_US": "Unable to encode STL coordinates.",
+    "ja_JP": "STL 座標をエンコードできません。"
+  },
+  "Unable to encode the GLB texture.": {
+    "zh_CN": "无法编码 GLB 贴图。",
+    "en_US": "Unable to encode the GLB texture.",
+    "ja_JP": "GLB テクスチャをエンコードできません。"
+  },
+  "The source model changed during export. Please try again after processing finishes.": {
+    "zh_CN": "导出过程中源模型发生变化，请等处理结束后重试。",
+    "en_US": "The source model changed during export. Please try again after processing finishes.",
+    "ja_JP": "エクスポート中に元のモデルが変更されました。処理が完了してから再試行してください。"
+  },
+  "Unable to finalize model file: %1": {
+    "zh_CN": "无法完成模型文件写入：%1",
+    "en_US": "Unable to finalize model file: %1",
+    "ja_JP": "モデルファイルの書き込みを完了できません：%1"
+  },
+  "Export currently supports one texture image per model.": {
+    "zh_CN": "当前导出支持每个模型一张贴图。",
+    "en_US": "Export currently supports one texture image per model.",
+    "ja_JP": "現在のエクスポートでは、モデルごとに 1 枚のテクスチャ画像をサポートしています。"
+  },
+  "Invalid mesh topology in source PLY.": {
+    "zh_CN": "源 PLY 的网格拓扑无效。",
+    "en_US": "Invalid mesh topology in source PLY.",
+    "ja_JP": "元の PLY のメッシュトポロジーが無効です。"
+  },
+  "Invalid texture coordinates in source PLY.": {
+    "zh_CN": "源 PLY 的纹理坐标无效。",
+    "en_US": "Invalid texture coordinates in source PLY.",
+    "ja_JP": "元の PLY のテクスチャ座標が無効です。"
+  },
+  "PLY crop export cannot remap indexed non-vertex elements.": {
+    "zh_CN": "PLY 裁剪导出不能重映射带索引的非顶点元素。",
+    "en_US": "PLY crop export cannot remap indexed non-vertex elements.",
+    "ja_JP": "PLY のトリミングエクスポートでは、頂点以外のインデックス付き要素を再マッピングできません。"
+  },
+  "Baking PLY transforms requires floating-point coordinates and normals.": {
+    "zh_CN": "烘焙 PLY 变换要求坐标和法线使用浮点类型。",
+    "en_US": "Baking PLY transforms requires floating-point coordinates and normals.",
+    "ja_JP": "PLY トランスフォームのベイクには、浮動小数点の座標と法線が必要です。"
+  },
+  "Baking transforms for PLY vertex list properties is not supported.": {
+    "zh_CN": "暂不支持为包含顶点列表属性的 PLY 烘焙变换。",
+    "en_US": "Baking transforms for PLY vertex list properties is not supported.",
+    "ja_JP": "頂点のリスト属性を含む PLY のトランスフォームのベイクには対応していません。"
+  },
+  "Unable to copy the model texture.": {
+    "zh_CN": "无法复制模型贴图。",
+    "en_US": "Unable to copy the model texture.",
+    "ja_JP": "モデルのテクスチャをコピーできません。"
+  },
+  "Unable to create model file: %1": {
+    "zh_CN": "无法创建模型文件：%1",
+    "en_US": "Unable to create model file: %1",
+    "ja_JP": "モデルファイルを作成できません：%1"
+  },
+  "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.": {
+    "zh_CN": "高斯 PLY 导出保留源坐标和全部属性；暂不支持烘焙高斯模型变换。",
+    "en_US": "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.",
+    "ja_JP": "ガウシアン PLY のエクスポートでは元の座標と全属性を保持します。ガウシアンモデルのトランスフォームのベイクには、まだ対応していません。"
+  },
   "Loss": {
     "zh_CN": "损失",
     "en_US": "Loss",
     "ja_JP": "損失"
+  },
+  "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.": {
+    "zh_CN": "烘焙镜像网格请使用 GLB、OBJ 或 STL；PLY 可导出其原始坐标。",
+    "en_US": "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.",
+    "ja_JP": "ミラーリングされたメッシュのベイクには GLB、OBJ、STL を使用してください。PLY では元の座標を保持してエクスポートできます。"
   }
 }

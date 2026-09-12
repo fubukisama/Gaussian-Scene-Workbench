@@ -53,6 +53,18 @@ class CatalogTests(unittest.TestCase):
         for text in catalog[tooltip].values():
             self.assertIn('Ctrl+Shift+L', text)
 
+    def test_model_export_formats_and_placeholders(self):
+        catalog = i18n.load_catalog()
+        for source in ('导出模型...', '导出坐标', '场景坐标（应用位移、旋转、缩放）',
+                       '模型已导出：%1', 'GLB（glTF 2.0）'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+        for text in catalog['模型已导出：%1'].values():
+            self.assertIn('%1', text)
+        tooltip = next(key for key in catalog if key.startswith('导出模型文件（PLY'))
+        for text in catalog[tooltip].values():
+            for token in ('PLY', 'GLB', 'OBJ', 'STL', 'XYZ', 'CSV', 'Ctrl+E'):
+                self.assertIn(token, text)
+
 
 if __name__ == '__main__':
     unittest.main()

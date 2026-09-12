@@ -73,6 +73,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MeshCache.h
   src/ModelInteraction.cpp
   src/ModelInteraction.h
+  src/ModelExport.cpp
+  src/ModelExport.h
+  src/ModelExportDialog.cpp
+  src/ModelExportDialog.h
   src/NavigationGizmo.cpp
   src/NavigationGizmo.h
   src/NativeViewport.cpp
@@ -369,6 +373,8 @@ if(BUILD_TESTING)
 
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
+      src/ModelExport.cpp
+      src/ModelInteraction.cpp
       src/CameraTrajectory.cpp
       src/CameraTrajectory.h
       src/ColmapSupport.cpp
@@ -396,6 +402,22 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+
+    qt_add_executable(gsw_model_export_tests
+      tests/ModelExportTests.cpp
+      src/ModelExport.cpp
+      src/ModelInteraction.cpp
+      src/PlyPointCloudLoader.cpp
+      src/PointCloudCache.cpp
+      src/MeshCache.cpp
+      src/SceneCoordinates.cpp
+    )
+    target_include_directories(gsw_model_export_tests PRIVATE src)
+    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_model_export_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME model_export COMMAND gsw_model_export_tests)
 
     qt_add_executable(gsw_recovery_store_tests
       tests/RecoveryStoreTests.cpp

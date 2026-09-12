@@ -11,6 +11,7 @@
 #include "ExternalBackupStore.h"
 #include "ImportEnvironmentProbe.h"
 #include "MediaProjectBootstrap.h"
+#include "ModelExportDialog.h"
 #include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
 #include "TrainingEnvironmentProbe.h"
@@ -35,6 +36,7 @@
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QFrame>
+#include <QEventLoop>
 #include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -85,6 +87,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <atomic>
 
 namespace gsw {
 
@@ -1189,6 +1192,13 @@ void MainWindow::createActions() {
   connect(mRedoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::redoEdit);
 
+  mExportModelAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), {}, this),
+      AppLanguage::source("导出模型..."));
+  mExportModelAction->setObjectName(QStringLiteral("exportModelAction"));
+  mExportModelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
+  AppLanguage::bind(mExportModelAction, "toolTip", AppLanguage::source("导出模型文件（PLY / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)"));
+  connect(mExportModelAction, &QAction::triggered, this, &MainWindow::exportModel);
+
   mExportCropAction =
       AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
                   QCoreApplication::translate("Workbench", "裁剪另存为..."), this), AppLanguage::source("裁剪另存为..."));
@@ -1270,6 +1280,7 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(mSaveAction);
   fileMenu->addAction(mSaveAsAction);
+  fileMenu->addAction(mExportModelAction);
   fileMenu->addAction(mRecoveryCenterAction);
   fileMenu->addAction(mSnapshotHistoryAction);
   fileMenu->addSeparator();
@@ -1327,6 +1338,7 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mVisibleOnlyAction);
   sceneMenu->addSeparator();
   sceneMenu->addAction(mExportCropAction);
+  sceneMenu->addAction(mExportModelAction);
   sceneMenu->addAction(mExportCoordinateReportAction);
 
   QMenu *viewMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图")), AppLanguage::source("视图"), "title");
@@ -1449,6 +1461,11 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(actions().at(0));
   mainToolbar->addAction(actions().at(1));
   mainToolbar->addAction(mSaveAction);
+  auto *exportButton = new QToolButton(mainToolbar);
+  exportButton->setObjectName(QStringLiteral("exportModelButton"));
+  exportButton->setDefaultAction(mExportModelAction);
+  exportButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  mainToolbar->addWidget(exportButton);
   mainToolbar->addSeparator();
   mainToolbar->addAction(mImportDatasetAction);
   mainToolbar->addAction(mImportSceneAction);
@@ -2703,6 +2720,8 @@ void MainWindow::updateEditActions() {
   }
   mInspectAction->setEnabled(modelNavigationAvailable || pointInteractive);
   mFindModelAction->setEnabled(modelNavigationAvailable);
+  mExportModelAction->setEnabled(modelNavigationAvailable && !mRecoveryBlocked &&
+      !mProcessSupervisor.isRunning() && !mViewport->modelTransformActive());
   mMoveModelAction->setEnabled(modelInteractive);
   mRotateModelAction->setEnabled(modelInteractive);
   mScaleModelAction->setEnabled(modelInteractive);
@@ -3632,6 +3651,45 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
       QCoreApplication::translate("Workbench", "已从中断训练恢复最近完整检查点：迭代 %1，%2")
           .arg(checkpoint->iteration)
           .arg(QDir::toNativeSeparators(checkpoint->path)));
+  return true;
+}
+
+bool MainWindow::exportModel() {
+  if (!mViewport->selectableModelAvailable() || mViewport->modelTransformActive() ||
+      mProcessSupervisor.isRunning() || !ensureProjectRecoveryReady()) return false;
+  QStringList protectedPaths{mWorkspace.projectFilePath()};
+  for (const auto &object : mWorkspace.sceneObjects()) protectedPaths.append(object.path);
+  ModelExportDialog dialog(mViewport->modelExportOptions(), mViewport->meshRenderingAvailable(),
+      mViewport->sourceHasGaussianAttributes(), protectedPaths, this);
+  if (dialog.exec() != QDialog::Accepted) return false;
+  auto options = dialog.options();
+  std::atomic_bool cancelled{false};
+  std::atomic_int percent{0};
+  options.progress = [&](int value) { percent.store(value); return cancelled.load(); };
+  QProgressDialog progress(this);
+  AppLanguage::bind(&progress, "windowTitle", AppLanguage::source("导出模型"));
+  AppLanguage::bind(&progress, "labelText", AppLanguage::source("正在导出完整模型数据..."));
+  progress.setRange(0, 100); progress.setMinimumDuration(0);
+  progress.setWindowModality(Qt::ApplicationModal);
+  progress.setAutoClose(false); progress.setAutoReset(false);
+  QFutureWatcher<ModelExportResult> watcher;
+  QEventLoop loop;
+  QTimer timer;
+  connect(&timer, &QTimer::timeout, &progress, [&] { progress.setValue(percent.load()); });
+  connect(&progress, &QProgressDialog::canceled, &progress, [&] { cancelled.store(true); });
+  connect(&watcher, &QFutureWatcher<ModelExportResult>::finished, &loop, &QEventLoop::quit);
+  watcher.setFuture(QtConcurrent::run([options] { return exportModelFile(options); }));
+  timer.start(80); progress.show();
+  if (!watcher.isFinished()) loop.exec();
+  timer.stop(); progress.hide();
+  const auto result = watcher.result();
+  if (result.cancelled) {
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "模型导出已取消，原有文件保持不变。"), 5000);
+    return false;
+  }
+  if (!result.success) { showError(QCoreApplication::translate("Workbench", "无法导出模型"), result.error); return false; }
+  appendTaskEvent(QCoreApplication::translate("Workbench", "模型已导出：%1").arg(QDir::toNativeSeparators(options.destinationPath)));
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "模型导出完成"), 5000);
   return true;
 }
 
@@ -4862,6 +4920,7 @@ void MainWindow::updateActionAvailability() {
   mImportSceneAction->setEnabled(dataEntryReady);
   mExportCoordinateReportAction->setEnabled(
       mViewport->sceneCoordinates().valid);
+  mExportModelAction->setEnabled(!running && !mRecoveryBlocked && mViewport->selectableModelAvailable());
   mModelBasePlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
   mWorldZeroPlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
   const bool cleanupReady =

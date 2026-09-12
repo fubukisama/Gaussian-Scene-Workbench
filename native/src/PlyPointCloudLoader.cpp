@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "PlyPointCloudLoader.h"
+#include "ModelExport.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QSaveFile>
 #include <QStringList>
 #include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QtEndian>
 
 #include <algorithm>
@@ -2343,6 +2345,294 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
     *errorMessage = error;
   }
   return succeeded;
+}
+
+bool PlyPointCloudLoader::visitSourceGeometry(const QString &sourcePath,
+    const PlyGeometryVisitor &visitor, QString &error) {
+  QFile source(sourcePath);
+  if (!source.open(QIODevice::ReadOnly)) {
+    error = QCoreApplication::translate("Workbench", "Unable to open source PLY: %1").arg(source.errorString());
+    return false;
+  }
+  PlyHeader header;
+  if (!parseHeader(source, header, error)) return false;
+  const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
+      [](const auto &e) { return e.name == QStringLiteral("vertex"); });
+  if (vertex == header.elements.cend() || vertex->count <= 0) {
+    error = QCoreApplication::translate("Workbench", "The source PLY does not contain a vertex element.");
+    return false;
+  }
+  const int x = findProperty(*vertex, {QStringLiteral("x")});
+  const int y = findProperty(*vertex, {QStringLiteral("y")});
+  const int z = findProperty(*vertex, {QStringLiteral("z")});
+  if (x < 0 || y < 0 || z < 0 || vertex->properties[x].isList ||
+      vertex->properties[y].isList || vertex->properties[z].isList) {
+    error = QCoreApplication::translate("Workbench", "The PLY vertex element must contain scalar x, y, and z properties.");
+    return false;
+  }
+  const int nx = findProperty(*vertex, {QStringLiteral("nx")});
+  const int ny = findProperty(*vertex, {QStringLiteral("ny")});
+  const int nz = findProperty(*vertex, {QStringLiteral("nz")});
+  int red = findProperty(*vertex, {QStringLiteral("red"), QStringLiteral("r"), QStringLiteral("diffuse_red")});
+  int green = findProperty(*vertex, {QStringLiteral("green"), QStringLiteral("g"), QStringLiteral("diffuse_green")});
+  int blue = findProperty(*vertex, {QStringLiteral("blue"), QStringLiteral("b"), QStringLiteral("diffuse_blue")});
+  bool sh = false;
+  if (red < 0 || green < 0 || blue < 0) {
+    red = findProperty(*vertex, {QStringLiteral("f_dc_0")});
+    green = findProperty(*vertex, {QStringLiteral("f_dc_1")});
+    blue = findProperty(*vertex, {QStringLiteral("f_dc_2")});
+    sh = true;
+  }
+  PlySourceGeometry info;
+  info.vertexCount = vertex->count;
+  const auto scalar = [&](int i) { return i >= 0 && !vertex->properties[i].isList; };
+  info.normals = scalar(nx) && scalar(ny) && scalar(nz);
+  info.colors = scalar(red) && scalar(green) && scalar(blue);
+  info.gaussian = findProperty(*vertex, {QStringLiteral("scale_0")}) >= 0 &&
+                  findProperty(*vertex, {QStringLiteral("rot_0")}) >= 0;
+  for (const auto &e : header.elements) {
+    if (e.name == QStringLiteral("face")) {
+      info.faceCount += e.count;
+      info.textureCoordinates = findProperty(e, {QStringLiteral("texcoord"), QStringLiteral("texcoords"),
+          QStringLiteral("texture_uv"), QStringLiteral("texture_coordinates"), QStringLiteral("uv")}) >= 0;
+    }
+  }
+  if (info.textureCoordinates) info.texturePath = resolveMeshTexturePath(sourcePath, header);
+  if (header.textureFiles.size() > 1) {
+    error = QCoreApplication::translate("Workbench", "Export currently supports one texture image per model.");
+    return false;
+  }
+  if (visitor.begin && !visitor.begin(info)) return false;
+  for (const auto &e : header.elements) {
+    const bool isVertex = &e == &*vertex;
+    const bool isFace = e.name == QStringLiteral("face") && e.count > 0;
+    const int indices = isFace ? findProperty(e, {QStringLiteral("vertex_indices"), QStringLiteral("vertex_index")}) : -1;
+    const int uv = isFace ? findProperty(e, {QStringLiteral("texcoord"), QStringLiteral("texcoords"),
+        QStringLiteral("texture_uv"), QStringLiteral("texture_coordinates"), QStringLiteral("uv")}) : -1;
+    if (isFace && (indices < 0 || !e.properties[indices].isList)) {
+      error = QCoreApplication::translate("Workbench", "Invalid mesh topology in source PLY.");
+      return false;
+    }
+    QVector<double> values;
+    QVector<QVector<double>> lists;
+    for (qint64 i = 0; i < e.count; ++i) {
+      if ((i & 4095) == 0 && visitor.cancelled &&
+          visitor.cancelled(static_cast<int>(source.pos() * 100.0 / std::max<qint64>(1, source.size())))) return false;
+      if (!(header.format == PlyFormat::Ascii
+              ? readAsciiElementRecord(source, e, values, lists, error)
+              : readBinaryElementRecord(source, e, header.format, values, lists, error))) return false;
+      if (isVertex && visitor.vertex) {
+        PlySourceVertex v;
+        v.position = {values[x], values[y], values[z]};
+        if (!v.position.isFinite()) {
+          error = QCoreApplication::translate("Workbench", "The model contains non-finite coordinates; export was not written.");
+          return false;
+        }
+        if (info.normals) v.normal = QVector3D(values[nx], values[ny], values[nz]);
+        if (info.colors) {
+          const auto channel = [&](int j) { return sh
+              ? static_cast<float>(std::clamp(0.5 + kSphericalHarmonicDc * values[j], 0.0, 1.0))
+              : normalizedColor(values[j], vertex->properties[j].valueType); };
+          v.color = {channel(red), channel(green), channel(blue)};
+        }
+        if (!visitor.vertex(i, v)) return false;
+      } else if (isFace && visitor.face) {
+        const auto &raw = lists[indices];
+        if (raw.size() < 3) {
+          error = QCoreApplication::translate("Workbench", "Invalid mesh topology in source PLY.");
+          return false;
+        }
+        QVector<quint32> face;
+        QVector<QVector2D> texcoords;
+        face.reserve(raw.size());
+        for (double index : raw) {
+          if (!std::isfinite(index) || index < 0 || index >= vertex->count ||
+              index > std::numeric_limits<quint32>::max() || std::floor(index) != index) {
+            error = QCoreApplication::translate("Workbench", "Invalid mesh topology in source PLY.");
+            return false;
+          }
+          face.append(static_cast<quint32>(index));
+        }
+        if (uv >= 0) {
+          if (!e.properties[uv].isList || lists[uv].size() != raw.size() * 2) {
+            error = QCoreApplication::translate("Workbench", "Invalid texture coordinates in source PLY.");
+            return false;
+          }
+          for (qsizetype j = 0; j < raw.size(); ++j) {
+            if (!std::isfinite(lists[uv][j * 2]) || !std::isfinite(lists[uv][j * 2 + 1])) {
+              error = QCoreApplication::translate("Workbench", "Invalid texture coordinates in source PLY.");
+              return false;
+            }
+            texcoords.append({static_cast<float>(lists[uv][j * 2]), static_cast<float>(lists[uv][j * 2 + 1])});
+          }
+        }
+        if (!visitor.face(face, texcoords)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions &options) {
+  ModelExportResult result;
+  QString &error = result.error;
+  const QFileInfo sourceBefore(options.sourcePath);
+  const qint64 sourceSize = sourceBefore.size();
+  const QDateTime sourceModified = sourceBefore.lastModified();
+  QFile source(options.sourcePath);
+  if (!source.open(QIODevice::ReadOnly)) {
+    error = QCoreApplication::translate("Workbench", "Unable to open source PLY: %1").arg(source.errorString());
+    return result;
+  }
+  PlyHeader header;
+  if (!parseHeader(source, header, error)) return result;
+  const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
+      [](const auto &e) { return e.name == QStringLiteral("vertex"); });
+  if (vertex == header.elements.cend() || vertex->count <= 0) {
+    error = QCoreApplication::translate("Workbench", "The source PLY does not contain a vertex element.");
+    return result;
+  }
+  const qint64 deletedCount = options.deletedVertices.count(true);
+  if ((!options.deletedVertices.isEmpty() && options.deletedVertices.size() != vertex->count) ||
+      deletedCount >= vertex->count) {
+    error = QCoreApplication::translate("Workbench", "The edit state no longer matches the source PLY vertex count.");
+    return result;
+  }
+  if (deletedCount && std::any_of(header.elements.cbegin(), header.elements.cend(),
+      [](const auto &e) { return e.name != QStringLiteral("vertex") && e.count > 0; })) {
+    error = QCoreApplication::translate("Workbench", "PLY crop export cannot remap indexed non-vertex elements.");
+    return result;
+  }
+  if (options.applyTransform && findProperty(*vertex, {QStringLiteral("scale_0")}) >= 0) {
+    error = QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.");
+    return result;
+  }
+  if (options.applyTransform && options.transform.scale.x() * options.transform.scale.y() * options.transform.scale.z() < 0 &&
+      std::any_of(header.elements.cbegin(), header.elements.cend(), [](const auto &e) { return e.name == QStringLiteral("face") && e.count > 0; })) {
+    error = QCoreApplication::translate("Workbench", "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.");
+    return result;
+  }
+  const std::array<int, 6> xyzNormal = {
+      findProperty(*vertex, {QStringLiteral("x")}), findProperty(*vertex, {QStringLiteral("y")}),
+      findProperty(*vertex, {QStringLiteral("z")}), findProperty(*vertex, {QStringLiteral("nx")}),
+      findProperty(*vertex, {QStringLiteral("ny")}), findProperty(*vertex, {QStringLiteral("nz")})};
+  if (options.applyTransform) {
+    for (int j = 0; j < 6; ++j) {
+      const int index = xyzNormal[j];
+      if ((j < 3 && index < 0) || (index >= 0 &&
+          (vertex->properties[index].isList || (vertex->properties[index].valueType != ScalarType::Float32 &&
+                                               vertex->properties[index].valueType != ScalarType::Float64)))) {
+        error = QCoreApplication::translate("Workbench", "Baking PLY transforms requires floating-point coordinates and normals.");
+        return result;
+      }
+    }
+    if (std::any_of(vertex->properties.cbegin(), vertex->properties.cend(), [](const auto &p) { return p.isList; })) {
+      error = QCoreApplication::translate("Workbench", "Baking transforms for PLY vertex list properties is not supported.");
+      return result;
+    }
+  }
+  const QDir outputDir = QFileInfo(options.destinationPath).absoluteDir();
+  QTemporaryDir assets(outputDir.filePath(QStringLiteral("gsw-assets-XXXXXX")));
+  QString texture;
+  if (!header.textureFiles.isEmpty()) {
+    if (header.textureFiles.size() > 1) {
+      error = QCoreApplication::translate("Workbench", "Export currently supports one texture image per model.");
+      return result;
+    }
+    const QString path = resolveMeshTexturePath(options.sourcePath, header);
+    if (path.isEmpty() || !assets.isValid()) {
+      error = QCoreApplication::translate("Workbench", "The source texture is missing or the export asset directory cannot be created.");
+      return result;
+    }
+    const QString name = QStringLiteral("texture.") + QFileInfo(path).suffix();
+    if (!QFile::copy(path, QDir(assets.path()).filePath(name))) {
+      error = QCoreApplication::translate("Workbench", "Unable to copy the model texture.");
+      return result;
+    }
+    texture = QDir(assets.path()).dirName() + QLatin1Char('/') + name;
+  }
+  QSaveFile destination(options.destinationPath);
+  if (!destination.open(QIODevice::WriteOnly)) {
+    error = QCoreApplication::translate("Workbench", "Unable to create model file: %1").arg(destination.errorString());
+    return result;
+  }
+  for (qsizetype i = 0; i < header.rawLines.size(); ++i) {
+    QByteArray line = header.rawLines[i];
+    if (i == header.vertexElementLine && deletedCount) line = "element vertex " + QByteArray::number(vertex->count - deletedCount) + '\n';
+    if (!texture.isEmpty() && line.trimmed().toLower().startsWith("comment texturefile"))
+      line = "comment TextureFile " + texture.toUtf8() + '\n';
+    if (!writeBytes(destination, line, error)) return result;
+  }
+  // An unchanged model can stream in large blocks, including mesh topology
+  // and custom fields, without decoding millions of individual properties.
+  if (options.applyTransform || deletedCount) for (const auto &e : header.elements) {
+    const bool isVertex = &e == &*vertex;
+    for (qint64 i = 0; i < e.count; ++i) {
+      if ((i & 4095) == 0 && options.progress && options.progress(static_cast<int>(source.pos() * 99.0 / std::max<qint64>(1, source.size())))) {
+        result.cancelled = true;
+        return result;
+      }
+      const qint64 offset = source.pos();
+      QByteArray raw;
+      if (!(header.format == PlyFormat::Ascii ? readAsciiRawRecord(source, raw, error)
+          : readBinaryRawRecord(source, e, header.format, raw, error))) return result;
+      if (isVertex && !options.deletedVertices.isEmpty() && options.deletedVertices.testBit(i)) continue;
+      if (isVertex && options.applyTransform) {
+        QVector<double> values;
+        QVector<QVector<double>> lists;
+        if (!source.seek(offset) || !(header.format == PlyFormat::Ascii
+            ? readAsciiElementRecord(source, e, values, lists, error)
+            : readBinaryElementRecord(source, e, header.format, values, lists, error))) return result;
+        const auto position = exportPosition({values[xyzNormal[0]], values[xyzNormal[1]], values[xyzNormal[2]]}, options);
+        QVector3D normal;
+        const bool normals = xyzNormal[3] >= 0 && xyzNormal[4] >= 0 && xyzNormal[5] >= 0;
+        if (normals) normal = exportNormal({static_cast<float>(values[xyzNormal[3]]), static_cast<float>(values[xyzNormal[4]]), static_cast<float>(values[xyzNormal[5]])}, options);
+        const std::array<double, 6> changed{position.x, position.y, position.z, normal.x(), normal.y(), normal.z()};
+        QList<QByteArray> tokens;
+        if (header.format == PlyFormat::Ascii) tokens = raw.simplified().split(' ');
+        for (int j = 0; j < (normals ? 6 : 3); ++j) {
+          const int index = xyzNormal[j];
+          const double value = changed[j];
+          if (!std::isfinite(value) || (e.properties[index].valueType == ScalarType::Float32 && std::abs(value) > std::numeric_limits<float>::max())) {
+            error = QCoreApplication::translate("Workbench", "The model contains non-finite coordinates; export was not written.");
+            return result;
+          }
+          if (header.format == PlyFormat::Ascii) {
+            tokens[index] = QByteArray::number(value, 'g', 17);
+          } else {
+            qsizetype byteOffset = 0;
+            for (int k = 0; k < index; ++k) byteOffset += scalarByteSize(e.properties[k].valueType);
+            auto *bytes = reinterpret_cast<uchar *>(raw.data() + byteOffset);
+            if (e.properties[index].valueType == ScalarType::Float32) {
+              const quint32 bits = std::bit_cast<quint32>(static_cast<float>(value));
+              if (header.format == PlyFormat::BinaryBigEndian) qToBigEndian(bits, bytes); else qToLittleEndian(bits, bytes);
+            } else {
+              const quint64 bits = std::bit_cast<quint64>(value);
+              if (header.format == PlyFormat::BinaryBigEndian) qToBigEndian(bits, bytes); else qToLittleEndian(bits, bytes);
+            }
+          }
+        }
+        if (header.format == PlyFormat::Ascii) raw = tokens.join(' ') + '\n';
+      }
+      if (!writeBytes(destination, raw, error)) return result;
+    }
+  }
+  while (!source.atEnd()) {
+    if (options.progress && options.progress(static_cast<int>(source.pos() * 99.0 / std::max<qint64>(1, source.size())))) {
+      result.cancelled = true; return result;
+    }
+    const QByteArray trailing = source.read(1024 * 1024);
+    if ((trailing.isEmpty() && source.error() != QFileDevice::NoError) || !writeBytes(destination, trailing, error)) return result;
+  }
+  if (options.progress && options.progress(99)) { result.cancelled = true; return result; }
+  const QFileInfo sourceAfter(options.sourcePath);
+  if (sourceSize != sourceAfter.size() || sourceModified != sourceAfter.lastModified()) {
+    error = QCoreApplication::translate("Workbench", "The source model changed during export. Please try again after processing finishes.");
+    return result;
+  }
+  if (!destination.commit()) error = QCoreApplication::translate("Workbench", "Unable to finalize model file: %1").arg(destination.errorString());
+  else { result.success = true; if (!texture.isEmpty()) assets.setAutoRemove(false); }
+  return result;
 }
 
 } // namespace gsw

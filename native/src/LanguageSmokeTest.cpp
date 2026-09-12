@@ -7,6 +7,7 @@
 #include "TrainingMonitorWidget.h"
 #include "WorkspaceDocument.h"
 #include "ManagedName.h"
+#include "ModelExportDialog.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -134,6 +135,35 @@ bool runLanguageSmokeTest(MainWindow &window) {
   if (!trackball) return false;
   if (!lockTools) return false;
   lockTools->setChecked(true);
+  auto *exportAction = window.findChild<QAction *>(QStringLiteral("exportModelAction"));
+  check(exportAction && exportAction->isEnabled() && exportAction->shortcut() == QKeySequence(QStringLiteral("Ctrl+E")),
+        "model export available without crop edits and while editing is locked");
+  // Exercise the actual menu action, options dialog and asynchronous writer.
+  const QString uiExportPath = QDir(temporary.path()).filePath(QStringLiteral("ui-export.glb"));
+  bool exportDialogSeen = false;
+  QTimer exportClick;
+  QObject::connect(&exportClick, &QTimer::timeout, &window, [&] {
+    auto *activeDialog = window.findChild<QDialog *>(QStringLiteral("modelExportDialog"));
+    if (!activeDialog || !activeDialog->isVisible()) return;
+    auto *format = activeDialog->findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
+    auto *path = activeDialog->findChild<QLineEdit *>(QStringLiteral("modelExportPath"));
+    auto *confirm = activeDialog->findChild<QAbstractButton *>(QStringLiteral("confirmModelExport"));
+    if (!format || !path || !confirm) { activeDialog->reject(); return; }
+    exportClick.stop(); exportDialogSeen = true;
+    format->setCurrentIndex(format->findData(static_cast<int>(ModelExportFormat::Glb)));
+    path->setText(uiExportPath); confirm->click();
+  });
+  exportClick.start(20);
+  if (exportAction) exportAction->trigger();
+  exportClick.stop();
+  check(exportDialogSeen && QFileInfo(uiExportPath).size() > 28 && viewport->editToolsLocked(),
+        "model export action writes a standalone GLB while locked");
+  ModelExportDialog exportDialog(viewport->modelExportOptions(), true, false, {ply.fileName()}, &window);
+  auto *exportFormat = exportDialog.findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
+  check(exportFormat && exportFormat->count() == 6, "all model export formats");
+  exportFormat->setCurrentIndex(exportFormat->findData(static_cast<int>(ModelExportFormat::Glb)));
+  const QString exportPath = exportDialog.options().destinationPath;
+  check(exportPath.endsWith(QStringLiteral(".glb")), "format switch updates extension");
   check(viewport->editToolsLocked() && !viewport->modelTransformActive(), "lock cancels modal edit");
   const QStringList lockTexts = {QStringLiteral("锁定编辑工具"), QStringLiteral("Lock Editing Tools"), QStringLiteral("編集ツールをロック")};
   const QStringList trackballTexts = {QStringLiteral("观察轨迹球"), QStringLiteral("View Trackball"), QStringLiteral("ビュートラックボール")};
@@ -200,6 +230,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
+    check(exportAction->text() == QCoreApplication::translate("Workbench", "导出模型...") &&
+          exportDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型"), "export action and dialog translated live");
+    check(exportDialog.options().format == ModelExportFormat::Glb && exportDialog.options().destinationPath == exportPath &&
+          exportDialog.options().applyTransform, "export settings survive language changes");
     check(trackball->text() == trackballTexts[next] && trackball->isChecked() && viewport->observationTrackballVisible(),
           "observation trackball translated and state retained");
     check(lockTools->text() == lockTexts[next] && lockTools->isChecked() && viewport->editToolsLocked() &&
@@ -276,6 +310,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QDir().mkpath(screenshotDirectory);
     check(window.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral(".png"))), "UI screenshot");
     check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-viewport.png"))), "trackball screenshot");
+    exportDialog.show(); exportDialog.adjustSize(); QApplication::processEvents();
+    check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
+    exportDialog.hide();
   }
   qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   if (testProcess) supervisor->shutdown();

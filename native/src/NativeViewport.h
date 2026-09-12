@@ -12,6 +12,7 @@
 #include "TrainingGpuPreviewBuffer.h"
 #include "TransformGizmo.h"
 #include "SceneObject.h"
+#include "ModelExport.h"
 #include <memory>
 
 #include <QImage>
@@ -118,6 +119,8 @@ public:
 
   [[nodiscard]] bool saveCroppedScene(const QString &filePath,
                                       QString *errorMessage = nullptr);
+  [[nodiscard]] ModelExportOptions modelExportOptions() const;
+  [[nodiscard]] bool sourceHasGaussianAttributes() const { return mScene->mHasGaussianAttributes; }
   [[nodiscard]] bool hasUnsavedSceneEdits() const;
   void discardSceneEdits();
   [[nodiscard]] bool hasEditableScene() const;

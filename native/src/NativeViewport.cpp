@@ -1168,6 +1168,17 @@ void NativeViewport::redoEdit() {
   update();
 }
 
+ModelExportOptions NativeViewport::modelExportOptions() const {
+  ModelExportOptions options;
+  options.sourcePath = mScene->mScenePath;
+  options.deletedVertices = mScene->mEditModel.deletedBits();
+  options.coordinates = mScene->mSceneCoordinates;
+  const float displayScale = static_cast<float>(options.coordinates.displayScale);
+  options.transform = {mScene->mModelTranslation / displayScale, mScene->mModelRotation, mScene->mModelScale};
+  options.pivot = options.coordinates.globalFromLocal(mScene->mSceneCenter);
+  return options;
+}
+
 bool NativeViewport::saveCroppedScene(const QString &filePath,
                                       QString *errorMessage) {
   if (!PlyPointCloudLoader::writeFiltered(
