@@ -1,4 +1,39 @@
 {
+  "桌面": {
+    "zh_CN": "桌面",
+    "en_US": "Desktop",
+    "ja_JP": "デスクトップ"
+  },
+  "转到桌面，保留当前文件名和文件类型": {
+    "zh_CN": "转到桌面，保留当前文件名和文件类型",
+    "en_US": "Go to Desktop; keep the current file name and file type",
+    "ja_JP": "ファイル名とファイル形式を保持してデスクトップに移動"
+  },
+  "全屏": {
+    "zh_CN": "全屏",
+    "en_US": "Full Screen",
+    "ja_JP": "全画面表示"
+  },
+  "退出全屏": {
+    "zh_CN": "退出全屏",
+    "en_US": "Exit Full Screen",
+    "ja_JP": "全画面表示を終了"
+  },
+  "最大化窗口": {
+    "zh_CN": "最大化窗口",
+    "en_US": "Maximize Window",
+    "ja_JP": "ウィンドウを最大化"
+  },
+  "还原窗口": {
+    "zh_CN": "还原窗口",
+    "en_US": "Restore Window",
+    "ja_JP": "ウィンドウを元に戻す"
+  },
+  "F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏": {
+    "zh_CN": "F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏",
+    "en_US": "F11 toggles full screen; Esc exits full screen; double-click the title bar to toggle full screen",
+    "ja_JP": "F11 で全画面表示を切り替え、Esc で終了。タイトルバーのダブルクリックでも切り替え可能"
+  },
   "cameras.json 过大，已跳过加载（上限 64 MiB）。": {
     "zh_CN": "cameras.json 过大，已跳过加载（上限 64 MiB）。",
     "en_US": "cameras.json exceeds 64 MiB; loading skipped.",

@@ -41,6 +41,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/AppTheme.h
   src/AppLanguage.cpp
   src/AppLanguage.h
+  src/WindowUi.cpp
+  src/WindowUi.h
+  src/WindowUiSmokeTest.cpp
+  src/WindowUiSmokeTest.h
   src/LanguageSmokeTest.cpp
   src/LanguageSmokeTest.h
   src/BackendLocator.cpp
@@ -192,7 +196,7 @@ if(BUILD_TESTING)
   foreach(language zh_CN en_US ja_JP)
     add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
     set_tests_properties(native_language_${language} PROPERTIES
-      TIMEOUT 25
+      TIMEOUT 45
       ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()

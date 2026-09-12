@@ -1,0 +1,360 @@
+#include "WindowUi.h"
+#include "AppLanguage.h"
+
+#include <QAbstractNativeEventFilter>
+#include <QAction>
+#include <QApplication>
+#include <QDialog>
+#include <QDockWidget>
+#include <QFileDialog>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QKeyEvent>
+#include <QLayout>
+#include <QMainWindow>
+#include <QListView>
+#include <QMouseEvent>
+#include <QMessageBox>
+#include <QPointer>
+#include <QPainter>
+#include <QStandardPaths>
+#include <QScopedValueRollback>
+#include <QStyle>
+#include <QToolButton>
+#include <QTimer>
+#include <QUrl>
+#include <QVariant>
+#include <algorithm>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
+
+namespace gsw {
+namespace {
+constexpr auto controllerName = "gswWindowController";
+QIcon windowIcon(bool restore, bool fullScreen = false) {
+  QPixmap pixmap(36, 36);
+  pixmap.setDevicePixelRatio(2);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  painter.setPen(QPen(QColor(210, 220, 225), 1.5));
+  if (restore) {
+    painter.drawLine(QPointF(6, 3), QPointF(15, 3));
+    painter.drawLine(QPointF(15, 3), QPointF(15, 12));
+    painter.drawRect(QRectF(3, 6, 9, 9));
+  } else if (fullScreen) {
+    for (const QPoint &corner : {QPoint(3, 3), QPoint(15, 3), QPoint(3, 15), QPoint(15, 15)}) {
+      painter.drawLine(corner, corner + QPoint(corner.x() == 3 ? 4 : -4, 0));
+      painter.drawLine(corner, corner + QPoint(0, corner.y() == 3 ? 4 : -4));
+    }
+  } else painter.drawRect(QRectF(3, 3, 12, 12));
+  return QIcon(pixmap);
+}
+bool eligible(QWidget *w) {
+  return w && w->isWindow() && (qobject_cast<QDialog *>(w) ||
+      qobject_cast<QMainWindow *>(w) || qobject_cast<QDockWidget *>(w));
+}
+
+class WindowController final : public QObject {
+public:
+  explicit WindowController(QWidget *window) : QObject(window), mWindow(window) {
+    setObjectName(QLatin1String(controllerName));
+    mFullScreen = new QAction(this);
+    mFullScreen->setObjectName(QStringLiteral("windowFullScreenAction"));
+    mFullScreen->setShortcut(QKeySequence(QStringLiteral("F11")));
+    mFullScreen->setShortcutContext(Qt::WindowShortcut);
+    window->addAction(mFullScreen);
+    connect(mFullScreen, &QAction::triggered, this, [this] { toggleFullScreen(); });
+    if (auto *dock = qobject_cast<QDockWidget *>(window))
+      connect(dock, &QDockWidget::topLevelChanged, this, [this] { refresh(); });
+    window->installEventFilter(this);
+    AppLanguage::onChanged(this, [this] { refresh(); });
+    refresh();
+  }
+
+  QAction *action() const { return mFullScreen; }
+
+  void decorate() {
+    if (!eligible(mWindow)) return;
+    // Do this before a native handle is shown: changing flags on a visible
+    // dialog hides it and can prematurely end its modal event loop.
+    if (!mWindow->isVisible()) {
+      auto flags = mWindow->windowFlags();
+      flags |= Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
+      flags &= ~Qt::WindowContextHelpButtonHint;
+      if (!qobject_cast<QDialog *>(mWindow)) flags |= Qt::WindowMinimizeButtonHint;
+      if (flags != mWindow->windowFlags()) mWindow->setWindowFlags(flags);
+    }
+    if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
+      auto urls = file->sidebarUrls();
+      const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+      if (!desktop.isEmpty()) {
+        const QUrl url = QUrl::fromLocalFile(desktop);
+        urls.removeAll(url);
+        urls.prepend(url);
+        file->setSidebarUrls(urls);
+      }
+    }
+    if (!qobject_cast<QDialog *>(mWindow) || !mWindow->layout()) return;
+    if (mHeader) {
+      attachHeader();
+      return;
+    }
+    // QLayout's menu-bar slot reserves real space above the contents; never
+    // overlay the file list, file-name editor or confirmation buttons.
+    if (mWindow->layout()->menuBar()) return;
+    mHeader = new QWidget(mWindow);
+    mHeader->setObjectName(QStringLiteral("windowControlsBar"));
+    auto *row = new QHBoxLayout(mHeader);
+    row->setContentsMargins(0, 0, 0, 4);
+    row->setSpacing(6);
+    if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
+      auto *desktop = new QToolButton(mHeader);
+      desktop->setObjectName(QStringLiteral("fileDialogDesktopButton"));
+      desktop->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+      desktop->setIcon(mWindow->style()->standardIcon(QStyle::SP_DesktopIcon));
+      AppLanguage::bind(desktop, "text", AppLanguage::source("桌面"));
+      AppLanguage::bind(desktop, "toolTip", AppLanguage::source("转到桌面，保留当前文件名和文件类型"));
+      const QString path = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+      desktop->setEnabled(!path.isEmpty());
+      connect(desktop, &QToolButton::clicked, file, [file, path] {
+        // setDirectory preserves the save-name editor and active name filter.
+        file->setDirectory(path);
+      });
+      row->addWidget(desktop);
+    }
+    row->addStretch();
+    mMaximize = new QToolButton(mHeader);
+    mMaximize->setObjectName(QStringLiteral("windowMaximizeButton"));
+    mMaximize->setAutoRaise(true);
+    connect(mMaximize, &QToolButton::clicked, this, [this] { toggleMaximized(); });
+    row->addWidget(mMaximize);
+    auto *full = new QToolButton(mHeader);
+    full->setObjectName(QStringLiteral("windowFullScreenButton"));
+    full->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    full->setDefaultAction(mFullScreen);
+    row->addWidget(full);
+    mHeader->installEventFilter(this);
+    attachHeader();
+    refresh();
+  }
+
+  void toggleFullScreen() {
+    ++mStateRevision;
+    const QScopedValueRollback<bool> changingState(mChangingState, true);
+    if (auto *dock = qobject_cast<QDockWidget *>(mWindow); dock && !dock->isFloating())
+      dock->setFloating(true);
+    if (mWindow->isFullScreen()) {
+      mWindow->showNormal();
+      if (mNormalGeometry.isValid()) mWindow->setGeometry(mNormalGeometry);
+      if (mWasMaximized) mWindow->showMaximized();
+    } else {
+      mWasMaximized = mWindow->isMaximized();
+      mNormalGeometry = mWasMaximized ? mWindow->normalGeometry() : mWindow->geometry();
+      allowExpansion();
+      mWindow->showFullScreen();
+    }
+    refresh();
+  }
+
+  void toggleMaximized() {
+    ++mStateRevision;
+    const QScopedValueRollback<bool> changingState(mChangingState, true);
+    if (mWindow->isFullScreen()) {
+      // The restore button always returns to a normal, resizable window.
+      mWasMaximized = false;
+      toggleFullScreen();
+    } else if (mWindow->isMaximized()) {
+      mWindow->showNormal();
+    } else {
+      allowExpansion();
+      mWindow->showMaximized();
+    }
+    refresh();
+  }
+
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    if (watched == mWindow && (event->type() == QEvent::LanguageChange ||
+        event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange)) {
+      const Qt::WindowStates state = mWindow->windowState();
+      const auto revision = mStateRevision;
+      QTimer::singleShot(0, this, [this, state, revision] {
+        decorate();
+        // Some Qt dialogs rebuild their layout and call setFixedSize while
+        // translating/repolishing. Restore presentation after that work,
+        // unless the user has explicitly requested a different window state.
+        if (mStateRevision == revision && mWindow->isVisible() && qobject_cast<QMessageBox *>(mWindow) &&
+            (state.testFlag(Qt::WindowFullScreen) || state.testFlag(Qt::WindowMaximized))) {
+          const QScopedValueRollback<bool> changing(mChangingState, true);
+          allowExpansion();
+          if (state.testFlag(Qt::WindowFullScreen)) mWindow->showFullScreen();
+          else mWindow->showMaximized();
+        }
+        refresh();
+      });
+    }
+    if (watched == mWindow && event->type() == QEvent::Show && mChangingState &&
+        qobject_cast<QMessageBox *>(mWindow)) {
+      // A visible message box receives another Show when changing window
+      // state; its override would call setFixedSize and undo full screen.
+      // Its initial show (escape/default buttons, accessibility) is untouched.
+      return true;
+    }
+    if (watched == mWindow && event->type() == QEvent::LayoutRequest &&
+        qobject_cast<QMessageBox *>(mWindow) && (mChangingState || mWindow->isFullScreen() || mWindow->isMaximized())) {
+      // QMessageBox normally re-applies setFixedSize on every layout request.
+      // Activate its layout without shrinking a user-expanded window.
+      allowExpansion();
+      mWindow->layout()->activate();
+      return true;
+    }
+    if (watched == mWindow && event->type() == QEvent::WindowStateChange) refresh();
+    if (watched == mHeader && event->type() == QEvent::MouseButtonDblClick &&
+        static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+      toggleFullScreen();
+      return true;
+    }
+    return false;
+  }
+
+private:
+  void attachHeader() {
+    if (qobject_cast<QMessageBox *>(mWindow)) {
+      // QMessageBox calculates a fixed size from its grid's contents. A
+      // menu-bar slot is not counted consistently by its height-for-width
+      // path, so reserve an actual grid row instead of overlaying its text.
+      auto *grid = qobject_cast<QGridLayout *>(mWindow->layout());
+      if (!grid || grid->indexOf(mHeader) >= 0) return;
+      struct Cell { QLayoutItem *item; int row, column, rows, columns; };
+      QList<Cell> cells;
+      const int columns = grid->columnCount();
+      for (int row = grid->rowCount() - 1; row >= 0; --row) {
+        grid->setRowStretch(row + 1, grid->rowStretch(row));
+        grid->setRowMinimumHeight(row + 1, grid->rowMinimumHeight(row));
+      }
+      grid->setRowStretch(0, 0); grid->setRowMinimumHeight(0, 0);
+      while (grid->count()) {
+        Cell cell;
+        grid->getItemPosition(0, &cell.row, &cell.column, &cell.rows, &cell.columns);
+        cell.item = grid->takeAt(0);
+        cells.append(cell);
+      }
+      for (const auto &cell : cells) grid->addItem(cell.item, cell.row + 1, cell.column, cell.rows, cell.columns);
+      grid->addWidget(mHeader, 0, 0, 1, std::max(1, columns));
+    } else if (!mWindow->layout()->menuBar()) mWindow->layout()->setMenuBar(mHeader);
+  }
+  void allowExpansion() {
+    if (auto *layout = mWindow->layout(); layout && layout->sizeConstraint() == QLayout::SetFixedSize)
+      layout->setSizeConstraint(QLayout::SetMinimumSize);
+    mWindow->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+  }
+  void refresh() {
+    const bool full = mWindow->isFullScreen();
+    const bool restore = full || mWindow->isMaximized();
+    AppLanguage::bind(mFullScreen, "text", full ? AppLanguage::source("退出全屏") : AppLanguage::source("全屏"));
+    AppLanguage::bind(mFullScreen, "toolTip", AppLanguage::source("F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏"));
+    mFullScreen->setIcon(windowIcon(full, true));
+    if (auto *dock = qobject_cast<QDockWidget *>(mWindow)) mFullScreen->setShortcut(dock->isFloating() ? QKeySequence(QStringLiteral("F11")) : QKeySequence());
+    if (mMaximize) {
+      AppLanguage::bind(mMaximize, "toolTip", restore ? AppLanguage::source("还原窗口") : AppLanguage::source("最大化窗口"));
+      AppLanguage::bind(mMaximize, "accessibleName", restore ? AppLanguage::source("还原窗口") : AppLanguage::source("最大化窗口"));
+      mMaximize->setIcon(windowIcon(restore));
+    }
+    refreshDesktopLabel();
+  }
+  void refreshDesktopLabel() {
+    if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
+      // Qt's URL sidebar stores filesystem display names. Translate only the
+      // well-known Desktop shortcut, never arbitrary folders or user files.
+      if (auto *sidebar = file->findChild<QListView *>(QStringLiteral("sidebar")); sidebar && sidebar->model()) {
+        if (mSidebarModel != sidebar->model()) {
+          mSidebarModel = sidebar->model();
+          connect(mSidebarModel, &QAbstractItemModel::dataChanged, this, [this] { refreshDesktopLabel(); });
+          connect(mSidebarModel, &QAbstractItemModel::modelReset, this, [this] { refreshDesktopLabel(); });
+          connect(mSidebarModel, &QAbstractItemModel::rowsInserted, this, [this] { refreshDesktopLabel(); });
+        }
+        const QUrl desktop = QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DesktopLocation));
+        constexpr int urlRole = Qt::UserRole + 1; // Qt QFileDialog's URL model
+        for (int row = 0; row < sidebar->model()->rowCount(); ++row) {
+          const auto index = sidebar->model()->index(row, 0);
+          const QString label = QCoreApplication::translate("Workbench", "桌面");
+          if (index.data(urlRole).toUrl() == desktop && index.data().toString() != label)
+            sidebar->model()->setData(index, label, Qt::DisplayRole);
+        }
+      }
+    }
+  }
+  QWidget *mWindow;
+  QAction *mFullScreen;
+  QPointer<QWidget> mHeader;
+  QPointer<QToolButton> mMaximize;
+  QPointer<QAbstractItemModel> mSidebarModel;
+  QRect mNormalGeometry;
+  bool mWasMaximized = false;
+  bool mChangingState = false;
+  quint64 mStateRevision = 0;
+};
+
+WindowController *controller(QWidget *w) {
+  if (!w) return nullptr;
+  auto *existing = w->findChild<QObject *>(QLatin1String(controllerName), Qt::FindDirectChildrenOnly);
+  return existing ? static_cast<WindowController *>(existing) : new WindowController(w);
+}
+
+class WindowPolicy final : public QObject, public QAbstractNativeEventFilter {
+public:
+  explicit WindowPolicy(QObject *parent) : QObject(parent) {}
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    auto *widget = qobject_cast<QWidget *>(watched);
+    if (!widget) return false;
+    if ((event->type() == QEvent::Polish || event->type() == QEvent::Show) && eligible(widget))
+      WindowUi::prepare(widget);
+    if ((event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) &&
+        eligible(widget->window()) && widget->window()->isFullScreen()) {
+      auto *key = static_cast<QKeyEvent *>(event);
+      if (key->key() == Qt::Key_Escape && key->modifiers() == Qt::NoModifier) {
+        if (event->type() == QEvent::KeyPress) WindowUi::toggleFullScreen(widget->window());
+        event->accept();
+        return true;
+      }
+    }
+    return false;
+  }
+  bool nativeEventFilter(const QByteArray &, void *message, qintptr *result) override {
+#ifdef Q_OS_WIN
+    auto *msg = static_cast<MSG *>(message);
+    // Only the OS title-bar caption. File rows, text editors and the viewport
+    // keep their own double-click behavior (open / select / recenter).
+    if (msg->message == WM_NCLBUTTONDBLCLK && msg->wParam == HTCAPTION) {
+      auto *window = QWidget::find(reinterpret_cast<WId>(msg->hwnd));
+      if (eligible(window)) {
+        // Changing native window state while Windows/Qt is still dispatching
+        // the caption message can invalidate its in-flight platform handle.
+        QTimer::singleShot(0, window, [window] { WindowUi::toggleFullScreen(window); });
+        // Qt's queued-input dispatcher may pass a null result pointer.
+        if (result) *result = 0;
+        return true;
+      }
+    }
+#else
+    Q_UNUSED(message)
+    Q_UNUSED(result)
+#endif
+    return false;
+  }
+};
+} // namespace
+
+void WindowUi::install() {
+  static QPointer<WindowPolicy> policy;
+  if (policy) return;
+  policy = new WindowPolicy(qApp);
+  qApp->installEventFilter(policy);
+  qApp->installNativeEventFilter(policy);
+}
+void WindowUi::prepare(QWidget *window) { if (eligible(window)) controller(window)->decorate(); }
+QAction *WindowUi::fullScreenAction(QWidget *window) { return controller(window)->action(); }
+void WindowUi::toggleFullScreen(QWidget *window) { controller(window)->toggleFullScreen(); }
+void WindowUi::toggleMaximized(QWidget *window) { controller(window)->toggleMaximized(); }
+} // namespace gsw

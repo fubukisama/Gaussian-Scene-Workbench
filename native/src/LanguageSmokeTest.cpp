@@ -21,6 +21,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileDialog>
+#include "WindowUiSmokeTest.h"
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -188,6 +189,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto projectName = document->projectName();
   const auto activeId = viewport->activeSceneId();
   const auto modelCount = viewport->sceneObjectCount();
+  // Window controls are installed lazily when a dialog is polished. Warm
+  // existing dialogs before asserting that language changes add no actions.
+  for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
+       static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
+       static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog)}) dialog->ensurePolished();
+  QApplication::processEvents();
   const auto actionCount = window.findChildren<QAction *>().size();
 
   // The build-tree test owns a real child process. It must stay alive during
@@ -314,8 +321,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();
   }
-  qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   if (testProcess) supervisor->shutdown();
+  check(runWindowUiSmokeTest(), "unified window and file-dialog controls");
+  qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   return passed;
 }
 } // namespace gsw

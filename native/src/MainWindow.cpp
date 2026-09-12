@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "ManagedName.h"
 #include "AppLanguage.h"
+#include "WindowUi.h"
 
 #include "AppTheme.h"
 #include "BackendLocator.h"
@@ -113,6 +114,10 @@ public:
 
     mFloatButton = createButton(QStringLiteral("dockTitleButton"));
     mCloseButton = createButton(QStringLiteral("dockTitleButton"));
+    mFullScreenButton = createButton(QStringLiteral("dockFullScreenButton"));
+    mFullScreenButton->setDefaultAction(WindowUi::fullScreenAction(dock));
+    mFullScreenButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    mLayout->addWidget(mFullScreenButton);
     mLayout->addWidget(mFloatButton);
     mLayout->addWidget(mCloseButton);
 
@@ -127,6 +132,7 @@ public:
             [this]() { updateActions(); });
     connect(mFloatButton, &QToolButton::clicked, this, [this]() {
       if (mDock->features().testFlag(QDockWidget::DockWidgetFloatable)) {
+        if (mDock->isFullScreen()) WindowUi::toggleMaximized(mDock);
         mDock->setFloating(!mDock->isFloating());
       }
     });
@@ -148,7 +154,7 @@ public:
     const int iconSize = AppTheme::scaled(10, scalePercent);
     mLayout->setContentsMargins(paddingX, paddingY, paddingX, paddingY);
     mLayout->setSpacing(spacing);
-    for (QToolButton *button : {mFloatButton, mCloseButton}) {
+    for (QToolButton *button : {mFullScreenButton, mFloatButton, mCloseButton}) {
       button->setFixedSize(buttonSize, buttonSize);
       button->setIconSize(QSize(iconSize, iconSize));
     }
@@ -169,7 +175,12 @@ protected:
   void mousePressEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseMoveEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseReleaseEvent(QMouseEvent *event) override { event->ignore(); }
-  void mouseDoubleClickEvent(QMouseEvent *event) override { event->ignore(); }
+  void mouseDoubleClickEvent(QMouseEvent *event) override {
+    if (event->button() == Qt::LeftButton) {
+      WindowUi::toggleFullScreen(mDock);
+      event->accept();
+    } else event->ignore();
+  }
 
 private:
   QToolButton *createButton(const QString &objectName) {
@@ -184,6 +195,7 @@ private:
     const QDockWidget::DockWidgetFeatures features = mDock->features();
     const bool canFloat = features.testFlag(QDockWidget::DockWidgetFloatable);
     const bool canClose = features.testFlag(QDockWidget::DockWidgetClosable);
+    mFullScreenButton->setVisible(canFloat);
     const QString floatText = mDock->isFloating() ? QCoreApplication::translate("Workbench", "停靠面板")
                                                   : QCoreApplication::translate("Workbench", "浮动面板");
     mFloatButton->setVisible(canFloat);
@@ -206,6 +218,7 @@ private:
   QLabel *mTitleLabel = nullptr;
   QToolButton *mFloatButton = nullptr;
   QToolButton *mCloseButton = nullptr;
+  QToolButton *mFullScreenButton = nullptr;
 };
 
 void installDockTitleBar(QDockWidget *dock, const int scalePercent) {
@@ -1342,6 +1355,8 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mExportCoordinateReportAction);
 
   QMenu *viewMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "视图")), AppLanguage::source("视图"), "title");
+  viewMenu->addAction(WindowUi::fullScreenAction(this));
+  viewMenu->addSeparator();
   viewMenu->addAction(mLockEditToolsAction);
   viewMenu->addAction(mObservationTrackballAction);
   viewMenu->addSeparator();

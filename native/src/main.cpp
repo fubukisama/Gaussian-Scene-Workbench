@@ -1,5 +1,6 @@
 #include "AppTheme.h"
 #include "AppLanguage.h"
+#include "WindowUi.h"
 #include "LanguageSmokeTest.h"
 #include "MainWindow.h"
 #include "NativeViewport.h"
@@ -213,6 +214,7 @@ int main(int argc, char *argv[]) {
 
   application.setProperty("gswInitialMediaSources",
                           parser.values(mediaSourceOption));
+  gsw::WindowUi::install();
   gsw::MainWindow window;
   QString projectPath = parser.value(projectOption);
   const bool importDialogSmokeTest = parser.isSet(importDialogSmokeTestOption);
