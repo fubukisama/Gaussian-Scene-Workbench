@@ -1,33 +1,23 @@
 #include "WindowUi.h"
 #include "AppLanguage.h"
 
-#include <QAbstractNativeEventFilter>
 #include <QAction>
 #include <QApplication>
 #include <QDialog>
 #include <QDockWidget>
 #include <QFileDialog>
-#include <QHBoxLayout>
-#include <QGridLayout>
 #include <QKeyEvent>
 #include <QLayout>
 #include <QMainWindow>
 #include <QListView>
-#include <QMouseEvent>
 #include <QMessageBox>
 #include <QPointer>
 #include <QPainter>
 #include <QStandardPaths>
 #include <QScopedValueRollback>
-#include <QStyle>
-#include <QToolButton>
 #include <QTimer>
 #include <QUrl>
 #include <QVariant>
-#include <algorithm>
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 
 namespace gsw {
 namespace {
@@ -78,7 +68,9 @@ public:
     if (!eligible(mWindow)) return;
     // Do this before a native handle is shown: changing flags on a visible
     // dialog hides it and can prematurely end its modal event loop.
-    if (!mWindow->isVisible()) {
+    // QDockWidget owns its flags and native drag state. Never recreate its
+    // platform window while Qt is unplugging or dragging a panel.
+    if (!mWindow->isVisible() && !qobject_cast<QDockWidget *>(mWindow)) {
       auto flags = mWindow->windowFlags();
       flags |= Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
       flags &= ~Qt::WindowContextHelpButtonHint;
@@ -95,47 +87,8 @@ public:
         file->setSidebarUrls(urls);
       }
     }
-    if (!qobject_cast<QDialog *>(mWindow) || !mWindow->layout()) return;
-    if (mHeader) {
-      attachHeader();
-      return;
-    }
-    // QLayout's menu-bar slot reserves real space above the contents; never
-    // overlay the file list, file-name editor or confirmation buttons.
-    if (mWindow->layout()->menuBar()) return;
-    mHeader = new QWidget(mWindow);
-    mHeader->setObjectName(QStringLiteral("windowControlsBar"));
-    auto *row = new QHBoxLayout(mHeader);
-    row->setContentsMargins(0, 0, 0, 4);
-    row->setSpacing(6);
-    if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
-      auto *desktop = new QToolButton(mHeader);
-      desktop->setObjectName(QStringLiteral("fileDialogDesktopButton"));
-      desktop->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-      desktop->setIcon(mWindow->style()->standardIcon(QStyle::SP_DesktopIcon));
-      AppLanguage::bind(desktop, "text", AppLanguage::source("桌面"));
-      AppLanguage::bind(desktop, "toolTip", AppLanguage::source("转到桌面，保留当前文件名和文件类型"));
-      const QString path = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-      desktop->setEnabled(!path.isEmpty());
-      connect(desktop, &QToolButton::clicked, file, [file, path] {
-        // setDirectory preserves the save-name editor and active name filter.
-        file->setDirectory(path);
-      });
-      row->addWidget(desktop);
-    }
-    row->addStretch();
-    mMaximize = new QToolButton(mHeader);
-    mMaximize->setObjectName(QStringLiteral("windowMaximizeButton"));
-    mMaximize->setAutoRaise(true);
-    connect(mMaximize, &QToolButton::clicked, this, [this] { toggleMaximized(); });
-    row->addWidget(mMaximize);
-    auto *full = new QToolButton(mHeader);
-    full->setObjectName(QStringLiteral("windowFullScreenButton"));
-    full->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    full->setDefaultAction(mFullScreen);
-    row->addWidget(full);
-    mHeader->installEventFilter(this);
-    attachHeader();
+    // The OS caption is the sole window-control bar. Desktop remains a
+    // sidebar location; F11 is an action, not another row above the contents.
     refresh();
   }
 
@@ -210,40 +163,10 @@ protected:
       return true;
     }
     if (watched == mWindow && event->type() == QEvent::WindowStateChange) refresh();
-    if (watched == mHeader && event->type() == QEvent::MouseButtonDblClick &&
-        static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
-      toggleFullScreen();
-      return true;
-    }
     return false;
   }
 
 private:
-  void attachHeader() {
-    if (qobject_cast<QMessageBox *>(mWindow)) {
-      // QMessageBox calculates a fixed size from its grid's contents. A
-      // menu-bar slot is not counted consistently by its height-for-width
-      // path, so reserve an actual grid row instead of overlaying its text.
-      auto *grid = qobject_cast<QGridLayout *>(mWindow->layout());
-      if (!grid || grid->indexOf(mHeader) >= 0) return;
-      struct Cell { QLayoutItem *item; int row, column, rows, columns; };
-      QList<Cell> cells;
-      const int columns = grid->columnCount();
-      for (int row = grid->rowCount() - 1; row >= 0; --row) {
-        grid->setRowStretch(row + 1, grid->rowStretch(row));
-        grid->setRowMinimumHeight(row + 1, grid->rowMinimumHeight(row));
-      }
-      grid->setRowStretch(0, 0); grid->setRowMinimumHeight(0, 0);
-      while (grid->count()) {
-        Cell cell;
-        grid->getItemPosition(0, &cell.row, &cell.column, &cell.rows, &cell.columns);
-        cell.item = grid->takeAt(0);
-        cells.append(cell);
-      }
-      for (const auto &cell : cells) grid->addItem(cell.item, cell.row + 1, cell.column, cell.rows, cell.columns);
-      grid->addWidget(mHeader, 0, 0, 1, std::max(1, columns));
-    } else if (!mWindow->layout()->menuBar()) mWindow->layout()->setMenuBar(mHeader);
-  }
   void allowExpansion() {
     if (auto *layout = mWindow->layout(); layout && layout->sizeConstraint() == QLayout::SetFixedSize)
       layout->setSizeConstraint(QLayout::SetMinimumSize);
@@ -251,16 +174,10 @@ private:
   }
   void refresh() {
     const bool full = mWindow->isFullScreen();
-    const bool restore = full || mWindow->isMaximized();
     AppLanguage::bind(mFullScreen, "text", full ? AppLanguage::source("退出全屏") : AppLanguage::source("全屏"));
-    AppLanguage::bind(mFullScreen, "toolTip", AppLanguage::source("F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏"));
+    AppLanguage::bind(mFullScreen, "toolTip", AppLanguage::source("F11 切换全屏；Esc 退出全屏；双击系统标题栏最大化或还原"));
     mFullScreen->setIcon(windowIcon(full, true));
     if (auto *dock = qobject_cast<QDockWidget *>(mWindow)) mFullScreen->setShortcut(dock->isFloating() ? QKeySequence(QStringLiteral("F11")) : QKeySequence());
-    if (mMaximize) {
-      AppLanguage::bind(mMaximize, "toolTip", restore ? AppLanguage::source("还原窗口") : AppLanguage::source("最大化窗口"));
-      AppLanguage::bind(mMaximize, "accessibleName", restore ? AppLanguage::source("还原窗口") : AppLanguage::source("最大化窗口"));
-      mMaximize->setIcon(windowIcon(restore));
-    }
     refreshDesktopLabel();
   }
   void refreshDesktopLabel() {
@@ -279,16 +196,19 @@ private:
         for (int row = 0; row < sidebar->model()->rowCount(); ++row) {
           const auto index = sidebar->model()->index(row, 0);
           const QString label = QCoreApplication::translate("Workbench", "桌面");
-          if (index.data(urlRole).toUrl() == desktop && index.data().toString() != label)
-            sidebar->model()->setData(index, label, Qt::DisplayRole);
+          if (index.data(urlRole).toUrl() == desktop) {
+            if (index.data().toString() != label)
+              sidebar->model()->setData(index, label, Qt::DisplayRole);
+            const QString tip = QCoreApplication::translate("Workbench", "转到桌面，保留当前文件名和文件类型");
+            if (index.data(Qt::ToolTipRole).toString() != tip)
+              sidebar->model()->setData(index, tip, Qt::ToolTipRole);
+          }
         }
       }
     }
   }
   QWidget *mWindow;
   QAction *mFullScreen;
-  QPointer<QWidget> mHeader;
-  QPointer<QToolButton> mMaximize;
   QPointer<QAbstractItemModel> mSidebarModel;
   QRect mNormalGeometry;
   bool mWasMaximized = false;
@@ -302,7 +222,7 @@ WindowController *controller(QWidget *w) {
   return existing ? static_cast<WindowController *>(existing) : new WindowController(w);
 }
 
-class WindowPolicy final : public QObject, public QAbstractNativeEventFilter {
+class WindowPolicy final : public QObject {
 public:
   explicit WindowPolicy(QObject *parent) : QObject(parent) {}
   bool eventFilter(QObject *watched, QEvent *event) override {
@@ -321,28 +241,6 @@ public:
     }
     return false;
   }
-  bool nativeEventFilter(const QByteArray &, void *message, qintptr *result) override {
-#ifdef Q_OS_WIN
-    auto *msg = static_cast<MSG *>(message);
-    // Only the OS title-bar caption. File rows, text editors and the viewport
-    // keep their own double-click behavior (open / select / recenter).
-    if (msg->message == WM_NCLBUTTONDBLCLK && msg->wParam == HTCAPTION) {
-      auto *window = QWidget::find(reinterpret_cast<WId>(msg->hwnd));
-      if (eligible(window)) {
-        // Changing native window state while Windows/Qt is still dispatching
-        // the caption message can invalidate its in-flight platform handle.
-        QTimer::singleShot(0, window, [window] { WindowUi::toggleFullScreen(window); });
-        // Qt's queued-input dispatcher may pass a null result pointer.
-        if (result) *result = 0;
-        return true;
-      }
-    }
-#else
-    Q_UNUSED(message)
-    Q_UNUSED(result)
-#endif
-    return false;
-  }
 };
 } // namespace
 
@@ -351,7 +249,6 @@ void WindowUi::install() {
   if (policy) return;
   policy = new WindowPolicy(qApp);
   qApp->installEventFilter(policy);
-  qApp->installNativeEventFilter(policy);
 }
 void WindowUi::prepare(QWidget *window) { if (eligible(window)) controller(window)->decorate(); }
 QAction *WindowUi::fullScreenAction(QWidget *window) { return controller(window)->action(); }

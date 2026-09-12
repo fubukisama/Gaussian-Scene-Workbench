@@ -322,7 +322,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     exportDialog.hide();
   }
   if (testProcess) supervisor->shutdown();
-  check(runWindowUiSmokeTest(), "unified window and file-dialog controls");
+  check(runWindowUiSmokeTest(window), "native window and dock controls");
   qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   return passed;
 }

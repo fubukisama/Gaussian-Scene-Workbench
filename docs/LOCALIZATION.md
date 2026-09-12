@@ -29,6 +29,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 桌面 | Desktop | デスクトップ |
 | 全屏 / 退出全屏 | Full Screen / Exit Full Screen | 全画面表示 / 全画面表示を終了 |
 | 最大化窗口 / 还原窗口 | Maximize Window / Restore Window | ウィンドウを最大化 / ウィンドウを元に戻す |
+| 停靠面板 / 浮动面板 | Dock Panel / Float Panel | パネルをドッキング / パネルをフローティング |
 | 显示名称 / 存储标识 | Display Name / Storage Identifier | 表示名 / 保存用識別子 |
 | 点云 | Point Cloud | 点群 |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
@@ -55,9 +56,11 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 
 ## Window and file-dialog controls
 
-All Qt open/save/folder dialogs include the actual Windows Desktop in their sidebar and a translated **Desktop** button. The location comes from `QStandardPaths::DesktopLocation` (including redirected desktops), not a hard-coded `C:` path. Navigation does not create files or change the filename/type. Existing sidebar places and directory history remain available.
+All Qt open/save/folder dialogs include a translated **Desktop** shortcut in their sidebar. The location comes from `QStandardPaths::DesktopLocation` (including redirected desktops), not a hard-coded `C:` path. Navigation does not create files or change the filename/type. Existing sidebar places and directory history remain available. There is no duplicate window-control row or second Desktop button.
 
-The main window, dialogs and floating docks support **Full Screen** (`F11`), **Exit Full Screen** (`Esc` or `F11`), and maximize/restore. Windows title-bar left double-click toggles true full screen. Dialogs have a compact reserved control row; its blank area also toggles full screen on double-click. Dock title bars expose full screen and retain their separate dock/undock button. Full screen restores the previous normal geometry/maximized state without recreating the window or resetting input/model/worker data. Popups and tooltips are excluded. Double-clicking files, text fields or model geometry retains the existing open/select/recenter operation. `Esc` exits full screen first; only a subsequent `Esc` invokes the dialog's normal cancel behavior. Labels change live in all three languages.
+The main window and dialogs keep only the native Windows caption controls: title-bar left double-click **maximizes/restores**, not full screen. **Full Screen** remains available through the View menu or `F11`; `Esc` or `F11` exits it. Full screen restores the previous normal geometry/maximized state without resetting input/model/worker data. Popups and tooltips are excluded. Double-clicking files, text fields or model geometry retains the existing open/select/recenter operation. `Esc` exits full screen first; only a subsequent `Esc` invokes the dialog's normal cancel behavior. Labels change live in all three languages.
+
+Project, Properties and Tasks and Logs panels can be dragged by their compact title bar to any of the four dock areas, split/tabbed with other panels, or floated. Double-click their panel title to dock/undock; Ctrl-drag keeps them floating. Panel captions retain only dock/undock and close buttons; floating panels also support F11/Esc. Qt owns their window flags and mouse drag sequence. Initial floating sizes are 360 × 520 logical pixels for side panels and 840 × 460 for Tasks and Logs (scaled for the UI and clamped to the screen); existing usable restored sizes are retained. Floating size is remembered separately from docked extents and across sessions, without imposing a new minimum size. The bottom dock stays compact by default. Reset Layout also returns detached panels to their default dock areas.
 
 ## Editing guard
 

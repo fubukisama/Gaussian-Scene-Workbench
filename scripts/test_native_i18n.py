@@ -14,9 +14,13 @@ class CatalogTests(unittest.TestCase):
                        '转到桌面，保留当前文件名和文件类型'):
             self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
             self.assertEqual(len(set(catalog[source].values())), 3)
-        for text in catalog['F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏'].values():
+        for text in catalog['F11 切换全屏；Esc 退出全屏；双击系统标题栏最大化或还原'].values():
             self.assertIn('F11', text)
             self.assertIn('Esc', text)
+        dock_help = catalog['拖动标题栏移动面板；双击停靠或浮动；Ctrl 拖动保持浮动']
+        self.assertEqual(set(dock_help), {'zh_CN', 'en_US', 'ja_JP'})
+        for text in dock_help.values():
+            self.assertIn('Ctrl', text)
 
     def test_production_catalog(self):
         self.assertEqual(i18n.validate(i18n.load_catalog(), i18n.sources()), [])

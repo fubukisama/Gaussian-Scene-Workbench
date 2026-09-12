@@ -29,10 +29,15 @@
     "en_US": "Restore Window",
     "ja_JP": "ウィンドウを元に戻す"
   },
-  "F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏": {
-    "zh_CN": "F11 切换全屏；Esc 退出全屏；双击标题栏切换全屏",
-    "en_US": "F11 toggles full screen; Esc exits full screen; double-click the title bar to toggle full screen",
-    "ja_JP": "F11 で全画面表示を切り替え、Esc で終了。タイトルバーのダブルクリックでも切り替え可能"
+  "F11 切换全屏；Esc 退出全屏；双击系统标题栏最大化或还原": {
+    "zh_CN": "F11 切换全屏；Esc 退出全屏；双击系统标题栏最大化或还原",
+    "en_US": "F11 toggles full screen; Esc exits full screen; double-click the system title bar to maximize or restore",
+    "ja_JP": "F11 で全画面表示を切り替え、Esc で終了。システムのタイトルバーをダブルクリックして最大化または元に戻す"
+  },
+  "拖动标题栏移动面板；双击停靠或浮动；Ctrl 拖动保持浮动": {
+    "zh_CN": "拖动标题栏移动面板；双击停靠或浮动；Ctrl 拖动保持浮动",
+    "en_US": "Drag the title bar to move the panel; double-click to dock or float; hold Ctrl while dragging to keep it floating",
+    "ja_JP": "タイトルバーをドラッグしてパネルを移動。ダブルクリックでドッキング／フローティングを切り替え。Ctrl を押しながらドラッグするとフローティングを維持"
   },
   "cameras.json 过大，已跳过加载（上限 64 MiB）。": {
     "zh_CN": "cameras.json 过大，已跳过加载（上限 64 MiB）。",

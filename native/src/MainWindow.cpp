@@ -102,6 +102,8 @@ public:
     setObjectName(QStringLiteral("dockTitleBar"));
     setAccessibleName(dock->windowTitle());
     setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    mFloatingSize = QSettings().value(QStringLiteral("window/floatingSize/") + dock->objectName()).toSize();
+    dock->installEventFilter(this);
 
     mLayout = new QHBoxLayout(this);
     mTitleLabel = new QLabel(dock->windowTitle(), this);
@@ -114,10 +116,7 @@ public:
 
     mFloatButton = createButton(QStringLiteral("dockTitleButton"));
     mCloseButton = createButton(QStringLiteral("dockTitleButton"));
-    mFullScreenButton = createButton(QStringLiteral("dockFullScreenButton"));
-    mFullScreenButton->setDefaultAction(WindowUi::fullScreenAction(dock));
-    mFullScreenButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    mLayout->addWidget(mFullScreenButton);
+    WindowUi::fullScreenAction(dock);
     mLayout->addWidget(mFloatButton);
     mLayout->addWidget(mCloseButton);
 
@@ -129,7 +128,11 @@ public:
     connect(dock, &QDockWidget::featuresChanged, this,
             [this]() { updateActions(); });
     connect(dock, &QDockWidget::topLevelChanged, this,
-            [this]() { updateActions(); });
+            [this](bool floating) {
+              mFloatingReady = false;
+              if (floating) sizeFloatingPanel();
+              updateActions();
+            });
     connect(mFloatButton, &QToolButton::clicked, this, [this]() {
       if (mDock->features().testFlag(QDockWidget::DockWidgetFloatable)) {
         if (mDock->isFullScreen()) WindowUi::toggleMaximized(mDock);
@@ -154,7 +157,7 @@ public:
     const int iconSize = AppTheme::scaled(10, scalePercent);
     mLayout->setContentsMargins(paddingX, paddingY, paddingX, paddingY);
     mLayout->setSpacing(spacing);
-    for (QToolButton *button : {mFullScreenButton, mFloatButton, mCloseButton}) {
+    for (QToolButton *button : {mFloatButton, mCloseButton}) {
       button->setFixedSize(buttonSize, buttonSize);
       button->setIconSize(QSize(iconSize, iconSize));
     }
@@ -176,13 +179,45 @@ protected:
   void mouseMoveEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseReleaseEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseDoubleClickEvent(QMouseEvent *event) override {
-    if (event->button() == Qt::LeftButton) {
-      WindowUi::toggleFullScreen(mDock);
-      event->accept();
-    } else event->ignore();
+    // Let QDockWidget handle its own drag and dock/undock gestures.
+    event->ignore();
+  }
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    if (watched == mDock && event->type() == QEvent::Resize && mFloatingReady &&
+        mDock->isFloating() && !mDock->isMaximized() && !mDock->isFullScreen()) {
+      mFloatingSize = static_cast<QResizeEvent *>(event)->size();
+      mDock->setProperty("gswFloatingSize", mFloatingSize);
+    }
+    return false;
   }
 
 private:
+  void sizeFloatingPanel() {
+    // Docked extents (a narrow sidebar or full-width log strip) are not useful
+    // floating defaults. Keep a separate normal size, never a minimum size.
+    const int scale = qApp->property("gswUiScalePercent").toInt();
+    const QRect available = mDock->screen()->availableGeometry().adjusted(12, 36, -12, -12);
+    if (!mFloatingSize.isValid()) {
+      const QSize current = mDock->size();
+      const bool usable = current.width() >= AppTheme::scaled(300, scale) &&
+          current.height() >= AppTheme::scaled(300, scale) &&
+          current.width() < current.height() * 3 && current.height() < current.width() * 3;
+      mFloatingSize = usable ? current :
+          (mDock->objectName() == QStringLiteral("taskDock")
+              ? QSize(AppTheme::scaled(840, scale), AppTheme::scaled(460, scale))
+              : QSize(AppTheme::scaled(360, scale), AppTheme::scaled(520, scale)));
+    }
+    mFloatingSize = mFloatingSize.boundedTo(available.size());
+    mDock->resize(mFloatingSize);
+    // Keep newly detached title bars reachable, including on small screens.
+    if (QApplication::mouseButtons() == Qt::NoButton) {
+      mDock->move(std::clamp(mDock->x(), available.left(), available.right() - mDock->width() + 1),
+                  std::clamp(mDock->y(), available.top(), available.bottom() - mDock->height() + 1));
+    }
+    mDock->setProperty("gswFloatingSize", mFloatingSize);
+    mFloatingReady = true;
+  }
+
   QToolButton *createButton(const QString &objectName) {
     auto *button = new QToolButton(this);
     button->setObjectName(objectName);
@@ -195,7 +230,7 @@ private:
     const QDockWidget::DockWidgetFeatures features = mDock->features();
     const bool canFloat = features.testFlag(QDockWidget::DockWidgetFloatable);
     const bool canClose = features.testFlag(QDockWidget::DockWidgetClosable);
-    mFullScreenButton->setVisible(canFloat);
+    AppLanguage::bind(this, "toolTip", AppLanguage::source("拖动标题栏移动面板；双击停靠或浮动；Ctrl 拖动保持浮动"));
     const QString floatText = mDock->isFloating() ? QCoreApplication::translate("Workbench", "停靠面板")
                                                   : QCoreApplication::translate("Workbench", "浮动面板");
     mFloatButton->setVisible(canFloat);
@@ -218,10 +253,14 @@ private:
   QLabel *mTitleLabel = nullptr;
   QToolButton *mFloatButton = nullptr;
   QToolButton *mCloseButton = nullptr;
-  QToolButton *mFullScreenButton = nullptr;
+  QSize mFloatingSize;
+  bool mFloatingReady = false;
 };
 
 void installDockTitleBar(QDockWidget *dock, const int scalePercent) {
+  dock->setAllowedAreas(Qt::AllDockWidgetAreas);
+  dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable |
+                    QDockWidget::DockWidgetClosable);
   auto *titleBar = new DockTitleBar(dock);
   dock->setTitleBarWidget(titleBar);
   titleBar->applyScale(scalePercent);
@@ -1560,8 +1599,6 @@ void MainWindow::createToolBars() {
 void MainWindow::createProjectDock() {
   mProjectDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "工程"), this), AppLanguage::source("工程"), "windowTitle");
   mProjectDock->setObjectName(QStringLiteral("projectDock"));
-  mProjectDock->setAllowedAreas(Qt::LeftDockWidgetArea |
-                                Qt::RightDockWidgetArea);
   mProjectDock->setMinimumSize(0, 0);
   mProjectDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mProjectDock, mUiScalePercent);
@@ -1634,8 +1671,6 @@ void MainWindow::createProjectDock() {
 void MainWindow::createInspectorDock() {
   mInspectorDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "属性"), this), AppLanguage::source("属性"), "windowTitle");
   mInspectorDock->setObjectName(QStringLiteral("inspectorDock"));
-  mInspectorDock->setAllowedAreas(Qt::LeftDockWidgetArea |
-                                  Qt::RightDockWidgetArea);
   mInspectorDock->setMinimumSize(0, 0);
   mInspectorDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mInspectorDock, mUiScalePercent);
@@ -1739,7 +1774,6 @@ void MainWindow::createInspectorDock() {
 void MainWindow::createTaskDock() {
   mTaskDock = AppLanguage::text(new QDockWidget(QCoreApplication::translate("Workbench", "任务与日志"), this), AppLanguage::source("任务与日志"), "windowTitle");
   mTaskDock->setObjectName(QStringLiteral("taskDock"));
-  mTaskDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
   mTaskDock->setMinimumSize(0, 0);
   mTaskDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mTaskDock, mUiScalePercent);
@@ -2536,9 +2570,19 @@ void MainWindow::saveWindowState() {
   settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
   settings.setValue(QStringLiteral("window/state"),
                     saveState(kDockLayoutStateVersion));
+  for (const auto *dock : {mProjectDock, mInspectorDock, mTaskDock}) {
+    const QSize floatingSize = dock->property("gswFloatingSize").toSize();
+    if (floatingSize.isValid())
+      settings.setValue(QStringLiteral("window/floatingSize/") + dock->objectName(), floatingSize);
+  }
 }
 
 void MainWindow::resetDockLayout() {
+  for (auto *dock : {mProjectDock, mInspectorDock, mTaskDock}) {
+    if (dock->isFullScreen()) WindowUi::toggleFullScreen(dock);
+    if (dock->isMaximized()) dock->showNormal();
+    dock->setFloating(false);
+  }
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
   addDockWidget(Qt::RightDockWidgetArea, mInspectorDock);
   addDockWidget(Qt::BottomDockWidgetArea, mTaskDock);

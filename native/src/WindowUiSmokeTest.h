@@ -1,4 +1,5 @@
 #pragma once
+class QMainWindow;
 namespace gsw {
-bool runWindowUiSmokeTest();
+bool runWindowUiSmokeTest(QMainWindow &workbench);
 }
