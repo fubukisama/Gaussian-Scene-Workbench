@@ -40,6 +40,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 重建 / 训练 | Reconstruction / Training | 再構築 / 学習 |
 | 迭代 / 损失 | Iteration / Loss | 反復 / 損失 |
 | 高斯点 / 增密 | Gaussian Splat / Densification | ガウシアンスプラット / 高密度化 |
+| 显存常驻 / 深度顺序 | GPU-Resident / Depth Order | GPU メモリ常駐 / 深度順序 |
 | 移动 / 旋转 / 缩放 | Move / Rotate / Scale | 移動 / 回転 / スケール |
 | 等比缩放 | Uniform Scale | 均等スケール |
 | 全局 / 局部 | Global / Local | グローバル / ローカル |

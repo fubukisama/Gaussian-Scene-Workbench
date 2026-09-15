@@ -689,10 +689,10 @@
     "en_US": "Gaussians",
     "ja_JP": "ガウシアン"
   },
-  "使用缩放、旋转与透明度显示屏幕空间高斯": {
-    "zh_CN": "使用缩放、旋转与透明度显示屏幕空间高斯",
-    "en_US": "Render screen-space Gaussians with scale, rotation and opacity",
-    "ja_JP": "スケール・回転・不透明度を使ってスクリーン空間のガウシアンを描画"
+  "使用缩放、旋转与透明度显示高斯；支持时将属性常驻显存，仅更新深度顺序，不降低精度": {
+    "zh_CN": "使用缩放、旋转与透明度显示高斯；支持时将属性常驻显存，仅更新深度顺序，不降低精度",
+    "en_US": "Render Gaussians with scale, rotation and opacity; where supported, keep attributes GPU-resident and update only depth order without reducing precision",
+    "ja_JP": "スケール・回転・不透明度を使ってガウシアンを描画。対応環境では属性を GPU メモリに常駐させ、精度を落とさず深度順序のみ更新"
   },
   "网格": {
     "zh_CN": "网格",

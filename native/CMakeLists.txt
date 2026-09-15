@@ -64,6 +64,12 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ExternalBackupStore.h
   src/FrameRateCounter.cpp
   src/FrameRateCounter.h
+  src/GaussianDepthSorter.cpp
+  src/GaussianDepthSorter.h
+  src/GaussianGpuBuffer.cpp
+  src/GaussianGpuBuffer.h
+  src/GaussianPerformanceSmokeTest.cpp
+  src/GaussianPerformanceSmokeTest.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
@@ -356,6 +362,13 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  add_test(NAME native_gaussian_interaction
+    COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
+  set_tests_properties(native_gaussian_interaction PROPERTIES
+    TIMEOUT 90
+    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
   set_tests_properties(native_paged_mesh_scene PROPERTIES
     ENVIRONMENT
       "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4;GSW_EXPECT_DEPTH_OCCLUSION=1"
@@ -631,6 +644,21 @@ if(BUILD_TESTING)
       target_compile_options(gsw_frame_rate_counter_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME frame_rate_counter COMMAND gsw_frame_rate_counter_tests)
+
+    qt_add_executable(gsw_gaussian_depth_sorter_tests
+      tests/GaussianDepthSorterTests.cpp
+      src/GaussianDepthSorter.cpp
+      src/GaussianDepthSorter.h
+    )
+    target_include_directories(gsw_gaussian_depth_sorter_tests PRIVATE src)
+    target_link_libraries(gsw_gaussian_depth_sorter_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_gaussian_depth_sorter_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME gaussian_depth_sorter COMMAND gsw_gaussian_depth_sorter_tests)
+    set_tests_properties(gaussian_depth_sorter PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin"
+    )
 
     qt_add_executable(gsw_navigation_gizmo_tests
       tests/NavigationGizmoTests.cpp

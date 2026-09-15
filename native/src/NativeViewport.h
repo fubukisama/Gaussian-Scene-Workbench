@@ -4,6 +4,8 @@
 
 #include "CameraTrajectory.h"
 #include "FrameRateCounter.h"
+#include "GaussianDepthSorter.h"
+#include "GaussianGpuBuffer.h"
 #include "ModelInteraction.h"
 #include "NavigationGizmo.h"
 #include "PlyPointCloudLoader.h"
@@ -125,6 +127,10 @@ public:
   void discardSceneEdits();
   [[nodiscard]] bool hasEditableScene() const;
   [[nodiscard]] bool gaussianRenderingAvailable() const;
+  [[nodiscard]] bool indexedGaussianRendering() const { return mScene->indexedGaussians; }
+  [[nodiscard]] quint64 gaussianAttributeUploads() const { return mScene->gaussianGpu.attributeUploads(); }
+  [[nodiscard]] quint64 gaussianOrderUploads() const { return mScene->gaussianGpu.orderUploads(); }
+  [[nodiscard]] qsizetype renderedPointCount() const { return mScene->mRenderedPointCount; }
   [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
     return mScene->mUploadedFullResolutionMeshTriangleCount;
@@ -283,6 +289,9 @@ private:
     bool buffersInitialized = false;
     QVector3D sortedForward;
     bool sortDirectionValid = false;
+    GaussianDepthSorter depthSorter;
+    GaussianGpuBuffer gaussianGpu;
+    bool indexedGaussians = false;
     QString mScenePath;
     QString mRequestedScenePath;
     QString mSceneLoadMessage;

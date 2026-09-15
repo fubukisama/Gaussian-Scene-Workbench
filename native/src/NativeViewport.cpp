@@ -301,9 +301,6 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
           });
   connect(mViewSnapAnimation, &QVariantAnimation::finished, this, [this]() {
     mYawDegrees = std::remainder(mYawDegrees, 360.0F);
-    if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
-      rebuildRenderedVertices();
-    }
     update();
   });
   mTrainingGpuPreviewTimer = new QTimer(this);
@@ -347,6 +344,9 @@ NativeViewport::~NativeViewport() {
 }
 
 void NativeViewport::releaseSceneBuffers() {
+  mScene->gaussianGpu.release();
+  mScene->indexedGaussians = false;
+  mScene->sortDirectionValid = false;
   releaseFullResolutionPointCloud();
   releaseFullResolutionMesh();
   releaseMeshTexture();
@@ -597,6 +597,9 @@ void NativeViewport::setScene(const QString &scenePath,
   mScene->mPreviewVertices.squeeze();
   mScene->mPendingVertices.clear();
   mScene->mPendingVertices.squeeze();
+  mScene->gaussianGpu.clear();
+  mScene->indexedGaussians = false;
+  mScene->sortDirectionValid = false;
   mScene->mPointCache = {};
   mScene->mDesiredPointCacheNodes.clear();
   mScene->mPointCacheReadsInFlight.clear();
@@ -937,9 +940,6 @@ bool NativeViewport::focusModel() {
   mDistance = clampViewportDistance(frame->distance, frame->radius);
   mCameraManipulated = false;
   setFocus(Qt::ShortcutFocusReason);
-  if (!mScene->mPreviewVertices.isEmpty()) {
-    rebuildRenderedVertices();
-  }
   update();
   return true;
 }
@@ -1064,9 +1064,6 @@ void NativeViewport::resetCamera() {
   mOrthographic = false;
   mCameraViewActive = false;
   mStoredCameraView.reset();
-  if (!mScene->mPreviewVertices.isEmpty()) {
-    rebuildRenderedVertices();
-  }
   update();
 }
 
@@ -1443,11 +1440,15 @@ void main() {
   const bool gaussianVertexCompiled =
       mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
                                                 R"GLSL(#version 330 core
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 color;
-layout(location = 2) in float opacity;
-layout(location = 3) in vec3 scale;
-layout(location = 4) in vec4 rotation;
+layout(location = 0) in vec3 attributePosition;
+layout(location = 1) in vec3 attributeColor;
+layout(location = 2) in float attributeOpacity;
+layout(location = 3) in vec3 attributeScale;
+layout(location = 4) in vec4 attributeRotation;
+
+uniform bool indexedAttributes;
+uniform samplerBuffer gaussianAttributes;
+uniform usamplerBuffer gaussianOrder;
 
 uniform mat4 view;
 uniform mat4 projection;
@@ -1476,6 +1477,21 @@ mat3 rotationMatrix(vec4 quaternionWxyz) {
 }
 
 void main() {
+  vec3 position = attributePosition;
+  vec3 color = attributeColor;
+  float opacity = attributeOpacity;
+  vec3 scale = attributeScale;
+  vec4 rotation = attributeRotation;
+  if (indexedAttributes) {
+    int base = int(texelFetch(gaussianOrder, gl_InstanceID).r) * 4;
+    vec4 a = texelFetch(gaussianAttributes, base);
+    vec4 b = texelFetch(gaussianAttributes, base + 1);
+    vec4 c = texelFetch(gaussianAttributes, base + 2);
+    vec4 d = texelFetch(gaussianAttributes, base + 3);
+    position = a.xyz; opacity = a.w;
+    color = b.xyz; scale = vec3(b.w, c.x, c.y);
+    rotation = vec4(c.zw, d.xy);
+  }
   vec4 cameraCenter = view * vec4(position, 1.0);
   vec4 clipCenter = projection * cameraCenter;
   vertexColor = color;
@@ -1802,6 +1818,8 @@ void main() {
 void NativeViewport::initializeSceneBuffers() {
   if (mScene->buffersInitialized) return;
   mScene->buffersInitialized = true;
+  if (mGaussianShaderReady) mScene->gaussianGpu.initialize();
+  mScene->sortDirectionValid = false;
   if ((mPointProgram != nullptr && mPointProgram->isLinked())) {
     mScene->mPointBuffer.create();
     mScene->mPointBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
@@ -1994,14 +2012,22 @@ void NativeViewport::paintGL() {
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
   initializeSceneBuffers();
-  if (mScene->mRenderMode == RenderMode::Gaussians) {
+  if (mScene->mRenderMode == RenderMode::Gaussians &&
+      (mRenderingInactiveScene || !mTrainingGpuPreview.hasFrame())) {
     const QVector3D forward = modelMatrix().transposed().mapVector(
         (mTarget - cameraPosition()).normalized()).normalized();
     if (!mScene->sortDirectionValid ||
         (forward - mScene->sortedForward).lengthSquared() > 1.0e-8F) {
-      rebuildRenderedVertices();
+      if (mScene->indexedGaussians) {
+        mScene->gaussianGpu.sort(forward);
+        mScene->sortedForward = forward;
+        mScene->sortDirectionValid = true;
+      } else {
+        rebuildRenderedVertices();
+      }
     }
   }
+  mScene->gaussianGpu.upload();
   uploadPendingPointCloud();
   uploadPendingMeshTexture();
   uploadPendingMesh();
@@ -2255,7 +2281,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
             }
             mScene->mSceneLoadMessage.clear();
             if (!mRenderingInactiveScene) resetCamera();
-            else rebuildRenderedVertices();
+            rebuildRenderedVertices();
             updateFrameRefreshPolicy();
             notifyEditState();
             notifyModelInteractionState();
@@ -2384,6 +2410,8 @@ void NativeViewport::rebuildRenderedVertices() {
     }
     mScene->mPendingVertices.append(renderedVertex);
   }
+  mScene->mRenderedPointCount = mScene->mPendingVertices.size();
+  mScene->indexedGaussians = false;
   if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     QVector3D forward = (mTarget - cameraPosition()).normalized();
     bool invertible = false;
@@ -2394,22 +2422,18 @@ void NativeViewport::rebuildRenderedVertices() {
     }
     mScene->sortedForward = forward;
     mScene->sortDirectionValid = true;
-    std::sort(mScene->mPendingVertices.begin(), mScene->mPendingVertices.end(),
-              [&forward](const PointCloudVertex &left,
-                         const PointCloudVertex &right) {
-                const float leftDepth = left.x * forward.x() +
-                                        left.y * forward.y() +
-                                        left.z * forward.z();
-                const float rightDepth = right.x * forward.x() +
-                                         right.y * forward.y() +
-                                         right.z * forward.z();
-                if (leftDepth == rightDepth) {
-                  return left.sourceIndex < right.sourceIndex;
-                }
-                return leftDepth > rightDepth;
-              });
+    mScene->indexedGaussians = mScene->gaussianGpu.supports(mScene->mRenderedPointCount) &&
+        !qEnvironmentVariableIsSet("GSW_DISABLE_INDEXED_GAUSSIANS");
+    if (mScene->indexedGaussians) {
+      mScene->gaussianGpu.setVertices(mScene->mPendingVertices);
+      mScene->gaussianGpu.sort(forward);
+    } else {
+      mScene->depthSorter.sort(mScene->mPendingVertices, forward);
+    }
   }
-  mScene->mRenderedPointCount = mScene->mPendingVertices.size();
+  if (!mScene->indexedGaussians) mScene->gaussianGpu.clear();
+  // Surface picking (including double-click recentering of inactive layers)
+  // still uses the point VAO. Refresh it on edits/load, never on camera motion.
   mScene->mPointUploadPending = true;
   updateFrameRefreshPolicy();
 }
@@ -3571,6 +3595,10 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   mGaussianProgram->bind();
+  const bool indexed = !livePreview && mScene->indexedGaussians;
+  mGaussianProgram->setUniformValue("indexedAttributes", indexed);
+  mGaussianProgram->setUniformValue("gaussianAttributes", 2);
+  mGaussianProgram->setUniformValue("gaussianOrder", 3);
   mGaussianProgram->setUniformValue("view", view);
   mGaussianProgram->setUniformValue("selected",
                                     mModelSelected ? 1.0F : 0.0F);
@@ -3583,6 +3611,10 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
     glBindVertexArray(0);
+  } else if (indexed) {
+    mScene->gaussianGpu.bind();
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(drawCount));
+    mScene->gaussianGpu.unbind();
   } else {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
@@ -4028,10 +4060,7 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
   mPressedButtons = event->buttons();
   if (mCameraManipulated && mPressedButtons == Qt::NoButton) {
     mCameraManipulated = false;
-    if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
-      rebuildRenderedVertices();
-      update();
-    }
+    update(); // direction changes are sorted once, immediately before drawing
   }
   if (finishedTemporaryOrbit) {
     if (mMode == InteractionMode::Brush) {
@@ -4184,9 +4213,6 @@ void NativeViewport::finishNavigationGizmoInteraction() {
         update();
       }
     }
-  } else if (mScene->mRenderMode == RenderMode::Gaussians &&
-             gaussianRenderingAvailable()) {
-    rebuildRenderedVertices();
   }
 
   updateNavigationGizmoHover(QPointF(mLastMousePosition));

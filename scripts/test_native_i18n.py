@@ -8,6 +8,13 @@ import native_i18n as i18n
 
 
 class CatalogTests(unittest.TestCase):
+    def test_gaussian_resident_rendering_tooltip(self):
+        catalog = i18n.load_catalog()
+        source = '使用缩放、旋转与透明度显示高斯；支持时将属性常驻显存，仅更新深度顺序，不降低精度'
+        self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+        self.assertEqual(len(set(catalog[source].values())), 3)
+        self.assertEqual(i18n.validate({source: catalog[source]}, {}), [])
+
     def test_window_controls_and_desktop(self):
         catalog = i18n.load_catalog()
         for source in ('桌面', '全屏', '退出全屏', '最大化窗口', '还原窗口',

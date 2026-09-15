@@ -5,6 +5,7 @@
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "MultiSceneSmokeTest.h"
+#include "GaussianPerformanceSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -187,6 +188,9 @@ int main(int argc, char *argv[]) {
       QStringLiteral("Scene PLY used by viewport smoke tests."),
       QStringLiteral("file"));
   parser.addOption(smokeSceneOption);
+  QCommandLineOption gaussianPerformanceOption(QStringLiteral("smoke-test-gaussian-performance"),
+      QStringLiteral("Measure input and frame latency with --smoke-scene."));
+  parser.addOption(gaussianPerformanceOption);
   QCommandLineOption gpuPreviewInteropProbeOption(
       QStringLiteral("probe-gpu-preview-interop"),
       QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
@@ -231,6 +235,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
@@ -282,6 +287,12 @@ int main(int argc, char *argv[]) {
           smokeTestFailureCode = capability.available ? 0 : 3;
           application.exit(smokeTestFailureCode);
         });
+  } else if (parser.isSet(gaussianPerformanceOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runGaussianPerformanceSmokeTest(*viewport, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
   } else if (referenceAxesSmokeTest) {
     auto *viewport =
         qobject_cast<gsw::NativeViewport *>(window.centralWidget());

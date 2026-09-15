@@ -1040,7 +1040,7 @@ void MainWindow::createActions() {
   mGaussianRenderAction->setObjectName(QStringLiteral("gaussianRenderAction"));
   mGaussianRenderAction->setCheckable(true);
   mGaussianRenderAction->setEnabled(false);
-  AppLanguage::bind(mGaussianRenderAction, "toolTip", AppLanguage::source("使用缩放、旋转与透明度显示屏幕空间高斯"));
+  AppLanguage::bind(mGaussianRenderAction, "toolTip", AppLanguage::source("使用缩放、旋转与透明度显示高斯；支持时将属性常驻显存，仅更新深度顺序，不降低精度"));
   mRenderModeActionGroup->addAction(mGaussianRenderAction);
   connect(mGaussianRenderAction, &QAction::triggered, this, [this]() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
