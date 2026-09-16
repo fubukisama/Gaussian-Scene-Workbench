@@ -74,6 +74,9 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
   src/MainWindow.h
+  src/MultiItemList.cpp
+  src/MultiItemList.h
+  src/CatalogPathGuard.h
   src/MultiSceneSmokeTest.cpp
   src/MultiSceneSmokeTest.h
   src/SceneObject.h
@@ -581,6 +584,22 @@ if(BUILD_TESTING)
       src/AppTheme.cpp
       src/AppTheme.h
     )
+    qt_add_executable(gsw_multi_item_list_tests
+      tests/MultiItemListTests.cpp
+      src/MultiItemList.cpp
+      src/MultiItemList.h
+      src/AppLanguage.cpp
+      src/AppLanguage.h
+    )
+    target_include_directories(gsw_multi_item_list_tests PRIVATE src)
+    target_link_libraries(gsw_multi_item_list_tests PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_multi_item_list_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME multi_item_lists COMMAND gsw_multi_item_list_tests)
+    set_tests_properties(multi_item_lists PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     target_include_directories(gsw_app_theme_tests PRIVATE src)
     target_link_libraries(gsw_app_theme_tests PRIVATE
       Qt6::Core

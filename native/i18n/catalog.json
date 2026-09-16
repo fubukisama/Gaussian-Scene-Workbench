@@ -1,4 +1,114 @@
 {
+  "Ctrl 点选多选 · Shift 连选 · Ctrl+A 全选 · Delete 移除所选": {
+    "zh_CN": "Ctrl 点选多选 · Shift 连选 · Ctrl+A 全选 · Delete 移除所选",
+    "en_US": "Ctrl-click to multi-select · Shift-click for range · Ctrl+A select all · Delete remove selected",
+    "ja_JP": "Ctrl クリックで複数選択 · Shift クリックで範囲選択 · Ctrl+A ですべて選択 · Delete で選択項目を削除"
+  },
+  "全选": {
+    "zh_CN": "全选",
+    "en_US": "Select All",
+    "ja_JP": "すべて選択"
+  },
+  "取消全选": {
+    "zh_CN": "取消全选",
+    "en_US": "Clear Selection",
+    "ja_JP": "選択を解除"
+  },
+  "已选 %1 项": {
+    "zh_CN": "已选 %1 项",
+    "en_US": "%1 items selected",
+    "ja_JP": "%1 項目を選択中"
+  },
+  "确认批量移除": {
+    "zh_CN": "确认批量移除",
+    "en_US": "Confirm Batch Removal",
+    "ja_JP": "一括削除の確認"
+  },
+  "将处理所选的 %1 项。\n%2": {
+    "zh_CN": "将处理所选的 %1 项。\n%2",
+    "en_US": "Process the %1 selected items.\n%2",
+    "ja_JP": "選択した %1 項目を処理します。\n%2"
+  },
+  "正在处理所选记录…": {
+    "zh_CN": "正在处理所选记录…",
+    "en_US": "Processing selected records…",
+    "ja_JP": "選択した記録を処理中…"
+  },
+  "移除失败": {
+    "zh_CN": "移除失败",
+    "en_US": "Removal failed",
+    "ja_JP": "削除に失敗しました"
+  },
+  "部分记录未能移除": {
+    "zh_CN": "部分记录未能移除",
+    "en_US": "Some Records Could Not Be Removed",
+    "ja_JP": "一部の記録を削除できませんでした"
+  },
+  "已移除成功项；失败项仍保留在列表中，可重试。": {
+    "zh_CN": "已移除成功项；失败项仍保留在列表中，可重试。",
+    "en_US": "Successful items were removed. Failed items remain in the list for retry.",
+    "ja_JP": "成功した項目は削除しました。失敗した項目はリストに残っており、再試行できます。"
+  },
+  "删除所选记录": {
+    "zh_CN": "删除所选记录",
+    "en_US": "Delete Selected Records",
+    "ja_JP": "選択した記録を削除"
+  },
+  "恢复操作每次只能选择一项；多选可批量删除。": {
+    "zh_CN": "恢复操作每次只能选择一项；多选可批量删除。",
+    "en_US": "Select exactly one item to restore; select multiple items to delete in a batch.",
+    "ja_JP": "復元する項目は 1 件のみ選択してください。複数選択で一括削除できます。"
+  },
+  "快照位置或标识不匹配，已拒绝删除。": {
+    "zh_CN": "快照位置或标识不匹配，已拒绝删除。",
+    "en_US": "Snapshot location or identity does not match; deletion was refused.",
+    "ja_JP": "スナップショットの場所または識別子が一致しないため、削除を拒否しました。"
+  },
+  "无法删除快照文件：%1": {
+    "zh_CN": "无法删除快照文件：%1",
+    "en_US": "Unable to delete snapshot file: %1",
+    "ja_JP": "スナップショットファイルを削除できません：%1"
+  },
+  "永久删除所选恢复工程及其恢复目录。此操作不可撤销；外部关联文件保持不变。": {
+    "zh_CN": "永久删除所选恢复工程及其恢复目录。此操作不可撤销；外部关联文件保持不变。",
+    "en_US": "Permanently delete the selected recovery projects and their recovery directories. This cannot be undone; externally linked files are unchanged.",
+    "ja_JP": "選択した復旧用プロジェクトとその復旧用フォルダーを完全に削除します。この操作は元に戻せません。外部リンク先のファイルは変更しません。"
+  },
+  "仅删除所选工程快照。当前工程、模型和数据集文件保持不变。": {
+    "zh_CN": "仅删除所选工程快照。当前工程、模型和数据集文件保持不变。",
+    "en_US": "Delete only the selected project snapshots. The current project, models and dataset files are unchanged.",
+    "ja_JP": "選択したプロジェクトのスナップショットのみ削除します。現在のプロジェクト、モデル、データセットのファイルは変更しません。"
+  },
+  "仅删除所选备份快照清单。共享备份数据及源文件保留，不会回收全部逻辑大小对应的空间。": {
+    "zh_CN": "仅删除所选备份快照清单。共享备份数据及源文件保留，不会回收全部逻辑大小对应的空间。",
+    "en_US": "Delete only the selected backup snapshot manifests. Shared backup data and source files are retained; this does not reclaim the full logical size.",
+    "ja_JP": "選択したバックアップのスナップショット一覧ファイルのみ削除します。共有バックアップデータと元ファイルは保持するため、論理サイズ全体の容量が解放されるわけではありません。"
+  },
+  "卸载所选模型": {
+    "zh_CN": "卸载所选模型",
+    "en_US": "Unload Selected Models",
+    "ja_JP": "選択したモデルをアンロード"
+  },
+  "移除所选任务记录": {
+    "zh_CN": "移除所选任务记录",
+    "en_US": "Remove Selected Task Records",
+    "ja_JP": "選択したタスクの記録を削除"
+  },
+  "仅从工程卸载所选模型，不删除原始模型或训练输出文件。": {
+    "zh_CN": "仅从工程卸载所选模型，不删除原始模型或训练输出文件。",
+    "en_US": "Unload selected models from the project only; original models and training output files are not deleted.",
+    "ja_JP": "選択したモデルをプロジェクトからのみアンロードします。元のモデルや学習出力ファイルは削除しません。"
+  },
+  "已卸载 %1 个模型；原始文件保持不变。": {
+    "zh_CN": "已卸载 %1 个模型；原始文件保持不变。",
+    "en_US": "Unloaded %1 models; original files are unchanged.",
+    "ja_JP": "%1 個のモデルをアンロードしました。元ファイルは変更していません。"
+  },
+  "仅移除已结束的任务记录，保留日志和输出文件；运行中的任务不会移除。": {
+    "zh_CN": "仅移除已结束的任务记录，保留日志和输出文件；运行中的任务不会移除。",
+    "en_US": "Remove completed task records only. Keep logs and output files; running tasks are not removed.",
+    "ja_JP": "終了したタスクの記録のみ削除します。ログと出力ファイルは保持し、実行中のタスクは削除しません。"
+  },
   "桌面": {
     "zh_CN": "桌面",
     "en_US": "Desktop",

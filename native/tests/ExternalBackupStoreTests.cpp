@@ -61,6 +61,18 @@ void ExternalBackupStoreTests::deduplicatesAndRestoresProjectBackups() {
   }
   QCOMPARE(objectCount, qsizetype(3));
   QCOMPARE(store.snapshots(&error).size(), 2);
+  auto mismatched = *first;
+  mismatched.snapshotId = QStringLiteral("wrong-id");
+  QVERIFY(!store.discardSnapshot(mismatched, &error));
+  gsw::ExternalBackupStore wrongCatalog(root.filePath(QStringLiteral("unrelated")));
+  QVERIFY(!wrongCatalog.discardSnapshot(*first, &error));
+  QVERIFY(QFileInfo::exists(first->manifestPath));
+  QVERIFY2(store.discardSnapshot(*first, &error), qPrintable(error));
+  QVERIFY(!QFileInfo::exists(first->manifestPath));
+  QCOMPARE(store.snapshots(&error).size(), 1);
+  QVERIFY(QFileInfo::exists(projectFile));
+  QVERIFY(QFileInfo::exists(image.fileName()));
+  // The surviving backup must restore shared data after sibling deletion.
 
   const QString restoredRoot =
       root.filePath(QStringLiteral("restored"));

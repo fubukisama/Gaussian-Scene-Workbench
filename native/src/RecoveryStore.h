@@ -55,6 +55,8 @@ public:
   recoverableWorkspaces(QString *errorMessage = nullptr) const;
   bool discardWorkspace(const RecoveryWorkspace &workspace,
                         QString *errorMessage = nullptr) const;
+  bool discardProjectSnapshot(const ProjectSnapshot &snapshot, const QString &projectDataRoot,
+                              QString *errorMessage = nullptr) const;
   bool completeWorkspace(const RecoveryWorkspace &workspace,
                          const QString &managedProjectRoot,
                          QString *errorMessage = nullptr) const;

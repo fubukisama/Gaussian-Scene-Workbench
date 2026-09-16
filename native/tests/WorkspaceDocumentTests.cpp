@@ -27,6 +27,7 @@ class WorkspaceDocumentTests final : public QObject {
 
 private slots:
   void parsesGaussianPlyHeader();
+  void removesMultipleModelsWithoutDeletingFiles();
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsOversizedBinaryPointCloudAtFullResolution();
   void loadsOversizedAsciiPointCloudIntoDiskCache();
@@ -2284,6 +2285,37 @@ void WorkspaceDocumentTests::decimatesLargeCameraVisualization() {
   compareVector(geometry.path.constFirst().start, QVector3D(0.0F, 0.0F, 0.0F));
   compareVector(geometry.path.constLast().end,
                 QVector3D(static_cast<float>(cameraCount - 1), 0.0F, 0.0F));
+}
+
+void WorkspaceDocumentTests::removesMultipleModelsWithoutDeletingFiles() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.createUntitled(temporary.path(), "Batch", &error));
+  QStringList files;
+  for (int i = 0; i < 3; ++i) {
+    QFile file(QDir(temporary.path()).filePath(QString("model-%1.ply").arg(i)));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n");
+    file.close();
+    QVERIFY(document.addScenePath(file.fileName(), &error));
+    files.append(file.fileName());
+  }
+  const auto objects = document.sceneObjects();
+  QSignalSpy changed(&document, &gsw::WorkspaceDocument::changed);
+  QVERIFY(!document.removeSceneObjects({objects.first().id, "missing"}));
+  QCOMPARE(document.sceneObjects().size(), 3);
+  QCOMPARE(changed.count(), 0);
+  QVERIFY(document.removeSceneObjects({objects.first().id, objects.last().id}));
+  QCOMPARE(changed.count(), 1);
+  QCOMPARE(document.sceneObjects().size(), 1);
+  QCOMPARE(document.activeSceneId(), objects[1].id);
+  QVERIFY(document.removeSceneObjects({objects[1].id, objects[1].id}));
+  QVERIFY(document.sceneObjects().isEmpty());
+  QVERIFY(document.scenePath().isEmpty());
+  QVERIFY(document.activeSceneId().isEmpty());
+  for (const auto &path : files) QVERIFY(QFileInfo::exists(path));
 }
 
 QTEST_GUILESS_MAIN(WorkspaceDocumentTests)

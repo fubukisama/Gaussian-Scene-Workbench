@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "MultiItemList.h"
 #include "ManagedName.h"
 #include "AppLanguage.h"
 #include "WindowUi.h"
@@ -981,9 +982,9 @@ void MainWindow::createActions() {
 
   mClearSceneAction =
       AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
-                  QCoreApplication::translate("Workbench", "卸载场景..."), this), AppLanguage::source("卸载场景..."));
+                  QCoreApplication::translate("Workbench", "卸载所选模型"), this), AppLanguage::source("卸载所选模型"));
   mClearSceneAction->setObjectName(QStringLiteral("clearSceneAction"));
-  AppLanguage::bind(mClearSceneAction, "toolTip", AppLanguage::source("从当前工程卸载场景，不删除 PLY 或训练输出"));
+  AppLanguage::bind(mClearSceneAction, "toolTip", AppLanguage::source("仅从工程卸载所选模型，不删除原始模型或训练输出文件。"));
   connect(mClearSceneAction, &QAction::triggered, this,
           &MainWindow::clearSceneImport);
 
@@ -1613,6 +1614,11 @@ void MainWindow::createProjectDock() {
   AppLanguage::bind(mProjectTree, "toolTip", AppLanguage::source("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
+  auto *projectList = new MultiItemList(mProjectTree, AppLanguage::source("卸载所选模型"),
+      [this]() {
+        for (const auto *item : mProjectTree->selectedItems())
+          if (!item->data(0, Qt::UserRole + 2).toString().isEmpty()) { clearSceneImport(); return; }
+      }, false);
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
 
   connect(mProjectTree, &QTreeWidget::itemSelectionChanged, this, [this]() {
@@ -1636,7 +1642,7 @@ void MainWindow::createProjectDock() {
                                 .arg(ids.size()), 6000);
   });
   connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
-          [this](const QPoint &position) {
+          [this, projectList](const QPoint &position) {
             QTreeWidgetItem *item = mProjectTree->itemAt(position);
             if (item == nullptr) {
               return;
@@ -1658,7 +1664,7 @@ void MainWindow::createProjectDock() {
             } else if (kind == QStringLiteral("scene")) {
               menu.addAction(mFindModelAction);
               menu.addSeparator();
-              menu.addAction(mClearSceneAction);
+              projectList->addToMenu(menu);
             } else if (kind == QStringLiteral("tasks")) {
               menu.addAction(mClearTasksAction);
             } else {
@@ -1782,6 +1788,9 @@ void MainWindow::createTaskDock() {
   mTaskTabs->setMinimumSize(0, 0);
   mTaskTabs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mTaskTable = new QTableWidget(0, 4, mTaskTabs);
+  mTaskTable->setObjectName(QStringLiteral("taskRecords"));
+  new MultiItemList(mTaskTable, AppLanguage::source("移除所选任务记录"),
+      [this]() { removeSelectedTaskRecords(); });
   mTaskTable->setHorizontalHeaderLabels(
       {QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "任务"),
        QCoreApplication::translate("Workbench", "开始时间"), QCoreApplication::translate("Workbench", "结果")});
@@ -3054,7 +3063,7 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
       {QCoreApplication::translate("Workbench", "更新时间"), QCoreApplication::translate("Workbench", "名称"),
        QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "恢复位置")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table->verticalHeader()->setVisible(false);
   table->horizontalHeader()->setStretchLastSection(true);
@@ -3076,6 +3085,8 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
         static_cast<int>(row), 3,
         new QTableWidgetItem(QDir::toNativeSeparators(candidate.rootPath)));
   }
+  for (int row = 0; row < table->rowCount(); ++row) table->item(row, 0)->setData(Qt::UserRole, row);
+  table->setObjectName(QStringLiteral("recoveryRecords"));
   table->selectRow(0);
   layout->addWidget(table, 1);
 
@@ -3083,47 +3094,36 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
   auto *recoverButton =
       AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "恢复所选工程"),
                          QDialogButtonBox::AcceptRole), AppLanguage::source("恢复所选工程"));
-  auto *discardButton =
-      AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "永久删除所选"),
-                         QDialogButtonBox::DestructiveRole), AppLanguage::source("永久删除所选"));
   auto *laterButton =
       AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "稍后处理"),
                          QDialogButtonBox::RejectRole), AppLanguage::source("稍后处理"));
   connect(recoverButton, &QPushButton::clicked, &dialog,
           [&dialog]() { dialog.done(1); });
-  connect(discardButton, &QPushButton::clicked, &dialog,
-          [&dialog]() { dialog.done(2); });
   connect(laterButton, &QPushButton::clicked, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
 
-  const int result = dialog.exec();
-  const int selectedRow = table->currentRow();
-  if (selectedRow < 0 || selectedRow >= candidates.size()) {
-    return;
-  }
-  const RecoveryWorkspace selected = candidates.at(selectedRow);
-  if (result == 1) {
-    restoreRecoveryWorkspace(selected);
-    return;
-  }
-  if (result == 2) {
-    const QMessageBox::StandardButton confirmed = QMessageBox::warning(
-        this, QCoreApplication::translate("Workbench", "永久删除恢复工程"),
-        QCoreApplication::translate("Workbench", "将永久删除以下异常恢复数据：\n%1")
-            .arg(QDir::toNativeSeparators(selected.rootPath)),
-        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-    if (confirmed != QMessageBox::Yes) {
-      return;
+  installRecordRemoval(table, recoverButton, &dialog,
+      AppLanguage::source("永久删除所选恢复工程及其恢复目录。此操作不可撤销；外部关联文件保持不变。"),
+      [candidates](int id) { return candidates.at(id).displayName + QLatin1Char('\n') + QDir::toNativeSeparators(candidates.at(id).rootPath); },
+      [store = *mRecoveryStore, candidates](int id, QString *error) { return store.discardWorkspace(candidates.at(id), error); });
+  AppLanguage::bind(table->findChild<QAction *>(QStringLiteral("listRemoveSelected")), "text",
+                    AppLanguage::source("永久删除所选"));
+  AppLanguage::onChanged(&dialog, [table, description, startupPrompt, candidates]() {
+    description->setText(startupPrompt
+        ? QCoreApplication::translate("Workbench", "检测到上次异常退出保留的工程。选择一项恢复，或稍后从“文件 → 恢复中心”处理。")
+        : QCoreApplication::translate("Workbench", "以下工程由异常退出保护保留。"));
+    table->setHorizontalHeaderLabels({QCoreApplication::translate("Workbench", "更新时间"),
+        QCoreApplication::translate("Workbench", "名称"), QCoreApplication::translate("Workbench", "状态"),
+        QCoreApplication::translate("Workbench", "恢复位置")});
+    for (int row = 0; row < table->rowCount(); ++row) {
+      const auto &record = candidates.at(table->item(row, 0)->data(Qt::UserRole).toInt());
+      table->item(row, 2)->setText(record.projectFilePath.isEmpty()
+          ? QCoreApplication::translate("Workbench", "未命名工程")
+          : QCoreApplication::translate("Workbench", "保存迁移待恢复"));
     }
-    QString discardError;
-    if (!mRecoveryStore->discardWorkspace(selected, &discardError)) {
-      showError(QCoreApplication::translate("Workbench", "无法删除恢复工程"), discardError);
-      return;
-    }
-    appendTaskEvent(
-        QCoreApplication::translate("Workbench", "已永久删除恢复工程：%1").arg(selected.displayName));
-    showRecoveryCenter(false);
-  }
+  });
+  if (dialog.exec() == QDialog::Accepted && selectedListRows(table).size() == 1)
+    restoreRecoveryWorkspace(candidates.at(selectedListRows(table).first().data(Qt::UserRole).toInt()));
 }
 
 bool MainWindow::restoreRecoveryWorkspace(
@@ -3260,10 +3260,11 @@ void MainWindow::showSnapshotHistory() {
   description->setWordWrap(true);
   layout->addWidget(description);
   auto *table = new QTableWidget(snapshots.size(), 2, &dialog);
+  table->setObjectName(QStringLiteral("snapshotRecords"));
   table->setHorizontalHeaderLabels(
       {QCoreApplication::translate("Workbench", "快照时间"), QCoreApplication::translate("Workbench", "来源工程")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table->verticalHeader()->setVisible(false);
   table->horizontalHeader()->setStretchLastSection(true);
@@ -3278,6 +3279,7 @@ void MainWindow::showSnapshotHistory() {
         new QTableWidgetItem(
             QDir::toNativeSeparators(snapshot.sourceProjectFilePath)));
   }
+  for (int row = 0; row < table->rowCount(); ++row) table->item(row, 0)->setData(Qt::UserRole, row);
   table->selectRow(0);
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
@@ -3290,11 +3292,21 @@ void MainWindow::showSnapshotHistory() {
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
-  if (dialog.exec() != QDialog::Accepted || table->currentRow() < 0) {
+  installRecordRemoval(table, restoreButton, &dialog,
+      AppLanguage::source("仅删除所选工程快照。当前工程、模型和数据集文件保持不变。"),
+      [snapshots](int id) { return QDir::toNativeSeparators(snapshots.at(id).snapshotPath); },
+      [store = *mRecoveryStore, snapshots, root = mWorkspace.rootPath()](int id, QString *error) {
+        return store.discardProjectSnapshot(snapshots.at(id), root, error);
+      });
+  AppLanguage::onChanged(table, [table]() {
+    table->setHorizontalHeaderLabels({QCoreApplication::translate("Workbench", "快照时间"),
+        QCoreApplication::translate("Workbench", "来源工程")});
+  });
+  if (dialog.exec() != QDialog::Accepted || selectedListRows(table).size() != 1) {
     return;
   }
 
-  const ProjectSnapshot selected = snapshots.at(table->currentRow());
+  const ProjectSnapshot selected = snapshots.at(selectedListRows(table).first().data(Qt::UserRole).toInt());
   const QFileInfo currentProject(mWorkspace.projectFilePath());
   QString projectStemName = currentProject.fileName();
   const QString suffix = QStringLiteral(".gsw.json");
@@ -3446,11 +3458,12 @@ void MainWindow::showExternalBackups() {
   dialog.resize(780, 380);
   auto *layout = new QVBoxLayout(&dialog);
   auto *table = new QTableWidget(backups.size(), 4, &dialog);
+  table->setObjectName(QStringLiteral("backupRecords"));
   table->setHorizontalHeaderLabels(
       {QCoreApplication::translate("Workbench", "备份时间"), QCoreApplication::translate("Workbench", "工程"),
        QCoreApplication::translate("Workbench", "文件数"), QCoreApplication::translate("Workbench", "逻辑大小")});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table->verticalHeader()->setVisible(false);
   table->horizontalHeader()->setStretchLastSection(true);
@@ -3468,6 +3481,7 @@ void MainWindow::showExternalBackups() {
     table->setItem(static_cast<int>(row), 3,
                    new QTableWidgetItem(formatFileSize(backup.totalBytes)));
   }
+  for (int row = 0; row < table->rowCount(); ++row) table->item(row, 0)->setData(Qt::UserRole, row);
   table->selectRow(0);
   layout->addWidget(table, 1);
   auto *buttons = new QDialogButtonBox(&dialog);
@@ -3480,11 +3494,20 @@ void MainWindow::showExternalBackups() {
   connect(restoreButton, &QPushButton::clicked, &dialog, &QDialog::accept);
   connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::reject);
   layout->addWidget(buttons);
-  if (dialog.exec() != QDialog::Accepted || table->currentRow() < 0) {
+  installRecordRemoval(table, restoreButton, &dialog,
+      AppLanguage::source("仅删除所选备份快照清单。共享备份数据及源文件保留，不会回收全部逻辑大小对应的空间。"),
+      [backups](int id) { return backups.at(id).projectName + QLatin1Char('\n') + QDir::toNativeSeparators(backups.at(id).manifestPath); },
+      [store, backups](int id, QString *error) { return store.discardSnapshot(backups.at(id), error); });
+  AppLanguage::onChanged(table, [table]() {
+    table->setHorizontalHeaderLabels({QCoreApplication::translate("Workbench", "备份时间"),
+        QCoreApplication::translate("Workbench", "工程"), QCoreApplication::translate("Workbench", "文件数"),
+        QCoreApplication::translate("Workbench", "逻辑大小")});
+  });
+  if (dialog.exec() != QDialog::Accepted || selectedListRows(table).size() != 1) {
     return;
   }
 
-  const ExternalBackupSnapshot selected = backups.at(table->currentRow());
+  const ExternalBackupSnapshot selected = backups.at(selectedListRows(table).first().data(Qt::UserRole).toInt());
   const QString destinationParent = QFileDialog::getExistingDirectory(
       this, QCoreApplication::translate("Workbench", "选择备份恢复位置"));
   if (destinationParent.isEmpty()) {
@@ -4530,39 +4553,42 @@ void MainWindow::clearReconstructionImport() {
 }
 
 void MainWindow::clearSceneImport() {
-  if (!ensureProjectRecoveryReady() || mProcessSupervisor.isRunning()) {
-    return;
+  if (!ensureProjectRecoveryReady() || mProcessSupervisor.isRunning() || mSelectionBusy) return;
+  QStringList ids = mViewport->selectedSceneIds();
+  if (ids.isEmpty() && !mWorkspace.activeSceneId().isEmpty()) ids.append(mWorkspace.activeSceneId());
+  QStringList names;
+  for (const auto &object : mWorkspace.sceneObjects())
+    if (ids.contains(object.id)) names.append(QDir::toNativeSeparators(object.path));
+  if (names.isEmpty() || !confirmDiscardSceneEdits()) return;
+  if (!confirmListRemoval(this,
+      QCoreApplication::translate("Workbench", "仅从工程卸载所选模型，不删除原始模型或训练输出文件。"), names)) return;
+  if (mProcessSupervisor.isRunning() || mSelectionBusy) return;
+  if (mWorkspace.removeSceneObjects(ids)) {
+    appendTaskEvent(QCoreApplication::translate("Workbench", "已卸载 %1 个模型；原始文件保持不变。").arg(ids.size()));
+    updateActionAvailability();
   }
-  if (mWorkspace.scenePath().isEmpty()) {
-    QMessageBox::information(this, QCoreApplication::translate("Workbench", "没有已载入场景"),
-                             QCoreApplication::translate("Workbench", "当前工程尚未导入场景。"));
-    return;
-  }
-  if (!confirmDiscardSceneEdits()) {
-    return;
-  }
-  const QString scenePath = mWorkspace.scenePath();
-  const QMessageBox::StandardButton answer = QMessageBox::warning(
-      this, QCoreApplication::translate("Workbench", "确认卸载场景"),
-      QCoreApplication::translate("Workbench", "只从当前工程和视口卸载场景，不删除 PLY 或训练输出：\n%1")
-          .arg(QDir::toNativeSeparators(scenePath)),
-      QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-  if (answer != QMessageBox::Yes) {
-    return;
-  }
-  ImportCleanupOptions options;
-  options.clearDataset = false;
-  options.clearScene = true;
-  ImportCleanupResult result;
-  QString error;
-  if (!mWorkspace.clearImportedData(options, &result, &error)) {
-    showError(QCoreApplication::translate("Workbench", "无法卸载场景"), error);
-    return;
-  }
-  appendTaskEvent(
-      QCoreApplication::translate("Workbench", "已卸载场景关联；PLY 与训练输出保持不变：%1")
-          .arg(QDir::toNativeSeparators(scenePath)));
-  statusBar()->showMessage(QCoreApplication::translate("Workbench", "场景已卸载"), 5000);
+}
+
+void MainWindow::removeSelectedTaskRecords() {
+  auto rows = selectedListRows(mTaskTable);
+  rows.removeIf([this](const QPersistentModelIndex &row) {
+    return mProcessSupervisor.isRunning() && row.row() == mActiveTaskRow;
+  });
+  if (rows.isEmpty()) return;
+  QStringList names;
+  for (const auto &row : rows) names.append(row.sibling(row.row(), 1).data().toString());
+  if (!confirmListRemoval(this,
+      QCoreApplication::translate("Workbench", "仅移除已结束的任务记录，保留日志和输出文件；运行中的任务不会移除。"), names)) return;
+  // A task can finish/start while confirmation is open. Resolve the active row now,
+  // retain persistent indexes for selected history entries, and never delete the worker row.
+  QPersistentModelIndex active;
+  if (mActiveTaskRow >= 0) active = mTaskTable->model()->index(mActiveTaskRow, 0);
+  for (const auto &row : rows)
+    if (row.isValid() && !(mProcessSupervisor.isRunning() && row == active))
+      mTaskTable->removeRow(row.row());
+  mActiveTaskRow = active.isValid() ? active.row() : -1;
+  rebuildProjectTree();
+  updateActionAvailability();
 }
 
 void MainWindow::clearTaskHistory() {

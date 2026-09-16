@@ -1,4 +1,6 @@
 #include "LanguageSmokeTest.h"
+#include "MultiItemList.h"
+#include "ExternalBackupStore.h"
 #include "AppLanguage.h"
 #include "MainWindow.h"
 #include "TrainingDialog.h"
@@ -24,6 +26,9 @@
 #include "WindowUiSmokeTest.h"
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QKeyEvent>
+#include <QPushButton>
 #include <QMenu>
 #include <QMessageBox>
 #include <QProgressBar>
@@ -40,6 +45,192 @@
 #include <functional>
 
 namespace gsw {
+bool runListInteractionSmokeTest(MainWindow &window) {
+  bool passed = true;
+  auto check = [&](bool condition, const char *description) {
+    if (!condition) { qCritical() << "List smoke:" << description; passed = false; }
+  };
+  const auto key = [](QWidget *target, int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QKeyEvent overrideEvent(QEvent::ShortcutOverride, code, modifiers);
+    QApplication::sendEvent(target, &overrideEvent);
+    QKeyEvent event(QEvent::KeyPress, code, modifiers);
+    QApplication::sendEvent(target, &event);
+  };
+  QTemporaryDir temporary;
+  if (!temporary.isValid()) return false;
+  QStringList mediaPaths;
+  for (int i = 0; i < 3; ++i) {
+    QFile file(QDir(temporary.path()).filePath(QString("source-%1.jpg").arg(i)));
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    file.write("fixture"); file.close(); mediaPaths.append(file.fileName());
+  }
+  DatasetImportDialog media({}, "Batch", mediaPaths, temporary.path(), true, &window);
+  auto *sources = media.findChild<QListWidget *>();
+  check(sources && sources->selectionMode() == QAbstractItemView::ExtendedSelection, "media extended selection");
+  if (sources) {
+    key(sources, Qt::Key_A, Qt::ControlModifier);
+    check(sources->selectedItems().size() == 3, "media select all");
+    key(sources, Qt::Key_Delete);
+    check(sources->count() == 0, "media batch removal");
+  }
+  for (const auto &path : mediaPaths) check(QFileInfo::exists(path), "media source preserved");
+
+  auto *tasks = window.mTaskTable;
+  const bool running = window.mProcessSupervisor.isRunning();
+  tasks->insertRow(0);
+  for (int col = 0; col < 4; ++col) tasks->setItem(0, col, new QTableWidgetItem("history-fixture"));
+  if (window.mActiveTaskRow >= 0) ++window.mActiveTaskRow;
+  const QPersistentModelIndex active = running
+      ? QPersistentModelIndex(tasks->model()->index(window.mActiveTaskRow, 0)) : QPersistentModelIndex();
+  QTimer answer;
+  QObject::connect(&answer, &QTimer::timeout, &window, []() {
+    if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) box->done(QMessageBox::Yes);
+  });
+  answer.start(10);
+  key(tasks, Qt::Key_A, Qt::ControlModifier);
+  key(tasks, Qt::Key_Delete);
+  check(tasks->rowCount() == (running ? 1 : 0), "task batch history removal");
+  if (running) {
+    check(active.isValid() && active.row() == window.mActiveTaskRow && window.mActiveTaskRow == 0,
+          "active task row remapped and protected");
+    key(tasks, Qt::Key_Delete);
+    check(tasks->rowCount() == 1, "running-only selection cannot be removed");
+    window.mProcessSupervisor.shutdown();
+  }
+  answer.stop();
+
+  // Never operate on the user's recovery catalog: replace it with an owned fixture.
+  auto originalStore = std::move(window.mRecoveryStore);
+  window.mRecoveryStore = std::make_unique<RecoveryStore>(QDir(temporary.path()).filePath("recovery"));
+  for (int i = 0; i < 3; ++i)
+    check(window.mRecoveryStore->beginWorkspace(QString("Recovery %1").arg(i)).has_value(), "create recovery fixture");
+  const QString locale = AppLanguage::current();
+  QTimer drive;
+  QElapsedTimer elapsed;
+  elapsed.start();
+  int stage = 0;
+  QTimer recoveryAnswer;
+  QObject::connect(&recoveryAnswer, &QTimer::timeout, &window, [&]() {
+    if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+      box->done(stage == 1 ? QMessageBox::Cancel : QMessageBox::Yes);
+  });
+  recoveryAnswer.start(10);
+  QObject::connect(&drive, &QTimer::timeout, &window, [&]() {
+    auto *modal = QApplication::activeModalWidget();
+    if (!modal) return;
+    if (elapsed.elapsed() > 12000) { passed = false; modal->close(); return; }
+    if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+      box->done(stage == 1 ? QMessageBox::Cancel : QMessageBox::Yes);
+      return;
+    }
+    auto *table = modal->findChild<QTableWidget *>("recoveryRecords");
+    if (!table || !table->isEnabled()) return;
+    if (stage == 0) {
+      table->selectAll();
+      check(selectedListRows(table).size() == 3, "recovery batch selected");
+      for (auto *button : modal->findChildren<QPushButton *>())
+        if (button->property("gswTranslation_text").toByteArray() == "恢复所选工程")
+          check(!button->isEnabled(), "restore disabled for multiple records");
+      const auto selected = selectedListRows(table);
+      for (const auto &language : AppLanguage::supported()) {
+        check(AppLanguage::apply(language, false), "list live language switch");
+        check(selectedListRows(table) == selected, "list selection survives translation");
+        check(table->findChild<QAction *>("listSelectAll")->text() ==
+              QCoreApplication::translate("Workbench", "全选"), "list action translates live");
+        const QString output = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
+        if (!output.isEmpty()) {
+          QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+          modal->grab().save(QDir(output).filePath(language + "-recovery-list.png"));
+        }
+      }
+      AppLanguage::apply(locale, false);
+      stage = 1;
+      table->findChild<QAction *>("listRemoveSelected")->trigger();
+      check(table->rowCount() == 3, "cancel keeps recovery records");
+      stage = 2;
+    } else if (stage == 2) {
+      stage = 3;
+      table->findChild<QAction *>("listRemoveSelected")->trigger();
+      check(table->rowCount() == 0, "all selected recovery records removed");
+      modal->close();
+    }
+  });
+  drive.start(15);
+  window.showRecoveryCenter(false);
+  drive.stop();
+  recoveryAnswer.stop();
+  check(stage == 3 && window.mRecoveryStore->recoverableWorkspaces().isEmpty(), "recovery batch completed in place");
+  window.mRecoveryStore = std::move(originalStore);
+  AppLanguage::apply(locale, false);
+  const auto inspectRecordDialog = [&](const QString &objectName, const std::function<void()> &open) {
+    QTimer inspect;
+    bool visited = false;
+    QObject::connect(&inspect, &QTimer::timeout, &window, [&]() {
+      auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+      if (!dialog) return;
+      auto *table = dialog->findChild<QTableWidget *>(objectName);
+      if (!table) { passed = false; dialog->reject(); return; }
+      visited = true;
+      table->selectAll();
+      const auto selection = selectedListRows(table);
+      check(selection.size() >= 2, "snapshot/backup multiple records");
+      for (const auto &language : AppLanguage::supported()) {
+        AppLanguage::apply(language, false);
+        check(selectedListRows(table) == selection, "snapshot/backup selection survives live translation");
+        check(table->findChild<QAction *>("listRemoveSelected")->text() ==
+              QCoreApplication::translate("Workbench", "删除所选记录"), "snapshot/backup removal translated");
+      }
+      AppLanguage::apply(locale, false);
+      dialog->reject();
+    });
+    inspect.start(15);
+    open();
+    inspect.stop();
+    check(visited, "snapshot/backup dialog exercised");
+  };
+  QString storeError;
+  const QString projectFile = QDir(temporary.path()).filePath("list-project.gsw.json");
+  check(window.mWorkspace.saveManifest(projectFile, &storeError), "save snapshot fixture project");
+  for (int i = 0; i < 2; ++i)
+    check(window.mRecoveryStore->createProjectSnapshot(QString("{\"revision\":%1}").arg(i).toUtf8(),
+        projectFile, window.mWorkspace.rootPath(), 20, &storeError).has_value(), "create snapshot list fixture");
+  inspectRecordDialog("snapshotRecords", [&]() { window.showSnapshotHistory(); });
+  const QString backupRoot = QDir(temporary.path()).filePath("backups");
+  const QString backupData = QDir(temporary.path()).filePath("backup-data");
+  QDir().mkpath(backupData);
+  ExternalBackupStore backupStore(backupRoot);
+  const QString backupProject = QDir(temporary.path()).filePath("backup-source.gsw.json");
+  for (int i = 0; i < 2; ++i) {
+    QFile file(backupProject);
+    check(file.open(QIODevice::WriteOnly), "create backup fixture");
+    file.write(QString("{\"revision\":%1}").arg(i).toUtf8()); file.close();
+    check(backupStore.backupProject(backupProject, backupData, &storeError).has_value(), "create backup list fixture");
+  }
+  const auto previousBackupRoot = QSettings().value("recovery/externalBackupRoot");
+  QSettings().setValue("recovery/externalBackupRoot", backupRoot);
+  inspectRecordDialog("backupRecords", [&]() { window.showExternalBackups(); });
+  if (previousBackupRoot.isValid()) QSettings().setValue("recovery/externalBackupRoot", previousBackupRoot);
+  else QSettings().remove("recovery/externalBackupRoot");
+  // Model references are removed as a batch; test-owned original PLYs survive.
+  QFile extraModel(QDir(temporary.path()).filePath("second-model.ply"));
+  check(extraModel.open(QIODevice::WriteOnly), "create second model fixture");
+  extraModel.write("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n1 0 0\n0 1 0\n");
+  extraModel.close();
+  check(window.mWorkspace.addScenePath(extraModel.fileName(), &storeError), "import second model fixture");
+  auto *tree = window.mProjectTree;
+  const auto objects = window.mWorkspace.sceneObjects();
+  check(objects.size() >= 2, "multiple model fixtures available");
+  key(tree, Qt::Key_A, Qt::ControlModifier);
+  check(window.mViewport->selectedSceneIds().size() == objects.size(), "project tree select all models");
+  answer.start(10);
+  key(tree, Qt::Key_Delete);
+  answer.stop();
+  check(window.mWorkspace.sceneObjects().isEmpty(), "project tree unloads all selected models");
+  for (const auto &object : objects) check(QFileInfo::exists(object.path), "model source preserved");
+  qInfo() << "List interaction smoke:" << (passed ? "PASS" : "FAIL");
+  return passed;
+}
+
 bool runLanguageSmokeTest(MainWindow &window) {
   const QString locale = AppLanguage::current();
   const int index = AppLanguage::supported().indexOf(locale);
@@ -321,6 +512,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();
   }
+  check(runListInteractionSmokeTest(window), "all item-list interactions");
   if (testProcess) supervisor->shutdown();
   check(runWindowUiSmokeTest(window), "native window and dock controls");
   qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");

@@ -8,6 +8,18 @@ import native_i18n as i18n
 
 
 class CatalogTests(unittest.TestCase):
+    def test_multi_item_lists_and_delete_semantics(self):
+        catalog = i18n.load_catalog()
+        for source in ('全选', '取消全选', '已选 %1 项', '删除所选记录',
+                       '卸载所选模型', '移除所选任务记录',
+                       '将处理所选的 %1 项。\n%2',
+                       '恢复操作每次只能选择一项；多选可批量删除。'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            self.assertEqual(i18n.validate({source: catalog[source]}, {}), [])
+        for text in catalog['Ctrl 点选多选 · Shift 连选 · Ctrl+A 全选 · Delete 移除所选'].values():
+            for shortcut in ('Ctrl', 'Shift', 'Ctrl+A', 'Delete'):
+                self.assertIn(shortcut, text)
+
     def test_gaussian_resident_rendering_tooltip(self):
         catalog = i18n.load_catalog()
         source = '使用缩放、旋转与透明度显示高斯；支持时将属性常驻显存，仅更新深度顺序，不降低精度'

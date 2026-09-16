@@ -35,6 +35,8 @@ public:
                 const QString &linkedScenePath = {}) const;
   [[nodiscard]] QList<ExternalBackupSnapshot>
   snapshots(QString *errorMessage = nullptr) const;
+  bool discardSnapshot(const ExternalBackupSnapshot &snapshot,
+                       QString *errorMessage = nullptr) const;
   bool restore(const ExternalBackupSnapshot &snapshot,
                const QString &destinationRoot,
                QString *errorMessage = nullptr) const;

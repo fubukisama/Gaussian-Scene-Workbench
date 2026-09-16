@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "RecoveryStore.h"
+#include "CatalogPathGuard.h"
 
 #include <QDir>
 #include <QFile>
@@ -357,7 +358,7 @@ RecoveryStore::recoverableWorkspaces(QString *errorMessage) const {
 bool RecoveryStore::discardWorkspace(const RecoveryWorkspace &workspace,
                                      QString *errorMessage) const {
   if (!workspace.isValid() ||
-      !pathInside(mWorkspaceBase, workspace.rootPath)) {
+      !safeCatalogChild(mWorkspaceBase, workspace.rootPath)) {
     assignError(errorMessage,
                 QCoreApplication::translate("Workbench", "Refusing to discard a workspace outside the "
                                "recovery catalog."));
@@ -377,6 +378,24 @@ bool RecoveryStore::discardWorkspace(const RecoveryWorkspace &workspace,
     assignError(errorMessage,
                 QCoreApplication::translate("Workbench", "Unable to discard recovery workspace: %1")
                     .arg(workspace.rootPath));
+    return false;
+  }
+  return true;
+}
+
+bool RecoveryStore::discardProjectSnapshot(const ProjectSnapshot &snapshot,
+    const QString &projectDataRoot, QString *errorMessage) const {
+  const QString historyRoot = QDir(projectDataRoot).filePath(QString::fromLatin1(kProjectHistoryPath));
+  const auto stored = readProjectSnapshot(snapshot.snapshotPath, nullptr, errorMessage);
+  if (!safeCatalogChild(projectDataRoot, snapshot.snapshotPath) ||
+      !safeCatalogChild(historyRoot, snapshot.snapshotPath) || !stored ||
+      stored->snapshotId != snapshot.snapshotId ||
+      stored->sourceProjectFilePath != snapshot.sourceProjectFilePath) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "快照位置或标识不匹配，已拒绝删除。"));
+    return false;
+  }
+  if (!QFile::remove(snapshot.snapshotPath)) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "无法删除快照文件：%1").arg(snapshot.snapshotPath));
     return false;
   }
   return true;

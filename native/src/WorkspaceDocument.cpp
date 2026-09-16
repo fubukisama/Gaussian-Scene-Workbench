@@ -1006,6 +1006,23 @@ bool WorkspaceDocument::activateSceneObject(const QString &id) {
   return true;
 }
 
+bool WorkspaceDocument::removeSceneObjects(const QStringList &ids) {
+  if (ids.isEmpty()) return true;
+  const auto objects = sceneObjects();
+  for (const QString &id : ids)
+    if (std::none_of(objects.cbegin(), objects.cend(), [&](const SceneObject &object) { return object.id == id; }))
+      return false;
+  QJsonObject state = sceneCollectionJson();
+  QJsonArray remaining;
+  for (const auto &value : state.value(QStringLiteral("objects")).toArray())
+    if (!ids.contains(value.toObject().value(QStringLiteral("id")).toString())) remaining.append(value);
+  state.insert(QStringLiteral("objects"), remaining);
+  restoreSceneCollection(state);
+  setModified(true);
+  emit changed();
+  return true;
+}
+
 bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);
   if (!metadata.valid) return false;

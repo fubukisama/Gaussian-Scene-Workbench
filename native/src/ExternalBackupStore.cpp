@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "ExternalBackupStore.h"
+#include "CatalogPathGuard.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -428,6 +429,22 @@ ExternalBackupStore::snapshots(QString *errorMessage) const {
                     .arg(invalid.join(QLatin1Char('\n'))));
   }
   return result;
+}
+
+bool ExternalBackupStore::discardSnapshot(const ExternalBackupSnapshot &snapshot,
+                                         QString *errorMessage) const {
+  const auto stored = readSnapshot(snapshot.manifestPath, nullptr, errorMessage);
+  if (!safeCatalogChild(mBackupRoot, snapshot.manifestPath) || !stored ||
+      stored->snapshotId != snapshot.snapshotId || stored->projectKey != snapshot.projectKey) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "快照位置或标识不匹配，已拒绝删除。"));
+    return false;
+  }
+  // Objects are shared by multiple manifests; deleting them would break other backups.
+  if (!QFile::remove(snapshot.manifestPath)) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "无法删除快照文件：%1").arg(snapshot.manifestPath));
+    return false;
+  }
+  return true;
 }
 
 bool ExternalBackupStore::restore(

@@ -47,6 +47,7 @@ protected:
   void resizeEvent(QResizeEvent *event) override;
 
 private:
+  friend bool runListInteractionSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -136,6 +137,7 @@ private:
   void clearReconstructionImport();
   void clearSceneImport();
   void clearTaskHistory();
+  void removeSelectedTaskRecords();
   void runEnvironmentCheck();
   void startReconstruction();
   void startTraining();

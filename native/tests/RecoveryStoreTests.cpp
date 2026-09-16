@@ -16,6 +16,7 @@ private slots:
   void recoversAndDiscardsAnUntitledWorkspace();
   void removesRecoveryMetadataWhenWorkspaceBecomesManaged();
   void retainsAndRestoresProjectSnapshots();
+  void rejectsUnsafeRecoveryDeletion();
 };
 
 void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
@@ -161,6 +162,37 @@ void RecoveryStoreTests::retainsAndRestoresProjectSnapshots() {
   QFile restoredFile(restored);
   QVERIFY(restoredFile.open(QIODevice::ReadOnly));
   QCOMPARE(restoredFile.readAll(), QByteArray("{\"revision\":2}"));
+  auto bad = snapshots.first();
+  bad.snapshotId = QStringLiteral("wrong-id");
+  QVERIFY(!store.discardProjectSnapshot(bad, projectData, &error));
+  QVERIFY(!store.discardProjectSnapshot(snapshots.first(), temporary.path() + "/outside", &error));
+  QVERIFY(store.discardProjectSnapshot(snapshots.first(), projectData, &error));
+  QCOMPARE(store.projectSnapshots(projectData).size(), 1);
+  QVERIFY(QFileInfo::exists(projectFile));
+  QVERIFY(QFileInfo::exists(restored));
+  QVERIFY(QFileInfo::exists(snapshots.last().snapshotPath));
+}
+
+void RecoveryStoreTests::rejectsUnsafeRecoveryDeletion() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  gsw::RecoveryStore store(QDir(temporary.path()).filePath("catalog"));
+  QString error;
+  const auto first = store.beginWorkspace("First", &error);
+  const auto second = store.beginWorkspace("Second", &error);
+  QVERIFY(first && second);
+  auto mismatch = *first;
+  mismatch.sessionId = second->sessionId;
+  QVERIFY(!store.discardWorkspace(mismatch, &error));
+  gsw::RecoveryStore outside(QDir(temporary.path()).filePath("outside"));
+  QVERIFY(!outside.discardWorkspace(*first, &error));
+  auto rootTarget = *first;
+  rootTarget.rootPath = QDir(temporary.path()).filePath("catalog");
+  QVERIFY(!store.discardWorkspace(rootTarget, &error));
+  QCOMPARE(store.recoverableWorkspaces().size(), 2);
+  QVERIFY(store.discardWorkspace(*first, &error));
+  QCOMPARE(store.recoverableWorkspaces().size(), 1);
+  QVERIFY(QFileInfo::exists(second->rootPath));
 }
 
 QTEST_GUILESS_MAIN(RecoveryStoreTests)

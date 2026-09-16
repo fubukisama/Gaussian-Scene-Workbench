@@ -54,6 +54,16 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 透视 / 正交 | Perspective / Orthographic | 透視投影 / 平行投影 |
 | 包围盒 | Bounding Box | バウンディングボックス |
 | 快照 / 恢复 | Snapshot / Recovery | スナップショット / リカバリー |
+| 多选 / 范围选择 | Multiple Selection / Range Selection | 複数選択 / 範囲選択 |
+| 全选 / 取消全选 | Select All / Clear Selection | すべて選択 / 選択を解除 |
+| 卸载所选模型 | Unload Selected Models | 選択したモデルをアンロード |
+| 批量移除 | Batch Removal | 一括削除 |
+
+## Multi-item lists
+
+Recovery projects, project snapshots, external backup snapshots, scene models, task records and media sources use extended row selection: Ctrl-click toggles an item, Shift-click selects a range, Ctrl+A selects all and Delete invokes the list's removal operation. Right-click preserves a multi-selection and provides Select All / Clear Selection / Remove Selected. Shortcuts are scoped to the focused list so Delete cannot trim viewport points. Recovery/history/backup dialogs include a compact selection-count bar. Restore requires exactly one selected record; multiple selection never restores several projects over each other.
+
+Recovery directory deletion is permanent, validated against catalog scope and identity, and confirmed once with count and paths (full list in Details). Project snapshot deletion leaves the current project and data intact. External backup deletion removes manifests only and retains shared deduplicated objects, so it does not reclaim the full logical size. Record deletion runs in a worker; successful rows disappear in place and failures remain for retry. Models are unloaded by stable ID without deleting source files. Removing task records preserves logs/output and skips the running task; the active worker row remains correctly addressed after history removal. Media source removal only changes the pending import list. All captions, counts and explanations change language immediately without resetting selection.
 
 ## Window and file-dialog controls
 

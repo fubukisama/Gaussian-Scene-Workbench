@@ -1,6 +1,7 @@
 #include "AppLanguage.h"
 #include <QCoreApplication>
 #include "DatasetImportDialog.h"
+#include "MultiItemList.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -143,6 +144,9 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   sourceButtons->addWidget(mRemoveButton);
   sourceButtons->addWidget(mClearButton);
   rootLayout->addLayout(sourceButtons);
+  new MultiItemList(mSourceList, AppLanguage::source("移除所选"),
+      [this]() { removeSelected(); });
+  // Existing remove/clear buttons stay in place; context menu and keyboard share their operation.
 
   mSummary = new QLabel(this);
   mSummary->setObjectName(QStringLiteral("datasetImportSummaryLabel"));
