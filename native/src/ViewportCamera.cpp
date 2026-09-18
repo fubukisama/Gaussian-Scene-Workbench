@@ -101,6 +101,22 @@ OrbitAngles orbitAnglesAfterRotation(const OrbitAngles current,
   return result;
 }
 
+OrbitAngles orbitAnglesAfterScreenDrag(const OrbitAngles current,
+                                        const QPointF &delta) {
+  if (!std::isfinite(delta.x()) || !std::isfinite(delta.y()) || delta.isNull())
+    return current;
+  const auto frame = orbitFrame(current);
+  const QVector3D right = QVector3D::crossProduct(
+      -frame.cameraOffsetDirection, frame.upDirection).normalized();
+  const QVector3D rotationVector =
+      -frame.upDirection * static_cast<float>(delta.x() * 0.32) -
+      right * static_cast<float>(delta.y() * 0.28);
+  const float degrees = rotationVector.length();
+  if (!std::isfinite(degrees) || degrees < 1.0e-6F) return current;
+  return orbitAnglesAfterRotation(current, QQuaternion::fromAxisAndAngle(
+      rotationVector / degrees, degrees));
+}
+
 ReferenceGridPlane referenceGridPlane(const OrbitAngles angles,
                                       const bool orthographic) {
   if (!orthographic) {

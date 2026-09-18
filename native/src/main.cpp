@@ -6,6 +6,7 @@
 #include "NativeViewport.h"
 #include "MultiSceneSmokeTest.h"
 #include "GaussianPerformanceSmokeTest.h"
+#include "ObservationNavigationSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -191,6 +192,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption gaussianPerformanceOption(QStringLiteral("smoke-test-gaussian-performance"),
       QStringLiteral("Measure input and frame latency with --smoke-scene."));
   parser.addOption(gaussianPerformanceOption);
+  QCommandLineOption observationNavigationOption(QStringLiteral("smoke-test-observation-navigation"),
+      QStringLiteral("Verify navigation outside the observation trackball."));
+  parser.addOption(observationNavigationOption);
   QCommandLineOption gpuPreviewInteropProbeOption(
       QStringLiteral("probe-gpu-preview-interop"),
       QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
@@ -235,6 +239,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(observationNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
@@ -254,7 +259,13 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(languageSmokeOption)) {
+  if (parser.isSet(observationNavigationOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runObservationNavigationSmokeTest(*viewport, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(languageSmokeOption)) {
     QTimer::singleShot(650, &application, [&] {
       smokeTestCompleted = gsw::runLanguageSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

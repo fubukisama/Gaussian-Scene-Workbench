@@ -1117,7 +1117,7 @@ void MainWindow::createActions() {
   mObservationTrackballAction->setObjectName(QStringLiteral("observationTrackballAction"));
   mObservationTrackballAction->setCheckable(true);
   mObservationTrackballAction->setChecked(QSettings().value(QStringLiteral("view/showObservationTrackball"), true).toBool());
-  AppLanguage::bind(mObservationTrackballAction, "toolTip", AppLanguage::source("在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位"));
+  AppLanguage::bind(mObservationTrackballAction, "toolTip", AppLanguage::source("观察导航：整个视口左键拖动自由旋转，拖动球上彩色弧线按轴旋转；Ctrl+左键或中/右键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心。隐藏轨迹球不影响自由导航。"));
   mViewport->setShowObservationTrackball(mObservationTrackballAction->isChecked());
   connect(mObservationTrackballAction, &QAction::toggled, this, [this](bool visible) {
     mViewport->setShowObservationTrackball(visible);

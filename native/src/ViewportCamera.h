@@ -67,6 +67,11 @@ isTemporaryOrbitShortcut(Qt::MouseButton button,
 [[nodiscard]] OrbitAngles orbitAnglesAfterRotation(OrbitAngles current,
                                                    const QQuaternion &rotation);
 
+// Unbounded observation orbit in camera-local screen axes. Sensitivity is in
+// logical pixels, independent of pointer location and navigation-sphere size.
+[[nodiscard]] OrbitAngles orbitAnglesAfterScreenDrag(OrbitAngles current,
+                                                     const QPointF &delta);
+
 [[nodiscard]] ReferenceGridPlane
 referenceGridPlane(OrbitAngles angles, bool orthographic);
 

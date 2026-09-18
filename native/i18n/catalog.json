@@ -5529,15 +5529,10 @@
     "en_US": "View Trackball",
     "ja_JP": "ビュートラックボール"
   },
-  "在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位": {
-    "zh_CN": "在编辑工具锁定时显示观察轨迹球；隐藏球体不影响视角导航或双击定位",
-    "en_US": "Show the observation trackball while editing tools are locked; hiding it preserves navigation and double-click centering",
-    "ja_JP": "編集ツールのロック中にビュートラックボールを表示します。非表示でも視点操作とダブルクリックによる中心設定は使用できます"
-  },
-  "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心": {
-    "zh_CN": "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心",
-    "en_US": "View trackball: left-drag to rotate, Ctrl+left-drag to pan, Shift+left-drag or wheel to zoom; double-click the model surface to set the rotation center",
-    "ja_JP": "ビュートラックボール：左ドラッグで回転、Ctrl+左ドラッグでパン、Shift+左ドラッグまたはホイールでズーム。モデル表面をダブルクリックして回転中心を設定"
+  "观察导航：整个视口左键拖动自由旋转，拖动球上彩色弧线按轴旋转；Ctrl+左键或中/右键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心。隐藏轨迹球不影响自由导航。": {
+    "zh_CN": "观察导航：整个视口左键拖动自由旋转，拖动球上彩色弧线按轴旋转；Ctrl+左键或中/右键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心。隐藏轨迹球不影响自由导航。",
+    "en_US": "View navigation: left-drag anywhere in the viewport to orbit freely; drag a colored arc to rotate about its axis. Ctrl+left-drag or middle/right-drag pans; Shift+left-drag or the wheel zooms. Double-click a model surface to set the rotation center. Free navigation also works with the trackball hidden.",
+    "ja_JP": "視点操作：ビューポート全体で左ドラッグすると自由回転、色付きの円弧をドラッグすると軸回転します。Ctrl+左ドラッグまたは中/右ドラッグでパン、Shift+左ドラッグまたはホイールでズーム。モデル表面のダブルクリックで回転中心を設定します。トラックボールを非表示にしても自由に操作できます。"
   },
   "未命中模型表面，旋转中心保持不变": {
     "zh_CN": "未命中模型表面，旋转中心保持不变",

@@ -86,6 +86,15 @@ class CatalogTests(unittest.TestCase):
         for text in catalog[tooltip].values():
             self.assertIn('Ctrl+Shift+L', text)
 
+    def test_observation_navigation_controls(self):
+        catalog = i18n.load_catalog()
+        tooltip = next(key for key in catalog if key.startswith('观察导航：'))
+        self.assertEqual(set(catalog[tooltip]), {'zh_CN', 'en_US', 'ja_JP'})
+        self.assertEqual(len(set(catalog[tooltip].values())), 3)
+        for text in catalog[tooltip].values():
+            for token in ('Ctrl+', 'Shift+'):
+                self.assertIn(token, text)
+
     def test_model_export_formats_and_placeholders(self):
         catalog = i18n.load_catalog()
         for source in ('导出模型...', '导出坐标', '场景坐标（应用位移、旋转、缩放）',

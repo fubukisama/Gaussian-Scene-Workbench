@@ -70,6 +70,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/GaussianGpuBuffer.h
   src/GaussianPerformanceSmokeTest.cpp
   src/GaussianPerformanceSmokeTest.h
+  src/ObservationNavigationSmokeTest.cpp
+  src/ObservationNavigationSmokeTest.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
@@ -369,6 +371,13 @@ if(BUILD_TESTING)
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
   set_tests_properties(native_gaussian_interaction PROPERTIES
     TIMEOUT 90
+    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+  )
+  add_test(NAME native_observation_navigation
+    COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation)
+  set_tests_properties(native_observation_navigation PROPERTIES
+    TIMEOUT 30
     ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )

@@ -454,8 +454,10 @@ private:
   void drawOverlay(QPainter &painter);
   void drawAxisGizmo(QPainter &painter);
   void drawObservationTrackball(QPainter &painter);
+  void updateObservationNavigationToolTip();
   [[nodiscard]] float observationTrackballRadius() const;
   [[nodiscard]] int observationTrackballAxisAt(const QPointF &position) const;
+  void beginObservationRotation(const QPointF &position, bool pickAxis);
   void updateObservationRotation(const QPointF &position);
   [[nodiscard]] NavigationGizmoLayout navigationGizmo() const;
   void updateNavigationGizmoHover(const QPointF &position);
@@ -521,7 +523,6 @@ private:
   int mObservationDragAxis = -1;
   QPointF mObservationDragStart;
   OrbitAngles mObservationDragAngles;
-  QMatrix4x4 mObservationDragView;
   QMatrix4x4 mObservationDragProjection;
   float mObservationDragRadius = 1.0F;
   quint64 mSelectionRequestEpoch = 0;

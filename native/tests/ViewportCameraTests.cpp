@@ -21,6 +21,7 @@ private slots:
   void usesZAsWorldUpAxis();
   void keepsCameraFrameContinuousAcrossPoles();
   void preservesTrackballCameraRollAndPoleContinuity();
+  void observesFromAnyCameraOrientationWithoutDeadZones();
   void framesModelBoundsAtCurrentOrbit();
   void rejectsInvalidFocusBounds();
   void selectsScreenParallelGridForAxisOrthographicViews();
@@ -57,6 +58,29 @@ void ViewportCameraTests::recognizesTemporaryTrimOrbitShortcut() {
       Qt::LeftButton, Qt::ControlModifier | Qt::ShiftModifier));
   QVERIFY(!isTemporaryOrbitShortcut(Qt::LeftButton, Qt::NoModifier));
   QVERIFY(!isTemporaryOrbitShortcut(Qt::RightButton, Qt::ControlModifier));
+}
+
+void ViewportCameraTests::observesFromAnyCameraOrientationWithoutDeadZones() {
+  for (const OrbitAngles start : {OrbitAngles{0, 0, 0}, OrbitAngles{37, 90, 72},
+                                  OrbitAngles{12, -90, -56}, OrbitAngles{25, 151, 95}}) {
+    const auto before = orbitFrame(start);
+    const auto right = QVector3D::crossProduct(-before.cameraOffsetDirection, before.upDirection);
+    for (const QPointF delta : {QPointF(30, 0), QPointF(-30, 0), QPointF(0, 30),
+                                QPointF(0, -30), QPointF(24, 18)}) {
+      const auto after = orbitFrame(orbitAnglesAfterScreenDrag(start, delta));
+      const auto axis = -before.upDirection * float(delta.x() * 0.32) - right * float(delta.y() * 0.28);
+      const auto expected = QQuaternion::fromAxisAndAngle(axis.normalized(), axis.length());
+      QVERIFY((after.cameraOffsetDirection - before.cameraOffsetDirection).length() > 0.1F);
+      QVERIFY((after.cameraOffsetDirection - expected.rotatedVector(before.cameraOffsetDirection)).length() < 1.0e-4F);
+      QVERIFY((after.upDirection - expected.rotatedVector(before.upDirection)).length() < 1.0e-4F);
+    }
+    QCOMPARE(orbitAnglesAfterScreenDrag(start, QPointF()), start);
+    QCOMPARE(orbitAnglesAfterScreenDrag(start, QPointF(std::numeric_limits<double>::infinity(), 0)), start);
+  }
+  const auto right = orbitAnglesAfterScreenDrag({}, QPointF(25, 0));
+  QVERIFY(qAbs(right.yawDegrees - 8.0F) < 1.0e-4F);
+  const auto down = orbitAnglesAfterScreenDrag({}, QPointF(0, 10));
+  QVERIFY(qAbs(down.pitchDegrees - 2.8F) < 1.0e-4F);
 }
 
 void ViewportCameraTests::allowsVerticalOrbitPastBothPoles() {

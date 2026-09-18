@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "NativeViewport.h"
+#include "AppLanguage.h"
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
 
@@ -284,6 +285,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   setMouseTracking(true);
   setMinimumSize(0, 0);
   setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  AppLanguage::onChanged(this, [this]() { updateObservationNavigationToolTip(); });
   resetModelTransformHistory();
 
   mViewSnapAnimation = new QVariantAnimation(this);
@@ -736,21 +738,40 @@ int NativeViewport::observationTrackballAxisAt(const QPointF &position) const {
   return result;
 }
 
+void NativeViewport::updateObservationNavigationToolTip() {
+  if (mEditToolsLocked && mMode == InteractionMode::Inspect &&
+      mNavigationHover.part == NavigationGizmoPart::None) {
+    setToolTip(QCoreApplication::translate("Workbench", "观察导航：整个视口左键拖动自由旋转，拖动球上彩色弧线按轴旋转；Ctrl+左键或中/右键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心。隐藏轨迹球不影响自由导航。"));
+  }
+}
+
+void NativeViewport::beginObservationRotation(const QPointF &position, const bool pickAxis) {
+  mViewSnapAnimation->stop();
+  leaveCameraView();
+  mObservationDragActive = true;
+  mObservationDragStart = position;
+  mObservationDragAngles = viewOrbitAngles();
+  mObservationDragProjection = viewProjectionMatrix();
+  mObservationDragRadius = observationTrackballRadius();
+  mObservationDragAxis = pickAxis ? observationTrackballAxisAt(position) : -1;
+}
+
 void NativeViewport::updateObservationRotation(const QPointF &position) {
   if (!mObservationDragActive) return;
-  QQuaternion rotation;
+  OrbitAngles angles;
   if (mObservationDragAxis >= 0) {
     QVector3D axis;
     axis[mObservationDragAxis] = 1.0F;
     const float angle = axisRotationDragDegrees(mObservationDragStart, position,
         mTarget, axis, mObservationDragProjection, size(), mObservationDragRadius);
-    rotation = QQuaternion::fromAxisAndAngle(axis, -angle);
+    angles = orbitAnglesAfterRotation(mObservationDragAngles,
+                                      QQuaternion::fromAxisAndAngle(axis, -angle));
   } else {
-    rotation = trackballRotationDelta(mObservationDragStart, position,
-        QPointF(width() * 0.5, height() * 0.5), mObservationDragRadius,
-        mObservationDragView).conjugated();
+    // The small sphere is an axis guide, not a boundary for camera input.
+    // Equator-clamped arcball vectors made radial drags outside it a no-op.
+    angles = orbitAnglesAfterScreenDrag(viewOrbitAngles(), position - mObservationDragStart);
+    mObservationDragStart = position;
   }
-  const OrbitAngles angles = orbitAnglesAfterRotation(mObservationDragAngles, rotation);
   mYawDegrees = angles.yawDegrees;
   mPitchDegrees = angles.pitchDegrees;
   mRollDegrees = angles.rollDegrees;
@@ -3902,15 +3923,7 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
   mLastMousePosition = event->position().toPoint();
   if (mEditToolsLocked && mMode == InteractionMode::Inspect &&
       event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
-    mViewSnapAnimation->stop();
-    leaveCameraView();
-    mObservationDragActive = true;
-    mObservationDragStart = event->position();
-    mObservationDragAngles = viewOrbitAngles();
-    mObservationDragView = viewMatrix();
-    mObservationDragProjection = viewProjectionMatrix();
-    mObservationDragRadius = observationTrackballRadius();
-    mObservationDragAxis = observationTrackballAxisAt(event->position());
+    beginObservationRotation(event->position(), true);
   }
   if (mMode == InteractionMode::Brush && !mTemporaryOrbitActive) {
     mBrushCursorPosition = event->position();
@@ -3969,9 +3982,7 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
       }
     } else {
       updateNavigationGizmoHover(event->position());
-      if (observationTrackballVisible() && mNavigationHover.part == NavigationGizmoPart::None) {
-        setToolTip(QCoreApplication::translate("Workbench", "观察轨迹球：左键旋转，Ctrl+左键平移，Shift+左键或滚轮缩放；双击模型表面设置旋转中心"));
-      }
+      updateObservationNavigationToolTip();
     }
     if (mMode == InteractionMode::Brush) {
       update();
@@ -3990,17 +4001,27 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
     leaveCameraView();
   }
 
-  if (mObservationDragActive) {
-    updateObservationRotation(event->position());
-    update();
-    event->accept();
-    return;
-  }
-  if (mEditToolsLocked && mPressedButtons.testFlag(Qt::LeftButton) &&
-      event->modifiers().testFlag(Qt::ShiftModifier) &&
-      !event->modifiers().testFlag(Qt::ControlModifier)) {
-    mDistance = clampViewportDistance(mDistance * std::pow(1.008F, static_cast<float>(delta.y())),
-                                      transformedSceneRadius());
+  if (mEditToolsLocked && mMode == InteractionMode::Inspect) {
+    const bool left = mPressedButtons.testFlag(Qt::LeftButton);
+    const bool pan = mPressedButtons.testFlag(Qt::MiddleButton) ||
+                     mPressedButtons.testFlag(Qt::RightButton) ||
+                     (left && event->modifiers().testFlag(Qt::ControlModifier));
+    const bool zoom = left && event->modifiers().testFlag(Qt::ShiftModifier);
+    mViewSnapAnimation->stop();
+    if (pan || zoom) {
+      // Modifiers take priority even during a drag. Discard the rotation
+      // anchor so resuming orbit cannot jump back to the pre-pan camera.
+      mObservationDragActive = false;
+      if (pan) panCamera(delta);
+      else mDistance = clampViewportDistance(
+          mDistance * std::pow(1.008F, static_cast<float>(delta.y())), transformedSceneRadius());
+    } else if (left) {
+      // Only a fresh press may capture an axis. Crossing an arc or releasing
+      // Ctrl/Shift mid-drag must not unexpectedly constrain free navigation.
+      if (!mObservationDragActive)
+        beginObservationRotation(event->position() - QPointF(delta), false);
+      updateObservationRotation(event->position());
+    }
     update();
     event->accept();
     return;
@@ -4024,7 +4045,11 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
 
 void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton && mObservationDragActive) {
-    updateObservationRotation(event->position());
+    if (!event->modifiers().testFlag(Qt::ControlModifier) &&
+        !event->modifiers().testFlag(Qt::ShiftModifier) &&
+        !event->buttons().testFlag(Qt::MiddleButton) &&
+        !event->buttons().testFlag(Qt::RightButton))
+      updateObservationRotation(event->position());
     mObservationDragActive = false;
     update();
   }

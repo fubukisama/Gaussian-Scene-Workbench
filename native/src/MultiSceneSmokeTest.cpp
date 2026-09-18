@@ -212,11 +212,11 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
              viewport->viewOrbitAngles() == modifierAngles, "Shift plus left drag zooms without panning")) return false;
   const QPointF ballCenter = viewport->rect().center();
   const qreal radius = std::min(viewport->width(), viewport->height()) * 0.12;
-  const auto rollBefore = viewport->viewOrbitAngles();
+  const auto orbitBefore = orbitFrame(viewport->viewOrbitAngles());
   drag(ballCenter + QPointF(radius * 1.5, 0), {-radius * 1.5, -radius * 1.5}, Qt::LeftButton);
-  if (!check(viewport->viewOrbitAngles() != rollBefore && std::abs(viewport->viewOrbitAngles().rollDegrees) > 1 &&
+  if (!check((orbitFrame(viewport->viewOrbitAngles()).cameraOffsetDirection - orbitBefore.cameraOffsetDirection).length() > 0.01F &&
              viewport->viewTarget() == modifierTarget && document->sceneCollectionJson() == originalCollection,
-             "outside trackball rolls camera around the chosen pivot")) return false;
+             "outside trackball freely orbits around the chosen pivot instead of only rolling")) return false;
   auto *showTrackball = window.findChild<QAction *>("observationTrackballAction");
   if (!check(showTrackball != nullptr, "trackball visibility action")) return false;
   showTrackball->setChecked(false);
@@ -228,7 +228,7 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   viewport->clearSelection();
   viewport->resetCamera();
   qInfo() << "EDIT_LOCK PASS: cancel, input guard, navigation, clean rendering, persistence and undo";
-  qInfo() << "OBSERVATION_NAVIGATION PASS: trackball, roll, surface-depth double-click, misses, visibility and model isolation";
+  qInfo() << "OBSERVATION_NAVIGATION PASS: trackball, unrestricted orbit, surface-depth double-click, misses, visibility and model isolation";
   bool dialogSeen = false;
   const auto chooseImport = [&](int index, const QString &buttonName) {
     dialogSeen = false;
