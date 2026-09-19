@@ -1879,6 +1879,8 @@ void MainWindow::connectServices() {
               mLiveTrainingPreviewPath.clear();
               mLiveTrainingGaussianCount = 0;
               mLastTrainingPreviewIteration = -1;
+              mLastTrainingSparsePreviewIteration = -1;
+              mViewport->beginProcessingPreview();
               mTrainingMonitor->beginTraining(
                   taskName, mPendingTraining->backend,
                   mPendingTraining->expectedIterations);
@@ -1892,8 +1894,8 @@ void MainWindow::connectServices() {
                   comparablePath(mPendingReconstruction->datasetPath);
               mLiveReconstructionPointCount = 0;
               mLastReconstructionPreviewIteration = -1;
-              mViewport->setScene(QString(), 0);
-              mViewport->setRenderMode(NativeViewport::RenderMode::Points);
+              mViewport->beginProcessingPreview();
+              mViewport->setProcessingStage(QStringLiteral("colmap"));
             }
             appendTaskEvent(QCoreApplication::translate("Workbench", "开始任务：%1").arg(taskName));
           });
@@ -1908,12 +1910,17 @@ void MainWindow::connectServices() {
             if (mPendingTraining.has_value()) {
               mTrainingMonitor->updateStatus(status);
             }
-            if (!mViewport->trainingGpuPreviewActive() &&
-                status.previewIteration.has_value() &&
+            if (mPendingTraining.has_value() || mPendingReconstruction.has_value()) {
+              // Worker terminal status is not a validated/published final model yet.
+              if (status.state != QStringLiteral("done") && status.state != QStringLiteral("failed") &&
+                  status.state != QStringLiteral("cancelled"))
+                mViewport->setProcessingStage(status.stage, status.iteration.value_or(-1),
+                    status.totalIterations.value_or(-1), status.progressPercent.value_or(-1));
+            }
+            if (status.previewIteration.has_value() &&
                 !status.previewPath.isEmpty()) {
               const bool colmapPreview =
-                  status.previewKind == QStringLiteral("colmap_sparse") ||
-                  status.stage == QStringLiteral("colmap");
+                  status.previewKind == QStringLiteral("colmap_sparse");
               QString allowedRoot;
               int *lastPreviewIteration = nullptr;
               QString *livePreviewPath = nullptr;
@@ -1922,7 +1929,7 @@ void MainWindow::connectServices() {
                 allowedRoot = colmapPreview
                                   ? mPendingTraining->datasetPath
                                   : mPendingTraining->outputDirectory;
-                lastPreviewIteration = &mLastTrainingPreviewIteration;
+                lastPreviewIteration = colmapPreview ? &mLastTrainingSparsePreviewIteration : &mLastTrainingPreviewIteration;
                 livePreviewPath = &mLiveTrainingPreviewPath;
                 livePreviewCount = &mLiveTrainingGaussianCount;
               } else if (mPendingReconstruction.has_value()) {
@@ -1945,10 +1952,9 @@ void MainWindow::connectServices() {
                 *livePreviewPath =
                     comparablePath(previewInfo.absoluteFilePath());
                 *livePreviewCount = status.gaussianCount.value_or(0);
-                mViewport->setScene(*livePreviewPath, *livePreviewCount);
-                if (colmapPreview) {
-                  mViewport->setRenderMode(NativeViewport::RenderMode::Points);
-                }
+                // Maintain a CPU/file fallback even when shared GPU rendering is
+                // connected. A publisher disconnect must not reveal an empty view.
+                mViewport->setPreviewScene(*livePreviewPath, *livePreviewCount);
                 appendTaskEvent(
                     colmapPreview
                         ? QCoreApplication::translate("Workbench", "COLMAP 稀疏点云已更新：快照 %1 · %2 个点")
@@ -2210,6 +2216,11 @@ void MainWindow::connectServices() {
         if (finishingTraining) {
           mViewport->stopTrainingGpuPreview();
           mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled);
+        }
+        if (finishingTraining || finishingReconstruction) {
+          mViewport->finishProcessingPreview(effectiveSucceeded, cancelled);
+          if (finishingTraining && effectiveSucceeded)
+            mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
@@ -4896,17 +4907,14 @@ void MainWindow::updateWorkspaceUi() {
                                   : QCoreApplication::translate("Workbench", "未打开工程");
   mViewport->setProjectLabel(projectName);
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
-    mViewport->setScene(mLiveTrainingPreviewPath,
+    mViewport->setPreviewScene(mLiveTrainingPreviewPath,
                         mLiveTrainingGaussianCount);
-    mViewport->setModelTransform({}, {});
   } else if (!mLiveReconstructionPreviewPath.isEmpty() &&
              QFileInfo::exists(mLiveReconstructionPreviewPath) &&
              pathsReferToSameLocation(mWorkspace.datasetPath(),
                                       mLiveReconstructionDatasetPath)) {
-    mViewport->setScene(mLiveReconstructionPreviewPath,
+    mViewport->setPreviewScene(mLiveReconstructionPreviewPath,
                         mLiveReconstructionPointCount);
-    mViewport->setModelTransform({}, {});
-    mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   } else {
     mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
   }

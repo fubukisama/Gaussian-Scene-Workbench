@@ -33,6 +33,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 显示名称 / 存储标识 | Display Name / Storage Identifier | 表示名 / 保存用識別子 |
 | 点云 | Point Cloud | 点群 |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
+| 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
+| 密度控制 | Density Control | 密度制御 |
+| 定时快照回退 | Periodic Snapshot Fallback | 定期スナップショットにフォールバック |
 | 网格 / 三角网格 | Mesh / Triangle Mesh | メッシュ / 三角形メッシュ |
 | 顶点 / 面 / 法线 | Vertex / Face / Normal | 頂点 / 面 / 法線 |
 | 纹理 / UV 坐标 | Texture / UV Coordinates | テクスチャ / UV 座標 |

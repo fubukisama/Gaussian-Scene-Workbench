@@ -7,6 +7,7 @@
 #include "MultiSceneSmokeTest.h"
 #include "GaussianPerformanceSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
+#include "ProcessingPreviewSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -195,6 +196,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption observationNavigationOption(QStringLiteral("smoke-test-observation-navigation"),
       QStringLiteral("Verify navigation outside the observation trackball."));
   parser.addOption(observationNavigationOption);
+  QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
+      QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
+  parser.addOption(processingPreviewOption);
   QCommandLineOption gpuPreviewInteropProbeOption(
       QStringLiteral("probe-gpu-preview-interop"),
       QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
@@ -239,6 +243,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(processingPreviewOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(languageSmokeOption) ||
@@ -259,7 +264,13 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(observationNavigationOption)) {
+  if (parser.isSet(processingPreviewOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(observationNavigationOption)) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runObservationNavigationSmokeTest(*viewport, parser.value(smokeSceneOption));

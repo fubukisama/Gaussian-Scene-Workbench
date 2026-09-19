@@ -8,6 +8,17 @@ import native_i18n as i18n
 
 
 class CatalogTests(unittest.TestCase):
+    def test_continuous_training_preview(self):
+        catalog = i18n.load_catalog()
+        for source in ('相机解算与稀疏点云', '初始化高斯', '高斯训练 · 优化与密度控制',
+                       '处理完成 · 显示最终结果', '准备影像与训练数据',
+                       '处理已中断 · 保留最近可用画面', ' · 迭代 %1 / %2',
+                       '等待首个三维结果 · 保留当前画面', '定时快照回退',
+                       '点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察',
+                       '预览不修改源数据', '预览更新失败 · 继续显示上一结果'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            self.assertEqual(i18n.validate({source: catalog[source]}, {}), [])
+
     def test_multi_item_lists_and_delete_semantics(self):
         catalog = i18n.load_catalog()
         for source in ('全选', '取消全选', '已选 %1 项', '删除所选记录',

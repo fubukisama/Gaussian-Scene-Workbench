@@ -90,11 +90,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     training_started_at = time.monotonic()
     gpu_preview = None
     gpu_preview_emit = None
+    file_preview = None
     if enable_gpu_preview:
         try:
             repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             if repository_root not in sys.path:
                 sys.path.insert(0, repository_root)
+            from native.worker.training_preview import TrainingPreviewPublisher
+            file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event)
+            file_preview.publish_gaussians(gaussians, first_iter, initial=True)
             from native.worker.gpu_preview_publisher import create_publisher, emit_descriptor
             gpu_preview_emit = emit_descriptor
             gpu_preview, failure_descriptor = create_publisher(
@@ -222,6 +226,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Log and save
             training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background, 1., SPARSE_ADAM_AVAILABLE, None, dataset.train_test_exp), dataset.train_test_exp)
             if (iteration in saving_iterations):
+                # Drain a pending older observation frame before announcing the
+                # durable checkpoint; the receiver also rejects out-of-order frames.
+                if file_preview is not None and iteration == opt.iterations:
+                    file_preview.close()
+                    file_preview = None
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
                 preview_path = os.path.abspath(os.path.join(
@@ -277,10 +286,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gpu_preview.close(detach_timeout=0)
                     gpu_preview = None
 
+            if file_preview is not None:
+                try:
+                    file_preview.publish_gaussians(gaussians, iteration)
+                except Exception as preview_error:
+                    emit_gsw_event("[gsw-preview-warning]", str(preview_error))
+                    file_preview.close()
+                    file_preview = None
+
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
+    if file_preview is not None:
+        file_preview.close()
     if gpu_preview is not None:
         gpu_preview_emit({
             "version": GPU_PREVIEW_PROTOCOL_VERSION,

@@ -4335,10 +4335,22 @@ def apply_training_preview(job, payload):
     iteration = finite_training_number(payload.get("iteration"), integer=True)
     point_cloud_path = payload.get("point_cloud_path")
     if iteration is not None and isinstance(point_cloud_path, str) and point_cloud_path.strip():
+        kind = payload.get("preview_kind", "training_checkpoint")
+        if kind not in {"training_checkpoint", "gaussian_initial", "gaussian_live"}:
+            return
+        if (job.get("preview_kind") != "colmap_sparse" and
+                iteration < int(job.get("preview_iteration") or 0)):
+            return
+        if (iteration == job.get("preview_iteration") and
+                job.get("preview_kind") == "training_checkpoint" and kind != "training_checkpoint"):
+            return
         job["latest_iteration"] = iteration
         job["preview_iteration"] = iteration
         job["partial_point_cloud_path"] = point_cloud_path
-        job["preview_kind"] = "training_checkpoint"
+        job["preview_kind"] = kind
+        count = finite_training_number(payload.get("gaussian_count"), integer=True)
+        if count is not None:
+            job["gaussian_count"] = count
 
 
 def add_job_log(job, message):
@@ -5828,13 +5840,13 @@ def run_training_job(job, run_convert, quality, overwrite):
         if start_checkpoint:
             add_job_log(job, f"Resuming from checkpoint: {start_checkpoint}")
         command = training_command(backend, dataset, output, options, start_checkpoint=start_checkpoint)
-        with TRAIN_LOCK:
-            # The sparse COLMAP preview remains visible until the first GPU or
-            # checkpoint frame arrives, but training metrics must immediately
-            # switch back to Gaussian semantics.
-            job["preview_kind"] = None
-            job["point_count"] = None
-            persist_train_job(job)
+        # Existing reconstructions need the same first point-cloud view as a
+        # newly run COLMAP job. This also covers starting training after restart.
+        if job.get("preview_kind") != "colmap_sparse":
+            sparse_preview = ColmapPointCloudPreviewPublisher(job, dataset, [dataset / "sparse"])
+            sparse_preview.publish_latest(force=True)
+        # Keep sparse path/count correctly typed until a Gaussian frame exists;
+        # clearing its kind/count early would mislabel the initialization view.
         set_job_stage(job, "running", "train")
         run_logged(job, command, TWO_DGS_DIR if backend == "2dgs" else GAUSSIAN_DIR, backend)
         result = training_point_cloud(job["output_scene"], options["iterations"])

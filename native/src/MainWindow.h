@@ -268,6 +268,7 @@ private:
   QString mLiveTrainingPreviewPath;
   qint64 mLiveTrainingGaussianCount = 0;
   int mLastTrainingPreviewIteration = -1;
+  int mLastTrainingSparsePreviewIteration = -1;
   QString mLiveReconstructionPreviewPath;
   QString mLiveReconstructionDatasetPath;
   qint64 mLiveReconstructionPointCount = 0;

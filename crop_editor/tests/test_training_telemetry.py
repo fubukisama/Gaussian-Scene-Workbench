@@ -38,6 +38,23 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_initial_gaussians_follow_sparse_generation_and_ignore_late_frames(self):
+        job = {"preview_kind": "colmap_sparse", "preview_iteration": 40}
+        server.apply_training_preview(job, {"iteration": 0, "preview_kind": "gaussian_initial",
+            "point_cloud_path": "E:/initial.ply", "gaussian_count": 12})
+        self.assertEqual(job["preview_iteration"], 0)
+        self.assertEqual(job["preview_kind"], "gaussian_initial")
+        server.apply_training_preview(job, {"iteration": 30, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/live.ply"})
+        server.apply_training_preview(job, {"iteration": 20, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/old.ply"})
+        self.assertEqual(job["partial_point_cloud_path"], "E:/live.ply")
+        self.assertEqual(job["gaussian_count"], 12)
+        server.apply_training_preview(job, {"iteration": 30, "point_cloud_path": "E:/checkpoint.ply"})
+        server.apply_training_preview(job, {"iteration": 30, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/late.ply"})
+        self.assertEqual(job["partial_point_cloud_path"], "E:/checkpoint.ply")
+
     def test_training_log_updates_live_visualization_metrics(self):
         job = {
             "id": "train-telemetry",

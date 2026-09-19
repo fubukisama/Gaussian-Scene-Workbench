@@ -78,6 +78,12 @@ public:
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
+  void beginProcessingPreview();
+  void setProcessingStage(const QString &stage, int iteration = -1, int total = -1,
+                          int progress = -1);
+  void finishProcessingPreview(bool succeeded, bool cancelled);
+  void setPreviewScene(const QString &path, qint64 count);
+  [[nodiscard]] QString processingPreviewLabel() const;
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
   bool activateSceneObject(const QString &id);
   bool setSceneSelection(const QStringList &ids, const QString &activeId = {});
@@ -176,6 +182,7 @@ public:
   }
   [[nodiscard]] bool orthographicProjection() const { return mOrthographic; }
   [[nodiscard]] bool selectableModelAvailable() const;
+  [[nodiscard]] bool visibleModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
@@ -314,6 +321,11 @@ private:
     bool mFullResolutionPointClearPending = false;
     bool mFullResolutionMeshClearPending = false;
     int mSceneGeneration = 0;
+    bool previewLoadBusy = false;
+    bool previewLoadFailed = false;
+    QString queuedPreviewPath;
+    qint64 queuedPreviewCount = 0;
+    qint64 requestedPreviewCount = 0;
     int mCameraTrajectoryGeneration = 0;
     RenderMode mRenderMode = RenderMode::Points;
     SceneCoordinateInfo mSceneCoordinates;
@@ -410,7 +422,8 @@ private:
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
   void rebuildCameraGeometry();
-  void startSceneLoad(const QString &scenePath);
+  void startSceneLoad(const QString &scenePath, bool continuous = false);
+  [[nodiscard]] QMatrix4x4 trainingPreviewCoordinateTransform() const;
   void startSelection(const ScreenSelectionRequest &request,
                       SelectionOperation operation);
   void finishSelectionGesture(Qt::KeyboardModifiers modifiers);
@@ -507,6 +520,13 @@ private:
                                                const SceneState &to) const;
   void publishActiveSceneState();
   QString mProjectLabel;
+  bool mProcessingActive = false;
+  bool mProcessingPreviewPresent = false;
+  bool mProcessingHasFrame = false;
+  QString mProcessingStage;
+  int mProcessingIteration = -1;
+  int mProcessingTotal = -1;
+  int mProcessingProgress = -1;
   InteractionMode mMode = InteractionMode::Inspect;
   QPoint mLastMousePosition;
   Qt::MouseButtons mPressedButtons = Qt::NoButton;

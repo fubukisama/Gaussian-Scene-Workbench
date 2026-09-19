@@ -391,6 +391,7 @@ void NativeViewport::publishActiveSceneState() {
 
 void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
                                     const QString &activeId) {
+  if (mProcessingActive) return;
   const bool collectionChanged = objects.size() != mSceneStates.size() ||
       std::any_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
         return std::none_of(mSceneStates.cbegin(), mSceneStates.cend(), [&](const auto &state) {
@@ -400,6 +401,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
   if ((mScene->id != activeId || collectionChanged) && mModelDragActive) finishModelTransform(false);
   if (collectionChanged) resetModelTransformHistory();
   const auto oldActive = mScene;
+  const auto previewToAdopt = mProcessingPreviewPresent ? mScene : nullptr;
   const QVector3D oldTarget = mTarget;
   const float oldDistance = mDistance;
   QList<std::shared_ptr<SceneState>> retained;
@@ -410,7 +412,8 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     for (const auto &object : objects) {
       auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
           [&](const auto &state) { return state->id == object.id; });
-      auto state = found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
+      const bool adoptPreview = previewToAdopt && object.id == activeId;
+      auto state = adoptPreview ? previewToAdopt : found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
       state->id = object.id;
       retained.append(state);
       const bool isActive = object.id == activeId;
@@ -419,11 +422,13 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       QScopedValueRollback<bool> background(mRenderingInactiveScene, !isActive);
       if (state->mRequestedScenePath != object.path) {
         changedSource |= isActive;
-        setScene(object.path, object.vertexCount);
+        if (adoptPreview) setPreviewScene(object.path, object.vertexCount);
+        else setScene(object.path, object.vertexCount);
       }
       state->sourceTranslation = object.translation;
       setModelTransform(object.translation * static_cast<float>(state->mSceneCoordinates.displayScale),
                         object.rotation, object.scale);
+      if (adoptPreview) mProcessingPreviewPresent = false;
     }
     if (context() != nullptr && context()->isValid()) {
       makeCurrent();
@@ -539,6 +544,80 @@ void NativeViewport::setProjectLabel(const QString &label) {
   update();
 }
 
+void NativeViewport::beginProcessingPreview() {
+  if (mModelDragActive) finishModelTransform(false);
+  ++mSelectionRequestEpoch;
+  mSelectionGestureActive = false;
+  mSelectionPath.clear();
+  mProcessingActive = true;
+  mProcessingPreviewPresent = true;
+  mProcessingHasFrame = false;
+  mProcessingStage = QStringLiteral("prepare");
+  mProcessingIteration = mProcessingTotal = mProcessingProgress = -1;
+  mModelSelected = false;
+  mSelectedSceneIds.clear();
+  setInteractionMode(InteractionMode::Inspect);
+  update();
+}
+
+void NativeViewport::setProcessingStage(const QString &stage, int iteration, int total, int progress) {
+  mProcessingStage = stage;
+  mProcessingIteration = iteration;
+  mProcessingTotal = total;
+  mProcessingProgress = progress;
+  update();
+}
+
+void NativeViewport::finishProcessingPreview(bool succeeded, bool cancelled) {
+  mProcessingActive = false;
+  mProcessingStage = succeeded ? QStringLiteral("done") :
+      cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed");
+  update();
+}
+
+QString NativeViewport::processingPreviewLabel() const {
+  if (mProcessingStage.isEmpty()) return {};
+  QString phase;
+  if (mProcessingStage == QStringLiteral("done"))
+    phase = QCoreApplication::translate("Workbench", "处理完成 · 显示最终结果");
+  else if (mProcessingStage == QStringLiteral("cancelled") || mProcessingStage == QStringLiteral("failed"))
+    phase = QCoreApplication::translate("Workbench", "处理已中断 · 保留最近可用画面");
+  else if (mProcessingStage == QStringLiteral("colmap"))
+    phase = QCoreApplication::translate("Workbench", "相机解算与稀疏点云");
+  else if (mProcessingStage == QStringLiteral("train"))
+    phase = mProcessingIteration > 0
+        ? QCoreApplication::translate("Workbench", "高斯训练 · 优化与密度控制")
+        : QCoreApplication::translate("Workbench", "初始化高斯");
+  else
+    phase = QCoreApplication::translate("Workbench", "准备影像与训练数据");
+  if (mProcessingActive && mProcessingIteration >= 0 && mProcessingTotal > 0)
+    phase += QCoreApplication::translate("Workbench", " · 迭代 %1 / %2").arg(mProcessingIteration).arg(mProcessingTotal);
+  else if (mProcessingActive && mProcessingProgress >= 0)
+    phase += QStringLiteral(" · %1%").arg(mProcessingProgress);
+  return phase;
+}
+
+void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
+  if (path.isEmpty() || path == mScene->mRequestedScenePath) return;
+  if (mScene->previewLoadBusy) {
+    mScene->queuedPreviewPath = path;
+    mScene->queuedPreviewCount = count;
+    return;
+  }
+  if (mSceneStates.isEmpty()) mSceneStates.append(mScene);
+  // Do not invalidate visible geometry or the user's camera while reading.
+  ++mScene->mSceneGeneration;
+  if (mScene->mSelectionBusy) {
+    mScene->mSelectionBusy = false;
+    emit selectionBusyChanged(false);
+  }
+  mScene->mRequestedScenePath = path;
+  mScene->requestedPreviewCount = count;
+  mScene->previewLoadBusy = true;
+  mScene->previewLoadFailed = false;
+  startSceneLoad(path, true);
+}
+
 void NativeViewport::setScene(const QString &scenePath,
                               const qint64 gaussianCount) {
   if (mSceneStates.isEmpty()) mSceneStates.append(mScene);
@@ -550,6 +629,13 @@ void NativeViewport::setScene(const QString &scenePath,
   }
 
   ++mScene->mSceneGeneration;
+  mScene->previewLoadBusy = false;
+  mScene->previewLoadFailed = false;
+  mScene->queuedPreviewPath.clear();
+  if (!mRenderingInactiveScene) {
+    mProcessingStage.clear();
+    mProcessingPreviewPresent = false;
+  }
   if (mScene->mSelectionBusy) {
     mScene->mSelectionBusy = false;
     emit selectionBusyChanged(false);
@@ -699,7 +785,7 @@ void NativeViewport::setShowObservationTrackball(const bool visible) {
 
 bool NativeViewport::observationTrackballVisible() const {
   return mEditToolsLocked && mShowObservationTrackball &&
-         mMode == InteractionMode::Inspect && selectableModelAvailable();
+         mMode == InteractionMode::Inspect && visibleModelAvailable();
 }
 
 float NativeViewport::observationTrackballRadius() const {
@@ -789,7 +875,7 @@ std::optional<QVector3D> NativeViewport::observationPointAt(const QPointF &posit
     QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
     QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
     QScopedValueRollback<QMatrix4x4> display(mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
-    if (!selectableModelAvailable()) continue;
+    if (!visibleModelAvailable()) continue;
     float depth = 1.0F;
     QVector3D point;
     if (modelGeometryHitAt(position, &depth, &point).value_or(false) && depth < nearestDepth &&
@@ -1221,16 +1307,21 @@ void NativeViewport::discardSceneEdits() {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
+  return !mProcessingActive && !mProcessingPreviewPresent && mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
          mScene->mEditModel.pointCount() > 0;
 }
 
 bool NativeViewport::selectableModelAvailable() const {
-  return !mScene->mScenePath.isEmpty() && mScene->mSceneLoadMessage.isEmpty() &&
+  return !mProcessingActive && !mProcessingPreviewPresent && visibleModelAvailable();
+}
+
+bool NativeViewport::visibleModelAvailable() const {
+  return (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ||
+      (!mScene->mScenePath.isEmpty() &&
          (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
           mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
           mScene->mFullResolutionPointCount > 0 ||
-          mScene->mFullResolutionMeshTriangleCount > 0);
+          mScene->mFullResolutionMeshTriangleCount > 0));
 }
 
 void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
@@ -1952,12 +2043,18 @@ void NativeViewport::paintGL() {
           std::isfinite(previewCenter.y()) &&
           std::isfinite(previewCenter.z()) && std::isfinite(previewRadius) &&
           previewRadius > 0.0F) {
-        mScene->mSceneCenter = previewCenter;
-        mScene->mSceneRadius = std::max(previewRadius, 1.0e-4F);
+        mScene->mSceneCenter = trainingPreviewCoordinateTransform().map(previewCenter);
+        mScene->mSceneRadius = std::max(previewRadius * static_cast<float>(mScene->mSceneCoordinates.displayScale), 1.0e-4F);
         rebuildCameraGeometry();
         if (!mTrainingGpuPreviewCameraFramed) {
           mTrainingGpuPreviewCameraFramed = true;
-          if (!mRenderingInactiveScene) resetCamera();
+          if (mProcessingActive) {
+            mScene->mModelTranslation = {};
+            mScene->mModelRotation = {};
+            mScene->mModelScale = QVector3D(1, 1, 1);
+          }
+          if (!mRenderingInactiveScene && !mProcessingHasFrame) resetCamera();
+          mProcessingHasFrame = true;
         }
       }
     }
@@ -1970,7 +2067,7 @@ void NativeViewport::paintGL() {
   } else if (previewChanged && !mTrainingGpuPreview.attached()) {
     mTrainingGpuPreviewTimer->stop();
     emit trainingGpuPreviewStateChanged(
-        false, QCoreApplication::translate("Workbench", "PLY 检查点回退"),
+        false, QCoreApplication::translate("Workbench", "定时快照回退"),
         QCoreApplication::translate("Workbench", "共享显存预览已结束"));
   }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -2061,9 +2158,10 @@ void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 
     drawMesh(modelViewProjection);
   } else if (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame() &&
              mScene->mRenderMode == RenderMode::Points) {
-    drawTrainingPointCloud(modelViewProjection);
+    drawTrainingPointCloud(modelViewProjection * trainingPreviewCoordinateTransform());
   } else if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
-    drawGaussianCloud(view * modelMatrix(), projection);
+    drawGaussianCloud(view * modelMatrix() *
+        ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4()), projection);
   } else {
     drawPointCloud(modelViewProjection);
   }
@@ -2080,7 +2178,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     mTrainingGpuPreviewCameraFramed = false;
     if (wasAttached) {
       emit trainingGpuPreviewStateChanged(
-          false, QCoreApplication::translate("Workbench", "PLY 检查点回退"),
+          false, QCoreApplication::translate("Workbench", "定时快照回退"),
           QCoreApplication::translate("Workbench", "训练任务已停止"));
     }
   }
@@ -2103,7 +2201,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
             : QCoreApplication::translate("Workbench", "训练共享显存发布器已关闭");
     if (wasAttached || descriptor.state == TrainingGpuPreviewState::Failed) {
       emit trainingGpuPreviewStateChanged(
-          false, QCoreApplication::translate("Workbench", "PLY 检查点回退"), detail);
+          false, QCoreApplication::translate("Workbench", "定时快照回退"), detail);
     }
     return;
   }
@@ -2115,7 +2213,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     mTrainingGpuPreviewTimer->stop();
     mTrainingGpuPreviewError = error;
     emit trainingGpuPreviewStateChanged(
-        false, QCoreApplication::translate("Workbench", "PLY 检查点回退"), error);
+        false, QCoreApplication::translate("Workbench", "定时快照回退"), error);
     return;
   }
   synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
@@ -2189,14 +2287,22 @@ void NativeViewport::rebuildCameraGeometry() {
   transformSegments(mScene->mCameraGeometry.path);
 }
 
-void NativeViewport::startSceneLoad(const QString &scenePath) {
+QMatrix4x4 NativeViewport::trainingPreviewCoordinateTransform() const {
+  QMatrix4x4 result;
+  const auto &coordinates = mScene->mSceneCoordinates;
+  result.scale(static_cast<float>(coordinates.displayScale));
+  result.translate(QVector3D(coordinates.displayShift.x, coordinates.displayShift.y, coordinates.displayShift.z));
+  return result;
+}
+
+void NativeViewport::startSceneLoad(const QString &scenePath, const bool continuous) {
   mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
   const int generation = mScene->mSceneGeneration;
 
   auto *watcher = new QFutureWatcher<PointCloudData>(this);
   connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
-          [this, watcher, scenePath, generation , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+          [this, watcher, scenePath, generation, continuous, weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
             const bool foreground = targetScene == mScene;
@@ -2210,18 +2316,43 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
                 generation != mScene->mSceneGeneration) {
               return;
             }
+            if (continuous) {
+              mScene->previewLoadBusy = false;
+              const auto queued = mScene->queuedPreviewPath;
+              const auto count = mScene->queuedPreviewCount;
+              mScene->queuedPreviewPath.clear();
+              if (!queued.isEmpty()) QTimer::singleShot(0, this, [this, weakScene, queued, count, generation]() {
+                if (weakScene.lock() == mScene && mScene->mSceneGeneration == generation)
+                  setPreviewScene(queued, count);
+              });
+            }
             if (!data.isValid()) {
+              mScene->previewLoadFailed = continuous;
               mScene->mSceneLoadMessage = data.error;
               emit sceneLoadFailed(scenePath, data.error);
               update();
               return;
             }
-
+            const auto oldCoordinates = mScene->mSceneCoordinates;
+            const auto oldTarget = mTarget;
+            const auto oldDistance = mDistance;
+            const bool keepCamera = continuous && mProcessingHasFrame;
+            mScene->mScenePath = scenePath;
+            if (continuous) {
+              mScene->sourceTranslation = {};
+              mScene->mModelRotation = {};
+              mScene->mModelScale = QVector3D(1, 1, 1);
+              mScene->gaussianGpu.clear();
+              mScene->indexedGaussians = false;
+              mScene->sortDirectionValid = false;
+              mScene->mGaussianCount = mScene->requestedPreviewCount > 0 ? mScene->requestedPreviewCount : data.sourceVertexCount;
+              reloadCameraTrajectory(scenePath, false);
+            }
             mScene->mSceneCoordinates = data.coordinates;
             mScene->mModelTranslation = mScene->sourceTranslation *
                 static_cast<float>(data.coordinates.displayScale);
             mScene->mSceneCenter = data.center();
-            if (!mRenderingInactiveScene) mTarget = mScene->mSceneCenter;
+            if (!mRenderingInactiveScene && !keepCamera) mTarget = mScene->mSceneCenter;
             mScene->mSceneRadius = data.radius();
             rebuildCameraGeometry();
             const bool loadedHasMesh = data.hasMesh();
@@ -2301,7 +2432,14 @@ void NativeViewport::startSceneLoad(const QString &scenePath) {
               emit renderModeChanged(mScene->mRenderMode);
             }
             mScene->mSceneLoadMessage.clear();
-            if (!mRenderingInactiveScene) resetCamera();
+            if (!mRenderingInactiveScene) {
+              if (!keepCamera) resetCamera();
+              else if (oldCoordinates.valid && data.coordinates.valid) {
+                mTarget = data.coordinates.localFromGlobal(oldCoordinates.globalFromLocal(oldTarget));
+                mDistance = oldDistance * static_cast<float>(data.coordinates.displayScale / oldCoordinates.displayScale);
+              }
+              if (continuous) mProcessingHasFrame = true;
+            }
             rebuildRenderedVertices();
             updateFrameRefreshPolicy();
             notifyEditState();
@@ -4709,7 +4847,8 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
       const QMatrix4x4 modelViewProjection =
-          viewProjectionMatrix() * modelMatrix();
+          viewProjectionMatrix() * modelMatrix() *
+          ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4());
       const float pointSize = std::max(
           3.0F, 3.0F * static_cast<float>(devicePixelRatioF()));
       bool drewPrimitives = false;
@@ -6185,6 +6324,10 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                 : QCoreApplication::translate("Workbench", "迭代 %1 | %2 高斯 | 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())
                       .arg(formatCount(mTrainingGpuPreview.pointCount()));
+  } else if (mScene->previewLoadBusy) {
+    count = QCoreApplication::translate("Workbench", "正在读取 PLY 场景...");
+  } else if (mScene->previewLoadFailed) {
+    count = QCoreApplication::translate("Workbench", "预览更新失败 · 继续显示上一结果");
   } else if (!mScene->mSceneLoadMessage.isEmpty()) {
     count = mScene->mSceneLoadMessage;
   } else if (pagedMeshAvailable()) {
@@ -6315,6 +6458,34 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   lineRect.translate(0, lineHeight + lineGap);
   painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
                    metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
+
+  if (!mProcessingStage.isEmpty()) {
+    const QString phase = processingPreviewLabel();
+    const QString detail = !mProcessingHasFrame
+        ? QCoreApplication::translate("Workbench", "等待首个三维结果 · 保留当前画面")
+        : mProcessingActive
+            ? QCoreApplication::translate("Workbench", "点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察")
+            : QCoreApplication::translate("Workbench", "预览不修改源数据");
+    const int panelWidth = std::min(width() - viewportMargin * 2,
+        std::max(metrics.horizontalAdvance(phase), metrics.horizontalAdvance(detail)) + headerPaddingX * 2);
+    const QRect panel(viewportMargin, headerRect.bottom() + 6, panelWidth, headerHeight + 3);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(17, 23, 26, 225));
+    painter.drawRoundedRect(panel, 5, 5);
+    QRect row = panel.adjusted(headerPaddingX, headerPaddingY, -headerPaddingX, -headerPaddingY);
+    row.setHeight(lineHeight);
+    painter.setPen(QColor(120, 208, 186));
+    painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(phase, Qt::ElideRight, row.width()));
+    row.translate(0, lineHeight + lineGap);
+    painter.setPen(QColor(181, 193, 200));
+    painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(detail, Qt::ElideRight, row.width()));
+    if (mProcessingActive && mProcessingProgress >= 0) {
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(QColor(89, 169, 153));
+      painter.drawRect(QRect(panel.left(), panel.bottom() - 2,
+          panel.width() * std::clamp(mProcessingProgress, 0, 100) / 100, 2));
+    }
+  }
 
   const QString renderer =
       mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()

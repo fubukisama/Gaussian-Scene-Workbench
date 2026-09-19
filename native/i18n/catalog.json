@@ -1,4 +1,64 @@
 {
+  "预览更新失败 · 继续显示上一结果": {
+    "zh_CN": "预览更新失败 · 继续显示上一结果",
+    "en_US": "Preview update failed · Keeping the previous result",
+    "ja_JP": "プレビューの更新に失敗 · 直前の結果を表示"
+  },
+  "处理完成 · 显示最终结果": {
+    "zh_CN": "处理完成 · 显示最终结果",
+    "en_US": "Processing complete · Final result",
+    "ja_JP": "処理完了 · 最終結果"
+  },
+  "处理已中断 · 保留最近可用画面": {
+    "zh_CN": "处理已中断 · 保留最近可用画面",
+    "en_US": "Processing interrupted · Last available view retained",
+    "ja_JP": "処理中断 · 最後の有効な表示を保持"
+  },
+  "相机解算与稀疏点云": {
+    "zh_CN": "相机解算与稀疏点云",
+    "en_US": "Camera alignment and sparse point cloud",
+    "ja_JP": "カメラアライメントと疎な点群"
+  },
+  "高斯训练 · 优化与密度控制": {
+    "zh_CN": "高斯训练 · 优化与密度控制",
+    "en_US": "Gaussian training · Optimization and density control",
+    "ja_JP": "ガウシアン学習 · 最適化と密度制御"
+  },
+  "初始化高斯": {
+    "zh_CN": "初始化高斯",
+    "en_US": "Initializing Gaussians",
+    "ja_JP": "ガウシアンを初期化"
+  },
+  "准备影像与训练数据": {
+    "zh_CN": "准备影像与训练数据",
+    "en_US": "Preparing images and training data",
+    "ja_JP": "画像と学習データを準備"
+  },
+  " · 迭代 %1 / %2": {
+    "zh_CN": " · 迭代 %1 / %2",
+    "en_US": " · Iteration %1 / %2",
+    "ja_JP": " · 反復 %1 / %2"
+  },
+  "等待首个三维结果 · 保留当前画面": {
+    "zh_CN": "等待首个三维结果 · 保留当前画面",
+    "en_US": "Waiting for the first 3D result · Current view retained",
+    "ja_JP": "最初の 3D 結果を待機中 · 現在の表示を保持"
+  },
+  "点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察": {
+    "zh_CN": "点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察",
+    "en_US": "Point cloud → Initial Gaussians → Optimization → Final result · Navigate freely",
+    "ja_JP": "点群 → 初期ガウシアン → 最適化 → 最終結果 · 自由に視点操作"
+  },
+  "预览不修改源数据": {
+    "zh_CN": "预览不修改源数据",
+    "en_US": "Preview does not modify source data",
+    "ja_JP": "プレビューは元データを変更しません"
+  },
+  "定时快照回退": {
+    "zh_CN": "定时快照回退",
+    "en_US": "Periodic snapshot fallback",
+    "ja_JP": "定期スナップショットにフォールバック"
+  },
   "Ctrl 点选多选 · Shift 连选 · Ctrl+A 全选 · Delete 移除所选": {
     "zh_CN": "Ctrl 点选多选 · Shift 连选 · Ctrl+A 全选 · Delete 移除所选",
     "en_US": "Ctrl-click to multi-select · Shift-click for range · Ctrl+A select all · Delete remove selected",
