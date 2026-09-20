@@ -1,4 +1,54 @@
 {
+  "球谐显示": {
+    "zh_CN": "球谐显示",
+    "en_US": "SH Display",
+    "ja_JP": "SH 表示"
+  },
+  "自动（源文件阶数）": {
+    "zh_CN": "自动（源文件阶数）",
+    "en_US": "Automatic (source degree)",
+    "ja_JP": "自動（ソースの次数）"
+  },
+  "SH 0 阶（基础颜色）": {
+    "zh_CN": "SH 0 阶（基础颜色）",
+    "en_US": "SH Degree 0 (base color)",
+    "ja_JP": "SH 0 次（基本色）"
+  },
+  "SH 1 阶": {
+    "zh_CN": "SH 1 阶",
+    "en_US": "SH Degree 1",
+    "ja_JP": "SH 1 次"
+  },
+  "SH 2 阶": {
+    "zh_CN": "SH 2 阶",
+    "en_US": "SH Degree 2",
+    "ja_JP": "SH 2 次"
+  },
+  "SH 3 阶": {
+    "zh_CN": "SH 3 阶",
+    "en_US": "SH Degree 3",
+    "ja_JP": "SH 3 次"
+  },
+  "SH 4 阶": {
+    "zh_CN": "SH 4 阶",
+    "en_US": "SH Degree 4",
+    "ja_JP": "SH 4 次"
+  },
+  "高斯 SH %1 阶": {
+    "zh_CN": "高斯 SH %1 阶",
+    "en_US": "Gaussian SH Degree %1",
+    "ja_JP": "ガウシアン SH %1 次"
+  },
+  "高斯 DC（无可用 SH）": {
+    "zh_CN": "高斯 DC（无可用 SH）",
+    "en_US": "Gaussian DC (SH unavailable)",
+    "ja_JP": "ガウシアン DC（SH 利用不可）"
+  },
+  "即时切换高斯球谐显示阶数（最高不超过源数据）。降低阶数可减少着色开销，不修改模型或导出数据；无可用 SH 时显示基础颜色。": {
+    "zh_CN": "即时切换高斯球谐显示阶数（最高不超过源数据）。降低阶数可减少着色开销，不修改模型或导出数据；无可用 SH 时显示基础颜色。",
+    "en_US": "Change the Gaussian SH display degree immediately, capped at the source degree. Lower degrees reduce shading cost without modifying the model or exported data; base colors are used when SH is unavailable.",
+    "ja_JP": "ガウシアンの SH 表示次数を即時に切り替えます（ソースの次数が上限）。次数を下げるとシェーディング負荷が減少します。モデルやエクスポートデータは変更せず、SH が利用できない場合は基本色を表示します。"
+  },
   "导入模型（PLY / SPZ）": {
     "zh_CN": "导入模型（PLY / SPZ）",
     "en_US": "Import Model (PLY / SPZ)",

@@ -2122,6 +2122,38 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
           ? vertexElement.count
           : std::min<qint64>(vertexElement.count, maximumPreviewPoints));
   result.vertices.reserve(sampleCount);
+  // Decode alongside the vertex pass, never rescan a large PLY for SH. PLY
+  // f_rest is channel-major; the GPU consumes coefficient-major RGB texels.
+  QVector<int> shProperties;
+  if (result.hasGaussianAttributes) {
+    int restCount = 0;
+    for (const auto &property : vertexElement.properties)
+      if (property.name.startsWith(QStringLiteral("f_rest_"))) ++restCount;
+    int degree = -1;
+    for (int d = 0; d <= 4; ++d)
+      if (restCount == 3 * ((d + 1) * (d + 1) - 1)) degree = d;
+    const int coefficients = (degree + 1) * (degree + 1);
+    bool valid = degree >= 0;
+    for (int k = 0; valid && k < coefficients; ++k) {
+      for (int channel = 0; channel < 3; ++channel) {
+        const QString name = k == 0 ? QStringLiteral("f_dc_%1").arg(channel)
+            : QStringLiteral("f_rest_%1").arg(channel * (coefficients - 1) + k - 1);
+        const int index = findProperty(vertexElement, {name});
+        valid = valid && isScalarProperty(index) &&
+            std::count_if(vertexElement.properties.cbegin(), vertexElement.properties.cend(),
+                [&name](const auto &p) { return p.name == name; }) == 1;
+        shProperties.append(index);
+      }
+    }
+    if (valid && sampleCount <= GaussianShData::MaximumBytes /
+            (coefficients * 3 * qint64(sizeof(float)) + qint64(sizeof(quint32)))) {
+      result.sphericalHarmonics.degree = degree;
+      result.sphericalHarmonics.coefficients.reserve(sampleCount * coefficients * 3);
+      result.sphericalHarmonics.sourceIndices.reserve(sampleCount);
+    } else {
+      shProperties.clear();
+    }
+  }
   result.sourcePositions.reserve(static_cast<qsizetype>(vertexElement.count));
   if (containsMeshFaces) {
     result.meshIndices.reserve(static_cast<qsizetype>(
@@ -2183,11 +2215,28 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       }
       const bool appendPreview = shouldSampleVertex(
           recordIndex, vertexElement.count, sampleCount, nextSampleIndex);
+      const qsizetype previousSize = result.vertices.size();
       appendVertex(element, values, xIndex, yIndex, zIndex, redIndex, greenIndex,
                    blueIndex, sphericalHarmonicColor, opacityIndex,
                    scaleIndices, rotationIndices, result.hasGaussianAttributes,
                    recordIndex, appendPreview, hasFiniteBounds,
                    coordinateTracker, result);
+      if (!shProperties.isEmpty() && result.vertices.size() > previousSize) {
+        auto &sh = result.sphericalHarmonics;
+        bool finite = true;
+        for (int property : shProperties) {
+          const float coefficient = static_cast<float>(values.at(property));
+          finite = finite && std::isfinite(coefficient);
+          sh.coefficients.append(coefficient);
+        }
+        if (finite) {
+          sh.sourceIndices.append(static_cast<quint32>(recordIndex));
+        } else {
+          // Keep geometry usable, but do not advertise corrupt SH as full SH.
+          sh = {};
+          shProperties.clear();
+        }
+      }
     }
   }
 

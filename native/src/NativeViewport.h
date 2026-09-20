@@ -136,6 +136,11 @@ public:
   [[nodiscard]] bool indexedGaussianRendering() const { return mScene->indexedGaussians; }
   [[nodiscard]] quint64 gaussianAttributeUploads() const { return mScene->gaussianGpu.attributeUploads(); }
   [[nodiscard]] quint64 gaussianOrderUploads() const { return mScene->gaussianGpu.orderUploads(); }
+  [[nodiscard]] quint64 gaussianShUploads() const { return mScene->gaussianGpu.shUploads(); }
+  [[nodiscard]] int maximumShDegree() const { return mMaximumShDegree; }
+  [[nodiscard]] int sourceShDegree() const { return mScene->mSphericalHarmonics.degree; }
+  [[nodiscard]] int effectiveShDegree() const;
+  void setMaximumShDegree(int degree);
   [[nodiscard]] qsizetype renderedPointCount() const { return mScene->mRenderedPointCount; }
   [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
@@ -298,6 +303,7 @@ private:
     bool sortDirectionValid = false;
     GaussianDepthSorter depthSorter;
     GaussianGpuBuffer gaussianGpu;
+    GaussianShData mSphericalHarmonics;
     bool indexedGaussians = false;
     QString mScenePath;
     QString mRequestedScenePath;
@@ -555,6 +561,7 @@ private:
   bool mNavigationDragging = false;
   Qt::KeyboardModifiers mNavigationPressModifiers = Qt::NoModifier;
   bool mOrthographic = false;
+  int mMaximumShDegree = -1; // automatic = use the source degree
   bool mCameraViewActive = false;
   bool mShowCameras = false;
   bool mGaussianShaderReady = false;

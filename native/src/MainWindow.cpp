@@ -1433,6 +1433,28 @@ void MainWindow::createMenus() {
   renderMenu->addAction(mGaussianRenderAction);
   renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
+  auto *shMenu = AppLanguage::text(renderMenu->addMenu(QString()),
+      AppLanguage::source("球谐显示"), "title");
+  shMenu->setObjectName(QStringLiteral("shDisplayMenu"));
+  auto *shGroup = new QActionGroup(shMenu);
+  shGroup->setExclusive(true);
+  mViewport->setMaximumShDegree(QSettings().value(QStringLiteral("view/maximumShDegree"), -1).toInt());
+  const QList<const char *> shLabels = {
+      AppLanguage::source("自动（源文件阶数）"), AppLanguage::source("SH 0 阶（基础颜色）"),
+      AppLanguage::source("SH 1 阶"), AppLanguage::source("SH 2 阶"),
+      AppLanguage::source("SH 3 阶"), AppLanguage::source("SH 4 阶")};
+  for (int degree = -1; degree <= 4; ++degree) {
+    auto *action = AppLanguage::text(shMenu->addAction(QString()), shLabels.at(degree + 1));
+    action->setObjectName(QStringLiteral("shDegree%1Action").arg(degree));
+    action->setCheckable(true);
+    action->setChecked(degree == mViewport->maximumShDegree());
+    action->setData(degree);
+    shGroup->addAction(action);
+  }
+  connect(shGroup, &QActionGroup::triggered, this, [this](QAction *action) {
+    mViewport->setMaximumShDegree(action->data().toInt());
+    QSettings().setValue(QStringLiteral("view/maximumShDegree"), mViewport->maximumShDegree());
+  });
   viewMenu->addAction(mShowCamerasAction);
   QMenu *referencePlaneMenu =
       AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格")), AppLanguage::source("基准面网格"), "title");
@@ -1540,6 +1562,12 @@ void MainWindow::createToolBars() {
   mRenderToolbar->addAction(mGaussianRenderAction);
   mRenderToolbar->addAction(mMeshRenderAction);
   mRenderToolbar->addAction(mPointRenderAction);
+  auto *shButton = AppLanguage::text(new QToolButton(mRenderToolbar), AppLanguage::source("球谐显示"));
+  shButton->setObjectName(QStringLiteral("shDisplayButton"));
+  shButton->setPopupMode(QToolButton::InstantPopup);
+  shButton->setMenu(findChild<QMenu *>(QStringLiteral("shDisplayMenu")));
+  AppLanguage::bind(shButton, "toolTip", AppLanguage::source("即时切换高斯球谐显示阶数（最高不超过源数据）。降低阶数可减少着色开销，不修改模型或导出数据；无可用 SH 时显示基础颜色。"));
+  mRenderToolbar->addWidget(shButton);
   mRenderToolbar->addSeparator();
   mRenderToolbar->addAction(mShowCamerasAction);
 

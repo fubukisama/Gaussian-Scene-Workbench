@@ -26,6 +26,14 @@ The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source a
 
 日本語：デスクトップ版は Niantic/Adobe の MIT ライセンス SPZ ソースを上記コミットに固定して直接コンパイルします。ソース・著作権・ライセンスは配布物の `licenses/spz/` に同梱します。zlib と Zstandard はそれぞれのライセンスを維持します。
 
+## Native SH Evaluation / 原生球谐求值 / ネイティブ SH 評価
+
+`native/third_party/gsplat-sh/evaluate_sh.glsl` directly adapts `sh_coeffs_to_color_fast` from gsplat commit `512d366b67073d77ca099ede742683c165dfc23b` under Apache-2.0: https://github.com/nerfstudio-project/gsplat . The Regents of the University of California, Nerfstudio Team/contributors and NVIDIA notices, modification notice and full license are retained and shipped under `licenses/gsplat-sh/`. Only the evaluator is adapted; no CUDA/PyTorch runtime is added. No upstream NOTICE file is present at that revision.
+
+中文：GLSL 球谐求值直接改编 gsplat 的 Apache-2.0 源码，固定上述提交。完整保留版权、修改声明及许可证，并随桌面安装包分发；不增加 CUDA/PyTorch 运行时依赖。
+
+日本語：GLSL の SH 評価は gsplat の Apache-2.0 ソースを上記コミットに固定して直接移植しています。著作権・変更通知・ライセンスを保持し配布物に同梱します。CUDA/PyTorch ランタイム依存は追加しません。
+
 ## LichtFeld Studio Reference
 
 LichtFeld Studio is studied as an architecture and workflow reference under GPL-3.0-or-later. No LichtFeld implementation source is copied or linked into the current MIT-licensed native preview. Direct future reuse requires a compatible GPL release and an explicit licensing change: https://github.com/MrNeRF/LichtFeld-Studio

@@ -434,6 +434,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
     }
   });
   dismissUnexpectedNotice.start(10);
+  auto *shMenu = window.findChild<QMenu *>(QStringLiteral("shDisplayMenu"));
+  auto *shAction = window.findChild<QAction *>(QStringLiteral("shDegree2Action"));
+  if (!shMenu || !shAction) return false;
+  const int savedShDegree = viewport->maximumShDegree();
+  shAction->trigger();
   for (int step = 1; step <= 6; ++step) {
     const int next = (index + step) % 3;
     const QString language = AppLanguage::supported()[next];
@@ -441,6 +446,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
+    check(shMenu->title() == QCoreApplication::translate("Workbench", "球谐显示") &&
+          shAction->text() == QCoreApplication::translate("Workbench", "SH 2 阶") &&
+          shAction->isChecked() && viewport->maximumShDegree() == 2,
+          "SH display translated live without resetting quality preference");
     check(exportAction->text() == QCoreApplication::translate("Workbench", "导出模型...") &&
           exportDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型"), "export action and dialog translated live");
     check(exportDialog.options().format == ModelExportFormat::Glb && exportDialog.options().destinationPath == exportPath &&
@@ -510,6 +519,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name, "worker not interrupted");
   }
   dismissUnexpectedNotice.stop();
+  if (auto *restoreSh = window.findChild<QAction *>(QStringLiteral("shDegree%1Action").arg(savedShDegree)))
+    restoreSh->trigger();
   check(!AppLanguage::apply(QStringLiteral("invalid")) && AppLanguage::current() == locale &&
         AppLanguage::saved() == locale, "invalid locale leaves current UI unchanged");
   const QString screenshotDirectory = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");

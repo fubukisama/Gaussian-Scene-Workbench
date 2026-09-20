@@ -10,6 +10,7 @@
 #include <QtEndian>
 
 #include <QDir>
+#include <QDataStream>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -42,6 +43,7 @@ private slots:
   void loadsConfiguredRealMeshFixture();
   void loadsConfiguredRealCoordinateFixture();
   void loadsBinaryGaussianSphericalHarmonicColors();
+  void retainsFullSphericalHarmonics();
   void activatesGaussianScaleRotationAndOpacity();
   void detectsColmapDatasetLayoutAndExecutable();
   void selectsNewestVersionedColmapExecutable();
@@ -76,6 +78,90 @@ private slots:
   void reloadsCameraSidecarAfterRepair();
   void decimatesLargeCameraVisualization();
 };
+
+void WorkspaceDocumentTests::retainsFullSphericalHarmonics() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  for (int format = 0; format < 3; ++format) {
+    for (int degree = 0; degree <= 4; ++degree) {
+      const int rest = (degree + 1) * (degree + 1) - 1;
+      const auto path = QDir(temporary.path()).filePath("sh.ply");
+      QFile file(path);
+      QVERIFY(file.open(QIODevice::WriteOnly));
+      QByteArray header = "ply\nformat " + QByteArray(format == 0 ? "ascii" :
+          format == 1 ? "binary_little_endian" : "binary_big_endian") + " 1.0\nelement vertex 7\n";
+      // RGB coexisting with f_dc must not suppress SH, and shuffled property
+      // order must not be mistaken for the conventional training layout.
+      for (const char *name : {"x", "y", "z", "red", "green", "blue", "f_dc_2", "f_dc_0", "f_dc_1",
+              "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"})
+        header += QByteArray("property float ") + name + '\n';
+      for (int i = rest * 3 - 1; i >= 0; --i)
+        header += "property float f_rest_" + QByteArray::number(i) + '\n';
+      file.write(header + "end_header\n");
+      QDataStream stream(&file);
+      stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+      stream.setByteOrder(format == 2 ? QDataStream::BigEndian : QDataStream::LittleEndian);
+      for (int p = 0; p < 7; ++p) {
+        QVector<float> values{float(p), 1, 2, 128, 200, 255, 3, 1, 2, 4, -2, -2, -2, 1, 0, 0, 0};
+        for (int i = rest * 3 - 1; i >= 0; --i) values.append(float(p * 100 + i) / 100.0F);
+        for (float value : values) {
+          if (format == 0) file.write(QByteArray::number(value, 'g', 9) + ' ');
+          else stream << value;
+        }
+        if (format == 0) file.write("\n");
+      }
+      file.close();
+      for (int sampleCount : {3, 7}) {
+        const auto data = gsw::PlyPointCloudLoader::load(path, sampleCount);
+        QVERIFY2(data.isValid(), qPrintable(data.error));
+        const auto &sh = data.sphericalHarmonics;
+        QCOMPARE(sh.degree, degree);
+        QCOMPARE(sh.sourceIndices.size(), data.vertices.size());
+        QCOMPARE(sh.coefficients.size(), data.vertices.size() * (rest + 1) * 3);
+        for (qsizetype p = 0; p < data.vertices.size(); ++p) {
+          QCOMPARE(sh.sourceIndices[p], data.vertices[p].sourceIndex);
+          for (int k = 0; k <= rest; ++k)
+            for (int c = 0; c < 3; ++c) {
+              const float expected = k == 0 ? float(c + 1) :
+                  float(sh.sourceIndices[p] * 100 + c * rest + k - 1) / 100.0F;
+              QCOMPARE(sh.coefficients[(p * (rest + 1) + k) * 3 + c], expected);
+            }
+        }
+      }
+    }
+  }
+  // Invalid/duplicate fields and non-finite coefficients fall back to DC,
+  // preserving usable geometry. NaN coordinates must not shift SH indices.
+  const QByteArray base = "ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\nproperty float y\nproperty float z\n"
+      "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
+      "property float scale_0\nproperty float scale_1\nproperty float scale_2\n"
+      "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n";
+  for (int variant = 0; variant < 4; ++variant) {
+    QFile file(QDir(temporary.path()).filePath("invalid.ply"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(base);
+    if (variant == 0) file.write("property float f_rest_0\n");
+    if (variant == 1) file.write("property float f_dc_0\n");
+    file.write("end_header\n");
+    file.write(variant == 3 ? "nan 0 0 " : "0 0 0 ");
+    file.write(variant == 2 ? "nan 0 0 " : "0 0 0 ");
+    file.write("1 -2 -2 -2 1 0 0 0");
+    if (variant < 2) file.write(" 0");
+    file.write("\n1 0 0 2 0 0 1 -2 -2 -2 1 0 0 0");
+    if (variant < 2) file.write(" 0");
+    file.write("\n");
+    file.close();
+    const auto data = gsw::PlyPointCloudLoader::load(file.fileName());
+    QVERIFY2(data.isValid(), qPrintable(data.error));
+    if (variant == 3) {
+      QCOMPARE(data.sphericalHarmonics.sourceIndices, QVector<quint32>{1});
+      QCOMPARE(data.sphericalHarmonics.coefficients[0], 2.0F);
+    } else {
+      QCOMPARE(data.sphericalHarmonics.degree, -1);
+      QVERIFY(data.sphericalHarmonics.coefficients.isEmpty());
+    }
+  }
+}
 
 void WorkspaceDocumentTests::preservesIndependentSceneObjectsAcrossImportAndSave() {
   QTemporaryDir temporary;

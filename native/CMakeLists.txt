@@ -222,6 +222,7 @@ install(TARGETS GaussianSceneWorkbench
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(DIRECTORY third_party/spz DESTINATION licenses)
+install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -721,6 +722,17 @@ if(BUILD_TESTING)
       src/GaussianDepthSorter.cpp
       src/GaussianDepthSorter.h
     )
+    qt_add_executable(gsw_gaussian_sh_tests tests/GaussianShTests.cpp
+      src/GaussianGpuBuffer.cpp src/GaussianDepthSorter.cpp resources.qrc)
+    target_include_directories(gsw_gaussian_sh_tests PRIVATE src)
+    target_link_libraries(gsw_gaussian_sh_tests PRIVATE Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_gaussian_sh_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME gaussian_spherical_harmonics COMMAND gsw_gaussian_sh_tests)
+    set_tests_properties(gaussian_spherical_harmonics PROPERTIES TIMEOUT 45
+      ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     target_include_directories(gsw_gaussian_depth_sorter_tests PRIVATE src)
     target_link_libraries(gsw_gaussian_depth_sorter_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)

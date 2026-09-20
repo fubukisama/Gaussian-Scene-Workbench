@@ -15,6 +15,7 @@
 #include <QEnterEvent>
 #include <QEvent>
 #include <QFileInfo>
+#include <QFile>
 #include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QFutureWatcher>
@@ -686,6 +687,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mScene->mPendingVertices.clear();
   mScene->mPendingVertices.squeeze();
   mScene->gaussianGpu.clear();
+  mScene->mSphericalHarmonics = {};
   mScene->indexedGaussians = false;
   mScene->sortDirectionValid = false;
   mScene->mPointCache = {};
@@ -1549,9 +1551,12 @@ void main() {
   }
 
   mGaussianProgram = new QOpenGLShaderProgram(this);
+  QFile shSource(QStringLiteral(":/shaders/evaluate_sh.glsl"));
+  shSource.open(QIODevice::ReadOnly);
+  const QByteArray shEvaluator = shSource.readAll();
   const bool gaussianVertexCompiled =
       mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
-                                                R"GLSL(#version 330 core
+          QByteArray("#version 330 core\n") + shEvaluator + R"GLSL(
 layout(location = 0) in vec3 attributePosition;
 layout(location = 1) in vec3 attributeColor;
 layout(location = 2) in float attributeOpacity;
@@ -1594,6 +1599,7 @@ void main() {
   float opacity = attributeOpacity;
   vec3 scale = attributeScale;
   vec4 rotation = attributeRotation;
+  vec2 shRecord = vec2(-1.0, 0.0);
   if (indexedAttributes) {
     int base = int(texelFetch(gaussianOrder, gl_InstanceID).r) * 4;
     vec4 a = texelFetch(gaussianAttributes, base);
@@ -1603,7 +1609,12 @@ void main() {
     position = a.xyz; opacity = a.w;
     color = b.xyz; scale = vec3(b.w, c.x, c.y);
     rotation = vec4(c.zw, d.xy);
+    shRecord = d.zw;
+  } else if (shDegree >= 0) {
+    shRecord = texelFetch(gaussianAttributes, gl_InstanceID * 4 + 3).zw;
   }
+  if (shDegree >= 0 && shRecord.x >= 0.0 && shRecord.y < 0.5)
+    color = evaluateSh(int(shRecord.x), shOrthographic ? shParallelDirection : position - shCameraPosition);
   vec4 cameraCenter = view * vec4(position, 1.0);
   vec4 clipCenter = projection * cameraCenter;
   vertexColor = color;
@@ -2369,6 +2380,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->mRenderedMeshIndexCount = data.meshIndices.size();
             mScene->mSourcePositions = std::move(data.sourcePositions);
             mScene->mPreviewVertices = std::move(data.vertices);
+            mScene->mSphericalHarmonics = std::move(data.sphericalHarmonics);
             mScene->mPreviewOnlyScene = data.previewOnly;
             mScene->mPointCache = std::move(data.pointCache);
             mScene->mMeshCache = std::move(data.meshCache);
@@ -2584,13 +2596,18 @@ void NativeViewport::rebuildRenderedVertices() {
     mScene->indexedGaussians = mScene->gaussianGpu.supports(mScene->mRenderedPointCount) &&
         !qEnvironmentVariableIsSet("GSW_DISABLE_INDEXED_GAUSSIANS");
     if (mScene->indexedGaussians) {
-      mScene->gaussianGpu.setVertices(mScene->mPendingVertices);
+      mScene->gaussianGpu.setVertices(mScene->mPendingVertices, mScene->mSphericalHarmonics, selected);
       mScene->gaussianGpu.sort(forward);
     } else {
       mScene->depthSorter.sort(mScene->mPendingVertices, forward);
+      if (mScene->gaussianGpu.supports(mScene->mRenderedPointCount))
+        mScene->gaussianGpu.setVertices(mScene->mPendingVertices, mScene->mSphericalHarmonics, selected);
+      else
+        mScene->gaussianGpu.clear();
     }
+  } else {
+    mScene->gaussianGpu.clear();
   }
-  if (!mScene->indexedGaussians) mScene->gaussianGpu.clear();
   // Surface picking (including double-click recentering of inactive layers)
   // still uses the point VAO. Refresh it on edits/load, never on camera motion.
   mScene->mPointUploadPending = true;
@@ -3735,6 +3752,17 @@ void NativeViewport::drawTrainingPointCloud(
   glDisable(GL_BLEND);
 }
 
+int NativeViewport::effectiveShDegree() const {
+  if (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) return -1;
+  const int available = mScene->gaussianGpu.shDegree();
+  return mMaximumShDegree < 0 ? available : std::min(available, mMaximumShDegree);
+}
+
+void NativeViewport::setMaximumShDegree(int degree) {
+  mMaximumShDegree = std::clamp(degree, -1, 4);
+  update(); // uniforms only: no worker reset, vertex rebuild, or SH upload
+}
+
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
   const bool livePreview = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame());
@@ -3758,6 +3786,13 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   mGaussianProgram->setUniformValue("indexedAttributes", indexed);
   mGaussianProgram->setUniformValue("gaussianAttributes", 2);
   mGaussianProgram->setUniformValue("gaussianOrder", 3);
+  mGaussianProgram->setUniformValue("gaussianSh", 4);
+  mGaussianProgram->setUniformValue("shDegree", effectiveShDegree());
+  mGaussianProgram->setUniformValue("shCoefficientCount", mScene->gaussianGpu.shCoefficientCount());
+  const QMatrix4x4 inverseView = view.inverted();
+  mGaussianProgram->setUniformValue("shCameraPosition", inverseView.map(QVector3D()));
+  mGaussianProgram->setUniformValue("shParallelDirection", inverseView.mapVector(QVector3D(0, 0, -1)).normalized());
+  mGaussianProgram->setUniformValue("shOrthographic", mOrthographic);
   mGaussianProgram->setUniformValue("view", view);
   mGaussianProgram->setUniformValue("selected",
                                     mModelSelected ? 1.0F : 0.0F);
@@ -3775,9 +3810,11 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(drawCount));
     mScene->gaussianGpu.unbind();
   } else {
+    mScene->gaussianGpu.bindTextures();
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
+    mScene->gaussianGpu.unbindTextures();
   }
   mGaussianProgram->release();
   glDisable(GL_BLEND);
@@ -6493,7 +6530,9 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                                  : QCoreApplication::translate("Workbench", "三角网格")
           : mScene->mRenderMode == RenderMode::Gaussians &&
                     gaussianRenderingAvailable()
-                ? QCoreApplication::translate("Workbench", "高斯 DC SH")
+                ? effectiveShDegree() >= 0
+                    ? QCoreApplication::translate("Workbench", "高斯 SH %1 阶").arg(effectiveShDegree())
+                    : QCoreApplication::translate("Workbench", "高斯 DC（无可用 SH）")
                 : QCoreApplication::translate("Workbench", "点预览");
 
   const ReferenceGridScale gridScale = referenceGridScale(

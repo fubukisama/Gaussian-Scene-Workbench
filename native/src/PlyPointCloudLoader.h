@@ -75,8 +75,19 @@ struct PointPosition {
   [[nodiscard]] QVector3D toVector3D() const { return QVector3D(x, y, z); }
 };
 
+// Optional, compact SH sidecar; ordinary points retain their 60-byte layout.
+// Preview order, coefficient-major RGB (DC included), indexed by source record.
+struct GaussianShData {
+  int degree = -1;
+  QVector<float> coefficients;
+  QVector<quint32> sourceIndices;
+  static constexpr qint64 MaximumBytes = 512LL * 1024 * 1024;
+  int coefficientCount() const { return degree < 0 ? 0 : (degree + 1) * (degree + 1); }
+};
+
 struct PointCloudData {
   QVector<PointCloudVertex> vertices;
+  GaussianShData sphericalHarmonics;
   QVector<PointPosition> sourcePositions;
   PointCloudCacheIndex pointCache;
   MeshCacheIndex meshCache;
