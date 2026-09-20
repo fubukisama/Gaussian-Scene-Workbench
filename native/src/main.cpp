@@ -8,6 +8,7 @@
 #include "GaussianPerformanceSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
+#include "SpzSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -199,6 +200,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
+  QCommandLineOption spzSmokeOption(QStringLiteral("smoke-test-spz"),
+      QStringLiteral("Verify SPZ UI export/import and project persistence, optionally with --smoke-scene."));
+  parser.addOption(spzSmokeOption);
   QCommandLineOption gpuPreviewInteropProbeOption(
       QStringLiteral("probe-gpu-preview-interop"),
       QStringLiteral("Probe CUDA VMM / OpenGL Win32 external-memory support."));
@@ -243,6 +247,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
@@ -264,7 +269,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(processingPreviewOption)) {
+  if (parser.isSet(spzSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runSpzSmokeTest(window, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(processingPreviewOption)) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);

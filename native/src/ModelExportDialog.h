@@ -21,6 +21,10 @@ private:
   QStringList mProtectedPaths;
   QComboBox *mFormat;
   QComboBox *mCoordinates;
+  QWidget *mSpzOptions;
+  QComboBox *mSpzVersion;
+  QComboBox *mSpzQuality;
+  QComboBox *mSpzShDegree;
   QLineEdit *mPath;
   QLabel *mDescription;
 };

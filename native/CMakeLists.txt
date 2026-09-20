@@ -35,6 +35,21 @@ find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
+# Pinned, vendored MIT codec. No configure-time downloads or Python bindings.
+find_package(ZLIB REQUIRED)
+find_package(zstd CONFIG REQUIRED)
+add_library(gsw_spz STATIC third_party/spz/src/cc/load-spz.cc third_party/spz/src/cc/splat-types.cc)
+target_include_directories(gsw_spz SYSTEM PUBLIC third_party/spz/src/cc)
+if(TARGET zstd::libzstd_static)
+  set(GSW_ZSTD_TARGET zstd::libzstd_static)
+else()
+  set(GSW_ZSTD_TARGET zstd::libzstd_shared)
+endif()
+target_link_libraries(gsw_spz PUBLIC ZLIB::ZLIB ${GSW_ZSTD_TARGET})
+if(MSVC)
+  target_compile_options(gsw_spz PRIVATE /utf-8 /Zc:__cplusplus)
+endif()
+
 qt_add_executable(GaussianSceneWorkbench WIN32
   resources.qrc
   src/AppTheme.cpp
@@ -92,6 +107,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ModelInteraction.h
   src/ModelExport.cpp
   src/ModelExport.h
+  src/SpzIO.cpp
+  src/SpzIO.h
+  src/SpzSmokeTest.cpp
+  src/SpzSmokeTest.h
   src/ModelExportDialog.cpp
   src/ModelExportDialog.h
   src/NavigationGizmo.cpp
@@ -173,6 +192,7 @@ endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
+  gsw_spz
   Qt6::Core
   Qt6::Concurrent
   Qt6::Gui
@@ -201,6 +221,7 @@ include(GNUInstallDirs)
 install(TARGETS GaussianSceneWorkbench
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+install(DIRECTORY third_party/spz DESTINATION licenses)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -384,6 +405,10 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
+  add_test(NAME native_spz_interchange COMMAND GaussianSceneWorkbench --smoke-test-spz)
+  set_tests_properties(native_spz_interchange PROPERTIES TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_processing_preview PROPERTIES
     TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
@@ -395,7 +420,15 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
-  set_tests_properties(native_dense_grid_point_scene PROPERTIES
+    # The resident solid-box fixture, like the paged box above, occludes the
+    # origin marker. Depth picking and gizmos require the desktop GL backend.
+    set_tests_properties(native_reference_axes_with_scene PROPERTIES
+      ENVIRONMENT
+        "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_EXPECT_DEPTH_OCCLUSION=1"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    )
+    set_tests_properties(native_dense_grid_point_scene PROPERTIES
     ENVIRONMENT
       "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION
@@ -411,6 +444,7 @@ if(BUILD_TESTING)
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
       src/ModelExport.cpp
+      src/SpzIO.cpp
       src/ModelInteraction.cpp
       src/CameraTrajectory.cpp
       src/CameraTrajectory.h
@@ -434,7 +468,7 @@ if(BUILD_TESTING)
       src/WorkspaceDocument.h
     )
     target_include_directories(gsw_native_tests PRIVATE src)
-    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz)
     if(MSVC)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -443,6 +477,7 @@ if(BUILD_TESTING)
     qt_add_executable(gsw_model_export_tests
       tests/ModelExportTests.cpp
       src/ModelExport.cpp
+      src/SpzIO.cpp
       src/ModelInteraction.cpp
       src/PlyPointCloudLoader.cpp
       src/PointCloudCache.cpp
@@ -450,7 +485,7 @@ if(BUILD_TESTING)
       src/SceneCoordinates.cpp
     )
     target_include_directories(gsw_model_export_tests PRIVATE src)
-    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz)
     if(MSVC)
       target_compile_options(gsw_model_export_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()

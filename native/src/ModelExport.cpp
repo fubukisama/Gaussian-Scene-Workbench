@@ -1,5 +1,6 @@
 #include "ModelExport.h"
 #include "PlyPointCloudLoader.h"
+#include "SpzIO.h"
 
 #include <QBuffer>
 #include <QCache>
@@ -49,6 +50,7 @@ QString modelExportSuffix(ModelExportFormat format) {
   case ModelExportFormat::Obj: return QStringLiteral("obj");
   case ModelExportFormat::Stl: return QStringLiteral("stl");
   case ModelExportFormat::Glb: return QStringLiteral("glb");
+  case ModelExportFormat::Spz: return QStringLiteral("spz");
   }
   return {};
 }
@@ -125,6 +127,7 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
     return fail(QCoreApplication::translate("Workbench", "Choose a new file name; model export cannot overwrite its source."));
   if (o.applyTransform && (!o.transform.isValid() || !o.pivot.isFinite()))
     return fail(QCoreApplication::translate("Workbench", "The model transform is invalid."));
+  if (o.format == ModelExportFormat::Spz) return exportSpz(o);
   if (o.format == ModelExportFormat::Ply) {
     auto ply = o;
     if (o.transform.translation.isNull() && rotationsEquivalent(o.transform.rotation, QQuaternion()) &&

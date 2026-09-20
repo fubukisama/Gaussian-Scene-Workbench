@@ -1,4 +1,129 @@
 {
+  "导入模型（PLY / SPZ）": {
+    "zh_CN": "导入模型（PLY / SPZ）",
+    "en_US": "Import Model (PLY / SPZ)",
+    "ja_JP": "モデルをインポート（PLY / SPZ）"
+  },
+  "导入 PLY 点云、网格或 SPZ 压缩高斯场景": {
+    "zh_CN": "导入 PLY 点云、网格或 SPZ 压缩高斯场景",
+    "en_US": "Import PLY point clouds, meshes or SPZ compressed Gaussian scenes",
+    "ja_JP": "PLY 点群・メッシュまたは SPZ 圧縮ガウシアンシーンをインポート"
+  },
+  "导出模型文件（PLY / SPZ / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)": {
+    "zh_CN": "导出模型文件（PLY / SPZ / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)",
+    "en_US": "Export model files (PLY / SPZ / GLB / OBJ / STL / XYZ / CSV), separately from saving the project (Ctrl+E)",
+    "ja_JP": "プロジェクト保存とは別にモデルファイル（PLY / SPZ / GLB / OBJ / STL / XYZ / CSV）をエクスポート (Ctrl+E)"
+  },
+  "模型文件 (*.ply *.spz);;PLY 场景与网格 (*.ply);;SPZ 压缩高斯 (*.spz);;所有文件 (*.*)": {
+    "zh_CN": "模型文件 (*.ply *.spz);;PLY 场景与网格 (*.ply);;SPZ 压缩高斯 (*.spz);;所有文件 (*.*)",
+    "en_US": "Model Files (*.ply *.spz);;PLY Scenes and Meshes (*.ply);;SPZ Compressed Gaussians (*.spz);;All Files (*.*)",
+    "ja_JP": "モデルファイル (*.ply *.spz);;PLY シーンとメッシュ (*.ply);;SPZ 圧縮ガウシアン (*.spz);;すべてのファイル (*.*)"
+  },
+  "导入 SPZ 高斯": {
+    "zh_CN": "导入 SPZ 高斯",
+    "en_US": "Import SPZ Gaussians",
+    "ja_JP": "SPZ ガウシアンをインポート"
+  },
+  "正在解码 SPZ 为工程内 PLY 工作副本；原文件保持不变。取消将在当前解码阶段结束后生效。": {
+    "zh_CN": "正在解码 SPZ 为工程内 PLY 工作副本；原文件保持不变。取消将在当前解码阶段结束后生效。",
+    "en_US": "Decoding SPZ to a project-owned PLY working copy; the original stays unchanged. Cancellation takes effect after the current decoding stage.",
+    "ja_JP": "SPZ をプロジェクト内の PLY 作業用コピーにデコード中。元ファイルは変更されません。キャンセルは現在のデコード段階の終了後に反映されます。"
+  },
+  "SPZ 已解码为工程内 PLY 工作副本：%1；保留高斯参数，不能恢复压缩前丢失的精度。": {
+    "zh_CN": "SPZ 已解码为工程内 PLY 工作副本：%1；保留高斯参数，不能恢复压缩前丢失的精度。",
+    "en_US": "SPZ decoded to a project-owned PLY working copy: %1. Gaussian parameters are retained; precision lost during compression cannot be recovered.",
+    "ja_JP": "SPZ をプロジェクト内の PLY 作業用コピーにデコードしました：%1。ガウシアンパラメーターは保持されますが、圧縮で失われた精度は復元できません。"
+  },
+  "SPZ（压缩高斯）": {
+    "zh_CN": "SPZ（压缩高斯）",
+    "en_US": "SPZ (Compressed Gaussians)",
+    "ja_JP": "SPZ（圧縮ガウシアン）"
+  },
+  "SPZ 版本": {
+    "zh_CN": "SPZ 版本",
+    "en_US": "SPZ Version",
+    "ja_JP": "SPZ バージョン"
+  },
+  "紧凑（较小文件）": {
+    "zh_CN": "紧凑（较小文件）",
+    "en_US": "Compact (Smaller File)",
+    "ja_JP": "コンパクト（小さいファイル）"
+  },
+  "均衡（推荐）": {
+    "zh_CN": "均衡（推荐）",
+    "en_US": "Balanced (Recommended)",
+    "ja_JP": "バランス（推奨）"
+  },
+  "高精度（较大文件）": {
+    "zh_CN": "高精度（较大文件）",
+    "en_US": "High Precision (Larger File)",
+    "ja_JP": "高精度（大きいファイル）"
+  },
+  "压缩质量": {
+    "zh_CN": "压缩质量",
+    "en_US": "Compression Quality",
+    "ja_JP": "圧縮品質"
+  },
+  "保留源球谐阶数": {
+    "zh_CN": "保留源球谐阶数",
+    "en_US": "Keep Source SH Degree",
+    "ja_JP": "元の球面調和関数の次数を保持"
+  },
+  "最大球谐阶数": {
+    "zh_CN": "最大球谐阶数",
+    "en_US": "Maximum SH Degree",
+    "ja_JP": "球面調和関数の最大次数"
+  },
+  "SPZ 保留高斯尺度、旋转、不透明度与所选球谐外观；有损量化，不减少高斯数量。仅导出原始坐标，范围须在 ±2048 源单位内；不保存 CRS、单位和自定义属性。v4 更快，v3 用于旧版查看器。降低球谐阶数会减少视角相关细节；高精度也不是无损。取消将在当前编解码阶段结束后生效。": {
+    "zh_CN": "SPZ 保留高斯尺度、旋转、不透明度与所选球谐外观；有损量化，不减少高斯数量。仅导出原始坐标，范围须在 ±2048 源单位内；不保存 CRS、单位和自定义属性。v4 更快，v3 用于旧版查看器。降低球谐阶数会减少视角相关细节；高精度也不是无损。取消将在当前编解码阶段结束后生效。",
+    "en_US": "SPZ retains Gaussian scale, rotation, opacity and the selected SH appearance with lossy quantization, without reducing the splat count. Original coordinates only, within ±2048 source units; CRS, units and custom attributes are not stored. v4 is faster; v3 targets older viewers. Lower SH degrees reduce view-dependent detail; High Precision is still lossy. Cancellation takes effect after the current codec stage.",
+    "ja_JP": "SPZ はガウシアンのスケール・回転・不透明度と選択した球面調和関数の外観を保持し、スプラット数を減らさずに非可逆量子化します。元の座標のみ、範囲は元の単位で ±2048 以内。CRS・単位・カスタム属性は保存しません。v4 は高速、v3 は旧ビューアー向けです。次数を下げると視点依存の細部が減り、高精度でも非可逆です。キャンセルは現在の処理段階の終了後に反映されます。"
+  },
+  "SPZ requires a Gaussian PLY with complete position, opacity, scale, rotation and spherical harmonics fields (degree 0–4), without mesh faces.": {
+    "zh_CN": "SPZ 需要包含完整位置、不透明度、尺度、旋转及球谐属性（0–4 阶）且不含网格面的高斯 PLY。",
+    "en_US": "SPZ requires a Gaussian PLY with complete position, opacity, scale, rotation and spherical harmonics fields (degree 0–4), without mesh faces.",
+    "ja_JP": "SPZ には位置・不透明度・スケール・回転・球面調和関数（次数 0–4）の完全な属性を持ち、メッシュ面を含まないガウシアン PLY が必要です。"
+  },
+  "Invalid, truncated or unsupported SPZ data.": {
+    "zh_CN": "SPZ 数据无效、不完整或不受支持。",
+    "en_US": "Invalid, truncated or unsupported SPZ data.",
+    "ja_JP": "SPZ データが無効、切り詰められている、または未対応です。"
+  },
+  "SPZ conversion exceeds the 2 GiB working-memory budget. Use PLY for this model.": {
+    "zh_CN": "SPZ 转换超出 2 GiB 工作内存预算。请对此模型使用 PLY。",
+    "en_US": "SPZ conversion exceeds the 2 GiB working-memory budget. Use PLY for this model.",
+    "ja_JP": "SPZ 変換が作業メモリ上限の 2 GiB を超えます。このモデルには PLY を使用してください。"
+  },
+  "This SPZ uses unsupported extensions or flags. Export a standard SPZ without extensions, or use Gaussian PLY; coordinate conventions will not be guessed.": {
+    "zh_CN": "此 SPZ 使用了不受支持的扩展或标志。请导出不带扩展的标准 SPZ，或使用高斯 PLY；软件不会猜测坐标约定。",
+    "en_US": "This SPZ uses unsupported extensions or flags. Export a standard SPZ without extensions, or use Gaussian PLY; coordinate conventions will not be guessed.",
+    "ja_JP": "この SPZ は未対応の拡張またはフラグを使用しています。拡張なしの標準 SPZ またはガウシアン PLY を使用してください。座標の規約は推測しません。"
+  },
+  "SPZ export currently requires original coordinates; Gaussian transform baking is not supported.": {
+    "zh_CN": "SPZ 当前仅支持原始坐标导出，尚不支持烘焙高斯变换。",
+    "en_US": "SPZ export currently requires original coordinates; Gaussian transform baking is not supported.",
+    "ja_JP": "現在の SPZ エクスポートは元の座標のみ対応し、ガウシアンのトランスフォームのベイクは未対応です。"
+  },
+  "Gaussian attributes must be finite; SPZ export was not written.": {
+    "zh_CN": "高斯属性必须是有限值；未写入 SPZ 导出文件。",
+    "en_US": "Gaussian attributes must be finite; SPZ export was not written.",
+    "ja_JP": "ガウシアン属性は有限値である必要があります。SPZ は書き込まれませんでした。"
+  },
+  "SPZ positions must stay within ±2048 source units. Use PLY for large coordinates; no automatic shift or rescaling was applied.": {
+    "zh_CN": "SPZ 位置须在 ±2048 源单位内。大坐标请使用 PLY；未执行自动平移或缩放。",
+    "en_US": "SPZ positions must stay within ±2048 source units. Use PLY for large coordinates; no automatic shift or rescaling was applied.",
+    "ja_JP": "SPZ の位置は元の単位で ±2048 以内である必要があります。大きな座標には PLY を使用してください。自動移動・スケール変更は行っていません。"
+  },
+  "Gaussian rotation contains an invalid quaternion; SPZ export was not written.": {
+    "zh_CN": "高斯旋转包含无效四元数；未写入 SPZ 导出文件。",
+    "en_US": "Gaussian rotation contains an invalid quaternion; SPZ export was not written.",
+    "ja_JP": "ガウシアンの回転に無効なクォータニオンが含まれています。SPZ は書き込まれませんでした。"
+  },
+  "The source model changed during conversion. Please retry.": {
+    "zh_CN": "转换过程中源模型发生变化，请重试。",
+    "en_US": "The source model changed during conversion. Please retry.",
+    "ja_JP": "変換中に元のモデルが変更されました。再試行してください。"
+  },
   "预览更新失败 · 继续显示上一结果": {
     "zh_CN": "预览更新失败 · 继续显示上一结果",
     "en_US": "Preview update failed · Keeping the previous result",

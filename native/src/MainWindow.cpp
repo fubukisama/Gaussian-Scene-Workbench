@@ -14,6 +14,9 @@
 #include "ImportEnvironmentProbe.h"
 #include "MediaProjectBootstrap.h"
 #include "ModelExportDialog.h"
+#include "SpzIO.h"
+#include <QTemporaryDir>
+#include <memory>
 #include "ReconstructionDialog.h"
 #include "TrainingDialog.h"
 #include "TrainingEnvironmentProbe.h"
@@ -957,9 +960,9 @@ void MainWindow::createActions() {
 
   mImportSceneAction =
       AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-                  QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), this), AppLanguage::source("导入 PLY 场景/网格"));
+                  QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"), this), AppLanguage::source("导入模型（PLY / SPZ）"));
   mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
-  AppLanguage::bind(mImportSceneAction, "toolTip", AppLanguage::source("导入 PLY 点云、高斯场景或三角网格"));
+  AppLanguage::bind(mImportSceneAction, "toolTip", AppLanguage::source("导入 PLY 点云、网格或 SPZ 压缩高斯场景"));
   connect(mImportSceneAction, &QAction::triggered, this,
           &MainWindow::importScene);
 
@@ -1249,7 +1252,7 @@ void MainWindow::createActions() {
       AppLanguage::source("导出模型..."));
   mExportModelAction->setObjectName(QStringLiteral("exportModelAction"));
   mExportModelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
-  AppLanguage::bind(mExportModelAction, "toolTip", AppLanguage::source("导出模型文件（PLY / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)"));
+  AppLanguage::bind(mExportModelAction, "toolTip", AppLanguage::source("导出模型文件（PLY / SPZ / GLB / OBJ / STL / XYZ / CSV），独立于保存工程 (Ctrl+E)"));
   connect(mExportModelAction, &QAction::triggered, this, &MainWindow::exportModel);
 
   mExportCropAction =
@@ -4372,12 +4375,12 @@ void MainWindow::importScene() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
-  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"))) {
+  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"))) {
     return;
   }
   const QString filePath = QFileDialog::getOpenFileName(
-      this, QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"), mWorkspace.rootPath(),
-      QCoreApplication::translate("Workbench", "PLY 场景与网格 (*.ply);;所有文件 (*.*)"));
+      this, QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"), mWorkspace.rootPath(),
+      QCoreApplication::translate("Workbench", "模型文件 (*.ply *.spz);;PLY 场景与网格 (*.ply);;SPZ 压缩高斯 (*.spz);;所有文件 (*.*)"));
   if (filePath.isEmpty()) {
     return;
   }
@@ -4386,7 +4389,7 @@ void MainWindow::importScene() {
 
 bool MainWindow::importSceneFile(const QString &filePath) {
   if (filePath.isEmpty() || !ensureProjectRecoveryReady() ||
-      !ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入 PLY 场景/网格"))) return false;
+      !ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"))) return false;
   bool append = false;
   if (!mWorkspace.sceneObjects().isEmpty()) {
     QMessageBox choice(QMessageBox::Question, QCoreApplication::translate("Workbench", "选择导入方式"),
@@ -4409,12 +4412,52 @@ bool MainWindow::importSceneFile(const QString &filePath) {
     if (choice.clickedButton() != add && choice.clickedButton() != replace) return false;
     append = choice.clickedButton() == add;
   }
+  QString scenePath = filePath;
+  // SPZ is a delivery format, not an editing/checkpoint container. Decode a
+  // private project-owned working copy; save-as/recovery already migrate this root.
+  std::unique_ptr<QTemporaryDir> spzDirectory;
+  if (QFileInfo(filePath).suffix().compare(QStringLiteral("spz"), Qt::CaseInsensitive) == 0) {
+    spzDirectory = std::make_unique<QTemporaryDir>(QDir(mWorkspace.rootPath()).filePath(QStringLiteral("spz-import-XXXXXX")));
+    if (!spzDirectory->isValid()) {
+      showError(QCoreApplication::translate("Workbench", "无法导入场景"),
+          QCoreApplication::translate("Workbench", "Unable to create export files in the selected directory.")); return false;
+    }
+    scenePath = QDir(spzDirectory->path()).filePath(QFileInfo(filePath).completeBaseName() + QStringLiteral(".ply"));
+    std::atomic_bool cancelled{false}; std::atomic_int percent{0};
+    QProgressDialog progress(this);
+    progress.setObjectName(QStringLiteral("spzImportProgress"));
+    AppLanguage::bind(&progress, "windowTitle", AppLanguage::source("导入 SPZ 高斯"));
+    AppLanguage::bind(&progress, "labelText", AppLanguage::source("正在解码 SPZ 为工程内 PLY 工作副本；原文件保持不变。取消将在当前解码阶段结束后生效。"));
+    progress.setRange(0, 100); progress.setMinimumDuration(0);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setAutoClose(false); progress.setAutoReset(false);
+    QFutureWatcher<ModelExportResult> watcher;
+    QEventLoop loop; QTimer timer;
+    connect(&timer, &QTimer::timeout, &progress, [&] { progress.setValue(percent.load()); });
+    connect(&progress, &QProgressDialog::canceled, &progress, [&] { cancelled.store(true); });
+    connect(&watcher, &QFutureWatcher<ModelExportResult>::finished, &loop, &QEventLoop::quit);
+    watcher.setFuture(QtConcurrent::run([&] {
+      return importSpzToPly(filePath, scenePath, [&](int p) { percent.store(p); return cancelled.load(); });
+    }));
+    timer.start(80); progress.show();
+    if (!watcher.isFinished()) loop.exec();
+    timer.stop(); progress.hide();
+    const auto result = watcher.result();
+    if (result.cancelled) return false;
+    if (!result.success) { showError(QCoreApplication::translate("Workbench", "无法导入场景"), result.error); return false; }
+  }
+  // A failed/cancelled decode must not discard edits on the current model.
+  // Ask only once the replacement is ready to be adopted.
   if (!confirmDiscardSceneEdits()) return false;
   QString error;
-  if (!(append ? mWorkspace.addScenePath(filePath, &error)
-               : mWorkspace.setScenePath(filePath, &error))) {
+  if (!(append ? mWorkspace.addScenePath(scenePath, &error)
+               : mWorkspace.setScenePath(scenePath, &error))) {
     showError(QCoreApplication::translate("Workbench", "无法导入场景"), error);
     return false;
+  }
+  if (spzDirectory) {
+    spzDirectory->setAutoRemove(false);
+    appendTaskEvent(QCoreApplication::translate("Workbench", "SPZ 已解码为工程内 PLY 工作副本：%1；保留高斯参数，不能恢复压缩前丢失的精度。").arg(QDir::toNativeSeparators(scenePath)));
   }
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   const QString sceneType =

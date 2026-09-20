@@ -11,6 +11,7 @@
 #include <QVector2D>
 #include <QVector3D>
 #include <functional>
+#include <array>
 
 namespace gsw {
 
@@ -37,6 +38,14 @@ struct PlyGeometryVisitor {
   std::function<bool(const PlySourceGeometry &)> begin;
   std::function<bool(qint64, const PlySourceVertex &)> vertex;
   std::function<bool(const QVector<quint32> &, const QVector<QVector2D> &)> face;
+  std::function<bool(int)> cancelled;
+};
+
+// Raw training parameters: xyz, DC RGB, opacity logit, log-scale xyz,
+// quaternion wxyz, followed by channel-major f_rest_0..71. Never display/LOD data.
+struct PlyGaussianVisitor {
+  std::function<bool(qint64, int, bool)> begin;
+  std::function<bool(qint64, const std::array<double, 86> &)> gaussian;
   std::function<bool(int)> cancelled;
 };
 
@@ -121,6 +130,8 @@ public:
       const PlyGeometryVisitor &visitor, QString &error);
   [[nodiscard]] static ModelExportResult exportSourcePly(
       const ModelExportOptions &options);
+  [[nodiscard]] static bool visitSourceGaussians(const QString &sourcePath,
+      const PlyGaussianVisitor &visitor, QString &error);
 };
 
 } // namespace gsw

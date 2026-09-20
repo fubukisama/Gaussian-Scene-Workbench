@@ -18,6 +18,14 @@ The `native/` application dynamically links Qt 6.8 Core, Gui, Widgets, OpenGL, O
 
 Local packages built from the Conda Qt environment can also include dynamically linked runtime libraries such as zlib, zstd, PCRE2, double-conversion, libpng, libjpeg-turbo, libtiff, FreeType, WebP, libdeflate, Lerc, and liblzma. Those libraries retain their respective upstream open-source licenses. GitHub Actions builds use the official Qt Windows distribution.
 
+## Native SPZ Codec / 原生 SPZ 编解码 / ネイティブ SPZ コーデック
+
+The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source at commit `affd0ecea7fbb4c265ee119475af7ee5b2997482`: https://github.com/nianticlabs/spz . Copyright notices, the upstream license and the exact vendored source subset are retained in `native/third_party/spz/` and distributed in desktop packages under `licenses/spz/`. This is actual codec reuse, not a reimplementation. Its zlib and Zstandard dependencies retain their existing licenses (https://zlib.net/zlib_license.html and https://github.com/facebook/zstd/blob/dev/LICENSE); these notices are also included under `licenses/spz/dependency-licenses/`.
+
+中文：桌面端直接编译复用 Niantic/Adobe 的 MIT 开源 SPZ 编解码源码，固定上述提交；保留源码、版权及许可，安装包内位于 `licenses/spz/`。zlib 与 Zstandard 依赖保留各自许可。
+
+日本語：デスクトップ版は Niantic/Adobe の MIT ライセンス SPZ ソースを上記コミットに固定して直接コンパイルします。ソース・著作権・ライセンスは配布物の `licenses/spz/` に同梱します。zlib と Zstandard はそれぞれのライセンスを維持します。
+
 ## LichtFeld Studio Reference
 
 LichtFeld Studio is studied as an architecture and workflow reference under GPL-3.0-or-later. No LichtFeld implementation source is copied or linked into the current MIT-licensed native preview. Direct future reuse requires a compatible GPL release and an explicit licensing change: https://github.com/MrNeRF/LichtFeld-Studio

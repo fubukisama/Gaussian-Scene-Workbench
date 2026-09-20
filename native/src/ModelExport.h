@@ -7,7 +7,7 @@
 #include <functional>
 
 namespace gsw {
-enum class ModelExportFormat { Ply, Xyz, Csv, Obj, Stl, Glb };
+enum class ModelExportFormat { Ply, Xyz, Csv, Obj, Stl, Glb, Spz };
 
 struct ModelExportOptions {
   QString sourcePath;
@@ -18,6 +18,9 @@ struct ModelExportOptions {
   ModelTransform transform;
   SceneCoordinate3D pivot;
   SceneCoordinateInfo coordinates;
+  int spzVersion = 4;
+  int spzMaximumShDegree = -1; // -1 retains the source degree.
+  int spzQuality = 1; // 0 compact (4/3), 1 balanced (5/4), 2 high (8/8).
   // Called on the export thread. A true return requests cancellation.
   std::function<bool(int)> progress;
 };

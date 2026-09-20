@@ -1,5 +1,7 @@
 #include "ModelExport.h"
 #include "PlyPointCloudLoader.h"
+#include "SpzIO.h"
+#include <load-spz.h>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
@@ -28,6 +30,21 @@ quint32 uintAt(const QByteArray &data, qsizetype offset) {
   return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(data.constData() + offset));
 }
 float floatAt(const QByteArray &data, qsizetype offset) { return std::bit_cast<float>(uintAt(data, offset)); }
+QByteArray gaussianPly(int degree = 3, double x = 1.12345, bool invalidRotation = false) {
+  QByteArray h = "ply\nformat ascii 1.0\nelement vertex 3\n";
+  for (const char *p : {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"})
+    h += QByteArray("property double ") + p + '\n';
+  const int dim = (degree + 1) * (degree + 1) - 1;
+  for (int j = 0; j < 3 * dim; ++j) h += "property float f_rest_" + QByteArray::number(j) + '\n';
+  h += "end_header\n";
+  for (int i = 0; i < 3; ++i) {
+    h += QByteArray::number(x, 'g', 12) + " -2.25 " + QByteArray::number(i + 0.125) + " 0.3 -0.2 0.6 0.75 -2 -3 -4 " +
+        (invalidRotation ? QByteArray("0 0 0 0") : QByteArray("0.7 0.2 -0.3 0.4"));
+    for (int j = 0; j < 3 * dim; ++j) h += ' ' + QByteArray::number((j - 20) * 0.011, 'g', 8);
+    h += '\n';
+  }
+  return h;
+}
 }
 
 class ModelExportTests final : public QObject {
@@ -41,6 +58,9 @@ private slots:
   void transformsBinaryEndianPly();
   void usesFullSourceAcrossDiskPages();
   void rejectsSourceChangesBeforeCommit();
+  void spzRoundTripAndDegreeOptions();
+  void spzRejectsInvalidAndCancelledWithoutPublishing();
+  void spzRealModelWhenRequested();
 };
 
 void ModelExportTests::preservesPlyAndCroppedGaussianAttributes() {
@@ -247,6 +267,134 @@ void ModelExportTests::rejectsSourceChangesBeforeCommit() {
     QVERIFY(changed); QVERIFY(!result.success); QVERIFY(!result.cancelled);
     QCOMPARE(read(o.destinationPath), QByteArray("original destination"));
   }
+}
+
+void ModelExportTests::spzRoundTripAndDegreeOptions() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.format = ModelExportFormat::Spz; o.spzQuality = 2;
+  o.sourcePath = dir.filePath(QStringLiteral("源 日 model.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("圧縮 model.spz"));
+  const auto source = gaussianPly(); QVERIFY(save(o.sourcePath, source));
+  o.deletedVertices.resize(3); o.deletedVertices.setBit(1);
+  for (int version : {3, 4}) for (int degree : {0, 1, 2, 3}) {
+    o.spzVersion = version; o.spzMaximumShDegree = degree;
+    auto r = exportModelFile(o); QVERIFY2(r.success, qPrintable(r.error));
+    const auto bytes = read(o.destinationPath);
+    QVERIFY(version == 3 ? bytes.startsWith(QByteArray::fromHex("1f8b")) : bytes.startsWith("NGSP"));
+    const QString decoded = dir.filePath(QStringLiteral("decoded.ply"));
+    r = importSpzToPly(o.destinationPath, decoded); QVERIFY2(r.success, qPrintable(r.error));
+    int seen = 0;
+    PlyGaussianVisitor visitor;
+    visitor.begin = [&](qint64 n, int d, bool aa) { return n == 2 && d == degree && !aa; };
+    visitor.gaussian = [&](qint64, const std::array<double, 86> &v) {
+      const int originalIndex = seen++ == 0 ? 0 : 2;
+      if (std::abs(v[0] - 1.12345) > 0.00013 || std::abs(v[1] + 2.25) > 0.00013 ||
+          std::abs(v[2] - originalIndex - 0.125) > 0.00013) return false;
+      if (std::abs(v[3] - 0.3) > 0.04 || std::abs(v[6] - 0.75) > 0.04 || std::abs(v[8] + 3) > 0.07) return false;
+      const QQuaternion q(v[10], v[11], v[12], v[13]);
+      if (std::abs(QQuaternion::dotProduct(q.normalized(), QQuaternion(0.7F, 0.2F, -0.3F, 0.4F).normalized())) < 0.99999) return false;
+      const int dim = (degree + 1) * (degree + 1) - 1;
+      for (int c = 0; c < 3; ++c) for (int k = 0; k < dim; ++k)
+        if (std::abs(v[14+c*dim+k] - (c*15+k-20)*0.011) > 0.009) return false;
+      return true;
+    };
+    QString error;
+    QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(decoded, visitor, error), qPrintable(error)); QCOMPARE(seen, 2);
+    const auto preview = PlyPointCloudLoader::load(decoded);
+    QVERIFY2(preview.isValid(), qPrintable(preview.error)); QVERIFY(preview.hasGaussianAttributes);
+    QCOMPARE(preview.sourceVertexCount, 2);
+    QCOMPARE(read(o.sourcePath), source);
+  }
+  QVERIFY(save(o.sourcePath, gaussianPly(4)));
+  o.spzMaximumShDegree = -1;
+  QVERIFY(exportModelFile(o).success);
+  const auto degree4 = dir.filePath(QStringLiteral("degree4.ply"));
+  QVERIFY(importSpzToPly(o.destinationPath, degree4).success);
+  PlyGaussianVisitor degreeVisitor;
+  degreeVisitor.begin = [](qint64 n, int d, bool) { return n == 2 && d == 4; };
+  QString degreeError;
+  QVERIFY(PlyPointCloudLoader::visitSourceGaussians(degree4, degreeVisitor, degreeError));
+  // Legacy v2 created by the actual upstream encoder (not our PLY bridge).
+  spz::GaussianCloud g; g.numPoints = 1;
+  g.positions = {1,2,3}; g.colors = {.1F,.2F,.3F}; g.scales = {-2,-3,-4}; g.alphas = {.7F}; g.rotations = {0,0,0,1};
+  spz::PackOptions pack; pack.version = 2; pack.from = spz::CoordinateSystem::RDF;
+  std::vector<uint8_t> bytes; QVERIFY(spz::saveSpz(g, pack, &bytes));
+  QVERIFY(save(o.destinationPath, QByteArray(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+  QVERIFY(importSpzToPly(o.destinationPath, dir.filePath(QStringLiteral("legacy.ply"))).success);
+  // The official decoder returns infinite logits at alpha endpoints. Our
+  // working PLY must stay finite and remain exportable, for both 0 and 255.
+  for (float alpha : {-1000.0F, 1000.0F}) {
+    g.alphas = {alpha}; pack.version = 4;
+    QVERIFY(spz::saveSpz(g, pack, &bytes));
+    QVERIFY(save(o.destinationPath, QByteArray(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+    const auto working = dir.filePath(QStringLiteral("saturated.ply"));
+    QVERIFY(importSpzToPly(o.destinationPath, working).success);
+    ModelExportOptions again; again.sourcePath = working; again.destinationPath = dir.filePath(QStringLiteral("again.spz"));
+    again.format = ModelExportFormat::Spz;
+    QVERIFY(exportModelFile(again).success);
+  }
+}
+
+void ModelExportTests::spzRejectsInvalidAndCancelledWithoutPublishing() {
+  QTemporaryDir dir;
+  ModelExportOptions o; o.format = ModelExportFormat::Spz;
+  o.sourcePath = dir.filePath(QStringLiteral("source.ply")); o.destinationPath = dir.filePath(QStringLiteral("out.spz"));
+  QVERIFY(save(o.sourcePath, gaussianPly()));
+  QVERIFY(exportModelFile(o).success);
+  const auto valid = read(o.destinationPath);
+  for (const auto &bad : {pointPly(), gaussianPly(3, 1e6), gaussianPly(3, 1, true)}) {
+    QVERIFY(save(o.sourcePath, bad)); QVERIFY(save(o.destinationPath, "sentinel"));
+    QVERIFY(!exportModelFile(o).success); QCOMPARE(read(o.destinationPath), QByteArray("sentinel"));
+  }
+  QVERIFY(save(o.sourcePath, gaussianPly()));
+  for (int stage : {0, 65, 90, 99}) {
+    o.progress = [stage](int p) { return p >= stage; };
+    const auto r = exportModelFile(o); QVERIFY(r.cancelled); QVERIFY(!r.success);
+    QCOMPARE(read(o.destinationPath), QByteArray("sentinel"));
+  }
+  o.progress = {}; o.applyTransform = true; QVERIFY(!exportModelFile(o).success); o.applyTransform = false;
+  o.deletedVertices.resize(3); o.deletedVertices.fill(true); QVERIFY(!exportModelFile(o).success); o.deletedVertices.clear();
+  bool changed = false;
+  o.progress = [&](int p) { if (p == 99) { QFile f(o.sourcePath); if (f.open(QIODevice::Append)) { f.write("\n"); changed = true; } } return false; };
+  QVERIFY(!exportModelFile(o).success); QVERIFY(changed); QCOMPARE(read(o.destinationPath), QByteArray("sentinel"));
+  const auto decoded = dir.filePath(QStringLiteral("existing.ply")); QVERIFY(save(decoded, "unchanged"));
+  QList<QByteArray> invalid{QByteArray("not spz"), valid.left(valid.size()-1), valid + 'x'};
+  auto hostile = valid; hostile[12] = 5; invalid << hostile;
+  hostile = valid; hostile[13] = 31; invalid << hostile;
+  hostile = valid; hostile[14] = 2; invalid << hostile;
+  hostile = valid; for (int i = 8; i < 12; ++i) hostile[i] = char(0x7f); invalid << hostile;
+  for (const auto &data : invalid) {
+    QVERIFY(save(o.destinationPath, data)); QVERIFY(!importSpzToPly(o.destinationPath, decoded).success);
+    QCOMPARE(read(decoded), QByteArray("unchanged"));
+  }
+  QVERIFY(save(o.destinationPath, valid));
+  for (int stage : {0, 10, 40, 99}) {
+    const auto r = importSpzToPly(o.destinationPath, decoded, [stage](int p) { return p >= stage; });
+    QVERIFY(r.cancelled); QVERIFY(!r.success); QCOMPARE(read(decoded), QByteArray("unchanged"));
+  }
+  QVERIFY(!importSpzToPly(o.destinationPath, o.destinationPath).success); QCOMPARE(read(o.destinationPath), valid);
+  QVERIFY(!exportSpz(ModelExportOptions{o.sourcePath, o.sourcePath}).success);
+}
+
+void ModelExportTests::spzRealModelWhenRequested() {
+  const QString source = qEnvironmentVariable("GSW_SPZ_SOURCE");
+  if (source.isEmpty()) QSKIP("Set GSW_SPZ_SOURCE for read-only real-model round-trip QA.");
+  const QDir dir(qEnvironmentVariable("GSW_MODEL_EXPORT_FIXTURE_DIR"));
+  QVERIFY(!dir.path().isEmpty()); QVERIFY(QDir().mkpath(dir.path()));
+  ModelExportOptions o; o.format = ModelExportFormat::Spz; o.sourcePath = source;
+  o.destinationPath = dir.filePath(QStringLiteral("real-model.spz"));
+  auto r = exportModelFile(o); QVERIFY2(r.success, qPrintable(r.error));
+  r = importSpzToPly(o.destinationPath, dir.filePath(QStringLiteral("real-model.ply")));
+  QVERIFY2(r.success, qPrintable(r.error));
+  const auto a = PlyPointCloudLoader::load(source, 10000);
+  const auto b = PlyPointCloudLoader::load(dir.filePath(QStringLiteral("real-model.ply")), 10000);
+  QVERIFY(a.isValid()); QVERIFY2(b.isValid(), qPrintable(b.error));
+  QCOMPARE(a.sourceVertexCount, b.sourceVertexCount); QVERIFY(b.hasGaussianAttributes);
+  QVERIFY((a.boundsMinimum - b.boundsMinimum).length() < 0.001F);
+  QVERIFY((a.boundsMaximum - b.boundsMaximum).length() < 0.001F);
+  qInfo() << "SPZ real round trip:" << a.sourceVertexCount << "gaussians; PLY bytes" << QFileInfo(source).size()
+          << "SPZ bytes" << QFileInfo(o.destinationPath).size();
 }
 
 QTEST_GUILESS_MAIN(ModelExportTests)

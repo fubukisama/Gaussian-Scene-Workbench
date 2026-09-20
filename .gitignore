@@ -36,6 +36,7 @@ __pycache__/
 .tmp/
 
 # Build intermediates
+native/.deps/
 build/
 build-*/
 dist/

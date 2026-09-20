@@ -66,6 +66,8 @@ When an installed package is still running, use `-PackageDirectoryName <safe-nam
 
 Set `GSW_NATIVE_QT_ROOT` or pass `-QtRoot` when Qt is installed elsewhere.
 
+SPZ interchange additionally requires zlib development files and the Zstandard CMake package. They are already supplied by the local Conda Qt toolchain. Other toolchains can provide `ZLIB_ROOT` and `zstd_DIR`; Windows CI installs `zlib` and `zstd` with the `x64-windows-static-md` vcpkg triplet. The pinned MIT SPZ source is vendored in `native/third_party/spz`, compiled locally, and included with its license in packages. CMake does not download codec source at configure time. See [studio comparison and SPZ limits](../docs/STUDIO_COMPARISON.md).
+
 On a managed Windows workstation, configure an organization-approved code-signing certificate before building so the application and native test executables are signed before launch:
 
 ```powershell

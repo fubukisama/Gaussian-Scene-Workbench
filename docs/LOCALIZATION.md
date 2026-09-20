@@ -32,6 +32,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 停靠面板 / 浮动面板 | Dock Panel / Float Panel | パネルをドッキング / パネルをフローティング |
 | 显示名称 / 存储标识 | Display Name / Storage Identifier | 表示名 / 保存用識別子 |
 | 点云 | Point Cloud | 点群 |
+| 压缩高斯 / 有损量化 | Compressed Gaussians / Lossy Quantization | 圧縮ガウシアン / 非可逆量子化 |
+| 最大球谐阶数 | Maximum SH Degree | 球面調和関数の最大次数 |
+| 压缩质量 / 工作副本 | Compression Quality / Working Copy | 圧縮品質 / 作業用コピー |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
 | 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
 | 密度控制 | Density Control | 密度制御 |
@@ -84,6 +87,10 @@ Project, Properties and Tasks and Logs panels can be dragged by their compact ti
 ## References
 
 ### Model file export
+
+SPZ delivery is available for Gaussian models only, with v4 (Zstandard) / v3 (gzip), Compact / Balanced / High Precision and a maximum SH degree. The native Niantic/Adobe MIT codec is compiled from pinned source. Export keeps all undeleted source splats, not the viewport sample. SPZ is quantized/lossy at every quality level; lower SH degrees intentionally remove view-dependent information. It does not carry arbitrary PLY metadata, CRS, units, or optimizer state. Original source coordinates only, no Gaussian transform baking, no hidden recenter/scale; positions outside the format's 24-bit fixed-point range (approximately ±2048 source units at 12 fractional bits) are rejected. The buffered codec has a conservative 2 GiB working-memory budget; use PLY for larger models. Cancellation is honoured between codec stages and before atomic publication.
+
+**Import Model (PLY / SPZ)** accepts standard SPZ v1–v4 and decodes it off the UI thread to a project-owned PLY working copy. The original SPZ and existing objects are untouched; Append / Replace remains explicit. The work copy follows normal project save-as/recovery migration. Unsupported extensions/flags are rejected because they may change coordinate conventions. RGB/SH, scale, quaternion and opacity are decoded, with finite ±20 opacity logits at the quantized 0/255 endpoints. The original SPZ's quantization loss cannot be undone by saving a PLY. Current native Gaussian rendering is DC SH; higher-degree coefficients are retained for re-export, not claimed to be fully rendered. Options, explanations and progress text switch language immediately without changing parameters.
 
 **File → Export Model** (`Ctrl+E`) and the labeled toolbar button are separate from **Save Project**. Export works without cropping and while editing tools are locked. It exports the active model only, reading complete source records rather than preview/LOD buffers. Model selection, transforms, undo history and the original source remain unchanged. Point deletions are applied to exports. Current processing must finish first; live GPU-only training state is not exported as if it were a complete file.
 

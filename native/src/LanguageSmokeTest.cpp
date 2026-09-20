@@ -351,6 +351,18 @@ bool runLanguageSmokeTest(MainWindow &window) {
   check(exportDialogSeen && QFileInfo(uiExportPath).size() > 28 && viewport->editToolsLocked(),
         "model export action writes a standalone GLB while locked");
   ModelExportDialog exportDialog(viewport->modelExportOptions(), true, false, {ply.fileName()}, &window);
+  auto spzOptions = viewport->modelExportOptions();
+  spzOptions.spzVersion = 3; spzOptions.spzQuality = 2; spzOptions.spzMaximumShDegree = 2;
+  ModelExportDialog spzDialog(spzOptions, false, true, {ply.fileName()}, &window);
+  auto *spzFormat = spzDialog.findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
+  auto *spzQuality = spzDialog.findChild<QComboBox *>(QStringLiteral("spzQuality"));
+  auto *spzVersion = spzDialog.findChild<QComboBox *>(QStringLiteral("spzVersion"));
+  auto *spzDegree = spzDialog.findChild<QComboBox *>(QStringLiteral("spzShDegree"));
+  spzFormat->setCurrentIndex(spzFormat->findData(static_cast<int>(ModelExportFormat::Spz)));
+  check(spzQuality->currentIndex() == 2 && spzVersion->currentData().toInt() == 3 &&
+        spzDegree->currentData().toInt() == 2, "SPZ controls preserve supplied options");
+  check(spzDialog.options().format == ModelExportFormat::Spz && !spzDialog.options().applyTransform,
+        "SPZ uses original coordinates and true Gaussian format");
   auto *exportFormat = exportDialog.findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
   check(exportFormat && exportFormat->count() == 6, "all model export formats");
   exportFormat->setCurrentIndex(exportFormat->findData(static_cast<int>(ModelExportFormat::Glb)));
@@ -384,7 +396,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // existing dialogs before asserting that language changes add no actions.
   for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
        static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
-       static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog)}) dialog->ensurePolished();
+       static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog),
+       static_cast<QDialog *>(&spzDialog)}) dialog->ensurePolished();
   QApplication::processEvents();
   const auto actionCount = window.findChildren<QAction *>().size();
 
@@ -432,6 +445,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
           exportDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型"), "export action and dialog translated live");
     check(exportDialog.options().format == ModelExportFormat::Glb && exportDialog.options().destinationPath == exportPath &&
           exportDialog.options().applyTransform, "export settings survive language changes");
+    check(spzQuality->currentText() == QCoreApplication::translate("Workbench", "高精度（较大文件）") &&
+          spzDialog.options().spzQuality == 2 && spzDialog.options().spzVersion == 3 &&
+          spzDialog.options().spzMaximumShDegree == 2 && !spzDialog.options().applyTransform,
+          "SPZ options translate immediately without changing export parameters");
     check(trackball->text() == trackballTexts[next] && trackball->isChecked() && viewport->observationTrackballVisible(),
           "observation trackball translated and state retained");
     check(lockTools->text() == lockTexts[next] && lockTools->isChecked() && viewport->editToolsLocked() &&
@@ -511,6 +528,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     exportDialog.show(); exportDialog.adjustSize(); QApplication::processEvents();
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();
+    spzDialog.show(); spzDialog.adjustSize(); QApplication::processEvents();
+    check(spzDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-spz.png"))), "SPZ dialog screenshot");
+    spzDialog.hide();
   }
   check(runListInteractionSmokeTest(window), "all item-list interactions");
   if (testProcess) supervisor->shutdown();

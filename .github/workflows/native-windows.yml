@@ -71,6 +71,17 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
+      - name: Install SPZ codec dependencies
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "native/.deps"
+          New-Item -ItemType Directory -Force -Path "$root/binary-cache" | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = "$root/binary-cache"
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw "SPZ codec dependencies failed to build." }
+
       - name: Configure
         shell: pwsh
         run: >-
@@ -78,6 +89,8 @@ jobs:
           -G "Visual Studio 17 2022" -A x64
           -DBUILD_TESTING=ON
           -DGSW_RELEASE_DATE=2026-07-16
+          -DZLIB_ROOT="${{ github.workspace }}/native/.deps/installed/x64-windows-static-md"
+          -Dzstd_DIR="${{ github.workspace }}/native/.deps/installed/x64-windows-static-md/share/zstd"
 
       - name: Build
         shell: pwsh
@@ -133,6 +146,7 @@ jobs:
           Copy-Item LICENSE native/artifact/LICENSE
           Copy-Item THIRD_PARTY_LICENSES.md native/artifact/THIRD_PARTY_LICENSES.md
           Copy-Item docs/LOCALIZATION.md native/artifact/LOCALIZATION.md
+          Copy-Item docs/STUDIO_COMPARISON.md native/artifact/STUDIO_COMPARISON.md
 
       - name: Stage native compute backend
         shell: pwsh

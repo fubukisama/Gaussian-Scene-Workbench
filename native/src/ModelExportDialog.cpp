@@ -34,6 +34,7 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
     AppLanguage::bindComboItem(mFormat, mFormat->count() - 1, label);
   };
   add(ModelExportFormat::Ply, AppLanguage::source("PLY（保留源属性）"));
+  if (gaussian) add(ModelExportFormat::Spz, AppLanguage::source("SPZ（压缩高斯）"));
   add(ModelExportFormat::Glb, AppLanguage::source("GLB（glTF 2.0）"));
   add(ModelExportFormat::Xyz, AppLanguage::source("XYZ（坐标与颜色）"));
   add(ModelExportFormat::Csv, AppLanguage::source("CSV（坐标与颜色）"));
@@ -48,6 +49,29 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   AppLanguage::bindComboItem(mCoordinates, 1, AppLanguage::source("场景坐标（应用位移、旋转、缩放）"));
   mCoordinates->setCurrentIndex(gaussian ? 0 : 1);
   form->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("导出坐标")), mCoordinates);
+  mSpzOptions = new QWidget(this);
+  auto *spzForm = new QFormLayout(mSpzOptions);
+  spzForm->setContentsMargins(0, 0, 0, 0);
+  mSpzVersion = new QComboBox(mSpzOptions); mSpzVersion->setObjectName(QStringLiteral("spzVersion"));
+  mSpzVersion->addItem(QStringLiteral("SPZ v4 (Zstandard)"), 4);
+  mSpzVersion->addItem(QStringLiteral("SPZ v3 (gzip)"), 3);
+  const int versionIndex = mSpzVersion->findData(source.spzVersion);
+  mSpzVersion->setCurrentIndex(versionIndex < 0 ? 0 : versionIndex);
+  spzForm->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("SPZ 版本")), mSpzVersion);
+  mSpzQuality = new QComboBox(mSpzOptions); mSpzQuality->setObjectName(QStringLiteral("spzQuality"));
+  for (const char *key : {AppLanguage::source("紧凑（较小文件）"), AppLanguage::source("均衡（推荐）"), AppLanguage::source("高精度（较大文件）")}) {
+    mSpzQuality->addItem({}); AppLanguage::bindComboItem(mSpzQuality, mSpzQuality->count() - 1, key);
+  }
+  mSpzQuality->setCurrentIndex(source.spzQuality >= 0 && source.spzQuality <= 2 ? source.spzQuality : 1);
+  spzForm->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("压缩质量")), mSpzQuality);
+  mSpzShDegree = new QComboBox(mSpzOptions); mSpzShDegree->setObjectName(QStringLiteral("spzShDegree"));
+  mSpzShDegree->addItem({}, -1);
+  AppLanguage::bindComboItem(mSpzShDegree, 0, AppLanguage::source("保留源球谐阶数"));
+  for (int degree = 0; degree <= 4; ++degree) mSpzShDegree->addItem(QString::number(degree), degree);
+  const int degreeIndex = mSpzShDegree->findData(source.spzMaximumShDegree);
+  mSpzShDegree->setCurrentIndex(degreeIndex < 0 ? 0 : degreeIndex);
+  spzForm->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("最大球谐阶数")), mSpzShDegree);
+  layout->addWidget(mSpzOptions);
   auto *pathLayout = new QHBoxLayout;
   mPath = new QLineEdit(QFileInfo(source.sourcePath).dir().filePath(
       QFileInfo(source.sourcePath).completeBaseName() + QStringLiteral("-exported.ply")), this);
@@ -70,7 +94,7 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
     const QFileInfo path(mPath->text());
     const auto format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
     const QStringList suffixes{QStringLiteral("ply"), QStringLiteral("glb"), QStringLiteral("obj"),
-        QStringLiteral("stl"), QStringLiteral("xyz"), QStringLiteral("csv")};
+        QStringLiteral("stl"), QStringLiteral("xyz"), QStringLiteral("csv"), QStringLiteral("spz")};
     const QString base = suffixes.contains(path.suffix().toLower()) ? path.completeBaseName() : path.fileName();
     mPath->setText(path.dir().filePath(base + QLatin1Char('.') + modelExportSuffix(format)));
     refreshDescription();
@@ -84,16 +108,23 @@ ModelExportOptions ModelExportDialog::options() const {
   result.format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
   result.destinationPath = mPath->text();
   result.applyTransform = mCoordinates->currentIndex() == 1;
+  result.spzVersion = mSpzVersion->currentData().toInt();
+  result.spzQuality = mSpzQuality->currentIndex();
+  result.spzMaximumShDegree = mSpzShDegree->currentData().toInt();
   return result;
 }
 
 void ModelExportDialog::refreshDescription() {
   const auto format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
   const bool gaussianPly = mGaussian && format == ModelExportFormat::Ply;
-  mCoordinates->setEnabled(!gaussianPly);
-  if (gaussianPly) mCoordinates->setCurrentIndex(0);
+  const bool spz = format == ModelExportFormat::Spz;
+  mSpzOptions->setVisible(spz);
+  mCoordinates->setEnabled(!gaussianPly && !spz);
+  if (gaussianPly || spz) mCoordinates->setCurrentIndex(0);
   QString description;
   switch (format) {
+  case ModelExportFormat::Spz:
+    description = QCoreApplication::translate("Workbench", "SPZ 保留高斯尺度、旋转、不透明度与所选球谐外观；有损量化，不减少高斯数量。仅导出原始坐标，范围须在 ±2048 源单位内；不保存 CRS、单位和自定义属性。v4 更快，v3 用于旧版查看器。降低球谐阶数会减少视角相关细节；高精度也不是无损。取消将在当前编解码阶段结束后生效。"); break;
   case ModelExportFormat::Ply:
     description = QCoreApplication::translate("Workbench", "保留 PLY 顶点属性、网格拓扑与 UV；贴图复制到配套资源目录。原始文件不会被修改。"); break;
   case ModelExportFormat::Obj:
@@ -106,7 +137,7 @@ void ModelExportDialog::refreshDescription() {
   case ModelExportFormat::Csv:
     description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性；坐标使用源模型单位。"); break;
   }
-  if (mGaussian) description += QLatin1Char('\n') + (gaussianPly
+  if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
       ? QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.")
       : QCoreApplication::translate("Workbench", "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。"));
   mDescription->setText(description);

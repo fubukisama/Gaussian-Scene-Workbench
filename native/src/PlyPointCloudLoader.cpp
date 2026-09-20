@@ -2473,6 +2473,64 @@ bool PlyPointCloudLoader::visitSourceGeometry(const QString &sourcePath,
   return true;
 }
 
+bool PlyPointCloudLoader::visitSourceGaussians(const QString &path,
+    const PlyGaussianVisitor &visitor, QString &error) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    error = QCoreApplication::translate("Workbench", "Unable to open source PLY: %1").arg(file.errorString());
+    return false;
+  }
+  PlyHeader header;
+  if (!parseHeader(file, header, error)) return false;
+  const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
+      [](const auto &e) { return e.name == QStringLiteral("vertex"); });
+  const auto invalid = [&] {
+    error = QCoreApplication::translate("Workbench", "SPZ requires a Gaussian PLY with complete position, opacity, scale, rotation and spherical harmonics fields (degree 0–4), without mesh faces.");
+    return false;
+  };
+  if (vertex == header.elements.cend() || vertex->count <= 0) return invalid();
+  for (const auto &e : header.elements)
+    if (e.name == QStringLiteral("face") && e.count > 0) return invalid();
+  QStringList names{QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("z"),
+      QStringLiteral("f_dc_0"), QStringLiteral("f_dc_1"), QStringLiteral("f_dc_2"),
+      QStringLiteral("opacity"), QStringLiteral("scale_0"), QStringLiteral("scale_1"), QStringLiteral("scale_2"),
+      QStringLiteral("rot_0"), QStringLiteral("rot_1"), QStringLiteral("rot_2"), QStringLiteral("rot_3")};
+  int rest = 0;
+  for (const auto &p : vertex->properties) if (p.name.startsWith(QStringLiteral("f_rest_"))) ++rest;
+  int degree = -1;
+  for (int d = 0; d <= 4; ++d) if (rest == ((d + 1) * (d + 1) - 1) * 3) degree = d;
+  if (degree < 0) return invalid();
+  for (int i = 0; i < rest; ++i) names.append(QStringLiteral("f_rest_%1").arg(i));
+  QVector<int> indices;
+  for (const auto &name : names) {
+    const int index = findProperty(*vertex, {name});
+    if (index < 0 || vertex->properties[index].isList) return invalid();
+    int occurrences = 0;
+    for (const auto &p : vertex->properties) if (p.name == name) ++occurrences;
+    if (occurrences != 1) return invalid();
+    indices.append(index);
+  }
+  bool antialiased = false;
+  for (const auto &line : header.rawLines)
+    if (line.trimmed() == "comment gsw_spz_antialiased 1") antialiased = true;
+  if (visitor.begin && !visitor.begin(vertex->count, degree, antialiased)) return false;
+  QVector<double> values;
+  QVector<QVector<double>> lists;
+  std::array<double, 86> raw{};
+  for (const auto &e : header.elements) {
+    for (qint64 i = 0; i < e.count; ++i) {
+      if ((i & 4095) == 0 && visitor.cancelled && visitor.cancelled(
+          static_cast<int>(file.pos() * 100.0 / std::max<qint64>(1, file.size())))) return false;
+      if (!(header.format == PlyFormat::Ascii ? readAsciiElementRecord(file, e, values, lists, error)
+              : readBinaryElementRecord(file, e, header.format, values, lists, error))) return false;
+      if (&e != &*vertex || !visitor.gaussian) continue;
+      for (int j = 0; j < indices.size(); ++j) raw[j] = values[indices[j]];
+      if (!visitor.gaussian(i, raw)) return false;
+    }
+  }
+  return true;
+}
+
 ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions &options) {
   ModelExportResult result;
   QString &error = result.error;
