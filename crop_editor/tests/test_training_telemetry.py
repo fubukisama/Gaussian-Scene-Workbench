@@ -38,6 +38,46 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_pause_exit_requires_current_session_checkpoint(self):
+        from native.worker.training_checkpoint import TrainingCheckpoint
+        import pickle
+        with tempfile.TemporaryDirectory() as temporary:
+            control = {"output": temporary, "session": "current"}
+            TrainingCheckpoint(temporary, control).save(types.SimpleNamespace(save=pickle.dump),
+                {"iteration": 3, "total": 10, "identity": "test"})
+            job = {"id": "pause-test", "backend": "3dgs", "native_control": control, "log": []}
+            process = mock.Mock(stdout=[], wait=mock.Mock(return_value=75))
+            with mock.patch.object(server, "persist_train_job"), \
+                 mock.patch.object(server, "training_env", return_value={}), \
+                 mock.patch.object(server.subprocess, "Popen", return_value=process) as launch:
+                with self.assertRaises(server.NativeTrainingPaused) as paused:
+                    server.run_logged(job, ["python", "train.py"], temporary, "3dgs")
+                self.assertEqual(paused.exception.manifest["iteration"], 3)
+                self.assertEqual(json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"]), control)
+                control["session"] = "next-session"
+                with self.assertRaisesRegex(RuntimeError, "this training session"):
+                    server.run_logged(job, ["python", "train.py"], temporary, "3dgs")
+                self.assertIsNone(job["process"])
+
+    def test_native_resume_never_reconstructs_missing_alignment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = Path(temporary) / "dataset"
+            (dataset / "images").mkdir(parents=True)
+            (dataset / "images/a.jpg").write_bytes(b"fixture")
+            job = {"id": "resume-test", "scene": "test", "output_scene": "test", "backend": "3dgs",
+                   "dataset_path": str(dataset), "native_control": {"resume": True}, "log": []}
+            with mock.patch.object(server, "OUTPUT_DIR", Path(temporary) / "output"), \
+                 mock.patch.object(server, "ensure_training_environment", return_value={"python": "test", "colmap": "test"}), \
+                 mock.patch.object(server, "persist_train_job"), mock.patch.object(server, "run_logged"), \
+                 mock.patch.object(server, "restore_alignment_cache", return_value=False) as restore, \
+                 mock.patch.object(server, "run_colmap_convert", side_effect=RuntimeError("COLMAP must not run")) as convert, \
+                 mock.patch.object(server, "training_point_cloud", return_value=None):
+                server.run_training_job(job, False, "quick", False)
+            convert.assert_not_called()
+            restore.assert_not_called()
+            self.assertEqual(job["status"], "failed")
+            self.assertIn("resume", job["error"].lower())
+
     def test_initial_gaussians_follow_sparse_generation_and_ignore_late_frames(self):
         job = {"preview_kind": "colmap_sparse", "preview_iteration": 40}
         server.apply_training_preview(job, {"iteration": 0, "preview_kind": "gaussian_initial",

@@ -16,6 +16,13 @@
 int main(int argc, char *argv[]) {
   QCoreApplication application(argc, argv);
   const QStringList arguments = application.arguments();
+  if (arguments.size() == 2 && arguments.at(1) == QStringLiteral("pause-worker")) {
+    char command[32] = {};
+    if (!std::fgets(command, sizeof(command), stdin) || QByteArray(command).trimmed() != "pause") return 8;
+    std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"paused\",\"stage\":\"paused\"}");
+    std::fflush(stdout);
+    return 75;
+  }
   if (arguments.size() >= 2 && arguments.at(1) == QStringLiteral("tree-child")) {
     QDeadlineTimer deadline(60000);
     while (!deadline.hasExpired()) {

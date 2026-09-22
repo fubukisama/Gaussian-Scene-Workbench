@@ -48,6 +48,7 @@ protected:
 
 private:
   friend bool runListInteractionSmokeTest(MainWindow &window);
+  friend bool runTrainingResumeSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -141,6 +142,9 @@ private:
   void runEnvironmentCheck();
   void startReconstruction();
   void startTraining();
+  void pauseTraining();
+  void resumeTraining();
+  void updateTrainingActions();
   void updateWorkspaceUi();
   void retranslateUi();
   void updateTaskLabels();
@@ -217,6 +221,9 @@ private:
   QAction *mClearTasksAction = nullptr;
   QAction *mReconstructAction = nullptr;
   QAction *mTrainAction = nullptr;
+  QAction *mPauseTrainingAction = nullptr;
+  QAction *mResumeTrainingAction = nullptr;
+  bool mPauseRequested = false;
   QAction *mStopAction = nullptr;
   QAction *mGaussianRenderAction = nullptr;
   QAction *mMeshRenderAction = nullptr;

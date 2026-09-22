@@ -14,6 +14,9 @@ struct TrainingOutputScene {
 struct ActiveTrainingJob {
   QString configurationPath;
   QString outputSceneRoot;
+  // A safely paused/recovered preview is already part of the project. Do not
+  // replace a subsequently selected model every time that project is opened.
+  bool previewRecovered = false;
 
   [[nodiscard]] bool isValid() const {
     return !configurationPath.isEmpty() && !outputSceneRoot.isEmpty();
@@ -22,6 +25,9 @@ struct ActiveTrainingJob {
 
 [[nodiscard]] TrainingOutputScene findLatestTrainingOutputScene(
     const QString &outputSceneRoot);
+// Cheap availability check only. The worker verifies SHA-256 and compatibility
+// before deserializing a user-confirmed checkpoint.
+[[nodiscard]] int nativeResumeIteration(const QString &outputSceneRoot);
 bool saveActiveTrainingJob(const QString &projectRoot,
                            const ActiveTrainingJob &job,
                            QString *errorMessage = nullptr);

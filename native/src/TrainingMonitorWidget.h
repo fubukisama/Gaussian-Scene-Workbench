@@ -21,7 +21,7 @@ public:
   void beginTraining(const QString &taskName, const QString &backend,
                      int expectedIterations);
   void updateStatus(const WorkerStatus &status);
-  void finishTraining(bool succeeded, bool cancelled);
+  void finishTraining(bool succeeded, bool cancelled, bool paused = false);
 
   [[nodiscard]] const TrainingTelemetry &telemetry() const;
 
@@ -34,6 +34,7 @@ private:
   bool mFinished = false;
   bool mSucceeded = false;
   bool mCancelled = false;
+  bool mPaused = false;
   bool mSparsePreview = false;
 
   TrainingTelemetry mTelemetry;

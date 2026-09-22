@@ -457,6 +457,7 @@ QString workerStageLabel(const QString &stage) {
       {QStringLiteral("prepare"), QCoreApplication::translate("Workbench", "准备训练")},
       {QStringLiteral("colmap"), QCoreApplication::translate("Workbench", "COLMAP 重建")},
       {QStringLiteral("train"), QCoreApplication::translate("Workbench", "训练")},
+      {QStringLiteral("paused"), QCoreApplication::translate("Workbench", "已暂停")},
       {QStringLiteral("done"), QCoreApplication::translate("Workbench", "完成")},
       {QStringLiteral("failed"), QCoreApplication::translate("Workbench", "失败")},
       {QStringLiteral("cancelled"), QCoreApplication::translate("Workbench", "已取消")},
@@ -1022,6 +1023,15 @@ void MainWindow::createActions() {
   AppLanguage::bind(mTrainAction, "toolTip", AppLanguage::source("启动当前工程训练"));
   connect(mTrainAction, &QAction::triggered, this, &MainWindow::startTraining);
 
+  mPauseTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPause), {}, this), AppLanguage::source("暂停训练"));
+  mPauseTrainingAction->setObjectName(QStringLiteral("pauseTrainingAction"));
+  AppLanguage::bind(mPauseTrainingAction, "toolTip", AppLanguage::source("保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）"));
+  connect(mPauseTrainingAction, &QAction::triggered, this, &MainWindow::pauseTraining);
+  mResumeTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaSeekForward), {}, this), AppLanguage::source("继续训练"));
+  mResumeTrainingAction->setObjectName(QStringLiteral("resumeTrainingAction"));
+  AppLanguage::bind(mResumeTrainingAction, "toolTip", AppLanguage::source("从当前工程的完整训练检查点继续，保留优化器与迭代进度"));
+  connect(mResumeTrainingAction, &QAction::triggered, this, &MainWindow::resumeTraining);
+
   mStopAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaStop),
                             QCoreApplication::translate("Workbench", "停止任务"), this), AppLanguage::source("停止任务"));
   AppLanguage::bind(mStopAction, "toolTip", AppLanguage::source("停止当前任务"));
@@ -1377,6 +1387,8 @@ void MainWindow::createMenus() {
   workflowMenu->addSeparator();
   workflowMenu->addAction(mReconstructAction);
   workflowMenu->addAction(mTrainAction);
+  workflowMenu->addAction(mPauseTrainingAction);
+  workflowMenu->addAction(mResumeTrainingAction);
   workflowMenu->addAction(mStopAction);
 
   QMenu *sceneMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景")), AppLanguage::source("场景"), "title");
@@ -1552,6 +1564,8 @@ void MainWindow::createToolBars() {
   mainToolbar->addSeparator();
   mainToolbar->addAction(mReconstructAction);
   mainToolbar->addAction(mTrainAction);
+  mainToolbar->addAction(mPauseTrainingAction);
+  mainToolbar->addAction(mResumeTrainingAction);
   mainToolbar->addAction(mStopAction);
 
   addToolBarBreak(Qt::TopToolBarArea);
@@ -2000,6 +2014,7 @@ void MainWindow::connectServices() {
               return;
             }
             mLastWorkerStatus = status;
+            updateTrainingActions();
             QString detail = workerStageLabel(status.stage);
             if (status.previewKind == QStringLiteral("colmap_sparse") &&
                 status.gaussianCount.has_value()) {
@@ -2022,6 +2037,10 @@ void MainWindow::connectServices() {
         const bool finishingTraining =
             mPendingTraining.has_value() &&
             mPendingTraining->taskName == taskName;
+        const bool paused = finishingTraining && !processCancelled && exitCode == 75 &&
+            mActiveWorkerState == QStringLiteral("paused") &&
+            nativeResumeIteration(mPendingTraining->outputDirectory) > 0;
+        mPauseRequested = false;
         const bool finishingReconstruction =
             mPendingReconstruction.has_value() &&
             mPendingReconstruction->taskName == taskName;
@@ -2215,14 +2234,23 @@ void MainWindow::connectServices() {
                   QCoreApplication::translate("Workbench", "训练未完成，已保留最近可用检查点：迭代 %1，%2")
                       .arg(partial->iteration)
                       .arg(QDir::toNativeSeparators(partial->path)));
-              if ((mClosePending || mWorkspace.hasPendingDataMigration()) &&
+              if ((paused || mClosePending || mWorkspace.hasPendingDataMigration()) &&
                   pathsReferToSameLocation(mWorkspace.rootPath(),
                                            pending.projectRoot)) {
                 QString sceneError;
                 if (mWorkspace.setScenePath(partial->path, &sceneError)) {
-                  completionDetail = QCoreApplication::translate("Workbench", "保留迭代 %1 · 等待保存")
-                                         .arg(partial->iteration);
-                  appendTaskEvent(
+                  if (paused) {
+                    QString saveError;
+                    if (mWorkspace.projectFilePath().isEmpty() || mWorkspace.saveManifest({}, &saveError)) {
+                      auto active = loadActiveTrainingJob(pending.projectRoot);
+                      active.previewRecovered = true;
+                      if (!saveActiveTrainingJob(pending.projectRoot, active, &saveError)) appendTaskEvent(saveError);
+                    } else appendTaskEvent(saveError);
+                  }
+                  completionDetail = paused
+                      ? QCoreApplication::translate("Workbench", "训练已暂停 · 检查点已保存，可继续训练")
+                      : QCoreApplication::translate("Workbench", "保留迭代 %1 · 等待保存").arg(partial->iteration);
+                  if (!paused) appendTaskEvent(
                       QCoreApplication::translate("Workbench", "退出前已将最近训练检查点关联到当前工程；"
                                      "请在保存确认中选择是否保留。"));
                 } else {
@@ -2234,7 +2262,8 @@ void MainWindow::connectServices() {
             }
           }
           QString recoveryRecordError;
-          if (!clearActiveTrainingJob(pending.projectRoot,
+          if ((effectiveSucceeded || nativeResumeIteration(pending.outputDirectory) < 0) &&
+              !clearActiveTrainingJob(pending.projectRoot,
                                       &recoveryRecordError)) {
             appendTaskEvent(
                 QCoreApplication::translate("Workbench", "训练已结束，但恢复标记清理失败：%1")
@@ -2246,22 +2275,24 @@ void MainWindow::connectServices() {
             processCancelled && !effectiveSucceeded && !recoveryFailed;
         if (finishingTraining) {
           mViewport->stopTrainingGpuPreview();
-          mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled);
+          mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled, paused);
         }
         if (finishingTraining || finishingReconstruction) {
-          mViewport->finishProcessingPreview(effectiveSucceeded, cancelled);
-          if (finishingTraining && effectiveSucceeded)
+          if (finishingTraining && (effectiveSucceeded || paused))
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
+          mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
           state->setData(Qt::UserRole + 31, effectiveSucceeded ? QStringLiteral("done")
+              : paused ? QStringLiteral("paused")
               : cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed"));
           state->setText(effectiveSucceeded ? QCoreApplication::translate("Workbench", "完成")
+                         : paused ? QCoreApplication::translate("Workbench", "已暂停")
                          : cancelled        ? QCoreApplication::translate("Workbench", "已取消")
                                             : QCoreApplication::translate("Workbench", "失败"));
           state->setForeground(effectiveSucceeded ? QColor(102, 193, 168)
-                               : cancelled        ? QColor(218, 169, 82)
+                               : (cancelled || paused) ? QColor(218, 169, 82)
                                                   : QColor(211, 95, 95));
           if (!effectiveSucceeded) {
             mTaskTable->item(mActiveTaskRow, 3)
@@ -2276,6 +2307,7 @@ void MainWindow::connectServices() {
         }
 
         const QString outcome = effectiveSucceeded ? QCoreApplication::translate("Workbench", "完成")
+                                : paused ? QCoreApplication::translate("Workbench", "已暂停")
                                 : cancelled        ? QCoreApplication::translate("Workbench", "取消")
                                                    : QCoreApplication::translate("Workbench", "失败");
         appendTaskEvent(QCoreApplication::translate("Workbench", "任务%1：%2").arg(outcome, taskName));
@@ -2308,6 +2340,7 @@ void MainWindow::connectServices() {
         }
         mActiveTaskRow = -1;
         mActiveWorkerState.clear();
+        updateTrainingActions();
         rebuildProjectTree();
         updateInspector();
         if (mClosePending) {
@@ -3714,9 +3747,10 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
     }
     return false;
   }
-  if (!job.isValid()) {
+  if (!job.isValid() || job.previewRecovered) {
     return true;
   }
+  const bool resumable = nativeResumeIteration(job.outputSceneRoot) > 0;
 
   QString resultError;
   std::optional<ResolvedTrainingPointCloud> checkpoint =
@@ -3724,7 +3758,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
                                 &resultError);
   if (!checkpoint.has_value()) {
     QString clearError;
-    if (!clearActiveTrainingJob(mWorkspace.rootPath(), &clearError)) {
+    if (!resumable && !clearActiveTrainingJob(mWorkspace.rootPath(), &clearError)) {
       if (errorMessage != nullptr) {
         *errorMessage = clearError;
       }
@@ -3764,7 +3798,12 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
     return false;
   }
   QString clearError;
-  if (!clearActiveTrainingJob(mWorkspace.rootPath(), &clearError)) {
+  if (resumable) {
+    auto recovered = job;
+    recovered.previewRecovered = true;
+    if (!saveActiveTrainingJob(mWorkspace.rootPath(), recovered, errorMessage)) return false;
+  }
+  if (!resumable && !clearActiveTrainingJob(mWorkspace.rootPath(), &clearError)) {
     if (errorMessage != nullptr) {
       *errorMessage = clearError;
     }
@@ -4814,10 +4853,112 @@ void MainWindow::startReconstruction() {
   }
 }
 
+void MainWindow::updateTrainingActions() {
+  const bool running = mProcessSupervisor.isRunning();
+  mPauseTrainingAction->setEnabled(running && !mPauseRequested && mPendingTraining &&
+      mPendingTraining->backend == QStringLiteral("3dgs") && mLastWorkerStatus &&
+      mLastWorkerStatus->stage == QStringLiteral("train") && !mProcessSupervisor.wasStopRequested());
+  const auto active = !running && mWorkspace.hasProject()
+      ? loadActiveTrainingJob(mWorkspace.rootPath()) : ActiveTrainingJob{};
+  mResumeTrainingAction->setEnabled(!running && !mRecoveryBlocked &&
+      QFileInfo::exists(active.configurationPath) && nativeResumeIteration(active.outputSceneRoot) > 0);
+}
+
+void MainWindow::pauseTraining() {
+  updateTrainingActions();
+  if (!mPauseTrainingAction->isEnabled()) return;
+  if (mProcessSupervisor.requestPause()) {
+    mPauseRequested = true;
+    updateTrainingActions();
+    appendTaskEvent(QCoreApplication::translate("Workbench", "正在保存完整训练状态；保存完成后暂停，请勿强制关闭。"));
+  }
+}
+
+void MainWindow::resumeTraining() {
+  if (mProcessSupervisor.isRunning() || !ensureProjectRecoveryReady()) return;
+  const auto active = loadActiveTrainingJob(mWorkspace.rootPath());
+  const int iteration = nativeResumeIteration(active.outputSceneRoot);
+  QFile original(active.configurationPath);
+  if (iteration < 0 || !original.open(QIODevice::ReadOnly)) return;
+  QJsonObject config = QJsonDocument::fromJson(original.readAll()).object();
+  if (config.value(QStringLiteral("backend")).toString() != QStringLiteral("3dgs") ||
+      !config.value(QStringLiteral("nativeCheckpoint")).toBool()) return;
+  if (QMessageBox::question(this, QCoreApplication::translate("Workbench", "继续训练"),
+          QCoreApplication::translate("Workbench", "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。")
+              .arg(iteration), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+  if (!confirmDiscardSceneEdits()) return;
+
+  // Managed paths migrate with Save As. External datasets/output stay external.
+  const QString oldRoot = config.value(QStringLiteral("projectRoot")).toString();
+  for (const QString &key : {QStringLiteral("datasetPath"), QStringLiteral("outputRoot"), QStringLiteral("jobStore")}) {
+    const QString path = config.value(key).toString();
+    const QString relative = QDir(oldRoot).relativeFilePath(path);
+    if (!oldRoot.isEmpty() && !relative.startsWith(QStringLiteral("../")) && !QDir::isAbsolutePath(relative))
+      config.insert(key, QDir(mWorkspace.rootPath()).absoluteFilePath(relative));
+  }
+  const QString dataset = config.value(QStringLiteral("datasetPath")).toString();
+  const QString output = QDir(config.value(QStringLiteral("outputRoot")).toString())
+      .filePath(config.value(QStringLiteral("outputScene")).toString());
+  if (!pathsReferToSameLocation(dataset, mWorkspace.datasetPath()) ||
+      !pathsReferToSameLocation(output, active.outputSceneRoot)) {
+    showError(QCoreApplication::translate("Workbench", "无法继续训练"),
+        QCoreApplication::translate("Workbench", "当前数据集或输出位置与检查点不一致。请打开原工程并恢复对应的数据集。"));
+    return;
+  }
+  const QString root = BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString worker = QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
+  const QString python = findTrainingPython(root);
+  if (root.isEmpty() || !QFileInfo::exists(worker) || python.isEmpty()) {
+    showError(QCoreApplication::translate("Workbench", "训练后端不可用"), backendUnavailableMessage(root, worker, python));
+    return;
+  }
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const auto preflight = TrainingEnvironmentProbe::run(python, root, dataset,
+      QStringLiteral("3dgs"), false, pythonProcessEnvironment(python));
+  QApplication::restoreOverrideCursor();
+  if (!preflight.ready) {
+    showError(QCoreApplication::translate("Workbench", "无法继续训练"), preflight.errorMessage);
+    return;
+  }
+  config.insert(QStringLiteral("projectRoot"), mWorkspace.rootPath());
+  config.insert(QStringLiteral("repositoryRoot"), root);
+  config.insert(QStringLiteral("overwrite"), false);
+  config.insert(QStringLiteral("runColmap"), false);
+  const QString configPath = QDir(mWorkspace.rootPath()).filePath(
+      QStringLiteral(".gsw/jobs/resume-%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+  QSaveFile file(configPath);
+  const QByteArray bytes = QJsonDocument(config).toJson();
+  if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+    showError(QCoreApplication::translate("Workbench", "无法保存训练任务"), file.errorString());
+    return;
+  }
+  QString error;
+  if (!saveActiveTrainingJob(mWorkspace.rootPath(), {configPath, output}, &error)) {
+    showError(QCoreApplication::translate("Workbench", "无法保存训练恢复信息"), error);
+    return;
+  }
+  const int total = config.value(QStringLiteral("trainOptions")).toObject().value(QStringLiteral("iterations")).toInt();
+  const QString taskName = config.value(QStringLiteral("outputDisplayName")).toString() + QStringLiteral(" | ") +
+      QCoreApplication::translate("Workbench", "继续训练 · 迭代 %1 / %2").arg(iteration).arg(total);
+  mPendingTraining = PendingTraining{taskName, comparablePath(mWorkspace.rootPath()), comparablePath(dataset), output, QStringLiteral("3dgs"), total};
+  mPauseRequested = false;
+  mLiveReconstructionPreviewPath.clear();
+  if (!mProcessSupervisor.start(taskName, python, {worker, QStringLiteral("--config"), configPath,
+          QStringLiteral("--resume-training")}, root, pythonProcessEnvironment(python), true)) {
+    mPendingTraining.reset();
+    updateTrainingActions();
+  }
+}
+
 void MainWindow::startTraining() {
   if (!ensureProjectRecoveryReady()) {
     return;
   }
+  const auto previous = loadActiveTrainingJob(mWorkspace.rootPath());
+  if (nativeResumeIteration(previous.outputSceneRoot) > 0 &&
+      QMessageBox::question(this, QCoreApplication::translate("Workbench", "已有可继续的训练"),
+          QCoreApplication::translate("Workbench", "开始新训练会替换当前工程的续训入口。旧检查点是否保留取决于输出位置和覆盖设置。是否继续？"),
+          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
   if (mWorkspace.datasetPath().isEmpty()) {
     QMessageBox::information(
         this, QCoreApplication::translate("Workbench", "尚未导入数据集"),
@@ -4893,6 +5034,8 @@ void MainWindow::startTraining() {
   trainOptions.insert(QStringLiteral("iterations"), config.iterations);
   trainOptions.insert(QStringLiteral("resolution"), config.resolution);
   QJsonObject workerConfig;
+  workerConfig.insert(QStringLiteral("projectRoot"), mWorkspace.rootPath());
+  workerConfig.insert(QStringLiteral("nativeCheckpoint"), config.backend == QStringLiteral("3dgs"));
   workerConfig.insert(QStringLiteral("repositoryRoot"), QDir::cleanPath(root));
   workerConfig.insert(QStringLiteral("datasetPath"),
                       QDir::cleanPath(mWorkspace.datasetPath()));
@@ -4940,6 +5083,7 @@ void MainWindow::startTraining() {
       taskName, comparablePath(mWorkspace.rootPath()),
       comparablePath(mWorkspace.datasetPath()), outputDirectory,
       config.backend, config.iterations};
+  mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();
   mLiveReconstructionDatasetPath.clear();
   mLiveReconstructionPointCount = 0;
@@ -5073,6 +5217,7 @@ void MainWindow::updateActionAvailability() {
   mNewProjectAction->setEnabled(!running);
   mOpenProjectAction->setEnabled(!running);
   mStopAction->setEnabled(running);
+  updateTrainingActions();
   mSaveAction->setEnabled(workspaceReady);
   mSaveAsAction->setEnabled(
       workspaceReady && (!running || !mWorkspace.hasPendingDataMigration()));

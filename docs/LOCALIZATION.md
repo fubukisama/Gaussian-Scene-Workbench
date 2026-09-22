@@ -41,6 +41,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
 | 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
 | 密度控制 | Density Control | 密度制御 |
+| 暂停训练 / 继续训练 | Pause Training / Resume Training | 学習を一時停止 / 学習を再開 |
+| 已暂停 | Paused | 一時停止中 |
+| 训练检查点 / 优化器状态 | Training Checkpoint / Optimizer State | 学習チェックポイント / 最適化器の状態 |
 | 定时快照回退 | Periodic Snapshot Fallback | 定期スナップショットにフォールバック |
 | 网格 / 三角网格 | Mesh / Triangle Mesh | メッシュ / 三角形メッシュ |
 | 顶点 / 面 / 法线 | Vertex / Face / Normal | 頂点 / 面 / 法線 |

@@ -48,6 +48,7 @@ class ProcessSupervisorTests final : public QObject {
 
 private slots:
   void initTestCase();
+  void pauseIsDistinctFromCancellation();
   void parsesFragmentedWorkerStatusWithoutPollutingLogs();
   void stopTerminatesTheEntireProcessTree();
   void gracefulStopCleansChildAfterParentExitsFirst();
@@ -57,6 +58,22 @@ private slots:
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
+}
+
+void ProcessSupervisorTests::pauseIsDistinctFromCancellation() {
+  ProcessSupervisor supervisor;
+  QVERIFY(!supervisor.requestPause());
+  QSignalSpy statusSpy(&supervisor, &ProcessSupervisor::workerStatusReady);
+  QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
+  QVERIFY(supervisor.start(QStringLiteral("pause-fixture"), processOutputFixturePath(),
+      {QStringLiteral("pause-worker")}, {}, {}, true));
+  QVERIFY(supervisor.requestPause());
+  QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 5000);
+  QCOMPARE(finishedSpy.at(0).at(1).toInt(), 75);
+  QCOMPARE(statusSpy.count(), 1);
+  QCOMPARE(qvariant_cast<WorkerStatus>(statusSpy.at(0).at(0)).state, QStringLiteral("paused"));
+  QVERIFY(!supervisor.wasStopRequested());
+  QVERIFY(!supervisor.requestPause());
 }
 
 void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() {

@@ -90,12 +90,18 @@ bool saveActiveTrainingJob(const QString &projectRoot,
                     .arg(marker.errorString()));
     return false;
   }
+  const auto portablePath = [&projectRoot](const QString &path) {
+    const QString relative = QDir(projectRoot).relativeFilePath(normalizedAbsolutePath(path));
+    return relative.startsWith(QStringLiteral("../")) || QDir::isAbsolutePath(relative)
+        ? normalizedAbsolutePath(path) : relative;
+  };
   const QJsonObject root{
       {QStringLiteral("version"), 1},
       {QStringLiteral("configurationPath"),
-       normalizedAbsolutePath(job.configurationPath)},
+       portablePath(job.configurationPath)},
       {QStringLiteral("outputSceneRoot"),
-       normalizedAbsolutePath(job.outputSceneRoot)}};
+       portablePath(job.outputSceneRoot)},
+      {QStringLiteral("previewRecovered"), job.previewRecovered}};
   const QByteArray serialized =
       QJsonDocument(root).toJson(QJsonDocument::Indented);
   if (marker.write(serialized) != serialized.size()) {
@@ -148,15 +154,33 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
 
   ActiveTrainingJob job{
       root.value(QStringLiteral("configurationPath")).toString(),
-      root.value(QStringLiteral("outputSceneRoot")).toString()};
+      root.value(QStringLiteral("outputSceneRoot")).toString(),
+      root.value(QStringLiteral("previewRecovered")).toBool()};
   if (!job.isValid()) {
     assignError(errorMessage,
                 QCoreApplication::translate("Workbench", "Training recovery record is incomplete."));
     return {};
   }
-  job.configurationPath = normalizedAbsolutePath(job.configurationPath);
-  job.outputSceneRoot = normalizedAbsolutePath(job.outputSceneRoot);
+  job.configurationPath = normalizedAbsolutePath(QDir(projectRoot).absoluteFilePath(job.configurationPath));
+  job.outputSceneRoot = normalizedAbsolutePath(QDir(projectRoot).absoluteFilePath(job.outputSceneRoot));
   return job;
+}
+
+int nativeResumeIteration(const QString &outputSceneRoot) {
+  if (outputSceneRoot.isEmpty()) return -1;
+  const QDir root(QDir(outputSceneRoot).filePath(QStringLiteral(".gsw-resume")));
+  QFile manifest(root.filePath(QStringLiteral("ready.json")));
+  if (!manifest.open(QIODevice::ReadOnly) || manifest.size() > 16384) return -1;
+  const QJsonObject data = QJsonDocument::fromJson(manifest.readAll()).object();
+  const QString name = data.value(QStringLiteral("file")).toString();
+  static const QRegularExpression pattern(QStringLiteral("^state-[0-9a-f]{32}\\.pth$"));
+  const int iteration = data.value(QStringLiteral("iteration")).toInt(-1);
+  const QFileInfo state(root.filePath(name));
+  if (data.value(QStringLiteral("version")).toInt() != 1 || !pattern.match(name).hasMatch() ||
+      iteration <= 0 || iteration >= data.value(QStringLiteral("total")).toInt() ||
+      !state.isFile() || state.size() == 0 || state.isSymLink() ||
+      QDir(state.canonicalPath()) != QDir(root.canonicalPath())) return -1;
+  return iteration;
 }
 
 bool clearActiveTrainingJob(const QString &projectRoot,

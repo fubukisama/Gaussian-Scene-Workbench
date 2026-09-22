@@ -13,6 +13,7 @@ import os
 import json
 import torch
 import time
+import numpy as np
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -88,6 +89,34 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     ema_Ll1depth_for_log = 0.0
     training_started_at = time.monotonic()
+    native_checkpoint = None
+    native_identity = None
+    paused = False
+    control_json = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
+    if control_json:
+        repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        if repository_root not in sys.path:
+            sys.path.insert(0, repository_root)
+        from native.worker.training_checkpoint import (
+            TrainingCheckpoint, training_identity, capture_state, restore_state)
+        native_checkpoint = TrainingCheckpoint(scene.model_path, json.loads(control_json))
+        native_identity = training_identity(dataset, opt, pipe)
+        # Scene construction shuffles cameras. Stable ordering lets saved sampler
+        # indices survive a fresh process without depending on initialization RNG.
+        scene.getTrainCameras().sort(key=lambda camera: (camera.image_name, camera.colmap_id))
+        camera_names = [(camera.image_name, camera.colmap_id) for camera in scene.getTrainCameras()]
+        viewpoint_stack = scene.getTrainCameras().copy()
+        viewpoint_indices = list(range(len(viewpoint_stack)))
+        if native_checkpoint.control.get("resume"):
+            state = native_checkpoint.load(torch, native_identity)
+            restore_state(torch, np, gaussians, opt, state, native_identity, camera_names)
+            first_iter = state["iteration"]
+            viewpoint_indices = state["pending_indices"]
+            viewpoint_stack = [scene.getTrainCameras()[index] for index in viewpoint_indices]
+            training_started_at -= state["elapsed"]
+            ema_loss_for_log = state["ema_loss"]
+            ema_Ll1depth_for_log = state["ema_depth"]
+            del state
     gpu_preview = None
     gpu_preview_emit = None
     file_preview = None
@@ -298,6 +327,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
+            if (native_checkpoint is not None and iteration < opt.iterations
+                    and native_checkpoint.pause_requested()):
+                # This boundary is AFTER densification and optimizer.step(). A
+                # resumed run starts at iteration + 1 with the original schedule.
+                if file_preview is not None:
+                    file_preview.close()
+                    file_preview = None
+                scene.save(iteration)
+                native_checkpoint.save(torch, capture_state(
+                    torch, np, gaussians, iteration, opt.iterations, native_identity,
+                    camera_names, viewpoint_indices, time.monotonic() - training_started_at,
+                    ema_loss_for_log, ema_Ll1depth_for_log))
+                emit_gsw_event("[gsw-training-preview]", {
+                    "iteration": iteration,
+                    "point_cloud_path": os.path.abspath(os.path.join(
+                        scene.model_path, "point_cloud", "iteration_{}".format(iteration), "point_cloud.ply"))})
+                paused = True
+                progress_bar.close()
+                break
+
     if file_preview is not None:
         file_preview.close()
     if gpu_preview is not None:
@@ -308,6 +357,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             "sessionId": gpu_preview.session_id,
         })
         gpu_preview.close()
+    if tb_writer:
+        tb_writer.close()
+    return paused
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
@@ -402,7 +454,10 @@ if __name__ == "__main__":
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
+    paused = training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
+    if paused:
+        print("\nTraining paused; native optimizer checkpoint saved.")
+        sys.exit(75)
 
     # All done
     print("\nTraining complete.")

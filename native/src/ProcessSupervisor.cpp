@@ -246,6 +246,11 @@ bool ProcessSupervisor::start(const QString &taskName, const QString &program,
   return true;
 }
 
+bool ProcessSupervisor::requestPause() {
+  return isRunning() && mAcceptsCancelCommand && !mStopRequested &&
+         mProcess.write("pause\n") == 6;
+}
+
 void ProcessSupervisor::stop() {
   if (mShutdownStarted || !isRunning()) {
     return;

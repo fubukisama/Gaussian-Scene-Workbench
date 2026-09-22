@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 
-FINAL_STATES = {"done", "failed", "cancelled"}
+FINAL_STATES = {"done", "failed", "cancelled", "paused"}
 SCENE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 WINDOWS_DEVICE_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -71,8 +71,17 @@ def import_backend(repository_root):
     return server
 
 
-def watch_cancel_input(cancel_callback, job_id):
+def watch_cancel_input(cancel_callback, job_id, pause_callback=None):
     for line in sys.stdin:
+        if line.strip().lower() == "pause" and pause_callback:
+            try:
+                pause_callback()
+                print("[worker] Pause requested; saving at the next iteration boundary.", flush=True)
+            except Exception as exc:
+                print("[worker] Pause request failed: {}".format(exc), flush=True)
+                cancel_callback(job_id)
+                return
+            continue
         if line.strip().lower() != "cancel":
             continue
         print("[worker] Cancellation requested by the desktop application.")
@@ -931,24 +940,44 @@ def run_import_project_recovery(config):
     return 0
 
 
-def run_training(config):
+def run_training(config, resume=False):
     display_name = validated_display_name(config, "outputDisplayName", "outputScene")
     server = import_backend(config["repositoryRoot"])
     server.OUTPUT_DIR = Path(config["outputRoot"]).resolve()
     server.TRAIN_JOBS_DIR = Path(config["jobStore"]).resolve()
     server.TRAIN_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
+    native_options = {}
+    pause_callback = None
+    request_path = None
+    if config.get("nativeCheckpoint") and config.get("backend") == "3dgs":
+        sys.path.insert(0, str(Path(config["repositoryRoot"]).resolve()))
+        from native.worker.training_checkpoint import atomic_json, read_manifest
+        output = _lexical_absolute(server.OUTPUT_DIR / config["outputScene"])
+        _ensure_within_root(output, server.OUTPUT_DIR, direct_child=True)
+        session = uuid.uuid4().hex
+        request_path = server.TRAIN_JOBS_DIR / ("pause-" + session + ".json")
+        native_options["native_control"] = {
+            "output": str(output), "request": str(request_path), "session": session, "resume": resume}
+        pause_callback = lambda: atomic_json(request_path, {"session": session})
+        if resume:
+            manifest, _ = read_manifest(output)
+            native_options["resume_checkpoint_iteration"] = manifest["iteration"]
+    elif resume:
+        raise ValueError("This task has no native 3DGS training checkpoint support")
+
     snapshot = server.start_training(
         config.get("scene") or "native-project",
         config["outputScene"],
         config.get("quality", "quick"),
-        bool(config.get("runColmap", True)),
-        bool(config.get("overwrite", False)),
+        False if resume else bool(config.get("runColmap", True)),
+        False if resume else bool(config.get("overwrite", False)),
         config.get("backend", "3dgs"),
         config.get("colmapOptions") or {},
         config.get("trainOptions") or {},
-        False,
+        resume,
         dataset_path=config["datasetPath"],
+        **native_options
     )
     job_id = snapshot["id"]
     print("[worker] Training job {} started.".format(job_id))
@@ -956,13 +985,15 @@ def run_training(config):
 
     cancel_thread = threading.Thread(
         target=watch_cancel_input,
-        args=(server.cancel_training, job_id),
+        args=(server.cancel_training, job_id, pause_callback),
         name="gsw-cancel",
         daemon=True,
     )
     cancel_thread.start()
 
     state, error = stream_job(server.TRAIN_LOCK, server.TRAIN_JOBS, job_id)
+    if request_path and request_path.exists():
+        request_path.unlink()
 
     output_path = _lexical_absolute(server.OUTPUT_DIR / config["outputScene"])
     _ensure_within_root(output_path, server.OUTPUT_DIR, direct_child=True)
@@ -972,6 +1003,9 @@ def run_training(config):
     if state == "done":
         print("[worker] Training completed successfully.")
         return 0
+    if state == "paused":
+        print("[worker] Training paused; optimizer state preserved.")
+        return 75
     if state == "cancelled":
         print("[worker] Training cancelled.")
         return 130
@@ -1035,6 +1069,7 @@ def main():
     configure_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--resume-training", action="store_true")
     parser.add_argument(
         "--task",
         choices=("training", "colmap", "import", "import-recovery", "import-project-recovery"),
@@ -1050,7 +1085,7 @@ def main():
             return run_import_recovery(config)
         if config["task"] == "import-project-recovery":
             return run_import_project_recovery(config)
-        return run_training(config)
+        return run_training(config, resume=args.resume_training)
     except Exception as exc:
         print("[worker] Fatal error: {}".format(exc), file=sys.stderr)
         return 1

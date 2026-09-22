@@ -595,7 +595,7 @@ $PreviousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = "1"
 Push-Location $Root
 try {
-  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview crop_editor.tests.test_training_telemetry
+  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint crop_editor.tests.test_training_telemetry
   if ($LASTEXITCODE -ne 0) {
     throw "Native worker tests failed with exit code $LASTEXITCODE."
   }
@@ -644,6 +644,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\LOCALIZATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\CONTINUOUS_TRAINING_PREVIEW.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\STUDIO_COMPARISON.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\TRAINING_RESUME.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
     -DestinationRoot $PackageRoot
@@ -654,6 +655,7 @@ if ($Package) {
     "native\worker\training_preflight.py",
     "native\worker\gpu_preview_publisher.py",
     "native\worker\training_preview.py",
+    "native\worker\training_checkpoint.py",
     "crop_editor\server.py",
     "crop_editor\video_extract.py",
     "scripts\check_3dgs_env.ps1",

@@ -7,6 +7,9 @@
 #include "DatasetImportDialog.h"
 #include "ReconstructionDialog.h"
 #include "TrainingMonitorWidget.h"
+#include "TrainingOutputLocator.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 #include "WorkspaceDocument.h"
 #include "ManagedName.h"
 #include "ModelExportDialog.h"
@@ -45,6 +48,102 @@
 #include <functional>
 
 namespace gsw {
+bool runTrainingResumeSmokeTest(MainWindow &window) {
+  bool passed = true;
+  const auto check = [&](bool condition, const char *message) {
+    if (!condition) { qCritical() << "Training resume:" << message; passed = false; }
+  };
+  QTimer unexpectedDialog;
+  QObject::connect(&unexpectedDialog, &QTimer::timeout, &window, [&]() {
+    if (auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+      qCritical() << "Training resume: unexpected dialog" << dialog->text();
+      passed = false;
+      dialog->reject();
+    }
+  });
+  unexpectedDialog.start(50);
+  const auto waitUntil = [](const std::function<bool()> &predicate) {
+    QElapsedTimer timer; timer.start();
+    while (!predicate() && timer.elapsed() < 10000) {
+      QEventLoop loop; QTimer::singleShot(20, &loop, &QEventLoop::quit); loop.exec();
+    }
+    return predicate();
+  };
+  QTemporaryDir temporary;
+  if (!temporary.isValid()) return false;
+  const QDir root(temporary.path());
+  const auto write = [&](const QString &path, const QByteArray &bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath()); QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+  };
+  const QString project = root.filePath(QStringLiteral("project"));
+  QString createError;
+  if (!QDir().mkpath(project) || !window.mWorkspace.create(project, &createError)) {
+    qCritical() << "Training resume: create isolated project:" << createError;
+    return false;
+  }
+  if (!window.mWorkspace.saveManifest(root.filePath(QStringLiteral("paused.gsw")), &createError)) {
+    qCritical() << "Training resume: save isolated project:" << createError;
+    return false;
+  }
+  const QString output = QDir(project).filePath(QStringLiteral("output/test"));
+  const QString config = QDir(project).filePath(QStringLiteral(".gsw/jobs/test.json"));
+  check(write(config, "{\"nativeCheckpoint\":true,\"backend\":\"3dgs\"}"), "write task config");
+  check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/state-0123456789abcdef0123456789abcdef.pth")), "fixture"), "write checkpoint fixture");
+  check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/ready.json")),
+      "{\"version\":1,\"iteration\":3,\"total\":10,\"file\":\"state-0123456789abcdef0123456789abcdef.pth\"}"), "write checkpoint manifest");
+  check(write(QDir(output).filePath(QStringLiteral("point_cloud/iteration_3/point_cloud.ply")),
+      "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
+      "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
+      "property float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\n"
+      "property float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n"
+      "0 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n1 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n"
+      "0 1 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 0 1 0 0 0 1 -3 -3 -3 1 0 0 0\n"), "write complete preview");
+  check(saveActiveTrainingJob(project, {config, output}), "save active task");
+  const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
+  window.mPendingTraining = MainWindow::PendingTraining{QStringLiteral("fixture"), project, {}, output, QStringLiteral("3dgs"), 10};
+  check(window.mProcessSupervisor.start(QStringLiteral("fixture"), helper, {QStringLiteral("pause-worker")}, {}, {}, true), "start owned worker");
+  WorkerStatus status; status.state = QStringLiteral("running"); status.stage = QStringLiteral("colmap");
+  emit window.mProcessSupervisor.workerStatusReady(status);
+  check(!window.mPauseTrainingAction->isEnabled(), "cannot pause COLMAP as 3DGS");
+  status.stage = QStringLiteral("train"); status.iteration = 3; status.totalIterations = 10;
+  emit window.mProcessSupervisor.workerStatusReady(status);
+  check(window.mPauseTrainingAction->isEnabled(), "pause enabled during 3DGS training");
+  window.mPauseTrainingAction->trigger();
+  check(!window.mPauseTrainingAction->isEnabled() && window.mPauseRequested, "duplicate pause blocked while saving");
+  check(waitUntil([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTraining; }), "pause finishes");
+  check(!window.mProcessSupervisor.wasStopRequested(), "pause never cancels");
+  check(window.mResumeTrainingAction->isEnabled(), "resume available after pause");
+  check(loadActiveTrainingJob(project).isValid(), "durable resume pointer retained");
+  check(!window.mWorkspace.scenePath().isEmpty(), "paused preview associated with project");
+  check(window.mTaskTable->item(0, 0)->data(Qt::UserRole + 31) == QStringLiteral("paused"), "history shows paused, not failed");
+  const auto samples = window.mTrainingMonitor->telemetry().samples().size();
+  for (const QString &language : AppLanguage::supported()) {
+    AppLanguage::apply(language);
+    check(window.mPauseTrainingAction->text() == QCoreApplication::translate("Workbench", "暂停训练"), "pause label language");
+    check(window.mResumeTrainingAction->text() == QCoreApplication::translate("Workbench", "继续训练"), "resume label language");
+    check(window.mTaskTable->item(0, 0)->text() == QCoreApplication::translate("Workbench", "已暂停"), "paused history translates live");
+    check(window.mTrainingMonitor->telemetry().samples().size() == samples, "translation preserves telemetry");
+  }
+  // A paused job is not an unexpected crash. Reopening must not replace a
+  // different model that the user imported/selected after the safe pause.
+  const QString otherModel = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("other.ply"));
+  check(QFile::copy(window.mWorkspace.scenePath(), otherModel), "copy independent model fixture");
+  check(window.mWorkspace.addScenePath(otherModel), "append another model after pause");
+  check(window.mWorkspace.setSceneTranslation(QVector3D(1, 2, 3)), "transform other model");
+  check(window.mWorkspace.saveManifest(), "save multi-model paused project");
+  const QString selectedId = window.mWorkspace.activeSceneId();
+  MainWindow reopened;
+  check(reopened.openProjectFile(window.mWorkspace.projectFilePath()), "reopen paused project");
+  check(reopened.mResumeTrainingAction->isEnabled() && loadActiveTrainingJob(project).isValid(), "resume survives project reopen");
+  check(reopened.mWorkspace.scenePath() == otherModel && reopened.mWorkspace.activeSceneId() == selectedId &&
+      reopened.mWorkspace.sceneTranslation() == QVector3D(1, 2, 3) && reopened.mWorkspace.sceneObjects().size() == 2,
+      "reopen preserves subsequent model selection and transform");
+  qInfo() << "Training resume desktop smoke:" << (passed ? "PASS" : "FAIL");
+  return passed;
+}
+
 bool runListInteractionSmokeTest(MainWindow &window) {
   bool passed = true;
   auto check = [&](bool condition, const char *description) {
@@ -446,6 +545,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
+    const auto *pause = window.findChild<QAction *>(QStringLiteral("pauseTrainingAction"));
+    const auto *resume = window.findChild<QAction *>(QStringLiteral("resumeTrainingAction"));
+    check(pause && resume && pause->text() == QCoreApplication::translate("Workbench", "暂停训练") &&
+          resume->text() == QCoreApplication::translate("Workbench", "继续训练"), "training controls translate live");
     check(shMenu->title() == QCoreApplication::translate("Workbench", "球谐显示") &&
           shAction->text() == QCoreApplication::translate("Workbench", "SH 2 阶") &&
           shAction->isChecked() && viewport->maximumShDegree() == 2,

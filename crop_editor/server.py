@@ -4725,6 +4725,12 @@ def command_failure_message(args, returncode, output_tail):
     return f"Command failed with exit code {returncode}: {command}"
 
 
+class NativeTrainingPaused(Exception):
+    def __init__(self, manifest):
+        super().__init__("Native training paused at iteration {}".format(manifest["iteration"]))
+        self.manifest = manifest
+
+
 def run_logged(job, args, cwd, backend=None):
     add_job_log(job, f"> {' '.join(str(a) for a in args)}")
     if backend == "sugar":
@@ -4733,6 +4739,9 @@ def run_logged(job, args, cwd, backend=None):
         process_env = gs2mesh_env()
     else:
         process_env = training_env(backend or job.get("backend", "3dgs"))
+    native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend == "3dgs" else None
+    if native_control:
+        process_env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps(native_control)
     process = subprocess.Popen(
         [str(a) for a in args],
         cwd=str(cwd),
@@ -4774,6 +4783,12 @@ def run_logged(job, args, cwd, backend=None):
                 job["process"] = None
     if job.get("cancel_requested"):
         raise RuntimeError("Training cancelled by user")
+    if rc == 75 and native_control:
+        from native.worker.training_checkpoint import read_manifest
+        manifest, _ = read_manifest(native_control["output"])
+        if manifest.get("session") != native_control["session"]:
+            raise RuntimeError("Pause exited without a checkpoint from this training session")
+        raise NativeTrainingPaused(manifest)
     if rc != 0:
         raise RuntimeError(command_failure_message(args, rc, output_tail))
     return rc
@@ -5773,6 +5788,11 @@ def run_training_job(job, run_convert, quality, overwrite):
         images_dir = colmap_image_input_path(dataset)
         if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
             raise ValueError(f"No training images found: {images_dir}")
+        if (job.get("native_control") or {}).get("resume"):
+            if run_convert or overwrite or not dataset_has_recognized_training_scene(dataset):
+                raise ValueError("Native resume requires the original reconstruction and cannot overwrite output or rerun COLMAP")
+            if images_dir.name == "input" and not (dataset / "images").exists():
+                raise ValueError("Native resume requires the original undistorted training images")
         if images_dir.name == "input" and not (dataset / "images").exists() and not run_convert:
             add_job_log(job, "Dataset contains input images but no undistorted images; enabling COLMAP conversion.")
             run_convert = True
@@ -5870,6 +5890,18 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["point_count"] = int(result["vertex_count"])
             persist_train_job(job)
         add_job_log(job, f"{backend.upper()} training complete: {result['path']}")
+    except NativeTrainingPaused as paused:
+        manifest = paused.manifest
+        with TRAIN_LOCK:
+            job["status"] = "paused"
+            job["stage"] = "paused"
+            job["returncode"] = 75
+            job["iteration"] = manifest["iteration"]
+            job["total_iterations"] = manifest["total"]
+            job["progressPercent"] = round(manifest["iteration"] * 100 / manifest["total"])
+            job["updated_at"] = time.time()
+            persist_train_job(job)
+        add_job_log(job, str(paused))
     except Exception as exc:
         partial_result = None
         try:
@@ -5992,6 +6024,7 @@ def start_training(
     resume_checkpoint=None,
     resume_checkpoint_iteration=None,
     resume_from_scene=None,
+    native_control=None,
 ):
     scene = safe_name(scene)
     output_scene = safe_name(output_scene or scene)
@@ -6015,6 +6048,7 @@ def start_training(
         "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
         "resume_checkpoint_iteration": int(resume_checkpoint_iteration) if resume_checkpoint_iteration is not None else None,
         "resume_from_scene": safe_name(resume_from_scene) if resume_from_scene else None,
+        "native_control": native_control,
         "process": None,
         "colmap_options": colmap_options_from_payload(colmap_options or {}),
         "train_options": train_options if isinstance(train_options, dict) else {},

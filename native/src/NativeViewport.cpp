@@ -569,9 +569,10 @@ void NativeViewport::setProcessingStage(const QString &stage, int iteration, int
   update();
 }
 
-void NativeViewport::finishProcessingPreview(bool succeeded, bool cancelled) {
+void NativeViewport::finishProcessingPreview(bool succeeded, bool cancelled, bool paused) {
   mProcessingActive = false;
   mProcessingStage = succeeded ? QStringLiteral("done") :
+      paused ? QStringLiteral("paused") :
       cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed");
   update();
 }
@@ -581,6 +582,8 @@ QString NativeViewport::processingPreviewLabel() const {
   QString phase;
   if (mProcessingStage == QStringLiteral("done"))
     phase = QCoreApplication::translate("Workbench", "处理完成 · 显示最终结果");
+  else if (mProcessingStage == QStringLiteral("paused"))
+    phase = QCoreApplication::translate("Workbench", "训练已暂停 · 检查点已保存，可继续训练");
   else if (mProcessingStage == QStringLiteral("cancelled") || mProcessingStage == QStringLiteral("failed"))
     phase = QCoreApplication::translate("Workbench", "处理已中断 · 保留最近可用画面");
   else if (mProcessingStage == QStringLiteral("colmap"))

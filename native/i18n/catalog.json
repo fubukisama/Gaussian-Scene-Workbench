@@ -1,4 +1,57 @@
 {
+  "暂停训练": {
+    "zh_CN": "暂停训练", "en_US": "Pause Training", "ja_JP": "学習を一時停止"
+  },
+  "继续训练": {
+    "zh_CN": "继续训练", "en_US": "Resume Training", "ja_JP": "学習を再開"
+  },
+  "已暂停": {
+    "zh_CN": "已暂停", "en_US": "Paused", "ja_JP": "一時停止中"
+  },
+  "保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）": {
+    "zh_CN": "保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）",
+    "en_US": "Save full training state, pause and release GPU memory (3DGS training stage only)",
+    "ja_JP": "完全な学習状態を保存して一時停止し、GPU メモリを解放（3DGS の学習段階のみ）"
+  },
+  "从当前工程的完整训练检查点继续，保留优化器与迭代进度": {
+    "zh_CN": "从当前工程的完整训练检查点继续，保留优化器与迭代进度",
+    "en_US": "Resume this project's full training checkpoint, preserving optimizer state and iteration progress",
+    "ja_JP": "最適化器の状態と反復の進捗を保持し、このプロジェクトの完全な学習チェックポイントから再開"
+  },
+  "训练已暂停 · 检查点已保存，可继续训练": {
+    "zh_CN": "训练已暂停 · 检查点已保存，可继续训练",
+    "en_US": "Training paused · Checkpoint saved, ready to resume",
+    "ja_JP": "学習を一時停止 · チェックポイント保存済み、再開できます"
+  },
+  "正在保存完整训练状态；保存完成后暂停，请勿强制关闭。": {
+    "zh_CN": "正在保存完整训练状态；保存完成后暂停，请勿强制关闭。",
+    "en_US": "Saving full training state; training will pause after saving. Do not force-close the application.",
+    "ja_JP": "完全な学習状態を保存中です。保存後に一時停止します。アプリケーションを強制終了しないでください。"
+  },
+  "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。": {
+    "zh_CN": "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。",
+    "en_US": "Resume training from iteration %1?\n\nCheckpoints contain Python-serialized data. Load only trusted local training files that have not been replaced by others. Checksums detect corruption, not provenance. Input data and training settings will be checked before resuming.",
+    "ja_JP": "反復 %1 から学習を再開しますか？\n\nチェックポイントには Python のシリアライズデータが含まれます。他者に置き換えられていない、信頼できるローカル学習ファイルのみ読み込んでください。チェックサムは破損を検出しますが、出所を証明しません。再開前に入力データと学習設定の一致を確認します。"
+  },
+  "无法继续训练": {
+    "zh_CN": "无法继续训练", "en_US": "Cannot Resume Training", "ja_JP": "学習を再開できません"
+  },
+  "当前数据集或输出位置与检查点不一致。请打开原工程并恢复对应的数据集。": {
+    "zh_CN": "当前数据集或输出位置与检查点不一致。请打开原工程并恢复对应的数据集。",
+    "en_US": "The current dataset or output location does not match the checkpoint. Open the original project and restore its dataset.",
+    "ja_JP": "現在のデータセットまたは出力先がチェックポイントと一致しません。元のプロジェクトを開き、対応するデータセットを復元してください。"
+  },
+  "继续训练 · 迭代 %1 / %2": {
+    "zh_CN": "继续训练 · 迭代 %1 / %2", "en_US": "Resume Training · Iteration %1 / %2", "ja_JP": "学習を再開 · 反復 %1 / %2"
+  },
+  "已有可继续的训练": {
+    "zh_CN": "已有可继续的训练", "en_US": "Resumable Training Exists", "ja_JP": "再開可能な学習があります"
+  },
+  "开始新训练会替换当前工程的续训入口。旧检查点是否保留取决于输出位置和覆盖设置。是否继续？": {
+    "zh_CN": "开始新训练会替换当前工程的续训入口。旧检查点是否保留取决于输出位置和覆盖设置。是否继续？",
+    "en_US": "Starting a new training task replaces this project's resume entry. Whether the previous checkpoint is kept depends on the output location and overwrite settings. Continue?",
+    "ja_JP": "新しい学習を開始すると、このプロジェクトの再開対象が置き換わります。以前のチェックポイントが保持されるかどうかは出力先と上書き設定によります。続行しますか？"
+  },
   "球谐显示": {
     "zh_CN": "球谐显示",
     "en_US": "SH Display",

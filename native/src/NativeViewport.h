@@ -81,7 +81,7 @@ public:
   void beginProcessingPreview();
   void setProcessingStage(const QString &stage, int iteration = -1, int total = -1,
                           int progress = -1);
-  void finishProcessingPreview(bool succeeded, bool cancelled);
+  void finishProcessingPreview(bool succeeded, bool cancelled, bool paused = false);
   void setPreviewScene(const QString &path, qint64 count);
   [[nodiscard]] QString processingPreviewLabel() const;
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);

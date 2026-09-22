@@ -1,6 +1,6 @@
 # Native GSW / LichtFeld Studio / Postshot
 
-核查日期：2026-09-20。原生桌面端已推进 SPZ 交付和完整 SH 显示两批对标升级，不代表已实现两款软件的全部功能。对方功能依据官方公开文档，本地状态依据当前桌面分支代码；没有做同一数据集、同一硬件下的三软件画质/速度排名。
+竞品核查日期：2026-09-20；本地进展更新：2026-09-23。原生桌面端已推进 SPZ 交付、完整 SH 显示和训练暂停/续训三批对标升级，不代表已实现两款软件的全部功能。对方功能依据官方公开文档，本地状态依据当前桌面分支代码；没有做同一数据集、同一硬件下的三软件画质/速度排名。
 
 ## 对比与优先级
 
@@ -10,7 +10,7 @@
 | 高斯交付 | 两者均提供 SPZ；Postshot 文档说明 v3/v4、压缩质量、SH 阶数 | **本轮新增**官方开源编解码、SPZ 导入/导出、版本/质量/SH 选项。已有 PLY/XYZ/CSV/OBJ/STL/GLB 不变；Gaussian GLB 仍是中心点，不是 splat 场景。 |
 | 编辑 | LichtFeld 具备高斯选择、变换与历史；Postshot 提供模型变换、裁剪范围 | 已有多对象、选择/删除/撤销与物体变换。尚不能把高斯旋转/尺度连同 SH 正确烘焙到交付文件；本轮不假装支持。 |
 | 渲染外观 | Postshot 可选择渲染 SH 阶数及尺度/不透明度 | 已接入 SH 0–4 阶与即时显示阶数控制，采用 gsplat 上游求值源码；属性常驻显存。尚未加入瓦片式 GPU 排序及同等完整的外观面板。 |
-| 训练管理 | LichtFeld 支持检查点续训；Postshot 可保存训练上下文 | GSW 有任务停止、检查点结果恢复和工程恢复；这不等价于带优化器状态的桌面暂停/继续。建议单独升级状态机。 |
+| 训练管理 | LichtFeld 支持检查点续训；Postshot 可保存训练上下文 | 第三批增加原生 3DGS 安全暂停/续训：保存优化器、曝光、采样器及随机状态，再退出释放显存。2DGS 和旧版 PLY/检查点仅保留原恢复能力。 |
 | 输入质量 | Postshot 提供图像筛选、蒙版与曝光补偿 | GSW 有照片/视频导入及 COLMAP 设置；还没有同等完整的可视化筛图、蒙版与曝光管理工作流。 |
 | 输出镜头 | Postshot 有动画时间线 | GSW 的相机轨迹查看不等价于镜头关键帧编辑和离线序列渲染，需独立实现。 |
 | 扩展能力 | LichtFeld 公开 Python 插件与 MCP 接口 | GSW 暂不提供同等原生插件接口；本轮不新增网络控制服务。 |
@@ -54,7 +54,7 @@
 
 验证入口：`gaussian_spherical_harmonics` 用独立连带勒让德递推核对 25 个基函数、五档阶数、多方向 GPU 输出和删除/重排映射；`workspace_document` 核对格式、采样、属性排列及异常输入；`native_gaussian_interaction` 检查真实视口颜色、物体变换、正交投影、常驻/兼容路径画面一致性以及转动时不重新上传 SH。三语测试覆盖即时切换且不重置质量设置。
 
-剩余优先级：优化器状态暂停/续训 → 输入图像质量/蒙版/曝光工作流 → 镜头关键帧与离线序列输出。瓦片式 GPU 排序、抗锯齿训练模型的等价渲染、带 SH 的变换烘焙仍需独立升级。
+第三批继续落实优化器状态暂停/续训（见下文）。后续优先级：输入图像质量/蒙版/曝光工作流 → 镜头关键帧与离线序列输出。瓦片式 GPU 排序、抗锯齿训练模型的等价渲染、带 SH 的变换烘焙仍需独立升级。
 
 ### 第二批验证记录（2026-09-20）
 
@@ -69,10 +69,20 @@ QA summary: 39 native tests and 51 backend tests passed. The installed build ren
 
 検証概要：ネイティブ 39 件とバックエンド 51 件が成功しました。インストール版で元ファイルを変更せず、読み込んだ 512,202 ガウシアンすべてをソースの SH3 で描画し、視点・次数切り替えで SH バッファを再利用しました。上記時間はローカル測定であり、他製品との比較ではありません。
 
+## 第三批落地：训练暂停 / 续训
+
+工具栏和「工作流」菜单新增「暂停训练」「继续训练」。在完整迭代边界保存高斯、Adam、曝光、随机数与相机采样状态，退出训练进程释放显存；暂停后的模型保留在视口中，重开工程可继续原迭代计划。直接复用同梱 Graphdeco 的 `GaussianModel.capture/restore`，不从 PLY 重新初始化，也不重跑 COLMAP。
+
+原子发布与输入内容指纹保护有效检查点；源数据或设置变化时拒绝续训。PyTorch pickle 状态仅可从可信来源加载，续训前必须明确确认。仅支持本版本新启动的原生 3DGS；2DGS、任意外部/旧版检查点不在本批范围内。精确状态恢复与 CUDA 后续数值波动分开验证，详见[训练续训说明](TRAINING_RESUME.md)。
+
 ## English
 
-These are scoped comparison-driven upgrades, not full parity. GSW already has continuous training previews and multi-object editing. Batch one added true SPZ interchange using pinned Niantic/Adobe MIT source. Batch two adds SH degrees 0–4 using the actual gsplat Apache-2.0 evaluator, live source-capped display quality and resident coefficient buffers. Display quality does not change exported data. Malformed/unavailable coefficients and resource limits use an explicitly labeled DC fallback; live shared-memory training remains DC, while PLY snapshots support SH. The 512 MiB per-model CPU SH budget and device limits apply; this is not disk-paged Gaussian rendering. Optimizer-state pause/resume, image-quality management, tile-based rendering and camera-animation output remain separate priorities.
+Batch three adds **Pause Training / Resume Training** for newly started native 3DGS jobs. Pause commits an iteration-boundary checkpoint and exits the training process to release GPU memory; the model preview remains visible. It directly reuses the vendored Graphdeco `GaussianModel.capture/restore`, adding exposure tensors/Adam state, Python/NumPy/PyTorch/CUDA RNG, camera sampler state and elapsed training time. SHA-256 and input/settings fingerprints reject corrupt or incompatible checkpoints. Reopening a project retains its resume entry. This is not OS process suspension, a PLY warm start, or 2DGS resume. Pickle-based checkpoints require explicit trust confirmation and must not come from untrusted sources. Numerical GPU updates are not promised to be bitwise reproducible; exact state restoration and CPU Adam equivalence are tested separately from CUDA image-quality continuity. See [training resume contract](TRAINING_RESUME.md).
+
+These are scoped comparison-driven upgrades, not full parity. GSW already has continuous training previews and multi-object editing. Batch one added true SPZ interchange using pinned Niantic/Adobe MIT source. Batch two adds SH degrees 0–4 using the actual gsplat Apache-2.0 evaluator, live source-capped display quality and resident coefficient buffers. Display quality does not change exported data. Malformed/unavailable coefficients and resource limits use an explicitly labeled DC fallback; live shared-memory training remains DC, while PLY snapshots support SH. The 512 MiB per-model CPU SH budget and device limits apply; this is not disk-paged Gaussian rendering. Image-quality management, tile-based rendering and camera-animation output remain separate priorities.
 
 ## 日本語
 
-比較に基づく段階的な改良で、全機能の同等性を意味しません。第一段階は Niantic/Adobe の MIT ソースを直接利用する SPZ 入出力、第二段階は gsplat の Apache-2.0 評価ソースによる SH 0–4 次描画と即時の表示次数切り替えです。係数は GPU に常駐し、表示品質を変えてもエクスポートデータは変更しません。不完全・非有限の係数やリソース上限では DC フォールバックを明示します。共有 GPU 学習プレビューは引き続き DC、PLY スナップショットは SH に対応します。モデルごとに CPU SH メモリ 512 MiB とデバイス上限があり、ディスクページング式ガウシアン描画ではありません。最適化状態の一時停止・再開、画像品質管理、タイル描画、カメラアニメーション出力は今後の別工程です。
+第三段階では、新しく開始したネイティブ 3DGS ジョブに **学習を一時停止 / 学習を再開** を追加します。反復の境界で状態を保存して学習プロセスを終了し、GPU メモリを解放します。モデルのプレビューは保持します。同梱 Graphdeco の `GaussianModel.capture/restore` を直接再利用し、露出テンソルと Adam 状態、Python/NumPy/PyTorch/CUDA の乱数状態、カメラサンプラー、学習経過時間を追加保存します。破損や入力・設定の不一致は再開前に拒否します。プロジェクトを開き直しても再開対象を保持します。OS のプロセス停止、PLY からの再学習、2DGS の再開とは異なります。pickle 形式のため、信頼できるチェックポイントであることの明示確認が必要です。GPU 更新のビット単位での再現性は保証しません。状態の完全復元と CPU Adam の一致を、CUDA の画質連続性とは別に検証します。[再開仕様](TRAINING_RESUME.md)を参照してください。
+
+比較に基づく段階的な改良で、全機能の同等性を意味しません。第一段階は Niantic/Adobe の MIT ソースを直接利用する SPZ 入出力、第二段階は gsplat の Apache-2.0 評価ソースによる SH 0–4 次描画と即時の表示次数切り替えです。係数は GPU に常駐し、表示品質を変えてもエクスポートデータは変更しません。不完全・非有限の係数やリソース上限では DC フォールバックを明示します。共有 GPU 学習プレビューは引き続き DC、PLY スナップショットは SH に対応します。モデルごとに CPU SH メモリ 512 MiB とデバイス上限があり、ディスクページング式ガウシアン描画ではありません。画像品質管理、タイル描画、カメラアニメーション出力は今後の別工程です。

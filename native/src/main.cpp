@@ -9,6 +9,7 @@
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "SpzSmokeTest.h"
+#include "SmokeTestSettings.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -109,17 +110,18 @@ int main(int argc, char *argv[]) {
   QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Scene Workbench Native"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
   const QStringList smokeArguments = application.arguments();
+  std::unique_ptr<QTemporaryDir> smokeSettings;
   if (std::any_of(smokeArguments.cbegin(), smokeArguments.cend(), [](const QString &argument) {
         return argument.startsWith(QStringLiteral("--smoke-test"));
       })) {
     // All GUI smoke tests must be independent of the user's edit lock/layout
     // preferences and must never write test state into interactive settings.
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(
-        QSettings::IniFormat, QSettings::UserScope,
-        QDir(QCoreApplication::applicationDirPath())
-            .filePath(QStringLiteral("test-settings/%1")
-                          .arg(QCoreApplication::applicationPid())));
+    smokeSettings = gsw::isolateSmokeTestSettings(
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("test-settings")));
+    if (!smokeSettings) {
+      qCritical() << "Unable to create isolated smoke-test settings.";
+      return 4;
+    }
   }
   const QIcon applicationIcon(QStringLiteral(":/icons/gsw-app-icon.png"));
   if (applicationIcon.isNull()) {
@@ -150,6 +152,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
+  QCommandLineOption trainingResumeSmokeOption(QStringLiteral("smoke-test-training-resume"),
+      QStringLiteral("Verify pause/resume actions, state, translations and project recovery."));
+  parser.addOption(trainingResumeSmokeOption);
   QCommandLineOption projectOption(
       {QStringLiteral("p"), QStringLiteral("project")},
       QStringLiteral("Open a .gsw.json project file."), QStringLiteral("file"));
@@ -247,6 +252,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
                          parser.isSet(observationNavigationOption) ||
@@ -269,7 +275,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(spzSmokeOption)) {
+  if (parser.isSet(trainingResumeSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runTrainingResumeSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(spzSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runSpzSmokeTest(window, parser.value(smokeSceneOption));
       application.exit(smokeTestCompleted ? 0 : 2);

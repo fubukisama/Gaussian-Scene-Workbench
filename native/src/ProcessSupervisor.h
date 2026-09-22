@@ -45,6 +45,7 @@ public:
              const QProcessEnvironment &environment = {},
              bool acceptsCancelCommand = false);
   void stop();
+  bool requestPause();
   void shutdown();
 
 signals:

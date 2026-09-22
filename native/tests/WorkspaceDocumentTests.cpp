@@ -50,6 +50,7 @@ private slots:
   void locatesVersionedColmapOnRepositoryVolume();
   void locatesNewestCompletedTrainingScene();
   void persistsActiveTrainingJobForCrashRecovery();
+  void portableTrainingResumeRecordAndManifest();
   void detectsCompleteAndIncompleteColmapModels();
   void selectsBrushStrokeAndHonorsVisibility();
   void tracksSelectionDeletionUndoAndRedo();
@@ -342,6 +343,32 @@ void WorkspaceDocumentTests::persistsActiveTrainingJobForCrashRecovery() {
            qPrintable(error));
   QVERIFY(!gsw::loadActiveTrainingJob(projectRoot, &error).isValid());
   QVERIFY2(error.isEmpty(), qPrintable(error));
+}
+
+void WorkspaceDocumentTests::portableTrainingResumeRecordAndManifest() {
+  QTemporaryDir temporary;
+  const QString original = QDir(temporary.path()).filePath(QStringLiteral("original"));
+  const QString moved = QDir(temporary.path()).filePath(QStringLiteral("moved"));
+  const QString output = QDir(original).filePath(QStringLiteral("output/test"));
+  QVERIFY(QDir().mkpath(output));
+  QVERIFY(gsw::saveActiveTrainingJob(original, {
+      QDir(original).filePath(QStringLiteral(".gsw/jobs/config.json")), output}));
+  QVERIFY(QDir().rename(original, moved));
+  const auto restored = gsw::loadActiveTrainingJob(moved);
+  QCOMPARE(restored.outputSceneRoot, QDir(moved).filePath(QStringLiteral("output/test")));
+  QCOMPARE(restored.configurationPath, QDir(moved).filePath(QStringLiteral(".gsw/jobs/config.json")));
+  QCOMPARE(gsw::nativeResumeIteration(restored.outputSceneRoot), -1);
+  const QDir root(QDir(restored.outputSceneRoot).filePath(QStringLiteral(".gsw-resume")));
+  QVERIFY(QDir().mkpath(root.path()));
+  QFile state(root.filePath(QStringLiteral("state-0123456789abcdef0123456789abcdef.pth")));
+  QVERIFY(state.open(QIODevice::WriteOnly)); state.write("fixture"); state.close();
+  QFile manifest(root.filePath(QStringLiteral("ready.json")));
+  QVERIFY(manifest.open(QIODevice::WriteOnly));
+  manifest.write("{\"version\":1,\"iteration\":3,\"total\":10,\"file\":\"state-0123456789abcdef0123456789abcdef.pth\"}");
+  manifest.close();
+  QCOMPARE(gsw::nativeResumeIteration(restored.outputSceneRoot), 3);
+  QVERIFY(state.remove());
+  QCOMPARE(gsw::nativeResumeIteration(restored.outputSceneRoot), -1);
 }
 
 namespace {

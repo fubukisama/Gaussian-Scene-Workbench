@@ -406,6 +406,10 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
+  add_test(NAME native_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
+  set_tests_properties(native_training_resume PROPERTIES TIMEOUT 40
+    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_spz_interchange COMMAND GaussianSceneWorkbench --smoke-test-spz)
   set_tests_properties(native_spz_interchange PROPERTIES TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
@@ -631,6 +635,14 @@ if(BUILD_TESTING)
       target_compile_options(gsw_backend_locator_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME backend_locator COMMAND gsw_backend_locator_tests)
+
+    qt_add_executable(gsw_smoke_settings_tests tests/SmokeTestSettingsTests.cpp)
+    target_include_directories(gsw_smoke_settings_tests PRIVATE src)
+    target_link_libraries(gsw_smoke_settings_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_smoke_settings_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME smoke_test_settings COMMAND gsw_smoke_settings_tests)
 
     qt_add_executable(gsw_app_theme_tests
       tests/AppThemeTests.cpp

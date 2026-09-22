@@ -40,6 +40,7 @@ QString formattedDuration(const double seconds) {
 }
 
 QString stageLabel(const QString &stage) {
+  if (stage == QStringLiteral("paused")) return QCoreApplication::translate("Workbench", "已暂停");
   if (stage == QStringLiteral("queued")) {
     return QCoreApplication::translate("Workbench", "排队中");
   }
@@ -252,6 +253,7 @@ void TrainingMonitorWidget::retranslateStatus() {
   if (mHasTraining) mTitle->setText(mTaskTitle);
   if (mFinished) {
     mState->setText(mSucceeded ? QCoreApplication::translate("Workbench", "已完成")
+        : mPaused ? QCoreApplication::translate("Workbench", "已暂停")
         : mCancelled ? QCoreApplication::translate("Workbench", "已取消")
                      : QCoreApplication::translate("Workbench", "失败"));
   } else if (mHasTraining) {
@@ -303,16 +305,19 @@ void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
 }
 
 void TrainingMonitorWidget::finishTraining(const bool succeeded,
-                                           const bool cancelled) {
+                                           const bool cancelled, const bool paused) {
   mFinished = true;
   mSucceeded = succeeded;
   mCancelled = cancelled;
+  mPaused = paused;
   mState->setText(succeeded ? QCoreApplication::translate("Workbench", "已完成")
+                  : paused ? QCoreApplication::translate("Workbench", "已暂停")
                   : cancelled ? QCoreApplication::translate("Workbench", "已取消")
                               : QCoreApplication::translate("Workbench", "失败"));
   if (succeeded) {
     mProgress->setValue(100);
   }
+  refreshMetrics();
 }
 
 const TrainingTelemetry &TrainingMonitorWidget::telemetry() const {
@@ -360,6 +365,7 @@ void TrainingMonitorWidget::refreshMetrics() {
   mElapsed->setText(mTelemetry.elapsedSeconds().has_value()
                         ? formattedDuration(*mTelemetry.elapsedSeconds())
                         : QStringLiteral("-"));
+  if (mFinished) mRemaining->setText(QStringLiteral("-"));
   mCurves->setSamples(mTelemetry.samples());
 }
 
