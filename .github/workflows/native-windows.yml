@@ -84,13 +84,15 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: >-
-          cmake -S native -B native/build-ci
-          -G "Visual Studio 17 2022" -A x64
-          -DBUILD_TESTING=ON
-          -DGSW_RELEASE_DATE=2026-07-16
-          -DZLIB_ROOT="${{ github.workspace }}/native/.deps/installed/x64-windows-static-md"
-          -Dzstd_DIR="${{ github.workspace }}/native/.deps/installed/x64-windows-static-md/share/zstd"
+        run: |
+          $releaseDate = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-ci `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DBUILD_TESTING=ON `
+            "-DGSW_RELEASE_DATE=$releaseDate" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 
       - name: Build
         shell: pwsh
