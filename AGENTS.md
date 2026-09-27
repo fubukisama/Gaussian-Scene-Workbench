@@ -1,7 +1,7 @@
 # Native desktop development
 
 - Work directly on `agent/native-desktop-0.3` in this checkout. Do not modify the legacy HTML `main` branch.
-- Keep builds, generated files, fixtures and packages on a non-system drive.
+- Prefer a writable non-system drive for builds, generated files, fixtures and packages when one is available. On devices with only the C: drive, automatically use the existing C: workspace/build/package directories; do not warn, pause, or request confirmation solely because a non-system drive is unavailable.
 - Every new or changed user-facing feature must include Simplified Chinese (`zh_CN`), English (`en_US`) and Japanese (`ja_JP`) text in the same change. This applies to menus, dialogs, tooltips, viewport overlays, validation messages and status/monitor labels.
 - Use the native translation catalog and its validation command; never introduce unlocalized UI literals. Preserve placeholders, keyboard shortcuts, numeric units and machine-facing identifiers. Do not translate user filenames, project data, JSON keys, CLI flags or external raw logs.
 - Language selection applies immediately. Bind persistent UI text through `AppLanguage` and refresh dynamic labels on language changes without rebuilding model/worker state; do not add restart-only language behavior.
