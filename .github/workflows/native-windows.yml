@@ -96,11 +96,14 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 
       - name: Build
+        id: native-build
         shell: pwsh
         run: cmake --build native/build-ci --config Release --parallel
 
       - name: Test
         shell: pwsh
+        env:
+          QT_FORCE_STDERR_LOGGING: "1"
         run: ctest --test-dir native/build-ci -C Release --no-tests=error --output-on-failure
 
       - name: Test native worker
@@ -203,3 +206,28 @@ jobs:
           path: native/artifact/
           if-no-files-found: error
           retention-days: 30
+
+      # Keep a failed run failed, but retain binaries and logs for reproducing
+      # rendering failures on a workstation with a hardware OpenGL driver.
+      - name: Collect failed-run diagnostic build
+        if: failure() && steps.native-build.outcome == 'success'
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD "native/diagnostic-artifact"
+          cmake --install native/build-ci --config Release --prefix $root
+          if ($LASTEXITCODE -ne 0) { throw "Diagnostic install failed." }
+          windeployqt --release --no-translations --compiler-runtime "$root/bin/Gaussian Scene Workbench.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Diagnostic runtime deployment failed." }
+          Copy-Item native/build_manifest.json "$root/build_manifest.json"
+          ./scripts/stage_native_backend.ps1 -SourceRoot $PWD -DestinationRoot $root
+          Copy-Item native/build-ci/Testing "$root/Testing" -Recurse
+          Copy-Item native/build-ci/Release/gsw_gaussian_sh_tests.exe "$root/bin/"
+
+      - name: Upload failed-run diagnostics
+        if: failure() && steps.native-build.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-windows-failed-run-diagnostics
+          path: native/diagnostic-artifact/
+          if-no-files-found: error
+          retention-days: 7
