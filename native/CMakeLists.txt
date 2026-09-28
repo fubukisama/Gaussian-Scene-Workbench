@@ -226,13 +226,18 @@ install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
 
 include(CTest)
 if(BUILD_TESTING)
+  set(GSW_TEST_OPENGL_BACKEND "desktop" CACHE STRING "OpenGL backend for native rendering tests")
+  set_property(CACHE GSW_TEST_OPENGL_BACKEND PROPERTY STRINGS desktop software)
+  if(NOT GSW_TEST_OPENGL_BACKEND MATCHES "^(desktop|software)$")
+    message(FATAL_ERROR "GSW_TEST_OPENGL_BACKEND must be desktop or software")
+  endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
   foreach(language zh_CN en_US ja_JP)
     add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
     set_tests_properties(native_language_${language} PROPERTIES
       TIMEOUT 45
-      ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
@@ -388,40 +393,40 @@ if(BUILD_TESTING)
     COMMAND GaussianSceneWorkbench --smoke-test-multi-scene)
   set_tests_properties(native_multi_scene_import PROPERTIES
     TIMEOUT 40
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_gaussian_interaction
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
   set_tests_properties(native_gaussian_interaction PROPERTIES
     TIMEOUT 90
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_observation_navigation
     COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation)
   set_tests_properties(native_observation_navigation PROPERTIES
     TIMEOUT 30
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
   add_test(NAME native_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
   set_tests_properties(native_training_resume PROPERTIES TIMEOUT 40
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_spz_interchange COMMAND GaussianSceneWorkbench --smoke-test-spz)
   set_tests_properties(native_spz_interchange PROPERTIES TIMEOUT 60
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_processing_preview PROPERTIES
     TIMEOUT 60
-    ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   set_tests_properties(native_paged_mesh_scene PROPERTIES
     ENVIRONMENT
-      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4;GSW_EXPECT_DEPTH_OCCLUSION=1"
+      "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4;GSW_EXPECT_DEPTH_OCCLUSION=1"
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
@@ -429,19 +434,19 @@ if(BUILD_TESTING)
     # origin marker. Depth picking and gizmos require the desktop GL backend.
     set_tests_properties(native_reference_axes_with_scene PROPERTIES
       ENVIRONMENT
-        "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_EXPECT_DEPTH_OCCLUSION=1"
+        "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_EXPECT_DEPTH_OCCLUSION=1"
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     )
     set_tests_properties(native_dense_grid_point_scene PROPERTIES
     ENVIRONMENT
-      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   set_tests_properties(native_textured_paged_mesh_scene PROPERTIES
     ENVIRONMENT
-      "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=3;GSW_MESH_RESIDENT_FACE_LIMIT=3;GSW_EXPECT_MESH_TEXTURE=1"
+      "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=3;GSW_MESH_RESIDENT_FACE_LIMIT=3;GSW_EXPECT_MESH_TEXTURE=1"
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
@@ -743,7 +748,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME gaussian_spherical_harmonics COMMAND gsw_gaussian_sh_tests)
     set_tests_properties(gaussian_spherical_harmonics PROPERTIES TIMEOUT 45
-      ENVIRONMENT "QT_OPENGL=desktop;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     target_include_directories(gsw_gaussian_depth_sorter_tests PRIVATE src)
     target_link_libraries(gsw_gaussian_depth_sorter_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
