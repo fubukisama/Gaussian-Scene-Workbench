@@ -4,6 +4,8 @@ This matrix is the release gate for replacing the legacy desktop application. A 
 
 Status: `available`, `partial`, `missing`, `hidden`.
 
+2026-09-30 generation update: native 3DGS and 2DGS share supervised control/state/telemetry/snapshot support. The isolated 2DGS runtime, real CUDA pause/resume/continuous-preview smoke and two-scale PLY are verified; representative-data quality and exact surfel viewport acceptance remain outstanding. The older broad training row below is superseded by the detailed [generation capability gates](GENERATION_PIPELINES.md); meshing entries remain missing until native typed jobs and their acceptance tests exist.
+
 | Workflow | Legacy capability | Native status | Native acceptance gate |
 | --- | --- | --- | --- |
 | Project | Open/save scene-oriented work | partial | Startup and New create an untitled working document without a save prompt. First save chooses any `.gsw.json` location and publishes managed data to the sibling `<name>.files` directory; Save As copies that managed tree, while portable relative paths and linked external sources survive reopen. |
@@ -29,6 +31,6 @@ Status: `available`, `partial`, `missing`, `hidden`.
 
 1. P0: honest controls, robust project/assets state, typed training/COLMAP worker, real PLY point preview, actionable errors.
 2. P1: GPU ID selection, production tile-based Gaussian rendering, and crop-volume tools. Native camera-frustum/capture-path visualization, the screen-space Gaussian preview, rectangle/lasso/brush editing, and lossless cropped PLY export are complete.
-3. P2: import masks and richer counters, 2DGS/resume, mesh/texture/export, PSNR, experiments, persistent task queue.
+3. P2: import masks and richer counters, representative-data 2DGS quality and exact surfel preview, native typed mesh/texture stages, PSNR, experiments, persistent task queue.
 
 `main` remains the stable legacy release until every P0 and P1 row is `available` and parity regression checks pass.

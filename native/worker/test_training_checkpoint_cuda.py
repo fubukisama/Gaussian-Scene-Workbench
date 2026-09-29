@@ -1,8 +1,9 @@
-"""Opt-in real CUDA/Graphdeco pause/resume integration test.
+"""Opt-in real CUDA/Graphdeco and surfel pause/resume integration test.
 
 Run with the configured training Python, its DLL PATH and TEMP on a data drive:
     python -m unittest native.worker.test_training_checkpoint_cuda
 Only test-owned synthetic data and subprocesses are used. No user models touched.
+Set GSW_CHECKPOINT_TEST_BACKEND=2dgs to test the separate surfel runtime.
 """
 import json
 import math
@@ -26,6 +27,12 @@ class CudaResumeTests(unittest.TestCase):
         from plyfile import PlyData
         self.assertTrue(torch.cuda.is_available(), "CUDA is required for this opt-in test")
         repository = Path(os.environ.get("GSW_CHECKPOINT_TEST_ROOT", Path(__file__).resolve().parents[2]))
+        backend = os.environ.get("GSW_CHECKPOINT_TEST_BACKEND", "3dgs")
+        self.assertIn(backend, ("3dgs", "2dgs"))
+        iterations = int(os.environ.get("GSW_CHECKPOINT_TEST_ITERATIONS", "16"))
+        self.assertGreaterEqual(iterations, 16)
+        source = (Path(os.environ["TWO_DGS_DIR"]) if backend == "2dgs"
+                  else repository / "gaussian-splatting")
         with tempfile.TemporaryDirectory(prefix="native-cuda-resume-") as temporary:
             root = Path(temporary)
             dataset = root / "dataset"
@@ -64,6 +71,12 @@ class CudaResumeTests(unittest.TestCase):
                 "property float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\n"
                 "property uchar blue\nend_header\n" + "\n".join(points) + "\n", encoding="ascii")
 
+            if backend == "2dgs":
+                from native.worker.training_preflight import probe_training_environment
+                report = probe_training_environment(repository, dataset, backend=backend)
+                self.assertTrue(report["ready"], report)
+                self.assertEqual(Path(report["python"]).resolve(), Path(sys.executable).resolve())
+
             def run(name, resume=False, pause=False):
                 output = root / name
                 request = root / (name + "-pause.json")
@@ -72,21 +85,34 @@ class CudaResumeTests(unittest.TestCase):
                     atomic_json(request, {"session": session})
                 env = os.environ.copy()
                 env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps({
-                    "output": str(output), "request": str(request), "session": session, "resume": resume})
+                    "output": str(output), "request": str(request), "session": session,
+                    "backend": backend, "resume": resume})
+                env["GSW_TWO_DGS_SOURCE"] = str(source)
                 env["PYTHONUTF8"] = "1"
-                command = [sys.executable, "train.py", "-s", str(dataset), "-m", str(output),
-                           "--iterations", "16", "-r", "1", "--data_device", "cpu", "--disable_viewer",
-                           "--test_iterations", "16", "--save_iterations", "16", "--checkpoint_iterations", "16",
-                           "--optimizer_type", "default", "--random_background", "--train_test_exp",
+                entry = str(repository / "native/worker/two_dgs_train.py") if backend == "2dgs" else "train.py"
+                command = [sys.executable, entry, "-s", str(dataset), "-m", str(output),
+                           "--iterations", str(iterations), "-r", "1", "--data_device", "cpu",
+                           "--test_iterations", str(iterations), "--save_iterations", str(iterations), "--checkpoint_iterations", str(iterations),
                            "--densify_from_iter", "0", "--densify_until_iter", "14",
                            "--densification_interval", "2", "--densify_grad_threshold", "1000",
                            "--opacity_reset_interval", "8"]
-                result = subprocess.run(command, cwd=str(repository / "gaussian-splatting"), env=env,
+                command += (["--opacity_cull", "0.001"] if backend == "2dgs" else [
+                    "--disable_viewer", "--optimizer_type", "default", "--random_background", "--train_test_exp"])
+                result = subprocess.run(command, cwd=str(source), env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        encoding="utf-8", errors="replace", timeout=120)
+                                        encoding="utf-8", errors="replace", timeout=300)
                 self.assertEqual(result.returncode, 75 if pause else 0, result.stdout[-12000:])
                 metrics[name] = [json.loads(line.split("[gsw-training-metrics] ", 1)[1])
-                                 for line in result.stdout.splitlines() if line.startswith("[gsw-training-metrics] ")]
+                                 for line in result.stdout.splitlines() if "[gsw-training-metrics] " in line]
+                previews = [json.loads(line.split("[gsw-training-preview] ", 1)[1])
+                            for line in result.stdout.splitlines() if "[gsw-training-preview] " in line]
+                self.assertTrue(previews, result.stdout[-4000:])
+                self.assertTrue(all(Path(item["point_cloud_path"]).is_file() for item in previews[-4:]))
+                if backend == "2dgs":
+                    self.assertTrue(any(item.get("preview_kind") == "gaussian_initial" for item in previews), result.stdout[-12000:])
+                    self.assertFalse((output / "exposure.json").exists())
+                    if iterations >= 1000 and not pause:
+                        self.assertTrue(any(item.get("preview_kind") == "gaussian_live" for item in previews), result.stdout[-4000:])
                 return output
 
             metrics = {}
@@ -95,22 +121,29 @@ class CudaResumeTests(unittest.TestCase):
             seed = run("seed", pause=True)
             manifest, state_path = read_manifest(seed)
             self.assertEqual(manifest["iteration"], 1)
+            self.assertEqual(manifest["backend"], backend)
             state = torch.load(str(state_path))
             self.assertEqual(len(state["pending_indices"]), 3)
-            self.assertTrue(state["exposure_optimizer"]["state"])
+            if backend == "3dgs":
+                self.assertTrue(state["exposure_optimizer"]["state"])
+            else:
+                self.assertNotIn("exposure_optimizer", state)
+                self.assertEqual(state["model"][4].shape[1], 2)
+                self.assertIn("ema_normal", state)
             self.assertGreater(float(state["model"][8].sum()), 0)  # densification gradient accumulator
             # Verify every saved CUDA tensor and optimizer slot exactly, before
             # performing more potentially non-deterministic rasterizer updates.
-            sys.path.insert(0, str(repository / "gaussian-splatting"))
+            sys.path.insert(0, str(source))
             from argparse import ArgumentParser
             from arguments import OptimizationParams
             from scene import GaussianModel
             from native.worker.training_checkpoint import restore_state
             parser = ArgumentParser()
             params = OptimizationParams(parser)
-            opt = params.extract(parser.parse_args(["--iterations", "16", "--optimizer_type", "default"]))
-            restored = GaussianModel(3, "default")
-            restore_state(torch, np, restored, opt, state, manifest["identity"], state["camera_names"])
+            options = ["--iterations", str(iterations)] + (["--optimizer_type", "default"] if backend == "3dgs" else [])
+            opt = params.extract(parser.parse_args(options))
+            restored = GaussianModel(3, "default") if backend == "3dgs" else GaussianModel(3)
+            restore_state(torch, np, restored, opt, state, manifest["identity"], state["camera_names"], backend=backend)
 
             def equal_tree(expected, actual):
                 if torch.is_tensor(expected):
@@ -127,8 +160,9 @@ class CudaResumeTests(unittest.TestCase):
                     self.assertEqual(expected, actual)
 
             equal_tree(state["model"], restored.capture())
-            equal_tree(state["exposure"], restored._exposure)
-            equal_tree(state["exposure_optimizer"], restored.exposure_optimizer.state_dict())
+            if backend == "3dgs":
+                equal_tree(state["exposure"], restored._exposure)
+                equal_tree(state["exposure_optimizer"], restored.exposure_optimizer.state_dict())
             equal_tree(state["cuda"], torch.cuda.get_rng_state_all())
             del restored
             del state
@@ -142,26 +176,31 @@ class CudaResumeTests(unittest.TestCase):
             interrupted = run("interrupted", resume=True, pause=True)
             self.assertEqual(read_manifest(interrupted)[0]["iteration"], 2)
             run("interrupted", resume=True)
-            final = "point_cloud/iteration_16/point_cloud.ply"
+            final = "point_cloud/iteration_{}/point_cloud.ply".format(iterations)
             expected = PlyData.read(str(reference / final), mmap=False)["vertex"]
             repeated = PlyData.read(str(repeat / final), mmap=False)["vertex"]
             actual = PlyData.read(str(interrupted / final), mmap=False)["vertex"]
             self.assertEqual(len(expected), len(actual))
+            self.assertGreater(len(actual), 0)
+            if backend == "2dgs":
+                self.assertIn("scale_1", actual.data.dtype.names)
+                self.assertNotIn("scale_2", actual.data.dtype.names)
             max_error = 0.0
             for field in expected.data.dtype.names:
                 max_error = max(max_error, float(np.max(np.abs(expected[field] - actual[field]))))
                 self.assertTrue(np.all(np.isfinite(actual[field])), field)
-            expected_exp = json.loads((reference / "exposure.json").read_text())
-            actual_exp = json.loads((interrupted / "exposure.json").read_text())
-            for name in expected_exp:
-                np.testing.assert_allclose(expected_exp[name], actual_exp[name], rtol=1e-3, atol=1e-3)
+            if backend == "3dgs":
+                expected_exp = json.loads((reference / "exposure.json").read_text())
+                actual_exp = json.loads((interrupted / "exposure.json").read_text())
+                for name in expected_exp:
+                    np.testing.assert_allclose(expected_exp[name], actual_exp[name], rtol=1e-3, atol=1e-3)
             # Independent continuous CUDA runs also vary. Test image-quality
             # continuity separately from the exact serialized-state contract.
             reference_psnr = metrics["reference"][-1]["psnr"]
             repeat_psnr = metrics["reference-repeat"][-1]["psnr"]
             resumed_psnr = metrics["interrupted"][-1]["psnr"]
             self.assertLess(abs(resumed_psnr - reference_psnr), 0.05)
-            print("CUDA: exact checkpoint/Adam/exposure/RNG restore; {} Gaussians; "
+            print(backend + " CUDA: exact checkpoint/Adam/RNG restore; {} Gaussians; "
                   "final PSNR continuous/repeat/resume {:.6f}/{:.6f}/{:.6f}; max field delta {:.8g}".format(
                       len(actual), reference_psnr, repeat_psnr, resumed_psnr, max_error))
 

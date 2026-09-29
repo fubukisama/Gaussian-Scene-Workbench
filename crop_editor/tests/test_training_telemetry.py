@@ -38,6 +38,53 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_two_dgs_runtime_discovery_and_explicit_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "2dgs"
+            source.mkdir()
+            (source / "train.py").touch()
+            local_python = source / ".venv/Scripts/python.exe"
+            local_python.parent.mkdir(parents=True)
+            local_python.touch()
+            with mock.patch.object(server, "ROOT", root), \
+                 mock.patch.object(server, "TWO_DGS_DIR", source), \
+                 mock.patch.dict(server.os.environ, {"TWO_DGS_DIR": "", "TWO_DGS_PYTHON": ""}):
+                self.assertEqual(server.two_dgs_source_root(), source)
+                self.assertEqual(server.training_python("2dgs"), local_python)
+                with mock.patch.dict(server.os.environ, {"TWO_DGS_DIR": str(root / "missing"),
+                                                        "TWO_DGS_PYTHON": str(root / "missing.exe")}):
+                    self.assertEqual(server.two_dgs_source_root(), root / "missing")
+                    self.assertEqual(server.training_python("2dgs"), root / "missing.exe")
+
+    def test_two_dgs_native_entry_and_preflight_use_surfel_runtime(self):
+        from native.worker.training_preflight import runtime_probe_code
+        self.assertIn("import diff_surfel_rasterization", runtime_probe_code("2dgs"))
+        self.assertNotIn("import diff_gaussian_rasterization", runtime_probe_code("2dgs"))
+        control = {"output": "output", "session": "native", "backend": "2dgs"}
+        job = {"id": "2dgs-entry", "backend": "2dgs", "native_control": control, "log": []}
+        process = mock.Mock(stdout=[], wait=mock.Mock(return_value=0))
+        with mock.patch.object(server, "persist_train_job"), \
+             mock.patch.object(server, "training_env", return_value={}), \
+             mock.patch.object(server.subprocess, "Popen", return_value=process) as launch:
+            server.run_logged(job, ["python", "train.py", "-s", "dataset"], server.TWO_DGS_DIR, "2dgs")
+            self.assertEqual(Path(launch.call_args.args[0][1]).name, "two_dgs_train.py")
+            self.assertEqual(launch.call_args.args[0][2:], ["-s", "dataset"])
+            self.assertEqual(json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"]), control)
+            # Non-native legacy tasks remain on their original entry.
+            job.pop("native_control")
+            server.run_logged(job, ["python", "train.py"], server.TWO_DGS_DIR, "2dgs")
+            self.assertEqual(launch.call_args.args[0][1], "train.py")
+
+    def test_every_generation_backend_has_an_explicit_parity_gate(self):
+        from native.worker.generation_capabilities import PIPELINES, supports_checkpoint
+        self.assertEqual(set(PIPELINES), server.TRAINING_BACKENDS | server.MESH_MODES | {"openmvs"})
+        for backend, entry in PIPELINES.items():
+            self.assertTrue(entry["limitation"])
+            self.assertTrue(entry["acceptance"])
+            self.assertEqual(supports_checkpoint(backend), backend in server.TRAINING_BACKENDS)
+        self.assertFalse(supports_checkpoint("unknown-backend"))
+
     def test_pause_exit_requires_current_session_checkpoint(self):
         from native.worker.training_checkpoint import TrainingCheckpoint
         import pickle

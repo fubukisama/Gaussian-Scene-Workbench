@@ -45,6 +45,7 @@ private slots:
   void loadsBinaryGaussianSphericalHarmonicColors();
   void retainsFullSphericalHarmonics();
   void activatesGaussianScaleRotationAndOpacity();
+  void loadsTwoScaleSurfelsWithoutChangingSource();
   void detectsColmapDatasetLayoutAndExecutable();
   void selectsNewestVersionedColmapExecutable();
   void locatesVersionedColmapOnRepositoryVolume();
@@ -1749,6 +1750,26 @@ void WorkspaceDocumentTests::resumesMigrationAfterDataDirectoryWasPublished() {
       QStringLiteral("output/checkpoint.ply"))));
   QVERIFY(!QFileInfo::exists(QDir(publishedRoot).filePath(
       QStringLiteral(".gsw-data-migration.json"))));
+}
+
+void WorkspaceDocumentTests::loadsTwoScaleSurfelsWithoutChangingSource() {
+  QTemporaryDir temporary;
+  const auto path = QDir(temporary.path()).filePath(QStringLiteral("surfel.ply"));
+  const QByteArray contents = "ply\nformat ascii 1.0\nelement vertex 1\n"
+      "property float x\nproperty float y\nproperty float z\nproperty float f_dc_0\n"
+      "property float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
+      "property float scale_0\nproperty float scale_1\nproperty float rot_0\n"
+      "property float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n"
+      "0 0 0 0 0 0 0 0 0 1 0 0 0\n";
+  QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write(contents); file.close();
+  const auto data = gsw::PlyPointCloudLoader::load(path);
+  QVERIFY2(data.isValid(), qPrintable(data.error));
+  QVERIFY(data.hasGaussianAttributes);
+  QCOMPARE(data.vertices.size(), 1);
+  QCOMPARE(data.vertices.first().scaleX, 1.0f);
+  QCOMPARE(data.vertices.first().scaleY, 1.0f);
+  QCOMPARE(data.vertices.first().scaleZ, 0.001f);
+  QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), contents);
 }
 
 void WorkspaceDocumentTests::savesAndLoadsPortableProject() {

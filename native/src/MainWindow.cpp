@@ -467,20 +467,33 @@ QString workerStageLabel(const QString &stage) {
 
 bool twoDgsAvailable(const QString &repositoryRoot) {
   QStringList candidates;
+  QDir volume(repositoryRoot);
+  while (volume.cdUp()) {}
   const QString configured = qEnvironmentVariable("TWO_DGS_DIR");
   if (!configured.isEmpty()) {
     candidates.append(configured);
+  } else {
+    candidates.append(QDir(repositoryRoot).filePath(QStringLiteral("2dgs")));
+    candidates.append(volume.filePath(
+        QStringLiteral("Gaussian-Scene-Workbench-Runtime/2dgs")));
+    candidates.append(
+        QDir(QDir::homePath()).filePath(QStringLiteral("Documents/2dgs")));
   }
-  candidates.append(
-      QDir(QDir::homePath()).filePath(QStringLiteral("Documents/2dgs")));
-  candidates.append(QDir(repositoryRoot).filePath(QStringLiteral("2dgs")));
-  return std::any_of(
-      candidates.cbegin(), candidates.cend(), [](const QString &candidate) {
-        return QFileInfo::exists(
-                   QDir(candidate).filePath(QStringLiteral("train.py"))) &&
-               QFileInfo::exists(QDir(candidate).filePath(
-                   QStringLiteral(".venv/Scripts/python.exe")));
-      });
+  // Match the worker's precedence, including an invalid explicit override:
+  // never report a different fallback source as ready behind the user's back.
+  for (const QString &candidate : candidates) {
+    if (!QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("train.py"))))
+      continue;
+    QString python = qEnvironmentVariable("TWO_DGS_PYTHON");
+    if (python.isEmpty()) {
+      python = QDir(candidate).filePath(QStringLiteral(".venv/Scripts/python.exe"));
+      if (!QFileInfo::exists(python))
+        python = volume.filePath(
+            QStringLiteral("conda/envs/gsw_2dgs/python.exe"));
+    }
+    return QFileInfo::exists(python);
+  }
+  return false;
 }
 
 QProcessEnvironment pythonProcessEnvironment(const QString &pythonPath) {
@@ -1025,7 +1038,7 @@ void MainWindow::createActions() {
 
   mPauseTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPause), {}, this), AppLanguage::source("暂停训练"));
   mPauseTrainingAction->setObjectName(QStringLiteral("pauseTrainingAction"));
-  AppLanguage::bind(mPauseTrainingAction, "toolTip", AppLanguage::source("保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）"));
+  AppLanguage::bind(mPauseTrainingAction, "toolTip", AppLanguage::source("保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）"));
   connect(mPauseTrainingAction, &QAction::triggered, this, &MainWindow::pauseTraining);
   mResumeTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaSeekForward), {}, this), AppLanguage::source("继续训练"));
   mResumeTrainingAction->setObjectName(QStringLiteral("resumeTrainingAction"));
@@ -4856,7 +4869,8 @@ void MainWindow::startReconstruction() {
 void MainWindow::updateTrainingActions() {
   const bool running = mProcessSupervisor.isRunning();
   mPauseTrainingAction->setEnabled(running && !mPauseRequested && mPendingTraining &&
-      mPendingTraining->backend == QStringLiteral("3dgs") && mLastWorkerStatus &&
+      (mPendingTraining->backend == QStringLiteral("3dgs") ||
+       mPendingTraining->backend == QStringLiteral("2dgs")) && mLastWorkerStatus &&
       mLastWorkerStatus->stage == QStringLiteral("train") && !mProcessSupervisor.wasStopRequested());
   const auto active = !running && mWorkspace.hasProject()
       ? loadActiveTrainingJob(mWorkspace.rootPath()) : ActiveTrainingJob{};
@@ -4881,7 +4895,8 @@ void MainWindow::resumeTraining() {
   QFile original(active.configurationPath);
   if (iteration < 0 || !original.open(QIODevice::ReadOnly)) return;
   QJsonObject config = QJsonDocument::fromJson(original.readAll()).object();
-  if (config.value(QStringLiteral("backend")).toString() != QStringLiteral("3dgs") ||
+  const QString backend = config.value(QStringLiteral("backend")).toString();
+  if ((backend != QStringLiteral("3dgs") && backend != QStringLiteral("2dgs")) ||
       !config.value(QStringLiteral("nativeCheckpoint")).toBool()) return;
   if (QMessageBox::question(this, QCoreApplication::translate("Workbench", "继续训练"),
           QCoreApplication::translate("Workbench", "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。")
@@ -4914,7 +4929,7 @@ void MainWindow::resumeTraining() {
   }
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const auto preflight = TrainingEnvironmentProbe::run(python, root, dataset,
-      QStringLiteral("3dgs"), false, pythonProcessEnvironment(python));
+      backend, false, pythonProcessEnvironment(python));
   QApplication::restoreOverrideCursor();
   if (!preflight.ready) {
     showError(QCoreApplication::translate("Workbench", "无法继续训练"), preflight.errorMessage);
@@ -4940,7 +4955,7 @@ void MainWindow::resumeTraining() {
   const int total = config.value(QStringLiteral("trainOptions")).toObject().value(QStringLiteral("iterations")).toInt();
   const QString taskName = config.value(QStringLiteral("outputDisplayName")).toString() + QStringLiteral(" | ") +
       QCoreApplication::translate("Workbench", "继续训练 · 迭代 %1 / %2").arg(iteration).arg(total);
-  mPendingTraining = PendingTraining{taskName, comparablePath(mWorkspace.rootPath()), comparablePath(dataset), output, QStringLiteral("3dgs"), total};
+  mPendingTraining = PendingTraining{taskName, comparablePath(mWorkspace.rootPath()), comparablePath(dataset), output, backend, total};
   mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();
   if (!mProcessSupervisor.start(taskName, python, {worker, QStringLiteral("--config"), configPath,
@@ -5035,7 +5050,7 @@ void MainWindow::startTraining() {
   trainOptions.insert(QStringLiteral("resolution"), config.resolution);
   QJsonObject workerConfig;
   workerConfig.insert(QStringLiteral("projectRoot"), mWorkspace.rootPath());
-  workerConfig.insert(QStringLiteral("nativeCheckpoint"), config.backend == QStringLiteral("3dgs"));
+  workerConfig.insert(QStringLiteral("nativeCheckpoint"), true);
   workerConfig.insert(QStringLiteral("repositoryRoot"), QDir::cleanPath(root));
   workerConfig.insert(QStringLiteral("datasetPath"),
                       QDir::cleanPath(mWorkspace.datasetPath()));

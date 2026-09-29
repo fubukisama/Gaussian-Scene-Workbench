@@ -34,8 +34,14 @@ class TrainingPreviewPublisher:
         with torch.no_grad():
             count = int(model.get_xyz.shape[0])
             stride = max(1, (count + self.max_points - 1) // self.max_points)
+            scaling = model._scaling[::stride]
+            if scaling.shape[1] == 2:
+                # Display-only thin disk approximation. Never add a trainable
+                # third scale to the 2DGS optimizer, checkpoint or source PLY.
+                normal_scale = scaling.min(dim=1, keepdim=True)[0] - 6.90775527898
+                scaling = torch.cat((scaling, normal_scale), dim=1)
             fields = (model.get_xyz[::stride], model._features_dc[::stride, 0, :],
-                      model._opacity[::stride], model._scaling[::stride], model._rotation[::stride])
+                      model._opacity[::stride], scaling, model._rotation[::stride])
             rows = torch.cat(fields, dim=1).detach().to(device="cpu", dtype=torch.float32).numpy()
         return self.publish_rows(rows, iteration, count, initial)
 

@@ -85,37 +85,44 @@ def training_identity(dataset, opt, pipe):
 
 
 def capture_state(torch, numpy, gaussians, iteration, total, identity,
-                  camera_names, pending_indices, elapsed, ema_loss, ema_depth):
-    return {
-        "version": 1, "iteration": iteration, "total": total, "identity": identity,
+                  camera_names, pending_indices, elapsed, ema_loss, ema_depth, backend="3dgs"):
+    state = {
+        "version": 1, "backend": backend, "iteration": iteration, "total": total, "identity": identity,
         # Reuse the vendored Graphdeco implementation, including Adam moments
         # and densification accumulators; exposure is not included upstream.
         "model": gaussians.capture(),
-        "exposure": gaussians._exposure,
-        "exposure_optimizer": gaussians.exposure_optimizer.state_dict(),
-        "exposure_mapping": gaussians.exposure_mapping,
-        "pretrained_exposures": gaussians.pretrained_exposures,
         "random": random.getstate(), "numpy": numpy.random.get_state(),
         "torch": torch.get_rng_state(),
         "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
         "camera_names": camera_names, "pending_indices": list(pending_indices),
         "elapsed": elapsed, "ema_loss": ema_loss, "ema_depth": ema_depth,
     }
+    if backend == "3dgs":
+        state.update(exposure=gaussians._exposure,
+                     exposure_optimizer=gaussians.exposure_optimizer.state_dict(),
+                     exposure_mapping=gaussians.exposure_mapping,
+                     pretrained_exposures=gaussians.pretrained_exposures)
+    elif backend != "2dgs":
+        raise ValueError("Unsupported checkpoint backend: " + backend)
+    return state
 
 
-def restore_state(torch, numpy, gaussians, opt, state, identity, camera_names):
+def restore_state(torch, numpy, gaussians, opt, state, identity, camera_names, backend="3dgs"):
     if (state.get("version") != 1 or state.get("identity") != identity or
-            state.get("total") != opt.iterations or state.get("camera_names") != camera_names):
+            state.get("total") != opt.iterations or state.get("camera_names") != camera_names or
+            state.get("backend", "3dgs") != backend or backend not in ("3dgs", "2dgs")):
         raise ValueError("Training inputs/settings changed; cannot resume this checkpoint")
     pending = state["pending_indices"]
     if (len(set(pending)) != len(pending) or
             any(type(i) is not int or not 0 <= i < len(camera_names) for i in pending)):
         raise ValueError("Invalid pending camera sampler state")
-    gaussians._exposure = state["exposure"]
-    gaussians.exposure_mapping = state["exposure_mapping"]
-    gaussians.pretrained_exposures = state["pretrained_exposures"]
+    if backend == "3dgs":
+        gaussians._exposure = state["exposure"]
+        gaussians.exposure_mapping = state["exposure_mapping"]
+        gaussians.pretrained_exposures = state["pretrained_exposures"]
     gaussians.restore(state["model"], opt)
-    gaussians.exposure_optimizer.load_state_dict(state["exposure_optimizer"])
+    if backend == "3dgs":
+        gaussians.exposure_optimizer.load_state_dict(state["exposure_optimizer"])
     random.setstate(state["random"])
     numpy.random.set_state(state["numpy"])
     torch.set_rng_state(state["torch"].cpu())
@@ -156,6 +163,7 @@ class TrainingCheckpoint:
                 os.fsync(stream.fileno())
             os.replace(str(temporary), str(path))
             manifest = {"version": 1, "file": path.name, "iteration": state["iteration"],
+                        "backend": state.get("backend", "3dgs"),
                         "total": state["total"], "identity": state["identity"],
                         "sha256": file_digest(path), "session": self.control["session"]}
             atomic_json(self.root / "ready.json", manifest)
@@ -172,11 +180,13 @@ class TrainingCheckpoint:
 
     def load(self, torch, identity):
         manifest, path = read_manifest(self.output)
-        if manifest.get("identity") != identity:
+        if (manifest.get("identity") != identity or
+                manifest.get("backend", "3dgs") != self.control.get("backend", "3dgs")):
             raise ValueError("Training inputs/settings changed; checkpoint was not loaded")
         # Only called by the explicit, trust-confirmed native Resume action.
         state = torch.load(str(path))
-        if (state.get("iteration") != manifest["iteration"] or
+        if (state.get("backend", "3dgs") != manifest.get("backend", "3dgs") or
+                state.get("iteration") != manifest["iteration"] or
                 state.get("total") != manifest["total"]):
             raise ValueError("Checkpoint payload and manifest disagree")
         return state

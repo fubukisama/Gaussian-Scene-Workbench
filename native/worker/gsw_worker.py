@@ -950,21 +950,25 @@ def run_training(config, resume=False):
     native_options = {}
     pause_callback = None
     request_path = None
-    if config.get("nativeCheckpoint") and config.get("backend") == "3dgs":
-        sys.path.insert(0, str(Path(config["repositoryRoot"]).resolve()))
+    sys.path.insert(0, str(Path(config["repositoryRoot"]).resolve()))
+    from native.worker.generation_capabilities import supports_checkpoint
+    if config.get("nativeCheckpoint") and supports_checkpoint(config.get("backend")):
         from native.worker.training_checkpoint import atomic_json, read_manifest
         output = _lexical_absolute(server.OUTPUT_DIR / config["outputScene"])
         _ensure_within_root(output, server.OUTPUT_DIR, direct_child=True)
         session = uuid.uuid4().hex
         request_path = server.TRAIN_JOBS_DIR / ("pause-" + session + ".json")
         native_options["native_control"] = {
-            "output": str(output), "request": str(request_path), "session": session, "resume": resume}
+            "output": str(output), "request": str(request_path), "session": session, "resume": resume,
+            "backend": config["backend"]}
         pause_callback = lambda: atomic_json(request_path, {"session": session})
         if resume:
             manifest, _ = read_manifest(output)
+            if manifest.get("backend", "3dgs") != config["backend"]:
+                raise ValueError("Checkpoint backend does not match the selected training method")
             native_options["resume_checkpoint_iteration"] = manifest["iteration"]
     elif resume:
-        raise ValueError("This task has no native 3DGS training checkpoint support")
+        raise ValueError("This task has no native training checkpoint support")
 
     snapshot = server.start_training(
         config.get("scene") or "native-project",

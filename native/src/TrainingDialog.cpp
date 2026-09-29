@@ -52,12 +52,26 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(datasetValue)), AppLanguage::source("数据集"));
 
   mBackend = new QComboBox(this);
+  mBackend->setObjectName(QStringLiteral("trainingBackendCombo"));
   mBackend->addItem(QStringLiteral("3D Gaussian Splatting"), QStringLiteral("3dgs"));
-  if (twoDgsAvailable) {
-    mBackend->addItem(QStringLiteral("2D Gaussian Splatting"), QStringLiteral("2dgs"));
-  }
+  mBackend->addItem(QStringLiteral("2D Gaussian Splatting"), QStringLiteral("2dgs"));
   form->addRow(QCoreApplication::translate("Workbench", "方法"), mBackend);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mBackend)), AppLanguage::source("方法"));
+  auto *pipelineHint = new QLabel(this);
+  pipelineHint->setObjectName(QStringLiteral("trainingPipelineHint"));
+  pipelineHint->setWordWrap(true);
+  const auto updatePipelineHint = [this, pipelineHint, twoDgsAvailable]() {
+    const bool surfels = mBackend->currentData().toString() == QStringLiteral("2dgs");
+    pipelineHint->setText(surfels && !twoDgsAvailable
+        ? QCoreApplication::translate("Workbench", "2DGS 环境尚未配置。请设置 TWO_DGS_DIR 和 TWO_DGS_PYTHON；开始前会检查曲面光栅化扩展。")
+        : surfels
+        ? QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。")
+        : QCoreApplication::translate("Workbench", "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。"));
+  };
+  connect(mBackend, &QComboBox::currentIndexChanged, this, updatePipelineHint);
+  AppLanguage::onChanged(this, updatePipelineHint);
+  updatePipelineHint();
+  form->addRow(pipelineHint);
 
   mQuality = new QComboBox(this);
   mQuality->addItem(QCoreApplication::translate("Workbench", "快速预览"), QStringLiteral("quick"));

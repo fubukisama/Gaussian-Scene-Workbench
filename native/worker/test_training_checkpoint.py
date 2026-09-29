@@ -77,10 +77,10 @@ class CheckpointTests(unittest.TestCase):
         image.write_bytes(b"abce")
         self.assertNotEqual(before, checkpoint.training_identity(dataset, opt, pipe))
 
-    def test_resume_worker_never_overwrites_output_or_reruns_colmap(self):
+    def test_resume_worker_never_overwrites_output_or_reruns_colmap(self, method="3dgs"):
         output = self.root / "output" / "scene"
         store = checkpoint.TrainingCheckpoint(output, {"output": str(output), "session": "old"})
-        store.save(PickleStore, self.state)
+        store.save(PickleStore, dict(self.state, backend=method))
         backend = SimpleNamespace(TRAIN_LOCK=threading.Lock(), TRAIN_JOBS={})
         calls = []
         def start(*args, **kwargs):
@@ -91,7 +91,7 @@ class CheckpointTests(unittest.TestCase):
         backend.cancel_training = lambda job: None
         config = {"repositoryRoot": str(Path(__file__).resolve().parents[2]), "outputRoot": str(output.parent),
                   "outputScene": "scene", "jobStore": str(self.root / "jobs"), "datasetPath": str(self.root / "dataset"),
-                  "backend": "3dgs", "nativeCheckpoint": True, "overwrite": True, "runColmap": True}
+                  "backend": method, "nativeCheckpoint": True, "overwrite": True, "runColmap": True}
         with mock.patch.object(gsw_worker, "import_backend", return_value=backend), context_stdout():
             with mock.patch.object(gsw_worker.threading, "Thread"):
                 self.assertEqual(gsw_worker.run_training(config, resume=True), 75)
@@ -102,6 +102,16 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(kwargs["resume_checkpoint_iteration"], 3)
         self.assertTrue(kwargs["native_control"]["resume"])
         self.assertNotIn("resume_checkpoint", kwargs)  # not a legacy PLY/tuple warm start
+
+    def test_two_dgs_resume_worker_uses_same_safety_contract(self):
+        self.test_resume_worker_never_overwrites_output_or_reruns_colmap("2dgs")
+
+    def test_backend_mismatch_rejected_before_pickle_load(self):
+        self.store.save(PickleStore, dict(self.state, backend="2dgs"))
+        loader = mock.Mock()
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.store.load(loader, "fixture")
+        loader.load.assert_not_called()
 
     def test_changed_identity_rejected_before_pickle_load(self):
         self.store.save(PickleStore, self.state)

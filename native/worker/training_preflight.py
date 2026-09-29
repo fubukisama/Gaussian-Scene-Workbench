@@ -74,13 +74,15 @@ def policy_exit_code(returncode):
     return (int(returncode) & 0xFFFFFFFF) in {0xC0E90002, 0xC0000428}
 
 
-def runtime_probe_code():
+def runtime_probe_code(backend="3dgs"):
     return "\n".join((
         "import json",
         "import torch",
         "import cv2",
         "from PIL import Image",
-        "import diff_gaussian_rasterization",
+        "import diff_surfel_rasterization" if backend == "2dgs" else "import diff_gaussian_rasterization",
+        "from scene import Scene, GaussianModel" if backend == "2dgs" else "import math",
+        "from gaussian_renderer import render" if backend == "2dgs" else "import math",
         "from simple_knn._C import distCUDA2",
         "if not torch.cuda.is_available():",
         "    raise RuntimeError('PyTorch cannot access a CUDA device')",
@@ -154,7 +156,7 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
                 )
 
         completed = subprocess.run(
-            [str(python_path), "-B", "-c", runtime_probe_code()],
+            [str(python_path), "-B", "-c", runtime_probe_code(backend)],
             cwd=str(gaussian_dir),
             env=process_environment,
             stdout=subprocess.PIPE,

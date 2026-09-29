@@ -28,7 +28,18 @@ DATASETS_DIR = WORKSPACE_ROOT / "datasets"
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
 PSNR_REPORTS_DIR = WORKSPACE_ROOT / "reports" / "psnr"
 GAUSSIAN_DIR = ROOT / "gaussian-splatting"
-TWO_DGS_DIR = Path(os.environ.get("TWO_DGS_DIR", Path.home() / "Documents" / "2dgs"))
+def two_dgs_source_root():
+    configured = os.environ.get("TWO_DGS_DIR")
+    if configured:
+        return Path(configured)
+    candidates = [ROOT / "2dgs"]
+    if ROOT.anchor:
+        candidates.append(Path(ROOT.anchor) / "Gaussian-Scene-Workbench-Runtime" / "2dgs")
+    candidates.append(Path.home() / "Documents" / "2dgs")
+    return next((path for path in candidates if (path / "train.py").is_file()), candidates[-1])
+
+
+TWO_DGS_DIR = two_dgs_source_root()
 SUGAR_DIR = Path(os.environ.get("SUGAR_DIR", ROOT / "SuGaR"))
 GS2MESH_DIR = Path(os.environ.get("GS2MESH_DIR", ROOT / "gs2mesh"))
 OPENMVS_DIR = Path(os.environ.get("OPENMVS_DIR", ROOT / "openMVS"))
@@ -4411,15 +4422,24 @@ def training_env(backend="3dgs"):
     ]
     if backend == "2dgs":
         two_dgs_venv = TWO_DGS_DIR / ".venv"
-        cuda_path = Path(os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"))
+        configured_python = training_python(backend)
+        runtime_prefix = configured_python.parent
+        if runtime_prefix.name.lower() == "scripts":
+            runtime_prefix = runtime_prefix.parent
+        managed_cuda = Path(ROOT.anchor) / "Gaussian-Scene-Workbench-Runtime" / "cuda-11.8"
+        cuda_location = os.environ.get("TWO_DGS_CUDA_PATH") or (
+            str(managed_cuda) if managed_cuda.is_dir() else os.environ.get("CUDA_PATH"))
         path_parts = [
+            str(configured_python.parent), str(runtime_prefix / "Library" / "bin"),
             str(two_dgs_venv / "Scripts"),
-            str(cuda_path / "bin"),
             *path_parts,
         ]
-        env["CUDA_PATH"] = str(cuda_path)
-        env["CUDA_HOME"] = str(cuda_path)
+        if cuda_location:
+            path_parts.insert(0, str(Path(cuda_location) / "bin"))
+            env["CUDA_PATH"] = cuda_location
+            env["CUDA_HOME"] = cuda_location
         env["TORCH_CUDA_ARCH_LIST"] = env.get("TORCH_CUDA_ARCH_LIST", "8.6")
+        env_root = runtime_prefix
     env["PATH"] = os.pathsep.join(path_parts)
     env["CONDA_PREFIX"] = str(env_root)
     env["GAUSSIAN_SPLATTING_CONDA_PREFIX"] = str(env_root)
@@ -4484,7 +4504,12 @@ def gs2mesh_env():
 def training_python(backend="3dgs"):
     backend = safe_training_backend(backend)
     if backend == "2dgs":
-        return TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe"
+        configured = os.environ.get("TWO_DGS_PYTHON")
+        if configured:
+            return Path(configured)
+        local_python = TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe"
+        managed_python = Path(ROOT.anchor) / "conda" / "envs" / "gsw_2dgs" / "python.exe"
+        return local_python if local_python.is_file() or not managed_python.is_file() else managed_python
     gaussian_python = gaussian_env_root() / "python.exe"
     if gaussian_python.exists():
         return gaussian_python
@@ -4545,7 +4570,7 @@ def python_probe(python_path, env, code, timeout=20):
 def training_environment_report(backend="3dgs"):
     backend = safe_training_backend(backend)
     env = training_env(backend)
-    env_root = gaussian_env_root()
+    env_root = Path(env["CONDA_PREFIX"])
     conda_bat = conda_bat_path()
     miniforge_root = conda_bat.parents[1] if conda_bat else env_root.parents[1]
     python_path = training_python(backend)
@@ -4570,7 +4595,8 @@ def training_environment_report(backend="3dgs"):
     runtime_ok, runtime_detail = python_probe(
         python_path,
         env,
-        "import torch, cv2; from PIL import Image; import diff_gaussian_rasterization; "
+        "import torch, cv2; from PIL import Image; import " +
+        ("diff_surfel_rasterization; " if backend == "2dgs" else "diff_gaussian_rasterization; ") +
         "from simple_knn._C import distCUDA2; "
         "assert torch.cuda.is_available(), 'PyTorch cannot access a CUDA device'; "
         "print('cuda', torch.cuda.get_device_name(0))",
@@ -4602,8 +4628,8 @@ def training_environment_report(backend="3dgs"):
         "gaussian_dir_exists": GAUSSIAN_DIR.exists(),
         "two_dgs_dir": str(TWO_DGS_DIR),
         "two_dgs_dir_exists": TWO_DGS_DIR.exists(),
-        "two_dgs_python": str(TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe"),
-        "two_dgs_python_exists": (TWO_DGS_DIR / ".venv" / "Scripts" / "python.exe").exists(),
+        "two_dgs_python": str(training_python("2dgs")),
+        "two_dgs_python_exists": training_python("2dgs").exists(),
         "two_dgs_train": str(TWO_DGS_DIR / "train.py"),
         "two_dgs_train_exists": (TWO_DGS_DIR / "train.py").exists(),
         "opencv_ok": opencv_ok,
@@ -4632,7 +4658,7 @@ def ensure_training_environment(backend="3dgs"):
         if not report["two_dgs_dir_exists"]:
             problems.append(f"Missing 2DGS directory: {report['two_dgs_dir']}")
         if not report["two_dgs_python_exists"]:
-            problems.append(f"Missing 2DGS venv Python: {report['two_dgs_python']}")
+            problems.append(f"Missing 2DGS Python: {report['two_dgs_python']}")
         if not report["two_dgs_train_exists"]:
             problems.append(f"Missing 2DGS train.py: {report['two_dgs_train']}")
     if not report["colmap_exists"]:
@@ -4656,7 +4682,7 @@ def ensure_training_environment(backend="3dgs"):
                 f"will not bypass enterprise policy. Details: {detail}"
             )
         else:
-            problems.append(f"3DGS PyTorch/CUDA runtime unavailable: {detail}")
+            problems.append(f"{backend.upper()} PyTorch/CUDA runtime unavailable: {detail}")
     if problems:
         raise RuntimeError("; ".join(problems))
     return report
@@ -4739,9 +4765,15 @@ def run_logged(job, args, cwd, backend=None):
         process_env = gs2mesh_env()
     else:
         process_env = training_env(backend or job.get("backend", "3dgs"))
-    native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend == "3dgs" else None
+    native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS else None
     if native_control:
         process_env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps(native_control)
+        if backend == "2dgs":
+            # Keep external upstream/runtime files untouched. The versioned
+            # native entry retains the official 2DGS optimization algorithm.
+            args = list(args)
+            args[1] = ROOT / "native" / "worker" / "two_dgs_train.py"
+            process_env["GSW_TWO_DGS_SOURCE"] = str(Path(cwd).resolve())
     process = subprocess.Popen(
         [str(a) for a in args],
         cwd=str(cwd),
@@ -4786,7 +4818,8 @@ def run_logged(job, args, cwd, backend=None):
     if rc == 75 and native_control:
         from native.worker.training_checkpoint import read_manifest
         manifest, _ = read_manifest(native_control["output"])
-        if manifest.get("session") != native_control["session"]:
+        if (manifest.get("session") != native_control["session"] or
+                manifest.get("backend", "3dgs") != backend):
             raise RuntimeError("Pause exited without a checkpoint from this training session")
         raise NativeTrainingPaused(manifest)
     if rc != 0:

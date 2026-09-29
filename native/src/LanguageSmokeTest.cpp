@@ -49,6 +49,7 @@
 
 namespace gsw {
 bool runTrainingResumeSmokeTest(MainWindow &window) {
+  const QString backend = qEnvironmentVariable("GSW_RESUME_SMOKE_BACKEND", "3dgs");
   bool passed = true;
   const auto check = [&](bool condition, const char *message) {
     if (!condition) { qCritical() << "Training resume:" << message; passed = false; }
@@ -88,28 +89,34 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
   }
   const QString output = QDir(project).filePath(QStringLiteral("output/test"));
   const QString config = QDir(project).filePath(QStringLiteral(".gsw/jobs/test.json"));
-  check(write(config, "{\"nativeCheckpoint\":true,\"backend\":\"3dgs\"}"), "write task config");
+  check(write(config, QJsonDocument(QJsonObject{{"nativeCheckpoint", true}, {"backend", backend}}).toJson()), "write task config");
   check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/state-0123456789abcdef0123456789abcdef.pth")), "fixture"), "write checkpoint fixture");
   check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/ready.json")),
-      "{\"version\":1,\"iteration\":3,\"total\":10,\"file\":\"state-0123456789abcdef0123456789abcdef.pth\"}"), "write checkpoint manifest");
-  check(write(QDir(output).filePath(QStringLiteral("point_cloud/iteration_3/point_cloud.ply")),
+      QJsonDocument(QJsonObject{{"version", 1}, {"iteration", 3}, {"total", 10}, {"backend", backend},
+          {"file", "state-0123456789abcdef0123456789abcdef.pth"}}).toJson()), "write checkpoint manifest");
+  QByteArray preview(
       "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
       "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
       "property float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\n"
       "property float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n"
       "0 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n1 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n"
-      "0 1 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 0 1 0 0 0 1 -3 -3 -3 1 0 0 0\n"), "write complete preview");
+      "0 1 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 0 1 0 0 0 1 -3 -3 -3 1 0 0 0\n");
+  if (backend == QStringLiteral("2dgs")) {
+    preview.replace("property float scale_2\n", "");
+    preview.replace("-3 -3 -3", "-3 -3");
+  }
+  check(write(QDir(output).filePath(QStringLiteral("point_cloud/iteration_3/point_cloud.ply")), preview), "write complete preview");
   check(saveActiveTrainingJob(project, {config, output}), "save active task");
   const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
       QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
-  window.mPendingTraining = MainWindow::PendingTraining{QStringLiteral("fixture"), project, {}, output, QStringLiteral("3dgs"), 10};
+  window.mPendingTraining = MainWindow::PendingTraining{QStringLiteral("fixture"), project, {}, output, backend, 10};
   check(window.mProcessSupervisor.start(QStringLiteral("fixture"), helper, {QStringLiteral("pause-worker")}, {}, {}, true), "start owned worker");
   WorkerStatus status; status.state = QStringLiteral("running"); status.stage = QStringLiteral("colmap");
   emit window.mProcessSupervisor.workerStatusReady(status);
-  check(!window.mPauseTrainingAction->isEnabled(), "cannot pause COLMAP as 3DGS");
+  check(!window.mPauseTrainingAction->isEnabled(), "cannot pause COLMAP as Gaussian training");
   status.stage = QStringLiteral("train"); status.iteration = 3; status.totalIterations = 10;
   emit window.mProcessSupervisor.workerStatusReady(status);
-  check(window.mPauseTrainingAction->isEnabled(), "pause enabled during 3DGS training");
+  check(window.mPauseTrainingAction->isEnabled(), "pause enabled during Gaussian training");
   window.mPauseTrainingAction->trigger();
   check(!window.mPauseTrainingAction->isEnabled() && window.mPauseRequested, "duplicate pause blocked while saving");
   check(waitUntil([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTraining; }), "pause finishes");
@@ -359,6 +366,15 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto configuration = training.configuration();
   check(configuration.backend == QStringLiteral("3dgs"), "training backend must not be translated");
   check(configuration.quality == QStringLiteral("quick"), "preset identifier must not be translated");
+  auto *backendCombo = training.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo"));
+  auto *pipelineHint = training.findChild<QLabel *>(QStringLiteral("trainingPipelineHint"));
+  check(backendCombo && backendCombo->count() == 2 && pipelineHint, "both training backends expose capabilities");
+  if (backendCombo && pipelineHint) {
+    backendCombo->setCurrentIndex(1);
+    check(training.configuration().backend == QStringLiteral("2dgs"), "2DGS backend identifier remains stable");
+    check(pipelineHint->text() == QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。"), "2DGS capabilities translated");
+    backendCombo->setCurrentIndex(0);
+  }
   DatasetImportDialog import({}, name, {}, QCoreApplication::applicationDirPath(), true, &window);
   check(import.request().sceneName == name, "user scene name must remain unchanged");
   // This source lives in the catalog under the original English diagnostic.
@@ -639,6 +655,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QDir().mkpath(screenshotDirectory);
     check(window.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral(".png"))), "UI screenshot");
     check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-viewport.png"))), "trackball screenshot");
+    if (backendCombo) backendCombo->setCurrentIndex(1);
+    training.show(); training.adjustSize(); QApplication::processEvents();
+    check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training.png"))), "training capabilities screenshot");
+    training.hide();
     exportDialog.show(); exportDialog.adjustSize(); QApplication::processEvents();
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();

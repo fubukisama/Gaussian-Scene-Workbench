@@ -4,11 +4,11 @@
 
 ## 简体中文
 
-工具栏和「工作流」菜单新增「暂停训练」「继续训练」。仅本版本新启动的原生 3DGS 训练支持；相机解算、导入和 2DGS 不会误启用暂停。
+工具栏和「工作流」菜单新增「暂停训练」「继续训练」。新启动的原生 3DGS 和 2DGS 训练入口均接入；相机解算、导入和未适配网格阶段不会误启用暂停。2DGS 的环境与待验收差异见[链路对齐](GENERATION_PIPELINES.md)。
 
 点击暂停后，等待当前迭代完成密度控制和优化器更新，再保存完整状态与 PLY 预览，最后退出训练进程释放显存。保存过程中请勿强制关闭；「停止任务」仍是取消，不等于安全暂停。暂停后保留视口模型、迭代和监视指标，工程重新打开后仍可继续。
 
-续训直接复用随附 Graphdeco 的 `GaussianModel.capture/restore`（原许可证不变），补全曝光张量/优化器、随机数状态、剩余相机采样队列、累计时间及日志平滑值。保持原总迭代数和学习率/密度控制计划，不从 PLY 重新初始化，也不重新运行 COLMAP；重建输入缺失时直接拒绝续训，不自动恢复缓存或重新解算。已正常暂停的工程不会在重开时替换后来选中的模型及其变换。历史曲线不跨进程恢复；不会伪造旧采样。旧版检查点、外部任意 PTH、2DGS 续训暂不支持。
+续训直接复用随附 Graphdeco 的 `GaussianModel.capture/restore`（原许可证不变），补全曝光张量/优化器、随机数状态、剩余相机采样队列、累计时间及日志平滑值。保持原总迭代数和学习率/密度控制计划，不从 PLY 重新初始化，也不重新运行 COLMAP；重建输入缺失时直接拒绝续训，不自动恢复缓存或重新解算。已正常暂停的工程不会在重开时替换后来选中的模型及其变换。历史曲线不跨进程恢复；不会伪造旧采样。旧版任意检查点和外部 PTH 不支持；2DGS 使用独立的双尺度状态及曲面训练入口，不含曝光优化器。
 
 完整状态先写唯一临时文件，再原子发布 `output/<scene>/.gsw-resume/ready.json`；只有新清单发布成功后才回收上一个状态文件。磁盘写入失败保留上一个有效检查点。续训核对 SHA-256、图像/相机文件内容和训练参数；源数据变更时拒绝继续。首次启动和续训需读取训练输入计算指纹，耗时取决于数据量。工程托管路径使用相对记录，另存为时跟随工程迁移；外部数据保持原外部位置。
 
@@ -18,7 +18,7 @@
 
 ## English
 
-**Pause Training** and **Resume Training** appear in the toolbar and Workflow menu for newly started native 3DGS jobs. Pause waits for an optimizer-step boundary, saves full state and a PLY preview, then exits to release GPU memory. Stop remains cancellation. The preview and project resume entry survive pausing/reopening. COLMAP, import, 2DGS, legacy checkpoints and arbitrary external PTH files are not supported by this resume path.
+**Pause Training** and **Resume Training** appear in the toolbar and Workflow menu for newly started native 3DGS and 2DGS jobs. Pause waits for an optimizer-step boundary, saves full state and a PLY preview, then exits to release GPU memory. Stop remains cancellation. The preview and project resume entry survive pausing/reopening. COLMAP, import, unadapted meshing stages, legacy checkpoints and arbitrary external PTH files are not supported by this resume path.
 
 The vendored Graphdeco capture/restore implementation is reused under its existing license, augmented with exposure/Adam, RNG, pending camera samples, elapsed time and smoothed log values. Original iteration schedules are retained; historical curves are not reconstructed. Atomic manifest-last publication preserves the previous checkpoint on write failure. Input-content fingerprints and SHA-256 detect incompatible/corrupt state, but do not establish trust. Hashing inputs costs time proportional to dataset size. Managed paths migrate with Save As; external paths remain external. Loading pickle-based checkpoints requires explicit user trust confirmation and never happens automatically on project open.
 
@@ -28,13 +28,17 @@ Missing reconstruction inputs fail safely instead of invoking automatic alignmen
 
 ## 日本語
 
-ツールバーと「ワークフロー」に「学習を一時停止」「学習を再開」を追加します。本バージョンで新しく開始したネイティブ 3DGS ジョブのみが対象です。最適化器の更新後に完全な状態と PLY プレビューを保存し、プロセスを終了して GPU メモリを解放します。「タスクを停止」は引き続きキャンセルです。プレビューと再開対象はプロジェクトを開き直しても保持します。COLMAP、インポート、2DGS、旧チェックポイント、任意の外部 PTH は対象外です。
+ツールバーと「ワークフロー」に「学習を一時停止」「学習を再開」を追加します。新しく開始したネイティブ 3DGS と 2DGS ジョブが対象です。最適化器の更新後に完全な状態と PLY プレビューを保存し、プロセスを終了して GPU メモリを解放します。「タスクを停止」は引き続きキャンセルです。プレビューと再開対象はプロジェクトを開き直しても保持します。COLMAP、インポート、未対応のメッシュ段階、旧チェックポイント、任意の外部 PTH は対象外です。
 
 同梱 Graphdeco の capture/restore を元のライセンスのまま再利用し、露出と Adam、乱数状態、未使用カメラのサンプル列、経過時間、平滑化ログ値を追加します。元の反復スケジュールを保持し、過去の曲線は再構築しません。マニフェストを最後に原子的に公開するため、書き込み失敗時も以前の有効な状態が残ります。入力内容の指紋と SHA-256 で不一致・破損を検出しますが、信頼性は保証しません。入力のハッシュ計算にはデータ量に応じた時間が必要です。管理対象のパスは「名前を付けて保存」で移行し、外部パスはそのままです。pickle の読み込みには明示的な信頼確認が必要で、プロジェクトを開いた際に自動実行しません。
 
 状態の安全性、ワーカーと UI のライフサイクル、三言語の即時切り替え、再オープンを検証します。CPU Adam の連続実行と復元後の実行は完全一致します。任意実行の CUDA テストはテンソル・最適化器・乱数状態の完全復元と画質の連続性を検証しますが、その後の GPU 更新のビット単位での再現性は保証しません。
 
 再構築入力が欠落した場合、自動アラインメントやキャッシュ復元を行わずに再開を拒否します。正常に一時停止したプロジェクトを開き直しても、その後ユーザーが保存したモデルの選択や変換を置き換えません。
+
+2DGS uses the official upstream adapter with two-scale state and no exposure optimizer. The isolated runtime, passing CUDA resume/preview smoke tests and remaining real-data/thin-disk preview limitations are documented in [generation pipeline parity](GENERATION_PIPELINES.md).
+
+2DGS は公式アダプターを使用し、二尺度の状態を保持します。露出最適化器は追加しません。独立環境、合格した実 CUDA の再開・プレビュー試験、実写品質と薄片近似表示の制限は[生成パイプラインの整合](GENERATION_PIPELINES.md)を参照してください。
 
 ## Developer validation
 

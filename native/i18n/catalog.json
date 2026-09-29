@@ -8,10 +8,25 @@
   "已暂停": {
     "zh_CN": "已暂停", "en_US": "Paused", "ja_JP": "一時停止中"
   },
-  "保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）": {
-    "zh_CN": "保存完整训练状态后暂停并释放显存（仅 3DGS 训练阶段）",
-    "en_US": "Save full training state, pause and release GPU memory (3DGS training stage only)",
-    "ja_JP": "完全な学習状態を保存して一時停止し、GPU メモリを解放（3DGS の学習段階のみ）"
+  "保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）": {
+    "zh_CN": "保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）",
+    "en_US": "Save full training state, pause and release GPU memory (3DGS / 2DGS training stage)",
+    "ja_JP": "完全な学習状態を保存して一時停止し、GPU メモリを解放（3DGS / 2DGS の学習段階）"
+  },
+  "2DGS 环境尚未配置。请设置 TWO_DGS_DIR 和 TWO_DGS_PYTHON；开始前会检查曲面光栅化扩展。": {
+    "zh_CN": "2DGS 环境尚未配置。请设置 TWO_DGS_DIR 和 TWO_DGS_PYTHON；开始前会检查曲面光栅化扩展。",
+    "en_US": "2DGS runtime is not configured. Set TWO_DGS_DIR and TWO_DGS_PYTHON; the surfel rasterizer is checked before training.",
+    "ja_JP": "2DGS 環境が未設定です。TWO_DGS_DIR と TWO_DGS_PYTHON を設定してください。学習前にサーフェル用ラスタライザーを確認します。"
+  },
+  "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。": {
+    "zh_CN": "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。",
+    "en_US": "2DGS supports pause, full-state resume and continuous snapshot previews. The viewport uses a thin-disk approximation, not exact surfel rasterization.",
+    "ja_JP": "2DGS は一時停止、完全な状態からの学習再開、連続スナップショットに対応。ビューポートは薄い円盤による近似表示で、厳密なサーフェル描画ではありません。"
+  },
+  "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。": {
+    "zh_CN": "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。",
+    "en_US": "3DGS supports pause, full-state resume and continuous previews, with snapshots when shared GPU preview is unavailable.",
+    "ja_JP": "3DGS は一時停止、完全な状態からの学習再開、連続プレビューに対応。GPU 共有プレビューが利用できない場合はスナップショットを使用します。"
   },
   "从当前工程的完整训练检查点继续，保留优化器与迭代进度": {
     "zh_CN": "从当前工程的完整训练检查点继续，保留优化器与迭代进度",

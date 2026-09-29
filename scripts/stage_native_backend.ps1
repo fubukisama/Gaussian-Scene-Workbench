@@ -55,9 +55,13 @@ $StaticFiles = @(
   @{ Source = "native\worker\gpu_preview_publisher.py"; Destination = "native\worker\gpu_preview_publisher.py" },
   @{ Source = "native\worker\training_preview.py"; Destination = "native\worker\training_preview.py" },
   @{ Source = "native\worker\training_checkpoint.py"; Destination = "native\worker\training_checkpoint.py" },
+  @{ Source = "native\worker\two_dgs_train.py"; Destination = "native\worker\two_dgs_train.py" },
+  @{ Source = "native\worker\generation_capabilities.py"; Destination = "native\worker\generation_capabilities.py" },
+  @{ Source = "native\worker\licenses\2dgs-LICENSE.md"; Destination = "native\worker\licenses\2dgs-LICENSE.md" },
   @{ Source = "crop_editor\server.py"; Destination = "crop_editor\server.py" },
   @{ Source = "crop_editor\video_extract.py"; Destination = "crop_editor\video_extract.py" },
   @{ Source = "scripts\check_3dgs_env.ps1"; Destination = "scripts\check_3dgs_env.ps1" },
+  @{ Source = "scripts\requirements-native-2dgs.txt"; Destination = "scripts\requirements-native-2dgs.txt" },
   @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" },
   @{ Source = "scripts\sign_windows_artifacts.ps1"; Destination = "scripts\sign_windows_artifacts.ps1" }
 )
@@ -90,11 +94,15 @@ $Manifest = [ordered]@{
     "native/worker/gpu_preview_publisher.py",
     "native/worker/training_preview.py",
     "native/worker/training_checkpoint.py",
+    "native/worker/two_dgs_train.py",
+    "native/worker/generation_capabilities.py",
+    "native/worker/licenses/2dgs-LICENSE.md",
     "crop_editor/server.py",
     "crop_editor/video_extract.py",
     "gaussian-splatting",
     "training_kit",
     "scripts/check_3dgs_env.ps1",
+    "scripts/requirements-native-2dgs.txt",
     "scripts/install_colmap.ps1",
     "scripts/sign_windows_artifacts.ps1"
   )

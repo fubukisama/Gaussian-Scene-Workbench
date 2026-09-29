@@ -862,7 +862,11 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
     vertex.opacity = activatedOpacity(values.at(opacityIndex));
     vertex.scaleX = activatedScale(values.at(scaleIndices.at(0)));
     vertex.scaleY = activatedScale(values.at(scaleIndices.at(1)));
-    vertex.scaleZ = activatedScale(values.at(scaleIndices.at(2)));
+    // Official 2DGS files contain two log-scales. Give the display-only
+    // affine splat a small normal thickness; never alter the source fields.
+    vertex.scaleZ = scaleIndices.at(2) >= 0
+        ? activatedScale(values.at(scaleIndices.at(2)))
+        : std::min(vertex.scaleX, vertex.scaleY) * 0.001f;
 
     const double rotationW = values.at(rotationIndices.at(0));
     const double rotationX = values.at(rotationIndices.at(1));
@@ -2086,8 +2090,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     return index >= 0 && !vertexElement.properties.at(index).isList;
   };
   result.hasGaussianAttributes = isScalarProperty(opacityIndex) &&
-      std::all_of(scaleIndices.cbegin(), scaleIndices.cend(),
-                  isScalarProperty) &&
+      isScalarProperty(scaleIndices[0]) && isScalarProperty(scaleIndices[1]) &&
+      (scaleIndices[2] < 0 || isScalarProperty(scaleIndices[2])) &&
       std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
                   isScalarProperty);
 

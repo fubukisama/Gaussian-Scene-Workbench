@@ -1,5 +1,11 @@
 # Native GSW / LichtFeld Studio / Postshot
 
+2026-09-30 第四批：2DGS 接入与 3DGS 共用的暂停/续训控制、指标与连续快照，补齐双尺度 PLY 显示和曲面扩展预检，并已补齐隔离环境、通过真实 CUDA 小样例续训与连续预览测试。以下第三批的“仅 3DGS”范围是历史记录；实拍质量、精确曲面显示及所有网格链路待办以[多链路对齐表](GENERATION_PIPELINES.md)为准，不能称为已全面对齐。
+
+Batch four: 2DGS now shares native pause/resume, telemetry and snapshots, with two-scale PLY and surfel preflight. Its isolated runtime and real CUDA resume/continuous-preview smoke tests are verified. Historical batch-three restrictions below are superseded by the [cross-pipeline gates](GENERATION_PIPELINES.md). Representative-data quality, exact surfel display and native staged meshing remain outstanding.
+
+第四段階：2DGS に共通の一時停止・再開、メトリクス、連続スナップショット、二尺度 PLY と専用拡張の検証を追加。独立環境を導入し、実 CUDA の再開・連続プレビューの小規模試験に合格。第三段階の範囲は履歴です。現在の差分は[能力表](GENERATION_PIPELINES.md)を参照。実写品質、厳密なサーフェル表示、段階別メッシュ処理は未完了です。
+
 竞品核查日期：2026-09-20；本地进展更新：2026-09-23。原生桌面端已推进 SPZ 交付、完整 SH 显示和训练暂停/续训三批对标升级，不代表已实现两款软件的全部功能。对方功能依据官方公开文档，本地状态依据当前桌面分支代码；没有做同一数据集、同一硬件下的三软件画质/速度排名。
 
 ## 对比与优先级

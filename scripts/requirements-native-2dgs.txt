@@ -1,0 +1,17 @@
+# Verified Windows 2DGS runtime. Install torch 2.0.1 / torchvision 0.15.2
+# from https://download.pytorch.org/whl/cu118 first, then this file and the
+# pinned upstream diff-surfel-rasterization / simple-knn submodules.
+numpy==1.26.4
+pillow==10.2.0
+setuptools==69.5.1
+open3d==0.18.0
+mediapy==1.1.2
+lpips==0.1.4
+scikit-image==0.21.0
+tqdm==4.66.2
+trimesh==4.3.2
+plyfile==1.0.3
+opencv-python==4.10.0.84
+matplotlib==3.8.4
+imageio-ffmpeg==0.6.0
+tensorboard==2.21.0
