@@ -49,6 +49,7 @@ protected:
 private:
   friend bool runListInteractionSmokeTest(MainWindow &window);
   friend bool runTrainingResumeSmokeTest(MainWindow &window);
+  friend bool runMeshGenerationSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -73,6 +74,13 @@ private:
     QString taskName;
     QString projectRoot;
     QString datasetPath;
+  };
+
+  struct PendingMesh {
+    QString taskName;
+    QString projectRoot;
+    QString outputDirectory;
+    QString previewPath;
   };
 
   void createActions();
@@ -142,6 +150,7 @@ private:
   void runEnvironmentCheck();
   void startReconstruction();
   void startTraining();
+  void startMeshGeneration();
   void pauseTraining();
   void resumeTraining();
   void updateTrainingActions();
@@ -221,6 +230,7 @@ private:
   QAction *mClearTasksAction = nullptr;
   QAction *mReconstructAction = nullptr;
   QAction *mTrainAction = nullptr;
+  QAction *mGenerateMeshAction = nullptr;
   QAction *mPauseTrainingAction = nullptr;
   QAction *mResumeTrainingAction = nullptr;
   bool mPauseRequested = false;
@@ -262,6 +272,8 @@ private:
   std::optional<PendingDatasetImport> mPendingDatasetImport;
   std::optional<PendingTraining> mPendingTraining;
   std::optional<PendingReconstruction> mPendingReconstruction;
+  std::optional<PendingMesh> mPendingMesh;
+  bool mShowGeneratedMesh = false;
   QString mActiveWorkerState;
   std::optional<WorkerStatus> mLastWorkerStatus;
   qsizetype mSelectedPointCount = 0;

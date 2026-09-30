@@ -47,6 +47,7 @@ def load_configuration(path, requested_task=None):
             "quality",
         ),
         "colmap": ("repositoryRoot", "datasetPath"),
+        "mesh": ("repositoryRoot", "modelDirectory", "outputRoot", "runName", "iteration", "mode"),
         "import": ("repositoryRoot", "projectRoot", "datasetRoot", "scene", "files"),
         "import-recovery": ("projectRoot", "datasetRoot", "scene"),
         "import-project-recovery": ("projectRoot", "datasetRoot"),
@@ -1076,11 +1077,15 @@ def main():
     parser.add_argument("--resume-training", action="store_true")
     parser.add_argument(
         "--task",
-        choices=("training", "colmap", "import", "import-recovery", "import-project-recovery"),
+        choices=("training", "colmap", "mesh", "import", "import-recovery", "import-project-recovery"),
     )
     args = parser.parse_args()
     try:
         config = load_configuration(args.config, args.task)
+        if config["task"] == "mesh":
+            sys.path.insert(0, str(Path(config["repositoryRoot"]).resolve()))
+            from native.worker.mesh_generation import run
+            return run(config, import_backend(config["repositoryRoot"]), emit_status)
         if config["task"] == "colmap":
             return run_colmap(config)
         if config["task"] == "import":

@@ -155,6 +155,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption trainingResumeSmokeOption(QStringLiteral("smoke-test-training-resume"),
       QStringLiteral("Verify pause/resume actions, state, translations and project recovery."));
   parser.addOption(trainingResumeSmokeOption);
+  QCommandLineOption meshGenerationSmokeOption(QStringLiteral("smoke-test-mesh-generation"),
+      QStringLiteral("Verify mesh publication, partial results and project persistence."));
+  parser.addOption(meshGenerationSmokeOption);
   QCommandLineOption projectOption(
       {QStringLiteral("p"), QStringLiteral("project")},
       QStringLiteral("Open a .gsw.json project file."), QStringLiteral("file"));
@@ -252,6 +255,7 @@ int main(int argc, char *argv[]) {
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
   const bool smokeTest = parser.isSet(smokeTestOption) ||
+                         parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
@@ -275,7 +279,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(trainingResumeSmokeOption)) {
+  if (parser.isSet(meshGenerationSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runMeshGenerationSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingResumeSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runTrainingResumeSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

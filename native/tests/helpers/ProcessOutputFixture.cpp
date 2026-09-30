@@ -2,6 +2,8 @@
 #include <QDeadlineTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QThread>
 #include <QTimer>
@@ -16,6 +18,21 @@
 int main(int argc, char *argv[]) {
   QCoreApplication application(argc, argv);
   const QStringList arguments = application.arguments();
+  if (arguments.size() == 4 && arguments.at(1) == QStringLiteral("mesh-worker")) {
+    const auto publish = [&](const QString &state, const QString &stage) {
+      const QByteArray bytes = QJsonDocument(QJsonObject{
+          {"version", 1}, {"type", "status"}, {"state", state}, {"stage", stage},
+          {"previewPath", arguments.at(2)}, {"previewKind", "mesh"}, {"previewIteration", 1}})
+          .toJson(QJsonDocument::Compact);
+      std::printf("[worker-event] %s\n", bytes.constData());
+      std::fflush(stdout);
+    };
+    publish(QStringLiteral("running"), QStringLiteral("mesh_ready"));
+    QThread::msleep(250);
+    const bool failed = arguments.at(3) == QStringLiteral("failed");
+    publish(failed ? QStringLiteral("failed") : QStringLiteral("done"), QStringLiteral("done"));
+    return failed ? 1 : 0;
+  }
   if (arguments.size() == 2 && arguments.at(1) == QStringLiteral("pause-worker")) {
     char command[32] = {};
     if (!std::fgets(command, sizeof(command), stdin) || QByteArray(command).trimmed() != "pause") return 8;

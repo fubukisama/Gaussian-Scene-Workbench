@@ -80,9 +80,12 @@ class TrainingTelemetryTests(unittest.TestCase):
         from native.worker.generation_capabilities import PIPELINES, supports_checkpoint
         self.assertEqual(set(PIPELINES), server.TRAINING_BACKENDS | server.MESH_MODES | {"openmvs"})
         for backend, entry in PIPELINES.items():
+            self.assertTrue(entry["native_entry"])
             self.assertTrue(entry["limitation"])
             self.assertTrue(entry["acceptance"])
             self.assertEqual(supports_checkpoint(backend), backend in server.TRAINING_BACKENDS)
+            if backend in server.MESH_MODES | {"openmvs"}:
+                self.assertEqual(entry["live_preview"], "completed_mesh_stage")
         self.assertFalse(supports_checkpoint("unknown-backend"))
 
     def test_pause_exit_requires_current_session_checkpoint(self):

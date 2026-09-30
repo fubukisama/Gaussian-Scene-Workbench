@@ -103,6 +103,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MediaProjectBootstrap.h
   src/MeshCache.cpp
   src/MeshCache.h
+  src/MeshGenerationDialog.cpp
+  src/MeshGenerationDialog.h
   src/ModelInteraction.cpp
   src/ModelInteraction.h
   src/ModelExport.cpp
@@ -412,6 +414,10 @@ if(BUILD_TESTING)
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
   add_test(NAME native_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
+  add_test(NAME native_mesh_generation COMMAND GaussianSceneWorkbench --smoke-test-mesh-generation)
+  set_tests_properties(native_mesh_generation PROPERTIES TIMEOUT 40
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_2dgs_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
   set_tests_properties(native_2dgs_training_resume PROPERTIES TIMEOUT 40
     ENVIRONMENT "GSW_RESUME_SMOKE_BACKEND=2dgs;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="

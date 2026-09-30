@@ -413,7 +413,12 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     for (const auto &object : objects) {
       auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
           [&](const auto &state) { return state->id == object.id; });
-      const bool adoptPreview = previewToAdopt && object.id == activeId;
+      // A staged result is a new object. Never share its SceneState with an
+      // original object that remains in the collection (including GPU buffers).
+      const bool adoptPreview = previewToAdopt && object.id == activeId &&
+          std::none_of(objects.cbegin(), objects.cend(), [&](const auto &other) {
+            return other.id != activeId && other.id == previewToAdopt->id;
+          });
       auto state = adoptPreview ? previewToAdopt : found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
       state->id = object.id;
       retained.append(state);
@@ -588,6 +593,18 @@ QString NativeViewport::processingPreviewLabel() const {
     phase = QCoreApplication::translate("Workbench", "处理已中断 · 保留最近可用画面");
   else if (mProcessingStage == QStringLiteral("colmap"))
     phase = QCoreApplication::translate("Workbench", "相机解算与稀疏点云");
+  else if (mProcessingStage == QStringLiteral("environment"))
+    phase = QCoreApplication::translate("Workbench", "检查环境");
+  else if (mProcessingStage == QStringLiteral("mesh_inputs"))
+    phase = QCoreApplication::translate("Workbench", "准备网格输入");
+  else if (mProcessingStage == QStringLiteral("mesh"))
+    phase = QCoreApplication::translate("Workbench", "生成网格");
+  else if (mProcessingStage == QStringLiteral("mesh_validation"))
+    phase = QCoreApplication::translate("Workbench", "校验网格");
+  else if (mProcessingStage == QStringLiteral("mesh_ready"))
+    phase = QCoreApplication::translate("Workbench", "网格已就绪");
+  else if (mProcessingStage == QStringLiteral("texture"))
+    phase = QCoreApplication::translate("Workbench", "烘焙照片纹理");
   else if (mProcessingStage == QStringLiteral("train"))
     phase = mProcessingIteration > 0
         ? QCoreApplication::translate("Workbench", "高斯训练 · 优化与密度控制")

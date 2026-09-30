@@ -14,6 +14,7 @@
 #include "ImportEnvironmentProbe.h"
 #include "MediaProjectBootstrap.h"
 #include "ModelExportDialog.h"
+#include "MeshGenerationDialog.h"
 #include "SpzIO.h"
 #include <QTemporaryDir>
 #include <memory>
@@ -454,6 +455,11 @@ QString workerStageLabel(const QString &stage) {
       {QStringLiteral("masks"), QCoreApplication::translate("Workbench", "处理蒙版")},
       {QStringLiteral("finalizing"), QCoreApplication::translate("Workbench", "提交数据集")},
       {QStringLiteral("environment"), QCoreApplication::translate("Workbench", "检查环境")},
+      {QStringLiteral("mesh_inputs"), QCoreApplication::translate("Workbench", "准备网格输入")},
+      {QStringLiteral("mesh"), QCoreApplication::translate("Workbench", "生成网格")},
+      {QStringLiteral("mesh_validation"), QCoreApplication::translate("Workbench", "校验网格")},
+      {QStringLiteral("mesh_ready"), QCoreApplication::translate("Workbench", "网格已就绪")},
+      {QStringLiteral("texture"), QCoreApplication::translate("Workbench", "烘焙照片纹理")},
       {QStringLiteral("prepare"), QCoreApplication::translate("Workbench", "准备训练")},
       {QStringLiteral("colmap"), QCoreApplication::translate("Workbench", "COLMAP 重建")},
       {QStringLiteral("train"), QCoreApplication::translate("Workbench", "训练")},
@@ -1036,6 +1042,11 @@ void MainWindow::createActions() {
   AppLanguage::bind(mTrainAction, "toolTip", AppLanguage::source("启动当前工程训练"));
   connect(mTrainAction, &QAction::triggered, this, &MainWindow::startTraining);
 
+  mGenerateMeshAction = AppLanguage::text(new QAction(this), AppLanguage::source("生成网格..."));
+  mGenerateMeshAction->setObjectName(QStringLiteral("generateMeshAction"));
+  AppLanguage::bind(mGenerateMeshAction, "toolTip", AppLanguage::source("从训练输出生成网格，并可烘焙照片纹理"));
+  connect(mGenerateMeshAction, &QAction::triggered, this, &MainWindow::startMeshGeneration);
+
   mPauseTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPause), {}, this), AppLanguage::source("暂停训练"));
   mPauseTrainingAction->setObjectName(QStringLiteral("pauseTrainingAction"));
   AppLanguage::bind(mPauseTrainingAction, "toolTip", AppLanguage::source("保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）"));
@@ -1400,6 +1411,7 @@ void MainWindow::createMenus() {
   workflowMenu->addSeparator();
   workflowMenu->addAction(mReconstructAction);
   workflowMenu->addAction(mTrainAction);
+  workflowMenu->addAction(mGenerateMeshAction);
   workflowMenu->addAction(mPauseTrainingAction);
   workflowMenu->addAction(mResumeTrainingAction);
   workflowMenu->addAction(mStopAction);
@@ -1577,6 +1589,10 @@ void MainWindow::createToolBars() {
   mainToolbar->addSeparator();
   mainToolbar->addAction(mReconstructAction);
   mainToolbar->addAction(mTrainAction);
+  auto *meshButton = new QToolButton(mainToolbar);
+  meshButton->setDefaultAction(mGenerateMeshAction);
+  meshButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  mainToolbar->addWidget(meshButton);
   mainToolbar->addAction(mPauseTrainingAction);
   mainToolbar->addAction(mResumeTrainingAction);
   mainToolbar->addAction(mStopAction);
@@ -1931,6 +1947,13 @@ void MainWindow::connectServices() {
                     QStringLiteral("HH:mm:ss"))));
             mTaskTable->setItem(mActiveTaskRow, 3,
                                 new QTableWidgetItem(QStringLiteral("-")));
+            if (mPendingMesh && mPendingMesh->taskName == taskName) {
+              mTaskTable->item(mActiveTaskRow, 1)->setData(Qt::UserRole + 32,
+                  taskName.section(QStringLiteral(" | "), 1));
+              mViewport->beginProcessingPreview();
+              mViewport->setProcessingStage(QStringLiteral("environment"));
+              mTaskTabs->setCurrentWidget(mTaskTable);
+            }
             if (mPendingTraining.has_value() &&
                 mPendingTraining->taskName == taskName) {
               mViewport->stopTrainingGpuPreview();
@@ -1968,7 +1991,7 @@ void MainWindow::connectServices() {
             if (mPendingTraining.has_value()) {
               mTrainingMonitor->updateStatus(status);
             }
-            if (mPendingTraining.has_value() || mPendingReconstruction.has_value()) {
+            if (mPendingTraining.has_value() || mPendingReconstruction.has_value() || mPendingMesh.has_value()) {
               // Worker terminal status is not a validated/published final model yet.
               if (status.state != QStringLiteral("done") && status.state != QStringLiteral("failed") &&
                   status.state != QStringLiteral("cancelled"))
@@ -1996,6 +2019,18 @@ void MainWindow::connectServices() {
                     &mLastReconstructionPreviewIteration;
                 livePreviewPath = &mLiveReconstructionPreviewPath;
                 livePreviewCount = &mLiveReconstructionPointCount;
+              }
+
+              if (mPendingMesh && status.previewKind == QStringLiteral("mesh") &&
+                  status.previewPath != mPendingMesh->previewPath &&
+                  pathIsWithinDirectory(status.previewPath, mPendingMesh->outputDirectory)) {
+                QString error;
+                const auto metadata = WorkspaceDocument::inspectPly(status.previewPath, &error);
+                if (metadata.valid && metadata.looksLikeMesh()) {
+                  mPendingMesh->previewPath = status.previewPath;
+                  mShowGeneratedMesh = true;
+                  mViewport->setPreviewScene(status.previewPath, metadata.vertexCount);
+                }
               }
 
               const QFileInfo previewInfo(status.previewPath);
@@ -2057,6 +2092,7 @@ void MainWindow::connectServices() {
         const bool finishingReconstruction =
             mPendingReconstruction.has_value() &&
             mPendingReconstruction->taskName == taskName;
+        const bool finishingMesh = mPendingMesh && mPendingMesh->taskName == taskName;
         bool effectiveSucceeded = succeeded;
         bool recoveryFailed = false;
         QString completionDetail;
@@ -2284,16 +2320,69 @@ void MainWindow::connectServices() {
           }
         }
 
+        if (finishingMesh) {
+          const auto pending = *mPendingMesh;
+          mPendingMesh.reset();
+          mShowGeneratedMesh = false;
+          QFile resultFile(QDir(pending.outputDirectory).filePath(QStringLiteral("result.json")));
+          QJsonObject result;
+          if (resultFile.open(QIODevice::ReadOnly)) result = QJsonDocument::fromJson(resultFile.readAll()).object();
+          const QString path = result.value(QStringLiteral("meshPath")).toString();
+          QString error;
+          const auto metadata = WorkspaceDocument::inspectPly(path, &error);
+          const bool valid = pathIsWithinDirectory(path, pending.outputDirectory) &&
+              metadata.valid && metadata.looksLikeMesh() &&
+              result.value(QStringLiteral("completedStages")).toArray().contains(QStringLiteral("mesh"));
+          effectiveSucceeded = succeeded && result.value(QStringLiteral("state")).toString() == QStringLiteral("done") && valid;
+          if (valid && pathsReferToSameLocation(mWorkspace.rootPath(), pending.projectRoot)) {
+            mShowGeneratedMesh = true;
+            if (mWorkspace.addScenePath(path, &error)) {
+              if (mViewport->scenePath() == path && mViewport->meshRenderingAvailable()) {
+                mShowGeneratedMesh = false;
+                mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
+              }
+              completionDetail = effectiveSucceeded
+                  ? QCoreApplication::translate("Workbench", "网格已载入 · %1 个面").arg(metadata.faceCount)
+                  : QCoreApplication::translate("Workbench", "保留已完成网格；后续阶段未完成");
+              if (mActiveTaskRow >= 0) {
+                auto *detail = mTaskTable->item(mActiveTaskRow, 3);
+                detail->setData(Qt::UserRole + 34, effectiveSucceeded
+                    ? QString::fromUtf8(AppLanguage::source("网格已载入 · %1 个面"))
+                    : QString::fromUtf8(AppLanguage::source("保留已完成网格；后续阶段未完成")));
+                detail->setData(Qt::UserRole + 35, effectiveSucceeded ? QVariantList{metadata.faceCount} : QVariantList{});
+              }
+              if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
+            } else {
+              effectiveSucceeded = false;
+              completionDetail = error;
+            }
+          } else {
+            mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
+            completionDetail = QCoreApplication::translate("Workbench", "生成结果目录：%1")
+                .arg(QDir::toNativeSeparators(pending.outputDirectory));
+          }
+          const QString rawError = result.value(QStringLiteral("error")).toString();
+          if (!rawError.isEmpty()) appendLog(rawError + QLatin1Char('\n'));
+          appendTaskEvent(QCoreApplication::translate("Workbench", "生成结果目录：%1")
+              .arg(QDir::toNativeSeparators(pending.outputDirectory)));
+        }
         const bool cancelled =
             processCancelled && !effectiveSucceeded && !recoveryFailed;
         if (finishingTraining) {
           mViewport->stopTrainingGpuPreview();
           mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled, paused);
         }
-        if (finishingTraining || finishingReconstruction) {
+        if (finishingTraining || finishingReconstruction || finishingMesh) {
           if (finishingTraining && (effectiveSucceeded || paused))
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
           mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
+          if (finishingMesh) {
+            mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
+            if (mViewport->meshRenderingAvailable()) {
+              mShowGeneratedMesh = false;
+              mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
+            }
+          }
         }
         if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
           auto *state = mTaskTable->item(mActiveTaskRow, 0);
@@ -2625,6 +2714,10 @@ void MainWindow::connectServices() {
   connect(mViewport, &NativeViewport::meshRenderingAvailabilityChanged, this,
           [this](const bool available) {
             mMeshRenderAction->setEnabled(available);
+            if (available && mShowGeneratedMesh) {
+              mShowGeneratedMesh = false;
+              mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
+            }
             if (!available && mMeshRenderAction->isChecked()) {
               mPointRenderAction->setChecked(true);
             }
@@ -4965,6 +5058,53 @@ void MainWindow::resumeTraining() {
   }
 }
 
+void MainWindow::startMeshGeneration() {
+  if (!ensureProjectRecoveryReady() || mProcessSupervisor.isRunning()) return;
+  const QString root = BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(),
+                                                          qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString worker = QDir(root).filePath(QStringLiteral("native/worker/gsw_worker.py"));
+  const QString python = findTrainingPython(root);
+  if (root.isEmpty() || !QFileInfo::exists(worker) || python.isEmpty()) {
+    showError(QCoreApplication::translate("Workbench", "训练后端不可用"), backendUnavailableMessage(root, worker, python));
+    return;
+  }
+  QString source = loadActiveTrainingJob(mWorkspace.rootPath()).outputSceneRoot;
+  const QDir jobs(QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs")));
+  if (source.isEmpty()) {
+    for (const auto &file : jobs.entryInfoList({QStringLiteral("training-*.json")}, QDir::Files, QDir::Time)) {
+      QFile configFile(file.absoluteFilePath());
+      if (!configFile.open(QIODevice::ReadOnly)) continue;
+      const auto config = QJsonDocument::fromJson(configFile.readAll()).object();
+      const QString candidate = QDir(config.value(QStringLiteral("outputRoot")).toString())
+          .filePath(config.value(QStringLiteral("outputScene")).toString());
+      if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("cfg_args")))) { source = candidate; break; }
+    }
+  }
+  MeshGenerationDialog dialog(source, this);
+  if (dialog.exec() != QDialog::Accepted || !confirmDiscardSceneEdits()) return;
+  QJsonObject config = dialog.configuration();
+  const QString run = QStringLiteral("mesh-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  const QString outputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes"));
+  config.insert(QStringLiteral("task"), QStringLiteral("mesh"));
+  config.insert(QStringLiteral("repositoryRoot"), root);
+  config.insert(QStringLiteral("projectRoot"), mWorkspace.rootPath());
+  config.insert(QStringLiteral("outputRoot"), outputRoot);
+  config.insert(QStringLiteral("runName"), run);
+  if (!QDir().mkpath(jobs.absolutePath())) return;
+  const QString configurationPath = jobs.filePath(run + QStringLiteral(".json"));
+  QSaveFile file(configurationPath);
+  if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(config).toJson()) < 0 || !file.commit()) {
+    showError(QCoreApplication::translate("Workbench", "无法保存生成任务"), file.errorString());
+    return;
+  }
+  const QString name = QCoreApplication::translate("Workbench", "生成网格") + QStringLiteral(" | ") +
+      config.value(QStringLiteral("mode")).toString();
+  mPendingMesh = PendingMesh{name, comparablePath(mWorkspace.rootPath()), QDir(outputRoot).filePath(run), {}};
+  mShowGeneratedMesh = false;
+  if (!mProcessSupervisor.start(name, python, {worker, QStringLiteral("--config"), configurationPath},
+                                root, pythonProcessEnvironment(python), true)) mPendingMesh.reset();
+}
+
 void MainWindow::startTraining() {
   if (!ensureProjectRecoveryReady()) {
     return;
@@ -5166,6 +5306,16 @@ void MainWindow::updateTaskLabels() {
     const QString key = state->data(Qt::UserRole + 31).toString();
     if (!key.isEmpty()) state->setText(key == QStringLiteral("running")
         ? QCoreApplication::translate("Workbench", "运行中") : workerStageLabel(key));
+    if (auto *name = mTaskTable->item(row, 1); name && name->data(Qt::UserRole + 32).isValid()) {
+      const QString method = name->data(Qt::UserRole + 32).toString();
+      name->setText(QCoreApplication::translate("Workbench", "生成网格") +
+          (method.isEmpty() ? QString() : QStringLiteral(" | ") + method));
+    }
+    if (auto *detail = mTaskTable->item(row, 3); detail && detail->data(Qt::UserRole + 34).isValid()) {
+      QString text = QCoreApplication::translate("Workbench", detail->data(Qt::UserRole + 34).toString().toUtf8().constData());
+      for (const auto &argument : detail->data(Qt::UserRole + 35).toList()) text = text.arg(argument.toString());
+      detail->setText(text);
+    }
   }
   if (mActiveTaskRow >= 0 && mLastWorkerStatus && mActiveTaskRow < mTaskTable->rowCount()) {
     const auto &status = *mLastWorkerStatus;
@@ -5263,6 +5413,7 @@ void MainWindow::updateActionAvailability() {
                                  !mWorkspace.datasetPath().isEmpty());
   mTrainAction->setEnabled(!running && workspaceReady &&
                            !mWorkspace.datasetPath().isEmpty());
+  mGenerateMeshAction->setEnabled(!running && workspaceReady);
   updateEditActions();
 }
 

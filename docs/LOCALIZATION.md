@@ -49,6 +49,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 网格 / 三角网格 | Mesh / Triangle Mesh | メッシュ / 三角形メッシュ |
 | 顶点 / 面 / 法线 | Vertex / Face / Normal | 頂点 / 面 / 法線 |
 | 纹理 / UV 坐标 | Texture / UV Coordinates | テクスチャ / UV 座標 |
+| 生成网格 / 深度融合 | Generate Mesh / Depth Fusion | メッシュを生成 / 深度融合 |
+| 有界 / 无界 TSDF | Bounded / Unbounded TSDF | 有界 / 非有界 TSDF |
+| 连通分量 / 纹理烘焙 | Connected Component / Texture Baking | 連結成分 / テクスチャベイク |
 | 相机位姿 | Camera Pose | カメラ姿勢 |
 | 重建 / 训练 | Reconstruction / Training | 再構築 / 学習 |
 | 迭代 / 损失 | Iteration / Loss | 反復 / 損失 |

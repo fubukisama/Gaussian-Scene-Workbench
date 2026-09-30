@@ -4,12 +4,14 @@
 #include "AppLanguage.h"
 #include "MainWindow.h"
 #include "TrainingDialog.h"
+#include "MeshGenerationDialog.h"
 #include "DatasetImportDialog.h"
 #include "ReconstructionDialog.h"
 #include "TrainingMonitorWidget.h"
 #include "TrainingOutputLocator.h"
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include "WorkspaceDocument.h"
 #include "ManagedName.h"
 #include "ModelExportDialog.h"
@@ -48,6 +50,87 @@
 #include <functional>
 
 namespace gsw {
+bool runMeshGenerationSmokeTest(MainWindow &window) {
+  bool passed = true;
+  const auto check = [&](bool condition, const char *message) {
+    if (!condition) { qCritical() << "Mesh generation:" << message; passed = false; }
+  };
+  const auto waitUntil = [](const std::function<bool()> &predicate) {
+    QElapsedTimer timer; timer.start();
+    while (!predicate() && timer.elapsed() < 10000) {
+      QEventLoop loop; QTimer::singleShot(20, &loop, &QEventLoop::quit); loop.exec();
+    }
+    return predicate();
+  };
+  QTemporaryDir temporary;
+  if (!temporary.isValid()) return false;
+  const QDir root(temporary.path());
+  const auto write = [](const QString &path, const QByteArray &bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath()); QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+  };
+  QString error;
+  const QString project = root.filePath(QStringLiteral("mesh-project.files"));
+  check(QDir().mkpath(project) && window.mWorkspace.create(project, &error), "create owned project");
+  check(window.mWorkspace.saveManifest(root.filePath(QStringLiteral("mesh-project.gsw.json")), &error), "save owned project");
+  const QString original = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("source.ply"));
+  const QByteArray points("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n1 0 0\n0 1 0\n");
+  check(write(original, points) && window.mWorkspace.addScenePath(original, &error), "load original model");
+  check(window.mWorkspace.setSceneTranslation(QVector3D(1, 2, 3)), "transform original model");
+  const QString originalId = window.mWorkspace.activeSceneId();
+  const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
+  const QByteArray mesh("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n");
+  for (const bool failed : {false, true}) {
+    const QString state = failed ? QStringLiteral("failed") : QStringLiteral("done");
+    const QString directory = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes/") + state);
+    const QString path = QDir(directory).filePath(QStringLiteral("model/mesh.ply"));
+    check(write(path, mesh), "write complete mesh fixture");
+    check(write(QDir(directory).filePath(QStringLiteral("result.json")), QJsonDocument(QJsonObject{
+        {"version", 1}, {"task", "mesh"}, {"state", state}, {"meshPath", path},
+        {"completedStages", QJsonArray{QStringLiteral("mesh")}}}).toJson()), "write stage journal");
+    const auto before = window.mWorkspace.sceneObjects().size();
+    window.mPendingMesh = MainWindow::PendingMesh{state, window.mWorkspace.rootPath(), directory, {}};
+    check(window.mProcessSupervisor.start(state, helper,
+        {QStringLiteral("mesh-worker"), path, state}, {}, {}, true), "start owned mesh worker");
+    check(waitUntil([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingMesh; }), "mesh worker finishes");
+    check(window.mWorkspace.sceneObjects().size() == before + 1 && window.mWorkspace.scenePath() == path,
+          "append final or validated partial mesh without replacing originals");
+    check(waitUntil([&] { return window.mViewport->meshRenderingAvailable() &&
+        window.mViewport->scenePath() == path && window.mViewport->renderMode() == NativeViewport::RenderMode::Mesh; }),
+        "generated geometry appears in mesh mode");
+    check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 0)->data(Qt::UserRole + 31).toString() == state,
+          "partial mesh cannot mark failed texturing successful");
+    const auto selectedId = window.mWorkspace.activeSceneId();
+    for (const QString &language : AppLanguage::supported()) {
+      AppLanguage::apply(language, false);
+      check(window.mGenerateMeshAction->text() == QCoreApplication::translate("Workbench", "生成网格..."), "mesh action translates live");
+      check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 3)->text() == (failed
+          ? QCoreApplication::translate("Workbench", "保留已完成网格；后续阶段未完成")
+          : QCoreApplication::translate("Workbench", "网格已载入 · %1 个面").arg(1)), "mesh history translates live");
+      check(window.mWorkspace.activeSceneId() == selectedId, "language change preserves generated model");
+    }
+  }
+  const QString selectedResult = window.mWorkspace.activeSceneId();
+  check(window.mViewport->activateSceneObject(originalId), "select preserved original");
+  check(waitUntil([&] { return window.mViewport->scenePath() == original &&
+      window.mViewport->renderedPointCount() == 3; }), "original has independent viewport data");
+  check(window.mViewport->activateSceneObject(selectedResult), "return to generated mesh");
+  QFile source(original);
+  check(source.open(QIODevice::ReadOnly) && source.readAll() == points, "original file unchanged");
+  WorkspaceDocument reopened;
+  check(reopened.load(window.mWorkspace.projectFilePath(), &error), "reopen staged project");
+  check(reopened.sceneObjects().size() == 3 && reopened.activeSceneId() == window.mWorkspace.activeSceneId(),
+        "mesh objects and selected result persist");
+  const auto objects = reopened.sceneObjects();
+  bool originalPreserved = false;
+  for (const auto &object : objects)
+    if (object.id == originalId) originalPreserved = object.translation == QVector3D(1, 2, 3);
+  check(originalPreserved, "source transform preserved");
+  qInfo() << "Mesh generation desktop smoke:" << (passed ? "PASS" : "FAIL");
+  return passed;
+}
+
 bool runTrainingResumeSmokeTest(MainWindow &window) {
   const QString backend = qEnvironmentVariable("GSW_RESUME_SMOKE_BACKEND", "3dgs");
   bool passed = true;
@@ -364,6 +447,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
   TrainingDialog training(QCoreApplication::applicationDirPath(), name,
                           QCoreApplication::applicationDirPath(), true, true, &window);
   const auto configuration = training.configuration();
+  MeshGenerationDialog meshing({}, &window);
+  auto *meshMethod = meshing.findChild<QComboBox *>(QStringLiteral("meshMethodCombo"));
+  check(meshMethod && meshMethod->count() == 4, "all native mesh methods exposed");
+  check(meshing.windowTitle() == QCoreApplication::translate("Workbench", "生成网格"), "mesh dialog translation");
+  if (meshMethod) meshMethod->setCurrentIndex(3);
   check(configuration.backend == QStringLiteral("3dgs"), "training backend must not be translated");
   check(configuration.quality == QStringLiteral("quick"), "preset identifier must not be translated");
   auto *backendCombo = training.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo"));
@@ -510,6 +598,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // Window controls are installed lazily when a dialog is polished. Warm
   // existing dialogs before asserting that language changes add no actions.
   for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
+       static_cast<QDialog *>(&meshing),
        static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
        static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog),
        static_cast<QDialog *>(&spzDialog)}) dialog->ensurePolished();
@@ -573,6 +662,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
           exportDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型"), "export action and dialog translated live");
     check(exportDialog.options().format == ModelExportFormat::Glb && exportDialog.options().destinationPath == exportPath &&
           exportDialog.options().applyTransform, "export settings survive language changes");
+    check(meshing.windowTitle() == QCoreApplication::translate("Workbench", "生成网格") &&
+          meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
+          "mesh dialog translates live without changing backend");
     check(spzQuality->currentText() == QCoreApplication::translate("Workbench", "高精度（较大文件）") &&
           spzDialog.options().spzQuality == 2 && spzDialog.options().spzVersion == 3 &&
           spzDialog.options().spzMaximumShDegree == 2 && !spzDialog.options().applyTransform,
@@ -659,6 +751,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training.png"))), "training capabilities screenshot");
     training.hide();
+    meshing.show(); meshing.adjustSize(); QApplication::processEvents();
+    check(meshing.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-meshing.png"))), "mesh dialog screenshot");
+    meshing.hide();
     exportDialog.show(); exportDialog.adjustSize(); QApplication::processEvents();
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();

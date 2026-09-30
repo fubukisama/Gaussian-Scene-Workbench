@@ -12,12 +12,12 @@
 | --- | --- | --- | --- |
 | 3DGS | 有 / 完整状态 | 稀疏点云 → 初始化 → GPU 或快照 → 结果 | GPU 共享依赖平台；历史曲线未跨进程恢复 |
 | 2DGS | 已接入 / 完整状态，真实 CUDA 小样例通过 | 同一阶段顺序，连续限量快照；双尺度 PLY 薄片近似 | 代表性实拍数据质量验收、精确曲面视口、共享 GPU 预览 |
-| 2DGS bounded / unbounded | 共享后端已有，原生类型化任务尚缺 | 原生阶段预览尚缺 | TSDF 阶段产物、取消、输出校验及重开；不是优化器续训 |
-| SuGaR | 共享后端已有，原生适配尚缺 | 原生阶段预览尚缺 | 独立优化器、网格与纹理各阶段的状态和验收 |
-| GS2Mesh | 共享后端已有，原生适配尚缺 | 原生阶段预览尚缺 | 深度估计/融合阶段完成产物校验与安全重试 |
-| OpenMVS | 共享后端已有，原生适配尚缺 | 原生阶段预览尚缺 | 稠密点云/网格/纹理各进程的进度、取消与阶段恢复 |
+| 2DGS bounded / unbounded | 原生独立阶段任务 / 不支持优化器续训 | 原画面保留 → 验证后的网格 | 有界真实 CUDA 小样例通过；无界实拍质量、逐体素预览与阶段恢复待验收 |
+| SuGaR | 原生类型化任务 / 无完整状态恢复 | 完成网格阶段预览 | 真实细化与材质环境、阶段恢复待验收 |
+| GS2Mesh | 原生类型化任务 / 无优化器恢复 | 完成网格阶段预览 | 真实立体深度环境、阶段重试待验收 |
+| OpenMVS | 原生可选照片纹理阶段 | 烘焙时保留网格 | 实拍烘焙、生成纹理在视口显示、独立稠密重建入口仍待实现/验收 |
 
-机器可检查矩阵在 `native/worker/generation_capabilities.py`，测试要求覆盖共享后端的全部训练/网格方法，并为每个能力差异提供原因和下一验收项。未完成项不得显示为已完成。后续优先接入原生类型化网格阶段任务，再逐个补齐阶段预览与恢复；不将多个研究后端简单套用同一检查点格式。
+机器可检查矩阵在 `native/worker/generation_capabilities.py`，测试要求覆盖共享后端的全部训练/网格方法，并为每个能力差异提供原因和下一验收项。2026-09-30 已加入原生“工作流 → 生成网格”及独立输出、取消、完整三角形校验、成功/部分成果追加和工程重开。详细用法与剩余边界见 [MESH_GENERATION.md](MESH_GENERATION.md)。不将多个研究后端套用同一检查点格式。
 
 2DGS 部署：2026-09-30 按用户授权已在 E 盘补齐独立环境，未替换系统 CUDA、驱动或原 3DGS 环境。软件自动查找安装盘的 `Gaussian-Scene-Workbench-Runtime/2dgs` 和 `conda/envs/gsw_2dgs/python.exe`；仍支持 `TWO_DGS_DIR` / `TWO_DGS_PYTHON` 显式覆盖，以及源码下 `.venv/Scripts/python.exe`。显式错误路径不会悄悄回退。预检验证实际曲面扩展。普通启动只检测环境，不自动下载安装。
 
@@ -31,11 +31,11 @@ All generation workflows must advance together, with explicit technical differen
 
 3DGS keeps shared-GPU/snapshot previews. 2DGS uses snapshots and a display-only affine thin-disk approximation; exact surfel rendering and shared GPU preview remain outstanding. Two-scale source data is unchanged. 2DGS checkpoint state includes native model/Adam/density statistics, RNG, camera sampling, iteration, elapsed time and all smoothed losses, but no invented exposure optimizer. Backend mismatches are rejected before deserialization. Old untagged native manifests are 3DGS only. Input and implementation fingerprints prevent incompatible continuation; explicit trust confirmation is still required for pickle.
 
-Bounded/unbounded TSDF, SuGaR, GS2Mesh and OpenMVS exist in the shared backend but still lack native typed stage jobs. They need stage-aware progress/preview/cancellation, validated artifacts and safe recovery, not a fake Gaussian optimizer resume. The executable capability matrix covers every training/mesh method and records each limitation and next gate. Native staged meshing is the next integration priority.
+On 2026-09-30, bounded/unbounded TSDF, SuGaR and GS2Mesh gained native typed, isolated stage jobs. OpenMVS is an optional photo-texturing stage, not a standalone native dense reconstruction pipeline. Jobs preserve the current view, publish validated completed meshes, support cancellation, append successful/partial geometry, and persist model associations across project reopen. See [MESH_GENERATION.md](MESH_GENERATION.md). Per-voxel/depth previews, stage recovery and full optimizer resume are not implemented. The executable matrix records runtime and quality acceptance gates separately. The earlier training acceptance below does not describe this mesh batch.
 
 An isolated runtime was installed on E: with user authorization on 2026-09-30, without changing system CUDA/drivers or the 3DGS environment. Discovery checks `Gaussian-Scene-Workbench-Runtime/2dgs` and `conda/envs/gsw_2dgs/python.exe` on the installation drive. Explicit `TWO_DGS_DIR` / `TWO_DGS_PYTHON` overrides and source-local `.venv/Scripts/python.exe` remain supported. Invalid explicit overrides fail rather than silently selecting something else. Normal application startup only probes the environment; it does not download dependencies.
 
-Real RTX 4070 Laptop GPU tests passed: exact serialized model/Adam/RNG restoration, a 1200-iteration continuous-preview/pause/restart run, TensorBoard evaluation, and final two-scale PLY. Continuous/repeat/resume PSNR was 27.176575 / 27.137341 / 27.168127 dB on a synthetic 32-Gaussian fixture, not a real-data quality guarantee. Long-run normal/distortion regularization, representative datasets, exact surfel viewport rendering and staged native mesh jobs still need acceptance.
+Real RTX 4070 Laptop GPU tests passed: exact serialized model/Adam/RNG restoration, a 1200-iteration continuous-preview/pause/restart run, TensorBoard evaluation, and final two-scale PLY. Continuous/repeat/resume PSNR was 27.176575 / 27.137341 / 27.168127 dB on a synthetic 32-Gaussian fixture, not a real-data quality guarantee. Long-run normal/distortion regularization, representative datasets and exact surfel viewport rendering still need acceptance. A separate bounded-TSDF CUDA test produced 700 vertices / 1274 faces; other mesh runtime/material quality gates remain in MESH_GENERATION.md.
 
 ## 日本語
 
@@ -43,11 +43,11 @@ Real RTX 4070 Laptop GPU tests passed: exact serialized model/Adam/RNG restorati
 
 3DGS は GPU 共有またはスナップショットを使用。2DGS は薄い円盤のアフィン近似表示で、厳密なサーフェル描画と GPU 共有は未対応です。表示用の厚みを元 PLY や学習テンソルへ書き込みません。チェックポイントは二つの尺度、SH、密度統計、Adam、乱数、カメラのサンプル列、反復、経過時間、三種類の平滑化損失を保持します。存在しない露出最適化器は追加しません。異なる手法の状態は読み込み前に拒否し、旧形式の原生マニフェストは 3DGS のみと扱います。入力・実装ファイルの指紋と明示的な信頼確認も必要です。
 
-bounded/unbounded TSDF、SuGaR、GS2Mesh、OpenMVS は共通バックエンドにありますが、ネイティブ段階別ジョブ、進捗・プレビュー、取消、成果物検証と安全な復旧は未完了です。最適化器の再開と同一視しません。機械検証可能な能力表に全手法の制限と次の受入項目を記録し、次に段階別メッシュジョブの統合を進めます。
+2026-09-30、bounded/unbounded TSDF、SuGaR、GS2Mesh にネイティブ段階別ジョブを追加しました。OpenMVS は任意の写真テクスチャ工程のみで、独立した密な再構築の入口ではありません。処理中の画面維持、取消、三角形全体の検証、完成・部分成果の追加、工程再読込での関連付けを実装しました。[MESH_GENERATION.md](MESH_GENERATION.md) を参照してください。逐次深度・ボクセルプレビュー、段階別復旧、最適化器の完全再開は未対応です。以下は先行する学習工程の受入記録です。
 
 2026-09-30、ユーザーの許可に基づいて E: に独立環境を導入しました。システム CUDA・ドライバーと既存 3DGS 環境は変更しません。インストール先ドライブの `Gaussian-Scene-Workbench-Runtime/2dgs` と `conda/envs/gsw_2dgs/python.exe` を自動検出し、`TWO_DGS_DIR` / `TWO_DGS_PYTHON` とソース内 `.venv/Scripts/python.exe` も使用できます。明示指定が不正な場合は黙って別環境へ切り替えません。通常起動時は検査のみで、自動ダウンロードは行いません。
 
-実 RTX 4070 Laptop GPU で状態・Adam・乱数の完全復元、1200 反復の連続プレビューと再開、TensorBoard 評価、二尺度 PLY 出力を検証しました。合成 32 ガウシアンの連続／再実行／再開 PSNR は 27.176575 / 27.137341 / 27.168127 dB です。実写品質の保証ではありません。長期の法線・歪み正則化、代表的データセット、厳密なサーフェル表示、段階別メッシュ処理は引き続き検証が必要です。
+実 RTX 4070 Laptop GPU で状態・Adam・乱数の完全復元、1200 反復の連続プレビューと再開、TensorBoard 評価、二尺度 PLY 出力を検証しました。合成 32 ガウシアンの連続／再実行／再開 PSNR は 27.176575 / 27.137341 / 27.168127 dB です。実写品質の保証ではありません。長期の法線・歪み正則化、代表的データセット、厳密なサーフェル表示は引き続き検証が必要です。別の有界 TSDF CUDA テストでは頂点 700・面 1274 を生成しました。他のメッシュ環境・材質品質の受入項目は MESH_GENERATION.md を参照してください。
 
 ## Verified Windows runtime / 已验证 Windows 环境 / 検証済み Windows 環境
 

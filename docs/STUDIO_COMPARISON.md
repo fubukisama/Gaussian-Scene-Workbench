@@ -1,10 +1,10 @@
 # Native GSW / LichtFeld Studio / Postshot
 
-2026-09-30 第四批：2DGS 接入与 3DGS 共用的暂停/续训控制、指标与连续快照，补齐双尺度 PLY 显示和曲面扩展预检，并已补齐隔离环境、通过真实 CUDA 小样例续训与连续预览测试。以下第三批的“仅 3DGS”范围是历史记录；实拍质量、精确曲面显示及所有网格链路待办以[多链路对齐表](GENERATION_PIPELINES.md)为准，不能称为已全面对齐。
+2026-09-30 第五批：加入原生网格生成入口，覆盖 2DGS 有界/无界 TSDF、3DGS 的 SuGaR/GS2Mesh 和可选 OpenMVS 照片纹理。独立任务输出、取消、完整网格校验、阶段预览、部分成果保留与工程重开已接通。有界 TSDF 通过真实 CUDA 合成测试；其余算法实拍/材质质量、生成纹理自动显示与阶段恢复仍待验收/实现。见[网格流程](MESH_GENERATION.md)。第四批的 2DGS 完整状态续训与连续快照不变；以下第三批范围为历史记录，当前以[多链路对齐表](GENERATION_PIPELINES.md)为准。
 
-Batch four: 2DGS now shares native pause/resume, telemetry and snapshots, with two-scale PLY and surfel preflight. Its isolated runtime and real CUDA resume/continuous-preview smoke tests are verified. Historical batch-three restrictions below are superseded by the [cross-pipeline gates](GENERATION_PIPELINES.md). Representative-data quality, exact surfel display and native staged meshing remain outstanding.
+Batch five adds native isolated mesh jobs for bounded/unbounded 2DGS TSDF, SuGaR/GS2Mesh from 3DGS, and optional OpenMVS photo texturing. Cancellation, validation, mesh-stage previews, partial artifacts and project reopen are integrated. Bounded TSDF passed a real CUDA synthetic test; other runtime/material quality, generated-texture viewport loading and stage recovery remain outstanding. See [mesh workflow](MESH_GENERATION.md). Batch-four 2DGS full-state resume and snapshots remain unchanged. Historical comparison rows below are superseded by [cross-pipeline gates](GENERATION_PIPELINES.md).
 
-第四段階：2DGS に共通の一時停止・再開、メトリクス、連続スナップショット、二尺度 PLY と専用拡張の検証を追加。独立環境を導入し、実 CUDA の再開・連続プレビューの小規模試験に合格。第三段階の範囲は履歴です。現在の差分は[能力表](GENERATION_PIPELINES.md)を参照。実写品質、厳密なサーフェル表示、段階別メッシュ処理は未完了です。
+第五段階：2DGS 有界/非有界 TSDF、3DGS の SuGaR/GS2Mesh、任意の OpenMVS 写真テクスチャをネイティブ段階別ジョブへ統合。独立出力、取消、検証、段階プレビュー、部分成果保持と工程再読込を実装。有界 TSDF は実 CUDA 合成試験に合格しました。他の実環境・材質品質、生成テクスチャの自動表示と段階復旧は未完了です。[メッシュ工程](MESH_GENERATION.md) を参照。第四段階の 2DGS 完全な状態再開・連続スナップショットは維持します。以下は履歴で、現在の差分は[能力表](GENERATION_PIPELINES.md)を参照してください。
 
 竞品核查日期：2026-09-20；本地进展更新：2026-09-23。原生桌面端已推进 SPZ 交付、完整 SH 显示和训练暂停/续训三批对标升级，不代表已实现两款软件的全部功能。对方功能依据官方公开文档，本地状态依据当前桌面分支代码；没有做同一数据集、同一硬件下的三软件画质/速度排名。
 
