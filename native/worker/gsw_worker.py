@@ -112,6 +112,8 @@ def status_telemetry(snapshot):
         "totalIterations": ("total_iterations", "totalIterations"),
         "gaussianCount": ("gaussian_count", "point_count", "gaussianCount"),
         "previewIteration": ("latest_iteration", "preview_iteration", "previewIteration"),
+        "densityGuardIteration": ("density_guard_iteration", "densityGuardIteration"),
+        "densityGuardDeferred": ("density_guard_deferred", "densityGuardDeferred"),
     }
     floating_fields = {
         "loss": ("loss",),

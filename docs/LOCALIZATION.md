@@ -41,6 +41,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
 | 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
 | 密度控制 | Density Control | 密度制御 |
+| 过度裁剪保护 | Over-pruning Protection | 過剰な枝刈りの抑制 |
 | 暂停训练 / 继续训练 | Pause Training / Resume Training | 学習を一時停止 / 学習を再開 |
 | 已暂停 | Paused | 一時停止中 |
 | 训练检查点 / 优化器状态 | Training Checkpoint / Optimizer State | 学習チェックポイント / 最適化器の状態 |

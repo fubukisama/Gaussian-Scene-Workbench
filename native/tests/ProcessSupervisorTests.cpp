@@ -122,6 +122,8 @@ void ProcessSupervisorTests::parsesFragmentedWorkerStatusWithoutPollutingLogs() 
   QCOMPARE(status.previewIteration.value(), 10000);
   QCOMPARE(status.previewPath, QStringLiteral("E:/model/point_cloud.ply"));
   QCOMPARE(status.previewKind, QStringLiteral("colmap_sparse"));
+  QCOMPARE(status.densityGuardIteration.value(), 3100);
+  QCOMPARE(status.densityGuardDeferred.value(), 3300);
   const TrainingGpuPreviewDescriptor gpuPreview =
       qvariant_cast<TrainingGpuPreviewDescriptor>(
           gpuPreviewSpy.takeFirst().at(0));

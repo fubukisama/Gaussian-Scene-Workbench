@@ -38,6 +38,24 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_density_protection_survives_job_snapshot_and_rejects_invalid_events(self):
+        job = dict(id="density", scene="scene", output_scene="out", status="running",
+                   stage="train", created_at=1, updated_at=1, log=[])
+        with mock.patch.object(server, "persist_train_job"):
+            server.add_job_log(job, '[gsw-density-control] {"version":1,"iteration":3100,"deferred":3300}')
+        snapshot = server.job_snapshot(job)
+        self.assertEqual(snapshot["density_guard_iteration"], 3100)
+        self.assertEqual(snapshot["density_guard_deferred"], 3300)
+        for payload in ({"version":2,"iteration":3200,"deferred":1},
+                        {"version":1,"iteration":3000,"deferred":1},
+                        {"version":1,"iteration":3200,"deferred":False},
+                        {"version":1,"iteration":3200,"deferred":1.5},
+                        {"version":1,"iteration":3200,"deferred":float("nan")},
+                        {"version":1,"iteration":3200,"deferred":2**32}):
+            server.apply_density_control(job, payload)
+            self.assertEqual(job["density_guard_iteration"], 3100)
+            self.assertEqual(job["density_guard_deferred"], 3300)
+
     def test_two_dgs_runtime_discovery_and_explicit_override(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -84,6 +102,11 @@ class TrainingTelemetryTests(unittest.TestCase):
             self.assertTrue(entry["limitation"])
             self.assertTrue(entry["acceptance"])
             self.assertEqual(supports_checkpoint(backend), backend in server.TRAINING_BACKENDS)
+            expected_density = {"3dgs":"native_guarded", "2dgs":"native_guarded",
+                                "bounded":"2dgs_input_only", "unbounded":"2dgs_input_only",
+                                "sugar":"3dgs_input_only", "gs2mesh":"3dgs_input_only",
+                                "openmvs":"not_applicable"}
+            self.assertEqual(entry["density_control"], expected_density[backend])
             if backend in server.MESH_MODES | {"openmvs"}:
                 self.assertEqual(entry["live_preview"], "completed_mesh_stage")
                 self.assertEqual(entry["material_preview"], "validated_diffuse_atlas")

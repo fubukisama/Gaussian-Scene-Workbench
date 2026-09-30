@@ -8,11 +8,11 @@ The render-performance meter is a JavaScript adaptation of the rolling frame-tim
 
 ## Native Qt 6 Preview
 
-Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual official hbb1/2d-gaussian-splatting `train.py`, commit `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678`: https://github.com/hbb1/2d-gaussian-splatting . Original Inria GRAPHDECO notices are retained. The complete upstream Gaussian-Splatting research/evaluation license is shipped at `native/worker/licenses/2dgs-LICENSE.md`. Changes add native state control, telemetry and observation snapshots; the external 2DGS renderer/model and optimizer algorithm remain upstream. No commercial-use permission is implied.
+Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual official hbb1/2d-gaussian-splatting `train.py`, commit `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678`: https://github.com/hbb1/2d-gaussian-splatting . Original Inria GRAPHDECO notices are retained. The complete upstream Gaussian-Splatting research/evaluation license is shipped at `native/worker/licenses/2dgs-LICENSE.md`. Changes add native state control, telemetry and observation snapshots. `native/worker/training_density_control.py` adapts the final densification/pruning orchestration from that model and the vendored Graphdeco `scene/gaussian_model.py`, under their existing research/evaluation licenses. It adds a robust geometry-aware size limit, reset-recovery grace and bounded final pruning. Upstream clone/split and optimizer surgery remain in their original modules. No commercial-use permission is implied.
 
-中文：2DGS 训练入口直接移植上述官方源码，保留版权及完整研究/评估用途许可证，不以 MIT 重新授权，不授予商用许可。修改仅用于原生状态控制、监视和快照集成。
+中文：2DGS 训练入口和原生密度控制编排基于上述官方源码，保留版权及完整研究/评估用途许可证，不以 MIT 重新授权，不授予商用许可。修改包括原生状态控制、监视、快照集成与过度裁剪保护。
 
-日本語：2DGS の学習入口は上記公式ソースを直接移植し、著作権と研究・評価用途のライセンスを保持します。MIT への変更や商用利用許諾はありません。変更は原生の状態制御、監視、スナップショット統合です。
+日本語：2DGS の学習入口と原生密度制御は上記公式ソースに基づき、著作権と研究・評価用途のライセンスを保持します。MIT への変更や商用利用許諾はありません。原生の状態制御、監視、スナップショット統合と過剰な枝刈りの抑制を追加しています。
 
 The native executable also embeds Qt base Chinese and Japanese translation catalogs for standard Qt controls. Their upstream sources and license notices are available in the Qt translations module: https://code.qt.io/cgit/qt/qttranslations.git/ . Workbench-specific Chinese, English and Japanese messages are original project translations; CloudCompare, Metashape and Blender are terminology references only.
 

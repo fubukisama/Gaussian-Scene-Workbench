@@ -15,7 +15,8 @@ Upstream: f3e3b9fa67bbd1c75e05167ff37391d8dab2a678 (2026-09-23).
 License: licenses/2dgs-LICENSE.md. See docs/GENERATION_PIPELINES.md.
 GSW changes: stable sampler, durable state, structured telemetry, bounded
 observation previews, and no network viewer in a native supervised process.
-The surfel renderer, losses, schedules and densification remain upstream code.
+The surfel renderer, losses, schedules and clone/split remain upstream code;
+native density-control safety guards the final pruning pass.
 """
 import os
 import sys
@@ -49,6 +50,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from native.worker.training_checkpoint import (
     TrainingCheckpoint, training_identity, capture_state, restore_state, file_digest)
 from native.worker.training_preview import TrainingPreviewPublisher
+from native.worker.training_density_control import NativeDensityControl
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -93,12 +95,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     identity = hashlib.sha256((training_identity(dataset, opt, pipe) +
                               "".join(file_digest(path) for path in runtime_files)).encode()).hexdigest()
     cameras = scene.getTrainCameras()
+    density_control = NativeDensityControl(torch, gaussians, scene.cameras_extent, "2dgs", emit_gsw_event)
     cameras.sort(key=lambda camera: (camera.image_name, camera.colmap_id))
     camera_names = [(camera.image_name, camera.colmap_id) for camera in cameras]
     viewpoint_indices = list(range(len(cameras)))
     if native_checkpoint.control.get("resume"):
         state = native_checkpoint.load(torch, identity)
         restore_state(torch, np, gaussians, opt, state, identity, camera_names, backend="2dgs")
+        density_control.restore(state["density_control"])
         first_iter = state["iteration"]
         viewpoint_indices = state["pending_indices"]
         started -= state["elapsed"]
@@ -209,7 +213,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, opt.opacity_cull, scene.cameras_extent, size_threshold)
+                    density_control.densify_and_prune(
+                        gaussians, opt.densify_grad_threshold, opt.opacity_cull, size_threshold,
+                        iteration, opt.opacity_reset_interval,
+                        white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
@@ -233,6 +240,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                       camera_names, viewpoint_indices, time.monotonic() - started,
                                       ema_loss_for_log, ema_dist_for_log, backend="2dgs")
                 state["ema_normal"] = ema_normal_for_log
+                state["density_control"] = density_control.capture()
                 native_checkpoint.save(torch, state)
                 emit_checkpoint_preview(scene, iteration)
                 paused = True

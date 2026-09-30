@@ -80,7 +80,9 @@ def training_identity(dataset, opt, pipe):
         files.append((relative.as_posix(), info.st_size, file_digest(path)))
     settings = {"dataset": {k: v for k, v in vars(dataset).items()
                              if k not in ("source_path", "model_path")},
-                "optimization": vars(opt), "pipeline": vars(pipe), "files": files}
+                "optimization": vars(opt), "pipeline": vars(pipe), "files": files,
+                # Density policy changes invalidate old optimizer-state resumes.
+                "native_density_source": file_digest(Path(__file__).with_name("training_density_control.py"))}
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
 
 

@@ -36,6 +36,8 @@ private:
   bool mCancelled = false;
   bool mPaused = false;
   bool mSparsePreview = false;
+  int mDensityGuardIteration = 0;
+  int mDensityGuardDeferred = 0;
 
   TrainingTelemetry mTelemetry;
   TrainingCurvesWidget *mCurves = nullptr;
@@ -49,6 +51,7 @@ private:
   QLabel *mSpeed = nullptr;
   QLabel *mElapsed = nullptr;
   QLabel *mRemaining = nullptr;
+  QLabel *mDensityWarning = nullptr;
   QProgressBar *mProgress = nullptr;
 };
 

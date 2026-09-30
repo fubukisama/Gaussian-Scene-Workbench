@@ -66,8 +66,28 @@ Real RTX 4070 Laptop GPU tests passed: exact serialized model/Adam/RNG restorati
 
 ## Developer checks
 
+### Native density-control correction / 原生密度控制修正 / 原生密度制御の修正 (2026-09-30)
+
+中文：原生 3DGS / 2DGS 共用 `training_density_control.py`。世界尺度裁剪以相机范围和初始化点云 5%–95% 稳健包围范围半对角线的较大值为基准（阈值仍为该尺度的 0.1）；不改变用于增密/位置学习率的相机尺度。保留上游克隆、分裂、Adam 参数同步和正常透明度/尺寸清理。透明度重置后 300 次迭代以内，裁剪阈值最多为 0.005；随后恢复后端原阈值。一次最终裁剪最多删除有效高斯的 20%，按透明度由低到高、同值按源顺序删除，其他候选暂缓并在训练面板提示；非有限坐标/尺度/透明度不受保留预算保护。这不是数量下限或几何质量保证，也不是关闭裁剪。
+
+English: Native 3DGS and 2DGS share a geometry-aware final-pruning policy. Its world-size threshold is 0.1 times the larger of camera extent and the half-diagonal of robust 5th–95th-percentile initialization bounds. Clone/split and position-learning-rate extent stay unchanged. After opacity resets, the cull threshold is capped at 0.005 for 300 iterations, then returns to the backend threshold. At most 20% of finite Gaussians are removed per final pass, ordered by increasing opacity with stable source-order ties; remaining candidates are deferred and reported in the monitor. Non-finite geometry/opacity is still removed. This is neither a minimum-count promise nor a geometric-quality guarantee; normal pruning remains enabled.
+
+日本語：原生 3DGS / 2DGS は初期点群の 5%–95% 範囲の半対角線とカメラ範囲の大きい方を世界スケールに使用し、その 0.1 を枝刈り閾値とします。高密度化と位置学習率のカメラ範囲、公式のクローン・分割・Adam 処理は変更しません。不透明度リセット後の 300 反復は閾値を最大 0.005 に制限し、その後は元の閾値に戻します。最終処理で有限ガウシアンの最大 20% を不透明度の低い順に削除し、同値は元の順序を維持します。残りは保留して監視パネルに表示し、非有限の座標・尺度・不透明度は保護対象にしません。最小個数や幾何品質の保証ではなく、正常な枝刈りは継続します。
+
+Scale calibration is serialized with native optimizer checkpoints. The density-control source digest is part of training identity, so pre-correction checkpoints are explicitly rejected for full-state resume rather than silently changing optimization semantics. Their original results remain available; corrected training must start a new run. PLY import is not optimizer resume.
+
+中文：标定尺度进入完整状态检查点；密度控制源码指纹参与训练身份校验。修正前检查点不允许静默续训，应新建训练，原成果保持不变。日本語：スケールを状態に保存し、密度制御のソース指紋を再開時に検証します。修正前のチェックポイントは再開せず、新規学習が必要です。元の成果は保持します。
+
+Parity: bounded/unbounded TSDF consume guarded native 2DGS results; SuGaR/GS2Mesh consume guarded native 3DGS results. Their mesh/depth stages have no Gaussian-density optimizer, and SuGaR's separate refinement does **not** acquire this policy or full-state resume. OpenMVS photo texturing has no Gaussian pruning. These distinctions are executable capability-matrix entries; acceptance still requires representative TSDF/refinement/depth/material quality, not just a larger input count.
+
+中文：保护同步覆盖两种原生训练，TSDF、SuGaR、GS2Mesh 可使用对应修正后的输入；SuGaR 自身细化尚未接入该保护。网格/深度/纹理阶段没有同一高斯裁剪操作，其实拍验收仍独立。日本語：TSDF は修正された 2DGS、SuGaR/GS2Mesh は修正された 3DGS を入力にできます。SuGaR 独自の細化には未適用で、メッシュ・深度・写真テクスチャの品質は別に検証が必要です。
+
+Real-data regression: the original nine-image, 2503-point COLMAP reconstruction was replayed at the same 7000-iteration / 1:8 quick settings without replacing original files. The original output contains 254 Gaussians with 18.2524 dB on the upstream five-training-view evaluation; the corrected run contains 41537 with 40.2916 dB on the same evaluation. A separate read-only evaluation of all nine training views gives 18.7689 → 40.7246 dB and confirms visibly restored details. This is training-view fit at 241 × 135, not held-out/novel-view or mesh-quality acceptance. The nine-image limited capture cannot reveal unseen geometry. Counts/quality vary slightly between independent CUDA runs. Baseline evidence and owned outputs are in the local `.tmp/2dgs-collapse-diagnosis` directory, not distributed user data.
+
+中文：同一九张实拍图、2503 稀疏点、7000 次 quick 回归中，254 → 41537 高斯，同一五训练视角 PSNR 18.2524 → 40.2916 dB；不是留出视角或网格质量保证。日本語：同一九画像・2503 疎点・7000 quick 反復で 254 → 41537、同じ五つの学習視点の PSNR は 18.2524 → 40.2916 dB。未知視点やメッシュ品質の受入ではありません。
+
 ```text
-python -B -m unittest native.worker.test_two_dgs_adapter native.worker.test_training_checkpoint native.worker.test_training_preview
+python -B -m unittest native.worker.test_two_dgs_adapter native.worker.test_training_checkpoint native.worker.test_training_preview native.worker.test_training_density_control
 python -B -m unittest crop_editor.tests.test_training_telemetry
 python scripts/native_i18n.py
 python scripts/test_native_i18n.py

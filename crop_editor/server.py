@@ -74,6 +74,7 @@ COLMAP_POINT_PREVIEW_INTERVAL_SECONDS = 0.5
 COLMAP_SNAPSHOT_TARGET_COUNT = 48
 TRAINING_PROGRESS_PATTERN = re.compile(r"\[gsw-training-progress\]\s+(\d+)\s*/\s*(\d+)")
 TRAINING_METRICS_PREFIX = "[gsw-training-metrics]"
+TRAINING_DENSITY_PREFIX = "[gsw-density-control]"
 TRAINING_PREVIEW_PREFIX = "[gsw-training-preview]"
 WINDOWS_DEVICE_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -4328,6 +4329,8 @@ def job_snapshot(job):
         "loss": job.get("loss"),
         "psnr": job.get("psnr"),
         "gaussian_count": job.get("gaussian_count"),
+        "density_guard_iteration": job.get("density_guard_iteration"),
+        "density_guard_deferred": job.get("density_guard_deferred"),
         "iteration_milliseconds": job.get("iteration_milliseconds"),
         "elapsed_seconds": job.get("elapsed_seconds"),
         "latest_iteration": job.get("latest_iteration"),
@@ -4426,6 +4429,19 @@ def apply_training_preview(job, payload):
             job["gaussian_count"] = count
 
 
+def apply_density_control(job, payload):
+    iteration = finite_training_number(payload.get("iteration"), integer=True)
+    deferred = finite_training_number(payload.get("deferred"), integer=True)
+    if (type(payload.get("version")) is int and payload["version"] == 1
+            and type(payload.get("iteration")) is int and type(payload.get("deferred")) is int
+            and iteration is not None and deferred is not None
+            and iteration > 0 and 0 < deferred <= 2147483647
+            and iteration <= 2147483647
+            and iteration >= int(job.get("density_guard_iteration") or 0)):
+        job["density_guard_iteration"] = iteration
+        job["density_guard_deferred"] = deferred
+
+
 def add_job_log(job, message):
     line = str(message).rstrip()
     if not line:
@@ -4435,10 +4451,13 @@ def add_job_log(job, message):
         if not mesh_like_job_kind(job) and job.get("kind") != "splat_export":
             metrics_payload = training_event_payload(line, TRAINING_METRICS_PREFIX)
             preview_payload = training_event_payload(line, TRAINING_PREVIEW_PREFIX)
+            density_payload = training_event_payload(line, TRAINING_DENSITY_PREFIX)
             if metrics_payload is not None:
                 apply_training_metrics(job, metrics_payload)
             if preview_payload is not None:
                 apply_training_preview(job, preview_payload)
+            if density_payload is not None:
+                apply_density_control(job, density_payload)
             progress_match = TRAINING_PROGRESS_PATTERN.search(line)
             if progress_match and metrics_payload is None:
                 iteration = int(progress_match.group(1))

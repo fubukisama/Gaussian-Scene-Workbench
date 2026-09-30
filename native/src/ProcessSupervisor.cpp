@@ -138,7 +138,11 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       !parseOptionalReal(object, QStringLiteral("elapsedSeconds"),
                          &parsedStatus.elapsedSeconds) ||
       !parseOptionalInteger(object, QStringLiteral("previewIteration"),
-                            &parsedStatus.previewIteration)) {
+                            &parsedStatus.previewIteration) ||
+      !parseOptionalInteger(object, QStringLiteral("densityGuardIteration"),
+                            &parsedStatus.densityGuardIteration, 1) ||
+      !parseOptionalInteger(object, QStringLiteral("densityGuardDeferred"),
+                            &parsedStatus.densityGuardDeferred, 1)) {
     return false;
   }
   const QJsonValue gaussianCount =

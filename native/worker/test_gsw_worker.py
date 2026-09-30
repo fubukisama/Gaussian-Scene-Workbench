@@ -424,6 +424,8 @@ class WorkerTests(unittest.TestCase):
             "latest_iteration": 10000,
             "partial_point_cloud_path": "E:/model/point_cloud.ply",
             "preview_kind": "colmap_sparse",
+            "density_guard_iteration": 3100,
+            "density_guard_deferred": 3300,
         }
 
         with contextlib.redirect_stdout(output):
@@ -440,6 +442,8 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(event["previewIteration"], 10000)
         self.assertEqual(event["previewPath"], "E:/model/point_cloud.ply")
         self.assertEqual(event["previewKind"], "colmap_sparse")
+        self.assertEqual(event["densityGuardIteration"], 3100)
+        self.assertEqual(event["densityGuardDeferred"], 3300)
 
     def test_run_colmap_forwards_absolute_dataset_and_options(self):
         with tempfile.TemporaryDirectory() as temporary:

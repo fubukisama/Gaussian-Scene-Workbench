@@ -123,6 +123,7 @@ class CudaResumeTests(unittest.TestCase):
             self.assertEqual(manifest["iteration"], 1)
             self.assertEqual(manifest["backend"], backend)
             state = torch.load(str(state_path))
+            self.assertEqual(state["density_control"]["backend"], backend)
             self.assertEqual(len(state["pending_indices"]), 3)
             if backend == "3dgs":
                 self.assertTrue(state["exposure_optimizer"]["state"])
@@ -164,6 +165,28 @@ class CudaResumeTests(unittest.TestCase):
                 equal_tree(state["exposure"], restored._exposure)
                 equal_tree(state["exposure_optimizer"], restored.exposure_optimizer.state_dict())
             equal_tree(state["cuda"], torch.cuda.get_rng_state_all())
+            # Exercise the guard on real backend optimizer tensors, including
+            # 3DGS temporary radii and 2DGS two-scale surfels, not just test doubles.
+            from native.worker.training_density_control import NativeDensityControl
+            density_events = []
+            density = NativeDensityControl(torch, restored,
+                state["density_control"]["camera_extent"], backend,
+                lambda *event: density_events.append(event))
+            density.restore(state["density_control"])
+            original_count = len(restored.get_xyz)
+            with torch.no_grad():
+                restored._opacity.fill_(-12.)
+                density.densify_and_prune(restored, 1000., .005, 20, 10, 8,
+                                         radii=torch.ones(original_count, device="cuda"))
+            self.assertEqual(len(restored.get_xyz), original_count - int(original_count * .2))
+            self.assertTrue(density_events)
+            for group in restored.optimizer.param_groups:
+                parameter = group["params"][0]
+                self.assertEqual(parameter.shape[0], len(restored.get_xyz))
+                saved_slots = restored.optimizer.state.get(parameter, {})
+                for field in ("exp_avg", "exp_avg_sq"):
+                    if field in saved_slots:
+                        self.assertEqual(saved_slots[field].shape, parameter.shape)
             del restored
             del state
             for name in ("reference", "reference-repeat", "interrupted"):

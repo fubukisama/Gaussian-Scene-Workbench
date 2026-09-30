@@ -18,6 +18,15 @@ class PickleStore:
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_density_policy_source_change_invalidates_resume_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = SimpleNamespace(source_path=temporary, model_path="ignored", sh_degree=3)
+            opt, pipe = SimpleNamespace(iterations=7000), SimpleNamespace(debug=False)
+            initial = checkpoint.training_identity(dataset, opt, pipe)
+            with mock.patch.object(checkpoint, "file_digest", return_value="changed-density-policy"):
+                changed = checkpoint.training_identity(dataset, opt, pipe)
+            self.assertNotEqual(initial, changed)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

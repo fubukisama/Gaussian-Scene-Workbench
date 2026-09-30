@@ -19,6 +19,7 @@ from unittest import mock
 
 from native.worker import training_checkpoint as cp
 from native.worker.training_preview import TrainingPreviewPublisher
+from native.worker.training_density_control import NativeDensityControl
 
 
 class TwoDgsAdapterTests(unittest.TestCase):
@@ -38,11 +39,21 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 self._rotation = torch.tensor([[1., 0., 0., 0.]] * 4)
                 self.max_radii2D = torch.zeros(4)
                 self.accumulator = torch.zeros(4)
+                self.xyz_gradient_accum = torch.zeros(4, 1)
+                self.denom = torch.ones(4, 1)
                 self.active_sh_degree = 0
 
             @property
             def get_xyz(self):
                 return self._xyz
+
+            @property
+            def get_scaling(self):
+                return self._scaling.exp()
+
+            @property
+            def get_opacity(self):
+                return self._opacity.sigmoid()
 
             def training_setup(self, opt):
                 self.optimizer = torch.optim.Adam([self._xyz, self._scaling], lr=.01)
@@ -67,8 +78,15 @@ class TwoDgsAdapterTests(unittest.TestCase):
             def add_densification_stats(self, points, visible):
                 self.accumulator[visible] += points.grad[visible].abs().sum(dim=1)
 
-            def densify_and_prune(self, *args):
+            def densify_and_clone(self, *args):
                 self.accumulator *= .5
+
+            def densify_and_split(self, *args):
+                pass
+
+            def prune_points(self, mask):
+                if mask.any():
+                    raise AssertionError("The state fixture must not be pruned")
 
             def reset_opacity(self):
                 self._opacity.zero_()
@@ -126,6 +144,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                       training_identity=cp.training_identity, capture_state=cp.capture_state,
                       restore_state=cp.restore_state, file_digest=cp.file_digest,
                       TrainingPreviewPublisher=TrainingPreviewPublisher, tqdm=Progress, render=render,
+                      NativeDensityControl=NativeDensityControl,
                       l1_loss=lambda a, b: (a - b).abs().mean(), ssim=lambda a, b: 1 - ((a - b)**2).mean(),
                       psnr=lambda a, b: -10 * torch.log10(((a-b)**2).mean()),
                       training_report=lambda *args: None, emit_gsw_event=lambda *event: events.append(event))

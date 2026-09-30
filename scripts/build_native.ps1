@@ -595,7 +595,7 @@ $PreviousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = "1"
 Push-Location $Root
 try {
-  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter crop_editor.tests.test_training_telemetry
+  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter native.worker.test_training_density_control crop_editor.tests.test_training_telemetry
   if ($LASTEXITCODE -ne 0) {
     throw "Native worker tests failed with exit code $LASTEXITCODE."
   }
@@ -658,6 +658,7 @@ if ($Package) {
     "native\worker\gpu_preview_publisher.py",
     "native\worker\training_preview.py",
     "native\worker\training_checkpoint.py",
+    "native\worker\training_density_control.py",
     "native\worker\two_dgs_train.py",
     "native\worker\generation_capabilities.py",
     "native\worker\mesh_generation.py",

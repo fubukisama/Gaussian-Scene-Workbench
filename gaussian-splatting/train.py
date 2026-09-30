@@ -91,6 +91,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     training_started_at = time.monotonic()
     native_checkpoint = None
     native_identity = None
+    density_control = None
     paused = False
     control_json = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
     if control_json:
@@ -99,6 +100,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             sys.path.insert(0, repository_root)
         from native.worker.training_checkpoint import (
             TrainingCheckpoint, training_identity, capture_state, restore_state)
+        from native.worker.training_density_control import NativeDensityControl
+        density_control = NativeDensityControl(torch, gaussians, scene.cameras_extent, "3dgs", emit_gsw_event)
         native_checkpoint = TrainingCheckpoint(scene.model_path, json.loads(control_json))
         native_identity = training_identity(dataset, opt, pipe)
         # Scene construction shuffles cameras. Stable ordering lets saved sampler
@@ -110,6 +113,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if native_checkpoint.control.get("resume"):
             state = native_checkpoint.load(torch, native_identity)
             restore_state(torch, np, gaussians, opt, state, native_identity, camera_names)
+            density_control.restore(state["density_control"])
             first_iter = state["iteration"]
             viewpoint_indices = state["pending_indices"]
             viewpoint_stack = [scene.getTrainCameras()[index] for index in viewpoint_indices]
@@ -284,7 +288,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii)
+                    if density_control is not None:
+                        density_control.densify_and_prune(
+                            gaussians, opt.densify_grad_threshold, .005, size_threshold,
+                            iteration, opt.opacity_reset_interval, radii=radii,
+                            white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
+                    else:
+                        gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii)
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
@@ -335,10 +345,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     file_preview.close()
                     file_preview = None
                 scene.save(iteration)
-                native_checkpoint.save(torch, capture_state(
+                native_state = capture_state(
                     torch, np, gaussians, iteration, opt.iterations, native_identity,
                     camera_names, viewpoint_indices, time.monotonic() - training_started_at,
-                    ema_loss_for_log, ema_Ll1depth_for_log))
+                    ema_loss_for_log, ema_Ll1depth_for_log)
+                native_state["density_control"] = density_control.capture()
+                native_checkpoint.save(torch, native_state)
                 emit_gsw_event("[gsw-training-preview]", {
                     "iteration": iteration,
                     "point_cloud_path": os.path.abspath(os.path.join(

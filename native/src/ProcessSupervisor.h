@@ -28,6 +28,8 @@ struct WorkerStatus final {
   std::optional<int> previewIteration;
   QString previewPath;
   QString previewKind;
+  std::optional<int> densityGuardIteration;
+  std::optional<int> densityGuardDeferred;
 };
 
 class ProcessSupervisor final : public QObject {

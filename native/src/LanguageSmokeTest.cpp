@@ -31,6 +31,7 @@
 #include <QImage>
 #include "WindowUiSmokeTest.h"
 #include <QLabel>
+#include <QLocale>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QKeyEvent>
@@ -697,6 +698,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
   status.loss = 0.125;
   status.psnr = 27.5;
   status.gaussianCount = 100000;
+  status.densityGuardIteration = 3100;
+  status.densityGuardDeferred = 3300;
   monitor->updateStatus(status);
   emit supervisor->workerStatusReady(status);
   auto *toolbar = window.findChild<QToolBar *>();
@@ -725,6 +728,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
     languageMenu->actions()[next]->trigger();
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
+    const auto *densityWarning = monitor->findChild<QLabel *>(QStringLiteral("densityGuardWarning"));
+    check(densityWarning && !densityWarning->isHidden() && densityWarning->text() ==
+          QCoreApplication::translate("Workbench", "过度裁剪保护：第 %1 次迭代暂缓删除 %2 个高斯。请检查拍摄覆盖与重建尺度；数量不代表几何质量。")
+              .arg(QLocale().toString(3100), QLocale().toString(3300)),
+          "density protection warning translates live without resetting training state");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
     const auto *pause = window.findChild<QAction *>(QStringLiteral("pauseTrainingAction"));
     const auto *resume = window.findChild<QAction *>(QStringLiteral("resumeTrainingAction"));

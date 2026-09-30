@@ -244,6 +244,13 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   }
   layout->addLayout(metrics);
 
+  mDensityWarning = new QLabel(this);
+  mDensityWarning->setObjectName(QStringLiteral("densityGuardWarning"));
+  mDensityWarning->setWordWrap(true);
+  mDensityWarning->setStyleSheet(QStringLiteral("color: #e2b55b;"));
+  mDensityWarning->hide();
+  layout->addWidget(mDensityWarning);
+
   mCurves = new TrainingCurvesWidget(this);
   layout->addWidget(mCurves, 1);
   AppLanguage::onChanged(this, [this]() { retranslateStatus(); });
@@ -273,6 +280,8 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
   mFinished = false;
   mSparsePreview = false;
   mLastStage.clear();
+  mDensityGuardIteration = 0;
+  mDensityGuardDeferred = 0;
   mTaskTitle = QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName);
   mTitle->setText(mTaskTitle);
   mState->setText(QCoreApplication::translate("Workbench", "启动中"));
@@ -284,6 +293,10 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
   mLastStage = status.stage;
+  if (status.densityGuardIteration.has_value() && status.densityGuardDeferred.has_value()) {
+    mDensityGuardIteration = *status.densityGuardIteration;
+    mDensityGuardDeferred = *status.densityGuardDeferred;
+  }
   mSparsePreview = status.previewKind == QStringLiteral("colmap_sparse") || status.stage == QStringLiteral("colmap");
   mState->setText(stageLabel(status.stage));
   mPrimitiveCountCaption->setText(
@@ -326,6 +339,12 @@ const TrainingTelemetry &TrainingMonitorWidget::telemetry() const {
 
 void TrainingMonitorWidget::refreshMetrics() {
   const QLocale locale;
+  mDensityWarning->setVisible(mDensityGuardDeferred > 0);
+  if (mDensityGuardDeferred > 0) {
+    mDensityWarning->setText(QCoreApplication::translate("Workbench",
+        "过度裁剪保护：第 %1 次迭代暂缓删除 %2 个高斯。请检查拍摄覆盖与重建尺度；数量不代表几何质量。")
+        .arg(locale.toString(mDensityGuardIteration), locale.toString(mDensityGuardDeferred)));
+  }
   const int total = mTelemetry.expectedIterations();
   mIteration->setText(mTelemetry.iteration().has_value()
                           ? QStringLiteral("%1 / %2")

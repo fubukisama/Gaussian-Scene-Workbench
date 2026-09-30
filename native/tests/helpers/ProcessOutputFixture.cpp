@@ -104,6 +104,7 @@ int main(int argc, char *argv[]) {
       "\"loss\":0.0234,\"psnr\":27.5,\"gaussianCount\":123456,"
       "\"iterationMilliseconds\":12.5,\"elapsedSeconds\":144.0,"
       "\"previewIteration\":10000,"
+      "\"densityGuardIteration\":3100,\"densityGuardDeferred\":3300,"
       "\"previewPath\":\"E:/model/point_cloud.ply\","
       "\"previewKind\":\"colmap_sparse\"}\n"
       "[gsw-training-gpu-preview] {\"version\":2,\"type\":\"gpu_preview\","
