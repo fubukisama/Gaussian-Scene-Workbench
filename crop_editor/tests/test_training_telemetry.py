@@ -86,6 +86,7 @@ class TrainingTelemetryTests(unittest.TestCase):
             self.assertEqual(supports_checkpoint(backend), backend in server.TRAINING_BACKENDS)
             if backend in server.MESH_MODES | {"openmvs"}:
                 self.assertEqual(entry["live_preview"], "completed_mesh_stage")
+                self.assertEqual(entry["material_preview"], "validated_diffuse_atlas")
         self.assertFalse(supports_checkpoint("unknown-backend"))
 
     def test_pause_exit_requires_current_session_checkpoint(self):

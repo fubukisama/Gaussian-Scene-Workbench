@@ -28,6 +28,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QImage>
 #include "WindowUiSmokeTest.h"
 #include <QLabel>
 #include <QLineEdit>
@@ -81,47 +82,122 @@ bool runMeshGenerationSmokeTest(MainWindow &window) {
   const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
       QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
   const QByteArray mesh("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n");
-  for (const bool failed : {false, true}) {
-    const QString state = failed ? QStringLiteral("failed") : QStringLiteral("done");
-    const QString directory = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes/") + state);
+  QString texturedPath;
+  QString texturedId;
+  for (const int scenario : {0, 1, 2, 3}) {
+    const bool failed = scenario == 1 || scenario == 3;
+    const bool textured = scenario == 2;
+    const bool invalidMaterial = scenario == 3;
+    const QString state = scenario == 1 ? QStringLiteral("failed") : QStringLiteral("done");
+    const QString expectedState = failed ? QStringLiteral("failed") : QStringLiteral("done");
+    const QString taskName = invalidMaterial ? QStringLiteral("invalid-material") :
+        textured ? QStringLiteral("textured") : state;
+    const QString directory = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes/") + taskName);
     const QString path = QDir(directory).filePath(QStringLiteral("model/mesh.ply"));
     check(write(path, mesh), "write complete mesh fixture");
-    check(write(QDir(directory).filePath(QStringLiteral("result.json")), QJsonDocument(QJsonObject{
+    QJsonObject result{
         {"version", 1}, {"task", "mesh"}, {"state", state}, {"meshPath", path},
-        {"completedStages", QJsonArray{QStringLiteral("mesh")}}}).toJson()), "write stage journal");
+        {"completedStages", QJsonArray{QStringLiteral("mesh")}}};
+    QString expectedPath = path;
+    const int expectedFaces = textured ? 2 : 1;
+    if (textured || invalidMaterial) {
+      const QString materialPath = QDir(directory).filePath(QStringLiteral("model/material-preview/textured.ply"));
+      const QByteArray texturedMesh("ply\nformat ascii 1.0\ncomment TextureFile atlas.png\nelement vertex 4\nproperty double x\nproperty double y\nproperty double z\nelement face 2\nproperty list uchar int vertex_indices\nproperty list uchar float texcoord\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n3 0 1 2 6 0 0 1 0 1 1\n3 0 2 3 6 0.25 0.25 1 1 0 1\n");
+      check(write(materialPath, texturedMesh), "write textured mesh with face-corner UV seam");
+      QImage atlas(2, 2, QImage::Format_RGBA8888);
+      atlas.setPixelColor(0, 0, Qt::red); atlas.setPixelColor(1, 0, Qt::green);
+      atlas.setPixelColor(0, 1, Qt::blue); atlas.setPixelColor(1, 1, Qt::yellow);
+      const QString atlasPath = QFileInfo(materialPath).absoluteDir().filePath(QStringLiteral("atlas.png"));
+      if (!invalidMaterial)
+        check(atlas.save(atlasPath), "write native-decoded PNG material fixture");
+      result.insert(QStringLiteral("materialPreview"), QJsonObject{{"ply", materialPath}, {"atlas", atlasPath}});
+      result.insert(QStringLiteral("completedStages"), QJsonArray{
+          QStringLiteral("mesh"), QStringLiteral("texture"), QStringLiteral("texture_preview")});
+      if (textured) {
+        texturedPath = materialPath;
+        expectedPath = materialPath;
+      }
+    }
+    check(write(QDir(directory).filePath(QStringLiteral("result.json")), QJsonDocument(result).toJson()), "write stage journal");
     const auto before = window.mWorkspace.sceneObjects().size();
-    window.mPendingMesh = MainWindow::PendingMesh{state, window.mWorkspace.rootPath(), directory, {}};
-    check(window.mProcessSupervisor.start(state, helper,
+    window.mPendingMesh = MainWindow::PendingMesh{taskName, window.mWorkspace.rootPath(), directory, {}};
+    check(window.mProcessSupervisor.start(taskName, helper,
         {QStringLiteral("mesh-worker"), path, state}, {}, {}, true), "start owned mesh worker");
     check(waitUntil([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingMesh; }), "mesh worker finishes");
-    check(window.mWorkspace.sceneObjects().size() == before + 1 && window.mWorkspace.scenePath() == path,
+    check(window.mWorkspace.sceneObjects().size() == before + 1 && window.mWorkspace.scenePath() == expectedPath,
           "append final or validated partial mesh without replacing originals");
     check(waitUntil([&] { return window.mViewport->meshRenderingAvailable() &&
-        window.mViewport->scenePath() == path && window.mViewport->renderMode() == NativeViewport::RenderMode::Mesh; }),
+        window.mViewport->scenePath() == expectedPath && window.mViewport->renderMode() == NativeViewport::RenderMode::Mesh &&
+        (!textured || window.mViewport->meshTextureAvailable()); }),
         "generated geometry appears in mesh mode");
-    check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 0)->data(Qt::UserRole + 31).toString() == state,
+    if (textured) check(window.mViewport->meshTextureAvailable(), "completed material preview is uploaded to the GPU");
+    check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 0)->data(Qt::UserRole + 31).toString() == expectedState,
           "partial mesh cannot mark failed texturing successful");
+    if (invalidMaterial)
+      check(!window.mViewport->meshTextureAvailable() && window.mWorkspace.scenePath() == path,
+            "missing atlas rejects material success but retains valid base mesh");
     const auto selectedId = window.mWorkspace.activeSceneId();
+    if (textured) texturedId = selectedId;
+    const auto viewTarget = window.mViewport->viewTarget();
+    const auto viewDistance = window.mViewport->viewDistance();
+    const auto viewAngles = window.mViewport->viewOrbitAngles();
+    const auto viewOrthographic = window.mViewport->orthographicProjection();
+    int languageSceneLoads = 0;
+    const auto loadConnection = QObject::connect(window.mViewport, &NativeViewport::sceneLoadStarted,
+        &window, [&](const QString &) { ++languageSceneLoads; });
     for (const QString &language : AppLanguage::supported()) {
       AppLanguage::apply(language, false);
       check(window.mGenerateMeshAction->text() == QCoreApplication::translate("Workbench", "生成网格..."), "mesh action translates live");
       check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 3)->text() == (failed
           ? QCoreApplication::translate("Workbench", "保留已完成网格；后续阶段未完成")
-          : QCoreApplication::translate("Workbench", "网格已载入 · %1 个面").arg(1)), "mesh history translates live");
+          : QCoreApplication::translate("Workbench", textured ? "贴图网格已载入 · %1 个面" : "网格已载入 · %1 个面").arg(expectedFaces)), "mesh history translates live");
       check(window.mWorkspace.activeSceneId() == selectedId, "language change preserves generated model");
+      check(window.mViewport->scenePath() == expectedPath && (!textured || window.mViewport->meshTextureAvailable()),
+            "language change preserves loaded geometry and material");
+      check(window.mViewport->viewTarget() == viewTarget && window.mViewport->viewDistance() == viewDistance &&
+          window.mViewport->viewOrbitAngles() == viewAngles && window.mViewport->orthographicProjection() == viewOrthographic,
+          "language change preserves camera state");
     }
+    QObject::disconnect(loadConnection);
+    check(languageSceneLoads == 0, "language switch does not rebuild model or texture state");
   }
-  const QString selectedResult = window.mWorkspace.activeSceneId();
+  const QString selectedResult = texturedId;
+  check(!selectedResult.isEmpty(), "textured result has independent persistent identity");
   check(window.mViewport->activateSceneObject(originalId), "select preserved original");
   check(waitUntil([&] { return window.mViewport->scenePath() == original &&
       window.mViewport->renderedPointCount() == 3; }), "original has independent viewport data");
   check(window.mViewport->activateSceneObject(selectedResult), "return to generated mesh");
+  const bool returnedMaterialReady = waitUntil([&] {
+    // Hidden installed-QA windows may not receive a presentation paint after
+    // switching objects. Render the owned framebuffer to service pending GPU
+    // uploads, rather than treating window exposure as material readiness.
+    (void)window.mViewport->grabFramebuffer();
+    return window.mViewport->scenePath() == texturedPath && window.mViewport->meshTextureAvailable();
+  });
+  if (!returnedMaterialReady)
+    qCritical() << "[material-return]" << "actual path" << window.mViewport->scenePath()
+        << "expected path" << texturedPath << "mesh available" << window.mViewport->meshRenderingAvailable()
+        << "texture available" << window.mViewport->meshTextureAvailable()
+        << "render mode" << static_cast<int>(window.mViewport->renderMode())
+        << "rendered points" << window.mViewport->renderedPointCount();
+  check(returnedMaterialReady, "material remains available after changing active model");
   QFile source(original);
   check(source.open(QIODevice::ReadOnly) && source.readAll() == points, "original file unchanged");
+  check(window.mWorkspace.saveManifest({}, &error), "save selected textured result before reopen");
   WorkspaceDocument reopened;
   check(reopened.load(window.mWorkspace.projectFilePath(), &error), "reopen staged project");
-  check(reopened.sceneObjects().size() == 3 && reopened.activeSceneId() == window.mWorkspace.activeSceneId(),
+  check(reopened.sceneObjects().size() == 5 && reopened.activeSceneId() == window.mWorkspace.activeSceneId(),
         "mesh objects and selected result persist");
+  check(reopened.scenePath() == texturedPath, "reopened active model links to material preview");
+  const auto reopenedMaterial = PlyPointCloudLoader::load(reopened.scenePath());
+  check(reopenedMaterial.isValid() && reopenedMaterial.hasMesh() && reopenedMaterial.meshHasTextureCoordinates &&
+      reopenedMaterial.sourceFaceCount == 2 && reopenedMaterial.meshVertices.size() == 5 &&
+      reopenedMaterial.meshTextureImage.size() == QSize(2, 2) && reopenedMaterial.meshTextureError.isEmpty(),
+      "saved project preserves texture asset linkage and UV seam");
+  if (!reopenedMaterial.meshTextureImage.isNull())
+    check(reopenedMaterial.meshTextureImage.pixelColor(0, 0) == QColor(Qt::red) &&
+        reopenedMaterial.meshTextureImage.pixelColor(0, 1) == QColor(Qt::blue),
+        "reopened PNG retains material color and orientation");
   const auto objects = reopened.sceneObjects();
   bool originalPreserved = false;
   for (const auto &object : objects)

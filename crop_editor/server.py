@@ -3314,39 +3314,9 @@ def find_latest_sugar_obj(source_path, started_at):
 
 def collect_sugar_mesh_outputs(scene, iteration, source_path, started_at):
     output_paths = mesh_texture_paths(scene, iteration, "sugar", post=True)
-    output_paths["dir"].mkdir(parents=True, exist_ok=True)
     source_obj = find_latest_sugar_obj(source_path, started_at)
-    source_mtl = parse_obj_material_path(source_obj)
-    source_texture = parse_mtl_texture_path(source_mtl)
-    if not source_mtl or not source_mtl.exists():
-        raise RuntimeError(f"SuGaR OBJ has no material file: {source_obj}")
-    if not source_texture or not source_texture.exists():
-        raise RuntimeError(f"SuGaR material has no texture image: {source_mtl}")
-
-    obj_text = source_obj.read_text(encoding="utf-8", errors="replace")
-    obj_lines = []
-    for line in obj_text.splitlines():
-        if line.strip().startswith("mtllib "):
-            obj_lines.append(f"mtllib {output_paths['mtl'].name}")
-        else:
-            obj_lines.append(line)
-    output_paths["obj"].write_text("\n".join(obj_lines) + "\n", encoding="utf-8", newline="\n")
-
-    mtl_text = source_mtl.read_text(encoding="utf-8", errors="replace")
-    mtl_lines = []
-    for line in mtl_text.splitlines():
-        if line.strip().startswith("map_Kd "):
-            mtl_lines.append(f"map_Kd {output_paths['png'].name}")
-        else:
-            mtl_lines.append(line)
-    output_paths["mtl"].write_text("\n".join(mtl_lines) + "\n", encoding="utf-8", newline="\n")
-    convert_texture_to_png(source_texture, output_paths["png"])
-
+    texture_bundle = collect_textured_obj_bundle(source_obj, source_obj.parent, output_paths)
     geometry_ply = obj_to_ascii_ply(output_paths["obj"], mesh_output_path(scene, iteration, "sugar", post=True))
-    with zipfile.ZipFile(output_paths["zip"], "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.write(output_paths["obj"], output_paths["obj"].name)
-        archive.write(output_paths["mtl"], output_paths["mtl"].name)
-        archive.write(output_paths["png"], output_paths["png"].name)
     glb_error = None
     try:
         export_textured_obj_to_glb(output_paths)
@@ -3358,6 +3328,8 @@ def collect_sugar_mesh_outputs(scene, iteration, source_path, started_at):
         "obj": str(output_paths["obj"]),
         "mtl": str(output_paths["mtl"]),
         "png": str(output_paths["png"]),
+        "pngs": texture_bundle["pngs"],
+        "texture_pages": texture_bundle["texture_pages"],
         "zip": str(output_paths["zip"]),
         "glb": str(output_paths["glb"]) if output_paths["glb"].exists() else None,
         "glb_error": glb_error,
@@ -3842,66 +3814,156 @@ def export_textured_obj_to_glb(output_paths):
     return glb_path
 
 
+def safe_texture_asset_path(reference, parent, trusted_root):
+    """Resolve generated OBJ dependencies without allowing arbitrary file reads."""
+    reference = str(reference).strip()
+    if len(reference) >= 2 and reference[0] == reference[-1] and reference[0] in {"'", '"'}:
+        reference = reference[1:-1]
+    normalized = reference.replace("\\", "/")
+    if (not normalized or "\x00" in normalized or normalized.startswith("/")
+            or re.match(r"^[a-zA-Z]:", normalized)):
+        raise RuntimeError(f"Texture dependency must be a relative path: {reference}")
+    trusted_root = Path(trusted_root).resolve()
+    try:
+        dependency = (Path(parent) / normalized).resolve()
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Invalid texture dependency path: {reference}") from exc
+    try:
+        dependency.relative_to(trusted_root)
+    except ValueError:
+        raise RuntimeError(f"Texture dependency escapes its source directory: {reference}")
+    if not dependency.is_file():
+        raise RuntimeError(f"Texture dependency does not exist: {reference}")
+    return dependency
+
+
+def collect_textured_obj_bundle(source_obj, trusted_root, output_paths, openmvs_opaque=False):
+    """Copy each material's image, retaining UV/material bindings and source files.
+
+    A single MTL is supported. Ambiguous multi-library declarations and map
+    options are rejected instead of publishing an incomplete textured model.
+    Output PNG names do not depend on source basenames, so atlas pages from
+    different subdirectories cannot overwrite one another.
+    """
+    source_obj = Path(source_obj).resolve()
+    trusted_root = Path(trusted_root).resolve()
+    try:
+        source_obj.relative_to(trusted_root)
+    except ValueError:
+        raise RuntimeError(f"Textured OBJ escapes its source directory: {source_obj}")
+    obj_lines = source_obj.read_text(encoding="utf-8", errors="replace").splitlines()
+    material_lines = []
+    for index, line in enumerate(obj_lines):
+        parts = line.strip().split(None, 1)
+        if parts and parts[0].lower() == "mtllib":
+            if len(parts) != 2:
+                raise RuntimeError(f"OBJ has an empty material library: {source_obj}")
+            material_lines.append((index, parts[1]))
+    if len(material_lines) != 1:
+        raise RuntimeError(f"Textured OBJ must reference exactly one MTL library: {source_obj}")
+    material_line, material_reference = material_lines[0]
+    if len(re.findall(r"\.mtl(?:[\"']|\s|$)", material_reference, flags=re.IGNORECASE)) > 1:
+        raise RuntimeError(f"Textured OBJ must reference exactly one MTL library: {source_obj}")
+    source_mtl = safe_texture_asset_path(material_reference, source_obj.parent, trusted_root)
+    if source_mtl.suffix.lower() != ".mtl":
+        raise RuntimeError(f"OBJ material dependency must be one MTL file: {material_reference}")
+    mtl_lines = source_mtl.read_text(encoding="utf-8", errors="replace").splitlines()
+    material_normalization = None
+    if openmvs_opaque:
+        # OpenMVS MaterialLib::Save writes Tr 1.000000 unconditionally, while
+        # its reader ignores Tr and treats these generated materials as opaque.
+        # Normalize that exact scalar convention in the owned copy only; other
+        # exporters and actual transparent values retain their original meaning.
+        # https://github.com/cdcseacave/openMVS/blob/master/libs/IO/OBJ.cpp
+        for index, line in enumerate(mtl_lines):
+            parts = line.strip().split()
+            if len(parts) != 2 or parts[0] != "Tr":
+                continue
+            try:
+                value = float(parts[1])
+            except ValueError:
+                continue
+            if math.isfinite(value) and value == 1.0:
+                mtl_lines[index] = "d 1"
+                material_normalization = "openmvs_opaque_Tr"
+    image_commands = {"map_ka", "map_kd", "map_ks", "map_ke", "map_ns", "map_d",
+                      "map_bump", "bump", "disp", "decal", "norm", "refl"}
+    image_lines = []
+    for index, line in enumerate(mtl_lines):
+        parts = line.strip().split(None, 1)
+        if not parts or parts[0].lower() not in image_commands:
+            continue
+        if len(parts) != 2 or parts[1].startswith("-"):
+            raise RuntimeError(f"Unsupported or empty MTL image map: {line.strip()}")
+        texture = safe_texture_asset_path(parts[1], source_mtl.parent, trusted_root)
+        if texture.suffix.lower() not in IMAGE_EXTS:
+            raise RuntimeError(f"Unsupported MTL texture image: {texture.name}")
+        image_lines.append((index, parts[0], texture))
+    if not any(command.lower() == "map_kd" for _, command, _ in image_lines):
+        raise RuntimeError(f"MTL has no diffuse texture image: {source_mtl}")
+
+    # Keep the first diffuse map as the legacy primary PNG even if auxiliary
+    # maps precede it. Shared source images only need to be converted once.
+    ordered_images = sorted(image_lines, key=lambda item: item[1].lower() != "map_kd")
+    converted = {}
+    primary_png = Path(output_paths["png"])
+    for _, _, source in ordered_images:
+        if source in converted:
+            continue
+        page = len(converted)
+        target = primary_png if page == 0 else primary_png.with_name(
+            f"{primary_png.stem}-page-{page + 1:02d}.png")
+        converted[source] = target
+    sources = {source_obj, source_mtl} | set(converted)
+    targets = [Path(output_paths[key]) for key in ("obj", "mtl", "zip", "glb")] + list(converted.values())
+    for target in targets:
+        if target.resolve() in sources:
+            raise RuntimeError(f"Texture collection must not overwrite its source: {target}")
+
+    Path(output_paths["dir"]).mkdir(parents=True, exist_ok=True)
+    for source, target in converted.items():
+        convert_texture_to_png(source, target)
+    obj_lines[material_line] = f"mtllib {Path(output_paths['mtl']).name}"
+    for index, command, source in image_lines:
+        mtl_lines[index] = f"{command} {converted[source].name}"
+    for key, lines in (("obj", obj_lines), ("mtl", mtl_lines)):
+        with Path(output_paths[key]).open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write("\n".join(lines) + "\n")
+    with zipfile.ZipFile(output_paths["zip"], "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in [Path(output_paths["obj"]), Path(output_paths["mtl"])] + list(converted.values()):
+            archive.write(path, path.name)
+    result = {"pngs": [str(path) for path in converted.values()], "texture_pages": len(converted)}
+    if material_normalization:
+        result["material_normalization"] = material_normalization
+    return result
+
+
 def collect_openmvs_texture_outputs(work_dir, output_paths):
     work_dir = Path(work_dir)
     obj_files = sorted(work_dir.rglob("*.obj"), key=lambda p: (0 if "text" in p.stem.lower() else 1, -p.stat().st_mtime))
     if not obj_files:
         raise RuntimeError(f"OpenMVS finished but no OBJ was written in {work_dir}")
     source_obj = obj_files[0]
-    source_mtl = source_obj.with_suffix(".mtl")
-    if not source_mtl.exists():
-        mtl_files = sorted(source_obj.parent.glob("*.mtl"))
-        if not mtl_files:
-            raise RuntimeError(f"OpenMVS OBJ has no MTL next to it: {source_obj}")
-        source_mtl = mtl_files[0]
-
-    output_paths["dir"].mkdir(parents=True, exist_ok=True)
-    texture_names = []
-    for raw_line in source_mtl.read_text(encoding="utf-8", errors="replace").splitlines():
-        stripped = raw_line.strip()
-        if stripped.lower().startswith("map_kd "):
-            texture_names.append(stripped.split(maxsplit=1)[1])
-    texture_sources = []
-    for name in texture_names:
-        texture = (source_mtl.parent / name).resolve()
-        if texture.exists() and texture.suffix.lower() in IMAGE_EXTS:
-            texture_sources.append(texture)
-    if not texture_sources:
-        images = [p for p in source_mtl.parent.iterdir() if p.suffix.lower() in IMAGE_EXTS]
-        texture_sources = sorted(images)
-    if not texture_sources:
-        raise RuntimeError(f"OpenMVS OBJ has no texture image next to it: {source_obj}")
-
-    obj_text = source_obj.read_text(encoding="utf-8", errors="replace")
-    obj_text = re.sub(r"(?m)^mtllib\s+.*$", f"mtllib {output_paths['mtl'].name}", obj_text)
-    output_paths["obj"].write_text(obj_text, encoding="utf-8")
-
-    convert_texture_to_png(texture_sources[0], output_paths["png"])
-    mtl_text = source_mtl.read_text(encoding="utf-8", errors="replace")
-    mtl_text = re.sub(r"(?mi)^map_Kd\s+.*$", f"map_Kd {output_paths['png'].name}", mtl_text)
-    output_paths["mtl"].write_text(mtl_text, encoding="utf-8")
-
-    with zipfile.ZipFile(output_paths["zip"], "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.write(output_paths["obj"], output_paths["obj"].name)
-        archive.write(output_paths["mtl"], output_paths["mtl"].name)
-        archive.write(output_paths["png"], output_paths["png"].name)
-        for texture in texture_sources[1:]:
-            archive.write(texture, texture.name)
+    texture_bundle = collect_textured_obj_bundle(source_obj, work_dir, output_paths, openmvs_opaque=True)
     glb_error = None
     try:
         export_textured_obj_to_glb(output_paths)
     except Exception as exc:
         glb_error = str(exc)
-    return {
+    result = {
         "obj": str(output_paths["obj"]),
         "mtl": str(output_paths["mtl"]),
         "png": str(output_paths["png"]),
+        "pngs": texture_bundle["pngs"],
         "zip": str(output_paths["zip"]),
         "glb": str(output_paths["glb"]) if output_paths["glb"].exists() else None,
         "glb_error": glb_error,
         "openmvs_obj": str(source_obj),
-        "texture_pages": len(texture_sources),
+        "texture_pages": texture_bundle["texture_pages"],
     }
+    if texture_bundle.get("material_normalization"):
+        result["material_normalization"] = texture_bundle["material_normalization"]
+    return result
 
 
 def write_colmap_textured_ply_as_obj(ply_path, texture_name, obj_path, mtl_name):

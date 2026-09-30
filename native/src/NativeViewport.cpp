@@ -605,6 +605,10 @@ QString NativeViewport::processingPreviewLabel() const {
     phase = QCoreApplication::translate("Workbench", "网格已就绪");
   else if (mProcessingStage == QStringLiteral("texture"))
     phase = QCoreApplication::translate("Workbench", "烘焙照片纹理");
+  else if (mProcessingStage == QStringLiteral("texture_preview"))
+    phase = QCoreApplication::translate("Workbench", "准备材质预览");
+  else if (mProcessingStage == QStringLiteral("texture_ready"))
+    phase = QCoreApplication::translate("Workbench", "贴图网格已就绪");
   else if (mProcessingStage == QStringLiteral("train"))
     phase = mProcessingIteration > 0
         ? QCoreApplication::translate("Workbench", "高斯训练 · 优化与密度控制")

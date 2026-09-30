@@ -48,6 +48,7 @@
 #include <QHBoxLayout>
 #include <QHash>
 #include <QHeaderView>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -460,6 +461,8 @@ QString workerStageLabel(const QString &stage) {
       {QStringLiteral("mesh_validation"), QCoreApplication::translate("Workbench", "校验网格")},
       {QStringLiteral("mesh_ready"), QCoreApplication::translate("Workbench", "网格已就绪")},
       {QStringLiteral("texture"), QCoreApplication::translate("Workbench", "烘焙照片纹理")},
+      {QStringLiteral("texture_preview"), QCoreApplication::translate("Workbench", "准备材质预览")},
+      {QStringLiteral("texture_ready"), QCoreApplication::translate("Workbench", "贴图网格已就绪")},
       {QStringLiteral("prepare"), QCoreApplication::translate("Workbench", "准备训练")},
       {QStringLiteral("colmap"), QCoreApplication::translate("Workbench", "COLMAP 重建")},
       {QStringLiteral("train"), QCoreApplication::translate("Workbench", "训练")},
@@ -2327,13 +2330,33 @@ void MainWindow::connectServices() {
           QFile resultFile(QDir(pending.outputDirectory).filePath(QStringLiteral("result.json")));
           QJsonObject result;
           if (resultFile.open(QIODevice::ReadOnly)) result = QJsonDocument::fromJson(resultFile.readAll()).object();
-          const QString path = result.value(QStringLiteral("meshPath")).toString();
+          const auto stages = result.value(QStringLiteral("completedStages")).toArray();
+          QString path = result.value(QStringLiteral("meshPath")).toString();
           QString error;
-          const auto metadata = WorkspaceDocument::inspectPly(path, &error);
+          auto metadata = WorkspaceDocument::inspectPly(path, &error);
+          bool textured = false;
+          const auto material = result.value(QStringLiteral("materialPreview")).toObject();
+          const QString materialPath = material.value(QStringLiteral("ply")).toString();
+          const QString atlasPath = material.value(QStringLiteral("atlas")).toString();
+          if (stages.contains(QStringLiteral("texture_preview")) &&
+              pathIsWithinDirectory(materialPath, pending.outputDirectory) &&
+              pathIsWithinDirectory(atlasPath, pending.outputDirectory)) {
+            const auto materialMetadata = WorkspaceDocument::inspectPly(materialPath, &error);
+            QImageReader atlas(atlasPath);
+            const QSize size = atlas.size();
+            if (materialMetadata.valid && materialMetadata.looksLikeMesh() &&
+                atlas.canRead() && size.isValid() && size.width() <= 8192 && size.height() <= 8192) {
+              path = materialPath;
+              metadata = materialMetadata;
+              textured = true;
+            }
+          }
           const bool valid = pathIsWithinDirectory(path, pending.outputDirectory) &&
               metadata.valid && metadata.looksLikeMesh() &&
-              result.value(QStringLiteral("completedStages")).toArray().contains(QStringLiteral("mesh"));
-          effectiveSucceeded = succeeded && result.value(QStringLiteral("state")).toString() == QStringLiteral("done") && valid;
+              stages.contains(QStringLiteral("mesh"));
+          const bool materialExpected = stages.contains(QStringLiteral("texture_preview"));
+          effectiveSucceeded = succeeded && result.value(QStringLiteral("state")).toString() == QStringLiteral("done") &&
+              valid && (!materialExpected || textured);
           if (valid && pathsReferToSameLocation(mWorkspace.rootPath(), pending.projectRoot)) {
             mShowGeneratedMesh = true;
             if (mWorkspace.addScenePath(path, &error)) {
@@ -2341,14 +2364,15 @@ void MainWindow::connectServices() {
                 mShowGeneratedMesh = false;
                 mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
               }
-              completionDetail = effectiveSucceeded
-                  ? QCoreApplication::translate("Workbench", "网格已载入 · %1 个面").arg(metadata.faceCount)
-                  : QCoreApplication::translate("Workbench", "保留已完成网格；后续阶段未完成");
+              const char *detailSource = !effectiveSucceeded
+                  ? AppLanguage::source("保留已完成网格；后续阶段未完成")
+                  : textured ? AppLanguage::source("贴图网格已载入 · %1 个面")
+                             : AppLanguage::source("网格已载入 · %1 个面");
+              completionDetail = QCoreApplication::translate("Workbench", detailSource);
+              if (effectiveSucceeded) completionDetail = completionDetail.arg(metadata.faceCount);
               if (mActiveTaskRow >= 0) {
                 auto *detail = mTaskTable->item(mActiveTaskRow, 3);
-                detail->setData(Qt::UserRole + 34, effectiveSucceeded
-                    ? QString::fromUtf8(AppLanguage::source("网格已载入 · %1 个面"))
-                    : QString::fromUtf8(AppLanguage::source("保留已完成网格；后续阶段未完成")));
+                detail->setData(Qt::UserRole + 34, QString::fromUtf8(detailSource));
                 detail->setData(Qt::UserRole + 35, effectiveSucceeded ? QVariantList{metadata.faceCount} : QVariantList{});
               }
               if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);

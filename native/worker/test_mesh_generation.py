@@ -22,11 +22,23 @@ MESH = ("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty flo
         "0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n")
 
 
+def texture_fixture(directory):
+    from PIL import Image
+    files = {name: str(directory / ("texture." + name)) for name in ("obj", "mtl", "png", "zip")}
+    Path(files["obj"]).write_text("mtllib texture.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\n"
+                                  "vt 0 0\nvt 1 0\nvt 0 1\nusemtl baked\nf 1/1 2/2 3/3\n")
+    Path(files["mtl"]).write_text("newmtl baked\nKd 1 1 1\nmap_Kd texture.png\n")
+    Image.new("RGB", (2, 2), (160, 70, 20)).save(files["png"])
+    Path(files["zip"]).write_bytes(b"owned texture package")
+    return files
+
+
 class Backend:
-    def __init__(self, backend, texture_failure=False, corrupt=False):
+    def __init__(self, backend, texture_failure=False, corrupt=False, own_texture=False):
         self.backend = backend
         self.texture_failure = texture_failure
         self.corrupt = corrupt
+        self.own_texture = own_texture
         self.MESH_LOCK = threading.Lock()
         self.MESH_JOBS = {}
         self.OUTPUT_DIR = None
@@ -54,18 +66,15 @@ class Backend:
         mesh = self.OUTPUT_DIR / scene / "mesh.ply"
         mesh.write_text(MESH.replace("3 0 1 2", "3 0 1 99") if self.corrupt else MESH)
         self.MESH_JOBS["mesh"] = {"status": "done", "output_mesh": str(mesh), "log": ["mesh output"]}
+        if self.own_texture:
+            self.MESH_JOBS["mesh"]["texture"] = texture_fixture(mesh.parent)
         return {"id": "mesh"}
 
     def start_texture_bake(self, scene, iteration, options):
         self.calls.append(options["backend"])
         self.MESH_JOBS["texture"] = {"status": "failed" if self.texture_failure else "done", "error": "texture failed"}
         if not self.texture_failure:
-            files = {}
-            for name in ("obj", "mtl", "png", "zip"):
-                asset = self.OUTPUT_DIR / scene / ("texture." + name)
-                asset.write_bytes(b"owned fixture")
-                files[name] = str(asset)
-            self.MESH_JOBS["texture"]["texture"] = files
+            self.MESH_JOBS["texture"]["texture"] = texture_fixture(self.OUTPUT_DIR / scene)
         return {"id": "texture"}
 
     def cancel_mesh_job(self, job_id):
@@ -99,9 +108,9 @@ class MeshJobTests(unittest.TestCase):
         for index, (mode, source_backend) in enumerate(mesh_generation.MODES.items()):
             with self.subTest(mode=mode):
                 self.config.update(mode=mode, runName="mesh-test-" + str(index))
-                self.assertEqual(self.run_job(Backend(source_backend)), 0)
+                self.assertEqual(self.run_job(Backend(source_backend, own_texture=mode == "sugar")), 0)
                 record = json.loads((self.root / "output" / self.config["runName"] / "result.json").read_text())
-                self.assertEqual(record["completedStages"], ["mesh"])
+                self.assertEqual(record["completedStages"], ["mesh", "texture", "texture_preview"] if mode == "sugar" else ["mesh"])
                 self.assertEqual(record["geometry"], {"vertices": 3, "faces": 1})
                 self.assertEqual((self.source / "point_cloud/iteration_7/point_cloud.ply").read_bytes(), b"training input is immutable")
 
@@ -119,9 +128,66 @@ class MeshJobTests(unittest.TestCase):
         self.config.update(mode="gs2mesh", bakeTexture=True)
         backend = Backend("3dgs")
         self.assertEqual(self.run_job(backend), 0)
-        self.assertEqual(self.record()["completedStages"], ["mesh", "texture"])
+        self.assertEqual(self.record()["completedStages"], ["mesh", "texture", "texture_preview"])
+        material = self.record()["materialPreview"]
+        self.assertEqual(mesh_generation.validate_mesh(material["ply"], textured=True), {"vertices": 3, "faces": 1})
+        self.assertTrue(Path(material["atlas"]).is_file())
         self.assertIn("openmvs", backend.calls)
         self.assertFalse((self.root / "output/mesh-owned-test/.gsw-resume").exists())
+
+    def test_shared_material_preview_covers_every_mesh_backend(self):
+        for index, (mode, backend_name) in enumerate(mesh_generation.MODES.items()):
+            with self.subTest(mode=mode):
+                self.config.update(mode=mode, runName="material-test-" + str(index), bakeTexture=mode != "sugar")
+                backend = Backend(backend_name, own_texture=mode == "sugar")
+                self.assertEqual(self.run_job(backend), 0)
+                record = json.loads((self.root / "output" / self.config["runName"] / "result.json").read_text())
+                self.assertEqual(record["completedStages"], ["mesh", "texture", "texture_preview"])
+                self.assertEqual(self.events[-1][3]["previewPath"], record["materialPreview"]["ply"])
+                self.assertEqual((self.source / "point_cloud/iteration_7/point_cloud.ply").read_bytes(), b"training input is immutable")
+
+    def test_material_adapter_failure_retains_completed_mesh_and_texture(self):
+        self.config["bakeTexture"] = True
+        backend = Backend("2dgs")
+        original = backend.start_texture_bake
+        def invalid(*args):
+            result = original(*args)
+            Path(backend.MESH_JOBS["texture"]["texture"]["obj"]).write_text("v 0 0 0\nf 1 2 3\n")
+            return result
+        backend.start_texture_bake = invalid
+        self.assertEqual(self.run_job(backend), 1)
+        record = self.record()
+        self.assertEqual(record["completedStages"], ["mesh", "texture"])
+        self.assertEqual(record["state"], "failed")
+        self.assertTrue(Path(record["meshPath"]).is_file())
+        self.assertNotIn("materialPreview", record)
+        self.assertFalse(any(event[0] == "done" for event in self.events))
+
+    def test_material_conversion_cancellation_retains_prior_stages(self):
+        self.config["bakeTexture"] = True
+        with mock.patch.object(mesh_generation, "prepare_material_preview", side_effect=InterruptedError("cancelled")):
+            self.assertEqual(self.run_job(Backend("2dgs")), 130)
+        self.assertEqual(self.record()["completedStages"], ["mesh", "texture"])
+        self.assertEqual(self.record()["state"], "cancelled")
+        self.assertNotIn("materialPreview", self.record())
+
+    def test_empty_successful_texture_bundle_is_not_success(self):
+        self.config["bakeTexture"] = True
+        backend = Backend("2dgs")
+        def empty(*args):
+            backend.MESH_JOBS["texture"] = {"status": "done", "texture": {}}
+            return {"id": "texture"}
+        backend.start_texture_bake = empty
+        self.assertEqual(self.run_job(backend), 1)
+        self.assertEqual(self.record()["completedStages"], ["mesh"])
+        self.assertEqual(self.record()["state"], "failed")
+
+    def test_sugar_missing_owned_materials_keeps_only_validated_geometry(self):
+        self.config["mode"] = "sugar"
+        self.assertEqual(self.run_job(Backend("3dgs")), 1)
+        self.assertEqual(self.record()["completedStages"], ["mesh"])
+        self.assertTrue(Path(self.record()["meshPath"]).is_file())
+        self.assertEqual(self.record()["state"], "failed")
 
     def test_invalid_face_indices_fail_before_preview(self):
         self.assertEqual(self.run_job(Backend("2dgs", corrupt=True)), 1)

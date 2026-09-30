@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from native.worker.training_checkpoint import atomic_json
+from native.worker.mesh_material_preview import prepare_material_preview
 
 
 MODES = {"bounded": "2dgs", "unbounded": "2dgs", "sugar": "3dgs", "gs2mesh": "3dgs"}
@@ -26,7 +27,7 @@ def _within(path, root):
         return False
 
 
-def validate_mesh(path, cancel=None):
+def validate_mesh(path, cancel=None, textured=False):
     """Check complete triangle payload, finite positions and index ranges."""
     import numpy as np
     from plyfile import PlyData
@@ -35,6 +36,8 @@ def validate_mesh(path, cancel=None):
     arguments = {"mmap": "r"}
     if "known_list_len" in inspect.signature(PlyData.read).parameters:
         arguments["known_list_len"] = {"face": {"vertex_indices": 3}}
+        if textured:
+            arguments["known_list_len"]["face"]["texcoord"] = 6
     ply = PlyData.read(str(path), **arguments)
     if "vertex" not in ply or "face" not in ply:
         raise ValueError("Mesh output must contain vertices and triangle faces")
@@ -202,15 +205,27 @@ def run(config, server, emit):
             texture_options = {"mode": mode, "backend": "openmvs", "post": True,
                                "texture_res": config.get("textureResolution", 2048), "max_faces": 0}
             result = stream(server.start_texture_bake(run_name, iteration, texture_options)["id"], "Texture baking")
-            files = result.get("texture") or {}
+            record["texture"] = result.get("texture") or {}
+        elif result.get("texture"):
+            record["texture"] = result["texture"]
+        if (texture or mode == "sugar") and not isinstance(record.get("texture"), dict):
+            raise ValueError("Texture generation returned no valid asset bundle")
+        if (texture or mode == "sugar") and not record.get("texture"):
+            raise ValueError("Texture generation returned an empty asset bundle")
+        if record.get("texture"):
+            files = record["texture"]
             for name in ("obj", "mtl", "png", "zip"):
                 asset = Path(files.get(name) or "").resolve()
                 if not _within(asset, model.resolve()) or not asset.is_file() or not asset.stat().st_size:
                     raise ValueError("Texture output is incomplete: " + name)
-            record["texture"] = files
             record["completedStages"].append("texture")
-        elif result.get("texture"):
-            record["texture"] = result["texture"]
+            stage("texture_preview", None, preview)
+            material = prepare_material_preview(files, model / "native-material", model, cancel)
+            validate_mesh(material["ply"], cancel, textured=True)
+            record["materialPreview"] = material
+            record["completedStages"].append("texture_preview")
+            preview = {"previewPath": material["ply"], "previewKind": "mesh", "previewIteration": 2}
+            stage("texture_ready", None, preview)
         if cancel.is_set():
             raise InterruptedError("Mesh job cancelled before publication")
         record.update(state="done", stage="done")

@@ -145,7 +145,7 @@ void MeshGenerationDialog::refreshOptions() {
   mSourceSummary->setText(mBackend.isEmpty()
       ? QCoreApplication::translate("Workbench", "需要包含 cfg_args 和 point_cloud/iteration_* 的训练输出；普通导入 PLY 不含所需相机数据。")
       : QCoreApplication::translate("Workbench", "源模型：%1 · 迭代 %2").arg(mBackend.toUpper()).arg(mIteration));
-  mHint->setText(QCoreApplication::translate("Workbench", "独立保存，不覆盖原模型。处理时保留画面，验证后显示网格；纹理另存为 OBJ 包，GLB 取决于后端转换。尚不支持阶段恢复或生成纹理的自动显示。"));
+  mHint->setText(QCoreApplication::translate("Workbench", "独立保存，不覆盖原模型。处理时保留画面，验证后自动显示网格及照片纹理。多张贴图按原分辨率合成预览图集；超出预算或不支持的材质保留几何和纹理包。GLB 取决于后端转换；尚不支持阶段恢复。"));
 }
 
 QJsonObject MeshGenerationDialog::configuration() const {
