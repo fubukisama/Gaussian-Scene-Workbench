@@ -1,6 +1,6 @@
 # Continuous reconstruction and training preview
 
-The native 3DGS workflow keeps one navigable viewport throughout processing:
+The native 3DGS and 2DGS workflows keep one navigable viewport throughout processing:
 
 1. **Prepare images/data**: the stage panel is visible immediately. Until actual
    geometry is available, retain the previous view and explicitly say that the
@@ -12,8 +12,8 @@ The native 3DGS workflow keeps one navigable viewport throughout processing:
    reconstruction also publishes a first sparse snapshot.
 3. **Initial Gaussians**: publish an observation PLY from initialized tensors at
    iteration 0 (or the restored iteration when resuming).
-4. **Optimization / density control**: prefer the existing CUDA/OpenGL shared
-   memory path. Independently keep time-based PLY observations as a fallback.
+4. **Optimization / density control**: 3DGS prefers the existing CUDA/OpenGL shared
+   memory path. Both adapters keep time-based PLY observations (also the 3DGS fallback).
    The default interval is 3 seconds, not an iteration checkpoint milestone.
 5. **Result**: validate and associate the full final PLY. Keep the previous
    observation until it has loaded; retain the viewing direction, target and
@@ -40,8 +40,8 @@ Live observations are read-only; viewport camera navigation remains available.
 
 Preparation/COLMAP display is progress plus discrete real reconstruction snapshots,
 not every internal optimization step. The periodic Gaussian tensor publisher is
-integrated into this repository's **3DGS** trainer; the external **2DGS** trainer
-continues to use its existing checkpoint events. A text-only COLMAP scene can train,
+integrated into both native **3DGS** and **2DGS** training adapters; external-only
+trainers retain their checkpoint-based fallback. A text-only COLMAP scene can train,
 but the pre-training sparse publisher currently reads binary `points3D.bin`.
 
 ## Design references
@@ -63,6 +63,13 @@ but the pre-training sparse publisher currently reads binary `points3D.bin`.
 `--smoke-test-processing-preview` tests sparse → initial → updated → final handoffs,
 nonempty buffers during reads, coalescing, failed-file retention, camera continuity,
 read-only previews, cancellation and live zh_CN/en_US/ja_JP labels.
+`--smoke-test-processing-completion` exercises the actual controller/owned-worker
+handoff for 3DGS, 2DGS and all four mesh outputs, including a preceding COLMAP
+job, explicit editing locks, select/delete/undo and live language changes.
+Processing ends before source association; cached sparse previews cannot replace
+model objects. Pending/failed final reads remain navigable but not editable.
+Same-path adoption republishes readiness, and late snapshots cannot replace the
+full source. See the trilingual handoff policy in [GENERATION_PIPELINES.md](GENERATION_PIPELINES.md).
 `native.worker.test_training_preview` checks atomic output, PLY attributes, bounded
 retention, write failures and backpressure; training telemetry tests check the
 independent sequence domains and rejection of late observations.

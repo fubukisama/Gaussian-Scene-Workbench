@@ -8,6 +8,7 @@
 #include "GaussianPerformanceSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
+#include "ProcessingCompletionSmokeTest.h"
 #include "SpzSmokeTest.h"
 #include "SmokeTestSettings.h"
 
@@ -208,6 +209,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
+  QCommandLineOption processingCompletionOption(QStringLiteral("smoke-test-processing-completion"),
+      QStringLiteral("Verify completed model workflows restore inspect and editing tools."));
+  parser.addOption(processingCompletionOption);
   QCommandLineOption spzSmokeOption(QStringLiteral("smoke-test-spz"),
       QStringLiteral("Verify SPZ UI export/import and project persistence, optionally with --smoke-scene."));
   parser.addOption(spzSmokeOption);
@@ -259,6 +263,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
+                         parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(languageSmokeOption) ||
@@ -279,7 +284,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(meshGenerationSmokeOption)) {
+  if (parser.isSet(processingCompletionOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runProcessingCompletionSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(meshGenerationSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runMeshGenerationSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

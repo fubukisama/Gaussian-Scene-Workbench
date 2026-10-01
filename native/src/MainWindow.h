@@ -50,6 +50,7 @@ private:
   friend bool runListInteractionSmokeTest(MainWindow &window);
   friend bool runTrainingResumeSmokeTest(MainWindow &window);
   friend bool runMeshGenerationSmokeTest(MainWindow &window);
+  friend bool runProcessingCompletionSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;

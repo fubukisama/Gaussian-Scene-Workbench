@@ -284,6 +284,9 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
   check(window.mResumeTrainingAction->isEnabled(), "resume available after pause");
   check(loadActiveTrainingJob(project).isValid(), "durable resume pointer retained");
   check(!window.mWorkspace.scenePath().isEmpty(), "paused preview associated with project");
+  check(waitUntil([&] { return window.mViewport->selectableModelAvailable() && window.mViewport->hasEditableScene(); }),
+        "paused full checkpoint restores observation and trim eligibility");
+  check(window.mInspectAction->isEnabled() && !window.mSelectionToolbar->isHidden(), "paused checkpoint restores inspect toolbar");
   check(window.mTaskTable->item(0, 0)->data(Qt::UserRole + 31) == QStringLiteral("paused"), "history shows paused, not failed");
   const auto samples = window.mTrainingMonitor->telemetry().samples().size();
   for (const QString &language : AppLanguage::supported()) {

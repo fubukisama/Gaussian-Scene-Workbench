@@ -109,8 +109,58 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
   finalObject.vertexCount = 21;
   viewport.setSceneObjects({finalObject}, finalObject.id);
   check(viewport.renderedPointCount() == 18, "final association does not clear preview");
+  check(!viewport.hasEditableScene() && !viewport.selectableModelAvailable(), "final read cannot expose old snapshot as editable source");
+  check(viewport.processingPreviewDetail() == QCoreApplication::translate("Workbench", "正在载入最终模型 · 可继续观察"), "final read is explicitly labeled");
   check(wait([&] { viewport.grabFramebuffer(); return viewport.renderedPointCount() == 21; }), "final result replaces preview");
+  check(viewport.hasEditableScene() && viewport.selectableModelAvailable(), "full final model restores interaction");
   check(cameraUnchanged(), "final handoff retains camera");
+  bool modelReadyPublished = false;
+  const auto readyConnection = QObject::connect(&viewport, &NativeViewport::modelInteractionStateChanged,
+      &viewport, [&](bool ready) { modelReadyPublished = ready; });
+  viewport.beginProcessingPreview();
+  viewport.finishProcessingPreview(true, false);
+  check(!modelReadyPublished, "terminal snapshot is still read-only before association");
+  viewport.setSceneObjects({finalObject}, finalObject.id);
+  check(modelReadyPublished, "same-path final adoption republishes readiness without reload");
+  QSet<QString> finalLabels;
+  for (const QString &language : AppLanguage::supported()) {
+    AppLanguage::apply(language, false);
+    finalLabels.insert(viewport.processingPreviewDetail());
+    check(viewport.processingPreviewDetail() == QCoreApplication::translate("Workbench", "最终模型已就绪 · 编辑工具已锁定"), "terminal label preserves explicit lock in every language");
+    check(cameraUnchanged(), "terminal label language switch retains camera");
+  }
+  check(finalLabels.size() == 3, "terminal detail is translated immediately");
+  viewport.beginProcessingPreview();
+  viewport.setPreviewScene(fixture(QStringLiteral("late-a"), 23, true), 23);
+  viewport.setPreviewScene(fixture(QStringLiteral("late-b"), 26, true), 26);
+  viewport.finishProcessingPreview(true, false);
+  finalObject.path = fixture(QStringLiteral("new-final"), 30, true);
+  finalObject.vertexCount = 30;
+  viewport.setSceneObjects({finalObject}, finalObject.id);
+  check(!viewport.hasEditableScene(), "in-flight handoff stays read-only");
+  check(wait([&] { viewport.grabFramebuffer(); return viewport.renderedPointCount() == 30; }), "full final source supersedes in-flight and queued observations");
+  check(viewport.scenePath() == finalObject.path && modelReadyPublished, "late observations cannot replace associated final model");
+  check(cameraUnchanged(), "in-flight final adoption preserves camera");
+  SceneObject companion;
+  companion.id = QStringLiteral("companion");
+  companion.path = fixture(QStringLiteral("companion"), 3, true);
+  companion.vertexCount = 3;
+  viewport.setSceneObjects({finalObject, companion}, companion.id);
+  check(wait([&] { return viewport.hasEditableScene(); }), "independent companion object loads");
+  viewport.beginProcessingPreview();
+  viewport.finishProcessingPreview(true, false);
+  viewport.setSceneObjects({finalObject, companion}, finalObject.id);
+  check(viewport.selectableModelAvailable() && viewport.hasEditableScene() && modelReadyPublished,
+        "existing full object restores tools without sharing the retained original state");
+  viewport.beginProcessingPreview();
+  viewport.finishProcessingPreview(true, false);
+  finalObject.path = directory.filePath(QStringLiteral("invalid-final.ply"));
+  viewport.setSceneObjects({finalObject}, finalObject.id);
+  check(wait([&] { return failures == 2; }), "invalid final read reports failure");
+  check(viewport.visibleModelAvailable() && viewport.renderedPointCount() == 30, "invalid final retains last visible geometry");
+  check(!viewport.hasEditableScene() && !viewport.selectableModelAvailable() && !modelReadyPublished, "invalid final never exposes stale geometry to edits");
+  check(viewport.processingPreviewDetail() == QCoreApplication::translate("Workbench", "最终模型载入失败 · 保留只读预览"), "invalid final is accurately labeled");
+  QObject::disconnect(readyConnection);
   QObject::disconnect(connection);
   QObject::disconnect(errorConnection);
   qInfo() << "Processing preview smoke:" << (passed ? "PASS" : "FAIL");

@@ -62,6 +62,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/WindowUiSmokeTest.h
   src/LanguageSmokeTest.cpp
   src/LanguageSmokeTest.h
+  src/ProcessingCompletionSmokeTest.cpp
+  src/ProcessingCompletionSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -413,6 +415,7 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
+  add_test(NAME native_processing_completion COMMAND GaussianSceneWorkbench --smoke-test-processing-completion)
   add_test(NAME native_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
   add_test(NAME native_mesh_generation COMMAND GaussianSceneWorkbench --smoke-test-mesh-generation)
   set_tests_properties(native_mesh_generation PROPERTIES TIMEOUT 40
@@ -429,7 +432,7 @@ if(BUILD_TESTING)
   set_tests_properties(native_spz_interchange PROPERTIES TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-  set_tests_properties(native_processing_preview PROPERTIES
+  set_tests_properties(native_processing_preview native_processing_completion PROPERTIES
     TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"

@@ -18,6 +18,22 @@
 int main(int argc, char *argv[]) {
   QCoreApplication application(argc, argv);
   const QStringList arguments = application.arguments();
+  if (arguments.size() == 5 && arguments.at(1) == QStringLiteral("completion-worker")) {
+    const bool mesh = arguments.at(4) == QStringLiteral("mesh");
+    const bool sparse = arguments.at(4) == QStringLiteral("colmap_sparse");
+    const QByteArray bytes = QJsonDocument(QJsonObject{
+        {"version", 1}, {"type", "status"}, {"state", "running"},
+        {"stage", sparse ? "colmap" : mesh ? "mesh_ready" : "train"}, {"previewPath", arguments.at(2)},
+        {"previewKind", arguments.at(4)}, {"previewIteration", 1}, {"gaussianCount", 4}})
+        .toJson(QJsonDocument::Compact);
+    std::printf("[worker-event] %s\n", bytes.constData()); std::fflush(stdout);
+    QDeadlineTimer deadline(10000);
+    while (!QFileInfo::exists(arguments.at(3)) && !deadline.hasExpired()) QThread::msleep(10);
+    if (!QFileInfo::exists(arguments.at(3))) return 7;
+    std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"done\",\"stage\":\"done\"}");
+    std::fflush(stdout);
+    return 0;
+  }
   if (arguments.size() == 4 && arguments.at(1) == QStringLiteral("mesh-worker")) {
     const auto publish = [&](const QString &state, const QString &stage) {
       const QByteArray bytes = QJsonDocument(QJsonObject{

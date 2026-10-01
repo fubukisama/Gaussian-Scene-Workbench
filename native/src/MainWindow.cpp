@@ -2397,9 +2397,13 @@ void MainWindow::connectServices() {
           mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled, paused);
         }
         if (finishingTraining || finishingReconstruction || finishingMesh) {
+          // End the processing guard before associating the validated source.
+          // setSceneObjects deliberately ignores collection mutations while
+          // processing; doing this in the opposite order leaves a read-only
+          // observation on screen with all model tools unavailable.
+          mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
           if (finishingTraining && (effectiveSucceeded || paused))
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
-          mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
           if (finishingMesh) {
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
             if (mViewport->meshRenderingAvailable()) {
@@ -2978,7 +2982,9 @@ void MainWindow::updateEditActions() {
   const bool modelInteractive = baseInteractive && mModelReady;
   const bool modelNavigationAvailable = !mSelectionBusy && mModelReady;
   const bool pointInteractive = baseInteractive && mSceneReady;
-  const bool anyScene = mModelReady || mSceneReady;
+  // Observations are navigable even before a full editable source is ready.
+  // Do not use model-selection eligibility to hide the navigation controls.
+  const bool anyScene = mViewport->visibleModelAvailable() || mModelReady || mSceneReady;
   if (mInspectAction == nullptr) {
     return;
   }
@@ -2991,7 +2997,7 @@ void MainWindow::updateEditActions() {
   if (mEditToolbar != nullptr) {
     mEditToolbar->setVisible(anyScene);
   }
-  mInspectAction->setEnabled(modelNavigationAvailable || pointInteractive);
+  mInspectAction->setEnabled(!mSelectionBusy && anyScene);
   mFindModelAction->setEnabled(modelNavigationAvailable);
   mExportModelAction->setEnabled(modelNavigationAvailable && !mRecoveryBlocked &&
       !mProcessSupervisor.isRunning() && !mViewport->modelTransformActive());
@@ -3019,7 +3025,7 @@ void MainWindow::updateEditActions() {
 
 void MainWindow::updateEditStatus() {
   if (mEditStatus != nullptr) {
-    mEditStatus->setVisible(mModelReady || mSceneReady || mSelectionBusy);
+    mEditStatus->setVisible(mViewport->visibleModelAvailable() || mModelReady || mSceneReady || mSelectionBusy);
     if (mViewport->editToolsLocked()) {
       mEditStatus->setText(QCoreApplication::translate("Workbench", "工具已锁定"));
     } else if (mSelectionBusy) {
@@ -5303,7 +5309,8 @@ void MainWindow::updateWorkspaceUi() {
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setPreviewScene(mLiveTrainingPreviewPath,
                         mLiveTrainingGaussianCount);
-  } else if (!mLiveReconstructionPreviewPath.isEmpty() &&
+  } else if (!mPendingTraining && mWorkspace.sceneObjects().isEmpty() &&
+             !mLiveReconstructionPreviewPath.isEmpty() &&
              QFileInfo::exists(mLiveReconstructionPreviewPath) &&
              pathsReferToSameLocation(mWorkspace.datasetPath(),
                                       mLiveReconstructionDatasetPath)) {

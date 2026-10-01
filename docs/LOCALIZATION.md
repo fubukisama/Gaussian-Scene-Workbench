@@ -39,6 +39,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 基础颜色 | Base color | 基本色 |
 | 压缩质量 / 工作副本 | Compression Quality / Working Copy | 圧縮品質 / 作業用コピー |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
+| 最终模型 / 只读预览 | Final Model / Read-only Preview | 最終モデル / 読み取り専用プレビュー |
 | 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
 | 密度控制 | Density Control | 密度制御 |
 | 过度裁剪保护 | Over-pruning Protection | 過剰な枝刈りの抑制 |

@@ -284,6 +284,36 @@
     "en_US": "Processing complete · Final result",
     "ja_JP": "処理完了 · 最終結果"
   },
+  "处理完成 · 显示只读预览": {
+    "zh_CN": "处理完成 · 显示只读预览",
+    "en_US": "Processing complete · Read-only preview",
+    "ja_JP": "処理完了 · 読み取り専用プレビュー"
+  },
+  "正在载入最终模型 · 可继续观察": {
+    "zh_CN": "正在载入最终模型 · 可继续观察",
+    "en_US": "Loading final model · Navigation remains available",
+    "ja_JP": "最終モデルを読み込み中 · 視点操作は可能です"
+  },
+  "最终模型载入失败 · 保留只读预览": {
+    "zh_CN": "最终模型载入失败 · 保留只读预览",
+    "en_US": "Final model loading failed · Read-only preview retained",
+    "ja_JP": "最終モデルの読み込みに失敗 · 読み取り専用プレビューを保持"
+  },
+  "最终模型已就绪 · 编辑工具已锁定": {
+    "zh_CN": "最终模型已就绪 · 编辑工具已锁定",
+    "en_US": "Final model ready · Editing tools locked",
+    "ja_JP": "最終モデルの準備完了 · 編集ツールはロック中"
+  },
+  "最终模型已就绪 · 工具已恢复": {
+    "zh_CN": "最终模型已就绪 · 工具已恢复",
+    "en_US": "Final model ready · Tools restored",
+    "ja_JP": "最終モデルの準備完了 · ツールを復帰"
+  },
+  "只读预览 · 可自由观察，不修改源数据": {
+    "zh_CN": "只读预览 · 可自由观察，不修改源数据",
+    "en_US": "Read-only preview · Navigate freely; source data unchanged",
+    "ja_JP": "読み取り専用プレビュー · 視点操作は自由、元データは変更しません"
+  },
   "处理已中断 · 保留最近可用画面": {
     "zh_CN": "处理已中断 · 保留最近可用画面",
     "en_US": "Processing interrupted · Last available view retained",

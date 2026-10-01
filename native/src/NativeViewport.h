@@ -84,6 +84,7 @@ public:
   void finishProcessingPreview(bool succeeded, bool cancelled, bool paused = false);
   void setPreviewScene(const QString &path, qint64 count);
   [[nodiscard]] QString processingPreviewLabel() const;
+  [[nodiscard]] QString processingPreviewDetail() const;
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
   bool activateSceneObject(const QString &id);
   bool setSceneSelection(const QStringList &ids, const QString &activeId = {});

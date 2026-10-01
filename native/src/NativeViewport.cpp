@@ -403,6 +403,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
   if (collectionChanged) resetModelTransformHistory();
   const auto oldActive = mScene;
   const auto previewToAdopt = mProcessingPreviewPresent ? mScene : nullptr;
+  const bool wasProcessingPreview = mProcessingPreviewPresent;
   const QVector3D oldTarget = mTarget;
   const float oldDistance = mDistance;
   QList<std::shared_ptr<SceneState>> retained;
@@ -426,6 +427,13 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       if (isActive) active = state;
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
       QScopedValueRollback<bool> background(mRenderingInactiveScene, !isActive);
+      if (adoptPreview) {
+        // A validated final source supersedes observations already being read
+        // or queued. Keep the last valid geometry/camera until it is ready.
+        state->queuedPreviewPath.clear();
+        state->queuedPreviewCount = 0;
+        if (state->mRequestedScenePath != object.path) state->previewLoadBusy = false;
+      }
       if (state->mRequestedScenePath != object.path) {
         changedSource |= isActive;
         if (adoptPreview) setPreviewScene(object.path, object.vertexCount);
@@ -447,13 +455,16 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     }
     mSceneStates = retained;
     mScene = active ? active : !retained.isEmpty() ? retained.first() : std::make_shared<SceneState>();
+    // Association can activate an already loaded object without adopting the
+    // observation state (for example, when other original objects coexist).
+    if (!retained.isEmpty()) mProcessingPreviewPresent = false;
     if (oldActive != mScene && !changedSource && !retained.isEmpty()) {
       const QMatrix4x4 mapping = sceneDisplayTransform(*oldActive, *mScene);
       mTarget = mapping.map(oldTarget);
       mDistance = oldDistance * mapping.mapVector(QVector3D(1, 0, 0)).length();
     }
   }
-  if (oldActive != mScene || changedSource) {
+  if (oldActive != mScene || changedSource || wasProcessingPreview != mProcessingPreviewPresent) {
     mSelectionGestureActive = false;
     mSelectionPath.clear();
     mPressedButtons = Qt::NoButton;
@@ -579,6 +590,10 @@ void NativeViewport::finishProcessingPreview(bool succeeded, bool cancelled, boo
   mProcessingStage = succeeded ? QStringLiteral("done") :
       paused ? QStringLiteral("paused") :
       cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed");
+  // Terminal observations remain read-only until setSceneObjects associates
+  // a validated full source, but camera navigation must become available now.
+  notifyEditState();
+  notifyModelInteractionState();
   update();
 }
 
@@ -586,7 +601,9 @@ QString NativeViewport::processingPreviewLabel() const {
   if (mProcessingStage.isEmpty()) return {};
   QString phase;
   if (mProcessingStage == QStringLiteral("done"))
-    phase = QCoreApplication::translate("Workbench", "处理完成 · 显示最终结果");
+    phase = QCoreApplication::translate("Workbench", mProcessingPreviewPresent
+        ? AppLanguage::source("处理完成 · 显示只读预览")
+        : AppLanguage::source("处理完成 · 显示最终结果"));
   else if (mProcessingStage == QStringLiteral("paused"))
     phase = QCoreApplication::translate("Workbench", "训练已暂停 · 检查点已保存，可继续训练");
   else if (mProcessingStage == QStringLiteral("cancelled") || mProcessingStage == QStringLiteral("failed"))
@@ -622,6 +639,23 @@ QString NativeViewport::processingPreviewLabel() const {
   return phase;
 }
 
+QString NativeViewport::processingPreviewDetail() const {
+  if (mProcessingStage.isEmpty()) return {};
+  if (mProcessingActive)
+    return QCoreApplication::translate("Workbench", !mProcessingHasFrame
+        ? AppLanguage::source("等待首个三维结果 · 保留当前画面")
+        : AppLanguage::source("点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察"));
+  if (mScene->previewLoadBusy && !mProcessingPreviewPresent)
+    return QCoreApplication::translate("Workbench", "正在载入最终模型 · 可继续观察");
+  if (mScene->previewLoadFailed && !mProcessingPreviewPresent)
+    return QCoreApplication::translate("Workbench", "最终模型载入失败 · 保留只读预览");
+  if (selectableModelAvailable())
+    return QCoreApplication::translate("Workbench", mEditToolsLocked
+        ? AppLanguage::source("最终模型已就绪 · 编辑工具已锁定")
+        : AppLanguage::source("最终模型已就绪 · 工具已恢复"));
+  return QCoreApplication::translate("Workbench", "只读预览 · 可自由观察，不修改源数据");
+}
+
 void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
   if (path.isEmpty() || path == mScene->mRequestedScenePath) return;
   if (mScene->previewLoadBusy) {
@@ -640,6 +674,8 @@ void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
   mScene->requestedPreviewCount = count;
   mScene->previewLoadBusy = true;
   mScene->previewLoadFailed = false;
+  notifyEditState();
+  notifyModelInteractionState();
   startSceneLoad(path, true);
 }
 
@@ -1333,12 +1369,15 @@ void NativeViewport::discardSceneEdits() {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mProcessingActive && !mProcessingPreviewPresent && mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
+  return !mProcessingActive && !mProcessingPreviewPresent &&
+         !mScene->previewLoadBusy && !mScene->previewLoadFailed &&
+         mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
          mScene->mEditModel.pointCount() > 0;
 }
 
 bool NativeViewport::selectableModelAvailable() const {
-  return !mProcessingActive && !mProcessingPreviewPresent && visibleModelAvailable();
+  return !mProcessingActive && !mProcessingPreviewPresent &&
+      !mScene->previewLoadBusy && !mScene->previewLoadFailed && visibleModelAvailable();
 }
 
 bool NativeViewport::visibleModelAvailable() const {
@@ -2357,7 +2396,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               const auto count = mScene->queuedPreviewCount;
               mScene->queuedPreviewPath.clear();
               if (!queued.isEmpty()) QTimer::singleShot(0, this, [this, weakScene, queued, count, generation]() {
-                if (weakScene.lock() == mScene && mScene->mSceneGeneration == generation)
+                if (mProcessingPreviewPresent && weakScene.lock() == mScene && mScene->mSceneGeneration == generation)
                   setPreviewScene(queued, count);
               });
             }
@@ -2365,13 +2404,16 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               mScene->previewLoadFailed = continuous;
               mScene->mSceneLoadMessage = data.error;
               emit sceneLoadFailed(scenePath, data.error);
+              notifyEditState();
+              notifyModelInteractionState();
               update();
               return;
             }
             const auto oldCoordinates = mScene->mSceneCoordinates;
             const auto oldTarget = mTarget;
             const auto oldDistance = mDistance;
-            const bool keepCamera = continuous && mProcessingHasFrame;
+            const bool keepCamera = continuous && (mProcessingHasFrame ||
+                (mScene->mSceneCoordinates.valid && visibleModelAvailable()));
             mScene->mScenePath = scenePath;
             if (continuous) {
               mScene->sourceTranslation = {};
@@ -6522,11 +6564,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 
   if (!mProcessingStage.isEmpty()) {
     const QString phase = processingPreviewLabel();
-    const QString detail = !mProcessingHasFrame
-        ? QCoreApplication::translate("Workbench", "等待首个三维结果 · 保留当前画面")
-        : mProcessingActive
-            ? QCoreApplication::translate("Workbench", "点云 → 初始化高斯 → 训练优化 → 最终结果 · 可自由观察")
-            : QCoreApplication::translate("Workbench", "预览不修改源数据");
+    const QString detail = processingPreviewDetail();
     const int panelWidth = std::min(width() - viewportMargin * 2,
         std::max(metrics.horizontalAdvance(phase), metrics.horizontalAdvance(detail)) + headerPaddingX * 2);
     const QRect panel(viewportMargin, headerRect.bottom() + 6, panelWidth, headerHeight + 3);

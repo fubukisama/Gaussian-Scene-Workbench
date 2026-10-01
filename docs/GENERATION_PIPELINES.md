@@ -66,6 +66,16 @@ Real RTX 4070 Laptop GPU tests passed: exact serialized model/Adam/RNG restorati
 
 ## Developer checks
 
+### Final-model handoff / 最终模型交接 / 最終モデルへの切り替え (2026-10-01)
+
+中文：任务结束先解除处理状态，再关联通过校验的完整模型；旧 COLMAP 快照只能在无模型的工程中作为观察回退，不能覆盖训练结果。两种高斯训练的完成/暂停检查点恢复查看及点级修剪资格；四种网格方法（含 OpenMVS 贴图后的成果）恢复查看与物体变换。完整文件读取期间保留上一画面/视角，只允许观察；同路径交接也发布工具就绪通知，迟到的快照不能覆盖最终文件。用户主动设置的编辑工具锁不自动解除。失败/取消的观察快照、受限稀疏快照仍为只读；网格没有点级修剪，未新增拓扑编辑。这次修复不改变训练算法或优化器恢复语义。
+
+English: End processing before associating the validated full source. Cached COLMAP snapshots are an observation fallback only for projects without model objects; they never override final training results. Completed/paused 3DGS and 2DGS checkpoints restore inspect/point-trim eligibility. All four mesh methods, including OpenMVS-textured results, restore inspection and object transforms. During final-file reads, keep the previous view/camera read-only; republish readiness for same-path adoption and reject late observations. Preserve the user's explicit edit lock. Failed/cancelled observations and bounded sparse snapshots remain read-only; mesh point trimming/topology editing is not added. Training algorithms and optimizer-resume semantics are unchanged.
+
+日本語：処理状態を終了してから検証済みの完全なモデルを関連付けます。COLMAP スナップショットはモデルがないプロジェクトの表示用フォールバックに限り、学習結果を上書きしません。3DGS / 2DGS の完了・一時停止チェックポイントで表示と点のトリミングを復帰し、全四メッシュ方式と OpenMVS の写真テクスチャ成果で表示・オブジェクト変換を復帰します。最終ファイルの読み込み中は直前の表示と視点を保持して読み取り専用にし、同じパスへの切り替えでも準備完了を通知します。遅れたプレビューは最終モデルを置き換えません。ユーザーの編集ロックは維持します。失敗・キャンセル時の表示用スナップショットと制限付き疎点群は読み取り専用のままです。メッシュの点トリミング・トポロジー編集は未対応で、学習アルゴリズムや最適化器の再開仕様は変更しません。
+
+Regression: `native_processing_completion` runs real owned-worker lifecycles for both training backends and all four mesh outputs, including preceding reconstruction, explicit-lock states, actual select/delete/undo, source-file preservation and live language switching. `native_processing_preview` covers same-path adoption, final reads, superseded in-flight snapshots and invalid-final retention. Both pause/resume desktop tests assert final-model tool readiness. These fixtures test desktop handoff, not CUDA training quality or mesh topology editing.
+
 ### Native density-control correction / 原生密度控制修正 / 原生密度制御の修正 (2026-09-30)
 
 中文：原生 3DGS / 2DGS 共用 `training_density_control.py`。世界尺度裁剪以相机范围和初始化点云 5%–95% 稳健包围范围半对角线的较大值为基准（阈值仍为该尺度的 0.1）；不改变用于增密/位置学习率的相机尺度。保留上游克隆、分裂、Adam 参数同步和正常透明度/尺寸清理。透明度重置后 300 次迭代以内，裁剪阈值最多为 0.005；随后恢复后端原阈值。一次最终裁剪最多删除有效高斯的 20%，按透明度由低到高、同值按源顺序删除，其他候选暂缓并在训练面板提示；非有限坐标/尺度/透明度不受保留预算保护。这不是数量下限或几何质量保证，也不是关闭裁剪。
