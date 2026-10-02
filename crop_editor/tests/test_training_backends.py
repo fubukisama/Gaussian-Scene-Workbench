@@ -1397,6 +1397,20 @@ class TrainingBackendTests(unittest.TestCase):
                 server.DATASETS_DIR = original_datasets
                 server.TRAIN_JOBS = original_train_jobs
 
+    def test_resume_original_quality_keeps_profile_and_resolution_in_both_backends(self):
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend), mock.patch.object(server, "checkpoint_for_iteration", return_value=Path("chkpnt7000.pth")), mock.patch.object(server, "experiment_payload", return_value={
+                "backend": backend,
+                "source_path": "original-dataset",
+                "training": {"quality": "original_quality", "options": {"iterations": 30000, "resolution": 1}},
+            }), mock.patch.object(server, "start_training", return_value={"id": "resume"}) as start:
+                server.resume_experiment_training("original", 7000, target_iterations=40000)
+                self.assertEqual(start.call_args.args[2], "original_quality")
+                self.assertEqual(start.call_args.kwargs["backend"], backend)
+                self.assertEqual(start.call_args.kwargs["train_options"]["resolution"], 1)
+                self.assertEqual(start.call_args.kwargs["train_options"]["iterations"], 40000)
+                self.assertFalse(start.call_args.kwargs["run_convert"])
+
     def test_training_job_persistence_round_trips_without_process_handle(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_jobs_dir = server.TRAIN_JOBS_DIR

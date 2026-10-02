@@ -649,6 +649,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\GENERATION_PIPELINES.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\MESH_GENERATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\RECONSTRUCTION_QUALITY.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\ORIGINAL_RESOLUTION_TRAINING.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
     -DestinationRoot $PackageRoot

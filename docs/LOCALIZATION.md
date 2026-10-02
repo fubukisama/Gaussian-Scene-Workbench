@@ -63,6 +63,8 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 相机位姿 | Camera Pose | カメラ姿勢 |
 | 重建 / 训练 | Reconstruction / Training | 再構築 / 学習 |
 | 迭代 / 损失 | Iteration / Loss | 反復 / 損失 |
+| 最高精度（原始分辨率） | Maximum Fidelity (Original Resolution) | 最高精細（元の解像度） |
+| 原始分辨率 / 降采样 | Original Resolution / Downsampling | 元の解像度 / ダウンサンプリング |
 | 高斯点 / 增密 | Gaussian Splat / Densification | ガウシアンスプラット / 高密度化 |
 | 显存常驻 / 深度顺序 | GPU-Resident / Depth Order | GPU メモリ常駐 / 深度順序 |
 | 移动 / 旋转 / 缩放 | Move / Rotate / Scale | 移動 / 回転 / スケール |

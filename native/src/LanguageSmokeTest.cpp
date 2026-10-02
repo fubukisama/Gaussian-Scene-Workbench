@@ -550,22 +550,28 @@ bool runLanguageSmokeTest(MainWindow &window) {
   auto *qualityCombo = training.findChild<QComboBox *>(QStringLiteral("trainingQualityCombo"));
   auto *resolutionCombo = training.findChild<QComboBox *>(QStringLiteral("trainingResolutionCombo"));
   auto *iterationsSpin = training.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
-  check(qualityCombo && resolutionCombo && iterationsSpin, "preset controls available");
+  auto *resolutionHint = training.findChild<QLabel *>(QStringLiteral("trainingResolutionHint"));
+  check(qualityCombo && qualityCombo->count() == 5 && resolutionCombo && iterationsSpin && resolutionHint,
+        "all five presets and original-resolution controls available");
   if (backendCombo && qualityCombo && resolutionCombo && iterationsSpin) {
     for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
       backendCombo->setCurrentIndex(backendCombo->findData(backend));
       for (const QString &quality : {QStringLiteral("full"), QStringLiteral("quality"),
-                                     QStringLiteral("max_quality"), QStringLiteral("quick")}) {
+                                     QStringLiteral("max_quality"), QStringLiteral("original_quality"), QStringLiteral("quick")}) {
         qualityCombo->setCurrentIndex(qualityCombo->findData(quality));
         const int expectedIterations = quality == QStringLiteral("quick") ? 10000 : 30000;
         const int expectedResolution = quality == QStringLiteral("full") ? 8 :
-            quality == QStringLiteral("quality") ? 4 : 2;
+            quality == QStringLiteral("quality") ? 4 :
+            quality == QStringLiteral("original_quality") ? 1 : 2;
         check(training.configuration().iterations == expectedIterations &&
               training.configuration().resolution == expectedResolution,
               "UI/backend preset resolution and iteration parity");
+        if (resolutionHint) check(resolutionHint->isHidden() == (expectedResolution != 1),
+                                  "original-resolution resource warning follows actual resolution");
       }
     }
     backendCombo->setCurrentIndex(0);
+    qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("original_quality")));
     resolutionCombo->setCurrentIndex(resolutionCombo->findData(1));
   }
   DatasetImportDialog import({}, name, {}, QCoreApplication::applicationDirPath(), true, &window);
@@ -811,9 +817,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
     }
     check(import.request().sceneName == name && training.configuration().outputScene == editedConfiguration.outputScene,
           "user names are not translated");
-    check(training.configuration().iterations == 12345 && training.configuration().quality == configuration.quality &&
+    check(training.configuration().iterations == 12345 && training.configuration().quality == editedConfiguration.quality &&
           training.configuration().backend == configuration.backend &&
           training.configuration().resolution == editedConfiguration.resolution, "training parameters retained");
+    if (resolutionCombo) check(resolutionCombo->currentText() ==
+        QCoreApplication::translate("Workbench", "原始分辨率（1:1）"), "original-resolution caption switches live");
+    if (qualityCombo) check(qualityCombo->currentText() ==
+        QCoreApplication::translate("Workbench", "最高精度（原始分辨率）"), "highest-fidelity preset switches live");
     check(reconstruction.configuration().cameraModel == reconstructionConfig.cameraModel &&
           reconstruction.configuration().featureMaxNumFeatures == reconstructionConfig.featureMaxNumFeatures,
           "reconstruction parameters retained");
@@ -872,6 +882,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
       backendCombo->setCurrentIndex(1);
       backendCombo->setCurrentIndex(0);
     }
+    if (qualityCombo) qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("quick")));
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.configuration().iterations == 10000 && training.configuration().resolution == 2,
           "3DGS displayed preview values match backend defaults");
@@ -879,6 +890,17 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (backendCombo) backendCombo->setCurrentIndex(1);
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training.png"))), "training capabilities screenshot");
+    if (backendCombo && qualityCombo) {
+      qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("original_quality")));
+      for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+        backendCombo->setCurrentIndex(backendCombo->findData(backend));
+        training.adjustSize(); QApplication::processEvents();
+        check(training.configuration().iterations == 30000 && training.configuration().resolution == 1,
+              "original-resolution displayed values match backend defaults");
+        check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training-original-") + backend + QStringLiteral(".png"))),
+              "original-resolution training screenshot");
+      }
+    }
     training.hide();
     meshing.show(); meshing.adjustSize(); QApplication::processEvents();
     check(meshing.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-meshing.png"))), "mesh dialog screenshot");

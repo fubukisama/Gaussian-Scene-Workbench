@@ -1401,7 +1401,7 @@ def resume_experiment_training(scene, checkpoint_iteration, output_scene=None, t
         raise ValueError("Experiment has no source_path in cfg_args; cannot resume training")
     previous_options = (payload.get("training") or {}).get("options") or {}
     previous_quality = (payload.get("training") or {}).get("quality") or "full"
-    if previous_quality not in {"quick", "full", "quality", "max_quality"}:
+    if previous_quality not in {"quick", "full", "quality", "max_quality", "original_quality"}:
         previous_quality = "full"
     options = dict(previous_options)
     if isinstance(train_options, dict):
@@ -5480,6 +5480,10 @@ def colmap_convert_commands(dataset, options, undistort_output=None, work_root=N
         undistort_output,
         "--output_type",
         "COLMAP",
+        # Calibration/undistortion is still required, but its training images
+        # must not acquire an implicit size cap from a COLMAP version default.
+        "--max_image_size",
+        "-1",
     ]
     return [feature, matcher, mapper, undistorter]
 
@@ -5795,6 +5799,12 @@ def run_colmap_convert(job, dataset, options):
 def train_args_for_quality(quality, backend="3dgs"):
     backend = safe_training_backend(backend)
     quality = quality or "quick"
+    if quality == "original_quality":
+        # Retain backend-specific highest-quality optimization. Explicit r=1
+        # also bypasses the upstream loaders' automatic 1600-pixel fallback.
+        options = train_args_for_quality("max_quality", backend)
+        options["resolution"] = 1
+        return options
     if backend == "2dgs":
         if quality == "quick":
             return {
@@ -6161,7 +6171,7 @@ def run_training_job(job, run_convert, quality, overwrite):
             if options["resolution"] <= 2:
                 add_job_log(
                     job,
-                    "WARNING: 2DGS r2/max-quality is VRAM-heavy. On 4GB GPUs, "
+                    "WARNING: 2DGS full/half-resolution training is VRAM-heavy. On 4GB GPUs, "
                     "the guard caps densification and saves 7000/15000/final checkpoints "
                     "so long jobs remain recoverable.",
                 )

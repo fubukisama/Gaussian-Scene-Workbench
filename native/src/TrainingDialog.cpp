@@ -83,6 +83,8 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("高质量"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "最高质量"), QStringLiteral("max_quality"));
   AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("最高质量"));
+  mQuality->addItem(QCoreApplication::translate("Workbench", "最高精度（原始分辨率）"), QStringLiteral("original_quality"));
+  AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("最高精度（原始分辨率）"));
   form->addRow(QCoreApplication::translate("Workbench", "质量预设"), mQuality);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mQuality)), AppLanguage::source("质量预设"));
 
@@ -98,8 +100,19 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   for (const int resolution : {1, 2, 4, 8}) {
     mResolution->addItem(QStringLiteral("1/%1").arg(resolution), resolution);
   }
+  AppLanguage::bindComboItem(mResolution, mResolution->findData(1), AppLanguage::source("原始分辨率（1:1）"));
+  AppLanguage::bind(mResolution, "toolTip", AppLanguage::source("比例分别作用于图像宽度和高度；原始分辨率不额外降采样。"));
   form->addRow(QCoreApplication::translate("Workbench", "训练分辨率"), mResolution);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mResolution)), AppLanguage::source("训练分辨率"));
+  auto *resolutionHint = AppLanguage::text(new QLabel(this), AppLanguage::source("原始分辨率按 1:1 训练，不自动降采样；显存占用和耗时会明显增加。去畸变仍会进行；已缩小的数据需从原图重新重建。"));
+  resolutionHint->setObjectName(QStringLiteral("trainingResolutionHint"));
+  resolutionHint->setWordWrap(true);
+  form->addRow(resolutionHint);
+  const auto updateResolutionHint = [this, resolutionHint]() {
+    resolutionHint->setVisible(mResolution->currentData().toInt() == 1);
+  };
+  connect(mResolution, &QComboBox::currentIndexChanged, this, updateResolutionHint);
+  updateResolutionHint();
 
   mOutputScene = new QLineEdit(projectName + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss")), this);
   mOutputScene->setObjectName(QStringLiteral("trainingOutputNameEdit"));
@@ -219,6 +232,8 @@ void TrainingDialog::applyPreset() {
     resolution = 4;
   } else if (quality == QStringLiteral("max_quality")) {
     resolution = 2;
+  } else if (quality == QStringLiteral("original_quality")) {
+    resolution = 1;
   }
   mIterations->setValue(iterations);
   const int resolutionIndex = mResolution->findData(resolution);

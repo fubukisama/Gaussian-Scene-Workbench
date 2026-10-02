@@ -173,6 +173,47 @@ class ReconstructionQualityTests(unittest.TestCase):
                 self.assertEqual(shortened["resolution"], 1)
                 self.assertLessEqual(shortened["densify_until_iter"], 2000)
 
+    def test_original_resolution_preset_uses_full_size_in_both_backends(self):
+        from crop_editor import server
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend):
+                original = server.training_options_from_payload(backend, "original_quality", {})
+                highest = server.train_args_for_quality("max_quality", backend)
+                self.assertEqual(original["iterations"], 30000)
+                self.assertEqual(original["resolution"], 1)
+                self.assertEqual(highest["resolution"], 2)
+                self.assertEqual(dict(original, resolution=2), highest)
+                command = server.training_command(backend, Path("dataset"), Path("original"), original)
+                self.assertEqual(command[command.index("-r") + 1], "1")
+                self.assertEqual(command[command.index("--iterations") + 1], "30000")
+                if backend == "3dgs":
+                    self.assertNotIn("--depth_ratio", command)
+                else:
+                    self.assertNotIn("--antialiasing", command)
+
+    def test_original_resolution_preset_preserves_explicit_manual_options(self):
+        from crop_editor import server
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend):
+                manual = server.training_options_from_payload(backend, "original_quality", {"iterations": 2000, "resolution": 4})
+                self.assertEqual(manual["iterations"], 2000)
+                self.assertEqual(manual["resolution"], 4)
+                self.assertLessEqual(manual["densify_until_iter"], 2000)
+
+    def test_colmap_training_images_have_no_resolution_cap(self):
+        from crop_editor import server
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp)
+            (dataset / "input").mkdir()
+            (dataset / "input" / "frame.jpg").write_bytes(b"original image")
+            with mock.patch.object(server, "colmap_executable", return_value=Path("colmap.exe")):
+                for preset in ("default", "robust", "sequential"):
+                    with self.subTest(preset=preset):
+                        commands = server.colmap_convert_commands(dataset, server.colmap_options_from_payload({"preset": preset}))
+                        undistorter = commands[-1]
+                        self.assertEqual(undistorter[undistorter.index("--max_image_size") + 1], "-1")
+                        self.assertEqual(Path(undistorter[undistorter.index("--image_path") + 1]), dataset / "input")
+
     def test_legacy_archived_video_uses_matching_import_rate_and_keeps_frames(self):
         from crop_editor import server
         with tempfile.TemporaryDirectory() as tmp:

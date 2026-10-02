@@ -2,6 +2,8 @@
 
 [简体中文](#简体中文) · [English](#english) · [日本語](#日本語)
 
+Original-resolution training (2026-10-02): the shared native 3DGS / 2DGS dialog now adds a fifth **Maximum Fidelity (Original Resolution)** preset, **30,000 iterations / 1:1**. UI values and backend `-r 1` agree, COLMAP's training-image output is explicitly uncapped, and old/manual/resume parameters are preserved. Mesh/depth/texture pipelines keep their separate backend-native resolution controls; this preset does not silently rewrite them. Resource/rectification limits, three-language usage and the full capability matrix are in [ORIGINAL_RESOLUTION_TRAINING.md](ORIGINAL_RESOLUTION_TRAINING.md).
+
 ## 简体中文
 
 自 2026-09-23 起，3DGS、2DGS 和其他已支持生成链路共同规划、同步验收。不能把显示导出文件、重新开始训练或重跑阶段称为完整状态续训。运行环境可用性与软件已实现能力分开检查。
