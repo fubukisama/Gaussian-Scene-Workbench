@@ -50,6 +50,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 已暂停 | Paused | 一時停止中 |
 | 训练检查点 / 优化器状态 | Training Checkpoint / Optimizer State | 学習チェックポイント / 最適化器の状態 |
 | 曲面光栅化 / 薄片近似 | Surfel Rasterization / Thin-Disk Approximation | サーフェル描画 / 薄い円盤による近似 |
+| 透视校正 / 混合 | Perspective Correction / Compositing | 透視補正 / 合成 |
 | 定时快照回退 | Periodic Snapshot Fallback | 定期スナップショットにフォールバック |
 | 网格 / 三角网格 | Mesh / Triangle Mesh | メッシュ / 三角形メッシュ |
 | 顶点 / 面 / 法线 | Vertex / Face / Normal | 頂点 / 面 / 法線 |

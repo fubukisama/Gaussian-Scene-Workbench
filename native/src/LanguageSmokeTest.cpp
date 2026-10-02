@@ -534,14 +534,39 @@ bool runLanguageSmokeTest(MainWindow &window) {
   if (meshMethod) meshMethod->setCurrentIndex(3);
   check(configuration.backend == QStringLiteral("3dgs"), "training backend must not be translated");
   check(configuration.quality == QStringLiteral("quick"), "preset identifier must not be translated");
+  check(configuration.iterations == 10000 && configuration.resolution == 2,
+        "3DGS quick preset uses the shared preview fidelity target");
   auto *backendCombo = training.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo"));
   auto *pipelineHint = training.findChild<QLabel *>(QStringLiteral("trainingPipelineHint"));
   check(backendCombo && backendCombo->count() == 2 && pipelineHint, "both training backends expose capabilities");
   if (backendCombo && pipelineHint) {
     backendCombo->setCurrentIndex(1);
     check(training.configuration().backend == QStringLiteral("2dgs"), "2DGS backend identifier remains stable");
-    check(pipelineHint->text() == QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。"), "2DGS capabilities translated");
+    check(training.configuration().iterations == 10000 && training.configuration().resolution == 2,
+          "2DGS quick preset retains parity");
+    check(pipelineHint->text() == QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用透视校正曲面显示，混合结果与 CUDA 渲染可能不同。"), "2DGS capabilities translated");
     backendCombo->setCurrentIndex(0);
+  }
+  auto *qualityCombo = training.findChild<QComboBox *>(QStringLiteral("trainingQualityCombo"));
+  auto *resolutionCombo = training.findChild<QComboBox *>(QStringLiteral("trainingResolutionCombo"));
+  auto *iterationsSpin = training.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
+  check(qualityCombo && resolutionCombo && iterationsSpin, "preset controls available");
+  if (backendCombo && qualityCombo && resolutionCombo && iterationsSpin) {
+    for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+      backendCombo->setCurrentIndex(backendCombo->findData(backend));
+      for (const QString &quality : {QStringLiteral("full"), QStringLiteral("quality"),
+                                     QStringLiteral("max_quality"), QStringLiteral("quick")}) {
+        qualityCombo->setCurrentIndex(qualityCombo->findData(quality));
+        const int expectedIterations = quality == QStringLiteral("quick") ? 10000 : 30000;
+        const int expectedResolution = quality == QStringLiteral("full") ? 8 :
+            quality == QStringLiteral("quality") ? 4 : 2;
+        check(training.configuration().iterations == expectedIterations &&
+              training.configuration().resolution == expectedResolution,
+              "UI/backend preset resolution and iteration parity");
+      }
+    }
+    backendCombo->setCurrentIndex(0);
+    resolutionCombo->setCurrentIndex(resolutionCombo->findData(1));
   }
   DatasetImportDialog import({}, name, {}, QCoreApplication::applicationDirPath(), true, &window);
   check(import.request().sceneName == name, "user scene name must remain unchanged");
@@ -569,7 +594,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto reconstructionConfig = reconstruction.configuration();
   // A custom iteration count catches accidental preset resets caused by
   // currentTextChanged signals when combo captions are translated.
-  training.findChild<QSpinBox *>()->setValue(12345);
+  if (iterationsSpin) iterationsSpin->setValue(12345);
   training.findChild<QLineEdit *>(QStringLiteral("trainingOutputNameEdit"))->setText(name);
   const auto editedConfiguration = training.configuration();
   auto *viewport = qobject_cast<NativeViewport *>(window.centralWidget());
@@ -787,7 +812,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(import.request().sceneName == name && training.configuration().outputScene == editedConfiguration.outputScene,
           "user names are not translated");
     check(training.configuration().iterations == 12345 && training.configuration().quality == configuration.quality &&
-          training.configuration().backend == configuration.backend, "training parameters retained");
+          training.configuration().backend == configuration.backend &&
+          training.configuration().resolution == editedConfiguration.resolution, "training parameters retained");
     check(reconstruction.configuration().cameraModel == reconstructionConfig.cameraModel &&
           reconstruction.configuration().featureMaxNumFeatures == reconstructionConfig.featureMaxNumFeatures,
           "reconstruction parameters retained");
@@ -842,6 +868,14 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QDir().mkpath(screenshotDirectory);
     check(window.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral(".png"))), "UI screenshot");
     check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-viewport.png"))), "trackball screenshot");
+    if (backendCombo) {
+      backendCombo->setCurrentIndex(1);
+      backendCombo->setCurrentIndex(0);
+    }
+    training.show(); training.adjustSize(); QApplication::processEvents();
+    check(training.configuration().iterations == 10000 && training.configuration().resolution == 2,
+          "3DGS displayed preview values match backend defaults");
+    check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training-3dgs.png"))), "3DGS training values screenshot");
     if (backendCombo) backendCombo->setCurrentIndex(1);
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training.png"))), "training capabilities screenshot");

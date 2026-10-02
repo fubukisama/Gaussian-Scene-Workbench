@@ -1,4 +1,4 @@
-# Reconstruction admission and 2DGS regression
+# Reconstruction admission and Gaussian quality regression
 
 ## Shared workflow
 
@@ -12,7 +12,7 @@ Original input frames are retained in `input` before a registered/undistorted su
 
 | Pipeline | COLMAP-based source gate | Remaining acceptance boundary |
 | --- | --- | --- |
-| 3DGS | Shared reconstruction recovery and admission before training | Representative held-out and geometric quality, not just training PSNR |
+| 3DGS | Shared reconstruction recovery and admission; quick defaults 10,000 iterations / resolution 2, followed by refinement after densification | Representative held-out and geometric quality, not just training PSNR; preserve volumetric covariance, not the 2DGS surfel shader |
 | 2DGS | Same gate; quick defaults 10,000 iterations / resolution 2; perspective-correct surfel snapshots and final viewport | Native center-sorted OpenGL compositing is not pixel-identical to the upstream CUDA tile renderer; held-out coverage remains untested |
 | Bounded / unbounded TSDF | Re-check the available source dataset before mesh work | Source surface/depth quality; no voxel-state resume |
 | SuGaR / GS2Mesh | Re-check the available source dataset before refinement/fusion | Independent real refinement/depth-fusion runtime acceptance |
@@ -23,6 +23,10 @@ External, relocated or synthetic inputs without an available COLMAP dataset cann
 ## 2DGS preset and native camera view
 
 2DGS quick defaults are now 10,000 iterations and half-resolution (`-r 2`). Same-size CUDA/native comparisons show that quarter-resolution training still leaves fine needle artifacts at desktop resolution, so acceptance must not rely on thumbnail appearance. The upstream normal-consistency phase starts after iteration 7,000; the previous 7,000-iteration quick run never entered it. Explicit manual iteration/resolution settings remain unchanged. More Gaussians are not a quality target in themselves.
+
+3DGS Quick Preview now shares the 10,000-iteration / half-resolution fidelity target. Its growth phase still ends at iteration 7,000, leaving 3,000 iterations of photometric refinement; its density threshold, volumetric covariance, optimizer and antialiasing settings are unchanged. 2DGS keeps its own surfel regularization and 5,000-iteration growth endpoint. This is not a transfer of the 2DGS normal-consistency loss or renderer into 3DGS. The native training dialog and its configuration defaults match the backend, and its explanation is updated together in Simplified Chinese, English and Japanese. Live language switching preserves edited iteration and resolution values.
+
+The other preset profiles remain unchanged in both backends. The legacy Standard profile uses resolution 8 to limit resource use; it must not be interpreted as a guarantee of better fine-detail reconstruction than the new half-resolution quick run. Increasing training resolution raises runtime and memory demands. New defaults do not rewrite saved jobs, historical result metadata, manual options or full optimizer-state resume: a saved 7,000-iteration / resolution-8 job still runs and displays those explicit values. Retraining at higher resolution is a new generation job, not restoration of the old optimizer state.
 
 Protected training results retain `cameras.json`, `training_backend.json` and `reconstruction_quality.json` beside their PLY. Source-camera view respects the camera's image-up/roll, calibrated vertical field of view and focal-axis ratio, and applies the same display/model coordinate transform as the model. Returning from source-camera view restores the prior orbit/projection settings. Orbiting away remains possible. A different viewport aspect ratio changes framing; this is not a pixel-identical photo viewer.
 
@@ -46,4 +50,19 @@ The installed native renderer was exercised with all 111,689 Gaussians at 1674 x
 
 Development checks use Python with NumPy, plyfile, Pillow and trimesh; on Python 3.13+ the legacy server also needs `legacy-cgi`. See `scripts/requirements-native-checks.txt`. These check dependencies do not replace the pinned CUDA training runtimes.
 
-Primary references: [COLMAP camera-model guidance](https://colmap.github.io/faq.html#camera-models), [COLMAP reconstruction format](https://colmap.github.io/format.html), and the [official 2DGS implementation](https://github.com/hbb1/2d-gaussian-splatting). Official 2DGS remains under its upstream research-use license, included in the package; no upstream renderer code is relicensed as MIT.
+## 3DGS quick-preset replay (2026-10-02)
+
+The temporary project associated with the latest 97.4K-Gaussian screenshot was no longer present during the resumed task. It was not substituted with another user's project. A controlled replay instead used the preserved C0001 source video and the same independent, admitted nine-view reconstruction used for the final 2DGS regression: 9/9 registered views, 2,509 valid sparse points and mean reprojection error 0.424 px. Both 3DGS runs used identical source images/calibration, unchanged density settings and the volumetric CUDA renderer. The replay is a comparison of preset behavior, not a claim to have recovered the exact lost 97.4K model.
+
+| Controlled 3DGS run | Iterations / training scale | Gaussians | Mean training-view PSNR at the **same** 964 x 542 evaluation size |
+| --- | --- | --- | --- |
+| Previous quick preset | 7,000 / resolution 8 | 100,188 | 19.21 dB |
+| New packaged quick preset | 10,000 / resolution 2 | 176,541 | 36.09 dB |
+
+There were 9 training views and **zero held-out views**. The previous preset's thin streaks and blurred appearance reproduced in the official CUDA renderer at desktop size, so this symptom is not exclusively a native display problem. The new half-resolution run visibly recovers the exhibit in both official CUDA and the installed native viewport at 1674 x 1032, including an interpolated-camera qualitative check inside the captured trajectory. Background display/glass artifacts and unobserved-view limits remain; the short video does not establish complete 360-degree coverage. The two changed parameters are evaluated together, not an ablation attributing all improvement to one of them. Training took about 124 seconds on the validation RTX 4070 Laptop GPU; hardware and source size affect timing.
+
+The installed native renderer drew all 176,541 new Gaussians. Median frame times on the initial pass were 5.17 ms at rest and 5.72 ms while orbiting. That pass met the existing strict resident/indexed-versus-compatibility image comparison (maximum difference one 8-bit channel level), editing, delete/undo and GPU-residency cleanup; subsequent pixel-equivalence repeats are qualified below. Both actual CUDA training backends also passed complete optimizer/Adam/RNG-state pause/resume checks against uninterrupted continuation. Both runtime preflights, media preflight, three live languages and completion/edit access across the generation capability matrix passed. The native CTest suite passed 44/44; the packaged worker check suite ran 134 tests with 8 documented runtime-specific skips, and the broader backend suite ran 100 tests with 1 skip.
+
+Supplemental repeats found a resident/compatibility differential above the strict one-level tolerance on **both** the old-preset replay and a delivered copy of the upgraded model: maximum channel difference two, involving a very small number of the 1,259,648 compared pixels. The earlier upgraded-model pass does not establish repeatable strict equivalence. An added complete source-order comparison verifies the draw order rather than assuming it from visually similar frames. The differential-test threshold has not been relaxed; pixel-equivalence failure remains a failing return code while independent editing and cleanup checks still execute. The exact real-model floating-point precision boundary remains an open acceptance gate, distinct from the large visible streak/blur regression. Neither shader arithmetic nor depth-order caching was changed in this upgrade to hide that gate. Do not report every supplemental render check as passed.
+
+Primary references: [COLMAP camera-model guidance](https://colmap.github.io/faq.html#camera-models), [COLMAP reconstruction format](https://colmap.github.io/format.html), the [official 3DGS implementation and resolution options](https://github.com/graphdeco-inria/gaussian-splatting), and the [official 2DGS implementation](https://github.com/hbb1/2d-gaussian-splatting). Official 3DGS and 2DGS remain under their upstream research-use licenses, included in the package; no upstream renderer code is relicensed as MIT.

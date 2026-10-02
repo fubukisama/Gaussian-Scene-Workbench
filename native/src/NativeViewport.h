@@ -139,6 +139,9 @@ public:
   [[nodiscard]] quint64 gaussianAttributeUploads() const { return mScene->gaussianGpu.attributeUploads(); }
   [[nodiscard]] quint64 gaussianOrderUploads() const { return mScene->gaussianGpu.orderUploads(); }
   [[nodiscard]] quint64 gaussianShUploads() const { return mScene->gaussianGpu.shUploads(); }
+  [[nodiscard]] QVector<quint32> gaussianRenderedSourceIndices() const {
+    return mScene->gaussianGpu.renderedSourceIndices(mScene->indexedGaussians);
+  }
   [[nodiscard]] int maximumShDegree() const { return mMaximumShDegree; }
   [[nodiscard]] int sourceShDegree() const { return mScene->mSphericalHarmonics.degree; }
   [[nodiscard]] int effectiveShDegree() const;

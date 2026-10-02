@@ -5835,8 +5835,10 @@ def train_args_for_quality(quality, backend="3dgs"):
     else:
         if quality == "quick":
             return {
-                "iterations": 7000,
-                "resolution": 8,
+                # Match the shared preview fidelity target, not 2DGS's
+                # surfel regularization. Keep a refinement phase after growth.
+                "iterations": 10000,
+                "resolution": 2,
                 "antialiasing": False,
                 "optimizer_type": "default",
                 "exposure_compensation": False,

@@ -69,6 +69,17 @@ void GaussianGpuBuffer::sort(const QVector3D &forward) {
   mOrderPending = true;
 }
 
+QVector<quint32> GaussianGpuBuffer::renderedSourceIndices(bool indexed) const {
+  QVector<quint32> result;
+  result.reserve(mVertices.size());
+  if (indexed) {
+    for (const auto index : mOrder) result.append(mVertices.at(index).sourceIndex);
+  } else {
+    for (const auto &vertex : mVertices) result.append(vertex.sourceIndex);
+  }
+  return result;
+}
+
 void GaussianGpuBuffer::upload() {
   if (!mVertexArray) return;
   if (mClearPending) {

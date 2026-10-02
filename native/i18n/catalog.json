@@ -1,5 +1,5 @@
 {
-  "训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。": {"zh_CN":"训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。","en_US":"Camera coverage and sparse points are checked before training. Degenerate reconstructions receive bounded retries; automatic reconstruction may try a simpler camera model. Original images and existing outputs are retained. 2DGS Quick Preview defaults to 10,000 iterations at 1/2 resolution, including normal regularization; manual settings are preserved.","ja_JP":"学習前にカメラのカバレッジと疎な点群を確認します。退化した再構築は回数を制限して再試行し、自動再構築では単純なカメラモデルも試します。元画像と既存出力は保持します。2DGS のクイックプレビューは既定で 10,000 回、1/2 解像度とし、法線の正則化段階を含みます。手動設定は変更しません。"},
+  "训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。": {"zh_CN":"训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。","en_US":"Camera coverage and sparse points are checked before training. Degenerate reconstructions receive bounded retries; original images and existing outputs are retained. 3DGS / 2DGS Quick Preview defaults to 10,000 iterations at 1/2 resolution. 3DGS continues refinement after densification; 2DGS includes normal regularization. Manual settings are preserved.","ja_JP":"学習前にカメラのカバレッジと疎な点群を確認します。退化した再構築は回数を制限して再試行し、元画像と既存出力は保持します。3DGS / 2DGS のクイックプレビューは既定で 10,000 回、1/2 解像度です。3DGS は高密度化後も最適化を続け、2DGS は法線の正則化段階を含みます。手動設定は変更しません。"},
   "质量不佳时有限重试（允许简化相机模型）": {"zh_CN":"质量不佳时有限重试（允许简化相机模型）","en_US":"Retry poor reconstructions (allow a simpler camera model)","ja_JP":"品質不足時に限定再試行（カメラモデルの簡略化を許可）"},
   "按已注册相机、有效点和重投影误差筛选子模型。最多追加两次重建；关闭重试后仍会阻止退化结果发布。原始照片完整保留。": {"zh_CN":"按已注册相机、有效点和重投影误差筛选子模型。最多追加两次重建；关闭重试后仍会阻止退化结果发布。原始照片完整保留。","en_US":"Select components by registered cameras, valid points and reprojection error. Up to two additional reconstructions are attempted; disabling retries still blocks degenerate results from publication. All original images are retained.","ja_JP":"登録カメラ、有効点、再投影誤差で部分モデルを選択します。追加の再構築は最大 2 回です。再試行を無効にしても退化した結果の公開は阻止します。元画像はすべて保持します。"},
   "原始帧无法完整恢复。请重新导入原始照片或视频；已保留当前模型，不会使用缺失照片的子集继续训练。": {"zh_CN":"原始帧无法完整恢复。请重新导入原始照片或视频；已保留当前模型，不会使用缺失照片的子集继续训练。","en_US":"The original frames could not be fully recovered. Reimport the original photos or video. The current model is retained; training will not continue on a subset with missing images.","ja_JP":"元のフレームを完全には復元できません。元の写真または動画を再インポートしてください。現在のモデルは保持し、画像が欠けた部分集合で学習を続行しません。"},
@@ -60,10 +60,10 @@
     "en_US": "2DGS runtime is not configured. Set TWO_DGS_DIR and TWO_DGS_PYTHON; the surfel rasterizer is checked before training.",
     "ja_JP": "2DGS 環境が未設定です。TWO_DGS_DIR と TWO_DGS_PYTHON を設定してください。学習前にサーフェル用ラスタライザーを確認します。"
   },
-  "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。": {
-    "zh_CN": "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。",
-    "en_US": "2DGS supports pause, full-state resume and continuous snapshot previews. The viewport uses a thin-disk approximation, not exact surfel rasterization.",
-    "ja_JP": "2DGS は一時停止、完全な状態からの学習再開、連続スナップショットに対応。ビューポートは薄い円盤による近似表示で、厳密なサーフェル描画ではありません。"
+  "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用透视校正曲面显示，混合结果与 CUDA 渲染可能不同。": {
+    "zh_CN": "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用透视校正曲面显示，混合结果与 CUDA 渲染可能不同。",
+    "en_US": "2DGS supports pause, full-state resume and continuous snapshot previews. The viewport uses perspective-correct surfel rendering; compositing may differ from CUDA rendering.",
+    "ja_JP": "2DGS は一時停止、完全な状態からの学習再開、連続スナップショットに対応。ビューポートでは透視補正したサーフェルを描画し、合成結果は CUDA の描画と異なる場合があります。"
   },
   "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。": {
     "zh_CN": "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。",

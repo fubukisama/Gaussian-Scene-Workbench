@@ -171,6 +171,7 @@ bool runGaussianPerformanceSmokeTest(NativeViewport &viewport, const QString &pa
   const QPoint start(viewport.width() / 2 + 50, viewport.height() / 2);
   double idleMedian = 0.0;
   bool withinBudget = true;
+  bool imageEquivalent = true;
   const int orbitBudget = qEnvironmentVariableIntValue("GSW_GAUSSIAN_ORBIT_BUDGET_MS");
   const QString imageDirectory = qEnvironmentVariable("GSW_GAUSSIAN_BENCHMARK_DIR");
   if (!imageDirectory.isEmpty()) {
@@ -274,11 +275,16 @@ bool runGaussianPerformanceSmokeTest(NativeViewport &viewport, const QString &pa
   if (indexed) {
     const QRect region(80, 100, frame.width() - 160, frame.height() - 200);
     const auto resident = viewport.grabFramebuffer().copy(region).convertToFormat(QImage::Format_RGB32);
+    const auto residentOrder = viewport.gaussianRenderedSourceIndices();
     qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", "1");
     viewport.setRenderMode(NativeViewport::RenderMode::Points);
     viewport.setRenderMode(NativeViewport::RenderMode::Gaussians);
     const auto compatibility = viewport.grabFramebuffer().copy(region).convertToFormat(QImage::Format_RGB32);
     qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+    if (!check(residentOrder.size() == expectedCount &&
+        residentOrder == viewport.gaussianRenderedSourceIndices(),
+        "resident and compatibility must draw the same complete source order")) return false;
+    qInfo() << "Gaussian benchmark: complete resident/compatibility source order matches";
     int maximumDifference = 0, changedPixels = 0;
     for (int y = 0; y < resident.height(); ++y) {
       const auto *a = reinterpret_cast<const QRgb *>(resident.constScanLine(y));
@@ -296,7 +302,9 @@ bool runGaussianPerformanceSmokeTest(NativeViewport &viewport, const QString &pa
     }
     // Different driver vertex-fetch paths can round the final UNORM color by
     // one level. Geometry/depth/order are unchanged; anything larger fails.
-    if (!check(maximumDifference <= 1, "resident and compatibility frames differ beyond 8-bit rounding")) return false;
+    // Keep the strict failure, but still exercise editing and cleanup so a
+    // precision discrepancy cannot hide a separate residency regression.
+    imageEquivalent = check(maximumDifference <= 1, "resident and compatibility frames differ beyond 8-bit rounding");
     viewport.setRenderMode(NativeViewport::RenderMode::Points);
     frame = viewport.grabFramebuffer();
     if (!check(viewport.renderedPointCount() == expectedCount, "point mode retains all centers")) return false;
@@ -321,7 +329,7 @@ bool runGaussianPerformanceSmokeTest(NativeViewport &viewport, const QString &pa
   frame = viewport.grabFramebuffer();
   if (!check(!viewport.indexedGaussianRendering() && viewport.renderedPointCount() == 0,
              "closing a scene invalidates resident data")) return false;
-  qInfo() << "Gaussian benchmark: image equivalence, residency, editing and cleanup checks passed";
-  return !frame.isNull() && withinBudget;
+  qInfo() << "Gaussian benchmark: residency, editing and cleanup checks passed; image equivalence" << imageEquivalent;
+  return !frame.isNull() && withinBudget && imageEquivalent;
 }
 }

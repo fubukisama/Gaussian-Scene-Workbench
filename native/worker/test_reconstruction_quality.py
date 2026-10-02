@@ -136,6 +136,43 @@ class ReconstructionQualityTests(unittest.TestCase):
         self.assertEqual(manual["iterations"], 7000)
         self.assertEqual(manual["resolution"], 8)
 
+    def test_quick_presets_match_without_copying_backend_specific_regularization(self):
+        from crop_editor import server
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend):
+                preset = server.training_options_from_payload(backend, "quick", {})
+                self.assertEqual(preset["iterations"], 10000)
+                self.assertEqual(preset["resolution"], 2)
+                self.assertLess(preset["densify_until_iter"], preset["iterations"])
+                command = server.training_command(backend, Path("dataset"), Path("preview"), preset)
+                self.assertEqual(command[command.index("--iterations") + 1], "10000")
+                self.assertEqual(command[command.index("-r") + 1], "2")
+                self.assertIn("10000", command[command.index("--save_iterations") + 1:command.index("--checkpoint_iterations")])
+                if backend == "3dgs":
+                    self.assertEqual(preset["densify_until_iter"], 7000)
+                    self.assertFalse(preset["antialiasing"])
+                    self.assertEqual(preset["optimizer_type"], "default")
+                    self.assertNotIn("--depth_ratio", command)
+                else:
+                    self.assertEqual(preset["densify_until_iter"], 5000)
+                    self.assertEqual(preset["depth_ratio"], 0.0)
+                    self.assertNotIn("--antialiasing", command)
+
+    def test_manual_and_historical_quick_parameters_remain_explicit(self):
+        from crop_editor import server
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend):
+                requested = {"iterations": 7000, "resolution": 8, "densify_until_iter": 6000}
+                manual = server.training_options_from_payload(backend, "quick", requested)
+                for key, value in requested.items():
+                    self.assertEqual(manual[key], value)
+                # Also preserve custom high-resolution requests and clamp the
+                # backend-specific growth phase to a shortened manual run.
+                shortened = server.training_options_from_payload(backend, "quick", {"iterations": 2000, "resolution": 1})
+                self.assertEqual(shortened["iterations"], 2000)
+                self.assertEqual(shortened["resolution"], 1)
+                self.assertLessEqual(shortened["densify_until_iter"], 2000)
+
     def test_legacy_archived_video_uses_matching_import_rate_and_keeps_frames(self):
         from crop_editor import server
         with tempfile.TemporaryDirectory() as tmp:

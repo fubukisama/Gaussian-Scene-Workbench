@@ -25,6 +25,7 @@ public:
   quint64 shUploads() const { return mShUploads; }
   quint64 attributeUploads() const { return mAttributeUploads; }
   quint64 orderUploads() const { return mOrderUploads; }
+  QVector<quint32> renderedSourceIndices(bool indexed) const;
 
 private:
   GLuint mBuffers[3]{};

@@ -65,7 +65,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
     pipelineHint->setText(surfels && !twoDgsAvailable
         ? QCoreApplication::translate("Workbench", "2DGS 环境尚未配置。请设置 TWO_DGS_DIR 和 TWO_DGS_PYTHON；开始前会检查曲面光栅化扩展。")
         : surfels
-        ? QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用薄片近似显示，不是精确曲面光栅化。")
+        ? QCoreApplication::translate("Workbench", "2DGS 支持暂停、完整状态续训与连续快照预览；视口使用透视校正曲面显示，混合结果与 CUDA 渲染可能不同。")
         : QCoreApplication::translate("Workbench", "3DGS 支持暂停、完整状态续训与连续预览；共享 GPU 预览不可用时回退到快照。"));
   };
   connect(mBackend, &QComboBox::currentIndexChanged, this, updatePipelineHint);
@@ -74,6 +74,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(pipelineHint);
 
   mQuality = new QComboBox(this);
+  mQuality->setObjectName(QStringLiteral("trainingQualityCombo"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "快速预览"), QStringLiteral("quick"));
   AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("快速预览"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "标准"), QStringLiteral("full"));
@@ -86,12 +87,14 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mQuality)), AppLanguage::source("质量预设"));
 
   mIterations = new QSpinBox(this);
+  mIterations->setObjectName(QStringLiteral("trainingIterationsSpinBox"));
   mIterations->setRange(1000, 200000);
   mIterations->setSingleStep(1000);
   form->addRow(QCoreApplication::translate("Workbench", "迭代次数"), mIterations);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mIterations)), AppLanguage::source("迭代次数"));
 
   mResolution = new QComboBox(this);
+  mResolution->setObjectName(QStringLiteral("trainingResolutionCombo"));
   for (const int resolution : {1, 2, 4, 8}) {
     mResolution->addItem(QStringLiteral("1/%1").arg(resolution), resolution);
   }
@@ -129,8 +132,8 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   rootLayout->addLayout(form);
 
   auto *note = AppLanguage::text(new QLabel(
-      QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。"),
-      this), AppLanguage::source("训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。"));
+      QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"),
+      this), AppLanguage::source("训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
   rootLayout->addWidget(note);
@@ -207,20 +210,14 @@ void TrainingDialog::accept() {
 }
 
 void TrainingDialog::applyPreset() {
-  const QString backend = mBackend->currentData().toString();
   const QString quality = mQuality->currentData().toString();
-  int iterations = quality == QStringLiteral("quick") ? 7000 : 30000;
+  const int iterations = quality == QStringLiteral("quick") ? 10000 : 30000;
   int resolution = 8;
-  if (quality == QStringLiteral("quality")) {
+  if (quality == QStringLiteral("quick")) {
+    resolution = 2;
+  } else if (quality == QStringLiteral("quality")) {
     resolution = 4;
   } else if (quality == QStringLiteral("max_quality")) {
-    resolution = 2;
-  }
-  if (backend == QStringLiteral("2dgs") && quality == QStringLiteral("max_quality")) {
-    iterations = 30000;
-  }
-  if (backend == QStringLiteral("2dgs") && quality == QStringLiteral("quick")) {
-    iterations = 10000;
     resolution = 2;
   }
   mIterations->setValue(iterations);

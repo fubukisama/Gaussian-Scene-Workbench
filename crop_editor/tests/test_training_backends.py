@@ -1388,6 +1388,9 @@ class TrainingBackendTests(unittest.TestCase):
                 self.assertIn("--start_checkpoint", captured["command"])
                 self.assertEqual(captured["command"][captured["command"].index("--start_checkpoint") + 1], str(model / "chkpnt7000.pth"))
                 self.assertEqual(captured["command"][captured["command"].index("--iterations") + 1], "15000")
+                # New preview defaults must not silently alter an older run's
+                # image scale when restoring its optimizer checkpoint.
+                self.assertEqual(captured["command"][captured["command"].index("-r") + 1], "8")
                 self.assertEqual(captured["backend"], "3dgs")
             finally:
                 server.OUTPUT_DIR = original_output
