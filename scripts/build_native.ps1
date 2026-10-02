@@ -682,6 +682,13 @@ if ($Package) {
   if ($MissingBackendFiles) {
     throw "Native package is missing backend files: $($MissingBackendFiles -join ', ')"
   }
+  # Exercise the installed entrypoint in isolation: repository PYTHONPATH must
+  # not hide missing imports in the staged server or its sibling modules.
+  & $CheckPython -I -B (Join-Path $PackageRoot "native\worker\import_preflight.py") `
+    --backend-root $PackageRoot
+  if ($LASTEXITCODE -ne 0) {
+    throw "Packaged media-import preflight failed with exit code $LASTEXITCODE."
+  }
   Write-Host "Native package directory:"
   Write-Host $PackageRoot
 }

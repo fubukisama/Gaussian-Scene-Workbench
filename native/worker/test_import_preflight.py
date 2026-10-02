@@ -1,5 +1,7 @@
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -48,6 +50,57 @@ class ImportPreflightTests(unittest.TestCase):
         self.assertEqual(report["server"], str((self.root / "crop_editor" / "server.py").resolve()))
         self.assertEqual(report["python"], str(Path(sys.executable).resolve()))
 
+    def prepare_sibling_dependency_fixture(self):
+        (self.root / "crop_editor" / "reconstruction_quality.py").write_text(
+            "MARKER = 'selected-staged-backend'\n", encoding="utf-8"
+        )
+        server = self.root / "crop_editor" / "server.py"
+        server.write_text(
+            "try:\n"
+            "    from crop_editor import reconstruction_quality\n"
+            "except ModuleNotFoundError:\n"
+            "    import reconstruction_quality\n" + server.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        # These stand-ins isolate module resolution, not numerical/video functionality.
+        for dependency in ("numpy", "plyfile", "cv2"):
+            (self.root / (dependency + ".py")).write_text("# test-owned dependency\n", encoding="utf-8")
+        working_directory = self.root / "unrelated-working-directory"
+        working_directory.mkdir()
+        return working_directory
+
+    def test_staged_media_cli_loads_siblings_without_backend_on_pythonpath(self):
+        working_directory = self.prepare_sibling_dependency_fixture()
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", str(MODULE_PATH.resolve()),
+             "--backend-root", str(self.root), "--require-video"],
+            cwd=str(working_directory), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=20, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        report = json.loads(completed.stdout.strip())
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["videoBackend"], "opencv-current-python")
+        self.assertEqual(report["server"], str((self.root / "crop_editor" / "server.py").resolve()))
+
+    def test_training_loader_resolves_siblings_from_selected_staged_backend(self):
+        working_directory = self.prepare_sibling_dependency_fixture()
+        code = "\n".join((
+            "import importlib.util, sys",
+            "spec = importlib.util.spec_from_file_location('isolated_preflight', sys.argv[1])",
+            "preflight = importlib.util.module_from_spec(spec)",
+            "spec.loader.exec_module(preflight)",
+            "server = preflight.load_server_module(sys.argv[2])",
+            "assert server.reconstruction_quality.MARKER == 'selected-staged-backend'",
+        ))
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", code,
+             str(MODULE_PATH.with_name("training_preflight.py").resolve()), str(self.root)],
+            cwd=str(working_directory), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=20, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
     def test_video_import_accepts_current_python_opencv(self):
         with mock.patch.dict(
             sys.modules,
@@ -71,7 +124,7 @@ class ImportPreflightTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["videoBackend"], "ffmpeg")
-        self.assertEqual(run_mock.call_args.args[0], [str(ffmpeg), "-version"])
+        self.assertEqual(run_mock.call_args[0][0], [str(ffmpeg), "-version"])
 
     def test_video_import_rejects_broken_ffmpeg_file_without_other_backend(self):
         ffmpeg = self.root / "ffmpeg.exe"
@@ -131,7 +184,7 @@ class ImportPreflightTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["videoBackend"], "conda-video-extract")
-        command = run_mock.call_args.args[0]
+        command = run_mock.call_args[0][0]
         self.assertEqual(command[:5], [str(conda), "run", "-n", "gaussian_splatting", "python"])
         self.assertIn("import cv2", command[-1])
 

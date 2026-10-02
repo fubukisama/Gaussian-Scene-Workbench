@@ -32,6 +32,8 @@ COLMAP inputs containing only `points3D.ply` lack point tracks and reprojection 
 
 Chinese, English and Japanese monitoring show registered/input view counts and valid sparse-point counts, plus repairing, rejected, accepted or partial status. Language changes retain worker and model state. Historical/raw backend logs remain untranslated.
 
+Media-import and training preflight entrypoints explicitly add the selected installed backend root to Python's module search path before loading the staged server. This applies to both 3DGS and 2DGS training checks and to the shared media-import path used by all generation pipelines. It does not depend on the developer checkout, launch directory or inherited `PYTHONPATH`. Isolated subprocess regression tests cover both loaders, and packaging runs the installed media-preflight entrypoint with Python isolated mode so a repository import cannot hide a missing staged dependency.
+
 ## Reproduced user regression (2026-10-01)
 
 The supplied C0001 video produced 9 extracted frames, but the selected old component contained only 2 registered images and 31 sparse points. Another component contained 5 images but only 2 points. The original published training-images folder contained only two frames, so a second reconstruction could silently lose coverage. The 7,000-iteration result contained 16,845 Gaussians but did not represent a reliable multi-view model.

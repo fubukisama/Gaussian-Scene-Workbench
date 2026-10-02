@@ -10,9 +10,13 @@ from pathlib import Path
 
 
 def load_server_module(backend_root):
-    server_path = Path(backend_root).resolve() / "crop_editor" / "server.py"
+    root = Path(backend_root).resolve()
+    server_path = root / "crop_editor" / "server.py"
     if not server_path.is_file():
         raise FileNotFoundError("staged crop_editor/server.py was not found: {}".format(server_path))
+    # Loading a file by spec does not add its package root to the search path.
+    # Match the worker's selected-backend imports, independent of launch cwd.
+    sys.path.insert(0, str(root))
     spec = importlib.util.spec_from_file_location("gsw_staged_crop_server", str(server_path))
     if spec is None or spec.loader is None:
         raise RuntimeError("could not create an import spec for {}".format(server_path))

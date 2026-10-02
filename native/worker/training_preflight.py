@@ -20,9 +20,13 @@ def configure_stdio():
 
 
 def load_server_module(backend_root):
-    server_path = Path(backend_root).resolve() / "crop_editor" / "server.py"
+    root = Path(backend_root).resolve()
+    server_path = root / "crop_editor" / "server.py"
     if not server_path.is_file():
         raise FileNotFoundError("crop_editor/server.py is missing: {}".format(server_path))
+    # Loading a file by spec does not add its package root to the search path.
+    # Match the worker's selected-backend imports, independent of launch cwd.
+    sys.path.insert(0, str(root))
     spec = importlib.util.spec_from_file_location("gsw_training_preflight_server", str(server_path))
     if spec is None or spec.loader is None:
         raise RuntimeError("could not load {}".format(server_path))
