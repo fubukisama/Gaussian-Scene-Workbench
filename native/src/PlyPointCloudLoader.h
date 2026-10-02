@@ -106,6 +106,7 @@ struct PointCloudData {
   qint64 sourceFaceCount = 0;
   qint64 sourceTriangleCount = 0;
   bool hasGaussianAttributes = false;
+  bool hasSurfelAttributes = false;
   bool meshPreviewDecimated = false;
   bool previewOnly = false;
   QString error;

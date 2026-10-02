@@ -38,6 +38,7 @@ private:
   bool mSparsePreview = false;
   int mDensityGuardIteration = 0;
   int mDensityGuardDeferred = 0;
+  WorkerStatus mReconstructionStatus;
 
   TrainingTelemetry mTelemetry;
   TrainingCurvesWidget *mCurves = nullptr;
@@ -52,6 +53,7 @@ private:
   QLabel *mElapsed = nullptr;
   QLabel *mRemaining = nullptr;
   QLabel *mDensityWarning = nullptr;
+  QLabel *mReconstructionQuality = nullptr;
   QProgressBar *mProgress = nullptr;
 };
 

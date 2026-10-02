@@ -21,6 +21,11 @@ from urllib.parse import parse_qs, quote, urlparse
 import numpy as np
 from plyfile import PlyData, PlyElement
 
+try:
+    from crop_editor import reconstruction_quality
+except ModuleNotFoundError:
+    import reconstruction_quality
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
@@ -4331,6 +4336,9 @@ def job_snapshot(job):
         "gaussian_count": job.get("gaussian_count"),
         "density_guard_iteration": job.get("density_guard_iteration"),
         "density_guard_deferred": job.get("density_guard_deferred"),
+        "reconstruction_quality": job.get("reconstruction_quality"),
+        "reconstruction_quality_phase": job.get("reconstruction_quality_phase"),
+        "generation_issue": job.get("generation_issue"),
         "iteration_milliseconds": job.get("iteration_milliseconds"),
         "elapsed_seconds": job.get("elapsed_seconds"),
         "latest_iteration": job.get("latest_iteration"),
@@ -4992,6 +5000,9 @@ def colmap_options_from_payload(payload):
         "mapper_ba_refine_principal_point": False,
         "mapper_ba_refine_extra_params": True,
         "mapper_max_runtime_seconds": -1,
+        "quality_recovery": True,
+        # Explicit calibration is preserved unless fallback is opted into.
+        "auto_camera_fallback": "camera_model" not in payload,
     }
     if options["preset"] == "robust":
         options.update({
@@ -5049,6 +5060,8 @@ def colmap_options_from_payload(payload):
     options["mapper_ba_refine_principal_point"] = safe_bool(payload.get("mapper_ba_refine_principal_point"), options["mapper_ba_refine_principal_point"])
     options["mapper_ba_refine_extra_params"] = safe_bool(payload.get("mapper_ba_refine_extra_params"), options["mapper_ba_refine_extra_params"])
     options["mapper_max_runtime_seconds"] = safe_int_range(payload.get("mapper_max_runtime_seconds"), options["mapper_max_runtime_seconds"], -1, 86400)
+    options["quality_recovery"] = safe_bool(payload.get("quality_recovery"), options["quality_recovery"])
+    options["auto_camera_fallback"] = safe_bool(payload.get("auto_camera_fallback"), options["auto_camera_fallback"])
     return options
 
 
@@ -5379,15 +5392,16 @@ def append_option(command, flag, value, include=True):
         command.extend([flag, str(value)])
 
 
-def colmap_convert_commands(dataset, options, undistort_output=None):
+def colmap_convert_commands(dataset, options, undistort_output=None, work_root=None):
     dataset = Path(dataset)
     colmap = colmap_executable()
     if not colmap:
         raise RuntimeError("Missing COLMAP executable")
     image_path = colmap_image_input_path(dataset)
     undistort_output = Path(undistort_output) if undistort_output else dataset / ".colmap-undistorted"
-    database_path = dataset / "distorted" / "database.db"
-    sparse_path = dataset / "distorted" / "sparse"
+    work_root = Path(work_root) if work_root else dataset / "distorted"
+    database_path = work_root / "database.db"
+    sparse_path = work_root / "sparse"
     use_gpu = "1" if options["use_gpu"] else "0"
     feature = [
         colmap,
@@ -5512,6 +5526,8 @@ def publish_undistorted_colmap_output(dataset, staging):
         if not (staging / name).is_dir():
             raise RuntimeError(f"COLMAP image undistortion is missing {name}")
 
+    preserve_colmap_source_images(dataset)
+
     backup = dataset / f".colmap-backup-{uuid.uuid4().hex}"
     backup.mkdir()
     moved_existing = []
@@ -5547,12 +5563,120 @@ def publish_undistorted_colmap_output(dataset, staging):
         shutil.rmtree(backup)
 
 
+def _archived_extraction_fps(dataset, record):
+    value = record.get("extractionFps")
+    if isinstance(value, (int, float)) and math.isfinite(value) and value > 0:
+        return value
+    # Legacy imports did not write FPS to their source manifest. Recover only
+    # an unambiguous matching import config; never invent an extraction rate.
+    rates = set()
+    for config_path in (dataset.parent.parent / ".gsw" / "jobs").glob("import-*.json"):
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+            if config.get("scene") != dataset.name:
+                continue
+            names = {Path(item if isinstance(item, str) else item.get("path", "")).name
+                     for item in config.get("files", []) if isinstance(item, (str, dict))}
+            fps = float(config.get("fps", 0))
+            if record.get("originalFilename") in names and math.isfinite(fps) and fps > 0:
+                rates.add(fps)
+        except (OSError, ValueError, TypeError):
+            continue
+    return next(iter(rates)) if len(rates) == 1 else None
+
+
+def preserve_colmap_source_images(dataset, job=None):
+    """Retain all raw input frames before publishing a registered subset.
+
+    Older datasets are repaired from their archived media, in a private
+    staging folder. Existing input, training images and archive are not edited.
+    """
+    dataset = Path(dataset).resolve()
+    if not dataset.is_dir():
+        return dataset / "images"
+    destination = dataset / "input"
+    manifest_path = dataset / "source" / "metadata_manifest.json"
+    records = []
+    if manifest_path.is_file():
+        records = json.loads(manifest_path.read_text(encoding="utf-8-sig")).get("files", [])
+    count = reconstruction_quality.image_count(destination)
+    expected = sum(1 if r.get("kind") == "image" else max(int(r.get("extractedFrames", 0)), 0) for r in records)
+    if count:
+        if expected > count:
+            raise RuntimeError("source_frames_missing: existing input does not contain all original frames")
+        return destination
+    # An explicitly supplied empty input folder must not be replaced silently.
+    if destination.exists():
+        raise RuntimeError("source_frames_missing: input directory is empty")
+    images = dataset / "images"
+    staging = dataset / (".colmap-source-" + uuid.uuid4().hex)
+    try:
+        staging.mkdir()
+        if records:
+            for record in records:
+                archive = (dataset / record.get("archivePath", "")).resolve()
+                if dataset not in archive.parents or not archive.is_file():
+                    raise RuntimeError("source_frames_missing: archived source is unavailable")
+                if record.get("kind") == "image":
+                    name = Path(record.get("trainingPath") or archive.name).name
+                    if (staging / name).exists():
+                        raise RuntimeError("source_frames_missing: duplicate original image name")
+                    shutil.copy2(archive, staging / name)
+                elif record.get("kind") == "video":
+                    fps = _archived_extraction_fps(dataset, record)
+                    if fps is None:
+                        raise RuntimeError("source_frames_missing: legacy extraction FPS is unknown; reimport original media")
+                    expected = int(record.get("extractedFrames", 0))
+                    extracted = extract_video_frames(archive, staging, fps)
+                    if expected > 0 and extracted != expected:
+                        raise RuntimeError("source_frames_missing: original frame count changed")
+            if not reconstruction_quality.image_count(staging):
+                raise RuntimeError("source_frames_missing: no recoverable archived images")
+        elif images.is_dir():
+            for image in images.iterdir():
+                if image.is_file() and image.suffix.lower() in IMAGE_EXTS:
+                    shutil.copy2(image, staging / image.name)
+        if not reconstruction_quality.image_count(staging):
+            return images
+        # Preserve existing alpha masks when all source names are available.
+        if (dataset / "source" / "masks").is_dir():
+            # The regular masking helper uses an images child, in owned staging.
+            mask_root = staging / ".mask-work"
+            (mask_root / "source").mkdir(parents=True)
+            shutil.copytree(dataset / "source" / "masks", mask_root / "source" / "masks")
+            (mask_root / "images").mkdir()
+            for image in list(staging.iterdir()):
+                if image.is_file():
+                    image.rename(mask_root / "images" / image.name)
+            apply_alpha_masks_to_dataset(mask_root)
+            for image in (mask_root / "images").iterdir():
+                image.rename(staging / image.name)
+            shutil.rmtree(mask_root)
+        staging.rename(destination)
+        if job is not None:
+            add_job_log(job, "Preserved/recovered {} original COLMAP frames: {}".format(reconstruction_quality.image_count(destination), destination))
+        return destination
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def report_reconstruction_quality(job, report, phase):
+    job["reconstruction_quality"] = report
+    job["reconstruction_quality_phase"] = phase
+    add_job_log(job, "COLMAP quality [{}]: registered {}/{}, valid points {}/{}, model {}, reasons {}".format(
+        phase, report.get("registeredImages", 0), report.get("inputImages", 0),
+        report.get("validPoints", 0), report.get("sparsePoints", 0),
+        report.get("modelPath", "-"), ",".join(report.get("reasons", []))))
+
+
 def run_colmap_convert(job, dataset, options):
     dataset = Path(dataset)
     options = dict(options)
     job_id = safe_filename(job.get("id") or uuid.uuid4().hex)
     snapshot_root = dataset / "distorted" / f".gsw-snapshots-{job_id}"
     preview_publisher = None
+    preserve_colmap_source_images(dataset, job)
     if options.get("reset", True):
         database = dataset / "database.db"
         if database.exists():
@@ -5572,9 +5696,52 @@ def run_colmap_convert(job, dataset, options):
     add_job_log(job, f"COLMAP preset: {options['preset']}, matching: {options['matching']}, camera: {options['camera_model']}")
     undistort_staging = dataset / f".colmap-undistorted-{uuid.uuid4().hex}"
     commands = colmap_convert_commands(dataset, options, undistort_staging)
+    quality_work = dataset / "distorted" / (".gsw-quality-" + job_id)
+    reports = []
+    selected = None
     try:
         for command in commands:
             is_mapper = len(command) > 1 and str(command[1]).lower() == "mapper"
+            if len(command) > 1 and str(command[1]).lower() == "image_undistorter":
+                total = reconstruction_quality.image_count(colmap_image_input_path(dataset))
+                selected, reports = reconstruction_quality.select_model(dataset / "distorted" / "sparse", total)
+                needs_repair = selected is None or not selected["preferred"]
+                if needs_repair and options.get("quality_recovery", True):
+                    repair_options = dict(options)
+                    # Bounded, deterministic reinitialization for narrow-baseline
+                    # video: first retain calibration, then optionally simplify it.
+                    attempts = [("baseline", repair_options, False)]
+                    if options.get("auto_camera_fallback") and options.get("single_camera") and options["camera_model"] == "OPENCV":
+                        radial = dict(options, camera_model="SIMPLE_RADIAL")
+                        attempts.append(("simple_radial", radial, True))
+                    for name, retry_options, extract in attempts:
+                        if job.get("cancel_requested"):
+                            raise RuntimeError("COLMAP quality recovery cancelled")
+                        root = quality_work / name
+                        (root / "sparse").mkdir(parents=True)
+                        retry_commands = colmap_convert_commands(dataset, retry_options, undistort_staging, root)
+                        if not extract:
+                            for retry in retry_commands[:3]:
+                                retry[retry.index("--database_path") + 1] = dataset / "distorted" / "database.db"
+                        baseline_report = selected or max(reports, key=lambda r: r["registeredImages"], default={"inputImages": total})
+                        report_reconstruction_quality(job, baseline_report, "repairing")
+                        add_job_log(job, "COLMAP quality recovery: {} camera={}, init_min_tri_angle=4, random_seed=1".format(name, retry_options["camera_model"]))
+                        for retry in retry_commands[:3] if extract else retry_commands[2:3]:
+                            if retry[1] == "mapper":
+                                retry.extend(["--Mapper.init_min_tri_angle", "4", "--Mapper.random_seed", "1"])
+                            run_logged(job, retry, ROOT, "3dgs")
+                        candidate, attempt_reports = reconstruction_quality.select_model(root / "sparse", total)
+                        reports.extend(attempt_reports)
+                        if candidate and (selected is None or (candidate["registeredImages"], candidate["validPoints"]) > (selected["registeredImages"], selected["validPoints"])):
+                            selected = candidate
+                        if selected and selected["preferred"]:
+                            break
+                if selected is None:
+                    rejected = max(reports, key=lambda r: (r["registeredImages"], r["validPoints"]), default={"inputImages": total, "reasons": ["no_model"]})
+                    report_reconstruction_quality(job, rejected, "rejected")
+                    raise reconstruction_quality.ReconstructionQualityError(rejected)
+                report_reconstruction_quality(job, selected, "accepted" if selected["preferred"] else "partial")
+                command[command.index("--input_path") + 1] = Path(selected["modelPath"])
             if not is_mapper:
                 run_logged(job, command, ROOT, "3dgs")
                 continue
@@ -5602,6 +5769,11 @@ def run_colmap_convert(job, dataset, options):
                 preview_publisher.stop()
         if commands:
             validate_undistorted_colmap_output(undistort_staging)
+            validation = reconstruction_quality.assess_model(undistort_staging / "sparse" / "0", selected["inputImages"])
+            if not validation["usable"]:
+                report_reconstruction_quality(job, validation, "rejected")
+                raise reconstruction_quality.ReconstructionQualityError(validation)
+            (undistort_staging / "sparse" / "0" / "reconstruction_quality.json").write_text(json.dumps(dict(validation, candidates=reports), indent=2), encoding="utf-8")
             publish_undistorted_colmap_output(dataset, undistort_staging)
             if preview_publisher is not None:
                 preview_publisher.source_roots.append(dataset / "sparse")
@@ -5615,6 +5787,8 @@ def run_colmap_convert(job, dataset, options):
             shutil.rmtree(undistort_staging)
         if snapshot_root.exists():
             shutil.rmtree(snapshot_root)
+        if quality_work.exists():
+            shutil.rmtree(quality_work)
     save_alignment_cache(dataset, job)
 
 
@@ -5624,8 +5798,8 @@ def train_args_for_quality(quality, backend="3dgs"):
     if backend == "2dgs":
         if quality == "quick":
             return {
-                "iterations": 7000,
-                "resolution": 8,
+                "iterations": 10000,
+                "resolution": 2,
                 "depth_ratio": 0.0,
                 "densify_grad_threshold": 0.00025,
                 "densification_interval": 100,
@@ -5900,6 +6074,13 @@ def run_training_job(job, run_convert, quality, overwrite):
                 f"Training output resolves outside the configured output root: {output}"
             )
         images_dir = colmap_image_input_path(dataset)
+        if output.exists() and any(output.iterdir()):
+            ensure_output_backend_compatible(job["output_scene"], backend)
+            # A predictable conflict must fail before recalibrating the source
+            # used by the preserved model. Actual overwrite deletion stays
+            # deferred until reconstruction admission succeeds below.
+            if not overwrite and not job.get("allow_existing_output"):
+                raise ValueError(f"Output already exists: {output}. Enable overwrite or choose another output name.")
         if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
             raise ValueError(f"No training images found: {images_dir}")
         if (job.get("native_control") or {}).get("resume"):
@@ -5910,15 +6091,13 @@ def run_training_job(job, run_convert, quality, overwrite):
         if images_dir.name == "input" and not (dataset / "images").exists() and not run_convert:
             add_job_log(job, "Dataset contains input images but no undistorted images; enabling COLMAP conversion.")
             run_convert = True
-        if output.exists() and any(output.iterdir()):
-            ensure_output_backend_compatible(job["output_scene"], backend)
-            if overwrite:
-                add_job_log(job, f"Removing existing output: {output}")
-                shutil.rmtree(output)
-            elif job.get("allow_existing_output"):
-                add_job_log(job, f"Using existing output directory: {output}")
-            else:
-                raise ValueError(f"Output already exists: {output}. Enable overwrite or choose another output name.")
+        if dataset_has_colmap_scene(dataset):
+            quality_report = reconstruction_quality.assess_dataset(dataset)
+            if not quality_report["usable"]:
+                report_reconstruction_quality(job, quality_report, "repairing")
+                if (job.get("native_control") or {}).get("resume"):
+                    raise reconstruction_quality.ReconstructionQualityError(quality_report)
+                run_convert = True
 
         set_job_stage(job, "running", "prepare")
         run_logged(job, ["cmd.exe", "/d", "/s", "/c", TRAINING_KIT_DIR / "apply_local_fixes.bat"], ROOT, "3dgs")
@@ -5931,6 +6110,20 @@ def run_training_job(job, run_convert, quality, overwrite):
                 add_job_log(job, "Existing dataset has no recognized sparse/0 or transforms_train.json; running COLMAP alignment first.")
                 set_job_stage(job, "running", "colmap")
                 run_colmap_convert(job, dataset, job.get("colmap_options") or colmap_options_from_payload({}))
+
+        if dataset_has_colmap_scene(dataset):
+            quality_report = reconstruction_quality.require_dataset(dataset)
+            report_reconstruction_quality(job, quality_report, "accepted" if quality_report["preferred"] else "partial")
+        # Do not discard an existing output until reconstruction admission passes.
+        if output.exists() and any(output.iterdir()):
+            ensure_output_backend_compatible(job["output_scene"], backend)
+            if overwrite:
+                add_job_log(job, f"Removing existing output: {output}")
+                shutil.rmtree(output)
+            elif job.get("allow_existing_output"):
+                add_job_log(job, f"Using existing output directory: {output}")
+            else:
+                raise ValueError(f"Output already exists: {output}. Enable overwrite or choose another output name.")
 
         options = training_options_from_payload(backend, quality, job.get("train_options"))
         options = resolve_training_options_for_environment(backend, options, job)
@@ -5989,6 +6182,8 @@ def run_training_job(job, run_convert, quality, overwrite):
                 f"Training command completed but iteration {options['iterations']} produced no point_cloud.ply"
             )
         write_training_metadata(output, backend, quality, options)
+        if job.get("reconstruction_quality"):
+            (output / "reconstruction_quality.json").write_text(json.dumps(job["reconstruction_quality"], indent=2), encoding="utf-8")
         with TRAIN_LOCK:
             job["status"] = "done"
             job["stage"] = "done"
@@ -6017,6 +6212,11 @@ def run_training_job(job, run_convert, quality, overwrite):
             persist_train_job(job)
         add_job_log(job, str(paused))
     except Exception as exc:
+        if isinstance(exc, reconstruction_quality.ReconstructionQualityError):
+            report_reconstruction_quality(job, exc.report, "rejected")
+            job["generation_issue"] = "reconstruction_quality"
+        elif str(exc).startswith("source_frames_missing:"):
+            job["generation_issue"] = "source_frames_missing"
         partial_result = None
         try:
             partial_result = training_point_cloud(job.get("output_scene"))
@@ -6070,6 +6270,11 @@ def run_colmap_alignment_job(job):
             }
         add_job_log(job, f"COLMAP alignment complete: {dataset}")
     except Exception as exc:
+        if isinstance(exc, reconstruction_quality.ReconstructionQualityError):
+            report_reconstruction_quality(job, exc.report, "rejected")
+            job["generation_issue"] = "reconstruction_quality"
+        elif str(exc).startswith("source_frames_missing:"):
+            job["generation_issue"] = "source_frames_missing"
         with MESH_LOCK:
             if job.get("cancel_requested"):
                 job["status"] = "cancelled"
@@ -6942,6 +7147,9 @@ def run_texture_bake_job(job):
         output_paths = mesh_texture_paths(job["scene"], job["iteration"], options["mode"], options["post"])
         cfg = load_cfg_args(model_dir(job["scene"]))
         dataset_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / job["scene"])
+        if options.get("backend") in {"openmvs", "colmap"} and dataset_has_colmap_scene(dataset_path):
+            quality_report = reconstruction_quality.require_dataset(dataset_path)
+            report_reconstruction_quality(job, quality_report, "accepted" if quality_report["preferred"] else "partial")
         add_job_log(job, f"Source mesh: {source_path}")
         add_job_log(job, f"Source photos: {dataset_path}")
         add_job_log(job, f"Texture resolution: {options['texture_res']}")
@@ -7325,6 +7533,7 @@ def import_archived_media(archive_target, original_filename, relative_path, cont
     else:
         saved_videos += 1
         frames = extract_video_frames(archive_target, images_dir, fps)
+        record["extractionFps"] = float(fps)
         record["extractedFrames"] = frames
         extracted_frames += frames
     return record, saved_images, saved_videos, extracted_frames
@@ -7465,6 +7674,7 @@ def import_archived_media_batch(entries, dataset, images_dir, fps, import_job_id
             for index, archive_target in video_entries:
                 update_import_job(import_job_id, current_file=archive_target.name)
                 frames = extract_video_frames(archive_target, images_dir, fps)
+                records[index]["extractionFps"] = float(fps)
                 records[index]["extractedFrames"] = frames
                 extracted_frames += frames
                 processed_videos += 1
@@ -7481,6 +7691,7 @@ def import_archived_media_batch(entries, dataset, images_dir, fps, import_job_id
                 for future in concurrent.futures.as_completed(futures):
                     index, archive_target = futures[future]
                     frames = future.result()
+                    records[index]["extractionFps"] = float(fps)
                     records[index]["extractedFrames"] = frames
                     extracted_frames += frames
                     processed_videos += 1

@@ -85,6 +85,13 @@ TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
   result.python = QDir::toNativeSeparators(
       report.value(QStringLiteral("python")).toString(result.python));
   result.cudaDevice = report.value(QStringLiteral("cudaDevice")).toString();
+  if (report.value(QStringLiteral("reconstructionRepairRequired")).toBool()) {
+    const QJsonObject quality = report.value(QStringLiteral("reconstructionQuality")).toObject();
+    result.reconstructionWarning = QCoreApplication::translate("Workbench", "已有重建不可训练：相机 %1/%2，有效稀疏点 %3。任务将尝试修复重建，不会直接增密退化结果。")
+        .arg(quality.value(QStringLiteral("registeredImages")).toInt())
+        .arg(quality.value(QStringLiteral("inputImages")).toInt())
+        .arg(quality.value(QStringLiteral("validPoints")).toInt());
+  }
   if (!result.ready) {
     QString detail = report.value(QStringLiteral("error")).toString().trimmed();
     if (detail.isEmpty()) {

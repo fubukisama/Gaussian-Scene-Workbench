@@ -17,6 +17,21 @@ class Rows:
 
 
 class TrainingPreviewTests(unittest.TestCase):
+    def test_two_scale_preview_preserves_surfel_contract(self):
+        import numpy as np
+        with tempfile.TemporaryDirectory() as directory:
+            events = []
+            publisher = TrainingPreviewPublisher(directory, lambda *event: events.append(event))
+            rows = np.arange(26, dtype=np.float32).reshape(2, 13)
+            self.assertTrue(publisher.publish_rows(rows, 12, source_count=30))
+            publisher.close()
+            data = Path(events[0][1]["point_cloud_path"]).read_bytes()
+            header, body = data.split(b"end_header\n", 1)
+            self.assertIn(b"property float scale_1", header)
+            self.assertNotIn(b"property float scale_2", header)
+            self.assertIn(b"property float rot_3", header)
+            self.assertEqual(body, rows.astype("<f4").tobytes())
+
     def test_cleanup_supports_legacy_training_python(self):
         original = Path.unlink
         def legacy_unlink(path):

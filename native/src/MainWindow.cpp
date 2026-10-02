@@ -437,6 +437,16 @@ std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
                         "point_cloud.ply")
                         .arg(group)
                         .arg(checkpoint.iteration));
+  // Camera calibration and backend identity belong to the protected result,
+  // not only to the disposable training-output directory.
+  for (const QString &name : {QStringLiteral("cameras.json"),
+       QStringLiteral("training_backend.json"),
+       QStringLiteral("reconstruction_quality.json")}) {
+    const QString source = QDir(outputDirectory).filePath(name);
+    if (QFileInfo::exists(source) && !DurableArtifactStore::publish(source,
+        QFileInfo(destination).absoluteDir().filePath(name), errorMessage).isValid())
+      return std::nullopt;
+  }
   const DurableArtifact artifact = DurableArtifactStore::publish(
       checkpoint.path, destination, errorMessage);
   if (!artifact.isValid()) {
@@ -1993,6 +2003,22 @@ void MainWindow::connectServices() {
             mActiveWorkerState = status.state;
             if (mPendingTraining.has_value()) {
               mTrainingMonitor->updateStatus(status);
+            }
+            if (!mPendingTraining && !status.reconstructionQuality.isEmpty() &&
+                (!mLastWorkerStatus || mLastWorkerStatus->reconstructionQuality != status.reconstructionQuality ||
+                 mLastWorkerStatus->reconstructionViews != status.reconstructionViews ||
+                 mLastWorkerStatus->reconstructionPoints != status.reconstructionPoints)) {
+              const QString phase = status.reconstructionQuality == QStringLiteral("repairing")
+                  ? QCoreApplication::translate("Workbench", "有限重试中")
+                  : status.reconstructionQuality == QStringLiteral("rejected")
+                  ? QCoreApplication::translate("Workbench", "质量检查未通过 · 已阻止训练")
+                  : status.reconstructionQuality == QStringLiteral("partial")
+                  ? QCoreApplication::translate("Workbench", "部分相机注册 · 覆盖不足")
+                  : QCoreApplication::translate("Workbench", "最低质量检查通过");
+              appendTaskEvent(QCoreApplication::translate("Workbench", "重建检查：相机 %1/%2 · 有效稀疏点 %3 · %4。高斯数量和训练 PSNR 不代表新视角质量。")
+                  .arg(QString::number(status.reconstructionViews.value_or(0)),
+                       QString::number(status.reconstructionInputs.value_or(0)),
+                       QString::number(status.reconstructionPoints.value_or(0)), phase));
             }
             if (mPendingTraining.has_value() || mPendingReconstruction.has_value() || mPendingMesh.has_value()) {
               // Worker terminal status is not a validated/published final model yet.
@@ -4932,6 +4958,8 @@ void MainWindow::startReconstruction() {
   colmapOptions.insert(QStringLiteral("preset"), config.preset);
   colmapOptions.insert(QStringLiteral("matching"), config.matching);
   colmapOptions.insert(QStringLiteral("camera_model"), config.cameraModel);
+  colmapOptions.insert(QStringLiteral("quality_recovery"), config.qualityRecovery);
+  colmapOptions.insert(QStringLiteral("auto_camera_fallback"), config.qualityRecovery);
   colmapOptions.insert(QStringLiteral("single_camera"), config.singleCamera);
   colmapOptions.insert(QStringLiteral("use_gpu"), config.useGpu);
   colmapOptions.insert(QStringLiteral("reset"), config.reset);
@@ -5197,6 +5225,9 @@ void MainWindow::startTraining() {
               QCoreApplication::translate("Workbench", "所选 Python：%1\n\n%2%3")
                   .arg(preflight.python, preflight.errorMessage, guidance));
     return;
+  }
+  if (!preflight.reconstructionWarning.isEmpty()) {
+    appendTaskEvent(preflight.reconstructionWarning);
   }
   appendTaskEvent(QCoreApplication::translate("Workbench", "训练预检通过：%1 张图像，%2，CUDA：%3")
                       .arg(preflight.imageCount)

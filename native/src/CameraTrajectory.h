@@ -14,6 +14,8 @@ struct CameraPose final {
   QVector3D forward;
   int width = 0;
   int height = 0;
+  float verticalFovDegrees = 46.0F;
+  float focalAspectCorrection = 1.0F;
 };
 
 struct CameraLineSegment final {

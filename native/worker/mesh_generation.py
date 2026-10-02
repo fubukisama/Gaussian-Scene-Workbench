@@ -86,11 +86,13 @@ def _validate_configuration(path):
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != "Namespace" or node.args:
         raise ValueError("Training cfg_args must be a literal Namespace configuration")
     names = set()
+    values = {}
     for keyword in node.keywords:
         if not keyword.arg or keyword.arg in names:
             raise ValueError("Training cfg_args contains invalid or duplicate options")
         names.add(keyword.arg)
-        ast.literal_eval(keyword.value)
+        values[keyword.arg] = ast.literal_eval(keyword.value)
+    return values
 
 
 def run(config, server, emit):
@@ -164,7 +166,15 @@ def run(config, server, emit):
         stage("environment")
         if not source.is_dir() or not (source / "cfg_args").is_file():
             raise ValueError("Select a training output directory containing cfg_args")
-        _validate_configuration(source / "cfg_args")
+        values = _validate_configuration(source / "cfg_args")
+        dataset = Path(values.get("source_path") or "")
+        if values.get("source_path") and (dataset / "sparse" / "0").is_dir():
+            from crop_editor.reconstruction_quality import require_dataset
+            report = require_dataset(dataset)
+            record["reconstructionQuality"] = report
+            stage("environment", None, {"reconstruction_quality": report,
+                  "reconstruction_quality_phase": "accepted" if report["preferred"] else "partial"})
+            print("[worker] Mesh input reconstruction: {}/{} cameras, {} valid points".format(report["registeredImages"], report["inputImages"], report["validPoints"]), flush=True)
         input_ply = source / "point_cloud" / ("iteration_" + str(iteration)) / "point_cloud.ply"
         if not input_ply.is_file():
             raise FileNotFoundError("Selected training iteration is missing: " + str(input_ply))
@@ -184,7 +194,7 @@ def run(config, server, emit):
         stage("mesh_inputs")
         model = run_dir / run_name
         _copy_input(input_ply, model / "point_cloud" / input_ply.parent.name / input_ply.name, cancel)
-        for name in ("cfg_args", "training_backend.json", "cameras.json", "input.ply", "exposure.json"):
+        for name in ("cfg_args", "training_backend.json", "cameras.json", "input.ply", "exposure.json", "reconstruction_quality.json"):
             if (source / name).is_file():
                 _copy_input(source / name, model / name, cancel)
         _validate_configuration(model / "cfg_args")
@@ -236,6 +246,13 @@ def run(config, server, emit):
         state = "cancelled" if cancel.is_set() or isinstance(exc, InterruptedError) else "failed"
         record.update(state=state, error=str(exc))
         atomic_json(record_path, record)
-        emit(state, state)
+        quality = getattr(exc, "report", None)
+        if isinstance(quality, dict):
+            record["reconstructionQuality"] = quality
+            atomic_json(record_path, record)
+            emit(state, state, None, {"reconstruction_quality": quality,
+                 "reconstruction_quality_phase": "rejected", "generation_issue": "reconstruction_quality"})
+        else:
+            emit(state, state)
         print("[worker] Mesh job {}: {}".format(state, exc), flush=True)
         return 130 if state == "cancelled" else 1

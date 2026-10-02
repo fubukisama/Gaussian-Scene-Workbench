@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import threading
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -83,6 +84,26 @@ class Backend:
 
 @unittest.skipUnless(NUMERIC_RUNTIME, "Run with a training Python containing NumPy and plyfile")
 class MeshJobTests(unittest.TestCase):
+    def test_all_mesh_methods_reject_degenerate_colmap_before_external_work(self):
+        from native.worker.test_reconstruction_quality import write_model
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "dataset"
+            (dataset / "images").mkdir(parents=True)
+            for i in range(9):
+                (dataset / "images" / ("frame%02d.jpg" % i)).write_bytes(b"raw")
+            write_model(dataset / "sparse" / "0", 2, 31)
+            (self.source / "cfg_args").write_text("Namespace(source_path={})".format(repr(str(dataset))))
+            for mode in ("bounded", "unbounded", "sugar", "gs2mesh"):
+                with self.subTest(mode=mode):
+                    backend = Backend("2dgs" if mode in ("bounded", "unbounded") else "3dgs")
+                    events = []
+                    config = dict(self.config, mode=mode, runName="quality-" + mode)
+                    with mock.patch.object(sys, "stdin", io.StringIO()):
+                        result = mesh_generation.run(config, backend, lambda *args: events.append(args))
+                    self.assertEqual(result, 1)
+                    self.assertEqual(backend.calls, [])
+                    self.assertEqual(events[-1][3]["generation_issue"], "reconstruction_quality")
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gsw-mesh-")
         self.addCleanup(self.temporary.cleanup)

@@ -703,6 +703,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
   status.gaussianCount = 100000;
   status.densityGuardIteration = 3100;
   status.densityGuardDeferred = 3300;
+  status.reconstructionQuality = QStringLiteral("accepted");
+  status.reconstructionViews = 9;
+  status.reconstructionInputs = 9;
+  status.reconstructionPoints = 2399;
   monitor->updateStatus(status);
   emit supervisor->workerStatusReady(status);
   auto *toolbar = window.findChild<QToolBar *>();
@@ -803,6 +807,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(document->projectName() == projectName && nameLabel->text() == projectName, "project name retained");
     check(monitor->telemetry().samples().size() == sampleCount && monitor->telemetry().iteration() == status.iteration &&
           monitor->telemetry().loss() == status.loss && progress->value() == 50, "telemetry and progress retained");
+    check(monitor->findChild<QLabel *>(QStringLiteral("reconstructionQualityLabel"))->text() ==
+          QCoreApplication::translate("Workbench", "重建检查：相机 %1/%2 · 有效稀疏点 %3 · %4。高斯数量和训练 PSNR 不代表新视角质量。")
+              .arg(QLocale().toString(9), QLocale().toString(9), QLocale().toString(2399),
+                   QCoreApplication::translate("Workbench", "最低质量检查通过")), "reconstruction quality translated live without modifying samples");
     check(monitor->findChild<QLabel *>(QStringLiteral("statusWarn"))->text() ==
           QCoreApplication::translate("Workbench", "训练中"), "live training state caption");
     check(box.button(QMessageBox::Cancel)->text() ==

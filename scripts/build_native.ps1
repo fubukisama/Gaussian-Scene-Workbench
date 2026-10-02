@@ -229,6 +229,7 @@ function Remove-DirectoryWithRetry {
 function Find-PythonForNativeChecks {
   $PathCommand = Get-Command python.exe -ErrorAction SilentlyContinue
   $Candidates = @(
+    $(if ($QtRoot) { Join-Path $QtRoot "python.exe" }),
     $(if ($PathCommand) { $PathCommand.Source }),
     $(if ($env:GAUSSIAN_SPLATTING_CONDA_PREFIX) { Join-Path $env:GAUSSIAN_SPLATTING_CONDA_PREFIX "python.exe" }),
     $(if ($env:GS_CONDA_PREFIX) { Join-Path $env:GS_CONDA_PREFIX "python.exe" }),
@@ -595,7 +596,7 @@ $PreviousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = "1"
 Push-Location $Root
 try {
-  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter native.worker.test_training_density_control crop_editor.tests.test_training_telemetry
+  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter native.worker.test_training_density_control native.worker.test_reconstruction_quality crop_editor.tests.test_training_telemetry
   if ($LASTEXITCODE -ne 0) {
     throw "Native worker tests failed with exit code $LASTEXITCODE."
   }
@@ -647,6 +648,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\TRAINING_RESUME.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\GENERATION_PIPELINES.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\MESH_GENERATION.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\RECONSTRUCTION_QUALITY.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
     -DestinationRoot $PackageRoot
@@ -665,6 +667,7 @@ if ($Package) {
     "native\worker\mesh_material_preview.py",
     "native\worker\licenses\2dgs-LICENSE.md",
     "crop_editor\server.py",
+    "crop_editor\reconstruction_quality.py",
     "crop_editor\video_extract.py",
     "scripts\check_3dgs_env.ps1",
     "scripts\sign_windows_artifacts.ps1",

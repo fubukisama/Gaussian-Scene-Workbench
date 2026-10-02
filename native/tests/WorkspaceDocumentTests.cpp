@@ -74,6 +74,7 @@ private slots:
   void clearsOnlyManagedReconstructionData();
   void refusesToModifyExternalReconstructionData();
   void loadsStandardCameraSidecarAndBuildsLegacyAxes();
+  void retainsSourceCameraCalibrationAndLegacyDefaults();
   void skipsMalformedCameraEntries();
   void reportsMalformedCameraDocument();
   void treatsMissingCameraSidecarAsOptional();
@@ -1765,6 +1766,7 @@ void WorkspaceDocumentTests::loadsTwoScaleSurfelsWithoutChangingSource() {
   const auto data = gsw::PlyPointCloudLoader::load(path);
   QVERIFY2(data.isValid(), qPrintable(data.error));
   QVERIFY(data.hasGaussianAttributes);
+  QVERIFY(data.hasSurfelAttributes);
   QCOMPARE(data.vertices.size(), 1);
   QCOMPARE(data.vertices.first().scaleX, 1.0f);
   QCOMPARE(data.vertices.first().scaleY, 1.0f);
@@ -2253,6 +2255,25 @@ void WorkspaceDocumentTests::refusesToModifyExternalReconstructionData() {
   QVERIFY(error.contains(QStringLiteral("external"), Qt::CaseInsensitive));
   QCOMPARE(project.datasetPath(), QDir::cleanPath(externalDataset));
   QVERIFY(QFileInfo::exists(sparseFile));
+}
+
+void WorkspaceDocumentTests::retainsSourceCameraCalibrationAndLegacyDefaults() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  auto calibrated = camera("calibrated", vector3(0, 0, 0),
+      rotation(vector3(1, 0, 0), vector3(0, 1, 0), vector3(0, 0, 1)), 1920, 1080);
+  calibrated.insert("fx", 1300.0);
+  calibrated.insert("fy", 1200.0);
+  auto legacy = calibrated;
+  legacy.remove("fx"); legacy.remove("fy");
+  QVERIFY(writeJson(QDir(temporary.path()).filePath("cameras.json"), QJsonDocument(QJsonArray{calibrated, legacy})));
+  const auto trajectory = gsw::CameraTrajectory::loadForScene(temporary.path());
+  QCOMPARE(trajectory.cameras().size(), qsizetype(2));
+  const auto first = trajectory.cameras().at(0);
+  QVERIFY(std::abs(first.verticalFovDegrees - 48.45549F) < 0.001F);
+  QVERIFY(std::abs(first.focalAspectCorrection - 1300.0F / 1200.0F) < 1.0e-6F);
+  QCOMPARE(trajectory.cameras().at(1).verticalFovDegrees, 46.0F);
+  QCOMPARE(trajectory.cameras().at(1).focalAspectCorrection, 1.0F);
 }
 
 void WorkspaceDocumentTests::loadsStandardCameraSidecarAndBuildsLegacyAxes() {

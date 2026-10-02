@@ -16,6 +16,7 @@ from plyfile import PlyData, PlyElement
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server  # noqa: E402
+from native.worker.test_reconstruction_quality import write_model  # noqa: E402
 
 
 class FakeUploadItem:
@@ -444,19 +445,20 @@ class TrainingBackendTests(unittest.TestCase):
             images = dataset / "images"
             images.mkdir(parents=True)
             (images / "frame.jpg").write_bytes(b"original")
+            for i in range(9):
+                (images / ("frame%02d.jpg" % i)).write_bytes(b"original")
             observed_original = []
 
             def fake_run(_job, command, _cwd, _backend):
+                if command[1] == "mapper":
+                    write_model(Path(command[command.index("--output_path") + 1]) / "0")
                 if command[1] != "image_undistorter":
                     return 0
                 observed_original.append((images / "frame.jpg").read_bytes())
                 staging = Path(command[command.index("--output_path") + 1])
                 (staging / "images").mkdir(parents=True)
                 (staging / "images" / "frame.jpg").write_bytes(b"undistorted")
-                sparse = staging / "sparse"
-                sparse.mkdir()
-                for name in ("cameras.bin", "images.bin", "points3D.bin"):
-                    (sparse / name).write_bytes(name.encode("ascii"))
+                write_model(staging / "sparse")
                 return 0
 
             with (
@@ -482,6 +484,8 @@ class TrainingBackendTests(unittest.TestCase):
             images = dataset / "images"
             images.mkdir(parents=True)
             (images / "frame.jpg").write_bytes(b"original")
+            for i in range(9):
+                (images / ("frame%02d.jpg" % i)).write_bytes(b"original")
             sparse = dataset / "sparse" / "0"
             sparse.mkdir(parents=True)
             for name in ("cameras.bin", "images.bin", "points3D.bin"):
@@ -491,6 +495,8 @@ class TrainingBackendTests(unittest.TestCase):
             (stereo / "original.txt").write_bytes(b"original")
 
             def fake_run(_job, command, _cwd, _backend):
+                if command[1] == "mapper":
+                    write_model(Path(command[command.index("--output_path") + 1]) / "0")
                 if command[1] == "image_undistorter":
                     staging = Path(command[command.index("--output_path") + 1])
                     (staging / "images").mkdir(parents=True)
@@ -719,10 +725,10 @@ class TrainingBackendTests(unittest.TestCase):
             server.OUTPUT_DIR = base / "output"
             dataset = server.DATASETS_DIR / "scene_existing"
             (dataset / "images").mkdir(parents=True)
-            (dataset / "images" / "frame.jpg").write_bytes(b"fake")
-            (dataset / "sparse" / "0").mkdir(parents=True)
-            for name in ("cameras.bin", "images.bin", "points3D.bin"):
-                (dataset / "sparse" / "0" / name).write_bytes(b"colmap")
+            for i in range(9):
+                (dataset / "images" / ("frame%02d.jpg" % i)).write_bytes(b"fake")
+            write_model(dataset / "sparse" / "0")
+            (server.OUTPUT_DIR / "scene_existing").mkdir(parents=True)
             job = {
                 "id": "job",
                 "scene": "scene_existing",
@@ -991,11 +997,11 @@ class TrainingBackendTests(unittest.TestCase):
             server.OUTPUT_DIR = base / "output"
             dataset = server.DATASETS_DIR / "scene_existing"
             (dataset / "images").mkdir(parents=True)
-            (dataset / "images" / "frame.jpg").write_bytes(b"fake")
+            for i in range(9):
+                (dataset / "images" / ("frame%02d.jpg" % i)).write_bytes(b"fake")
             cache_sparse0 = dataset / ".alignment_cache" / "sparse" / "0"
-            cache_sparse0.mkdir(parents=True)
-            for name in ("cameras.bin", "images.bin", "points3D.bin"):
-                (cache_sparse0 / name).write_bytes(b"cached")
+            write_model(cache_sparse0)
+            (server.OUTPUT_DIR / "scene_existing").mkdir(parents=True)
             job = {
                 "id": "job",
                 "scene": "scene_existing",
@@ -1811,8 +1817,8 @@ class TrainingBackendTests(unittest.TestCase):
         report = server.training_environment_report("2dgs")
 
         self.assertEqual(report["backend"], "2dgs")
-        self.assertTrue(report["two_dgs_dir"].endswith("Documents\\2dgs"))
-        self.assertTrue(report["two_dgs_python"].endswith(".venv\\Scripts\\python.exe"))
+        self.assertEqual(Path(report["two_dgs_dir"]), server.TWO_DGS_DIR)
+        self.assertEqual(Path(report["two_dgs_python"]), server.training_python("2dgs"))
         self.assertTrue(report["two_dgs_train"].endswith("train.py"))
 
     def test_point_payload_reports_2dgs_backend_and_robust_view_bounds(self):

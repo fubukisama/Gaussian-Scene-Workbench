@@ -173,6 +173,31 @@ bool runGaussianPerformanceSmokeTest(NativeViewport &viewport, const QString &pa
   bool withinBudget = true;
   const int orbitBudget = qEnvironmentVariableIntValue("GSW_GAUSSIAN_ORBIT_BUDGET_MS");
   const QString imageDirectory = qEnvironmentVariable("GSW_GAUSSIAN_BENCHMARK_DIR");
+  if (!imageDirectory.isEmpty()) {
+    QDir().mkpath(imageDirectory);
+    frame.save(QDir(imageDirectory).filePath("initial-view.png"));
+    QElapsedTimer cameras; cameras.start();
+    while (!viewport.camerasAvailable() && cameras.elapsed() < 3000) {
+      QEventLoop loop; QTimer::singleShot(20, &loop, &QEventLoop::quit); loop.exec();
+    }
+    if (viewport.camerasAvailable()) {
+      if (!check(viewport.setSourceCameraView(0), "source camera available after scene load")) return false;
+      const auto camera = CameraTrajectory::loadForScene(scenePath).cameras().constFirst();
+      const auto framePose = orbitFrame(viewport.viewOrbitAngles());
+      if (!check((-framePose.cameraOffsetDirection - camera.forward).length() < 1.0e-4F &&
+          (framePose.upDirection + camera.imageDown).length() < 1.0e-4F,
+          "source camera preserves forward and image-up, including camera roll")) return false;
+      frame = viewport.grabFramebuffer();
+      frame.save(QDir(imageDirectory).filePath("source-camera-0.png"));
+      qInfo() << "Gaussian benchmark: source-camera FOV" << viewport.perspectiveFovDegrees()
+              << "roll" << viewport.viewOrbitAngles().rollDegrees;
+      viewport.resetCamera();
+      // Source-camera QA changed the sorting direction. Settle its asynchronous
+      // depth order before measuring the no-navigation upload baseline.
+      QEventLoop settle; QTimer::singleShot(100, &settle, &QEventLoop::quit); settle.exec();
+      frame = viewport.grabFramebuffer();
+    }
+  }
   for (const auto phase : {"idle", "orbit", "wheel", "hover"}) {
     const auto attributesBefore = viewport.gaussianAttributeUploads();
     const auto shBefore = viewport.gaussianShUploads();

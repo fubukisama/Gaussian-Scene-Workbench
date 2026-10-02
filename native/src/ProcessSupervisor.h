@@ -28,6 +28,11 @@ struct WorkerStatus final {
   std::optional<int> previewIteration;
   QString previewPath;
   QString previewKind;
+  QString reconstructionQuality;
+  std::optional<int> reconstructionViews;
+  std::optional<int> reconstructionInputs;
+  std::optional<int> reconstructionPoints;
+  QString generationIssue;
   std::optional<int> densityGuardIteration;
   std::optional<int> densityGuardDeferred;
 };

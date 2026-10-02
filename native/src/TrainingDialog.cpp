@@ -129,8 +129,8 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   rootLayout->addLayout(form);
 
   auto *note = AppLanguage::text(new QLabel(
-      QCoreApplication::translate("Workbench", "输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"),
-      this), AppLanguage::source("输出默认写入工程所在磁盘。检测到已有稀疏重建时可关闭 COLMAP；关闭后若数据不可训练，任务会自动尝试恢复或重建。"));
+      QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。"),
+      this), AppLanguage::source("训练前检查相机覆盖和稀疏点。退化重建会有限重试；自动重建可尝试更简单的相机模型，原始照片与已有输出保留。2DGS 快速预览默认 10,000 次迭代、1/2 分辨率，包含法线约束阶段；手动参数不被覆盖。"));
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
   rootLayout->addWidget(note);
@@ -218,6 +218,10 @@ void TrainingDialog::applyPreset() {
   }
   if (backend == QStringLiteral("2dgs") && quality == QStringLiteral("max_quality")) {
     iterations = 30000;
+  }
+  if (backend == QStringLiteral("2dgs") && quality == QStringLiteral("quick")) {
+    iterations = 10000;
+    resolution = 2;
   }
   mIterations->setValue(iterations);
   const int resolutionIndex = mResolution->findData(resolution);

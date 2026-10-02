@@ -10,8 +10,8 @@ PIPELINES = {
                  limitation="Shared GPU preview is platform-dependent; no cross-process historical curves.",
                  acceptance="CUDA state restoration, preview fallback, desktop reopen and locale tests."),
     "2dgs": dict(native_entry=True, checkpoint=True, live_preview="snapshot", density_control="native_guarded",
-                 limitation="External surfel runtime required; affine thin-disk display, no shared GPU preview.",
-                 acceptance="Real CUDA checkpoint/preview smoke passed; representative-data quality, long-run regularization and exact surfel viewport remain."),
+                 limitation="External surfel runtime required; no shared GPU preview; center-sorted OpenGL compositing is not the upstream CUDA tile renderer.",
+                 acceptance="Real CUDA checkpoint/preview and nine-view reconstruction replay; perspective/orthographic surfel GPU regression. Held-out coverage and long-run regularization remain."),
     "bounded": dict(native_entry=True, checkpoint=False, live_preview="completed_mesh_stage",
                     density_control="2dgs_input_only",
                     material_preview="validated_diffuse_atlas",
@@ -38,6 +38,12 @@ PIPELINES = {
                     limitation="Native photo-texturing stage with validated diffuse-atlas preview; standalone dense reconstruction, general PBR and over-budget multi-atlas previews remain unavailable.",
                     acceptance="Native material mapping, preview, partial failure, locale/reopen tests; representative photo bake and dense staged reconstruction remain."),
 }
+
+# All generation entry points share source admission; imported geometry without
+# an SfM dataset cannot be certified by counts alone (never fabricate a pass).
+for _pipeline in PIPELINES.values():
+    _pipeline["reconstruction_gate"] = "shared_colmap_viability"
+    _pipeline["reconstruction_gate_limit"] = "Minimum viability, not held-out image or metric geometry accuracy; external/synthetic inputs require their own validation."
 
 
 def supports_checkpoint(backend):

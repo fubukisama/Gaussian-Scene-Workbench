@@ -1,0 +1,6 @@
+# Developer regression checks, not the pinned CUDA training environment.
+numpy>=1.24
+plyfile>=1.0
+Pillow>=9.5
+trimesh>=4.0
+legacy-cgi>=2.6; python_version >= "3.13"

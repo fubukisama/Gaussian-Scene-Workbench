@@ -115,6 +115,10 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
             raise RuntimeError("训练数据集中没有可用图像：{}".format(images_path))
 
         server = load_server_module(root)
+        if report["hasReconstruction"] and (dataset / "sparse" / "0").is_dir():
+            quality = server.reconstruction_quality.assess_dataset(dataset)
+            report["reconstructionQuality"] = quality
+            report["reconstructionRepairRequired"] = not quality["usable"]
         python_path = Path(server.training_python(backend)).resolve()
         report["python"] = str(python_path)
         if not python_path.is_file():
@@ -126,7 +130,7 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         if not colmap or not Path(colmap).is_file():
             raise FileNotFoundError("COLMAP 不可用，无法完成训练数据准备。")
         report["colmap"] = str(Path(colmap).resolve())
-        report["colmapRequired"] = bool(run_colmap or not report["hasReconstruction"])
+        report["colmapRequired"] = bool(run_colmap or not report["hasReconstruction"] or report.get("reconstructionRepairRequired"))
         process_environment = server.training_env(backend)
         if report["colmapRequired"]:
             colmap_probe = subprocess.run(

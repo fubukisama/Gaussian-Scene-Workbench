@@ -39,6 +39,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 基础颜色 | Base color | 基本色 |
 | 压缩质量 / 工作副本 | Compression Quality / Working Copy | 圧縮品質 / 作業用コピー |
 | 稀疏点云 | Sparse Point Cloud | 疎な点群 |
+| 相机注册 / 拍摄覆盖 | Camera Registration / Capture Coverage | カメラ登録 / 撮影カバレッジ |
+| 重投影误差 / 法线约束 | Reprojection Error / Normal Regularization | 再投影誤差 / 法線の正則化 |
+| 退化重建 / 最低有效性检查 | Degenerate Reconstruction / Minimum Viability Check | 退化した再構築 / 最低限の有効性検査 |
 | 最终模型 / 只读预览 | Final Model / Read-only Preview | 最終モデル / 読み取り専用プレビュー |
 | 初始化高斯 | Initializing Gaussians | ガウシアンを初期化 |
 | 密度控制 | Density Control | 密度制御 |

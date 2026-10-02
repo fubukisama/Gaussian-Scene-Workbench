@@ -130,6 +130,7 @@ public:
                                       QString *errorMessage = nullptr);
   [[nodiscard]] ModelExportOptions modelExportOptions() const;
   [[nodiscard]] bool sourceHasGaussianAttributes() const { return mScene->mHasGaussianAttributes; }
+  [[nodiscard]] bool sourceHasSurfelAttributes() const { return mScene->mHasSurfelAttributes; }
   [[nodiscard]] bool hasUnsavedSceneEdits() const;
   void discardSceneEdits();
   [[nodiscard]] bool hasEditableScene() const;
@@ -152,6 +153,8 @@ public:
   }
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
+  [[nodiscard]] bool setSourceCameraView(qsizetype index);
+  [[nodiscard]] float perspectiveFovDegrees() const { return mPerspectiveFovDegrees; }
   [[nodiscard]] RenderMode renderMode() const { return mScene->mRenderMode; }
   [[nodiscard]] ReferencePlaneMode referencePlaneMode() const {
     return mReferencePlaneMode;
@@ -322,6 +325,7 @@ private:
     qsizetype mRenderedMeshIndexCount = 0;
     bool mSelectionBusy = false;
     bool mHasGaussianAttributes = false;
+    bool mHasSurfelAttributes = false;
     bool mHasMesh = false;
     bool mPreviewOnlyScene = false;
     bool mProgressiveUploadActive = false;
@@ -395,6 +399,8 @@ private:
     float distance = 0.0F;
     bool orthographic = false;
     float rollDegrees = 0.0F;
+    float fovDegrees = 46.0F;
+    float focalAspectCorrection = 1.0F;
   };
 
   enum class TransformConstraintKind { None, Axis, Plane };
@@ -596,6 +602,8 @@ private:
   float mRollDegrees = 0.0F;
   float mSnapStartRoll = 0.0F;
   float mDistance = 12.0F;
+  float mPerspectiveFovDegrees = 46.0F;
+  float mFocalAspectCorrection = 1.0F;
   NavigationGizmoHit mNavigationHover;
   NavigationGizmoHit mNavigationPress;
   QPoint mNavigationPressPosition;

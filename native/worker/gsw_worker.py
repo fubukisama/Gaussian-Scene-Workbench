@@ -114,6 +114,9 @@ def status_telemetry(snapshot):
         "previewIteration": ("latest_iteration", "preview_iteration", "previewIteration"),
         "densityGuardIteration": ("density_guard_iteration", "densityGuardIteration"),
         "densityGuardDeferred": ("density_guard_deferred", "densityGuardDeferred"),
+        "reconstructionViews": ("reconstructionViews",),
+        "reconstructionInputs": ("reconstructionInputs",),
+        "reconstructionPoints": ("reconstructionPoints",),
     }
     floating_fields = {
         "loss": ("loss",),
@@ -142,6 +145,18 @@ def status_telemetry(snapshot):
     preview_kind = snapshot.get("preview_kind") or snapshot.get("previewKind")
     if isinstance(preview_kind, str) and preview_kind.strip():
         telemetry["previewKind"] = preview_kind.strip()
+    quality = snapshot.get("reconstruction_quality")
+    if isinstance(quality, dict):
+        for output, source in (("reconstructionViews", "registeredImages"), ("reconstructionInputs", "inputImages"), ("reconstructionPoints", "validPoints")):
+            value = quality.get(source)
+            if _finite_number(value) and value >= 0:
+                telemetry[output] = int(value)
+    phase = snapshot.get("reconstruction_quality_phase") or snapshot.get("reconstructionQuality")
+    if phase in ("accepted", "partial", "repairing", "rejected"):
+        telemetry["reconstructionQuality"] = phase
+    issue = snapshot.get("generation_issue") or snapshot.get("generationIssue")
+    if issue in ("reconstruction_quality", "source_frames_missing"):
+        telemetry["generationIssue"] = issue
     return telemetry
 
 

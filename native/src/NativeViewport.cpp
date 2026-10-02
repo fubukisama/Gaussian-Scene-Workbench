@@ -734,6 +734,7 @@ void NativeViewport::setScene(const QString &scenePath,
   const bool meshAvailabilityChanged = meshRenderingAvailable();
   const bool renderModeChangedToPoints = mScene->mRenderMode != RenderMode::Points;
   mScene->mHasGaussianAttributes = false;
+  mScene->mHasSurfelAttributes = false;
   mScene->mHasMesh = false;
   mScene->mPreviewOnlyScene = false;
   mScene->mRenderMode = RenderMode::Points;
@@ -1094,6 +1095,8 @@ bool NativeViewport::focusModel() {
   }
 
   const QVector<QVector3D> corners = selectionBoundsCorners();
+  mPerspectiveFovDegrees = 46.0F;
+  mFocalAspectCorrection = 1.0F;
   const float aspectRatio =
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
                    : 1.0F;
@@ -1227,6 +1230,8 @@ void NativeViewport::resetCamera() {
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
   mRollDegrees = 0.0F;
+  mPerspectiveFovDegrees = 46.0F;
+  mFocalAspectCorrection = 1.0F;
   const float radius = transformedSceneRadius();
   mDistance = clampViewportDistance(
       std::max(radius * 2.8F, 0.1F), radius);
@@ -1617,9 +1622,12 @@ void main() {
   QFile shSource(QStringLiteral(":/shaders/evaluate_sh.glsl"));
   shSource.open(QIODevice::ReadOnly);
   const QByteArray shEvaluator = shSource.readAll();
+  QFile surfelSource(QStringLiteral(":/shaders/evaluate_surfel.glsl"));
+  surfelSource.open(QIODevice::ReadOnly);
+  const QByteArray surfelEvaluator = surfelSource.readAll();
   const bool gaussianVertexCompiled =
       mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
-          QByteArray("#version 330 core\n") + shEvaluator + R"GLSL(
+          QByteArray("#version 330 core\n") + shEvaluator + surfelEvaluator + R"GLSL(
 layout(location = 0) in vec3 attributePosition;
 layout(location = 1) in vec3 attributeColor;
 layout(location = 2) in float attributeOpacity;
@@ -1633,10 +1641,16 @@ uniform usamplerBuffer gaussianOrder;
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec2 viewportPixels;
+uniform bool surfelRendering;
 
 out vec3 vertexColor;
 out float vertexOpacity;
 out vec2 gaussianCoordinate;
+flat out vec3 surfelTu;
+flat out vec3 surfelTv;
+flat out vec3 surfelTw;
+flat out vec2 surfelFilterCenter;
+flat out vec3 surfelCameraDepth;
 
 mat3 rotationMatrix(vec4 quaternionWxyz) {
   vec4 q = quaternionWxyz / max(length(quaternionWxyz), 1e-8);
@@ -1694,6 +1708,9 @@ void main() {
     localCoordinate = vec2(3.0, 3.0);
   }
   gaussianCoordinate = localCoordinate;
+  surfelTu = surfelTv = surfelTw = vec3(0.0);
+  surfelFilterCenter = vec2(0.0);
+  surfelCameraDepth = vec3(0.0);
 
   if (cameraCenter.z >= -1e-4 || clipCenter.w <= 0.0 ||
       vertexOpacity <= (1.0 / 255.0)) {
@@ -1704,6 +1721,37 @@ void main() {
 
   vec3 safeScale = clamp(scale, vec3(1e-8), vec3(1e6));
   mat3 worldRotation = rotationMatrix(rotation);
+  if (surfelRendering) {
+    vec4 cameraU = view * vec4(worldRotation[0] * safeScale.x, 0.0);
+    vec4 cameraV = view * vec4(worldRotation[1] * safeScale.y, 0.0);
+    vec4 clipU = projection * cameraU;
+    vec4 clipV = projection * cameraV;
+    surfelCameraDepth = -vec3(cameraU.z, cameraV.z, cameraCenter.z);
+    surfelTw = vec3(clipU.w, clipV.w, clipCenter.w);
+    surfelTu = 0.5 * viewportPixels.x *
+        (vec3(clipU.x, clipV.x, clipCenter.x) + surfelTw);
+    surfelTv = 0.5 * viewportPixels.y *
+        (vec3(clipU.y, clipV.y, clipCenter.y) + surfelTw);
+    vec2 center, extent;
+    bool bounded = surfelBounds(surfelTu, surfelTv, surfelTw, center, extent);
+    if (!bounded) {
+      center = 0.5 * viewportPixels;
+      extent = 0.5 * viewportPixels;
+    }
+    surfelFilterCenter = bounded ? center :
+        0.5 * viewportPixels * (clipCenter.xy / clipCenter.w + 1.0);
+    vec2 lower = max(center - extent, vec2(0.0));
+    vec2 upper = min(center + extent, viewportPixels);
+    if (any(lessThanEqual(upper, lower))) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      vertexOpacity = 0.0;
+      return;
+    }
+    vec2 pixel = mix(lower, upper, localCoordinate / 6.0 + 0.5);
+    gl_Position = vec4(2.0 * pixel / viewportPixels - 1.0,
+                       clipCenter.z / clipCenter.w, 1.0);
+    return;
+  }
   mat3 scaleSquared = mat3(
       vec3(safeScale.x * safeScale.x, 0.0, 0.0),
       vec3(0.0, safeScale.y * safeScale.y, 0.0),
@@ -1757,15 +1805,33 @@ void main() {
 )GLSL");
   const bool gaussianFragmentCompiled =
       mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
-                                                R"GLSL(#version 330 core
+          QByteArray("#version 330 core\n") + surfelEvaluator + R"GLSL(
 in vec3 vertexColor;
 in float vertexOpacity;
 in vec2 gaussianCoordinate;
+flat in vec3 surfelTu;
+flat in vec3 surfelTv;
+flat in vec3 surfelTw;
+flat in vec2 surfelFilterCenter;
+flat in vec3 surfelCameraDepth;
+uniform bool surfelRendering;
+uniform mat4 projection;
 uniform float selected;
 out vec4 fragmentColor;
 void main() {
+  gl_FragDepth = gl_FragCoord.z;
   float power = -0.5 * dot(gaussianCoordinate, gaussianCoordinate);
+  if (surfelRendering) {
+    vec2 uv;
+    float depth;
+    if (!surfelIntersection(gl_FragCoord.xy, surfelTu, surfelTv, surfelTw, uv, depth)) discard;
+    float fragmentDepth = surfelFragmentDepth(uv, surfelCameraDepth, projection);
+    if (fragmentDepth < 0.0 || fragmentDepth > 1.0) discard;
+    gl_FragDepth = fragmentDepth;
+    power = surfelPower(uv, gl_FragCoord.xy, surfelFilterCenter);
+  }
   float alpha = vertexOpacity * exp(power);
+  if (surfelRendering) alpha = min(0.99, alpha);
   if (alpha < (1.0 / 255.0)) {
     discard;
   }
@@ -2497,6 +2563,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             // opacity also have a paged representation.
             mScene->mHasGaussianAttributes =
                 data.hasGaussianAttributes && !mScene->mPreviewOnlyScene;
+            mScene->mHasSurfelAttributes =
+                data.hasSurfelAttributes && mScene->mHasGaussianAttributes;
             const bool isAvailable = gaussianRenderingAvailable();
             if (isAvailable != wasAvailable) {
               emit gaussianRenderingAvailabilityChanged(isAvailable);
@@ -3850,6 +3918,7 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   mGaussianProgram->bind();
   const bool indexed = !livePreview && mScene->indexedGaussians;
   mGaussianProgram->setUniformValue("indexedAttributes", indexed);
+  mGaussianProgram->setUniformValue("surfelRendering", !livePreview && mScene->mHasSurfelAttributes);
   mGaussianProgram->setUniformValue("gaussianAttributes", 2);
   mGaussianProgram->setUniformValue("gaussianOrder", 3);
   mGaussianProgram->setUniformValue("gaussianSh", 4);
@@ -4524,6 +4593,8 @@ void NativeViewport::toggleCameraView() {
     mYawDegrees = mStoredCameraView->yawDegrees;
     mPitchDegrees = mStoredCameraView->pitchDegrees;
     mRollDegrees = mStoredCameraView->rollDegrees;
+    mPerspectiveFovDegrees = mStoredCameraView->fovDegrees;
+    mFocalAspectCorrection = mStoredCameraView->focalAspectCorrection;
     mDistance =
         clampViewportDistance(mStoredCameraView->distance,
                               transformedSceneRadius());
@@ -4533,27 +4604,40 @@ void NativeViewport::toggleCameraView() {
     update();
     return;
   }
-  if (!camerasAvailable()) {
-    return;
-  }
+  (void)setSourceCameraView(0);
+}
 
-  const CameraPose &camera = mScene->mCameraTrajectory.cameras().constFirst();
-  const QVector3D forward = camera.forward.normalized();
+bool NativeViewport::setSourceCameraView(const qsizetype index) {
+  if (!camerasAvailable() || index < 0 || index >= cameraCount()) return false;
+  const CameraPose &camera = mScene->mCameraTrajectory.cameras().at(index);
+  const auto mapping = modelMatrix() * trainingPreviewCoordinateTransform();
+  const QVector3D forward = mapping.mapVector(camera.forward).normalized();
+  QVector3D up = mapping.mapVector(-camera.imageDown);
+  up = (up - forward * QVector3D::dotProduct(up, forward)).normalized();
   if (forward.lengthSquared() < 1.0e-6F) {
-    return;
+    return false;
   }
-
-  mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
-                                       mDistance, mOrthographic, mRollDegrees};
+  if (up.lengthSquared() < 1.0e-6F) return false;
+  if (!mCameraViewActive)
+    mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
+        mDistance, mOrthographic, mRollDegrees, mPerspectiveFovDegrees,
+        mFocalAspectCorrection};
+  mViewSnapAnimation->stop();
   mRollDegrees = 0.0F;
   const QVector3D cameraOffset = -forward;
   mPitchDegrees =
       std::asin(std::clamp(cameraOffset.z(), -1.0F, 1.0F)) * 180.0F / kPi;
   mYawDegrees = std::atan2(cameraOffset.x(), cameraOffset.y()) * 180.0F / kPi;
-  mTarget = camera.position + forward * mDistance;
+  const QVector3D baseUp = orbitFrame(viewOrbitAngles()).upDirection;
+  mRollDegrees = std::atan2(QVector3D::dotProduct(cameraOffset,
+      QVector3D::crossProduct(baseUp, up)), QVector3D::dotProduct(baseUp, up)) * 180.0F / kPi;
+  mTarget = mapping.map(camera.position) + forward * mDistance;
+  mPerspectiveFovDegrees = camera.verticalFovDegrees;
+  mFocalAspectCorrection = camera.focalAspectCorrection;
   mOrthographic = false;
   mCameraViewActive = true;
   update();
+  return true;
 }
 
 void NativeViewport::leaveCameraView() {
@@ -4759,11 +4843,12 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   }
   if (mOrthographic) {
     const float halfHeight =
-        std::max(0.05F, mDistance * std::tan(radians(23.0F)));
+        std::max(0.05F, mDistance * std::tan(radians(mPerspectiveFovDegrees * 0.5F)));
     projection.ortho(-halfHeight * aspect, halfHeight * aspect, -halfHeight,
                      halfHeight, nearPlane, farPlane);
   } else {
-    projection.perspective(46.0F, aspect, nearPlane, farPlane);
+    projection.perspective(mPerspectiveFovDegrees, aspect, nearPlane, farPlane);
+    projection(0, 0) *= mFocalAspectCorrection;
   }
   return projection;
 }

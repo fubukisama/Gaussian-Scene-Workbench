@@ -110,6 +110,15 @@ bool parseCamera(const QJsonValue &value, CameraPose *camera) {
   const int height = object.value(QStringLiteral("height")).toInt();
   camera->width = width > 0 ? width : 0;
   camera->height = height > 0 ? height : 0;
+  const double fx = object.value(QStringLiteral("fx")).toDouble();
+  const double fy = object.value(QStringLiteral("fy")).toDouble();
+  if (height > 0 && std::isfinite(fy) && fy > 0.0) {
+    const double fov = 2.0 * std::atan(height / (2.0 * fy)) * 180.0 /
+                       3.14159265358979323846;
+    if (fov >= 1.0 && fov <= 175.0) camera->verticalFovDegrees = float(fov);
+    if (std::isfinite(fx) && fx > 0.0 && fx / fy >= 0.1 && fx / fy <= 10.0)
+      camera->focalAspectCorrection = float(fx / fy);
+  }
   return true;
 }
 

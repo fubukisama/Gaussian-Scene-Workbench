@@ -142,7 +142,10 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       !parseOptionalInteger(object, QStringLiteral("densityGuardIteration"),
                             &parsedStatus.densityGuardIteration, 1) ||
       !parseOptionalInteger(object, QStringLiteral("densityGuardDeferred"),
-                            &parsedStatus.densityGuardDeferred, 1)) {
+                            &parsedStatus.densityGuardDeferred, 1) ||
+      !parseOptionalInteger(object, QStringLiteral("reconstructionViews"), &parsedStatus.reconstructionViews) ||
+      !parseOptionalInteger(object, QStringLiteral("reconstructionInputs"), &parsedStatus.reconstructionInputs) ||
+      !parseOptionalInteger(object, QStringLiteral("reconstructionPoints"), &parsedStatus.reconstructionPoints)) {
     return false;
   }
   const QJsonValue gaussianCount =
@@ -171,6 +174,16 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       return false;
     }
     parsedStatus.previewKind = previewKind.toString();
+  }
+  for (const QString &key : {QStringLiteral("reconstructionQuality"), QStringLiteral("generationIssue")}) {
+    const auto value = object.value(key);
+    if (value.isUndefined()) continue;
+    const QStringList allowed = key == QStringLiteral("reconstructionQuality")
+        ? QStringList{QStringLiteral("accepted"), QStringLiteral("partial"), QStringLiteral("repairing"), QStringLiteral("rejected")}
+        : QStringList{QStringLiteral("reconstruction_quality"), QStringLiteral("source_frames_missing")};
+    if (!value.isString() || !allowed.contains(value.toString())) return false;
+    if (key == QStringLiteral("reconstructionQuality")) parsedStatus.reconstructionQuality = value.toString();
+    else parsedStatus.generationIssue = value.toString();
   }
 
   *status = std::move(parsedStatus);

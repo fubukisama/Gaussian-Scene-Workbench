@@ -155,6 +155,10 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   mReset = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "重建前清理旧 COLMAP 缓存"), this), AppLanguage::source("重建前清理旧 COLMAP 缓存"));
   mReset->setChecked(!mHasExistingData);
   form->addRow(QString(), mReset);
+  mQualityRecovery = AppLanguage::text(new QCheckBox(this), AppLanguage::source("质量不佳时有限重试（允许简化相机模型）"));
+  mQualityRecovery->setChecked(settings.value(QStringLiteral("reconstruction/qualityRecovery"), true).toBool());
+  AppLanguage::bind(mQualityRecovery, "toolTip", AppLanguage::source("按已注册相机、有效点和重投影误差筛选子模型。最多追加两次重建；关闭重试后仍会阻止退化结果发布。原始照片完整保留。"));
+  form->addRow(QString(), mQualityRecovery);
 
   rootLayout->addLayout(form);
 
@@ -208,6 +212,7 @@ ReconstructionConfiguration ReconstructionDialog::configuration() const {
   result.useGpu = mUseGpu->isChecked();
   result.singleCamera = mSingleCamera->isChecked();
   result.reset = mReset->isChecked();
+  result.qualityRecovery = mQualityRecovery->isChecked();
   return result;
 }
 
@@ -250,6 +255,7 @@ void ReconstructionDialog::accept() {
   settings.setValue(QStringLiteral("reconstruction/preset"), config.preset);
   settings.setValue(QStringLiteral("reconstruction/cameraModel"),
                     config.cameraModel);
+  settings.setValue(QStringLiteral("reconstruction/qualityRecovery"), config.qualityRecovery);
   settings.setValue(QStringLiteral("reconstruction/useGpu"), config.useGpu);
   settings.setValue(QStringLiteral("reconstruction/singleCamera"),
                     config.singleCamera);

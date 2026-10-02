@@ -35,11 +35,6 @@ class TrainingPreviewPublisher:
             count = int(model.get_xyz.shape[0])
             stride = max(1, (count + self.max_points - 1) // self.max_points)
             scaling = model._scaling[::stride]
-            if scaling.shape[1] == 2:
-                # Display-only thin disk approximation. Never add a trainable
-                # third scale to the 2DGS optimizer, checkpoint or source PLY.
-                normal_scale = scaling.min(dim=1, keepdim=True)[0] - 6.90775527898
-                scaling = torch.cat((scaling, normal_scale), dim=1)
             fields = (model.get_xyz[::stride], model._features_dc[::stride, 0, :],
                       model._opacity[::stride], scaling, model._rotation[::stride])
             rows = torch.cat(fields, dim=1).detach().to(device="cpu", dtype=torch.float32).numpy()
@@ -50,7 +45,7 @@ class TrainingPreviewPublisher:
             return False
         import numpy as np
         rows = np.asarray(rows, dtype="<f4")
-        if rows.ndim != 2 or rows.shape[1] != 14 or rows.shape[0] == 0:
+        if rows.ndim != 2 or rows.shape[1] not in (13, 14) or rows.shape[0] == 0:
             return False
         source_count = int(source_count if source_count is not None else len(rows))
         stride = max(1, (len(rows) + self.max_points - 1) // self.max_points)
@@ -67,6 +62,10 @@ class TrainingPreviewPublisher:
             path.parent.mkdir(parents=True, exist_ok=True)
             properties = ("x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity",
                           "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3")
+            # Official 2DGS snapshots retain two scales so the native loader
+            # selects perspective-correct surface rendering during training too.
+            if getattr(rows, "shape", (len(rows), 14))[1] == 13:
+                properties = tuple(name for name in properties if name != "scale_2")
             header = "ply\nformat binary_little_endian 1.0\ncomment gsw observation preview, not a checkpoint\n"
             header += f"element vertex {len(rows)}\n"
             header += "".join(f"property float {name}\n" for name in properties) + "end_header\n"

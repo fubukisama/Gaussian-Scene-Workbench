@@ -13,6 +13,7 @@ struct TrainingEnvironmentProbeResult final {
   QString python;
   QString cudaDevice;
   QString errorMessage;
+  QString reconstructionWarning;
 };
 
 class TrainingEnvironmentProbe final {

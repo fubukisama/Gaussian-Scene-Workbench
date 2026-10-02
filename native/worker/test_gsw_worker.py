@@ -445,6 +445,22 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(event["densityGuardIteration"], 3100)
         self.assertEqual(event["densityGuardDeferred"], 3300)
 
+    def test_reconstruction_telemetry_survives_normalization_and_streaming(self):
+        snapshot = {"reconstruction_quality": {"registeredImages": 9, "inputImages": 9, "validPoints": 2330},
+                    "reconstruction_quality_phase": "accepted", "generation_issue": "reconstruction_quality"}
+        normalized = gsw_worker.status_telemetry(snapshot)
+        self.assertEqual(gsw_worker.status_telemetry(normalized), normalized)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            gsw_worker.emit_status("running", "colmap", 0, normalized)
+        event = json.loads(output.getvalue().split(" ", 1)[1])
+        self.assertEqual(event["reconstructionViews"], 9)
+        self.assertEqual(event["reconstructionInputs"], 9)
+        self.assertEqual(event["reconstructionPoints"], 2330)
+        self.assertEqual(event["reconstructionQuality"], "accepted")
+        self.assertEqual(event["generationIssue"], "reconstruction_quality")
+        self.assertEqual(gsw_worker.status_telemetry({"reconstructionQuality": "arbitrary", "generationIssue": "arbitrary"}), {})
+
     def test_run_colmap_forwards_absolute_dataset_and_options(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

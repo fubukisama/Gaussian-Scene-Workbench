@@ -22,6 +22,7 @@ struct ReconstructionConfiguration {
   bool useGpu = true;
   bool singleCamera = true;
   bool reset = true;
+  bool qualityRecovery = true;
 };
 
 class ReconstructionDialog final : public QDialog {
@@ -53,6 +54,7 @@ private:
   QCheckBox *mUseGpu = nullptr;
   QCheckBox *mSingleCamera = nullptr;
   QCheckBox *mReset = nullptr;
+  QCheckBox *mQualityRecovery = nullptr;
 };
 
 } // namespace gsw

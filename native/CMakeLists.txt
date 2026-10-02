@@ -227,6 +227,8 @@ install(TARGETS GaussianSceneWorkbench
 )
 install(DIRECTORY third_party/spz DESTINATION licenses)
 install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
+install(DIRECTORY third_party/2dgs-surfel DESTINATION licenses)
+install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/2dgs-surfel RENAME LICENSE.md)
 
 include(CTest)
 if(BUILD_TESTING)

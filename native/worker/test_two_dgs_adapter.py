@@ -201,14 +201,15 @@ class TwoDgsAdapterTests(unittest.TestCase):
             previews = [value for prefix, value in events if prefix == "[gsw-training-preview]"]
             self.assertTrue(any(value.get("preview_kind") == "gaussian_initial" for value in previews))
             self.assertTrue(any(value["iteration"] == 12 for value in previews))
-            # Preview-only scale expansion is finite and leaves source scales intact.
+            # Snapshot keeps the two-scale source contract and finite attributes.
             preview = next(Path(value["point_cloud_path"]) for value in previews
                            if value.get("preview_kind") == "gaussian_initial")
             header, payload = preview.read_bytes().split(b"end_header\n", 1)
-            self.assertIn(b"property float scale_2", header)
-            rows = np.frombuffer(payload, dtype="<f4").reshape(-1, 14)
+            self.assertIn(b"property float scale_1", header)
+            self.assertNotIn(b"property float scale_2", header)
+            rows = np.frombuffer(payload, dtype="<f4").reshape(-1, 13)
             self.assertTrue(np.isfinite(rows).all())
-            self.assertTrue(np.all(rows[:, 9] < rows[:, 7]))
+            self.assertEqual(rows.shape[1], 13)
             self.assertEqual(resumed._scaling.shape[1], 2)
 
 

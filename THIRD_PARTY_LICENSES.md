@@ -32,6 +32,14 @@ The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source a
 
 日本語：デスクトップ版は Niantic/Adobe の MIT ライセンス SPZ ソースを上記コミットに固定して直接コンパイルします。ソース・著作権・ライセンスは配布物の `licenses/spz/` に同梱します。zlib と Zstandard はそれぞれのライセンスを維持します。
 
+## Native 2DGS Surface Projection / 原生 2DGS 表面投影 / ネイティブ 2DGS サーフェル投影
+
+`native/third_party/2dgs-surfel/evaluate_surfel.glsl` directly adapts the bounding-box and ray/surfel intersection routines from `cuda_rasterizer/forward.cu` in hbb1/diff-surfel-rasterization, commit `e0ed0207b3e0669960cfad70852200a4a5847f61`: https://github.com/hbb1/diff-surfel-rasterization . Original Inria GRAPHDECO notices and the complete research/evaluation license are retained in that directory and distributed under `licenses/2dgs-surfel/`. The GLSL adapter adds OpenGL pixel-center conventions, orthographic projection and finite/projection-pole guards. This derivative code is not MIT and grants no commercial-use permission.
+
+中文：桌面端二维高斯投影直接改编上述官方源码，保留 Inria GRAPHDECO 版权及研究/评估用途许可证，随安装包分发，不以 MIT 重新授权，不授予商用许可。
+
+日本語：ネイティブの 2DGS 投影は上記公式ソースを直接移植し、Inria GRAPHDECO の著作権と研究・評価用途のライセンスを同梱します。MIT への変更や商用利用許諾はありません。
+
 ## Native SH Evaluation / 原生球谐求值 / ネイティブ SH 評価
 
 `native/third_party/gsplat-sh/evaluate_sh.glsl` directly adapts `sh_coeffs_to_color_fast` from gsplat commit `512d366b67073d77ca099ede742683c165dfc23b` under Apache-2.0: https://github.com/nerfstudio-project/gsplat . The Regents of the University of California, Nerfstudio Team/contributors and NVIDIA notices, modification notice and full license are retained and shipped under `licenses/gsplat-sh/`. Only the evaluator is adapted; no CUDA/PyTorch runtime is added. No upstream NOTICE file is present at that revision.

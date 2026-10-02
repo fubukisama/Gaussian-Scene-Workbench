@@ -108,6 +108,12 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (kind == "2dgs") { bytes.replace("property float scale_2\n", ""); bytes.replace("-3 -3 -3", "-3 -3"); }
       if (kind == "2dgs" && !realBytes.isEmpty()) bytes = realBytes;
       if (!check(write(final, bytes) && write(preview, bytes), "write independent preview/final fixtures")) return false;
+      if (training) {
+        check(write(QDir(output).filePath("cameras.json"),
+            "[{\"img_name\":\"fixture\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]],\"width\":1920,\"height\":1080,\"fx\":1300,\"fy\":1300}]"), "write source camera fixture");
+        check(write(QDir(output).filePath("reconstruction_quality.json"),
+            "{\"registeredImages\":9,\"inputImages\":9}"), "write quality report fixture");
+      }
       const QString task = kind + "-completion";
       if (training) window.mPendingTraining = MainWindow::PendingTraining{task, project, {}, output, kind, 2};
       else {
@@ -134,6 +140,11 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       check(training ? window.mWorkspace.scenePath().contains("/.gsw/checkpoints/training/") :
           window.mWorkspace.scenePath() == final, "validated final is associated, not the previous model");
       check(!window.mSelectionToolbar->isHidden() && window.mInspectAction->isEnabled(), "inspect toolbar is restored");
+      if (training) {
+        check(wait([&] { return window.mViewport->cameraCount() == 1; }), "protected training result retains source cameras");
+        const auto directory = QFileInfo(window.mViewport->scenePath()).absoluteDir();
+        check(QFileInfo::exists(directory.filePath("reconstruction_quality.json")), "protected result retains quality report");
+      }
       check(window.mViewport->editToolsLocked() == locked, "explicit editing-lock preference survives completion");
       check(window.mRectangleAction->isEnabled() == (training && !locked), "trim availability follows final geometry and lock");
       check(window.mMoveModelAction->isEnabled() == !locked, "model transforms follow explicit lock");

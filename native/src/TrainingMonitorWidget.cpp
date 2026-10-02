@@ -220,6 +220,11 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mProgress->setValue(0);
   mProgress->setTextVisible(true);
   layout->addWidget(mProgress);
+  mReconstructionQuality = new QLabel(this);
+  mReconstructionQuality->setObjectName(QStringLiteral("reconstructionQualityLabel"));
+  mReconstructionQuality->setWordWrap(true);
+  mReconstructionQuality->hide();
+  layout->addWidget(mReconstructionQuality);
 
   auto *metrics = new QGridLayout();
   metrics->setHorizontalSpacing(18);
@@ -282,6 +287,7 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
   mLastStage.clear();
   mDensityGuardIteration = 0;
   mDensityGuardDeferred = 0;
+  mReconstructionStatus = {};
   mTaskTitle = QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName);
   mTitle->setText(mTaskTitle);
   mState->setText(QCoreApplication::translate("Workbench", "启动中"));
@@ -293,6 +299,9 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
   mLastStage = status.stage;
+  if (!status.reconstructionQuality.isEmpty() || !status.generationIssue.isEmpty()) {
+    mReconstructionStatus = status;
+  }
   if (status.densityGuardIteration.has_value() && status.densityGuardDeferred.has_value()) {
     mDensityGuardIteration = *status.densityGuardIteration;
     mDensityGuardDeferred = *status.densityGuardDeferred;
@@ -339,6 +348,25 @@ const TrainingTelemetry &TrainingMonitorWidget::telemetry() const {
 
 void TrainingMonitorWidget::refreshMetrics() {
   const QLocale locale;
+  const WorkerStatus &quality = mReconstructionStatus;
+  mReconstructionQuality->setVisible(!quality.reconstructionQuality.isEmpty() || !quality.generationIssue.isEmpty());
+  QString message;
+  if (quality.generationIssue == QStringLiteral("source_frames_missing")) {
+    message = QCoreApplication::translate("Workbench", "原始帧无法完整恢复。请重新导入原始照片或视频；已保留当前模型，不会使用缺失照片的子集继续训练。");
+  } else if (!quality.reconstructionQuality.isEmpty()) {
+    const QString phase = quality.reconstructionQuality == QStringLiteral("repairing")
+        ? QCoreApplication::translate("Workbench", "有限重试中")
+        : quality.reconstructionQuality == QStringLiteral("rejected")
+        ? QCoreApplication::translate("Workbench", "质量检查未通过 · 已阻止训练")
+        : quality.reconstructionQuality == QStringLiteral("partial")
+        ? QCoreApplication::translate("Workbench", "部分相机注册 · 覆盖不足")
+        : QCoreApplication::translate("Workbench", "最低质量检查通过");
+    message = QCoreApplication::translate("Workbench", "重建检查：相机 %1/%2 · 有效稀疏点 %3 · %4。高斯数量和训练 PSNR 不代表新视角质量。")
+        .arg(locale.toString(quality.reconstructionViews.value_or(0)),
+             locale.toString(quality.reconstructionInputs.value_or(0)),
+             locale.toString(quality.reconstructionPoints.value_or(0)), phase);
+  }
+  mReconstructionQuality->setText(message);
   mDensityWarning->setVisible(mDensityGuardDeferred > 0);
   if (mDensityGuardDeferred > 0) {
     mDensityWarning->setText(QCoreApplication::translate("Workbench",
