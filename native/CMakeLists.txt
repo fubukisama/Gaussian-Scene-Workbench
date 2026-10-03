@@ -141,6 +141,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ScreenSpaceSelection.h
   src/TrainingDialog.cpp
   src/TrainingDialog.h
+  src/TrainingInputSummary.cpp
+  src/TrainingInputSummary.h
   src/TrainingEnvironmentProbe.cpp
   src/TrainingEnvironmentProbe.h
   src/TrainingGpuPreviewProtocol.cpp
@@ -601,6 +603,20 @@ if(BUILD_TESTING)
       target_compile_options(gsw_training_telemetry_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME training_telemetry COMMAND gsw_training_telemetry_tests)
+
+    qt_add_executable(gsw_training_input_summary_tests
+      tests/TrainingInputSummaryTests.cpp
+      src/TrainingInputSummary.cpp
+      src/TrainingInputSummary.h
+    )
+    target_include_directories(gsw_training_input_summary_tests PRIVATE src)
+    target_link_libraries(gsw_training_input_summary_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_training_input_summary_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME training_input_summary COMMAND gsw_training_input_summary_tests)
+    set_tests_properties(training_input_summary PROPERTIES TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
 
     qt_add_executable(gsw_training_gpu_preview_protocol_tests
       tests/TrainingGpuPreviewProtocolTests.cpp

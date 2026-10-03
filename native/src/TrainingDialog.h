@@ -2,10 +2,12 @@
 
 #include <QDialog>
 #include <QString>
+#include "TrainingInputSummary.h"
 
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
+class QLabel;
 class QSpinBox;
 
 namespace gsw {
@@ -38,6 +40,8 @@ protected:
 private:
   void applyPreset();
   void chooseOutputRoot();
+  void refreshInputSummary();
+  void scanInputSummary();
   [[nodiscard]] bool datasetContainsImages() const;
 
   QString mDatasetPath;
@@ -49,6 +53,10 @@ private:
   QLineEdit *mOutputScene = nullptr;
   QCheckBox *mRunColmap = nullptr;
   QCheckBox *mOverwrite = nullptr;
+  QLabel *mInputSummaryLabel = nullptr;
+  TrainingInputSummaryScanner *mInputScanner = nullptr;
+  TrainingInputSummary mInputSummary;
+  bool mInputSummaryPending = false;
 };
 
 } // namespace gsw

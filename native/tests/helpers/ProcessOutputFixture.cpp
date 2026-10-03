@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QProcess>
 #include <QThread>
@@ -18,6 +19,31 @@
 int main(int argc, char *argv[]) {
   QCoreApplication application(argc, argv);
   const QStringList arguments = application.arguments();
+  if (arguments.size() == 2 && arguments.at(1) == QStringLiteral("summary-worker")) {
+    QJsonObject summary{{"version", 1}, {"phase", "loaded"}, {"backend", "3dgs"},
+        {"quality", "original_quality"}, {"iterations", 30000}, {"resolution", 1},
+        {"optimizer", "default"}, {"densifyUntil", 0}, {"densificationInterval", 80},
+        {"densifyGradient", .00012}, {"antialiasing", true}, {"exposureCompensation", false},
+        {"trainImageCount", 2}, {"trainDimensionKinds", 1},
+        {"trainDimensions", QJsonArray{QJsonValue(QJsonArray{1928, 1084, 2})}},
+        {"trainPixels", qint64(1928) * 1084 * 2}};
+    const auto publish = [&](const QJsonObject &metadata) {
+      const QByteArray bytes = QJsonDocument(QJsonObject{{"version", 1}, {"type", "status"},
+          {"state", "running"}, {"stage", "train"}, {"iteration", 3},
+          {"trainingSummary", metadata}}).toJson(QJsonDocument::Compact);
+      std::printf("[worker-event] %s\n", bytes.constData());
+      std::fflush(stdout);
+    };
+    publish(summary);
+    auto invalid = summary; invalid["trainPixels"] = 1; publish(invalid);
+    invalid = summary; invalid["resolution"] = true; publish(invalid);
+    invalid = summary; invalid["trainDimensions"] = QJsonArray{QJsonArray{1928, 1084}}; publish(invalid);
+    invalid = summary; invalid["version"] = 2; publish(invalid);
+    invalid = summary; invalid["trainPixels"] = 1.0e20; publish(invalid);
+    summary["backend"] = QStringLiteral("2dgs"); summary["optimizer"] = QStringLiteral("adam");
+    summary["depthRatio"] = 0.0; summary["resolution"] = 16; publish(summary);
+    return 0;
+  }
   if (arguments.size() == 5 && arguments.at(1) == QStringLiteral("completion-worker")) {
     const bool mesh = arguments.at(4) == QStringLiteral("mesh");
     const bool sparse = arguments.at(4) == QStringLiteral("colmap_sparse");

@@ -20,6 +20,7 @@ from unittest import mock
 from native.worker import training_checkpoint as cp
 from native.worker.training_preview import TrainingPreviewPublisher
 from native.worker.training_density_control import NativeDensityControl
+from native.worker.training_summary import emit_loaded_training_summary
 
 
 class TwoDgsAdapterTests(unittest.TestCase):
@@ -145,6 +146,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                       restore_state=cp.restore_state, file_digest=cp.file_digest,
                       TrainingPreviewPublisher=TrainingPreviewPublisher, tqdm=Progress, render=render,
                       NativeDensityControl=NativeDensityControl,
+                      emit_loaded_training_summary=emit_loaded_training_summary,
                       l1_loss=lambda a, b: (a - b).abs().mean(), ssim=lambda a, b: 1 - ((a - b)**2).mean(),
                       psnr=lambda a, b: -10 * torch.log10(((a-b)**2).mean()),
                       training_report=lambda *args: None, emit_gsw_event=lambda *event: events.append(event))

@@ -6203,6 +6203,136 @@
     "en_US": "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.",
     "ja_JP": "ガウシアン PLY のエクスポートでは元の座標と全属性を保持します。ガウシアンモデルのトランスフォームのベイクには、まだ対応していません。"
   },
+  "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。": {
+    "zh_CN": "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。",
+    "en_US": "Effective settings: %1 · %2 iterations · %3 · %4 optimizer.",
+    "ja_JP": "有効な設定：%1 · %2 反復 · %3 · 最適化器 %4。"
+  },
+  "1/%1 分辨率": {
+    "zh_CN": "1/%1 分辨率",
+    "en_US": "1/%1 resolution",
+    "ja_JP": "1/%1 解像度"
+  },
+  "目标宽度 %1 px": {
+    "zh_CN": "目标宽度 %1 px",
+    "en_US": "Target width %1 px",
+    "ja_JP": "目標幅 %1 px"
+  },
+  "%1 × %2 px（%3 张）": {
+    "zh_CN": "%1 × %2 px（%3 张）",
+    "en_US": "%1 × %2 px (%3 images)",
+    "ja_JP": "%1 × %2 px（%3 枚）"
+  },
+  "另有 %1 种尺寸": {
+    "zh_CN": "另有 %1 种尺寸",
+    "en_US": "%1 more dimensions",
+    "ja_JP": "ほか %1 種類の寸法"
+  },
+  "实际训练图像：%1 张 · %2 · 总计 %3 MP。": {
+    "zh_CN": "实际训练图像：%1 张 · %2 · 总计 %3 MP。",
+    "en_US": "Loaded training images: %1 · %2 · %3 MP total.",
+    "ja_JP": "読み込み済み学習画像：%1 枚 · %2 · 合計 %3 MP。"
+  },
+  "实际训练图像尺寸将在相机加载后确认。": {
+    "zh_CN": "实际训练图像尺寸将在相机加载后确认。",
+    "en_US": "Actual training image dimensions will be confirmed after cameras load.",
+    "ja_JP": "実際の学習画像の寸法は、カメラの読み込み後に確認されます。"
+  },
+  "增密截止：%1 · 间隔：%2 · 梯度阈值：%3": {
+    "zh_CN": "增密截止：%1 · 间隔：%2 · 梯度阈值：%3",
+    "en_US": "Densification end: %1 · interval: %2 · gradient threshold: %3",
+    "ja_JP": "高密度化の終了：%1 · 間隔：%2 · 勾配しきい値：%3"
+  },
+  "抗锯齿：%1 · 曝光补偿：%2": {
+    "zh_CN": "抗锯齿：%1 · 曝光补偿：%2",
+    "en_US": "Antialiasing: %1 · exposure compensation: %2",
+    "ja_JP": "アンチエイリアシング：%1 · 露出補正：%2"
+  },
+  "深度混合比例：%1": {
+    "zh_CN": "深度混合比例：%1",
+    "en_US": "Depth blending ratio: %1",
+    "ja_JP": "深度のブレンド比率：%1"
+  },
+  "启用": {
+    "zh_CN": "启用",
+    "en_US": "Enabled",
+    "ja_JP": "有効"
+  },
+  "禁用": {
+    "zh_CN": "禁用",
+    "en_US": "Disabled",
+    "ja_JP": "無効"
+  },
+  "稀疏 Adam": {
+    "zh_CN": "稀疏 Adam",
+    "en_US": "Sparse Adam",
+    "ja_JP": "スパース Adam"
+  },
+  "图像尺寸摘要": {
+    "zh_CN": "图像尺寸摘要",
+    "en_US": "Image Dimensions",
+    "ja_JP": "画像寸法の概要"
+  },
+  "正在读取图像尺寸（仅读取文件头）…": {
+    "zh_CN": "正在读取图像尺寸（仅读取文件头）…",
+    "en_US": "Reading image dimensions (headers only)…",
+    "ja_JP": "画像寸法を読み取り中（ヘッダーのみ）…"
+  },
+  "未找到可读取的图像文件。": {
+    "zh_CN": "未找到可读取的图像文件。",
+    "en_US": "No readable image files were found.",
+    "ja_JP": "読み取り可能な画像ファイルが見つかりません。"
+  },
+  "去畸变前预计尺寸（%1 张目录图像；非注册相机数量）": {
+    "zh_CN": "去畸变前预计尺寸（%1 张目录图像；非注册相机数量）",
+    "en_US": "Estimated dimensions before undistortion (%1 directory images; not registered cameras)",
+    "ja_JP": "歪み補正前の予想寸法（フォルダー内の画像 %1 枚。登録カメラ数ではありません）"
+  },
+  "目录尺寸预计值（%1 张图像；非注册相机数量或最终加载尺寸）": {
+    "zh_CN": "目录尺寸预计值（%1 张图像；非注册相机数量或最终加载尺寸）",
+    "en_US": "Directory estimate (%1 images; not registered cameras or final loaded dimensions)",
+    "ja_JP": "フォルダーからの予測（画像 %1 枚。登録カメラ数や最終読み込み寸法ではありません）"
+  },
+  "来源：%1": {
+    "zh_CN": "来源：%1",
+    "en_US": "Source: %1",
+    "ja_JP": "参照元：%1"
+  },
+  "%1 × %2 → %3 × %4 px（%5 张）": {
+    "zh_CN": "%1 × %2 → %3 × %4 px（%5 张）",
+    "en_US": "%1 × %2 → %3 × %4 px (%5 images)",
+    "ja_JP": "%1 × %2 → %3 × %4 px（%5 枚）"
+  },
+  "另有 %1 种图像尺寸。": {
+    "zh_CN": "另有 %1 种图像尺寸。",
+    "en_US": "%1 more image dimensions.",
+    "ja_JP": "ほかに %1 種類の画像寸法があります。"
+  },
+  "已知尺寸的目录图像：%1 MP → 预计 %2 MP（%3%）。": {
+    "zh_CN": "已知尺寸的目录图像：%1 MP → 预计 %2 MP（%3%）。",
+    "en_US": "Directory images with known dimensions: %1 MP → estimated %2 MP (%3%).",
+    "ja_JP": "寸法が確認できたフォルダー内画像：%1 MP → 予想 %2 MP（%3%）。"
+  },
+  "%1 张图像尺寸未知（损坏或格式不受支持）；未推测其尺寸。": {
+    "zh_CN": "%1 张图像尺寸未知（损坏或格式不受支持）；未推测其尺寸。",
+    "en_US": "%1 images have unknown dimensions (damaged or unsupported format); their dimensions were not estimated.",
+    "ja_JP": "%1 枚の画像の寸法が不明です（破損または非対応の形式）。寸法を推測していません。"
+  },
+  "跳过 %1 个符号链接或范围外路径。": {
+    "zh_CN": "跳过 %1 个符号链接或范围外路径。",
+    "en_US": "Skipped %1 symbolic links or out-of-scope paths.",
+    "ja_JP": "%1 件のシンボリックリンクまたは対象範囲外のパスをスキップしました。"
+  },
+  "有图像缩放后宽或高为 0 px；请提高训练分辨率。": {
+    "zh_CN": "有图像缩放后宽或高为 0 px；请提高训练分辨率。",
+    "en_US": "An image would have a width or height of 0 px after resizing; increase the training resolution.",
+    "ja_JP": "縮小後に幅または高さが 0 px になる画像があります。学習解像度を上げてください。"
+  },
+  "去畸变可能改变有效尺寸；实际训练尺寸以加载报告为准。": {
+    "zh_CN": "去畸变可能改变有效尺寸；实际训练尺寸以加载报告为准。",
+    "en_US": "Undistortion may change valid dimensions; the loaded-image report confirms actual training dimensions.",
+    "ja_JP": "歪み補正により有効寸法が変わることがあります。実際の学習寸法は読み込み結果で確認してください。"
+  },
   "Loss": {
     "zh_CN": "损失",
     "en_US": "Loss",

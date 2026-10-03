@@ -123,6 +123,76 @@ class SafeNameImportBackend(FakeImportBackend):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_import_journal_retries_only_transient_windows_replace_locks(self):
+        for winerror in (5, 32):
+            with self.subTest(winerror=winerror), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "journal.json"
+                path.write_text('{"state":"old"}', encoding="utf-8")
+                locked = PermissionError("temporarily locked")
+                locked.winerror = winerror
+                replace = os.replace
+                attempts = []
+
+                def replace_after_lock(source, target):
+                    attempts.append((source, target))
+                    if len(attempts) <= 2:
+                        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["state"], "old")
+                        raise locked
+                    replace(source, target)
+
+                with mock.patch.object(gsw_worker.os, "replace", side_effect=replace_after_lock), \
+                     mock.patch.object(gsw_worker.time, "sleep") as sleep:
+                    gsw_worker.write_import_journal(path, {"state": "committed"})
+                self.assertEqual(len(attempts), 3)
+                self.assertEqual(len({str(item[0]) for item in attempts}), 1)
+                self.assertEqual(sleep.call_args_list, [mock.call(.05), mock.call(.05)])
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"state": "committed"})
+                self.assertEqual(list(path.parent.glob("journal.json.tmp-*")), [])
+
+    def test_import_journal_persistent_windows_lock_is_bounded_and_preserves_old_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "journal.json"
+            old = b'{"state":"old"}'
+            path.write_bytes(old)
+            locked = PermissionError("persistent lock")
+            locked.winerror = 5
+            with mock.patch.object(gsw_worker.os, "replace", side_effect=locked) as replace, \
+                 mock.patch.object(gsw_worker.time, "sleep") as sleep:
+                with self.assertRaises(PermissionError):
+                    gsw_worker.write_import_journal(path, {"state": "committed"})
+            self.assertEqual(replace.call_count, 5)
+            self.assertEqual(sleep.call_args_list, [mock.call(.05)] * 4)
+            self.assertEqual(path.read_bytes(), old)
+            self.assertEqual(list(path.parent.glob("journal.json.tmp-*")), [])
+
+    def test_import_journal_non_lock_errors_fail_without_retry(self):
+        unrelated = OSError("unrelated failure")
+        unrelated.winerror = 112
+        for error in (PermissionError("ordinary access denial"), unrelated, FileNotFoundError("missing file")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "journal.json"
+                with mock.patch.object(gsw_worker.os, "replace", side_effect=error) as replace, \
+                     mock.patch.object(gsw_worker.time, "sleep") as sleep:
+                    with self.assertRaises(type(error)):
+                        gsw_worker.write_import_journal(path, {"state": "committed"})
+                self.assertEqual(replace.call_count, 1)
+                sleep.assert_not_called()
+                self.assertFalse(path.exists())
+                self.assertEqual(list(path.parent.glob("journal.json.tmp-*")), [])
+
+    def test_import_journal_rechecks_reparse_target_before_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "journal.json"
+            locked = PermissionError("temporary lock")
+            locked.winerror = 32
+            with mock.patch.object(gsw_worker.os, "replace", side_effect=locked) as replace, \
+                 mock.patch.object(gsw_worker, "_is_reparse_point", side_effect=[False, False, True]), \
+                 mock.patch.object(gsw_worker.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, "link or reparse point"):
+                    gsw_worker.write_import_journal(path, {"state": "committed"})
+            self.assertEqual(replace.call_count, 1)
+            self.assertEqual(list(path.parent.glob("journal.json.tmp-*")), [])
+
     def configuration(self, root):
         return {
             "repositoryRoot": str(root),
@@ -461,6 +531,30 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(event["generationIssue"], "reconstruction_quality")
         self.assertEqual(gsw_worker.status_telemetry({"reconstructionQuality": "arbitrary", "generationIssue": "arbitrary"}), {})
 
+    def test_training_summary_survives_normalization_streaming_and_backend_specific_fields(self):
+        from native.worker.training_summary import configured_training_summary, loaded_training_summary
+        from types import SimpleNamespace
+        for backend in ("3dgs", "2dgs"):
+            options = {"iterations": 30000, "resolution": 1, "densify_until_iter": 22000,
+                       "densification_interval": 80, "densify_grad_threshold": .00012,
+                       "optimizer_type": "default", "antialiasing": True,
+                       "exposure_compensation": True, "depth_ratio": 0.0}
+            summary = loaded_training_summary(configured_training_summary(backend, "original_quality", options),
+                                              [SimpleNamespace(image_width=1928, image_height=1084)])
+            normalized = gsw_worker.status_telemetry({"kind": "training", "trainingSummary": summary})
+            self.assertEqual(normalized, {"trainingSummary": summary})
+            self.assertEqual(gsw_worker.status_telemetry(normalized), normalized)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                gsw_worker.emit_status("running", "train", 0, normalized)
+            event = json.loads(output.getvalue().split(" ", 1)[1])
+            self.assertEqual(event["trainingSummary"], summary)
+            self.assertEqual(summary["optimizer"], "default" if backend == "3dgs" else "adam")
+            for kind in ("mesh", "colmap", "splat_export"):
+                self.assertNotIn("trainingSummary", gsw_worker.status_telemetry({"kind": kind, "trainingSummary": summary}))
+        for malformed in (None, {}, [], {"quality": []}):
+            self.assertEqual(gsw_worker.status_telemetry({"trainingSummary": malformed}), {})
+
     def test_run_colmap_forwards_absolute_dataset_and_options(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -734,6 +828,43 @@ class WorkerTests(unittest.TestCase):
 
             self.assertEqual((final / "version.txt").read_text(encoding="utf-8"), "old")
             self.assertFalse(backup.exists())
+
+    def test_import_commit_lock_retries_publication_and_keeps_rollback_on_exhaustion(self):
+        for permanent in (False, True):
+            with self.subTest(permanent=permanent), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config = self.import_configuration(root, overwrite=True)
+                final = Path(config["datasetRoot"]) / config["scene"]
+                (final / "images").mkdir(parents=True)
+                photo = final / "images" / "frame.jpg"
+                photo.write_bytes(b"old model source")
+                backend = SafeNameImportBackend(imported_bytes=b"new model source")
+                journal = gsw_worker.import_journal_path(Path(config["datasetRoot"]), config["scene"])
+                replace = os.replace
+                commit_attempts = []
+
+                def commit_lock(source, target):
+                    if Path(target) == journal:
+                        payload = json.loads(Path(source).read_text(encoding="utf-8"))
+                        if payload["state"] == "committed":
+                            commit_attempts.append(payload)
+                            if permanent or len(commit_attempts) <= 2:
+                                error = PermissionError("commit locked")
+                                error.winerror = 5
+                                raise error
+                    return replace(source, target)
+
+                with mock.patch.object(gsw_worker, "import_backend", return_value=backend), \
+                     mock.patch.object(gsw_worker.os, "replace", side_effect=commit_lock), \
+                     mock.patch.object(gsw_worker.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
+                    exit_code = gsw_worker.run_import(config)
+                self.assertEqual(exit_code, 1 if permanent else 0)
+                self.assertEqual(len(commit_attempts), 5 if permanent else 3)
+                self.assertEqual(photo.read_bytes(), b"old model source" if permanent else b"new model source")
+                self.assertEqual(json.loads(journal.read_text(encoding="utf-8"))["state"],
+                                 "publishing" if permanent else "committed")
+                self.assertEqual(list(journal.parent.glob(journal.name + ".tmp-*")), [])
+                self.assertEqual(list(journal.parent.glob(".capture.backup-*")), [])
 
     def test_project_recovery_scans_journals_without_a_scene_argument(self):
         with tempfile.TemporaryDirectory() as temporary:

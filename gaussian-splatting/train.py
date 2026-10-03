@@ -101,8 +101,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         from native.worker.training_checkpoint import (
             TrainingCheckpoint, training_identity, capture_state, restore_state)
         from native.worker.training_density_control import NativeDensityControl
+        from native.worker.training_summary import emit_loaded_training_summary
         density_control = NativeDensityControl(torch, gaussians, scene.cameras_extent, "3dgs", emit_gsw_event)
         native_checkpoint = TrainingCheckpoint(scene.model_path, json.loads(control_json))
+        emit_loaded_training_summary(emit_gsw_event, native_checkpoint.control, scene.getTrainCameras())
         native_identity = training_identity(dataset, opt, pipe)
         # Scene construction shuffles cameras. Stable ordering lets saved sampler
         # indices survive a fresh process without depending on initialization RNG.

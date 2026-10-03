@@ -50,6 +50,7 @@ private slots:
   void initTestCase();
   void pauseIsDistinctFromCancellation();
   void parsesFragmentedWorkerStatusWithoutPollutingLogs();
+  void trainingSummaryDoesNotBreakLegacyProgress();
   void stopTerminatesTheEntireProcessTree();
   void gracefulStopCleansChildAfterParentExitsFirst();
   void shutdownTerminatesTheEntireProcessTreeSynchronously();
@@ -58,6 +59,28 @@ private slots:
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
+}
+
+void ProcessSupervisorTests::trainingSummaryDoesNotBreakLegacyProgress() {
+  ProcessSupervisor supervisor;
+  QSignalSpy statusSpy(&supervisor, &ProcessSupervisor::workerStatusReady);
+  QSignalSpy outputSpy(&supervisor, &ProcessSupervisor::outputReady);
+  QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
+  QVERIFY(supervisor.start(QStringLiteral("summary"), processOutputFixturePath(),
+                          {QStringLiteral("summary-worker")}));
+  QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 5000);
+  QCOMPARE(statusSpy.size(), 7);
+  QCOMPARE(outputSpy.size(), 0);
+  for (const auto &arguments : statusSpy)
+    QCOMPARE(qvariant_cast<WorkerStatus>(arguments.at(0)).iteration.value(), 3);
+  const auto summary = qvariant_cast<WorkerStatus>(statusSpy.at(0).at(0)).trainingSummary;
+  QCOMPARE(summary.value(QStringLiteral("trainPixels")).toInteger(), qint64(1928) * 1084 * 2);
+  QCOMPARE(summary.value(QStringLiteral("densifyUntil")).toInt(), 0);
+  for (int i = 1; i <= 5; ++i)
+    QVERIFY(qvariant_cast<WorkerStatus>(statusSpy.at(i).at(0)).trainingSummary.isEmpty());
+  const auto surfel = qvariant_cast<WorkerStatus>(statusSpy.at(6).at(0)).trainingSummary;
+  QCOMPARE(surfel.value(QStringLiteral("backend")).toString(), QStringLiteral("2dgs"));
+  QCOMPARE(surfel.value(QStringLiteral("resolution")).toInt(), 16);
 }
 
 void ProcessSupervisorTests::pauseIsDistinctFromCancellation() {

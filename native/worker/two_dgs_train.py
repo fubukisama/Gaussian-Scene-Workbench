@@ -51,6 +51,7 @@ from native.worker.training_checkpoint import (
     TrainingCheckpoint, training_identity, capture_state, restore_state, file_digest)
 from native.worker.training_preview import TrainingPreviewPublisher
 from native.worker.training_density_control import NativeDensityControl
+from native.worker.training_summary import emit_loaded_training_summary
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -95,6 +96,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     identity = hashlib.sha256((training_identity(dataset, opt, pipe) +
                               "".join(file_digest(path) for path in runtime_files)).encode()).hexdigest()
     cameras = scene.getTrainCameras()
+    emit_loaded_training_summary(emit_gsw_event, native_checkpoint.control, cameras)
     density_control = NativeDensityControl(torch, gaussians, scene.cameras_extent, "2dgs", emit_gsw_event)
     cameras.sort(key=lambda camera: (camera.image_name, camera.colmap_id))
     camera_names = [(camera.image_name, camera.colmap_id) for camera in cameras]

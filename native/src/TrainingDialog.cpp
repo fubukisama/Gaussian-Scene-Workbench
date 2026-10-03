@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -135,8 +136,31 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(outputRow)), AppLanguage::source("输出目录"));
 
   mRunColmap = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this), AppLanguage::source("训练前运行 COLMAP 重建"));
+  mRunColmap->setObjectName(QStringLiteral("trainingRunColmapCheckBox"));
   mRunColmap->setChecked(!hasSparseReconstruction);
   form->addRow(QString(), mRunColmap);
+
+  mInputSummaryLabel = new QLabel(this);
+  mInputSummaryLabel->setObjectName(QStringLiteral("trainingInputSummaryLabel"));
+  mInputSummaryLabel->setTextFormat(Qt::PlainText);
+  mInputSummaryLabel->setWordWrap(true);
+  mInputSummaryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  form->addRow(QCoreApplication::translate("Workbench", "图像尺寸摘要"), mInputSummaryLabel);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mInputSummaryLabel)),
+                    AppLanguage::source("图像尺寸摘要"));
+  mInputScanner = new TrainingInputSummaryScanner(this);
+  connect(mInputScanner, &TrainingInputSummaryScanner::summaryReady, this,
+          [this](const TrainingInputSummary &summary) {
+            mInputSummary = summary;
+            mInputSummaryPending = false;
+            refreshInputSummary();
+          });
+  connect(mResolution, &QComboBox::currentIndexChanged, this,
+          &TrainingDialog::refreshInputSummary);
+  connect(mRunColmap, &QCheckBox::toggled, this, &TrainingDialog::scanInputSummary);
+  connect(this, &QDialog::finished, mInputScanner,
+          &TrainingInputSummaryScanner::cancel);
+  AppLanguage::onChanged(this, [this] { refreshInputSummary(); });
 
   mOverwrite = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this), AppLanguage::source("允许覆盖同名输出"));
   mOverwrite->setChecked(false);
@@ -157,12 +181,14 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   startButton->setDefault(true);
   rootLayout->addWidget(buttons);
 
-  connect(mBackend, &QComboBox::currentIndexChanged, this, &TrainingDialog::applyPreset);
+  // Backend-specific optimization defaults are resolved by the worker. The
+  // common iteration/resolution values here are user edits, not reset triggers.
   connect(mQuality, &QComboBox::currentIndexChanged, this, &TrainingDialog::applyPreset);
   connect(browseButton, &QPushButton::clicked, this, &TrainingDialog::chooseOutputRoot);
   connect(buttons, &QDialogButtonBox::accepted, this, &TrainingDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, this, &TrainingDialog::reject);
   applyPreset();
+  scanInputSummary();
 }
 
 TrainingConfiguration TrainingDialog::configuration() const {
@@ -248,6 +274,88 @@ void TrainingDialog::chooseOutputRoot() {
   if (!directory.isEmpty()) {
     mOutputRoot->setText(QDir::toNativeSeparators(directory));
   }
+}
+
+void TrainingDialog::scanInputSummary() {
+  mInputSummaryPending = true;
+  refreshInputSummary();
+  mInputScanner->request(mDatasetPath, mRunColmap->isChecked());
+}
+
+void TrainingDialog::refreshInputSummary() {
+  if (!mInputSummaryLabel) {
+    return;
+  }
+  if (mInputSummaryPending) {
+    mInputSummaryLabel->setText(QCoreApplication::translate(
+        "Workbench", "正在读取图像尺寸（仅读取文件头）…"));
+    return;
+  }
+  if (mInputSummary.imageCount == 0) {
+    mInputSummaryLabel->setText(QCoreApplication::translate(
+        "Workbench", "未找到可读取的图像文件。"));
+    return;
+  }
+  const QLocale locale;
+  QStringList lines;
+  lines.append((mRunColmap->isChecked()
+      ? QCoreApplication::translate("Workbench", "去畸变前预计尺寸（%1 张目录图像；非注册相机数量）")
+      : QCoreApplication::translate("Workbench", "目录尺寸预计值（%1 张图像；非注册相机数量或最终加载尺寸）"))
+      .arg(locale.toString(mInputSummary.imageCount)));
+  lines.append(QCoreApplication::translate("Workbench", "来源：%1")
+      .arg(QDir::toNativeSeparators(mInputSummary.sourceDirectory)));
+  const int resolution = mResolution->currentData().toInt();
+  long double sourcePixels = 0;
+  long double projectedPixels = 0;
+  bool zeroDimension = false;
+  for (qsizetype index = 0; index < mInputSummary.sizeGroups.size(); ++index) {
+    const auto &group = mInputSummary.sizeGroups.at(index);
+    const QSize projected = projectedTrainingImageSize(group.sourceSize, resolution);
+    zeroDimension = zeroDimension || projected.width() == 0 || projected.height() == 0;
+    // Convert before multiplying: arbitrary headers/counts must not overflow
+    // a 32-bit dimension or a 64-bit total-pixel accumulator.
+    sourcePixels += static_cast<long double>(group.sourceSize.width()) *
+                    group.sourceSize.height() * group.imageCount;
+    projectedPixels += static_cast<long double>(projected.width()) *
+                       projected.height() * group.imageCount;
+    if (index < 4) {
+      lines.append(QCoreApplication::translate(
+          "Workbench", "%1 × %2 → %3 × %4 px（%5 张）")
+          .arg(locale.toString(group.sourceSize.width()),
+               locale.toString(group.sourceSize.height()),
+               locale.toString(projected.width()), locale.toString(projected.height()),
+               locale.toString(group.imageCount)));
+    }
+  }
+  if (mInputSummary.sizeGroups.size() > 4) {
+    lines.append(QCoreApplication::translate("Workbench", "另有 %1 种图像尺寸。")
+        .arg(locale.toString(mInputSummary.sizeGroups.size() - 4)));
+  }
+  if (sourcePixels > 0) {
+    lines.append(QCoreApplication::translate(
+        "Workbench", "已知尺寸的目录图像：%1 MP → 预计 %2 MP（%3%）。")
+        .arg(locale.toString(double(sourcePixels / 1000000.0L), 'f', 1),
+             locale.toString(double(projectedPixels / 1000000.0L), 'f', 1),
+             locale.toString(double(projectedPixels * 100.0L / sourcePixels), 'f', 1)));
+  }
+  if (mInputSummary.unknownSizeCount > 0) {
+    lines.append(QCoreApplication::translate(
+        "Workbench", "%1 张图像尺寸未知（损坏或格式不受支持）；未推测其尺寸。")
+        .arg(locale.toString(mInputSummary.unknownSizeCount)));
+  }
+  if (mInputSummary.skippedLinkCount > 0) {
+    lines.append(QCoreApplication::translate("Workbench", "跳过 %1 个符号链接或范围外路径。")
+        .arg(locale.toString(mInputSummary.skippedLinkCount)));
+  }
+  if (zeroDimension) {
+    lines.append(QCoreApplication::translate(
+        "Workbench", "有图像缩放后宽或高为 0 px；请提高训练分辨率。"));
+  }
+  if (mRunColmap->isChecked()) {
+    lines.append(QCoreApplication::translate(
+        "Workbench", "去畸变可能改变有效尺寸；实际训练尺寸以加载报告为准。"));
+  }
+  mInputSummaryLabel->setText(lines.join(QLatin1Char('\n')));
 }
 
 bool TrainingDialog::datasetContainsImages() const {

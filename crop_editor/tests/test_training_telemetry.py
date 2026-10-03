@@ -38,6 +38,53 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_loaded_training_input_event_persists_and_preserves_effective_options(self):
+        from native.worker.training_summary import configured_training_summary, loaded_training_summary
+        for backend in ("3dgs", "2dgs"):
+            options = server.training_options_from_payload(backend, "original_quality")
+            if backend == "3dgs":
+                with mock.patch.object(server, "sparse_adam_available", return_value=False):
+                    options = server.resolve_training_options_for_environment(backend, options)
+            configured = configured_training_summary(backend, "original_quality", options)
+            job = dict(id="summary", scene="scene", output_scene="out", backend=backend,
+                       status="running", stage="train", created_at=1, updated_at=1,
+                       log=[], trainingSummary=configured)
+            loaded = loaded_training_summary(configured, [types.SimpleNamespace(image_width=1928, image_height=1084),
+                                                          types.SimpleNamespace(image_width=961, image_height=541)])
+            with tempfile.TemporaryDirectory() as temporary, mock.patch.object(server, "TRAIN_JOBS_DIR", Path(temporary)):
+                server.add_job_log(job, "[gsw-training-input] " + json.dumps(loaded))
+                persisted = json.loads((Path(temporary) / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(persisted["trainingSummary"], loaded)
+            self.assertEqual(server.job_snapshot(job)["trainingSummary"], loaded)
+            self.assertEqual(loaded["optimizer"], "default" if backend == "3dgs" else "adam")
+            self.assertEqual(loaded["trainImageCount"], 2)
+            self.assertEqual(loaded["trainDimensionKinds"], 2)
+            # Stale, malformed, wrong-backend or different-option events cannot overwrite the real input.
+            for changed in (configured, {"version": 2}, dict(loaded, resolution=2),
+                            dict(loaded, trainPixels=1), dict(loaded, backend="unknown")):
+                server.apply_training_input(job, changed)
+                self.assertEqual(job["trainingSummary"], loaded)
+            mesh = dict(kind="mesh", log=[], updated_at=1)
+            server.add_job_log(mesh, "[gsw-training-input] " + json.dumps(loaded))
+            self.assertNotIn("trainingSummary", mesh)
+            self.assertIsNone(server.job_snapshot(dict(job, trainingSummary=None))["trainingSummary"])
+
+    def test_effective_summary_passed_to_trainers_without_mutating_checkpoint_control(self):
+        from native.worker.training_summary import configured_training_summary
+        for backend in ("3dgs", "2dgs"):
+            control = {"output": "out", "session": "same", "resume": True}
+            summary = configured_training_summary(backend, "original_quality",
+                                                  server.training_options_from_payload(backend, "original_quality"))
+            job = {"log": [], "native_control": control, "trainingSummary": summary}
+            process = mock.Mock(stdout=[], wait=mock.Mock(return_value=0))
+            with mock.patch.object(server, "training_env", return_value={}), \
+                 mock.patch.object(server.subprocess, "Popen", return_value=process) as launch:
+                server.run_logged(job, ["python", "train.py"], "source", backend)
+            passed = json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"])
+            self.assertEqual(passed["trainingSummary"], summary)
+            self.assertEqual(passed["session"], "same")
+            self.assertEqual(control, {"output": "out", "session": "same", "resume": True})
+
     def test_density_protection_survives_job_snapshot_and_rejects_invalid_events(self):
         job = dict(id="density", scene="scene", output_scene="out", status="running",
                    stage="train", created_at=1, updated_at=1, log=[])

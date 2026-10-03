@@ -15,6 +15,12 @@ import time
 import uuid
 from pathlib import Path
 
+try:
+    from native.worker.training_summary import normalize_training_summary
+except ModuleNotFoundError:
+    # Direct execution uses this file's directory, not the repository root.
+    from training_summary import normalize_training_summary
+
 
 FINAL_STATES = {"done", "failed", "cancelled", "paused"}
 SCENE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -107,6 +113,10 @@ def status_telemetry(snapshot):
         return {}
 
     telemetry = {}
+    summary = (normalize_training_summary(snapshot.get("trainingSummary"))
+               if snapshot.get("kind") in (None, "training") else None)
+    if summary is not None:
+        telemetry["trainingSummary"] = summary
     integer_fields = {
         "iteration": ("iteration",),
         "totalIterations": ("total_iterations", "totalIterations"),
@@ -489,7 +499,19 @@ def write_import_journal(path, payload):
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        # Antivirus/indexing can briefly deny Windows atomic replacement even
+        # after our fsynced stream is closed. Retry only this publication step;
+        # never rerun the import or remove the existing journal as a fallback.
+        for attempt in range(5):
+            if _is_reparse_point(path):
+                raise RuntimeError("Import journal must not be a link or reparse point: {}".format(path))
+            try:
+                os.replace(temporary, path)
+                break
+            except OSError as error:
+                if getattr(error, "winerror", None) not in (5, 32) or attempt == 4:
+                    raise
+                time.sleep(.05)
     finally:
         if _path_exists_no_follow(temporary):
             temporary.unlink()

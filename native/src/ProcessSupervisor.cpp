@@ -2,6 +2,7 @@
 #include "ProcessSupervisor.h"
 
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QProcessEnvironment>
@@ -185,6 +186,76 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
     if (key == QStringLiteral("reconstructionQuality")) parsedStatus.reconstructionQuality = value.toString();
     else parsedStatus.generationIssue = value.toString();
   }
+
+  // Summary metadata is optional for old workers. Reject malformed metadata
+  // independently: a bad caption must never discard valid progress samples.
+  const QJsonObject summary = object.value(QStringLiteral("trainingSummary")).toObject();
+  const auto positiveInteger = [](const QJsonValue &value, double maximum) {
+    const double number = value.toDouble(-1.0);
+    return value.isDouble() && std::isfinite(number) && number >= 1.0 &&
+           number <= maximum && std::floor(number) == number;
+  };
+  const auto boundedReal = [](const QJsonValue &value, double maximum) {
+    const double number = value.toDouble(-1.0);
+    return value.isDouble() && std::isfinite(number) && number >= 0.0 && number <= maximum;
+  };
+  const QString backend = summary.value(QStringLiteral("backend")).toString();
+  const QString phase = summary.value(QStringLiteral("phase")).toString();
+  const QString optimizer = summary.value(QStringLiteral("optimizer")).toString();
+  const int resolution = summary.value(QStringLiteral("resolution")).toInt();
+  bool summaryValid = summary.value(QStringLiteral("version")).toDouble(-1) == 1.0 &&
+      (backend == QStringLiteral("3dgs") || backend == QStringLiteral("2dgs")) &&
+      (phase == QStringLiteral("configured") || phase == QStringLiteral("loaded")) &&
+      (optimizer == QStringLiteral("default") || optimizer == QStringLiteral("adam") ||
+       optimizer == QStringLiteral("sparse_adam")) &&
+      positiveInteger(summary.value(QStringLiteral("iterations")), 2147483647.0) &&
+      positiveInteger(summary.value(QStringLiteral("resolution")), 16.0) && resolution >= 1 &&
+      boundedReal(summary.value(QStringLiteral("densifyUntil")), 2147483647.0) &&
+      std::floor(summary.value(QStringLiteral("densifyUntil")).toDouble()) == summary.value(QStringLiteral("densifyUntil")).toDouble() &&
+      positiveInteger(summary.value(QStringLiteral("densificationInterval")), 2147483647.0) &&
+      boundedReal(summary.value(QStringLiteral("densifyGradient")), 1.0);
+  if (backend == QStringLiteral("3dgs")) {
+    summaryValid = summaryValid && summary.value(QStringLiteral("antialiasing")).isBool() &&
+        summary.value(QStringLiteral("exposureCompensation")).isBool();
+  } else {
+    summaryValid = summaryValid && boundedReal(summary.value(QStringLiteral("depthRatio")), 1.0);
+  }
+  if (phase == QStringLiteral("loaded")) {
+    const QJsonArray dimensions = summary.value(QStringLiteral("trainDimensions")).toArray();
+    summaryValid = summaryValid && !dimensions.isEmpty() && dimensions.size() <= 8 &&
+        positiveInteger(summary.value(QStringLiteral("trainImageCount")), 2147483647.0) &&
+        positiveInteger(summary.value(QStringLiteral("trainDimensionKinds")), 2147483647.0) &&
+        summary.value(QStringLiteral("trainDimensionKinds")).toInt() >= dimensions.size() &&
+        positiveInteger(summary.value(QStringLiteral("trainPixels")), 9007199254740991.0);
+    qint64 listedImages = 0;
+    qint64 listedPixels = 0;
+    QPair<int, int> previousSize;
+    for (const QJsonValue &value : dimensions) {
+      const QJsonArray size = value.toArray();
+      if (size.size() != 3 || !positiveInteger(size.at(0), 1000000.0) ||
+          !positiveInteger(size.at(1), 1000000.0) || !positiveInteger(size.at(2), 2147483647.0)) {
+        summaryValid = false;
+        break;
+      }
+      const QPair<int, int> currentSize{size.at(0).toInt(), size.at(1).toInt()};
+      const qint64 count = size.at(2).toInt();
+      const qint64 pixels = qint64(currentSize.first) * currentSize.second;
+      if (currentSize <= previousSize || pixels > 9007199254740991LL / count ||
+          listedPixels > 9007199254740991LL - pixels * count) {
+        summaryValid = false;
+        break;
+      }
+      previousSize = currentSize;
+      listedImages += count;
+      listedPixels += pixels * count;
+    }
+    const qint64 totalImages = summary.value(QStringLiteral("trainImageCount")).toInteger();
+    const qint64 totalPixels = summary.value(QStringLiteral("trainPixels")).toInteger();
+    summaryValid = summaryValid && listedImages <= totalImages && listedPixels <= totalPixels;
+    if (summary.value(QStringLiteral("trainDimensionKinds")).toInt() == dimensions.size())
+      summaryValid = summaryValid && listedImages == totalImages && listedPixels == totalPixels;
+  }
+  if (summaryValid) parsedStatus.trainingSummary = summary;
 
   *status = std::move(parsedStatus);
   return true;

@@ -1765,10 +1765,19 @@ void main() {
   float depth = -cameraCenter.z;
   float focalX = 0.5 * viewportPixels.x * projection[0][0];
   float focalY = 0.5 * viewportPixels.y * projection[1][1];
-  vec3 jacobianX = vec3(focalX / depth, 0.0,
-                        focalX * cameraCenter.x / (depth * depth));
-  vec3 jacobianY = vec3(0.0, focalY / depth,
-                        focalY * cameraCenter.y / (depth * depth));
+  vec3 jacobianX;
+  vec3 jacobianY;
+  if (shOrthographic) {
+    // Orthographic pixel coordinates are affine in camera X/Y. Dividing by
+    // depth here incorrectly shrinks splats twice when the viewport zooms.
+    jacobianX = vec3(focalX, 0.0, 0.0);
+    jacobianY = vec3(0.0, focalY, 0.0);
+  } else {
+    jacobianX = vec3(focalX / depth, 0.0,
+                     focalX * cameraCenter.x / (depth * depth));
+    jacobianY = vec3(0.0, focalY / depth,
+                     focalY * cameraCenter.y / (depth * depth));
+  }
   float covarianceXX =
       dot(jacobianX, cameraCovariance * jacobianX) + 0.09;
   float covarianceXY = dot(jacobianX, cameraCovariance * jacobianY);

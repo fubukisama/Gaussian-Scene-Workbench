@@ -65,6 +65,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 迭代 / 损失 | Iteration / Loss | 反復 / 損失 |
 | 最高精度（原始分辨率） | Maximum Fidelity (Original Resolution) | 最高精細（元の解像度） |
 | 原始分辨率 / 降采样 | Original Resolution / Downsampling | 元の解像度 / ダウンサンプリング |
+| 图像尺寸摘要 / 生效参数 | Image Dimensions / Effective Settings | 画像寸法の概要 / 有効な設定 |
+| 预计尺寸 / 实际训练图像 | Estimated Dimensions / Loaded Training Images | 予想寸法 / 読み込み済み学習画像 |
+| 稀疏 Adam / 曝光补偿 | Sparse Adam / Exposure Compensation | スパース Adam / 露出補正 |
 | 高斯点 / 增密 | Gaussian Splat / Densification | ガウシアンスプラット / 高密度化 |
 | 显存常驻 / 深度顺序 | GPU-Resident / Depth Order | GPU メモリ常駐 / 深度順序 |
 | 移动 / 旋转 / 缩放 | Move / Rotate / Scale | 移動 / 回転 / スケール |

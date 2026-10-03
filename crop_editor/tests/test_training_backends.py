@@ -1159,6 +1159,52 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertEqual(scene_metadata["training"]["quality"], "quality")
             self.assertEqual(scene_metadata["training"]["options"]["optimizer_type"], "sparse_adam")
 
+    def test_training_metadata_retains_loaded_summary_for_both_backends(self):
+        from native.worker.training_summary import configured_training_summary, loaded_training_summary
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "model"
+                options = server.training_options_from_payload(backend, "original_quality", {"iterations": 12345})
+                summary = loaded_training_summary(configured_training_summary(backend, "original_quality", options),
+                                                  [types.SimpleNamespace(image_width=1928, image_height=1084)])
+                server.write_training_metadata(output, backend, "original_quality", options, summary)
+                metadata = json.loads((output / "scene.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["training"]["summary"], summary)
+                self.assertEqual(metadata["training"]["options"], options)
+                self.assertEqual(summary["iterations"], 12345)
+
+    def test_configured_effective_summary_is_persisted_before_training_for_both_backends(self):
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                dataset = root / "dataset"
+                (dataset / "images").mkdir(parents=True)
+                (dataset / "images" / "frame.jpg").write_bytes(b"fixture")
+                (dataset / "transforms_train.json").write_text("{}", encoding="utf-8")
+                job = {"id": "configured", "scene": "scene", "output_scene": "out", "backend": backend,
+                       "status": "queued", "stage": "queued", "error": None, "cancel_requested": False,
+                       "dataset_path": str(dataset), "train_options": {"iterations": 12345}, "log": []}
+                observed = []
+                def run(_job, _command, _directory, _backend):
+                    if _command[1] != "train.py":
+                        return
+                    persisted = json.loads((root / "jobs" / "configured.json").read_text(encoding="utf-8"))
+                    observed.append(persisted["trainingSummary"])
+                    self.assertEqual(persisted["effective_train_options"]["iterations"], 12345)
+                with mock.patch.object(server, "OUTPUT_DIR", root / "output"), \
+                     mock.patch.object(server, "TRAIN_JOBS_DIR", root / "jobs"), \
+                     mock.patch.object(server, "ensure_training_environment", return_value={"python": "python", "colmap": "colmap", "two_dgs_dir": "2dgs"}), \
+                     mock.patch.object(server, "sparse_adam_available", return_value=False), \
+                     mock.patch.object(server, "run_logged", side_effect=run), \
+                     mock.patch.object(server, "training_point_cloud", return_value={"iteration": 12345, "path": "model.ply", "vertex_count": 42}):
+                    server.run_training_job(job, False, "original_quality", False)
+                self.assertEqual(job["status"], "done", job.get("error"))
+                self.assertEqual(len(observed), 1)
+                self.assertEqual(observed[0]["phase"], "configured")
+                self.assertEqual(observed[0]["optimizer"], "default" if backend == "3dgs" else "adam")
+                self.assertEqual(observed[0]["iterations"], 12345)
+                self.assertEqual(job["train_options"], {"iterations": 12345})
+
     def test_experiment_payload_lists_checkpoints_and_training_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_output = server.OUTPUT_DIR

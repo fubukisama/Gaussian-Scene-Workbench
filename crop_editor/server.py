@@ -28,6 +28,11 @@ except ModuleNotFoundError:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from native.worker.training_summary import (
+    configured_training_summary, normalize_training_summary, PARAMETER_FIELDS,
+)
 WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
 DATASETS_DIR = WORKSPACE_ROOT / "datasets"
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
@@ -79,6 +84,7 @@ COLMAP_POINT_PREVIEW_INTERVAL_SECONDS = 0.5
 COLMAP_SNAPSHOT_TARGET_COUNT = 48
 TRAINING_PROGRESS_PATTERN = re.compile(r"\[gsw-training-progress\]\s+(\d+)\s*/\s*(\d+)")
 TRAINING_METRICS_PREFIX = "[gsw-training-metrics]"
+TRAINING_INPUT_PREFIX = "[gsw-training-input]"
 TRAINING_DENSITY_PREFIX = "[gsw-density-control]"
 TRAINING_PREVIEW_PREFIX = "[gsw-training-preview]"
 WINDOWS_DEVICE_NAMES = {
@@ -4330,6 +4336,7 @@ def job_snapshot(job):
         "resume_checkpoint_iteration": job.get("resume_checkpoint_iteration"),
         "iteration": job.get("iteration"),
         "total_iterations": job.get("total_iterations"),
+        "trainingSummary": normalize_training_summary(job.get("trainingSummary")),
         "progressPercent": job.get("progressPercent"),
         "loss": job.get("loss"),
         "psnr": job.get("psnr"),
@@ -4450,6 +4457,15 @@ def apply_density_control(job, payload):
         job["density_guard_deferred"] = deferred
 
 
+def apply_training_input(job, payload):
+    summary = normalize_training_summary(payload)
+    configured = normalize_training_summary(job.get("trainingSummary"))
+    if (summary is None or summary["phase"] != "loaded" or configured is None
+            or any(summary.get(key) != configured.get(key) for key in PARAMETER_FIELDS)):
+        return
+    job["trainingSummary"] = summary
+
+
 def add_job_log(job, message):
     line = str(message).rstrip()
     if not line:
@@ -4460,12 +4476,15 @@ def add_job_log(job, message):
             metrics_payload = training_event_payload(line, TRAINING_METRICS_PREFIX)
             preview_payload = training_event_payload(line, TRAINING_PREVIEW_PREFIX)
             density_payload = training_event_payload(line, TRAINING_DENSITY_PREFIX)
+            input_payload = training_event_payload(line, TRAINING_INPUT_PREFIX)
             if metrics_payload is not None:
                 apply_training_metrics(job, metrics_payload)
             if preview_payload is not None:
                 apply_training_preview(job, preview_payload)
             if density_payload is not None:
                 apply_density_control(job, density_payload)
+            if input_payload is not None:
+                apply_training_input(job, input_payload)
             progress_match = TRAINING_PROGRESS_PATTERN.search(line)
             if progress_match and metrics_payload is None:
                 iteration = int(progress_match.group(1))
@@ -4856,7 +4875,11 @@ def run_logged(job, args, cwd, backend=None):
         process_env = training_env(backend or job.get("backend", "3dgs"))
     native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS else None
     if native_control:
-        process_env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps(native_control)
+        control_payload = dict(native_control)
+        summary = normalize_training_summary(job.get("trainingSummary"))
+        if summary is not None:
+            control_payload["trainingSummary"] = summary
+        process_env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps(control_payload)
         if backend == "2dgs":
             # Keep external upstream/runtime files untouched. The versioned
             # native entry retains the official 2DGS optimization algorithm.
@@ -5954,7 +5977,7 @@ def training_milestone_iterations(iterations):
     return sorted(set(milestones))
 
 
-def write_training_metadata(output, backend, quality=None, options=None):
+def write_training_metadata(output, backend, quality=None, options=None, summary=None):
     metadata = {
         "backend": backend,
         "created_at": time.time(),
@@ -5976,6 +5999,9 @@ def write_training_metadata(output, backend, quality=None, options=None):
                 "options": options,
             },
         }
+        normalized_summary = normalize_training_summary(summary)
+        if normalized_summary is not None and normalized_summary["backend"] == backend:
+            scene_metadata["training"]["summary"] = normalized_summary
         with open(output / "scene.json", "w", encoding="utf-8") as f:
             json.dump(scene_metadata, f, indent=2)
 
@@ -6140,6 +6166,8 @@ def run_training_job(job, run_convert, quality, overwrite):
         options = training_options_from_payload(backend, quality, job.get("train_options"))
         options = resolve_training_options_for_environment(backend, options, job)
         with TRAIN_LOCK:
+            job["trainingSummary"] = configured_training_summary(backend, quality, options)
+            job["effective_train_options"] = dict(options)
             job["iteration"] = int(job.get("resume_checkpoint_iteration") or 0)
             job["total_iterations"] = int(options["iterations"])
             job["progressPercent"] = max(
@@ -6193,7 +6221,7 @@ def run_training_job(job, run_convert, quality, overwrite):
             raise RuntimeError(
                 f"Training command completed but iteration {options['iterations']} produced no point_cloud.ply"
             )
-        write_training_metadata(output, backend, quality, options)
+        write_training_metadata(output, backend, quality, options, job.get("trainingSummary"))
         if job.get("reconstruction_quality"):
             (output / "reconstruction_quality.json").write_text(json.dumps(job["reconstruction_quality"], indent=2), encoding="utf-8")
         with TRAIN_LOCK:

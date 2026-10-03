@@ -1,6 +1,7 @@
 #include "AppLanguage.h"
 #include <QCoreApplication>
 #include "TrainingMonitorWidget.h"
+#include <QJsonArray>
 
 #include <QFontMetrics>
 #include <QGridLayout>
@@ -226,6 +227,14 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mReconstructionQuality->hide();
   layout->addWidget(mReconstructionQuality);
 
+  mEffectiveParameters = new QLabel(this);
+  mEffectiveParameters->setObjectName(QStringLiteral("trainingEffectiveParameters"));
+  mEffectiveParameters->setWordWrap(true);
+  mEffectiveParameters->setTextFormat(Qt::PlainText);
+  mEffectiveParameters->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mEffectiveParameters->hide();
+  layout->addWidget(mEffectiveParameters);
+
   auto *metrics = new QGridLayout();
   metrics->setHorizontalSpacing(18);
   metrics->setVerticalSpacing(2);
@@ -288,6 +297,7 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
   mDensityGuardIteration = 0;
   mDensityGuardDeferred = 0;
   mReconstructionStatus = {};
+  mTrainingSummary = {};
   mTaskTitle = QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName);
   mTitle->setText(mTaskTitle);
   mState->setText(QCoreApplication::translate("Workbench", "启动中"));
@@ -298,6 +308,10 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
+  if (!status.trainingSummary.isEmpty() &&
+      (mTrainingSummary.value(QStringLiteral("phase")).toString() != QStringLiteral("loaded") ||
+       status.trainingSummary.value(QStringLiteral("phase")).toString() == QStringLiteral("loaded")))
+    mTrainingSummary = status.trainingSummary;
   mLastStage = status.stage;
   if (!status.reconstructionQuality.isEmpty() || !status.generationIssue.isEmpty()) {
     mReconstructionStatus = status;
@@ -348,6 +362,54 @@ const TrainingTelemetry &TrainingMonitorWidget::telemetry() const {
 
 void TrainingMonitorWidget::refreshMetrics() {
   const QLocale locale;
+  mEffectiveParameters->setVisible(!mTrainingSummary.isEmpty());
+  if (!mTrainingSummary.isEmpty()) {
+    const auto &summary = mTrainingSummary;
+    const QString optimizer = summary.value(QStringLiteral("optimizer")).toString() == QStringLiteral("sparse_adam")
+        ? QCoreApplication::translate("Workbench", "稀疏 Adam") : QStringLiteral("Adam");
+    const int resolution = summary.value(QStringLiteral("resolution")).toInt();
+    const QString resolutionText = (resolution == 1 || resolution == 2 || resolution == 4 || resolution == 8)
+        ? QCoreApplication::translate("Workbench", "1/%1 分辨率").arg(resolution)
+        : QCoreApplication::translate("Workbench", "目标宽度 %1 px").arg(locale.toString(resolution));
+    QString text = QCoreApplication::translate("Workbench", "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。")
+        .arg(summary.value(QStringLiteral("backend")).toString().toUpper(),
+             locale.toString(summary.value(QStringLiteral("iterations")).toInt()),
+             resolutionText, optimizer);
+    if (summary.value(QStringLiteral("phase")).toString() == QStringLiteral("loaded")) {
+      QStringList dimensions;
+      for (const QJsonValue &value : summary.value(QStringLiteral("trainDimensions")).toArray()) {
+        const QJsonArray size = value.toArray();
+        dimensions.append(QCoreApplication::translate("Workbench", "%1 × %2 px（%3 张）")
+            .arg(locale.toString(size.at(0).toInt()), locale.toString(size.at(1).toInt()),
+                 locale.toString(size.at(2).toInt())));
+      }
+      const int extra = summary.value(QStringLiteral("trainDimensionKinds")).toInt() - dimensions.size();
+      if (extra > 0) dimensions.append(QCoreApplication::translate("Workbench", "另有 %1 种尺寸").arg(locale.toString(extra)));
+      text += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "实际训练图像：%1 张 · %2 · 总计 %3 MP。")
+          .arg(locale.toString(summary.value(QStringLiteral("trainImageCount")).toInt()),
+               dimensions.join(QStringLiteral(" · ")),
+               locale.toString(summary.value(QStringLiteral("trainPixels")).toDouble() / 1000000.0, 'f', 2));
+    } else {
+      text += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "实际训练图像尺寸将在相机加载后确认。");
+    }
+    mEffectiveParameters->setText(text);
+    QString details = QCoreApplication::translate("Workbench", "增密截止：%1 · 间隔：%2 · 梯度阈值：%3")
+        .arg(locale.toString(summary.value(QStringLiteral("densifyUntil")).toInt()),
+             locale.toString(summary.value(QStringLiteral("densificationInterval")).toInt()),
+             locale.toString(summary.value(QStringLiteral("densifyGradient")).toDouble(), 'g', 6));
+    if (summary.value(QStringLiteral("backend")).toString() == QStringLiteral("3dgs")) {
+      const auto enabled = [](bool value) {
+        return value ? QCoreApplication::translate("Workbench", "启用") : QCoreApplication::translate("Workbench", "禁用");
+      };
+      details += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "抗锯齿：%1 · 曝光补偿：%2")
+          .arg(enabled(summary.value(QStringLiteral("antialiasing")).toBool()),
+               enabled(summary.value(QStringLiteral("exposureCompensation")).toBool()));
+    } else {
+      details += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "深度混合比例：%1")
+          .arg(locale.toString(summary.value(QStringLiteral("depthRatio")).toDouble(), 'g', 6));
+    }
+    mEffectiveParameters->setToolTip(details);
+  }
   const WorkerStatus &quality = mReconstructionStatus;
   mReconstructionQuality->setVisible(!quality.reconstructionQuality.isEmpty() || !quality.generationIssue.isEmpty());
   QString message;

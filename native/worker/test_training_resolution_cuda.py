@@ -54,6 +54,7 @@ class OriginalResolutionCudaTests(unittest.TestCase):
         sys.path.insert(0, str(repository / "crop_editor"))
         import server
         self.assertEqual(Path(server.__file__).resolve().parent, (repository / "crop_editor").resolve())
+        from native.worker.training_summary import configured_training_summary, emit_loaded_training_summary
         source = Path(os.environ["TWO_DGS_DIR"]) if backend == "2dgs" else repository / "gaussian-splatting"
         sys.path.insert(0, str(source))
         # Follow the trainers' import order; importing camera_utils first would
@@ -85,6 +86,17 @@ class OriginalResolutionCudaTests(unittest.TestCase):
                                   else loadCam(args, 0, info, 1.0, False, False))
                         self.assertEqual((camera.image_width, camera.image_height), expected)
                         self.assertEqual(tuple(camera.original_image.shape), (3, expected[1], expected[0]))
+                        summary_options = dict(options)
+                        if backend == "3dgs":
+                            summary_options["optimizer_type"] = "default"
+                        configured = configured_training_summary(backend, quality, summary_options)
+                        emitted = []
+                        summary = emit_loaded_training_summary(lambda *event: emitted.append(event),
+                                                               {"trainingSummary": configured}, [camera])
+                        self.assertEqual(emitted, [("[gsw-training-input]", summary)])
+                        self.assertEqual(summary["trainDimensions"], [[expected[0], expected[1], 1]])
+                        self.assertEqual(summary["trainPixels"], expected[0] * expected[1])
+                        self.assertEqual(summary["trainImageCount"], 1)
                         if quality == "original_quality":
                             actual = camera.original_image.cpu().numpy()
                             self.assertTrue(np.allclose(actual, pixels.transpose(2, 0, 1) / 255.0, atol=1e-7))

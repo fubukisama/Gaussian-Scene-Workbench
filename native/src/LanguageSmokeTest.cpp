@@ -524,7 +524,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
     check(languageMenu->actions()[i]->text() == AppLanguage::displayName(AppLanguage::supported()[i]), "autonyms");
   }
   const QString name = QStringLiteral("古墳 / 日本語:*?\"<>|📷 ");
-  TrainingDialog training(QCoreApplication::applicationDirPath(), name,
+  QTemporaryDir trainingImages;
+  if (!trainingImages.isValid()) return false;
+  check(QDir().mkpath(QDir(trainingImages.path()).filePath(QStringLiteral("images"))), "create training image header fixture");
+  QImage trainingPhoto(1928, 1084, QImage::Format_RGB32);
+  trainingPhoto.fill(Qt::darkGray);
+  check(trainingPhoto.save(QDir(trainingImages.path()).filePath(QStringLiteral("images/古墳.png"))), "save full-size training fixture");
+  TrainingDialog training(trainingImages.path(), name,
                           QCoreApplication::applicationDirPath(), true, true, &window);
   const auto configuration = training.configuration();
   MeshGenerationDialog meshing({}, &window);
@@ -595,12 +601,34 @@ bool runLanguageSmokeTest(MainWindow &window) {
     }
     return predicate();
   };
+  auto *inputSummary = training.findChild<QLabel *>(QStringLiteral("trainingInputSummaryLabel"));
+  const QString fullSize = QCoreApplication::translate("Workbench", "%1 × %2 → %3 × %4 px（%5 张）")
+      .arg(QLocale().toString(1928), QLocale().toString(1084), QLocale().toString(1928),
+           QLocale().toString(1084), QLocale().toString(1));
+  check(inputSummary && waitUntil([&] { return inputSummary->text().contains(fullSize); }),
+        "asynchronous image headers show actual paired source size and original-resolution estimate");
+  if (resolutionCombo && inputSummary) {
+    resolutionCombo->setCurrentIndex(resolutionCombo->findData(2));
+    check(inputSummary->text().contains(QCoreApplication::translate("Workbench", "%1 × %2 → %3 × %4 px（%5 张）")
+        .arg(QLocale().toString(1928), QLocale().toString(1084), QLocale().toString(964),
+             QLocale().toString(542), QLocale().toString(1))), "ratio change formats cached image dimensions");
+    resolutionCombo->setCurrentIndex(resolutionCombo->findData(1));
+  }
   ReconstructionDialog reconstruction(QCoreApplication::applicationDirPath(),
                                       QCoreApplication::applicationDirPath(), &window);
   const auto reconstructionConfig = reconstruction.configuration();
   // A custom iteration count catches accidental preset resets caused by
   // currentTextChanged signals when combo captions are translated.
   if (iterationsSpin) iterationsSpin->setValue(12345);
+  if (backendCombo && iterationsSpin && resolutionCombo) {
+    const int selectedResolution = training.configuration().resolution;
+    backendCombo->setCurrentIndex(1);
+    check(training.configuration().iterations == 12345 && training.configuration().resolution == selectedResolution,
+          "backend switch preserves manually edited shared parameters");
+    backendCombo->setCurrentIndex(0);
+    check(training.configuration().iterations == 12345 && training.configuration().resolution == selectedResolution,
+          "returning to 3DGS preserves manually edited shared parameters");
+  }
   training.findChild<QLineEdit *>(QStringLiteral("trainingOutputNameEdit"))->setText(name);
   const auto editedConfiguration = training.configuration();
   auto *viewport = qobject_cast<NativeViewport *>(window.centralWidget());
@@ -722,12 +750,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
       .filePath(QStringLiteral("gsw_process_output_fixture.exe"));
   const bool testProcess = QFileInfo::exists(fixture);
   if (testProcess) check(supervisor->start(name, fixture, {QStringLiteral("tree-child")}), "start test worker");
-  monitor->beginTraining(name, QStringLiteral("3dgs"), 7000);
+  monitor->beginTraining(name, QStringLiteral("3dgs"), 30000);
   WorkerStatus status;
   status.state = QStringLiteral("running");
   status.stage = QStringLiteral("train");
-  status.iteration = 3500;
-  status.totalIterations = 7000;
+  status.iteration = 15000;
+  status.totalIterations = 30000;
   status.progressPercent = 50;
   status.loss = 0.125;
   status.psnr = 27.5;
@@ -738,8 +766,30 @@ bool runLanguageSmokeTest(MainWindow &window) {
   status.reconstructionViews = 9;
   status.reconstructionInputs = 9;
   status.reconstructionPoints = 2399;
+  status.trainingSummary = {{"version", 1}, {"phase", "loaded"}, {"backend", "3dgs"},
+      {"quality", "original_quality"}, {"iterations", 30000}, {"resolution", 1}, {"optimizer", "default"},
+      {"densifyUntil", 22000}, {"densificationInterval", 80}, {"densifyGradient", .00012},
+      {"antialiasing", true}, {"exposureCompensation", true}, {"trainImageCount", 9},
+      {"trainDimensionKinds", 1}, {"trainDimensions", QJsonArray{QJsonValue(QJsonArray{1928, 1084, 9})}},
+      {"trainPixels", qint64(1928) * 1084 * 9}};
   monitor->updateStatus(status);
   emit supervisor->workerStatusReady(status);
+  TrainingMonitorWidget surfelMonitor;
+  surfelMonitor.beginTraining(name, QStringLiteral("2dgs"), 30000);
+  WorkerStatus surfelStatus = status;
+  surfelStatus.trainingSummary["backend"] = QStringLiteral("2dgs");
+  surfelStatus.trainingSummary["optimizer"] = QStringLiteral("adam");
+  surfelStatus.trainingSummary["resolution"] = 16;
+  surfelStatus.trainingSummary["depthRatio"] = 0.0;
+  surfelStatus.trainingSummary["trainDimensions"] = QJsonArray{QJsonValue(QJsonArray{16, 8, 9})};
+  surfelStatus.trainingSummary["trainPixels"] = 16 * 8 * 9;
+  surfelMonitor.updateStatus(surfelStatus);
+  auto configuredStatus = surfelStatus;
+  configuredStatus.trainingSummary["phase"] = QStringLiteral("configured");
+  surfelMonitor.updateStatus(configuredStatus);
+  // Partial/old-worker progress must not erase the most recent loaded report.
+  WorkerStatus legacyStatus; legacyStatus.stage = QStringLiteral("train");
+  surfelMonitor.updateStatus(legacyStatus);
   auto *toolbar = window.findChild<QToolBar *>();
   if (toolbar) toolbar->hide();
   auto *progress = monitor->findChild<QProgressBar *>();
@@ -771,6 +821,25 @@ bool runLanguageSmokeTest(MainWindow &window) {
           QCoreApplication::translate("Workbench", "过度裁剪保护：第 %1 次迭代暂缓删除 %2 个高斯。请检查拍摄覆盖与重建尺度；数量不代表几何质量。")
               .arg(QLocale().toString(3100), QLocale().toString(3300)),
           "density protection warning translates live without resetting training state");
+    const auto *effective = monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"));
+    const QString expectedEffective = QCoreApplication::translate("Workbench", "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。")
+            .arg(QStringLiteral("3DGS"), QLocale().toString(30000),
+                 QCoreApplication::translate("Workbench", "1/%1 分辨率").arg(1), QStringLiteral("Adam")) + QLatin1Char('\n') +
+        QCoreApplication::translate("Workbench", "实际训练图像：%1 张 · %2 · 总计 %3 MP。")
+            .arg(QLocale().toString(9), QCoreApplication::translate("Workbench", "%1 × %2 px（%3 张）")
+                .arg(QLocale().toString(1928), QLocale().toString(1084), QLocale().toString(9)),
+                 QLocale().toString(1928.0 * 1084 * 9 / 1000000, 'f', 2));
+    if (effective && effective->text() != expectedEffective)
+      qWarning() << "Effective parameters actual/expected:" << effective->text() << expectedEffective;
+    check(effective && !effective->isHidden() && effective->text() == expectedEffective,
+        "actual training dimensions and effective Adam fallback translate without resetting samples");
+    const auto *surfelEffective = surfelMonitor.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"));
+    check(surfelEffective && !surfelEffective->isHidden() &&
+        surfelEffective->text().contains(QCoreApplication::translate("Workbench", "目标宽度 %1 px").arg(QLocale().toString(16))) &&
+        surfelEffective->text().contains(QCoreApplication::translate("Workbench", "%1 × %2 px（%3 张）")
+            .arg(QLocale().toString(16), QLocale().toString(8), QLocale().toString(9))) &&
+        surfelEffective->toolTip().contains(QCoreApplication::translate("Workbench", "深度混合比例：%1").arg(QLocale().toString(0.0, 'g', 6))),
+        "2DGS target-width semantics and loaded metadata survive language/partial/configured updates");
     check(saveAction->text() == saveTexts[next], "existing action updates immediately");
     const auto *pause = window.findChild<QAction *>(QStringLiteral("pauseTrainingAction"));
     const auto *resume = window.findChild<QAction *>(QStringLiteral("resumeTrainingAction"));
@@ -824,6 +893,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
         QCoreApplication::translate("Workbench", "原始分辨率（1:1）"), "original-resolution caption switches live");
     if (qualityCombo) check(qualityCombo->currentText() ==
         QCoreApplication::translate("Workbench", "最高精度（原始分辨率）"), "highest-fidelity preset switches live");
+    check(inputSummary && inputSummary->text().contains(
+        QCoreApplication::translate("Workbench", "%1 × %2 → %3 × %4 px（%5 张）")
+            .arg(QLocale().toString(1928), QLocale().toString(1084), QLocale().toString(1928),
+                 QLocale().toString(1084), QLocale().toString(1))) &&
+        inputSummary->text().contains(QDir::toNativeSeparators(QDir(trainingImages.path()).filePath(QStringLiteral("images")))),
+        "cached input header summary translates live without changing dimensions or user paths");
     check(reconstruction.configuration().cameraModel == reconstructionConfig.cameraModel &&
           reconstruction.configuration().featureMaxNumFeatures == reconstructionConfig.featureMaxNumFeatures,
           "reconstruction parameters retained");
@@ -861,6 +936,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name, "worker not interrupted");
   }
   dismissUnexpectedNotice.stop();
+  surfelMonitor.finishTraining(true, false);
+  check(!surfelMonitor.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->isHidden(),
+        "finished training retains its loaded report");
+  surfelMonitor.beginTraining(name, QStringLiteral("2dgs"), 10000);
+  check(surfelMonitor.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->isHidden(),
+        "new/legacy training clears stale effective metadata");
   if (auto *restoreSh = window.findChild<QAction *>(QStringLiteral("shDegree%1Action").arg(savedShDegree)))
     restoreSh->trigger();
   check(!AppLanguage::apply(QStringLiteral("invalid")) && AppLanguage::current() == locale &&
@@ -870,7 +951,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     // Expand only the isolated QA layout to inspect translated monitor labels.
     if (tabs) {
       if (auto *dock = qobject_cast<QDockWidget *>(tabs->parentWidget()))
-        window.resizeDocks({dock}, {260}, Qt::Vertical);
+        window.resizeDocks({dock}, {360}, Qt::Vertical);
     }
     if (toolbar) toolbar->show();
     (void)viewport->focusModel();

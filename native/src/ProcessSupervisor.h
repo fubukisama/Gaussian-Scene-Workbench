@@ -3,6 +3,7 @@
 #include "TrainingGpuPreviewProtocol.h"
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QMetaType>
 #include <QObject>
 #include <QProcess>
@@ -35,6 +36,7 @@ struct WorkerStatus final {
   QString generationIssue;
   std::optional<int> densityGuardIteration;
   std::optional<int> densityGuardDeferred;
+  QJsonObject trainingSummary;
 };
 
 class ProcessSupervisor final : public QObject {
