@@ -248,9 +248,14 @@ if (-not $SkipNativeLoad) {
     }
   }
   if ($NativeExecutable) {
-    & $NativeExecutable --project $ProjectPath --smoke-test
-    if ($LASTEXITCODE -ne 0) {
-      throw "Native model load smoke test failed with exit code $LASTEXITCODE."
+    # --smoke-test asserts an empty workspace, not a loaded model. Windows
+    # GUI executables also do not reliably update PowerShell's LASTEXITCODE.
+    # Wait for the renderer-specific check and read that process's exit code.
+    $NativeProcess = Start-Process -FilePath $NativeExecutable `
+      -ArgumentList ('--smoke-test-gaussian-performance --smoke-scene "{0}"' -f $PlyPath) `
+      -WindowStyle Hidden -Wait -PassThru
+    if ($NativeProcess.ExitCode -ne 0) {
+      throw "Native model load smoke test failed with exit code $($NativeProcess.ExitCode)."
     }
     $NativeLoaded = $true
   } else {

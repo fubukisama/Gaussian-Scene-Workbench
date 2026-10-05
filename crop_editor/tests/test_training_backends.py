@@ -2756,7 +2756,7 @@ class TrainingBackendTests(unittest.TestCase):
         self.assertEqual(options["texture_size_multiple"], 8192)
 
     def test_openmvs_texture_commands_stage_colmap_scene_before_texturemesh(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(server.os.environ, {"OPENMVS_BIN": ""}):
             base = Path(tmp)
             original_output = server.OUTPUT_DIR
             original_openmvs = server.OPENMVS_DIR

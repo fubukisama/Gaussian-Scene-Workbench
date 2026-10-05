@@ -18,6 +18,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
 #include <bit>
@@ -1354,6 +1355,18 @@ void WorkspaceDocumentTests::selectsNewestVersionedColmapExecutable() {
 }
 
 void WorkspaceDocumentTests::locatesVersionedColmapOnRepositoryVolume() {
+  const bool hadColmapPath = qEnvironmentVariableIsSet("COLMAP_PATH");
+  const bool hadColmapExe = qEnvironmentVariableIsSet("COLMAP_EXE");
+  const QByteArray originalColmapPath = qgetenv("COLMAP_PATH");
+  const QByteArray originalColmapExe = qgetenv("COLMAP_EXE");
+  const auto restoreEnvironment = qScopeGuard([&]() {
+    if (hadColmapPath) qputenv("COLMAP_PATH", originalColmapPath);
+    else qunsetenv("COLMAP_PATH");
+    if (hadColmapExe) qputenv("COLMAP_EXE", originalColmapExe);
+    else qunsetenv("COLMAP_EXE");
+  });
+  qunsetenv("COLMAP_PATH");
+  qunsetenv("COLMAP_EXE");
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
   const QDir fixture(temporary.path());

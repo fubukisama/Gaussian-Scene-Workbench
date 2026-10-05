@@ -1,0 +1,16 @@
+diff --git a/pytorch3d/csrc/pulsar/cuda/commands.h b/pytorch3d/csrc/pulsar/cuda/commands.h
+--- a/pytorch3d/csrc/pulsar/cuda/commands.h
++++ b/pytorch3d/csrc/pulsar/cuda/commands.h
+@@ -12,4 +12,12 @@
+ // Definitions for GPU commands.
+ #include <cooperative_groups.h>
++#ifdef _WIN32
++// Windows RPC defines `small` as `char`; CUDA 11.8 CUB uses that name.
++#pragma push_macro("small")
++#undef small
++#endif
+ #include <cub/cub.cuh>
++#ifdef _WIN32
++#pragma pop_macro("small")
++#endif
+ namespace cg = cooperative_groups;

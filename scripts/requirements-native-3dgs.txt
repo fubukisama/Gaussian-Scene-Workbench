@@ -1,0 +1,18 @@
+# Windows 3DGS runtime, Python 3.8.20. Install this file, then the three
+# CUDA extensions from gaussian-splatting/submodules in the same environment.
+# CUDA 11.8 and an x64 MSVC/Windows SDK environment are required to build.
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.0.1+cu118
+torchvision==0.15.2+cu118
+numpy==1.24.4
+pillow==10.2.0
+setuptools==69.5.1
+plyfile==1.0.3
+tqdm==4.66.2
+opencv-python==4.10.0.84
+joblib==1.4.2
+scipy==1.10.1
+imageio==2.35.1
+imageio-ffmpeg==0.5.1
+tensorboard==2.14.0
+lpips==0.1.4

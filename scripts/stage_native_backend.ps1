@@ -66,7 +66,11 @@ $StaticFiles = @(
   @{ Source = "crop_editor\reconstruction_quality.py"; Destination = "crop_editor\reconstruction_quality.py" },
   @{ Source = "crop_editor\video_extract.py"; Destination = "crop_editor\video_extract.py" },
   @{ Source = "scripts\check_3dgs_env.ps1"; Destination = "scripts\check_3dgs_env.ps1" },
+  @{ Source = "scripts\requirements-native-3dgs.txt"; Destination = "scripts\requirements-native-3dgs.txt" },
   @{ Source = "scripts\requirements-native-2dgs.txt"; Destination = "scripts\requirements-native-2dgs.txt" },
+  @{ Source = "scripts\requirements-native-sugar.txt"; Destination = "scripts\requirements-native-sugar.txt" },
+  @{ Source = "scripts\requirements-native-gs2mesh.txt"; Destination = "scripts\requirements-native-gs2mesh.txt" },
+  @{ Source = "scripts\patches\pytorch3d-0.7.4-windows-cub.patch"; Destination = "scripts\patches\pytorch3d-0.7.4-windows-cub.patch" },
   @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" },
   @{ Source = "scripts\sign_windows_artifacts.ps1"; Destination = "scripts\sign_windows_artifacts.ps1" }
 )
@@ -112,7 +116,11 @@ $Manifest = [ordered]@{
     "gaussian-splatting",
     "training_kit",
     "scripts/check_3dgs_env.ps1",
+    "scripts/requirements-native-3dgs.txt",
     "scripts/requirements-native-2dgs.txt",
+    "scripts/requirements-native-sugar.txt",
+    "scripts/requirements-native-gs2mesh.txt",
+    "scripts/patches/pytorch3d-0.7.4-windows-cub.patch",
     "scripts/install_colmap.ps1",
     "scripts/sign_windows_artifacts.ps1"
   )

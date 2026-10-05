@@ -3,6 +3,7 @@ param(
   [string]$Configuration = "RelWithDebInfo",
   [string]$QtRoot = "",
   [string]$CMakeRoot = "",
+  [string]$MsvcEnvironmentScript = "",
   [string]$BuildDirectory = "",
   [string]$PackageDirectoryName = "Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64",
   [switch]$Clean,
@@ -43,6 +44,13 @@ if ([string]::IsNullOrWhiteSpace($SignToolPath)) {
 if ([string]::IsNullOrWhiteSpace($CMakeRoot)) {
   $CMakeRoot = $env:GSW_NATIVE_CMAKE_ROOT
 }
+if ([string]::IsNullOrWhiteSpace($MsvcEnvironmentScript)) {
+  $MsvcEnvironmentScript = $env:GSW_NATIVE_MSVC_SETUP
+}
+if ($MsvcEnvironmentScript -and
+    -not (Test-Path -LiteralPath $MsvcEnvironmentScript -PathType Leaf)) {
+  throw "MSVC environment script not found: $MsvcEnvironmentScript"
+}
 if ($SigningCertificateStoreLocation -notin @("CurrentUser", "LocalMachine")) {
   throw "SigningCertificateStoreLocation must be CurrentUser or LocalMachine."
 }
@@ -75,12 +83,13 @@ if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
 }
 
 $VsDevCmdCandidates = @(
+  $MsvcEnvironmentScript,
   (Join-Path $DriveRoot "vsi\Common7\Tools\VsDevCmd.bat"),
   "E:\vsi\Common7\Tools\VsDevCmd.bat",
   "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat",
   "C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat",
   "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
-) | Where-Object { Test-Path -LiteralPath $_ }
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
 $VsDevCmd = $VsDevCmdCandidates | Select-Object -First 1
 if (-not $VsDevCmd) {
   throw "Visual Studio C++ build environment not found."
@@ -627,8 +636,10 @@ if ($Package) {
   if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE." }
   $RuntimeSearchRoots = @(
     (Join-Path $QtRoot "Library\bin"),
-    (Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT")
-  )
+    $(if ($env:VCToolsRedistDir) {
+      Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT"
+    })
+  ) | Where-Object { $_ }
   Copy-AppLocalDependencies -PackageBin (Split-Path -Parent $PackagedExecutable) -SearchRoots $RuntimeSearchRoots
   Invoke-WindowsArtifactSigning `
     -Artifacts @($PackagedExecutable) `
@@ -650,6 +661,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\MESH_GENERATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\RECONSTRUCTION_QUALITY.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\ORIGINAL_RESOLUTION_TRAINING.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_NATIVE_RUNTIME.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
     -DestinationRoot $PackageRoot
@@ -672,6 +684,11 @@ if ($Package) {
     "crop_editor\reconstruction_quality.py",
     "crop_editor\video_extract.py",
     "scripts\check_3dgs_env.ps1",
+    "scripts\requirements-native-3dgs.txt",
+    "scripts\requirements-native-2dgs.txt",
+    "scripts\requirements-native-sugar.txt",
+    "scripts\requirements-native-gs2mesh.txt",
+    "scripts\patches\pytorch3d-0.7.4-windows-cub.patch",
     "scripts\sign_windows_artifacts.ps1",
     "gaussian-splatting\train.py",
     "training_kit\apply_local_fixes.bat",

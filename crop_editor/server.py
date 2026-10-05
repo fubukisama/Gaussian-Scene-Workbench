@@ -4600,12 +4600,16 @@ def gs2mesh_env():
     ]
     env["PATH"] = os.pathsep.join(path_parts)
     env["CONDA_PREFIX"] = str(env_root)
-    sugar_extension_paths = [
-        str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "diff-gaussian-rasterization"),
-        str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "simple-knn"),
-    ]
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = os.pathsep.join([*sugar_extension_paths, existing_pythonpath])
+    # Only the legacy shared prefix can reuse SuGaR's in-place extensions.
+    # An independent GS2Mesh prefix must load its own installed CUDA packages:
+    # SuGaR's source paths can shadow them with a different PyTorch ABI.
+    if env_root.resolve() == sugar_env_root().resolve():
+        sugar_extension_paths = [
+            str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "diff-gaussian-rasterization"),
+            str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "simple-knn"),
+        ]
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join([*sugar_extension_paths, existing_pythonpath])
     return env
 
 
