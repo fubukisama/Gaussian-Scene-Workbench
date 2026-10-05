@@ -514,17 +514,18 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   replace(QStringLiteral("@SECTION_BOTTOM@"), 4);
   if (theme == UiTheme::Light) {
     // Paint Qt's real dock resize handles, not an overlay over the viewport.
-    // Include both one-pixel edges in the scaled extent; the native mouse
-    // handling, floating panels and dark-theme separator stay unchanged.
-    const int separatorContent = std::max(2, AppTheme::scaled(6, scalePercent) - 2);
+    // Match the panel-header gray and distinguish regions through modest width,
+    // not dark outlines. Include both one-pixel edges in the scaled extent;
+    // native mouse handling, floating panels and dark separators stay unchanged.
+    const int separatorContent = std::max(2, AppTheme::scaled(8, scalePercent) - 2);
     css += QStringLiteral(R"CSS(
 QMainWindow::separator {
-  background: #c0c0c0;
-  border: 1px solid #898989;
+  background: #dedede;
+  border: 1px solid #c8c8c8;
   width: %1px;
   height: %1px;
 }
-QMainWindow::separator:hover { background: #8eaed0; border-color: #2467a5; }
+QMainWindow::separator:hover { background: #d0d0d0; border-color: #b5b5b5; }
 )CSS").arg(separatorContent);
   }
   return css;

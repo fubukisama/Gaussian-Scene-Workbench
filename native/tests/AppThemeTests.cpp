@@ -433,12 +433,16 @@ void AppThemeTests::paintsVisibleLeftAndRightDockSeparators() {
     const auto lightSplits = splits();
     for (const QRect &split : lightSplits) {
       QVERIFY(split.isValid());
-      QCOMPARE(split.width(), AppTheme::scaled(6, scale));
-      QVERIFY(hasInk(lightFrame, split, QColor("#c0c0c0")));
-      QVERIFY(hasInk(lightFrame, split, QColor("#898989")));
+      QCOMPARE(split.width(), AppTheme::scaled(8, scale));
+      // Match the neutral panel-header grey. The wider band separates areas
+      // without introducing a high-contrast dark outline into the light UI.
+      QVERIFY(hasInk(lightFrame, split, QColor("#dedede")));
+      QVERIFY(hasInk(lightFrame, split, QColor("#c8c8c8")));
+      QCOMPARE(pixelAt(lightFrame, split.center()), QColor("#dedede"));
       const QColor edge = darkestPixel(lightFrame, split);
       QVERIFY(neutral(edge));
-      QVERIFY(contrast(edge, QColor("#ffffff")) >= 3.0);
+      QVERIFY(edge.lightness() >= 195);
+      QVERIFY(contrast(edge, QColor("#ffffff")) < 2.0);
     }
 
     const auto mouse = [&window](const QEvent::Type type, const QPoint &local,
@@ -483,7 +487,7 @@ void AppThemeTests::paintsVisibleLeftAndRightDockSeparators() {
       QCOMPARE(pixelAt(restoredFrame, restored[index].center()),
                pixelAt(darkFrame, darkSplits[index].center()));
     }
-    // The stronger painted boundaries remain real resize handles rather than
+    // The wider light bands remain real resize handles rather than
     // decorative frames. Keep both sidebars independently resizable in night.
     const int leftWidth = left->width();
     const int rightWidth = right->width();
