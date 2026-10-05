@@ -3,15 +3,23 @@
 #include <QApplication>
 #include <QColor>
 #include <QDir>
+#include <QHeaderView>
+#include <QImage>
+#include <QLabel>
 #include <QLineEdit>
+#include <QMenuBar>
 #include <QPalette>
+#include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSize>
+#include <QTableWidget>
 #include <QTemporaryDir>
+#include <QToolBar>
 #include <QVariant>
 #include <QtTest>
+#include <QtMath>
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +42,45 @@ double contrast(const QColor &first, const QColor &second) {
   const double b = luminance(second);
   return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
 }
+
+QImage painted(QWidget &widget) {
+  widget.ensurePolished();
+  return widget.grab().toImage().convertToFormat(QImage::Format_ARGB32);
+}
+
+QColor darkestPixel(const QImage &image, const QRect &logicalBounds) {
+  const qreal ratio = image.devicePixelRatio();
+  const QRect bounds(qFloor(logicalBounds.x() * ratio),
+                     qFloor(logicalBounds.y() * ratio),
+                     qCeil(logicalBounds.width() * ratio),
+                     qCeil(logicalBounds.height() * ratio));
+  QColor darkest(Qt::white);
+  double lowest = 1.0;
+  const QRect clipped = bounds.intersected(image.rect());
+  for (int y = clipped.top(); y <= clipped.bottom(); ++y) {
+    for (int x = clipped.left(); x <= clipped.right(); ++x) {
+      const QColor color = image.pixelColor(x, y);
+      const double value = luminance(color);
+      if (value < lowest) {
+        lowest = value;
+        darkest = color;
+      }
+    }
+  }
+  return darkest;
+}
+
+QColor pixelAt(const QImage &image, const QPoint &logicalPoint) {
+  const qreal ratio = image.devicePixelRatio();
+  return image.pixelColor(std::clamp(qRound(logicalPoint.x() * ratio),
+                                    0, image.width() - 1),
+                          std::clamp(qRound(logicalPoint.y() * ratio),
+                                     0, image.height() - 1));
+}
+
+bool neutral(const QColor &color) {
+  return color.red() == color.green() && color.green() == color.blue();
+}
 } // namespace
 
 class AppThemeTests final : public QObject {
@@ -47,6 +94,8 @@ private slots:
   void keepsLiveThemeDuringLanguageAndScaleChanges();
   void restoresSavedThemeOnInitialApplication();
   void providesReadablePalettesForBothThemes();
+  void usesNeutralLightSurfacesAndBlueInteractionColors();
+  void paintsReadableLightControlsAndDistinctPanelStructure();
   void reusesOneScaledLayoutForBothThemes();
   void keepsAutomaticTextReadableAcrossCommonWindowSizes();
   void compensatesForOperatingSystemDisplayScale();
@@ -128,7 +177,7 @@ void AppThemeTests::keepsLiveThemeDuringLanguageAndScaleChanges() {
       field.ensurePolished();
       button.ensurePolished();
       QCOMPARE(AppTheme::currentTheme(), UiTheme::Light);
-      QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#f3f5f3"));
+      QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#ffffff"));
       QCOMPARE(qApp->font().pointSizeF(), 10.0 * scale / 100.0);
       QCOMPARE(qApp->property("gswUiScalePercent").toInt(), scale);
       if (language == QStringLiteral("ja_JP")) {
@@ -179,6 +228,10 @@ void AppThemeTests::providesReadablePalettesForBothThemes() {
                        colors.color(group, QPalette::ToolTipBase)) >= 7.0);
       QVERIFY(contrast(colors.color(group, QPalette::Link),
                        colors.color(group, QPalette::Base)) >= 4.5);
+      if (theme == UiTheme::Light) {
+        QVERIFY(contrast(colors.color(group, QPalette::PlaceholderText),
+                         colors.color(group, QPalette::Base)) >= 7.0);
+      }
     }
     const auto disabled = QPalette::Disabled;
     QVERIFY(contrast(colors.color(disabled, QPalette::WindowText),
@@ -189,6 +242,109 @@ void AppThemeTests::providesReadablePalettesForBothThemes() {
                      colors.color(disabled, QPalette::Button)) >= 3.0);
     QVERIFY(contrast(colors.color(disabled, QPalette::HighlightedText),
                      colors.color(disabled, QPalette::Highlight)) >= 4.5);
+  }
+}
+
+void AppThemeTests::usesNeutralLightSurfacesAndBlueInteractionColors() {
+  const QPalette colors = AppTheme::palette(UiTheme::Light);
+  for (const auto role : {QPalette::Window, QPalette::Base, QPalette::AlternateBase,
+                          QPalette::Button, QPalette::WindowText, QPalette::Text,
+                          QPalette::ButtonText, QPalette::PlaceholderText,
+                          QPalette::Midlight, QPalette::Mid, QPalette::Dark}) {
+    QVERIFY(neutral(colors.color(QPalette::Active, role)));
+  }
+  QCOMPARE(colors.color(QPalette::Window), QColor("#ffffff"));
+  QCOMPARE(colors.color(QPalette::WindowText), QColor("#171717"));
+  QCOMPARE(colors.color(QPalette::PlaceholderText), QColor("#444444"));
+  QCOMPARE(colors.color(QPalette::Highlight), QColor("#2467a5"));
+  QCOMPARE(colors.color(QPalette::Link), QColor("#135f9b"));
+}
+
+void AppThemeTests::paintsReadableLightControlsAndDistinctPanelStructure() {
+  for (const QString &language : {QStringLiteral("zh_CN"),
+                                  QStringLiteral("en_US"),
+                                  QStringLiteral("ja_JP")}) {
+    qApp->setProperty("gswUiLanguage", language);
+    for (const int scale : {90, 100, 150}) {
+      AppTheme::apply(*qApp, scale, false);
+      AppTheme::applyTheme(*qApp, UiTheme::Light, false);
+      QWidget panel;
+      panel.resize(520, 360);
+      QLabel active(QStringLiteral("MMMM 0123456789"), &panel);
+      active.setGeometry(16, 10, 340, 44);
+      QLabel muted(QStringLiteral("MMMM 0123456789"), &panel);
+      muted.setObjectName(QStringLiteral("mutedLabel"));
+      muted.setGeometry(16, 54, 340, 44);
+      QWidget dockHeader(&panel);
+      dockHeader.setObjectName(QStringLiteral("dockTitleBar"));
+      dockHeader.setGeometry(16, 102, 360, 44);
+      QLabel dockTitle(QStringLiteral("MMMM 0123456789"), &dockHeader);
+      dockTitle.setObjectName(QStringLiteral("dockTitleLabel"));
+      dockTitle.setGeometry(8, 0, 330, 43);
+      QTableWidget table(1, 1, &panel);
+      table.setHorizontalHeaderLabels({QStringLiteral("MMMM 0123456789")});
+      table.verticalHeader()->hide();
+      table.horizontalHeader()->setStretchLastSection(true);
+      table.setGeometry(16, 150, 360, 70);
+      QLineEdit field(QStringLiteral("MMMM 0123456789"), &panel);
+      field.setFocusPolicy(Qt::NoFocus);
+      field.setGeometry(16, 226, 360, 54);
+      QPushButton button(QStringLiteral("MMMM"), &panel);
+      button.setFocusPolicy(Qt::NoFocus);
+      button.setAutoDefault(false);
+      button.setGeometry(16, 292, 180, 54);
+      QMenuBar menuBar(&panel);
+      menuBar.setGeometry(390, 10, 110, 44);
+      QToolBar toolbar(&panel);
+      toolbar.setGeometry(390, 64, 110, 44);
+      panel.show();
+      QApplication::processEvents();
+      QTest::qWait(20);
+      // The user's stationary cursor may happen to be over this disposable
+      // window. Sample the normal controls, not an incidental hover state.
+      button.setAttribute(Qt::WA_UnderMouse, false);
+      field.setAttribute(Qt::WA_UnderMouse, false);
+
+      // Inspect the actual stylesheet-painted widgets. Palette-only checks
+      // would miss a muted/header rule that still uses the former washed-out
+      // green colours, or a native control whose boundary disappears.
+      const QImage activeImage = painted(active);
+      const QImage mutedImage = painted(muted);
+      const QImage dockImage = painted(dockHeader);
+      const QImage tableHeaderImage = painted(*table.horizontalHeader());
+      const QImage fieldImage = painted(field);
+      const QImage buttonImage = painted(button);
+      const QColor white = pixelAt(activeImage, QPoint(330, 8));
+      const QColor header = pixelAt(dockImage, QPoint(350, 8));
+      const QColor tableHeader = pixelAt(tableHeaderImage,
+          QPoint(table.horizontalHeader()->width() - 12, 6));
+      QCOMPARE(white, QColor("#ffffff"));
+      QCOMPARE(header, QColor("#dedede"));
+      QCOMPARE(tableHeader, QColor("#dedede"));
+      QVERIFY(white.lightness() - header.lightness() >= 32);
+      QCOMPARE(pixelAt(painted(menuBar), QPoint(80, 8)), QColor("#e7e7e7"));
+      QCOMPARE(pixelAt(painted(toolbar), QPoint(80, 8)), QColor("#e7e7e7"));
+      QVERIFY(contrast(darkestPixel(activeImage, active.rect()), white) >= 7.0);
+      QVERIFY(contrast(darkestPixel(mutedImage, muted.rect()), white) >= 7.0);
+      QVERIFY(contrast(darkestPixel(dockImage, QRect(8, 2, 300, 38)), header) >= 7.0);
+      QVERIFY(contrast(darkestPixel(tableHeaderImage,
+          QRect(8, 3, 280, table.horizontalHeader()->height() - 8)), tableHeader) >= 7.0);
+      QVERIFY(contrast(darkestPixel(fieldImage, QRect(12, 6, 300, 42)), white) >= 7.0);
+      const QColor buttonBackground = pixelAt(buttonImage, QPoint(8, 12));
+      QCOMPARE(buttonBackground, QColor("#f3f3f3"));
+      QVERIFY(contrast(darkestPixel(buttonImage, QRect(12, 6, 150, 42)),
+                       buttonBackground) >= 7.0);
+      const QColor fieldBorder = darkestPixel(fieldImage, QRect(0, 24, 2, 6));
+      const QColor buttonBorder = darkestPixel(buttonImage, QRect(0, 24, 2, 6));
+      QVERIFY(neutral(fieldBorder) && neutral(buttonBorder));
+      QVERIFY(contrast(fieldBorder, white) >= 3.0);
+      QVERIFY(contrast(buttonBorder, buttonBackground) >= 3.0);
+      const QColor dockBoundary = darkestPixel(dockImage,
+          QRect(320, dockHeader.height() - 2, 20, 2));
+      QVERIFY(neutral(dockBoundary));
+      QVERIFY(header.lightness() - dockBoundary.lightness() >= 50);
+      panel.hide();
+    }
   }
 }
 

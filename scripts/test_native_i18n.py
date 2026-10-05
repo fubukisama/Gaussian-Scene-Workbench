@@ -116,7 +116,7 @@ class CatalogTests(unittest.TestCase):
     def test_day_and_night_theme_messages(self):
         catalog = i18n.load_catalog()
         for source in ('外观', '浅色（白天）', '深色（黑夜）',
-                       '使用浅色界面与视口背景，适合白天观察；立即生效并记住选择',
+                       '使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择',
                        '使用深色界面与视口背景，适合夜间观察；立即生效并记住选择'):
             self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
             self.assertEqual(len(set(catalog[source].values())), 3)

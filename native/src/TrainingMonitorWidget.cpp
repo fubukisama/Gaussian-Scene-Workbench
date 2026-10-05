@@ -116,11 +116,11 @@ protected:
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     const bool light = AppTheme::currentTheme() == UiTheme::Light;
-    const QColor canvas = light ? QColor(250, 252, 253) : QColor(15, 18, 20);
-    const QColor grid = light ? QColor(211, 221, 225) : QColor(47, 53, 57);
-    const QColor lossColor = light ? QColor(17, 114, 95) : QColor(91, 199, 170);
-    const QColor psnrColor = light ? QColor(144, 90, 9) : QColor(226, 181, 91);
-    const QColor waitingColor = light ? QColor(93, 103, 111) : QColor(126, 134, 139);
+    const QColor canvas = light ? QColor(255, 255, 255) : QColor(15, 18, 20);
+    const QColor grid = light ? QColor(200, 200, 200) : QColor(47, 53, 57);
+    const QColor lossColor = light ? QColor(16, 100, 85) : QColor(91, 199, 170);
+    const QColor psnrColor = light ? QColor(128, 75, 10) : QColor(226, 181, 91);
+    const QColor waitingColor = light ? QColor(68, 68, 68) : QColor(126, 134, 139);
     painter.fillRect(rect(), canvas);
 
     QFont chartFont = font();

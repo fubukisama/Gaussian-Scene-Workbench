@@ -53,14 +53,14 @@ UiTheme AppTheme::currentTheme() {
 QPalette AppTheme::palette(const UiTheme theme) {
   const bool light = theme == UiTheme::Light;
   QPalette result;
-  const QColor window(light ? "#f3f5f3" : "#1b1d1f");
+  const QColor window(light ? "#ffffff" : "#1b1d1f");
   const QColor base(light ? "#ffffff" : "#151719");
-  const QColor text(light ? "#24302c" : "#e7e9ea");
-  const QColor muted(light ? "#596b60" : "#a2aaaf");
-  const QColor disabled(light ? "#67756e" : "#929a9f");
-  const QColor disabledBase(light ? "#edf1ee" : "#242629");
-  const QColor button(light ? "#f7f9f7" : "#2a2e31");
-  const QColor accent(light ? "#176d60" : "#327e74");
+  const QColor text(light ? "#171717" : "#e7e9ea");
+  const QColor muted(light ? "#444444" : "#a2aaaf");
+  const QColor disabled(light ? "#6b6b6b" : "#929a9f");
+  const QColor disabledBase(light ? "#ededed" : "#242629");
+  const QColor button(light ? "#f3f3f3" : "#2a2e31");
+  const QColor accent(light ? "#2467a5" : "#327e74");
   for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                          QPalette::Disabled}) {
     const bool isDisabled = group == QPalette::Disabled;
@@ -69,32 +69,32 @@ QPalette AppTheme::palette(const UiTheme theme) {
     result.setColor(group, QPalette::WindowText, foreground);
     result.setColor(group, QPalette::Base, isDisabled ? disabledBase : base);
     result.setColor(group, QPalette::AlternateBase,
-                    QColor(light ? "#f0f4f1" : "#1e2123"));
+                    QColor(light ? "#f5f5f5" : "#1e2123"));
     result.setColor(group, QPalette::Text, foreground);
     result.setColor(group, QPalette::Button, isDisabled ? disabledBase : button);
     result.setColor(group, QPalette::ButtonText, foreground);
     result.setColor(group, QPalette::BrightText, QColor(Qt::white));
     result.setColor(group, QPalette::Highlight,
-                    isDisabled ? QColor(light ? "#63796d" : "#445b54") : accent);
+                    isDisabled ? QColor(light ? "#666666" : "#445b54") : accent);
     result.setColor(group, QPalette::HighlightedText, QColor(Qt::white));
     result.setColor(group, QPalette::ToolTipBase,
-                    QColor(light ? "#fffef8" : "#2c3033"));
+                    QColor(light ? "#fffff5" : "#2c3033"));
     result.setColor(group, QPalette::ToolTipText, foreground);
     result.setColor(group, QPalette::PlaceholderText, isDisabled ? disabled : muted);
     result.setColor(group, QPalette::Link,
-                    QColor(light ? "#126d54" : "#70cdb4"));
+                    QColor(light ? "#135f9b" : "#70cdb4"));
     result.setColor(group, QPalette::LinkVisited,
                     QColor(light ? "#64518a" : "#c7a9e9"));
     result.setColor(group, QPalette::Light,
                     QColor(light ? "#ffffff" : "#5a6268"));
     result.setColor(group, QPalette::Midlight,
-                    QColor(light ? "#e1ebe4" : "#41464b"));
+                    QColor(light ? "#e0e0e0" : "#41464b"));
     result.setColor(group, QPalette::Mid,
-                    QColor(light ? "#b8c7bd" : "#34383c"));
+                    QColor(light ? "#a0a0a0" : "#34383c"));
     result.setColor(group, QPalette::Dark,
-                    QColor(light ? "#84998c" : "#111315"));
+                    QColor(light ? "#8a8a8a" : "#111315"));
     result.setColor(group, QPalette::Shadow,
-                    QColor(light ? "#647a6d" : "#090b0d"));
+                    QColor(light ? "#656565" : "#090b0d"));
     result.setColor(group, QPalette::Accent, accent);
   }
   return result;
@@ -338,7 +338,7 @@ QTreeView::item:selected, QTableView::item:selected { background: @PRESSED@; col
 QListView::item:hover { background: @ITEM_HOVER@; }
 QListView::item:selected { background: @PRESSED@; color: @TEXT@; }
 QHeaderView::section {
-  background: @MENU@;
+  background: @HEADER@;
   color: @HEADER_TEXT@;
   border: 0;
   border-right: 1px solid @HEADER_BORDER@;
@@ -431,53 +431,54 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
     const char *light;
   };
   const ColorToken colors[] = {
-      {"@SURFACE@", "#1b1d1f", "#f3f5f3"},
-      {"@TEXT@", "#e7e9ea", "#24302c"},
-      {"@SELECTION@", "#327e74", "#176d60"},
-      {"@PROGRESS@", "#327e74", "#a5d4c1"},
-      {"@WINDOW@", "#17191b", "#edf1ee"},
-      {"@BAR@", "#202326", "#e6ece8"},
-      {"@BORDER@", "#34383c", "#c5cfc9"},
-      {"@HOVER@", "#303438", "#dbe6e0"},
-      {"@MENU@", "#24272a", "#f7f9f7"},
-      {"@FIELD_BORDER@", "#41464b", "#adbcb3"},
-      {"@MENU_SELECTION@", "#356e67", "#d0e7de"},
-      {"@SEPARATOR@", "#3b3f43", "#bdcac1"},
-      {"@HOVER_BORDER@", "#444a4f", "#91a69a"},
-      {"@PRESSED@", "#315d58", "#c7e3d7"},
-      {"@ACCENT@", "#4a9a8f", "#287d64"},
-      {"@DISABLED_TEXT@", "#929a9f", "#67756e"},
-      {"@BUTTON@", "#2a2e31", "#f7f9f7"},
-      {"@BUTTON_BORDER@", "#454a4f", "#acbbb2"},
-      {"@BUTTON_HOVER@", "#34383c", "#e1ebe4"},
-      {"@BUTTON_HOVER_BORDER@", "#5a6268", "#84998c"},
-      {"@DISABLED_SURFACE@", "#242629", "#edf1ee"},
-      {"@DISABLED_BORDER@", "#34373a", "#cdd7d0"},
+      {"@SURFACE@", "#1b1d1f", "#ffffff"},
+      {"@TEXT@", "#e7e9ea", "#171717"},
+      {"@SELECTION@", "#327e74", "#2467a5"},
+      {"@PROGRESS@", "#327e74", "#aecbe8"},
+      {"@WINDOW@", "#17191b", "#f3f3f3"},
+      {"@BAR@", "#202326", "#e7e7e7"},
+      {"@BORDER@", "#34383c", "#a0a0a0"},
+      {"@HOVER@", "#303438", "#d8e5f2"},
+      {"@MENU@", "#24272a", "#ffffff"},
+      {"@HEADER@", "#24272a", "#dedede"},
+      {"@FIELD_BORDER@", "#41464b", "#8a8a8a"},
+      {"@MENU_SELECTION@", "#356e67", "#cddff3"},
+      {"@SEPARATOR@", "#3b3f43", "#aaaaaa"},
+      {"@HOVER_BORDER@", "#444a4f", "#6e8ead"},
+      {"@PRESSED@", "#315d58", "#cddff3"},
+      {"@ACCENT@", "#4a9a8f", "#2467a5"},
+      {"@DISABLED_TEXT@", "#929a9f", "#6b6b6b"},
+      {"@BUTTON@", "#2a2e31", "#f3f3f3"},
+      {"@BUTTON_BORDER@", "#454a4f", "#8a8a8a"},
+      {"@BUTTON_HOVER@", "#34383c", "#e0e8f1"},
+      {"@BUTTON_HOVER_BORDER@", "#5a6268", "#135f9b"},
+      {"@DISABLED_SURFACE@", "#242629", "#ededed"},
+      {"@DISABLED_BORDER@", "#34373a", "#b0b0b0"},
       {"@FIELD@", "#151719", "#ffffff"},
-      {"@FOCUS@", "#55b2a5", "#137854"},
-      {"@ITEM_VIEW@", "#191b1d", "#fafcf9"},
-      {"@ALTERNATE@", "#1e2123", "#f0f4f1"},
-      {"@ITEM_HOVER@", "#282c2f", "#e4eee7"},
-      {"@HEADER_TEXT@", "#b9bec2", "#43594b"},
-      {"@HEADER_BORDER@", "#35393d", "#c8d3cb"},
-      {"@TITLE_TEXT@", "#dfe2e4", "#304b3b"},
-      {"@TITLE@", "#222528", "#e0e9e2"},
-      {"@TITLE_BORDER@", "#363a3e", "#bacbbf"},
-      {"@TAB_BORDER@", "#373b3f", "#c5d2c8"},
-      {"@TAB_TEXT@", "#aeb4b8", "#52685a"},
-      {"@ACTIVE_TAB_TEXT@", "#ffffff", "#24302c"},
-      {"@TAB_HOVER@", "#272a2d", "#dce7df"},
+      {"@FOCUS@", "#55b2a5", "#135f9b"},
+      {"@ITEM_VIEW@", "#191b1d", "#ffffff"},
+      {"@ALTERNATE@", "#1e2123", "#f5f5f5"},
+      {"@ITEM_HOVER@", "#282c2f", "#e5edf7"},
+      {"@HEADER_TEXT@", "#b9bec2", "#252525"},
+      {"@HEADER_BORDER@", "#35393d", "#a0a0a0"},
+      {"@TITLE_TEXT@", "#dfe2e4", "#171717"},
+      {"@TITLE@", "#222528", "#dedede"},
+      {"@TITLE_BORDER@", "#363a3e", "#a0a0a0"},
+      {"@TAB_BORDER@", "#373b3f", "#a0a0a0"},
+      {"@TAB_TEXT@", "#aeb4b8", "#444444"},
+      {"@ACTIVE_TAB_TEXT@", "#ffffff", "#171717"},
+      {"@TAB_HOVER@", "#272a2d", "#d8e5f2"},
       {"@LOG@", "#111315", "#ffffff"},
-      {"@LOG_TEXT@", "#ced3d6", "#30433a"},
-      {"@SCROLL_HANDLE@", "#484d51", "#91a699"},
-      {"@SECTION_TEXT@", "#d9dddf", "#304b3b"},
-      {"@SECTION_BORDER@", "#383c40", "#c2d1c6"},
-      {"@MUTED_TEXT@", "#949ba0", "#596b60"},
-      {"@GOOD_TEXT@", "#66c1a8", "#187456"},
-      {"@WARN_TEXT@", "#d9ad5b", "#8a580d"},
-      {"@TOOLTIP@", "#2c3033", "#fffef8"},
-      {"@TOOLTIP_TEXT@", "#ffffff", "#24302c"},
-      {"@TOOLTIP_BORDER@", "#555b60", "#adbdb1"},
+      {"@LOG_TEXT@", "#ced3d6", "#171717"},
+      {"@SCROLL_HANDLE@", "#484d51", "#858585"},
+      {"@SECTION_TEXT@", "#d9dddf", "#171717"},
+      {"@SECTION_BORDER@", "#383c40", "#a0a0a0"},
+      {"@MUTED_TEXT@", "#949ba0", "#444444"},
+      {"@GOOD_TEXT@", "#66c1a8", "#176b37"},
+      {"@WARN_TEXT@", "#d9ad5b", "#805409"},
+      {"@TOOLTIP@", "#2c3033", "#fffff5"},
+      {"@TOOLTIP_TEXT@", "#ffffff", "#171717"},
+      {"@TOOLTIP_BORDER@", "#555b60", "#8a8a8a"},
   };
   for (const ColorToken &color : colors) {
     css.replace(QString::fromLatin1(color.token),

@@ -106,11 +106,11 @@ constexpr int kDefaultTaskDockHeight = 105;
 QColor taskStateColor(const QString &state) {
   const bool light = AppTheme::currentTheme() == UiTheme::Light;
   if (state == QStringLiteral("running") || state == QStringLiteral("done"))
-    return light ? QColor(18, 106, 86) : QColor(102, 193, 168);
+    return light ? QColor(16, 94, 66) : QColor(102, 193, 168);
   if (state == QStringLiteral("cancelled") || state == QStringLiteral("paused"))
-    return light ? QColor(131, 84, 16) : QColor(218, 169, 82);
+    return light ? QColor(119, 69, 9) : QColor(218, 169, 82);
   if (state == QStringLiteral("failed"))
-    return light ? QColor(166, 48, 48) : QColor(211, 95, 95);
+    return light ? QColor(150, 33, 33) : QColor(211, 95, 95);
   return qApp->palette().color(QPalette::Text);
 }
 
@@ -1507,7 +1507,7 @@ void MainWindow::createMenus() {
   lightTheme->setData(QStringLiteral("light"));
   lightTheme->setCheckable(true);
   lightTheme->setChecked(AppTheme::currentTheme() == UiTheme::Light);
-  AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用浅色界面与视口背景，适合白天观察；立即生效并记住选择"));
+  AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择"));
   auto *darkTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
       AppLanguage::source("深色（黑夜）"));
   darkTheme->setObjectName(QStringLiteral("darkThemeAction"));

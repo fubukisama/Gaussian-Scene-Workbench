@@ -6363,10 +6363,10 @@
     "en_US": "Dark (Night)",
     "ja_JP": "ダーク（夜間）"
   },
-  "使用浅色界面与视口背景，适合白天观察；立即生效并记住选择": {
-    "zh_CN": "使用浅色界面与视口背景，适合白天观察；立即生效并记住选择",
-    "en_US": "Use a light interface and viewport background for daytime viewing; applies immediately and remembers your choice.",
-    "ja_JP": "昼間の観察に適した明るい UI とビューポート背景を使用します。即時に適用し、選択を保存します。"
+  "使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择": {
+    "zh_CN": "使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择",
+    "en_US": "Use white workspaces, gray toolbars and dark text for daytime viewing; applies immediately and remembers your choice.",
+    "ja_JP": "昼間の観察に適した白い作業領域、グレーのツールバー、濃い文字を使用します。即時に適用し、選択を保存します。"
   },
   "使用深色界面与视口背景，适合夜间观察；立即生效并记住选择": {
     "zh_CN": "使用深色界面与视口背景，适合夜间观察；立即生效并记住选择",

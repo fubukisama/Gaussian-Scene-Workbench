@@ -25,11 +25,15 @@ The shared 3DGS / 2DGS training monitor reflows its seven metrics by available w
 
 **View → Appearance → Light (Day) / Dark (Night)** changes the interface immediately and remembers the choice (`ui/theme`). The existing default remains dark. Light mode covers menus, dialogs and file browsers, dock panels, logs, training charts, status text, viewport background, grid and navigation/transform overlays. Language and UI-scale changes retain the selected appearance. It is a manual preference, not a time-based or Windows-theme schedule.
 
+Light mode uses the neutral hierarchy illustrated in the user's Metashape reference: white workspaces, gray toolbars/panel headers, near-black text and distinct blue focus/selection states. Muted and disabled text remains legible rather than fading into the background. Field/button boundaries are darker, while minor viewport grid lines remain quieter than major lines and colored axes. This is an original palette adaptation, not a copy of proprietary code or assets; dark mode and UI density are unchanged. Validation covers rendered label/header/control contrast as well as palette contrast, framebuffer opacity and actual viewport clear color.
+
 The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all mesh-generation workflows. It does not reload models, rewrite RGB/SH/materials, alter camera/selection/transforms, clear training curves, interrupt workers or change exported data. Transparent splats naturally composite against the chosen backdrop; this is not relighting or a new reconstruction. `--theme light|dark` is a non-persistent launch/QA override. The language smoke matrix toggles both themes while a test-owned worker runs; light-mode Gaussian, navigation and mesh-publication regressions complement existing dark tests.
 
 中文：通过“视图 → 外观 → 浅色（白天）／深色（黑夜）”即时切换并记住选择；界面与观察背景一起切换，不修改模型或训练数据。
+浅色采用白色工作区、灰色工具栏和深色文字，增强控件边界与蓝色选中状态；网格保持主次层级，深色模式和界面尺寸不变。
 
 日本語：「ビュー → 外観 → ライト（昼間）／ダーク（夜間）」で即時に切り替え、選択を保存します。UI と観察用背景のみを変更し、モデルや学習データは変更しません。
+ライトテーマは白い作業領域、グレーのツールバー、濃い文字で構成し、コントロールの境界と青い選択状態を明確にします。グリッドの主線と補助線を区別し、ダークテーマと UI の寸法は変更しません。
 
 ## Terminology
 

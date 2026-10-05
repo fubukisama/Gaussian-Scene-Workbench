@@ -846,6 +846,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
           lightTheme->text() == QCoreApplication::translate("Workbench", "浅色（白天）") &&
           darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
           "appearance menu switches language immediately");
+    check(lightTheme->toolTip() == QCoreApplication::translate("Workbench",
+          "使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择"),
+          "high-contrast light appearance description switches language immediately");
     const auto themeFont = qApp->font();
     const auto themeScale = qApp->property("gswUiScalePercent");
     const QString effectiveBeforeTheme = monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text();
@@ -874,8 +877,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
         if (viewport->context())
           viewport->context()->functions()->glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
         viewport->doneCurrent();
-        const float expectedClear[4] = {light ? 234.0F / 255.0F : .047F,
-            light ? 239.0F / 255.0F : .051F, light ? 243.0F / 255.0F : .055F, 1.0F};
+        const float expectedClear[4] = {light ? 1.0F : .047F,
+            light ? 1.0F : .051F, light ? 1.0F : .055F, 1.0F};
         for (int channel = 0; channel < 4; ++channel)
           check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
                 "theme reaches the actual OpenGL viewport background");
@@ -1237,6 +1240,19 @@ bool runLanguageSmokeTest(MainWindow &window) {
     spzDialog.show(); spzDialog.adjustSize(); QApplication::processEvents();
     check(spzDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-spz.png"))), "SPZ dialog screenshot");
     spzDialog.hide();
+    // Inspect the same shallow perspective grid as a normal daytime session,
+    // after the live-state assertions above. Only the isolated QA view changes.
+    viewport->resetCamera();
+    for (QAction *action : {lightTheme, darkTheme}) {
+      action->trigger();
+      settleLayout();
+      const QString prefix = locale + QStringLiteral("-perspective-") + action->data().toString();
+      check(window.grab().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral(".png"))),
+            "installed perspective theme UI screenshot");
+      check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral("-viewport.png"))),
+            "installed perspective theme grid screenshot");
+    }
+    (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
   }
   check(runListInteractionSmokeTest(window), "all item-list interactions");
   if (testProcess) supervisor->shutdown();
