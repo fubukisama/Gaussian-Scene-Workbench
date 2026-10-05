@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QPainter>
+#include <QPalette>
 #include <QStandardPaths>
 #include <QScopedValueRollback>
 #include <QTimer>
@@ -23,22 +24,32 @@ namespace gsw {
 namespace {
 constexpr auto controllerName = "gswWindowController";
 QIcon windowIcon(bool restore, bool fullScreen = false) {
-  QPixmap pixmap(36, 36);
-  pixmap.setDevicePixelRatio(2);
-  pixmap.fill(Qt::transparent);
-  QPainter painter(&pixmap);
-  painter.setPen(QPen(QColor(210, 220, 225), 1.5));
-  if (restore) {
-    painter.drawLine(QPointF(6, 3), QPointF(15, 3));
-    painter.drawLine(QPointF(15, 3), QPointF(15, 12));
-    painter.drawRect(QRectF(3, 6, 9, 9));
-  } else if (fullScreen) {
-    for (const QPoint &corner : {QPoint(3, 3), QPoint(15, 3), QPoint(3, 15), QPoint(15, 15)}) {
-      painter.drawLine(corner, corner + QPoint(corner.x() == 3 ? 4 : -4, 0));
-      painter.drawLine(corner, corner + QPoint(0, corner.y() == 3 ? 4 : -4));
-    }
-  } else painter.drawRect(QRectF(3, 3, 12, 12));
-  return QIcon(pixmap);
+  QIcon icon;
+  const QPalette palette = qApp->palette();
+  for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled}) {
+    QPixmap pixmap(36, 36);
+    pixmap.setDevicePixelRatio(2);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QColor foreground = mode == QIcon::Disabled
+        ? palette.color(QPalette::Disabled, QPalette::ButtonText)
+        : mode == QIcon::Selected ? palette.color(QPalette::Active, QPalette::HighlightedText)
+                                 : palette.color(QPalette::Active, QPalette::ButtonText);
+    painter.setPen(QPen(foreground, 1.5));
+    if (restore) {
+      painter.drawLine(QPointF(6, 3), QPointF(15, 3));
+      painter.drawLine(QPointF(15, 3), QPointF(15, 12));
+      painter.drawRect(QRectF(3, 6, 9, 9));
+    } else if (fullScreen) {
+      for (const QPoint &corner : {QPoint(3, 3), QPoint(15, 3), QPoint(3, 15), QPoint(15, 15)}) {
+        painter.drawLine(corner, corner + QPoint(corner.x() == 3 ? 4 : -4, 0));
+        painter.drawLine(corner, corner + QPoint(0, corner.y() == 3 ? 4 : -4));
+      }
+    } else painter.drawRect(QRectF(3, 3, 12, 12));
+    icon.addPixmap(pixmap, mode);
+  }
+  return icon;
 }
 bool eligible(QWidget *w) {
   return w && w->isWindow() && (qobject_cast<QDialog *>(w) ||
@@ -129,7 +140,8 @@ public:
 protected:
   bool eventFilter(QObject *watched, QEvent *event) override {
     if (watched == mWindow && (event->type() == QEvent::LanguageChange ||
-        event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange)) {
+        event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
+        event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange)) {
       const Qt::WindowStates state = mWindow->windowState();
       const auto revision = mStateRevision;
       QTimer::singleShot(0, this, [this, state, revision] {

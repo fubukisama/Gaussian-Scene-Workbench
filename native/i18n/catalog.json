@@ -6348,6 +6348,31 @@
     "en_US": "Scroll to see all information in a small panel; metrics wrap automatically to fit its width.",
     "ja_JP": "小さいパネルではスクロールしてすべての情報を確認できます。指標は幅に合わせて自動的に折り返されます。"
   },
+  "外观": {
+    "zh_CN": "外观",
+    "en_US": "Appearance",
+    "ja_JP": "外観"
+  },
+  "浅色（白天）": {
+    "zh_CN": "浅色（白天）",
+    "en_US": "Light (Day)",
+    "ja_JP": "ライト（昼間）"
+  },
+  "深色（黑夜）": {
+    "zh_CN": "深色（黑夜）",
+    "en_US": "Dark (Night)",
+    "ja_JP": "ダーク（夜間）"
+  },
+  "使用浅色界面与视口背景，适合白天观察；立即生效并记住选择": {
+    "zh_CN": "使用浅色界面与视口背景，适合白天观察；立即生效并记住选择",
+    "en_US": "Use a light interface and viewport background for daytime viewing; applies immediately and remembers your choice.",
+    "ja_JP": "昼間の観察に適した明るい UI とビューポート背景を使用します。即時に適用し、選択を保存します。"
+  },
+  "使用深色界面与视口背景，适合夜间观察；立即生效并记住选择": {
+    "zh_CN": "使用深色界面与视口背景，适合夜间观察；立即生效并记住选择",
+    "en_US": "Use a dark interface and viewport background for nighttime viewing; applies immediately and remembers your choice.",
+    "ja_JP": "夜間の観察に適した暗い UI とビューポート背景を使用します。即時に適用し、選択を保存します。"
+  },
   "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.": {
     "zh_CN": "烘焙镜像网格请使用 GLB、OBJ 或 STL；PLY 可导出其原始坐标。",
     "en_US": "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.",

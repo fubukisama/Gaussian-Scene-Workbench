@@ -2,6 +2,7 @@
 #include "MultiItemList.h"
 #include "ExternalBackupStore.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include "MainWindow.h"
 #include "TrainingDialog.h"
 #include "MeshGenerationDialog.h"
@@ -38,6 +39,8 @@
 #include <QPushButton>
 #include <QMenu>
 #include <QMessageBox>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -53,6 +56,7 @@
 #include <QTimer>
 
 #include <functional>
+#include <cmath>
 
 namespace gsw {
 bool runMeshGenerationSmokeTest(MainWindow &window) {
@@ -85,6 +89,10 @@ bool runMeshGenerationSmokeTest(MainWindow &window) {
   const QString originalId = window.mWorkspace.activeSceneId();
   const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
       QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
+  if (!QFileInfo(helper).isFile()) {
+    qCritical() << "Mesh generation: missing owned worker fixture:" << helper;
+    return false;
+  }
   const QByteArray mesh("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n");
   QString texturedPath;
   QString texturedId;
@@ -135,7 +143,8 @@ bool runMeshGenerationSmokeTest(MainWindow &window) {
         (!textured || window.mViewport->meshTextureAvailable()); }),
         "generated geometry appears in mesh mode");
     if (textured) check(window.mViewport->meshTextureAvailable(), "completed material preview is uploaded to the GPU");
-    check(window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 0)->data(Qt::UserRole + 31).toString() == expectedState,
+    const auto *taskState = window.mTaskTable->item(window.mTaskTable->rowCount() - 1, 0);
+    check(taskState && taskState->data(Qt::UserRole + 31).toString() == expectedState,
           "partial mesh cannot mark failed texturing successful");
     if (invalidMaterial)
       check(!window.mViewport->meshTextureAvailable() && window.mWorkspace.scenePath() == path,
@@ -522,6 +531,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
   auto *languageMenu = window.findChild<QMenu *>(QStringLiteral("languageMenu"));
   check(languageMenu && languageMenu->actions().size() == 3, "language menu");
   if (!languageMenu) return false;
+  auto *appearanceMenu = window.findChild<QMenu *>(QStringLiteral("appearanceMenu"));
+  auto *lightTheme = window.findChild<QAction *>(QStringLiteral("lightThemeAction"));
+  auto *darkTheme = window.findChild<QAction *>(QStringLiteral("darkThemeAction"));
+  check(appearanceMenu && lightTheme && darkTheme && appearanceMenu->actions().size() == 2,
+        "day/night appearance menu is available");
+  if (!appearanceMenu || !lightTheme || !darkTheme) return false;
+  const UiTheme originalTheme = AppTheme::currentTheme();
   for (int i = 0; i < 3; ++i) {
     check(languageMenu->actions()[i]->data().toString() == AppLanguage::supported()[i], "stable locale identifiers");
     check(languageMenu->actions()[i]->text() == AppLanguage::displayName(AppLanguage::supported()[i]), "autonyms");
@@ -747,10 +763,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
   QApplication::processEvents();
   const auto actionCount = window.findChildren<QAction *>().size();
 
-  // The build-tree test owns a real child process. It must stay alive during
-  // every switch. Installed-package QA runs the same UI/data assertions.
-  const QString fixture = QDir(QCoreApplication::applicationDirPath())
-      .filePath(QStringLiteral("gsw_process_output_fixture.exe"));
+  // The test owns a real child process. Installed-package QA may explicitly
+  // supply the same fixture without shipping test helpers in the package.
+  const QString fixture = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
+      QDir(QCoreApplication::applicationDirPath())
+          .filePath(QStringLiteral("gsw_process_output_fixture.exe")));
   const bool testProcess = QFileInfo::exists(fixture);
   if (testProcess) check(supervisor->start(name, fixture, {QStringLiteral("tree-child")}), "start test worker");
   monitor->beginTraining(name, QStringLiteral("3dgs"), 30000);
@@ -813,12 +830,72 @@ bool runLanguageSmokeTest(MainWindow &window) {
   if (!shMenu || !shAction) return false;
   const int savedShDegree = viewport->maximumShDegree();
   shAction->trigger();
+  int presentationSceneLoads = 0;
+  const auto presentationLoadConnection = QObject::connect(viewport, &NativeViewport::sceneLoadStarted,
+      &window, [&](const QString &) { ++presentationSceneLoads; });
+  lightTheme->trigger();
   for (int step = 1; step <= 6; ++step) {
     const int next = (index + step) % 3;
     const QString language = AppLanguage::supported()[next];
     languageMenu->actions()[next]->trigger();
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
+    check(AppTheme::currentTheme() == UiTheme::Light && lightTheme->isChecked() &&
+          !darkTheme->isChecked(), "live language switching preserves the selected theme");
+    check(appearanceMenu->title() == QCoreApplication::translate("Workbench", "外观") &&
+          lightTheme->text() == QCoreApplication::translate("Workbench", "浅色（白天）") &&
+          darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
+          "appearance menu switches language immediately");
+    const auto themeFont = qApp->font();
+    const auto themeScale = qApp->property("gswUiScalePercent");
+    const QString effectiveBeforeTheme = monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text();
+    for (QAction *action : {darkTheme, lightTheme}) {
+      action->trigger();
+      QApplication::processEvents();
+      const bool light = action == lightTheme;
+      check(AppTheme::currentTheme() == (light ? UiTheme::Light : UiTheme::Dark) &&
+            AppTheme::loadTheme() == AppTheme::currentTheme() &&
+            action->isChecked() && QSettings().value(QStringLiteral("ui/theme")).toString() ==
+                action->data().toString(), "theme changes and persists immediately through the real menu");
+      check((qApp->palette().color(QPalette::Window).lightness() > 200) == light &&
+            qApp->font() == themeFont && qApp->property("gswUiScalePercent") == themeScale,
+            "theme updates palette without changing language fonts or scale");
+      if (step == 1) {
+        const QImage frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
+        bool opaque = !frame.isNull();
+        for (int y = 0; y < frame.height() && opaque; ++y) {
+          const auto *pixels = reinterpret_cast<const QRgb *>(frame.constScanLine(y));
+          for (int x = 0; x < frame.width(); ++x)
+            if (qAlpha(pixels[x]) != 255) { opaque = false; break; }
+        }
+        check(opaque, "day/night viewport stays opaque through overlay alpha blending");
+        viewport->makeCurrent();
+        GLfloat clearColor[4] = {};
+        if (viewport->context())
+          viewport->context()->functions()->glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+        viewport->doneCurrent();
+        const float expectedClear[4] = {light ? 234.0F / 255.0F : .047F,
+            light ? 239.0F / 255.0F : .051F, light ? 243.0F / 255.0F : .055F, 1.0F};
+        for (int channel = 0; channel < 4; ++channel)
+          check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
+                "theme reaches the actual OpenGL viewport background");
+      }
+      check(viewport->scenePath() == ply.fileName() && viewport->activeSceneId() == activeId &&
+            viewport->sceneObjectCount() == modelCount && viewport->selectedSceneIds() == selection &&
+            viewport->modelTranslation() == translation && viewport->modelRotation() == rotation &&
+            viewport->modelScale() == scale && viewport->viewTarget() == target &&
+            viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
+            viewport->orthographicProjection() == orthographic && treeState() == originalTree,
+            "day/night switching preserves models, transforms, camera and selection");
+      check(monitor->telemetry().samples().size() == sampleCount && progress->value() == 50 &&
+            monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text() == effectiveBeforeTheme &&
+            surfelMonitor.telemetry().iteration() == surfelStatus.iteration &&
+            training.configuration().iterations == 12345 &&
+            meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
+            "theme preserves both trainers, mesh settings and recorded telemetry");
+      if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
+                            "theme switching does not interrupt processing");
+    }
     const auto *densityWarning = monitor->findChild<QLabel *>(QStringLiteral("densityGuardWarning"));
     check(densityWarning && !densityWarning->isHidden() && densityWarning->text() ==
           QCoreApplication::translate("Workbench", "过度裁剪保护：第 %1 次迭代暂缓删除 %2 个高斯。请检查拍摄覆盖与重建尺度；数量不代表几何质量。")
@@ -938,7 +1015,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (tabs) check(tabs->currentWidget() == monitor, "active tab retained");
     if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name, "worker not interrupted");
   }
+  QObject::disconnect(presentationLoadConnection);
+  check(presentationSceneLoads == 0, "theme and language changes do not reload scene data");
   dismissUnexpectedNotice.stop();
+  (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
   surfelMonitor.finishTraining(true, false);
   check(!surfelMonitor.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->isHidden(),
         "finished training retains its loaded report");
@@ -1109,6 +1189,21 @@ bool runLanguageSmokeTest(MainWindow &window) {
     QDir().mkpath(screenshotDirectory);
     check(window.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral(".png"))), "UI screenshot");
     check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-viewport.png"))), "trackball screenshot");
+    for (QAction *action : {lightTheme, darkTheme}) {
+      action->trigger();
+      settleLayout();
+      const QString prefix = locale + QStringLiteral("-theme-") + action->data().toString();
+      check(window.grab().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral(".png"))),
+            "installed day/night UI screenshot");
+      const QImage frame = viewport->grabFramebuffer();
+      check(!frame.isNull() && frame.save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral("-viewport.png"))),
+            "installed day/night viewport screenshot");
+      exportDialog.show(); exportDialog.adjustSize(); settleLayout();
+      check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral("-export.png"))),
+            "installed day/night export-dialog screenshot");
+      exportDialog.hide();
+    }
+    (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
     if (backendCombo) {
       backendCombo->setCurrentIndex(1);
       backendCombo->setCurrentIndex(0);

@@ -113,6 +113,15 @@ class CatalogTests(unittest.TestCase):
             for token in ('Ctrl+', 'Shift+'):
                 self.assertIn(token, text)
 
+    def test_day_and_night_theme_messages(self):
+        catalog = i18n.load_catalog()
+        for source in ('外观', '浅色（白天）', '深色（黑夜）',
+                       '使用浅色界面与视口背景，适合白天观察；立即生效并记住选择',
+                       '使用深色界面与视口背景，适合夜间观察；立即生效并记住选择'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            self.assertEqual(len(set(catalog[source].values())), 3)
+            self.assertEqual(i18n.validate({source: catalog[source]}, {}), [])
+
     def test_model_export_formats_and_placeholders(self):
         catalog = i18n.load_catalog()
         for source in ('导出模型...', '导出坐标', '场景坐标（应用位移、旋转、缩放）',

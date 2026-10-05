@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include "NativeViewport.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
 
@@ -50,6 +51,89 @@ namespace gsw {
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
 
+// Presentation colours only. Model RGB, material textures, Gaussian attributes
+// and compositing equations are deliberately independent of the UI theme.
+struct ViewportColors final {
+  QColor backdrop{12, 15, 17};
+  QColor card{17, 19, 21};
+  QColor text{232, 235, 236};
+  QColor muted{181, 189, 193};
+  QColor accent{102, 193, 168};
+  QColor processCard{17, 23, 26};
+  QColor processText{120, 208, 186};
+  QColor processDetail{181, 193, 200};
+  QColor progress{89, 169, 153};
+  QColor modeCard{49, 93, 88};
+  QColor modeText{238, 246, 244};
+  QColor hintCard{38, 31, 23};
+  QColor hintText{255, 203, 122};
+  QColor highlight{255, 224, 118};
+  QColor toolCard{24, 27, 30};
+  QColor toolBorder{63, 68, 72};
+  QColor toolIdle{34, 38, 41};
+  QColor toolHover{62, 67, 72};
+  QColor toolActive{70, 116, 183};
+  QColor toolIcon{238, 241, 243};
+  QColor toolDisabled{28, 31, 34};
+  QColor disabledBorder{76, 81, 85};
+  QColor disabledText{157, 164, 169};
+  QColor orientationText{220, 225, 228};
+  QColor handleEdge{228, 232, 234};
+  QColor handleFill{48, 53, 57};
+  QColor viewRing{225, 229, 232};
+};
+
+bool lightViewport() { return AppTheme::currentTheme() == UiTheme::Light; }
+
+ViewportColors viewportColors() {
+  ViewportColors colors;
+  if (!lightViewport()) return colors;
+  colors.backdrop = QColor(234, 239, 243);
+  colors.card = QColor(250, 252, 253);
+  colors.text = QColor(35, 47, 58);
+  colors.muted = QColor(78, 94, 106);
+  colors.accent = QColor(23, 113, 97);
+  colors.processCard = QColor(243, 250, 248);
+  colors.processText = QColor(22, 113, 98);
+  colors.processDetail = QColor(76, 93, 103);
+  colors.progress = QColor(41, 136, 116);
+  colors.modeCard = QColor(216, 237, 232);
+  colors.modeText = QColor(24, 91, 80);
+  colors.hintCard = QColor(255, 244, 218);
+  colors.hintText = QColor(123, 76, 16);
+  colors.highlight = QColor(168, 108, 14);
+  colors.toolCard = QColor(246, 249, 251);
+  colors.toolBorder = QColor(158, 174, 187);
+  colors.toolIdle = QColor(229, 236, 241);
+  colors.toolHover = QColor(208, 224, 235);
+  colors.toolActive = QColor(52, 106, 173);
+  colors.toolIcon = QColor(44, 61, 76);
+  colors.toolDisabled = QColor(237, 241, 244);
+  colors.disabledBorder = QColor(187, 198, 207);
+  colors.disabledText = QColor(112, 125, 137);
+  colors.orientationText = QColor(40, 58, 73);
+  colors.handleEdge = QColor(54, 72, 88);
+  colors.handleFill = QColor(238, 245, 250);
+  colors.viewRing = QColor(62, 82, 101);
+  return colors;
+}
+
+QColor translucent(QColor color, const int alpha) {
+  color.setAlpha(alpha);
+  return color;
+}
+
+QColor themeInk(const QColor &night, const QColor &day) {
+  return lightViewport() ? day : night;
+}
+
+QVector4D viewportClearColor() {
+  // Preserve the original night clear value exactly, not its 8-bit rounding.
+  if (!lightViewport()) return QVector4D(0.047F, 0.051F, 0.055F, 1.0F);
+  const QColor backdrop = viewportColors().backdrop;
+  return QVector4D(backdrop.redF(), backdrop.greenF(), backdrop.blueF(), 1.0F);
+}
+
 struct ReferenceGridFrame final {
   QVector3D normal;
   QVector3D axisU;
@@ -92,8 +176,11 @@ QColor mixColor(const QColor &background, const QColor &foreground,
 }
 
 QColor navigationAxisColor(const int axisIndex) {
-  static const std::array<QColor, 3> colors = {
+  static const std::array<QColor, 3> nightColors = {
       QColor(226, 67, 67), QColor(62, 116, 232), QColor(104, 185, 57)};
+  static const std::array<QColor, 3> dayColors = {
+      QColor(189, 48, 48), QColor(39, 91, 180), QColor(57, 132, 31)};
+  const auto &colors = lightViewport() ? dayColors : nightColors;
   return colors[static_cast<std::size_t>(axisIndex)];
 }
 
@@ -977,11 +1064,15 @@ void NativeViewport::drawObservationTrackball(QPainter &painter) {
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
   QRadialGradient glass(center - QPointF(radius * 0.27F, radius * 0.3F), radius * 1.4F);
-  glass.setColorAt(0.0, QColor(227, 237, 245, hover ? 43 : 24));
-  glass.setColorAt(0.65, QColor(163, 178, 193, hover ? 27 : 14));
-  glass.setColorAt(1.0, QColor(89, 103, 117, hover ? 46 : 26));
+  glass.setColorAt(0.0, themeInk(QColor(227, 237, 245, hover ? 43 : 24),
+                                QColor(250, 253, 255, hover ? 50 : 30)));
+  glass.setColorAt(0.65, themeInk(QColor(163, 178, 193, hover ? 27 : 14),
+                                 QColor(142, 161, 178, hover ? 25 : 15)));
+  glass.setColorAt(1.0, themeInk(QColor(89, 103, 117, hover ? 46 : 26),
+                                QColor(72, 93, 111, hover ? 45 : 27)));
   painter.setBrush(glass);
-  painter.setPen(QPen(QColor(207, 218, 228, hover ? 130 : 75), 1.0));
+  painter.setPen(QPen(themeInk(QColor(207, 218, 228, hover ? 130 : 75),
+                               QColor(66, 86, 104, hover ? 150 : 95)), 1.0));
   painter.drawEllipse(center, radius, radius);
   painter.setBrush(Qt::NoBrush);
   const auto view = viewMatrix();
@@ -1002,7 +1093,8 @@ void NativeViewport::drawObservationTrackball(QPainter &painter) {
       previous = screen;
     }
   }
-  painter.setPen(QPen(QColor(236, 240, 243, 185), 1.0));
+  painter.setPen(QPen(themeInk(QColor(236, 240, 243, 185),
+                               QColor(45, 67, 86, 205)), 1.0));
   painter.drawLine(center - QPointF(3, 0), center + QPointF(3, 0));
   painter.drawLine(center - QPointF(0, 3), center + QPointF(0, 3));
   painter.restore();
@@ -1508,7 +1600,8 @@ void NativeViewport::initializeGL() {
     mMeshCacheGpuBudgetBytes =
         static_cast<qsizetype>(meshBudgetOverrideMegabytes) * 1024LL * 1024LL;
   }
-  glClearColor(0.047F, 0.051F, 0.055F, 1.0F);
+  const QVector4D clearColor = viewportClearColor();
+  glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glDisable(GL_CULL_FACE);
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_PROGRAM_POINT_SIZE);
@@ -2170,6 +2263,16 @@ void NativeViewport::resizeGL(const int width, const int height) {
   glViewport(0, 0, qRound(width * ratio), qRound(height * ratio));
 }
 
+void NativeViewport::changeEvent(QEvent *event) {
+  QOpenGLWidget::changeEvent(event);
+  if (event->type() == QEvent::PaletteChange ||
+      event->type() == QEvent::ApplicationPaletteChange ||
+      event->type() == QEvent::StyleChange) {
+    // Repaint only: never rebuild scene data or interrupt a worker/navigation.
+    update();
+  }
+}
+
 void NativeViewport::paintGL() {
   applyPendingTrainingGpuPreview();
   const bool gaussianWasAvailable = gaussianRenderingAvailable();
@@ -2219,6 +2322,11 @@ void NativeViewport::paintGL() {
         false, QCoreApplication::translate("Workbench", "定时快照回退"),
         QCoreApplication::translate("Workbench", "共享显存预览已结束"));
   }
+  // Resolve the current theme at frame time so live changes also affect every
+  // Gaussian path (resident, compatibility and training preview). The splats
+  // continue to use unchanged premultiplied-alpha blending over this backdrop.
+  const QVector4D clearColor = viewportClearColor();
+  glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
@@ -3716,7 +3824,8 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
 
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                      GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   mPointProgram->bind();
   mPointProgram->setUniformValue("viewProjection", viewProjection);
   mPointProgram->setUniformValue("selected", mModelSelected ? 1.0F : 0.0F);
@@ -3874,7 +3983,8 @@ void NativeViewport::drawTrainingPointCloud(
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
   glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                      GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   mPointProgram->bind();
   mPointProgram->setUniformValue("viewProjection", viewProjection);
   mPointProgram->setUniformValue("selected", mModelSelected ? 1.0F : 0.0F);
@@ -3976,7 +4086,13 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   glDepthMask(GL_FALSE);
   glEnable(GL_BLEND);
   glEnable(GL_MULTISAMPLE);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  // These shaders emit straight RGB, but the QOpenGLWidget framebuffer is
+  // presented/captured as premultiplied RGBA. Keep the opaque backdrop alpha
+  // opaque: applying SRC_ALPHA to alpha as well would produce 1-a+a*a and
+  // make Qt unpremultiply bright day-grid pixels into saturated colours.
+  // RGB blending is unchanged; only the alpha-channel source factor differs.
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                      GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glLineWidth(1.0F);
   mGridProgram->bind();
   const ReferenceGridScale scale = referenceGridScale(
@@ -4025,9 +4141,11 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
     // and avoid the periodic-fragment phase loss seen on dense point clouds.
     const float minorStep = scale.displayMajorStep * 0.1F;
     drawGridLevel(minorStep, 161,
-                  QVector4D(0.17F, 0.19F, 0.20F, 0.38F));
+                  lightViewport() ? QVector4D(0.53F, 0.59F, 0.64F, 0.32F)
+                                  : QVector4D(0.17F, 0.19F, 0.20F, 0.38F));
     drawGridLevel(scale.displayMajorStep, 81,
-                  QVector4D(0.29F, 0.31F, 0.33F, 0.58F));
+                  lightViewport() ? QVector4D(0.35F, 0.43F, 0.49F, 0.47F)
+                                  : QVector4D(0.29F, 0.31F, 0.33F, 0.58F));
 
     // Keep the coloured origin axes inside the same camera-relative patch as
     // the major grid. Extending them farther than the grey lines makes a
@@ -5948,7 +6066,8 @@ void NativeViewport::drawDepthAwareLines(
   glDisable(GL_CULL_FACE);
   glEnable(GL_BLEND);
   glEnable(GL_MULTISAMPLE);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                      GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glLineWidth(std::max(
       1.0F, logicalLineWidth * static_cast<float>(devicePixelRatioF())));
 
@@ -6011,7 +6130,9 @@ void NativeViewport::drawDepthAwareModelBounds(
   constexpr qreal dashPixels = 8.0;
   constexpr qreal gapPixels = 5.0;
   constexpr int maximumDashesPerEdge = 256;
-  const QVector3D color(1.0F, 166.0F / 255.0F, 64.0F / 255.0F);
+  const QVector3D color = lightViewport()
+                            ? QVector3D(0.65F, 0.38F, 0.07F)
+                            : QVector3D(1.0F, 166.0F / 255.0F, 64.0F / 255.0F);
 
   QVector<DepthOverlayVertex> vertices;
   vertices.reserve(384);
@@ -6098,10 +6219,12 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
   painter.setBrush(Qt::NoBrush);
-  painter.setPen(QPen(QColor(109, 160, 255, 205), 1.8, Qt::SolidLine,
+  painter.setPen(QPen(themeInk(QColor(109, 160, 255, 205),
+                               QColor(43, 103, 190, 220)), 1.8, Qt::SolidLine,
                       Qt::RoundCap, Qt::RoundJoin));
   drawSegments(mScene->mCameraGeometry.path);
-  painter.setPen(QPen(QColor(84, 209, 122, 220), 1.25, Qt::SolidLine,
+  painter.setPen(QPen(themeInk(QColor(84, 209, 122, 220),
+                               QColor(31, 139, 77, 225)), 1.25, Qt::SolidLine,
                       Qt::RoundCap, Qt::RoundJoin));
   drawSegments(mScene->mCameraGeometry.frustums);
   painter.restore();
@@ -6116,10 +6239,12 @@ void NativeViewport::drawModelSelection(
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
   Q_UNUSED(modelViewProjection);
+  const ViewportColors colors = viewportColors();
   const auto center = projectPoint(selectionPivot(), viewProjectionMatrix());
   if (center.has_value()) {
     if (mModelDragActive && mMode == InteractionMode::Rotate) {
-      painter.setPen(QPen(QColor(255, 173, 66, 205), 1.7,
+      painter.setPen(QPen(themeInk(QColor(255, 173, 66, 205),
+                                   QColor(168, 102, 18, 225)), 1.7,
                           Qt::DashLine, Qt::RoundCap));
       painter.setBrush(Qt::NoBrush);
       painter.drawEllipse(*center, mModelRotationRadiusPixels,
@@ -6142,8 +6267,10 @@ void NativeViewport::drawModelSelection(
         painter.drawLine(*start, *end);
       }
     }
-    painter.setPen(QPen(QColor(255, 187, 84, 245), 1.5));
-    painter.setBrush(QColor(255, 166, 64, 72));
+    painter.setPen(QPen(themeInk(QColor(255, 187, 84, 245),
+                                 QColor(167, 98, 12, 245)), 1.5));
+    painter.setBrush(themeInk(QColor(255, 166, 64, 72),
+                              QColor(195, 131, 28, 50)));
     const qreal pivotRadius = modelTransformGizmo().centerHandle.width() * 0.3;
     painter.drawEllipse(*center, pivotRadius, pivotRadius);
     const QString hint =
@@ -6159,9 +6286,9 @@ void NativeViewport::drawModelSelection(
         modelTransformGizmo(), QSizeF(textBounds.size()),
         QSizeF(width(), height()));
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(38, 31, 23, 225));
+    painter.setBrush(translucent(colors.hintCard, 225));
     painter.drawRoundedRect(badge, 5.0, 5.0);
-    painter.setPen(QColor(255, 203, 122));
+    painter.setPen(colors.hintText);
     painter.drawText(badge, Qt::AlignCenter, hint);
   }
   painter.restore();
@@ -6173,6 +6300,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
   if (!layout.valid) {
     return;
   }
+  const ViewportColors colors = viewportColors();
   const bool drawMove = mTransformGizmoMode == TransformGizmoMode::Move ||
                         mTransformGizmoMode == TransformGizmoMode::Transform;
   const bool drawRotate = mTransformGizmoMode == TransformGizmoMode::Rotate ||
@@ -6185,9 +6313,9 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     return (mTransformGizmoPress.isValid() ? mTransformGizmoPress
                                            : mTransformGizmoHover) == candidate;
   };
-  const auto displayColor = [&highlighted](const int axis,
+  const auto displayColor = [&highlighted, &colors](const int axis,
                                            const TransformGizmoHandleKind kind) {
-    return highlighted(kind, axis) ? QColor(255, 224, 118)
+    return highlighted(kind, axis) ? colors.highlight
                                     : navigationAxisColor(axis);
   };
 
@@ -6236,15 +6364,15 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     }
     const bool viewHighlight =
         highlighted(TransformGizmoHandleKind::RotateView, -1);
-    painter.setPen(QPen(viewHighlight ? QColor(255, 224, 118)
-                                     : QColor(225, 229, 232, 220),
+    painter.setPen(QPen(viewHighlight ? colors.highlight
+                                     : translucent(colors.viewRing, 220),
                         layout.lineWidth + (viewHighlight ? 1.2 : 0.0),
                         Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.setBrush(Qt::NoBrush);
     painter.drawPolygon(layout.viewRing);
     if (highlighted(TransformGizmoHandleKind::RotateTrackball, -1)) {
-      painter.setPen(QPen(QColor(255, 224, 118, 210), 1.4, Qt::DashLine));
-      painter.setBrush(QColor(255, 224, 118, 24));
+      painter.setPen(QPen(translucent(colors.highlight, 210), 1.4, Qt::DashLine));
+      painter.setBrush(translucent(colors.highlight, 24));
       QPainterPath trackball;
       trackball.setFillRule(Qt::OddEvenFill);
       trackball.addEllipse(layout.trackballBounds);
@@ -6276,7 +6404,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
                               navigationAxisColor(secondAxis), 0.5);
       const bool active = highlighted(planeKind, excludedAxis);
       if (active) {
-        color = QColor(255, 224, 118);
+        color = colors.highlight;
       }
       QColor fill = color;
       fill.setAlpha(active ? 105 : 42);
@@ -6296,7 +6424,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     if (drawMove) {
       const bool moveActive =
           highlighted(TransformGizmoHandleKind::MoveAxis, axis);
-      const QColor moveColor = moveActive ? QColor(255, 224, 118)
+      const QColor moveColor = moveActive ? colors.highlight
                                           : navigationAxisColor(axis);
       painter.setPen(QPen(moveColor,
                           layout.lineWidth + (moveActive ? 1.3 : 0.0),
@@ -6308,7 +6436,7 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
     if (drawScale) {
       const bool scaleActive =
           highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
-      QColor scaleColor = scaleActive ? QColor(255, 224, 118)
+      QColor scaleColor = scaleActive ? colors.highlight
                                       : navigationAxisColor(axis);
       if (mTransformGizmoMode == TransformGizmoMode::Transform &&
           !scaleActive) {
@@ -6331,11 +6459,10 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
   if (mTransformGizmoMode == TransformGizmoMode::Move ||
       mTransformGizmoMode == TransformGizmoMode::Transform) {
     const bool active = highlighted(TransformGizmoHandleKind::MoveView, -1);
-    painter.setPen(QPen(active ? QColor(255, 224, 118)
-                              : QColor(228, 232, 234),
+    painter.setPen(QPen(active ? colors.highlight : colors.handleEdge,
                         active ? 2.2 : 1.5));
-    painter.setBrush(active ? QColor(255, 224, 118, 155)
-                            : QColor(48, 53, 57, 220));
+    painter.setBrush(active ? translucent(colors.highlight, 155)
+                            : translucent(colors.handleFill, 220));
     painter.drawEllipse(layout.centerHandle);
   } else if (mTransformGizmoMode == TransformGizmoMode::Scale) {
     const bool active = highlighted(TransformGizmoHandleKind::ScaleUniform, -1);
@@ -6346,11 +6473,10 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
             << center + QPointF(extent, 0.0)
             << center + QPointF(0.0, extent)
             << center + QPointF(-extent, 0.0);
-    painter.setPen(QPen(active ? QColor(255, 224, 118)
-                              : QColor(228, 232, 234),
+    painter.setPen(QPen(active ? colors.highlight : colors.handleEdge,
                         active ? 2.2 : 1.5));
-    painter.setBrush(active ? QColor(255, 224, 118, 190)
-                            : QColor(48, 53, 57, 230));
+    painter.setBrush(active ? translucent(colors.highlight, 190)
+                            : translucent(colors.handleFill, 230));
     painter.drawPolygon(diamond);
   }
   painter.restore();
@@ -6364,10 +6490,11 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
   static const std::array<TransformGizmoMode, 4> modes = {
       TransformGizmoMode::Move, TransformGizmoMode::Rotate,
       TransformGizmoMode::Scale, TransformGizmoMode::Transform};
+  const ViewportColors colors = viewportColors();
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
-  painter.setPen(QPen(QColor(63, 68, 72, 220), 1.0));
-  painter.setBrush(QColor(24, 27, 30, 232));
+  painter.setPen(QPen(translucent(colors.toolBorder, 220), 1.0));
+  painter.setBrush(translucent(colors.toolCard, 232));
   painter.drawRoundedRect(layout.background, 6.0, 6.0);
 
   for (int index = 0; index < 4; ++index) {
@@ -6376,13 +6503,15 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
         mTransformGizmoMode == modes.at(static_cast<std::size_t>(index));
     const bool hover = mTransformToolHover == index;
     painter.setPen(Qt::NoPen);
-    painter.setBrush(active ? QColor(70, 116, 183, 245)
-                            : hover ? QColor(62, 67, 72, 235)
-                                    : QColor(34, 38, 41, 210));
+    painter.setBrush(active ? translucent(colors.toolActive, 245)
+                            : hover ? translucent(colors.toolHover, 235)
+                                    : translucent(colors.toolIdle, 210));
     painter.drawRoundedRect(rect, 4.0, 4.0);
-    painter.setPen(QPen(QColor(238, 241, 243), 2.0, Qt::SolidLine,
+    const QColor icon = lightViewport() && active ? QColor(247, 251, 255)
+                                                : colors.toolIcon;
+    painter.setPen(QPen(icon, 2.0, Qt::SolidLine,
                         Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(QColor(238, 241, 243));
+    painter.setBrush(icon);
     const QPointF center = rect.center();
     const qreal radius = rect.width() * 0.26;
     if (index == 0 || index == 3) {
@@ -6407,7 +6536,7 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
                         QSizeF(radius * 2.0, radius * 2.0));
       painter.setBrush(Qt::NoBrush);
       painter.drawArc(ring, 30 * 16, 285 * 16);
-      painter.setBrush(QColor(238, 241, 243));
+      painter.setBrush(icon);
       QPolygonF arrow;
       arrow << ring.topRight() + QPointF(-1.0, 2.0)
             << ring.topRight() + QPointF(-7.0, 0.0)
@@ -6418,27 +6547,26 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
       const QPointF start = center + QPointF(-radius * 0.65, radius * 0.65);
       const QPointF end = center + QPointF(radius * 0.68, -radius * 0.68);
       painter.drawLine(start, end);
-      painter.setBrush(QColor(238, 241, 243));
+      painter.setBrush(icon);
       painter.drawRect(QRectF(end - QPointF(4.0, 4.0), QSizeF(8.0, 8.0)));
     }
   }
 
   const bool locked = modelGizmoOrientationLocked();
   const bool local = modelGizmoUsesLocalOrientation();
-  painter.setPen(locked ? QPen(QColor(76, 81, 85, 185), 1.0)
+  painter.setPen(locked ? QPen(translucent(colors.disabledBorder, 185), 1.0)
                         : QPen(Qt::NoPen));
-  painter.setBrush(locked ? QColor(28, 31, 34, 205)
+  painter.setBrush(locked ? translucent(colors.toolDisabled, 205)
                           : mTransformToolHover == 4
-                                ? QColor(62, 67, 72, 235)
-                                : QColor(34, 38, 41, 210));
+                                ? translucent(colors.toolHover, 235)
+                                : translucent(colors.toolIdle, 210));
   painter.drawRoundedRect(layout.orientationButton, 4.0, 4.0);
   QFont small = painter.font();
   if (small.pointSizeF() > 0.0) {
     small.setPointSizeF(std::max(8.0, small.pointSizeF() - 1.0));
   }
   painter.setFont(small);
-  painter.setPen(locked ? QColor(157, 164, 169)
-                        : QColor(220, 225, 228));
+  painter.setPen(locked ? colors.disabledText : colors.orientationText);
   painter.drawText(layout.orientationButton, Qt::AlignCenter,
                    locked && mSelectedSceneIds.size() > 1 ? QCoreApplication::translate("Workbench", "等比\n缩放")
                           : locked ? QCoreApplication::translate("Workbench", "局部\n锁定")
@@ -6456,6 +6584,8 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
 
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
+  const ViewportColors colors = viewportColors();
+  const QColor brushEdge = themeInk(QColor(124, 219, 191), QColor(17, 117, 97));
   if (mMode == InteractionMode::Brush) {
     if (mSelectionGestureActive && !mSelectionPath.isEmpty()) {
       QPainterPath stroke;
@@ -6465,24 +6595,24 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
       }
       stroke.lineTo(mSelectionCurrent);
       painter.setBrush(Qt::NoBrush);
-      painter.setPen(QPen(QColor(102, 193, 168, 48), mBrushRadius * 2.0,
+      painter.setPen(QPen(translucent(colors.accent, 48), mBrushRadius * 2.0,
                           Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
       painter.drawPath(stroke);
-      painter.setPen(QPen(QColor(124, 219, 191, 205), 1.2, Qt::SolidLine,
+      painter.setPen(QPen(translucent(brushEdge, 205), 1.2, Qt::SolidLine,
                           Qt::RoundCap, Qt::RoundJoin));
       painter.drawPath(stroke);
     }
     if (drawBrushCursor) {
-      painter.setBrush(QColor(102, 193, 168, 20));
-      painter.setPen(QPen(QColor(124, 219, 191, 220), 1.4));
+      painter.setBrush(translucent(colors.accent, 20));
+      painter.setPen(QPen(translucent(brushEdge, 220), 1.4));
       painter.drawEllipse(mBrushCursorPosition, mBrushRadius, mBrushRadius);
     }
     painter.restore();
     return;
   }
 
-  painter.setPen(QPen(QColor(102, 193, 168), 1.5, Qt::SolidLine));
-  painter.setBrush(QColor(102, 193, 168, 36));
+  painter.setPen(QPen(colors.accent, 1.5, Qt::SolidLine));
+  painter.setBrush(translucent(colors.accent, 36));
   if (mMode == InteractionMode::Rectangle) {
     painter.drawRect(QRectF(mSelectionStart, mSelectionCurrent).normalized());
   } else if (mMode == InteractionMode::Lasso && !mSelectionPath.isEmpty()) {
@@ -6499,9 +6629,10 @@ void NativeViewport::drawSelectionGesture(QPainter &painter) {
 }
 
 void NativeViewport::drawOverlay(QPainter &painter) {
+  const ViewportColors colors = viewportColors();
   painter.save();
   painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(17, 19, 21, 225));
+  painter.setBrush(translucent(colors.card, 225));
 
   const QString sceneName = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())
                                 ? mScene->mRenderMode == RenderMode::Points
@@ -6636,10 +6767,10 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QRect headerRect(
       viewportMargin, viewportMargin,
       std::clamp(widthHint, headerMinWidth, headerMaxWidth), headerHeight);
-  painter.setBrush(QColor(17, 19, 21, 215));
+  painter.setBrush(translucent(colors.card, 215));
   painter.drawRoundedRect(headerRect, 5, 5);
 
-  painter.setPen(QColor(232, 235, 236));
+  painter.setPen(colors.text);
   QFont strongFont = compactFont;
   strongFont.setWeight(QFont::DemiBold);
   painter.setFont(strongFont);
@@ -6651,7 +6782,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
       QFontMetrics(strongFont).elidedText(title, Qt::ElideMiddle,
                                           lineRect.width()));
   painter.setFont(compactFont);
-  painter.setPen(QColor(102, 193, 168));
+  painter.setPen(colors.accent);
   lineRect.translate(0, lineHeight + lineGap);
   painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
                    metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
@@ -6663,18 +6794,18 @@ void NativeViewport::drawOverlay(QPainter &painter) {
         std::max(metrics.horizontalAdvance(phase), metrics.horizontalAdvance(detail)) + headerPaddingX * 2);
     const QRect panel(viewportMargin, headerRect.bottom() + 6, panelWidth, headerHeight + 3);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(17, 23, 26, 225));
+    painter.setBrush(translucent(colors.processCard, 225));
     painter.drawRoundedRect(panel, 5, 5);
     QRect row = panel.adjusted(headerPaddingX, headerPaddingY, -headerPaddingX, -headerPaddingY);
     row.setHeight(lineHeight);
-    painter.setPen(QColor(120, 208, 186));
+    painter.setPen(colors.processText);
     painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(phase, Qt::ElideRight, row.width()));
     row.translate(0, lineHeight + lineGap);
-    painter.setPen(QColor(181, 193, 200));
+    painter.setPen(colors.processDetail);
     painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(detail, Qt::ElideRight, row.width()));
     if (mProcessingActive && mProcessingProgress >= 0) {
       painter.setPen(Qt::NoPen);
-      painter.setBrush(QColor(89, 169, 153));
+      painter.setBrush(colors.progress);
       painter.drawRect(QRect(panel.left(), panel.bottom() - 2,
           panel.width() * std::clamp(mProcessingProgress, 0, 100) / 100, 2));
     }
@@ -6714,9 +6845,9 @@ void NativeViewport::drawOverlay(QPainter &painter) {
       (std::min)(statusWidth, qMax(1, width() - viewportMargin * 2)),
       badgeHeight);
   painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(17, 19, 21, 215));
+  painter.setBrush(translucent(colors.card, 215));
   painter.drawRoundedRect(statusRect, 5, 5);
-  painter.setPen(QColor(181, 189, 193));
+  painter.setPen(colors.muted);
   painter.drawText(
       statusRect.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft,
       metrics.elidedText(statusText, Qt::ElideRight,
@@ -6725,9 +6856,9 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QRect modeRect(width() - modeWidth - viewportMargin, viewportMargin,
                        modeWidth, badgeHeight);
   painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(49, 93, 88, 235));
+  painter.setBrush(translucent(colors.modeCard, 235));
   painter.drawRoundedRect(modeRect, 5, 5);
-  painter.setPen(QColor(238, 246, 244));
+  painter.setPen(colors.modeText);
   painter.drawText(modeRect, Qt::AlignCenter, mode);
 
   painter.restore();
@@ -6737,7 +6868,7 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
   const NavigationGizmoLayout layout = navigationGizmo();
-  const QColor viewportColor(12, 15, 17);
+  const QColor viewportColor = viewportColors().backdrop;
   const bool rotateActive =
       mNavigationHover.part == NavigationGizmoPart::Rotate ||
       (mNavigationInteractionActive &&
@@ -6745,7 +6876,7 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
 
   if (rotateActive) {
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(0, 0, 0, 82));
+    painter.setBrush(themeInk(QColor(0, 0, 0, 82), QColor(86, 111, 132, 24)));
     painter.drawEllipse(layout.rotateBounds);
   }
 
@@ -6796,15 +6927,17 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
           0.78 + static_cast<qreal>(handle->depth) * 0.12, 0.68, 0.92);
       lineColor = mixColor(viewportColor, axisColor, colorAmount);
     } else {
-      lineColor = QColor(170, 176, 182, 178);
+      lineColor = themeInk(QColor(170, 176, 182, 178), QColor(100, 117, 133, 205));
       lineWidth *= 0.72;
     }
     if (handleHighlighted(*handle)) {
-      lineColor = mixColor(lineColor, QColor(255, 255, 255), 0.34);
+      lineColor = mixColor(lineColor,
+                           themeInk(QColor(255, 255, 255), QColor(28, 53, 76)), 0.34);
       lineWidth *= 1.18;
     }
     const QPointF shadowOffset(1.0, 1.2);
-    painter.setPen(QPen(QColor(0, 0, 0, 135), lineWidth + 1.1, Qt::SolidLine,
+    painter.setPen(QPen(themeInk(QColor(0, 0, 0, 135), QColor(56, 78, 98, 50)),
+                        lineWidth + 1.1, Qt::SolidLine,
                         Qt::RoundCap));
     painter.drawLine(lineStart + shadowOffset, lineEnd + shadowOffset);
     painter.setPen(QPen(lineColor, lineWidth, Qt::SolidLine, Qt::RoundCap));
@@ -6843,14 +6976,15 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
           0.82 + static_cast<qreal>(handle->depth) * 0.10, 0.72, 0.94);
       fill = mixColor(viewportColor, axisColor, amount);
     } else {
-      fill = QColor(178, 184, 190, 205);
+      fill = themeInk(QColor(178, 184, 190, 205), QColor(115, 133, 148, 225));
     }
     if (highlighted) {
-      fill = mixColor(fill, QColor(255, 255, 255), 0.26);
+      fill = mixColor(fill,
+                       themeInk(QColor(255, 255, 255), QColor(28, 53, 76)), 0.26);
     }
 
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(0, 0, 0, 125));
+    painter.setBrush(themeInk(QColor(0, 0, 0, 125), QColor(56, 78, 98, 70)));
     painter.drawPolygon(cone.translated(1.0, 1.2));
 
     QColor brightFace = mixColor(fill, QColor(255, 255, 255), 0.28);
@@ -6871,7 +7005,8 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
     painter.setBrush(darkFace);
     painter.drawPolygon(secondFace);
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(highlighted ? QColor(255, 255, 255, 235)
+    painter.setPen(QPen(highlighted ? themeInk(QColor(255, 255, 255, 235),
+                                               QColor(32, 54, 74, 245))
                                     : mixColor(darkFace, fill, 0.58),
                         std::max(1.0, layout.lineWidth * 0.52), Qt::SolidLine,
                         Qt::RoundCap, Qt::RoundJoin));
@@ -6888,11 +7023,12 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
       const QRectF textRect(labelCenter.x() - labelSize,
                             labelCenter.y() - labelSize * 0.70, labelSize * 2.0,
                             labelSize * 1.40);
-      painter.setPen(QColor(0, 0, 0, 185));
+      painter.setPen(themeInk(QColor(0, 0, 0, 185), QColor(255, 255, 255, 200)));
       painter.drawText(textRect.translated(1.0, 1.0), Qt::AlignCenter,
                        navigationAxisLabel(handle->axis));
       painter.setPen(highlighted
-                         ? QColor(255, 255, 255)
+                         ? themeInk(QColor(255, 255, 255), QColor(29, 50, 69))
+                         : lightViewport() ? axisColor
                          : mixColor(axisColor, QColor(255, 255, 255), 0.30));
       painter.drawText(textRect, Qt::AlignCenter,
                        navigationAxisLabel(handle->axis));
@@ -6906,16 +7042,17 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   if (projectionActive) {
     const QRectF targetFeedback =
         layout.projectionHitArea.adjusted(1.0, 1.0, -1.0, -1.0);
-    painter.setPen(QPen(QColor(230, 236, 242, 150),
+    painter.setPen(QPen(themeInk(QColor(230, 236, 242, 150),
+                                 QColor(54, 94, 130, 170)),
                         std::max(1.0, layout.lineWidth * 0.42), Qt::SolidLine,
                         Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(QColor(132, 166, 196, 34));
+    painter.setBrush(themeInk(QColor(132, 166, 196, 34), QColor(58, 112, 154, 22)));
     painter.drawEllipse(targetFeedback);
   }
   const std::vector<NavigationCubeFaceProjection> cubeFaces =
       projectNavigationCube(viewMatrix(), layout.projectionCube);
   painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(0, 0, 0, 125));
+  painter.setBrush(themeInk(QColor(0, 0, 0, 125), QColor(56, 78, 98, 70)));
   for (const NavigationCubeFaceProjection &face : cubeFaces) {
     painter.drawPolygon(face.polygon.translated(1.2, 1.5));
   }
@@ -6942,8 +7079,9 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   projectionFont.setPixelSize(
       std::clamp(qRound(layout.projectionLabel.height() * 0.56), 10, 14));
   painter.setFont(projectionFont);
-  painter.setPen(projectionActive ? QColor(255, 255, 255)
-                                  : QColor(205, 210, 216, 225));
+  painter.setPen(projectionActive
+                     ? themeInk(QColor(255, 255, 255), QColor(29, 50, 69))
+                     : themeInk(QColor(205, 210, 216, 225), QColor(61, 80, 97, 235)));
   painter.drawText(layout.projectionLabel, Qt::AlignCenter,
                    mOrthographic ? QStringLiteral("≡  Iso")
                                  : QStringLiteral("≡  Persp"));
@@ -6954,10 +7092,12 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
             mNavigationHover.part == part ||
             (mNavigationInteractionActive && mNavigationPress.part == part);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(active ? QColor(0, 0, 0, 112) : QColor(0, 0, 0, 42));
+        painter.setBrush(active
+                             ? themeInk(QColor(0, 0, 0, 112), QColor(87, 116, 139, 55))
+                             : themeInk(QColor(0, 0, 0, 42), QColor(247, 251, 253, 145)));
         painter.drawEllipse(rect);
       };
-  const QColor iconColor(216, 220, 224, 225);
+  const QColor iconColor = themeInk(QColor(216, 220, 224, 225), QColor(46, 66, 83, 235));
   const qreal iconWidth = std::max(1.5, layout.lineWidth * 0.72);
 
   drawButtonBackground(layout.zoomButton, NavigationGizmoPart::Zoom);
@@ -7000,8 +7140,9 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   drawButtonBackground(layout.cameraButton, NavigationGizmoPart::Camera);
   const QColor cameraIconColor =
       !camerasAvailable()
-          ? QColor(135, 140, 145, 120)
-          : (mCameraViewActive ? QColor(114, 190, 255) : iconColor);
+          ? themeInk(QColor(135, 140, 145, 120), QColor(126, 141, 155, 155))
+          : (mCameraViewActive ? themeInk(QColor(114, 190, 255), QColor(35, 109, 177))
+                               : iconColor);
   painter.setPen(QPen(cameraIconColor, iconWidth, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
   painter.setBrush(Qt::NoBrush);

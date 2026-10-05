@@ -2,6 +2,7 @@
 
 #include <QSize>
 #include <QString>
+#include <QPalette>
 
 class QApplication;
 class QScreen;
@@ -13,8 +14,17 @@ enum class UiScaleMode {
   Manual,
 };
 
+enum class UiTheme {
+  Dark,
+  Light,
+};
+
 class AppTheme final {
 public:
+  static UiTheme loadTheme();
+  static UiTheme currentTheme();
+  static QPalette palette(UiTheme theme);
+  static void applyTheme(QApplication &application, UiTheme theme, bool persist);
   static UiScaleMode loadScaleMode();
   static int loadScalePercent(const QScreen *screen);
   static int recommendedScalePercent(const QScreen *screen);
@@ -36,7 +46,7 @@ public:
   static int scaled(int value, int scalePercent);
 
 private:
-  static QString styleSheet(int scalePercent);
+  static QString styleSheet(int scalePercent, UiTheme theme);
 };
 
 } // namespace gsw

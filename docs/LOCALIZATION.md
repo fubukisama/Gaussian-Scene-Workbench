@@ -21,6 +21,16 @@ QA example: `"Gaussian Scene Workbench.exe" --smoke-test-language --language ja_
 
 The shared 3DGS / 2DGS training monitor reflows its seven metrics by available width and font size. Narrow or short panels scroll vertically instead of shrinking the chart below its readable height; the default bottom dock remains compact. Long task titles use plain text and middle elision, with their complete original text in the tooltip. The effective-input tooltip also retains the full report. Resizing, scrolling and font/language changes only update presentation, not training samples, progress, backend settings or worker state. Language smoke tests cover both backends at 320 / 520 / 900 px with 90% / 150% fonts and return to a wide layout. Other generation jobs retain their own status displays; no Gaussian training metrics are fabricated for reconstruction or meshing.
 
+## Day and night appearance
+
+**View → Appearance → Light (Day) / Dark (Night)** changes the interface immediately and remembers the choice (`ui/theme`). The existing default remains dark. Light mode covers menus, dialogs and file browsers, dock panels, logs, training charts, status text, viewport background, grid and navigation/transform overlays. Language and UI-scale changes retain the selected appearance. It is a manual preference, not a time-based or Windows-theme schedule.
+
+The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all mesh-generation workflows. It does not reload models, rewrite RGB/SH/materials, alter camera/selection/transforms, clear training curves, interrupt workers or change exported data. Transparent splats naturally composite against the chosen backdrop; this is not relighting or a new reconstruction. `--theme light|dark` is a non-persistent launch/QA override. The language smoke matrix toggles both themes while a test-owned worker runs; light-mode Gaussian, navigation and mesh-publication regressions complement existing dark tests.
+
+中文：通过“视图 → 外观 → 浅色（白天）／深色（黑夜）”即时切换并记住选择；界面与观察背景一起切换，不修改模型或训练数据。
+
+日本語：「ビュー → 外観 → ライト（昼間）／ダーク（夜間）」で即時に切り替え、選択を保存します。UI と観察用背景のみを変更し、モデルや学習データは変更しません。
+
 ## Terminology
 
 Scene and training-output names accept arbitrary Unicode text, spaces and symbols (including characters forbidden in Windows filenames). Only blank names are rejected. `ManagedName.h` maps display names to backend-safe ASCII storage identifiers; matching Python validation must stay in sync. Legacy safe ASCII names keep their paths, except the reserved `gsw-name-` namespace. Names requiring encoding use that prefix plus the full SHA-256 of the exact UTF-8 name. Do not trim, case-fold, translate or sanitize the display name. `.gsw-name.json` retains the original name alongside the dataset and travels with project migration/backup; import publishes it in the same transaction as the data. Existing job configurations without display metadata remain supported. Actual export filenames still obey operating-system filesystem rules.
@@ -29,6 +39,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | --- | --- | --- |
 | 工程 / 数据集 | Project / Dataset | プロジェクト / データセット |
 | 桌面 | Desktop | デスクトップ |
+| 外观 / 浅色（白天） / 深色（黑夜） | Appearance / Light (Day) / Dark (Night) | 外観 / ライト（昼間） / ダーク（夜間） |
 | 全屏 / 退出全屏 | Full Screen / Exit Full Screen | 全画面表示 / 全画面表示を終了 |
 | 最大化窗口 / 还原窗口 | Maximize Window / Restore Window | ウィンドウを最大化 / ウィンドウを元に戻す |
 | 停靠面板 / 浮动面板 | Dock Panel / Float Panel | パネルをドッキング / パネルをフローティング |

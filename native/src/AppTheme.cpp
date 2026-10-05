@@ -1,15 +1,18 @@
 #include "AppTheme.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QFont>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QSettings>
 #include <QSize>
 #include <QString>
+#include <QVariant>
 #include <QtMath>
 
 #include <algorithm>
+#include <initializer_list>
 
 namespace gsw {
 
@@ -20,7 +23,92 @@ constexpr int kMaximumScale = 150;
 int clampScale(const int value) {
   return std::clamp(value, kMinimumScale, kMaximumScale);
 }
+
+QString themeName(const UiTheme theme) {
+  return theme == UiTheme::Light ? QStringLiteral("light")
+                               : QStringLiteral("dark");
+}
 } // namespace
+
+UiTheme AppTheme::loadTheme() {
+  const QString value =
+      QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("dark"))
+          .toString();
+  return value == QStringLiteral("light") ? UiTheme::Light : UiTheme::Dark;
+}
+
+UiTheme AppTheme::currentTheme() {
+  if (QCoreApplication::instance() != nullptr) {
+    const QString value = QCoreApplication::instance()->property("gswUiTheme").toString();
+    if (value == QStringLiteral("light")) {
+      return UiTheme::Light;
+    }
+    if (value == QStringLiteral("dark")) {
+      return UiTheme::Dark;
+    }
+  }
+  return loadTheme();
+}
+
+QPalette AppTheme::palette(const UiTheme theme) {
+  const bool light = theme == UiTheme::Light;
+  QPalette result;
+  const QColor window(light ? "#f3f5f3" : "#1b1d1f");
+  const QColor base(light ? "#ffffff" : "#151719");
+  const QColor text(light ? "#24302c" : "#e7e9ea");
+  const QColor muted(light ? "#596b60" : "#a2aaaf");
+  const QColor disabled(light ? "#67756e" : "#929a9f");
+  const QColor disabledBase(light ? "#edf1ee" : "#242629");
+  const QColor button(light ? "#f7f9f7" : "#2a2e31");
+  const QColor accent(light ? "#176d60" : "#327e74");
+  for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                         QPalette::Disabled}) {
+    const bool isDisabled = group == QPalette::Disabled;
+    const QColor foreground = isDisabled ? disabled : text;
+    result.setColor(group, QPalette::Window, window);
+    result.setColor(group, QPalette::WindowText, foreground);
+    result.setColor(group, QPalette::Base, isDisabled ? disabledBase : base);
+    result.setColor(group, QPalette::AlternateBase,
+                    QColor(light ? "#f0f4f1" : "#1e2123"));
+    result.setColor(group, QPalette::Text, foreground);
+    result.setColor(group, QPalette::Button, isDisabled ? disabledBase : button);
+    result.setColor(group, QPalette::ButtonText, foreground);
+    result.setColor(group, QPalette::BrightText, QColor(Qt::white));
+    result.setColor(group, QPalette::Highlight,
+                    isDisabled ? QColor(light ? "#63796d" : "#445b54") : accent);
+    result.setColor(group, QPalette::HighlightedText, QColor(Qt::white));
+    result.setColor(group, QPalette::ToolTipBase,
+                    QColor(light ? "#fffef8" : "#2c3033"));
+    result.setColor(group, QPalette::ToolTipText, foreground);
+    result.setColor(group, QPalette::PlaceholderText, isDisabled ? disabled : muted);
+    result.setColor(group, QPalette::Link,
+                    QColor(light ? "#126d54" : "#70cdb4"));
+    result.setColor(group, QPalette::LinkVisited,
+                    QColor(light ? "#64518a" : "#c7a9e9"));
+    result.setColor(group, QPalette::Light,
+                    QColor(light ? "#ffffff" : "#5a6268"));
+    result.setColor(group, QPalette::Midlight,
+                    QColor(light ? "#e1ebe4" : "#41464b"));
+    result.setColor(group, QPalette::Mid,
+                    QColor(light ? "#b8c7bd" : "#34383c"));
+    result.setColor(group, QPalette::Dark,
+                    QColor(light ? "#84998c" : "#111315"));
+    result.setColor(group, QPalette::Shadow,
+                    QColor(light ? "#647a6d" : "#090b0d"));
+    result.setColor(group, QPalette::Accent, accent);
+  }
+  return result;
+}
+
+void AppTheme::applyTheme(QApplication &application, const UiTheme theme,
+                          const bool persist) {
+  application.setProperty("gswUiTheme", themeName(theme));
+  if (persist) {
+    QSettings().setValue(QStringLiteral("ui/theme"), themeName(theme));
+  }
+  const QVariant scale = application.property("gswUiScalePercent");
+  apply(application, scale.isValid() ? scale.toInt() : 100, false);
+}
 
 UiScaleMode AppTheme::loadScaleMode() {
   const QString mode =
@@ -143,6 +231,9 @@ int AppTheme::scaled(const int value, const int scalePercent) {
 
 void AppTheme::apply(QApplication &application, const int scalePercent, const bool persist) {
   const int scale = clampScale(scalePercent);
+  const UiTheme theme = currentTheme();
+  application.setProperty("gswUiTheme", themeName(theme));
+  application.setPalette(palette(theme));
   QFont font(QStringLiteral("Microsoft YaHei UI"));
   const QString language = application.property("gswUiLanguage").toString();
   if (language == QStringLiteral("ja_JP")) {
@@ -154,7 +245,7 @@ void AppTheme::apply(QApplication &application, const int scalePercent, const bo
   font.setPointSizeF(10.0 * scale / 100.0);
   font.setStyleStrategy(QFont::PreferAntialias);
   application.setFont(font);
-  application.setStyleSheet(styleSheet(scale));
+  application.setStyleSheet(styleSheet(scale, theme));
   application.setProperty("gswUiScalePercent", scale);
 
   if (persist) {
@@ -163,102 +254,114 @@ void AppTheme::apply(QApplication &application, const int scalePercent, const bo
   }
 }
 
-QString AppTheme::styleSheet(const int scalePercent) {
+QString AppTheme::styleSheet(const int scalePercent, const UiTheme theme) {
   QString css = QStringLiteral(R"CSS(
 QWidget {
-  background: #1b1d1f;
-  color: #e7e9ea;
-  selection-background-color: #327e74;
+  background: @SURFACE@;
+  color: @TEXT@;
+  selection-background-color: @SELECTION@;
   selection-color: #ffffff;
 }
-QMainWindow, QDialog { background: #17191b; }
+QWidget:disabled { color: @DISABLED_TEXT@; }
+QMainWindow, QDialog { background: @WINDOW@; }
 QMenuBar {
-  background: #202326;
-  border-bottom: 1px solid #34383c;
+  background: @BAR@;
+  border-bottom: 1px solid @BORDER@;
   padding: @MENU_PAD@px;
 }
 QMenuBar::item { padding: @MENU_ITEM_V@px @MENU_ITEM_H@px; background: transparent; }
-QMenuBar::item:selected { background: #303438; }
+QMenuBar::item:selected { background: @HOVER@; }
+QMenuBar::item:disabled { color: @DISABLED_TEXT@; }
 QMenu {
-  background: #24272a;
-  border: 1px solid #41464b;
+  background: @MENU@;
+  border: 1px solid @FIELD_BORDER@;
   padding: 4px;
 }
 QMenu::item { padding: @MENU_ROW_V@px @MENU_ROW_H@px; border-radius: 3px; }
-QMenu::item:selected { background: #356e67; }
-QMenu::separator { height: 1px; background: #3b3f43; margin: 4px 8px; }
+QMenu::item:selected { background: @MENU_SELECTION@; }
+QMenu::item:disabled { color: @DISABLED_TEXT@; }
+QMenu::separator { height: 1px; background: @SEPARATOR@; margin: 4px 8px; }
 QToolBar {
-  background: #202326;
+  background: @BAR@;
   border: 0;
-  border-bottom: 1px solid #34383c;
+  border-bottom: 1px solid @BORDER@;
   spacing: @TOOL_GAP@px;
   padding: @TOOL_PAD@px;
 }
-QToolBar::separator { width: 1px; background: #3b3f43; margin: 4px 6px; }
+QToolBar::separator { width: 1px; background: @SEPARATOR@; margin: 4px 6px; }
 QToolButton {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
   padding: @BUTTON_PAD@px;
 }
-QToolButton:hover { background: #303438; border-color: #444a4f; }
-QToolButton:pressed, QToolButton:checked { background: #315d58; border-color: #4a9a8f; }
-QToolButton:disabled { color: #676d72; }
+QToolButton:hover { background: @HOVER@; border-color: @HOVER_BORDER@; }
+QToolButton:pressed, QToolButton:checked { background: @PRESSED@; border-color: @ACCENT@; }
+QToolButton:focus { border-color: @FOCUS@; }
+QToolButton:disabled { color: @DISABLED_TEXT@; }
 QPushButton {
   min-height: @CONTROL_HEIGHT@px;
   padding: 0 @CONTROL_PAD@px;
-  background: #2a2e31;
-  border: 1px solid #454a4f;
+  background: @BUTTON@;
+  border: 1px solid @BUTTON_BORDER@;
   border-radius: 4px;
 }
-QPushButton:hover { background: #34383c; border-color: #5a6268; }
-QPushButton:pressed { background: #315d58; border-color: #4a9a8f; }
-QPushButton:disabled { color: #6f7478; background: #242629; border-color: #34373a; }
+QPushButton:hover { background: @BUTTON_HOVER@; border-color: @BUTTON_HOVER_BORDER@; }
+QPushButton:pressed, QPushButton:checked { background: @PRESSED@; border-color: @ACCENT@; }
+QPushButton:focus, QPushButton:default { border-color: @FOCUS@; }
+QPushButton:disabled { color: @DISABLED_TEXT@; background: @DISABLED_SURFACE@; border-color: @DISABLED_BORDER@; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
   min-height: @CONTROL_HEIGHT@px;
-  background: #151719;
-  border: 1px solid #41464b;
+  background: @FIELD@;
+  border: 1px solid @FIELD_BORDER@;
   border-radius: 4px;
   padding: 0 @INPUT_PAD@px;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-  border-color: #55b2a5;
+  border-color: @FOCUS@;
+}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+  color: @DISABLED_TEXT@;
+  background: @DISABLED_SURFACE@;
+  border-color: @DISABLED_BORDER@;
 }
 QComboBox::drop-down { border: 0; width: @COMBO_ARROW@px; }
 QAbstractItemView {
-  background: #191b1d;
-  alternate-background-color: #1e2123;
+  background: @ITEM_VIEW@;
+  alternate-background-color: @ALTERNATE@;
   border: 0;
   outline: 0;
 }
 QTreeView::item, QTableView::item { min-height: @ROW_HEIGHT@px; }
-QTreeView::item:hover, QTableView::item:hover { background: #282c2f; }
-QTreeView::item:selected, QTableView::item:selected { background: #315d58; }
+QTreeView::item:hover, QTableView::item:hover { background: @ITEM_HOVER@; }
+QTreeView::item:selected, QTableView::item:selected { background: @PRESSED@; color: @TEXT@; }
+QListView::item:hover { background: @ITEM_HOVER@; }
+QListView::item:selected { background: @PRESSED@; color: @TEXT@; }
 QHeaderView::section {
-  background: #24272a;
-  color: #b9bec2;
+  background: @MENU@;
+  color: @HEADER_TEXT@;
   border: 0;
-  border-right: 1px solid #35393d;
-  border-bottom: 1px solid #35393d;
+  border-right: 1px solid @HEADER_BORDER@;
+  border-bottom: 1px solid @HEADER_BORDER@;
   padding: @HEADER_PAD@px;
 }
-QDockWidget { color: #dfe2e4; }
+QDockWidget { color: @TITLE_TEXT@; }
 QDockWidget::title {
-  background: #222528;
-  border-bottom: 1px solid #363a3e;
+  background: @TITLE@;
+  border-bottom: 1px solid @TITLE_BORDER@;
   padding: @DOCK_FALLBACK_V@px @DOCK_FALLBACK_H@px;
   font-size: @DOCK_FALLBACK_FONT@px;
   font-weight: 400;
   text-align: left;
 }
 QWidget#dockTitleBar {
-  background: #222528;
+  background: @TITLE@;
   border: 0;
-  border-bottom: 1px solid #363a3e;
+  border-bottom: 1px solid @TITLE_BORDER@;
 }
 QLabel#dockTitleLabel {
   background: transparent;
-  color: #dfe2e4;
+  color: @TITLE_TEXT@;
   border: 0;
   padding: 0;
 }
@@ -268,46 +371,119 @@ QToolButton#dockTitleButton {
   border-radius: 2px;
   padding: 0;
 }
-QToolButton#dockTitleButton:hover { background: #34383c; }
-QToolButton#dockTitleButton:pressed { background: #315d58; }
-QTabWidget::pane { border: 0; border-top: 1px solid #373b3f; }
+QToolButton#dockTitleButton:hover { background: @BUTTON_HOVER@; }
+QToolButton#dockTitleButton:pressed { background: @PRESSED@; }
+QTabWidget::pane { border: 0; border-top: 1px solid @TAB_BORDER@; }
 QTabBar::tab {
-  background: #202326;
-  color: #aeb4b8;
+  background: @BAR@;
+  color: @TAB_TEXT@;
   padding: @TAB_V@px @TAB_H@px;
   border: 0;
-  border-right: 1px solid #34383c;
+  border-right: 1px solid @BORDER@;
 }
-QTabBar::tab:selected { color: #ffffff; background: #2a2e31; border-top: 2px solid #55b2a5; }
-QTabBar::tab:hover:!selected { background: #272a2d; }
+QTabBar::tab:selected { color: @ACTIVE_TAB_TEXT@; background: @BUTTON@; border-top: 2px solid @FOCUS@; }
+QTabBar::tab:hover:!selected { background: @TAB_HOVER@; }
+QTabBar::tab:disabled { color: @DISABLED_TEXT@; }
 QPlainTextEdit {
-  background: #111315;
-  color: #ced3d6;
+  background: @LOG@;
+  color: @LOG_TEXT@;
   border: 0;
   font-family: "Cascadia Mono", "Consolas";
 }
-QScrollBar:vertical { background: #191b1d; width: @SCROLL@px; margin: 0; }
-QScrollBar::handle:vertical { background: #484d51; min-height: 24px; border-radius: 4px; }
+QScrollBar:vertical { background: @ITEM_VIEW@; width: @SCROLL@px; margin: 0; }
+QScrollBar::handle:vertical { background: @SCROLL_HANDLE@; min-height: 24px; border-radius: 4px; }
+QScrollBar::handle:vertical:hover { background: @ACCENT@; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar:horizontal { background: #191b1d; height: @SCROLL@px; margin: 0; }
-QScrollBar::handle:horizontal { background: #484d51; min-width: 24px; border-radius: 4px; }
+QScrollBar:horizontal { background: @ITEM_VIEW@; height: @SCROLL@px; margin: 0; }
+QScrollBar::handle:horizontal { background: @SCROLL_HANDLE@; min-width: 24px; border-radius: 4px; }
+QScrollBar::handle:horizontal:hover { background: @ACCENT@; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-QStatusBar { background: #202326; border-top: 1px solid #34383c; color: #aeb4b8; }
+QStatusBar { background: @BAR@; border-top: 1px solid @BORDER@; color: @TAB_TEXT@; }
 QStatusBar::item { border: 0; }
 QLabel#sectionTitle {
-  color: #d9dddf;
+  color: @SECTION_TEXT@;
   font-weight: 600;
   padding-top: @SECTION_TOP@px;
   padding-bottom: @SECTION_BOTTOM@px;
-  border-bottom: 1px solid #383c40;
+  border-bottom: 1px solid @SECTION_BORDER@;
 }
-QLabel#mutedLabel, QLabel#uiScaleStatus { color: #949ba0; }
-QLabel#statusGood { color: #66c1a8; }
-QLabel#statusWarn { color: #d9ad5b; }
-QFrame#inspectorPanel { background: #1b1d1f; }
-QSplitter::handle { background: #34383c; }
-QToolTip { background: #2c3033; color: #ffffff; border: 1px solid #555b60; padding: 4px; }
+QLabel#mutedLabel, QLabel#uiScaleStatus { color: @MUTED_TEXT@; }
+QLabel#statusGood { color: @GOOD_TEXT@; }
+QLabel#statusWarn, QLabel#densityGuardWarning { color: @WARN_TEXT@; }
+QFrame#inspectorPanel { background: @SURFACE@; }
+QSplitter::handle { background: @BORDER@; }
+QProgressBar {
+  background: @FIELD@;
+  color: @TEXT@;
+  border: 1px solid @FIELD_BORDER@;
+  border-radius: 3px;
+  text-align: center;
+}
+QProgressBar::chunk { background: @PROGRESS@; border-radius: 2px; }
+QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOLTIP_BORDER@; padding: 4px; }
 )CSS");
+
+  // Both modes share one geometry/font template, so switching appearance cannot
+  // introduce a different UI density or undo the selected language's font.
+  struct ColorToken {
+    const char *token;
+    const char *dark;
+    const char *light;
+  };
+  const ColorToken colors[] = {
+      {"@SURFACE@", "#1b1d1f", "#f3f5f3"},
+      {"@TEXT@", "#e7e9ea", "#24302c"},
+      {"@SELECTION@", "#327e74", "#176d60"},
+      {"@PROGRESS@", "#327e74", "#a5d4c1"},
+      {"@WINDOW@", "#17191b", "#edf1ee"},
+      {"@BAR@", "#202326", "#e6ece8"},
+      {"@BORDER@", "#34383c", "#c5cfc9"},
+      {"@HOVER@", "#303438", "#dbe6e0"},
+      {"@MENU@", "#24272a", "#f7f9f7"},
+      {"@FIELD_BORDER@", "#41464b", "#adbcb3"},
+      {"@MENU_SELECTION@", "#356e67", "#d0e7de"},
+      {"@SEPARATOR@", "#3b3f43", "#bdcac1"},
+      {"@HOVER_BORDER@", "#444a4f", "#91a69a"},
+      {"@PRESSED@", "#315d58", "#c7e3d7"},
+      {"@ACCENT@", "#4a9a8f", "#287d64"},
+      {"@DISABLED_TEXT@", "#929a9f", "#67756e"},
+      {"@BUTTON@", "#2a2e31", "#f7f9f7"},
+      {"@BUTTON_BORDER@", "#454a4f", "#acbbb2"},
+      {"@BUTTON_HOVER@", "#34383c", "#e1ebe4"},
+      {"@BUTTON_HOVER_BORDER@", "#5a6268", "#84998c"},
+      {"@DISABLED_SURFACE@", "#242629", "#edf1ee"},
+      {"@DISABLED_BORDER@", "#34373a", "#cdd7d0"},
+      {"@FIELD@", "#151719", "#ffffff"},
+      {"@FOCUS@", "#55b2a5", "#137854"},
+      {"@ITEM_VIEW@", "#191b1d", "#fafcf9"},
+      {"@ALTERNATE@", "#1e2123", "#f0f4f1"},
+      {"@ITEM_HOVER@", "#282c2f", "#e4eee7"},
+      {"@HEADER_TEXT@", "#b9bec2", "#43594b"},
+      {"@HEADER_BORDER@", "#35393d", "#c8d3cb"},
+      {"@TITLE_TEXT@", "#dfe2e4", "#304b3b"},
+      {"@TITLE@", "#222528", "#e0e9e2"},
+      {"@TITLE_BORDER@", "#363a3e", "#bacbbf"},
+      {"@TAB_BORDER@", "#373b3f", "#c5d2c8"},
+      {"@TAB_TEXT@", "#aeb4b8", "#52685a"},
+      {"@ACTIVE_TAB_TEXT@", "#ffffff", "#24302c"},
+      {"@TAB_HOVER@", "#272a2d", "#dce7df"},
+      {"@LOG@", "#111315", "#ffffff"},
+      {"@LOG_TEXT@", "#ced3d6", "#30433a"},
+      {"@SCROLL_HANDLE@", "#484d51", "#91a699"},
+      {"@SECTION_TEXT@", "#d9dddf", "#304b3b"},
+      {"@SECTION_BORDER@", "#383c40", "#c2d1c6"},
+      {"@MUTED_TEXT@", "#949ba0", "#596b60"},
+      {"@GOOD_TEXT@", "#66c1a8", "#187456"},
+      {"@WARN_TEXT@", "#d9ad5b", "#8a580d"},
+      {"@TOOLTIP@", "#2c3033", "#fffef8"},
+      {"@TOOLTIP_TEXT@", "#ffffff", "#24302c"},
+      {"@TOOLTIP_BORDER@", "#555b60", "#adbdb1"},
+  };
+  for (const ColorToken &color : colors) {
+    css.replace(QString::fromLatin1(color.token),
+                QString::fromLatin1(theme == UiTheme::Light ? color.light
+                                                          : color.dark));
+  }
 
   const auto replace = [&css, scalePercent](const QString &token, const int baseValue) {
     css.replace(token, QString::number(AppTheme::scaled(baseValue, scalePercent)));

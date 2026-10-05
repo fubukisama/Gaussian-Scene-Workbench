@@ -98,6 +98,7 @@ private:
   void updateDockMetrics();
   void rebalanceDockSizes();
   void applyUiScale(int scalePercent, bool persist);
+  void refreshThemePresentation();
   void setAutomaticUiScale(bool automatic, bool persist);
   void refreshAutomaticUiScale();
   void scheduleAutomaticUiScale();

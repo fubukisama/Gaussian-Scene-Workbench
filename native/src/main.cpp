@@ -150,6 +150,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("UI language: zh_CN, en_US or ja_JP (does not change saved preference)."),
       QStringLiteral("locale"));
   parser.addOption(languageOption);
+  QCommandLineOption themeOption(QStringLiteral("theme"),
+      QStringLiteral("Override the interface theme: light or dark (does not change saved preference)."),
+      QStringLiteral("mode"));
+  parser.addOption(themeOption);
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
@@ -227,6 +231,16 @@ int main(int argc, char *argv[]) {
   parser.addOption(mediaSourceOption);
   parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("Project file to open."), QStringLiteral("[project]"));
   parser.process(application);
+
+  if (parser.isSet(themeOption)) {
+    const QString theme = parser.value(themeOption);
+    if (theme != QStringLiteral("light") && theme != QStringLiteral("dark")) {
+      qCritical() << "Invalid interface theme:" << theme;
+      return 5;
+    }
+    gsw::AppTheme::applyTheme(application,
+        theme == QStringLiteral("light") ? gsw::UiTheme::Light : gsw::UiTheme::Dark, false);
+  }
 
   QString languageOverride = parser.value(languageOption);
   const auto arguments = application.arguments();

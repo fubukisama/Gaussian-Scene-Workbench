@@ -250,6 +250,7 @@ protected:
   void initializeGL() override;
   void resizeGL(int width, int height) override;
   void paintGL() override;
+  void changeEvent(QEvent *event) override;
   void enterEvent(QEnterEvent *event) override;
   void leaveEvent(QEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;

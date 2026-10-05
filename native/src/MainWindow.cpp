@@ -95,12 +95,24 @@
 #include <cmath>
 #include <functional>
 #include <atomic>
+#include <utility>
 
 namespace gsw {
 
 namespace {
 constexpr int kDockLayoutStateVersion = 5;
 constexpr int kDefaultTaskDockHeight = 105;
+
+QColor taskStateColor(const QString &state) {
+  const bool light = AppTheme::currentTheme() == UiTheme::Light;
+  if (state == QStringLiteral("running") || state == QStringLiteral("done"))
+    return light ? QColor(18, 106, 86) : QColor(102, 193, 168);
+  if (state == QStringLiteral("cancelled") || state == QStringLiteral("paused"))
+    return light ? QColor(131, 84, 16) : QColor(218, 169, 82);
+  if (state == QStringLiteral("failed"))
+    return light ? QColor(166, 48, 48) : QColor(211, 95, 95);
+  return qApp->palette().color(QPalette::Text);
+}
 
 class DockTitleBar final : public QWidget {
 public:
@@ -181,6 +193,12 @@ public:
   }
 
 protected:
+  void changeEvent(QEvent *event) override {
+    QWidget::changeEvent(event);
+    if (mDock && mFloatButton && mCloseButton &&
+        (event->type() == QEvent::PaletteChange ||
+         event->type() == QEvent::StyleChange)) updateActions();
+  }
   void mousePressEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseMoveEvent(QMouseEvent *event) override { event->ignore(); }
   void mouseReleaseEvent(QMouseEvent *event) override { event->ignore(); }
@@ -1478,6 +1496,32 @@ void MainWindow::createMenus() {
     for (auto *item : languageGroup->actions())
       item->setChecked(item->data().toString() == AppLanguage::current());
   });
+  auto *appearanceMenu = AppLanguage::text(viewMenu->addMenu(QString()),
+      AppLanguage::source("外观"), "title");
+  appearanceMenu->setObjectName(QStringLiteral("appearanceMenu"));
+  auto *themeGroup = new QActionGroup(appearanceMenu);
+  themeGroup->setExclusive(true);
+  auto *lightTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
+      AppLanguage::source("浅色（白天）"));
+  lightTheme->setObjectName(QStringLiteral("lightThemeAction"));
+  lightTheme->setData(QStringLiteral("light"));
+  lightTheme->setCheckable(true);
+  lightTheme->setChecked(AppTheme::currentTheme() == UiTheme::Light);
+  AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用浅色界面与视口背景，适合白天观察；立即生效并记住选择"));
+  auto *darkTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
+      AppLanguage::source("深色（黑夜）"));
+  darkTheme->setObjectName(QStringLiteral("darkThemeAction"));
+  darkTheme->setData(QStringLiteral("dark"));
+  darkTheme->setCheckable(true);
+  darkTheme->setChecked(AppTheme::currentTheme() == UiTheme::Dark);
+  AppLanguage::bind(darkTheme, "toolTip", AppLanguage::source("使用深色界面与视口背景，适合夜间观察；立即生效并记住选择"));
+  themeGroup->addAction(lightTheme);
+  themeGroup->addAction(darkTheme);
+  connect(themeGroup, &QActionGroup::triggered, this, [this](QAction *action) {
+    AppTheme::applyTheme(*qApp, action->data().toString() == QStringLiteral("light")
+        ? UiTheme::Light : UiTheme::Dark, true);
+    refreshThemePresentation();
+  });
   viewMenu->addSeparator();
   QMenu *renderMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "title");
   renderMenu->addAction(mGaussianRenderAction);
@@ -1950,7 +1994,7 @@ void MainWindow::connectServices() {
             mTaskTable->insertRow(mActiveTaskRow);
             auto *state = new QTableWidgetItem(QCoreApplication::translate("Workbench", "运行中"));
             state->setData(Qt::UserRole + 31, QStringLiteral("running"));
-            state->setForeground(QColor(102, 193, 168));
+            state->setForeground(taskStateColor(QStringLiteral("running")));
             mTaskTable->setItem(mActiveTaskRow, 0, state);
             mTaskTable->setItem(mActiveTaskRow, 1,
                                 new QTableWidgetItem(taskName));
@@ -2447,9 +2491,7 @@ void MainWindow::connectServices() {
                          : paused ? QCoreApplication::translate("Workbench", "已暂停")
                          : cancelled        ? QCoreApplication::translate("Workbench", "已取消")
                                             : QCoreApplication::translate("Workbench", "失败"));
-          state->setForeground(effectiveSucceeded ? QColor(102, 193, 168)
-                               : (cancelled || paused) ? QColor(218, 169, 82)
-                                                  : QColor(211, 95, 95));
+          state->setForeground(taskStateColor(state->data(Qt::UserRole + 31).toString()));
           if (!effectiveSucceeded) {
             mTaskTable->item(mActiveTaskRow, 3)
                 ->setText(!completionDetail.isEmpty() ? completionDetail
@@ -2862,6 +2904,47 @@ void MainWindow::updateDockMetrics() {
   if (mTaskDock != nullptr) {
     mTaskDock->setMinimumHeight(0);
   }
+}
+
+void MainWindow::refreshThemePresentation() {
+  // Rebuild theme-dependent icons only; never rebuild the project tree,
+  // reconnect a worker or reload a scene when changing appearance.
+  const std::pair<QAction *, QStyle::StandardPixmap> icons[] = {
+      {mNewProjectAction, QStyle::SP_FileIcon},
+      {mOpenProjectAction, QStyle::SP_DialogOpenButton},
+      {mSaveAction, QStyle::SP_DialogSaveButton},
+      {mImportDatasetAction, QStyle::SP_DirOpenIcon},
+      {mImportDatasetDirectoryAction, QStyle::SP_DirIcon},
+      {mAttachDatasetAction, QStyle::SP_DirLinkIcon},
+      {mImportSceneAction, QStyle::SP_FileDialogDetailedView},
+      {mClearDatasetAction, QStyle::SP_TrashIcon},
+      {mClearReconstructionAction, QStyle::SP_TrashIcon},
+      {mClearSceneAction, QStyle::SP_TrashIcon},
+      {mClearTasksAction, QStyle::SP_TrashIcon},
+      {findChild<QAction *>(QStringLiteral("environmentAction")), QStyle::SP_BrowserReload},
+      {mReconstructAction, QStyle::SP_ComputerIcon},
+      {mTrainAction, QStyle::SP_MediaPlay},
+      {mPauseTrainingAction, QStyle::SP_MediaPause},
+      {mResumeTrainingAction, QStyle::SP_MediaSeekForward},
+      {mStopAction, QStyle::SP_MediaStop},
+      {findChild<QAction *>(QStringLiteral("resetCameraAction")), QStyle::SP_BrowserReload},
+      {mInspectAction, QStyle::SP_ArrowUp},
+      {mRectangleAction, QStyle::SP_FileDialogDetailedView},
+      {mLassoAction, QStyle::SP_FileDialogListView},
+      {mBrushAction, QStyle::SP_FileDialogListView},
+      {mVisibleOnlyAction, QStyle::SP_DialogApplyButton},
+      {mClearSelectionAction, QStyle::SP_DialogResetButton},
+      {mInvertSelectionAction, QStyle::SP_BrowserReload},
+      {mDeleteSelectionAction, QStyle::SP_TrashIcon},
+      {mUndoEditAction, QStyle::SP_ArrowBack},
+      {mRedoEditAction, QStyle::SP_ArrowForward},
+      {mExportModelAction, QStyle::SP_DialogSaveButton},
+      {mExportCropAction, QStyle::SP_DialogSaveButton}};
+  for (const auto &[action, icon] : icons)
+    if (action) action->setIcon(style()->standardIcon(icon, nullptr, this));
+  updateDockMetrics();
+  updateTaskLabels();
+  mViewport->update();
 }
 
 void MainWindow::applyUiScale(const int scalePercent, const bool persist) {
@@ -5366,6 +5449,7 @@ void MainWindow::updateTaskLabels() {
     auto *state = mTaskTable->item(row, 0);
     if (!state) continue;
     const QString key = state->data(Qt::UserRole + 31).toString();
+    if (!key.isEmpty()) state->setForeground(taskStateColor(key));
     if (!key.isEmpty()) state->setText(key == QStringLiteral("running")
         ? QCoreApplication::translate("Workbench", "运行中") : workerStageLabel(key));
     if (auto *name = mTaskTable->item(row, 1); name && name->data(Qt::UserRole + 32).isValid()) {

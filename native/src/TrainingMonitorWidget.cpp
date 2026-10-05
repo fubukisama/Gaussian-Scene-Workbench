@@ -1,4 +1,5 @@
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include <QCoreApplication>
 #include "TrainingMonitorWidget.h"
 #include <QJsonArray>
@@ -103,12 +104,24 @@ protected:
       setMinimumHeight(fontMetrics().height() * 6 + 32);
       updateGeometry();
     }
+    if (event->type() == QEvent::PaletteChange ||
+        event->type() == QEvent::ApplicationPaletteChange ||
+        event->type() == QEvent::StyleChange) {
+      // Theme changes repaint existing samples; they never modify telemetry.
+      update();
+    }
   }
 
   void paintEvent(QPaintEvent *) override {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(rect(), QColor(15, 18, 20));
+    const bool light = AppTheme::currentTheme() == UiTheme::Light;
+    const QColor canvas = light ? QColor(250, 252, 253) : QColor(15, 18, 20);
+    const QColor grid = light ? QColor(211, 221, 225) : QColor(47, 53, 57);
+    const QColor lossColor = light ? QColor(17, 114, 95) : QColor(91, 199, 170);
+    const QColor psnrColor = light ? QColor(144, 90, 9) : QColor(226, 181, 91);
+    const QColor waitingColor = light ? QColor(93, 103, 111) : QColor(126, 134, 139);
+    painter.fillRect(rect(), canvas);
 
     QFont chartFont = font();
     if (chartFont.pointSizeF() > 0.0) {
@@ -123,14 +136,12 @@ protected:
       return;
     }
 
-    painter.setPen(QColor(47, 53, 57));
+    painter.setPen(grid);
     for (int line = 0; line <= 4; ++line) {
       const qreal y = plot.top() + plot.height() * line / 4.0;
       painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y));
     }
 
-    const QColor lossColor(91, 199, 170);
-    const QColor psnrColor(226, 181, 91);
     painter.setPen(lossColor);
     painter.drawText(QPointF(plot.left(), labelHeight), QCoreApplication::translate("Workbench", "Loss"));
     const QString psnrLabel = QStringLiteral("PSNR");
@@ -140,7 +151,7 @@ protected:
                      psnrLabel);
 
     if (mSamples.size() < 2) {
-      painter.setPen(QColor(126, 134, 139));
+      painter.setPen(waitingColor);
       const QString waiting = QCoreApplication::translate("Workbench", "等待训练采样…");
       painter.drawText(plot, Qt::AlignCenter, waiting);
       return;
@@ -294,7 +305,6 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mDensityWarning = new QLabel(content);
   mDensityWarning->setObjectName(QStringLiteral("densityGuardWarning"));
   mDensityWarning->setWordWrap(true);
-  mDensityWarning->setStyleSheet(QStringLiteral("color: #e2b55b;"));
   mDensityWarning->hide();
   layout->addWidget(mDensityWarning);
 

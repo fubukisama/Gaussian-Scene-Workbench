@@ -411,6 +411,16 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  add_test(NAME native_light_gaussian_interaction
+    COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance --theme light)
+  add_test(NAME native_light_observation_navigation
+    COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation --theme light)
+  add_test(NAME native_light_mesh_generation
+    COMMAND GaussianSceneWorkbench --smoke-test-mesh-generation --theme light)
+  set_tests_properties(native_light_gaussian_interaction native_light_observation_navigation
+    native_light_mesh_generation PROPERTIES TIMEOUT 90
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_observation_navigation
     COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation)
   set_tests_properties(native_observation_navigation PROPERTIES
@@ -712,6 +722,9 @@ if(BUILD_TESTING)
       target_compile_options(gsw_app_theme_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME app_theme COMMAND gsw_app_theme_tests)
+    set_tests_properties(app_theme PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_viewport_camera_tests
       tests/ViewportCameraTests.cpp
