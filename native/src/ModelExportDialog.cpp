@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 namespace gsw {
@@ -20,14 +21,33 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
     : QDialog(parent), mSource(source), mGaussian(gaussian), mProtectedPaths(protectedPaths) {
   setObjectName(QStringLiteral("modelExportDialog"));
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("导出模型"));
-  resize(700, 350);
+  setMinimumSize(320, 220);
+  resize(700, 440);
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(16, 14, 16, 14);
+  layout->setSpacing(12);
+  auto *scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto *body = new QWidget(scroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyLayout->setSpacing(12);
+  scroll->setWidget(body);
+  layout->addWidget(scroll, 1);
   auto *intro = AppLanguage::text(new QLabel(this), AppLanguage::source("导出当前活动模型，不合并其他模型；使用完整源数据并应用裁剪结果，不受预览点数限制。"));
-  intro->setWordWrap(true); layout->addWidget(intro);
+  intro->setWordWrap(true); bodyLayout->addWidget(intro);
   auto *name = new QLabel(QDir::toNativeSeparators(source.sourcePath), this);
-  name->setTextFormat(Qt::PlainText); name->setWordWrap(true); layout->addWidget(name);
+  name->setTextFormat(Qt::PlainText); name->setWordWrap(true); bodyLayout->addWidget(name);
   auto *form = new QFormLayout;
-  layout->addLayout(form);
+  form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+  form->setHorizontalSpacing(14);
+  form->setVerticalSpacing(9);
+  bodyLayout->addLayout(form);
   mFormat = new QComboBox(this); mFormat->setObjectName(QStringLiteral("modelExportFormat"));
   const auto add = [&](ModelExportFormat format, const char *label) {
     mFormat->addItem({}, static_cast<int>(format));
@@ -50,8 +70,14 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   mCoordinates->setCurrentIndex(gaussian ? 0 : 1);
   form->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("导出坐标")), mCoordinates);
   mSpzOptions = new QWidget(this);
+  mSpzOptions->setProperty("gswLayoutContainer", true);
   auto *spzForm = new QFormLayout(mSpzOptions);
   spzForm->setContentsMargins(0, 0, 0, 0);
+  spzForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  spzForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  spzForm->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+  spzForm->setHorizontalSpacing(14);
+  spzForm->setVerticalSpacing(9);
   mSpzVersion = new QComboBox(mSpzOptions); mSpzVersion->setObjectName(QStringLiteral("spzVersion"));
   mSpzVersion->addItem(QStringLiteral("SPZ v4 (Zstandard)"), 4);
   mSpzVersion->addItem(QStringLiteral("SPZ v3 (gzip)"), 3);
@@ -71,7 +97,7 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   const int degreeIndex = mSpzShDegree->findData(source.spzMaximumShDegree);
   mSpzShDegree->setCurrentIndex(degreeIndex < 0 ? 0 : degreeIndex);
   spzForm->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("最大球谐阶数")), mSpzShDegree);
-  layout->addWidget(mSpzOptions);
+  bodyLayout->addWidget(mSpzOptions);
   auto *pathLayout = new QHBoxLayout;
   mPath = new QLineEdit(QFileInfo(source.sourcePath).dir().filePath(
       QFileInfo(source.sourcePath).completeBaseName() + QStringLiteral("-exported.ply")), this);
@@ -81,7 +107,17 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   form->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("输出文件")), pathLayout);
   mDescription = new QLabel(this); mDescription->setWordWrap(true);
   mDescription->setObjectName(QStringLiteral("modelExportDescription"));
-  layout->addWidget(mDescription);
+  bodyLayout->addWidget(mDescription);
+  bodyLayout->addStretch(1);
+  for (auto *combo : body->findChildren<QComboBox *>()) {
+    combo->setMinimumContentsLength(8);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  }
+  for (auto *label : body->findChildren<QLabel *>()) {
+    if (label->wordWrap())
+      label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  }
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   auto *exportButton = buttons->addButton(QString(), QDialogButtonBox::AcceptRole);
   exportButton->setObjectName(QStringLiteral("confirmModelExport"));

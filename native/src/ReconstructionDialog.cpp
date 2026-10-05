@@ -3,6 +3,7 @@
 #include "ReconstructionDialog.h"
 
 #include "ColmapSupport.h"
+#include "WrappingCheckBox.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -17,6 +18,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -32,15 +34,30 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
       mHasExistingData(hasColmapWorkingData(datasetPath)) {
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("COLMAP 稀疏重建"));
   setModal(true);
-  setMinimumWidth(580);
+  setMinimumSize(320, 220);
+  resize(640, 650);
 
   QSettings settings;
   auto *rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(16, 14, 16, 14);
   rootLayout->setSpacing(12);
 
+  auto *scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto *body = new QWidget(scroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyLayout->setSpacing(12);
+  scroll->setWidget(body);
+  rootLayout->addWidget(scroll, 1);
+
   auto *form = new QFormLayout();
   form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
   form->setHorizontalSpacing(14);
   form->setVerticalSpacing(9);
 
@@ -52,6 +69,7 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(datasetValue)), AppLanguage::source("数据集"));
 
   auto *executableRow = new QWidget(this);
+  executableRow->setProperty("gswLayoutContainer", true);
   auto *executableLayout = new QHBoxLayout(executableRow);
   executableLayout->setContentsMargins(0, 0, 0, 0);
   executableLayout->setSpacing(6);
@@ -141,26 +159,26 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   form->addRow(QCoreApplication::translate("Workbench", "Mapper 限时"), mRuntimeMinutes);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mRuntimeMinutes)), AppLanguage::source("Mapper 限时"));
 
-  mUseGpu = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "使用 GPU 进行特征提取和匹配"), this), AppLanguage::source("使用 GPU 进行特征提取和匹配"));
+  mUseGpu = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "使用 GPU 进行特征提取和匹配"), this), AppLanguage::source("使用 GPU 进行特征提取和匹配"));
   mUseGpu->setChecked(
       settings.value(QStringLiteral("reconstruction/useGpu"), true).toBool());
   form->addRow(QString(), mUseGpu);
 
-  mSingleCamera = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "所有图像共用一套相机参数"), this), AppLanguage::source("所有图像共用一套相机参数"));
+  mSingleCamera = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "所有图像共用一套相机参数"), this), AppLanguage::source("所有图像共用一套相机参数"));
   mSingleCamera->setChecked(
       settings.value(QStringLiteral("reconstruction/singleCamera"), true)
           .toBool());
   form->addRow(QString(), mSingleCamera);
 
-  mReset = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "重建前清理旧 COLMAP 缓存"), this), AppLanguage::source("重建前清理旧 COLMAP 缓存"));
+  mReset = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "重建前清理旧 COLMAP 缓存"), this), AppLanguage::source("重建前清理旧 COLMAP 缓存"));
   mReset->setChecked(!mHasExistingData);
   form->addRow(QString(), mReset);
-  mQualityRecovery = AppLanguage::text(new QCheckBox(this), AppLanguage::source("质量不佳时有限重试（允许简化相机模型）"));
+  mQualityRecovery = AppLanguage::text(new WrappingCheckBox(this), AppLanguage::source("质量不佳时有限重试（允许简化相机模型）"));
   mQualityRecovery->setChecked(settings.value(QStringLiteral("reconstruction/qualityRecovery"), true).toBool());
   AppLanguage::bind(mQualityRecovery, "toolTip", AppLanguage::source("按已注册相机、有效点和重投影误差筛选子模型。最多追加两次重建；关闭重试后仍会阻止退化结果发布。原始照片完整保留。"));
   form->addRow(QString(), mQualityRecovery);
 
-  rootLayout->addLayout(form);
+  bodyLayout->addLayout(form);
 
   auto *note = new QLabel(
       mHasExistingData
@@ -169,7 +187,18 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
       this);
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
-  rootLayout->addWidget(note);
+  bodyLayout->addWidget(note);
+  bodyLayout->addStretch(1);
+
+  for (auto *combo : body->findChildren<QComboBox *>()) {
+    combo->setMinimumContentsLength(8);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  }
+  for (auto *label : body->findChildren<QLabel *>()) {
+    if (label->wordWrap())
+      label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  }
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));

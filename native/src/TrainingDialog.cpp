@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include "TrainingDialog.h"
 #include "ManagedName.h"
+#include "WrappingCheckBox.h"
 
 #include "ColmapSupport.h"
 
@@ -20,6 +21,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScrollArea>
 #include <QSet>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -34,14 +36,30 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
     : QDialog(parent), mDatasetPath(datasetPath) {
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("训练设置"));
   setModal(true);
-  setMinimumWidth(520);
+  setMinimumSize(320, 220);
+  resize(640, 650);
 
   auto *rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(16, 14, 16, 14);
   rootLayout->setSpacing(12);
 
+  // Only the body scrolls; the primary action remains reachable at any height.
+  auto *scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto *body = new QWidget(scroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyLayout->setSpacing(12);
+  scroll->setWidget(body);
+  rootLayout->addWidget(scroll, 1);
+
   auto *form = new QFormLayout();
   form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
   form->setHorizontalSpacing(14);
   form->setVerticalSpacing(9);
 
@@ -124,6 +142,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mOutputScene)), AppLanguage::source("输出名称"));
 
   auto *outputRow = new QWidget(this);
+  outputRow->setProperty("gswLayoutContainer", true);
   auto *outputLayout = new QHBoxLayout(outputRow);
   outputLayout->setContentsMargins(0, 0, 0, 0);
   outputLayout->setSpacing(6);
@@ -135,7 +154,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(QCoreApplication::translate("Workbench", "输出目录"), outputRow);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(outputRow)), AppLanguage::source("输出目录"));
 
-  mRunColmap = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this), AppLanguage::source("训练前运行 COLMAP 重建"));
+  mRunColmap = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this), AppLanguage::source("训练前运行 COLMAP 重建"));
   mRunColmap->setObjectName(QStringLiteral("trainingRunColmapCheckBox"));
   mRunColmap->setChecked(!hasSparseReconstruction);
   form->addRow(QString(), mRunColmap);
@@ -162,18 +181,29 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
           &TrainingInputSummaryScanner::cancel);
   AppLanguage::onChanged(this, [this] { refreshInputSummary(); });
 
-  mOverwrite = AppLanguage::text(new QCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this), AppLanguage::source("允许覆盖同名输出"));
+  mOverwrite = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "允许覆盖同名输出"), this), AppLanguage::source("允许覆盖同名输出"));
   mOverwrite->setChecked(false);
   form->addRow(QString(), mOverwrite);
 
-  rootLayout->addLayout(form);
+  bodyLayout->addLayout(form);
 
   auto *note = AppLanguage::text(new QLabel(
       QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"),
       this), AppLanguage::source("训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
-  rootLayout->addWidget(note);
+  bodyLayout->addWidget(note);
+  bodyLayout->addStretch(1);
+
+  for (auto *combo : body->findChildren<QComboBox *>()) {
+    combo->setMinimumContentsLength(8);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  }
+  for (auto *label : body->findChildren<QLabel *>()) {
+    if (label->wordWrap())
+      label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  }
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));

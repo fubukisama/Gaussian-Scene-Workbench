@@ -1,6 +1,7 @@
 #include "WindowUiSmokeTest.h"
 #include "WindowUi.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 
 #include <QAction>
 #include <QApplication>
@@ -11,6 +12,9 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileDialog>
+#include <QFile>
+#include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLineEdit>
@@ -19,10 +23,13 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QProgressDialog>
+#include <QScreen>
+#include <QScrollBar>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
+#include <QTreeView>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -158,12 +165,20 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
   QFileDialog file(&host);
   file.setOption(QFileDialog::DontUseNativeDialog);
   file.setAcceptMode(QFileDialog::AcceptSave);
+  file.setViewMode(QFileDialog::Detail);
   file.setNameFilters({QStringLiteral("PLY (*.ply)"), QStringLiteral("GLB (*.glb)")});
   file.selectNameFilter(QStringLiteral("GLB (*.glb)"));
   file.setDirectory(temporary.path());
   file.setSidebarUrls({QUrl::fromLocalFile(temporary.path())});
   file.selectFile(QStringLiteral("模型_日本語.glb"));
-  file.resize(800, 560);
+  for (const QString &fixtureName : {QStringLiteral("模型_日本語.glb"), QStringLiteral("another.glb")}) {
+    QFile fixture(QDir(temporary.path()).filePath(fixtureName));
+    check(fixture.open(QIODevice::WriteOnly), "create real file-dialog selection fixture");
+    fixture.write("file dialog fixture\n");
+  }
+  const QSize available = file.screen()->availableGeometry().size();
+  const QSize normalFileSize = AppTheme::fitWindowResolution(QSize(1100, 680), available, QSize(640, 460));
+  file.resize(normalFileSize);
   file.show(); file.activateWindow(); settle();
   check(file.findChildren<QWidget *>(QStringLiteral("windowControlsBar")).isEmpty(), "only the native title bar, no duplicate controls row");
   auto *name = file.findChild<QLineEdit *>(QStringLiteral("fileNameEdit"));
@@ -199,6 +214,161 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
   check(!file.isMaximized() && !file.isFullScreen() && name->text() == filename, "dialog restore retains filename");
   file.hide(); file.show(); settle();
   check(file.findChildren<QWidget *>(QStringLiteral("windowControlsBar")).isEmpty(), "reopening and translation never add duplicate controls");
+  // Exercise the real QFileDialog detail view after asynchronous filesystem
+  // loading, not a synthetic table with unrelated header defaults.
+  auto *tree = file.findChild<QTreeView *>(QStringLiteral("treeView"));
+  check(tree && tree->header()->count() >= 4, "file dialog exposes its four real detail columns");
+  if (tree && tree->header()->count() >= 4) {
+    const int originalScale = qApp->property("gswUiScalePercent").toInt();
+    const UiTheme originalTheme = AppTheme::currentTheme();
+    auto *header = tree->header();
+    auto *detailButton = file.findChild<QToolButton *>(QStringLiteral("detailModeButton"));
+    check(detailButton != nullptr, "file dialog detail-view button exists for scale checks");
+    tree->sortByColumn(0, Qt::DescendingOrder);
+    file.selectFile(QStringLiteral("模型_日本語.glb"));
+    settle();
+    QModelIndex selectedFixture;
+    for (int attempt = 0; attempt < 15 && !selectedFixture.isValid(); ++attempt) {
+      for (int row = 0; row < tree->model()->rowCount(tree->rootIndex()); ++row) {
+        const auto index = tree->model()->index(row, 0, tree->rootIndex());
+        if (index.data().toString() == QStringLiteral("模型_日本語.glb")) {
+          selectedFixture = index;
+          break;
+        }
+      }
+      if (!selectedFixture.isValid()) settle();
+    }
+    check(selectedFixture.isValid(), "filesystem model loaded the Unicode GLB selection fixture");
+    if (selectedFixture.isValid()) {
+      tree->selectionModel()->setCurrentIndex(selectedFixture,
+          QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+      settle();
+    }
+    const auto selectedNames = [tree] {
+      QStringList values;
+      for (const auto &index : tree->selectionModel()->selectedRows(0))
+        values.append(index.data().toString());
+      values.sort();
+      return values;
+    };
+    const QStringList expectedSelection = selectedNames();
+    check(!expectedSelection.isEmpty(), "selection preservation checks start with a real selected file");
+    const QString expectedFileName = name->text();
+    const QString expectedFilter = file.selectedNameFilter();
+    const QString expectedDirectory = file.directory().absolutePath();
+    const int expectedSortColumn = header->sortIndicatorSection();
+    const auto expectedSortOrder = header->sortIndicatorOrder();
+    // A deliberate user width above the 150% font minimum must not be reset by
+    // repolishing, resizing or translating the dialog.
+    header->resizeSection(3, 400);
+    const int userDateWidth = header->sectionSize(3);
+    const auto checkFileState = [&] {
+      check(name->text() == expectedFileName && file.selectedNameFilter() == expectedFilter &&
+            file.directory().absolutePath() == expectedDirectory && selectedNames() == expectedSelection,
+            "file layout/theme/scale/language changes preserve filename, filter, directory and selection");
+      check(header->sortIndicatorSection() == expectedSortColumn &&
+            header->sortIndicatorOrder() == expectedSortOrder && header->sectionSize(3) == userDateWidth,
+            "file layout/theme/scale/language changes preserve sorting and the user-sized date column");
+    };
+    const auto checkFileColumns = [&] {
+      const int viewportWidth = tree->viewport()->width();
+      const int minimumTotal = header->minimumSectionSize() * header->count();
+      int metadataWidth = 0;
+      for (int column = 1; column < header->count(); ++column)
+        metadataWidth += header->sectionSize(column);
+      const bool columnsShouldFit = viewportWidth >= metadataWidth + header->minimumSectionSize() &&
+                                    viewportWidth >= minimumTotal;
+      if (header->length() < viewportWidth || (columnsShouldFit && header->length() != viewportWidth))
+        qWarning() << "File detail geometry:" << file.windowState() << qApp->property("gswUiScalePercent")
+                   << header->length() << viewportWidth << header->sectionSize(0)
+                   << header->sectionSize(1) << header->sectionSize(2) << header->sectionSize(3);
+      check(header->sectionResizeMode(0) == QHeaderView::Stretch && !header->stretchLastSection(),
+            "file name column, not the date column, absorbs available dialog width");
+      for (int column = 1; column < header->count(); ++column)
+        check(header->sectionResizeMode(column) == QHeaderView::Interactive,
+              "file metadata columns remain user-resizable");
+      // Small screens may legitimately need horizontal scrolling for the
+      // explicit user width. A larger viewport must never leave a white gap.
+      check(header->length() >= viewportWidth,
+            "detail header covers the full file-list viewport without a trailing blank gap");
+      if (columnsShouldFit)
+        check(header->length() == viewportWidth && tree->horizontalScrollBar()->maximum() == 0,
+              "file details use all available width without an unnecessary horizontal scrollbar");
+      check(header->sectionSize(0) >= header->minimumSectionSize(), "file-name column remains usable");
+      checkFileState();
+    };
+    QSize smallIconSize;
+    for (const int scale : {90, 150, 90}) {
+      file.showNormal(); file.resize(normalFileSize); settle();
+      AppTheme::apply(*qApp, scale, false); settle();
+      checkFileColumns();
+      if (detailButton) {
+        if (smallIconSize.isEmpty()) smallIconSize = detailButton->iconSize();
+        else check(scale == 150 ? detailButton->iconSize().height() > smallIconSize.height()
+                                : detailButton->iconSize() == smallIconSize,
+                   "file navigation icons scale up at 150% and return to their 90% size");
+      }
+      const int normalViewportWidth = tree->viewport()->width();
+      const int normalNameWidth = header->sectionSize(0);
+      const bool normalColumnsFit = header->length() == normalViewportWidth;
+      captionDoubleClick(file);
+      check(file.isMaximized(), "file detail matrix enters maximized mode through the native caption");
+      checkFileColumns();
+      if (normalColumnsFit && tree->viewport()->width() > normalViewportWidth)
+        check(header->sectionSize(0) > normalNameWidth, "maximizing expands the file-name column with the viewport");
+      WindowUi::fullScreenAction(&file)->trigger(); settle();
+      check(file.isFullScreen(), "file detail matrix enters full screen");
+      checkFileColumns();
+      key(*name, Qt::Key_Escape);
+      check(file.isMaximized() && !file.isFullScreen(), "file detail matrix restores its maximized state after full screen");
+      checkFileColumns();
+      captionDoubleClick(file);
+      check(!file.isMaximized() && !file.isFullScreen(), "file detail matrix returns to normal mode");
+      checkFileColumns();
+    }
+    // A user may intentionally prefer a compact metadata column. With the
+    // same font, window-state or palette changes must not silently widen it.
+    const int retainedTypeWidth = header->sectionSize(2);
+    const QString narrowFontKey = tree->font().key();
+    const int narrowScale = qApp->property("gswUiScalePercent").toInt();
+    header->resizeSection(2, 80);
+    settle();
+    const int narrowTypeWidth = header->sectionSize(2);
+    check(narrowTypeWidth == 80 && narrowTypeWidth < retainedTypeWidth,
+          "narrow-column regression starts with a real user-sized type column below the automatic width");
+    captionDoubleClick(file);
+    check(file.isMaximized() && header->sectionSize(2) == narrowTypeWidth,
+          "same-font maximization preserves the user's narrow type column");
+    checkFileColumns();
+    captionDoubleClick(file);
+    check(!file.isMaximized() && !file.isFullScreen() && header->sectionSize(2) == narrowTypeWidth,
+          "same-font restoration preserves the user's narrow type column");
+    checkFileColumns();
+    for (const UiTheme theme : {UiTheme::Dark, UiTheme::Light}) {
+      AppTheme::applyTheme(*qApp, theme, false); settle();
+      check(tree->font().key() == narrowFontKey && qApp->property("gswUiScalePercent").toInt() == narrowScale &&
+            header->sectionSize(2) == narrowTypeWidth,
+            "day/night palette changes preserve the user's narrow type column without changing font or scale");
+      checkFileColumns();
+    }
+    header->resizeSection(2, retainedTypeWidth);
+    settle();
+    for (const QString &language : AppLanguage::supported()) {
+      AppLanguage::apply(language, false); settle();
+      checkFileColumns();
+      file.showMaximized(); settle();
+      checkFileColumns();
+      if (!shots.isEmpty())
+        check(file.grab().save(QDir(shots).filePath(language + QStringLiteral("-file-dialog-maximized-light.png"))),
+              "maximized light file dialog screenshot for each language");
+      file.showNormal(); settle();
+    }
+    AppLanguage::apply(locale, false);
+    AppTheme::applyTheme(*qApp, originalTheme, false);
+    AppTheme::apply(*qApp, originalScale, false);
+    settle();
+    checkFileState();
+  }
   if (!shots.isEmpty()) {
     QDir().mkpath(shots);
     check(file.grab().save(QDir(shots).filePath(locale + QStringLiteral("-file-dialog.png"))), "file-dialog screenshot");
@@ -207,9 +377,64 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
   // Covers Qt static directory/open dialogs as well as the save path.
   for (const auto mode : {QFileDialog::ExistingFiles, QFileDialog::Directory}) {
     QFileDialog open(&host);
+    open.setOption(QFileDialog::DontUseNativeDialog);
+    open.setViewMode(QFileDialog::Detail);
     open.setFileMode(mode); open.setDirectory(temporary.path());
+    open.resize(normalFileSize);
     open.show(); settle();
     check(open.sidebarUrls().contains(QUrl::fromLocalFile(desktop)), "open and folder dialog desktop shortcut");
+    auto *openTree = open.findChild<QTreeView *>(QStringLiteral("treeView"));
+    check(openTree && openTree->header()->count() >= 4, "open and folder dialogs expose the same detail columns");
+    if (openTree && openTree->header()->count() >= 4) {
+      auto *header = openTree->header();
+      header->resizeSection(3, 400);
+      const int userWidth = header->sectionSize(3);
+      openTree->sortByColumn(0, Qt::DescendingOrder);
+      const auto directory = open.directory().absolutePath();
+      const auto filter = open.selectedNameFilter();
+      const int initialScale = qApp->property("gswUiScalePercent").toInt();
+      const auto checkDetails = [&] {
+        const int viewportWidth = openTree->viewport()->width();
+        int metadataWidth = 0;
+        for (int column = 1; column < header->count(); ++column) {
+          metadataWidth += header->sectionSize(column);
+          check(header->sectionResizeMode(column) == QHeaderView::Interactive,
+                "open/folder metadata columns remain user-resizable");
+        }
+        check(header->sectionResizeMode(0) == QHeaderView::Stretch && !header->stretchLastSection() &&
+              header->length() >= viewportWidth,
+              "open/folder name column expands without a trailing header gap");
+        if (viewportWidth >= metadataWidth + header->minimumSectionSize())
+          check(header->length() == viewportWidth && openTree->horizontalScrollBar()->maximum() == 0,
+                "open/folder details avoid unnecessary horizontal scrolling");
+        check(header->sectionSize(3) == userWidth && header->sortIndicatorSection() == 0 &&
+              header->sortIndicatorOrder() == Qt::DescendingOrder &&
+              open.directory().absolutePath() == directory && open.selectedNameFilter() == filter,
+              "open/folder resizing and scale changes preserve user column widths, sorting, directory and filter");
+      };
+      for (const int scale : {90, 150, 90}) {
+        open.showNormal(); open.resize(normalFileSize); settle();
+        AppTheme::apply(*qApp, scale, false); settle();
+        checkDetails();
+        const int normalViewport = openTree->viewport()->width();
+        const int normalFirstColumn = header->sectionSize(0);
+        const bool columnsFit = header->length() == normalViewport;
+        open.showMaximized(); settle();
+        check(open.isMaximized(), "open/folder details maximize");
+        checkDetails();
+        if (columnsFit && openTree->viewport()->width() > normalViewport)
+          check(header->sectionSize(0) > normalFirstColumn, "open/folder file-name column follows viewport expansion");
+        WindowUi::fullScreenAction(&open)->trigger(); settle();
+        check(open.isFullScreen(), "open/folder details enter full screen");
+        checkDetails();
+        WindowUi::fullScreenAction(&open)->trigger(); settle();
+        check(open.isMaximized() && !open.isFullScreen(), "open/folder details restore their maximized state");
+        checkDetails();
+      }
+      open.showNormal();
+      AppTheme::apply(*qApp, initialScale, false); settle();
+      checkDetails();
+    }
     open.hide();
   }
   QInputDialog input(&host); input.setTextValue(QStringLiteral("unmodified"));

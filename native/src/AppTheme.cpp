@@ -424,8 +424,8 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
 )CSS");
 
   // Both modes share the widget/font template, retaining text density and the
-  // selected language's font. Only light dock-resize borders add a compact,
-  // scale-aware separator rule below; dark separators retain native styling.
+  // selected language's font. Light-only presentation rules below unify resize
+  // handles and dialog surfaces; dark widgets retain their original styling.
   struct ColorToken {
     const char *token;
     const char *dark;
@@ -513,11 +513,14 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   replace(QStringLiteral("@SECTION_TOP@"), 6);
   replace(QStringLiteral("@SECTION_BOTTOM@"), 4);
   if (theme == UiTheme::Light) {
-    // Paint Qt's real dock resize handles, not an overlay over the viewport.
+    // Paint Qt's real dock and splitter resize handles, not an overlay.
     // Match the panel-header gray and distinguish regions through modest width,
     // not dark outlines. Include both one-pixel edges in the scaled extent;
     // native mouse handling, floating panels and dark separators stay unchanged.
     const int separatorContent = std::max(2, AppTheme::scaled(8, scalePercent) - 2);
+    // QSplitter applies its handle rule in both pixelMetric and sizeFromContents,
+    // adding these borders twice. Keep the final extent at the scaled 8px target.
+    const int splitterContent = std::max(1, AppTheme::scaled(8, scalePercent) - 4);
     css += QStringLiteral(R"CSS(
 QMainWindow::separator {
   background: #dedede;
@@ -525,8 +528,22 @@ QMainWindow::separator {
   width: %1px;
   height: %1px;
 }
-QMainWindow::separator:hover { background: #d0d0d0; border-color: #b5b5b5; }
-)CSS").arg(separatorContent);
+QSplitter::handle {
+  background: #dedede;
+  border: 1px solid #c8c8c8;
+  width: %2px;
+  height: %2px;
+}
+QMainWindow::separator:hover, QSplitter::handle:hover {
+  background: #d0d0d0;
+  border-color: #b5b5b5;
+}
+QHeaderView, QHeaderView QWidget#qt_scrollarea_viewport { background: #dedede; }
+QDialog QLabel, QDialog QCheckBox, QDialog QRadioButton { background: transparent; }
+QDialog QDialogButtonBox, QWidget[gswLayoutContainer="true"] { background: transparent; }
+QWidget#dialogBody, QScrollArea#dialogBodyScroll,
+QScrollArea#dialogBodyScroll > QWidget { background: #f3f3f3; }
+)CSS").arg(separatorContent).arg(splitterContent);
   }
   return css;
 }

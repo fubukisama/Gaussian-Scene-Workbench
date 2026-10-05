@@ -1,11 +1,13 @@
 #include "WindowUi.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QDialog>
 #include <QDockWidget>
 #include <QFileDialog>
+#include <QHeaderView>
 #include <QKeyEvent>
 #include <QLayout>
 #include <QMainWindow>
@@ -17,8 +19,12 @@
 #include <QStandardPaths>
 #include <QScopedValueRollback>
 #include <QTimer>
+#include <QToolButton>
+#include <QTreeView>
 #include <QUrl>
 #include <QVariant>
+
+#include <algorithm>
 
 namespace gsw {
 namespace {
@@ -95,7 +101,7 @@ public:
         const QUrl url = QUrl::fromLocalFile(desktop);
         urls.removeAll(url);
         urls.prepend(url);
-        file->setSidebarUrls(urls);
+        if (urls != file->sidebarUrls()) file->setSidebarUrls(urls);
       }
     }
     // The OS caption is the sole window-control bar. Desktop remains a
@@ -139,6 +145,13 @@ public:
 
 protected:
   bool eventFilter(QObject *watched, QEvent *event) override {
+    if (watched == mWindow && event->type() == QEvent::Show &&
+        qobject_cast<QFileDialog *>(mWindow)) {
+      // QFileDialog restores its native saved header state in showEvent,
+      // after application polish/show filters. Apply the layout contract once
+      // that restoration has finished, rather than racing its initial setup.
+      QTimer::singleShot(0, this, [this] { refreshFileLayout(); });
+    }
     if (watched == mWindow && (event->type() == QEvent::LanguageChange ||
         event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
         event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange)) {
@@ -191,6 +204,65 @@ private:
     mFullScreen->setIcon(windowIcon(full, true));
     if (auto *dock = qobject_cast<QDockWidget *>(mWindow)) mFullScreen->setShortcut(dock->isFloating() ? QKeySequence(QStringLiteral("F11")) : QKeySequence());
     refreshDesktopLabel();
+    refreshFileLayout();
+  }
+  void refreshFileLayout() {
+    auto *file = qobject_cast<QFileDialog *>(mWindow);
+    if (!file) return;
+    const int scale = qApp->property("gswUiScalePercent").toInt();
+    // Qt's default detail columns keep their initial widths even when the
+    // dialog is maximized. Give the spare width to filenames, not metadata.
+    // Configure once; subsequent language/theme changes retain user widths,
+    // sort order, selected files, directory, filename and filter.
+    auto *tree = file->findChild<QTreeView *>(QStringLiteral("treeView"));
+    if (tree && tree->header()->count() > 0) {
+      auto *header = tree->header();
+      const bool initialize = mFileTree != tree;
+      QString metricsSignature = tree->font().key() + QString::number(scale);
+      for (int column = 0; column < header->count(); ++column)
+        metricsSignature += QChar(0x1f) + tree->model()->headerData(column, Qt::Horizontal).toString();
+      const bool metricsChanged = initialize || metricsSignature != mFileMetricsSignature;
+      if (initialize) {
+        mFileTree = tree;
+        for (int column = 1; column < header->count(); ++column) {
+          header->setSectionResizeMode(column, QHeaderView::Interactive);
+          tree->resizeColumnToContents(column);
+        }
+      }
+      if (header->stretchLastSection()) header->setStretchLastSection(false);
+      if (header->sectionResizeMode(0) != QHeaderView::Stretch)
+        header->setSectionResizeMode(0, QHeaderView::Stretch);
+      for (int column = 1; column < header->count(); ++column)
+        if (header->sectionResizeMode(column) != QHeaderView::Interactive)
+          header->setSectionResizeMode(column, QHeaderView::Interactive);
+      header->setMinimumSectionSize(std::max(AppTheme::scaled(40, scale),
+                                             header->fontMetrics().height() * 2));
+      for (int column = 1; metricsChanged && column < header->count(); ++column) {
+        const QFontMetrics metrics(tree->font());
+        const int sampleWidth = column == 3
+            ? metrics.horizontalAdvance(QStringLiteral("0000/00/00 00:00"))
+            : column == 1
+            ? metrics.horizontalAdvance(QStringLiteral("0000.00 MB"))
+            : AppTheme::scaled(110, scale);
+        const int minimum = std::max(header->sectionSizeHint(column),
+                                      sampleWidth + AppTheme::scaled(16, scale));
+        if (header->sectionSize(column) < minimum) header->resizeSection(column, minimum);
+      }
+      mFileMetricsSignature = metricsSignature;
+    }
+    // Navigation controls stay compact but follow the actual selected font
+    // and UI scale. Their size is independent of the maximized window size.
+    const int icon = std::max(AppTheme::scaled(20, scale), file->fontMetrics().height());
+    for (auto *button : file->findChildren<QToolButton *>()) {
+      button->setIconSize(QSize(icon, icon));
+      const int minimum = icon + AppTheme::scaled(10, scale);
+      button->setMinimumSize(minimum, minimum);
+    }
+    if (auto *sidebar = file->findChild<QListView *>(QStringLiteral("sidebar"))) {
+      const int hint = sidebar->sizeHintForColumn(0) + AppTheme::scaled(16, scale);
+      sidebar->setMinimumWidth(std::clamp(hint, AppTheme::scaled(120, scale),
+                                                AppTheme::scaled(220, scale)));
+    }
   }
   void refreshDesktopLabel() {
     if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
@@ -222,6 +294,8 @@ private:
   QWidget *mWindow;
   QAction *mFullScreen;
   QPointer<QAbstractItemModel> mSidebarModel;
+  QPointer<QTreeView> mFileTree;
+  QString mFileMetricsSignature;
   QRect mNormalGeometry;
   bool mWasMaximized = false;
   bool mChangingState = false;

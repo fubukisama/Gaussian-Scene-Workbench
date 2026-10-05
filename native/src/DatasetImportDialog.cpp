@@ -2,15 +2,18 @@
 #include <QCoreApplication>
 #include "DatasetImportDialog.h"
 #include "MultiItemList.h"
+#include "WrappingCheckBox.h"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -18,9 +21,13 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QScrollArea>
 #include <QSet>
 #include <QStyle>
+#include <QTimer>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <limits>
 
 namespace gsw {
@@ -44,6 +51,120 @@ QString pathKey(const QString &path) {
 #endif
 }
 
+// Keep complete action captions without making narrow import windows wider.
+// The list below remains its own scrollable view, not nested inside this body.
+class SourceActions final : public QWidget {
+public:
+  SourceActions(const QList<QPushButton *> &buttons, QWidget *parent)
+      : QWidget(parent), mButtons(buttons), mLayout(new QGridLayout(this)) {
+    setProperty("gswLayoutContainer", true);
+    mLayout->setContentsMargins(0, 0, 0, 0);
+    mLayout->setSpacing(6);
+    // The previous column arrangement must not freeze the minimum width after
+    // maximizing, otherwise the body could never shrink enough to reflow.
+    mLayout->setSizeConstraint(QLayout::SetNoConstraint);
+    QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    policy.setHeightForWidth(true);
+    setSizePolicy(policy);
+    refreshLayout();
+  }
+
+  QSize sizeHint() const override {
+    int preferredWidth = 0;
+    for (auto *button : mButtons) preferredWidth += button->sizeHint().width();
+    preferredWidth += (mButtons.size() - 1) * mLayout->spacing();
+    return QSize(preferredWidth, heightForWidth(width()));
+  }
+
+  QSize minimumSizeHint() const override {
+    int minimumWidth = 0;
+    for (auto *button : mButtons) {
+      minimumWidth = std::max(minimumWidth, button->minimumSizeHint().width());
+    }
+    return QSize(minimumWidth, heightForWidth(width()));
+  }
+
+  int heightForWidth(int width) const override {
+    const int columns = columnsForWidth(width);
+    int result = 0;
+    for (int start = 0; start < mButtons.size(); start += columns) {
+      int rowHeight = 0;
+      for (int i = start; i < std::min(start + columns, int(mButtons.size())); ++i)
+        rowHeight = std::max(rowHeight, mButtons.at(i)->sizeHint().height());
+      result += rowHeight + (start ? mLayout->spacing() : 0);
+    }
+    return result;
+  }
+
+  void refreshLayout() {
+    const int columns = columnsForWidth(width());
+    bool changed = false;
+    if (columns != mColumns) {
+      while (auto *item = mLayout->takeAt(0)) delete item;
+      for (int column = 0; column < mButtons.size(); ++column)
+        mLayout->setColumnStretch(column, column < columns ? 1 : 0);
+      for (int i = 0; i < mButtons.size(); ++i)
+        mLayout->addWidget(mButtons.at(i), i / columns, i % columns);
+      mColumns = columns;
+      changed = true;
+    }
+    // A normal QGridLayout has no height-for-width contract of its own. Make
+    // the current row height explicit so QWidgetItem cannot fall back to the
+    // old single-row minimum and squeeze the reflowed buttons.
+    const int requiredHeight = heightForWidth(width());
+    if (minimumHeight() != requiredHeight) {
+      setMinimumHeight(requiredHeight);
+      changed = true;
+    }
+    if (changed) updateGeometry();
+  }
+
+protected:
+  void resizeEvent(QResizeEvent *event) override {
+    QWidget::resizeEvent(event);
+    refreshLayout();
+  }
+
+  void changeEvent(QEvent *event) override {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::FontChange ||
+        event->type() == QEvent::ApplicationFontChange ||
+        event->type() == QEvent::StyleChange ||
+        event->type() == QEvent::LanguageChange) {
+      // Child buttons settle their font/style size hints after propagation.
+      // Coalesce those events and never queue a refresh from resize itself.
+      if (!mRefreshQueued) {
+        mRefreshQueued = true;
+        QTimer::singleShot(0, this, [this]() {
+          mRefreshQueued = false;
+          refreshLayout();
+          updateGeometry();
+        });
+      }
+    }
+  }
+
+private:
+  int columnsForWidth(int width) const {
+    for (const int columns : {4, 2}) {
+      int requiredWidth = (columns - 1) * mLayout->spacing();
+      for (int column = 0; column < columns; ++column) {
+        int columnWidth = 0;
+        for (int i = column; i < mButtons.size(); i += columns)
+          columnWidth = std::max(columnWidth, mButtons.at(i)->sizeHint().width());
+        requiredWidth += columnWidth;
+      }
+      if (requiredWidth <= width) return columns;
+    }
+    return 1;
+  }
+
+  QList<QPushButton *> mButtons;
+  QGridLayout *mLayout;
+  int mColumns = 0;
+  bool mRefreshQueued = false;
+};
+
 } // namespace
 
 DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
@@ -57,11 +178,26 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   setObjectName(QStringLiteral("datasetImportDialog"));
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("添加照片与视频"));
   setModal(true);
-  setMinimumSize(640, 460);
+  setMinimumSize(400, 260);
+  resize(800, 640);
 
   auto *rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(16, 14, 16, 14);
   rootLayout->setSpacing(12);
+
+  // The setup area and source list scroll independently. The final action bar
+  // never scrolls away, even when enlarged fonts leave little vertical space.
+  auto *scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto *body = new QWidget(scroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyLayout->setSpacing(12);
+  scroll->setWidget(body);
+  rootLayout->addWidget(scroll, 1);
 
   auto *introduction = new QLabel(
       unsavedProject
@@ -70,7 +206,7 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
       this);
   introduction->setObjectName(QStringLiteral("datasetImportIntroductionLabel"));
   introduction->setWordWrap(true);
-  rootLayout->addWidget(introduction);
+  bodyLayout->addWidget(introduction);
 
   auto *projectPath = new QLabel(
       unsavedProject
@@ -81,10 +217,12 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   projectPath->setObjectName(QStringLiteral("datasetImportProjectPathLabel"));
   projectPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
   projectPath->setWordWrap(true);
-  rootLayout->addWidget(projectPath);
+  bodyLayout->addWidget(projectPath);
 
   auto *form = new QFormLayout();
   form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
   form->setHorizontalSpacing(14);
   form->setVerticalSpacing(9);
 
@@ -109,26 +247,24 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   form->addRow(QCoreApplication::translate("Workbench", "视频抽帧"), mFramesPerSecond);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mFramesPerSecond)), AppLanguage::source("视频抽帧"));
 
-  mOverwrite = AppLanguage::text(new QCheckBox(
+  mOverwrite = AppLanguage::text(new WrappingCheckBox(
       QCoreApplication::translate("Workbench", "覆盖同名托管数据集（开始前会再次确认）"), this), AppLanguage::source("覆盖同名托管数据集（开始前会再次确认）"));
   mOverwrite->setObjectName(QStringLiteral("datasetImportOverwriteCheck"));
   form->addRow(QString(), mOverwrite);
-  rootLayout->addLayout(form);
+  bodyLayout->addLayout(form);
 
   auto *sourceTitle = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "媒体来源"), this), AppLanguage::source("媒体来源"));
   sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
-  rootLayout->addWidget(sourceTitle);
+  bodyLayout->addWidget(sourceTitle);
 
   mSourceList = new QListWidget(this);
   mSourceList->setObjectName(QStringLiteral("datasetImportSourceList"));
   AppLanguage::bind(mSourceList, "accessibleName", AppLanguage::source("待导入媒体来源"));
   mSourceList->setAlternatingRowColors(true);
   mSourceList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  mSourceList->setMinimumHeight(190);
+  mSourceList->setMinimumHeight(72);
   rootLayout->addWidget(mSourceList, 1);
 
-  auto *sourceButtons = new QHBoxLayout();
-  sourceButtons->setSpacing(6);
   auto *addFilesButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加照片/视频..."), this), AppLanguage::source("继续添加照片/视频..."));
   addFilesButton->setObjectName(QStringLiteral("datasetImportAddFilesButton"));
   auto *addDirectoryButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加目录..."), this), AppLanguage::source("继续添加目录..."));
@@ -138,12 +274,12 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mRemoveButton->setObjectName(QStringLiteral("datasetImportRemoveButton"));
   mClearButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "清空"), this), AppLanguage::source("清空"));
   mClearButton->setObjectName(QStringLiteral("datasetImportClearButton"));
-  sourceButtons->addWidget(addFilesButton);
-  sourceButtons->addWidget(addDirectoryButton);
-  sourceButtons->addStretch(1);
-  sourceButtons->addWidget(mRemoveButton);
-  sourceButtons->addWidget(mClearButton);
-  rootLayout->addLayout(sourceButtons);
+  auto *sourceButtons = new SourceActions(
+      {addFilesButton, addDirectoryButton, mRemoveButton, mClearButton}, body);
+  sourceButtons->setObjectName(QStringLiteral("datasetImportSourceActions"));
+  bodyLayout->addWidget(sourceButtons);
+  AppLanguage::onChanged(sourceButtons,
+      [sourceButtons]() { sourceButtons->refreshLayout(); });
   new MultiItemList(mSourceList, AppLanguage::source("移除所选"),
       [this]() { removeSelected(); });
   // Existing remove/clear buttons stay in place; context menu and keyboard share their operation.
@@ -151,7 +287,12 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mSummary = new QLabel(this);
   mSummary->setObjectName(QStringLiteral("datasetImportSummaryLabel"));
   mSummary->setWordWrap(true);
-  rootLayout->addWidget(mSummary);
+  bodyLayout->addWidget(mSummary);
+  bodyLayout->addStretch(1);
+  for (auto *label : body->findChildren<QLabel *>()) {
+    if (label->wordWrap())
+      label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  }
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   buttons->setObjectName(QStringLiteral("datasetImportButtonBox"));

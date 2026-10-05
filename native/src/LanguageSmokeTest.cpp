@@ -16,6 +16,7 @@
 #include "WorkspaceDocument.h"
 #include "ManagedName.h"
 #include "ModelExportDialog.h"
+#include "WrappingCheckBox.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -24,11 +25,13 @@
 #include <QDir>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QImage>
 #include "WindowUiSmokeTest.h"
 #include <QLabel>
@@ -847,7 +850,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
           darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
           "appearance menu switches language immediately");
     check(lightTheme->toolTip() == QCoreApplication::translate("Workbench",
-          "使用白色工作区、灰色工具栏、深色文字与统一浅灰面板边界，适合白天观察；立即生效并记住选择"),
+          "使用白色工作区、灰色工具栏、深色文字与统一浅灰面板及弹窗边界，适合白天观察；立即生效并记住选择"),
           "high-contrast light appearance description switches language immediately");
     const auto themeFont = qApp->font();
     const auto themeScale = qApp->property("gswUiScalePercent");
@@ -1165,6 +1168,127 @@ bool runLanguageSmokeTest(MainWindow &window) {
           "wide monitor screenshot");
     }
     responsive.hide();
+  }
+  // Forms share one scroll/reflow contract across both Gaussian trainers,
+  // reconstruction, all mesh methods, media import and model export. Resize
+  // existing edited dialogs; do not rebuild their controls or worker state.
+  const QJsonObject retainedMeshForm = meshing.configuration();
+  const QString retainedExportDestination = exportDialog.options().destinationPath;
+  const int retainedTrainingIterations = training.configuration().iterations;
+  const QString retainedTrainingBackend = training.configuration().backend;
+  TrainingDialog twoDSettings(trainingImages.path(), name,
+      QCoreApplication::applicationDirPath(), true, true, &window);
+  if (auto *backend = twoDSettings.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo")))
+    backend->setCurrentIndex(backend->findData(QStringLiteral("2dgs")));
+  const int retainedTwoDIterations = twoDSettings.configuration().iterations;
+  check(twoDSettings.configuration().backend == QStringLiteral("2dgs"),
+        "responsive settings matrix covers the real 2DGS form too");
+  for (const int fontPercent : {90, 150, 90}) {
+    auto *action = scaleAction(fontPercent);
+    if (!action) continue;
+    action->trigger();
+    settleLayout();
+    for (QDialog *dialog : {static_cast<QDialog *>(&training),
+                           static_cast<QDialog *>(&twoDSettings),
+                           static_cast<QDialog *>(&reconstruction),
+                           static_cast<QDialog *>(&meshing),
+                           static_cast<QDialog *>(&import),
+                           static_cast<QDialog *>(&exportDialog),
+                           static_cast<QDialog *>(&spzDialog)}) {
+      const bool visible = dialog->isVisible();
+      const QSize retainedSize = dialog->size();
+      dialog->showNormal();
+      dialog->resize(680, 460);
+      settleLayout();
+      auto *scroll = dialog->findChild<QScrollArea *>(QStringLiteral("dialogBodyScroll"));
+      auto *buttons = dialog->findChild<QDialogButtonBox *>();
+      check(scroll && buttons, "settings dialog has scrolling body and independent action buttons");
+      if (scroll && buttons) {
+        check(!scroll->isAncestorOf(buttons) &&
+              dialog->rect().contains(QRect(buttons->mapTo(dialog, QPoint()), buttons->size())),
+              "small high-font settings dialog keeps all action buttons visible");
+        if (scroll->horizontalScrollBar()->maximum() != 0)
+          qCritical() << "Horizontal settings overflow:" << dialog->objectName()
+                      << dialog->windowTitle() << fontPercent
+                      << scroll->horizontalScrollBar()->maximum();
+        check(scroll->horizontalScrollBar()->maximum() == 0,
+              "settings dialog wraps long form rows instead of horizontal clipping");
+        for (auto *form : scroll->findChildren<QFormLayout *>())
+          check(form->rowWrapPolicy() == QFormLayout::WrapLongRows &&
+                form->formAlignment().testFlag(Qt::AlignTop),
+                "settings form wraps and remains top aligned on enlargement");
+        for (auto *checkBox : scroll->findChildren<QCheckBox *>()) {
+          if (!checkBox->isVisible()) continue;
+          check(checkBox->height() >= checkBox->heightForWidth(checkBox->width()),
+                "localized checkbox captions reserve enough height for every wrapped line");
+        }
+        for (auto *field : scroll->findChildren<QLineEdit *>()) {
+          if (!field->isVisible()) continue;
+          scroll->ensureWidgetVisible(field);
+          settleLayout();
+          check(scroll->viewport()->rect().contains(
+              QRect(field->mapTo(scroll->viewport(), QPoint()), field->size()).center()),
+              "every settings input remains reachable through scrolling");
+        }
+        scroll->verticalScrollBar()->setValue(0);
+      }
+      if (dialog == &import && scroll) {
+        auto *sourceActions = dialog->findChild<QWidget *>(QStringLiteral("datasetImportSourceActions"));
+        auto *sourceList = dialog->findChild<QListWidget *>(QStringLiteral("datasetImportSourceList"));
+        check(sourceActions && sourceList && !scroll->isAncestorOf(sourceList),
+              "media source list keeps its independent scrolling view");
+        if (sourceActions) {
+          for (const int width : {460, 1100, 460}) {
+            dialog->resize(width, 460);
+            settleLayout();
+            const auto actions = sourceActions->findChildren<QPushButton *>();
+            check(actions.size() == 4, "media source reflow preserves all four action buttons");
+            check(sourceActions->height() >= sourceActions->minimumSizeHint().height(),
+                  "media source actions reserve the complete reflowed row height");
+            for (qsizetype i = 0; i < actions.size(); ++i) {
+              const auto *button = actions.at(i);
+              const QRect geometry(button->mapTo(sourceActions, QPoint()), button->size());
+              check(sourceActions->rect().contains(geometry) &&
+                    button->height() >= button->sizeHint().height(),
+                    "each media source button remains fully visible after narrow-wide-narrow resizing");
+              for (qsizetype j = i + 1; j < actions.size(); ++j)
+                check(!geometry.intersects(QRect(actions.at(j)->mapTo(sourceActions, QPoint()),
+                                                actions.at(j)->size())),
+                      "reflowed media source buttons do not overlap");
+            }
+          }
+          dialog->resize(680, 460);
+          settleLayout();
+        }
+      }
+      if (fontPercent == 150 && dialog == &training && !screenshotDirectory.isEmpty()) {
+        QDir().mkpath(screenshotDirectory);
+        check(dialog->grab().save(QDir(screenshotDirectory).filePath(
+            locale + QStringLiteral("-settings-150-small.png"))), "high-font settings screenshot");
+      }
+      if (fontPercent == 150 && dialog == &twoDSettings && !screenshotDirectory.isEmpty()) {
+        QDir().mkpath(screenshotDirectory);
+        check(dialog->grab().save(QDir(screenshotDirectory).filePath(
+            locale + QStringLiteral("-settings-2dgs-150-small.png"))), "high-font 2DGS settings screenshot");
+      }
+      dialog->showMaximized();
+      settleLayout();
+      if (buttons)
+        check(dialog->rect().contains(QRect(buttons->mapTo(dialog, QPoint()), buttons->size())),
+              "maximized settings dialog keeps action buttons reachable");
+      dialog->showNormal();
+      dialog->resize(retainedSize);
+      if (!visible) dialog->hide();
+      settleLayout();
+    }
+    check(training.configuration().iterations == retainedTrainingIterations &&
+          training.configuration().backend == retainedTrainingBackend &&
+          twoDSettings.configuration().backend == QStringLiteral("2dgs") &&
+          twoDSettings.configuration().iterations == retainedTwoDIterations &&
+          reconstruction.configuration().cameraModel == reconstructionConfig.cameraModel &&
+          meshing.configuration() == retainedMeshForm &&
+          exportDialog.options().destinationPath == retainedExportDestination,
+          "dialog resizing and font changes retain edited generation and export settings");
   }
   if (retainedAutomaticScale && automaticScale) {
     automaticScale->trigger();

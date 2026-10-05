@@ -244,7 +244,8 @@ if(BUILD_TESTING)
   foreach(language zh_CN en_US ja_JP)
     add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
     set_tests_properties(native_language_${language} PROPERTIES
-      TIMEOUT 45
+      # Includes normal/maximized/full-screen, scale and live locale matrices.
+      TIMEOUT 90
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()

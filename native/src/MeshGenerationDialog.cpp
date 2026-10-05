@@ -1,6 +1,7 @@
 #include "MeshGenerationDialog.h"
 #include "AppLanguage.h"
 #include "WorkspaceDocument.h"
+#include "WrappingCheckBox.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -18,6 +19,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -27,14 +29,33 @@ MeshGenerationDialog::MeshGenerationDialog(const QString &modelDirectory, QWidge
     : QDialog(parent) {
   setObjectName(QStringLiteral("meshGenerationDialog"));
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("生成网格"));
-  setMinimumWidth(560);
+  setMinimumSize(320, 220);
+  resize(640, 540);
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(16, 14, 16, 14);
+  layout->setSpacing(12);
+  auto *scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto *body = new QWidget(scroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyLayout->setSpacing(12);
+  scroll->setWidget(body);
+  layout->addWidget(scroll, 1);
   auto *form = new QFormLayout;
   form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+  form->setHorizontalSpacing(14);
+  form->setVerticalSpacing(9);
   auto row = [form](const char *caption, QWidget *field) {
     form->addRow(AppLanguage::text(new QLabel, caption), field);
   };
   auto *sourceRow = new QWidget(this);
+  sourceRow->setProperty("gswLayoutContainer", true);
   auto *sourceLayout = new QHBoxLayout(sourceRow);
   sourceLayout->setContentsMargins(0, 0, 0, 0);
   mSource = new QLineEdit(QDir::toNativeSeparators(modelDirectory), sourceRow);
@@ -75,17 +96,27 @@ MeshGenerationDialog::MeshGenerationDialog(const QString &modelDirectory, QWidge
   mDownsample->setRange(1, 8);
   mDownsample->setValue(2);
   row(AppLanguage::source("GS2Mesh 下采样倍数"), mDownsample);
-  mTexture = AppLanguage::text(new QCheckBox(this), AppLanguage::source("完成网格后使用 OpenMVS 烘焙照片纹理"));
+  mTexture = AppLanguage::text(new WrappingCheckBox(this), AppLanguage::source("完成网格后使用 OpenMVS 烘焙照片纹理"));
   form->addRow(mTexture);
   mTextureResolution = new QSpinBox(this);
   mTextureResolution->setRange(512, 8192);
   mTextureResolution->setValue(2048);
   row(AppLanguage::source("纹理分辨率"), mTextureResolution);
-  layout->addLayout(form);
+  bodyLayout->addLayout(form);
   mHint = new QLabel(this);
   mHint->setWordWrap(true);
   mHint->setObjectName(QStringLiteral("meshPipelineHint"));
-  layout->addWidget(mHint);
+  bodyLayout->addWidget(mHint);
+  bodyLayout->addStretch(1);
+  for (auto *combo : body->findChildren<QComboBox *>()) {
+    combo->setMinimumContentsLength(8);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  }
+  for (auto *label : body->findChildren<QLabel *>()) {
+    if (label->wordWrap())
+      label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  }
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));
   buttons->addButton(AppLanguage::text(new QPushButton(this), AppLanguage::source("开始生成")), QDialogButtonBox::AcceptRole);
