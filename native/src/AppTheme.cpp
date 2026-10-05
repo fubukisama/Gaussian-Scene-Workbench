@@ -423,8 +423,9 @@ QProgressBar::chunk { background: @PROGRESS@; border-radius: 2px; }
 QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOLTIP_BORDER@; padding: 4px; }
 )CSS");
 
-  // Both modes share one geometry/font template, so switching appearance cannot
-  // introduce a different UI density or undo the selected language's font.
+  // Both modes share the widget/font template, retaining text density and the
+  // selected language's font. Only light dock-resize borders add a compact,
+  // scale-aware separator rule below; dark separators retain native styling.
   struct ColorToken {
     const char *token;
     const char *dark;
@@ -511,6 +512,21 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   replace(QStringLiteral("@SCROLL@"), 10);
   replace(QStringLiteral("@SECTION_TOP@"), 6);
   replace(QStringLiteral("@SECTION_BOTTOM@"), 4);
+  if (theme == UiTheme::Light) {
+    // Paint Qt's real dock resize handles, not an overlay over the viewport.
+    // Include both one-pixel edges in the scaled extent; the native mouse
+    // handling, floating panels and dark-theme separator stay unchanged.
+    const int separatorContent = std::max(2, AppTheme::scaled(6, scalePercent) - 2);
+    css += QStringLiteral(R"CSS(
+QMainWindow::separator {
+  background: #c0c0c0;
+  border: 1px solid #898989;
+  width: %1px;
+  height: %1px;
+}
+QMainWindow::separator:hover { background: #8eaed0; border-color: #2467a5; }
+)CSS").arg(separatorContent);
+  }
   return css;
 }
 

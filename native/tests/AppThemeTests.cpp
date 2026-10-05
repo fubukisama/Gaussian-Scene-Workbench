@@ -3,17 +3,21 @@
 #include <QApplication>
 #include <QColor>
 #include <QDir>
+#include <QDockWidget>
 #include <QHeaderView>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSize>
+#include <QStyle>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QToolBar>
@@ -96,6 +100,7 @@ private slots:
   void providesReadablePalettesForBothThemes();
   void usesNeutralLightSurfacesAndBlueInteractionColors();
   void paintsReadableLightControlsAndDistinctPanelStructure();
+  void paintsVisibleLeftAndRightDockSeparators();
   void reusesOneScaledLayoutForBothThemes();
   void keepsAutomaticTextReadableAcrossCommonWindowSizes();
   void compensatesForOperatingSystemDisplayScale();
@@ -349,6 +354,8 @@ void AppThemeTests::paintsReadableLightControlsAndDistinctPanelStructure() {
 }
 
 void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
+  const QRegularExpression daySeparators(
+      QStringLiteral("QMainWindow::separator[^\\{]*\\{[^\\}]*\\}\\s*"));
   for (const int scale : {90, 100, 150}) {
     AppTheme::apply(*qApp, scale, false);
     AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
@@ -356,9 +363,137 @@ void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
     darkGeometry.remove(QRegularExpression(QStringLiteral("#[0-9a-fA-F]{6}")));
     AppTheme::applyTheme(*qApp, UiTheme::Light, false);
     QString lightGeometry = qApp->styleSheet();
+    // The light-only resize-handle enhancement is an explicit exception;
+    // all other widget/font/dock-title geometry must remain identical.
+    lightGeometry.remove(daySeparators);
     lightGeometry.remove(QRegularExpression(QStringLiteral("#[0-9a-fA-F]{6}")));
-    QCOMPARE(lightGeometry, darkGeometry);
+    QCOMPARE(lightGeometry.trimmed(), darkGeometry.trimmed());
     QVERIFY(qApp->styleSheet().contains(QStringLiteral("QLabel#densityGuardWarning")));
+  }
+}
+
+void AppThemeTests::paintsVisibleLeftAndRightDockSeparators() {
+  const auto hasInk = [](const QImage &image, const QRect &logical,
+                          const QColor &expected) {
+    const qreal ratio = image.devicePixelRatio();
+    const QRect pixels(qFloor(logical.x() * ratio), qFloor(logical.y() * ratio),
+                       qCeil(logical.width() * ratio), qCeil(logical.height() * ratio));
+    const QRect clipped = pixels.intersected(image.rect());
+    for (int y = clipped.top(); y <= clipped.bottom(); ++y) {
+      for (int x = clipped.left(); x <= clipped.right(); ++x) {
+        const QColor color = image.pixelColor(x, y);
+        if (std::abs(color.red() - expected.red()) <= 2 &&
+            std::abs(color.green() - expected.green()) <= 2 &&
+            std::abs(color.blue() - expected.blue()) <= 2)
+          return true;
+      }
+    }
+    return false;
+  };
+  for (const int scale : {90, 100, 150}) {
+    AppTheme::apply(*qApp, scale, false);
+    AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
+    QMainWindow window;
+    window.resize(740, 360);
+    auto *center = new QWidget(&window);
+    center->setMinimumSize(200, 160);
+    window.setCentralWidget(center);
+    auto *left = new QDockWidget(QStringLiteral("Left"), &window);
+    auto *right = new QDockWidget(QStringLiteral("Right"), &window);
+    left->setWidget(new QWidget(left));
+    right->setWidget(new QWidget(right));
+    window.addDockWidget(Qt::LeftDockWidgetArea, left);
+    window.addDockWidget(Qt::RightDockWidgetArea, right);
+    window.show();
+    window.resizeDocks({left, right}, {120, 120}, Qt::Horizontal);
+    QApplication::processEvents();
+    QTest::qWait(20);
+    const auto splits = [&] {
+      const int top = center->geometry().center().y() - 20;
+      return QList<QRect>{
+          QRect(left->geometry().right() + 1, top,
+                center->geometry().left() - left->geometry().right() - 1, 40),
+          QRect(center->geometry().right() + 1, top,
+                right->geometry().left() - center->geometry().right() - 1, 40)};
+    };
+    QVERIFY(!qApp->styleSheet().contains(QStringLiteral("QMainWindow::separator")));
+    const auto darkSplits = splits();
+    const int nativeExtent = window.style()->pixelMetric(
+        QStyle::PM_DockWidgetSeparatorExtent, nullptr, &window);
+    for (const QRect &split : darkSplits) {
+      QVERIFY(split.isValid());
+      QCOMPARE(split.width(), nativeExtent);
+    }
+    const QImage darkFrame = painted(window);
+
+    AppTheme::applyTheme(*qApp, UiTheme::Light, false);
+    QApplication::processEvents();
+    const QImage lightFrame = painted(window);
+    QCOMPARE(pixelAt(lightFrame, center->geometry().center()), QColor("#ffffff"));
+    const auto lightSplits = splits();
+    for (const QRect &split : lightSplits) {
+      QVERIFY(split.isValid());
+      QCOMPARE(split.width(), AppTheme::scaled(6, scale));
+      QVERIFY(hasInk(lightFrame, split, QColor("#c0c0c0")));
+      QVERIFY(hasInk(lightFrame, split, QColor("#898989")));
+      const QColor edge = darkestPixel(lightFrame, split);
+      QVERIFY(neutral(edge));
+      QVERIFY(contrast(edge, QColor("#ffffff")) >= 3.0);
+    }
+
+    const auto mouse = [&window](const QEvent::Type type, const QPoint &local,
+                                 const Qt::MouseButton button,
+                                 const Qt::MouseButtons buttons) {
+      QMouseEvent event(type, QPointF(local), QPointF(window.mapToGlobal(local)),
+                        button, buttons, Qt::NoModifier);
+      QApplication::sendEvent(&window, &event);
+    };
+    const auto dragSeparator = [&](const int index, const int deltaX) {
+      const QPoint start = splits()[index].center();
+      const QPoint end = start + QPoint(deltaX, 0);
+      // Exercise QMainWindow's real separator hit-test/resize sequence without
+      // moving the physical cursor or touching any other application window.
+      mouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+      mouse(QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
+      QApplication::processEvents();
+      mouse(QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+      QApplication::processEvents();
+      QTest::qWait(20);
+      mouse(QEvent::MouseMove, center->geometry().center(),
+            Qt::NoButton, Qt::NoButton);
+      QApplication::processEvents();
+    };
+    const int dayLeftWidth = left->width();
+    dragSeparator(0, 30);
+    QVERIFY(left->width() > dayLeftWidth);
+    const int dayRightWidth = right->width();
+    dragSeparator(1, -30);
+    QVERIFY(right->width() > dayRightWidth);
+    QVERIFY(!left->isFloating() && !right->isFloating());
+    QCOMPARE(window.dockWidgetArea(left), Qt::LeftDockWidgetArea);
+    QCOMPARE(window.dockWidgetArea(right), Qt::RightDockWidgetArea);
+
+    AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
+    QApplication::processEvents();
+    QVERIFY(!qApp->styleSheet().contains(QStringLiteral("QMainWindow::separator")));
+    const auto restored = splits();
+    const QImage restoredFrame = painted(window);
+    for (int index = 0; index < restored.size(); ++index) {
+      QCOMPARE(restored[index].width(), darkSplits[index].width());
+      QCOMPARE(pixelAt(restoredFrame, restored[index].center()),
+               pixelAt(darkFrame, darkSplits[index].center()));
+    }
+    // The stronger painted boundaries remain real resize handles rather than
+    // decorative frames. Keep both sidebars independently resizable in night.
+    const int leftWidth = left->width();
+    const int rightWidth = right->width();
+    window.resizeDocks({left}, {leftWidth + 30}, Qt::Horizontal);
+    QApplication::processEvents();
+    QVERIFY(left->width() > leftWidth);
+    window.resizeDocks({right}, {rightWidth + 30}, Qt::Horizontal);
+    QApplication::processEvents();
+    QVERIFY(right->width() > rightWidth);
+    window.hide();
   }
 }
 

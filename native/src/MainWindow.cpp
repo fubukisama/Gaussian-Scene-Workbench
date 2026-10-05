@@ -1507,7 +1507,7 @@ void MainWindow::createMenus() {
   lightTheme->setData(QStringLiteral("light"));
   lightTheme->setCheckable(true);
   lightTheme->setChecked(AppTheme::currentTheme() == UiTheme::Light);
-  AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择"));
+  AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用白色工作区、灰色工具栏、深色文字与清晰面板边界，适合白天观察；立即生效并记住选择"));
   auto *darkTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
       AppLanguage::source("深色（黑夜）"));
   darkTheme->setObjectName(QStringLiteral("darkThemeAction"));

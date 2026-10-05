@@ -847,7 +847,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
           darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
           "appearance menu switches language immediately");
     check(lightTheme->toolTip() == QCoreApplication::translate("Workbench",
-          "使用白色工作区、灰色工具栏与深色文字，适合白天观察；立即生效并记住选择"),
+          "使用白色工作区、灰色工具栏、深色文字与清晰面板边界，适合白天观察；立即生效并记住选择"),
           "high-contrast light appearance description switches language immediately");
     const auto themeFont = qApp->font();
     const auto themeScale = qApp->property("gswUiScalePercent");
