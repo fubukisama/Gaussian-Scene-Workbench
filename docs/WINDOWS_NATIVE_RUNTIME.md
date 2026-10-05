@@ -168,8 +168,18 @@ support and reliable acceptance-script behavior, not a new UI version.
 | Bounded TSDF | Real CUDA surfel rendering and TSDF; trained fixture: 6,690 vertices / 12,888 faces |
 | Unbounded TSDF | Official 512 grid; 1,324,447 vertices / 2,666,688 faces |
 | OpenMVS photo texturing | InterfaceCOLMAP and TextureMesh 2.4.0; 2,048 atlas; OBJ/MTL/PNG/ZIP and installed native material render passed |
-| SuGaR | Own Gaussian/KNN and PyTorch3D wheels installed; GPU KNN and mesh-rasterizer backward passed; real coarse optimization reached 15,000 and refinement reached 2,000; staged export: 508,962 Gaussians and an 824 x 824 textured OBJ/MTL/PNG; patched uninterrupted native rerun in progress |
+| SuGaR | Own Gaussian/KNN and PyTorch3D wheels installed; GPU KNN and mesh-rasterizer backward passed; patched uninterrupted native job completed coarse optimization, extraction, 2,000-step refinement, texture and material preview: 47,621 vertices / 91,099 triangles; 546,594 finite refined Gaussians; 856 x 856 source texture |
 | GS2Mesh | Own four CUDA wheels installed; connected components and deformable-attention forward/backward passed; both DLNR checkpoints, SAM 2 Large and GroundingDINO ran real GPU inference; native mesh job completed with 25,454 vertices / 45,093 triangles |
+| Shared GLB export | Trimesh 4.3.2 present in both primary workers; real bounded-TSDF and SuGaR textured models exported and reloaded in both 3DGS and 2DGS prefixes, preserving all faces, finite coordinates and texture images |
+
+All four compute prefixes were audited against their version-pinned requirement
+files after installation; every listed distribution matched. Dependency
+consistency checks passed. The GLB helper runs in the primary worker process:
+SuGaR/GS2Mesh mesh jobs use the 3DGS worker, even though the old missing-module
+error text mentions the 2DGS environment. Therefore `trimesh==4.3.2` is also
+required in `requirements-native-3dgs.txt`, not only in the research/2DGS
+prefixes. The pinned [Trimesh distribution](https://pypi.org/project/trimesh/4.3.2/)
+supports these Python versions and provides mesh/GLB import and export.
 
 2DGS 1,200-iteration resume comparison initially exceeded the existing 0.05 dB
 acceptance threshold (0.134813 dB). An unchanged rerun passed with 0.025623 dB,
@@ -193,6 +203,14 @@ failure records and saved phase checkpoints. Export validation reused these
 already-computed phase outputs after the path fixes; it is not native
 optimizer-state resume. The real PyTorch3D fallback produced a non-constant
 824 x 824 texture with OBJ/MTL/PNG assets and finite refined Gaussian fields.
+The subsequent uninterrupted installed-worker job finished with `state=done`
+and completed mesh, texture and material-preview stages. Its full output
+contains 47,621 vertices / 91,099 triangles, 546,594 refined Gaussians with all
+PLY fields finite, and a non-constant 856 x 856 source texture. That first
+complete job retained a GLB missing-dependency warning; after installing the
+dependency in its actual 3DGS worker prefix, separate GLB exports passed on
+the unchanged real outputs. The original job report was not rewritten to
+conceal the warning.
 Upstream coarse training starts at iteration 6,999 and stops at 15,000, so this
 is 8,001 actual optimizer updates, not 15,000 updates. The short fixture uses
 an initial 1,000-step 3DGS model, eight reduced-size views and 2,000 refinement

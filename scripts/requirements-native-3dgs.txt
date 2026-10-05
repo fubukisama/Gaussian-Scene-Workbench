@@ -16,3 +16,4 @@ imageio==2.35.1
 imageio-ffmpeg==0.5.1
 tensorboard==2.14.0
 lpips==0.1.4
+trimesh==4.3.2
