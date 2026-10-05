@@ -4,6 +4,7 @@
 #include <QJsonArray>
 
 #include <QFontMetrics>
+#include <QEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -11,7 +12,10 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QProgressBar>
+#include <QScrollArea>
 #include <QSizePolicy>
+#include <QTextDocument>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -70,12 +74,10 @@ QLabel *metricValue(QWidget *parent) {
   return label;
 }
 
-QLabel *addMetric(QGridLayout *layout, const int column,
-                  const char *source, QLabel *value) {
+QLabel *metricCaption(const char *source, QLabel *value) {
   auto *captionLabel = AppLanguage::text(new QLabel(value->parentWidget()), source);
   captionLabel->setObjectName(QStringLiteral("mutedLabel"));
-  layout->addWidget(captionLabel, 0, column);
-  layout->addWidget(value, 1, column);
+  captionLabel->setWordWrap(true);
   return captionLabel;
 }
 
@@ -84,8 +86,9 @@ QLabel *addMetric(QGridLayout *layout, const int column,
 class TrainingCurvesWidget final : public QWidget {
 public:
   explicit TrainingCurvesWidget(QWidget *parent = nullptr) : QWidget(parent) {
-    setMinimumHeight(0);
-    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    setObjectName(QStringLiteral("trainingCurves"));
+    setMinimumHeight(fontMetrics().height() * 6 + 32);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   }
 
   void setSamples(const QVector<TrainingSample> &samples) {
@@ -94,6 +97,14 @@ public:
   }
 
 protected:
+  void changeEvent(QEvent *event) override {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::FontChange) {
+      setMinimumHeight(fontMetrics().height() * 6 + 32);
+      updateGeometry();
+    }
+  }
+
   void paintEvent(QPaintEvent *) override {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -201,33 +212,53 @@ private:
 TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) {
   setMinimumSize(0, 0);
   setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-  auto *layout = new QVBoxLayout(this);
+  auto *outer = new QVBoxLayout(this);
+  outer->setContentsMargins(0, 0, 0, 0);
+  outer->setSizeConstraint(QLayout::SetNoConstraint);
+  mScrollArea = new QScrollArea(this);
+  mScrollArea->setObjectName(QStringLiteral("trainingMonitorScroll"));
+  mScrollArea->setFrameShape(QFrame::NoFrame);
+  mScrollArea->setMinimumSize(0, 0);
+  mScrollArea->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  mScrollArea->setWidgetResizable(true);
+  AppLanguage::bind(mScrollArea, "accessibleName", AppLanguage::source("训练监视内容"));
+  AppLanguage::bind(mScrollArea, "accessibleDescription", AppLanguage::source("缩小面板时可滚动查看全部信息；指标会随宽度自动换行。"));
+  outer->addWidget(mScrollArea);
+  auto *content = new QWidget(mScrollArea);
+  content->setObjectName(QStringLiteral("trainingMonitorContent"));
+  auto *layout = new QVBoxLayout(content);
+  layout->setSizeConstraint(QLayout::SetMinimumSize);
   layout->setContentsMargins(10, 8, 10, 8);
   layout->setSpacing(6);
 
   auto *heading = new QHBoxLayout();
-  mTitle = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "尚未开始训练"), this), AppLanguage::source("尚未开始训练"));
+  mTitle = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "尚未开始训练"), content), AppLanguage::source("尚未开始训练"));
+  mTitle->setObjectName(QStringLiteral("trainingTaskTitle"));
+  mTitle->setTextFormat(Qt::PlainText);
+  mTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  mTitle->setMinimumWidth(0);
   QFont titleFont = mTitle->font();
   titleFont.setBold(true);
   mTitle->setFont(titleFont);
-  mState = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "空闲"), this), AppLanguage::source("空闲"));
+  mState = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "空闲"), content), AppLanguage::source("空闲"));
+  mState->setTextFormat(Qt::PlainText);
   mState->setObjectName(QStringLiteral("statusWarn"));
   heading->addWidget(mTitle, 1);
   heading->addWidget(mState);
   layout->addLayout(heading);
 
-  mProgress = new QProgressBar(this);
+  mProgress = new QProgressBar(content);
   mProgress->setRange(0, 100);
   mProgress->setValue(0);
   mProgress->setTextVisible(true);
   layout->addWidget(mProgress);
-  mReconstructionQuality = new QLabel(this);
+  mReconstructionQuality = new QLabel(content);
   mReconstructionQuality->setObjectName(QStringLiteral("reconstructionQualityLabel"));
   mReconstructionQuality->setWordWrap(true);
   mReconstructionQuality->hide();
   layout->addWidget(mReconstructionQuality);
 
-  mEffectiveParameters = new QLabel(this);
+  mEffectiveParameters = new QLabel(content);
   mEffectiveParameters->setObjectName(QStringLiteral("trainingEffectiveParameters"));
   mEffectiveParameters->setWordWrap(true);
   mEffectiveParameters->setTextFormat(Qt::PlainText);
@@ -235,39 +266,96 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mEffectiveParameters->hide();
   layout->addWidget(mEffectiveParameters);
 
-  auto *metrics = new QGridLayout();
-  metrics->setHorizontalSpacing(18);
-  metrics->setVerticalSpacing(2);
-  mIteration = metricValue(this);
-  mLoss = metricValue(this);
-  mPsnr = metricValue(this);
-  mGaussianCount = metricValue(this);
-  mSpeed = metricValue(this);
-  mElapsed = metricValue(this);
-  mRemaining = metricValue(this);
-  addMetric(metrics, 0, AppLanguage::source("迭代"), mIteration);
-  addMetric(metrics, 1, AppLanguage::source("Loss"), mLoss);
-  addMetric(metrics, 2, AppLanguage::source("训练 PSNR"), mPsnr);
-  mPrimitiveCountCaption =
-      addMetric(metrics, 3, AppLanguage::source("高斯数量"), mGaussianCount);
-  addMetric(metrics, 4, AppLanguage::source("速度"), mSpeed);
-  addMetric(metrics, 5, AppLanguage::source("已用时"), mElapsed);
-  addMetric(metrics, 6, AppLanguage::source("预计剩余"), mRemaining);
-  for (int column = 0; column < 7; ++column) {
-    metrics->setColumnStretch(column, 1);
+  mMetricsGrid = new QGridLayout();
+  mMetricsGrid->setHorizontalSpacing(18);
+  mMetricsGrid->setVerticalSpacing(2);
+  mIteration = metricValue(content);
+  mLoss = metricValue(content);
+  mPsnr = metricValue(content);
+  mGaussianCount = metricValue(content);
+  mSpeed = metricValue(content);
+  mElapsed = metricValue(content);
+  mRemaining = metricValue(content);
+  mMetricValues = {mIteration, mLoss, mPsnr, mGaussianCount, mSpeed, mElapsed, mRemaining};
+  mMetricCaptions = {metricCaption(AppLanguage::source("迭代"), mIteration),
+      metricCaption(AppLanguage::source("Loss"), mLoss),
+      metricCaption(AppLanguage::source("训练 PSNR"), mPsnr),
+      metricCaption(AppLanguage::source("高斯数量"), mGaussianCount),
+      metricCaption(AppLanguage::source("速度"), mSpeed),
+      metricCaption(AppLanguage::source("已用时"), mElapsed),
+      metricCaption(AppLanguage::source("预计剩余"), mRemaining)};
+  mPrimitiveCountCaption = mMetricCaptions[3];
+  for (int index = 0; index < 7; ++index) {
+    mMetricValues[index]->setObjectName(QStringLiteral("trainingMetricValue%1").arg(index));
+    mMetricValues[index]->setTextFormat(Qt::PlainText);
   }
-  layout->addLayout(metrics);
+  layout->addLayout(mMetricsGrid);
 
-  mDensityWarning = new QLabel(this);
+  mDensityWarning = new QLabel(content);
   mDensityWarning->setObjectName(QStringLiteral("densityGuardWarning"));
   mDensityWarning->setWordWrap(true);
   mDensityWarning->setStyleSheet(QStringLiteral("color: #e2b55b;"));
   mDensityWarning->hide();
   layout->addWidget(mDensityWarning);
 
-  mCurves = new TrainingCurvesWidget(this);
+  mCurves = new TrainingCurvesWidget(content);
   layout->addWidget(mCurves, 1);
+  mScrollArea->setWidget(content);
+  mScrollArea->viewport()->installEventFilter(this);
+  mTitle->installEventFilter(this);
+  relayoutMetrics();
   AppLanguage::onChanged(this, [this]() { retranslateStatus(); });
+}
+
+bool TrainingMonitorWidget::eventFilter(QObject *watched, QEvent *event) {
+  if (event->type() == QEvent::FontChange) {
+    // QSS can notify related widgets separately. Measure after font/style
+    // propagation, not against a mixture of old and new font metrics.
+    QTimer::singleShot(0, this, [this] { relayoutMetrics(); refreshTaskTitle(); });
+  } else if (event->type() == QEvent::Resize) {
+    if (watched == mScrollArea->viewport()) relayoutMetrics();
+    if (watched == mTitle) refreshTaskTitle();
+  }
+  return QWidget::eventFilter(watched, event);
+}
+
+void TrainingMonitorWidget::refreshTaskTitle() {
+  const QString full = mHasTraining ? mTaskTitle
+      : QCoreApplication::translate("Workbench", "尚未开始训练");
+  QString singleLine = full;
+  for (const QChar separator : {QChar('\r'), QChar('\n'), QChar('\t'), QChar(0x2028), QChar(0x2029)})
+    singleLine.replace(separator, QLatin1Char(' '));
+  mTitle->setText(mTitle->fontMetrics().elidedText(singleLine, Qt::ElideMiddle,
+                                                 std::max(0, mTitle->width())));
+  // Qt tooltips detect HTML automatically. Escape legal markup in user names
+  // so the complete name is displayed literally, never interpreted as HTML.
+  mTitle->setToolTip(Qt::convertFromPlainText(full));
+}
+
+void TrainingMonitorWidget::relayoutMetrics() {
+  const QString iterationWidth = QStringLiteral("%1 / %1").arg(QLocale().toString(200000));
+  int tileWidth = mIteration->fontMetrics().horizontalAdvance(iterationWidth);
+  for (int index = 0; index < 7; ++index) {
+    tileWidth = std::max(tileWidth, mMetricCaptions[index]->fontMetrics().horizontalAdvance(mMetricCaptions[index]->text()));
+    tileWidth = std::max(tileWidth, mMetricValues[index]->fontMetrics().horizontalAdvance(mMetricValues[index]->text()));
+  }
+  const int spacing = mMetricsGrid->horizontalSpacing();
+  const int available = std::max(0, mScrollArea->viewport()->width() - 20);
+  const int columns = std::clamp((available + spacing) / std::max(1, tileWidth + spacing), 1, 7);
+  if (columns == mMetricColumns) return;
+  mMetricColumns = columns;
+  setProperty("metricColumns", columns);
+  for (int index = 0; index < 7; ++index) {
+    mMetricsGrid->removeWidget(mMetricCaptions[index]);
+    mMetricsGrid->removeWidget(mMetricValues[index]);
+    mMetricsGrid->setColumnStretch(index, index < columns ? 1 : 0);
+  }
+  for (int index = 0; index < 7; ++index) {
+    const int row = (index / columns) * 2;
+    const int column = index % columns;
+    mMetricsGrid->addWidget(mMetricCaptions[index], row, column);
+    mMetricsGrid->addWidget(mMetricValues[index], row + 1, column);
+  }
 }
 
 void TrainingMonitorWidget::retranslateStatus() {
@@ -408,7 +496,7 @@ void TrainingMonitorWidget::refreshMetrics() {
       details += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "深度混合比例：%1")
           .arg(locale.toString(summary.value(QStringLiteral("depthRatio")).toDouble(), 'g', 6));
     }
-    mEffectiveParameters->setToolTip(details);
+    mEffectiveParameters->setToolTip(text + QLatin1Char('\n') + details);
   }
   const WorkerStatus &quality = mReconstructionStatus;
   mReconstructionQuality->setVisible(!quality.reconstructionQuality.isEmpty() || !quality.generationIssue.isEmpty());
@@ -476,6 +564,8 @@ void TrainingMonitorWidget::refreshMetrics() {
                         : QStringLiteral("-"));
   if (mFinished) mRemaining->setText(QStringLiteral("-"));
   mCurves->setSamples(mTelemetry.samples());
+  relayoutMetrics();
+  refreshTaskTitle();
 }
 
 } // namespace gsw

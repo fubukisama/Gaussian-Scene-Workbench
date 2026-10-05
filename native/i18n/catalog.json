@@ -6338,6 +6338,16 @@
     "en_US": "Loss",
     "ja_JP": "損失"
   },
+  "训练监视内容": {
+    "zh_CN": "训练监视内容",
+    "en_US": "Training Monitor Content",
+    "ja_JP": "学習モニターの内容"
+  },
+  "缩小面板时可滚动查看全部信息；指标会随宽度自动换行。": {
+    "zh_CN": "缩小面板时可滚动查看全部信息；指标会随宽度自动换行。",
+    "en_US": "Scroll to see all information in a small panel; metrics wrap automatically to fit its width.",
+    "ja_JP": "小さいパネルではスクロールしてすべての情報を確認できます。指標は幅に合わせて自動的に折り返されます。"
+  },
   "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.": {
     "zh_CN": "烘焙镜像网格请使用 GLB、OBJ 或 STL；PLY 可导出其原始坐标。",
     "en_US": "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.",

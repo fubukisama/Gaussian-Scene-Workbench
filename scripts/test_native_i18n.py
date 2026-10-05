@@ -8,6 +8,13 @@ import native_i18n as i18n
 
 
 class CatalogTests(unittest.TestCase):
+    def test_responsive_training_monitor(self):
+        catalog = i18n.load_catalog()
+        for source in ('训练监视内容', '缩小面板时可滚动查看全部信息；指标会随宽度自动换行。'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            self.assertEqual(len(set(catalog[source].values())), 3)
+            self.assertEqual(i18n.validate({source: catalog[source]}, {}), [])
+
     def test_continuous_training_preview(self):
         catalog = i18n.load_catalog()
         for source in ('相机解算与稀疏点云', '初始化高斯', '高斯训练 · 优化与密度控制',

@@ -22,6 +22,8 @@
 
 训练监视先显示环境适配后的生效迭代、比例与实际优化器；相机加载后替换为真正用于训练的图像张数、尺寸组和总像素。增密参数、3DGS 抗锯齿/曝光补偿或 2DGS 深度混合比例在摘要提示中展示。结果目录 `scene.json` 的 `training.summary` 与持久化任务保存相同机器摘要；旧任务没有新字段仍能运行。历史手动分辨率参数只有 `1/2/4/8` 表示缩放除数，其余正值按上游语义显示为目标像素宽度，不改写旧任务。它不推断峰值显存，不是质量评分，也不改变优化器或图像数据。
 
+两通道的监视面板现在按宽度和字体大小自动排列七项指标。缩小或浮动面板时可滚动查看完整报告、告警和曲线，不强制把底部面板撑大。长任务名称以纯文本省略显示，悬停可查看完整原文；生效参数提示也保留完整报告。滚动、调整面板和切换语言不清空训练采样或改变处理状态。
+
 ## English
 
 Choose **Training Settings → Quality Preset → Maximum Fidelity (Original Resolution)** for either 3DGS or 2DGS. Defaults are **30,000 iterations / Original Resolution (1:1)**. An explicit `-r 1` bypasses the upstream automatic 1600 px mode. Both image dimensions are retained, with no silent resolution reduction on out-of-memory. Fidelity here concerns image sampling, not certified metric accuracy, unseen-view coverage or mesh quality.
@@ -32,6 +34,8 @@ Training Settings asynchronously reads image headers and groups actual paired wi
 
 The training monitor reports effective settings after environment adaptation (including actual Adam fallback), then the dimensions/count/pixels of cameras actually loaded by each trainer. Its tooltip exposes backend-specific densification/appearance settings. Persistent jobs and result `scene.json` (`training.summary`) retain this machine-readable report; old jobs without it remain compatible. Only legacy resolution values `1/2/4/8` mean divisors; other positive values are displayed as target pixel widths, preserving upstream semantics without rewriting jobs. It neither estimates peak VRAM nor changes image/optimizer data. It is not a reconstruction-quality score.
 
+Both monitors reflow all seven metrics by width and font size. Narrow or short panels scroll to keep reports, warnings and readable curves accessible without enlarging the default bottom dock. Long task names are plain-text, middle-elided labels with complete tooltips; the effective-settings tooltip retains the complete report too. Scrolling, resizing and live language switching preserve samples and processing state.
+
 ## 日本語
 
 3DGS、2DGS とも **学習設定 → 品質プリセット → 最高精細（元の解像度）** を選択します。既定値は **30,000 回 / 元の解像度（1:1）** です。`-r 1` を明示し、上流実装の自動 1600 px 縮小を使用しません。画像の幅・高さを保持し、メモリ不足時に黙って解像度を下げません。画像の細部を保持する設定であり、測量精度、未知視点やメッシュ品質を保証するものではありません。
@@ -41,6 +45,8 @@ The training monitor reports effective settings after environment adaptation (in
 学習設定では画像ヘッダーを非同期で読み取り、幅・高さの正しい組み合わせ、縮小後の予想寸法、フォルダー内の画像数と総画素数を表示します。COLMAP を実行する場合は `input`、それ以外は `images` を優先します。登録カメラ数や最終寸法ではなく、フォルダーからの予測です。不明な寸法を推測しません。解像度比や言語の切替ではキャッシュを再表示し、ダイアログを開き直すと再読取します。3DGS / 2DGS の切替は手入力の反復数と比率を保持し、品質プリセットの明示的な変更だけが既定値を再適用します。
 
 学習モニターには環境に適合した有効設定（実際の Adam フォールバックを含む）、続いて学習器が読み込んだカメラ画像の実寸・枚数・総画素数を表示します。方式固有の高密度化や表示設定は概要のツールチップで確認できます。タスク記録と結果の `scene.json` 内 `training.summary` に同じ概要を保存し、旧タスクとの互換性を維持します。従来の解像度値は `1/2/4/8` のみが縮小除数で、その他の正値は上流の仕様どおり目標幅として表示し、タスク値を変更しません。ピーク GPU メモリの推定や品質評価ではなく、画像や最適化状態を変更しません。
+
+両方式のモニターは幅と文字サイズに合わせて七つの指標を再配置します。小さいパネルでもスクロールして設定、警告、読みやすい曲線を確認でき、下部パネルを強制的に拡大しません。長いタスク名はプレーンテキストで中央を省略し、ツールチップで原文全体を表示します。有効設定のツールチップも報告全体を保持します。スクロール、サイズ変更、即時の言語切替で学習の記録や処理状態は変わりません。
 
 ## Capability matrix and remaining gates
 
@@ -62,6 +68,8 @@ Validated on 2026-10-02 against the new desktop package: **44/44 native CTests**
 The training-summary upgrade was validated on 2026-10-03: **45/45 native CTests**, **154 worker checks (8 runtime-specific skips)**, **165 focused worker/backend checks (2 environment-specific skips: Open3D and the non-training Python's tensor-state check)**, and **14 translation-validator checks** passed. Installed three-language dialogs and monitors were visually checked. In each actual CUDA runtime, camera/tensor dimensions and RGB were retained at **1928 x 1084**, the half-resolution profile loaded **964 x 542**, and the shared loaded-input event helper reported those actual camera dimensions/count/pixels. This loader/event-helper test does not claim to exercise every full worker subprocess event or run a new 30K quality benchmark. Both installed trainers separately passed complete optimizer/Adam/RNG-state resume. The native GPU projected-support test also passes for both Gaussian backends and both resident/compatibility paths; see `RECONSTRUCTION_QUALITY.md` for its scope and the still-open real-model precision gate.
 
 The same validation exposed intermittent Windows access-denied errors when atomically replacing the shared media-import transaction journal. Publication now retries only WinError 5/32, at most five replacements with four 50 ms waits, using the same fsynced temporary file. It rechecks link/reparse targets, never deletes the old journal as a fallback, and still reports persistent failures. Fault-injection tests verify both successful overwrite after a short lock and preservation/rollback of the previous dataset after retry exhaustion. This shared import path applies to all generation pipelines; no training optimizer or image preparation is retried.
+
+The responsive-monitor upgrade was validated on 2026-10-05: **45/45 native CTests**, **154 packaged-build worker checks (8 runtime-specific skips)**, **165 focused worker/backend checks (2 environment-specific skips)** and **15 translation-validator checks** passed. Installed monitors were checked in all three languages for both backends at narrow widths and enlarged fonts, including scrolling to the preserved-height curves. Actual installed trainer subprocesses now additionally run an owned **2-iteration / 4-camera / 32 x 24** fixture in each CUDA runtime: stdout must contain exactly one loaded-input event, all configured fields must match the actual CLI, and its **3072 pixels** must agree with output `cameras.json`; a final PLY must exist. This closes the trainer-subprocess event gate left by the 2026-10-03 helper-only check, not the full GUI/worker-queue end-to-end or 30K reconstruction-quality gates. Original-resolution loader, uncapped COLMAP and complete optimizer-state resume regressions remain passing. No training algorithm, image preparation, preset or renderer math changed in this upgrade; previously documented real-model precision limitations remain open.
 
 中文：媒体导入事务记录遇到 Windows 短暂文件锁时，最多重试 5 次、总等待 0.2 秒，只重试原子发布。持续失败仍报错，并保留旧数据及回滚检查；不会重新执行整个导入或训练。
 

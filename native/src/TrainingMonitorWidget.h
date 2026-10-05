@@ -3,10 +3,12 @@
 #include "TrainingTelemetry.h"
 
 #include <QWidget>
+#include <array>
 
 class QLabel;
 class QProgressBar;
-class QTabWidget;
+class QGridLayout;
+class QScrollArea;
 
 namespace gsw {
 
@@ -25,9 +27,14 @@ public:
 
   [[nodiscard]] const TrainingTelemetry &telemetry() const;
 
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
   void refreshMetrics();
   void retranslateStatus();
+  void refreshTaskTitle();
+  void relayoutMetrics();
   QString mTaskTitle;
   QString mLastStage;
   bool mHasTraining = false;
@@ -42,6 +49,11 @@ private:
   QJsonObject mTrainingSummary;
 
   TrainingTelemetry mTelemetry;
+  QScrollArea *mScrollArea = nullptr;
+  QGridLayout *mMetricsGrid = nullptr;
+  std::array<QLabel *, 7> mMetricCaptions{};
+  std::array<QLabel *, 7> mMetricValues{};
+  int mMetricColumns = 0;
   TrainingCurvesWidget *mCurves = nullptr;
   QLabel *mTitle = nullptr;
   QLabel *mState = nullptr;

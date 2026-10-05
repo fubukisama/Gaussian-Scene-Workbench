@@ -4,6 +4,8 @@ Run with each backend's training Python and DLL PATH. Set
 GSW_RESOLUTION_TEST_ROOT to an installed package and
 GSW_RESOLUTION_TEST_BACKEND to 3dgs or 2dgs. CUDA is required.
 """
+import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -11,9 +13,115 @@ import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
+import uuid
 
 
 class OriginalResolutionCudaTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("GSW_RESOLUTION_TEST_ROOT"),
+                         "Set GSW_RESOLUTION_TEST_ROOT to opt in to installed trainer execution")
+    def test_real_trainer_emits_loaded_input_report(self):
+        """Exercise the real process event, not a reconstruction-quality benchmark."""
+        import numpy as np
+        import torch
+        from PIL import Image
+
+        self.assertTrue(torch.cuda.is_available(), "CUDA is required for this opt-in test")
+        repository = Path(os.environ["GSW_RESOLUTION_TEST_ROOT"]).resolve()
+        backend = os.environ.get("GSW_RESOLUTION_TEST_BACKEND", "3dgs")
+        self.assertIn(backend, ("3dgs", "2dgs"))
+        source = (Path(os.environ["TWO_DGS_DIR"]).resolve() if backend == "2dgs"
+                  else repository / "gaussian-splatting")
+        entry = (repository / "native/worker/two_dgs_train.py" if backend == "2dgs"
+                 else source / "train.py")
+        self.assertTrue(entry.is_file(), str(entry))
+        self.assertTrue((repository / "native/worker/training_summary.py").is_file())
+        # The caller sets TEMP/TMP to the data-drive validation directory. Every
+        # input, output, control request and process below belongs to this test.
+        with tempfile.TemporaryDirectory(prefix="native-cuda-input-event-") as temporary:
+            root = Path(temporary)
+            dataset = root / "dataset"
+            (dataset / "images").mkdir(parents=True)
+            width, height, count = 32, 24, 4
+            frames = []
+            for index in range(count):
+                angle = index * math.pi / 2
+                position = np.array([3 * math.sin(angle), -3 * math.cos(angle), 1.0])
+                backward = position / np.linalg.norm(position)
+                right = np.cross([0, 0, 1], backward)
+                right /= np.linalg.norm(right)
+                up = np.cross(backward, right)
+                matrix = np.eye(4)
+                matrix[:3, :3] = np.stack([right, up, backward], axis=1)
+                matrix[:3, 3] = position
+                frames.append({"file_path": "images/view-{}".format(index),
+                               "transform_matrix": matrix.tolist()})
+                photo = np.zeros((height, width, 4), dtype=np.uint8)
+                photo[:, :, 3] = 255
+                photo[6:18, 8:24, :3] = [180, 110 + index * 10, 60]
+                Image.fromarray(photo).save(str(dataset / "images/view-{}.png".format(index)))
+            for split in ("train", "test"):
+                (dataset / ("transforms_" + split + ".json")).write_text(json.dumps({
+                    "camera_angle_x": 0.7, "frames": frames if split == "train" else []}),
+                    encoding="utf-8")
+            point_rng = np.random.RandomState(71)
+            points = []
+            for x in range(4):
+                for y in range(4):
+                    for z in range(2):
+                        jitter = point_rng.uniform(-.035, .035, 3)
+                        points.append("{} {} {} 0 0 0 180 120 60".format(
+                            x * .2 - .3 + jitter[0], y * .2 - .3 + jitter[1], z * .2 + jitter[2]))
+            (dataset / "points3d.ply").write_text(
+                "ply\nformat ascii 1.0\nelement vertex 32\nproperty float x\nproperty float y\nproperty float z\n"
+                "property float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\n"
+                "property uchar blue\nend_header\n" + "\n".join(points) + "\n", encoding="ascii")
+
+            configured = {
+                "version": 1, "phase": "configured", "backend": backend, "quality": "quick",
+                "iterations": 2, "resolution": 1, "optimizer": "adam" if backend == "2dgs" else "default",
+                "densifyUntil": 0, "densificationInterval": 80, "densifyGradient": 0.00012,
+            }
+            if backend == "2dgs":
+                configured["depthRatio"] = 0.0
+            else:
+                configured.update(antialiasing=False, exposureCompensation=False)
+            output = root / "output"
+            env = os.environ.copy()
+            env["GSW_NATIVE_TRAINING_CONTROL"] = json.dumps({
+                "output": str(output), "request": str(root / "pause-request.json"),
+                "session": uuid.uuid4().hex, "backend": backend, "resume": False,
+                "trainingSummary": configured})
+            env["GSW_TWO_DGS_SOURCE"] = str(source)
+            env["PYTHONUTF8"] = "1"
+            # Match every parameter in the configured report to the actual CLI;
+            # densification is disabled rather than disguising a huge threshold.
+            command = [sys.executable, "-B", str(entry), "-s", str(dataset), "-m", str(output),
+                       "--iterations", "2", "-r", "1", "--data_device", "cpu",
+                       "--test_iterations", "2", "--save_iterations", "2", "--checkpoint_iterations", "2",
+                       "--densify_until_iter", "0", "--densification_interval", "80",
+                       "--densify_grad_threshold", "0.00012"]
+            command += (["--depth_ratio", "0"] if backend == "2dgs"
+                        else ["--disable_viewer", "--optimizer_type", "default"])
+            result = subprocess.run(command, cwd=str(source), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    encoding="utf-8", errors="replace", timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout[-12000:])
+            prefix = "[gsw-training-input] "
+            events = [line[len(prefix):] for line in result.stdout.splitlines() if line.startswith(prefix)]
+            self.assertEqual(len(events), 1, result.stdout[-12000:])
+            expected = dict(configured, phase="loaded", trainImageCount=count,
+                            trainDimensionKinds=1, trainDimensions=[[width, height, count]],
+                            trainPixels=width * height * count)
+            self.assertEqual(json.loads(events[0]), expected)
+            cameras = json.loads((output / "cameras.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(cameras), count)
+            self.assertEqual([(camera["width"], camera["height"]) for camera in cameras],
+                             [(width, height)] * count)
+            self.assertTrue((output / "point_cloud/iteration_2/point_cloud.ply").is_file())
+            print("{} actual installed trainer: 2 iterations; one loaded input event; "
+                  "{} cameras at {}x{}, {} pixels; parameter report matches CLI".format(
+                      backend, count, width, height, expected["trainPixels"]), flush=True)
+
     def test_colmap_pinhole_preparation_keeps_original_dimensions(self):
         from PIL import Image
 

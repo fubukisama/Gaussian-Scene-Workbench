@@ -19,6 +19,8 @@ CMake runs validation, generates TS files in the build directory, compiles them 
 
 QA example: `"Gaussian Scene Workbench.exe" --smoke-test-language --language ja_JP`. The language override does not modify the user's preference. Language smoke tests isolate their settings and cycle all three languages twice in one window. They verify live actions/dialogs, Qt buttons, persistence, camera/transforms/selection, telemetry samples and unchanged backend/preset/user-name data. Build-tree tests also keep a real test-owned worker process running during the switches. Set `GSW_LANGUAGE_SCREENSHOT_DIR` to a non-system-drive directory for application-only QA images.
 
+The shared 3DGS / 2DGS training monitor reflows its seven metrics by available width and font size. Narrow or short panels scroll vertically instead of shrinking the chart below its readable height; the default bottom dock remains compact. Long task titles use plain text and middle elision, with their complete original text in the tooltip. The effective-input tooltip also retains the full report. Resizing, scrolling and font/language changes only update presentation, not training samples, progress, backend settings or worker state. Language smoke tests cover both backends at 320 / 520 / 900 px with 90% / 150% fonts and return to a wide layout. Other generation jobs retain their own status displays; no Gaussian training metrics are fabricated for reconstruction or meshing.
+
 ## Terminology
 
 Scene and training-output names accept arbitrary Unicode text, spaces and symbols (including characters forbidden in Windows filenames). Only blank names are rejected. `ManagedName.h` maps display names to backend-safe ASCII storage identifiers; matching Python validation must stay in sync. Legacy safe ASCII names keep their paths, except the reserved `gsw-name-` namespace. Names requiring encoding use that prefix plus the full SHA-256 of the exact UTF-8 name. Do not trim, case-fold, translate or sanitize the display name. `.gsw-name.json` retains the original name alongside the dataset and travels with project migration/backup; import publishes it in the same transaction as the data. Existing job configurations without display metadata remain supported. Actual export filenames still obey operating-system filesystem rules.
@@ -66,6 +68,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 最高精度（原始分辨率） | Maximum Fidelity (Original Resolution) | 最高精細（元の解像度） |
 | 原始分辨率 / 降采样 | Original Resolution / Downsampling | 元の解像度 / ダウンサンプリング |
 | 图像尺寸摘要 / 生效参数 | Image Dimensions / Effective Settings | 画像寸法の概要 / 有効な設定 |
+| 训练监视内容 | Training Monitor Content | 学習モニターの内容 |
 | 预计尺寸 / 实际训练图像 | Estimated Dimensions / Loaded Training Images | 予想寸法 / 読み込み済み学習画像 |
 | 稀疏 Adam / 曝光补偿 | Sparse Adam / Exposure Compensation | スパース Adam / 露出補正 |
 | 高斯点 / 增密 | Gaussian Splat / Densification | ガウシアンスプラット / 高密度化 |

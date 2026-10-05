@@ -39,10 +39,13 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTextDocument>
 #include <QToolBar>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -947,6 +950,153 @@ bool runLanguageSmokeTest(MainWindow &window) {
   check(!AppLanguage::apply(QStringLiteral("invalid")) && AppLanguage::current() == locale &&
         AppLanguage::saved() == locale, "invalid locale leaves current UI unchanged");
   const QString screenshotDirectory = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
+  // Resize a separate, owned monitor while exercising the production scale
+  // actions on the isolated smoke-test window. Never re-ingest samples while
+  // changing presentation. All three language CTests run both trainers.
+  const auto settleLayout = [] {
+    for (int pass = 0; pass < 4; ++pass) QApplication::processEvents();
+  };
+  auto *displaySettings = window.findChild<QMenu *>(QStringLiteral("displaySettingsMenu"));
+  auto *automaticScale = window.findChild<QAction *>(QStringLiteral("autoUiScaleAction"));
+  const auto scaleAction = [displaySettings](const int percent) -> QAction * {
+    if (!displaySettings) return nullptr;
+    for (auto *menu : displaySettings->findChildren<QMenu *>()) {
+      for (auto *action : menu->actions()) {
+        if (action->isCheckable() && action->data().toInt() == percent)
+          return action;
+      }
+    }
+    return nullptr;
+  };
+  const int retainedUiScale = qApp->property("gswUiScalePercent").toInt();
+  const bool retainedAutomaticScale = automaticScale && automaticScale->isChecked();
+  check(displaySettings && automaticScale && scaleAction(90) && scaleAction(150),
+        "production application-scale actions are available");
+  for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+    TrainingMonitorWidget responsive;
+    const QString longName = name + QStringLiteral("\n<b>model</b>\t") + QChar(0x2028) + QString(240, QLatin1Char('W'));
+    const QString fullTitle = backend.toUpper() + QStringLiteral(" · ") + longName;
+    responsive.beginTraining(longName, backend, 30000);
+    WorkerStatus responsiveStatus = status;
+    responsiveStatus.trainingSummary["backend"] = backend;
+    if (backend == QStringLiteral("2dgs")) {
+      responsiveStatus.trainingSummary["optimizer"] = QStringLiteral("adam");
+      responsiveStatus.trainingSummary["depthRatio"] = 0.0;
+    }
+    responsive.updateStatus(responsiveStatus);
+    responsiveStatus.iteration = 15010;
+    responsiveStatus.loss = 0.12;
+    responsiveStatus.psnr = 27.6;
+    responsive.updateStatus(responsiveStatus);
+    const auto retainedSamples = responsive.telemetry().samples().size();
+    const auto *effective = responsive.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"));
+    const QString retainedReport = effective->text();
+    auto *title = responsive.findChild<QLabel *>(QStringLiteral("trainingTaskTitle"));
+    auto *scroll = responsive.findChild<QScrollArea *>(QStringLiteral("trainingMonitorScroll"));
+    auto *curves = responsive.findChild<QWidget *>(QStringLiteral("trainingCurves"));
+    auto *responsiveProgress = responsive.findChild<QProgressBar *>();
+    check(title && scroll && curves && responsiveProgress, "responsive monitor test objects");
+    if (!title || !scroll || !curves || !responsiveProgress) continue;
+    responsive.show();
+    for (const int fontPercent : {90, 150, 90}) {
+      // Use the production application-font/QSS path, not a local font
+      // override that can be overridden by the stylesheet's font resolution.
+      auto *action = scaleAction(fontPercent);
+      if (!action) continue;
+      action->trigger();
+      responsive.resize(1400, 260);
+      settleLayout();
+      check(qAbs(curves->font().pointSizeF() - fontPercent / 10.0) < .01,
+            "monitor matrix uses the actual application font scale");
+      const int wideColumns = responsive.property("metricColumns").toInt();
+      check(wideColumns >= 4, "wide monitor retains a compact metric row");
+      for (const int width : {320, 520, 900}) {
+        responsive.resize(width, 180);
+        settleLayout();
+        check(responsive.size() == QSize(width, 180), "monitor does not force the dock to grow");
+        check(responsive.property("metricColumns").toInt() <= wideColumns &&
+            (width != 320 || responsive.property("metricColumns").toInt() < wideColumns),
+            "metric columns adapt to available width and font scale");
+        check(scroll->horizontalScrollBar()->maximum() == 0,
+            "normal narrow monitors do not require horizontal scrolling");
+        check(curves->height() >= curves->fontMetrics().height() * 6 + 32,
+            "curves preserve a readable font-scaled height");
+        check(title->textFormat() == Qt::PlainText && title->toolTip() == Qt::convertFromPlainText(fullTitle) &&
+            !title->text().contains(QLatin1Char('\n')) && !title->text().contains(QLatin1Char('\t')) &&
+            title->fontMetrics().horizontalAdvance(title->text()) <= title->width(),
+            "long user titles are plain text and elided with complete tooltips");
+        for (int metric = 0; metric < 7; ++metric) {
+          auto *value = responsive.findChild<QLabel *>(QStringLiteral("trainingMetricValue%1").arg(metric));
+          check(value && !value->isHidden(), "all seven metrics survive reflow");
+          if (!value) continue;
+          check(qAbs(value->font().pointSizeF() - fontPercent / 10.0) < .01,
+              "metric values follow the actual live font scale");
+          check(value->width() >= value->fontMetrics().horizontalAdvance(value->text()),
+              "metric values are not clipped");
+          scroll->ensureWidgetVisible(value, 0, 0);
+          settleLayout();
+          const QRect visible(value->mapTo(scroll->viewport(), QPoint()), value->size());
+          check(scroll->viewport()->rect().contains(visible.center()),
+              "each metric is reachable through scrolling");
+        }
+        check(scroll->verticalScrollBar()->maximum() > 0,
+            "short monitors scroll rather than crush report and curves");
+        scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+        settleLayout();
+        const int bottom = curves->mapTo(scroll->viewport(), QPoint(0, curves->height())).y();
+        check(bottom <= scroll->viewport()->height(), "curve bottom remains reachable");
+        const int scrollPosition = scroll->verticalScrollBar()->value();
+        WorkerStatus partial; partial.stage = QStringLiteral("train");
+        responsive.updateStatus(partial);
+        settleLayout();
+        check(scroll->verticalScrollBar()->value() == scrollPosition,
+            "ordinary telemetry refresh does not reset the scroll position");
+        check(responsive.telemetry().samples().size() == retainedSamples &&
+            responsive.telemetry().iteration() == responsiveStatus.iteration &&
+            responsiveProgress->value() == 50 && effective->text() == retainedReport,
+            "resize and font changes preserve telemetry and loaded parameters");
+      }
+      responsive.resize(1400, 260);
+      settleLayout();
+      check(responsive.property("metricColumns").toInt() == wideColumns &&
+          scroll->horizontalScrollBar()->maximum() == 0,
+          "wide layout recovers after narrowing and font-scale round trips");
+    }
+    if (!screenshotDirectory.isEmpty()) {
+      QDir().mkpath(screenshotDirectory);
+      responsive.resize(360, 260);
+      scroll->verticalScrollBar()->setValue(0);
+      settleLayout();
+      check(responsive.grab().save(QDir(screenshotDirectory).filePath(
+          locale + QStringLiteral("-monitor-narrow-") + backend + QStringLiteral(".png"))),
+          "narrow monitor screenshot");
+      scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+      settleLayout();
+      check(responsive.grab().save(QDir(screenshotDirectory).filePath(
+          locale + QStringLiteral("-monitor-curves-") + backend + QStringLiteral(".png"))),
+          "scrolled monitor screenshot");
+      responsive.resize(1400, 380);
+      settleLayout();
+      check(responsive.grab().save(QDir(screenshotDirectory).filePath(
+          locale + QStringLiteral("-monitor-wide-") + backend + QStringLiteral(".png"))),
+          "wide monitor screenshot");
+    }
+    responsive.hide();
+  }
+  if (retainedAutomaticScale && automaticScale) {
+    automaticScale->trigger();
+  } else {
+    auto *action = scaleAction(retainedUiScale);
+    check(action != nullptr, "original manual scale can be restored");
+    if (action) action->trigger();
+  }
+  settleLayout();
+  check(monitor->telemetry().samples().size() == sampleCount &&
+        monitor->telemetry().iteration() == status.iteration &&
+        viewport->scenePath() == ply.fileName() && viewport->activeSceneId() == activeId,
+        "application-scale changes preserve the live monitor and loaded model");
+  if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
+                        "application-scale changes do not interrupt the worker");
   if (!screenshotDirectory.isEmpty()) {
     // Expand only the isolated QA layout to inspect translated monitor labels.
     if (tabs) {
