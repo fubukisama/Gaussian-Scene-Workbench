@@ -71,6 +71,7 @@ $StaticFiles = @(
   @{ Source = "scripts\requirements-native-sugar.txt"; Destination = "scripts\requirements-native-sugar.txt" },
   @{ Source = "scripts\requirements-native-gs2mesh.txt"; Destination = "scripts\requirements-native-gs2mesh.txt" },
   @{ Source = "scripts\patches\pytorch3d-0.7.4-windows-cub.patch"; Destination = "scripts\patches\pytorch3d-0.7.4-windows-cub.patch" },
+  @{ Source = "scripts\patches\sugar-windows-stage-paths.patch"; Destination = "scripts\patches\sugar-windows-stage-paths.patch" },
   @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" },
   @{ Source = "scripts\sign_windows_artifacts.ps1"; Destination = "scripts\sign_windows_artifacts.ps1" }
 )
@@ -121,6 +122,7 @@ $Manifest = [ordered]@{
     "scripts/requirements-native-sugar.txt",
     "scripts/requirements-native-gs2mesh.txt",
     "scripts/patches/pytorch3d-0.7.4-windows-cub.patch",
+    "scripts/patches/sugar-windows-stage-paths.patch",
     "scripts/install_colmap.ps1",
     "scripts/sign_windows_artifacts.ps1"
   )

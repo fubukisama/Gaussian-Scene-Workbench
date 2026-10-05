@@ -111,6 +111,15 @@ building. This scopes the macro suppression around the CUB include; it does
 not modify CUDA, Windows headers or numerical kernels. NVIDIA nvdiffrast is
 optional; upstream SuGaR provides the PyTorch3D mesh-rasterization fallback.
 
+The pinned SuGaR source also mixes POSIX-style stage names with Windows
+`os.path.join` results. Real coarse-mesh and refined-PLY export reproduced
+malformed output paths and `IndexError` respectively. Apply
+`scripts/patches/sugar-windows-stage-paths.patch` with
+`git apply --unidiff-zero` to that exact SuGaR commit. The patch normalizes
+returned stage paths with `Path.as_posix()` and splits the refined PLY path
+with `Path.parts`; training parameters, model state and numerical kernels are
+unchanged. Both compatibility patches are included in the native package.
+
 GS2Mesh requires four separately built source packages from its pinned tree:
 its Gaussian rasterizer, simple-knn, `segment-anything-2`, and GroundingDINO.
 Build SAM 2 with `SAM2_BUILD_ALLOW_ERRORS=0` so a failed CUDA extension is not
@@ -159,7 +168,7 @@ support and reliable acceptance-script behavior, not a new UI version.
 | Bounded TSDF | Real CUDA surfel rendering and TSDF; trained fixture: 6,690 vertices / 12,888 faces |
 | Unbounded TSDF | Official 512 grid; 1,324,447 vertices / 2,666,688 faces |
 | OpenMVS photo texturing | InterfaceCOLMAP and TextureMesh 2.4.0; 2,048 atlas; OBJ/MTL/PNG/ZIP and installed native material render passed |
-| SuGaR | Own Gaussian/KNN and PyTorch3D wheels installed; GPU KNN and mesh-rasterizer backward passed; native surface-constrained training running; final mesh/refinement acceptance in progress |
+| SuGaR | Own Gaussian/KNN and PyTorch3D wheels installed; GPU KNN and mesh-rasterizer backward passed; real coarse optimization reached 15,000 and refinement reached 2,000; staged export: 508,962 Gaussians and an 824 x 824 textured OBJ/MTL/PNG; patched uninterrupted native rerun in progress |
 | GS2Mesh | Own four CUDA wheels installed; connected components and deformable-attention forward/backward passed; both DLNR checkpoints, SAM 2 Large and GroundingDINO ran real GPU inference; native mesh job completed with 25,454 vertices / 45,093 triangles |
 
 2DGS 1,200-iteration resume comparison initially exceeded the existing 0.05 dB
@@ -179,6 +188,18 @@ and 3DGS warm starts do not provide their optimizer-state resume. Standalone
 OpenMVS dense reconstruction is likewise not a native generation entry;
 OpenMVS's verified native role is photo-texturing an existing mesh.
 
+The first SuGaR native job and the first staged continuation retained their
+failure records and saved phase checkpoints. Export validation reused these
+already-computed phase outputs after the path fixes; it is not native
+optimizer-state resume. The real PyTorch3D fallback produced a non-constant
+824 x 824 texture with OBJ/MTL/PNG assets and finite refined Gaussian fields.
+Upstream coarse training starts at iteration 6,999 and stops at 15,000, so this
+is 8,001 actual optimizer updates, not 15,000 updates. The short fixture uses
+an initial 1,000-step 3DGS model, eight reduced-size views and 2,000 refinement
+updates; it verifies execution and artifact handling, not production mesh or
+appearance quality. A well-converged initial 3DGS model and dataset-specific
+quality checks remain necessary for research results.
+
 The photo/video E2E script now runs `--smoke-test-gaussian-performance` with the
 actual output PLY and waits for its own Windows GUI process exit code.
 `--smoke-test` asserts an empty workspace and cannot verify model loading;
@@ -194,6 +215,14 @@ native renderer. Its combined reference-axis/picking/gizmo fixture did not
 pass (axis sampling region, center-point picking and one orthographic gizmo
 ratio); this is not a mesh-generation or CUDA-environment success criterion,
 and remains a separate interaction/fixture acceptance gate.
+
+The staged SuGaR PLY was loaded in the installed renderer with all 508,962
+Gaussians and source SH degree 3 resident on the GPU. Projection, complete
+source order, navigation without attribute reuploads, selection/deletion/undo
+and cleanup checks passed. Its strict resident-versus-compatibility image
+comparison did not pass: maximum channel delta 2 across 139 changed pixels,
+against the unchanged <= 1 threshold. Preserve this precision gate separately;
+do not label the combined benchmark a pass or weaken its assertion.
 
 The first strict-photo rerun hit the backend's 20-second runtime probe while
 the two research-prefix installers were writing bytecode caches. A direct cold

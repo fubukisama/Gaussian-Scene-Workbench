@@ -1,0 +1,28 @@
+diff --git a/train.py b/train.py
+--- a/train.py
++++ b/train.py
+@@ -1,0 +2 @@ import argparse
++from pathlib import Path
+@@ -129 +130 @@ if __name__ == "__main__":
+-        coarse_sugar_path = coarse_training_with_sdf_regularization(coarse_args)
++        coarse_sugar_path = Path(coarse_training_with_sdf_regularization(coarse_args)).as_posix()
+@@ -131 +132 @@ if __name__ == "__main__":
+-        coarse_sugar_path = coarse_training_with_density_regularization(coarse_args)
++        coarse_sugar_path = Path(coarse_training_with_density_regularization(coarse_args)).as_posix()
+@@ -133 +134 @@ if __name__ == "__main__":
+-        coarse_sugar_path = coarse_training_with_density_regularization_and_dn_consistency(coarse_args)
++        coarse_sugar_path = Path(coarse_training_with_density_regularization_and_dn_consistency(coarse_args)).as_posix()
+@@ -157 +158 @@ if __name__ == "__main__":
+-    coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
++    coarse_mesh_path = Path(extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]).as_posix()
+@@ -178 +179 @@ if __name__ == "__main__":
+-    refined_sugar_path = refined_training(refined_args)
++    refined_sugar_path = Path(refined_training(refined_args)).as_posix()
+diff --git a/sugar_trainers/refine.py b/sugar_trainers/refine.py
+--- a/sugar_trainers/refine.py
++++ b/sugar_trainers/refine.py
+@@ -1,0 +2 @@ import os
++from pathlib import Path
+@@ -881 +882 @@ def refined_training(args):
+-        tmp_list = model_path.split(os.sep)
++        tmp_list = list(Path(model_path).parts)

@@ -689,6 +689,7 @@ if ($Package) {
     "scripts\requirements-native-sugar.txt",
     "scripts\requirements-native-gs2mesh.txt",
     "scripts\patches\pytorch3d-0.7.4-windows-cub.patch",
+    "scripts\patches\sugar-windows-stage-paths.patch",
     "scripts\sign_windows_artifacts.ps1",
     "gaussian-splatting\train.py",
     "training_kit\apply_local_fixes.bat",
