@@ -99,6 +99,7 @@ private:
   void rebalanceDockSizes();
   void applyUiScale(int scalePercent, bool persist);
   void refreshThemePresentation();
+  void refreshAutomaticTheme();
   void setAutomaticUiScale(bool automatic, bool persist);
   void refreshAutomaticUiScale();
   void scheduleAutomaticUiScale();
@@ -190,6 +191,7 @@ private:
   QToolBar *mSelectionToolbar = nullptr;
   QToolBar *mEditToolbar = nullptr;
   QTimer *mUiAdaptTimer = nullptr;
+  QTimer *mAutomaticThemeTimer = nullptr;
   QTimer *mRecoveryCheckpointTimer = nullptr;
 
   QLabel *mProjectNameValue = nullptr;

@@ -637,6 +637,17 @@ MainWindow::MainWindow(QWidget *parent)
   connect(mUiAdaptTimer, &QTimer::timeout, this,
           &MainWindow::refreshAutomaticUiScale);
 
+  mAutomaticThemeTimer = new QTimer(this);
+  mAutomaticThemeTimer->setObjectName(QStringLiteral("automaticThemeTimer"));
+  mAutomaticThemeTimer->setSingleShot(true);
+  mAutomaticThemeTimer->setTimerType(Qt::PreciseTimer);
+  connect(mAutomaticThemeTimer, &QTimer::timeout, this,
+          &MainWindow::refreshAutomaticTheme);
+  connect(qApp, &QGuiApplication::applicationStateChanged, this,
+          [this](Qt::ApplicationState state) {
+            if (state == Qt::ApplicationActive) refreshAutomaticTheme();
+          });
+
   QString recoveryBaseError;
   const QString recoveryBase =
       defaultUntitledWorkspaceBase(&recoveryBaseError);
@@ -697,6 +708,7 @@ MainWindow::MainWindow(QWidget *parent)
   });
   mRecoveryCheckpointTimer->start();
   AppLanguage::onChanged(this, [this]() { retranslateUi(); });
+  refreshAutomaticTheme();
 }
 
 MainWindow::~MainWindow() {
@@ -1501,26 +1513,37 @@ void MainWindow::createMenus() {
   appearanceMenu->setObjectName(QStringLiteral("appearanceMenu"));
   auto *themeGroup = new QActionGroup(appearanceMenu);
   themeGroup->setExclusive(true);
+  auto *automaticTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
+      AppLanguage::source("自动（按时间）"));
+  automaticTheme->setObjectName(QStringLiteral("automaticThemeAction"));
+  automaticTheme->setData(QStringLiteral("auto"));
+  automaticTheme->setCheckable(true);
+  automaticTheme->setChecked(AppTheme::currentThemeMode() == UiThemeMode::Automatic);
+  AppLanguage::bind(automaticTheme, "toolTip", AppLanguage::source("按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择"));
   auto *lightTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
       AppLanguage::source("浅色（白天）"));
   lightTheme->setObjectName(QStringLiteral("lightThemeAction"));
   lightTheme->setData(QStringLiteral("light"));
   lightTheme->setCheckable(true);
-  lightTheme->setChecked(AppTheme::currentTheme() == UiTheme::Light);
+  lightTheme->setChecked(AppTheme::currentThemeMode() == UiThemeMode::Light);
   AppLanguage::bind(lightTheme, "toolTip", AppLanguage::source("使用白色工作区、灰色工具栏、深色文字与统一浅灰面板及弹窗边界，适合白天观察；立即生效并记住选择"));
   auto *darkTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
       AppLanguage::source("深色（黑夜）"));
   darkTheme->setObjectName(QStringLiteral("darkThemeAction"));
   darkTheme->setData(QStringLiteral("dark"));
   darkTheme->setCheckable(true);
-  darkTheme->setChecked(AppTheme::currentTheme() == UiTheme::Dark);
+  darkTheme->setChecked(AppTheme::currentThemeMode() == UiThemeMode::Dark);
   AppLanguage::bind(darkTheme, "toolTip", AppLanguage::source("使用深色界面与视口背景，适合夜间观察；立即生效并记住选择"));
+  themeGroup->addAction(automaticTheme);
   themeGroup->addAction(lightTheme);
   themeGroup->addAction(darkTheme);
   connect(themeGroup, &QActionGroup::triggered, this, [this](QAction *action) {
-    AppTheme::applyTheme(*qApp, action->data().toString() == QStringLiteral("light")
-        ? UiTheme::Light : UiTheme::Dark, true);
+    const QString mode = action->data().toString();
+    AppTheme::applyThemeMode(*qApp, mode == QStringLiteral("auto")
+        ? UiThemeMode::Automatic : (mode == QStringLiteral("light")
+        ? UiThemeMode::Light : UiThemeMode::Dark), true);
     refreshThemePresentation();
+    refreshAutomaticTheme();
   });
   viewMenu->addSeparator();
   QMenu *renderMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "title");
@@ -2904,6 +2927,15 @@ void MainWindow::updateDockMetrics() {
   if (mTaskDock != nullptr) {
     mTaskDock->setMinimumHeight(0);
   }
+}
+
+void MainWindow::refreshAutomaticTheme() {
+  const QTime localTime = QTime::currentTime();
+  if (AppTheme::refreshAutomaticTheme(*qApp, localTime)) refreshThemePresentation();
+  if (AppTheme::currentThemeMode() == UiThemeMode::Automatic)
+    mAutomaticThemeTimer->start(AppTheme::automaticThemeCheckInterval(localTime));
+  else
+    mAutomaticThemeTimer->stop();
 }
 
 void MainWindow::refreshThemePresentation() {

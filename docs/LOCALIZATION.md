@@ -23,19 +23,21 @@ The shared 3DGS / 2DGS training monitor reflows its seven metrics by available w
 
 ## Day and night appearance
 
-**View → Appearance → Light (Day) / Dark (Night)** changes the interface immediately and remembers the choice (`ui/theme`). The existing default remains dark. Light mode covers menus, dialogs and file browsers, dock panels, logs, training charts, status text, viewport background, grid and navigation/transform overlays. Language and UI-scale changes retain the selected appearance. It is a manual preference, not a time-based or Windows-theme schedule.
+**View → Appearance → Automatic (Time-based) / Light (Day) / Dark (Night)** changes the interface immediately and remembers the selected mode (`ui/theme`: `auto`, `light` or `dark`). Automatic is the initial default when no appearance preference has been saved; an existing manual light/dark preference is retained. Automatic follows the computer's local time: 00:00–17:59:59 is light, and 18:00–23:59:59 is dark. At midnight it returns to light, following the requested “light before 18:00” rule rather than adding an unrequested morning boundary. Light or Dark remains a manual override and does not follow the clock or Windows theme.
+
+The schedule updates during use. A periodic check detects the 18:00/midnight boundary, clock or time-zone changes, and resume from sleep within 30 seconds; application activation also refreshes it immediately. The remembered mode remains `auto` while its effective light/dark palette changes. Light mode covers menus, dialogs and file browsers, dock panels, logs, training charts, status text, viewport background, grid and navigation/transform overlays. Language and UI-scale changes retain the selected mode and do not interrupt the schedule.
 
 Light mode uses the neutral hierarchy illustrated in the user's Metashape reference: white workspaces, gray toolbars/panel headers, near-black text and distinct blue focus/selection states. Muted and disabled text remains legible rather than fading into the background. Field/button boundaries are darker, while minor viewport grid lines remain quieter than major lines and colored axes. This is an original palette adaptation, not a copy of proprietary code or assets; dark mode and UI density are unchanged. Validation covers rendered label/header/control contrast as well as palette contrast, framebuffer opacity and actual viewport clear color.
 
 Light-mode dock separators match the light gray of the panel headers, with subtle one-pixel edges and neutral-gray hover feedback. Their modestly wider 8-pixel base extent distinguishes the left/right panels from the white viewport through spacing rather than dark outlines. They are Qt's actual resize handles, not overlays; their extent follows the UI scale, and drag-resize, docking/floating, immediate language switching and dark-mode styling are preserved. Tests inspect the actual rendered colors and widths and resize both side panels.
 
-The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all mesh-generation workflows. It does not reload models, rewrite RGB/SH/materials, alter camera/selection/transforms, clear training curves, interrupt workers or change exported data. Transparent splats naturally composite against the chosen backdrop; this is not relighting or a new reconstruction. `--theme light|dark` is a non-persistent launch/QA override. The language smoke matrix toggles both themes while a test-owned worker runs; light-mode Gaussian, navigation and mesh-publication regressions complement existing dark tests.
+The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all mesh-generation workflows. Manual and scheduled switches do not reload models, rewrite RGB/SH/materials, alter camera/selection/transforms, clear training curves, interrupt workers or change exported data. Transparent splats naturally composite against the chosen backdrop; this is not relighting or a new reconstruction. `--theme auto|light|dark` is a non-persistent launch/QA override. A manual CLI override disables scheduled switching for that launch without changing the saved mode. The language smoke matrix toggles both themes while a test-owned worker runs; light-mode Gaussian, navigation and mesh-publication regressions complement existing dark tests.
 
-中文：通过“视图 → 外观 → 浅色（白天）／深色（黑夜）”即时切换并记住选择；界面与观察背景一起切换，不修改模型或训练数据。
+中文：通过“视图 → 外观 → 自动（按时间）／浅色（白天）／深色（黑夜）”即时切换并记住选择。未保存过外观选择时默认自动，已有的手动浅色或深色设置保留。自动模式按本机时间在 18:00 前使用浅色、18:00 起使用深色，午夜回到浅色；运行中持续检查，唤醒或修改时钟后最迟 30 秒更新，重新激活程序时立即更新。手动模式不随时间改变。界面与观察背景一起切换，不修改模型或训练数据。
 浅色采用白色工作区、灰色工具栏和深色文字，增强控件边界与蓝色选中状态；网格保持主次层级，深色模式和界面尺寸不变。
 左右停靠面板与视口之间使用与标题栏统一的浅灰分隔带和柔和细线，基础宽度适度加宽至 8 像素并随界面缩放；悬停保持灰色，仍可拖动调整宽度。
 
-日本語：「ビュー → 外観 → ライト（昼間）／ダーク（夜間）」で即時に切り替え、選択を保存します。UI と観察用背景のみを変更し、モデルや学習データは変更しません。
+日本語：「ビュー → 外観 → 自動（時刻に応じて）／ライト（昼間）／ダーク（夜間）」で即時に切り替え、選択を保存します。外観設定が未保存の場合は自動が既定で、既存の手動設定は保持します。自動は本機の時刻に従い、18:00 より前はライト、18:00 以降はダーク、午前 0:00 にはライトへ戻ります。実行中も確認し、スリープ復帰や時刻変更後は 30 秒以内、アプリの再アクティブ化時は即時に更新します。手動モードは時刻に連動しません。UI と観察用背景のみを変更し、モデルや学習データは変更しません。
 ライトテーマは白い作業領域、グレーのツールバー、濃い文字で構成し、コントロールの境界と青い選択状態を明確にします。グリッドの主線と補助線を区別し、ダークテーマと UI の寸法は変更しません。
 左右のドックパネルとビューポートの間に、タイトルバーと統一したライトグレーの区切りと柔らかな細線を表示します。基準幅を控えめに 8 ピクセルへ広げ、UI スケールに追従します。ホバー時もグレーを保ち、ドラッグによる幅の調整は引き続き利用できます。
 
@@ -47,7 +49,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | --- | --- | --- |
 | 工程 / 数据集 | Project / Dataset | プロジェクト / データセット |
 | 桌面 | Desktop | デスクトップ |
-| 外观 / 浅色（白天） / 深色（黑夜） | Appearance / Light (Day) / Dark (Night) | 外観 / ライト（昼間） / ダーク（夜間） |
+| 外观 / 自动（按时间） / 浅色（白天） / 深色（黑夜） | Appearance / Automatic (Time-based) / Light (Day) / Dark (Night) | 外観 / 自動（時刻に応じて） / ライト（昼間） / ダーク（夜間） |
 | 全屏 / 退出全屏 | Full Screen / Exit Full Screen | 全画面表示 / 全画面表示を終了 |
 | 最大化窗口 / 还原窗口 | Maximize Window / Restore Window | ウィンドウを最大化 / ウィンドウを元に戻す |
 | 停靠面板 / 浮动面板 | Dock Panel / Float Panel | パネルをドッキング / パネルをフローティング |

@@ -535,12 +535,21 @@ bool runLanguageSmokeTest(MainWindow &window) {
   check(languageMenu && languageMenu->actions().size() == 3, "language menu");
   if (!languageMenu) return false;
   auto *appearanceMenu = window.findChild<QMenu *>(QStringLiteral("appearanceMenu"));
+  auto *automaticTheme = window.findChild<QAction *>(QStringLiteral("automaticThemeAction"));
   auto *lightTheme = window.findChild<QAction *>(QStringLiteral("lightThemeAction"));
   auto *darkTheme = window.findChild<QAction *>(QStringLiteral("darkThemeAction"));
-  check(appearanceMenu && lightTheme && darkTheme && appearanceMenu->actions().size() == 2,
-        "day/night appearance menu is available");
-  if (!appearanceMenu || !lightTheme || !darkTheme) return false;
-  const UiTheme originalTheme = AppTheme::currentTheme();
+  auto *automaticThemeTimer = window.findChild<QTimer *>(QStringLiteral("automaticThemeTimer"));
+  check(appearanceMenu && automaticTheme && lightTheme && darkTheme &&
+        appearanceMenu->actions().size() == 3 && automaticThemeTimer,
+        "automatic/day/night appearance menu and schedule are available");
+  if (!appearanceMenu || !automaticTheme || !lightTheme || !darkTheme || !automaticThemeTimer) return false;
+  check(automaticThemeTimer->isSingleShot() && automaticThemeTimer->timerType() == Qt::PreciseTimer,
+        "automatic appearance uses one precise single-shot timer");
+  const UiThemeMode originalThemeMode = AppTheme::currentThemeMode();
+  const auto restoreThemeMode = [&] {
+    (originalThemeMode == UiThemeMode::Automatic ? automaticTheme :
+        originalThemeMode == UiThemeMode::Light ? lightTheme : darkTheme)->trigger();
+  };
   for (int i = 0; i < 3; ++i) {
     check(languageMenu->actions()[i]->data().toString() == AppLanguage::supported()[i], "stable locale identifiers");
     check(languageMenu->actions()[i]->text() == AppLanguage::displayName(AppLanguage::supported()[i]), "autonyms");
@@ -836,6 +845,43 @@ bool runLanguageSmokeTest(MainWindow &window) {
   int presentationSceneLoads = 0;
   const auto presentationLoadConnection = QObject::connect(viewport, &NativeViewport::sceneLoadStarted,
       &window, [&](const QString &) { ++presentationSceneLoads; });
+  const auto checkThemeStatePreserved = [&] {
+    check(viewport->scenePath() == ply.fileName() && viewport->activeSceneId() == activeId &&
+          viewport->sceneObjectCount() == modelCount && viewport->selectedSceneIds() == selection &&
+          viewport->modelTranslation() == translation && viewport->modelRotation() == rotation &&
+          viewport->modelScale() == scale && viewport->viewTarget() == target &&
+          viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
+          viewport->orthographicProjection() == orthographic && treeState() == originalTree &&
+          presentationSceneLoads == 0,
+          "manual/automatic appearance preserves models, transforms, camera, selection and scene residency");
+    check(monitor->telemetry().samples().size() == sampleCount && progress->value() == 50 &&
+          surfelMonitor.telemetry().iteration() == surfelStatus.iteration &&
+          training.configuration().iterations == 12345 &&
+          meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
+          "manual/automatic appearance preserves both trainers, mesh settings and recorded telemetry");
+    if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
+                          "manual/automatic appearance does not interrupt processing");
+  };
+  const auto checkViewportTheme = [&](const bool light) {
+    const QImage frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
+    bool opaque = !frame.isNull();
+    for (int y = 0; y < frame.height() && opaque; ++y) {
+      const auto *pixels = reinterpret_cast<const QRgb *>(frame.constScanLine(y));
+      for (int x = 0; x < frame.width(); ++x)
+        if (qAlpha(pixels[x]) != 255) { opaque = false; break; }
+    }
+    check(opaque, "manual/automatic viewport stays opaque through overlay alpha blending");
+    viewport->makeCurrent();
+    GLfloat clearColor[4] = {};
+    if (viewport->context())
+      viewport->context()->functions()->glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    viewport->doneCurrent();
+    const float expectedClear[4] = {light ? 1.0F : .047F,
+        light ? 1.0F : .051F, light ? 1.0F : .055F, 1.0F};
+    for (int channel = 0; channel < 4; ++channel)
+      check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
+            "manual/automatic appearance reaches the actual OpenGL viewport background");
+  };
   lightTheme->trigger();
   for (int step = 1; step <= 6; ++step) {
     const int next = (index + step) % 3;
@@ -843,12 +889,17 @@ bool runLanguageSmokeTest(MainWindow &window) {
     languageMenu->actions()[next]->trigger();
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
-    check(AppTheme::currentTheme() == UiTheme::Light && lightTheme->isChecked() &&
-          !darkTheme->isChecked(), "live language switching preserves the selected theme");
+    check(AppTheme::currentTheme() == UiTheme::Light && AppTheme::currentThemeMode() == UiThemeMode::Light &&
+          lightTheme->isChecked() && !darkTheme->isChecked() && !automaticTheme->isChecked() &&
+          !automaticThemeTimer->isActive(), "live language switching preserves the selected manual theme");
     check(appearanceMenu->title() == QCoreApplication::translate("Workbench", "外观") &&
+          automaticTheme->text() == QCoreApplication::translate("Workbench", "自动（按时间）") &&
           lightTheme->text() == QCoreApplication::translate("Workbench", "浅色（白天）") &&
           darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
           "appearance menu switches language immediately");
+    check(automaticTheme->toolTip() == QCoreApplication::translate("Workbench",
+          "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择"),
+          "automatic appearance schedule description switches language immediately");
     check(lightTheme->toolTip() == QCoreApplication::translate("Workbench",
           "使用白色工作区、灰色工具栏、深色文字与统一浅灰面板及弹窗边界，适合白天观察；立即生效并记住选择"),
           "high-contrast light appearance description switches language immediately");
@@ -860,48 +911,82 @@ bool runLanguageSmokeTest(MainWindow &window) {
       QApplication::processEvents();
       const bool light = action == lightTheme;
       check(AppTheme::currentTheme() == (light ? UiTheme::Light : UiTheme::Dark) &&
+            AppTheme::currentThemeMode() == (light ? UiThemeMode::Light : UiThemeMode::Dark) &&
             AppTheme::loadTheme() == AppTheme::currentTheme() &&
-            action->isChecked() && QSettings().value(QStringLiteral("ui/theme")).toString() ==
+            action->isChecked() && !automaticTheme->isChecked() && !automaticThemeTimer->isActive() &&
+            QSettings().value(QStringLiteral("ui/theme")).toString() ==
                 action->data().toString(), "theme changes and persists immediately through the real menu");
       check((qApp->palette().color(QPalette::Window).lightness() > 200) == light &&
             qApp->font() == themeFont && qApp->property("gswUiScalePercent") == themeScale,
             "theme updates palette without changing language fonts or scale");
       if (step == 1) {
-        const QImage frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
-        bool opaque = !frame.isNull();
-        for (int y = 0; y < frame.height() && opaque; ++y) {
-          const auto *pixels = reinterpret_cast<const QRgb *>(frame.constScanLine(y));
-          for (int x = 0; x < frame.width(); ++x)
-            if (qAlpha(pixels[x]) != 255) { opaque = false; break; }
-        }
-        check(opaque, "day/night viewport stays opaque through overlay alpha blending");
-        viewport->makeCurrent();
-        GLfloat clearColor[4] = {};
-        if (viewport->context())
-          viewport->context()->functions()->glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
-        viewport->doneCurrent();
-        const float expectedClear[4] = {light ? 1.0F : .047F,
-            light ? 1.0F : .051F, light ? 1.0F : .055F, 1.0F};
-        for (int channel = 0; channel < 4; ++channel)
-          check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
-                "theme reaches the actual OpenGL viewport background");
+        checkViewportTheme(light);
       }
-      check(viewport->scenePath() == ply.fileName() && viewport->activeSceneId() == activeId &&
-            viewport->sceneObjectCount() == modelCount && viewport->selectedSceneIds() == selection &&
-            viewport->modelTranslation() == translation && viewport->modelRotation() == rotation &&
-            viewport->modelScale() == scale && viewport->viewTarget() == target &&
-            viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
-            viewport->orthographicProjection() == orthographic && treeState() == originalTree,
-            "day/night switching preserves models, transforms, camera and selection");
-      check(monitor->telemetry().samples().size() == sampleCount && progress->value() == 50 &&
-            monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text() == effectiveBeforeTheme &&
-            surfelMonitor.telemetry().iteration() == surfelStatus.iteration &&
-            training.configuration().iterations == 12345 &&
-            meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
-            "theme preserves both trainers, mesh settings and recorded telemetry");
-      if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
-                            "theme switching does not interrupt processing");
+      checkThemeStatePreserved();
+      check(monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text() == effectiveBeforeTheme,
+            "manual appearance preserves displayed effective training parameters");
     }
+    automaticTheme->trigger();
+    QApplication::processEvents();
+    check(AppTheme::currentThemeMode() == UiThemeMode::Automatic &&
+          AppTheme::loadThemeMode() == UiThemeMode::Automatic && automaticTheme->isChecked() &&
+          !lightTheme->isChecked() && !darkTheme->isChecked() && automaticThemeTimer->isActive() &&
+          automaticThemeTimer->interval() >= 1 && automaticThemeTimer->interval() <= 30000 &&
+          QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto"),
+          "automatic appearance persists its mode and activates the bounded schedule through the real menu");
+    languageMenu->actions()[(next + 1) % 3]->trigger();
+    QApplication::processEvents();
+    check(AppTheme::currentThemeMode() == UiThemeMode::Automatic && automaticThemeTimer->isActive() &&
+          automaticTheme->isChecked() && !lightTheme->isChecked() && !darkTheme->isChecked() &&
+          automaticTheme->text() == QCoreApplication::translate("Workbench", "自动（按时间）") &&
+          automaticTheme->toolTip() == QCoreApplication::translate("Workbench",
+              "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择") &&
+          QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto"),
+          "live language changes preserve automatic selection, timer and translated schedule text");
+    languageMenu->actions()[next]->trigger();
+    QApplication::processEvents();
+    checkThemeStatePreserved();
+    // Inject wall-clock samples through the public theme seam, without altering
+    // the computer's clock or waiting until evening. The same live state gates
+    // as the manual switches cover both trainers and every mesh mode.
+    // Keep a real 18:00/midnight tick from racing these deterministic samples;
+    // the actual timeout callback below must rearm this same timer afterwards.
+    automaticThemeTimer->stop();
+    AppTheme::applyThemeMode(*qApp, UiThemeMode::Automatic, false, QTime(17, 59, 59, 999));
+    for (const QTime &time : {QTime(18, 0), QTime(23, 59, 59, 999), QTime(0, 0), QTime(17, 59, 59, 999)}) {
+      const UiTheme expected = AppTheme::themeForTime(time);
+      const bool changes = AppTheme::currentTheme() != expected;
+      check(AppTheme::refreshAutomaticTheme(*qApp, time) == changes,
+            "automatic appearance changes only when crossing a day/night boundary");
+      QApplication::processEvents();
+      const bool light = expected == UiTheme::Light;
+      check(AppTheme::currentTheme() == expected && AppTheme::currentThemeMode() == UiThemeMode::Automatic &&
+            automaticTheme->isChecked() && !lightTheme->isChecked() && !darkTheme->isChecked() &&
+            QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto") &&
+            (qApp->palette().color(QPalette::Window).lightness() > 200) == light &&
+            qApp->font() == themeFont && qApp->property("gswUiScalePercent") == themeScale,
+            "18:00/midnight switches retain automatic policy, localized fonts, scale and menu selection");
+      checkViewportTheme(light);
+      checkThemeStatePreserved();
+      check(monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text() == effectiveBeforeTheme,
+            "scheduled appearance preserves displayed effective training parameters");
+    }
+    // Force the real schedule callback to correct an intentionally stale
+    // palette to today's clock, exercising MainWindow's presentation path.
+    const UiTheme realTheme = AppTheme::themeForTime(QTime::currentTime());
+    AppTheme::refreshAutomaticTheme(*qApp, realTheme == UiTheme::Light ? QTime(18, 0) : QTime(0, 0));
+    check(QMetaObject::invokeMethod(automaticThemeTimer, "timeout", Qt::DirectConnection),
+          "invoke the real automatic appearance timer callback");
+    QApplication::processEvents();
+    const UiTheme refreshedTheme = AppTheme::themeForTime(QTime::currentTime());
+    check(AppTheme::currentTheme() == refreshedTheme && automaticThemeTimer->isActive() &&
+          AppTheme::currentThemeMode() == UiThemeMode::Automatic && automaticTheme->isChecked() &&
+          QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto"),
+          "real timer corrects stale palettes and rearms without overwriting automatic preference");
+    checkViewportTheme(refreshedTheme == UiTheme::Light);
+    checkThemeStatePreserved();
+    lightTheme->trigger();
+    check(!automaticThemeTimer->isActive(), "returning to a manual theme stops scheduled checks");
     const auto *densityWarning = monitor->findChild<QLabel *>(QStringLiteral("densityGuardWarning"));
     check(densityWarning && !densityWarning->isHidden() && densityWarning->text() ==
           QCoreApplication::translate("Workbench", "过度裁剪保护：第 %1 次迭代暂缓删除 %2 个高斯。请检查拍摄覆盖与重建尺度；数量不代表几何质量。")
@@ -1024,7 +1109,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   QObject::disconnect(presentationLoadConnection);
   check(presentationSceneLoads == 0, "theme and language changes do not reload scene data");
   dismissUnexpectedNotice.stop();
-  (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
+  restoreThemeMode();
   surfelMonitor.finishTraining(true, false);
   check(!surfelMonitor.findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->isHidden(),
         "finished training retains its loaded report");
@@ -1330,7 +1415,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
             "installed day/night export-dialog screenshot");
       exportDialog.hide();
     }
-    (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
+    restoreThemeMode();
     if (backendCombo) {
       backendCombo->setCurrentIndex(1);
       backendCombo->setCurrentIndex(0);
@@ -1376,7 +1461,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
       check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral("-viewport.png"))),
             "installed perspective theme grid screenshot");
     }
-    (originalTheme == UiTheme::Light ? lightTheme : darkTheme)->trigger();
+    restoreThemeMode();
   }
   check(runListInteractionSmokeTest(window), "all item-list interactions");
   if (testProcess) supervisor->shutdown();

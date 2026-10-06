@@ -220,7 +220,7 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
   check(tree && tree->header()->count() >= 4, "file dialog exposes its four real detail columns");
   if (tree && tree->header()->count() >= 4) {
     const int originalScale = qApp->property("gswUiScalePercent").toInt();
-    const UiTheme originalTheme = AppTheme::currentTheme();
+    const UiThemeMode originalThemeMode = AppTheme::currentThemeMode();
     auto *header = tree->header();
     auto *detailButton = file.findChild<QToolButton *>(QStringLiteral("detailModeButton"));
     check(detailButton != nullptr, "file dialog detail-view button exists for scale checks");
@@ -364,7 +364,13 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
       file.showNormal(); settle();
     }
     AppLanguage::apply(locale, false);
-    AppTheme::applyTheme(*qApp, originalTheme, false);
+    AppTheme::applyThemeMode(*qApp, originalThemeMode, false);
+    if (auto *themeTimer = workbench.findChild<QTimer *>(QStringLiteral("automaticThemeTimer"))) {
+      check(QMetaObject::invokeMethod(themeTimer, "timeout", Qt::DirectConnection),
+            "restore the appearance schedule after non-persistent palette QA overrides");
+      check(themeTimer->isActive() == (originalThemeMode == UiThemeMode::Automatic),
+            "file-dialog palette QA retains the original automatic/manual schedule policy");
+    }
     AppTheme::apply(*qApp, originalScale, false);
     settle();
     checkFileState();

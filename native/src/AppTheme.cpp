@@ -28,13 +28,45 @@ QString themeName(const UiTheme theme) {
   return theme == UiTheme::Light ? QStringLiteral("light")
                                : QStringLiteral("dark");
 }
+
+QString themeModeName(const UiThemeMode mode) {
+  if (mode == UiThemeMode::Automatic) return QStringLiteral("auto");
+  return mode == UiThemeMode::Light ? QStringLiteral("light")
+                                   : QStringLiteral("dark");
+}
+
+UiThemeMode themeModeFromName(const QString &name) {
+  if (name == QStringLiteral("light")) return UiThemeMode::Light;
+  if (name == QStringLiteral("dark")) return UiThemeMode::Dark;
+  return UiThemeMode::Automatic;
+}
+
+UiTheme resolveTheme(const UiThemeMode mode, const QTime &localTime) {
+  if (mode == UiThemeMode::Automatic) return AppTheme::themeForTime(localTime);
+  return mode == UiThemeMode::Light ? UiTheme::Light : UiTheme::Dark;
+}
 } // namespace
 
-UiTheme AppTheme::loadTheme() {
-  const QString value =
-      QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("dark"))
-          .toString();
-  return value == QStringLiteral("light") ? UiTheme::Light : UiTheme::Dark;
+UiThemeMode AppTheme::loadThemeMode() {
+  return themeModeFromName(
+      QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("auto")).toString());
+}
+
+UiThemeMode AppTheme::currentThemeMode() {
+  if (QCoreApplication::instance() != nullptr) {
+    const QVariant mode = QCoreApplication::instance()->property("gswUiThemeMode");
+    if (mode.isValid()) return themeModeFromName(mode.toString());
+  }
+  return loadThemeMode();
+}
+
+UiTheme AppTheme::themeForTime(const QTime &localTime) {
+  return localTime.isValid() && localTime < QTime(18, 0)
+      ? UiTheme::Light : UiTheme::Dark;
+}
+
+UiTheme AppTheme::loadTheme(const QTime &localTime) {
+  return resolveTheme(loadThemeMode(), localTime);
 }
 
 UiTheme AppTheme::currentTheme() {
@@ -102,12 +134,41 @@ QPalette AppTheme::palette(const UiTheme theme) {
 
 void AppTheme::applyTheme(QApplication &application, const UiTheme theme,
                           const bool persist) {
-  application.setProperty("gswUiTheme", themeName(theme));
+  applyThemeMode(application, theme == UiTheme::Light ? UiThemeMode::Light
+                                                    : UiThemeMode::Dark, persist);
+}
+
+void AppTheme::applyThemeMode(QApplication &application, const UiThemeMode mode,
+                              const bool persist, const QTime &localTime) {
+  application.setProperty("gswUiThemeMode", themeModeName(mode));
+  application.setProperty("gswUiTheme", themeName(resolveTheme(mode, localTime)));
   if (persist) {
-    QSettings().setValue(QStringLiteral("ui/theme"), themeName(theme));
+    QSettings().setValue(QStringLiteral("ui/theme"), themeModeName(mode));
   }
   const QVariant scale = application.property("gswUiScalePercent");
   apply(application, scale.isValid() ? scale.toInt() : 100, false);
+}
+
+bool AppTheme::refreshAutomaticTheme(QApplication &application,
+                                     const QTime &localTime) {
+  if (currentThemeMode() != UiThemeMode::Automatic || !localTime.isValid()) return false;
+  const UiTheme theme = themeForTime(localTime);
+  if (currentTheme() == theme) return false;
+  // Do not save the resolved palette over the user's automatic policy.
+  application.setProperty("gswUiTheme", themeName(theme));
+  const QVariant scale = application.property("gswUiScalePercent");
+  apply(application, scale.isValid() ? scale.toInt() : 100, false);
+  return true;
+}
+
+int AppTheme::automaticThemeCheckInterval(const QTime &localTime) {
+  if (!localTime.isValid()) return 30000;
+  const int untilBoundary = localTime < QTime(18, 0)
+      ? localTime.msecsTo(QTime(18, 0))
+      : localTime.msecsTo(QTime(0, 0)) + 24 * 60 * 60 * 1000;
+  // Reach the next boundary, but also re-read the wall clock after sleep,
+  // clock/time-zone edits or a backwards jump. Never use a 24-hour fixed timer.
+  return std::clamp(untilBoundary, 1, 30000);
 }
 
 UiScaleMode AppTheme::loadScaleMode() {
@@ -232,6 +293,7 @@ int AppTheme::scaled(const int value, const int scalePercent) {
 void AppTheme::apply(QApplication &application, const int scalePercent, const bool persist) {
   const int scale = clampScale(scalePercent);
   const UiTheme theme = currentTheme();
+  application.setProperty("gswUiThemeMode", themeModeName(currentThemeMode()));
   application.setProperty("gswUiTheme", themeName(theme));
   application.setPalette(palette(theme));
   QFont font(QStringLiteral("Microsoft YaHei UI"));

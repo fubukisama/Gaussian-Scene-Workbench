@@ -3,6 +3,7 @@
 #include <QSize>
 #include <QString>
 #include <QPalette>
+#include <QTime>
 
 class QApplication;
 class QScreen;
@@ -19,12 +20,28 @@ enum class UiTheme {
   Light,
 };
 
+// The saved policy is separate from the palette currently being displayed.
+enum class UiThemeMode {
+  Automatic,
+  Dark,
+  Light,
+};
+
 class AppTheme final {
 public:
-  static UiTheme loadTheme();
+  static UiThemeMode loadThemeMode();
+  static UiThemeMode currentThemeMode();
+  static UiTheme themeForTime(const QTime &localTime);
+  static UiTheme loadTheme(const QTime &localTime = QTime::currentTime());
   static UiTheme currentTheme();
   static QPalette palette(UiTheme theme);
   static void applyTheme(QApplication &application, UiTheme theme, bool persist);
+  static void applyThemeMode(QApplication &application, UiThemeMode mode,
+                             bool persist,
+                             const QTime &localTime = QTime::currentTime());
+  static bool refreshAutomaticTheme(QApplication &application,
+                                    const QTime &localTime = QTime::currentTime());
+  static int automaticThemeCheckInterval(const QTime &localTime);
   static UiScaleMode loadScaleMode();
   static int loadScalePercent(const QScreen *screen);
   static int recommendedScalePercent(const QScreen *screen);

@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
       QStringLiteral("locale"));
   parser.addOption(languageOption);
   QCommandLineOption themeOption(QStringLiteral("theme"),
-      QStringLiteral("Override the interface theme: light or dark (does not change saved preference)."),
+      QStringLiteral("Override the interface theme: auto, light or dark (does not change saved preference)."),
       QStringLiteral("mode"));
   parser.addOption(themeOption);
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
@@ -234,12 +234,17 @@ int main(int argc, char *argv[]) {
 
   if (parser.isSet(themeOption)) {
     const QString theme = parser.value(themeOption);
-    if (theme != QStringLiteral("light") && theme != QStringLiteral("dark")) {
+    if (theme != QStringLiteral("auto") && theme != QStringLiteral("light") && theme != QStringLiteral("dark")) {
       qCritical() << "Invalid interface theme:" << theme;
       return 5;
     }
-    gsw::AppTheme::applyTheme(application,
-        theme == QStringLiteral("light") ? gsw::UiTheme::Light : gsw::UiTheme::Dark, false);
+    gsw::AppTheme::applyThemeMode(application, theme == QStringLiteral("auto")
+        ? gsw::UiThemeMode::Automatic : (theme == QStringLiteral("light")
+        ? gsw::UiThemeMode::Light : gsw::UiThemeMode::Dark), false);
+  } else if (smokeSettings) {
+    // Keep existing rendering fixtures independent of the time of day. Auto
+    // scheduling remains explicitly testable through --theme auto.
+    gsw::AppTheme::applyTheme(application, gsw::UiTheme::Dark, false);
   }
 
   QString languageOverride = parser.value(languageOption);
