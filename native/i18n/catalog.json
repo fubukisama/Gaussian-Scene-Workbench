@@ -6358,10 +6358,10 @@
     "en_US": "Automatic (Time-based)",
     "ja_JP": "自動（時刻に応じて）"
   },
-  "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择": {
-    "zh_CN": "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择",
-    "en_US": "Switch automatically by local time: light before 18:00 and dark from 18:00; updates while running and remembers your choice.",
-    "ja_JP": "本機の時刻に応じて自動切り替え：18:00 より前はライト、18:00 以降はダーク。実行中も自動更新し、選択を保存します。"
+  "按本机时间自动切换：06:00 至 18:00 前为浅色，其余时间为深色（午夜保持深色）；运行中自动更新并记住选择": {
+    "zh_CN": "按本机时间自动切换：06:00 至 18:00 前为浅色，其余时间为深色（午夜保持深色）；运行中自动更新并记住选择",
+    "en_US": "Switch automatically by local time: light from 06:00 until 18:00, dark at all other times (including midnight); updates while running and remembers your choice.",
+    "ja_JP": "本機の時刻に応じて自動切り替え：06:00 から 18:00 より前はライト、それ以外はダーク（午前 0:00 もダークを維持）。実行中も自動更新し、選択を保存します。"
   },
   "浅色（白天）": {
     "zh_CN": "浅色（白天）",

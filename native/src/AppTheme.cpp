@@ -19,6 +19,8 @@ namespace gsw {
 namespace {
 constexpr int kMinimumScale = 90;
 constexpr int kMaximumScale = 150;
+constexpr int kDayStartHour = 6;
+constexpr int kNightStartHour = 18;
 
 int clampScale(const int value) {
   return std::clamp(value, kMinimumScale, kMaximumScale);
@@ -61,7 +63,8 @@ UiThemeMode AppTheme::currentThemeMode() {
 }
 
 UiTheme AppTheme::themeForTime(const QTime &localTime) {
-  return localTime.isValid() && localTime < QTime(18, 0)
+  return localTime.isValid() && localTime >= QTime(kDayStartHour, 0) &&
+         localTime < QTime(kNightStartHour, 0)
       ? UiTheme::Light : UiTheme::Dark;
 }
 
@@ -163,9 +166,13 @@ bool AppTheme::refreshAutomaticTheme(QApplication &application,
 
 int AppTheme::automaticThemeCheckInterval(const QTime &localTime) {
   if (!localTime.isValid()) return 30000;
-  const int untilBoundary = localTime < QTime(18, 0)
-      ? localTime.msecsTo(QTime(18, 0))
-      : localTime.msecsTo(QTime(0, 0)) + 24 * 60 * 60 * 1000;
+  const QTime dayStart(kDayStartHour, 0);
+  const QTime nightStart(kNightStartHour, 0);
+  const int untilBoundary = localTime < dayStart
+      ? localTime.msecsTo(dayStart)
+      : localTime < nightStart
+          ? localTime.msecsTo(nightStart)
+          : localTime.msecsTo(dayStart) + 24 * 60 * 60 * 1000;
   // Reach the next boundary, but also re-read the wall clock after sleep,
   // clock/time-zone edits or a backwards jump. Never use a 24-hour fixed timer.
   return std::clamp(untilBoundary, 1, 30000);

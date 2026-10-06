@@ -33,6 +33,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QImage>
+#include <QItemSelectionModel>
 #include "WindowUiSmokeTest.h"
 #include <QLabel>
 #include <QLocale>
@@ -55,11 +56,13 @@
 #include <QToolBar>
 #include <QTemporaryDir>
 #include <QTreeWidget>
+#include <QTreeView>
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
 
 #include <functional>
 #include <cmath>
+#include <utility>
 
 namespace gsw {
 bool runMeshGenerationSmokeTest(MainWindow &window) {
@@ -517,6 +520,7 @@ bool runListInteractionSmokeTest(MainWindow &window) {
 
 bool runLanguageSmokeTest(MainWindow &window) {
   const QString locale = AppLanguage::current();
+  const QString screenshotDirectory = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
   const int index = AppLanguage::supported().indexOf(locale);
   bool passed = index >= 0 && window.isVisible();
   auto check = [&passed](bool condition, const char *description) {
@@ -765,6 +769,51 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto projectName = document->projectName();
   const auto activeId = viewport->activeSceneId();
   const auto modelCount = viewport->sceneObjectCount();
+  // Keep a real filesystem row selected while the appearance schedule runs.
+  // This is a test-owned dialog/fixture; no user file or system clock is changed.
+  QFileDialog appearanceFiles(&window);
+  appearanceFiles.setOption(QFileDialog::DontUseNativeDialog);
+  appearanceFiles.setWindowModality(Qt::NonModal);
+  appearanceFiles.setFileMode(QFileDialog::ExistingFile);
+  appearanceFiles.setViewMode(QFileDialog::Detail);
+  appearanceFiles.setNameFilter(QStringLiteral("PLY (*.ply)"));
+  appearanceFiles.setDirectory(temporary.path());
+  appearanceFiles.selectFile(ply.fileName());
+  appearanceFiles.resize(680, 460);
+  appearanceFiles.show();
+  auto *appearanceFileTree = appearanceFiles.findChild<QTreeView *>(QStringLiteral("treeView"));
+  auto *appearanceFileName = appearanceFiles.findChild<QLineEdit *>(QStringLiteral("fileNameEdit"));
+  QModelIndex appearanceFileIndex;
+  check(appearanceFileTree && appearanceFileName && waitUntil([&] {
+    for (int row = 0; row < appearanceFileTree->model()->rowCount(appearanceFileTree->rootIndex()); ++row) {
+      const auto candidate = appearanceFileTree->model()->index(row, 0, appearanceFileTree->rootIndex());
+      if (candidate.data().toString() == QFileInfo(ply.fileName()).fileName()) {
+        appearanceFileIndex = candidate;
+        return true;
+      }
+    }
+    return false;
+  }), "automatic appearance starts with a loaded Unicode file selection fixture");
+  if (appearanceFileTree && appearanceFileIndex.isValid())
+    appearanceFileTree->selectionModel()->setCurrentIndex(appearanceFileIndex,
+        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+  QApplication::processEvents();
+  const auto appearanceSelectedRows = [&] {
+    QStringList result;
+    if (appearanceFileTree && appearanceFileTree->selectionModel())
+      for (const auto &row : appearanceFileTree->selectionModel()->selectedRows(0))
+        result.append(row.data().toString());
+    result.sort();
+    return result;
+  };
+  const QStringList appearanceSelection = appearanceSelectedRows();
+  const QStringList appearanceSelectedFiles = appearanceFiles.selectedFiles();
+  const QString appearanceEnteredName = appearanceFileName ? appearanceFileName->text() : QString();
+  const QString appearanceDirectory = appearanceFiles.directory().absolutePath();
+  const QString appearanceFilter = appearanceFiles.selectedNameFilter();
+  check(!appearanceSelection.isEmpty() && appearanceSelectedFiles.contains(ply.fileName()),
+        "appearance preservation checks own a real selected source file");
+  appearanceFiles.hide();
   // Window controls are installed lazily when a dialog is polished. Warm
   // existing dialogs before asserting that language changes add no actions.
   for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
@@ -861,6 +910,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
           "manual/automatic appearance preserves both trainers, mesh settings and recorded telemetry");
     if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
                           "manual/automatic appearance does not interrupt processing");
+    check(appearanceFileName && appearanceFileName->text() == appearanceEnteredName &&
+          appearanceFiles.selectedFiles() == appearanceSelectedFiles &&
+          appearanceFiles.directory().absolutePath() == appearanceDirectory &&
+          appearanceFiles.selectedNameFilter() == appearanceFilter &&
+          appearanceSelectedRows() == appearanceSelection,
+          "manual/automatic appearance preserves selected files, filename, format and directory");
   };
   const auto checkViewportTheme = [&](const bool light) {
     const QImage frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
@@ -882,6 +937,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
       check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
             "manual/automatic appearance reaches the actual OpenGL viewport background");
   };
+  const std::pair<QTime, UiTheme> themeBoundarySamples[] = {
+      {QTime(5, 59, 59, 999), UiTheme::Dark},
+      {QTime(6, 0), UiTheme::Light},
+      {QTime(17, 59, 59, 999), UiTheme::Light},
+      {QTime(18, 0), UiTheme::Dark},
+      {QTime(23, 59, 59, 999), UiTheme::Dark},
+      {QTime(0, 0), UiTheme::Dark}};
   lightTheme->trigger();
   for (int step = 1; step <= 6; ++step) {
     const int next = (index + step) % 3;
@@ -898,7 +960,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
           darkTheme->text() == QCoreApplication::translate("Workbench", "深色（黑夜）"),
           "appearance menu switches language immediately");
     check(automaticTheme->toolTip() == QCoreApplication::translate("Workbench",
-          "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择"),
+          "按本机时间自动切换：06:00 至 18:00 前为浅色，其余时间为深色（午夜保持深色）；运行中自动更新并记住选择"),
           "automatic appearance schedule description switches language immediately");
     check(lightTheme->toolTip() == QCoreApplication::translate("Workbench",
           "使用白色工作区、灰色工具栏、深色文字与统一浅灰面板及弹窗边界，适合白天观察；立即生效并记住选择"),
@@ -919,6 +981,15 @@ bool runLanguageSmokeTest(MainWindow &window) {
       check((qApp->palette().color(QPalette::Window).lightness() > 200) == light &&
             qApp->font() == themeFont && qApp->property("gswUiScalePercent") == themeScale,
             "theme updates palette without changing language fonts or scale");
+      for (const auto &[time, scheduledTheme] : themeBoundarySamples) {
+        Q_UNUSED(scheduledTheme);
+        check(!AppTheme::refreshAutomaticTheme(*qApp, time) &&
+              AppTheme::currentTheme() == (light ? UiTheme::Light : UiTheme::Dark) &&
+              AppTheme::loadTheme(time) == AppTheme::currentTheme() &&
+              AppTheme::currentThemeMode() == (light ? UiThemeMode::Light : UiThemeMode::Dark) &&
+              action->isChecked() && !automaticTheme->isChecked() && !automaticThemeTimer->isActive(),
+              "manual light/dark overrides ignore dawn, dusk and midnight clock samples");
+      }
       if (step == 1) {
         checkViewportTheme(light);
       }
@@ -940,7 +1011,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
           automaticTheme->isChecked() && !lightTheme->isChecked() && !darkTheme->isChecked() &&
           automaticTheme->text() == QCoreApplication::translate("Workbench", "自动（按时间）") &&
           automaticTheme->toolTip() == QCoreApplication::translate("Workbench",
-              "按本机时间自动切换：18:00 前为浅色，18:00 起为深色；运行中自动更新并记住选择") &&
+              "按本机时间自动切换：06:00 至 18:00 前为浅色，其余时间为深色（午夜保持深色）；运行中自动更新并记住选择") &&
           QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto"),
           "live language changes preserve automatic selection, timer and translated schedule text");
     languageMenu->actions()[next]->trigger();
@@ -949,12 +1020,16 @@ bool runLanguageSmokeTest(MainWindow &window) {
     // Inject wall-clock samples through the public theme seam, without altering
     // the computer's clock or waiting until evening. The same live state gates
     // as the manual switches cover both trainers and every mesh mode.
-    // Keep a real 18:00/midnight tick from racing these deterministic samples;
+    // Keep a real 06:00/18:00 tick from racing these deterministic samples;
     // the actual timeout callback below must rearm this same timer afterwards.
+    appearanceFiles.show();
+    QApplication::processEvents();
     automaticThemeTimer->stop();
-    AppTheme::applyThemeMode(*qApp, UiThemeMode::Automatic, false, QTime(17, 59, 59, 999));
-    for (const QTime &time : {QTime(18, 0), QTime(23, 59, 59, 999), QTime(0, 0), QTime(17, 59, 59, 999)}) {
-      const UiTheme expected = AppTheme::themeForTime(time);
+    AppTheme::applyThemeMode(*qApp, UiThemeMode::Automatic, false, QTime(5, 59, 59, 998));
+    check(AppTheme::currentTheme() == UiTheme::Dark, "automatic appearance before 06:00 starts dark");
+    for (const auto &[time, expected] : themeBoundarySamples) {
+      check(AppTheme::themeForTime(time) == expected,
+            "independent dawn/dusk/midnight theme schedule expectations");
       const bool changes = AppTheme::currentTheme() != expected;
       check(AppTheme::refreshAutomaticTheme(*qApp, time) == changes,
             "automatic appearance changes only when crossing a day/night boundary");
@@ -965,26 +1040,45 @@ bool runLanguageSmokeTest(MainWindow &window) {
             QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto") &&
             (qApp->palette().color(QPalette::Window).lightness() > 200) == light &&
             qApp->font() == themeFont && qApp->property("gswUiScalePercent") == themeScale,
-            "18:00/midnight switches retain automatic policy, localized fonts, scale and menu selection");
+            "06:00/18:00 switches and unchanged midnight retain automatic policy, fonts, scale and menu selection");
       checkViewportTheme(light);
       checkThemeStatePreserved();
       check(monitor->findChild<QLabel *>(QStringLiteral("trainingEffectiveParameters"))->text() == effectiveBeforeTheme,
             "scheduled appearance preserves displayed effective training parameters");
     }
+    appearanceFiles.hide();
+    QApplication::processEvents();
     // Force the real schedule callback to correct an intentionally stale
     // palette to today's clock, exercising MainWindow's presentation path.
     const UiTheme realTheme = AppTheme::themeForTime(QTime::currentTime());
-    AppTheme::refreshAutomaticTheme(*qApp, realTheme == UiTheme::Light ? QTime(18, 0) : QTime(0, 0));
+    AppTheme::refreshAutomaticTheme(*qApp, realTheme == UiTheme::Light ? QTime(18, 0) : QTime(6, 0));
     check(QMetaObject::invokeMethod(automaticThemeTimer, "timeout", Qt::DirectConnection),
           "invoke the real automatic appearance timer callback");
     QApplication::processEvents();
-    const UiTheme refreshedTheme = AppTheme::themeForTime(QTime::currentTime());
+    const QTime actualLocalTime = QTime::currentTime();
+    const bool actualDaytime = actualLocalTime.hour() >= 6 && actualLocalTime.hour() < 18;
+    const UiTheme refreshedTheme = actualDaytime ? UiTheme::Light : UiTheme::Dark;
     check(AppTheme::currentTheme() == refreshedTheme && automaticThemeTimer->isActive() &&
           AppTheme::currentThemeMode() == UiThemeMode::Automatic && automaticTheme->isChecked() &&
           QSettings().value(QStringLiteral("ui/theme")).toString() == QStringLiteral("auto"),
           "real timer corrects stale palettes and rearms without overwriting automatic preference");
+    check((qApp->palette().color(QPalette::Window).lightness() > 200) == actualDaytime,
+          "real timer palette follows independent local 06:00-inclusive/18:00-exclusive expectations");
     checkViewportTheme(refreshedTheme == UiTheme::Light);
     checkThemeStatePreserved();
+    if (step == 3) {
+      qInfo().noquote() << QStringLiteral("Automatic theme smoke: localTime=%1 mode=auto resolved=%2")
+          .arg(actualLocalTime.toString(QStringLiteral("HH:mm:ss")),
+               AppTheme::currentTheme() == UiTheme::Light ? QStringLiteral("light") : QStringLiteral("dark"));
+      if (!screenshotDirectory.isEmpty()) {
+        check(QDir().mkpath(screenshotDirectory), "prepare real-clock automatic appearance screenshot directory");
+        const QString prefix = locale + QStringLiteral("-theme-auto-real");
+        check(window.grab().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral(".png"))),
+              "real-clock automatic appearance screenshot before manual cleanup");
+        check(viewport->grabFramebuffer().save(QDir(screenshotDirectory).filePath(prefix + QStringLiteral("-viewport.png"))),
+              "real-clock automatic viewport screenshot before manual cleanup");
+      }
+    }
     lightTheme->trigger();
     check(!automaticThemeTimer->isActive(), "returning to a manual theme stops scheduled checks");
     const auto *densityWarning = monitor->findChild<QLabel *>(QStringLiteral("densityGuardWarning"));
@@ -1120,7 +1214,6 @@ bool runLanguageSmokeTest(MainWindow &window) {
     restoreSh->trigger();
   check(!AppLanguage::apply(QStringLiteral("invalid")) && AppLanguage::current() == locale &&
         AppLanguage::saved() == locale, "invalid locale leaves current UI unchanged");
-  const QString screenshotDirectory = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
   // Resize a separate, owned monitor while exercising the production scale
   // actions on the isolated smoke-test window. Never re-ingest samples while
   // changing presentation. All three language CTests run both trainers.

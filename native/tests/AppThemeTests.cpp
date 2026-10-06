@@ -156,12 +156,14 @@ void AppThemeTests::defaultsToAutomaticAndRetainsManualPreferences() {
   QCOMPARE(AppTheme::currentThemeMode(), UiThemeMode::Automatic);
   QCOMPARE(AppTheme::loadTheme(QTime(12, 0)), UiTheme::Light);
   QCOMPARE(AppTheme::loadTheme(QTime(20, 0)), UiTheme::Dark);
+  QCOMPARE(AppTheme::loadTheme(QTime(1, 12)), UiTheme::Dark);
   for (const QString &name : {QString(), QStringLiteral("auto"),
                               QStringLiteral("LIGHT"), QStringLiteral("night")}) {
     QSettings().setValue(QStringLiteral("ui/theme"), name);
     QCOMPARE(AppTheme::loadThemeMode(), UiThemeMode::Automatic);
     QCOMPARE(AppTheme::loadTheme(QTime(12, 0)), UiTheme::Light);
     QCOMPARE(AppTheme::loadTheme(QTime(20, 0)), UiTheme::Dark);
+    QCOMPARE(AppTheme::loadTheme(QTime(1, 12)), UiTheme::Dark);
   }
   QSettings().setValue(QStringLiteral("ui/theme"), QStringLiteral("light"));
   QCOMPARE(AppTheme::loadThemeMode(), UiThemeMode::Light);
@@ -172,15 +174,26 @@ void AppThemeTests::defaultsToAutomaticAndRetainsManualPreferences() {
 }
 
 void AppThemeTests::resolvesTimeBoundariesAndSchedulesPromptChecks() {
-  QCOMPARE(AppTheme::themeForTime(QTime(0, 0)), UiTheme::Light);
+  QCOMPARE(AppTheme::themeForTime(QTime(0, 0)), UiTheme::Dark);
+  QCOMPARE(AppTheme::themeForTime(QTime(5, 59, 59, 999)), UiTheme::Dark);
+  QCOMPARE(AppTheme::themeForTime(QTime(6, 0)), UiTheme::Light);
   QCOMPARE(AppTheme::themeForTime(QTime(17, 59, 59, 999)), UiTheme::Light);
   QCOMPARE(AppTheme::themeForTime(QTime(18, 0)), UiTheme::Dark);
   QCOMPARE(AppTheme::themeForTime(QTime(23, 59, 59, 999)), UiTheme::Dark);
+  QCOMPARE(AppTheme::themeForTime(QTime()), UiTheme::Dark);
+  for (int minute = 0; minute < 24 * 60; ++minute) {
+    const QTime time(minute / 60, minute % 60);
+    QCOMPARE(AppTheme::themeForTime(time),
+             minute >= 6 * 60 && minute < 18 * 60 ? UiTheme::Light : UiTheme::Dark);
+  }
   QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(0, 0)), 30000);
+  QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(5, 59, 40)), 20000);
+  QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(5, 59, 59, 999)), 1);
+  QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(6, 0)), 30000);
   QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(17, 59, 40)), 20000);
   QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(17, 59, 59, 999)), 1);
   QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(18, 0)), 30000);
-  QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(23, 59, 59, 999)), 1);
+  QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime(23, 59, 59, 999)), 30000);
   QCOMPARE(AppTheme::automaticThemeCheckInterval(QTime()), 30000);
 }
 
@@ -200,12 +213,20 @@ void AppThemeTests::switchesAutomaticallyWithoutOverwritingPolicyOrInputs() {
   QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#1b1d1f"));
   QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("auto"));
   QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(23, 59)));
-  QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(0, 0)));
+  QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(0, 0)));
+  QCOMPARE(AppTheme::currentTheme(), UiTheme::Dark);
+  QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#1b1d1f"));
+  QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(1, 12)));
+  QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(5, 59, 59, 999)));
+  QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(6, 0)));
   QCOMPARE(AppTheme::currentTheme(), UiTheme::Light);
   QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#ffffff"));
   // A backwards clock edit is handled identically to an ordinary boundary.
   QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(19, 0)));
+  QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(1, 12)));
   QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(12, 0)));
+  QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(5, 59)));
+  QVERIFY(AppTheme::refreshAutomaticTheme(*qApp, QTime(6, 0)));
   QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime()));
   for (const QString &language : {QStringLiteral("zh_CN"), QStringLiteral("en_US"), QStringLiteral("ja_JP")}) {
     qApp->setProperty("gswUiLanguage", language);
@@ -229,6 +250,9 @@ void AppThemeTests::manualOverridesIgnoreAutomaticClockChecks() {
     QCOMPARE(AppTheme::currentThemeMode(), theme == UiTheme::Light ? UiThemeMode::Light : UiThemeMode::Dark);
     QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(12, 0)));
     QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(20, 0)));
+    QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(0, 0)));
+    QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(5, 59, 59, 999)));
+    QVERIFY(!AppTheme::refreshAutomaticTheme(*qApp, QTime(6, 0)));
     QCOMPARE(AppTheme::currentTheme(), theme);
     QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("auto"));
   }
