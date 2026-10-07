@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMetaMethod>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -48,6 +49,8 @@ class ProcessSupervisorTests final : public QObject {
 
 private slots:
   void initTestCase();
+  void failedLaunchRemainsObservableAsAnAcceptedAttempt();
+  void acceptedLaunchPrecedesStartedAndBusyRejectionIsNotReported();
   void pauseIsDistinctFromCancellation();
   void parsesFragmentedWorkerStatusWithoutPollutingLogs();
   void trainingSummaryDoesNotBreakLegacyProgress();
@@ -59,6 +62,86 @@ private slots:
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
+}
+
+void ProcessSupervisorTests::failedLaunchRemainsObservableAsAnAcceptedAttempt() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  ProcessSupervisor supervisor;
+  QSignalSpy startedSpy(&supervisor, &ProcessSupervisor::taskStarted);
+  QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
+  QSignalSpy outputSpy(&supervisor, &ProcessSupervisor::outputReady);
+  const int launchSignalIndex = supervisor.metaObject()->indexOfSignal(
+      "taskLaunchRequested(QString,QString)");
+  std::unique_ptr<QSignalSpy> launchSpy;
+  if (launchSignalIndex >= 0) {
+    launchSpy = std::make_unique<QSignalSpy>(
+        &supervisor, supervisor.metaObject()->method(launchSignalIndex));
+  }
+  bool attemptVisibleBeforeCompletion = false;
+  connect(&supervisor, &ProcessSupervisor::taskFinished, &supervisor,
+      [&launchSpy, &attemptVisibleBeforeCompletion]() {
+        attemptVisibleBeforeCompletion = launchSpy && launchSpy->count() == 1;
+      });
+
+  const QString task = QStringLiteral("missing-program");
+  QVERIFY(supervisor.start(task,
+      QDir(temporary.path()).filePath(QStringLiteral("missing-worker.exe")),
+      {}, temporary.path()));
+  QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 5000);
+  QCOMPARE(startedSpy.count(), 0);
+  QCOMPARE(finishedSpy.at(0).at(0).toString(), task);
+  QCOMPARE(finishedSpy.at(0).at(1).toInt(), -1);
+  QVERIFY(!finishedSpy.at(0).at(2).toBool());
+  QVERIFY(!outputSpy.isEmpty());
+  QVERIFY2(attemptVisibleBeforeCompletion,
+      "An accepted task must be observable before an OS launch failure completes it.");
+  QCOMPARE(launchSpy->count(), 1);
+  QCOMPARE(launchSpy->at(0).at(0).toString(), task);
+  QCOMPARE(launchSpy->at(0).at(1).toString(), temporary.path());
+  QVERIFY(!supervisor.isRunning());
+  QVERIFY(supervisor.activeTask().isEmpty());
+}
+
+void ProcessSupervisorTests::acceptedLaunchPrecedesStartedAndBusyRejectionIsNotReported() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  ProcessSupervisor supervisor;
+  QSignalSpy launchSpy(&supervisor, &ProcessSupervisor::taskLaunchRequested);
+  QSignalSpy startedSpy(&supervisor, &ProcessSupervisor::taskStarted);
+  QSignalSpy finishedSpy(&supervisor, &ProcessSupervisor::taskFinished);
+  QStringList lifecycle;
+  connect(&supervisor, &ProcessSupervisor::taskLaunchRequested, &supervisor,
+      [&lifecycle]() { lifecycle.append(QStringLiteral("requested")); });
+  connect(&supervisor, &ProcessSupervisor::taskStarted, &supervisor,
+      [&lifecycle]() { lifecycle.append(QStringLiteral("started")); });
+  connect(&supervisor, &ProcessSupervisor::taskFinished, &supervisor,
+      [&lifecycle]() { lifecycle.append(QStringLiteral("finished")); });
+
+  const QString task = QStringLiteral("accepted-worker");
+  QVERIFY(supervisor.start(task, processOutputFixturePath(),
+      {QStringLiteral("pause-worker")}, temporary.path(), {}, true));
+  QCOMPARE(launchSpy.count(), 1);
+  QCOMPARE(launchSpy.at(0).at(0).toString(), task);
+  QCOMPARE(launchSpy.at(0).at(1).toString(), temporary.path());
+  QTRY_COMPARE_WITH_TIMEOUT(startedSpy.count(), 1, 5000);
+  QCOMPARE(startedSpy.at(0).at(0).toString(), task);
+  QCOMPARE(lifecycle, QStringList({QStringLiteral("requested"),
+                                  QStringLiteral("started")}));
+
+  QVERIFY(!supervisor.start(QStringLiteral("rejected-while-busy"),
+      processOutputFixturePath(), {QStringLiteral("summary-worker")},
+      temporary.path()));
+  QCOMPARE(launchSpy.count(), 1);
+  QCOMPARE(supervisor.activeTask(), task);
+  QVERIFY(supervisor.requestPause());
+  QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 5000);
+  QCOMPARE(lifecycle, QStringList({QStringLiteral("requested"),
+                                  QStringLiteral("started"),
+                                  QStringLiteral("finished")}));
+  QCOMPARE(launchSpy.count(), 1);
+  QCOMPARE(startedSpy.count(), 1);
+  QCOMPARE(finishedSpy.at(0).at(0).toString(), task);
 }
 
 void ProcessSupervisorTests::trainingSummaryDoesNotBreakLegacyProgress() {

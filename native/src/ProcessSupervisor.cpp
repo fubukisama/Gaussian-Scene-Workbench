@@ -329,6 +329,7 @@ bool ProcessSupervisor::start(const QString &taskName, const QString &program,
   mProcess.setProcessEnvironment(environment.isEmpty()
                                      ? QProcessEnvironment::systemEnvironment()
                                      : environment);
+  emit taskLaunchRequested(mActiveTask, mProcess.workingDirectory());
   mProcess.start(program, arguments,
                  acceptsCancelCommand ? QIODevice::ReadWrite : QIODevice::ReadOnly);
   return true;

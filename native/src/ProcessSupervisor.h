@@ -58,6 +58,8 @@ public:
   void shutdown();
 
 signals:
+  void taskLaunchRequested(const QString &taskName,
+                           const QString &workingDirectory);
   void taskStarted(const QString &taskName);
   void outputReady(const QString &text);
   void workerStatusReady(const WorkerStatus &status);

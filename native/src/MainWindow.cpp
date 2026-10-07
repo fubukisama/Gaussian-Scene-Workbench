@@ -23,15 +23,19 @@
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
 #include "TrainingOutputLocator.h"
+#include "TaskRecord.h"
+#include "TaskDetailsDialog.h"
 #include "UntitledWorkspaceStorage.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -89,6 +93,7 @@
 #include <QTreeWidgetItemIterator>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QUrl>
 #include <QtConcurrent>
 
 #include <algorithm>
@@ -1943,8 +1948,8 @@ void MainWindow::createTaskDock() {
   mTaskTabs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mTaskTable = new QTableWidget(0, 4, mTaskTabs);
   mTaskTable->setObjectName(QStringLiteral("taskRecords"));
-  new MultiItemList(mTaskTable, AppLanguage::source("移除所选任务记录"),
-      [this]() { removeSelectedTaskRecords(); });
+  auto *taskList = new MultiItemList(mTaskTable, AppLanguage::source("移除所选任务记录"),
+      [this]() { removeSelectedTaskRecords(); }, false);
   mTaskTable->setHorizontalHeaderLabels(
       {QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "任务"),
        QCoreApplication::translate("Workbench", "开始时间"), QCoreApplication::translate("Workbench", "结果")});
@@ -1959,26 +1964,86 @@ void MainWindow::createTaskDock() {
       2, QHeaderView::ResizeToContents);
   mTaskTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
 
+  mTaskDetailsAction = AppLanguage::text(new QAction(this), AppLanguage::source("任务详情"));
+  mTaskDetailsAction->setObjectName(QStringLiteral("taskDetailsAction"));
+  mOpenTaskFolderAction = AppLanguage::text(new QAction(this), AppLanguage::source("打开任务文件夹"));
+  mOpenTaskFolderAction->setObjectName(QStringLiteral("openTaskFolderAction"));
+  mCopyTaskSummaryAction = AppLanguage::text(new QAction(this), AppLanguage::source("复制任务摘要"));
+  mCopyTaskSummaryAction->setObjectName(QStringLiteral("copyTaskSummaryAction"));
+  connect(mTaskDetailsAction, &QAction::triggered, this, &MainWindow::showSelectedTaskDetails);
+  connect(mOpenTaskFolderAction, &QAction::triggered, this, &MainWindow::openSelectedTaskFolder);
+  connect(mCopyTaskSummaryAction, &QAction::triggered, this, &MainWindow::copySelectedTaskSummaries);
+  connect(mTaskTable->selectionModel(), &QItemSelectionModel::selectionChanged,
+          this, &MainWindow::updateTaskRecordActions);
+  connect(mTaskTable, &QTableWidget::cellDoubleClicked, this, [this](int, int) { showSelectedTaskDetails(); });
+  mTaskTable->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(mTaskTable, &QWidget::customContextMenuRequested, this, [this, taskList](const QPoint &position) {
+    const auto index = mTaskTable->indexAt(position);
+    if (index.isValid() && !mTaskTable->selectionModel()->isSelected(index))
+      mTaskTable->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    updateTaskRecordActions();
+    QMenu menu(mTaskTable);
+    menu.addActions({mTaskDetailsAction, mOpenTaskFolderAction, mCopyTaskSummaryAction});
+    menu.addSeparator();
+    taskList->addToMenu(menu);
+    menu.exec(mTaskTable->viewport()->mapToGlobal(position));
+  });
+  mTaskPage = new QWidget(mTaskTabs);
+  auto *taskLayout = new QVBoxLayout(mTaskPage);
+  taskLayout->setContentsMargins(0, 0, 0, 0);
+  taskLayout->setSpacing(2);
+  auto *taskBar = new QToolBar(mTaskPage);
+  taskBar->setObjectName(QStringLiteral("taskRecordToolbar"));
+  taskBar->setMovable(false);
+  taskBar->addActions({mTaskDetailsAction, mOpenTaskFolderAction, mCopyTaskSummaryAction});
+  AppLanguage::bind(taskBar, "toolTip", AppLanguage::source("任务日志仅在本次会话保留；每项任务最多保留最近 512 Ki 字符。"));
+  taskLayout->addWidget(taskBar);
+  taskLayout->addWidget(mTaskTable, 1);
+
   mTrainingMonitor = new TrainingMonitorWidget(mTaskTabs);
 
   mConsole = new QPlainTextEdit(mTaskTabs);
+  mConsole->setObjectName(QStringLiteral("taskConsole"));
   mConsole->setReadOnly(true);
   mConsole->setMaximumBlockCount(10000);
   mConsole->setLineWrapMode(QPlainTextEdit::NoWrap);
 
-  mTaskTabs->addTab(mTaskTable, QCoreApplication::translate("Workbench", "任务"));
+  mLogPage = new QWidget(mTaskTabs);
+  auto *logLayout = new QVBoxLayout(mLogPage);
+  logLayout->setContentsMargins(0, 0, 0, 0);
+  logLayout->setSpacing(2);
+  auto *logBar = new QToolBar(mLogPage);
+  logBar->setMovable(false);
+  mFollowLogsAction = AppLanguage::text(new QAction(this), AppLanguage::source("跟随最新日志"));
+  mFollowLogsAction->setObjectName(QStringLiteral("followLatestLogsAction"));
+  mFollowLogsAction->setCheckable(true);
+  mFollowLogsAction->setChecked(QSettings().value(QStringLiteral("ui/followLogs"), true).toBool());
+  connect(mFollowLogsAction, &QAction::toggled, this, [this](bool follow) {
+    QSettings().setValue(QStringLiteral("ui/followLogs"), follow);
+    if (follow) mConsole->verticalScrollBar()->setValue(mConsole->verticalScrollBar()->maximum());
+  });
+  mExportLogsAction = AppLanguage::text(new QAction(this), AppLanguage::source("导出当前日志..."));
+  mExportLogsAction->setObjectName(QStringLiteral("exportCurrentLogsAction"));
+  connect(mExportLogsAction, &QAction::triggered, this, &MainWindow::exportCurrentLogs);
+  logBar->addActions({mFollowLogsAction, mExportLogsAction});
+  AppLanguage::bind(logBar, "toolTip", AppLanguage::source("当前日志最多保留 10000 行；导出的是当前保留内容。"));
+  logLayout->addWidget(logBar);
+  logLayout->addWidget(mConsole, 1);
+
+  mTaskTabs->addTab(mTaskPage, QCoreApplication::translate("Workbench", "任务"));
   mTaskTabs->addTab(mTrainingMonitor, QCoreApplication::translate("Workbench", "训练监视"));
-  mTaskTabs->addTab(mConsole, QCoreApplication::translate("Workbench", "日志"));
+  mTaskTabs->addTab(mLogPage, QCoreApplication::translate("Workbench", "日志"));
   AppLanguage::onChanged(mTaskTabs, [this]() {
-    mTaskTabs->setTabText(mTaskTabs->indexOf(mTaskTable), QCoreApplication::translate("Workbench", "任务"));
+    mTaskTabs->setTabText(mTaskTabs->indexOf(mTaskPage), QCoreApplication::translate("Workbench", "任务"));
     mTaskTabs->setTabText(mTaskTabs->indexOf(mTrainingMonitor), QCoreApplication::translate("Workbench", "训练监视"));
-    mTaskTabs->setTabText(mTaskTabs->indexOf(mConsole), QCoreApplication::translate("Workbench", "日志"));
+    mTaskTabs->setTabText(mTaskTabs->indexOf(mLogPage), QCoreApplication::translate("Workbench", "日志"));
     mTaskTable->setHorizontalHeaderLabels({QCoreApplication::translate("Workbench", "状态"),
         QCoreApplication::translate("Workbench", "任务"), QCoreApplication::translate("Workbench", "开始时间"),
         QCoreApplication::translate("Workbench", "结果")});
   });
   mTaskDock->setWidget(mTaskTabs);
   addDockWidget(Qt::BottomDockWidgetArea, mTaskDock);
+  updateTaskRecordActions();
 }
 
 void MainWindow::createStatusBar() {
@@ -1998,6 +2063,116 @@ void MainWindow::createStatusBar() {
   statusBar()->addPermanentWidget(mScaleStatus);
 }
 
+QSharedPointer<TaskRecord> MainWindow::taskRecordForRow(const int row) const {
+  const auto *item = mTaskTable->item(row, 0);
+  return item ? mTaskRecords.value(item->data(Qt::UserRole + 35).toULongLong()) : QSharedPointer<TaskRecord>();
+}
+
+void MainWindow::beginTaskRecord(const QString &taskName, const QString &workingDirectory) {
+  mActiveWorkerState.clear();
+  mLastWorkerStatus.reset();
+  QString directory = workingDirectory;
+  if (mPendingDatasetImport && mPendingDatasetImport->taskName == taskName)
+    directory = mPendingDatasetImport->datasetPath;
+  else if (mPendingReconstruction && mPendingReconstruction->taskName == taskName)
+    directory = mPendingReconstruction->datasetPath;
+  else if (mPendingTraining && mPendingTraining->taskName == taskName)
+    directory = mPendingTraining->outputDirectory;
+  else if (mPendingMesh && mPendingMesh->taskName == taskName)
+    directory = mPendingMesh->outputDirectory;
+  auto record = QSharedPointer<TaskRecord>::create(taskName, directory);
+  const quint64 id = mNextTaskRecordId++;
+  mTaskRecords.insert(id, record);
+  mActiveTaskRow = mTaskTable->rowCount();
+  mTaskTable->insertRow(mActiveTaskRow);
+  auto *state = new QTableWidgetItem(QCoreApplication::translate("Workbench", "正在启动"));
+  state->setData(Qt::UserRole + 31, QStringLiteral("starting"));
+  state->setData(Qt::UserRole + 35, id);
+  mTaskTable->setItem(mActiveTaskRow, 0, state);
+  mTaskTable->setItem(mActiveTaskRow, 1, new QTableWidgetItem(taskName));
+  mTaskTable->setItem(mActiveTaskRow, 2,
+      new QTableWidgetItem(record->startedAt().toString(QStringLiteral("HH:mm:ss"))));
+  mTaskTable->setItem(mActiveTaskRow, 3, new QTableWidgetItem(QStringLiteral("-")));
+  updateTaskRecordActions();
+}
+
+void MainWindow::updateTaskRecordActions() {
+  const auto rows = selectedListRows(mTaskTable);
+  const auto record = rows.size() == 1 ? taskRecordForRow(rows.first().row()) : QSharedPointer<TaskRecord>();
+  mTaskDetailsAction->setEnabled(!record.isNull());
+  mOpenTaskFolderAction->setEnabled(record && !record->outputDirectory().isEmpty());
+  mCopyTaskSummaryAction->setEnabled(std::any_of(rows.cbegin(), rows.cend(), [this](const auto &row) {
+    return !taskRecordForRow(row.row()).isNull();
+  }));
+}
+
+void MainWindow::showSelectedTaskDetails() {
+  const auto rows = selectedListRows(mTaskTable);
+  if (rows.size() != 1) return;
+  auto record = taskRecordForRow(rows.first().row());
+  if (!record) return;
+  TaskDetailsDialog dialog(record, this);
+  dialog.exec();
+}
+
+void MainWindow::openSelectedTaskFolder() {
+  const auto rows = selectedListRows(mTaskTable);
+  if (rows.size() != 1) return;
+  const auto record = taskRecordForRow(rows.first().row());
+  if (!record || record->outputDirectory().isEmpty()) return;
+  const QString directory = record->outputDirectory();
+  if (!QFileInfo(directory).isDir()) {
+    showError(QCoreApplication::translate("Workbench", "打开任务文件夹"),
+              QCoreApplication::translate("Workbench", "任务文件夹不存在：%1").arg(QDir::toNativeSeparators(directory)));
+    return;
+  }
+  if (!QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(directory).absoluteFilePath())))
+    showError(QCoreApplication::translate("Workbench", "打开任务文件夹"),
+              QCoreApplication::translate("Workbench", "无法打开任务文件夹：%1").arg(QDir::toNativeSeparators(directory)));
+}
+
+void MainWindow::copySelectedTaskSummaries() {
+  auto rows = selectedListRows(mTaskTable);
+  std::reverse(rows.begin(), rows.end());
+  QStringList summaries;
+  for (const auto &row : rows) {
+    if (auto record = taskRecordForRow(row.row())) {
+      const auto *result = mTaskTable->item(row.row(), 3);
+      summaries.append(record->diagnosticSummary() + QLatin1Char('\n') +
+          QCoreApplication::translate("Workbench", "结果") + QStringLiteral(": ") +
+          (result ? result->text() : QString()));
+    }
+  }
+  if (summaries.isEmpty()) return;
+  QApplication::clipboard()->setText(summaries.join(QStringLiteral("\n\n")));
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "任务摘要已复制"), 3000);
+}
+
+void MainWindow::exportCurrentLogs() {
+  const QString directory = mWorkspace.hasProject() ? mWorkspace.rootPath() : QString();
+  const QString destination = QFileDialog::getSaveFileName(this,
+      QCoreApplication::translate("Workbench", "保存日志"), QDir(directory).filePath(QStringLiteral("gsw-session-log.txt")),
+      QCoreApplication::translate("Workbench", "文本文件 (*.txt);;所有文件 (*)"));
+  if (destination.isEmpty()) return;
+  QSaveFile file(destination);
+  file.setDirectWriteFallback(false);
+  const QByteArray text = mConsole->toPlainText().toUtf8();
+  if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size() || !file.commit()) {
+    showError(QCoreApplication::translate("Workbench", "无法导出日志"),
+        QCoreApplication::translate("Workbench", "无法写入日志：%1").arg(file.errorString()));
+    return;
+  }
+  statusBar()->showMessage(QCoreApplication::translate("Workbench", "日志已导出：%1")
+      .arg(QDir::toNativeSeparators(destination)), 5000);
+}
+
+void MainWindow::remapTaskOutputDirectories(const QString &oldRoot, const QString &newRoot) {
+  if (oldRoot.isEmpty() || newRoot.isEmpty() || pathsReferToSameLocation(oldRoot, newRoot)) return;
+  for (const auto &record : std::as_const(mTaskRecords))
+    record->remapManagedOutputDirectory(oldRoot, newRoot);
+  updateTaskRecordActions();
+}
+
 void MainWindow::connectServices() {
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
           &MainWindow::updateWorkspaceUi);
@@ -2009,30 +2184,23 @@ void MainWindow::connectServices() {
           [this](const bool modified) { setWindowModified(modified); });
   connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this,
           [this](const bool) { updateActionAvailability(); });
+  connect(&mProcessSupervisor, &ProcessSupervisor::taskLaunchRequested, this,
+          &MainWindow::beginTaskRecord);
   connect(&mProcessSupervisor, &ProcessSupervisor::taskStarted, this,
           [this](const QString &taskName) {
-            mActiveWorkerState.clear();
-            mLastWorkerStatus.reset();
-            mActiveTaskRow = mTaskTable->rowCount();
-            mTaskTable->insertRow(mActiveTaskRow);
-            auto *state = new QTableWidgetItem(QCoreApplication::translate("Workbench", "运行中"));
-            state->setData(Qt::UserRole + 31, QStringLiteral("running"));
-            state->setForeground(taskStateColor(QStringLiteral("running")));
-            mTaskTable->setItem(mActiveTaskRow, 0, state);
-            mTaskTable->setItem(mActiveTaskRow, 1,
-                                new QTableWidgetItem(taskName));
-            mTaskTable->setItem(
-                mActiveTaskRow, 2,
-                new QTableWidgetItem(QDateTime::currentDateTime().toString(
-                    QStringLiteral("HH:mm:ss"))));
-            mTaskTable->setItem(mActiveTaskRow, 3,
-                                new QTableWidgetItem(QStringLiteral("-")));
+            if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
+              auto *state = mTaskTable->item(mActiveTaskRow, 0);
+              state->setData(Qt::UserRole + 31, QStringLiteral("running"));
+              state->setText(QCoreApplication::translate("Workbench", "运行中"));
+              state->setForeground(taskStateColor(QStringLiteral("running")));
+              if (auto record = taskRecordForRow(mActiveTaskRow)) record->setState(QStringLiteral("running"));
+            }
             if (mPendingMesh && mPendingMesh->taskName == taskName) {
               mTaskTable->item(mActiveTaskRow, 1)->setData(Qt::UserRole + 32,
                   taskName.section(QStringLiteral(" | "), 1));
               mViewport->beginProcessingPreview();
               mViewport->setProcessingStage(QStringLiteral("environment"));
-              mTaskTabs->setCurrentWidget(mTaskTable);
+              mTaskTabs->setCurrentWidget(mTaskPage);
             }
             if (mPendingTraining.has_value() &&
                 mPendingTraining->taskName == taskName) {
@@ -2515,6 +2683,8 @@ void MainWindow::connectServices() {
                          : cancelled        ? QCoreApplication::translate("Workbench", "已取消")
                                             : QCoreApplication::translate("Workbench", "失败"));
           state->setForeground(taskStateColor(state->data(Qt::UserRole + 31).toString()));
+          if (auto record = taskRecordForRow(mActiveTaskRow))
+            record->finish(state->data(Qt::UserRole + 31).toString());
           if (!effectiveSucceeded) {
             mTaskTable->item(mActiveTaskRow, 3)
                 ->setText(!completionDetail.isEmpty() ? completionDetail
@@ -2560,6 +2730,7 @@ void MainWindow::connectServices() {
           }
         }
         mActiveTaskRow = -1;
+        updateTaskRecordActions();
         mActiveWorkerState.clear();
         updateTrainingActions();
         rebuildProjectTree();
@@ -3948,6 +4119,7 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
                                ? QCoreApplication::translate("Workbench", "正在保存工程状态…")
                                : QCoreApplication::translate("Workbench", "正在保存工程与托管数据…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
+  const QString oldRoot = mWorkspace.rootPath();
   const bool saved = taskRunning ? mWorkspace.saveManifest(target, &error)
                                  : mWorkspace.save(target, &error);
   QApplication::restoreOverrideCursor();
@@ -3956,6 +4128,7 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
     showError(QCoreApplication::translate("Workbench", "无法保存工程"), error);
     return false;
   }
+  remapTaskOutputDirectories(oldRoot, mWorkspace.rootPath());
   if (!taskRunning && !mWorkspace.isUntitled() &&
       !mWorkspace.hasPendingDataMigration()) {
     if (mCurrentRecovery.has_value() &&
@@ -4000,6 +4173,7 @@ bool MainWindow::finalizePendingProjectSave(QString *errorMessage) {
   if (!mWorkspace.finalizeDataMigration(errorMessage)) {
     return false;
   }
+  remapTaskOutputDirectories(oldRoot, mWorkspace.rootPath());
   if (mCurrentRecovery.has_value() &&
       pathsReferToSameLocation(mCurrentRecovery->rootPath, oldRoot)) {
     QString discardError;
@@ -4982,11 +5156,15 @@ void MainWindow::removeSelectedTaskRecords() {
   QPersistentModelIndex active;
   if (mActiveTaskRow >= 0) active = mTaskTable->model()->index(mActiveTaskRow, 0);
   for (const auto &row : rows)
-    if (row.isValid() && !(mProcessSupervisor.isRunning() && row == active))
+    if (row.isValid() && !(mProcessSupervisor.isRunning() && row == active)) {
+      if (const auto *state = mTaskTable->item(row.row(), 0))
+        mTaskRecords.remove(state->data(Qt::UserRole + 35).toULongLong());
       mTaskTable->removeRow(row.row());
+    }
   mActiveTaskRow = active.isValid() ? active.row() : -1;
   rebuildProjectTree();
   updateActionAvailability();
+  updateTaskRecordActions();
 }
 
 void MainWindow::clearTaskHistory() {
@@ -5004,8 +5182,10 @@ void MainWindow::clearTaskHistory() {
     return;
   }
   mTaskTable->setRowCount(0);
+  mTaskRecords.clear();
   mConsole->clear();
   mActiveTaskRow = -1;
+  updateTaskRecordActions();
   rebuildProjectTree();
   updateActionAvailability();
   statusBar()->showMessage(QCoreApplication::translate("Workbench", "任务记录已清空"), 5000);
@@ -5482,12 +5662,16 @@ void MainWindow::updateTaskLabels() {
     if (!state) continue;
     const QString key = state->data(Qt::UserRole + 31).toString();
     if (!key.isEmpty()) state->setForeground(taskStateColor(key));
-    if (!key.isEmpty()) state->setText(key == QStringLiteral("running")
+    if (!key.isEmpty()) state->setText(key == QStringLiteral("starting")
+        ? QCoreApplication::translate("Workbench", "正在启动") : key == QStringLiteral("running")
         ? QCoreApplication::translate("Workbench", "运行中") : workerStageLabel(key));
     if (auto *name = mTaskTable->item(row, 1); name && name->data(Qt::UserRole + 32).isValid()) {
       const QString method = name->data(Qt::UserRole + 32).toString();
       name->setText(QCoreApplication::translate("Workbench", "生成网格") +
           (method.isEmpty() ? QString() : QStringLiteral(" | ") + method));
+    }
+    if (auto record = taskRecordForRow(row)) {
+      if (const auto *name = mTaskTable->item(row, 1)) record->setName(name->text());
     }
     if (auto *detail = mTaskTable->item(row, 3); detail && detail->data(Qt::UserRole + 34).isValid()) {
       QString text = QCoreApplication::translate("Workbench", detail->data(Qt::UserRole + 34).toString().toUtf8().constData());
@@ -5879,12 +6063,9 @@ void MainWindow::updateInspector() {
 }
 
 void MainWindow::appendLog(const QString &text) {
-  mConsole->moveCursor(QTextCursor::End);
-  mConsole->insertPlainText(text);
-  if (!text.endsWith(QLatin1Char('\n'))) {
-    mConsole->insertPlainText(QStringLiteral("\n"));
-  }
-  mConsole->moveCursor(QTextCursor::End);
+  const QString line = text.endsWith(QLatin1Char('\n')) ? text : text + QLatin1Char('\n');
+  if (auto record = taskRecordForRow(mActiveTaskRow)) record->appendLog(line);
+  TaskRecord::appendToLogView(mConsole, line, mFollowLogsAction->isChecked());
 }
 
 void MainWindow::appendTaskEvent(const QString &text) {

@@ -6,6 +6,8 @@
 #include "WorkspaceDocument.h"
 
 #include <QMainWindow>
+#include <QHash>
+#include <QSharedPointer>
 #include <QSize>
 #include <QStringList>
 
@@ -30,6 +32,7 @@ class QTreeWidget;
 namespace gsw {
 
 class TrainingMonitorWidget;
+class TaskRecord;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -51,6 +54,7 @@ private:
   friend bool runTrainingResumeSmokeTest(MainWindow &window);
   friend bool runMeshGenerationSmokeTest(MainWindow &window);
   friend bool runProcessingCompletionSmokeTest(MainWindow &window);
+  friend bool runTaskActionsSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -150,6 +154,14 @@ private:
   void clearSceneImport();
   void clearTaskHistory();
   void removeSelectedTaskRecords();
+  void beginTaskRecord(const QString &taskName, const QString &workingDirectory);
+  void updateTaskRecordActions();
+  QSharedPointer<TaskRecord> taskRecordForRow(int row) const;
+  void showSelectedTaskDetails();
+  void openSelectedTaskFolder();
+  void copySelectedTaskSummaries();
+  void exportCurrentLogs();
+  void remapTaskOutputDirectories(const QString &oldRoot, const QString &newRoot);
   void runEnvironmentCheck();
   void startReconstruction();
   void startTraining();
@@ -184,8 +196,17 @@ private:
   QDockWidget *mTaskDock = nullptr;
   QTreeWidget *mProjectTree = nullptr;
   QTabWidget *mTaskTabs = nullptr;
+  QWidget *mTaskPage = nullptr;
+  QWidget *mLogPage = nullptr;
   QTableWidget *mTaskTable = nullptr;
   QPlainTextEdit *mConsole = nullptr;
+  QHash<quint64, QSharedPointer<TaskRecord>> mTaskRecords;
+  quint64 mNextTaskRecordId = 1;
+  QAction *mTaskDetailsAction = nullptr;
+  QAction *mOpenTaskFolderAction = nullptr;
+  QAction *mCopyTaskSummaryAction = nullptr;
+  QAction *mFollowLogsAction = nullptr;
+  QAction *mExportLogsAction = nullptr;
   TrainingMonitorWidget *mTrainingMonitor = nullptr;
   QToolBar *mRenderToolbar = nullptr;
   QToolBar *mSelectionToolbar = nullptr;

@@ -11,6 +11,7 @@
 #include "ProcessingCompletionSmokeTest.h"
 #include "SpzSmokeTest.h"
 #include "SmokeTestSettings.h"
+#include "TaskActionsSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -157,6 +158,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
+  QCommandLineOption taskActionsSmokeOption(QStringLiteral("smoke-test-task-actions"),
+      QStringLiteral("Verify shared task details, retained logs and failed-launch records."));
+  parser.addOption(taskActionsSmokeOption);
   QCommandLineOption trainingResumeSmokeOption(QStringLiteral("smoke-test-training-resume"),
       QStringLiteral("Verify pause/resume actions, state, translations and project recovery."));
   parser.addOption(trainingResumeSmokeOption);
@@ -277,7 +281,7 @@ int main(int argc, char *argv[]) {
       parser.isSet(referenceAxesSmokeTestOption);
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
-  const bool smokeTest = parser.isSet(smokeTestOption) ||
+  const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(taskActionsSmokeOption) ||
                          parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
@@ -303,7 +307,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(processingCompletionOption)) {
+  if (parser.isSet(taskActionsSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runTaskActionsSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(processingCompletionOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runProcessingCompletionSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

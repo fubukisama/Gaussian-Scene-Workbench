@@ -95,6 +95,12 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
   src/MainWindow.h
+  src/TaskRecord.cpp
+  src/TaskRecord.h
+  src/TaskDetailsDialog.cpp
+  src/TaskDetailsDialog.h
+  src/TaskActionsSmokeTest.cpp
+  src/TaskActionsSmokeTest.h
   src/MultiItemList.cpp
   src/MultiItemList.h
   src/CatalogPathGuard.h
@@ -345,6 +351,14 @@ if(BUILD_TESTING)
     NAME native_adaptive_display_layout
     COMMAND GaussianSceneWorkbench --smoke-test-display-layout
   )
+  foreach(GSW_TASK_ACTION_LOCALE zh_CN en_US ja_JP)
+    add_test(NAME native_task_actions_${GSW_TASK_ACTION_LOCALE}
+      COMMAND GaussianSceneWorkbench --smoke-test-task-actions --language ${GSW_TASK_ACTION_LOCALE})
+    set_tests_properties(native_task_actions_${GSW_TASK_ACTION_LOCALE} PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "QT_OPENGL=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   add_test(
     NAME native_exit_confirmation
     COMMAND GaussianSceneWorkbench --smoke-test-exit-confirmation
@@ -511,6 +525,22 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+
+    qt_add_executable(gsw_task_record_tests
+      tests/TaskRecordTests.cpp
+      src/TaskRecord.cpp
+      src/TaskRecord.h
+    )
+    target_include_directories(gsw_task_record_tests PRIVATE src)
+    target_link_libraries(gsw_task_record_tests PRIVATE Qt6::Widgets Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_task_record_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME task_records COMMAND gsw_task_record_tests)
+    set_tests_properties(task_records PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_model_export_tests
       tests/ModelExportTests.cpp

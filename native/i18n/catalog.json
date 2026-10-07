@@ -6387,5 +6387,27 @@
     "zh_CN": "烘焙镜像网格请使用 GLB、OBJ 或 STL；PLY 可导出其原始坐标。",
     "en_US": "To bake a mirrored mesh, choose GLB, OBJ or STL; PLY can preserve its original coordinates.",
     "ja_JP": "ミラーリングされたメッシュのベイクには GLB、OBJ、STL を使用してください。PLY では元の座標を保持してエクスポートできます。"
-  }
+  },
+  "任务详情": {"zh_CN":"任务详情","en_US":"Task Details","ja_JP":"タスクの詳細"},
+  "打开任务文件夹": {"zh_CN":"打开任务文件夹","en_US":"Open Task Folder","ja_JP":"タスクのフォルダーを開く"},
+  "复制任务摘要": {"zh_CN":"复制任务摘要","en_US":"Copy Task Summary","ja_JP":"タスクの概要をコピー"},
+  "跟随最新日志": {"zh_CN":"跟随最新日志","en_US":"Follow Latest Logs","ja_JP":"最新のログを追跡"},
+  "导出当前日志...": {"zh_CN":"导出当前日志...","en_US":"Export Current Logs...","ja_JP":"現在のログをエクスポート..."},
+  "任务日志仅在本次会话保留；每项任务最多保留最近 512 Ki 字符。": {"zh_CN":"任务日志仅在本次会话保留；每项任务最多保留最近 512 Ki 字符。","en_US":"Task logs are kept only for this session; each task retains up to the latest 512 Ki characters.","ja_JP":"タスクのログはこのセッションでのみ保持し、各タスクで最新の最大 512 Ki 文字を保存します。"},
+  "当前日志最多保留 10000 行；导出的是当前保留内容。": {"zh_CN":"当前日志最多保留 10000 行；导出的是当前保留内容。","en_US":"Current logs retain up to 10000 lines; export includes only the retained content.","ja_JP":"現在のログは最大 10000 行を保持し、エクスポートには保持中の内容のみが含まれます。"},
+  "任务摘要已复制": {"zh_CN":"任务摘要已复制","en_US":"Task summary copied","ja_JP":"タスクの概要をコピーしました"},
+  "任务文件夹不存在：%1": {"zh_CN":"任务文件夹不存在：%1","en_US":"Task folder does not exist: %1","ja_JP":"タスクのフォルダーが存在しません：%1"},
+  "无法打开任务文件夹：%1": {"zh_CN":"无法打开任务文件夹：%1","en_US":"Unable to open task folder: %1","ja_JP":"タスクのフォルダーを開けません：%1"},
+  "保存日志": {"zh_CN":"保存日志","en_US":"Save Logs","ja_JP":"ログを保存"},
+  "文本文件 (*.txt);;所有文件 (*)": {"zh_CN":"文本文件 (*.txt);;所有文件 (*)","en_US":"Text Files (*.txt);;All Files (*)","ja_JP":"テキストファイル (*.txt);;すべてのファイル (*)"},
+  "无法导出日志": {"zh_CN":"无法导出日志","en_US":"Unable to Export Logs","ja_JP":"ログをエクスポートできません"},
+  "日志已导出：%1": {"zh_CN":"日志已导出：%1","en_US":"Logs exported: %1","ja_JP":"ログをエクスポートしました：%1"},
+  "无法写入日志：%1": {"zh_CN":"无法写入日志：%1","en_US":"Unable to write logs: %1","ja_JP":"ログを書き込めません：%1"},
+  "正在启动": {"zh_CN":"正在启动","en_US":"Starting","ja_JP":"起動中"},
+  "结束时间": {"zh_CN":"结束时间","en_US":"End Time","ja_JP":"終了時刻"},
+  "未设置": {"zh_CN":"未设置","en_US":"Not Set","ja_JP":"未設定"},
+  "尚未结束": {"zh_CN":"尚未结束","en_US":"Not Finished","ja_JP":"未終了"},
+  "日志已截断，仅保留最近 %1 个字符": {"zh_CN":"日志已截断，仅保留最近 %1 个字符","en_US":"Log truncated; only the latest %1 characters are retained","ja_JP":"ログを切り詰め、最新の %1 文字のみを保持しています"},
+  "导出保留日志...": {"zh_CN":"导出保留日志...","en_US":"Export Retained Logs...","ja_JP":"保持中のログをエクスポート..."},
+  "保留日志": {"zh_CN":"保留日志","en_US":"Retained Logs","ja_JP":"保持中のログ"}
 }
