@@ -52,6 +52,35 @@ The desktop application only auto-discovers a backend beside its executable. Sou
 
 The build script discovers Qt/CMake/Ninja from `GSW_NATIVE_QT_ROOT`, the active Conda environment, common Miniforge/Miniconda locations, and the repository drive. Visual Studio 2022 C++ Build Tools are discovered automatically. Python 3.10 or newer is required for the worker test and staged-source syntax gates; these checks run for normal builds and `-Package` builds.
 
+With `BUILD_TESTING=ON` (the default), the CMake-selected Python also needs
+NumPy and Pillow for the real-framebuffer texture/text regression. Configure
+fails with an explicit dependency diagnostic rather than silently skipping it:
+
+```powershell
+& <Python3_EXECUTABLE> -m pip install numpy Pillow
+```
+
+`native_texture_text_*` checks all three UI languages in both themes using
+independent textured/untextured application processes. The title and tool-state
+glyphs must retain at least 98% matching pixels; the tiny model must still show
+the texture. `scripts/test_native_texture_text.py` additionally supports
+`--source <single-atlas.ply>`, `--paging resident|paged`, and
+`--texture-format ppm|png|jpg`. Real fixtures use independent copies and verify
+that the original model and texture hashes are unchanged. This common native
+mesh path covers imported Metashape models and the material previews generated
+by OpenMVS/SuGaR; untextured 2DGS, TSDF, and GS2Mesh outputs retain their existing
+rendering behavior. No training or optimizer-state capability is changed.
+
+中文：默认构建测试需要 NumPy 和 Pillow。纹理模型回归在三种界面语言、
+深浅两种主题中对比真实视口字形，同时确认贴图仍被绘制。真实模型仅使用
+独立副本，校验原模型和贴图未变；训练及优化器状态能力不受影响。
+
+日本語：既定のビルドテストには NumPy と Pillow が必要です。テクスチャ付き
+モデルの回帰テストは、3言語・明暗2テーマの実際のビューポート文字を比較し、
+テクスチャの描画も確認します。実モデルは独立したコピーのみを使用し、元の
+モデルと画像が変更されていないことを検証します。学習やオプティマイザーの
+状態に関する機能は変更しません。
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1
 ```

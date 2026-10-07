@@ -3518,9 +3518,14 @@ void NativeViewport::uploadPendingMeshTexture() {
     glTexParameterf(GL_TEXTURE_2D, kTextureAnisotropy,
                     std::min(maximumAnisotropy, 8.0F));
   }
+  // The context is shared with QPainter. Qt's 8-bit glyph rows are padded to
+  // four bytes, so leaking alignment 1 corrupts newly uploaded text glyphs.
+  GLint previousUnpackAlignment = 4;
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, &previousUnpackAlignment);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image.width(), image.height(), 0,
                GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
+  glPixelStorei(GL_UNPACK_ALIGNMENT, previousUnpackAlignment);
   glGenerateMipmap(GL_TEXTURE_2D);
   const GLenum uploadError = glGetError();
   glBindTexture(GL_TEXTURE_2D, 0);

@@ -89,6 +89,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/GaussianPerformanceSmokeTest.h
   src/MeshRenderingSmokeTest.cpp
   src/MeshRenderingSmokeTest.h
+  src/TextureTextSmokeTest.cpp
+  src/TextureTextSmokeTest.h
   src/ObservationNavigationSmokeTest.cpp
   src/ObservationNavigationSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
@@ -242,6 +244,16 @@ install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/2dgs-surfel R
 
 include(CTest)
 if(BUILD_TESTING)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import numpy; from PIL import Image"
+    RESULT_VARIABLE GSW_FRAMEBUFFER_QA_IMPORT_RESULT
+    ERROR_VARIABLE GSW_FRAMEBUFFER_QA_IMPORT_ERROR)
+  if(NOT GSW_FRAMEBUFFER_QA_IMPORT_RESULT EQUAL 0)
+    message(FATAL_ERROR
+      "Native framebuffer QA requires NumPy and Pillow in ${Python3_EXECUTABLE}. "
+      "Install with: ${Python3_EXECUTABLE} -m pip install numpy Pillow. "
+      "Import failure: ${GSW_FRAMEBUFFER_QA_IMPORT_ERROR}")
+  endif()
   set(GSW_TEST_OPENGL_BACKEND "desktop" CACHE STRING "OpenGL backend for native rendering tests")
   set_property(CACHE GSW_TEST_OPENGL_BACKEND PROPERTY STRINGS desktop software)
   if(NOT GSW_TEST_OPENGL_BACKEND MATCHES "^(desktop|software)$")
@@ -442,6 +454,19 @@ if(BUILD_TESTING)
     TIMEOUT 150
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  foreach(GSW_TEXT_LANGUAGE zh_CN en_US ja_JP)
+    foreach(GSW_TEXT_THEME light dark)
+      set(GSW_TEXT_TEST_NAME "native_texture_text_${GSW_TEXT_LANGUAGE}_${GSW_TEXT_THEME}")
+      add_test(NAME "${GSW_TEXT_TEST_NAME}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text.py"
+          --executable $<TARGET_FILE:GaussianSceneWorkbench>
+          --output-directory "${CMAKE_CURRENT_BINARY_DIR}/texture-text-captures"
+          --language "${GSW_TEXT_LANGUAGE}" --theme "${GSW_TEXT_THEME}")
+      set_tests_properties("${GSW_TEXT_TEST_NAME}" PROPERTIES TIMEOUT 85
+        ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    endforeach()
+  endforeach()
   set_tests_properties(native_light_gaussian_interaction native_light_observation_navigation
     native_light_mesh_generation PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
