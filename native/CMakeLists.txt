@@ -87,6 +87,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/GaussianGpuBuffer.h
   src/GaussianPerformanceSmokeTest.cpp
   src/GaussianPerformanceSmokeTest.h
+  src/MeshRenderingSmokeTest.cpp
+  src/MeshRenderingSmokeTest.h
   src/ObservationNavigationSmokeTest.cpp
   src/ObservationNavigationSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
@@ -432,6 +434,14 @@ if(BUILD_TESTING)
     COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation --theme light)
   add_test(NAME native_light_mesh_generation
     COMMAND GaussianSceneWorkbench --smoke-test-mesh-generation --theme light)
+  add_test(NAME native_paged_mesh_surface
+    COMMAND GaussianSceneWorkbench --smoke-test-mesh-rendering --theme dark)
+  add_test(NAME native_light_paged_mesh_surface
+    COMMAND GaussianSceneWorkbench --smoke-test-mesh-rendering --theme light)
+  set_tests_properties(native_paged_mesh_surface native_light_paged_mesh_surface PROPERTIES
+    TIMEOUT 150
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_light_gaussian_interaction native_light_observation_navigation
     native_light_mesh_generation PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="

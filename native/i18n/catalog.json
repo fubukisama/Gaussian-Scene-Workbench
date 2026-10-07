@@ -3678,6 +3678,11 @@
     "en_US": "Hierarchical Mesh LOD",
     "ja_JP": "階層メッシュ LOD"
   },
+  "网格分页预览": {
+    "zh_CN": "网格分页预览",
+    "en_US": "Paged Mesh Preview",
+    "ja_JP": "ページングメッシュプレビュー"
+  },
   "叶级细节": {
     "zh_CN": "叶级细节",
     "en_US": "Leaf-Level Detail",
@@ -3728,10 +3733,20 @@
     "en_US": " | UV · Vertex-color fallback",
     "ja_JP": " | UV · 頂点カラーへフォールバック"
   },
+  " | UV · 基础颜色回退": {
+    "zh_CN": " | UV · 基础颜色回退",
+    "en_US": " | UV · Base-color fallback",
+    "ja_JP": " | UV · 基本色へフォールバック"
+  },
   " | 顶点色": {
     "zh_CN": " | 顶点色",
     "en_US": " | Vertex colors",
     "ja_JP": " | 頂点カラー"
+  },
+  " | 基础颜色": {
+    "zh_CN": " | 基础颜色",
+    "en_US": " | Base color",
+    "ja_JP": " | 基本色"
   },
   " | 贴图警告": {
     "zh_CN": " | 贴图警告",

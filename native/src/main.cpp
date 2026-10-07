@@ -6,6 +6,7 @@
 #include "NativeViewport.h"
 #include "MultiSceneSmokeTest.h"
 #include "GaussianPerformanceSmokeTest.h"
+#include "MeshRenderingSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "ProcessingCompletionSmokeTest.h"
@@ -211,6 +212,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption gaussianPerformanceOption(QStringLiteral("smoke-test-gaussian-performance"),
       QStringLiteral("Measure input and frame latency with --smoke-scene."));
   parser.addOption(gaussianPerformanceOption);
+  QCommandLineOption meshRenderingOption(QStringLiteral("smoke-test-mesh-rendering"),
+      QStringLiteral("Verify continuous resident and paged mesh surfaces with --smoke-scene."));
+  parser.addOption(meshRenderingOption);
   QCommandLineOption observationNavigationOption(QStringLiteral("smoke-test-observation-navigation"),
       QStringLiteral("Verify navigation outside the observation trackball."));
   parser.addOption(observationNavigationOption);
@@ -377,6 +381,12 @@ int main(int argc, char *argv[]) {
           smokeTestFailureCode = capability.available ? 0 : 3;
           application.exit(smokeTestFailureCode);
         });
+  } else if (parser.isSet(meshRenderingOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runMeshRenderingSmokeTest(*viewport, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
   } else if (parser.isSet(gaussianPerformanceOption)) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();

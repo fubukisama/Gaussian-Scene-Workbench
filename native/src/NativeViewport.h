@@ -148,6 +148,7 @@ public:
   void setMaximumShDegree(int degree);
   [[nodiscard]] qsizetype renderedPointCount() const { return mScene->mRenderedPointCount; }
   [[nodiscard]] bool meshRenderingAvailable() const;
+  [[nodiscard]] bool meshPagingSettled() const;
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
     return mScene->mUploadedFullResolutionMeshTriangleCount;
   }

@@ -1616,6 +1616,32 @@ bool NativeViewport::meshRenderingAvailable() const {
          (mScene->mRenderedMeshIndexCount > 0 || pagedMeshAvailable());
 }
 
+bool NativeViewport::meshPagingSettled() const {
+  if (mScene->mMeshUploadPending || mScene->mMeshTextureUploadPending) {
+    return false;
+  }
+  if (!pagedMeshAvailable()) {
+    return true;
+  }
+  if (!mScene->mMeshCacheReadsInFlight.isEmpty() ||
+      !mScene->mPendingMeshCachePages.isEmpty()) {
+    return false;
+  }
+  // Cached ancestors inflate the uploaded triangle count without completing
+  // the visible surface. Readiness means every currently requested page is
+  // resident, including exact children rather than just their fallbacks.
+  return std::all_of(
+      mScene->mDesiredMeshCacheNodes.cbegin(), mScene->mDesiredMeshCacheNodes.cend(),
+      [this](const int nodeId) {
+        return std::any_of(
+            mScene->mFullResolutionMeshGpuChunks.cbegin(),
+            mScene->mFullResolutionMeshGpuChunks.cend(),
+            [nodeId](const FullResolutionMeshGpuChunk &chunk) {
+              return chunk.nodeId == nodeId;
+            });
+      });
+}
+
 bool NativeViewport::infiniteGridRenderingAvailable() const {
   return mGridShaderReady;
 }
@@ -3520,7 +3546,13 @@ void NativeViewport::updateMeshCacheSelection(
       mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
       (mViewSnapAnimation != nullptr &&
        mViewSnapAnimation->state() == QAbstractAnimation::Running);
-  const float refinementThresholdPixels = interacting ? 180.0F : 34.0F;
+  // Ancestor pages contain sampled original triangles, not a continuous
+  // simplified surface. Never stop at them just because their projected size
+  // is small or navigation is active; refine to exact pages when budget allows.
+  // Point previews keep their existing prefetch policy instead of loading
+  // full triangle pages that they do not draw.
+  const float refinementThresholdPixels = mScene->mRenderMode == RenderMode::Mesh
+      ? 0.0F : (interacting ? 180.0F : 34.0F);
   const qsizetype byteBudget = static_cast<qsizetype>(
       static_cast<long double>((mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) * 0.85L);
   const QVector3D eye = cameraPosition();
@@ -3619,11 +3651,18 @@ void NativeViewport::requestMissingMeshCachePages() {
                          return chunk.nodeId == nodeId;
                        });
   };
+  // Finished reads leave the in-flight set before GPU upload. Treat their
+  // queued pages as scheduled too, or repeated ancestor reads starve leaf pages.
+  QSet<int> queuedNodes;
+  for (const auto &page : std::as_const(mScene->mPendingMeshCachePages)) {
+    queuedNodes.insert(page.nodeId);
+  }
   QSet<int> needed;
   for (const int desired : std::as_const(mScene->mDesiredMeshCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0 && !isResident(nodeId)) {
       if (!mScene->mMeshCacheReadsInFlight.contains(nodeId) &&
+          !queuedNodes.contains(nodeId) &&
           !mScene->mMeshCacheFailedNodes.contains(nodeId)) {
         needed.insert(nodeId);
       }
@@ -3750,76 +3789,85 @@ void NativeViewport::uploadPendingMeshCachePages() {
       !mMeshProgram->isLinked()) {
     return;
   }
-  MeshCachePage page = mScene->mPendingMeshCachePages.takeFirst();
-  const bool alreadyResident = std::any_of(
-      mScene->mFullResolutionMeshGpuChunks.cbegin(),
-      mScene->mFullResolutionMeshGpuChunks.cend(),
-      [&page](const FullResolutionMeshGpuChunk &chunk) {
-        return chunk.nodeId == page.nodeId;
-      });
-  if (!alreadyResident && page.nodeId >= 0 &&
-      page.nodeId < mScene->mMeshCache.nodes.size()) {
-    const qsizetype vertexBytes =
-        page.vertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
-    const qsizetype indexBytes =
-        page.indices.size() * static_cast<qsizetype>(sizeof(quint32));
-    const qsizetype byteCount = vertexBytes + indexBytes;
-    evictMeshCacheUntilFits(byteCount);
-    FullResolutionMeshGpuChunk gpuChunk;
-    gpuChunk.nodeId = page.nodeId;
-    gpuChunk.indexCount = static_cast<GLsizei>(page.indices.size());
-    gpuChunk.byteCount = byteCount;
-    gpuChunk.lastUsedFrame = mScene->mMeshCacheFrameSerial;
-    const MeshCacheNode &node = mScene->mMeshCache.nodes.at(page.nodeId);
-    gpuChunk.boundsMinimum = node.boundsMinimum;
-    gpuChunk.boundsMaximum = node.boundsMaximum;
-    while (glGetError() != GL_NO_ERROR) {
+  // Drain small completed pages together, bounded by both work and wall time,
+  // rather than leaving the upload queue limited to one page per painted frame.
+  QElapsedTimer uploadBudget;
+  uploadBudget.start();
+  int uploadedPages = 0;
+  do {
+    MeshCachePage page = mScene->mPendingMeshCachePages.takeFirst();
+    const bool alreadyResident = std::any_of(
+        mScene->mFullResolutionMeshGpuChunks.cbegin(),
+        mScene->mFullResolutionMeshGpuChunks.cend(),
+        [&page](const FullResolutionMeshGpuChunk &chunk) {
+          return chunk.nodeId == page.nodeId;
+        });
+    if (!alreadyResident && page.nodeId >= 0 &&
+        page.nodeId < mScene->mMeshCache.nodes.size()) {
+      const qsizetype vertexBytes =
+          page.vertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
+      const qsizetype indexBytes =
+          page.indices.size() * static_cast<qsizetype>(sizeof(quint32));
+      const qsizetype byteCount = vertexBytes + indexBytes;
+      evictMeshCacheUntilFits(byteCount);
+      FullResolutionMeshGpuChunk gpuChunk;
+      gpuChunk.nodeId = page.nodeId;
+      gpuChunk.indexCount = static_cast<GLsizei>(page.indices.size());
+      gpuChunk.byteCount = byteCount;
+      gpuChunk.lastUsedFrame = mScene->mMeshCacheFrameSerial;
+      const MeshCacheNode &node = mScene->mMeshCache.nodes.at(page.nodeId);
+      gpuChunk.boundsMinimum = node.boundsMinimum;
+      gpuChunk.boundsMaximum = node.boundsMaximum;
+      while (glGetError() != GL_NO_ERROR) {
+      }
+      glGenVertexArrays(1, &gpuChunk.vertexArray);
+      glGenBuffers(1, &gpuChunk.vertexBuffer);
+      glGenBuffers(1, &gpuChunk.indexBuffer);
+      glBindVertexArray(gpuChunk.vertexArray);
+      glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.vertexBuffer);
+      glBufferData(GL_ARRAY_BUFFER, vertexBytes, page.vertices.constData(),
+                   GL_STATIC_DRAW);
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+                            nullptr);
+      glEnableVertexAttribArray(1);
+      glVertexAttribPointer(
+          1, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+          reinterpret_cast<const void *>(offsetof(MeshVertex, red)));
+      glEnableVertexAttribArray(2);
+      glVertexAttribPointer(
+          2, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+          reinterpret_cast<const void *>(offsetof(MeshVertex, normalX)));
+      glEnableVertexAttribArray(3);
+      glVertexAttribPointer(
+          3, 2, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+          reinterpret_cast<const void *>(offsetof(MeshVertex, textureU)));
+      glEnableVertexAttribArray(4);
+      glVertexAttribPointer(
+          4, 1, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
+          reinterpret_cast<const void *>(offsetof(MeshVertex, textureWeight)));
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpuChunk.indexBuffer);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, page.indices.constData(),
+                   GL_STATIC_DRAW);
+      const GLenum uploadError = glGetError();
+      if (uploadError == GL_NO_ERROR) {
+        mScene->mMeshCacheResidentBytes += byteCount;
+        mScene->mFullResolutionMeshGpuChunks.append(gpuChunk);
+      } else {
+        glDeleteBuffers(1, &gpuChunk.indexBuffer);
+        glDeleteBuffers(1, &gpuChunk.vertexBuffer);
+        glDeleteVertexArrays(1, &gpuChunk.vertexArray);
+        mScene->mMeshCacheFailedNodes.insert(page.nodeId);
+        mScene->mMeshCacheError =
+            QCoreApplication::translate("Workbench", "GPU memory could not accept mesh-cache node %1.")
+                .arg(page.nodeId);
+      }
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glBindVertexArray(0);
     }
-    glGenVertexArrays(1, &gpuChunk.vertexArray);
-    glGenBuffers(1, &gpuChunk.vertexBuffer);
-    glGenBuffers(1, &gpuChunk.indexBuffer);
-    glBindVertexArray(gpuChunk.vertexArray);
-    glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.vertexBuffer);
-    glBufferData(GL_ARRAY_BUFFER, vertexBytes, page.vertices.constData(),
-                 GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
-                          nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
-        reinterpret_cast<const void *>(offsetof(MeshVertex, red)));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(
-        2, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
-        reinterpret_cast<const void *>(offsetof(MeshVertex, normalX)));
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(
-        3, 2, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
-        reinterpret_cast<const void *>(offsetof(MeshVertex, textureU)));
-    glEnableVertexAttribArray(4);
-    glVertexAttribPointer(
-        4, 1, GL_FLOAT, GL_FALSE, sizeof(MeshVertex),
-        reinterpret_cast<const void *>(offsetof(MeshVertex, textureWeight)));
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpuChunk.indexBuffer);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, page.indices.constData(),
-                 GL_STATIC_DRAW);
-    const GLenum uploadError = glGetError();
-    if (uploadError == GL_NO_ERROR) {
-      mScene->mMeshCacheResidentBytes += byteCount;
-      mScene->mFullResolutionMeshGpuChunks.append(gpuChunk);
-    } else {
-      glDeleteBuffers(1, &gpuChunk.indexBuffer);
-      glDeleteBuffers(1, &gpuChunk.vertexBuffer);
-      glDeleteVertexArrays(1, &gpuChunk.vertexArray);
-      mScene->mMeshCacheFailedNodes.insert(page.nodeId);
-      mScene->mMeshCacheError =
-          QCoreApplication::translate("Workbench", "GPU memory could not accept mesh-cache node %1.")
-              .arg(page.nodeId);
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-  }
+    ++uploadedPages;
+  } while (!mScene->mPendingMeshCachePages.isEmpty() && uploadedPages < 8 &&
+           uploadBudget.elapsed() < 4);
   mScene->mUploadedFullResolutionMeshTriangleCount = 0;
   for (const FullResolutionMeshGpuChunk &chunk :
        std::as_const(mScene->mFullResolutionMeshGpuChunks)) {
@@ -6731,7 +6779,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                      mScene->mProgressiveUploadActive
                          ? QCoreApplication::translate("Workbench", "磁盘分页")
                          : mInteractionLodActive
-                               ? QCoreApplication::translate("Workbench", "层级 Mesh LOD")
+                               ? QCoreApplication::translate("Workbench", "网格分页预览")
                                : QCoreApplication::translate("Workbench", "叶级细节"),
                      formatCount(mScene->mDrawnFullResolutionMeshTriangleCount),
                      formatCount(mScene->mUploadedFullResolutionMeshTriangleCount));
@@ -6778,9 +6826,9 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                    .arg(mScene->mMeshTextureSize.width())
                    .arg(mScene->mMeshTextureSize.height());
     } else if (mScene->mMeshHasTextureCoordinates) {
-      count += QCoreApplication::translate("Workbench", " | UV · 顶点色回退");
+      count += QCoreApplication::translate("Workbench", " | UV · 基础颜色回退");
     } else {
-      count += QCoreApplication::translate("Workbench", " | 顶点色");
+      count += QCoreApplication::translate("Workbench", " | 基础颜色");
     }
     if (!mScene->mMeshTextureError.isEmpty()) {
       count += QCoreApplication::translate("Workbench", " | 贴图警告");
