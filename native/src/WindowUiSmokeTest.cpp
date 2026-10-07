@@ -16,8 +16,10 @@
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QInputDialog>
+#include <QImage>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QLabel>
 #include <QListView>
 #include <QMainWindow>
 #include <QMessageBox>
@@ -29,8 +31,12 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
+#include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -76,6 +82,143 @@ void captionDoubleClick(QWidget &window) {
 #endif
 }
 } // namespace
+
+bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
+  bool passed = true;
+  const QString locale = AppLanguage::current();
+  const auto check = [&](bool condition, const char *message) {
+    if (!condition) { qWarning() << "Window appearance smoke:" << message; passed = false; }
+  };
+  const QString shots = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
+  if (!shots.isEmpty()) QDir().mkpath(shots);
+  auto *import = workbench.findChild<QAction *>(QStringLiteral("importSceneAction"));
+  check(import && import->isEnabled(), "real model-import action is available");
+  if (!import || !import->isEnabled()) return false;
+
+  const auto checkImportDialog = [&](const QString &suffix, const int requestedScale) {
+    bool observed = false;
+    QElapsedTimer deadline;
+    deadline.start();
+    QTimer inspect;
+    inspect.setInterval(20);
+    QObject::connect(&inspect, &QTimer::timeout, &workbench, [&] {
+      auto *file = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+      if (!file || !file->isVisible()) {
+        if (deadline.elapsed() > 2500) {
+          check(false, "model-import action presents a real Qt file dialog");
+          if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) dialog->reject();
+          inspect.stop();
+        }
+        return;
+      }
+      // Let the dialog's own queued show/layout work finish before observing it.
+      inspect.stop();
+      QTimer::singleShot(80, file, [&, file] {
+        observed = true;
+        const int scale = qApp->property("gswUiScalePercent").toInt();
+        const QRect available = file->screen()->availableGeometry();
+        // Independent worked examples from the requested 640 logical-pixel
+        // baseline, rather than the production AppTheme sizing helper.
+        const int specifiedWidth = requestedScale == 150 ? 960 : 640;
+        const int expectedWidth = std::min(specifiedWidth, available.width() - 32);
+        qInfo() << "Window appearance geometry:" << file->size() << "DPR" << file->devicePixelRatioF()
+                << "scale" << scale << "minimum width" << expectedWidth;
+        check(file->width() >= expectedWidth,
+              "model-import dialog initially has the requested wide filename area without manual resizing");
+        check(available.contains(file->frameGeometry()), "initial model-import dialog stays inside the current screen");
+        if (!shots.isEmpty())
+          check(file->grab().save(QDir(shots).filePath(suffix + QStringLiteral("-import-default.png"))),
+                "initial import-dialog screenshot");
+        // The default must not become a forced minimum or reset an in-progress
+        // dialog when presentation changes. Observe only public dialog state.
+        const QSize userSize(std::max(file->minimumWidth(), expectedWidth - 120), file->height());
+        file->resize(userSize);
+        settle();
+        const QSize actualUserSize = file->size();
+        AppLanguage::apply(locale == QStringLiteral("en_US")
+                               ? QStringLiteral("ja_JP") : QStringLiteral("en_US"), false);
+        settle();
+        check(file->size() == actualUserSize, "language change preserves user-resized import dialog dimensions");
+        AppLanguage::apply(locale, false);
+        settle();
+        check(file->size() == actualUserSize, "restoring language retains the user's narrower import dialog size");
+        const UiTheme originalTheme = AppTheme::currentTheme();
+        auto *otherTheme = workbench.findChild<QAction *>(originalTheme == UiTheme::Light
+            ? QStringLiteral("darkThemeAction") : QStringLiteral("lightThemeAction"));
+        auto *restoreTheme = workbench.findChild<QAction *>(originalTheme == UiTheme::Light
+            ? QStringLiteral("lightThemeAction") : QStringLiteral("darkThemeAction"));
+        check(otherTheme && restoreTheme, "live appearance actions are available while importing");
+        if (otherTheme && restoreTheme) {
+          otherTheme->trigger(); settle();
+          check(file->size() == actualUserSize, "appearance change preserves user-resized import dialog dimensions");
+          restoreTheme->trigger(); settle();
+          check(file->size() == actualUserSize, "restoring appearance retains the user's narrower import dialog size");
+        }
+        file->reject();
+      });
+    });
+    inspect.start();
+    import->trigger();
+    inspect.stop();
+    check(observed, "initial import-dialog geometry was observed through the real action");
+  };
+
+  auto *toolbar = workbench.findChild<QToolBar *>(QStringLiteral("selectionToolbar"));
+  auto *radius = toolbar ? toolbar->findChild<QLabel *>(QStringLiteral("mutedLabel")) : nullptr;
+  check(toolbar && radius, "real selection toolbar exposes its brush-radius label");
+  const auto checkToolbar = [&](const QString &suffix) {
+    if (toolbar && radius) {
+      toolbar->show();
+      workbench.showMaximized();
+      settle();
+      check(radius->isVisible(), "brush-radius label is visible in the actual toolbar");
+      check(radius->text() == QCoreApplication::translate("Workbench", "半径"),
+            "brush-radius label retains the selected live language");
+      const QImage toolbarImage = toolbar->grab().toImage();
+      check(!toolbarImage.isNull(), "actual toolbar and label paint into screenshots");
+      if (!toolbarImage.isNull()) {
+        // Observe the composed toolbar, not QLabel::grab(): a correctly
+        // transparent label's isolated image legitimately has alpha zero.
+        const QPoint corner = radius->mapTo(toolbar, QPoint(1, 1));
+        const qreal dpr = toolbarImage.devicePixelRatio();
+        const QPoint pixel(qRound(corner.x() * dpr), qRound(corner.y() * dpr));
+        check(toolbarImage.rect().contains(pixel), "visible brush-radius background lies inside the real toolbar image");
+        if (!toolbarImage.rect().contains(pixel)) return;
+        const QColor labelBackground = toolbarImage.pixelColor(pixel);
+        const QColor toolbarBackground = toolbarImage.pixelColor(3, 3);
+        const int difference = std::max({std::abs(labelBackground.red() - toolbarBackground.red()),
+                                         std::abs(labelBackground.green() - toolbarBackground.green()),
+                                         std::abs(labelBackground.blue() - toolbarBackground.blue())});
+        qInfo() << "Window appearance backgrounds:" << labelBackground << toolbarBackground << "difference" << difference;
+        check(difference <= 6, "brush-radius label paints the toolbar background, not a contrasting rectangle");
+        if (!shots.isEmpty())
+          check(toolbarImage.save(QDir(shots).filePath(suffix + QStringLiteral("-selection-toolbar.png"))),
+                "selection-toolbar background screenshot");
+      }
+    }
+  };
+  auto *light = workbench.findChild<QAction *>(QStringLiteral("lightThemeAction"));
+  auto *dark = workbench.findChild<QAction *>(QStringLiteral("darkThemeAction"));
+  check(light && dark, "actual light and dark appearance menu actions are available");
+  if (light && dark) for (auto *theme : {light, dark}) {
+    theme->trigger();
+    for (const int scale : {90, 100, 150}) {
+      QAction *scaleAction = nullptr;
+      for (auto *action : workbench.findChildren<QAction *>())
+        if (action->isCheckable() && action->data().toInt() == scale) { scaleAction = action; break; }
+      check(scaleAction != nullptr, "real manual UI-scale command is available");
+      if (!scaleAction) continue;
+      scaleAction->trigger(); settle();
+      check(qApp->property("gswUiScalePercent").toInt() == scale, "appearance matrix uses the real manual font scale");
+      const QString suffix = locale + QLatin1Char('-') + theme->data().toString() + QLatin1Char('-') + QString::number(scale);
+      qInfo().noquote() << "Window appearance scenario:" << suffix;
+      checkImportDialog(suffix, scale);
+      checkToolbar(suffix);
+    }
+  }
+  qInfo().noquote() << "Window appearance smoke:" << locale << (passed ? "PASS" : "FAIL");
+  return passed;
+}
 
 bool runWindowUiSmokeTest(QMainWindow &workbench) {
   bool passed = true;

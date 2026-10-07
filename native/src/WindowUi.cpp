@@ -18,6 +18,7 @@
 #include <QPalette>
 #include <QStandardPaths>
 #include <QScopedValueRollback>
+#include <QScreen>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
@@ -150,7 +151,10 @@ protected:
       // QFileDialog restores its native saved header state in showEvent,
       // after application polish/show filters. Apply the layout contract once
       // that restoration has finished, rather than racing its initial setup.
-      QTimer::singleShot(0, this, [this] { refreshFileLayout(); });
+      QTimer::singleShot(0, this, [this] {
+        refreshFileLayout();
+        applyInitialFileWidth();
+      });
     }
     if (watched == mWindow && (event->type() == QEvent::LanguageChange ||
         event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
@@ -192,6 +196,31 @@ protected:
   }
 
 private:
+  void applyInitialFileWidth() {
+    auto *file = qobject_cast<QFileDialog *>(mWindow);
+    if (!file || mInitialFileWidthApplied) return;
+    mInitialFileWidthApplied = true;
+    if (file->isMaximized() || file->isFullScreen() || !file->screen()) return;
+    const QRect available = file->screen()->availableGeometry();
+    const int scale = qApp->property("gswUiScalePercent").toInt();
+    // A compact font must not reduce the user's requested filename area.
+    // Apply after Qt restores its dialog geometry, once per dialog instance.
+    // This is an initial size, not a minimum: later user resizing is untouched.
+    const int preferred = std::max(640, AppTheme::scaled(640, scale));
+    const int width = std::min(std::max(file->width(), preferred),
+                               std::max(1, available.width() - 32));
+    if (width == file->width()) return;
+    const QPoint center = file->frameGeometry().center();
+    file->resize(width, file->height());
+    QRect frame = file->frameGeometry();
+    frame.moveCenter(center);
+    const QRect inset = available.adjusted(16, 16, -16, -16);
+    const int left = std::clamp(frame.left(), inset.left(),
+                               std::max(inset.left(), inset.right() - frame.width() + 1));
+    const int top = std::clamp(frame.top(), inset.top(),
+                              std::max(inset.top(), inset.bottom() - frame.height() + 1));
+    file->move(left, top);
+  }
   void allowExpansion() {
     if (auto *layout = mWindow->layout(); layout && layout->sizeConstraint() == QLayout::SetFixedSize)
       layout->setSizeConstraint(QLayout::SetMinimumSize);
@@ -299,6 +328,7 @@ private:
   QRect mNormalGeometry;
   bool mWasMaximized = false;
   bool mChangingState = false;
+  bool mInitialFileWidthApplied = false;
   quint64 mStateRevision = 0;
 };
 

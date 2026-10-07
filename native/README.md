@@ -138,6 +138,54 @@ Gaussian PLY fields and checkpoint, and opens the resulting project with the
 native executable when a local build is available. Use `-WorkRoot` to choose a
 different empty directory; the script never deletes an existing run.
 
+## Complete mesh loading and compact UI
+
+Model-import and other Qt file dialogs start at 640 logical pixels wide (960
+at 150% UI scale), bounded by the current screen. Their height and later manual
+resizing are preserved. Toolbar labels use the surrounding toolbar background
+in light/dark appearance and all three live languages.
+
+The shared native mesh loader no longer samples resident faces above two
+million. It loads complete meshes under five-million vertex/face safety
+ceilings and a conservative per-load byte allowance capped at 1 GiB, including
+the point-picking buffer, worst-case UV seams, indices and actual RGBA mip
+levels. Unexpected polygon fan expansion re-enters disk-backed loading from
+the original payload offset instead of truncating surfaces. The originals are
+not rewritten. This applies to imported meshes and 2DGS TSDF/OpenMVS, 3DGS
+SuGaR/GS2Mesh outputs alike; training state is unchanged.
+
+Paging remains for larger models. A cache parent that already contains all its
+valid source triangles is complete, so it is not needlessly refined. Missing
+pages use at most 16 concurrent reads and a bounded pending/in-flight byte
+allowance; GPU uploads retain the existing eight-page/four-ms scheduling bound.
+This is not new surface-preserving LOD, a hard aggregate VRAM guarantee, or
+proof of dense GS2Mesh quality. Existing resident objects are not reclassified
+when more are added; startup/new-batch loads can precede final GPU/scene-count
+information. Full textures remain separate from the paged-geometry allowance.
+
+Public regression commands: `--smoke-test-window-appearance` covers the real
+import action/dialog and composed toolbar at 90/100/150% in both themes;
+`--smoke-test-mesh-rendering` compares actual frames. Optional developer
+environment controls `GSW_MESH_TEST_DEFAULT_POLICY=1`,
+`GSW_MESH_TEST_GRID_SIDE=16|1024` and `GSW_MESH_TEST_MAX_COMPLETE_MS=5000|10000`
+select the bounded default/full-surface and latency gates. Measurements include
+GPU framebuffer readback and 40-ms sampling, not estimated FPS.
+
+中文：文件导入窗口默认加宽且可继续手动调整；工具栏标签随深浅主题继承底色。
+常规网格在受控字节预算内完整加载，不再因超过 200 万面而抽样或强制分页。
+超大模型仍分页；已包含完整三角形的父页不重复细分，读取并发与排队字节数均
+受限。覆盖导入模型及所有支持的网格生成结果，不改原始数据或训练状态。
+这不是新的连续曲面 LOD，也不保证全部对象与纹理的总显存硬上限。
+
+日本語：ファイル選択ダイアログの初期幅を広げ、手動でのサイズ変更を保持
+します。ツールバーのラベル背景は明暗テーマに追従します。通常のメッシュは
+制限付きのバイト予算内で完全に読み込み、200 万面を超えるだけで間引きや
+ページングを行いません。大規模モデルは引き続きページングし、完全な親
+ページは重複して細分化しません。読み込みの並列数と待機バイト数を制限
+します。対応する全メッシュ出力で共通し、元データや学習状態は変更しません。
+新しい表面維持 LOD や、全オブジェクトとテクスチャの総 VRAM 上限を保証
+する機能ではありません。
+
 ## License boundary
 
 LichtFeld Studio is used as an architecture and workflow reference. Its source is GPL-3.0-or-later. No LichtFeld source code is copied into this MIT-licensed native preview. Any future direct reuse must be isolated and licensed compatibly before it is merged.

@@ -123,7 +123,8 @@ public:
   static constexpr qsizetype DefaultMaximumPreviewPoints = 1'500'000;
   static constexpr qint64 DefaultMaximumEditablePoints = 10'000'000;
   static constexpr qint64 DefaultMaximumResidentMeshVertices = 5'000'000;
-  static constexpr qint64 DefaultMaximumResidentMeshFaces = 2'000'000;
+  static constexpr qint64 DefaultMaximumResidentMeshFaces = 5'000'000;
+  static constexpr qint64 DefaultMaximumResidentMeshBytes = 1024LL * 1024 * 1024;
 
   [[nodiscard]] static PointCloudData load(
       const QString &filePath,
@@ -131,7 +132,8 @@ public:
       qint64 maximumEditablePoints = DefaultMaximumEditablePoints,
       qint64 maximumResidentMeshVertices =
           DefaultMaximumResidentMeshVertices,
-      qint64 maximumResidentMeshFaces = DefaultMaximumResidentMeshFaces);
+      qint64 maximumResidentMeshFaces = DefaultMaximumResidentMeshFaces,
+      qint64 maximumResidentMeshBytes = DefaultMaximumResidentMeshBytes);
 
   [[nodiscard]] static bool writeFiltered(
       const QString &sourceFilePath, const QString &destinationFilePath,

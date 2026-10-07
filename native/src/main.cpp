@@ -14,6 +14,7 @@
 #include "SpzSmokeTest.h"
 #include "SmokeTestSettings.h"
 #include "TaskActionsSmokeTest.h"
+#include "WindowUiSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -160,6 +161,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
+  QCommandLineOption windowAppearanceSmokeOption(QStringLiteral("smoke-test-window-appearance"),
+      QStringLiteral("Verify initial import-dialog width and toolbar label appearance."));
+  parser.addOption(windowAppearanceSmokeOption);
   QCommandLineOption taskActionsSmokeOption(QStringLiteral("smoke-test-task-actions"),
       QStringLiteral("Verify shared task details, retained logs and failed-launch records."));
   parser.addOption(taskActionsSmokeOption);
@@ -299,6 +303,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
+                         parser.isSet(windowAppearanceSmokeOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
@@ -317,7 +322,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(taskActionsSmokeOption)) {
+  if (parser.isSet(windowAppearanceSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runWindowUiAppearanceSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(taskActionsSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runTaskActionsSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

@@ -135,6 +135,21 @@ This action center is shared by media import, COLMAP reconstruction, 3DGS, 2DGS,
 
 ## Window and file-dialog controls
 
+Qt file dialogs now initially use at least 640 logical pixels of width (960 at
+150% UI scale), clamped to the available screen, without increasing their
+initial height or forcing a new minimum size. Live language/theme changes
+retain later manual sizes. All toolbar labels inherit the toolbar background
+instead of showing white rectangles in light appearance.
+
+中文：文件窗口默认宽度至少为 640 逻辑像素，150% 界面缩放时为 960，且不超出
+当前屏幕；不增加初始高度、不限制后续缩窄。语言与主题切换保留手动尺寸。
+工具栏标签继承工具栏底色，浅色主题不再出现白色文字底块。
+
+日本語：ファイルダイアログの初期幅は 640 論理ピクセル以上（UI 150% では
+960）とし、画面内に収めます。初期高さを増やさず、後の手動縮小を妨げません。
+言語やテーマの切り替えでも手動サイズを保持します。ツールバーのラベルは
+背景色を継承し、ライトテーマで白い四角が現れません。
+
 All Qt open/save/folder dialogs include a translated **Desktop** shortcut in their sidebar. The location comes from `QStandardPaths::DesktopLocation` (including redirected desktops), not a hard-coded `C:` path. Navigation does not create files or change the filename/type. Existing sidebar places and directory history remain available. There is no duplicate window-control row or second Desktop button.
 
 File-dialog detail views stretch the filename column to the available width in normal, maximized and full-screen windows. Metadata columns remain individually resizable; language, appearance and UI-scale changes retain user widths, sort order, selection, directory, filename and file type, growing a column only when needed to fit its translated header. Navigation icons and the Desktop sidebar's minimum width follow the actual font/UI scale, not the maximized window's dimensions. Light-mode splitter handles and header backgrounds use the same soft gray as panel boundaries, including unused header space; form labels inherit the dialog background instead of painting white rectangles.
@@ -180,6 +195,34 @@ Observation navigation uses the familiar [Metashape Model-view navigation contro
 Terminology references: [CloudCompare official translations](https://github.com/CloudCompare/CloudCompare/tree/master/qCC/translations), [Agisoft official manuals](https://www.agisoft.com/downloads/user-manuals/), and [Blender Japanese manual](https://docs.blender.org/manual/ja/latest/). Application messages are original translations, not wholesale copies of another application's language library. Loading follows the official [QTranslator documentation](https://doc.qt.io/qt-6/qtranslator.html). Qt base catalogs remain upstream Qt assets; see `THIRD_PARTY_LICENSES.md`.
 
 ## Paged mesh preview
+
+Native loading is not required to page ordinary models merely because the
+legacy HTML did. Resident meshes now retain all valid triangles under
+five-million vertex/face safety limits and a conservative byte allowance
+capped at 1 GiB per load, including UV-corner duplication, point-picking data,
+indices and actual texture mip levels. Oversized polygon fans rewind into the
+existing disk-backed path, never a silently sampled resident mesh. Complete
+cache parents (all valid source triangles present) need no further refinement.
+Page reads can run 16 at a time with a bounded pending/in-flight byte allowance.
+The byte estimate uses currently known GPU/scene information; startup/batch
+loads may precede final information, existing resident models are not
+reclassified, and paged texture storage remains separate. This is not a hard
+aggregate VRAM cap or a new continuous-surface LOD algorithm.
+
+中文：常规模型不因 HTML 旧版逻辑而必须分页。常驻网格在 500 万顶点／面安全
+上限及每次加载最多 1 GiB 的保守字节预算内保留所有有效三角形，并计入 UV
+接缝、拾取数据、索引和实际纹理 mip 层级。多边形展开超预算时回到磁盘分页，
+不悄悄抽面。完整父页不再重复细分；分页读取最多并行 16 项并限制排队字节数。
+预算依据当时已知信息，不是全部对象与纹理的总显存硬上限，也不是新的连续
+曲面 LOD。
+
+日本語：通常のモデルは HTML 旧版を理由にページングする必要はありません。
+500 万頂点／面の安全上限と一回の読み込みで最大 1 GiB の保守的なバイト予算
+の範囲で、全有効三角形を保持します。UV シーム、ピッキング用データ、索引、
+実際の mip レベルを含みます。多角形の展開が予算を超えるとディスク経由へ
+戻し、面を黙って間引きません。完全な親ページを再分割せず、最大 16 件の
+並列読み込みと待機バイト数を制限します。全オブジェクトとテクスチャの総
+VRAM 上限や、新しい表面維持 LOD を保証するものではありません。
 
 Acceptance for this repair compares resident and paged framebuffers against matching empty backgrounds, retaining at least 90% of a reference surface with at least 1,000 interior pixels. The reported 2DGS model, bounded/unbounded TSDF, OpenMVS-textured and SuGaR plain/textured outputs passed this gate in light and dark installed builds. The existing reduced GS2Mesh fixture has only 297 reference interior pixels across sparse disconnected islands; paging retains those pixels, but the fixture cannot establish continuous-surface correctness. Dense GS2Mesh output acceptance remains pending with a suitable bounded, provenance-verified fixture; the common renderer fix is not a claim that GS2Mesh generation quality has been validated.
 

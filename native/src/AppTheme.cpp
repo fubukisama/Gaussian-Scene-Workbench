@@ -358,6 +358,7 @@ QToolBar {
   padding: @TOOL_PAD@px;
 }
 QToolBar::separator { width: 1px; background: @SEPARATOR@; margin: 4px 6px; }
+QToolBar QLabel { background: transparent; }
 QToolButton {
   background: transparent;
   border: 1px solid transparent;

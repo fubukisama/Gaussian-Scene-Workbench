@@ -30,8 +30,6 @@ namespace {
 constexpr double kSphericalHarmonicDc = 0.28209479177387814;
 constexpr qint64 kMaximumHeaderBytes = 1024 * 1024;
 constexpr qint64 kMaximumRecordBytes = 256LL * 1024LL * 1024LL;
-constexpr qint64 kMaximumMeshPreviewFaces = 2'000'000;
-constexpr qint64 kMaximumMeshPreviewTriangles = 5'000'000;
 constexpr qsizetype kFullResolutionPointChunkSize = 1'000'000;
 constexpr qsizetype kAsciiSpoolBufferPoints = 262'144;
 constexpr qint64 kStaleAsciiSpoolMilliseconds =
@@ -1757,10 +1755,6 @@ bool appendFaceTriangles(const QVector<double> &faceIndices,
   }
 
   for (qsizetype index = 1; index + 1 < indices.size(); ++index) {
-    if (result.meshIndices.size() / 3 >= kMaximumMeshPreviewTriangles) {
-      result.meshPreviewDecimated = true;
-      break;
-    }
     result.meshIndices.append(indices.first());
     result.meshIndices.append(indices.at(index));
     result.meshIndices.append(indices.at(index + 1));
@@ -1950,7 +1944,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                                          const qsizetype maximumPreviewPoints,
                                          const qint64 maximumEditablePoints,
                                          const qint64 maximumResidentMeshVertices,
-                                         const qint64 maximumResidentMeshFaces) {
+                                         const qint64 maximumResidentMeshFaces,
+                                         const qint64 maximumResidentMeshBytes) {
   PointCloudData result;
   qint64 residentMeshVertexLimit = maximumResidentMeshVertices;
   qint64 residentMeshFaceLimit = maximumResidentMeshFaces;
@@ -1984,6 +1979,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   if (!parseHeader(file, header, result.error)) {
     return result;
   }
+  const qint64 payloadOffset = file.pos();
 
   auto vertexElementIterator = std::find_if(
       header.elements.cbegin(), header.elements.cend(),
@@ -2096,14 +2092,52 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                   isScalarProperty);
   result.hasSurfelAttributes = result.hasGaussianAttributes && scaleIndices[2] < 0;
 
+  // Estimate the actual native buffers, not a browser-era face-count limit.
+  // UV seams may duplicate every triangle corner. Include the point-picking
+  // buffer and every RGBA mip level (skinny atlases do not follow a 4/3 ratio).
+  long double textureBytes = 0;
+  for (QSize level = result.meshTextureImage.size();
+       level.width() > 0 && level.height() > 0;) {
+    textureBytes += static_cast<long double>(level.width()) * level.height() * 4;
+    if (level.width() == 1 && level.height() == 1) break;
+    level = QSize(std::max(1, level.width() / 2), std::max(1, level.height() / 2));
+  }
+  const qint64 residentByteBudget = std::clamp<qint64>(
+      maximumResidentMeshBytes, 0, DefaultMaximumResidentMeshBytes);
+  const auto meshFitsResidentBudget = [&](const qint64 triangles) {
+    const long double meshVertexBytes = faceTextureCoordinatesProperty >= 0
+        ? static_cast<long double>(triangles) * 3 * sizeof(MeshVertex)
+        : static_cast<long double>(vertexElement.count) * sizeof(MeshVertex);
+    const long double bytes = textureBytes + meshVertexBytes +
+        static_cast<long double>(vertexElement.count) * sizeof(PointCloudVertex) +
+        static_cast<long double>(triangles) * 3 * sizeof(quint32);
+    return bytes <= residentByteBudget &&
+        meshVertexBytes <= std::numeric_limits<int>::max() &&
+        static_cast<long double>(triangles) * 3 <= std::numeric_limits<int>::max();
+  };
+  const auto loadPagedMesh = [&]() {
+    // A polygon may exceed the initial one-triangle-per-face estimate. Restart
+    // from the saved payload, with no partial resident attributes or counters.
+    PointCloudData paged;
+    paged.meshTextureImage = std::move(result.meshTextureImage);
+    paged.meshTexturePath = std::move(result.meshTexturePath);
+    paged.meshTextureError = std::move(result.meshTextureError);
+    result = std::move(paged);
+    if (!file.seek(payloadOffset)) {
+      result.error = QCoreApplication::translate("Workbench", "Unable to open PLY file %1: %2")
+                         .arg(QFileInfo(filePath).fileName(), file.errorString());
+      return;
+    }
+    loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
+                     faceVertexIndicesProperty, faceTextureCoordinatesProperty,
+                     xIndex, yIndex, zIndex, redIndex, greenIndex, blueIndex,
+                     sphericalHarmonicColor, coordinateMetadata, result);
+  };
   if (containsMeshFaces &&
       (vertexElement.count > residentMeshVertexLimit ||
-       faceElementIterator->count > residentMeshFaceLimit)) {
-    loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
-                      faceVertexIndicesProperty,
-                      faceTextureCoordinatesProperty, xIndex, yIndex, zIndex,
-                      redIndex, greenIndex, blueIndex,
-                      sphericalHarmonicColor, coordinateMetadata, result);
+       faceElementIterator->count > residentMeshFaceLimit ||
+       !meshFitsResidentBudget(faceElementIterator->count))) {
+    loadPagedMesh();
     return result;
   }
 
@@ -2162,19 +2196,11 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   result.sourcePositions.reserve(static_cast<qsizetype>(vertexElement.count));
   if (containsMeshFaces) {
     result.meshIndices.reserve(static_cast<qsizetype>(
-        std::min<qint64>(faceElementIterator->count,
-                         kMaximumMeshPreviewTriangles) *
-        3));
+        faceElementIterator->count * 3));
     result.meshCornerTextureCoordinates.reserve(result.meshIndices.capacity());
     result.meshCornerTextured.reserve(result.meshIndices.capacity());
   }
   qsizetype nextSampleIndex = 0;
-  qsizetype nextFaceSampleIndex = 0;
-  const qsizetype faceSampleCount =
-      containsMeshFaces
-          ? static_cast<qsizetype>(std::min<qint64>(
-                faceElementIterator->count, kMaximumMeshPreviewFaces))
-          : 0;
   bool hasFiniteBounds = false;
   SceneCoordinateTracker coordinateTracker(coordinateMetadata);
 
@@ -2195,18 +2221,22 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         return result;
       }
       if (containsMeshFaces && &element == &(*faceElementIterator)) {
-        const bool appendPreview = shouldSampleVertex(
-            recordIndex, faceElementIterator->count, faceSampleCount,
-            nextFaceSampleIndex);
+        const auto &faceIndices = listValues.at(faceVertexIndicesProperty);
+        const qint64 triangles = std::max<qint64>(0, faceIndices.size() - 2);
+        if (triangles > std::numeric_limits<qint64>::max() - result.sourceTriangleCount ||
+            !meshFitsResidentBudget(result.sourceTriangleCount + triangles)) {
+          loadPagedMesh();
+          return result;
+        }
         const QVector<double> emptyTextureCoordinates;
         const QVector<double> &textureCoordinates =
             faceTextureCoordinatesProperty >= 0
                 ? listValues.at(faceTextureCoordinatesProperty)
                 : emptyTextureCoordinates;
-        if (!appendFaceTriangles(listValues.at(faceVertexIndicesProperty),
+        if (!appendFaceTriangles(faceIndices,
                                  textureCoordinates,
                                  faceTextureCoordinatesProperty >= 0,
-                                 vertexElement.count, appendPreview, result)) {
+                                 vertexElement.count, true, result)) {
           result.vertices.clear();
           result.sourcePositions.clear();
           result.meshIndices.clear();

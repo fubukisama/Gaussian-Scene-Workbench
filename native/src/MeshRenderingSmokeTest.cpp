@@ -74,16 +74,39 @@ struct Capture {
   qint64 sourceFaces = 0;
   qsizetype previewTriangles = 0;
   qsizetype gpuTriangles = 0;
+  qint64 parsedMilliseconds = 0;
+  qint64 firstVisibleMilliseconds = -1;
+  qint64 completeDisplayMilliseconds = 0;
   qint64 settlingMilliseconds = 0;
   QVector3D target;
   OrbitAngles angles;
   float distance = 0.0F;
 };
 
+enum class LoadingPolicy { Resident, Paged, Default };
+
+const char *policyName(const LoadingPolicy policy) {
+  switch (policy) {
+  case LoadingPolicy::Resident: return "resident";
+  case LoadingPolicy::Paged: return "paged";
+  case LoadingPolicy::Default: return "default";
+  }
+  return "unknown";
+}
+
+bool foregroundAt(const QImage &surface, const QImage &background,
+                  int x, int y);
+
 bool capturePolicy(NativeViewport &viewport, const QString &path,
-                   const bool paged, const bool tiledFixture, Capture &capture) {
-  qputenv("GSW_MESH_RESIDENT_VERTEX_LIMIT", paged ? "4" : "2147483647");
-  qputenv("GSW_MESH_RESIDENT_FACE_LIMIT", paged ? "4" : "2147483647");
+                   const LoadingPolicy policy, const bool tiledFixture, Capture &capture) {
+  if (policy == LoadingPolicy::Default) {
+    qunsetenv("GSW_MESH_RESIDENT_VERTEX_LIMIT");
+    qunsetenv("GSW_MESH_RESIDENT_FACE_LIMIT");
+  } else {
+    const QByteArray limit = policy == LoadingPolicy::Paged ? "4" : "2147483647";
+    qputenv("GSW_MESH_RESIDENT_VERTEX_LIMIT", limit);
+    qputenv("GSW_MESH_RESIDENT_FACE_LIMIT", limit);
+  }
   viewport.setScene({}, 0); // Reload the same source under the other policy.
   processFor(30);
   bool loaded = false;
@@ -106,14 +129,15 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
     QObject::disconnect(loadedConnection);
     QObject::disconnect(failedConnection);
   });
-  viewport.setScene(path, 0);
   QElapsedTimer loading;
   loading.start();
+  viewport.setScene(path, 0);
   while (!loaded && !failed && loading.elapsed() < 20000) processFor(20);
   if (!loaded || failed) {
     qCritical() << "Mesh surface comparison FAIL: source did not load within 20 seconds" << path;
     return false;
   }
+  capture.parsedMilliseconds = loading.elapsed();
   if (!viewport.meshRenderingAvailable()) {
     qCritical() << "Mesh surface comparison FAIL: mesh rendering is unavailable" << path;
     return false;
@@ -139,21 +163,28 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   // count or retrying until the coverage assertion passes.
   QElapsedTimer settling;
   settling.start();
+  struct TimedFrame { qint64 milliseconds; QImage thumbnail; };
+  QVector<TimedFrame> frames;
   do {
     processFor(40);
     capture.surface = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+    // The timestamp includes the actual GPU readback, rather than an estimated
+    // render rate. Small thumbnails keep the timing trace bounded while the
+    // matching empty background is captured through the public transform later.
+    frames.append({loading.elapsed(), capture.surface.scaledToWidth(320)});
   } while (settling.elapsed() < 40000 &&
-           (settling.elapsed() < 1500 || !viewport.meshPagingSettled()));
+           !viewport.meshPagingSettled());
   capture.settlingMilliseconds = settling.elapsed();
+  capture.completeDisplayMilliseconds = loading.elapsed();
   if (!viewport.meshPagingSettled()) {
     qCritical() << "Mesh surface comparison FAIL: viewport surface was not ready within 40 seconds"
-                << (paged ? "paged" : "resident") << path
+                << policyName(policy) << path
                 << "GPU triangles" << viewport.residentMeshTriangleCount()
                 << "elapsed milliseconds" << capture.settlingMilliseconds;
     const QString directory = qEnvironmentVariable("GSW_MESH_BENCHMARK_DIR");
     if (!directory.isEmpty() && !capture.surface.isNull()) {
-      capture.surface.save(QDir(directory).filePath(QString::fromLatin1(
-          paged ? "paged-unsettled.png" : "resident-unsettled.png")));
+      capture.surface.save(QDir(directory).filePath(QString::fromLatin1(policyName(policy)) +
+                                                   QString::fromLatin1("-unsettled.png")));
     }
     return false;
   }
@@ -167,7 +198,7 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   } while (finalFrames.elapsed() < 1000);
   if (!viewport.meshPagingSettled()) {
     qCritical() << "Mesh surface comparison FAIL: viewport surface became unsettled during final frames"
-                << (paged ? "paged" : "resident") << path;
+                << policyName(policy) << path;
     return false;
   }
   if (capture.surface.isNull()) return false;
@@ -184,8 +215,35 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   viewport.setModelTranslation(originalTranslation + QVector3D(offset, offset, offset));
   capture.background = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
   viewport.setModelTranslation(originalTranslation);
-  return !capture.background.isNull() &&
-         capture.background.size() == capture.surface.size();
+  if (capture.background.isNull() || capture.background.size() != capture.surface.size())
+    return false;
+  const QImage thumbnailBackground = capture.background.scaledToWidth(320);
+  const QRect region(thumbnailBackground.width() / 8, thumbnailBackground.height() / 6,
+                     thumbnailBackground.width() * 3 / 4,
+                     thumbnailBackground.height() * 2 / 3);
+  for (const TimedFrame &frame : frames) {
+    qint64 foreground = 0;
+    for (int y = region.top(); y <= region.bottom() && foreground < 20; ++y)
+      for (int x = region.left(); x <= region.right() && foreground < 20; ++x)
+        foreground += foregroundAt(frame.thumbnail, thumbnailBackground, x, y);
+    if (foreground >= 20) {
+      capture.firstVisibleMilliseconds = frame.milliseconds;
+      break;
+    }
+  }
+  qInfo() << "Mesh load timing:" << "policy" << policyName(policy)
+          << "source" << path << "source parsed milliseconds" << capture.parsedMilliseconds
+          << "first visible milliseconds" << capture.firstVisibleMilliseconds
+          << "complete display milliseconds" << capture.completeDisplayMilliseconds
+          << "first visible to complete milliseconds"
+          << (capture.firstVisibleMilliseconds >= 0
+                  ? capture.completeDisplayMilliseconds - capture.firstVisibleMilliseconds : -1)
+          << "GPU triangles" << capture.gpuTriangles;
+  if (capture.firstVisibleMilliseconds < 0) {
+    qCritical() << "Mesh load timing FAIL: no visible surface was presented" << policyName(policy);
+    return false;
+  }
+  return true;
 }
 
 bool foregroundAt(const QImage &surface, const QImage &background,
@@ -234,10 +292,12 @@ bool runMeshRenderingSmokeTest(NativeViewport &viewport, const QString &path) {
 
   Capture resident;
   Capture paged;
-  if (!capturePolicy(viewport, sourcePath, false, tiledFixture, resident) ||
-      !capturePolicy(viewport, sourcePath, true, tiledFixture, paged)) return false;
+  const bool defaultPolicy = qEnvironmentVariableIntValue("GSW_MESH_TEST_DEFAULT_POLICY") != 0;
+  const LoadingPolicy comparisonPolicy = defaultPolicy ? LoadingPolicy::Default : LoadingPolicy::Paged;
+  if (!capturePolicy(viewport, sourcePath, LoadingPolicy::Resident, tiledFixture, resident) ||
+      !capturePolicy(viewport, sourcePath, comparisonPolicy, tiledFixture, paged)) return false;
   if (!saveCapture(resident, outputDirectory, "resident") ||
-      !saveCapture(paged, outputDirectory, "paged")) return false;
+      !saveCapture(paged, outputDirectory, policyName(comparisonPolicy))) return false;
   qInfo() << "Mesh surface comparison: resident source vertices/faces/preview triangles/frame"
           << resident.sourceVertices << resident.sourceFaces << resident.previewTriangles
           << resident.surface.size()
@@ -311,10 +371,27 @@ bool runMeshRenderingSmokeTest(NativeViewport &viewport, const QString &path) {
           << "preserved surface coverage" << preservedCoverage;
   // The independent visible-behavior requirement is that paging retains at
   // least 90% of a continuous surface. A point-like sparse subset is not a mesh.
-  const bool passed = residentInterior >= 1000 && preservedCoverage >= 0.90;
-  if (!passed)
+  const int maximumCompleteMilliseconds = qEnvironmentVariableIntValue("GSW_MESH_TEST_MAX_COMPLETE_MS");
+  const bool completedPromptly = maximumCompleteMilliseconds <= 0 ||
+      paged.completeDisplayMilliseconds <= maximumCompleteMilliseconds;
+  // Default-policy regression is opt-in for a bounded model that fits the test
+  // device. Its ready-to-display mesh must preserve the resident reference's
+  // valid triangles, rather than announce only a sampled preview as loaded.
+  const bool completePreview = !defaultPolicy ||
+      paged.previewTriangles == resident.previewTriangles;
+  const bool preservedSurface = residentInterior >= 1000 && preservedCoverage >= 0.90;
+  const bool passed = preservedSurface && completedPromptly && completePreview;
+  if (!completedPromptly)
+    qCritical() << "Mesh load timing FAIL:" << policyName(comparisonPolicy)
+                << "complete display milliseconds" << paged.completeDisplayMilliseconds
+                << "exceeds public performance gate" << maximumCompleteMilliseconds;
+  if (!completePreview)
+    qCritical() << "Mesh load timing FAIL: bounded default-policy model and resident reference"
+                << "announced different valid triangle counts:" << paged.previewTriangles << "versus"
+                << resident.previewTriangles;
+  if (!preservedSurface)
     qCritical() << "Mesh surface comparison FAIL: paged mesh lost continuous surface coverage";
-  else
+  else if (passed)
     qInfo() << "Mesh surface comparison PASS: paging preserves the visible surface";
   return passed;
 }

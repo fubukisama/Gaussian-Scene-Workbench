@@ -2642,6 +2642,12 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
   mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
   const int generation = mScene->mSceneGeneration;
+  // Keep the fast complete-mesh path within a conservative per-load share.
+  // Previously loaded resident scenes are not retroactively reclassified.
+  const qint64 residentMeshByteBudget = std::min<qint64>(
+      PlyPointCloudLoader::DefaultMaximumResidentMeshBytes,
+      static_cast<qint64>((mMeshCacheGpuBudgetBytes /
+          std::max<qsizetype>(1, mSceneStates.size())) * 0.85L));
 
   auto *watcher = new QFutureWatcher<PointCloudData>(this);
   connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
@@ -2799,7 +2805,14 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             emit sceneCoordinatesChanged();
           });
   watcher->setFuture(QtConcurrent::run(
-      [scenePath]() { return PlyPointCloudLoader::load(scenePath); }));
+      [scenePath, residentMeshByteBudget]() {
+        return PlyPointCloudLoader::load(scenePath,
+            PlyPointCloudLoader::DefaultMaximumPreviewPoints,
+            PlyPointCloudLoader::DefaultMaximumEditablePoints,
+            PlyPointCloudLoader::DefaultMaximumResidentMeshVertices,
+            PlyPointCloudLoader::DefaultMaximumResidentMeshFaces,
+            residentMeshByteBudget);
+      }));
 }
 
 void NativeViewport::startSelection(const ScreenSelectionRequest &request,
@@ -3615,6 +3628,13 @@ void NativeViewport::updateMeshCacheSelection(
     }
     const int nodeId = refinable.takeAt(bestPosition);
     const MeshCacheNode &node = mScene->mMeshCache.nodes.at(nodeId);
+    // A reservoir below its sample limit is already the complete surface.
+    // Refining that exact parent would only fetch and upload the same triangles
+    // again across hundreds of tiny octree children.
+    if (mScene->mRenderMode == RenderMode::Mesh &&
+        node.indexCount / 3 == node.sourceTriangleCount) {
+      continue;
+    }
     QVector<int> visibleChildren;
     qsizetype childBytes = 0;
     for (const int childId : node.children) {
@@ -3684,11 +3704,24 @@ void NativeViewport::requestMissingMeshCachePages() {
     }
     return a.byteCount() < b.byteCount();
   });
-  constexpr qsizetype kMaximumReadsInFlight = 2;
+  constexpr qsizetype kMaximumReadsInFlight = 16;
+  const qint64 maximumQueuedBytes = std::min<qint64>(128LL * 1024 * 1024,
+      mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()) / 4);
+  qint64 queuedBytes = 0;
+  for (const MeshCachePage &page : std::as_const(mScene->mPendingMeshCachePages))
+    queuedBytes += page.vertices.size() * qint64(sizeof(MeshVertex)) +
+                   page.indices.size() * qint64(sizeof(quint32));
+  for (const int nodeId : std::as_const(mScene->mMeshCacheReadsInFlight))
+    queuedBytes += mScene->mMeshCache.nodes.at(nodeId).byteCount();
   for (const int nodeId : std::as_const(ordered)) {
     if (mScene->mMeshCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
       break;
     }
+    const qint64 bytes = mScene->mMeshCache.nodes.at(nodeId).byteCount();
+    // Allow one indivisible cache page to make progress, but never enqueue a
+    // large group of pages just because read concurrency is now higher.
+    if (queuedBytes > 0 && bytes > maximumQueuedBytes - queuedBytes) continue;
+    queuedBytes += bytes;
     mScene->mMeshCacheReadsInFlight.insert(nodeId);
     const int generation = mScene->mSceneGeneration;
     const MeshCacheIndex cache = mScene->mMeshCache;

@@ -262,6 +262,11 @@ if(BUILD_TESTING)
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
   foreach(language zh_CN en_US ja_JP)
+    add_test(NAME native_window_appearance_${language} COMMAND GaussianSceneWorkbench --smoke-test-window-appearance --language ${language})
+    set_tests_properties(native_window_appearance_${language} PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
     set_tests_properties(native_language_${language} PROPERTIES
       # Includes normal/maximized/full-screen, scale and live locale matrices.
@@ -453,6 +458,16 @@ if(BUILD_TESTING)
   set_tests_properties(native_paged_mesh_surface native_light_paged_mesh_surface PROPERTIES
     TIMEOUT 150
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_mesh_small_paging_latency
+    COMMAND GaussianSceneWorkbench --smoke-test-mesh-rendering --theme light)
+  add_test(NAME native_mesh_default_complete_surface
+    COMMAND GaussianSceneWorkbench --smoke-test-mesh-rendering --theme light)
+  set_tests_properties(native_mesh_small_paging_latency PROPERTIES TIMEOUT 45
+    ENVIRONMENT "GSW_MESH_TEST_GRID_SIDE=16;GSW_MESH_TEST_MAX_COMPLETE_MS=5000;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  set_tests_properties(native_mesh_default_complete_surface PROPERTIES TIMEOUT 60
+    ENVIRONMENT "GSW_MESH_TEST_GRID_SIDE=1024;GSW_MESH_TEST_DEFAULT_POLICY=1;GSW_MESH_TEST_MAX_COMPLETE_MS=10000;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   foreach(GSW_TEXT_LANGUAGE zh_CN en_US ja_JP)
     foreach(GSW_TEXT_THEME light dark)
