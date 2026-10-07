@@ -15,6 +15,9 @@
 #include "SmokeTestSettings.h"
 #include "TaskActionsSmokeTest.h"
 #include "WindowUiSmokeTest.h"
+#include "ResourceBudgetSmokeTest.h"
+#include "ResourceBudgetLargeMeshSmokeTest.h"
+#include "ResourceBudgetUiSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -164,6 +167,33 @@ int main(int argc, char *argv[]) {
   QCommandLineOption windowAppearanceSmokeOption(QStringLiteral("smoke-test-window-appearance"),
       QStringLiteral("Verify initial import-dialog width and toolbar label appearance."));
   parser.addOption(windowAppearanceSmokeOption);
+  QCommandLineOption resourceBudgetSmokeOption(QStringLiteral("smoke-test-resource-budget"),
+      QStringLiteral("Verify the live resource-budget settings through the native interface."));
+  parser.addOption(resourceBudgetSmokeOption);
+  QCommandLineOption resourceBudgetMeshSmokeOption(QStringLiteral("smoke-test-resource-budget-mesh"),
+      QStringLiteral("Verify live resource-budget changes in the real mesh viewport."));
+  parser.addOption(resourceBudgetMeshSmokeOption);
+  QCommandLineOption resourceBudgetSharedSmokeOption(QStringLiteral("smoke-test-resource-budget-shared"),
+      QStringLiteral("Verify serial and concurrent mesh imports share one resource budget."));
+  parser.addOption(resourceBudgetSharedSmokeOption);
+  QCommandLineOption resourceBudgetTexturePageSmokeOption(QStringLiteral("smoke-test-resource-budget-texture-page"),
+      QStringLiteral("Verify a texture-compatible budget can display a fitting mesh page."));
+  parser.addOption(resourceBudgetTexturePageSmokeOption);
+  QCommandLineOption resourceBudgetMinimumPageSmokeOption(QStringLiteral("smoke-test-resource-budget-minimum-page"),
+      QStringLiteral("Verify minimum textured-page admission and live budget recovery."));
+  parser.addOption(resourceBudgetMinimumPageSmokeOption);
+  QCommandLineOption resourceBudgetCacheFirstSmokeOption(QStringLiteral("smoke-test-resource-budget-cache-first"),
+      QStringLiteral("Verify surplus pages shrink before reloading a fitting resident mesh."));
+  parser.addOption(resourceBudgetCacheFirstSmokeOption);
+  QCommandLineOption resourceBudgetLargeMeshSmokeOption(QStringLiteral("smoke-test-resource-budget-large-mesh"),
+      QStringLiteral("Verify a bounded mesh beyond five million faces loads completely when resources fit."));
+  parser.addOption(resourceBudgetLargeMeshSmokeOption);
+  QCommandLineOption resourceBudgetHudSmokeOption(QStringLiteral("smoke-test-resource-budget-hud"),
+      QStringLiteral("Verify an unknown-count mesh import presents the correct vertex count in the real HUD."));
+  parser.addOption(resourceBudgetHudSmokeOption);
+  QCommandLineOption resourceBudgetUiSmokeOption(QStringLiteral("smoke-test-resource-budget-ui"),
+      QStringLiteral("Verify live resource settings across languages and window sizes."));
+  parser.addOption(resourceBudgetUiSmokeOption);
   QCommandLineOption taskActionsSmokeOption(QStringLiteral("smoke-test-task-actions"),
       QStringLiteral("Verify shared task details, retained logs and failed-launch records."));
   parser.addOption(taskActionsSmokeOption);
@@ -304,6 +334,15 @@ int main(int argc, char *argv[]) {
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
                          parser.isSet(windowAppearanceSmokeOption) ||
+                         parser.isSet(resourceBudgetSmokeOption) ||
+                         parser.isSet(resourceBudgetMeshSmokeOption) ||
+                         parser.isSet(resourceBudgetSharedSmokeOption) ||
+                         parser.isSet(resourceBudgetTexturePageSmokeOption) ||
+                         parser.isSet(resourceBudgetMinimumPageSmokeOption) ||
+                         parser.isSet(resourceBudgetCacheFirstSmokeOption) ||
+                         parser.isSet(resourceBudgetLargeMeshSmokeOption) ||
+                         parser.isSet(resourceBudgetHudSmokeOption) ||
+                         parser.isSet(resourceBudgetUiSmokeOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
@@ -322,7 +361,52 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(windowAppearanceSmokeOption)) {
+  if (parser.isSet(resourceBudgetHudSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetHudSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetLargeMeshSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetLargeMeshSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetCacheFirstSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetCacheFirstSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetMinimumPageSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetMinimumPageSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetTexturePageSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetTexturePageSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetSharedSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetSharedMeshSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetUiSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetUiSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetMeshSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetMeshSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runResourceBudgetSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(windowAppearanceSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runWindowUiAppearanceSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

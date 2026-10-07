@@ -15,9 +15,11 @@
 #include "TransformGizmo.h"
 #include "SceneObject.h"
 #include "ModelExport.h"
+#include "ResourceBudget.h"
 #include <memory>
 
 #include <QImage>
+#include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLExtraFunctions>
@@ -75,6 +77,9 @@ public:
 
   explicit NativeViewport(QWidget *parent = nullptr);
   ~NativeViewport() override;
+  [[nodiscard]] ResourceBudgetPolicy resourceBudgetPolicy() const;
+  void setResourceBudgetPolicy(const ResourceBudgetPolicy &policy);
+  [[nodiscard]] ResourceBudgetStatus resourceBudgetStatus() const;
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
@@ -211,6 +216,7 @@ public:
   }
 
 signals:
+  void resourceBudgetStatusChanged();
   void sceneSelectionChanged(const QStringList &ids, const QString &activeId);
   void sceneTransformsCommitted(const QList<SceneObject> &objects);
   void activeSceneObjectChanged(const QString &id);
@@ -318,6 +324,7 @@ private:
     QString mRequestedScenePath;
     QString mSceneLoadMessage;
     qint64 mGaussianCount = 0;
+    qint64 mSourceVertexCount = 0;
     qint64 mSourceFaceCount = 0;
     qsizetype mPreviewPointCount = 0;
     qsizetype mPreviewTriangleCount = 0;
@@ -390,6 +397,20 @@ private:
     QOpenGLBuffer mPointBuffer{QOpenGLBuffer::VertexBuffer};
     QOpenGLBuffer mMeshVertexBuffer{QOpenGLBuffer::VertexBuffer};
     QOpenGLBuffer mMeshIndexBuffer{QOpenGLBuffer::IndexBuffer};
+    qint64 resourcePointGpuBytes = 0;
+    qint64 resourceMeshGpuBytes = 0;
+    qint64 resourceTextureGpuBytes = 0;
+    qint64 resourceResidentRamPeakBytes = 0;
+    qint64 resourceResidentGpuBytes = 0;
+    bool resourceResidentStorageSupported = true;
+    qint64 resourceRetryAfterMs = 0;
+    bool resourceLoading = false;
+    bool resourceNeedsReload = false;
+    bool resourceForcePagedRetry = false;
+    bool resourceResidentUploadFailed = false;
+    std::shared_ptr<ResourceReservation> resourceLoadReservation;
+    QHash<int, std::shared_ptr<ResourceReservation>> resourceMeshPageReservations;
+    QHash<int, std::shared_ptr<ResourceReservation>> resourcePointPageReservations;
     QOpenGLVertexArrayObject mPointVertexArray;
     QOpenGLVertexArrayObject mMeshVertexArray;
     QOpenGLVertexArrayObject mGaussianVertexArray;
@@ -440,7 +461,9 @@ private:
   projectPoint(const QVector3D &point, const QMatrix4x4 &viewProjection) const;
   void reloadCameraTrajectory(const QString &scenePath, bool clearExisting);
   void rebuildCameraGeometry();
-  void startSceneLoad(const QString &scenePath, bool continuous = false);
+  void startSceneLoad(const QString &scenePath, bool continuous = false,
+                      bool preserveView = false, bool forcePaged = false,
+                      std::shared_ptr<ResourceReservation> reservation = {});
   [[nodiscard]] QMatrix4x4 trainingPreviewCoordinateTransform() const;
   void startSelection(const ScreenSelectionRequest &request,
                       SelectionOperation operation);
@@ -537,6 +560,16 @@ private:
   [[nodiscard]] QMatrix4x4 sceneDisplayTransform(const SceneState &from,
                                                const SceneState &to) const;
   void publishActiveSceneState();
+  void refreshResourceBudgets();
+  void updateManagedResourceUsage();
+  void rebalanceResourceResidency();
+  qsizetype sharedPageGpuBudget() const;
+  void finishResourceUpload();
+  void discardResidentMeshStorage();
+  std::shared_ptr<ResourceBudgetController> mResources;
+  QTimer *mResourceBudgetTimer = nullptr;
+  QElapsedTimer mResourceClock;
+  bool mResourceRebalancing = false;
   QString mProjectLabel;
   bool mProcessingActive = false;
   bool mProcessingPreviewPresent = false;

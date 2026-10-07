@@ -19,6 +19,8 @@
 #include <QTemporaryDir>
 #include <memory>
 #include "ReconstructionDialog.h"
+#include "ResourceBudgetDialog.h"
+#include "ResourceBudget.h"
 #include "TrainingDialog.h"
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
@@ -673,6 +675,16 @@ MainWindow::MainWindow(QWidget *parent)
 
   mViewport = new NativeViewport(this);
   setCentralWidget(mViewport);
+  {
+    QSettings settings;
+    ResourceBudgetPolicy policy;
+    policy.mode = settings.value(QStringLiteral("view/resourceBudgetMode"), QStringLiteral("auto")).toString()
+                          == QStringLiteral("manual")
+        ? ResourceBudgetPolicy::Mode::Manual : ResourceBudgetPolicy::Mode::Automatic;
+    policy.ramLimitMiB = settings.value(QStringLiteral("view/resourceRamLimitMiB"), policy.ramLimitMiB).toLongLong();
+    policy.gpuLimitMiB = settings.value(QStringLiteral("view/resourceGpuLimitMiB"), policy.gpuLimitMiB).toLongLong();
+    mViewport->setResourceBudgetPolicy(policy);
+  }
 
   createActions();
   createProjectDock();
@@ -1549,6 +1561,18 @@ void MainWindow::createMenus() {
         ? UiThemeMode::Light : UiThemeMode::Dark), true);
     refreshThemePresentation();
     refreshAutomaticTheme();
+  });
+  auto *resourceBudgetAction = AppLanguage::text(viewMenu->addAction(QString()),
+      AppLanguage::source("资源预算..."));
+  resourceBudgetAction->setObjectName(QStringLiteral("resourceBudgetAction"));
+  connect(resourceBudgetAction, &QAction::triggered, this, [this] {
+    if (!mResourceBudgetDialog) {
+      mResourceBudgetDialog = new ResourceBudgetDialog(mViewport, this);
+      mResourceBudgetDialog->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    mResourceBudgetDialog->show();
+    mResourceBudgetDialog->raise();
+    mResourceBudgetDialog->activateWindow();
   });
   viewMenu->addSeparator();
   QMenu *renderMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "title");

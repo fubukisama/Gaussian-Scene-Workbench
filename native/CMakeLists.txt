@@ -35,6 +35,13 @@ find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
+add_library(gsw_resource_budget STATIC src/ResourceBudget.cpp src/ResourceBudget.h)
+target_include_directories(gsw_resource_budget PUBLIC src)
+target_link_libraries(gsw_resource_budget PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(gsw_resource_budget PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
 # Pinned, vendored MIT codec. No configure-time downloads or Python bindings.
 find_package(ZLIB REQUIRED)
 find_package(zstd CONFIG REQUIRED)
@@ -60,6 +67,16 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/WindowUi.h
   src/WindowUiSmokeTest.cpp
   src/WindowUiSmokeTest.h
+  src/ResourceBudgetSmokeTest.cpp
+  src/ResourceBudgetSmokeTest.h
+  src/ResourceBudgetLargeMeshSmokeTest.cpp
+  src/ResourceBudgetLargeMeshSmokeTest.h
+  src/ResourceBudgetUiSmokeTest.cpp
+  src/ResourceBudgetUiSmokeTest.h
+  src/ResourceBudgetDialog.cpp
+  src/ResourceBudgetDialog.h
+  src/SystemResourceProbe.cpp
+  src/SystemResourceProbe.h
   src/LanguageSmokeTest.cpp
   src/LanguageSmokeTest.h
   src/ProcessingCompletionSmokeTest.cpp
@@ -209,6 +226,7 @@ endif()
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
   gsw_spz
+  gsw_resource_budget
   Qt6::Core
   Qt6::Concurrent
   Qt6::Gui
@@ -261,6 +279,60 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  add_test(NAME native_resource_budget_settings
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget --language zh_CN)
+  set_tests_properties(native_resource_budget_settings PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_mesh_transition
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-mesh --language zh_CN)
+  set_tests_properties(native_resource_budget_mesh_transition PROPERTIES
+    TIMEOUT 90
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_shared_meshes
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-shared --language zh_CN)
+  set_tests_properties(native_resource_budget_shared_meshes PROPERTIES
+    TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_texture_page
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-texture-page --language zh_CN)
+  set_tests_properties(native_resource_budget_texture_page PROPERTIES
+    TIMEOUT 75
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_minimum_page
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-minimum-page --language en_US)
+  set_tests_properties(native_resource_budget_minimum_page PROPERTIES
+    TIMEOUT 75
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_cache_first
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-cache-first --language zh_CN)
+  set_tests_properties(native_resource_budget_cache_first PROPERTIES
+    TIMEOUT 75
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_large_mesh
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-large-mesh --language zh_CN)
+  set_tests_properties(native_resource_budget_large_mesh PROPERTIES
+    TIMEOUT 180
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_hud
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-hud --language en_US)
+  set_tests_properties(native_resource_budget_hud PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_resource_budget_ui
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-ui --language zh_CN)
+  set_tests_properties(native_resource_budget_ui PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   foreach(language zh_CN en_US ja_JP)
     add_test(NAME native_window_appearance_${language} COMMAND GaussianSceneWorkbench --smoke-test-window-appearance --language ${language})
     set_tests_properties(native_window_appearance_${language} PROPERTIES
@@ -570,7 +642,7 @@ if(BUILD_TESTING)
       src/WorkspaceDocument.h
     )
     target_include_directories(gsw_native_tests PRIVATE src)
-    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz)
+    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget)
     if(MSVC)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -603,11 +675,21 @@ if(BUILD_TESTING)
       src/SceneCoordinates.cpp
     )
     target_include_directories(gsw_model_export_tests PRIVATE src)
-    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz)
+    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget)
     if(MSVC)
       target_compile_options(gsw_model_export_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME model_export COMMAND gsw_model_export_tests)
+
+    qt_add_executable(gsw_resource_budget_tests tests/ResourceBudgetTests.cpp)
+    target_link_libraries(gsw_resource_budget_tests PRIVATE gsw_resource_budget Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_resource_budget_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME resource_budget_ledger COMMAND gsw_resource_budget_tests)
+    set_tests_properties(resource_budget_ledger PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_recovery_store_tests
       tests/RecoveryStoreTests.cpp

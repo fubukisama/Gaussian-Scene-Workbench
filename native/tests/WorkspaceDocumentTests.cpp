@@ -1,6 +1,7 @@
 #include "CameraTrajectory.h"
 #include "ColmapSupport.h"
 #include "PlyPointCloudLoader.h"
+#include "ResourceBudget.h"
 #include "SceneEditModel.h"
 #include "ScreenSpaceSelection.h"
 #include "TrainingOutputLocator.h"
@@ -37,6 +38,7 @@ private slots:
   void parsesUnitsAndExportsCoordinateReport();
   void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
+  void loadsAdaptiveAsciiMeshEfficientlyAndPreservesChunkedRecords();
   void loadsBinaryBigEndianMesh();
   void loadsOversizedAsciiMeshIntoDiskCache();
   void preservesResidentMeshUvSeams();
@@ -912,6 +914,64 @@ void WorkspaceDocumentTests::loadsAsciiPolygonMeshAndTriangulates() {
            QVector<quint32>({0U, 1U, 2U, 0U, 2U, 3U}));
   QCOMPARE(data.meshVertices.at(0).red, 1.0F);
   QVERIFY(data.meshVertices.at(0).normalZ > 0.99F);
+}
+
+void WorkspaceDocumentTests::loadsAdaptiveAsciiMeshEfficientlyAndPreservesChunkedRecords() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  for (const bool longRecords : {false, true}) {
+    const QString path = QDir(temporary.path()).filePath(
+        longRecords ? QStringLiteral("chunked-records.ply") : QStringLiteral("short-records.ply"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QByteArray payload = "ply\nformat ascii 1.0\nelement vertex ";
+    payload += longRecords ? "4" : "3";
+    payload += "\nproperty float x\nproperty float y\nproperty float z\nelement face ";
+    payload += longRecords ? "1" : "4000";
+    payload += "\nproperty list uchar int vertex_indices\nend_header\n";
+    if (longRecords) {
+      const QByteArray padding(9000, ' ');
+      payload += padding + "\r\n0" + padding + "0" + padding + "0\r\n";
+      payload += "1 0 0\r\n1 1 0\r\n0 1 0\r\n" + padding + "4 0 1 2 3";
+    } else {
+      payload += "0 0 0\n1 0 0\n0 1 0\n";
+      for (int index = 0; index < 4000; ++index) payload += "3 0 1 2\n";
+    }
+    QCOMPARE(file.write(payload), qint64(payload.size()));
+    file.close();
+
+    gsw::ResourceBudgetController budget;
+    gsw::ResourceBudgetPolicy policy;
+    policy.mode = gsw::ResourceBudgetPolicy::Mode::Manual;
+    policy.ramLimitMiB = 64;
+    policy.gpuLimitMiB = 64;
+    budget.setPolicy(policy);
+    gsw::LoaderResourcePolicy loadingPolicy;
+    loadingPolicy.reservation = budget.createReservation();
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const auto data = gsw::PlyPointCloudLoader::load(path,
+        gsw::PlyPointCloudLoader::DefaultMaximumPreviewPoints,
+        gsw::PlyPointCloudLoader::DefaultMaximumEditablePoints,
+        gsw::PlyPointCloudLoader::DefaultMaximumResidentMeshVertices,
+        gsw::PlyPointCloudLoader::DefaultMaximumResidentMeshFaces,
+        gsw::PlyPointCloudLoader::DefaultMaximumResidentMeshBytes, loadingPolicy);
+    const qint64 milliseconds = elapsed.elapsed();
+    QVERIFY2(data.isValid(), qPrintable(data.error));
+    QVERIFY(data.hasMesh());
+    QVERIFY(!data.meshCache.isValid());
+    QCOMPARE(data.sourceVertexCount, longRecords ? qint64(4) : qint64(3));
+    QCOMPARE(data.sourceFaceCount, longRecords ? qint64(1) : qint64(4000));
+    QCOMPARE(data.meshIndices.size() / 3, longRecords ? qsizetype(2) : qsizetype(4000));
+    QVERIFY(data.residentRamPeakBytes <= 64LL * 1024 * 1024);
+    QVERIFY(data.residentGpuBytes <= 64LL * 1024 * 1024);
+    qInfo() << "Adaptive ASCII public loader:" << (longRecords ? "chunked CRLF/EOF" : "4003 short records")
+            << "elapsed milliseconds" << milliseconds << "file bytes" << payload.size();
+    QVERIFY2(milliseconds < 2000, "A bounded ASCII mesh must not allocate the maximum record size for every short line.");
+    loadingPolicy.reservation.reset();
+    QCOMPARE(budget.status().reservedRamBytes, qint64(0));
+    QCOMPARE(budget.status().reservedGpuBytes, qint64(0));
+  }
 }
 
 void WorkspaceDocumentTests::loadsBinaryBigEndianMesh() {

@@ -516,7 +516,7 @@ QString resolveMeshTexturePath(const QString &sourcePath,
 
 void loadMeshTexture(const QString &sourcePath, const PlyHeader &header,
                      const bool hasTextureCoordinateProperty,
-                     PointCloudData &result) {
+                     PointCloudData &result, const bool decode = true) {
   if (!hasTextureCoordinateProperty) {
     return;
   }
@@ -527,6 +527,9 @@ void loadMeshTexture(const QString &sourcePath, const PlyHeader &header,
                                         "does not declare a texture image.")
                                   : QCoreApplication::translate("Workbench", "The PLY-declared texture image could "
                                         "not be found beside the mesh.");
+    return;
+  }
+  if (!decode) {
     return;
   }
   QImageReader reader(result.meshTexturePath);
@@ -888,14 +891,45 @@ bool appendVertex(const ElementDefinition &element, const QVector<double> &value
 bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
                             QVector<double> &values,
                             QVector<QVector<double>> &listValues,
-                            QString &error) {
+                            QString &error,
+                            const std::function<bool(qint64, qsizetype)> &
+                                admitRecord = {}) {
   QByteArray rawLine;
   do {
     if (file.atEnd()) {
       error = QCoreApplication::translate("Workbench", "Unexpected end of ASCII PLY data.");
       return false;
     }
-    rawLine = file.readLine().trimmed();
+    if (admitRecord) {
+      // Qt's QByteArray readLine(maxSize) allocates maxSize before reading and
+      // squeezes afterward. Passing the 256 MiB protection limit for every
+      // short ASCII row causes massive allocation churn. Grow only as needed,
+      // admitting cumulative scratch before appending each bounded segment.
+      rawLine.clear();
+      std::array<char, 8193> segment;
+      while (true) {
+        const qint64 count = file.readLine(segment.data(), segment.size());
+        if (count <= 0) {
+          error = QCoreApplication::translate("Workbench", "Unexpected end of ASCII PLY data.");
+          return false;
+        }
+        if (count > kMaximumRecordBytes - rawLine.size()) {
+          error = QCoreApplication::translate("Workbench", "ASCII PLY list property is truncated.");
+          return false;
+        }
+        if (!admitRecord(rawLine.size() + count, -1)) {
+          error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+          return false;
+        }
+        rawLine.append(segment.data(), count);
+        if (segment[static_cast<std::size_t>(count - 1)] == '\n' || file.atEnd()) {
+          break;
+        }
+      }
+      rawLine = rawLine.trimmed();
+    } else {
+      rawLine = file.readLine().trimmed();
+    }
   } while (rawLine.isEmpty());
 
   rawLine.replace('\t', ' ');
@@ -932,6 +966,10 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
       error = QCoreApplication::translate("Workbench", "ASCII PLY list property is truncated.");
       return false;
     }
+    if (admitRecord && !admitRecord(listCount, propertyIndex)) {
+      error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+      return false;
+    }
     QVector<double> &items = listValues[propertyIndex];
     items.reserve(static_cast<qsizetype>(listCount));
     for (qint64 index = 0; index < listCount; ++index) {
@@ -949,7 +987,9 @@ bool readAsciiElementRecord(QFile &file, const ElementDefinition &element,
 bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
                              const PlyFormat format, QVector<double> &values,
                              QVector<QVector<double>> &listValues,
-                             QString &error) {
+                             QString &error,
+                             const std::function<bool(qint64, qsizetype)> &
+                                 admitRecord = {}) {
   values.fill(0.0, element.properties.size());
   listValues.clear();
   listValues.resize(element.properties.size());
@@ -976,6 +1016,10 @@ bool readBinaryElementRecord(QFile &file, const ElementDefinition &element,
     const qint64 listCount = static_cast<qint64>(countValue);
     if (listCount > 100'000'000) {
       error = QCoreApplication::translate("Workbench", "Invalid binary PLY list length.");
+      return false;
+    }
+    if (admitRecord && !admitRecord(listCount, propertyIndex)) {
+      error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
       return false;
     }
     QVector<double> &items = listValues[propertyIndex];
@@ -1063,9 +1107,15 @@ bool loadOutOfCoreMesh(
     const int greenIndex, const int blueIndex,
     const bool sphericalHarmonicColor,
     const SceneCoordinateMetadata &coordinateMetadata,
-    PointCloudData &result) {
+    PointCloudData &result,
+    const std::function<bool(bool, qint64, qint64)> &admitResources = {}) {
   const MeshCacheIndex existing = MeshCache::loadForSource(file.fileName());
   if (existing.isValid()) {
+    if (admitResources &&
+        !admitResources(true, existing.fullTriangleCount, 0)) {
+      result.error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+      return false;
+    }
     result.meshCache = existing;
     result.sourceVertexCount = existing.fullVertexCount;
     result.sourceFaceCount = existing.fullFaceCount;
@@ -1076,6 +1126,11 @@ bool loadOutOfCoreMesh(
     result.coordinates = existing.coordinates;
     result.previewOnly = true;
     return true;
+  }
+
+  if (admitResources && !admitResources(false, faceElement.count, 0)) {
+    result.error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+    return false;
   }
 
   const auto vertexIterator = std::find_if(
@@ -1167,6 +1222,21 @@ bool loadOutOfCoreMesh(
         const bool collectTextureCoordinates =
             &element == &faceElement &&
             propertyIndex == faceTextureCoordinatesProperty;
+        const qint64 faceTriangles = collectFaceIndices
+            ? std::max<qint64>(0, listCount - 2) : 0;
+        if (faceTriangles > std::numeric_limits<qint64>::max() -
+                                sourceTriangleIndex) {
+          result.error = QCoreApplication::translate("Workbench", "Invalid binary PLY list length.");
+          return false;
+        }
+        if (admitResources && (collectFaceIndices || collectTextureCoordinates) &&
+            !admitResources(false,
+                std::max(faceElement.count, sourceTriangleIndex + faceTriangles),
+                collectFaceIndices ? listCount * 24 :
+                listCount * 8 + faceIndices.size() * 4)) {
+          result.error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+          return false;
+        }
         if (collectFaceIndices) {
           faceIndices.reserve(static_cast<qsizetype>(listCount));
         } else if (collectTextureCoordinates) {
@@ -1945,7 +2015,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                                          const qint64 maximumEditablePoints,
                                          const qint64 maximumResidentMeshVertices,
                                          const qint64 maximumResidentMeshFaces,
-                                         const qint64 maximumResidentMeshBytes) {
+                                         const qint64 maximumResidentMeshBytes,
+                                         const LoaderResourcePolicy &resourcePolicy) {
   PointCloudData result;
   qint64 residentMeshVertexLimit = maximumResidentMeshVertices;
   qint64 residentMeshFaceLimit = maximumResidentMeshFaces;
@@ -2038,7 +2109,7 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   }
 
   loadMeshTexture(file.fileName(), header,
-                  faceTextureCoordinatesProperty >= 0, result);
+                  faceTextureCoordinatesProperty >= 0, result, false);
 
   const int xIndex = findProperty(vertexElement, {QStringLiteral("x")});
   const int yIndex = findProperty(vertexElement, {QStringLiteral("y")});
@@ -2092,33 +2163,125 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                   isScalarProperty);
   result.hasSurfelAttributes = result.hasGaussianAttributes && scaleIndices[2] < 0;
 
-  // Estimate the actual native buffers, not a browser-era face-count limit.
-  // UV seams may duplicate every triangle corner. Include the point-picking
-  // buffer and every RGBA mip level (skinny atlases do not follow a 4/3 ratio).
-  long double textureBytes = 0;
-  for (QSize level = result.meshTextureImage.size();
-       level.width() > 0 && level.height() > 0;) {
-    textureBytes += static_cast<long double>(level.width()) * level.height() * 4;
-    if (level.width() == 1 && level.height() == 1) break;
-    level = QSize(std::max(1, level.width() / 2), std::max(1, level.height() / 2));
+  // Obtain image metadata before decoding. Source pixels, an RGBA conversion
+  // and its mirrored upload copy can coexist; budget 16 bytes per pixel, plus
+  // the encoded file. GPU storage includes each actual mip level, not a 4/3
+  // approximation that is wrong for very skinny images.
+  QSize textureSize;
+  if (!result.meshTexturePath.isEmpty()) {
+    QImageReader metadata(result.meshTexturePath);
+    textureSize = metadata.size();
+    if (!textureSize.isValid() || textureSize.isEmpty()) {
+      result.meshTextureError = QCoreApplication::translate("Workbench", "Unable to decode mesh texture %1: %2")
+          .arg(QFileInfo(result.meshTexturePath).fileName(), metadata.errorString());
+      result.meshTexturePath.clear();
+    }
   }
-  const qint64 residentByteBudget = std::clamp<qint64>(
-      maximumResidentMeshBytes, 0, DefaultMaximumResidentMeshBytes);
-  const auto meshFitsResidentBudget = [&](const qint64 triangles) {
+  const auto costBytes = [](const long double value) {
+    if (!std::isfinite(value) ||
+        value >= static_cast<long double>(std::numeric_limits<qint64>::max())) {
+      return std::numeric_limits<qint64>::max();
+    }
+    return static_cast<qint64>(std::ceil(std::max(0.0L, value)));
+  };
+  long double textureGpuBytes = 0;
+  long double textureRamPeakBytes = 0;
+  const auto updateTextureCosts = [&]() {
+    textureGpuBytes = 0;
+    textureRamPeakBytes = 0;
+    if (!textureSize.isValid() || textureSize.isEmpty()) return;
+    textureRamPeakBytes = static_cast<long double>(textureSize.width()) *
+        textureSize.height() * 16;
+    if (!result.meshTexturePath.isEmpty()) {
+      textureRamPeakBytes += std::max<qint64>(
+          0, QFileInfo(result.meshTexturePath).size());
+    }
+    for (QSize level = textureSize;;) {
+      textureGpuBytes += static_cast<long double>(level.width()) * level.height() * 4;
+      if (level.width() == 1 && level.height() == 1) break;
+      level = QSize(std::max(1, level.width() / 2), std::max(1, level.height() / 2));
+    }
+  };
+  updateTextureCosts();
+  bool textureDecoded = false;
+  const auto decodeTexture = [&]() {
+    if (textureDecoded || result.meshTexturePath.isEmpty()) return;
+    loadMeshTexture(file.fileName(), header,
+                    faceTextureCoordinatesProperty >= 0, result);
+    textureDecoded = true;
+    textureSize = result.meshTextureImage.size();
+    updateTextureCosts();
+  };
+
+  const auto completeCosts = [&](const qint64 triangles,
+                                  const qint64 recordScratch) {
+    if (!containsMeshFaces) return std::pair<qint64, qint64>{0, 0};
+    const long double vertices = vertexElement.count;
+    const long double corners = static_cast<long double>(triangles) * 3;
     const long double meshVertexBytes = faceTextureCoordinatesProperty >= 0
-        ? static_cast<long double>(triangles) * 3 * sizeof(MeshVertex)
+        ? corners * sizeof(MeshVertex) : vertices * sizeof(MeshVertex);
+    // Native mesh rendering uploads geometry and the atlas, not the loader's
+    // CPU point preview. A future mesh-points GPU representation needs its own
+    // viewport admission rather than fictional storage in the mesh estimate.
+    const long double gpu = textureGpuBytes + meshVertexBytes +
+        corners * sizeof(quint32);
+    // Source XYZ, 60-byte preview plus its viewport staging copy, source mesh
+    // vertices and normal sums: 192 B/source vertex. Raw and filtered index/UV/
+    // flag streams coexist (39 B/triangle each); allow raw-vector growth too.
+    long double ram = textureRamPeakBytes + vertices * 192 +
+        static_cast<long double>(triangles) * 117 + recordScratch;
+    if (faceTextureCoordinatesProperty >= 0) {
+      // Worst-case UV seams duplicate every corner. The reserved hash table
+      // includes capacity/entry overhead in addition to render vertices/indices.
+      ram += corners * (sizeof(MeshVertex) + sizeof(quint32) + 64);
+    }
+    return std::pair<qint64, qint64>{costBytes(ram), costBytes(gpu)};
+  };
+  qint64 admittedTriangles = 0;
+  qint64 admittedRecordScratch = 4096;
+  bool residentAdmissionGranted = false;
+  const qint64 residentByteBudget = std::max<qint64>(0, maximumResidentMeshBytes);
+  const auto setCompleteCost = [&](const qint64 triangles,
+                                   const qint64 recordScratch) {
+    const auto [ram, gpu] = completeCosts(triangles, recordScratch);
+    result.residentRamPeakBytes = ram;
+    result.residentGpuBytes = gpu;
+    const long double corners = static_cast<long double>(triangles) * 3;
+    const long double meshVertexBytes = faceTextureCoordinatesProperty >= 0
+        ? corners * sizeof(MeshVertex)
         : static_cast<long double>(vertexElement.count) * sizeof(MeshVertex);
-    const long double bytes = textureBytes + meshVertexBytes +
-        static_cast<long double>(vertexElement.count) * sizeof(PointCloudVertex) +
-        static_cast<long double>(triangles) * 3 * sizeof(quint32);
-    return bytes <= residentByteBudget &&
+    result.residentStorageSupported =
+        vertexElement.count <= residentMeshVertexLimit &&
+        vertexElement.count <= std::numeric_limits<quint32>::max() &&
+        faceElementIterator->count <= residentMeshFaceLimit &&
+        gpu <= residentByteBudget &&
+        textureGpuBytes + meshVertexBytes + corners * sizeof(quint32) <=
+            static_cast<long double>(std::numeric_limits<qint64>::max()) &&
         meshVertexBytes <= std::numeric_limits<int>::max() &&
-        static_cast<long double>(triangles) * 3 <= std::numeric_limits<int>::max();
+        corners * sizeof(quint32) <= std::numeric_limits<int>::max();
+  };
+  const auto meshFitsResidentBudget = [&](const qint64 triangles,
+                                          const qint64 recordScratch = 4096) {
+    if (residentAdmissionGranted && triangles <= admittedTriangles &&
+        recordScratch <= admittedRecordScratch) return true;
+    const qint64 projectedTriangles = std::max(admittedTriangles, triangles);
+    const qint64 projectedScratch = std::max(admittedRecordScratch, recordScratch);
+    setCompleteCost(projectedTriangles, projectedScratch);
+    const bool fits = !resourcePolicy.forcePaged &&
+        result.residentStorageSupported;
+    if (!fits || (resourcePolicy.reservation &&
+        !resourcePolicy.reservation->tryResize(result.residentRamPeakBytes,
+                                               result.residentGpuBytes))) return false;
+    admittedTriangles = projectedTriangles;
+    admittedRecordScratch = projectedScratch;
+    residentAdmissionGranted = true;
+    return true;
   };
   const auto loadPagedMesh = [&]() {
     // A polygon may exceed the initial one-triangle-per-face estimate. Restart
     // from the saved payload, with no partial resident attributes or counters.
     PointCloudData paged;
+    paged.residentStorageSupported = result.residentStorageSupported;
     paged.meshTextureImage = std::move(result.meshTextureImage);
     paged.meshTexturePath = std::move(result.meshTexturePath);
     paged.meshTextureError = std::move(result.meshTextureError);
@@ -2128,17 +2291,85 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
                          .arg(QFileInfo(filePath).fileName(), file.errorString());
       return;
     }
-    loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
+    qint64 pagedAdmittedTriangles = -1;
+    qint64 pagedRecordScratch = 4096;
+    bool pagedCacheHit = false;
+    const auto admitPaged = [&](const bool cacheHit, const qint64 triangles,
+                                const qint64 recordScratch) {
+      if (cacheHit == pagedCacheHit && triangles <= pagedAdmittedTriangles &&
+          recordScratch <= pagedRecordScratch) return true;
+      const qint64 projectedTriangles = std::max(
+          std::max<qint64>(0, triangles), pagedAdmittedTriangles);
+      pagedRecordScratch = std::max(pagedRecordScratch, recordScratch);
+      setCompleteCost(projectedTriangles, pagedRecordScratch);
+      long double ram = textureRamPeakBytes + 8LL * 1024 * 1024;
+      if (!cacheHit) {
+        constexpr std::array<qint64, 5> reservoirCapacities = {
+            32'768, 65'536, 262'144, 1'048'576, 2'097'152};
+        long double reservoirBytes = 0;
+        for (const qint64 capacity : reservoirCapacities)
+          reservoirBytes += static_cast<long double>(std::min(projectedTriangles, capacity)) * 40;
+        const long double bucketBytes = static_cast<long double>(
+            std::min<qint64>(projectedTriangles, 2'097'152)) * 40;
+        const long double exactPageScratch = static_cast<long double>(
+            std::min<qint64>(projectedTriangles, 65'536)) *
+            (40 + 3 * (sizeof(MeshVertex) + sizeof(quint32) + 64));
+        // MeshCacheBuilder maps XYZ/RGB and normal sums (36 B/V), retains five
+        // bounded reservoirs and buckets, and stages one exact output page.
+        // Capacity growth is covered separately; no full 60 B/V preview exists.
+        ram += static_cast<long double>(vertexElement.count) * 36 +
+            262'144LL * 24 + 8LL * 1024 * 1024 +
+            2 * (reservoirBytes + bucketBytes + exactPageScratch) + pagedRecordScratch;
+      }
+      ram += static_cast<long double>(result.vertices.size()) *
+          sizeof(PointCloudVertex) * 2;
+      qint64 minimumPageBytes = 0;
+      if (result.meshCache.isValid()) {
+        minimumPageBytes = result.meshCache.nodes.at(result.meshCache.rootNode).byteCount();
+        // A decoded atlas without even one drawable geometry page is not a
+        // usable paged model. Account for the actual indivisible root page once
+        // the cache index is available, before reporting import success.
+        ram += static_cast<long double>(minimumPageBytes) * 3;
+      }
+      const qint64 gpu = costBytes(textureGpuBytes +
+          static_cast<long double>(result.vertices.size()) * sizeof(PointCloudVertex) +
+          minimumPageBytes);
+      if (resourcePolicy.reservation &&
+          !resourcePolicy.reservation->tryResize(costBytes(ram), gpu)) return false;
+      pagedAdmittedTriangles = projectedTriangles;
+      pagedCacheHit = cacheHit;
+      return true;
+    };
+    const bool loaded = loadOutOfCoreMesh(file, header, vertexElement, *faceElementIterator,
                      faceVertexIndicesProperty, faceTextureCoordinatesProperty,
                      xIndex, yIndex, zIndex, redIndex, greenIndex, blueIndex,
-                     sphericalHarmonicColor, coordinateMetadata, result);
+                     sphericalHarmonicColor, coordinateMetadata, result, admitPaged);
+    if (loaded) {
+      decodeTexture();
+      setCompleteCost(result.sourceTriangleCount, pagedRecordScratch);
+      // Builder temporaries are now gone. Retain decoded image/metadata and any
+      // real preview buffer through result delivery and the pending GPU upload.
+      pagedAdmittedTriangles = -1;
+      if (!admitPaged(true, result.sourceTriangleCount, pagedRecordScratch)) {
+        result.error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+      }
+    }
   };
   if (containsMeshFaces &&
-      (vertexElement.count > residentMeshVertexLimit ||
-       faceElementIterator->count > residentMeshFaceLimit ||
-       !meshFitsResidentBudget(faceElementIterator->count))) {
+      !meshFitsResidentBudget(faceElementIterator->count)) {
     loadPagedMesh();
     return result;
+  }
+
+  if (containsMeshFaces) {
+    decodeTexture();
+    // A decoder can expose different storage than metadata (or fail). Refresh
+    // the same reservation before any complete geometry arrays are allocated.
+    residentAdmissionGranted = false;
+    if (!meshFitsResidentBudget(faceElementIterator->count)) {
+      loadPagedMesh();
+      return result;
+    }
   }
 
   if (!containsMeshFaces && vertexElement.count > maximumEditablePoints) {
@@ -2207,14 +2438,58 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   for (const ElementDefinition &element : header.elements) {
     QVector<double> values(element.properties.size());
     QVector<QVector<double>> listValues(element.properties.size());
+    bool recordAdmissionRefused = false;
+    long double recordExpandedBytes = 0;
+    std::function<bool(qint64, qsizetype)> admitRecord;
+    if (containsMeshFaces) {
+      admitRecord = [&](const qint64 count, const qsizetype propertyIndex) {
+        if (propertyIndex < 0) {
+          recordExpandedBytes = static_cast<long double>(count) * 64;
+        } else {
+          // All listValues (including ignored properties) coexist until this
+          // record finishes. Sum them rather than reserving only the largest;
+          // 24 B/value covers doubles, vector growth and per-list staging.
+          recordExpandedBytes += static_cast<long double>(count) * 24;
+        }
+        const qint64 scratch = costBytes(recordExpandedBytes);
+        qint64 projectedTriangles = faceElementIterator->count;
+        if (propertyIndex >= 0 && &element == &(*faceElementIterator) &&
+            (propertyIndex == faceVertexIndicesProperty ||
+             propertyIndex == faceTextureCoordinatesProperty)) {
+          const qint64 corners = propertyIndex == faceTextureCoordinatesProperty
+              ? count / 2 : count;
+          const qint64 fanTriangles = std::max<qint64>(0, corners - 2);
+          if (fanTriangles > std::numeric_limits<qint64>::max() -
+                                 result.sourceTriangleCount) {
+            recordAdmissionRefused = true;
+            return false;
+          }
+          projectedTriangles = std::max(projectedTriangles,
+              result.sourceTriangleCount + fanTriangles);
+        }
+        const bool admitted = meshFitsResidentBudget(projectedTriangles, scratch);
+        recordAdmissionRefused = recordAdmissionRefused || !admitted;
+        return admitted;
+      };
+    }
     for (qint64 recordIndex = 0; recordIndex < element.count; ++recordIndex) {
+      recordAdmissionRefused = false;
+      recordExpandedBytes = 0;
       const bool read = header.format == PlyFormat::Ascii
                             ? readAsciiElementRecord(file, element, values,
-                                                     listValues, result.error)
+                                                     listValues, result.error,
+                                                     admitRecord)
                             : readBinaryElementRecord(file, element,
                                                       header.format, values,
-                                                      listValues, result.error);
+                                                      listValues, result.error,
+                                                      admitRecord);
       if (!read) {
+        if (recordAdmissionRefused) {
+          values = {};
+          listValues = {};
+          loadPagedMesh();
+          return result;
+        }
         result.vertices.clear();
         result.sourcePositions.clear();
         result.meshIndices.clear();
@@ -2225,6 +2500,8 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
         const qint64 triangles = std::max<qint64>(0, faceIndices.size() - 2);
         if (triangles > std::numeric_limits<qint64>::max() - result.sourceTriangleCount ||
             !meshFitsResidentBudget(result.sourceTriangleCount + triangles)) {
+          values = {};
+          listValues = {};
           loadPagedMesh();
           return result;
         }
@@ -2282,6 +2559,9 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   result.coordinates = coordinateTracker.info();
   if (containsMeshFaces && !finalizeMeshGeometry(result)) {
     result.error = QCoreApplication::translate("Workbench", "The PLY declares mesh faces but contains no renderable triangles.");
+  }
+  if (containsMeshFaces) {
+    setCompleteCost(result.sourceTriangleCount, admittedRecordScratch);
   }
   return result;
 }

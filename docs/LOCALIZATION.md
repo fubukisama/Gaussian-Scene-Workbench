@@ -197,32 +197,37 @@ Terminology references: [CloudCompare official translations](https://github.com/
 ## Paged mesh preview
 
 Native loading is not required to page ordinary models merely because the
-legacy HTML did. Resident meshes now retain all valid triangles under
-five-million vertex/face safety limits and a conservative byte allowance
-capped at 1 GiB per load, including UV-corner duplication, point-picking data,
-indices and actual texture mip levels. Oversized polygon fans rewind into the
+legacy HTML did. Resident mesh admission now follows available RAM/VRAM and a
+shared reservation ledger rather than fixed five-million / 1 GiB thresholds.
+Estimates include UV-corner duplication, actual GPU buffers, CPU transient
+arrays and texture conversion/mip levels. Oversized polygon fans rewind into the
 existing disk-backed path, never a silently sampled resident mesh. Complete
 cache parents (all valid source triangles present) need no further refinement.
 Page reads can run 16 at a time with a bounded pending/in-flight byte allowance.
-The byte estimate uses currently known GPU/scene information; startup/batch
-loads may precede final information, existing resident models are not
-reclassified, and paged texture storage remains separate. This is not a hard
-aggregate VRAM cap or a new continuous-surface LOD algorithm.
+Startup loads wait for the actual OpenGL device probe. Manual settings apply
+immediately; existing meshes can change residency without resetting the camera
+or transform. Model loading and display targets are shared, not separate pools
+for every object. Texture atlases are included but cannot themselves be paged;
+insufficient mandatory storage reports a resource error. This is not an OS hard
+quota, a training-process scheduler or a continuous-surface LOD algorithm.
 
-中文：常规模型不因 HTML 旧版逻辑而必须分页。常驻网格在 500 万顶点／面安全
-上限及每次加载最多 1 GiB 的保守字节预算内保留所有有效三角形，并计入 UV
-接缝、拾取数据、索引和实际纹理 mip 层级。多边形展开超预算时回到磁盘分页，
+中文：常规模型不因 HTML 旧版逻辑而必须分页。根据实时可用内存、显存和共享
+资源预留决定是否常驻，不再采用默认 500 万／1 GiB 门槛；计入 UV 接缝、实际
+GPU 缓冲区、CPU 临时数组和纹理转换／mip 层级。多边形展开超预算时回到磁盘分页，
 不悄悄抽面。完整父页不再重复细分；分页读取最多并行 16 项并限制排队字节数。
-预算依据当时已知信息，不是全部对象与纹理的总显存硬上限，也不是新的连续
-曲面 LOD。
+预算设置即时生效；已有模型可改变常驻方式而保留视点和变换。纹理计入预算，
+但纹理本身不支持分页，必需资源不足会明确报错。这不是操作系统硬配额、训练
+资源调度器或新的连续曲面 LOD。
 
 日本語：通常のモデルは HTML 旧版を理由にページングする必要はありません。
-500 万頂点／面の安全上限と一回の読み込みで最大 1 GiB の保守的なバイト予算
-の範囲で、全有効三角形を保持します。UV シーム、ピッキング用データ、索引、
-実際の mip レベルを含みます。多角形の展開が予算を超えるとディスク経由へ
+現在の空き RAM・GPU メモリと共有予約台帳で常駐を判断し、既定の 500 万／
+1 GiB のしきい値を使用しません。UV シーム、実際の GPU バッファ、CPU 作業
+配列、テクスチャ変換と全 mip レベルを含みます。多角形の展開が予算を超えるとディスク経由へ
 戻し、面を黙って間引きません。完全な親ページを再分割せず、最大 16 件の
-並列読み込みと待機バイト数を制限します。全オブジェクトとテクスチャの総
-VRAM 上限や、新しい表面維持 LOD を保証するものではありません。
+並列読み込みと待機バイト数を制限します。予算は即時反映され、モデル変換と
+視点を保持して常駐方式を変更できます。テクスチャ自身はページングせず、
+必須領域が不足すると明示的なエラーを表示します。OS の強制配分上限、学習
+リソースのスケジューラ、新しい表面維持 LOD を保証するものではありません。
 
 Acceptance for this repair compares resident and paged framebuffers against matching empty backgrounds, retaining at least 90% of a reference surface with at least 1,000 interior pixels. The reported 2DGS model, bounded/unbounded TSDF, OpenMVS-textured and SuGaR plain/textured outputs passed this gate in light and dark installed builds. The existing reduced GS2Mesh fixture has only 297 reference interior pixels across sparse disconnected islands; paging retains those pixels, but the fixture cannot establish continuous-surface correctness. Dense GS2Mesh output acceptance remains pending with a suitable bounded, provenance-verified fixture; the common renderer fix is not a claim that GS2Mesh generation quality has been validated.
 
@@ -230,7 +235,7 @@ Acceptance for this repair compares resident and paged framebuffers against matc
 
 日本語：本修正は同じ背景で常駐表示とページング表示の実際の画像を比較し、参照面の内部画素が 1000 以上で、その 90% 以上を保持することを条件とします。報告された 2DGS モデル、有界・無界 TSDF、OpenMVS のテクスチャ付きメッシュ、SuGaR の通常・テクスチャ付きメッシュは、インストール版の明暗両テーマで合格しました。既存の縮小 GS2Mesh サンプルは分散した小片で、参照内部画素は 297 しかありません。ページングで同じ画素を保持しますが、連続した面の正しさは検証できません。出所を確認した適切な規模の高密度 GS2Mesh サンプルによる検証は未完了であり、共通の表示修正は GS2Mesh の生成品質を検証したという意味ではありません。
 
-**Paged Mesh Preview** describes disk-backed mesh display, not a surface-preserving LOD algorithm. Coarse cache ancestors are random subsets of the original triangles and can look incomplete. When the exact visible pages fit the shared per-scene GPU budget, the renderer continues loading and displays those complete pages rather than stopping at a random sample because of viewing distance or interaction. Pending CPU page reads are deduplicated before GPU upload. The original PLY is unchanged and UV seams are preserved. **Base color** means source vertex RGB when available, otherwise the default material color; **UV · Base-color fallback** does not claim that an RGB-free mesh contains vertex colors.
+**Paged Mesh Preview** describes disk-backed mesh display, not a surface-preserving LOD algorithm. Coarse cache ancestors are random subsets of the original triangles and can look incomplete. When the exact visible pages fit the shared viewport GPU budget, the renderer continues loading and displays those complete pages rather than stopping at a random sample because of viewing distance or interaction. Pending CPU page reads are deduplicated before GPU upload. The original PLY is unchanged and UV seams are preserved. **Base color** means source vertex RGB when available, otherwise the default material color; **UV · Base-color fallback** does not claim that an RGB-free mesh contains vertex colors.
 
 This display fix is shared by imported meshes and all supported mesh outputs, including 2DGS TSDF/OpenMVS and 3DGS SuGaR/GS2Mesh; generation parameters and optimizer state are unchanged. Completed pages upload in small batches bounded by eight pages and a four-millisecond scheduling budget per frame (an individual upload may exceed that time), so waiting pages do not accumulate behind a one-page-per-frame limit. If all visible complete pages exceed the shared GPU budget, an incomplete sampled preview can still remain. Genuine surface-preserving large-mesh LOD is a remaining acceptance gate, not a capability delivered by this fix.
 

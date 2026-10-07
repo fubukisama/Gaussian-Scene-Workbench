@@ -654,6 +654,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\LOCALIZATION.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\RESOURCE_BUDGETS.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\CONTINUOUS_TRAINING_PREVIEW.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\STUDIO_COMPARISON.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\TRAINING_RESUME.md") -Destination $PackageRoot -Force

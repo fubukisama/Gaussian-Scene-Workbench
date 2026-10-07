@@ -2,6 +2,7 @@
 
 #include "MeshCache.h"
 #include "PointCloudCache.h"
+#include "ResourceBudget.h"
 #include "SceneCoordinates.h"
 
 #include <QBitArray>
@@ -12,6 +13,7 @@
 #include <QVector3D>
 #include <functional>
 #include <array>
+#include <limits>
 
 namespace gsw {
 
@@ -109,6 +111,15 @@ struct PointCloudData {
   bool hasSurfelAttributes = false;
   bool meshPreviewDecimated = false;
   bool previewOnly = false;
+  // Estimated costs of the complete native mesh, retained on paged results so
+  // the viewport can atomically admit a later upgrade without blind reloads.
+  qint64 residentRamPeakBytes = 0;
+  qint64 residentGpuBytes = 0;
+  // Resource pressure may be retried; explicit ceilings or native buffer/index
+  // limits must not trigger repeated attempts to make a paged mesh resident.
+  bool residentStorageSupported = true;
+  // Worker failure classification must survive an immediate UI language switch.
+  bool resourceLimited = false;
   QString error;
 
   [[nodiscard]] bool isValid() const;
@@ -118,13 +129,23 @@ struct PointCloudData {
   [[nodiscard]] float radius() const;
 };
 
+struct LoaderResourcePolicy final {
+  std::shared_ptr<ResourceReservation> reservation;
+  bool forcePaged = false;
+};
+
 class PlyPointCloudLoader final {
 public:
   static constexpr qsizetype DefaultMaximumPreviewPoints = 1'500'000;
   static constexpr qint64 DefaultMaximumEditablePoints = 10'000'000;
-  static constexpr qint64 DefaultMaximumResidentMeshVertices = 5'000'000;
-  static constexpr qint64 DefaultMaximumResidentMeshFaces = 5'000'000;
-  static constexpr qint64 DefaultMaximumResidentMeshBytes = 1024LL * 1024 * 1024;
+  // Default eligibility is resource-based. Explicit legacy/test ceilings remain
+  // supported, while actual individual GL buffers must still fit signed int.
+  static constexpr qint64 DefaultMaximumResidentMeshVertices =
+      std::numeric_limits<quint32>::max();
+  static constexpr qint64 DefaultMaximumResidentMeshFaces =
+      std::numeric_limits<qint64>::max();
+  static constexpr qint64 DefaultMaximumResidentMeshBytes =
+      std::numeric_limits<qint64>::max();
 
   [[nodiscard]] static PointCloudData load(
       const QString &filePath,
@@ -133,7 +154,8 @@ public:
       qint64 maximumResidentMeshVertices =
           DefaultMaximumResidentMeshVertices,
       qint64 maximumResidentMeshFaces = DefaultMaximumResidentMeshFaces,
-      qint64 maximumResidentMeshBytes = DefaultMaximumResidentMeshBytes);
+      qint64 maximumResidentMeshBytes = DefaultMaximumResidentMeshBytes,
+      const LoaderResourcePolicy &resourcePolicy = {});
 
   [[nodiscard]] static bool writeFiltered(
       const QString &sourceFilePath, const QString &destinationFilePath,

@@ -7,6 +7,7 @@
 
 #include <QMainWindow>
 #include <QHash>
+#include <QPointer>
 #include <QSharedPointer>
 #include <QSize>
 #include <QStringList>
@@ -33,6 +34,7 @@ namespace gsw {
 
 class TrainingMonitorWidget;
 class TaskRecord;
+class ResourceBudgetDialog;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -191,6 +193,7 @@ private:
   QList<RecoveryWorkspace> mStartupRecovery;
   ProcessSupervisor mProcessSupervisor;
   NativeViewport *mViewport = nullptr;
+  QPointer<ResourceBudgetDialog> mResourceBudgetDialog;
   QDockWidget *mProjectDock = nullptr;
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;

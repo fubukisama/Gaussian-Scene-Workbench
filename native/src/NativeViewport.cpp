@@ -43,6 +43,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -426,12 +427,29 @@ QString formatCount(const qint64 count) {
 } // namespace
 
 NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
+  mResources = std::make_shared<ResourceBudgetController>();
+  mResourceClock.start();
+  mResourceBudgetTimer = new QTimer(this);
+  mResourceBudgetTimer->setInterval(1000);
+  connect(mResourceBudgetTimer, &QTimer::timeout, this,
+          &NativeViewport::refreshResourceBudgets);
+  mResourceBudgetTimer->start();
   setObjectName(QStringLiteral("nativeViewport"));
   setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setMinimumSize(0, 0);
   setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-  AppLanguage::onChanged(this, [this]() { updateObservationNavigationToolTip(); });
+  AppLanguage::onChanged(this, [this]() {
+    updateObservationNavigationToolTip();
+    auto states = mSceneStates;
+    if (!states.contains(mScene)) states.append(mScene);
+    for (const auto &state : states) {
+      if (state->resourceNeedsReload && !state->resourceLoading)
+        state->mSceneLoadMessage = QCoreApplication::translate(
+            "Workbench", "Insufficient memory for the mesh preview and texture.");
+    }
+    update();
+  });
   resetModelTransformHistory();
 
   mViewSnapAnimation = new QVariantAnimation(this);
@@ -491,6 +509,223 @@ NativeViewport::~NativeViewport() {
   }
 }
 
+ResourceBudgetPolicy NativeViewport::resourceBudgetPolicy() const {
+  return mResources->policy();
+}
+
+void NativeViewport::setResourceBudgetPolicy(const ResourceBudgetPolicy &policy) {
+  mResources->setPolicy(policy);
+  for (const auto &state : mSceneStates) {
+    state->resourceRetryAfterMs = 0;
+    state->resourceResidentUploadFailed = false;
+  }
+  mScene->resourceRetryAfterMs = 0;
+  mScene->resourceResidentUploadFailed = false;
+  refreshResourceBudgets();
+  update();
+}
+
+ResourceBudgetStatus NativeViewport::resourceBudgetStatus() const {
+  auto status = mResources->status();
+  status.loadingMeshCount = 0;
+  auto states = mSceneStates;
+  if (!states.contains(mScene)) states.append(mScene);
+  for (const auto &state : states) {
+    if (state->mHasMesh) {
+      if (state->mMeshCache.isValid()) ++status.pagedMeshCount;
+      else ++status.residentMeshCount;
+    }
+    if (state->resourceLoading) ++status.loadingMeshCount;
+  }
+  return status;
+}
+
+void NativeViewport::updateManagedResourceUsage() {
+  qint64 ram = 0;
+  qint64 gpu = 0;
+  auto states = mSceneStates;
+  if (!states.contains(mScene)) states.append(mScene);
+  for (const auto &state : states) {
+    ram += state->mSourcePositions.capacity() * qint64(sizeof(PointPosition)) +
+           state->mPreviewVertices.capacity() * qint64(sizeof(PointCloudVertex)) +
+           state->mPendingVertices.capacity() * qint64(sizeof(PointCloudVertex)) +
+           state->mPendingMeshVertices.capacity() * qint64(sizeof(MeshVertex)) +
+           state->mPendingMeshIndices.capacity() * qint64(sizeof(quint32)) +
+           state->mPendingMeshTexture.sizeInBytes();
+    for (const auto &page : state->mPendingMeshCachePages)
+      ram += page.vertices.capacity() * qint64(sizeof(MeshVertex)) +
+             page.indices.capacity() * qint64(sizeof(quint32));
+    for (const auto &page : state->mPendingPointCachePages)
+      ram += page.vertices.capacity() * qint64(sizeof(PointPreviewVertex));
+    ram += state->mSphericalHarmonics.coefficients.capacity() * qint64(sizeof(float)) +
+           state->mSphericalHarmonics.sourceIndices.capacity() * qint64(sizeof(quint32));
+    gpu += state->resourcePointGpuBytes + state->resourceMeshGpuBytes +
+           state->resourceTextureGpuBytes + state->mMeshCacheResidentBytes +
+           state->mPointCacheResidentBytes;
+  }
+  mResources->setManagedUsage(ram, gpu);
+}
+
+void NativeViewport::refreshResourceBudgets() {
+  updateManagedResourceUsage();
+  SystemResourceSnapshot snapshot;
+  const bool currentAlready = context() && QOpenGLContext::currentContext() == context();
+  if (context() && context()->isValid()) {
+    if (!currentAlready) makeCurrent();
+    snapshot = SystemResourceProbe::probe(context());
+    if (!currentAlready) doneCurrent();
+  } else {
+    snapshot = SystemResourceProbe::probe();
+  }
+  mResources->updateSnapshot(snapshot);
+  const auto status = mResources->status();
+  mMeshCacheGpuBudgetBytes = static_cast<qsizetype>(status.effectiveGpuBudgetBytes);
+  mPointCacheGpuBudgetBytes = mMeshCacheGpuBudgetBytes;
+  if (context() && context()->isValid()) {
+    const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+    if (!alreadyCurrent) makeCurrent();
+    auto states = mSceneStates;
+    if (!states.contains(mScene)) states.append(mScene);
+    for (const auto &state : states) {
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+      evictMeshCacheUntilFits(0);
+      evictPointCacheUntilFits(0);
+      state->mMeshCacheFailedNodes.clear();
+      state->mPointCacheFailedNodes.clear();
+    }
+    if (!alreadyCurrent) doneCurrent();
+  }
+  // Page caches are disposable. Trim them against this probe's target before
+  // deciding whether an otherwise-fitting complete mesh needs a costly reload.
+  rebalanceResourceResidency();
+  emit resourceBudgetStatusChanged();
+}
+
+qsizetype NativeViewport::sharedPageGpuBudget() const {
+  const auto status = mResources->status();
+  qint64 cacheBytes = 0;
+  qint64 owners = 0;
+  auto states = mSceneStates;
+  if (!states.contains(mScene)) states.append(mScene);
+  for (const auto &state : states) {
+    cacheBytes += state->mMeshCacheResidentBytes + state->mPointCacheResidentBytes;
+    if (state->mMeshCache.isValid() || state->mPointCache.isValid()) ++owners;
+  }
+  const qint64 mandatory = std::max<qint64>(0, status.managedGpuBytes - cacheBytes);
+  const qint64 pool = std::max<qint64>(0,
+      // Use the target captured by the last hardware probe for this trim pass.
+      // A freed page is not immediately credited to an old free-memory sample;
+      // recomputing that conservative target after every deletion would keep
+      // lowering it and evict the entire cache instead of only the shortfall.
+      qint64(mMeshCacheGpuBudgetBytes) - mandatory - status.reservedGpuBytes);
+  return static_cast<qsizetype>(pool / std::max<qint64>(1, owners));
+}
+
+void NativeViewport::finishResourceUpload() {
+  updateManagedResourceUsage();
+  if (!mScene->resourceLoadReservation || mScene->mPointUploadPending ||
+      mScene->mMeshUploadPending || mScene->mMeshTextureUploadPending) return;
+  mScene->resourceLoadReservation.reset();
+  emit resourceBudgetStatusChanged();
+}
+
+void NativeViewport::discardResidentMeshStorage() {
+  const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+  if (!alreadyCurrent) makeCurrent();
+  releaseSceneBuffers();
+  if (!alreadyCurrent) doneCurrent();
+  mScene->mPreviewVertices = {};
+  mScene->mSourcePositions = {};
+  mScene->mPendingVertices = {};
+  mScene->mPendingMeshVertices = {};
+  mScene->mPendingMeshIndices = {};
+  mScene->mPendingMeshTexture = {};
+  mScene->mRenderedPointCount = 0;
+  mScene->mRenderedMeshIndexCount = 0;
+  mScene->resourceLoadReservation.reset();
+  updateManagedResourceUsage();
+}
+
+void NativeViewport::rebalanceResourceResidency() {
+  if (mResourceRebalancing || mProcessingActive || !context() || !context()->isValid()) return;
+  QScopedValueRollback<bool> guard(mResourceRebalancing, true);
+  auto states = mSceneStates;
+  if (!states.contains(mScene)) states.append(mScene);
+  const auto active = mScene;
+  for (const auto &state : states) {
+    if (state->resourceNeedsReload && !state->resourceLoading &&
+        state->resourceRetryAfterMs <= mResourceClock.elapsed() &&
+        !state->mRequestedScenePath.isEmpty()) {
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+      QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+      ++state->mSceneGeneration;
+      state->resourceRetryAfterMs = mResourceClock.elapsed() + 10000;
+      if (state->resourceForcePagedRetry) discardResidentMeshStorage();
+      startSceneLoad(state->mRequestedScenePath, false, true, state->resourceForcePagedRetry);
+      continue;
+    }
+    if (!state->mHasMesh || state->resourceLoading || state->resourceLoadReservation ||
+        state->mScenePath.isEmpty() || state->resourceRetryAfterMs > mResourceClock.elapsed()) continue;
+    updateManagedResourceUsage();
+    const auto budget = mResources->status();
+    // Compare GPU usage with the target captured before this trim pass. A freed
+    // cache page is not immediately credited by an old hardware observation;
+    // recomputing its shortfall here would subtract it twice and demote a mesh
+    // even after the requested amount of disposable storage was released.
+    const bool pressure = budget.managedGpuBytes > qint64(mMeshCacheGpuBudgetBytes) ||
+                          budget.managedRamBytes > budget.effectiveRamBudgetBytes;
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+    if (pressure && !state->mMeshCache.isValid()) {
+      // Relinquish old storage before reserving a smaller representation. The
+      // model identity, transform and navigation state stay intact.
+      discardResidentMeshStorage();
+      ++state->mSceneGeneration;
+      state->resourceRetryAfterMs = mResourceClock.elapsed() + 5000;
+      startSceneLoad(state->mScenePath, false, true, true);
+    } else if (!pressure && !state->resourceResidentUploadFailed &&
+               state->resourceResidentStorageSupported && state->mMeshCache.isValid() &&
+               state->resourceResidentRamPeakBytes > 0 && state->resourceResidentGpuBytes > 0) {
+      auto reservation = mResources->createReservation();
+      if (!reservation->tryResize(state->resourceResidentRamPeakBytes,
+                                  state->resourceResidentGpuBytes)) {
+        // Promotion replaces this model's disposable page storage; requiring
+        // both representations to coexist would let a full cache permanently
+        // starve a resident mesh that fits the same total budget. Preflight the
+        // final GPU cost, reserve the CPU peak, then physically release old GPU
+        // storage before the normal atomic admission (never credit unfreed VRAM).
+        const qint64 replaceableGpu = state->resourcePointGpuBytes +
+            state->resourceMeshGpuBytes + state->resourceTextureGpuBytes +
+            state->mMeshCacheResidentBytes + state->mPointCacheResidentBytes;
+        const qint64 otherGpu = std::max<qint64>(0,
+            budget.managedGpuBytes - replaceableGpu);
+        const qint64 remainingGpu = std::max<qint64>(0,
+            budget.effectiveGpuBudgetBytes - otherGpu - budget.reservedGpuBytes);
+        if (state->resourceResidentGpuBytes > remainingGpu ||
+            !reservation->tryResize(state->resourceResidentRamPeakBytes, 0)) continue;
+        ++state->mSceneGeneration;
+        state->resourceLoading = true;
+        state->mPendingMeshCachePages.clear();
+        state->mPendingPointCachePages.clear();
+        state->resourceMeshPageReservations.clear();
+        state->resourcePointPageReservations.clear();
+        state->mMeshCacheReadsInFlight.clear();
+        state->mPointCacheReadsInFlight.clear();
+        discardResidentMeshStorage();
+        refreshResourceBudgets();
+        // If external pressure changed during replacement, the loader can
+        // safely choose paging with this CPU lease instead of overcommitting.
+        (void)reservation->tryResize(state->resourceResidentRamPeakBytes,
+                                     state->resourceResidentGpuBytes);
+      } else {
+        ++state->mSceneGeneration;
+      }
+      state->resourceRetryAfterMs = mResourceClock.elapsed() + 5000;
+      startSceneLoad(state->mScenePath, false, true, false, std::move(reservation));
+    }
+  }
+}
+
 void NativeViewport::releaseSceneBuffers() {
   mScene->gaussianGpu.release();
   mScene->indexedGaussians = false;
@@ -504,6 +739,8 @@ void NativeViewport::releaseSceneBuffers() {
   mScene->mMeshIndexBuffer.destroy();
   mScene->mMeshVertexBuffer.destroy();
   mScene->mPointBuffer.destroy();
+  mScene->resourcePointGpuBytes = 0;
+  mScene->resourceMeshGpuBytes = 0;
   mScene->buffersInitialized = false;
 }
 
@@ -835,6 +1072,16 @@ void NativeViewport::setScene(const QString &scenePath,
   }
 
   ++mScene->mSceneGeneration;
+  mScene->resourceLoading = false;
+  mScene->resourceNeedsReload = false;
+  mScene->resourceForcePagedRetry = false;
+  mScene->resourceResidentUploadFailed = false;
+  mScene->resourceResidentRamPeakBytes = 0;
+  mScene->resourceResidentGpuBytes = 0;
+  mScene->resourceResidentStorageSupported = true;
+  mScene->resourceLoadReservation.reset();
+  mScene->resourceMeshPageReservations.clear();
+  mScene->resourcePointPageReservations.clear();
   mScene->previewLoadBusy = false;
   mScene->previewLoadFailed = false;
   mScene->queuedPreviewPath.clear();
@@ -864,6 +1111,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mTemporaryOrbitActive = false;
   mScene->mRequestedScenePath = scenePath;
   mScene->mScenePath = scenePath;
+  mScene->mSourceVertexCount = 0;
   mScene->mSourceFaceCount = 0;
   mScene->mPreviewPointCount = 0;
   mScene->mPreviewTriangleCount = 0;
@@ -1656,35 +1904,18 @@ qsizetype NativeViewport::cameraCount() const {
 
 void NativeViewport::initializeGL() {
   initializeOpenGLFunctions();
-  constexpr GLenum kGpuMemoryTotalAvailableNvx = 0x9048;
-  if (QOpenGLContext::currentContext()->hasExtension(
-          QByteArrayLiteral("GL_NVX_gpu_memory_info"))) {
-    GLint totalKilobytes = 0;
-    glGetIntegerv(kGpuMemoryTotalAvailableNvx, &totalKilobytes);
-    if (totalKilobytes > 0) {
-      const qsizetype quarterBytes =
-          static_cast<qsizetype>(totalKilobytes) * 1024 / 4;
-      mPointCacheGpuBudgetBytes = std::clamp<qsizetype>(
-          quarterBytes, 512LL * 1024LL * 1024LL,
-          2048LL * 1024LL * 1024LL);
-      mMeshCacheGpuBudgetBytes = mPointCacheGpuBudgetBytes;
-    }
-  }
+  // Retain explicit diagnostic environment ceilings, but route them through
+  // the same model-wide controller rather than independent per-cache pools.
   bool budgetOverrideValid = false;
-  const int budgetOverrideMegabytes = qEnvironmentVariableIntValue(
+  int budgetOverrideMegabytes = qEnvironmentVariableIntValue(
+      "GSW_MESH_CACHE_GPU_BUDGET_MB", &budgetOverrideValid);
+  if (!budgetOverrideValid) budgetOverrideMegabytes = qEnvironmentVariableIntValue(
       "GSW_POINT_CACHE_GPU_BUDGET_MB", &budgetOverrideValid);
-  if (budgetOverrideValid && budgetOverrideMegabytes >= 64 &&
-      budgetOverrideMegabytes <= 4096) {
-    mPointCacheGpuBudgetBytes =
-        static_cast<qsizetype>(budgetOverrideMegabytes) * 1024LL * 1024LL;
-  }
-  bool meshBudgetOverrideValid = false;
-  const int meshBudgetOverrideMegabytes = qEnvironmentVariableIntValue(
-      "GSW_MESH_CACHE_GPU_BUDGET_MB", &meshBudgetOverrideValid);
-  if (meshBudgetOverrideValid && meshBudgetOverrideMegabytes >= 64 &&
-      meshBudgetOverrideMegabytes <= 4096) {
-    mMeshCacheGpuBudgetBytes =
-        static_cast<qsizetype>(meshBudgetOverrideMegabytes) * 1024LL * 1024LL;
+  if (budgetOverrideValid && budgetOverrideMegabytes >= 64 && budgetOverrideMegabytes <= 131072) {
+    auto policy = mResources->policy();
+    policy.mode = ResourceBudgetPolicy::Mode::Manual;
+    policy.gpuLimitMiB = budgetOverrideMegabytes;
+    mResources->setPolicy(policy);
   }
   const QVector4D clearColor = viewportClearColor();
   glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
@@ -2239,6 +2470,7 @@ void main() {
 
   initializeSceneBuffers();
 
+  refreshResourceBudgets();
   if (meshRenderingAvailable()) {
     emit meshRenderingAvailabilityChanged(true);
     if (mScene->mRenderMode != RenderMode::Mesh) {
@@ -2492,6 +2724,7 @@ void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 
   uploadPendingPointCloud();
   uploadPendingMeshTexture();
   uploadPendingMesh();
+  finishResourceUpload();
   const QMatrix4x4 modelViewProjection = projection * view * modelMatrix();
   updatePointCacheSelection(modelViewProjection);
   uploadPendingPointCachePages();
@@ -2638,20 +2871,36 @@ QMatrix4x4 NativeViewport::trainingPreviewCoordinateTransform() const {
   return result;
 }
 
-void NativeViewport::startSceneLoad(const QString &scenePath, const bool continuous) {
+void NativeViewport::startSceneLoad(const QString &scenePath, const bool continuous,
+                                    const bool preserveView, const bool forcePaged,
+                                    std::shared_ptr<ResourceReservation> reservation) {
+  mScene->resourceLoading = true;
+  const int generation = mScene->mSceneGeneration;
+  if (!context() || !context()->isValid()) {
+    // Load only after the viewport can identify its actual graphics device.
+    // Requests made while constructing the main window retain their identity.
+    QTimer::singleShot(50, this, [this, scenePath, continuous, preserveView, forcePaged,
+                                reservation, generation,
+                                weakScene = std::weak_ptr<SceneState>(mScene)]() {
+      const auto target = weakScene.lock();
+      if (!target || target->mSceneGeneration != generation ||
+          target->mRequestedScenePath != scenePath) return;
+      const bool foreground = target == mScene;
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, target);
+      QScopedValueRollback<bool> background(mRenderingInactiveScene, !foreground);
+      startSceneLoad(scenePath, continuous, preserveView, forcePaged, reservation);
+    });
+    return;
+  }
+  refreshResourceBudgets();
+  if (!reservation) reservation = mResources->createReservation();
   mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "正在读取 PLY 场景...");
   emit sceneLoadStarted(scenePath);
-  const int generation = mScene->mSceneGeneration;
-  // Keep the fast complete-mesh path within a conservative per-load share.
-  // Previously loaded resident scenes are not retroactively reclassified.
-  const qint64 residentMeshByteBudget = std::min<qint64>(
-      PlyPointCloudLoader::DefaultMaximumResidentMeshBytes,
-      static_cast<qint64>((mMeshCacheGpuBudgetBytes /
-          std::max<qsizetype>(1, mSceneStates.size())) * 0.85L));
 
   auto *watcher = new QFutureWatcher<PointCloudData>(this);
   connect(watcher, &QFutureWatcher<PointCloudData>::finished, this,
-          [this, watcher, scenePath, generation, continuous, weakScene = std::weak_ptr<SceneState>(mScene)]() {
+          [this, watcher, scenePath, generation, continuous, preserveView, reservation,
+           weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
             const bool foreground = targetScene == mScene;
@@ -2665,6 +2914,10 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
                 generation != mScene->mSceneGeneration) {
               return;
             }
+            mScene->resourceLoading = false;
+            mScene->resourceResidentRamPeakBytes = data.residentRamPeakBytes;
+            mScene->resourceResidentGpuBytes = data.residentGpuBytes;
+            mScene->resourceResidentStorageSupported = data.residentStorageSupported;
             if (continuous) {
               mScene->previewLoadBusy = false;
               const auto queued = mScene->queuedPreviewPath;
@@ -2676,9 +2929,13 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               });
             }
             if (!data.isValid()) {
+              mScene->resourceRetryAfterMs = mResourceClock.elapsed() + 10000;
+              mScene->resourceNeedsReload = data.resourceLimited;
               mScene->previewLoadFailed = continuous;
-              mScene->mSceneLoadMessage = data.error;
-              emit sceneLoadFailed(scenePath, data.error);
+              mScene->mSceneLoadMessage = data.resourceLimited
+                  ? QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.")
+                  : data.error;
+              emit sceneLoadFailed(scenePath, mScene->mSceneLoadMessage);
               notifyEditState();
               notifyModelInteractionState();
               update();
@@ -2687,8 +2944,11 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             const auto oldCoordinates = mScene->mSceneCoordinates;
             const auto oldTarget = mTarget;
             const auto oldDistance = mDistance;
-            const bool keepCamera = continuous && (mProcessingHasFrame ||
-                (mScene->mSceneCoordinates.valid && visibleModelAvailable()));
+            const bool keepCamera = preserveView || (continuous && (mProcessingHasFrame ||
+                (mScene->mSceneCoordinates.valid && visibleModelAvailable())));
+            mScene->resourceNeedsReload = false;
+            mScene->resourceForcePagedRetry = false;
+            mScene->resourceLoadReservation = reservation;
             mScene->mScenePath = scenePath;
             if (continuous) {
               mScene->sourceTranslation = {};
@@ -2709,6 +2969,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             rebuildCameraGeometry();
             const bool loadedHasMesh = data.hasMesh();
             mScene->mPreviewPointCount = data.previewPointCount();
+            mScene->mSourceVertexCount = data.sourceVertexCount;
             mScene->mSourceFaceCount = data.sourceFaceCount;
             mScene->mPreviewTriangleCount = data.meshCache.isValid()
                                         ? static_cast<qsizetype>(
@@ -2744,6 +3005,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->mPointCacheReadsInFlight.clear();
             mScene->mPointCacheFailedNodes.clear();
             mScene->mPendingPointCachePages.clear();
+            mScene->resourcePointPageReservations.clear();
             mScene->mFullResolutionPointCount =
                 mScene->mPointCache.isValid() ? mScene->mPreviewPointCount : 0;
             mScene->mUploadedFullResolutionPointCount = 0;
@@ -2752,6 +3014,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->mMeshCacheReadsInFlight.clear();
             mScene->mMeshCacheFailedNodes.clear();
             mScene->mPendingMeshCachePages.clear();
+            mScene->resourceMeshPageReservations.clear();
             mScene->mFullResolutionMeshTriangleCount =
                 pagedMeshAvailable()
                     ? static_cast<qsizetype>(std::min<qint64>(
@@ -2803,15 +3066,27 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             emit sceneLoaded(data.sourceVertexCount, mScene->mPreviewPointCount,
                              data.sourceFaceCount, mScene->mPreviewTriangleCount);
             emit sceneCoordinatesChanged();
+            updateManagedResourceUsage();
+            emit resourceBudgetStatusChanged();
           });
   watcher->setFuture(QtConcurrent::run(
-      [scenePath, residentMeshByteBudget]() {
-        return PlyPointCloudLoader::load(scenePath,
+      [scenePath, reservation, forcePaged]() {
+        try {
+          auto data = PlyPointCloudLoader::load(scenePath,
             PlyPointCloudLoader::DefaultMaximumPreviewPoints,
             PlyPointCloudLoader::DefaultMaximumEditablePoints,
             PlyPointCloudLoader::DefaultMaximumResidentMeshVertices,
             PlyPointCloudLoader::DefaultMaximumResidentMeshFaces,
-            residentMeshByteBudget);
+            PlyPointCloudLoader::DefaultMaximumResidentMeshBytes,
+            LoaderResourcePolicy{reservation, forcePaged});
+          data.resourceLimited = !data.isValid() && reservation->admissionWasRefused();
+          return data;
+        } catch (const std::bad_alloc &) {
+          PointCloudData result;
+          result.resourceLimited = true;
+          result.error = QCoreApplication::translate("Workbench", "Insufficient memory for the mesh preview and texture.");
+          return result;
+        }
       }));
 }
 
@@ -3128,14 +3403,25 @@ void NativeViewport::uploadPendingPointCloud() {
     return;
   }
   QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mPointVertexArray);
+  while (glGetError() != GL_NO_ERROR) {}
   mScene->mPointBuffer.bind();
   const qsizetype byteCount = mScene->mPendingVertices.size() *
                               static_cast<qsizetype>(sizeof(PointCloudVertex));
   mScene->mPointBuffer.allocate(
       mScene->mPendingVertices.isEmpty() ? nullptr : mScene->mPendingVertices.constData(),
       static_cast<int>(byteCount));
+  mScene->resourcePointGpuBytes = std::max(0, mScene->mPointBuffer.size());
+  const GLenum uploadError = glGetError();
   mScene->mPointBuffer.release();
-  mScene->mPendingVertices.clear();
+  if (mScene->mHasMesh && (uploadError != GL_NO_ERROR ||
+                         mScene->resourcePointGpuBytes != byteCount)) {
+    mScene->resourceNeedsReload = true;
+    mScene->resourceForcePagedRetry = true;
+    mScene->resourceResidentUploadFailed = true;
+    mScene->resourceRetryAfterMs = mResourceClock.elapsed();
+    mScene->mRenderedPointCount = 0;
+  }
+  mScene->mPendingVertices = {};
   mScene->mPointUploadPending = false;
 }
 
@@ -3166,9 +3452,7 @@ void NativeViewport::updatePointCacheSelection(
       (mViewSnapAnimation != nullptr &&
        mViewSnapAnimation->state() == QAbstractAnimation::Running);
   const float refinementThresholdPixels = interacting ? 140.0F : 28.0F;
-  const qsizetype pointBudget = static_cast<qsizetype>(
-      (static_cast<long double>((mPointCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) * 0.85L) /
-      sizeof(PointPreviewVertex));
+  const qsizetype pointBudget = sharedPageGpuBudget() / sizeof(PointPreviewVertex);
   const QVector3D eye = cameraPosition();
   const float viewportHeight =
       std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
@@ -3199,7 +3483,7 @@ void NativeViewport::updatePointCacheSelection(
   const PointCloudCacheNode &root =
       mScene->mPointCache.nodes.at(mScene->mPointCache.rootNode);
   qsizetype selectedPoints = 0;
-  if (visible(root)) {
+  if (visible(root) && root.pointCount <= pointBudget) {
     selected.insert(root.id);
     refinable.append(root.id);
     selectedPoints = static_cast<qsizetype>(root.pointCount);
@@ -3264,10 +3548,13 @@ void NativeViewport::requestMissingPointCachePages() {
                        });
   };
   QSet<int> needed;
+  QSet<int> queued;
+  for (const auto &page : mScene->mPendingPointCachePages) queued.insert(page.nodeId);
   for (const int desired : std::as_const(mScene->mDesiredPointCacheNodes)) {
     int nodeId = desired;
     while (nodeId >= 0 && !isResident(nodeId)) {
       if (!mScene->mPointCacheReadsInFlight.contains(nodeId) &&
+          !queued.contains(nodeId) &&
           !mScene->mPointCacheFailedNodes.contains(nodeId)) {
         needed.insert(nodeId);
       }
@@ -3289,12 +3576,18 @@ void NativeViewport::requestMissingPointCachePages() {
     if (mScene->mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
       break;
     }
+    const qint64 pageBytes = mScene->mPointCache.nodes.at(nodeId).pointCount *
+                             qint64(sizeof(PointPreviewVertex));
+    if (pageBytes > sharedPageGpuBudget()) continue;
+    auto reservation = mResources->createReservation();
+    if (!reservation->tryResize(pageBytes * 3, 0)) continue;
     mScene->mPointCacheReadsInFlight.insert(nodeId);
     const int generation = mScene->mSceneGeneration;
     const PointCloudCacheIndex cache = mScene->mPointCache;
     auto *watcher = new QFutureWatcher<PointCloudCachePage>(this);
     connect(watcher, &QFutureWatcher<PointCloudCachePage>::finished, this,
-            [this, watcher, generation, nodeId , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            [this, watcher, generation, nodeId, reservation,
+             weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
             const bool foreground = targetScene == mScene;
@@ -3309,6 +3602,7 @@ void NativeViewport::requestMissingPointCachePages() {
               }
               mScene->mPointCacheReadsInFlight.remove(nodeId);
               if (page.isValid()) {
+                mScene->resourcePointPageReservations.insert(nodeId, reservation);
                 mScene->mPendingPointCachePages.append(std::move(page));
               } else {
                 mScene->mPointCacheFailedNodes.insert(nodeId);
@@ -3318,7 +3612,7 @@ void NativeViewport::requestMissingPointCachePages() {
               update();
             });
     watcher->setFuture(QtConcurrent::run(
-        [cache, nodeId]() { return PointCloudCache::readNode(cache, nodeId); }));
+        [cache, nodeId, reservation]() { return PointCloudCache::readNode(cache, nodeId); }));
   }
 }
 
@@ -3343,7 +3637,7 @@ void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
   }
   while (!mScene->mFullResolutionPointGpuChunks.isEmpty() &&
          mScene->mPointCacheResidentBytes + requiredBytes >
-             (mPointCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) {
+             sharedPageGpuBudget()) {
     qsizetype victim = -1;
     quint64 oldest = std::numeric_limits<quint64>::max();
     for (qsizetype index = 0;
@@ -3379,6 +3673,7 @@ void NativeViewport::evictPointCacheUntilFits(const qsizetype requiredBytes) {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
     mScene->mPointCacheResidentBytes -= chunk.byteCount;
+    updateManagedResourceUsage();
   }
 }
 
@@ -3392,6 +3687,7 @@ void NativeViewport::uploadPendingPointCachePages() {
     return;
   }
   PointCloudCachePage page = mScene->mPendingPointCachePages.takeFirst();
+  auto ramReservation = mScene->resourcePointPageReservations.take(page.nodeId);
   const bool alreadyResident = std::any_of(
       mScene->mFullResolutionPointGpuChunks.cbegin(),
       mScene->mFullResolutionPointGpuChunks.cend(),
@@ -3403,6 +3699,13 @@ void NativeViewport::uploadPendingPointCachePages() {
     const qsizetype byteCount =
         page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
     evictPointCacheUntilFits(byteCount);
+    updateManagedResourceUsage();
+    auto gpuReservation = mResources->createReservation();
+    if (byteCount > sharedPageGpuBudget() - mScene->mPointCacheResidentBytes ||
+        !gpuReservation->tryResize(0, byteCount)) {
+      mScene->mPointCacheFailedNodes.insert(page.nodeId);
+      return;
+    }
     FullResolutionGpuChunk gpuChunk;
     gpuChunk.nodeId = page.nodeId;
     gpuChunk.pointCount = static_cast<GLsizei>(page.vertices.size());
@@ -3430,6 +3733,7 @@ void NativeViewport::uploadPendingPointCachePages() {
           reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
       mScene->mPointCacheResidentBytes += byteCount;
       mScene->mFullResolutionPointGpuChunks.append(gpuChunk);
+      updateManagedResourceUsage();
     } else {
       glDeleteBuffers(1, &gpuChunk.buffer);
       glDeleteVertexArrays(1, &gpuChunk.vertexArray);
@@ -3470,6 +3774,7 @@ void NativeViewport::releaseFullResolutionMesh() {
 }
 
 void NativeViewport::releaseMeshTexture() {
+  mScene->resourceTextureGpuBytes = 0;
   if (mScene->mMeshTexture != 0) {
     glDeleteTextures(1, &mScene->mMeshTexture);
     mScene->mMeshTexture = 0;
@@ -3549,6 +3854,12 @@ void NativeViewport::uploadPendingMeshTexture() {
     return;
   }
   mScene->mMeshTextureSize = image.size();
+  mScene->resourceTextureGpuBytes = 0;
+  for (QSize level = image.size(); level.width() > 0 && level.height() > 0;) {
+    mScene->resourceTextureGpuBytes += qint64(level.width()) * level.height() * 4;
+    if (level.width() == 1 && level.height() == 1) break;
+    level = QSize(std::max(1, level.width() / 2), std::max(1, level.height() / 2));
+  }
   mScene->mMeshTextureReady = true;
   updateFrameRefreshPolicy();
 }
@@ -3571,8 +3882,7 @@ void NativeViewport::updateMeshCacheSelection(
   // full triangle pages that they do not draw.
   const float refinementThresholdPixels = mScene->mRenderMode == RenderMode::Mesh
       ? 0.0F : (interacting ? 180.0F : 34.0F);
-  const qsizetype byteBudget = static_cast<qsizetype>(
-      static_cast<long double>((mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) * 0.85L);
+  const qsizetype byteBudget = sharedPageGpuBudget();
   const QVector3D eye = cameraPosition();
   const float viewportHeight =
       std::max(1.0F, static_cast<float>(height() * devicePixelRatioF()));
@@ -3606,7 +3916,7 @@ void NativeViewport::updateMeshCacheSelection(
   QVector<int> refinable;
   const MeshCacheNode &root = mScene->mMeshCache.nodes.at(mScene->mMeshCache.rootNode);
   qsizetype selectedBytes = 0;
-  if (visible(root)) {
+  if (visible(root) && pageBytes(root) <= byteBudget) {
     selected.insert(root.id);
     refinable.append(root.id);
     selectedBytes = pageBytes(root);
@@ -3666,7 +3976,7 @@ void NativeViewport::updateMeshCacheSelection(
 }
 
 void NativeViewport::requestMissingMeshCachePages() {
-  if (!pagedMeshAvailable()) {
+  if (!pagedMeshAvailable() || mScene->resourceLoading) {
     return;
   }
   const auto isResident = [this](const int nodeId) {
@@ -3705,8 +4015,9 @@ void NativeViewport::requestMissingMeshCachePages() {
     return a.byteCount() < b.byteCount();
   });
   constexpr qsizetype kMaximumReadsInFlight = 16;
+  const qint64 pageBudget = sharedPageGpuBudget();
   const qint64 maximumQueuedBytes = std::min<qint64>(128LL * 1024 * 1024,
-      mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()) / 4);
+      pageBudget / 4);
   qint64 queuedBytes = 0;
   for (const MeshCachePage &page : std::as_const(mScene->mPendingMeshCachePages))
     queuedBytes += page.vertices.size() * qint64(sizeof(MeshVertex)) +
@@ -3718,16 +4029,21 @@ void NativeViewport::requestMissingMeshCachePages() {
       break;
     }
     const qint64 bytes = mScene->mMeshCache.nodes.at(nodeId).byteCount();
-    // Allow one indivisible cache page to make progress, but never enqueue a
-    // large group of pages just because read concurrency is now higher.
-    if (queuedBytes > 0 && bytes > maximumQueuedBytes - queuedBytes) continue;
+    // One indivisible page may exceed the prefetch quarter, but never the
+    // real shared geometry allowance. Otherwise a large atlas can leave enough
+    // GPU room for a root page while the read queue starves it forever.
+    if (bytes > pageBudget ||
+        (queuedBytes > 0 && bytes > maximumQueuedBytes - queuedBytes)) continue;
+    auto reservation = mResources->createReservation();
+    if (!reservation->tryResize(bytes * 3, 0)) continue;
     queuedBytes += bytes;
     mScene->mMeshCacheReadsInFlight.insert(nodeId);
     const int generation = mScene->mSceneGeneration;
     const MeshCacheIndex cache = mScene->mMeshCache;
     auto *watcher = new QFutureWatcher<MeshCachePage>(this);
     connect(watcher, &QFutureWatcher<MeshCachePage>::finished, this,
-            [this, watcher, generation, nodeId , weakScene = std::weak_ptr<SceneState>(mScene)]() {
+            [this, watcher, generation, nodeId, reservation,
+             weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
             const bool foreground = targetScene == mScene;
@@ -3742,6 +4058,7 @@ void NativeViewport::requestMissingMeshCachePages() {
               }
               mScene->mMeshCacheReadsInFlight.remove(nodeId);
               if (page.isValid()) {
+                mScene->resourceMeshPageReservations.insert(nodeId, reservation);
                 mScene->mPendingMeshCachePages.append(std::move(page));
               } else {
                 mScene->mMeshCacheFailedNodes.insert(nodeId);
@@ -3751,7 +4068,7 @@ void NativeViewport::requestMissingMeshCachePages() {
               update();
             });
     watcher->setFuture(QtConcurrent::run(
-        [cache, nodeId]() { return MeshCache::readNode(cache, nodeId); }));
+        [cache, nodeId, reservation]() { return MeshCache::readNode(cache, nodeId); }));
   }
 }
 
@@ -3776,7 +4093,7 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
   }
   while (!mScene->mFullResolutionMeshGpuChunks.isEmpty() &&
          mScene->mMeshCacheResidentBytes + requiredBytes >
-             (mMeshCacheGpuBudgetBytes / std::max<qsizetype>(1, mSceneStates.size()))) {
+             sharedPageGpuBudget()) {
     qsizetype victim = -1;
     quint64 oldest = std::numeric_limits<quint64>::max();
     for (qsizetype index = 0;
@@ -3815,6 +4132,7 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
       glDeleteVertexArrays(1, &chunk.vertexArray);
     }
     mScene->mMeshCacheResidentBytes -= chunk.byteCount;
+    updateManagedResourceUsage();
   }
 }
 
@@ -3834,6 +4152,7 @@ void NativeViewport::uploadPendingMeshCachePages() {
   int uploadedPages = 0;
   do {
     MeshCachePage page = mScene->mPendingMeshCachePages.takeFirst();
+    auto ramReservation = mScene->resourceMeshPageReservations.take(page.nodeId);
     const bool alreadyResident = std::any_of(
         mScene->mFullResolutionMeshGpuChunks.cbegin(),
         mScene->mFullResolutionMeshGpuChunks.cend(),
@@ -3848,6 +4167,13 @@ void NativeViewport::uploadPendingMeshCachePages() {
           page.indices.size() * static_cast<qsizetype>(sizeof(quint32));
       const qsizetype byteCount = vertexBytes + indexBytes;
       evictMeshCacheUntilFits(byteCount);
+      updateManagedResourceUsage();
+      auto gpuReservation = mResources->createReservation();
+      if (byteCount > sharedPageGpuBudget() - mScene->mMeshCacheResidentBytes ||
+          !gpuReservation->tryResize(0, byteCount)) {
+        mScene->mMeshCacheFailedNodes.insert(page.nodeId);
+        continue;
+      }
       FullResolutionMeshGpuChunk gpuChunk;
       gpuChunk.nodeId = page.nodeId;
       gpuChunk.indexCount = static_cast<GLsizei>(page.indices.size());
@@ -3902,6 +4228,7 @@ void NativeViewport::uploadPendingMeshCachePages() {
       }
       glBindBuffer(GL_ARRAY_BUFFER, 0);
       glBindVertexArray(0);
+      updateManagedResourceUsage();
     }
     ++uploadedPages;
   } while (!mScene->mPendingMeshCachePages.isEmpty() && uploadedPages < 8 &&
@@ -3923,6 +4250,7 @@ void NativeViewport::uploadPendingMesh() {
   }
 
   QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mMeshVertexArray);
+  while (glGetError() != GL_NO_ERROR) {}
   mScene->mMeshVertexBuffer.bind();
   const qsizetype vertexBytes =
       mScene->mPendingMeshVertices.size() * static_cast<qsizetype>(sizeof(MeshVertex));
@@ -3930,6 +4258,7 @@ void NativeViewport::uploadPendingMesh() {
       mScene->mPendingMeshVertices.isEmpty() ? nullptr
                                      : mScene->mPendingMeshVertices.constData(),
       static_cast<int>(vertexBytes));
+  const qint64 allocatedVertexBytes = std::max(0, mScene->mMeshVertexBuffer.size());
   mScene->mMeshVertexBuffer.release();
 
   mScene->mMeshIndexBuffer.bind();
@@ -3938,10 +4267,23 @@ void NativeViewport::uploadPendingMesh() {
   mScene->mMeshIndexBuffer.allocate(
       mScene->mPendingMeshIndices.isEmpty() ? nullptr : mScene->mPendingMeshIndices.constData(),
       static_cast<int>(indexBytes));
+  mScene->resourceMeshGpuBytes = allocatedVertexBytes +
+      std::max(0, mScene->mMeshIndexBuffer.size());
+  const GLenum uploadError = glGetError();
   mScene->mMeshIndexBuffer.release();
 
-  mScene->mPendingMeshVertices.clear();
-  mScene->mPendingMeshIndices.clear();
+  if (uploadError != GL_NO_ERROR || mScene->resourceMeshGpuBytes != vertexBytes + indexBytes) {
+    mScene->resourceNeedsReload = true;
+    mScene->resourceForcePagedRetry = true;
+    mScene->resourceResidentUploadFailed = true;
+    mScene->resourceRetryAfterMs = mResourceClock.elapsed();
+    mScene->mRenderedMeshIndexCount = 0;
+    qWarning().noquote() << QCoreApplication::translate(
+        "Workbench", "Insufficient memory for the mesh preview and texture.");
+  }
+
+  mScene->mPendingMeshVertices = {};
+  mScene->mPendingMeshIndices = {};
   mScene->mMeshUploadPending = false;
 }
 
@@ -6840,7 +7182,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
     }
   } else if (mScene->mSourceFaceCount > 0 && mScene->mPreviewTriangleCount > 0) {
     count = QCoreApplication::translate("Workbench", "%1 顶点 | %2 面 | %3 预览三角形")
-                .arg(formatCount(mScene->mGaussianCount),
+                .arg(formatCount(mScene->mSourceVertexCount),
                      formatCount(mScene->mSourceFaceCount),
                      formatCount(mScene->mPreviewTriangleCount));
   } else if (mScene->mGaussianCount > 0 && mScene->mPreviewPointCount > 0 &&
