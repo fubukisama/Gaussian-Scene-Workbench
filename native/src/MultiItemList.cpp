@@ -77,6 +77,7 @@ void MultiItemList::addToMenu(QMenu &menu) {
 
 QWidget *MultiItemList::createBar(QWidget *parent) {
   auto *bar = new QWidget(parent);
+  bar->setProperty("gswLayoutContainer", true);
   auto *layout = new QHBoxLayout(bar);
   layout->setContentsMargins(0, 0, 0, 0);
   for (auto *action : {mAll, mNone}) {

@@ -434,13 +434,14 @@ void AppThemeTests::paintsReadableLightControlsAndDistinctPanelStructure() {
       // Inspect the actual stylesheet-painted widgets. Palette-only checks
       // would miss a muted/header rule that still uses the former washed-out
       // green colours, or a native control whose boundary disappears.
-      const QImage activeImage = painted(active);
-      const QImage mutedImage = painted(muted);
+      // Labels are transparent. Inspect their composed parent so their text
+      // contrast and background match what is actually visible to the user.
+      const QImage panelImage = painted(panel);
       const QImage dockImage = painted(dockHeader);
       const QImage tableHeaderImage = painted(*table.horizontalHeader());
       const QImage fieldImage = painted(field);
       const QImage buttonImage = painted(button);
-      const QColor white = pixelAt(activeImage, QPoint(330, 8));
+      const QColor white = pixelAt(panelImage, active.pos() + QPoint(330, 8));
       const QColor header = pixelAt(dockImage, QPoint(350, 8));
       const QColor tableHeader = pixelAt(tableHeaderImage,
           QPoint(table.horizontalHeader()->width() - 12, 6));
@@ -450,8 +451,8 @@ void AppThemeTests::paintsReadableLightControlsAndDistinctPanelStructure() {
       QVERIFY(white.lightness() - header.lightness() >= 32);
       QCOMPARE(pixelAt(painted(menuBar), QPoint(80, 8)), QColor("#e7e7e7"));
       QCOMPARE(pixelAt(painted(toolbar), QPoint(80, 8)), QColor("#e7e7e7"));
-      QVERIFY(contrast(darkestPixel(activeImage, active.rect()), white) >= 7.0);
-      QVERIFY(contrast(darkestPixel(mutedImage, muted.rect()), white) >= 7.0);
+      QVERIFY(contrast(darkestPixel(panelImage, active.geometry()), white) >= 7.0);
+      QVERIFY(contrast(darkestPixel(panelImage, muted.geometry()), white) >= 7.0);
       QVERIFY(contrast(darkestPixel(dockImage, QRect(8, 2, 300, 38)), header) >= 7.0);
       QVERIFY(contrast(darkestPixel(tableHeaderImage,
           QRect(8, 3, 280, table.horizontalHeader()->height() - 8)), tableHeader) >= 7.0);
@@ -477,12 +478,7 @@ void AppThemeTests::paintsReadableLightControlsAndDistinctPanelStructure() {
 void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
   const QRegularExpression dayPresentation(
       QStringLiteral("(?:QMainWindow::separator[^\\{]*|"
-                     "QSplitter::handle(?=\\s*\\{\\s*background: #dedede;)|"
-                     "QHeaderView, QHeaderView QWidget#qt_scrollarea_viewport|"
-                     "QDialog QLabel, QDialog QCheckBox, QDialog QRadioButton|"
-                     "QDialog QDialogButtonBox, QWidget\\[gswLayoutContainer=\"true\"\\]|"
-                     "QWidget#dialogBody, QScrollArea#dialogBodyScroll,\\s*"
-                     "QScrollArea#dialogBodyScroll > QWidget)"
+                     "QSplitter::handle(?=\\s*\\{\\s*background: #dedede;))"
                      "\\s*\\{[^\\}]*\\}\\s*"));
   for (const int scale : {90, 100, 150}) {
     AppTheme::apply(*qApp, scale, false);
@@ -491,8 +487,8 @@ void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
     darkGeometry.remove(QRegularExpression(QStringLiteral("#[0-9a-fA-F]{6}")));
     AppTheme::applyTheme(*qApp, UiTheme::Light, false);
     QString lightGeometry = qApp->styleSheet();
-    // Only the light-only resize handles, header remainder and transparent
-    // dialog labels are exceptions; every other layout/font rule is shared.
+    // Only the light-only resize handles are exceptions. Header remainder,
+    // dialog surfaces and transparent labels now share both themes' rules.
     lightGeometry.remove(dayPresentation);
     lightGeometry.remove(QRegularExpression(QStringLiteral("#[0-9a-fA-F]{6}")));
     QCOMPARE(lightGeometry.trimmed(), darkGeometry.trimmed());
@@ -580,8 +576,10 @@ void AppThemeTests::paintsHeaderRemainderAndContinuousDialogSurfaces() {
     label.setGeometry(18, 18, 380, 40);
     QCheckBox check(QStringLiteral("Check"), &dialog);
     check.setGeometry(18, 66, 380, 40);
+    check.setChecked(true);
     QRadioButton radio(QStringLiteral("Radio"), &dialog);
     radio.setGeometry(18, 114, 380, 40);
+    radio.setChecked(true);
     QLineEdit field(QStringLiteral("unmodified"), &dialog);
     field.setFocusPolicy(Qt::NoFocus);
     field.setGeometry(18, 166, 380, 44);
@@ -602,9 +600,19 @@ void AppThemeTests::paintsHeaderRemainderAndContinuousDialogSurfaces() {
     const QPoint emptyHeader(header->viewport()->width() - 8,
                              header->viewport()->height() / 2);
     QVERIFY(emptyHeader.x() > header->length());
-    const QColor darkRemainder = pixelAt(painted(*header->viewport()), emptyHeader);
-    const QColor darkLabel = pixelAt(painted(label), emptyLabel);
-    QCOMPARE(pixelAt(painted(dialog), freeSpace), QColor("#17191b"));
+    const QColor darkDialog("#17191b");
+    const QImage darkFrame = painted(dialog);
+    QCOMPARE(pixelAt(painted(*header->viewport()), emptyHeader), QColor("#24272a"));
+    QCOMPARE(pixelAt(darkFrame, freeSpace), darkDialog);
+    for (QWidget *control : {static_cast<QWidget *>(&label),
+                             static_cast<QWidget *>(&check),
+                             static_cast<QWidget *>(&radio)}) {
+      QCOMPARE(pixelAt(darkFrame, control->pos() + emptyLabel), darkDialog);
+    }
+    QCOMPARE(pixelAt(painted(field), QPoint(370, 10)), QColor("#151719"));
+    QCOMPARE(pixelAt(painted(*table.viewport()), QPoint(580, 80)), QColor("#191b1d"));
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
 
     AppTheme::applyTheme(*qApp, UiTheme::Light, false);
     QApplication::processEvents();
@@ -623,13 +631,24 @@ void AppThemeTests::paintsHeaderRemainderAndContinuousDialogSurfaces() {
     QCOMPARE(pixelAt(painted(*table.viewport()), QPoint(580, 80)), QColor("#ffffff"));
     QCOMPARE(field.text(), QStringLiteral("unmodified"));
     QCOMPARE(header->length(), 300);
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
 
     AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
     QApplication::processEvents();
-    QCOMPARE(pixelAt(painted(*header->viewport()), emptyHeader), darkRemainder);
-    QCOMPARE(pixelAt(painted(label), emptyLabel), darkLabel);
-    QCOMPARE(pixelAt(painted(dialog), freeSpace), QColor("#17191b"));
+    QCOMPARE(pixelAt(painted(*header->viewport()), emptyHeader), QColor("#24272a"));
+    const QImage restoredDarkFrame = painted(dialog);
+    QCOMPARE(pixelAt(restoredDarkFrame, freeSpace), darkDialog);
+    for (QWidget *control : {static_cast<QWidget *>(&label),
+                             static_cast<QWidget *>(&check),
+                             static_cast<QWidget *>(&radio)}) {
+      QCOMPARE(pixelAt(restoredDarkFrame, control->pos() + emptyLabel), darkDialog);
+    }
+    QCOMPARE(pixelAt(painted(field), QPoint(370, 10)), QColor("#151719"));
+    QCOMPARE(pixelAt(painted(*table.viewport()), QPoint(580, 80)), QColor("#191b1d"));
     QCOMPARE(field.text(), QStringLiteral("unmodified"));
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
     dialog.hide();
   }
 }
@@ -655,13 +674,15 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     field.setGeometry(14, 74, 360, 44);
     QCheckBox check(QStringLiteral("Check"), body);
     check.setGeometry(14, 134, 360, 44);
+    check.setChecked(true);
     // Pure layout wrappers must not introduce a white rectangle into the
     // grey dialog. Their fields must still use the explicit white field rule.
     QWidget wrapper(body);
     wrapper.setProperty("gswLayoutContainer", true);
     wrapper.setGeometry(14, 194, 360, 88);
     QRadioButton radio(QStringLiteral("Radio"), &wrapper);
-    radio.setGeometry(0, 0, 360, 44);
+    radio.setGeometry(0, 0, 360, 40);
+    radio.setChecked(true);
     QLineEdit nestedField(QStringLiteral("nested unchanged"), &wrapper);
     nestedField.setFocusPolicy(Qt::NoFocus);
     nestedField.setGeometry(0, 44, 360, 44);
@@ -676,10 +697,25 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     QTest::qWait(20);
     const QPoint bodyBlank(390, 290);
     const QPoint viewportBlank(450, 300);
-    const QColor darkBody = pixelAt(painted(*body), bodyBlank);
-    const QColor darkViewport = pixelAt(painted(*scroll.viewport()), viewportBlank);
-    const QColor darkField = pixelAt(painted(field), QPoint(350, 10));
-    const QColor darkFooter = pixelAt(painted(dialog), footer.pos() + QPoint(8, 10));
+    const QPoint wrapperBlank(350, 42);
+    const QColor darkSurface("#17191b");
+    const QImage darkFrame = painted(dialog);
+    QCOMPARE(pixelAt(darkFrame, QPoint(490, 12)), darkSurface);
+    QCOMPARE(pixelAt(darkFrame, body->mapTo(&dialog, bodyBlank)), darkSurface);
+    QCOMPARE(pixelAt(darkFrame, scroll.viewport()->mapTo(&dialog, viewportBlank)), darkSurface);
+    QCOMPARE(pixelAt(darkFrame, wrapper.mapTo(&dialog, wrapperBlank)), darkSurface);
+    QCOMPARE(pixelAt(darkFrame, footer.pos() + QPoint(8, 10)), darkSurface);
+    for (QWidget *control : {static_cast<QWidget *>(&label),
+                             static_cast<QWidget *>(&check),
+                             static_cast<QWidget *>(&radio)}) {
+      QCOMPARE(pixelAt(darkFrame, control->mapTo(&dialog, QPoint(350, 10))), darkSurface);
+    }
+    QCOMPARE(pixelAt(painted(field), QPoint(350, 10)), QColor("#151719"));
+    QCOMPARE(pixelAt(painted(nestedField), QPoint(350, 10)), QColor("#151719"));
+    QCOMPARE(field.text(), QStringLiteral("unchanged"));
+    QCOMPARE(nestedField.text(), QStringLiteral("nested unchanged"));
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
 
     AppTheme::applyTheme(*qApp, UiTheme::Light, false);
     QApplication::processEvents();
@@ -688,6 +724,7 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     QCOMPARE(pixelAt(painted(*body), bodyBlank), daySurface);
     QCOMPARE(pixelAt(painted(*scroll.viewport()), viewportBlank), daySurface);
     const QImage frame = painted(dialog);
+    QCOMPARE(pixelAt(frame, wrapper.mapTo(&dialog, wrapperBlank)), daySurface);
     QCOMPARE(pixelAt(frame, footer.pos() + QPoint(8, 10)), daySurface);
     for (QWidget *control : {static_cast<QWidget *>(&label),
                              static_cast<QWidget *>(&check),
@@ -700,15 +737,28 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     QCOMPARE(pixelAt(painted(*cancel), QPoint(8, 12)), QColor("#f3f3f3"));
     QCOMPARE(field.text(), QStringLiteral("unchanged"));
     QCOMPARE(nestedField.text(), QStringLiteral("nested unchanged"));
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
 
     AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
     QApplication::processEvents();
-    QCOMPARE(pixelAt(painted(*body), bodyBlank), darkBody);
-    QCOMPARE(pixelAt(painted(*scroll.viewport()), viewportBlank), darkViewport);
-    QCOMPARE(pixelAt(painted(field), QPoint(350, 10)), darkField);
-    QCOMPARE(pixelAt(painted(dialog), footer.pos() + QPoint(8, 10)), darkFooter);
+    const QImage restoredDarkFrame = painted(dialog);
+    QCOMPARE(pixelAt(restoredDarkFrame, QPoint(490, 12)), darkSurface);
+    QCOMPARE(pixelAt(restoredDarkFrame, body->mapTo(&dialog, bodyBlank)), darkSurface);
+    QCOMPARE(pixelAt(restoredDarkFrame, scroll.viewport()->mapTo(&dialog, viewportBlank)), darkSurface);
+    QCOMPARE(pixelAt(restoredDarkFrame, wrapper.mapTo(&dialog, wrapperBlank)), darkSurface);
+    QCOMPARE(pixelAt(restoredDarkFrame, footer.pos() + QPoint(8, 10)), darkSurface);
+    for (QWidget *control : {static_cast<QWidget *>(&label),
+                             static_cast<QWidget *>(&check),
+                             static_cast<QWidget *>(&radio)}) {
+      QCOMPARE(pixelAt(restoredDarkFrame, control->mapTo(&dialog, QPoint(350, 10))), darkSurface);
+    }
+    QCOMPARE(pixelAt(painted(field), QPoint(350, 10)), QColor("#151719"));
+    QCOMPARE(pixelAt(painted(nestedField), QPoint(350, 10)), QColor("#151719"));
     QCOMPARE(field.text(), QStringLiteral("unchanged"));
     QCOMPARE(nestedField.text(), QStringLiteral("nested unchanged"));
+    QVERIFY(check.isChecked());
+    QVERIFY(radio.isChecked());
     dialog.hide();
   }
 }

@@ -31,15 +31,19 @@ Light mode uses the neutral hierarchy illustrated in the user's Metashape refere
 
 Light-mode dock separators match the light gray of the panel headers, with subtle one-pixel edges and neutral-gray hover feedback. Their modestly wider 8-pixel base extent distinguishes the left/right panels from the white viewport through spacing rather than dark outlines. They are Qt's actual resize handles, not overlays; their extent follows the UI scale, and drag-resize, docking/floating, immediate language switching and dark-mode styling are preserved. Tests inspect the actual rendered colors and widths and resize both side panels.
 
+Text labels, checkbox/radio captions, dialog button areas, selection toolbars and resize-grip backgrounds reveal their containing surface in both themes. Inputs, buttons, lists, selected rows, progress bars and viewport overlay cards keep their own intentional surfaces. Appearance checks compare the actual rendered status-bar and dialog pixels across light/dark switching, all three languages and 90%/100%/150% UI scale, so a label cannot quietly reintroduce a white or dark rectangle. This shared treatment follows [Qt's style-sheet cascading rules](https://doc.qt.io/qt-6.8/stylesheet-syntax.html#cascading).
+
 The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all mesh-generation workflows. Manual and scheduled switches do not reload models, rewrite RGB/SH/materials, alter camera/selection/transforms, clear training curves, interrupt workers or change exported data. Transparent splats naturally composite against the chosen backdrop; this is not relighting or a new reconstruction. `--theme auto|light|dark` is a non-persistent launch/QA override. A manual CLI override disables scheduled switching for that launch without changing the saved mode. The language smoke matrix toggles both themes while a test-owned worker runs and a real file remains selected. It checks 05:59:59.999 → 06:00 → 17:59:59.999 → 18:00 → 23:59:59.999 → 00:00 against independent expected colors, including no switch at midnight and unchanged manual overrides. Real-clock QA invokes the application's timer callback, reports the local time and effective theme, and saves automatic-mode screenshots before restoring a manual mode. Light-mode Gaussian, navigation and mesh-publication regressions complement existing dark tests.
 
 中文：通过“视图 → 外观 → 自动（按时间）／浅色（白天）／深色（黑夜）”即时切换并记住选择。未保存过外观选择时默认自动，已有的手动浅色或深色设置保留。自动模式按本机时间在 06:00（含）至 18:00（不含）使用浅色，其余时间使用深色，午夜保持深色；运行中持续检查，唤醒或修改时钟后最迟 30 秒更新，重新激活程序时立即更新。手动模式不随时间改变。界面与观察背景一起切换，不修改模型或训练数据。
 浅色采用白色工作区、灰色工具栏和深色文字，增强控件边界与蓝色选中状态；网格保持主次层级，深色模式和界面尺寸不变。
 左右停靠面板与视口之间使用与标题栏统一的浅灰分隔带和柔和细线，基础宽度适度加宽至 8 像素并随界面缩放；悬停保持灰色，仍可拖动调整宽度。
+深浅两种主题的文字标签、复选框／单选框文字区、对话框按钮区、批量选择工具条和窗口缩放把手均显示所在容器的底色，避免独立的白色或深色色块。输入框、按钮、列表选中、进度条和视口信息卡片保留各自需要的底色。实际界面像素验收覆盖三种语言、深浅色往返切换及 90%／100%／150% 界面缩放。
 
 日本語：「ビュー → 外観 → 自動（時刻に応じて）／ライト（昼間）／ダーク（夜間）」で即時に切り替え、選択を保存します。外観設定が未保存の場合は自動が既定で、既存の手動設定は保持します。自動は本機の時刻に従い、06:00 から 18:00 より前はライト、それ以外はダークです。午前 0:00 もダークを維持します。実行中も確認し、スリープ復帰や時刻変更後は 30 秒以内、アプリの再アクティブ化時は即時に更新します。手動モードは時刻に連動しません。UI と観察用背景のみを変更し、モデルや学習データは変更しません。
 ライトテーマは白い作業領域、グレーのツールバー、濃い文字で構成し、コントロールの境界と青い選択状態を明確にします。グリッドの主線と補助線を区別し、ダークテーマと UI の寸法は変更しません。
 左右のドックパネルとビューポートの間に、タイトルバーと統一したライトグレーの区切りと柔らかな細線を表示します。基準幅を控えめに 8 ピクセルへ広げ、UI スケールに追従します。ホバー時もグレーを保ち、ドラッグによる幅の調整は引き続き利用できます。
+両テーマで、ラベル、チェックボックス／ラジオボタンの文字領域、ダイアログのボタン領域、一括選択ツールバー、サイズ変更グリップは親領域の背景を表示し、白や暗色の矩形が浮く状態を防ぎます。入力欄、ボタン、リストの選択行、進捗バー、ビューポートの情報カードは必要な固有の背景を維持します。実際の描画ピクセルによる検証は、3 言語、ライト／ダークの往復切替、90%／100%／150% の UI スケールを対象とします。
 
 ## Terminology
 

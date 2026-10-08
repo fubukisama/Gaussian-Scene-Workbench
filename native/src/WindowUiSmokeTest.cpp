@@ -27,7 +27,9 @@
 #include <QProgressDialog>
 #include <QScreen>
 #include <QScrollBar>
+#include <QSizeGrip>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
@@ -390,6 +392,11 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
   };
   const QString shots = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
   if (!shots.isEmpty()) QDir().mkpath(shots);
+  const auto colorDifference = [](const QColor &first, const QColor &second) {
+    return std::max({std::abs(first.red() - second.red()),
+                     std::abs(first.green() - second.green()),
+                     std::abs(first.blue() - second.blue())});
+  };
   auto *import = workbench.findChild<QAction *>(QStringLiteral("importSceneAction"));
   check(import && import->isEnabled(), "real model-import action is available");
   if (!import || !import->isEnabled()) return false;
@@ -414,6 +421,45 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
       inspect.stop();
       QTimer::singleShot(80, file, [&, file] {
         observed = true;
+        const auto checkDialogSurfaces = [&] {
+          const QImage dialogImage = file->grab().toImage();
+          check(!dialogImage.isNull(), "real model-import dialog paints into a screenshot");
+          if (dialogImage.isNull()) return;
+          const qreal dpr = dialogImage.devicePixelRatio();
+          const QColor dialogBackground = dialogImage.pixelColor(qRound(2 * dpr), qRound(2 * dpr));
+          int observedLabels = 0;
+          for (auto *label : file->findChildren<QLabel *>()) {
+            if (!label->isVisibleTo(file) || label->text().isEmpty() ||
+                label->width() < 3 || label->height() < 3) continue;
+            ++observedLabels;
+            const QPoint corner = label->mapTo(file, QPoint(1, 1));
+            const QPoint pixel(qRound(corner.x() * dpr), qRound(corner.y() * dpr));
+            check(dialogImage.rect().contains(pixel), "visible import label background lies inside the real dialog image");
+            if (!dialogImage.rect().contains(pixel)) continue;
+            const QColor labelBackground = dialogImage.pixelColor(pixel);
+            qInfo() << "Window dialog backgrounds:" << label->objectName() << label->text()
+                    << labelBackground << dialogBackground << "difference"
+                    << colorDifference(labelBackground, dialogBackground);
+            check(colorDifference(labelBackground, dialogBackground) <= 2,
+                  "plain import-dialog labels share the dialog background in the current live theme");
+          }
+          check(observedLabels >= 2, "real import-dialog form labels are visible during surface checks");
+          auto *filename = file->findChild<QLineEdit *>(QStringLiteral("fileNameEdit"));
+          check(filename && filename->isVisibleTo(file), "filename input remains visible beside the plain form labels");
+          if (filename && filename->isVisibleTo(file)) {
+            // Sample an empty inner area away from the border, focus ring,
+            // cursor and filename; editable fields must keep their own surface.
+            const QPoint inner = filename->mapTo(file, QPoint(filename->width() - 8, filename->height() / 2));
+            const QColor inputBackground = dialogImage.pixelColor(qRound(inner.x() * dpr), qRound(inner.y() * dpr));
+            qInfo() << "Window input background:" << inputBackground << dialogBackground
+                    << "difference" << colorDifference(inputBackground, dialogBackground);
+            const QColor expectedInput(AppTheme::currentTheme() == UiTheme::Light
+                                           ? "#ffffff" : "#151719");
+            check(inputBackground == expectedInput && inputBackground != dialogBackground,
+                  "filename input retains its distinct editable surface when surrounding labels are transparent");
+          }
+        };
+        checkDialogSurfaces();
         const int scale = qApp->property("gswUiScalePercent").toInt();
         const QRect available = file->screen()->availableGeometry();
         // Independent worked examples from the requested 640 logical-pixel
@@ -450,8 +496,10 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
         if (otherTheme && restoreTheme) {
           otherTheme->trigger(); settle();
           check(file->size() == actualUserSize, "appearance change preserves user-resized import dialog dimensions");
+          checkDialogSurfaces();
           restoreTheme->trigger(); settle();
           check(file->size() == actualUserSize, "restoring appearance retains the user's narrower import dialog size");
+          checkDialogSurfaces();
         }
         file->reject();
       });
@@ -489,17 +537,71 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
                                          std::abs(labelBackground.green() - toolbarBackground.green()),
                                          std::abs(labelBackground.blue() - toolbarBackground.blue())});
         qInfo() << "Window appearance backgrounds:" << labelBackground << toolbarBackground << "difference" << difference;
-        check(difference <= 6, "brush-radius label paints the toolbar background, not a contrasting rectangle");
+        check(difference <= 2, "brush-radius label paints the toolbar background, not a contrasting rectangle");
         if (!shots.isEmpty())
           check(toolbarImage.save(QDir(shots).filePath(suffix + QStringLiteral("-selection-toolbar.png"))),
                 "selection-toolbar background screenshot");
       }
     }
   };
+  const auto checkStatusBar = [&](const QString &suffix) {
+    // A normal window exposes the real resize grip; maximized windows hide it.
+    workbench.showNormal();
+    workbench.resize(workbench.screen()->availableGeometry().size() - QSize(48, 64));
+    settle();
+    auto *status = workbench.statusBar();
+    const QImage statusImage = status->grab().toImage();
+    check(!statusImage.isNull(), "actual status bar paints into a screenshot");
+    if (statusImage.isNull()) return;
+    const qreal dpr = statusImage.devicePixelRatio();
+    // Find an exposed part of the composed bar, avoiding text, labels and the
+    // resize grip. Compare real pixels rather than stylesheet declarations.
+    QPoint exposed;
+    bool foundExposed = false;
+    const int middle = status->height() / 2;
+    for (int x = 1; x < status->width() - 1; ++x) {
+      if (!status->childAt(x, middle)) {
+        exposed = QPoint(x, middle);
+        foundExposed = true;
+        break;
+      }
+    }
+    check(foundExposed, "status bar exposes a plain background reference beside its labels");
+    if (!foundExposed) return;
+    const QColor barBackground = statusImage.pixelColor(qRound(exposed.x() * dpr), qRound(exposed.y() * dpr));
+    int observedLabels = 0;
+    for (auto *label : status->findChildren<QLabel *>()) {
+      if (!label->isVisibleTo(status) || label->width() < 3 || label->height() < 3) continue;
+      ++observedLabels;
+      const QPoint corner = label->mapTo(status, QPoint(1, 1));
+      const QPoint pixel(qRound(corner.x() * dpr), qRound(corner.y() * dpr));
+      check(statusImage.rect().contains(pixel), "visible status label background lies inside the composed bar image");
+      if (!statusImage.rect().contains(pixel)) continue;
+      const QColor labelBackground = statusImage.pixelColor(pixel);
+      const int difference = colorDifference(labelBackground, barBackground);
+      qInfo() << "Window status backgrounds:" << label->objectName() << label->text()
+              << labelBackground << barBackground << "difference" << difference;
+      check(difference <= 2, "every visible status label shares its bar background without a contrasting rectangle");
+    }
+    check(observedLabels >= 3, "renderer, editing and UI-scale status labels remain visible during background checks");
+    auto *grip = status->findChild<QSizeGrip *>();
+    check(grip && grip->isVisibleTo(status), "normal main window exposes its real status-bar resize grip");
+    if (grip && grip->isVisibleTo(status)) {
+      const QPoint corner = grip->mapTo(status, QPoint(1, 1));
+      const QColor gripBackground = statusImage.pixelColor(qRound(corner.x() * dpr), qRound(corner.y() * dpr));
+      qInfo() << "Window resize-grip background:" << gripBackground << barBackground
+              << "difference" << colorDifference(gripBackground, barBackground);
+      check(colorDifference(gripBackground, barBackground) <= 2,
+            "resize-grip blank corner shares its bar background instead of painting a contrasting square");
+    }
+    if (!shots.isEmpty())
+      check(statusImage.save(QDir(shots).filePath(suffix + QStringLiteral("-status-bar.png"))),
+            "status-bar background screenshot");
+  };
   auto *light = workbench.findChild<QAction *>(QStringLiteral("lightThemeAction"));
   auto *dark = workbench.findChild<QAction *>(QStringLiteral("darkThemeAction"));
   check(light && dark, "actual light and dark appearance menu actions are available");
-  if (light && dark) for (auto *theme : {light, dark}) {
+  if (light && dark) for (auto *theme : {light, dark, light}) {
     theme->trigger();
     for (const int scale : {90, 100, 150}) {
       QAction *scaleAction = nullptr;
@@ -513,6 +615,7 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
       qInfo().noquote() << "Window appearance scenario:" << suffix;
       checkImportDialog(suffix, scale);
       checkToolbar(suffix);
+      checkStatusBar(suffix);
     }
   }
   qInfo().noquote() << "Window appearance smoke:" << locale << (passed ? "PASS" : "FAIL");
