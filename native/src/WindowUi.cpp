@@ -1,6 +1,7 @@
 #include "WindowUi.h"
 #include "AppLanguage.h"
 #include "AppTheme.h"
+#include "FileDialogHistory.h"
 
 #include <QAction>
 #include <QApplication>
@@ -90,9 +91,8 @@ public:
     // platform window while Qt is unplugging or dragging a panel.
     if (!mWindow->isVisible() && !qobject_cast<QDockWidget *>(mWindow)) {
       auto flags = mWindow->windowFlags();
-      flags |= Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
+      flags |= Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
       flags &= ~Qt::WindowContextHelpButtonHint;
-      if (!qobject_cast<QDialog *>(mWindow)) flags |= Qt::WindowMinimizeButtonHint;
       if (flags != mWindow->windowFlags()) mWindow->setWindowFlags(flags);
     }
     if (auto *file = qobject_cast<QFileDialog *>(mWindow)) {
@@ -104,6 +104,7 @@ public:
         urls.prepend(url);
         if (urls != file->sidebarUrls()) file->setSidebarUrls(urls);
       }
+      FileDialogHistory::attach(file);
     }
     // The OS caption is the sole window-control bar. Desktop remains a
     // sidebar location; F11 is an action, not another row above the contents.

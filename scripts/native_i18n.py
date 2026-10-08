@@ -43,7 +43,7 @@ def decode_literals(value: str) -> str:
 def sources():
     result = collections.defaultdict(list)
     for path in sorted((ROOT / 'native/src').glob('*')):
-        if path.suffix not in {'.h', '.cpp'} or path.name in {'main.cpp', 'MultiSceneSmokeTest.cpp', 'LanguageSmokeTest.cpp', 'WindowUiSmokeTest.cpp', 'ResourceBudgetUiSmokeTest.cpp', 'GaussianPerformanceSmokeTest.cpp', 'ObservationNavigationSmokeTest.cpp'}:
+        if path.suffix not in {'.h', '.cpp'} or path.name in {'main.cpp', 'MultiSceneSmokeTest.cpp', 'LanguageSmokeTest.cpp', 'WindowUiSmokeTest.cpp', 'FileDialogHistorySmokeTest.cpp', 'FileDialogHistoryGuardSmokeTest.cpp', 'ResourceBudgetUiSmokeTest.cpp', 'GaussianPerformanceSmokeTest.cpp', 'ObservationNavigationSmokeTest.cpp'}:
             continue
         content = path.read_text(encoding='utf-8')
         for match in CALL.finditer(content):
@@ -93,7 +93,7 @@ def load_catalog(path=CATALOG):
 def migrate_literals(entries):
     """One-time mechanical migration, preserving non-UI literals and call arguments."""
     for path in sorted((ROOT / 'native/src').glob('*')):
-        if path.suffix not in {'.h', '.cpp'} or path.name in {'main.cpp', 'MultiSceneSmokeTest.cpp', 'LanguageSmokeTest.cpp', 'WindowUiSmokeTest.cpp', 'ResourceBudgetUiSmokeTest.cpp', 'GaussianPerformanceSmokeTest.cpp', 'ObservationNavigationSmokeTest.cpp'}:
+        if path.suffix not in {'.h', '.cpp'} or path.name in {'main.cpp', 'MultiSceneSmokeTest.cpp', 'LanguageSmokeTest.cpp', 'WindowUiSmokeTest.cpp', 'FileDialogHistorySmokeTest.cpp', 'FileDialogHistoryGuardSmokeTest.cpp', 'ResourceBudgetUiSmokeTest.cpp', 'GaussianPerformanceSmokeTest.cpp', 'ObservationNavigationSmokeTest.cpp'}:
             continue
         old = path.read_text(encoding='utf-8')
         def replace(match):

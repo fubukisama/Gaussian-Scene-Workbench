@@ -65,8 +65,14 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/AppLanguage.h
   src/WindowUi.cpp
   src/WindowUi.h
+  src/FileDialogHistory.cpp
+  src/FileDialogHistory.h
   src/WindowUiSmokeTest.cpp
   src/WindowUiSmokeTest.h
+  src/FileDialogHistorySmokeTest.cpp
+  src/FileDialogHistorySmokeTest.h
+  src/FileDialogHistoryGuardSmokeTest.cpp
+  src/FileDialogHistoryGuardSmokeTest.h
   src/ResourceBudgetSmokeTest.cpp
   src/ResourceBudgetSmokeTest.h
   src/ResourceBudgetLargeMeshSmokeTest.cpp
@@ -220,7 +226,7 @@ endforeach()
 
 if(WIN32)
   target_sources(GaussianSceneWorkbench PRIVATE assets/gsw-app-icon.rc)
-  target_link_libraries(GaussianSceneWorkbench PRIVATE Shell32)
+  target_link_libraries(GaussianSceneWorkbench PRIVATE Shell32 Ole32 OleAut32)
 endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
@@ -279,6 +285,51 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  add_test(NAME native_file_dialog_history
+    COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history --language zh_CN)
+  set_tests_properties(native_file_dialog_history PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_file_dialog_history_persistence
+    COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history-persistence --language zh_CN)
+  set_tests_properties(native_file_dialog_history_persistence PROPERTIES
+    TIMEOUT 40
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_file_dialog_history_ranking
+    COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history-ranking --language zh_CN)
+  set_tests_properties(native_file_dialog_history_ranking PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_file_dialog_history_filter
+    COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history-filter --language zh_CN)
+  set_tests_properties(native_file_dialog_history_filter PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_file_dialog_history_guard
+    COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history-guard --language zh_CN)
+  set_tests_properties(native_file_dialog_history_guard PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  foreach(history_locale zh_CN en_US ja_JP)
+    add_test(NAME native_file_dialog_history_ui_${history_locale}
+      COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history-ui --language ${history_locale})
+    set_tests_properties(native_file_dialog_history_ui_${history_locale} PROPERTIES
+      TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
+  add_test(NAME native_window_minimize
+    COMMAND GaussianSceneWorkbench --smoke-test-window-minimize --language zh_CN)
+  set_tests_properties(native_window_minimize PROPERTIES
+    TIMEOUT 30
+    RUN_SERIAL TRUE
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_resource_budget_settings
     COMMAND GaussianSceneWorkbench --smoke-test-resource-budget --language zh_CN)
   set_tests_properties(native_resource_budget_settings PROPERTIES

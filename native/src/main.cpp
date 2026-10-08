@@ -18,6 +18,8 @@
 #include "ResourceBudgetSmokeTest.h"
 #include "ResourceBudgetLargeMeshSmokeTest.h"
 #include "ResourceBudgetUiSmokeTest.h"
+#include "FileDialogHistorySmokeTest.h"
+#include "FileDialogHistoryGuardSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -124,11 +126,29 @@ int main(int argc, char *argv[]) {
       })) {
     // All GUI smoke tests must be independent of the user's edit lock/layout
     // preferences and must never write test state into interactive settings.
-    smokeSettings = gsw::isolateSmokeTestSettings(
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("test-settings")));
-    if (!smokeSettings) {
-      qCritical() << "Unable to create isolated smoke-test settings.";
-      return 4;
+    const QString smokeRoot = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("test-settings"));
+    const bool historyRestartChild = smokeArguments.contains(QStringLiteral("--smoke-test-file-dialog-history-persistence-child"));
+    const QString sharedSettings = qEnvironmentVariable("GSW_HISTORY_RESTART_SETTINGS");
+    if (historyRestartChild) {
+      // This override exists only for the cross-process GUI smoke test. It
+      // must resolve within this executable's QA root, never interactive data.
+      const QString canonicalRoot = QFileInfo(smokeRoot).canonicalFilePath();
+      const QString canonicalShared = QFileInfo(sharedSettings).canonicalFilePath();
+      if (canonicalRoot.isEmpty() || canonicalShared.isEmpty() || !QFileInfo(canonicalShared).isDir() ||
+          !canonicalShared.startsWith(canonicalRoot + QLatin1Char('/'), Qt::CaseInsensitive)) {
+        qCritical() << "Invalid isolated settings root for history restart smoke test.";
+        return 4;
+      }
+      QSettings::setDefaultFormat(QSettings::IniFormat);
+      QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, canonicalShared);
+      application.setProperty("gswSmokeSettingsDirectory", canonicalShared);
+    } else {
+      smokeSettings = gsw::isolateSmokeTestSettings(smokeRoot);
+      if (!smokeSettings) {
+        qCritical() << "Unable to create isolated smoke-test settings.";
+        return 4;
+      }
+      application.setProperty("gswSmokeSettingsDirectory", smokeSettings->path());
     }
   }
   const QIcon applicationIcon(QStringLiteral(":/icons/gsw-app-icon.png"));
@@ -167,6 +187,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption windowAppearanceSmokeOption(QStringLiteral("smoke-test-window-appearance"),
       QStringLiteral("Verify initial import-dialog width and toolbar label appearance."));
   parser.addOption(windowAppearanceSmokeOption);
+  QCommandLineOption windowMinimizeSmokeOption(QStringLiteral("smoke-test-window-minimize"),
+      QStringLiteral("Verify real Windows minimize buttons and restored window/file-dialog state."));
+  parser.addOption(windowMinimizeSmokeOption);
   QCommandLineOption resourceBudgetSmokeOption(QStringLiteral("smoke-test-resource-budget"),
       QStringLiteral("Verify the live resource-budget settings through the native interface."));
   parser.addOption(resourceBudgetSmokeOption);
@@ -194,6 +217,27 @@ int main(int argc, char *argv[]) {
   QCommandLineOption resourceBudgetUiSmokeOption(QStringLiteral("smoke-test-resource-budget-ui"),
       QStringLiteral("Verify live resource settings across languages and window sizes."));
   parser.addOption(resourceBudgetUiSmokeOption);
+  QCommandLineOption fileDialogHistorySmokeOption(QStringLiteral("smoke-test-file-dialog-history"),
+      QStringLiteral("Verify accepted files and folders are navigable from the real file-dialog history column."));
+  parser.addOption(fileDialogHistorySmokeOption);
+  QCommandLineOption fileDialogHistoryPersistenceSmokeOption(QStringLiteral("smoke-test-file-dialog-history-persistence"),
+      QStringLiteral("Verify file-dialog history persists into a fresh application process."));
+  parser.addOption(fileDialogHistoryPersistenceSmokeOption);
+  QCommandLineOption fileDialogHistoryPersistenceChildOption(QStringLiteral("smoke-test-file-dialog-history-persistence-child"),
+      QStringLiteral("Observe navigable history in the fresh application process of the persistence smoke test."));
+  parser.addOption(fileDialogHistoryPersistenceChildOption);
+  QCommandLineOption fileDialogHistoryRankingSmokeOption(QStringLiteral("smoke-test-file-dialog-history-ranking"),
+      QStringLiteral("Verify frequently accepted files and folders precede newer entries, with recency breaking usage ties."));
+  parser.addOption(fileDialogHistoryRankingSmokeOption);
+  QCommandLineOption fileDialogHistoryFilterSmokeOption(QStringLiteral("smoke-test-file-dialog-history-filter"),
+      QStringLiteral("Verify remembered files follow the selected file type and cancel/deleted-path clicks are safe."));
+  parser.addOption(fileDialogHistoryFilterSmokeOption);
+  QCommandLineOption fileDialogHistoryUiSmokeOption(QStringLiteral("smoke-test-file-dialog-history-ui"),
+      QStringLiteral("Verify live history language/scale, Desktop navigation and confirmed history clearing without changing source files."));
+  parser.addOption(fileDialogHistoryUiSmokeOption);
+  QCommandLineOption fileDialogHistoryGuardSmokeOption(QStringLiteral("smoke-test-file-dialog-history-guard"),
+      QStringLiteral("Verify distinct Unicode targets and newly accepted files survive a full history."));
+  parser.addOption(fileDialogHistoryGuardSmokeOption);
   QCommandLineOption taskActionsSmokeOption(QStringLiteral("smoke-test-task-actions"),
       QStringLiteral("Verify shared task details, retained logs and failed-launch records."));
   parser.addOption(taskActionsSmokeOption);
@@ -343,6 +387,14 @@ int main(int argc, char *argv[]) {
                          parser.isSet(resourceBudgetLargeMeshSmokeOption) ||
                          parser.isSet(resourceBudgetHudSmokeOption) ||
                          parser.isSet(resourceBudgetUiSmokeOption) ||
+                         parser.isSet(fileDialogHistorySmokeOption) ||
+                         parser.isSet(fileDialogHistoryPersistenceSmokeOption) ||
+                         parser.isSet(fileDialogHistoryPersistenceChildOption) ||
+                         parser.isSet(fileDialogHistoryRankingSmokeOption) ||
+                         parser.isSet(fileDialogHistoryFilterSmokeOption) ||
+                         parser.isSet(fileDialogHistoryUiSmokeOption) ||
+                         parser.isSet(fileDialogHistoryGuardSmokeOption) ||
+                         parser.isSet(windowMinimizeSmokeOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
@@ -361,7 +413,42 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(resourceBudgetHudSmokeOption)) {
+  if (parser.isSet(windowMinimizeSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runWindowMinimizeSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistoryGuardSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistoryGuardSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistoryUiSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistoryUiSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistoryFilterSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistoryFilterSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistoryRankingSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistoryRankingSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistoryPersistenceSmokeOption) || parser.isSet(fileDialogHistoryPersistenceChildOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistoryPersistenceSmokeTest(window, parser.isSet(fileDialogHistoryPersistenceChildOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(fileDialogHistorySmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runFileDialogHistorySmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetHudSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runResourceBudgetHudSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

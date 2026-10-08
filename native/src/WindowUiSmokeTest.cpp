@@ -36,9 +36,16 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
+#include <memory>
+#include <thread>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
+#include <UIAutomation.h>
+#include <OleAcc.h>
+#include <wrl/client.h>
 #endif
 
 namespace gsw {
@@ -81,7 +88,299 @@ void captionDoubleClick(QWidget &window) {
   WindowUi::toggleMaximized(&window); settle();
 #endif
 }
+
+#ifdef Q_OS_WIN
+using Microsoft::WRL::ComPtr;
+
+struct MinimizeButtonResult {
+  std::atomic_bool done{false};
+  std::atomic_bool canceled{false};
+  HRESULT result = E_PENDING;
+};
+
+HRESULT invokeOwnedMinimizeButton(HWND hwnd, const std::atomic_bool &canceled) {
+  // UIA must run on a windowless MTA thread when exercising our own UI.
+  // All COM objects stay in this apartment; only the HWND crosses threads.
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  if (FAILED(initialized)) return initialized;
+  struct Apartment { ~Apartment() { CoUninitialize(); } } apartment;
+  const auto stillOwned = [&] {
+    DWORD process = 0;
+    GetWindowThreadProcessId(hwnd, &process);
+    return !canceled.load() && IsWindow(hwnd) && process == GetCurrentProcessId();
+  };
+  if (!stillOwned()) return E_ABORT;
+  ComPtr<IUIAutomation2> automation;
+  HRESULT result = CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER,
+      IID_PPV_ARGS(automation.GetAddressOf()));
+  if (FAILED(result)) return result;
+  if (FAILED(result = automation->put_ConnectionTimeout(1000)) ||
+      FAILED(result = automation->put_TransactionTimeout(1000))) return result;
+  ComPtr<IUIAutomationElement> owned;
+  if (FAILED(result = automation->ElementFromHandle(hwnd, owned.GetAddressOf()))) return result;
+  int process = 0;
+  if (FAILED(result = owned->get_CurrentProcessId(&process))) return result;
+  if (process != static_cast<int>(GetCurrentProcessId()) || !stillOwned()) return E_ACCESSDENIED;
+  VARIANT type{};
+  type.vt = VT_I4;
+  type.lVal = UIA_TitleBarControlTypeId;
+  ComPtr<IUIAutomationCondition> titleBarCondition;
+  if (FAILED(result = automation->CreatePropertyCondition(UIA_ControlTypePropertyId, type,
+      titleBarCondition.GetAddressOf()))) return result;
+  ComPtr<IUIAutomationElement> titleBar;
+  if (FAILED(result = owned->FindFirst(TreeScope_Children, titleBarCondition.Get(),
+      titleBar.GetAddressOf()))) return result;
+  if (!titleBar) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+  type.lVal = UIA_ButtonControlTypeId;
+  ComPtr<IUIAutomationCondition> buttonCondition;
+  if (FAILED(result = automation->CreatePropertyCondition(UIA_ControlTypePropertyId, type,
+      buttonCondition.GetAddressOf()))) return result;
+  ComPtr<IUIAutomationElementArray> buttons;
+  if (FAILED(result = titleBar->FindAll(TreeScope_Children, buttonCondition.Get(),
+      buttons.GetAddressOf()))) return result;
+  int count = 0;
+  if (FAILED(result = buttons->get_Length(&count))) return result;
+  ComPtr<IUIAutomationElement> minimize;
+  for (int index = 0; index < count; ++index) {
+    if (!stillOwned()) return E_ABORT;
+    ComPtr<IUIAutomationElement> button;
+    if (FAILED(result = buttons->GetElement(index, button.GetAddressOf()))) return result;
+    BSTR rawId = nullptr;
+    button->get_CurrentAutomationId(&rawId);
+    const QString id = rawId ? QString::fromWCharArray(rawId) : QString();
+    SysFreeString(rawId);
+    int childId = 0;
+    DWORD role = 0;
+    ComPtr<IUIAutomationLegacyIAccessiblePattern> legacy;
+    if (SUCCEEDED(button->GetCurrentPatternAs(UIA_LegacyIAccessiblePatternId,
+        __uuidof(IUIAutomationLegacyIAccessiblePattern),
+        reinterpret_cast<void **>(legacy.GetAddressOf())))) {
+      legacy->get_CurrentChildId(&childId);
+      legacy->get_CurrentRole(&role);
+    }
+    qInfo() << "Native minimize UIA candidate:" << "AutomationId" << id
+            << "MSAA child" << childId << "role" << Qt::hex << role << Qt::dec;
+    // Do not select by a localized caption or invoke an arbitrary button.
+    // MSAA's minimize child (2) is accepted only when AutomationId is absent.
+    if (id != QStringLiteral("Minimize") && id != QStringLiteral("Minimize-Restore") &&
+        !(id.isEmpty() && childId == 2 && role == ROLE_SYSTEM_PUSHBUTTON)) continue;
+    if (minimize) return E_UNEXPECTED;
+    minimize = button;
+  }
+  if (!minimize) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+  BOOL enabled = FALSE;
+  BOOL offscreen = TRUE;
+  if (FAILED(result = minimize->get_CurrentProcessId(&process)) ||
+      FAILED(result = minimize->get_CurrentIsEnabled(&enabled)) ||
+      FAILED(result = minimize->get_CurrentIsOffscreen(&offscreen))) return result;
+  qInfo() << "Native minimize UIA selected:" << "PID" << process << "enabled" << bool(enabled)
+          << "offscreen" << bool(offscreen);
+  if (process != static_cast<int>(GetCurrentProcessId()) || !enabled || offscreen || !stillOwned())
+    return E_ACCESSDENIED;
+  ComPtr<IUIAutomationInvokePattern> action;
+  if (FAILED(result = minimize->GetCurrentPatternAs(UIA_InvokePatternId,
+      __uuidof(IUIAutomationInvokePattern), reinterpret_cast<void **>(action.GetAddressOf())))) return result;
+  if (!stillOwned()) return E_ABORT;
+  return action->Invoke(); // Real title-bar Button action, not WindowPattern::SetWindowVisualState.
+}
+
+bool captionMinimizeAndRestore(QWidget &window, const char *scenario) {
+  const HWND hwnd = reinterpret_cast<HWND>(window.winId());
+  DWORD ownedProcess = 0;
+  const DWORD ownedThread = GetWindowThreadProcessId(hwnd, &ownedProcess);
+  if (ownedProcess != GetCurrentProcessId() || ownedThread != GetCurrentThreadId()) return false;
+  // Only raise the isolated fixture; never manipulate a user's other windows.
+  SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  BringWindowToTop(hwnd);
+  window.raise();
+  window.activateWindow();
+  SetForegroundWindow(hwnd);
+  if (GetForegroundWindow() != hwnd) {
+    const HWND previous = GetForegroundWindow();
+    const DWORD foregroundThread = previous ? GetWindowThreadProcessId(previous, nullptr) : 0;
+    const DWORD currentThread = GetCurrentThreadId();
+    bool inputHeld = false;
+    for (const int key : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_SHIFT, VK_CONTROL, VK_MENU})
+      inputHeld = inputHeld || (GetAsyncKeyState(key) & 0x8000);
+    if (foregroundThread && foregroundThread != currentThread && !inputHeld &&
+        AttachThreadInput(currentThread, foregroundThread, TRUE)) {
+      SetForegroundWindow(hwnd);
+      BOOL detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
+      if (!detached) detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
+      if (!detached) {
+        qWarning() << "Native minimize:" << scenario << "input-queue detach failed";
+        return false;
+      }
+    }
+  }
+  for (int attempt = 0; attempt < 15 && GetForegroundWindow() != hwnd; ++attempt) settle();
+  settle();
+  const int observeMs = std::clamp(qEnvironmentVariableIntValue("GSW_MINIMIZE_QA_OBSERVE_MS"), 0, 60000);
+  if (observeMs) {
+    qInfo() << "Native minimize observation:" << scenario << "PID" << ownedProcess
+            << "title" << window.windowTitle() << "milliseconds" << observeMs;
+    QEventLoop loop;
+    QTimer::singleShot(observeMs, &loop, &QEventLoop::quit);
+    loop.exec();
+  }
+  const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+  const HMENU menu = GetSystemMenu(hwnd, FALSE);
+  const UINT menuState = menu ? GetMenuState(menu, SC_MINIMIZE, MF_BYCOMMAND) : UINT(-1);
+  const bool enabled = (style & WS_MINIMIZEBOX) && menuState != UINT(-1) &&
+      !(menuState & (MF_DISABLED | MF_GRAYED)) && IsWindowVisible(hwnd) && IsWindowEnabled(hwnd);
+  qInfo() << "Native minimize caption:" << scenario << "style" << Qt::hex << style
+          << "system menu" << menuState << Qt::dec << "enabled" << enabled
+          << "owned foreground" << (GetForegroundWindow() == hwnd);
+  if (!enabled || GetForegroundWindow() != hwnd) return false;
+
+  // UIA's own-window calls need GUI message pumping. Do not leave a detached
+  // worker able to invoke a caption button after this fixture is restored.
+  auto state = std::make_shared<MinimizeButtonResult>();
+  std::thread worker([hwnd, state] {
+    state->result = invokeOwnedMinimizeButton(hwnd, state->canceled);
+    state->done.store(true, std::memory_order_release);
+  });
+  QElapsedTimer deadline;
+  deadline.start();
+  while (!state->done.load(std::memory_order_acquire) && deadline.elapsed() < 5000) settle();
+  const bool completed = state->done.load(std::memory_order_acquire);
+  if (!completed) {
+    state->canceled.store(true);
+    qWarning() << "Native minimize:" << scenario << "UIA deadline exceeded; canceling and waiting for worker cleanup";
+    QElapsedTimer cleanupDeadline;
+    cleanupDeadline.start();
+    while (!state->done.load(std::memory_order_acquire) && cleanupDeadline.elapsed() < 2000) settle();
+    if (!state->done.load(std::memory_order_acquire)) {
+      // This helper is reached only by --smoke-test-window-minimize in its
+      // independent QA process. Fail fast before destroying/reusing its HWND;
+      // no other application or user instance is terminated.
+      qCritical() << "Native minimize:" << scenario
+                  << "UIA worker did not stop after cancellation; terminating only this smoke QA process";
+      std::_Exit(2);
+    }
+  }
+  worker.join();
+  const HRESULT actionResult = completed ? state->result : HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+  for (int attempt = 0; attempt < 30 && (!IsIconic(hwnd) || !window.isMinimized()); ++attempt) settle();
+  const bool minimized = completed && SUCCEEDED(actionResult) && IsIconic(hwnd) && window.isMinimized();
+  qInfo() << "Native minimize result:" << scenario << "UIA Invoke HRESULT" << Qt::hex << actionResult
+          << Qt::dec << "completed" << completed << "OS iconic" << bool(IsIconic(hwnd))
+          << "Qt minimized" << window.isMinimized();
+  // Taskbar-equivalent restore keeps the same window and its in-progress state.
+  if (IsIconic(hwnd) || window.isMinimized()) PostMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+  for (int attempt = 0; attempt < 30 && (IsIconic(hwnd) || window.isMinimized() || !window.isVisible()); ++attempt) settle();
+  settle();
+  const bool restored = !IsIconic(hwnd) && !window.isMinimized() && window.isVisible();
+  qInfo() << "Native restore result:" << scenario << "restored" << restored;
+  return minimized && restored;
+}
+#endif
 } // namespace
+
+bool runWindowMinimizeSmokeTest(QMainWindow &workbench) {
+  Q_UNUSED(workbench);
+  bool passed = true;
+  const auto check = [&](bool condition, const char *message) {
+    if (!condition) { qWarning() << "Window minimize smoke:" << message; passed = false; }
+  };
+#ifdef Q_OS_WIN
+  // Keep this seam independent of language/appearance/dock QA: unrelated
+  // modal windows in those suites can prevent safe native-caption clicks.
+  QTemporaryDir temporary;
+  check(temporary.isValid(), "create isolated file-dialog fixture directory");
+  if (!temporary.isValid()) return false;
+  const QString fixtureName = QStringLiteral("模型_日本語.glb");
+  const QString fixturePath = QDir(temporary.path()).filePath(fixtureName);
+  QFile fixture(fixturePath);
+  check(fixture.open(QIODevice::WriteOnly), "create the known Unicode file-dialog selection fixture");
+  if (!fixture.isOpen()) return false;
+  check(fixture.write("native caption fixture\n") == 23, "write the complete file-dialog selection fixture");
+  fixture.close();
+
+  QMainWindow host;
+  host.setWindowTitle(QStringLiteral("GSW minimize QA main"));
+  host.setCentralWidget(new QLineEdit(QStringLiteral("unchanged"), &host));
+  host.resize(640, 450);
+  host.show();
+  host.activateWindow();
+  settle();
+  const QRect hostGeometry = host.geometry();
+  check(captionMinimizeAndRestore(host, "isolated main window"),
+        "main-window enabled native minimize button actually minimizes and restores through Windows");
+  check(host.isVisible() && host.geometry() == hostGeometry &&
+        static_cast<QLineEdit *>(host.centralWidget())->text() == QStringLiteral("unchanged"),
+        "main-window native minimize and restore retain geometry and in-progress content");
+
+  int finishedCount = 0;
+  QFileDialog file(&host);
+  file.setOption(QFileDialog::DontUseNativeDialog);
+  file.setWindowModality(Qt::WindowModal);
+  file.setAcceptMode(QFileDialog::AcceptOpen);
+  file.setFileMode(QFileDialog::ExistingFile);
+  file.setViewMode(QFileDialog::Detail);
+  file.setNameFilters({QStringLiteral("PLY (*.ply)"), QStringLiteral("GLB (*.glb)")});
+  file.selectNameFilter(QStringLiteral("GLB (*.glb)"));
+  file.setDirectory(temporary.path());
+  file.selectFile(fixturePath);
+  file.setWindowTitle(QStringLiteral("GSW minimize QA file"));
+  file.resize(AppTheme::fitWindowResolution(QSize(900, 640), file.screen()->availableGeometry().size(),
+                                           QSize(640, 460)));
+  QObject::connect(&file, &QDialog::finished, &file, [&](int) { ++finishedCount; });
+  file.show();
+  file.activateWindow();
+  settle();
+  auto *name = file.findChild<QLineEdit *>(QStringLiteral("fileNameEdit"));
+  auto *tree = file.findChild<QTreeView *>(QStringLiteral("treeView"));
+  check(name && tree, "real file dialog exposes its filename editor and filesystem view");
+  if (!name || !tree) return false;
+  QModelIndex selectedFixture;
+  for (int attempt = 0; attempt < 30 && !selectedFixture.isValid(); ++attempt) {
+    for (int row = 0; row < tree->model()->rowCount(tree->rootIndex()); ++row) {
+      const auto index = tree->model()->index(row, 0, tree->rootIndex());
+      if (index.data().toString() == fixtureName) { selectedFixture = index; break; }
+    }
+    if (!selectedFixture.isValid()) settle();
+  }
+  check(selectedFixture.isValid(), "filesystem view actually loaded the known Unicode fixture");
+  if (!selectedFixture.isValid()) return false;
+  tree->selectionModel()->setCurrentIndex(selectedFixture,
+      QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+  settle();
+  const auto selectedNames = [&] {
+    QStringList names;
+    for (const auto &index : tree->selectionModel()->selectedRows(0)) names.append(index.data().toString());
+    names.sort();
+    return names;
+  };
+  const QString expectedDirectory = QDir(temporary.path()).absolutePath();
+  const QStringList expectedSelection{QStringLiteral("模型_日本語.glb")};
+  const QStringList expectedPaths{QDir::cleanPath(fixturePath)};
+  const QRect expectedGeometry = file.geometry();
+  check(file.directory().absolutePath() == expectedDirectory && name->text() == fixtureName &&
+        file.selectedNameFilter() == QStringLiteral("GLB (*.glb)") && selectedNames() == expectedSelection &&
+        file.selectedFiles() == expectedPaths && file.windowModality() == Qt::WindowModal && finishedCount == 0,
+        "file-dialog minimize regression begins with the known directory, filename, selection, filter and modality");
+  qInfo() << "File-dialog state before caption minimize:" << file.directory().absolutePath() << name->text()
+          << file.selectedNameFilter() << selectedNames() << file.selectedFiles() << file.windowModality()
+          << "geometry" << file.geometry() << "finished count" << finishedCount;
+  check(captionMinimizeAndRestore(file, "isolated modal file dialog"),
+        "file-dialog enabled native minimize button actually minimizes and restores through Windows");
+  qInfo() << "File-dialog state after caption restore:" << file.directory().absolutePath() << name->text()
+          << file.selectedNameFilter() << selectedNames() << file.selectedFiles() << file.windowModality()
+          << "geometry" << file.geometry() << "finished count" << finishedCount;
+  check(file.isVisible() && file.directory().absolutePath() == expectedDirectory && name->text() == fixtureName &&
+        file.selectedNameFilter() == QStringLiteral("GLB (*.glb)") && selectedNames() == expectedSelection &&
+        file.selectedFiles() == expectedPaths && file.windowModality() == Qt::WindowModal &&
+        file.geometry() == expectedGeometry && finishedCount == 0,
+        "native minimize and restore retain file-dialog directory, filename, filter, actual selection, modality and geometry without accepting or rejecting");
+  file.reject();
+  host.hide();
+#else
+  qInfo() << "Window minimize smoke: Windows native-caption seam unavailable on this platform";
+#endif
+  qInfo().noquote() << "Window minimize smoke:" << (passed ? "PASS" : "FAIL");
+  return passed;
+}
 
 bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
   bool passed = true;

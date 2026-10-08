@@ -49,6 +49,8 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | --- | --- | --- |
 | 工程 / 数据集 | Project / Dataset | プロジェクト / データセット |
 | 桌面 | Desktop | デスクトップ |
+| 常用文件夹 / 常用文件 | Frequent Folders / Frequent Files | よく使うフォルダー / よく使うファイル |
+| 文件窗口历史 / 清除历史 | File Dialog History / Clear History | ファイルダイアログの履歴 / 履歴を消去 |
 | 外观 / 自动（按时间） / 浅色（白天） / 深色（黑夜） | Appearance / Automatic (Time-based) / Light (Day) / Dark (Night) | 外観 / 自動（時刻に応じて） / ライト（昼間） / ダーク（夜間） |
 | 全屏 / 退出全屏 | Full Screen / Exit Full Screen | 全画面表示 / 全画面表示を終了 |
 | 最大化窗口 / 还原窗口 | Maximize Window / Restore Window | ウィンドウを最大化 / ウィンドウを元に戻す |
@@ -152,6 +154,14 @@ instead of showing white rectangles in light appearance.
 
 All Qt open/save/folder dialogs include a translated **Desktop** shortcut in their sidebar. The location comes from `QStandardPaths::DesktopLocation` (including redirected desktops), not a hard-coded `C:` path. Navigation does not create files or change the filename/type. Existing sidebar places and directory history remain available. There is no duplicate window-control row or second Desktop button.
 
+The same left column includes **Frequent Folders** and **Frequent Files**. A successful dialog selection increases its usage count; more-used entries come first, with the most recently accepted choice breaking ties. Clicking a folder navigates to it; clicking an existing file navigates and selects the original Unicode filename without accepting the dialog. Browsing or cancelling does not enter the history. Save destinations remember only their existing parent folder, not an input file. The app's local preferences retain at most 128 folder and 128 file records across launches, within a 512 KiB encoded limit; oldest records are evicted so new choices remain eligible. The compact list displays up to eight available folders and twelve compatible existing files, and follows the current file-type filter. This records confirmed file-dialog choices, not the success of downstream model import or training. Source files are never rewritten by the history feature.
+
+**Clear History** asks for confirmation with No as the default and clears only these application preference records. The current directory, filename, filter and file selection remain unchanged; source files are neither deleted nor modified. Language and font-scale changes update the sidebar's text and row metrics immediately without resetting those inputs or the user's resized window. Long place names are elided within the left column rather than adding a horizontal scrollbar.
+
+中文：文件窗口左栏增加“常用文件夹”和“常用文件”，按成功选择次数排序，同次数时最近使用优先。点击文件只定位并选中，不直接打开；取消及仅浏览不记入历史。记录保存在本机程序设置中，重开程序后仍保留，不修改原文件。文件列表跟随当前类型筛选，失效路径不显示。“清除历史”需要确认，仅清除记录，保留当前目录、文件名、筛选和选择，不删除文件。语言与字号即时更新，长路径名称在左栏内省略显示。
+
+日本語：ファイルダイアログの左側に「よく使うフォルダー」と「よく使うファイル」を表示します。選択を確定した回数で並べ、同数なら最近の使用を優先します。ファイルをクリックすると元の名前で選択するだけで、ダイアログは確定しません。キャンセルや閲覧のみは履歴に追加せず、再起動後も本機のアプリ設定に履歴を保持します。ファイル一覧は現在の種類フィルターに従い、無効なパスは表示しません。「履歴を消去」は確認後に記録のみを削除し、現在のフォルダー、ファイル名、フィルター、選択と元ファイルを保持します。言語と文字サイズは即時更新し、長い名前は左欄内で省略表示します。
+
 File-dialog detail views stretch the filename column to the available width in normal, maximized and full-screen windows. Metadata columns remain individually resizable; language, appearance and UI-scale changes retain user widths, sort order, selection, directory, filename and file type, growing a column only when needed to fit its translated header. Navigation icons and the Desktop sidebar's minimum width follow the actual font/UI scale, not the maximized window's dimensions. Light-mode splitter handles and header backgrounds use the same soft gray as panel boundaries, including unused header space; form labels inherit the dialog background instead of painting white rectangles.
 
 Training, reconstruction, meshing and model-export forms keep their controls top-aligned, wrap long rows and scroll when space is short; action buttons stay outside the scrolling body. Media import retains its independently scrollable source list. Enlarging a window increases usable content width rather than stretching control heights or row spacing. These are shared presentation changes for all supported generation pipelines, not changes to training parameters or model data.
@@ -161,6 +171,8 @@ Training, reconstruction, meshing and model-export forms keep their controls top
 日本語：ファイルダイアログの名前列はウィンドウ幅に追従し、他の列は手動で幅を調整できます。区切りとヘッダーを柔らかなライトグレーに統一します。アイコンとサイドバーは UI の文字サイズに追従し、ファイル名、形式、並び順と選択を保持します。設定フォームは折り返しとスクロールに対応し、操作ボタンは下部に表示したままにします。
 
 The main window and dialogs keep only the native Windows caption controls: title-bar left double-click **maximizes/restores**, not full screen. **Full Screen** remains available through the View menu or `F11`; `Esc` or `F11` exits it. Full screen restores the previous normal geometry/maximized state without resetting input/model/worker data. Popups and tooltips are excluded. Double-clicking files, text fields or model geometry retains the existing open/select/recenter operation. `Esc` exits full screen first; only a subsequent `Esc` invokes the dialog's normal cancel behavior. Labels change live in all three languages.
+
+Main windows and dialogs also enable the native **Minimize** button before their first native show. No flag recreation is performed on visible dialogs. Minimizing and restoring does not accept/cancel a file dialog or reconstruct its controls; the directory, filename, file type and current selection remain in progress. Qt continues to own floating dock-panel flags and dragging.
 
 Project, Properties and Tasks and Logs panels can be dragged by their compact title bar to any of the four dock areas, split/tabbed with other panels, or floated. Double-click their panel title to dock/undock; Ctrl-drag keeps them floating. Panel captions retain only dock/undock and close buttons; floating panels also support F11/Esc. Qt owns their window flags and mouse drag sequence. Initial floating sizes are 360 × 520 logical pixels for side panels and 840 × 460 for Tasks and Logs (scaled for the UI and clamped to the screen); existing usable restored sizes are retained. Floating size is remembered separately from docked extents and across sessions, without imposing a new minimum size. The bottom dock stays compact by default. Reset Layout also returns detached panels to their default dock areas.
 

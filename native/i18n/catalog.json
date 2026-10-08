@@ -6451,5 +6451,11 @@
   "尚未结束": {"zh_CN":"尚未结束","en_US":"Not Finished","ja_JP":"未終了"},
   "日志已截断，仅保留最近 %1 个字符": {"zh_CN":"日志已截断，仅保留最近 %1 个字符","en_US":"Log truncated; only the latest %1 characters are retained","ja_JP":"ログを切り詰め、最新の %1 文字のみを保持しています"},
   "导出保留日志...": {"zh_CN":"导出保留日志...","en_US":"Export Retained Logs...","ja_JP":"保持中のログをエクスポート..."},
-  "保留日志": {"zh_CN":"保留日志","en_US":"Retained Logs","ja_JP":"保持中のログ"}
+  "保留日志": {"zh_CN":"保留日志","en_US":"Retained Logs","ja_JP":"保持中のログ"},
+  "常用文件夹": {"zh_CN":"常用文件夹","en_US":"Frequent Folders","ja_JP":"よく使うフォルダー"},
+  "常用文件": {"zh_CN":"常用文件","en_US":"Frequent Files","ja_JP":"よく使うファイル"},
+  "文件窗口历史": {"zh_CN":"文件窗口历史","en_US":"File Dialog History","ja_JP":"ファイルダイアログの履歴"},
+  "清除历史": {"zh_CN":"清除历史","en_US":"Clear History","ja_JP":"履歴を消去"},
+  "清除常用文件夹和文件记录？不会删除或修改任何文件。": {"zh_CN":"清除常用文件夹和文件记录？不会删除或修改任何文件。","en_US":"Clear the frequent folder and file history? No files will be deleted or modified.","ja_JP":"よく使うフォルダーとファイルの履歴を消去しますか？ファイルは削除・変更されません。"},
+  "仅清除文件窗口历史，不删除或修改文件。": {"zh_CN":"仅清除文件窗口历史，不删除或修改文件。","en_US":"Clear only file dialog history; do not delete or modify files.","ja_JP":"ファイルダイアログの履歴のみを消去します。ファイルは削除・変更されません。"}
 }
