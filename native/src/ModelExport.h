@@ -18,6 +18,11 @@ struct ModelExportOptions {
   ModelTransform transform;
   SceneCoordinate3D pivot;
   SceneCoordinateInfo coordinates;
+  // When baking, convert source-unit TRS into the shared scene unit. This is
+  // not a GPU display scale/shift and is ignored by source-coordinate export.
+  double sceneUnitScale = 1.0;
+  SceneLengthUnit sceneUnit = SceneLengthUnit::Unknown;
+  bool sceneUnitDeclared = false;
   int spzVersion = 4;
   int spzMaximumShDegree = -1; // -1 retains the source degree.
   int spzQuality = 1; // 0 compact (4/3), 1 balanced (5/4), 2 high (8/8).

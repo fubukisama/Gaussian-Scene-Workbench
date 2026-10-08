@@ -49,16 +49,22 @@ SceneLengthUnit unitFromKey(const QString &key) {
   const QString normalized = key.trimmed().toLower();
   if (normalized == QStringLiteral("millimetres") ||
       normalized == QStringLiteral("millimeters") ||
+      normalized == QStringLiteral("millimetre") ||
+      normalized == QStringLiteral("millimeter") ||
       normalized == QStringLiteral("mm")) {
     return SceneLengthUnit::Millimetres;
   }
   if (normalized == QStringLiteral("centimetres") ||
       normalized == QStringLiteral("centimeters") ||
+      normalized == QStringLiteral("centimetre") ||
+      normalized == QStringLiteral("centimeter") ||
       normalized == QStringLiteral("cm")) {
     return SceneLengthUnit::Centimetres;
   }
   if (normalized == QStringLiteral("metres") ||
       normalized == QStringLiteral("meters") ||
+      normalized == QStringLiteral("metre") ||
+      normalized == QStringLiteral("meter") ||
       normalized == QStringLiteral("m")) {
     return SceneLengthUnit::Metres;
   }

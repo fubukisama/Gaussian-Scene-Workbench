@@ -243,6 +243,7 @@ private:
   QLabel *mPlyFormatValue = nullptr;
   QLabel *mCameraCountValue = nullptr;
   QLabel *mCoordinateSystemValue = nullptr;
+  QLabel *mSceneCoordinateRelationValue = nullptr;
   QLabel *mSceneUnitValue = nullptr;
   QLabel *mSceneCenterValue = nullptr;
   QLabel *mSceneSizeValue = nullptr;

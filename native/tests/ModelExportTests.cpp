@@ -52,6 +52,13 @@ class ModelExportTests final : public QObject {
 private slots:
   void preservesPlyAndCroppedGaussianAttributes();
   void exportsCoordinatesAndBakesDoublePrecisionTransform();
+  void exportsSceneUnitsAndPreservesSourceCoordinates();
+  void sceneUnitGlbUsesPhysicalMetresOnce();
+  void sceneUnitsCoverMeshFormatsAndMetadata();
+  void sceneUnitConversionKeepsGaussianSourceProtection();
+  void preservesProjectionSidecarMetadataInSourcePly();
+  void scenePlyDoesNotPublishSourceCrs();
+  void protectsExistingProjectionSidecars();
   void exportsCompleteMeshAndEmbeddedGlb();
   void exportsPointGlbWithoutInventingFaces();
   void keepsExistingFilesOnCancellationAndFailure();
@@ -114,6 +121,286 @@ void ModelExportTests::exportsCoordinatesAndBakesDoublePrecisionTransform() {
     }
   }
   QCOMPARE(read(o.sourcePath), pointPly());
+}
+
+void ModelExportTests::exportsSceneUnitsAndPreservesSourceCoordinates() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("centimetres.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("scene-metres.ply"));
+  QVERIFY(save(o.sourcePath, pointPly()));
+  o.coordinates.unit = SceneLengthUnit::Centimetres;
+  o.coordinates.unitDeclared = true;
+  o.coordinates.displayShift = {-1000000, 0, 0};
+  o.coordinates.displayScale = 0.25;
+  o.sceneUnitScale = 0.01;
+  o.sceneUnit = SceneLengthUnit::Metres;
+  o.sceneUnitDeclared = true;
+  o.applyTransform = true;
+  // Identity object TRS is not an unchanged export when scene units differ.
+  auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  auto loaded = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QVERIFY(std::abs(loaded.coordinates.globalMinimum.x - 10000.00125) < 1e-9);
+  QVERIFY(std::abs(loaded.coordinates.globalMaximum.y - 0.03) < 1e-12);
+  QCOMPARE(loaded.coordinates.unit, SceneLengthUnit::Metres);
+  QVERIFY(loaded.coordinates.unitDeclared);
+  QVERIFY(!read(o.destinationPath).contains("units cm"));
+  // A source-coordinate export ignores both the object TRS and scene unit.
+  o.applyTransform = false;
+  o.transform.translation = {10, 20, 30};
+  result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  QCOMPARE(read(o.destinationPath), pointPly());
+  QCOMPARE(read(o.sourcePath), pointPly());
+}
+
+void ModelExportTests::sceneUnitGlbUsesPhysicalMetresOnce() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("centimetres.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("scene.glb"));
+  QVERIFY(save(o.sourcePath, pointPly()));
+  o.format = ModelExportFormat::Glb;
+  o.coordinates.unit = SceneLengthUnit::Centimetres;
+  o.coordinates.unitDeclared = true;
+  o.pivot = {1000000.125, 2, 3};
+  o.transform.translation = {10, 20, 30};
+  o.applyTransform = true;
+  for (const auto unit : {SceneLengthUnit::Metres, SceneLengthUnit::Millimetres}) {
+    o.sceneUnit = unit;
+    o.sceneUnitDeclared = true;
+    o.sceneUnitScale = unit == SceneLengthUnit::Metres ? 0.01 : 10.0;
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto bytes = read(o.destinationPath);
+    const auto json = QJsonDocument::fromJson(bytes.mid(20, uintAt(bytes, 12))).object();
+    const auto translation = json["nodes"].toArray()[0].toObject()["translation"].toArray();
+    // The source 10 cm translation must still become 0.1 m in glTF,
+    // irrespective of whether the common scene frame uses metres or mm.
+    QVERIFY(std::abs(translation[0].toDouble() - 10000.10125) < 1e-8);
+    QVERIFY(std::abs(translation[1].toDouble() - 0.33) < 1e-12);
+    QVERIFY(std::abs(translation[2].toDouble() + 0.22) < 1e-12);
+    const qsizetype binStart = 28 + uintAt(bytes, 12);
+    QVERIFY(std::abs(floatAt(bytes, binStart + 48) - 0.01F) < 1e-7);
+  }
+  QCOMPARE(read(o.sourcePath), pointPly());
+}
+
+void ModelExportTests::sceneUnitsCoverMeshFormatsAndMetadata() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("source.ply"));
+  auto mesh = pointPly();
+  mesh.replace("end_header\n", "element face 1\nproperty list uchar int vertex_indices\nend_header\n");
+  mesh += "4 0 1 2 3\n";
+  QVERIFY(save(o.sourcePath, mesh));
+  o.coordinates.unit = SceneLengthUnit::Centimetres;
+  o.coordinates.unitDeclared = true;
+  o.sceneUnitScale = 0.01;
+  o.sceneUnit = SceneLengthUnit::Metres;
+  o.sceneUnitDeclared = true;
+  o.applyTransform = true;
+  o.transform.translation = {10, 20, 30};
+  for (auto format : {ModelExportFormat::Xyz, ModelExportFormat::Csv,
+                      ModelExportFormat::Obj, ModelExportFormat::Stl}) {
+    o.format = format;
+    o.destinationPath = dir.filePath(QStringLiteral("scene.") + modelExportSuffix(format));
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto bytes = read(o.destinationPath);
+    if (format == ModelExportFormat::Stl) {
+      QCOMPARE(uintAt(bytes, 80), 2);
+      QVERIFY(std::abs(floatAt(bytes, 96) - 10000.10125F) < 0.001F);
+      QVERIFY(std::abs(floatAt(bytes, 100) - 0.22F) < 1e-6F);
+      QVERIFY(std::abs(floatAt(bytes, 104) - 0.33F) < 1e-6F);
+    } else {
+      auto lines = bytes.trimmed().split('\n');
+      QByteArray line = lines[format == ModelExportFormat::Csv ? 1 : 0];
+      if (format == ModelExportFormat::Obj) line = line.mid(2);
+      const auto values = line.split(format == ModelExportFormat::Csv ? ',' : ' ');
+      QVERIFY(std::abs(values[0].toDouble() - 10000.10125) < 1e-9);
+      QVERIFY(std::abs(values[1].toDouble() - 0.22) < 1e-12);
+      QVERIFY(std::abs(values[2].toDouble() - 0.33) < 1e-12);
+    }
+  }
+  o.format = ModelExportFormat::Ply;
+  o.destinationPath = dir.filePath(QStringLiteral("metadata.ply"));
+  for (const QByteArray &declarations : {
+           QByteArray(),
+           QByteArray("comment units cm\nobj_info coordinate_unit=centimetres CRS:LOCAL\ncomment UNIT:CM\n")}) {
+    auto source = pointPly();
+    source.replace("comment units cm\n", declarations);
+    QVERIFY(save(o.sourcePath, source));
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto loaded = PlyPointCloudLoader::load(o.destinationPath);
+    QVERIFY(loaded.isValid());
+    QCOMPARE(loaded.coordinates.unit, SceneLengthUnit::Metres);
+    QVERIFY(!read(o.destinationPath).contains("centimetres"));
+    QVERIFY(!read(o.destinationPath).contains("UNIT:CM"));
+    QVERIFY(loaded.coordinates.coordinateReferenceSystem.isEmpty());
+    QCOMPARE(read(o.sourcePath), source);
+  }
+}
+
+void ModelExportTests::sceneUnitConversionKeepsGaussianSourceProtection() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("gaussians.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("destination"));
+  const auto original = gaussianPly();
+  QVERIFY(save(o.sourcePath, original));
+  o.sceneUnitScale = 0.01;
+  o.sceneUnit = SceneLengthUnit::Metres;
+  o.sceneUnitDeclared = true;
+  for (auto format : {ModelExportFormat::Ply, ModelExportFormat::Spz}) {
+    o.format = format;
+    o.applyTransform = true;
+    QVERIFY(save(o.destinationPath, "existing data"));
+    const auto rejected = exportModelFile(o);
+    QVERIFY(!rejected.success);
+    QCOMPARE(read(o.destinationPath), QByteArray("existing data"));
+    o.applyTransform = false;
+    const auto preserved = exportModelFile(o);
+    QVERIFY2(preserved.success, qPrintable(preserved.error));
+    if (format == ModelExportFormat::Ply) QCOMPARE(read(o.destinationPath), original);
+    QCOMPARE(read(o.sourcePath), original);
+  }
+  QVERIFY(save(o.sourcePath, pointPly()));
+  o.format = ModelExportFormat::Ply;
+  o.applyTransform = true;
+  for (double invalidScale : {0.0, -1.0, std::numeric_limits<double>::infinity()}) {
+    o.sceneUnitScale = invalidScale;
+    QVERIFY(save(o.destinationPath, "existing data"));
+    QVERIFY(!exportModelFile(o).success);
+    QCOMPARE(read(o.destinationPath), QByteArray("existing data"));
+  }
+}
+
+void ModelExportTests::preservesProjectionSidecarMetadataInSourcePly() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("source.ply"));
+  QVERIFY(QDir().mkpath(dir.filePath(QStringLiteral("export"))));
+  o.destinationPath = dir.filePath(QStringLiteral("export/standalone.ply"));
+  auto original = pointPly();
+  original.replace("comment units cm\n", "");
+  const auto projection = QStringLiteral("LOCAL_CS[\"研究室 / 建築\",UNIT[\"centimetre\",0.01]]").toUtf8();
+  const QString prj = dir.filePath(QStringLiteral("source.prj"));
+  QVERIFY(save(o.sourcePath, original));
+  QVERIFY(save(prj, projection));
+  const auto source = PlyPointCloudLoader::load(o.sourcePath);
+  QVERIFY(source.isValid());
+  QCOMPARE(source.coordinates.unit, SceneLengthUnit::Centimetres);
+  o.coordinates = source.coordinates;
+  const auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  const auto output = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY2(output.isValid(), qPrintable(output.error));
+  QCOMPARE(output.coordinates.unit, source.coordinates.unit);
+  QVERIFY(output.coordinates.unitDeclared);
+  QCOMPARE(output.coordinates.coordinateReferenceSystem, source.coordinates.coordinateReferenceSystem);
+  QCOMPARE(output.coordinates.globalMinimum.x, source.coordinates.globalMinimum.x);
+  const auto exported = read(o.destinationPath);
+  QCOMPARE(exported.mid(exported.indexOf("end_header\n") + 11), original.mid(original.indexOf("end_header\n") + 11));
+  QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("export/standalone.prj"))));
+  QCOMPARE(read(o.sourcePath), original);
+  QCOMPARE(read(prj), projection);
+
+  // The same source-coordinate contract includes full 3DGS/2DGS attributes.
+  const auto gaussians = gaussianPly();
+  QVERIFY(save(o.sourcePath, gaussians));
+  o.coordinates = PlyPointCloudLoader::load(o.sourcePath).coordinates;
+  const auto gaussianResult = exportModelFile(o);
+  QVERIFY2(gaussianResult.success, qPrintable(gaussianResult.error));
+  const auto gaussianOutput = read(o.destinationPath);
+  QCOMPARE(gaussianOutput.mid(gaussianOutput.indexOf("end_header\n") + 11),
+           gaussians.mid(gaussians.indexOf("end_header\n") + 11));
+  const auto loadedGaussians = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY(loadedGaussians.isValid());
+  QCOMPARE(loadedGaussians.coordinates.unit, SceneLengthUnit::Centimetres);
+  QCOMPARE(loadedGaussians.coordinates.coordinateReferenceSystem, source.coordinates.coordinateReferenceSystem);
+  QCOMPARE(read(o.sourcePath), gaussians);
+  QCOMPARE(read(prj), projection);
+}
+
+void ModelExportTests::scenePlyDoesNotPublishSourceCrs() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("source.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("scene.ply"));
+  const auto projection = QByteArray("LOCAL_CS[\"Source\",UNIT[\"centimetre\",0.01]]");
+  QVERIFY(save(dir.filePath(QStringLiteral("source.prj")), projection));
+  for (const auto &metadata : {QByteArray(), QByteArray("comment crs: EPSG:6677\n"),
+                              QByteArray("obj_info coordinate_unit=cm CRS:LOCAL\n")}) {
+    auto original = pointPly();
+    original.replace("comment units cm\n", metadata);
+    QVERIFY(save(o.sourcePath, original));
+    o.coordinates = PlyPointCloudLoader::load(o.sourcePath).coordinates;
+    o.applyTransform = true;
+    o.transform.translation = {10, 20, 30};
+    o.sceneUnitScale = 0.01;
+    o.sceneUnit = SceneLengthUnit::Metres;
+    o.sceneUnitDeclared = true;
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto output = PlyPointCloudLoader::load(o.destinationPath);
+    QVERIFY(output.isValid());
+    QCOMPARE(output.coordinates.unit, SceneLengthUnit::Metres);
+    QVERIFY(output.coordinates.coordinateReferenceSystem.isEmpty());
+    QVERIFY(std::abs(output.coordinates.globalMinimum.x - 10000.10125) < 1e-9);
+    QCOMPARE(read(o.sourcePath), original);
+    QCOMPARE(read(dir.filePath(QStringLiteral("source.prj"))), projection);
+  }
+}
+
+void ModelExportTests::protectsExistingProjectionSidecars() {
+  QTemporaryDir dir;
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("source.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("output.ply"));
+  const auto projection = QByteArray("LOCAL_CS[\"Source\",UNIT[\"centimetre\",0.01]]");
+  const auto conflict = QByteArray("LOCAL_CS[\"Other\",UNIT[\"metre\",1]]");
+  const QString sourcePrj = dir.filePath(QStringLiteral("source.prj"));
+  const QString targetPrj = dir.filePath(QStringLiteral("output.prj"));
+  QVERIFY(save(o.sourcePath, pointPly()));
+  QVERIFY(save(sourcePrj, projection));
+  o.coordinates = PlyPointCloudLoader::load(o.sourcePath).coordinates;
+  QVERIFY(save(o.destinationPath, "existing model"));
+  QVERIFY(save(targetPrj, conflict));
+  auto result = exportModelFile(o);
+  QVERIFY(!result.success);
+  QVERIFY(!result.error.isEmpty());
+  QCOMPARE(read(o.destinationPath), QByteArray("existing model"));
+  QCOMPARE(read(targetPrj), conflict);
+  QVERIFY(save(targetPrj, projection));
+  result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  QCOMPARE(read(targetPrj), projection);
+  QVERIFY(save(o.destinationPath, "existing model"));
+  o.progress = [&](int progress) {
+    if (progress == 99) save(targetPrj, conflict);
+    return false;
+  };
+  QVERIFY(!exportModelFile(o).success);
+  QCOMPARE(read(o.destinationPath), QByteArray("existing model"));
+  QCOMPARE(read(targetPrj), conflict);
+  QVERIFY(QFile::remove(targetPrj));
+  o.progress = [&](int progress) {
+    if (progress == 99) save(sourcePrj, conflict);
+    return false;
+  };
+  QVERIFY(!exportModelFile(o).success);
+  QCOMPARE(read(o.destinationPath), QByteArray("existing model"));
+  o.progress = {};
+  const QByteArray oversizedHeaderProjection = "LOCAL_CS[\"" + QByteArray(1024 * 1024 - 80, 'x') +
+      "\",UNIT[\"centimetre\",0.01]]";
+  QVERIFY(save(sourcePrj, oversizedHeaderProjection));
+  QVERIFY(!exportModelFile(o).success);
+  QCOMPARE(read(o.destinationPath), QByteArray("existing model"));
+  QCOMPARE(read(sourcePrj), oversizedHeaderProjection);
 }
 
 void ModelExportTests::exportsCompleteMeshAndEmbeddedGlb() {
@@ -225,6 +512,19 @@ void ModelExportTests::transformsBinaryEndianPly() {
     PlyGeometryVisitor visitor; bool checked = false;
     visitor.vertex = [&](qint64, const PlySourceVertex &v) { checked = true; return std::abs(v.normal.y() - 1) < 1e-6; };
     QString error; QVERIFY(PlyPointCloudLoader::visitSourceGeometry(o.destinationPath, visitor, error)); QVERIFY(checked);
+    o.coordinates.unit = SceneLengthUnit::Centimetres;
+    o.coordinates.unitDeclared = true;
+    o.sceneUnitScale = 0.01;
+    o.sceneUnit = SceneLengthUnit::Metres;
+    o.sceneUnitDeclared = true;
+    const auto unitResult = exportModelFile(o);
+    QVERIFY2(unitResult.success, qPrintable(unitResult.error));
+    const auto unitLoaded = PlyPointCloudLoader::load(o.destinationPath);
+    QVERIFY(unitLoaded.isValid());
+    QVERIFY(std::abs(unitLoaded.coordinates.globalMinimum.x - 10000.01125) < 1e-9);
+    QVERIFY(std::abs(unitLoaded.coordinates.globalMinimum.y - 0.04) < 1e-12);
+    QCOMPARE(unitLoaded.coordinates.unit, SceneLengthUnit::Metres);
+    QCOMPARE(static_cast<quint8>(read(o.destinationPath).back()), quint8(42));
   }
 }
 

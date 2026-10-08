@@ -760,15 +760,117 @@ void NativeViewport::releaseSceneBuffers() {
   mScene->buffersInitialized = false;
 }
 
+const NativeViewport::SceneState &NativeViewport::coordinateReferenceScene() const {
+  // The collection's persisted order, not the selection, owns its reference.
+  // Task observations are an isolated layer and retain their own frame.
+  if (mScene == mProcessingScene || mSceneStates.isEmpty()) return *mScene;
+  return *mSceneStates.first();
+}
+
+SceneCoordinateInfo NativeViewport::sceneReferenceCoordinates() const {
+  return coordinateReferenceScene().mSceneCoordinates;
+}
+
+double NativeViewport::sourceToReferenceUnitScale(const SceneState &state) const {
+  const auto &source = state.mSceneCoordinates;
+  const auto reference = sceneReferenceCoordinates();
+  if (!source.unitDeclared || !reference.unitDeclared ||
+      source.unit == SceneLengthUnit::Unknown || reference.unit == SceneLengthUnit::Unknown)
+    return 1.0; // Unknown units are not silently assumed to be metres.
+  const auto metres = [](SceneLengthUnit unit) {
+    return unit == SceneLengthUnit::Millimetres ? 0.001 :
+           unit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
+  };
+  return metres(source.unit) / metres(reference.unit);
+}
+
+double NativeViewport::sourceToSceneUnitScale() const {
+  return sourceToReferenceUnitScale(*mScene);
+}
+
+QString NativeViewport::sceneCoordinateSummary() const {
+  const auto reference = sceneReferenceCoordinates();
+  if (mSceneStates.isEmpty() && mScene->mRequestedScenePath.isEmpty()) return QStringLiteral("-");
+  if (!reference.valid) return coordinateReferenceScene().resourceLoading
+      ? QCoreApplication::translate("Workbench", "坐标信息加载中")
+      : QCoreApplication::translate("Workbench", "坐标关系未确认");
+  bool unknown = !reference.unitDeclared || reference.coordinateReferenceSystem.isEmpty();
+  for (const auto &state : displayedSceneStates()) {
+    const auto &source = state->mSceneCoordinates;
+    if (!source.valid) return state->resourceLoading
+        ? QCoreApplication::translate("Workbench", "坐标信息加载中")
+        : QCoreApplication::translate("Workbench", "坐标关系未确认");
+    if (!source.coordinateReferenceSystem.isEmpty() && !reference.coordinateReferenceSystem.isEmpty() &&
+        source.coordinateReferenceSystem != reference.coordinateReferenceSystem)
+      return QCoreApplication::translate("Workbench", "CRS 不同 · 需要配准或重投影");
+    unknown |= !source.unitDeclared || source.coordinateReferenceSystem.isEmpty();
+  }
+  return unknown ? QCoreApplication::translate("Workbench", "坐标关系未确认") :
+      QCoreApplication::translate("Workbench", "相同 CRS · 单位已统一（不代表精度验证）");
+}
+
+QString NativeViewport::sceneCoordinateDetail() const {
+  if (mSceneStates.isEmpty() && mScene->mRequestedScenePath.isEmpty()) return {};
+  const auto &reference = coordinateReferenceScene();
+  QString result = QCoreApplication::translate("Workbench",
+      "场景参考：%1\n场景单位：%2\n当前源单位：%3\n源坐标→场景单位倍率：%4\n共用世界坐标显示，不按模型大小自动归一化。对象位移、旋转和缩放独立保留。")
+      .arg(QFileInfo(reference.mRequestedScenePath).fileName(),
+           sceneLengthUnitDescription(reference.mSceneCoordinates),
+           sceneLengthUnitDescription(mScene->mSceneCoordinates),
+           QString::number(sourceToSceneUnitScale(), 'g', 12));
+  bool unknown = !reference.mSceneCoordinates.unitDeclared ||
+      reference.mSceneCoordinates.coordinateReferenceSystem.isEmpty();
+  bool conflict = false;
+  for (const auto &state : displayedSceneStates()) {
+    const auto &source = state->mSceneCoordinates;
+    unknown |= !source.unitDeclared || source.coordinateReferenceSystem.isEmpty();
+    conflict |= !source.coordinateReferenceSystem.isEmpty() &&
+        !reference.mSceneCoordinates.coordinateReferenceSystem.isEmpty() &&
+        source.coordinateReferenceSystem != reference.mSceneCoordinates.coordinateReferenceSystem;
+  }
+  if (unknown) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+      "未声明单位或 CRS，不能确认模型已配准；保留未知单位的原始数值，不猜测比例或自动对齐。");
+  if (conflict) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+      "CRS 不一致；这里只统一可识别的长度单位，不执行坐标投影转换。请先在配准或测绘工具中建立明确变换。");
+  return result;
+}
+
+bool NativeViewport::collectionReferenceBounds(QVector3D &minimum,
+                                               QVector3D &maximum) const {
+  bool found = false;
+  const auto &reference = coordinateReferenceScene();
+  for (const auto &state : displayedSceneStates()) {
+    const auto &coordinates = state->mSceneCoordinates;
+    if (!coordinates.valid) continue;
+    const auto low = coordinates.localMinimum();
+    const auto high = coordinates.localMaximum();
+    const auto matrix = sceneDisplayTransform(*state, reference) *
+        ModelTransform{state->mModelTranslation, state->mModelRotation,
+                       state->mModelScale}.matrix(state->mSceneCenter);
+    for (int corner = 0; corner < 8; ++corner) {
+      const auto point = matrix.map(QVector3D(corner & 1 ? high.x() : low.x(),
+          corner & 2 ? high.y() : low.y(), corner & 4 ? high.z() : low.z()));
+      if (!found) { minimum = maximum = point; found = true; }
+      else for (int axis = 0; axis < 3; ++axis) {
+        minimum[axis] = std::min(minimum[axis], point[axis]);
+        maximum[axis] = std::max(maximum[axis], point[axis]);
+      }
+    }
+  }
+  return found;
+}
+
 QMatrix4x4 NativeViewport::sceneDisplayTransform(const SceneState &from,
                                                 const SceneState &to) const {
   QMatrix4x4 mapping;
   if (!from.mSceneCoordinates.valid || !to.mSceneCoordinates.valid) return mapping;
   // displayShift is added to global XYZ, not the global position of local
   // zero. Convert that zero through the public inverse to preserve the sign.
-  mapping.translate(to.mSceneCoordinates.localFromGlobal(
-      from.mSceneCoordinates.globalFromLocal(QVector3D())));
-  mapping.scale(static_cast<float>(to.mSceneCoordinates.displayScale /
+  const double unitRatio = sourceToReferenceUnitScale(from) / sourceToReferenceUnitScale(to);
+  auto globalZero = from.mSceneCoordinates.globalFromLocal(QVector3D());
+  globalZero = {globalZero.x * unitRatio, globalZero.y * unitRatio, globalZero.z * unitRatio};
+  mapping.translate(to.mSceneCoordinates.localFromGlobal(globalZero));
+  mapping.scale(static_cast<float>(unitRatio * to.mSceneCoordinates.displayScale /
                                     from.mSceneCoordinates.displayScale));
   return mapping;
 }
@@ -2172,6 +2274,10 @@ ModelExportOptions NativeViewport::modelExportOptions() const {
   const float displayScale = static_cast<float>(options.coordinates.displayScale);
   options.transform = {mScene->mModelTranslation / displayScale, mScene->mModelRotation, mScene->mModelScale};
   options.pivot = options.coordinates.globalFromLocal(mScene->mSceneCenter);
+  options.sceneUnitScale = sourceToSceneUnitScale();
+  const auto reference = sceneReferenceCoordinates();
+  options.sceneUnit = reference.unit;
+  options.sceneUnitDeclared = reference.unitDeclared && options.coordinates.unitDeclared;
   return options;
 }
 
@@ -2229,20 +2335,19 @@ void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
 }
 
 double NativeViewport::referencePlaneElevation() const {
+  QVector3D minimum, maximum;
   return mReferencePlaneMode == ReferencePlaneMode::ModelBase &&
-                 mScene->mSceneCoordinates.valid
-             ? mScene->mSceneCoordinates.globalMinimum.z
-             : 0.0;
+                 collectionReferenceBounds(minimum, maximum)
+             ? sceneReferenceCoordinates().globalFromLocal(minimum).z : 0.0;
 }
 
 QString NativeViewport::referencePlaneDescription() const {
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero ||
-      !mScene->mSceneCoordinates.valid) {
+      !sceneReferenceCoordinates().valid) {
     return QCoreApplication::translate("Workbench", "世界坐标 Z=0");
   }
-  return QCoreApplication::translate("Workbench", "模型底部 Z=%1")
-      .arg(formatSceneCoordinate(mScene->mSceneCoordinates.globalMinimum.z,
-                                 mScene->mSceneCoordinates));
+  return QCoreApplication::translate("Workbench", "场景底部 Z=%1")
+      .arg(formatSceneCoordinate(referencePlaneElevation(), sceneReferenceCoordinates()));
 }
 
 namespace {
@@ -3404,6 +3509,13 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               return;
             }
             mScene->resourceLoading = false;
+            if (!foreground) QTimer::singleShot(0, this, [this] {
+              // Report only collection metadata after restoring the active
+              // state. sceneCoordinatesChanged also reapplies saved TRS, so
+              // emitting it here could interrupt an in-progress user edit.
+              emit sceneCoordinateRelationshipChanged();
+              update();
+            });
             mScene->resourceResidentRamPeakBytes = data.residentRamPeakBytes;
             mScene->resourceResidentGpuBytes = data.residentGpuBytes;
             mScene->resourceResidentStorageSupported = data.residentStorageSupported;
@@ -5092,8 +5204,7 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
                       GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glLineWidth(1.0F);
   mGridProgram->bind();
-  const ReferenceGridScale scale = referenceGridScale(
-      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const ReferenceGridScale scale = sceneGridScale();
   const ReferenceGridDrawSpans drawSpans =
       referenceGridDrawSpans(scale);
   const ReferenceGridPlane plane =
@@ -5914,20 +6025,24 @@ void NativeViewport::keyReleaseEvent(QKeyEvent *event) {
 }
 
 QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
-  if (!mScene->mSceneCoordinates.valid) {
+  const auto &reference = coordinateReferenceScene();
+  const auto &coordinates = reference.mSceneCoordinates;
+  if (!coordinates.valid) {
     return referenceGridOrigin();
   }
+  const auto mapping = sceneDisplayTransform(reference, *mScene);
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero) {
-    return mScene->mSceneCoordinates.localFromGlobal({0.0, 0.0, 0.0});
+    return mapping.map(coordinates.localFromGlobal({0.0, 0.0, 0.0}));
   }
-  const QVector3D minimum = mScene->mSceneCoordinates.localMinimum();
+  QVector3D minimum, maximum;
+  if (!collectionReferenceBounds(minimum, maximum)) return mapping.map(QVector3D());
   switch (plane) {
   case ReferenceGridPlane::XY:
-    return QVector3D(0.0F, 0.0F, minimum.z());
+    return mapping.map(QVector3D(0.0F, 0.0F, minimum.z()));
   case ReferenceGridPlane::XZ:
-    return QVector3D(0.0F, minimum.y(), 0.0F);
+    return mapping.map(QVector3D(0.0F, minimum.y(), 0.0F));
   case ReferenceGridPlane::YZ:
-    return QVector3D(minimum.x(), 0.0F, 0.0F);
+    return mapping.map(QVector3D(minimum.x(), 0.0F, 0.0F));
   }
   return referenceGridOrigin();
 }
@@ -5937,8 +6052,23 @@ QString NativeViewport::formatViewportDistance(const float localDistance) const 
     return formatMetricDistance(localDistance);
   }
   const double sourceDistance =
-      static_cast<double>(localDistance) / mScene->mSceneCoordinates.displayScale;
-  return formatSceneLength(sourceDistance, mScene->mSceneCoordinates);
+      static_cast<double>(localDistance) / mScene->mSceneCoordinates.displayScale * sourceToSceneUnitScale();
+  return formatSceneLength(sourceDistance, sceneReferenceCoordinates());
+}
+
+ReferenceGridScale NativeViewport::sceneGridScale() const {
+  const auto reference = sceneReferenceCoordinates();
+  const double displayRatio = reference.valid && mScene->mSceneCoordinates.valid
+      ? sourceToSceneUnitScale() * reference.displayScale / mScene->mSceneCoordinates.displayScale : 1.0;
+  auto scale = referenceGridScale(static_cast<float>(mDistance * displayRatio),
+      qMax(1, qRound(height() * devicePixelRatioF())));
+  const float inverseRatio = static_cast<float>(1.0 / displayRatio);
+  scale.minimumStep *= inverseRatio;
+  scale.lowerMinorStep *= inverseRatio;
+  scale.upperMinorStep *= inverseRatio;
+  scale.displayMajorStep *= inverseRatio;
+  scale.visibleDistance *= inverseRatio;
+  return scale;
 }
 
 QMatrix4x4 NativeViewport::viewMatrix() const {
@@ -5955,14 +6085,21 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   const float aspect =
       height() > 0 ? static_cast<float>(width()) / static_cast<float>(height())
                    : 1.0F;
-  const float nearPlane = std::max(0.001F, mDistance / 10000.0F);
+  // Projection limits belong to the shared reference, not the active source.
+  // Otherwise a metre/centimetre selection changes clipping precision and the
+  // minimum orthographic field of view even though the camera did not move.
+  const auto reference = sceneReferenceCoordinates();
+  const float referenceLocalUnit = reference.valid && mScene->mSceneCoordinates.valid
+      ? static_cast<float>(mScene->mSceneCoordinates.displayScale /
+          (sourceToSceneUnitScale() * reference.displayScale)) : 1.0F;
+  const float nearPlane = std::max(0.001F * referenceLocalUnit, mDistance / 10000.0F);
   const float modelDistance =
       (transformedSceneCenter() - cameraPosition()).length();
   const float transformedRadius =
       mScene->mSceneRadius *
       std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
                 std::abs(mScene->mModelScale.z())});
-  float farPlane = std::max(100.0F, modelDistance + transformedRadius * 12.0F);
+  float farPlane = std::max(100.0F * referenceLocalUnit, modelDistance + transformedRadius * 12.0F);
   for (const auto &state : displayedSceneStates()) {
     const auto mapping = sceneDisplayTransform(*state, *mScene);
     const float radius = state->mSceneRadius *
@@ -5974,7 +6111,7 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   }
   if (mOrthographic) {
     const float halfHeight =
-        std::max(0.05F, mDistance * std::tan(radians(mPerspectiveFovDegrees * 0.5F)));
+        std::max(0.05F * referenceLocalUnit, mDistance * std::tan(radians(mPerspectiveFovDegrees * 0.5F)));
     projection.ortho(-halfHeight * aspect, halfHeight * aspect, -halfHeight,
                      halfHeight, nearPlane, farPlane);
   } else {
@@ -6690,8 +6827,7 @@ QString NativeViewport::transformConstraintLabel() const {
 }
 
 float NativeViewport::transformSnapStep(const bool fine) const {
-  const ReferenceGridScale scale = referenceGridScale(
-      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const ReferenceGridScale scale = sceneGridScale();
   const float coarse = std::max(scale.displayMajorStep * 0.1F,
                                 scale.minimumStep);
   return fine ? coarse * 0.1F : coarse;
@@ -6750,7 +6886,11 @@ void NativeViewport::updateModelTransform(
                                             frame.upDirection);
       }
       if (direction.lengthSquared() > 1.0e-12F) {
-        delta = direction.normalized() * static_cast<float>(numericValue);
+        // Numeric translation uses the shared scene unit, just like the grid.
+        // GPU-local distances still use the active source's precision scale.
+        const double localDistance = numericValue * mScene->mSceneCoordinates.displayScale /
+                                     sourceToSceneUnitScale();
+        delta = direction.normalized() * static_cast<float>(localDistance);
       }
     }
     if (snap) {
@@ -7101,7 +7241,12 @@ void NativeViewport::drawDepthAwareReferenceAxes(
   const float uiScale = static_cast<float>(QFontMetricsF(font()).height() / 18.0);
   // Use source scene extent, not view distance or adaptive grid spacing: a
   // camera zoom must not cancel its own size cue or jump at grid-level changes.
-  const float referenceLength = std::max(mScene->mSceneRadius * 0.3F, 1.0e-6F);
+  QVector3D collectionMinimum, collectionMaximum;
+  const float referenceRadius = collectionReferenceBounds(collectionMinimum, collectionMaximum)
+      ? sceneDisplayTransform(coordinateReferenceScene(), *mScene)
+            .mapVector(collectionMaximum - collectionMinimum).length() * 0.5F
+      : mScene->mSceneRadius;
+  const float referenceLength = std::max(referenceRadius * 0.3F, 1.0e-6F);
   auto vertices = referenceAxisGeometry(
       viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale,
       referenceLength);
@@ -7827,8 +7972,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
                     : QCoreApplication::translate("Workbench", "高斯 DC（无可用 SH）")
                 : QCoreApplication::translate("Workbench", "点预览");
 
-  const ReferenceGridScale gridScale = referenceGridScale(
-      mDistance, qMax(1, qRound(height() * devicePixelRatioF())));
+  const ReferenceGridScale gridScale = sceneGridScale();
   const double framesPerSecond = mFrameRateCounter.framesPerSecond();
   const double averageFrameMilliseconds =
       mFrameRateCounter.averageFrameMilliseconds();

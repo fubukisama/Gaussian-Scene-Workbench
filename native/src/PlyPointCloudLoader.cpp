@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImageReader>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStringList>
 #include <QTemporaryFile>
@@ -402,7 +403,8 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     }
     if (parts.first().compare(QStringLiteral("comment"),
                               Qt::CaseInsensitive) == 0) {
-      const QString comment = line.sliced(parts.first().size()).trimmed();
+      const QString comment = QString::fromUtf8(rawLine).trimmed()
+                                  .sliced(parts.first().size()).trimmed();
       header.coordinateMetadata.append(comment);
       const QString textureKey = QStringLiteral("TextureFile");
       if (comment.startsWith(textureKey, Qt::CaseInsensitive)) {
@@ -423,7 +425,7 @@ bool parseHeader(QFile &file, PlyHeader &header, QString &error) {
     if (parts.first().compare(QStringLiteral("obj_info"),
                               Qt::CaseInsensitive) == 0) {
       header.coordinateMetadata.append(
-          line.sliced(parts.first().size()).trimmed());
+          QString::fromUtf8(rawLine).trimmed().sliced(parts.first().size()).trimmed());
       continue;
     }
     if (parts.first() == QStringLiteral("format") && parts.size() >= 2) {
@@ -2908,6 +2910,61 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
   }
   PlyHeader header;
   if (!parseHeader(source, header, error)) return result;
+  // Embed only metadata that depends on a sidecar. Geometry/attributes still
+  // stream unchanged for source-coordinate export; no auxiliary file is copied.
+  struct ProjectionSnapshot {
+    bool exists = false;
+    bool readable = false;
+    qint64 size = 0;
+    QDateTime modified;
+    QByteArray bytes;
+    bool operator==(const ProjectionSnapshot &) const = default;
+  };
+  const auto projectionPath = [](const QString &modelPath) {
+    const QFileInfo model(modelPath);
+    return model.absoluteDir().filePath(model.completeBaseName() + QStringLiteral(".prj"));
+  };
+  const auto projectionSnapshot = [](const QString &path) {
+    ProjectionSnapshot snapshot;
+    const QFileInfo info(path);
+    snapshot.exists = info.exists();
+    if (!snapshot.exists) return snapshot;
+    snapshot.size = info.size();
+    snapshot.modified = info.lastModified();
+    QFile file(path);
+    if (info.isFile() && snapshot.size <= 1024 * 1024 && file.open(QIODevice::ReadOnly)) {
+      snapshot.bytes = file.readAll();
+      snapshot.readable = file.error() == QFileDevice::NoError && snapshot.bytes.size() == snapshot.size;
+    }
+    return snapshot;
+  };
+  const QString sourcePrj = projectionPath(options.sourcePath);
+  const QString destinationPrj = projectionPath(options.destinationPath);
+  const auto sourceProjection = projectionSnapshot(sourcePrj);
+  const auto sourceMetadata = parsePlyCoordinateMetadata(header.coordinateMetadata, options.sourcePath, false);
+  auto outputMetadata = sourceMetadata;
+  if (options.applyTransform) {
+    // A user TRS or unit conversion is not a CRS reprojection. Do not claim the
+    // edited numbers still belong to the original source CRS.
+    outputMetadata.coordinateReferenceSystem.clear();
+    if (options.sceneUnitDeclared && options.sceneUnit != SceneLengthUnit::Unknown) {
+      outputMetadata.unit = options.sceneUnit;
+      outputMetadata.unitDeclared = true;
+    }
+  }
+  const auto projectionCompatible = [&] {
+    const auto snapshot = projectionSnapshot(destinationPrj);
+    if (!snapshot.exists) return true;
+    const auto existing = parsePlyCoordinateMetadata({}, options.destinationPath, false);
+    if (snapshot.readable && snapshot == projectionSnapshot(destinationPrj) &&
+        !existing.coordinateReferenceSystem.isEmpty() &&
+        existing.coordinateReferenceSystem == outputMetadata.coordinateReferenceSystem &&
+        existing.unitDeclared == outputMetadata.unitDeclared &&
+        (!existing.unitDeclared || existing.unit == outputMetadata.unit)) return true;
+    error = QCoreApplication::translate("Workbench", "The destination has a conflicting or unreadable .prj file. Choose a different model name or folder; no existing files were changed.");
+    return false;
+  };
+  if (!projectionCompatible()) return result;
   const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
       [](const auto &e) { return e.name == QStringLiteral("vertex"); });
   if (vertex == header.elements.cend() || vertex->count <= 0) {
@@ -2978,12 +3035,46 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
     error = QCoreApplication::translate("Workbench", "Unable to create model file: %1").arg(destination.errorString());
     return result;
   }
+  bool wroteUnit = false;
+  bool wroteCrs = false;
+  qint64 headerBytes = 0;
+  const auto writeHeader = [&](const QByteArray &line) {
+    if (line.size() > kMaximumHeaderBytes - headerBytes) {
+      error = QCoreApplication::translate("Workbench", "The PLY header is incomplete or too large.");
+      return false;
+    }
+    headerBytes += line.size();
+    return writeBytes(destination, line, error);
+  };
+  const QRegularExpression unitDeclaration(QStringLiteral(
+      R"(((?:^|\b)(?:coordinate[_ ]?unit|units?)\s*[:=]?\s*)(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)\b)"),
+      QRegularExpression::CaseInsensitiveOption);
+  const QRegularExpression crsDeclaration(QStringLiteral(
+      R"((?:\b(?:crs|coordinate[_ ]?system)\s*[:=]\s*[^\r\n]+|\bEPSG\s*[:=]?\s*\d{3,8}\b))"),
+      QRegularExpression::CaseInsensitiveOption);
   for (qsizetype i = 0; i < header.rawLines.size(); ++i) {
     QByteArray line = header.rawLines[i];
+    const QByteArray key = line.trimmed().toLower();
+    if (key.startsWith("comment ") || key.startsWith("obj_info ")) {
+      QString metadata = QString::fromUtf8(line);
+      if (options.applyTransform) {
+        metadata.remove(crsDeclaration);
+        if (outputMetadata.unitDeclared)
+          metadata.replace(unitDeclaration, QStringLiteral("\\1") + sceneLengthUnitSymbol(outputMetadata.unit));
+        line = metadata.toUtf8();
+      }
+      wroteUnit |= unitDeclaration.match(metadata).hasMatch();
+      wroteCrs |= crsDeclaration.match(metadata).hasMatch();
+    } else if (key == "end_header") {
+      if (!wroteUnit && outputMetadata.unitDeclared && (options.applyTransform || sourceProjection.readable))
+        if (!writeHeader("comment units " + sceneLengthUnitSymbol(outputMetadata.unit).toUtf8() + '\n')) return result;
+      if (!options.applyTransform && !wroteCrs && sourceProjection.readable && !outputMetadata.coordinateReferenceSystem.isEmpty())
+        if (!writeHeader("comment crs: " + outputMetadata.coordinateReferenceSystem.simplified().toUtf8() + '\n')) return result;
+    }
     if (i == header.vertexElementLine && deletedCount) line = "element vertex " + QByteArray::number(vertex->count - deletedCount) + '\n';
     if (!texture.isEmpty() && line.trimmed().toLower().startsWith("comment texturefile"))
       line = "comment TextureFile " + texture.toUtf8() + '\n';
-    if (!writeBytes(destination, line, error)) return result;
+    if (!writeHeader(line)) return result;
   }
   // An unchanged model can stream in large blocks, including mesh topology
   // and custom fields, without decoding millions of individual properties.
@@ -3048,10 +3139,12 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
   }
   if (options.progress && options.progress(99)) { result.cancelled = true; return result; }
   const QFileInfo sourceAfter(options.sourcePath);
-  if (sourceSize != sourceAfter.size() || sourceModified != sourceAfter.lastModified()) {
+  if (sourceSize != sourceAfter.size() || sourceModified != sourceAfter.lastModified() ||
+      !(sourceProjection == projectionSnapshot(sourcePrj))) {
     error = QCoreApplication::translate("Workbench", "The source model changed during export. Please try again after processing finishes.");
     return result;
   }
+  if (!projectionCompatible()) return result;
   if (!destination.commit()) error = QCoreApplication::translate("Workbench", "Unable to finalize model file: %1").arg(destination.errorString());
   else { result.success = true; if (!texture.isEmpty()) assets.setAutoRemove(false); }
   return result;

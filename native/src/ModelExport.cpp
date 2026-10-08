@@ -30,9 +30,9 @@ SceneCoordinate3D exportPosition(const SceneCoordinate3D &p, const ModelExportOp
   const auto r = o.transform.rotation.normalized().toRotationMatrix();
   const std::array<double, 3> v{(p.x - o.pivot.x) * o.transform.scale.x(),
       (p.y - o.pivot.y) * o.transform.scale.y(), (p.z - o.pivot.z) * o.transform.scale.z()};
-  return {o.pivot.x + o.transform.translation.x() + r(0,0)*v[0] + r(0,1)*v[1] + r(0,2)*v[2],
-          o.pivot.y + o.transform.translation.y() + r(1,0)*v[0] + r(1,1)*v[1] + r(1,2)*v[2],
-          o.pivot.z + o.transform.translation.z() + r(2,0)*v[0] + r(2,1)*v[1] + r(2,2)*v[2]};
+  return {(o.pivot.x + o.transform.translation.x() + r(0,0)*v[0] + r(0,1)*v[1] + r(0,2)*v[2]) * o.sceneUnitScale,
+          (o.pivot.y + o.transform.translation.y() + r(1,0)*v[0] + r(1,1)*v[1] + r(1,2)*v[2]) * o.sceneUnitScale,
+          (o.pivot.z + o.transform.translation.z() + r(2,0)*v[0] + r(2,1)*v[1] + r(2,2)*v[2]) * o.sceneUnitScale};
 }
 
 QVector3D exportNormal(const QVector3D &n, const ModelExportOptions &o) {
@@ -125,12 +125,16 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
   auto fail = [&](const QString &error) { result.error = error; return result; };
   if (sameFile(o.sourcePath, o.destinationPath))
     return fail(QCoreApplication::translate("Workbench", "Choose a new file name; model export cannot overwrite its source."));
-  if (o.applyTransform && (!o.transform.isValid() || !o.pivot.isFinite()))
+  if (o.applyTransform && (!o.transform.isValid() || !o.pivot.isFinite() ||
+      !std::isfinite(o.sceneUnitScale) || o.sceneUnitScale <= 0.0))
     return fail(QCoreApplication::translate("Workbench", "The model transform is invalid."));
   if (o.format == ModelExportFormat::Spz) return exportSpz(o);
   if (o.format == ModelExportFormat::Ply) {
     auto ply = o;
-    if (o.transform.translation.isNull() && rotationsEquivalent(o.transform.rotation, QQuaternion()) &&
+    const bool sameUnit = !o.sceneUnitDeclared ||
+        (o.coordinates.unitDeclared && o.coordinates.unit == o.sceneUnit);
+    if (o.sceneUnitScale == 1.0 && sameUnit &&
+        o.transform.translation.isNull() && rotationsEquivalent(o.transform.rotation, QQuaternion()) &&
         o.transform.scale == QVector3D(1, 1, 1)) ply.applyTransform = false;
     return PlyPointCloudLoader::exportSourcePly(ply);
   }
@@ -265,8 +269,10 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
     result.error = QCoreApplication::translate("Workbench", "Unable to read temporary export geometry.");
     return false;
   };
-  double metres = o.coordinates.unit == SceneLengthUnit::Millimetres ? 0.001 :
-                   o.coordinates.unit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
+  const SceneLengthUnit outputUnit = o.applyTransform && o.sceneUnitDeclared
+      ? o.sceneUnit : o.coordinates.unit;
+  const double metres = outputUnit == SceneLengthUnit::Millimetres ? 0.001 :
+                        outputUnit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
   const auto anchor = exportPosition(o.pivot, o);
   std::array<double, 3> minimum{INFINITY, INFINITY, INFINITY}, maximum{-INFINITY, -INFINITY, -INFINITY};
   QByteArray binaryBuffer;

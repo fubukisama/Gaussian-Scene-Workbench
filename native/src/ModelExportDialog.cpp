@@ -166,12 +166,16 @@ void ModelExportDialog::refreshDescription() {
   case ModelExportFormat::Obj:
     description = QCoreApplication::translate("Workbench", "导出完整三角网格、颜色、法线与 UV，并生成 MTL 和贴图资源目录；不保存自定义顶点属性。"); break;
   case ModelExportFormat::Stl:
-    description = QCoreApplication::translate("Workbench", "STL 仅保存三角形几何，不包含颜色、贴图或单位信息；坐标使用源模型单位。"); break;
+    description = QCoreApplication::translate("Workbench", "STL 仅保存三角形几何，不包含颜色、贴图或单位信息。"); break;
   case ModelExportFormat::Glb:
     description = QCoreApplication::translate("Workbench", "GLB 保存完整网格或点云，嵌入颜色、法线、UV 与贴图；转换为 Y 向上和米制。未声明单位时按 1 单位 = 1 m 处理。单文件须小于 4 GiB。"); break;
   case ModelExportFormat::Xyz:
   case ModelExportFormat::Csv:
-    description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性；坐标使用源模型单位。"); break;
+    description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性。"); break;
+  }
+  if (!gaussianPly && !spz) {
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+        "原始坐标保留源单位；场景坐标应用模型变换，并在源单位与场景参考单位均已声明时换算到场景参考单位。单位未知时保留数值，不猜测物理比例。GLB 随后按格式约定转换为米制。");
   }
   if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
       ? QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.")

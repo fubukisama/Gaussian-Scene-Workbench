@@ -116,6 +116,9 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 自由旋转 / 按轴旋转 | Free Orbit / Axis-Constrained Rotation | 自由回転 / 軸回転 |
 | 导出模型 / 导出坐标 | Export Model / Export Coordinates | モデルをエクスポート / エクスポート座標 |
 | 原始坐标 / 场景坐标 | Source Coordinates / Scene Coordinates | 元の座標 / シーン座標 |
+| 场景坐标关系 | Scene Coordinate Relationship | シーン座標の関係 |
+| 场景底部 | Scene Base | シーン底面 |
+| 场景参考 / 单位换算 / 配准未确认 | Scene Reference / Unit Conversion / Registration Unconfirmed | シーン基準 / 単位換算 / 位置合わせ未確認 |
 | 烘焙变换 | Bake Transforms | トランスフォームをベイク |
 | 坐标系 | Coordinate System | 座標系 |
 | 透视 / 正交 | Perspective / Orthographic | 透視投影 / 平行投影 |
@@ -231,6 +234,28 @@ Main windows and dialogs also enable the native **Minimize** button before their
 
 Project, Properties and Tasks and Logs panels can be dragged by their compact title bar to any of the four dock areas, split/tabbed with other panels, or floated. Double-click their panel title to dock/undock; Ctrl-drag keeps them floating. Panel captions retain only dock/undock and close buttons; floating panels also support F11/Esc. Qt owns their window flags and mouse drag sequence. Initial floating sizes are 360 × 520 logical pixels for side panels and 840 × 460 for Tasks and Logs (scaled for the UI and clamped to the screen); existing usable restored sizes are retained. Floating size is remembered separately from docked extents and across sessions, without imposing a new minimum size. The bottom dock stays compact by default. Reset Layout also returns detached panels to their default dock areas.
 
+## Shared scene-coordinate explanations
+
+The Properties panel's **Scene Coordinate Relationship** summary and tooltip
+refresh through the existing `updateInspector` language path. **Append** explains
+that source coordinates are retained and that declared-unit conversion is not
+registration or CRS reprojection; its open dialog and buttons also follow live
+language changes. **Scene Base** replaces the former active-model-base caption:
+the plane belongs to the collection and does not jump when selection changes.
+The machine-facing `modelBase` preference remains unchanged. Source filenames,
+CRS text and numerical coordinate data are never translated or rewritten.
+See [SCENE_COORDINATES.md](SCENE_COORDINATES.md) for the shared-frame contract and
+the distinction between object transforms, display precision and registration.
+
+中文：“场景坐标关系”摘要与提示通过现有属性刷新即时切换语言。导入窗口明确
+保留源坐标，区分单位换算与配准／CRS 重投影。“场景底部”指整组对象的底部，
+不会因切换选择改变；内部设置标识仍为 `modelBase`。文件名、CRS 和坐标数据不翻译。
+
+日本語：「シーン座標の関係」の概要とヒントは既存のプロパティ更新で即時に
+言語を切り替えます。インポートでは元の座標を保持し、単位換算と位置合わせ／
+CRS 再投影を区別します。「シーン底面」は全オブジェクトの底面を指し、選択を
+変えても移動しません。内部設定の `modelBase`、ファイル名、CRS、座標値は保持します。
+
 ## Editing guard
 
 **Lock Editing Tools** is a persistent view preference, available beside **Inspect** in the selection toolbar and in the **View** menu (`Ctrl+Shift+L`). Locking cancels uncommitted transforms and selection gestures, hides transform handles, the transform strip, model bounds and model-selection tint, and disables transform/trim/delete/undo/redo actions. It preserves committed transforms, selection, gizmo mode and undo history. Camera orbit/pan/zoom, axis views and Find Model remain available; viewport geometry clicks navigate without changing selection. Unlocking restores the tools in Inspect mode without resuming an unfinished edit. The action and locked-state labels update immediately in all three languages without changing the lock state. This is a viewport editing guard, not a project/file permission lock: explicit import, project-tree selection and background processing remain available.
@@ -247,7 +272,13 @@ SPZ delivery is available for Gaussian models only, with v4 (Zstandard) / v3 (gz
 
 **File → Export Model** (`Ctrl+E`) and the labeled toolbar button are separate from **Save Project**. Export works without cropping and while editing tools are locked. It exports the active model only, reading complete source records rather than preview/LOD buffers. Model selection, transforms, undo history and the original source remain unchanged. Point deletions are applied to exports. Current processing must finish first; live GPU-only training state is not exported as if it were a complete file.
 
-Formats: PLY preserves source vertex attributes, topology and face UVs; unchanged sources stream in large blocks. XYZ/CSV contain source-unit XYZ and 8-bit RGB. OBJ contains full triangulated geometry, normals, vertex colors and face UVs plus a companion MTL/texture directory. Binary STL contains triangles only (no colors, texture or unit metadata). GLB 2.0 stores meshes or points, embeds PNG textures and uses Y-up/metres; undeclared source units explicitly default to one metre. GLB writes local float coordinates with a separate translation for large-coordinate models; the format's 32-bit file size bounds are checked. Conversion formats do not carry arbitrary PLY fields or CRS as a standardized coordinate system. GLB includes source-coordinate metadata in application-specific extras.
+Formats: PLY preserves source vertex attributes, topology and face UVs; unchanged sources stream in large blocks. XYZ/CSV contain XYZ and 8-bit RGB in the selected export-coordinate units. OBJ contains full triangulated geometry, normals, vertex colors and face UVs plus a companion MTL/texture directory. Binary STL contains triangles only (no colors, texture or unit metadata). GLB 2.0 stores meshes or points, embeds PNG textures and uses Y-up/metres; undeclared output units explicitly default to one metre. GLB writes local float coordinates with a separate translation for large-coordinate models; the format's 32-bit file size bounds are checked. Conversion formats do not carry arbitrary PLY fields or CRS as a standardized coordinate system. GLB includes source-coordinate metadata in application-specific extras.
+
+The export explanation distinguishes **Original Coordinates**, which retain source units, from **Scene Coordinates**, which apply object transforms and convert known source/reference units into the shared scene-reference unit. Unknown units keep the raw numeric factor rather than guessing a physical scale. GLB performs its separate format-required metre conversion afterwards. Gaussian PLY and SPZ remain original-coordinate-only. Coordinate/dimension reports retain source units; their shared reference-plane elevation is converted back to the active source unit. Neither export-unit conversion nor report output performs CRS reprojection or geometric registration. These explanations update immediately with the language without changing export options.
+
+中文：导出说明区分“原始坐标”的源单位与“场景坐标”的场景参考单位；仅在单位已知时换算，未知单位不猜物理比例。GLB 随后按格式约定转为米制；Gaussian PLY／SPZ 仍限原始坐标。坐标／尺寸报告使用源单位，共享基准面高程也换算回当前源单位；不执行 CRS 重投影或配准。语言切换只刷新说明，不改变导出选择。
+
+日本語：エクスポート説明では、「元の座標」のソース単位と「シーン座標」のシーン基準単位を区別します。既知の単位のみ換算し、不明な単位の物理的な比率は推測しません。GLB はその後に形式の規約に従ってメートルへ変換し、Gaussian PLY／SPZ は元の座標のみを扱います。座標／寸法レポートはソース単位を使い、共通基準面の高さも現在のソース単位へ戻します。CRS 再投影や位置合わせは行いません。言語変更は説明のみ更新し、選択した出力設定を保持します。
 
 The dialog offers original coordinates or baked translation/rotation/scale about the model pivot; temporary viewport shifts are never exported. Gaussian PLY preserves its source coordinates and full Gaussian/SH attributes; baking Gaussian transforms remains unsupported and is disabled with an explanation. Gaussian XYZ/CSV/GLB exports are explicitly labeled as center points/base colors, not splat appearance or reconstructed surfaces. OBJ/STL require real mesh faces. Mirrored mesh transforms reverse winding in GLB/OBJ/STL; PLY explicitly requires original coordinates for mirrored meshes. Texture export supports the loader's single-texture, face-UV model; missing textures fail rather than silently disappearing. Generated opaque-diffuse triangle materials can first use the native-owned OBJ/MTL/image bridge to a PLY plus full-resolution atlas, preserving original output packages and UV seams. This internal generated-result adapter enables automatic preview and the existing PLY/OBJ/GLB export paths; it is not general OBJ/GLB import or support for arbitrary material shaders. See MESH_GENERATION.md for the 8192 px / 256 MiB limits and explicit failure contract.
 

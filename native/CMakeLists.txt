@@ -120,6 +120,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ObservationNavigationSmokeTest.h
   src/EditNavigationSmokeTest.cpp
   src/EditNavigationSmokeTest.h
+  src/CoordinateSceneSmokeTest.cpp
+  src/CoordinateSceneSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
   src/ProcessingPreviewSmokeTest.h
   src/TrainingIsolationSmokeTest.cpp
@@ -643,6 +645,12 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   foreach(GSW_NAVIGATION_LANGUAGE zh_CN en_US ja_JP)
+    add_test(NAME native_scene_coordinates_${GSW_NAVIGATION_LANGUAGE}
+      COMMAND GaussianSceneWorkbench --smoke-test-scene-coordinates --language ${GSW_NAVIGATION_LANGUAGE})
+    set_tests_properties(native_scene_coordinates_${GSW_NAVIGATION_LANGUAGE} PROPERTIES
+      TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME native_edit_navigation_${GSW_NAVIGATION_LANGUAGE}
       COMMAND GaussianSceneWorkbench --smoke-test-edit-navigation --language ${GSW_NAVIGATION_LANGUAGE})
     set_tests_properties(native_edit_navigation_${GSW_NAVIGATION_LANGUAGE} PROPERTIES

@@ -50,6 +50,7 @@ class QTimer;
 namespace gsw {
 
 enum class ReferenceGridPlane;
+struct ReferenceGridScale;
 
 class NativeViewport final : public QOpenGLWidget,
                              protected QOpenGLExtraFunctions {
@@ -212,6 +213,10 @@ public:
   [[nodiscard]] bool visibleModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
+  [[nodiscard]] SceneCoordinateInfo sceneReferenceCoordinates() const;
+  [[nodiscard]] double sourceToSceneUnitScale() const;
+  [[nodiscard]] QString sceneCoordinateSummary() const;
+  [[nodiscard]] QString sceneCoordinateDetail() const;
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
   [[nodiscard]] TrainingGpuPreviewCapability
   trainingGpuPreviewCapability() const {
@@ -245,6 +250,7 @@ signals:
   void meshRenderingAvailabilityChanged(bool available);
   void renderModeChanged(gsw::NativeViewport::RenderMode mode);
   void sceneCoordinatesChanged();
+  void sceneCoordinateRelationshipChanged();
   void referencePlaneModeChanged(
       gsw::NativeViewport::ReferencePlaneMode mode);
   void cameraTrajectoryChanged(qsizetype cameraCount,
@@ -599,6 +605,11 @@ private:
   void drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   [[nodiscard]] QMatrix4x4 sceneDisplayTransform(const SceneState &from,
                                                const SceneState &to) const;
+  [[nodiscard]] const SceneState &coordinateReferenceScene() const;
+  [[nodiscard]] double sourceToReferenceUnitScale(const SceneState &state) const;
+  [[nodiscard]] ReferenceGridScale sceneGridScale() const;
+  [[nodiscard]] bool collectionReferenceBounds(QVector3D &minimum,
+                                              QVector3D &maximum) const;
   void publishActiveSceneState();
   void refreshResourceBudgets();
   void updateManagedResourceUsage();

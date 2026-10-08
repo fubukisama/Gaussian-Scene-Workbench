@@ -10,6 +10,7 @@
 #include "TextureTextSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "EditNavigationSmokeTest.h"
+#include "CoordinateSceneSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
 #include "TrainingPreflightSmokeTest.h"
@@ -314,6 +315,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption editNavigationOption(QStringLiteral("smoke-test-edit-navigation"),
       QStringLiteral("Verify editing view navigation follows screen directions without changing models."));
   parser.addOption(editNavigationOption);
+  QCommandLineOption coordinateSceneOption(QStringLiteral("smoke-test-scene-coordinates"),
+      QStringLiteral("Verify shared scene coordinate frames and selection-independent reference grids."));
+  parser.addOption(coordinateSceneOption);
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
@@ -395,6 +399,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
+                         parser.isSet(coordinateSceneOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
@@ -567,6 +572,12 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(coordinateSceneOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runCoordinateSceneSmokeTest(*viewport);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(editNavigationOption)) {

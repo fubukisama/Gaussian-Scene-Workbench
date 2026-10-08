@@ -1410,10 +1410,12 @@ void MainWindow::createActions() {
   mReferencePlaneActionGroup = new QActionGroup(this);
   mReferencePlaneActionGroup->setExclusive(true);
   mModelBasePlaneAction =
-      AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "模型底部（推荐）"), this), AppLanguage::source("模型底部（推荐）"));
+      AppLanguage::text(new QAction(this), AppLanguage::source("场景底部（推荐）"));
   mModelBasePlaneAction->setObjectName(
       QStringLiteral("modelBaseReferencePlaneAction"));
   mModelBasePlaneAction->setCheckable(true);
+  AppLanguage::bind(mModelBasePlaneAction, "toolTip",
+                    AppLanguage::source("使用整组模型的底部作为基准面，不随当前选择变化。"));
   mWorldZeroPlaneAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "世界坐标 Z=0"), this), AppLanguage::source("世界坐标 Z=0"));
   mWorldZeroPlaneAction->setObjectName(
       QStringLiteral("worldZeroReferencePlaneAction"));
@@ -1968,6 +1970,9 @@ void MainWindow::createInspectorDock() {
   mPlyFormatValue = createValueLabel(panel);
   mCameraCountValue = createValueLabel(panel);
   mCoordinateSystemValue = createValueLabel(panel);
+  mSceneCoordinateRelationValue = createValueLabel(panel);
+  mSceneCoordinateRelationValue->setObjectName(QStringLiteral("sceneCoordinateRelationValue"));
+  mSceneCoordinateRelationValue->setTextFormat(Qt::PlainText);
   mSceneUnitValue = createValueLabel(panel);
   mSceneCenterValue = createValueLabel(panel);
   mSceneSizeValue = createValueLabel(panel);
@@ -1985,6 +1990,8 @@ void MainWindow::createInspectorDock() {
   AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mCameraCountValue)), AppLanguage::source("相机"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "坐标系"), mCoordinateSystemValue);
   AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mCoordinateSystemValue)), AppLanguage::source("坐标系"));
+  sceneForm->addRow(QCoreApplication::translate("Workbench", "场景坐标关系"), mSceneCoordinateRelationValue);
+  AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneCoordinateRelationValue)), AppLanguage::source("场景坐标关系"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "单位"), mSceneUnitValue);
   AppLanguage::text(qobject_cast<QLabel *>(sceneForm->labelForField(mSceneUnitValue)), AppLanguage::source("单位"));
   sceneForm->addRow(QCoreApplication::translate("Workbench", "中心"), mSceneCenterValue);
@@ -2977,6 +2984,8 @@ void MainWindow::connectServices() {
             updateInspector();
             updateActionAvailability();
           });
+  connect(mViewport, &NativeViewport::sceneCoordinateRelationshipChanged,
+          this, &MainWindow::updateInspector);
   connect(mViewport, &NativeViewport::referencePlaneModeChanged, this,
           [this](const NativeViewport::ReferencePlaneMode mode) {
             if (mModelBasePlaneAction != nullptr) {
@@ -4520,7 +4529,8 @@ bool MainWindow::exportCoordinateReport() {
           : QStringLiteral("worldZero");
   if (!writeSceneCoordinateReport(
           target, sourcePath, coordinates,
-          mViewport->referencePlaneElevation(), planeMode, &error)) {
+          mViewport->referencePlaneElevation() / mViewport->sourceToSceneUnitScale(),
+          planeMode, &error)) {
     showError(QCoreApplication::translate("Workbench", "无法导出坐标报告"), error);
     return false;
   }
@@ -5058,16 +5068,29 @@ bool MainWindow::importSceneFile(const QString &filePath) {
       !ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"))) return false;
   bool append = false;
   if (!mWorkspace.sceneObjects().isEmpty()) {
-    QMessageBox choice(QMessageBox::Question, QCoreApplication::translate("Workbench", "选择导入方式"),
-        QCoreApplication::translate("Workbench", "场景中已有 %1 个对象。\n\n"
-                       "同时导入：保留现有对象，在同一场景中加入新数据。\n"
-                       "覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n"
-                       "两种方式都不会删除或改写原始文件。")
-            .arg(mWorkspace.sceneObjects().size()).arg(QFileInfo(mWorkspace.scenePath()).fileName()),
-        QMessageBox::NoButton, this);
+    QMessageBox choice(QMessageBox::Question, QString(), QString(),
+                       QMessageBox::NoButton, this);
     choice.setObjectName(QStringLiteral("sceneImportChoiceDialog"));
-    auto *add = choice.addButton(QCoreApplication::translate("Workbench", "同时导入"), QMessageBox::AcceptRole);
-    auto *replace = choice.addButton(QCoreApplication::translate("Workbench", "覆盖当前"), QMessageBox::DestructiveRole);
+    choice.setTextFormat(Qt::PlainText);
+    AppLanguage::bind(&choice, "windowTitle", AppLanguage::source("选择导入方式"));
+    const qsizetype objectCount = mWorkspace.sceneObjects().size();
+    const QString currentFileName = QFileInfo(mWorkspace.scenePath()).fileName();
+    const auto updateChoiceText = [&choice, objectCount, currentFileName]() {
+      choice.setText(
+          QCoreApplication::translate("Workbench", "场景中已有 %1 个对象。\n\n"
+                         "同时导入：保留现有对象，在同一场景中加入新数据。\n"
+                         "覆盖当前：仅替换当前对象“%2”，其他对象不变。\n\n"
+                         "两种方式都不会删除或改写原始文件。")
+              .arg(objectCount).arg(currentFileName));
+    };
+    AppLanguage::onChanged(&choice, updateChoiceText);
+    updateChoiceText();
+    AppLanguage::bind(&choice, "informativeText", AppLanguage::source(
+        "同时导入保留源坐标；仅换算已声明的单位，不自动居中、缩放配准或转换 CRS。未知单位或不同坐标系的模型可能无法重合。"));
+    auto *add = AppLanguage::text(choice.addButton(QString(), QMessageBox::AcceptRole),
+                                  AppLanguage::source("同时导入"));
+    auto *replace = AppLanguage::text(choice.addButton(QString(), QMessageBox::DestructiveRole),
+                                      AppLanguage::source("覆盖当前"));
     auto *cancel = choice.addButton(QMessageBox::Cancel);
     add->setObjectName(QStringLiteral("appendSceneButton"));
     replace->setObjectName(QStringLiteral("replaceSceneButton"));
@@ -6316,6 +6339,8 @@ void MainWindow::updateInspector() {
                                           formatFileSize(metadata.fileSize))
                                : QStringLiteral("-"));
   const SceneCoordinateInfo &coordinates = mViewport->sceneCoordinates();
+  mSceneCoordinateRelationValue->setText(mViewport->sceneCoordinateSummary());
+  mSceneCoordinateRelationValue->setToolTip(mViewport->sceneCoordinateDetail());
   QVector3D translation = mWorkspace.sceneTranslation();
   QQuaternion rotation = mWorkspace.sceneRotation();
   QVector3D scale = mWorkspace.sceneScale();

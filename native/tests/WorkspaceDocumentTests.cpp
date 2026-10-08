@@ -36,6 +36,8 @@ private slots:
   void loadsOversizedAsciiPointCloudIntoDiskCache();
   void preservesGlobalCoordinatesWhilePagingLocalDisplayData();
   void parsesUnitsAndExportsCoordinateReport();
+  void recognizesSingularDeclaredLengthUnits_data();
+  void recognizesSingularDeclaredLengthUnits();
   void buildsAndInvalidatesDiskResidentPointOctree();
   void loadsAsciiPolygonMeshAndTriangulates();
   void loadsAdaptiveAsciiMeshEfficientlyAndPreservesChunkedRecords();
@@ -806,6 +808,38 @@ void WorkspaceDocumentTests::preservesGlobalCoordinatesWhilePagingLocalDisplayDa
   QCOMPARE(reused.pointCache.dataPath, data.pointCache.dataPath);
   QVERIFY(std::abs(reused.coordinates.globalMaximum.y - 4000005.654321) <
           1e-9);
+}
+
+void WorkspaceDocumentTests::recognizesSingularDeclaredLengthUnits_data() {
+  QTest::addColumn<QString>("name");
+  QTest::addColumn<QString>("symbol");
+  for (const auto &name : {"millimetre", "millimeter", "millimetres", "millimeters"})
+    QTest::newRow(name) << QString::fromLatin1(name) << QStringLiteral("mm");
+  for (const auto &name : {"centimetre", "centimeter", "centimetres", "centimeters"})
+    QTest::newRow(name) << QString::fromLatin1(name) << QStringLiteral("cm");
+  for (const auto &name : {"metre", "meter", "metres", "meters", "MeTrE"})
+    QTest::newRow(name) << QString::fromLatin1(name) << QStringLiteral("m");
+}
+
+void WorkspaceDocumentTests::recognizesSingularDeclaredLengthUnits() {
+  QFETCH(QString, name);
+  QFETCH(QString, symbol);
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString sourcePath = temporary.filePath(QStringLiteral("metric.ply"));
+  const QByteArray original = "ply\nformat ascii 1.0\ncomment coordinate_unit " + name.toUtf8() +
+      "\nelement vertex 1\nproperty double x\nproperty double y\nproperty double z\nend_header\n123.125 2 3\n";
+  QFile source(sourcePath);
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  QCOMPARE(source.write(original), original.size());
+  source.close();
+  const auto loaded = gsw::PlyPointCloudLoader::load(sourcePath);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QVERIFY(loaded.coordinates.unitDeclared);
+  QCOMPARE(gsw::sceneLengthUnitSymbol(loaded.coordinates.unit), symbol);
+  QCOMPARE(loaded.coordinates.globalMinimum.x, 123.125);
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  QCOMPARE(source.readAll(), original);
 }
 
 void WorkspaceDocumentTests::parsesUnitsAndExportsCoordinateReport() {
