@@ -9,9 +9,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from native.worker.training_preview_policy import TrainingPreviewPolicy
+
 
 class TrainingPreviewPublisher:
-    def __init__(self, output, emit, interval=3.0, max_points=500_000):
+    def __init__(self, output, emit, interval=3.0, max_points=500_000, policy=None):
         self.directory = Path(output) / ".gsw" / "previews" / uuid.uuid4().hex
         self.emit = emit
         self.interval = max(0.1, float(interval))
@@ -21,12 +23,15 @@ class TrainingPreviewPublisher:
         self.last_time = float("-inf")
         self.sequence = 0
         self.paths = []
+        self.policy = policy or TrainingPreviewPolicy(emit=emit)
 
-    def due(self):
-        return (self.future is None or self.future.done()) and time.monotonic() - self.last_time >= self.interval
+    def due(self, interval=None):
+        interval = self.interval if interval is None else interval
+        return (self.future is None or self.future.done()) and time.monotonic() - self.last_time >= interval
 
-    def publish_gaussians(self, model, iteration, initial=False):
-        if not self.due():
+    def publish_gaussians(self, model, iteration, initial=False, shared_gpu_healthy=False):
+        interval = max(self.interval, 30.) if shared_gpu_healthy else self.interval
+        if not self.policy.allows_snapshot(shared_gpu_healthy) or not self.due(interval):
             return False
         # Raw log-scale/logit/quaternion attributes match the source PLY contract.
         # No optimizer state or full SH arrays are copied for an observation frame.

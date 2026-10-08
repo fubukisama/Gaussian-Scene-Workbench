@@ -101,7 +101,8 @@ bool saveActiveTrainingJob(const QString &projectRoot,
        portablePath(job.configurationPath)},
       {QStringLiteral("outputSceneRoot"),
        portablePath(job.outputSceneRoot)},
-      {QStringLiteral("previewRecovered"), job.previewRecovered}};
+      {QStringLiteral("previewRecovered"), job.previewRecovered},
+      {QStringLiteral("resultSceneId"), job.resultSceneId}};
   const QByteArray serialized =
       QJsonDocument(root).toJson(QJsonDocument::Indented);
   if (marker.write(serialized) != serialized.size()) {
@@ -155,7 +156,8 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
   ActiveTrainingJob job{
       root.value(QStringLiteral("configurationPath")).toString(),
       root.value(QStringLiteral("outputSceneRoot")).toString(),
-      root.value(QStringLiteral("previewRecovered")).toBool()};
+      root.value(QStringLiteral("previewRecovered")).toBool(),
+      root.value(QStringLiteral("resultSceneId")).toString()};
   if (!job.isValid()) {
     assignError(errorMessage,
                 QCoreApplication::translate("Workbench", "Training recovery record is incomplete."));
@@ -164,6 +166,14 @@ ActiveTrainingJob loadActiveTrainingJob(const QString &projectRoot,
   job.configurationPath = normalizedAbsolutePath(QDir(projectRoot).absoluteFilePath(job.configurationPath));
   job.outputSceneRoot = normalizedAbsolutePath(QDir(projectRoot).absoluteFilePath(job.outputSceneRoot));
   return job;
+}
+
+bool restoreActiveTrainingJobAfterLaunchFailure(
+    const QString &projectRoot, const ActiveTrainingJob &previous,
+    QString *errorMessage) {
+  return previous.isValid()
+      ? saveActiveTrainingJob(projectRoot, previous, errorMessage)
+      : clearActiveTrainingJob(projectRoot, errorMessage);
 }
 
 int nativeResumeIteration(const QString &outputSceneRoot) {

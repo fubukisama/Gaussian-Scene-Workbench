@@ -33,10 +33,13 @@ def main():
             assert publisher.publish_gaussians(model, iteration, initial=iteration == 0)
             publisher.future.result()
         publisher.close()
-        assert len(events) == 6 and all(event[0] == "[gsw-training-preview]" for event in events), events
+        observations = [event for event in events if event[0] == "[gsw-training-preview]"]
+        statuses = [event[1] for event in events if event[0] == "[gsw-preview-status]"]
+        assert len(observations) == 6, events
+        assert statuses == [{"state": "active"}], statuses
         assert len(list(publisher.directory.glob("*.ply"))) == 4
         assert not list(publisher.directory.glob("*.tmp"))
-        payload = events[-1][1]
+        payload = observations[-1][1]
         data = PlyData.read(payload["point_cloud_path"], mmap=False)["vertex"].data
         assert len(data) == 256001 and payload["gaussian_count"] == count
         assert len(data.dtype.names) == 14 and data["rot_0"][0] == 1

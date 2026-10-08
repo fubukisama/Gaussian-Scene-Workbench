@@ -1,4 +1,6 @@
 {
+  "任务预览": {"zh_CN":"任务预览","en_US":"Task Preview","ja_JP":"タスクプレビュー"},
+  "切换任务预览与原场景；原模型和变换始终保留。训练中预览限制为 30 FPS，优先将 GPU 资源留给训练。": {"zh_CN":"切换任务预览与原场景；原模型和变换始终保留。训练中预览限制为 30 FPS，优先将 GPU 资源留给训练。","en_US":"Switch between the task preview and original scene. Original models and transforms are preserved. During training, preview is limited to 30 FPS to prioritize GPU resources for training.","ja_JP":"タスクプレビューと元のシーンを切り替えます。元のモデルと変換は保持されます。学習中のプレビューは 30 FPS に制限し、GPU リソースを学習に優先します。"},
   "Insufficient memory for the mesh preview and texture.": {"zh_CN":"内存或显存预算不足，无法加载网格预览及纹理。","en_US":"Insufficient memory for the mesh preview and texture.","ja_JP":"メモリまたは GPU メモリの予算が不足しているため、メッシュプレビューとテクスチャを読み込めません。"},
   "资源预算...": {"zh_CN":"资源预算...","en_US":"Resource Budget...","ja_JP":"リソース予算..."},
   "资源预算": {"zh_CN":"资源预算","en_US":"Resource Budget","ja_JP":"リソース予算"},

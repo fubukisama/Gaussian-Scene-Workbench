@@ -132,12 +132,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if repository_root not in sys.path:
                 sys.path.insert(0, repository_root)
             from native.worker.training_preview import TrainingPreviewPublisher
-            file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event)
+            from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
+            preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
+            file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
             file_preview.publish_gaussians(gaussians, first_iter, initial=True)
             from native.worker.gpu_preview_publisher import create_publisher, emit_descriptor
             gpu_preview_emit = emit_descriptor
             gpu_preview, failure_descriptor = create_publisher(
-                torch, fps=gpu_preview_fps
+                torch, fps=gpu_preview_fps, policy=preview_policy
             )
             if gpu_preview is not None:
                 gpu_preview_emit(gpu_preview.descriptor())
@@ -264,7 +266,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 # Drain a pending older observation frame before announcing the
                 # durable checkpoint; the receiver also rejects out-of-order frames.
                 if file_preview is not None and iteration == opt.iterations:
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -324,15 +326,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                         "sessionId": gpu_preview.session_id,
                         "error": str(preview_error)[:1000],
                     })
-                    gpu_preview.close(detach_timeout=0)
+                    close_preview_safely(gpu_preview, emit_gsw_event, detach_timeout=0)
                     gpu_preview = None
 
             if file_preview is not None:
                 try:
-                    file_preview.publish_gaussians(gaussians, iteration)
+                    file_preview.publish_gaussians(gaussians, iteration,
+                                                 shared_gpu_healthy=gpu_preview is not None and
+                                                 gpu_preview.has_active_consumer())
                 except Exception as preview_error:
                     emit_gsw_event("[gsw-preview-warning]", str(preview_error))
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
 
             if (iteration in checkpoint_iterations):
@@ -344,7 +348,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 # This boundary is AFTER densification and optimizer.step(). A
                 # resumed run starts at iteration + 1 with the original schedule.
                 if file_preview is not None:
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
                 scene.save(iteration)
                 native_state = capture_state(
@@ -362,7 +366,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 break
 
     if file_preview is not None:
-        file_preview.close()
+        close_preview_safely(file_preview, emit_gsw_event)
     if gpu_preview is not None:
         gpu_preview_emit({
             "version": GPU_PREVIEW_PROTOCOL_VERSION,
@@ -370,7 +374,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             "state": "closing",
             "sessionId": gpu_preview.session_id,
         })
-        gpu_preview.close()
+        close_preview_safely(gpu_preview, emit_gsw_event)
     if tb_writer:
         tb_writer.close()
     return paused

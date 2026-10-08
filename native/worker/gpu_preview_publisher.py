@@ -16,6 +16,8 @@ import time
 import uuid
 from ctypes import wintypes
 
+from native.worker.training_preview_policy import TrainingPreviewPolicy
+
 
 PROTOCOL_VERSION = 2
 CONTROL_MAGIC = b"GSWGPU2\0"
@@ -384,6 +386,7 @@ class GpuPreviewPublisher:
         requested_capacity=DEFAULT_CAPACITY,
         fps=15.0,
         memory_handle_type=HANDLE_TYPE_OPAQUE_WIN32_KMT,
+        policy=None,
     ):
         if sys.platform != "win32" or not torch_module.cuda.is_available():
             raise RuntimeError("CUDA/OpenGL shared preview is unavailable")
@@ -453,6 +456,8 @@ class GpuPreviewPublisher:
         self._bounds_point_count = -1
         self._bounds_updated_at = 0.0
         self._closed = False
+        self.last_consumer_release = float("-inf")
+        self.policy = policy or TrainingPreviewPolicy(memory_probe=self._memory_info)
         try:
             self._allocate()
             self._create_control_objects()
@@ -630,11 +635,18 @@ class GpuPreviewPublisher:
                 continue
             result = self.kernel32.WaitForSingleObject(self.release_events[slot], 0)
             if result == WAIT_OBJECT_0:
+                if self.slot_snapshots[slot][0] > 0:
+                    # Initial slot signals are not renderer acknowledgements.
+                    self.last_consumer_release = time.monotonic()
                 self.next_slot = (slot + 1) % SLOT_COUNT
                 return slot
             if result != WAIT_TIMEOUT:
                 raise ctypes.WinError(ctypes.get_last_error())
         return None
+
+    def has_active_consumer(self):
+        """Allocation success alone does not mean an OpenGL viewer is attached."""
+        return not self._closed and time.monotonic() - self.last_consumer_release < 2.
 
     def _sample_indices(self, point_count, device):
         key = (int(point_count), int(self.capacity), str(device))
@@ -701,6 +713,8 @@ class GpuPreviewPublisher:
         if self._closed:
             return False
         self._complete_pending(False)
+        if not self.policy.allows_gpu():
+            return False
         now = time.monotonic()
         if now - self.last_enqueue < self.minimum_interval:
             return False
@@ -788,11 +802,11 @@ class GpuPreviewPublisher:
             self._reserved = False
 
 
-def create_publisher(torch_module, requested_capacity=DEFAULT_CAPACITY, fps=15.0):
+def create_publisher(torch_module, requested_capacity=DEFAULT_CAPACITY, fps=15.0, policy=None):
     """Create the publisher without making preview support fatal to training."""
     session_id = str(uuid.uuid4())
     try:
-        publisher = GpuPreviewPublisher(torch_module, requested_capacity, fps)
+        publisher = GpuPreviewPublisher(torch_module, requested_capacity, fps, policy=policy)
         return publisher, None
     except Exception as exc:  # preview capability is optional; training must continue
         return None, state_descriptor(session_id, "failed", str(exc))

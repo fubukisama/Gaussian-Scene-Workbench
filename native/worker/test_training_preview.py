@@ -1,11 +1,14 @@
 import struct
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from native.worker.training_preview import TrainingPreviewPublisher
+from native.worker.training_preview_policy import TrainingPreviewPolicy
 
 
 class Rows:
@@ -17,6 +20,129 @@ class Rows:
 
 
 class TrainingPreviewTests(unittest.TestCase):
+    def test_observation_query_failure_skips_tensors_without_raising(self):
+        def unavailable():
+            raise RuntimeError("Owned CUDA query fixture unavailable")
+        policy = TrainingPreviewPolicy(memory_probe=unavailable)
+        class Model:
+            reads = 0
+            @property
+            def get_xyz(self):
+                self.reads += 1
+                raise AssertionError("Unavailable observation query must not read training tensors")
+        with tempfile.TemporaryDirectory() as directory:
+            publisher = TrainingPreviewPublisher(directory, lambda *event: None, policy=policy)
+            model = Model()
+            try:
+                self.assertFalse(publisher.publish_gaussians(model, 3860))
+                self.assertEqual(model.reads, 0)
+            finally:
+                publisher.close()
+
+    def test_invalid_memory_probe_cannot_authorize_tensor_snapshots(self):
+        class Model:
+            @property
+            def get_xyz(self):
+                raise AssertionError("Invalid budgets must not inspect training tensors")
+        for memory in ((float("nan"), 12 * 1024**3), (float("inf"), 12 * 1024**3),
+                       (1, 0), (True, 12 * 1024**3), (13 * 1024**3, 12 * 1024**3)):
+            with self.subTest(memory=memory), tempfile.TemporaryDirectory() as directory:
+                policy = TrainingPreviewPolicy(memory_probe=lambda: memory)
+                publisher = TrainingPreviewPublisher(directory, lambda *event: None, policy=policy)
+                try:
+                    self.assertFalse(publisher.publish_gaussians(Model(), 3860))
+                finally:
+                    publisher.close()
+
+    def test_healthy_shared_gpu_limits_redundant_cpu_observations(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("Run with the configured training Python for tensor observation tests")
+        now, emitted = [0.], threading.Event()
+        policy = TrainingPreviewPolicy(memory_probe=lambda: (8 * 1024**3, 12 * 1024**3),
+                                       clock=lambda: now[0])
+        model = SimpleNamespace(get_xyz=torch.zeros(2, 3), _scaling=torch.zeros(2, 3),
+                                _features_dc=torch.zeros(2, 1, 3), _opacity=torch.zeros(2, 1),
+                                _rotation=torch.zeros(2, 4))
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch("native.worker.training_preview.time.monotonic", side_effect=lambda: now[0]):
+            publisher = TrainingPreviewPublisher(directory, lambda *event: emitted.set(), policy=policy)
+            try:
+                self.assertTrue(publisher.publish_gaussians(model, 1, shared_gpu_healthy=True))
+                self.assertTrue(emitted.wait(2))
+                now[0] = 4.
+                self.assertFalse(publisher.publish_gaussians(model, 2, shared_gpu_healthy=True))
+                now[0] = 30.
+                deadline = time.perf_counter() + 2.
+                while not publisher.due() and time.perf_counter() < deadline:
+                    threading.Event().wait(.01)
+                self.assertTrue(publisher.publish_gaussians(model, 3, shared_gpu_healthy=True))
+            finally:
+                publisher.close()
+
+    def test_vram_recovery_requires_sustained_headroom_before_tensor_snapshot(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("Run with the configured training Python for tensor observation tests")
+        now, free = [0.], [128 * 1024**2]
+        policy = TrainingPreviewPolicy(memory_probe=lambda: (free[0], 12 * 1024**3),
+                                       clock=lambda: now[0])
+        model = SimpleNamespace()
+        model.get_xyz = torch.zeros(2, 3)
+        model._scaling = torch.zeros(2, 3)
+        model._features_dc = torch.zeros(2, 1, 3)
+        model._opacity = torch.zeros(2, 1)
+        model._rotation = torch.zeros(2, 4)
+        with tempfile.TemporaryDirectory() as directory:
+            publisher = TrainingPreviewPublisher(directory, lambda *event: None, policy=policy)
+            try:
+                self.assertFalse(publisher.publish_gaussians(model, 3860))
+                free[0], now[0] = 2 * 1024**3, 1.
+                self.assertFalse(publisher.publish_gaussians(model, 3861))
+                free[0], now[0] = 700 * 1024**2, 5.
+                self.assertFalse(publisher.publish_gaussians(model, 3862))
+                free[0], now[0] = 2 * 1024**3, 6.
+                self.assertFalse(publisher.publish_gaussians(model, 3863))
+                now[0] = 15.
+                self.assertFalse(publisher.publish_gaussians(model, 3864))
+                now[0] = 16.
+                self.assertTrue(publisher.publish_gaussians(model, 3865))
+            finally:
+                publisher.close()
+
+    def test_low_vram_skips_snapshot_before_reading_training_tensors(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("Run with the configured training Python for tensor observation tests")
+
+        class Model:
+            def __init__(self):
+                self.tensor_reads = 0
+                self._scaling = torch.zeros(2, 3)
+                self._features_dc = torch.zeros(2, 1, 3)
+                self._opacity = torch.zeros(2, 1)
+                self._rotation = torch.zeros(2, 4)
+
+            @property
+            def get_xyz(self):
+                self.tensor_reads += 1
+                return torch.zeros(2, 3)
+
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(torch.cuda, "is_available", return_value=True), \
+             mock.patch.object(torch.cuda, "mem_get_info", return_value=(128 * 1024**2, 12 * 1024**3)):
+            model, events = Model(), []
+            publisher = TrainingPreviewPublisher(directory, lambda *event: events.append(event))
+            try:
+                self.assertFalse(publisher.publish_gaussians(model, 3860))
+                self.assertEqual(model.tensor_reads, 0)
+                self.assertFalse(any(prefix == "[gsw-training-preview]" for prefix, _ in events))
+            finally:
+                publisher.close()
+
     def test_two_scale_preview_preserves_surfel_contract(self):
         import numpy as np
         with tempfile.TemporaryDirectory() as directory:

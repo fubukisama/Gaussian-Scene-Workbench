@@ -19,6 +19,7 @@ from unittest import mock
 
 from native.worker import training_checkpoint as cp
 from native.worker.training_preview import TrainingPreviewPublisher
+from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
 
@@ -145,6 +146,8 @@ class TwoDgsAdapterTests(unittest.TestCase):
                       training_identity=cp.training_identity, capture_state=cp.capture_state,
                       restore_state=cp.restore_state, file_digest=cp.file_digest,
                       TrainingPreviewPublisher=TrainingPreviewPublisher, tqdm=Progress, render=render,
+                      TrainingPreviewPolicy=TrainingPreviewPolicy,
+                      close_preview_safely=close_preview_safely,
                       NativeDensityControl=NativeDensityControl,
                       emit_loaded_training_summary=emit_loaded_training_summary,
                       l1_loss=lambda a, b: (a - b).abs().mean(), ssim=lambda a, b: 1 - ((a - b)**2).mean(),
@@ -160,7 +163,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 return original_tensor(*args, **kwargs)
             event = SimpleNamespace(record=lambda: None, elapsed_time=lambda other: 1.)
 
-            def run(name, pause=False, resume=False):
+            def run(name, pause=False, resume=False, free_vram=8 * 1024**3):
                 random.seed(999 if resume else 42)
                 np.random.seed(999 if resume else 42)
                 torch.manual_seed(999 if resume else 42)
@@ -174,6 +177,8 @@ class TwoDgsAdapterTests(unittest.TestCase):
                      mock.patch.object(torch, "tensor", side_effect=tensor), \
                      mock.patch.object(torch.Tensor, "cuda", lambda self: self), \
                      mock.patch.object(torch.cuda, "Event", return_value=event), \
+                     mock.patch.object(torch.cuda, "is_available", return_value=False), \
+                     mock.patch.object(torch.cuda, "mem_get_info", return_value=(free_vram, 12 * 1024**3)), \
                      mock.patch.object(torch.cuda, "synchronize"):
                     self.assertEqual(ns["training"](data, opt, SimpleNamespace(debug=False), [], [12], [], None), pause)
                 return models[str(output)]
@@ -213,6 +218,18 @@ class TwoDgsAdapterTests(unittest.TestCase):
             self.assertTrue(np.isfinite(rows).all())
             self.assertEqual(rows.shape[1], 13)
             self.assertEqual(resumed._scaling.shape[1], 2)
+            # A VRAM-constrained observation path must not stop optimization,
+            # change its state, or pretend it emitted a live observation.
+            first_event = len(events)
+            low_memory = run("low-memory", free_vram=128 * 1024**2)
+            self.assertTrue(torch.equal(reference._xyz, low_memory._xyz))
+            self.assertTrue(torch.equal(reference._scaling, low_memory._scaling))
+            constrained = events[first_event:]
+            self.assertFalse(any(prefix == "[gsw-training-preview]" and
+                                 value.get("preview_kind") in ("gaussian_initial", "gaussian_live")
+                                 for prefix, value in constrained))
+            self.assertTrue(any(prefix == "[gsw-training-metrics]" and value["iteration"] == 12
+                                for prefix, value in constrained))
 
 
 if __name__ == "__main__":

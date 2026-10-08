@@ -118,6 +118,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ObservationNavigationSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
   src/ProcessingPreviewSmokeTest.h
+  src/TrainingIsolationSmokeTest.cpp
+  src/TrainingIsolationSmokeTest.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
@@ -188,6 +190,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingTelemetry.h
   src/TrainingOutputLocator.cpp
   src/TrainingOutputLocator.h
+  src/TrainingPauseController.cpp
+  src/TrainingPauseController.h
   src/TransformGizmo.cpp
   src/TransformGizmo.h
   src/UntitledWorkspaceStorage.cpp
@@ -617,6 +621,10 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
+  add_test(NAME native_training_isolation COMMAND GaussianSceneWorkbench --smoke-test-training-isolation)
+  set_tests_properties(native_training_isolation PROPERTIES TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_processing_completion COMMAND GaussianSceneWorkbench --smoke-test-processing-completion)
   add_test(NAME native_training_resume COMMAND GaussianSceneWorkbench --smoke-test-training-resume)
   add_test(NAME native_mesh_generation COMMAND GaussianSceneWorkbench --smoke-test-mesh-generation)
@@ -804,6 +812,8 @@ if(BUILD_TESTING)
       tests/ProcessSupervisorTests.cpp
       src/ProcessSupervisor.cpp
       src/ProcessSupervisor.h
+      src/TrainingOutputLocator.cpp
+      src/TrainingOutputLocator.h
       src/TrainingGpuPreviewProtocol.cpp
       src/TrainingGpuPreviewProtocol.h
     )
@@ -815,6 +825,22 @@ if(BUILD_TESTING)
       target_compile_options(gsw_process_supervisor_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME process_supervisor COMMAND gsw_process_supervisor_tests)
+
+    qt_add_executable(gsw_training_pause_controller_tests
+      tests/TrainingPauseControllerTests.cpp
+      src/TrainingPauseController.cpp
+      src/TrainingPauseController.h
+      src/TrainingOutputLocator.cpp
+      src/TrainingOutputLocator.h
+    )
+    target_include_directories(gsw_training_pause_controller_tests PRIVATE src)
+    target_link_libraries(gsw_training_pause_controller_tests PRIVATE Qt6::Core Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_training_pause_controller_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME training_pause_controller COMMAND gsw_training_pause_controller_tests)
+    set_tests_properties(training_pause_controller PROPERTIES TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_training_telemetry_tests
       tests/TrainingTelemetryTests.cpp

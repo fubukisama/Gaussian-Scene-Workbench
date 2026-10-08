@@ -9,6 +9,7 @@
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <cstdio>
 #include <functional>
 
 namespace gsw {
@@ -36,7 +37,12 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
   };
   bool passed = true;
   const auto check = [&](bool ok, const char *message) {
-    if (!ok) { passed = false; qCritical() << "Processing preview FAIL:" << message; }
+    if (!ok) {
+      passed = false;
+      std::fprintf(stderr, "Processing preview FAIL: %s\n", message);
+      std::fflush(stderr);
+      qCritical() << "Processing preview FAIL:" << message;
+    }
   };
   int loaded = 0, failures = 0;
   const auto connection = QObject::connect(&viewport, &NativeViewport::sceneLoaded, &viewport,
@@ -101,7 +107,10 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
   }
   check(translated.size() == 3, "pipeline is translated immediately");
   viewport.finishProcessingPreview(false, true);
-  check(viewport.renderedPointCount() == 18, "cancel retains last valid result");
+  check(viewport.renderedPointCount() == 6, "cancel returns to the retained original model");
+  viewport.setProcessingPreviewVisible(true);
+  check(viewport.renderedPointCount() == 18 && !viewport.hasEditableScene(),
+        "cancelled task keeps its last valid observation available as a separate read-only view");
   viewport.finishProcessingPreview(true, false);
   SceneObject finalObject;
   finalObject.id = QStringLiteral("final-result");
@@ -119,7 +128,8 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
       &viewport, [&](bool ready) { modelReadyPublished = ready; });
   viewport.beginProcessingPreview();
   viewport.finishProcessingPreview(true, false);
-  check(!modelReadyPublished, "terminal snapshot is still read-only before association");
+  check(modelReadyPublished && viewport.hasEditableScene(),
+        "finishing without a new snapshot does not downgrade the original completed model");
   viewport.setSceneObjects({finalObject}, finalObject.id);
   check(modelReadyPublished, "same-path final adoption republishes readiness without reload");
   QSet<QString> finalLabels;

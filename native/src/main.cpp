@@ -10,6 +10,7 @@
 #include "TextureTextSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
+#include "TrainingIsolationSmokeTest.h"
 #include "ProcessingCompletionSmokeTest.h"
 #include "SpzSmokeTest.h"
 #include "SmokeTestSettings.h"
@@ -303,6 +304,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
+  QCommandLineOption trainingIsolationOption(QStringLiteral("smoke-test-training-isolation"),
+      QStringLiteral("Verify new training previews preserve independent reference models."));
+  parser.addOption(trainingIsolationOption);
   QCommandLineOption processingCompletionOption(QStringLiteral("smoke-test-processing-completion"),
       QStringLiteral("Verify completed model workflows restore inspect and editing tools."));
   parser.addOption(processingCompletionOption);
@@ -372,6 +376,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
+                         parser.isSet(trainingIsolationOption) ||
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
@@ -521,6 +526,12 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(spzSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runSpzSmokeTest(window, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingIsolationOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runTrainingIsolationSmokeTest(*viewport);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(processingPreviewOption)) {

@@ -62,6 +62,8 @@ private slots:
   void exportsFilteredBinaryPlyWithoutReencoding();
   void createsUntitledProjectWithoutAProjectFile();
   void preservesIndependentSceneObjectsAcrossImportAndSave();
+  void publishesGeneratedSceneWithoutReplacingReferences();
+  void rejectsInvalidGeneratedSceneWithoutChangingTheCollection();
   void commitsObjectTransformsAtomically();
   void serializesCurrentUnsavedStateForRecovery();
   void savesRecoverableManifestWithoutMovingActiveWorkspace();
@@ -232,6 +234,107 @@ void WorkspaceDocumentTests::preservesIndependentSceneObjectsAcrossImportAndSave
   for (const auto &file : files) QVERIFY(QFileInfo::exists(file));
 }
 
+void WorkspaceDocumentTests::publishesGeneratedSceneWithoutReplacingReferences() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(temporary.path(), "Generation isolation", &error), qPrintable(error));
+  QStringList paths;
+  for (const QString &name : {QStringLiteral("reference-one.ply"),
+                             QStringLiteral("reference-two.ply"),
+                             QStringLiteral("new-result.ply"),
+                             QStringLiteral("resumed-result.ply")}) {
+    QFile file(QDir(temporary.path()).filePath(name));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray ply("ply\nformat ascii 1.0\nelement vertex 1\n"
+                         "property float x\nproperty float y\nproperty float z\n"
+                         "end_header\n1 2 3\n");
+    QCOMPARE(file.write(ply), qint64(ply.size()));
+    file.close();
+    paths.append(file.fileName());
+  }
+  QVERIFY2(document.addScenePath(paths[0], &error), qPrintable(error));
+  QVERIFY2(document.setSceneTransform({4, -5, 6},
+      QQuaternion::fromAxisAndAngle(0, 0, 1, 30), {2, 3, 4}, &error), qPrintable(error));
+  QVERIFY2(document.addScenePath(paths[1], &error), qPrintable(error));
+  QVERIFY2(document.setSceneTransform({-7, 8, 9},
+      QQuaternion::fromAxisAndAngle(1, 0, 0, -20), {.5F, .75F, 1.25F}, &error), qPrintable(error));
+  const auto references = document.sceneObjects();
+  const QString resultId = QStringLiteral("generation-task-result");
+  QVERIFY2(document.publishGeneratedScene(paths[2], resultId, &error), qPrintable(error));
+  QCOMPARE(document.sceneObjects().size(), 3);
+  const auto published = document.sceneObjects();
+  for (int index = 0; index < 2; ++index) {
+    QCOMPARE(published[index].id, references[index].id);
+    QCOMPARE(published[index].path, references[index].path);
+    QCOMPARE(published[index].translation, references[index].translation);
+    QCOMPARE(published[index].rotation, references[index].rotation);
+    QCOMPARE(published[index].scale, references[index].scale);
+  }
+  QCOMPARE(published[2].id, resultId);
+  QCOMPARE(published[2].path, paths[2]);
+  QCOMPARE(document.activeSceneId(), resultId);
+
+  // A resumed/recovered task reuses its own result slot, regardless of which
+  // reference the user selected after its previous publication.
+  const QVector3D resultTranslation(1, 2, 3);
+  const auto resultRotation = QQuaternion::fromAxisAndAngle(0, 1, 0, 15);
+  const QVector3D resultScale(.5F, .5F, .5F);
+  QVERIFY2(document.setSceneTransform(resultTranslation, resultRotation, resultScale, &error), qPrintable(error));
+  QVERIFY(document.activateSceneObject(references[0].id));
+  QVERIFY2(document.publishGeneratedScene(paths[3], resultId, &error), qPrintable(error));
+  QCOMPARE(document.sceneObjects().size(), 3);
+  const auto resumed = document.sceneObjects();
+  for (int index = 0; index < 2; ++index) {
+    QCOMPARE(resumed[index].id, references[index].id);
+    QCOMPARE(resumed[index].path, references[index].path);
+    QCOMPARE(resumed[index].translation, references[index].translation);
+    QCOMPARE(resumed[index].rotation, references[index].rotation);
+    QCOMPARE(resumed[index].scale, references[index].scale);
+  }
+  QCOMPARE(resumed[2].id, resultId);
+  QCOMPARE(resumed[2].path, paths[3]);
+  QCOMPARE(resumed[2].translation, resultTranslation);
+  QCOMPARE(resumed[2].rotation, resultRotation);
+  QCOMPARE(resumed[2].scale, resultScale);
+  QCOMPARE(document.activeSceneId(), resultId);
+  QVERIFY(document.activateSceneObject(references[1].id));
+  QVERIFY2(document.publishGeneratedScene(paths[3], resultId, &error), qPrintable(error));
+  QCOMPARE(document.sceneObjects().size(), 3);
+  QCOMPARE(document.sceneObjects()[1].path, references[1].path);
+  QCOMPARE(document.sceneObjects()[1].translation, references[1].translation);
+  QCOMPARE(document.activeSceneId(), resultId);
+}
+
+void WorkspaceDocumentTests::rejectsInvalidGeneratedSceneWithoutChangingTheCollection() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(temporary.path(), "Invalid generation", &error), qPrintable(error));
+  QFile valid(QDir(temporary.path()).filePath("reference.ply"));
+  QVERIFY(valid.open(QIODevice::WriteOnly));
+  QVERIFY(valid.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\n"
+                      "property float y\nproperty float z\nend_header\n1 2 3\n") > 0);
+  valid.close();
+  QVERIFY2(document.addScenePath(valid.fileName(), &error), qPrintable(error));
+  QVERIFY2(document.setSceneTransform({2, -3, 4},
+      QQuaternion::fromAxisAndAngle(0, 0, 1, 25), {2, .5F, 3}, &error), qPrintable(error));
+  const auto before = document.sceneCollectionJson();
+  QFile malformed(QDir(temporary.path()).filePath("invalid.ply"));
+  QVERIFY(malformed.open(QIODevice::WriteOnly));
+  QVERIFY(malformed.write("not a PLY model\n") > 0);
+  malformed.close();
+  for (const auto &invalidPath : {QDir(temporary.path()).filePath("missing.ply"), malformed.fileName()}) {
+    QVERIFY(!document.publishGeneratedScene(invalidPath, "new-result-id", &error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(document.sceneCollectionJson(), before);
+  }
+  QVERIFY(!document.publishGeneratedScene(valid.fileName(), {}, &error));
+  QCOMPARE(document.sceneCollectionJson(), before);
+}
+
 void WorkspaceDocumentTests::commitsObjectTransformsAtomically() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -329,7 +432,8 @@ void WorkspaceDocumentTests::persistsActiveTrainingJobForCrashRecovery() {
   const QString projectRoot = root.filePath(QStringLiteral("project"));
   const gsw::ActiveTrainingJob expected{
       root.filePath(QStringLiteral("project/.gsw/jobs/training-job.json")),
-      root.filePath(QStringLiteral("output/scene"))};
+      root.filePath(QStringLiteral("output/scene")), true,
+      QStringLiteral("training-result-stable-id")};
   QString error;
   QVERIFY2(gsw::saveActiveTrainingJob(projectRoot, expected, &error),
            qPrintable(error));
@@ -343,6 +447,8 @@ void WorkspaceDocumentTests::persistsActiveTrainingJobForCrashRecovery() {
   QCOMPARE(restored.outputSceneRoot,
            QDir::cleanPath(
                QFileInfo(expected.outputSceneRoot).absoluteFilePath()));
+  QCOMPARE(restored.previewRecovered, true);
+  QCOMPARE(restored.resultSceneId, expected.resultSceneId);
 
   QVERIFY2(gsw::clearActiveTrainingJob(projectRoot, &error),
            qPrintable(error));
@@ -356,12 +462,15 @@ void WorkspaceDocumentTests::portableTrainingResumeRecordAndManifest() {
   const QString moved = QDir(temporary.path()).filePath(QStringLiteral("moved"));
   const QString output = QDir(original).filePath(QStringLiteral("output/test"));
   QVERIFY(QDir().mkpath(output));
+  const QString resultId = QStringLiteral("portable-training-result-id");
   QVERIFY(gsw::saveActiveTrainingJob(original, {
-      QDir(original).filePath(QStringLiteral(".gsw/jobs/config.json")), output}));
+      QDir(original).filePath(QStringLiteral(".gsw/jobs/config.json")), output, true, resultId}));
   QVERIFY(QDir().rename(original, moved));
   const auto restored = gsw::loadActiveTrainingJob(moved);
   QCOMPARE(restored.outputSceneRoot, QDir(moved).filePath(QStringLiteral("output/test")));
   QCOMPARE(restored.configurationPath, QDir(moved).filePath(QStringLiteral(".gsw/jobs/config.json")));
+  QCOMPARE(restored.previewRecovered, true);
+  QCOMPARE(restored.resultSceneId, resultId);
   QCOMPARE(gsw::nativeResumeIteration(restored.outputSceneRoot), -1);
   const QDir root(QDir(restored.outputSceneRoot).filePath(QStringLiteral(".gsw-resume")));
   QVERIFY(QDir().mkpath(root.path()));

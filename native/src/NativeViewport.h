@@ -87,7 +87,11 @@ public:
   void setProcessingStage(const QString &stage, int iteration = -1, int total = -1,
                           int progress = -1);
   void finishProcessingPreview(bool succeeded, bool cancelled, bool paused = false);
+  void clearProcessingPreview();
   void setPreviewScene(const QString &path, qint64 count);
+  void setProcessingPreviewVisible(bool visible);
+  [[nodiscard]] bool processingPreviewVisible() const { return mProcessingPreviewVisible; }
+  [[nodiscard]] bool hasProcessingPreview() const { return mProcessingScene && mProcessingHasFrame; }
   [[nodiscard]] QString processingPreviewLabel() const;
   [[nodiscard]] QString processingPreviewDetail() const;
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
@@ -96,7 +100,10 @@ public:
   void selectAllModels();
   [[nodiscard]] QStringList selectedSceneIds() const;
   [[nodiscard]] qsizetype selectedModelCount() const { return mSelectedSceneIds.size(); }
-  [[nodiscard]] QString activeSceneId() const { return mScene->id; }
+  [[nodiscard]] QString activeSceneId() const {
+    return mScene == mProcessingScene && mProcessingReferenceScene
+        ? mProcessingReferenceScene->id : mScene->id;
+  }
   [[nodiscard]] qsizetype sceneObjectCount() const { return mSceneStates.size(); }
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
@@ -216,6 +223,7 @@ public:
   }
 
 signals:
+  void processingPreviewChanged();
   void resourceBudgetStatusChanged();
   void sceneSelectionChanged(const QStringList &ids, const QString &activeId);
   void sceneTransformsCommitted(const QList<SceneObject> &objects);
@@ -314,6 +322,8 @@ private:
     QString id;
     QVector3D sourceTranslation;
     bool buffersInitialized = false;
+    bool processingGpuSuspended = false;
+    bool processingMeshNeedsReload = false;
     QVector3D sortedForward;
     bool sortDirectionValid = false;
     GaussianDepthSorter depthSorter;
@@ -464,6 +474,7 @@ private:
   void startSceneLoad(const QString &scenePath, bool continuous = false,
                       bool preserveView = false, bool forcePaged = false,
                       std::shared_ptr<ResourceReservation> reservation = {});
+  void loadContinuousScene(const QString &path, qint64 count);
   [[nodiscard]] QMatrix4x4 trainingPreviewCoordinateTransform() const;
   void startSelection(const ScreenSelectionRequest &request,
                       SelectionOperation operation);
@@ -551,6 +562,26 @@ private:
 
   std::shared_ptr<SceneState> mScene = std::make_shared<SceneState>();
   QList<std::shared_ptr<SceneState>> mSceneStates;
+  std::shared_ptr<SceneState> mProcessingScene;
+  std::shared_ptr<SceneState> mProcessingReferenceScene;
+  std::optional<StoredCameraView> mProcessingReferenceView;
+  std::optional<StoredCameraView> mProcessingPreviewView;
+  QImage mProcessingReferenceImage;
+  bool mCapturingProcessingReferenceImage = false;
+  bool mProcessingReferenceCaptureQueued = false;
+  quint64 mRenderedFrameSerial = 0;
+  quint64 mPresentedFrameSerial = 0;
+  QSet<QString> mProcessingReferenceSelection;
+  bool mProcessingReferenceSelected = false;
+  bool mProcessingPreviewVisible = false;
+  [[nodiscard]] QList<std::shared_ptr<SceneState>> displayedSceneStates() const;
+  [[nodiscard]] bool trainingGpuPreviewForScene() const;
+  [[nodiscard]] StoredCameraView currentProcessingView() const;
+  void restoreProcessingView(const StoredCameraView &view);
+  void suspendProcessingReferenceGpu();
+  void restoreProcessingReferenceGpu();
+  void prepareProcessingReferenceImage();
+  void discardProcessingScene();
   QMatrix4x4 mLayerDisplayTransform;
   QMatrix4x4 mCollectionProjection;
   bool mRenderingInactiveScene = false;

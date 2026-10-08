@@ -1082,6 +1082,37 @@ bool WorkspaceDocument::setSceneObjectTransforms(const QList<SceneObject> &objec
   return true;
 }
 
+bool WorkspaceDocument::publishGeneratedScene(const QString &path,
+                                               const QString &resultSceneId,
+                                               QString *errorMessage) {
+  if (resultSceneId.isEmpty()) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "Invalid object or transform in group operation."));
+    return false;
+  }
+  const PlyMetadata metadata = inspectPly(path, errorMessage);
+  if (!metadata.valid) return false;
+  storeActiveScene();
+  auto found = std::find_if(mSceneObjects.begin(), mSceneObjects.end(),
+      [&](const SceneObject &object) { return object.id == resultSceneId; });
+  if (found == mSceneObjects.end()) {
+    mSceneObjects.append({resultSceneId, normalizedAbsolutePath(path), {}, {},
+                          {1, 1, 1}, metadata.vertexCount});
+    found = std::prev(mSceneObjects.end());
+  } else {
+    found->path = normalizedAbsolutePath(path);
+    found->vertexCount = metadata.vertexCount;
+  }
+  mActiveSceneId = resultSceneId;
+  mScenePath = found->path;
+  mSceneTranslation = found->translation;
+  mSceneRotation = found->rotation;
+  mSceneScale = found->scale;
+  mSceneMetadata = metadata;
+  setModified(true);
+  emit changed();
+  return true;
+}
+
 bool WorkspaceDocument::setScenePath(const QString &path,
                                      QString *errorMessage) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);

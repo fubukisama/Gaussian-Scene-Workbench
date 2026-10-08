@@ -3,6 +3,7 @@
 #include "NativeViewport.h"
 #include "ProcessSupervisor.h"
 #include "RecoveryStore.h"
+#include "TrainingOutputLocator.h"
 #include "WorkspaceDocument.h"
 
 #include <QMainWindow>
@@ -75,6 +76,9 @@ private:
     QString outputDirectory;
     QString backend;
     int expectedIterations = 0;
+    QString resultSceneId;
+    ActiveTrainingJob previousRecovery;
+    bool launched = false;
   };
 
   struct PendingReconstruction {
@@ -267,6 +271,7 @@ private:
   QAction *mMeshRenderAction = nullptr;
   QAction *mPointRenderAction = nullptr;
   QAction *mShowCamerasAction = nullptr;
+  QAction *mTaskPreviewAction = nullptr;
   QAction *mInspectAction = nullptr;
   QAction *mLockEditToolsAction = nullptr;
   QAction *mObservationTrackballAction = nullptr;

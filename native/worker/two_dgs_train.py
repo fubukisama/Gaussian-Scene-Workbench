@@ -50,6 +50,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from native.worker.training_checkpoint import (
     TrainingCheckpoint, training_identity, capture_state, restore_state, file_digest)
 from native.worker.training_preview import TrainingPreviewPublisher
+from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
 try:
@@ -112,12 +113,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         ema_dist_for_log = state["ema_depth"]
         ema_normal_for_log = state["ema_normal"]
         del state
-    file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event)
+    preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
+    file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
     try:
         file_preview.publish_gaussians(gaussians, first_iter, initial=True)
     except Exception as error:
         emit_gsw_event("[gsw-preview-warning]", str(error))
-        file_preview.close()
+        close_preview_safely(file_preview, emit_gsw_event)
         file_preview = None
     paused = False
     progress_interval = max(1, min(100, opt.iterations // 100))
@@ -201,7 +203,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations):
                 if file_preview is not None and iteration == opt.iterations:
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -235,7 +237,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.iterations and native_checkpoint.pause_requested():
                 # AFTER optimizer and density updates: continue at iteration + 1.
                 if file_preview is not None:
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
                 scene.save(iteration)
                 state = capture_state(torch, np, gaussians, iteration, opt.iterations, identity,
@@ -253,11 +255,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     file_preview.publish_gaussians(gaussians, iteration)
                 except Exception as error:
                     emit_gsw_event("[gsw-preview-warning]", str(error))
-                    file_preview.close()
+                    close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
 
     if file_preview is not None:
-        file_preview.close()
+        close_preview_safely(file_preview, emit_gsw_event)
     if tb_writer:
         tb_writer.close()
     return paused

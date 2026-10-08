@@ -473,13 +473,22 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mTrainingGpuPreviewTimer->setTimerType(Qt::PreciseTimer);
   mTrainingGpuPreviewTimer->setInterval(0);
   connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
-          QOverload<>::of(&NativeViewport::update));
+          [this] {
+            if (mProcessingPreviewVisible && isVisible() && !window()->isMinimized()) update();
+          });
   mFrameRefreshTimer = new QTimer(this);
   mFrameRefreshTimer->setTimerType(Qt::PreciseTimer);
   mFrameRefreshTimer->setInterval(0);
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
-          QOverload<>::of(&NativeViewport::update));
+          [this] {
+            if (isVisible() && !window()->isMinimized()) update();
+          });
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
+    // Qt emits frameSwapped for top-level composition, including unrelated
+    // status-label repaints that reuse this widget's existing FBO. Count only
+    // a newly rendered viewport image that has actually reached composition.
+    if (mPresentedFrameSerial == mRenderedFrameSerial) return;
+    mPresentedFrameSerial = mRenderedFrameSerial;
     if (mScene->mRenderedPointCount <= 0 && mScene->mFullResolutionPointCount <= 0 &&
         mScene->mRenderedMeshIndexCount <= 0 &&
         mScene->mFullResolutionMeshTriangleCount <= 0 &&
@@ -500,6 +509,11 @@ NativeViewport::~NativeViewport() {
     for (const auto &scene : mSceneStates) {
       if (scene == mScene) continue;
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, scene);
+      releaseSceneBuffers();
+    }
+    if (mProcessingScene && mProcessingScene != mScene &&
+        !mSceneStates.contains(mProcessingScene)) {
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, mProcessingScene);
       releaseSceneBuffers();
     }
     mDepthOverlayVertexArray.destroy();
@@ -541,10 +555,11 @@ ResourceBudgetStatus NativeViewport::resourceBudgetStatus() const {
 }
 
 void NativeViewport::updateManagedResourceUsage() {
-  qint64 ram = 0;
+  qint64 ram = mProcessingReferenceImage.sizeInBytes();
   qint64 gpu = 0;
   auto states = mSceneStates;
   if (!states.contains(mScene)) states.append(mScene);
+  if (mProcessingScene && !states.contains(mProcessingScene)) states.append(mProcessingScene);
   for (const auto &state : states) {
     ram += state->mSourcePositions.capacity() * qint64(sizeof(PointPosition)) +
            state->mPreviewVertices.capacity() * qint64(sizeof(PointCloudVertex)) +
@@ -781,10 +796,29 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
           return state->id == object.id && state->mRequestedScenePath == object.path;
         });
       });
+  if (!objects.isEmpty() && !collectionChanged && mScene == mProcessingScene && mProcessingReferenceScene &&
+      activeId == mProcessingReferenceScene->id) {
+    // Synchronizing an unchanged project must not choose the reference view.
+    // Apply reference TRS updates without touching the independent task view.
+    QSignalBlocker signalBlocker(this);
+    for (const auto &object : objects) {
+      const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+          [&](const auto &state) { return state->id == object.id; });
+      if (found == mSceneStates.cend()) continue;
+      const auto &state = *found;
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+      QScopedValueRollback<bool> background(mRenderingInactiveScene, true);
+      state->sourceTranslation = object.translation;
+      setModelTransform(object.translation * static_cast<float>(state->mSceneCoordinates.displayScale),
+                        object.rotation, object.scale);
+    }
+    update();
+    return;
+  }
   if ((mScene->id != activeId || collectionChanged) && mModelDragActive) finishModelTransform(false);
   if (collectionChanged) resetModelTransformHistory();
   const auto oldActive = mScene;
-  const auto previewToAdopt = mProcessingPreviewPresent ? mScene : nullptr;
+  const auto previewToAdopt = hasProcessingPreview() ? mProcessingScene : nullptr;
   const bool wasProcessingPreview = mProcessingPreviewPresent;
   const QVector3D oldTarget = mTarget;
   const float oldDistance = mDistance;
@@ -799,9 +833,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       // A staged result is a new object. Never share its SceneState with an
       // original object that remains in the collection (including GPU buffers).
       const bool adoptPreview = previewToAdopt && object.id == activeId &&
-          std::none_of(objects.cbegin(), objects.cend(), [&](const auto &other) {
-            return other.id != activeId && other.id == previewToAdopt->id;
-          });
+          (found == mSceneStates.cend() || (*found)->mRequestedScenePath != object.path);
       auto state = adoptPreview ? previewToAdopt : found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
       state->id = object.id;
       retained.append(state);
@@ -818,7 +850,9 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       }
       if (state->mRequestedScenePath != object.path) {
         changedSource |= isActive;
-        if (adoptPreview) setPreviewScene(object.path, object.vertexCount);
+        if (adoptPreview || (isActive && !state->mScenePath.isEmpty() &&
+            (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0)))
+          loadContinuousScene(object.path, object.vertexCount);
         else setScene(object.path, object.vertexCount);
       }
       state->sourceTranslation = object.translation;
@@ -837,6 +871,15 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     }
     mSceneStates = retained;
     mScene = active ? active : !retained.isEmpty() ? retained.first() : std::make_shared<SceneState>();
+    if (retained.contains(mProcessingScene)) {
+      mProcessingScene.reset();
+      mProcessingHasFrame = false;
+      mProcessingPreviewVisible = false;
+    } else if (retained.isEmpty() || changedSource) {
+      discardProcessingScene();
+      if (retained.isEmpty()) mProcessingStage.clear();
+    }
+    mProcessingReferenceScene = mScene;
     // Association can activate an already loaded object without adopting the
     // observation state (for example, when other original objects coexist).
     if (!retained.isEmpty()) mProcessingPreviewPresent = false;
@@ -862,6 +905,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
   QSet<QString> existing;
   for (const auto &state : mSceneStates) existing.insert(state->id);
   mSelectedSceneIds.intersect(existing);
+  emit processingPreviewChanged();
   update();
 }
 
@@ -891,6 +935,7 @@ void NativeViewport::selectAllModels() {
 }
 
 bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &activeId) {
+  if (mScene == mProcessingScene) return false;
   QSet<QString> selected;
   for (const auto &state : mSceneStates) {
     if (ids.contains(state->id)) selected.insert(state->id);
@@ -908,6 +953,7 @@ bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &ac
   mTarget = mapping.map(mTarget);
   mDistance *= mapping.mapVector(QVector3D(1, 0, 0)).length();
   mScene = next;
+  if (mProcessingScene) mProcessingReferenceScene = next;
   mCameraViewActive = false;
   mStoredCameraView.reset();
   mTransformGizmoHover = {};
@@ -922,10 +968,13 @@ bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &ac
 
 void NativeViewport::setTrainingGpuPreviewDescriptor(
     const TrainingGpuPreviewDescriptor &descriptor) {
+  if (descriptor.state == TrainingGpuPreviewState::Ready &&
+      (!mProcessingActive || !mProcessingScene)) return;
   mPendingTrainingGpuPreviewDescriptor = descriptor;
   mTrainingGpuPreviewStopPending = false;
   if (descriptor.state == TrainingGpuPreviewState::Ready) {
     mTrainingGpuPreviewCameraFramed = false;
+    mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
     mTrainingGpuPreviewTimer->start();
   }
   update();
@@ -945,17 +994,28 @@ void NativeViewport::setProjectLabel(const QString &label) {
 
 void NativeViewport::beginProcessingPreview() {
   if (mModelDragActive) finishModelTransform(false);
+  if (mScene == mProcessingScene) setProcessingPreviewVisible(false);
+  discardProcessingScene();
+  stopTrainingGpuPreview();
+  mProcessingReferenceScene = mScene;
+  mProcessingReferenceView = currentProcessingView();
+  mProcessingPreviewView.reset();
+  mProcessingReferenceSelection = mSelectedSceneIds;
+  mProcessingReferenceSelected = mModelSelected;
+  mProcessingScene = std::make_shared<SceneState>();
+  mProcessingPreviewVisible = true;
   ++mSelectionRequestEpoch;
   mSelectionGestureActive = false;
   mSelectionPath.clear();
   mProcessingActive = true;
-  mProcessingPreviewPresent = true;
+  mProcessingPreviewPresent = false;
   mProcessingHasFrame = false;
   mProcessingStage = QStringLiteral("prepare");
   mProcessingIteration = mProcessingTotal = mProcessingProgress = -1;
   mModelSelected = false;
-  mSelectedSceneIds.clear();
   setInteractionMode(InteractionMode::Inspect);
+  updateFrameRefreshPolicy();
+  emit processingPreviewChanged();
   update();
 }
 
@@ -964,6 +1024,7 @@ void NativeViewport::setProcessingStage(const QString &stage, int iteration, int
   mProcessingIteration = iteration;
   mProcessingTotal = total;
   mProcessingProgress = progress;
+  prepareProcessingReferenceImage();
   update();
 }
 
@@ -972,10 +1033,224 @@ void NativeViewport::finishProcessingPreview(bool succeeded, bool cancelled, boo
   mProcessingStage = succeeded ? QStringLiteral("done") :
       paused ? QStringLiteral("paused") :
       cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed");
-  // Terminal observations remain read-only until setSceneObjects associates
-  // a validated full source, but camera navigation must become available now.
+  const bool referenceAvailable = mProcessingReferenceScene &&
+      !mProcessingReferenceScene->mScenePath.isEmpty() &&
+      (mProcessingReferenceScene->mPreviewPointCount > 0 ||
+       mProcessingReferenceScene->mPreviewTriangleCount > 0);
+  const bool keepTaskVisible = succeeded ? mProcessingPreviewVisible : !referenceAvailable;
+  setProcessingPreviewVisible(keepTaskVisible);
+  restoreProcessingReferenceGpu();
+  mProcessingReferenceImage = {};
+  mSelectedSceneIds = mProcessingReferenceSelection;
+  mModelSelected = !keepTaskVisible && mProcessingReferenceSelected;
   notifyEditState();
   notifyModelInteractionState();
+  notifySceneSelection();
+  emit processingPreviewChanged();
+  update();
+}
+
+void NativeViewport::clearProcessingPreview() {
+  // A project-context reset cannot stop an active worker. The caller performs
+  // this only after a successful new/open/recovery transition.
+  if (mProcessingActive) return;
+  if (mScene == mProcessingScene) {
+    if (!mSceneStates.isEmpty() && !mSceneStates.contains(mProcessingReferenceScene))
+      mProcessingReferenceScene = mSceneStates.first();
+    else if (!mProcessingReferenceScene || mProcessingReferenceScene == mProcessingScene)
+      mProcessingReferenceScene = std::make_shared<SceneState>();
+    setProcessingPreviewVisible(false);
+  }
+  restoreProcessingReferenceGpu();
+  discardProcessingScene();
+  stopTrainingGpuPreview();
+  if (context() && context()->isValid()) {
+    const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+    if (!alreadyCurrent) makeCurrent();
+    applyPendingTrainingGpuPreview();
+    if (!alreadyCurrent) doneCurrent();
+  }
+  mTrainingGpuPreviewTimer->stop();
+  mTrainingGpuPreviewError.clear();
+  mProcessingReferenceScene.reset();
+  mProcessingReferenceView.reset();
+  mProcessingPreviewView.reset();
+  mProcessingReferenceSelection.clear();
+  mProcessingReferenceSelected = false;
+  mProcessingStage.clear();
+  mProcessingIteration = mProcessingTotal = mProcessingProgress = -1;
+  mFrameRateCounter = {};
+  mPresentedFrameSerial = mRenderedFrameSerial;
+  updateManagedResourceUsage();
+  updateFrameRefreshPolicy();
+  publishActiveSceneState();
+  notifySceneSelection();
+  emit resourceBudgetStatusChanged();
+  emit processingPreviewChanged();
+  update();
+}
+
+QList<std::shared_ptr<NativeViewport::SceneState>> NativeViewport::displayedSceneStates() const {
+  if (mScene == mProcessingScene) return {mProcessingScene};
+  auto states = mSceneStates;
+  if (states.isEmpty()) states.append(mScene);
+  return states;
+}
+
+bool NativeViewport::trainingGpuPreviewForScene() const {
+  return mScene == mProcessingScene && mProcessingPreviewVisible && !mRenderingInactiveScene &&
+      isVisible() && !window()->isMinimized();
+}
+
+NativeViewport::StoredCameraView NativeViewport::currentProcessingView() const {
+  return {mTarget, mYawDegrees, mPitchDegrees, mDistance, mOrthographic,
+          mRollDegrees, mPerspectiveFovDegrees, mFocalAspectCorrection};
+}
+
+void NativeViewport::restoreProcessingView(const StoredCameraView &view) {
+  mTarget = view.target;
+  mYawDegrees = view.yawDegrees;
+  mPitchDegrees = view.pitchDegrees;
+  mDistance = view.distance;
+  mOrthographic = view.orthographic;
+  mRollDegrees = view.rollDegrees;
+  mPerspectiveFovDegrees = view.fovDegrees;
+  mFocalAspectCorrection = view.focalAspectCorrection;
+}
+
+void NativeViewport::discardProcessingScene() {
+  if (mProcessingScene && !mSceneStates.contains(mProcessingScene)) {
+    ++mProcessingScene->mSceneGeneration;
+    ++mProcessingScene->mCameraTrajectoryGeneration;
+    mProcessingScene->queuedPreviewPath.clear();
+    mProcessingScene->queuedPreviewCount = 0;
+    if (context() && context()->isValid()) {
+      const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+      if (!alreadyCurrent) makeCurrent();
+      {
+        QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, mProcessingScene);
+        releaseSceneBuffers();
+      }
+      if (!alreadyCurrent) doneCurrent();
+    }
+  }
+  mProcessingScene.reset();
+  mProcessingHasFrame = false;
+  mProcessingPreviewPresent = false;
+  mProcessingPreviewVisible = false;
+  mProcessingReferenceImage = {};
+  mProcessingReferenceCaptureQueued = false;
+}
+
+void NativeViewport::prepareProcessingReferenceImage() {
+  const bool intensiveStage = mProcessingStage == QStringLiteral("train") ||
+      mProcessingStage == QStringLiteral("mesh") || mProcessingStage == QStringLiteral("texture");
+  if (!mProcessingActive || !mProcessingPreviewVisible || hasProcessingPreview() ||
+      !intensiveStage || mScene == mProcessingScene || !context() || !context()->isValid() ||
+      mCapturingProcessingReferenceImage || mScene->processingGpuSuspended ||
+      !isVisible() || window()->isMinimized()) return;
+  // Keep only the reference geometry in a CPU image. The HUD is painted live,
+  // so progress and language changes never reuse text captured before training.
+  QScopedValueRollback<bool> capturing(mCapturingProcessingReferenceImage, true);
+  mProcessingReferenceImage = grabFramebuffer();
+  if (mProcessingReferenceImage.isNull()) return;
+  suspendProcessingReferenceGpu();
+}
+
+void NativeViewport::suspendProcessingReferenceGpu() {
+  if (!context() || !context()->isValid()) return;
+  const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+  if (!alreadyCurrent) makeCurrent();
+  auto states = mSceneStates;
+  if (mProcessingReferenceScene && !states.contains(mProcessingReferenceScene))
+    states.append(mProcessingReferenceScene);
+  for (const auto &state : states) {
+    if (state == mProcessingScene || state->processingGpuSuspended) continue;
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    state->processingMeshNeedsReload = state->mHasMesh && !state->mMeshCache.isValid() &&
+        state->mPendingMeshVertices.isEmpty() && state->resourceMeshGpuBytes > 0;
+    releaseSceneBuffers();
+    state->processingGpuSuspended = true;
+  }
+  if (!alreadyCurrent) doneCurrent();
+  updateManagedResourceUsage();
+  emit resourceBudgetStatusChanged();
+}
+
+void NativeViewport::restoreProcessingReferenceGpu() {
+  const bool canUseGl = context() && context()->isValid();
+  const bool alreadyCurrent = canUseGl && QOpenGLContext::currentContext() == context();
+  if (canUseGl && !alreadyCurrent) makeCurrent();
+  auto states = mSceneStates;
+  if (mProcessingReferenceScene && !states.contains(mProcessingReferenceScene))
+    states.append(mProcessingReferenceScene);
+  const auto active = mScene;
+  for (const auto &state : states) {
+    if (!state->processingGpuSuspended) continue;
+    state->processingGpuSuspended = false;
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+    if (state->processingMeshNeedsReload) {
+      state->processingMeshNeedsReload = false;
+      state->mRenderedMeshIndexCount = 0;
+      ++state->mSceneGeneration;
+      startSceneLoad(state->mRequestedScenePath, false, true);
+    } else {
+      // CPU attributes and edits remain owned by the original object. Only
+      // rebuild disposable display buffers; never reinitialize the edit model.
+      if (canUseGl) initializeSceneBuffers();
+      rebuildRenderedVertices();
+      state->mMeshUploadPending = !state->mPendingMeshVertices.isEmpty();
+      if (!state->mMeshTexturePath.isEmpty() && state->mPendingMeshTexture.isNull()) {
+        state->mPendingMeshTexture = QImage(state->mMeshTexturePath);
+        state->mMeshTextureUploadPending = !state->mPendingMeshTexture.isNull();
+      }
+    }
+  }
+  if (canUseGl && !alreadyCurrent) doneCurrent();
+  updateManagedResourceUsage();
+  emit resourceBudgetStatusChanged();
+}
+
+void NativeViewport::setProcessingPreviewVisible(const bool visible) {
+  mProcessingPreviewVisible = visible;
+  const auto next = visible && hasProcessingPreview() ? mProcessingScene : mProcessingReferenceScene;
+  if (!next || next == mScene) {
+    if (!visible) {
+      restoreProcessingReferenceGpu();
+      mProcessingReferenceImage = {};
+    } else prepareProcessingReferenceImage();
+    emit processingPreviewChanged();
+    update();
+    return;
+  }
+  if (mScene == mProcessingScene) mProcessingPreviewView = currentProcessingView();
+  else {
+    mProcessingReferenceScene = mScene;
+    mProcessingReferenceView = currentProcessingView();
+  }
+  mViewSnapAnimation->stop();
+  mScene = next;
+  mLayerDisplayTransform.setToIdentity();
+  mProcessingPreviewPresent = mScene == mProcessingScene;
+  mCameraViewActive = false;
+  mStoredCameraView.reset();
+  mPressedButtons = Qt::NoButton;
+  mObservationDragActive = false;
+  if (mProcessingPreviewPresent) {
+    mProcessingReferenceImage = {};
+    if (mProcessingPreviewView) restoreProcessingView(*mProcessingPreviewView);
+    else resetCamera();
+    mModelSelected = false;
+    if (mProcessingActive) suspendProcessingReferenceGpu();
+  } else {
+    if (mProcessingReferenceView) restoreProcessingView(*mProcessingReferenceView);
+    mModelSelected = mProcessingReferenceSelected;
+    restoreProcessingReferenceGpu();
+    mProcessingReferenceImage = {};
+  }
+  publishActiveSceneState();
+  emit processingPreviewChanged();
   update();
 }
 
@@ -1039,13 +1314,21 @@ QString NativeViewport::processingPreviewDetail() const {
 }
 
 void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
+  if (!mProcessingScene) return;
+  QSignalBlocker previewSignals(this);
+  if (mProcessingPreviewVisible) previewSignals.unblock();
+  QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, mProcessingScene);
+  QScopedValueRollback<bool> background(mRenderingInactiveScene, !mProcessingPreviewVisible);
+  loadContinuousScene(path, count);
+}
+
+void NativeViewport::loadContinuousScene(const QString &path, qint64 count) {
   if (path.isEmpty() || path == mScene->mRequestedScenePath) return;
   if (mScene->previewLoadBusy) {
     mScene->queuedPreviewPath = path;
     mScene->queuedPreviewCount = count;
     return;
   }
-  if (mSceneStates.isEmpty()) mSceneStates.append(mScene);
   // Do not invalidate visible geometry or the user's camera while reading.
   ++mScene->mSceneGeneration;
   if (mScene->mSelectionBusy) {
@@ -1056,6 +1339,12 @@ void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
   mScene->requestedPreviewCount = count;
   mScene->previewLoadBusy = true;
   mScene->previewLoadFailed = false;
+  if (context() && context()->isValid() && !mScene->buffersInitialized) {
+    const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+    if (!alreadyCurrent) makeCurrent();
+    initializeSceneBuffers();
+    if (!alreadyCurrent) doneCurrent();
+  }
   notifyEditState();
   notifyModelInteractionState();
   startSceneLoad(path, true);
@@ -1323,8 +1612,7 @@ std::optional<QVector3D> NativeViewport::observationPointAt(const QPointF &posit
   if (!rect().contains(position.toPoint())) return std::nullopt;
   const auto active = mScene;
   mCollectionProjection = projectionMatrix();
-  auto states = mSceneStates;
-  if (states.isEmpty()) states.append(active);
+  auto states = displayedSceneStates();
   float nearestDepth = 1.0F;
   std::optional<QVector3D> result;
   for (const auto &state : states) {
@@ -1774,19 +2062,19 @@ void NativeViewport::discardSceneEdits() {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mProcessingActive && !mProcessingPreviewPresent &&
+  return !mProcessingActive && mScene != mProcessingScene &&
          !mScene->previewLoadBusy && !mScene->previewLoadFailed &&
          mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
          mScene->mEditModel.pointCount() > 0;
 }
 
 bool NativeViewport::selectableModelAvailable() const {
-  return !mProcessingActive && !mProcessingPreviewPresent &&
+  return !mProcessingActive && mScene != mProcessingScene &&
       !mScene->previewLoadBusy && !mScene->previewLoadFailed && visibleModelAvailable();
 }
 
 bool NativeViewport::visibleModelAvailable() const {
-  return (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ||
+  return (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ||
       (!mScene->mScenePath.isEmpty() &&
          (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
           mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
@@ -1848,7 +2136,7 @@ bool boundsIntersectView(const QVector3D &minimum, const QVector3D &maximum,
 
 bool NativeViewport::gaussianRenderingAvailable() const {
   return (mScene->mHasGaussianAttributes ||
-          (!mRenderingInactiveScene && mTrainingGpuPreview.attached())) &&
+          (trainingGpuPreviewForScene() && mTrainingGpuPreview.attached())) &&
          mGaussianShaderReady;
 }
 
@@ -2592,11 +2880,17 @@ void NativeViewport::changeEvent(QEvent *event) {
 }
 
 void NativeViewport::paintGL() {
+  if (!isVisible() || window()->isMinimized()) return;
+  if (!mCapturingProcessingReferenceImage) {
+    QScopedValueRollback<std::shared_ptr<SceneState>> previewScope(mScene,
+        mProcessingScene ? mProcessingScene : mScene);
+    QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, false);
   applyPendingTrainingGpuPreview();
   const bool gaussianWasAvailable = gaussianRenderingAvailable();
   QString gpuPreviewError;
   const bool previewChanged =
-      mTrainingGpuPreview.poll(&gpuPreviewError);
+      mProcessingPreviewVisible && mProcessingActive && mProcessingScene
+          ? mTrainingGpuPreview.poll(&gpuPreviewError) : false;
   synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
   if (!gpuPreviewError.isEmpty() &&
       gpuPreviewError != mTrainingGpuPreviewError) {
@@ -2606,7 +2900,7 @@ void NativeViewport::paintGL() {
         gpuPreviewError);
   }
   if (previewChanged && mTrainingGpuPreview.attached()) {
-    if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())) {
+    if (mProcessingScene && mTrainingGpuPreview.hasFrame()) {
       const QVector3D previewCenter = mTrainingGpuPreview.sceneCenter();
       const float previewRadius = mTrainingGpuPreview.sceneRadius();
       if (std::isfinite(previewCenter.x()) &&
@@ -2623,7 +2917,6 @@ void NativeViewport::paintGL() {
             mScene->mModelRotation = {};
             mScene->mModelScale = QVector3D(1, 1, 1);
           }
-          if (!mRenderingInactiveScene && !mProcessingHasFrame) resetCamera();
           mProcessingHasFrame = true;
         }
       }
@@ -2640,12 +2933,29 @@ void NativeViewport::paintGL() {
         false, QCoreApplication::translate("Workbench", "定时快照回退"),
         QCoreApplication::translate("Workbench", "共享显存预览已结束"));
   }
+  }
+  if (!mCapturingProcessingReferenceImage && mProcessingPreviewVisible &&
+      hasProcessingPreview() && mScene != mProcessingScene)
+    setProcessingPreviewVisible(true);
   // Resolve the current theme at frame time so live changes also affect every
   // Gaussian path (resident, compatibility and training preview). The splats
   // continue to use unchanged premultiplied-alpha blending over this backdrop.
   const QVector4D clearColor = viewportClearColor();
   glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (!mCapturingProcessingReferenceImage && mProcessingActive &&
+      mProcessingPreviewVisible && !hasProcessingPreview() &&
+      mScene->processingGpuSuspended && !mProcessingReferenceImage.isNull()) {
+    QPainter painter(this);
+    painter.drawImage(rect(), mProcessingReferenceImage);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawOverlay(painter);
+    drawTransformToolStrip(painter);
+    drawAxisGizmo(painter);
+    painter.end();
+    ++mRenderedFrameSerial;
+    return;
+  }
   const QMatrix4x4 view = viewMatrix();
   const QMatrix4x4 projection = projectionMatrix();
   mCollectionProjection = projection;
@@ -2654,7 +2964,7 @@ void NativeViewport::paintGL() {
   drawInfiniteGrid(viewProjection);
   drawDepthAwareReferenceAxes(viewProjection);
   const auto active = mScene;
-  for (const auto &state : mSceneStates) {
+  for (const auto &state : displayedSceneStates()) {
     if (!mSelectedSceneIds.contains(state->id)) continue;
     QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
     QScopedValueRollback<bool> selectionScope(mModelSelected, true);
@@ -2662,8 +2972,7 @@ void NativeViewport::paintGL() {
         mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
     drawDepthAwareModelBounds(viewProjection * modelMatrix());
   }
-  auto ordered = mSceneStates;
-  if (ordered.isEmpty()) ordered.append(active);
+  auto ordered = displayedSceneStates();
   // Opaque objects share depth. Draw transparent objects back-to-front at the
   // object level, using the existing per-object Gaussian renderer.
   std::stable_sort(ordered.begin(), ordered.end(), [&](const auto &left, const auto &right) {
@@ -2697,16 +3006,30 @@ void NativeViewport::paintGL() {
   drawModelTransformGizmo(painter);
   drawObservationTrackball(painter);
 
-  drawOverlay(painter);
-  drawTransformToolStrip(painter);
-  drawAxisGizmo(painter);
+  if (!mCapturingProcessingReferenceImage) {
+    drawOverlay(painter);
+    drawTransformToolStrip(painter);
+    drawAxisGizmo(painter);
+  }
   painter.end();
+  if (!mCapturingProcessingReferenceImage) {
+    ++mRenderedFrameSerial;
+    if (mProcessingActive && mProcessingPreviewVisible && !hasProcessingPreview() &&
+        !mScene->processingGpuSuspended && !mProcessingReferenceCaptureQueued) {
+      mProcessingReferenceCaptureQueued = true;
+      QTimer::singleShot(0, this, [this] {
+        mProcessingReferenceCaptureQueued = false;
+        prepareProcessingReferenceImage();
+      });
+    }
+  }
 }
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
+  if (mScene->processingGpuSuspended) return;
   initializeSceneBuffers();
   if (mScene->mRenderMode == RenderMode::Gaussians &&
-      (mRenderingInactiveScene || !mTrainingGpuPreview.hasFrame())) {
+      (!trainingGpuPreviewForScene() || !mTrainingGpuPreview.hasFrame())) {
     const QVector3D forward = modelMatrix().transposed().mapVector(
         (mTarget - cameraPosition()).normalized()).normalized();
     if (!mScene->sortDirectionValid ||
@@ -2732,12 +3055,12 @@ void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 
   uploadPendingMeshCachePages();
   if (mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
     drawMesh(modelViewProjection);
-  } else if (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame() &&
+  } else if (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame() &&
              mScene->mRenderMode == RenderMode::Points) {
     drawTrainingPointCloud(modelViewProjection * trainingPreviewCoordinateTransform());
   } else if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()) {
     drawGaussianCloud(view * modelMatrix() *
-        ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4()), projection);
+        ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4()), projection);
   } else {
     drawPointCloud(modelViewProjection);
   }
@@ -2761,6 +3084,8 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
   if (!mPendingTrainingGpuPreviewDescriptor.has_value()) {
     return;
   }
+  if (mPendingTrainingGpuPreviewDescriptor->state == TrainingGpuPreviewState::Ready &&
+      (!mProcessingPreviewVisible || !isVisible() || window()->isMinimized())) return;
   const TrainingGpuPreviewDescriptor descriptor =
       *mPendingTrainingGpuPreviewDescriptor;
   mPendingTrainingGpuPreviewDescriptor.reset();
@@ -2924,7 +3249,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               const auto count = mScene->queuedPreviewCount;
               mScene->queuedPreviewPath.clear();
               if (!queued.isEmpty()) QTimer::singleShot(0, this, [this, weakScene, queued, count, generation]() {
-                if (mProcessingPreviewPresent && weakScene.lock() == mScene && mScene->mSceneGeneration == generation)
+                const auto scene = weakScene.lock();
+                if (scene && scene == mProcessingScene && scene->mSceneGeneration == generation)
                   setPreviewScene(queued, count);
               });
             }
@@ -2951,9 +3277,11 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->resourceLoadReservation = reservation;
             mScene->mScenePath = scenePath;
             if (continuous) {
-              mScene->sourceTranslation = {};
-              mScene->mModelRotation = {};
-              mScene->mModelScale = QVector3D(1, 1, 1);
+              if (targetScene == mProcessingScene) {
+                mScene->sourceTranslation = {};
+                mScene->mModelRotation = {};
+                mScene->mModelScale = QVector3D(1, 1, 1);
+              }
               mScene->gaussianGpu.clear();
               mScene->indexedGaussians = false;
               mScene->sortDirectionValid = false;
@@ -3056,13 +3384,23 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
                 mTarget = data.coordinates.localFromGlobal(oldCoordinates.globalFromLocal(oldTarget));
                 mDistance = oldDistance * static_cast<float>(data.coordinates.displayScale / oldCoordinates.displayScale);
               }
-              if (continuous) mProcessingHasFrame = true;
+            }
+            if (continuous && targetScene == mProcessingScene) {
+              mProcessingHasFrame = true;
+              QTimer::singleShot(0, this, [this, weakScene, generation] {
+                const auto scene = weakScene.lock();
+                if (!scene || scene != mProcessingScene || scene->mSceneGeneration != generation) return;
+                if (mProcessingPreviewVisible) setProcessingPreviewVisible(true);
+                else emit processingPreviewChanged();
+              });
             }
             rebuildRenderedVertices();
             updateFrameRefreshPolicy();
             notifyEditState();
             notifyModelInteractionState();
             emit meshRenderingAvailabilityChanged(meshRenderingAvailable());
+            if (targetScene == mProcessingScene && mProcessingPreviewVisible && !foreground)
+              sceneSignals.unblock();
             emit sceneLoaded(data.sourceVertexCount, mScene->mPreviewPointCount,
                              data.sourceFaceCount, mScene->mPreviewTriangleCount);
             emit sceneCoordinatesChanged();
@@ -3240,6 +3578,10 @@ void NativeViewport::rebuildRenderedVertices() {
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
+  // The optimizer has priority while a task is running. This changes actual
+  // drawing cadence only; FrameRateCounter still counts completed frames.
+  mFrameRefreshTimer->setInterval(mProcessingActive ? 33 : 0);
+  mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
   const auto needsRefresh = [](const auto &scene) {
     return scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
         !scene->mPendingPointCachePages.isEmpty() || !scene->mPointCacheReadsInFlight.isEmpty() ||
@@ -4494,7 +4836,7 @@ void NativeViewport::drawTrainingPointCloud(
 }
 
 int NativeViewport::effectiveShDegree() const {
-  if (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) return -1;
+  if (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) return -1;
   const int available = mScene->gaussianGpu.shDegree();
   return mMaximumShDegree < 0 ? available : std::min(available, mMaximumShDegree);
 }
@@ -4506,7 +4848,7 @@ void NativeViewport::setMaximumShDegree(int degree) {
 
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
-  const bool livePreview = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame());
+  const bool livePreview = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame());
   const qsizetype drawCount =
       livePreview ? mTrainingGpuPreview.pointCount() : mScene->mRenderedPointCount;
   if (drawCount <= 0 || mGaussianProgram == nullptr ||
@@ -5450,7 +5792,7 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
       std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
                 std::abs(mScene->mModelScale.z())});
   float farPlane = std::max(100.0F, modelDistance + transformedRadius * 12.0F);
-  for (const auto &state : mSceneStates) {
+  for (const auto &state : displayedSceneStates()) {
     const auto mapping = sceneDisplayTransform(*state, *mScene);
     const float radius = state->mSceneRadius *
         std::max({std::abs(state->mModelScale.x()), std::abs(state->mModelScale.y()),
@@ -5556,7 +5898,7 @@ QString NativeViewport::sceneObjectAt(const QPointF &position) {
   mCollectionProjection = projectionMatrix();
   QString bestId;
   float nearestDepth = 1.0F;
-  for (const auto &state : mSceneStates) {
+  for (const auto &state : displayedSceneStates()) {
     QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
     QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
     QScopedValueRollback<QMatrix4x4> display(mLayerDisplayTransform,
@@ -5654,7 +5996,7 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
 
       const QMatrix4x4 modelViewProjection =
           viewProjectionMatrix() * modelMatrix() *
-          ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4());
+          ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ? trainingPreviewCoordinateTransform() : QMatrix4x4());
       const float pointSize = std::max(
           3.0F, 3.0F * static_cast<float>(devicePixelRatioF()));
       bool drewPrimitives = false;
@@ -5684,7 +6026,7 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
                          nullptr);
           drewPrimitives = true;
         }
-      } else if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame()) &&
+      } else if ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) &&
                  mScene->mRenderMode == RenderMode::Points) {
         const GLuint vertexArray = mTrainingGpuPreview.activeVertexArray();
         const GLsizei pointCount = mTrainingGpuPreview.pointCount();
@@ -5698,7 +6040,7 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
         }
       } else if (mScene->mRenderMode == RenderMode::Gaussians &&
                  gaussianRenderingAvailable()) {
-        const bool livePreview = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame());
+        const bool livePreview = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame());
         const GLuint vertexArray =
             livePreview ? mTrainingGpuPreview.activeVertexArray()
                         : mScene->mGaussianVertexArray.objectId();
@@ -7126,7 +7468,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   painter.setPen(overlayBorder());
   painter.setBrush(overlaySurface(colors.card, 225));
 
-  const QString sceneName = (!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())
+  const QString sceneName = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())
                                 ? mScene->mRenderMode == RenderMode::Points
                                       ? QCoreApplication::translate("Workbench", "训练中 · 点云增密预览")
                                       : QCoreApplication::translate("Workbench", "训练中 · GPU 实时预览")
@@ -7136,7 +7478,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QString project =
       mProjectLabel.isEmpty() ? QCoreApplication::translate("Workbench", "未打开工程") : mProjectLabel;
   QString count;
-  if ((!mRenderingInactiveScene && mTrainingGpuPreview.hasFrame())) {
+  if ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())) {
     count = mScene->mRenderMode == RenderMode::Points
                 ? QCoreApplication::translate("Workbench", "迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())

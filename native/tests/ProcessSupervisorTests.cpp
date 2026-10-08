@@ -1,4 +1,5 @@
 #include "ProcessSupervisor.h"
+#include "TrainingOutputLocator.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -50,6 +51,8 @@ class ProcessSupervisorTests final : public QObject {
 private slots:
   void initTestCase();
   void failedLaunchRemainsObservableAsAnAcceptedAttempt();
+  void failedLaunchRestoresThePreviousTrainingResumeRecord_data();
+  void failedLaunchRestoresThePreviousTrainingResumeRecord();
   void acceptedLaunchPrecedesStartedAndBusyRejectionIsNotReported();
   void pauseIsDistinctFromCancellation();
   void parsesFragmentedWorkerStatusWithoutPollutingLogs();
@@ -101,6 +104,64 @@ void ProcessSupervisorTests::failedLaunchRemainsObservableAsAnAcceptedAttempt() 
   QCOMPARE(launchSpy->at(0).at(1).toString(), temporary.path());
   QVERIFY(!supervisor.isRunning());
   QVERIFY(supervisor.activeTask().isEmpty());
+}
+
+void ProcessSupervisorTests::failedLaunchRestoresThePreviousTrainingResumeRecord_data() {
+  QTest::addColumn<bool>("hasPrevious");
+  QTest::newRow("preserve-paused-task") << true;
+  QTest::newRow("first-task-no-prior-resume") << false;
+}
+
+void ProcessSupervisorTests::failedLaunchRestoresThePreviousTrainingResumeRecord() {
+  QFETCH(bool, hasPrevious);
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString project = temporary.path();
+  const ActiveTrainingJob previous{
+      QDir(project).filePath(QStringLiteral(".gsw/jobs/paused-task.json")),
+      QDir(project).filePath(QStringLiteral("output/paused-result")), true,
+      QStringLiteral("original-task-result")};
+  if (hasPrevious) QVERIFY(saveActiveTrainingJob(project, previous));
+  const auto previousRecord = loadActiveTrainingJob(project);
+  const ActiveTrainingJob attempt{
+      QDir(project).filePath(QStringLiteral(".gsw/jobs/new-attempt.json")),
+      QDir(project).filePath(QStringLiteral("output/new-attempt")), false,
+      QStringLiteral("new-attempt-result")};
+  QVERIFY(saveActiveTrainingJob(project, attempt));
+  ProcessSupervisor supervisor;
+  QSignalSpy finished(&supervisor, &ProcessSupervisor::taskFinished);
+  bool reachedStarted = false;
+  bool rolledBack = false;
+  QString rollbackError;
+  connect(&supervisor, &ProcessSupervisor::taskStarted, &supervisor,
+      [&] { reachedStarted = true; });
+  connect(&supervisor, &ProcessSupervisor::taskFinished, &supervisor,
+      [&](const QString &, int, bool) {
+        if (!reachedStarted)
+          rolledBack = restoreActiveTrainingJobAfterLaunchFailure(
+              project, previousRecord, &rollbackError);
+      });
+  QVERIFY(supervisor.start(QStringLiteral("failed-training-attempt"),
+      QDir(project).filePath(QStringLiteral("missing-training-python.exe")),
+      {}, project));
+  QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 5000);
+  QVERIFY(!reachedStarted);
+  QCOMPARE(finished.first().at(1).toInt(), -1);
+  QVERIFY2(rolledBack, qPrintable(rollbackError));
+  QString loadError;
+  const auto restored = loadActiveTrainingJob(project, &loadError);
+  QVERIFY2(loadError.isEmpty(), qPrintable(loadError));
+  QCOMPARE(restored.isValid(), hasPrevious);
+  if (hasPrevious) {
+    QCOMPARE(restored.configurationPath, previousRecord.configurationPath);
+    QCOMPARE(restored.outputSceneRoot, previousRecord.outputSceneRoot);
+    QCOMPARE(restored.previewRecovered, true);
+    QCOMPARE(restored.resultSceneId, QStringLiteral("original-task-result"));
+  } else {
+    QVERIFY(restored.configurationPath.isEmpty());
+    QVERIFY(restored.outputSceneRoot.isEmpty());
+    QVERIFY(restored.resultSceneId.isEmpty());
+  }
 }
 
 void ProcessSupervisorTests::acceptedLaunchPrecedesStartedAndBusyRejectionIsNotReported() {

@@ -17,6 +17,8 @@ struct ActiveTrainingJob {
   // A safely paused/recovered preview is already part of the project. Do not
   // replace a subsequently selected model every time that project is opened.
   bool previewRecovered = false;
+  // Stable across pause/resume, unrelated to the selected reference model.
+  QString resultSceneId;
 
   [[nodiscard]] bool isValid() const {
     return !configurationPath.isEmpty() && !outputSceneRoot.isEmpty();
@@ -36,5 +38,10 @@ loadActiveTrainingJob(const QString &projectRoot,
                       QString *errorMessage = nullptr);
 bool clearActiveTrainingJob(const QString &projectRoot,
                             QString *errorMessage = nullptr);
+// A launch that never reached taskStarted must not replace an earlier resume
+// record. Use the same rollback for immediate rejection and OS launch failure.
+bool restoreActiveTrainingJobAfterLaunchFailure(
+    const QString &projectRoot, const ActiveTrainingJob &previous,
+    QString *errorMessage = nullptr);
 
 } // namespace gsw

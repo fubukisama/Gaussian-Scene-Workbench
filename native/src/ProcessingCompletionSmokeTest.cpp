@@ -17,13 +17,19 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
+#include <cstdio>
 #include <functional>
 
 namespace gsw {
 bool runProcessingCompletionSmokeTest(MainWindow &window) {
   bool passed = true;
   const auto check = [&](bool ok, const char *message) {
-    if (!ok) { passed = false; qCritical() << "Processing completion FAIL:" << message; }
+    if (!ok) {
+      passed = false;
+      std::fprintf(stderr, "Processing completion FAIL: %s\n", message);
+      std::fflush(stderr);
+      qCritical() << "Processing completion FAIL:" << message;
+    }
     return ok;
   };
   const auto wait = [](const std::function<bool()> &predicate) {
