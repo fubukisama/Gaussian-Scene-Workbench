@@ -5699,10 +5699,14 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
 
 void NativeViewport::orbitCamera(const QPoint &delta) {
   mViewSnapAnimation->stop();
+  // Editing and the navigation gizmo must follow the current screen axes,
+  // just like locked observation. World yaw/pitch reverses drags after a
+  // rolled/upside-down view and collapses horizontal orbit at the poles.
   const OrbitAngles angles =
-      orbitAnglesAfterLeftDrag({mYawDegrees, mPitchDegrees}, delta);
+      orbitAnglesAfterScreenDrag(viewOrbitAngles(), QPointF(delta));
   mYawDegrees = angles.yawDegrees;
   mPitchDegrees = angles.pitchDegrees;
+  mRollDegrees = angles.rollDegrees;
 }
 
 void NativeViewport::panCamera(const QPoint &delta) {

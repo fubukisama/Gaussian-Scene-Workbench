@@ -118,6 +118,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TextureTextSmokeTest.h
   src/ObservationNavigationSmokeTest.cpp
   src/ObservationNavigationSmokeTest.h
+  src/EditNavigationSmokeTest.cpp
+  src/EditNavigationSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
   src/ProcessingPreviewSmokeTest.h
   src/TrainingIsolationSmokeTest.cpp
@@ -640,6 +642,14 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  foreach(GSW_NAVIGATION_LANGUAGE zh_CN en_US ja_JP)
+    add_test(NAME native_edit_navigation_${GSW_NAVIGATION_LANGUAGE}
+      COMMAND GaussianSceneWorkbench --smoke-test-edit-navigation --language ${GSW_NAVIGATION_LANGUAGE})
+    set_tests_properties(native_edit_navigation_${GSW_NAVIGATION_LANGUAGE} PROPERTIES
+      TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
   add_test(NAME native_training_isolation COMMAND GaussianSceneWorkbench --smoke-test-training-isolation)
   set_tests_properties(native_training_isolation PROPERTIES TIMEOUT 60

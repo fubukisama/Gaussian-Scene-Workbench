@@ -9,6 +9,7 @@
 #include "MeshRenderingSmokeTest.h"
 #include "TextureTextSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
+#include "EditNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
 #include "TrainingPreflightSmokeTest.h"
@@ -310,6 +311,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption observationNavigationOption(QStringLiteral("smoke-test-observation-navigation"),
       QStringLiteral("Verify navigation outside the observation trackball."));
   parser.addOption(observationNavigationOption);
+  QCommandLineOption editNavigationOption(QStringLiteral("smoke-test-edit-navigation"),
+      QStringLiteral("Verify editing view navigation follows screen directions without changing models."));
+  parser.addOption(editNavigationOption);
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
@@ -390,6 +394,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(trainingIsolationOption) ||
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
+                         parser.isSet(editNavigationOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
@@ -562,6 +567,12 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(editNavigationOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runEditNavigationSmokeTest(*viewport);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(observationNavigationOption)) {

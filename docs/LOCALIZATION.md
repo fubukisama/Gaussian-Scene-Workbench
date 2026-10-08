@@ -259,6 +259,12 @@ Observation navigation uses the familiar [Metashape Model-view navigation contro
 
 `--smoke-test-observation-navigation` drives real viewport mouse events against a disposable point fixture; optional `--smoke-scene` accepts a read-only real model. It covers radial drags outside the sphere, boundary crossing, hidden-sphere navigation, modifier transitions, pan/zoom, projection retention and unchanged model data. The matching CTest is `native_observation_navigation`.
 
+Editing-view orbit, temporary Ctrl+left orbit in trim tools, and the corner navigation rotation control use the same camera-local screen directions as locked observation. Rolled, upside-down and pole views do not reverse or swap pointer directions when editing is unlocked. Existing pan/zoom bindings and object transform tools are unchanged; navigation changes only the camera. This shared viewport behavior applies to point clouds, 3DGS/2DGS previews and meshes. `--smoke-test-edit-navigation` checks real viewport input and displayed motion with disposable fixtures in the three UI languages.
+
+中文：编辑模式下的视角旋转、裁剪工具中的 Ctrl+左键临时旋转以及角落导航旋转控件，均与锁定观察模式使用相同的屏幕方向。侧转、倒置或越过极点后，解锁编辑不会让上下左右反向或串方向。原有平移／缩放快捷键和模型变换工具保持不变，导航只改变相机；点云、3DGS／2DGS 预览和网格共用此逻辑。
+
+日本語：編集モードの視点回転、トリミング中の Ctrl+左ドラッグによる一時的な回転、隅のナビゲーション回転操作は、編集ロック時と同じ画面方向を使用します。視点が傾いた状態、上下逆の状態、極点を越えた状態でも、編集ロック解除後に上下左右が反転したり入れ替わったりしません。パン／ズームの既存操作とモデルのトランスフォームは変更せず、ナビゲーションはカメラだけを動かします。点群、3DGS／2DGS プレビュー、メッシュで共通の動作です。
+
 Terminology references: [CloudCompare official translations](https://github.com/CloudCompare/CloudCompare/tree/master/qCC/translations), [Agisoft official manuals](https://www.agisoft.com/downloads/user-manuals/), and [Blender Japanese manual](https://docs.blender.org/manual/ja/latest/). Application messages are original translations, not wholesale copies of another application's language library. Loading follows the official [QTranslator documentation](https://doc.qt.io/qt-6/qtranslator.html). Qt base catalogs remain upstream Qt assets; see `THIRD_PARTY_LICENSES.md`.
 
 ## Paged mesh preview
