@@ -81,6 +81,7 @@ TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
                  process.exitCode() == 0;
   result.policyBlocked = report.value(QStringLiteral("policyBlocked")).toBool(false);
   result.hasReconstruction = report.value(QStringLiteral("hasReconstruction")).toBool(false);
+  result.colmapRequired = report.value(QStringLiteral("colmapRequired")).toBool(false);
   result.imageCount = report.value(QStringLiteral("imageCount")).toInt(0);
   result.python = QDir::toNativeSeparators(
       report.value(QStringLiteral("python")).toString(result.python));
@@ -94,6 +95,15 @@ TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
   }
   if (!result.ready) {
     QString detail = report.value(QStringLiteral("error")).toString().trimmed();
+    if (report.value(QStringLiteral("sourceBlocked")).toBool()) {
+      const QString decision = report.value(QStringLiteral("reconstructionSummary")).toObject()
+          .value(QStringLiteral("decision")).toString();
+      detail = decision == QStringLiteral("invalid_cache")
+          ? QCoreApplication::translate("Workbench", "对齐缓存不可训练：后端会拒绝复用；请勾选重跑 COLMAP。")
+          : decision == QStringLiteral("no_images")
+          ? QCoreApplication::translate("Workbench", "无可用图像：不能开始训练。")
+          : QCoreApplication::translate("Workbench", "相机数据不可读取或不受训练器支持：不能直接复用；请勾选重跑 COLMAP。");
+    }
     if (detail.isEmpty()) {
       detail = QString::fromUtf8(standardError).trimmed();
     }

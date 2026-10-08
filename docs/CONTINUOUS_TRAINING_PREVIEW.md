@@ -125,3 +125,33 @@ validated project job store, with the process input channel as a secondary path.
 It rejects ambiguous jobs, mismatched sessions, traversal and linked job paths.
 This makes a successful UI pause request independent of stdin delivery; it still
 waits for the optimizer boundary and does not force termination.
+
+## Independent preview pause / 独立暂停预览 / 独立したプレビューの一時停止 (2026-10-08)
+
+中文：“视图 → 暂停预览”与工具栏同名按钮只冻结任务画面，不发送暂停、取消或停止命令；训练、增密、网格及纹理任务继续运行，阶段和进度文字仍更新。这不同于“暂停训练”：后者保存完整优化器状态并退出训练进程。仍可通过“任务预览”切回原场景，原模型、变换和两层各自的视角保持不变。
+
+暂停后保留当前任务画面的 CPU 图像，不再启动新的完整 PLY 解析、任务几何上传或共享 GPU 帧读取；已有异步读取的迟到结果被丢弃。共享 GPU 消费端在成功保存画面后释放，不以长期占用共享槽位维持冻结。暂停期间只记住最新可用的候选快照或共享 GPU 描述，不累积逐帧队列。恢复时读取最新可用的真实画面，读取失败或路径失效不应清空上一画面。冻结的是任务图像，不能把它当作可自由重新绘制的三维几何缓存。
+
+新任务和显式工程上下文切换重置预览暂停。经校验的最终成果关联不被观察暂停阻挡；任务结束后仍保留的只读观察可以解除暂停查看最新可用快照。最终结果、导出与完整状态检查点不使用冻结图像或限量观察 PLY 代替源数据。
+
+English: **View → Pause Preview** and the matching toolbar action freeze only the task picture. They send no pause, cancel or stop command: optimization, densification, meshing and texturing continue, while stage/progress labels remain live. **Pause Training** is different: it saves full optimizer state and exits the training process. **Task Preview** can still switch to reference models without changing their transforms or either layer's saved camera view.
+
+The frozen task picture is retained as a CPU image. New full PLY parsing, task-geometry uploads and shared-GPU frame reads stop; late results from already-running asynchronous reads are discarded. A shared-GPU consumer is released after successful picture capture rather than holding a producer slot indefinitely. Only the newest available snapshot/GPU descriptor is retained, not a frame queue. Unpausing loads the latest available real frame and keeps the previous picture if a read fails or the path has expired. A frozen image is not a freely navigable 3D geometry cache.
+
+A new task or explicit project-context change resets preview pause. Validated final-result association is not blocked by observation pause; a retained read-only terminal observation can still be unpaused to obtain the latest available snapshot. Frozen pictures and bounded observation PLYs never substitute for final source data, exports or full-state checkpoints.
+
+日本語：「ビュー → プレビューを一時停止」と同名のツールバーボタンはタスクの表示のみを止めます。一時停止・取消・停止の命令は送らず、最適化、高密度化、メッシュ生成、テクスチャ処理は継続し、段階と進捗の表示も更新します。「学習を一時停止」は完全な最適化器状態を保存して学習プロセスを終了する別操作です。「タスクプレビュー」で元のシーンへ切り替えても、元モデルの変換と各レイヤーの視点を保持します。
+
+停止中の表示は CPU 画像として保持します。新しい完全な PLY 解析、タスク形状の GPU 転送、共有 GPU フレームの読み取りは行わず、開始済みの非同期読み込みから遅れて届く結果は破棄します。画像の保存に成功した後は共有 GPU の消費側を解放し、停止画面のために共有スロットを占有し続けません。最新の使用可能なスナップショットまたは GPU 記述のみを保持し、フレームを蓄積しません。再開時は最新の実際の表示を読み込み、失敗や無効なパスで直前の画像を消去しません。固定した画像は、自由に再描画できる三次元形状キャッシュではありません。
+
+新規タスクと明示的なプロジェクト切り替えではプレビュー停止を解除します。検証済みの最終成果の関連付けは表示停止で妨げません。終了後に残った読み取り専用の観察も再開し、最新の使用可能なスナップショットを表示できます。固定画像や上限付きの観察 PLY を、最終ソース、エクスポート、完全な状態のチェックポイントの代用にはしません。
+
+Acceptance boundaries use the real `pausePreviewAction` and framebuffer: freeze
+the displayed geometry while stage iteration advances, coalesce multiple incoming
+snapshots, resume the latest valid one, retain reference IDs/transforms/cameras,
+reset on project-context clear and switch all three languages without rebuilding
+the scene. The CTest is `native_training_isolation`. These bounded desktop
+fixtures do not establish real-data CUDA throughput or exact 2DGS surfel fidelity.
+Experiment persistence and launch-source provenance are documented in
+[TRAINING_RESUME.md](TRAINING_RESUME.md) and
+[GENERATION_PIPELINES.md](GENERATION_PIPELINES.md).

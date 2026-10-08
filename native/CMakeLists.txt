@@ -87,6 +87,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/LanguageSmokeTest.h
   src/ProcessingCompletionSmokeTest.cpp
   src/ProcessingCompletionSmokeTest.h
+  src/TrainingPreflightSmokeTest.cpp
+  src/TrainingPreflightSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -189,6 +191,14 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingTelemetry.cpp
   src/TrainingTelemetry.h
   src/TrainingOutputLocator.cpp
+  src/GenerationHistoryStore.cpp
+  src/GenerationHistoryStore.h
+  src/GenerationHistoryDialog.cpp
+  src/GenerationHistoryDialog.h
+  src/GenerationHistorySmokeTest.cpp
+  src/GenerationHistorySmokeTest.h
+  src/TrainingReconstructionSummary.cpp
+  src/TrainingReconstructionSummary.h
   src/TrainingOutputLocator.h
   src/TrainingPauseController.cpp
   src/TrainingPauseController.h
@@ -402,6 +412,16 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
+  add_test(NAME native_generation_history COMMAND GaussianSceneWorkbench --smoke-test-generation-history)
+  set_tests_properties(native_generation_history PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  set_tests_properties(native_training_preflight PROPERTIES
+    TIMEOUT 40
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_PREFLIGHT_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(
     NAME native_application_launch
     COMMAND GaussianSceneWorkbench --smoke-test
@@ -706,6 +726,24 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+
+  qt_add_executable(gsw_generation_history_tests
+      tests/GenerationHistoryStoreTests.cpp
+      src/GenerationHistoryStore.cpp
+      src/GenerationHistoryStore.h
+      src/TrainingOutputLocator.cpp
+    src/TrainingOutputLocator.h
+    src/WorkspaceDocument.cpp
+    src/WorkspaceDocument.h
+    )
+    target_include_directories(gsw_generation_history_tests PRIVATE src)
+  target_link_libraries(gsw_generation_history_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_generation_history_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME generation_history COMMAND gsw_generation_history_tests)
+    set_tests_properties(generation_history PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_task_record_tests
       tests/TaskRecordTests.cpp

@@ -90,6 +90,8 @@ public:
   void clearProcessingPreview();
   void setPreviewScene(const QString &path, qint64 count);
   void setProcessingPreviewVisible(bool visible);
+  void setProcessingPreviewPaused(bool paused);
+  [[nodiscard]] bool processingPreviewPaused() const { return mProcessingPreviewPaused; }
   [[nodiscard]] bool processingPreviewVisible() const { return mProcessingPreviewVisible; }
   [[nodiscard]] bool hasProcessingPreview() const { return mProcessingScene && mProcessingHasFrame; }
   [[nodiscard]] QString processingPreviewLabel() const;
@@ -224,6 +226,7 @@ public:
 
 signals:
   void processingPreviewChanged();
+  void processingPreviewPausedChanged(bool paused);
   void resourceBudgetStatusChanged();
   void sceneSelectionChanged(const QStringList &ids, const QString &activeId);
   void sceneTransformsCommitted(const QList<SceneObject> &objects);
@@ -574,6 +577,12 @@ private:
   QSet<QString> mProcessingReferenceSelection;
   bool mProcessingReferenceSelected = false;
   bool mProcessingPreviewVisible = false;
+  bool mProcessingPreviewPaused = false;
+  QImage mProcessingPausedImage;
+  bool mProcessingPreviewResumePending = false;
+  QString mPausedPreviewCandidatePath;
+  qint64 mPausedPreviewCandidateCount = 0;
+  std::optional<TrainingGpuPreviewDescriptor> mLatestTrainingGpuPreviewDescriptor;
   [[nodiscard]] QList<std::shared_ptr<SceneState>> displayedSceneStates() const;
   [[nodiscard]] bool trainingGpuPreviewForScene() const;
   [[nodiscard]] StoredCameraView currentProcessingView() const;

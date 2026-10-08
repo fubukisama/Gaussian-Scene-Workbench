@@ -223,6 +223,83 @@ bool runTrainingIsolationSmokeTest(NativeViewport &viewport) {
   if (!check(presentedFrames > 0, "the visible task continues presenting real completed frames")) return false;
   if (!check(presentedFrames <= 45,
              "training observation is capped near 30 FPS instead of competing at unlimited refresh")) return false;
+  const QString intermediatePreview = writePoints(directory, QStringLiteral("task-preview-intermediate"), 35);
+  const QString latestPreview = writePoints(directory, QStringLiteral("task-preview-latest"), 40);
+  auto *pausePreviewAction = viewport.window()->findChild<QAction *>(QStringLiteral("pausePreviewAction"));
+  if (!check(pausePreviewAction && pausePreviewAction->isEnabled() &&
+             pausePreviewAction->isCheckable() && !pausePreviewAction->isChecked(),
+             "the real pause-preview action is available independently of training pause")) return false;
+  const QImage beforePausedFrame = viewport.grabFramebuffer();
+  QVector<QPoint> taskPixels;
+  for (int y = beforePausedFrame.height() / 4; y < beforePausedFrame.height() * 3 / 4; ++y) {
+    for (int x = beforePausedFrame.width() / 4; x < beforePausedFrame.width() * 3 / 4; ++x) {
+      const QRgb pixel = beforePausedFrame.pixel(x, y);
+      if (qRed(pixel) > 120 && qBlue(pixel) > 100 && qGreen(pixel) < 100 &&
+          qRed(pixel) - qGreen(pixel) > 60 && qBlue(pixel) - qGreen(pixel) > 40)
+        taskPixels.append({x, y});
+    }
+  }
+  if (!check(!taskPixels.isEmpty(), "the task fixture has real visible geometry before preview pause")) return false;
+  const auto pausedTarget = viewport.viewTarget();
+  const auto pausedDistance = viewport.viewDistance();
+  const auto pausedAngles = viewport.viewOrbitAngles();
+  int pausedReads = 0;
+  const auto pausedReadConnection = QObject::connect(&viewport, &NativeViewport::sceneLoadStarted,
+      &viewport, [&](const QString &) { ++pausedReads; });
+  pausePreviewAction->trigger();
+  QSet<QString> pausedActionLabels;
+  QSet<QString> pausedActionTooltips;
+  QSet<QString> pausedOverlayLabels;
+  for (const auto &language : AppLanguage::supported()) {
+    AppLanguage::apply(language, false);
+    pausedActionLabels.insert(pausePreviewAction->text());
+    pausedActionTooltips.insert(pausePreviewAction->toolTip());
+    pausedOverlayLabels.insert(viewport.processingPreviewDetail());
+    if (!check(pausePreviewAction->isChecked() && viewport.processingPreviewPaused() &&
+               pausePreviewAction->text() == QCoreApplication::translate("Workbench", "暂停预览") &&
+               viewport.scenePath() == preview && viewport.sceneObjectCount() == 2 &&
+               viewport.viewTarget() == pausedTarget && viewport.viewDistance() == pausedDistance &&
+               viewport.viewOrbitAngles() == pausedAngles,
+               "live language changes refresh the real pause action without resuming observation or changing its camera")) return false;
+  }
+  if (!check(pausedActionLabels.size() == 3 && pausedActionTooltips.size() == 3 &&
+             pausedOverlayLabels.size() == 3,
+             "pause-preview captions, help and status are localized in all three languages")) return false;
+  AppLanguage::apply(initialLanguage, false);
+  viewport.setPreviewScene(intermediatePreview, 35);
+  viewport.setProcessingStage(QStringLiteral("train"), 2, 30000, 0);
+  viewport.setPreviewScene(latestPreview, 40);
+  viewport.setPreviewScene(directory.filePath(QStringLiteral("expired-preview.ply")), 50);
+  QEventLoop pausedWindow;
+  QTimer::singleShot(180, &pausedWindow, &QEventLoop::quit);
+  pausedWindow.exec();
+  const QImage pausedFrame = viewport.grabFramebuffer();
+  int retainedTaskPixels = 0;
+  if (pausedFrame.size() == beforePausedFrame.size()) {
+    for (const QPoint &point : taskPixels) {
+      const QRgb before = beforePausedFrame.pixel(point);
+      const QRgb paused = pausedFrame.pixel(point);
+      if (std::abs(qRed(before) - qRed(paused)) <= 25 &&
+          std::abs(qGreen(before) - qGreen(paused)) <= 25 &&
+          std::abs(qBlue(before) - qBlue(paused)) <= 25) ++retainedTaskPixels;
+    }
+  }
+  QObject::disconnect(pausedReadConnection);
+  if (!check(pausePreviewAction->isChecked() && viewport.processingPreviewPaused() && pausedReads == 0 &&
+             viewport.scenePath() == preview && viewport.renderedPointCount() == 30 &&
+             retainedTaskPixels * 10 >= taskPixels.size() * 9 &&
+             viewport.processingPreviewLabel().contains(QStringLiteral("2 / 30000")) &&
+             viewport.viewTarget() == pausedTarget && viewport.viewDistance() == pausedDistance &&
+             viewport.viewOrbitAngles() == pausedAngles,
+             "pausing preview freezes the real task geometry without parsing newer snapshots or stopping training progress")) return false;
+  pausePreviewAction->trigger();
+  if (!check(waitFor([&] {
+        viewport.grabFramebuffer();
+        return !pausePreviewAction->isChecked() && !viewport.processingPreviewPaused() && viewport.scenePath() == latestPreview &&
+            viewport.renderedPointCount() == 40;
+      }) && viewport.viewTarget() == pausedTarget && viewport.viewDistance() == pausedDistance &&
+          viewport.viewOrbitAngles() == pausedAngles && viewport.sceneObjectCount() == 2,
+             "resuming observation skips superseded and expired candidates and shows the latest real frame with the same camera")) return false;
   viewport.finishProcessingPreview(false, true);
   if (!check(waitFor([&] {
         viewport.grabFramebuffer();
@@ -235,22 +312,25 @@ bool runTrainingIsolationSmokeTest(NativeViewport &viewport) {
   previewAction->trigger();
   if (!check(waitFor([&] {
         viewport.grabFramebuffer();
-        return previewAction->isChecked() && viewport.scenePath() == preview &&
-            viewport.renderedPointCount() == 30 && !viewport.hasEditableScene();
+        return previewAction->isChecked() && viewport.scenePath() == latestPreview &&
+            viewport.renderedPointCount() == 40 && !viewport.hasEditableScene();
       }), "a completed task observation remains available from the real action")) return false;
   const auto terminalPreviewTarget = viewport.viewTarget();
   const auto terminalPreviewDistance = viewport.viewDistance();
   const auto terminalPreviewAngles = viewport.viewOrbitAngles();
   viewport.setSceneObjects({first, second}, first.id);
-  if (!check(viewport.scenePath() == preview && viewport.processingPreviewVisible() &&
+  if (!check(viewport.scenePath() == latestPreview && viewport.processingPreviewVisible() &&
              previewAction->isChecked() && viewport.sceneObjectCount() == 2 &&
              viewport.activeSceneId() == first.id && !viewport.hasEditableScene() &&
              viewport.viewTarget() == terminalPreviewTarget &&
              viewport.viewDistance() == terminalPreviewDistance &&
              viewport.viewOrbitAngles() == terminalPreviewAngles,
              "synchronizing the unchanged project cannot interrupt a manually selected terminal preview")) return false;
+  viewport.setProcessingPreviewPaused(true);
   viewport.clearProcessingPreview();
   if (!check(!viewport.hasProcessingPreview() && !viewport.processingPreviewVisible() &&
+             !viewport.processingPreviewPaused() &&
+             !pausePreviewAction->isEnabled() && !pausePreviewAction->isChecked() &&
              !previewAction->isEnabled() && !previewAction->isChecked() &&
              viewport.processingPreviewLabel().isEmpty() && viewport.processingPreviewDetail().isEmpty(),
              "an explicit project-context reset clears only the transient task view and its user action")) return false;

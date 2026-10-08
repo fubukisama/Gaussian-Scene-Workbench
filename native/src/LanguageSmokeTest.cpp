@@ -255,7 +255,9 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
     QDir().mkpath(QFileInfo(path).absolutePath()); QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
   };
-  const QString project = root.filePath(QStringLiteral("project"));
+  // Match the saved document's managed root. Save As relocation has separate
+  // coverage; this test observes the safe-pause archive in one stable project.
+  const QString project = root.filePath(QStringLiteral("paused.files"));
   QString createError;
   if (!QDir().mkpath(project) || !window.mWorkspace.create(project, &createError)) {
     qCritical() << "Training resume: create isolated project:" << createError;
@@ -267,11 +269,18 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
   }
   const QString output = QDir(project).filePath(QStringLiteral("output/test"));
   const QString config = QDir(project).filePath(QStringLiteral(".gsw/jobs/test.json"));
-  check(write(config, QJsonDocument(QJsonObject{{"nativeCheckpoint", true}, {"backend", backend}}).toJson()), "write task config");
+  const QString dataset = QDir(project).filePath(QStringLiteral("datasets/test"));
+  check(QDir().mkpath(dataset) && window.mWorkspace.setDatasetPath(dataset), "associate test-owned dataset");
+  const QJsonObject configuration{{"nativeCheckpoint", true}, {"backend", backend},
+      {"projectRoot", project}, {"datasetPath", dataset},
+      {"outputRoot", QDir(project).filePath(QStringLiteral("output"))}, {"outputScene", "test"},
+      {"outputDisplayName", "fixture"}, {"trainOptions", QJsonObject{{"iterations", 10}}}};
+  check(write(config, QJsonDocument(configuration).toJson()), "write task config");
   check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/state-0123456789abcdef0123456789abcdef.pth")), "fixture"), "write checkpoint fixture");
   check(write(QDir(output).filePath(QStringLiteral(".gsw-resume/ready.json")),
       QJsonDocument(QJsonObject{{"version", 1}, {"iteration", 3}, {"total", 10}, {"backend", backend},
-          {"file", "state-0123456789abcdef0123456789abcdef.pth"}}).toJson()), "write checkpoint manifest");
+          {"file", "state-0123456789abcdef0123456789abcdef.pth"},
+          {"sha256", QString(64, QLatin1Char('a'))}, {"identity", QString(64, QLatin1Char('b'))}}).toJson()), "write checkpoint manifest");
   QByteArray preview(
       "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
       "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
@@ -284,10 +293,20 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
     preview.replace("-3 -3 -3", "-3 -3");
   }
   check(write(QDir(output).filePath(QStringLiteral("point_cloud/iteration_3/point_cloud.ply")), preview), "write complete preview");
-  check(saveActiveTrainingJob(project, {config, output}), "save active task");
+  const QString experimentId = QStringLiteral("history-paused-") + backend;
+  GenerationExperiment experiment;
+  experiment.id = experimentId; experiment.pipeline = QStringLiteral("training");
+  experiment.backend = backend; experiment.displayName = QStringLiteral("fixture");
+  experiment.datasetPath = dataset; experiment.configurationPath = config;
+  experiment.outputRoot = output; experiment.resultSceneId = experimentId;
+  experiment.status = QStringLiteral("queued"); experiment.parameters = configuration;
+  GenerationHistoryStore archive(project);
+  check(archive.upsert(experiment), "retain independent experiment before launch");
+  check(saveActiveTrainingJob(project, {config, output, false, experimentId}), "save active task");
   const QString helper = qEnvironmentVariable("GSW_PROCESS_OUTPUT_FIXTURE",
       QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("gsw_process_output_fixture.exe")));
-  window.mPendingTraining = MainWindow::PendingTraining{QStringLiteral("fixture"), project, {}, output, backend, 10};
+  window.mPendingTraining = MainWindow::PendingTraining{QStringLiteral("fixture"), project, dataset, output, backend, 10, experimentId};
+  window.mPendingTraining->historyId = experimentId;
   check(window.mProcessSupervisor.start(QStringLiteral("fixture"), helper, {QStringLiteral("pause-worker")}, {}, {}, true), "start owned worker");
   WorkerStatus status; status.state = QStringLiteral("running"); status.stage = QStringLiteral("colmap");
   emit window.mProcessSupervisor.workerStatusReady(status);
@@ -301,6 +320,13 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
   check(!window.mProcessSupervisor.wasStopRequested(), "pause never cancels");
   check(window.mResumeTrainingAction->isEnabled(), "resume available after pause");
   check(loadActiveTrainingJob(project).isValid(), "durable resume pointer retained");
+  const auto pausedExperiment = archive.record(experimentId);
+  check(pausedExperiment.status == QStringLiteral("paused"),
+      "safe pause retains paused experiment status");
+  check(pausedExperiment.resultPath == window.mWorkspace.scenePath(),
+      "safe pause retains its own result path");
+  check(archive.resumeAvailability(experimentId).available,
+      "safe pause retains full-state metadata availability");
   check(!window.mWorkspace.scenePath().isEmpty(), "paused preview associated with project");
   check(waitUntil([&] { return window.mViewport->selectableModelAvailable() && window.mViewport->hasEditableScene(); }),
         "paused full checkpoint restores observation and trim eligibility");
@@ -325,9 +351,118 @@ bool runTrainingResumeSmokeTest(MainWindow &window) {
   MainWindow reopened;
   check(reopened.openProjectFile(window.mWorkspace.projectFilePath()), "reopen paused project");
   check(reopened.mResumeTrainingAction->isEnabled() && loadActiveTrainingJob(project).isValid(), "resume survives project reopen");
+  check(GenerationHistoryStore(project).resumeAvailability(experimentId).available,
+      "independent paused experiment survives project reopen without deserializing fixture state");
   check(reopened.mWorkspace.scenePath() == otherModel && reopened.mWorkspace.activeSceneId() == selectedId &&
       reopened.mWorkspace.sceneTranslation() == QVector3D(1, 2, 3) && reopened.mWorkspace.sceneObjects().size() == 2,
       "reopen preserves subsequent model selection and transform");
+
+  // A genuinely interrupted job still needs recovery, but the user may have
+  // replaced its former result object's path without changing that object's
+  // identity. Opening the saved project must append the checkpoint, not take
+  // that now-independent object back for training.
+  const QString interruptedProject = root.filePath(QStringLiteral("interrupted.files"));
+  const QString interruptedFile = root.filePath(QStringLiteral("interrupted.gsw"));
+  const QString interruptedOutput = QDir(interruptedProject).filePath(QStringLiteral("output/interrupted"));
+  const QString interruptedConfig = QDir(interruptedProject).filePath(QStringLiteral(".gsw/jobs/interrupted.json"));
+  const QString interruptedDataset = QDir(interruptedProject).filePath(QStringLiteral("datasets/fixture"));
+  const QString interruptedFinal = QDir(interruptedOutput).filePath(QStringLiteral("point_cloud/iteration_3/point_cloud.ply"));
+  const QString replacement = QDir(interruptedProject).filePath(QStringLiteral("replacement.ply"));
+  const QString interruptedId = QStringLiteral("history-interrupted-") + backend;
+  QJsonObject interruptedParameters = configuration;
+  interruptedParameters.insert(QStringLiteral("projectRoot"), interruptedProject);
+  interruptedParameters.insert(QStringLiteral("datasetPath"), interruptedDataset);
+  interruptedParameters.insert(QStringLiteral("outputRoot"), QDir(interruptedProject).filePath(QStringLiteral("output")));
+  interruptedParameters.insert(QStringLiteral("outputScene"), QStringLiteral("interrupted"));
+  interruptedParameters.insert(QStringLiteral("outputDisplayName"), QStringLiteral("interrupted fixture"));
+  QByteArray replacementBytes = preview;
+  replacementBytes.replace("0 0 0 0 0 0 1", "0 0 0 0.75 0.25 0.5 1");
+  MainWindow beforeInterruption;
+  check(QDir().mkpath(interruptedProject) &&
+      beforeInterruption.mWorkspace.create(interruptedProject, &createError) &&
+      beforeInterruption.mWorkspace.saveManifest(interruptedFile, &createError) &&
+      !beforeInterruption.mWorkspace.hasPendingDataMigration(),
+      "create a separate stable-root interrupted project");
+  check(QDir().mkpath(interruptedDataset) &&
+      beforeInterruption.mWorkspace.setDatasetPath(interruptedDataset, &createError),
+      "associate interrupted project's test-owned dataset");
+  check(write(interruptedConfig, QJsonDocument(interruptedParameters).toJson()) &&
+      write(interruptedFinal, preview) && write(replacement, replacementBytes),
+      "write interrupted checkpoint and distinct replacement model sources");
+  check(write(QDir(interruptedOutput).filePath(QStringLiteral(".gsw-resume/state-0123456789abcdef0123456789abcdef.pth")), "fixture") &&
+      write(QDir(interruptedOutput).filePath(QStringLiteral(".gsw-resume/ready.json")),
+          QJsonDocument(QJsonObject{{"version", 1}, {"iteration", 3}, {"total", 10}, {"backend", backend},
+              {"file", "state-0123456789abcdef0123456789abcdef.pth"},
+              {"sha256", QString(64, QLatin1Char('a'))}, {"identity", QString(64, QLatin1Char('b'))}}).toJson()),
+      "write interrupted full-state metadata without deserializing optimizer data");
+  GenerationExperiment interruptedExperiment;
+  interruptedExperiment.id = interruptedId;
+  interruptedExperiment.pipeline = QStringLiteral("training");
+  interruptedExperiment.backend = backend;
+  interruptedExperiment.displayName = QStringLiteral("interrupted fixture");
+  interruptedExperiment.datasetPath = interruptedDataset;
+  interruptedExperiment.configurationPath = interruptedConfig;
+  interruptedExperiment.outputRoot = interruptedOutput;
+  interruptedExperiment.resultSceneId = interruptedId;
+  interruptedExperiment.resultPath = interruptedFinal;
+  interruptedExperiment.status = QStringLiteral("interrupted");
+  interruptedExperiment.parameters = interruptedParameters;
+  check(GenerationHistoryStore(interruptedProject).upsert(interruptedExperiment, &createError) &&
+      beforeInterruption.mWorkspace.publishGeneratedScene(interruptedFinal, interruptedId, &createError),
+      "retain interrupted experiment and its original result object identity");
+  const QVector3D replacementTranslation(2.0F, 3.0F, 4.0F);
+  const QQuaternion replacementRotation = QQuaternion::fromEulerAngles(15.0F, 25.0F, 35.0F);
+  const QVector3D replacementScale(2.0F, 3.0F, 4.0F);
+  check(beforeInterruption.mWorkspace.setScenePath(replacement, &createError) &&
+      beforeInterruption.mWorkspace.activeSceneId() == interruptedId &&
+      beforeInterruption.mWorkspace.setSceneTransform(replacementTranslation, replacementRotation,
+          replacementScale, &createError) && beforeInterruption.saveProject(),
+      "save a replacement model with the old result ID and independent nonzero transform");
+  check(saveActiveTrainingJob(interruptedProject,
+      {interruptedConfig, interruptedOutput, false, interruptedId}, &createError),
+      "mark the separate experiment genuinely interrupted, not already recovered");
+  MainWindow recoveredInterruption;
+  int trainingLaunches = 0;
+  const auto recoveryLaunch = QObject::connect(&recoveredInterruption.mProcessSupervisor,
+      &ProcessSupervisor::taskLaunchRequested, &recoveredInterruption,
+      [&](const QString &, const QString &) { ++trainingLaunches; });
+  check(recoveredInterruption.openProjectFile(interruptedFile),
+      "open the genuinely interrupted project through the public controller");
+  QObject::disconnect(recoveryLaunch);
+  check(trainingLaunches == 0 && !recoveredInterruption.mProcessSupervisor.isRunning(),
+      "automatic checkpoint recovery never starts a training worker");
+  bool replacementRetained = false;
+  for (const auto &object : recoveredInterruption.mWorkspace.sceneObjects()) {
+    if (object.id == interruptedId) {
+      replacementRetained = object.path == replacement &&
+          (object.translation - replacementTranslation).length() < 1.0e-4F &&
+          std::abs(QQuaternion::dotProduct(object.rotation, replacementRotation)) > 0.999999F &&
+          (object.scale - replacementScale).length() < 1.0e-4F;
+    }
+  }
+  check(replacementRetained,
+      "interruption recovery preserves the replaced object's ID, path and translation/rotation/scale");
+  const auto recoveredMarker = loadActiveTrainingJob(interruptedProject);
+  const QString recoveredId = recoveredInterruption.mWorkspace.activeSceneId();
+  const QString recoveredPath = recoveredInterruption.mWorkspace.scenePath();
+  check(recoveredInterruption.mWorkspace.sceneObjects().size() == 2 && recoveredId != interruptedId &&
+      recoveredPath != replacement && recoveredPath.contains(QStringLiteral("/.gsw/checkpoints/training/")),
+      "interruption recovery appends the latest protected checkpoint as a new result object");
+  check(recoveredMarker.isValid() && recoveredMarker.previewRecovered &&
+      recoveredMarker.resultSceneId == recoveredId && recoveredMarker.resultSceneId != interruptedId,
+      "interruption recovery rebinds its active marker to the new result object");
+  const auto reboundExperiment = GenerationHistoryStore(interruptedProject).record(interruptedId);
+  check(reboundExperiment.resultSceneId == recoveredId && reboundExperiment.resultPath == recoveredPath &&
+      GenerationHistoryStore(interruptedProject).records().size() == 1 &&
+      reboundExperiment.parameters == interruptedParameters,
+      "interruption recovery rebinds the existing experiment's result without duplicating or changing its parameters");
+  QFile replacementSource(replacement);
+  QFile checkpointSource(interruptedFinal);
+  QFile recoveredSource(recoveredPath);
+  check(replacementSource.open(QIODevice::ReadOnly) && replacementSource.readAll() == replacementBytes &&
+      checkpointSource.open(QIODevice::ReadOnly) && checkpointSource.readAll() == preview &&
+      recoveredSource.open(QIODevice::ReadOnly) && recoveredSource.readAll() == preview,
+      "interruption recovery preserves both source files and publishes the actual checkpoint bytes");
   qInfo() << "Training resume desktop smoke:" << (passed ? "PASS" : "FAIL");
   return passed;
 }

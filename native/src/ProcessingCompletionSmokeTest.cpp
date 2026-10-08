@@ -121,9 +121,27 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
             "{\"registeredImages\":9,\"inputImages\":9}"), "write quality report fixture");
       }
       const QString task = kind + "-completion";
-      if (training) window.mPendingTraining = MainWindow::PendingTraining{task, project, {}, output, kind, 2};
+      GenerationExperiment experiment;
+      experiment.id = QStringLiteral("history-") + name;
+      experiment.pipeline = training ? QStringLiteral("training") : QStringLiteral("mesh");
+      experiment.backend = kind;
+      experiment.displayName = name;
+      experiment.datasetPath = window.mWorkspace.datasetPath();
+      experiment.configurationPath = QDir(project).filePath(QStringLiteral(".gsw/jobs/completion.json"));
+      experiment.outputRoot = output;
+      experiment.resultSceneId = training ? experiment.id : QString();
+      experiment.status = QStringLiteral("queued");
+      experiment.parameters = {{QStringLiteral("backend"), kind},
+          {QStringLiteral("trainOptions"), QJsonObject{{QStringLiteral("iterations"), 2}}}};
+      if (!check(write(experiment.configurationPath, QJsonDocument(experiment.parameters).toJson()) &&
+          GenerationHistoryStore(project).upsert(experiment, &error), "retain independent generation parameters before launch")) return false;
+      if (training) {
+        window.mPendingTraining = MainWindow::PendingTraining{task, project, window.mWorkspace.datasetPath(), output, kind, 2, experiment.resultSceneId};
+        window.mPendingTraining->historyId = experiment.id;
+      }
       else {
         window.mPendingMesh = MainWindow::PendingMesh{task, project, output, {}};
+        window.mPendingMesh->historyId = experiment.id;
         check(write(QDir(output).filePath("result.json"), QJsonDocument(QJsonObject{
           {"version", 1}, {"task", "mesh"}, {"state", "done"}, {"meshPath", final},
           {"completedStages", QJsonArray{QStringLiteral("mesh")}}}).toJson()), "write valid mesh journal");
@@ -134,6 +152,8 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (!check(window.mProcessSupervisor.start(task, helper,
           {"completion-worker", preview, release, training ? "gaussian" : "mesh"}, {}, {}, true), "start owned worker")) return false;
       if (!check(wait([&] { return window.mViewport->scenePath() == preview; }), "live observation loads")) return false;
+      check(GenerationHistoryStore(project).record(experiment.id).status == QStringLiteral("running"),
+            "the real worker-start signal records this experiment as running");
       if (window.isVisible()) (void)window.mViewport->grabFramebuffer();
       check(!window.mViewport->hasEditableScene(), "live observation stays read-only");
       const auto target = window.mViewport->viewTarget();
@@ -143,6 +163,14 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (!check(wait([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTraining && !window.mPendingMesh; }), "worker finishes")) return false;
       if (!check(wait([&] { return window.mViewport->selectableModelAvailable() &&
           window.mViewport->scenePath() == window.mWorkspace.scenePath(); }), "completion hands final model to inspect tools")) return false;
+      const auto archived = GenerationHistoryStore(project).record(experiment.id);
+      check(archived.status == QStringLiteral("completed") &&
+          archived.resultPath == window.mWorkspace.scenePath() &&
+          archived.resultSceneId == window.mWorkspace.activeSceneId(),
+          "validated completion retains the experiment's own result association and terminal state");
+      check(archived.parameters.value(QStringLiteral("trainOptions")).toObject()
+          .value(QStringLiteral("iterations")).toInt() == 2,
+          "generation completion does not overwrite recorded settings");
       check(training ? window.mWorkspace.scenePath().contains("/.gsw/checkpoints/training/") :
           window.mWorkspace.scenePath() == final, "validated final is associated, not the previous model");
       check(!window.mSelectionToolbar->isHidden() && window.mInspectAction->isEnabled(), "inspect toolbar is restored");
@@ -186,6 +214,120 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       QFile source(final);
       check(source.open(QIODevice::ReadOnly) && source.readAll() == bytes, "generated source file is unchanged by trimming");
       qInfo() << "Processing completion:" << kind << "locked" << locked << (passed ? "PASS" : "FAIL");
+    }
+  }
+  // Distinct output parents may legitimately contain the same storage name.
+  // Complete both through the real controller: a filename-only protected
+  // checkpoint group would silently overwrite the first experiment's model.
+  for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+    const QString project = root.filePath(QStringLiteral("same-name-") + backend + QStringLiteral(".files"));
+    QString error;
+    if (!check(QDir().mkpath(project) && window.mWorkspace.create(project, &error) &&
+        window.mWorkspace.saveManifest(root.filePath(QStringLiteral("same-name-") + backend + QStringLiteral(".gsw")), &error),
+        "create same-basename experiment project")) return false;
+    const QString dataset = QDir(project).filePath(QStringLiteral("dataset"));
+    QImage photo(2, 2, QImage::Format_RGB32); photo.fill(Qt::white);
+    if (!check(QDir().mkpath(QDir(dataset).filePath(QStringLiteral("images"))) &&
+        photo.save(QDir(dataset).filePath(QStringLiteral("images/fixture.png"))) &&
+        window.mWorkspace.setDatasetPath(dataset, &error), "retain the shared controlled dataset")) return false;
+    const QString original = QDir(project).filePath(QStringLiteral("reference.ply"));
+    if (!check(write(original, points) && window.mWorkspace.setScenePath(original, &error),
+        "retain a reference object before independent experiment completion")) return false;
+    const QString originalId = window.mWorkspace.activeSceneId();
+    QByteArray firstBytes = gaussian;
+    if (backend == QStringLiteral("2dgs")) {
+      firstBytes.replace("property float scale_2\n", "");
+      firstBytes.replace("-3 -3 -3", "-3 -3");
+    }
+    QByteArray secondBytes = firstBytes;
+    secondBytes.replace("0 0 0 0 0 0 1", "0 0 0 0.5 0.25 0.75 1");
+    const QByteArray firstCameras("[{\"img_name\":\"first-experiment\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]],\"width\":1920,\"height\":1080,\"fx\":1300,\"fy\":1300}]");
+    QByteArray secondCameras = firstCameras;
+    secondCameras.replace("first-experiment", "second-experiment");
+    QString firstPath;
+    QString firstId;
+    QString firstFinal;
+    const QVector3D firstTranslation(1.0F, 2.0F, 3.0F);
+    for (int number = 0; number < 2; ++number) {
+      const QString output = QDir(project).filePath(
+          QStringLiteral("outputs/%1/same-storage-name").arg(number == 0 ? QStringLiteral("first") : QStringLiteral("second")));
+      const QString final = QDir(output).filePath(QStringLiteral("point_cloud/iteration_2/point_cloud.ply"));
+      const QString preview = QDir(output).filePath(QStringLiteral("live.ply"));
+      const QByteArray &bytes = number == 0 ? firstBytes : secondBytes;
+      const QByteArray &cameras = number == 0 ? firstCameras : secondCameras;
+      if (!check(write(final, bytes) && write(preview, bytes) &&
+          write(QDir(output).filePath(QStringLiteral("cameras.json")), cameras),
+          "write distinct same-basename experiment result sources")) return false;
+      GenerationExperiment experiment;
+      experiment.id = QStringLiteral("same-name-%1-%2").arg(backend).arg(number);
+      experiment.pipeline = QStringLiteral("training");
+      experiment.backend = backend;
+      experiment.displayName = QStringLiteral("same-storage-name");
+      experiment.datasetPath = dataset;
+      experiment.configurationPath = QDir(project).filePath(
+          QStringLiteral(".gsw/jobs/%1.json").arg(experiment.id));
+      experiment.outputRoot = output;
+      experiment.resultSceneId = experiment.id;
+      experiment.status = QStringLiteral("queued");
+      experiment.parameters = {{QStringLiteral("backend"), backend},
+          {QStringLiteral("trainOptions"), QJsonObject{{QStringLiteral("iterations"), 2}}}};
+      if (!check(write(experiment.configurationPath, QJsonDocument(experiment.parameters).toJson()) &&
+          GenerationHistoryStore(project).upsert(experiment, &error),
+          "archive independent experiments with identical storage basenames")) return false;
+      const QString task = experiment.id + QStringLiteral("-completion");
+      window.mPendingTraining = MainWindow::PendingTraining{
+          task, project, dataset, output, backend, 2, experiment.resultSceneId};
+      window.mPendingTraining->historyId = experiment.id;
+      const QString release = QDir(output).filePath(QStringLiteral("release"));
+      if (!check(window.mProcessSupervisor.start(task, helper,
+          {"completion-worker", preview, release, "gaussian"}, {}, {}, true),
+          "start same-basename owned completion worker")) return false;
+      if (!check(wait([&] { return window.mViewport->scenePath() == preview; }),
+          "same-basename completion preview becomes visible")) return false;
+      check(write(release, "done"), "release same-basename completion worker");
+      if (!check(wait([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTraining; }),
+          "same-basename completion reaches its terminal controller event")) return false;
+      if (!check(wait([&] { return window.mViewport->scenePath() == window.mWorkspace.scenePath() &&
+          window.mViewport->selectableModelAvailable(); }),
+          "same-basename completion loads its protected result")) return false;
+      const auto archived = GenerationHistoryStore(project).record(experiment.id);
+      check(archived.status == QStringLiteral("completed") &&
+          archived.resultSceneId == experiment.id && archived.resultPath == window.mWorkspace.scenePath(),
+          "same-basename experiments retain separate completed archive identities");
+      if (number == 0) {
+        firstId = experiment.id;
+        firstPath = archived.resultPath;
+        firstFinal = final;
+        check(window.mWorkspace.setSceneTranslation(firstTranslation, &error),
+            "set first experiment object transform before the second completes");
+      } else {
+        check(archived.resultPath != firstPath,
+            "different-parent same-basename experiments have independent protected result paths");
+        const auto retained = GenerationHistoryStore(project).record(firstId);
+        check(retained.resultSceneId == firstId && retained.resultPath == firstPath &&
+            retained.parameters.value(QStringLiteral("trainOptions")).toObject()
+                .value(QStringLiteral("iterations")).toInt() == 2,
+            "second completion preserves the first archive's result identity, path and parameters");
+        QFile firstProtected(firstPath);
+        check(firstProtected.open(QIODevice::ReadOnly) && firstProtected.readAll() == firstBytes,
+            "second completion does not overwrite the first protected Gaussian model bytes");
+        QFile firstProtectedCameras(QFileInfo(firstPath).absoluteDir().filePath(QStringLiteral("cameras.json")));
+        check(firstProtectedCameras.open(QIODevice::ReadOnly) && firstProtectedCameras.readAll() == firstCameras,
+            "second completion does not overwrite the first protected camera source bytes");
+        bool originalRetained = false;
+        bool firstRetained = false;
+        for (const auto &object : window.mWorkspace.sceneObjects()) {
+          if (object.id == originalId) originalRetained = object.path == original;
+          if (object.id == firstId) firstRetained = object.path == firstPath && object.translation == firstTranslation;
+        }
+        check(originalRetained && firstRetained && window.mWorkspace.sceneObjects().size() == 3,
+            "second completion keeps reference and first-experiment object IDs, paths and transforms");
+        QFile firstSource(firstFinal);
+        QFile secondSource(final);
+        check(firstSource.open(QIODevice::ReadOnly) && firstSource.readAll() == firstBytes &&
+            secondSource.open(QIODevice::ReadOnly) && secondSource.readAll() == secondBytes,
+            "both original experiment output sources remain byte-identical after completion");
+      }
     }
   }
   if (!realModel.isEmpty()) {

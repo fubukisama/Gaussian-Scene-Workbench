@@ -119,10 +119,21 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
             raise RuntimeError("训练数据集中没有可用图像：{}".format(images_path))
 
         server = load_server_module(root)
-        if report["hasReconstruction"] and (dataset / "sparse" / "0").is_dir():
-            quality = server.reconstruction_quality.assess_dataset(dataset)
-            report["reconstructionQuality"] = quality
-            report["reconstructionRepairRequired"] = not quality["usable"]
+        from native.worker.training_reconstruction_summary import summarize_reconstruction
+        reconstruction = summarize_reconstruction(dataset, run_colmap)
+        report["reconstructionSummary"] = reconstruction
+        # Current reconstruction is deliberately distinct from a reusable
+        # cache. Full optimizer resume requires the former; this read-only
+        # environment probe never restores a cache or regenerates alignment.
+        report["hasReconstruction"] = server.dataset_has_recognized_training_scene(dataset)
+        report["colmapRequired"] = reconstruction["effectiveRunColmap"]
+        report["reconstructionRepairRequired"] = reconstruction["decision"] == "repair_required"
+        if reconstruction["sourceKind"] == "colmap":
+            report["reconstructionQuality"] = reconstruction
+        if reconstruction["blocked"]:
+            report["sourceBlocked"] = True
+            report["errorCode"] = "reconstruction_source_unusable"
+            raise RuntimeError("reconstruction_source_unusable: " + reconstruction["decision"])
         python_path = Path(server.training_python(backend)).resolve()
         report["python"] = str(python_path)
         if not python_path.is_file():
@@ -134,7 +145,6 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         if not colmap or not Path(colmap).is_file():
             raise FileNotFoundError("COLMAP 不可用，无法完成训练数据准备。")
         report["colmap"] = str(Path(colmap).resolve())
-        report["colmapRequired"] = bool(run_colmap or not report["hasReconstruction"] or report.get("reconstructionRepairRequired"))
         process_environment = server.training_env(backend)
         if report["colmapRequired"]:
             colmap_probe = subprocess.run(

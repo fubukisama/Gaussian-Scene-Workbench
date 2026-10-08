@@ -9,6 +9,7 @@ struct TrainingEnvironmentProbeResult final {
   bool ready = false;
   bool policyBlocked = false;
   bool hasReconstruction = false;
+  bool colmapRequired = false;
   int imageCount = 0;
   QString python;
   QString cudaDevice;

@@ -72,6 +72,13 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 密度控制 | Density Control | 密度制御 |
 | 过度裁剪保护 | Over-pruning Protection | 過剰な枝刈りの抑制 |
 | 暂停训练 / 继续训练 | Pause Training / Resume Training | 学習を一時停止 / 学習を再開 |
+| 任务预览 / 暂停预览 | Task Preview / Pause Preview | タスクプレビュー / プレビューを一時停止 |
+| 实验与生成档案 | Experiments and Generation History | 実験と生成履歴 |
+| 查看所选成果 / 继续所选实验 | View Selected Result / Resume Selected Experiment | 選択した成果を表示 / 選択した実験を再開 |
+| 记录参数（原始标识） | Recorded Settings (Original Identifiers) | 保存済み設定（元の識別子） |
+| 相机与重建来源 / COLMAP 决策 | Camera and Reconstruction Sources / COLMAP Decision | カメラと再構築の参照元 / COLMAP の処理方針 |
+| 来源格式 / 注册照片 | Source Format / Registered Images | 参照元の形式 / 登録画像 |
+| 完整状态元数据 | Full-state Metadata | 完全な状態のメタデータ |
 | 已暂停 | Paused | 一時停止中 |
 | 训练检查点 / 优化器状态 | Training Checkpoint / Optimizer State | 学習チェックポイント / 最適化器の状態 |
 | 曲面光栅化 / 薄片近似 | Surfel Rasterization / Thin-Disk Approximation | サーフェル描画 / 薄い円盤による近似 |
@@ -134,6 +141,50 @@ This action center is shared by media import, COLMAP reconstruction, 3DGS, 2DGS,
 中文：在“任务与日志”中选中任务后，可查看详情、打开已有任务文件夹及复制摘要；双击任务也能打开详情。日志只在本次会话保留，每项最多保留最近 512 Ki UTF-16 代码单元，全局日志最多 10000 个文本块；复制摘要不包含日志正文，导出的只是当前保留内容而非完整日志。关闭“跟随最新日志”后可以阅读、选择旧内容，不会被新消息强制拉回末尾。启动失败仍会留下任务和错误信息。上述功能适用于所有支持的导入、重建、训练及网格生成流程，不增加持久队列、重试或续训能力。
 
 日本語：「タスクとログ」でタスクを選択すると、詳細の表示、既存のタスクフォルダーを開く操作、概要のコピーを利用できます。ダブルクリックでも詳細を表示できます。ログはこのセッションでのみ保持し、各タスクは最新の最大 512 Ki UTF-16 コード単位、全体のログは最大 10000 テキストブロックです。概要のコピーにはログ本文は含まれず、エクスポートも保持中の内容のみで、完全なログではありません。「最新のログを追跡」を無効にすると、新しいメッセージで末尾へ強制移動されず、過去の内容を読んだり選択したりできます。起動に失敗したタスクと診断も保持します。すべての対応インポート・再構築・学習・メッシュ生成に共通し、永続キュー、再試行、学習再開機能は追加しません。
+
+## Experiment history and observation controls (2026-10-08)
+
+**Experiments and Generation History** is a separate persistent metadata archive,
+not a replacement for the session-only task logs above. Every native training or
+mesh experiment retains its own settings, input/output locations, recorded state,
+result association and resume availability; optional OpenMVS stages belong to
+their mesh experiment. State labels, availability reasons, dialog/action captions
+and launch-source summaries follow `AppLanguage` immediately. The selection,
+raw parameter JSON, saved camera/model/worker state and unchanged source report
+are retained when only the language changes. Parameter keys, backend identifiers,
+user names, filenames, paths and external logs remain verbatim. Opening history
+or changing language never deserializes a checkpoint or starts a worker. Native
+3DGS/2DGS full-state resume is explicit and verified; mesh/texture history must
+display its unsupported resume reason, not suggest PLY-based optimizer recovery.
+
+**Pause Preview** must be translated distinctly from **Pause Training**. Its
+checked state freezes only the task picture while background work continues;
+the overlay says so only while a task is actually running. A retained terminal
+observation instead says that resuming will show the latest available frame.
+Progress/stage captions remain live, and **Task Preview** remains a separate
+layer-selection action. New tasks/project-context changes reset preview pause.
+Resource-yield explanations describe display/observation scheduling, not a hard
+training budget or maximum Gaussian count.
+
+The shared 3DGS/2DGS training dialog reports **Camera and Reconstruction Sources**
+and the actual **COLMAP Decision**. Translate source type, minimum-viability
+reasons and reuse/rerun/undistortion/repair explanations, but never the file paths
+or machine-facing decision identifiers. Unknown/unavailable counts are not
+rendered as a fabricated zero. Transforms frame counts and reference checks are
+not labeled as COLMAP registration/calibration counts or geometric accuracy.
+Language changes redraw the stored report without rescanning sources or changing
+the worker configuration; dataset/request changes perform their own source check.
+
+中文：“实验与生成档案”持久保存各训练/网格实验的参数、输入输出、状态、成果和续训可用性，与仅会话保留的任务日志分开；可选 OpenMVS 随所属网格实验归档。所有状态、原因、操作与来源摘要即时切换三语，保留选择和原始参数 JSON，文件名、路径、标识与外部日志不翻译。打开档案不启动训练或读取检查点。3DGS/2DGS 的完整续训需要明确操作与核验；网格/纹理必须说明未支持，而不是暗示 PLY 可恢复优化器。“暂停预览”只冻结观察，后台处理继续；已结束任务使用“最新可用画面”的说明，不误报训练仍在运行。“任务预览”是单独的层切换。来源预检显示真实复用/重跑/去畸变/修复决定，语言切换仅重绘已有报告，不重扫数据或改参数；最低有效性不是精度保证。
+
+日本語：「実験と生成履歴」は各学習・メッシュ実験の設定、入出力、状態、成果、再開可否を永続化し、セッション内のタスクログとは分けます。任意の OpenMVS は所属メッシュ実験に記録します。状態・理由・操作・参照元概要は三言語で即時更新し、選択と元の JSON を保持します。ファイル名、パス、識別子、外部ログは翻訳しません。履歴を開いても学習や状態の読み込みを始めません。3DGS/2DGS の完全な再開には明示操作と検証が必要で、メッシュ・テクスチャは未対応の理由を示し、PLY から最適化器を復元できるとは表示しません。「プレビューを一時停止」は観察のみを止め、バックグラウンド処理は継続します。終了済みのタスクは最新の使用可能な表示について説明し、学習中とは誤表示しません。「タスクプレビュー」は別のレイヤー切り替えです。参照元の事前確認は実際の再利用・再実行・歪み補正・修復の方針を示し、言語変更では既存の報告のみを再描画して再検査や設定変更をしません。最低限の有効性は精度保証ではありません。
+
+The public desktop boundaries are `native_training_isolation`,
+`native_generation_history` and `native_training_preflight`; catalog validation
+also scans their new user-facing source strings. Full workflow/capability details
+are in [GENERATION_PIPELINES.md](GENERATION_PIPELINES.md),
+[TRAINING_RESUME.md](TRAINING_RESUME.md) and
+[CONTINUOUS_TRAINING_PREVIEW.md](CONTINUOUS_TRAINING_PREVIEW.md).
 
 ## Window and file-dialog controls
 

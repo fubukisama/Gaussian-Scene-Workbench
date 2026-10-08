@@ -11,6 +11,9 @@
 #include "ObservationNavigationSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
+#include "TrainingPreflightSmokeTest.h"
+#include "GenerationHistorySmokeTest.h"
+#include "BackendLocator.h"
 #include "ProcessingCompletionSmokeTest.h"
 #include "SpzSmokeTest.h"
 #include "SmokeTestSettings.h"
@@ -245,6 +248,12 @@ int main(int argc, char *argv[]) {
   QCommandLineOption trainingResumeSmokeOption(QStringLiteral("smoke-test-training-resume"),
       QStringLiteral("Verify pause/resume actions, state, translations and project recovery."));
   parser.addOption(trainingResumeSmokeOption);
+  QCommandLineOption trainingPreflightSmokeOption(QStringLiteral("smoke-test-training-preflight"),
+      QStringLiteral("Verify reconstruction provenance and actual reuse/recompute decisions in the training dialog."));
+  parser.addOption(trainingPreflightSmokeOption);
+  QCommandLineOption generationHistorySmokeOption(QStringLiteral("smoke-test-generation-history"),
+      QStringLiteral("Verify persistent experiments, live translations, result viewing and safe resume selection."));
+  parser.addOption(generationHistorySmokeOption);
   QCommandLineOption meshGenerationSmokeOption(QStringLiteral("smoke-test-mesh-generation"),
       QStringLiteral("Verify mesh publication, partial results and project persistence."));
   parser.addOption(meshGenerationSmokeOption);
@@ -374,6 +383,8 @@ int main(int argc, char *argv[]) {
   const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(taskActionsSmokeOption) ||
                          parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
+                         parser.isSet(trainingPreflightSmokeOption) ||
+                         parser.isSet(generationHistorySmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
                          parser.isSet(trainingIsolationOption) ||
@@ -516,6 +527,19 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(meshGenerationSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runMeshGenerationSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(generationHistorySmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runGenerationHistorySmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingPreflightSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      const QString root = gsw::BackendLocator::findRepositoryRoot(
+          QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+      smokeTestCompleted = gsw::runTrainingPreflightSmokeTest(
+          qEnvironmentVariable("GSW_PREFLIGHT_TEST_PYTHON", QStringLiteral("python")), root);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(trainingResumeSmokeOption)) {

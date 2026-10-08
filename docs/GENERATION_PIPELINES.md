@@ -4,6 +4,80 @@
 
 Original-resolution training (2026-10-02): the shared native 3DGS / 2DGS dialog now adds a fifth **Maximum Fidelity (Original Resolution)** preset, **30,000 iterations / 1:1**. UI values and backend `-r 1` agree, COLMAP's training-image output is explicitly uncapped, and old/manual/resume parameters are preserved. Mesh/depth/texture pipelines keep their separate backend-native resolution controls; this preset does not silently rewrite them. Resource/rectification limits, three-language usage and the full capability matrix are in [ORIGINAL_RESOLUTION_TRAINING.md](ORIGINAL_RESOLUTION_TRAINING.md).
 
+## Shared experiment workflow / 共享实验工作流 / 共通の実験ワークフロー (2026-10-08)
+
+| 链路 | 独立观察与暂停预览 | 持久实验档案 | 完整优化器续训 |
+| --- | --- | --- | --- |
+| 原生 3DGS | GPU / PLY；仅冻结观察，训练继续 | 参数、输入、状态、独立成果与续训入口 | 有，需有效完整状态和续训前核验 |
+| 原生 2DGS | PLY；仅冻结观察，训练继续 | 同上 | 有，使用 2DGS 自身状态，不交叉恢复 |
+| bounded / unbounded TSDF、SuGaR、GS2Mesh（四种方法） | 已发布网格阶段观察可冻结；不是逐体素/深度实时预览 | 参数、输入、状态、完成或可用部分成果 | 无，不把阶段重跑当成优化器恢复 |
+| 可选 OpenMVS 纹理阶段 | 保留网格，显示通过校验的贴图成果；可冻结观察 | 随所属网格实验归档，不是独立稠密重建队列 | 无 |
+
+中文：通过“工作流 → 实验与生成档案”查看每个实验的原始参数、数据集与输出位置、状态、成果及可用续训原因。已有模型和其他实验保留；新实验有独立输出，不能占用已归档实验的输出目录。查看成果与继续实验是两个明确操作，打开工程不自动启动任务或反序列化检查点。活动续训入口只是快捷指针，不再代表工程只能保留一个实验。档案持久保存元数据，不等于完整日志、历史曲线、自动执行队列或阶段重试。
+
+English: **Workflow → Experiments and Generation History** retains settings,
+inputs, status, completed/available partial results and resume eligibility for
+each experiment. Native 3DGS and 2DGS support independent observations and full
+optimizer resume with backend-specific verified state. All four mesh methods
+(bounded/unbounded TSDF, SuGaR, GS2Mesh) support the same history and observation
+controls but not optimizer resume or per-voxel/depth live views. Optional OpenMVS
+texturing is recorded within its owning mesh experiment; this does not create a
+standalone dense-reconstruction queue. New experiments use separate output
+locations, preserving references and previous experiments. Viewing a result and
+resuming an experiment are explicit, separate actions; project open starts no
+worker and deserializes no checkpoint. The active resume entry is only a shortcut,
+not a single-experiment limit. Persistent metadata is not a complete log, historical
+metric curve, automatic queue or stage-retry implementation.
+
+日本語：「ワークフロー → 実験と生成履歴」で各実験の元の設定、入力、状態、完了済みまたは使用可能な部分成果、再開可否を保持します。ネイティブ 3DGS と 2DGS は独立した観察と、各手法の検証済み状態からの完全な最適化器再開に対応します。有界・非有界 TSDF、SuGaR、GS2Mesh の四方式も履歴と観察操作を共有しますが、最適化器再開やボクセル・深度ごとのライブ表示はありません。任意の OpenMVS テクスチャ工程は所属するメッシュ実験に記録し、独立した密な再構築キューにはしません。新規実験は別の出力先を使い、参照モデルと以前の実験を保持します。成果の表示と実験の再開は別の明示操作で、工程を開いてもワーカーの起動やチェックポイントの読み込みは行いません。有効な再開入口は近道であり、単一実験への制限ではありません。永続メタデータは完全なログ、過去の指標曲線、自動キュー、工程の再試行を意味しません。
+
+### Actual launch sources / 实际启动来源 / 実際の起動時の参照元
+
+中文：共享 3DGS/2DGS 训练窗口在允许开始前只读检查所选数据集，显示真实的相机与重建来源、文件位置、格式、输入/已注册照片数、相机标定数和稀疏点有效性。识别 COLMAP 二进制/文本、可用对齐缓存以及 Blender/NeRF transforms；不把 transforms 的帧数冒充 COLMAP 注册数或标定数。依据实际来源和后端行为说明“复用当前重建”“复用对齐缓存”“复用 transforms”“用户要求重跑”“缺少重建”“需去畸变”或“需修复”等决定，不仅显示复用复选框。不可用图像、错误来源及未完成/失败的来源预检阻止开始。决定摘要随实验参数保存；实际启动还需独立的 Python/CUDA/扩展/COLMAP 运行环境检查，源数据若在预检后变化仍由后端验证。
+
+网格与纹理档案记录自己的输入模型、数据集和生成参数，不伪造高斯训练的相机准入结果。COLMAP 最低有效性只是准入条件，不保证标尺、重建精度、留出视角或生成网格质量；transforms 参数/引用检查不是 COLMAP 最低有效性检查。
+
+English: The shared 3DGS/2DGS training dialog performs a read-only dataset-source
+check before enabling Start. It reports actual camera/reconstruction files and
+formats, input/registered image counts, calibration counts and sparse-point
+viability. Supported source descriptions include binary/text COLMAP, alignment
+cache and Blender/NeRF transforms; transforms frame counts are not presented as
+COLMAP registration/calibration counts. The decision explains reuse, cache
+restoration, transforms reuse, requested rerun, missing reconstruction, required
+undistortion or repair according to the source and backend behavior, rather than
+only echoing a checkbox. Unusable images/sources and incomplete or failed source
+checks block launch. The summary is retained with experiment settings. Runtime
+checks for Python/CUDA/extensions/COLMAP remain separate, and the backend still
+validates inputs that may have changed since preflight. Mesh/texture history
+retains its own model/dataset/settings without inventing Gaussian camera-admission
+results. COLMAP minimum viability is not scale calibration, reconstruction
+accuracy, held-out-view or mesh-quality acceptance; transforms reference checks
+are not COLMAP minimum-viability checks.
+
+日本語：共通の 3DGS/2DGS 学習画面は「開始」を有効にする前にデータセットの参照元を読み取り専用で確認し、実際のカメラ・再構築ファイル、形式、入力・登録画像数、キャリブレーション数、疎点の有効性を表示します。COLMAP バイナリ・テキスト、位置合わせキャッシュ、Blender/NeRF transforms を区別し、transforms のフレーム数を COLMAP の登録数や標定数として表示しません。チェックボックスの値だけでなく、現在の参照元とバックエンドの動作に基づき、再利用、キャッシュ復元、transforms 再利用、指定された再実行、再構築の欠落、歪み補正や修復の必要性を説明します。画像・参照元が使用できない、または事前確認が未完了・失敗した場合は開始を許可しません。概要を実験設定に保存します。Python/CUDA/拡張/COLMAP の実行環境検査は別に行い、事前確認後の入力変更もバックエンドで検証します。メッシュ・テクスチャ履歴は自身のモデル、データセット、設定を保存し、ガウシアン学習のカメラ検査結果を捏造しません。COLMAP の最低限の有効性は、尺度校正、再構築精度、未学習視点、メッシュ品質の保証ではなく、transforms の参照検査も COLMAP の最低限の有効性検査とは異なります。
+
+### Resource-policy boundary / 资源策略边界 / リソース方針の境界
+
+中文：“暂停预览”与训练优先的显示缓存让出只调度桌面观察资源，不修改训练参数、最大高斯数、增密算法或检查点身份，也不保证训练进程的硬内存/显存上限。需要安全释放训练显存时使用“暂停训练”。显示预算与观察节流无法把一个本身超出显存的训练配置变成可运行配置。
+
+English: Preview pause and training-priority display-cache yielding schedule
+observation resources only. They do not change training settings, maximum
+Gaussian count, densification or checkpoint identity, nor enforce a hard RAM/VRAM
+quota on the training process. Use Pause Training to safely release its GPU
+allocations. Display budgets and observation throttling cannot make an intrinsically
+over-budget training configuration fit.
+
+日本語：プレビュー停止と学習優先の表示キャッシュ解放は観察リソースのみを調整します。学習設定、最大ガウシアン数、高密度化、チェックポイントの同一性は変更せず、学習プロセスの RAM・GPU メモリに強制的な上限を設けません。学習の GPU 領域を安全に解放するには「学習を一時停止」を使います。表示予算と観察頻度の調整だけで、元から GPU メモリを超える学習設定を収めることはできません。
+
+Public acceptance surfaces are `native_training_isolation` (real preview actions
+and viewport), `native_generation_history` / `generation_history` (selection,
+reopen, metadata safety and launch rollback), and `native_training_preflight`
+(real dialog/source decisions). They use bounded fixtures/test-owned workers,
+not the user's real training. Existing dated CUDA-quality records below are
+historical results, not a new throughput or full-suite pass count for this change.
+See [CONTINUOUS_TRAINING_PREVIEW.md](CONTINUOUS_TRAINING_PREVIEW.md) and
+[TRAINING_RESUME.md](TRAINING_RESUME.md) for lifecycle and checkpoint details.
+
 ## 简体中文
 
 自 2026-09-23 起，3DGS、2DGS 和其他已支持生成链路共同规划、同步验收。不能把显示导出文件、重新开始训练或重跑阶段称为完整状态续训。运行环境可用性与软件已实现能力分开检查。

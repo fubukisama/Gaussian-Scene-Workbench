@@ -668,6 +668,7 @@ void NativeViewport::rebalanceResourceResidency() {
   if (!states.contains(mScene)) states.append(mScene);
   const auto active = mScene;
   for (const auto &state : states) {
+    if (state == mProcessingScene && mProcessingPreviewPaused) continue;
     if (state->resourceNeedsReload && !state->resourceLoading &&
         state->resourceRetryAfterMs <= mResourceClock.elapsed() &&
         !state->mRequestedScenePath.isEmpty()) {
@@ -851,9 +852,13 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       if (state->mRequestedScenePath != object.path) {
         changedSource |= isActive;
         if (adoptPreview || (isActive && !state->mScenePath.isEmpty() &&
-            (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0)))
+            (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0))) {
+          // Publishing a validated result is not an observation request. Its
+          // now-persistent object must load even if observation was paused.
+          QScopedValueRollback<bool> finalPublication(mProcessingPreviewPaused,
+              adoptPreview ? false : mProcessingPreviewPaused);
           loadContinuousScene(object.path, object.vertexCount);
-        else setScene(object.path, object.vertexCount);
+        } else setScene(object.path, object.vertexCount);
       }
       state->sourceTranslation = object.translation;
       setModelTransform(object.translation * static_cast<float>(state->mSceneCoordinates.displayScale),
@@ -905,6 +910,14 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
   QSet<QString> existing;
   for (const auto &state : mSceneStates) existing.insert(state->id);
   mSelectedSceneIds.intersect(existing);
+  if (!mProcessingScene && mProcessingPreviewPaused) {
+    mProcessingPreviewPaused = false;
+    mProcessingPausedImage = {};
+    mProcessingPreviewResumePending = false;
+    mPausedPreviewCandidatePath.clear();
+    mPausedPreviewCandidateCount = 0;
+    emit processingPreviewPausedChanged(false);
+  }
   emit processingPreviewChanged();
   update();
 }
@@ -970,9 +983,13 @@ void NativeViewport::setTrainingGpuPreviewDescriptor(
     const TrainingGpuPreviewDescriptor &descriptor) {
   if (descriptor.state == TrainingGpuPreviewState::Ready &&
       (!mProcessingActive || !mProcessingScene)) return;
+  if (descriptor.state == TrainingGpuPreviewState::Ready)
+    mLatestTrainingGpuPreviewDescriptor = descriptor;
+  else
+    mLatestTrainingGpuPreviewDescriptor.reset();
   mPendingTrainingGpuPreviewDescriptor = descriptor;
   mTrainingGpuPreviewStopPending = false;
-  if (descriptor.state == TrainingGpuPreviewState::Ready) {
+  if (descriptor.state == TrainingGpuPreviewState::Ready && !mProcessingPreviewPaused) {
     mTrainingGpuPreviewCameraFramed = false;
     mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
     mTrainingGpuPreviewTimer->start();
@@ -982,6 +999,7 @@ void NativeViewport::setTrainingGpuPreviewDescriptor(
 
 void NativeViewport::stopTrainingGpuPreview() {
   mPendingTrainingGpuPreviewDescriptor.reset();
+  mLatestTrainingGpuPreviewDescriptor.reset();
   mTrainingGpuPreviewStopPending = true;
   mTrainingGpuPreviewCameraFramed = false;
   update();
@@ -1000,6 +1018,12 @@ void NativeViewport::beginProcessingPreview() {
   mProcessingReferenceScene = mScene;
   mProcessingReferenceView = currentProcessingView();
   mProcessingPreviewView.reset();
+  const bool wasPreviewPaused = mProcessingPreviewPaused;
+  mProcessingPreviewPaused = false;
+  mProcessingPausedImage = {};
+  mProcessingPreviewResumePending = false;
+  mPausedPreviewCandidatePath.clear();
+  mPausedPreviewCandidateCount = 0;
   mProcessingReferenceSelection = mSelectedSceneIds;
   mProcessingReferenceSelected = mModelSelected;
   mProcessingScene = std::make_shared<SceneState>();
@@ -1015,6 +1039,7 @@ void NativeViewport::beginProcessingPreview() {
   mModelSelected = false;
   setInteractionMode(InteractionMode::Inspect);
   updateFrameRefreshPolicy();
+  if (wasPreviewPaused) emit processingPreviewPausedChanged(false);
   emit processingPreviewChanged();
   update();
 }
@@ -1075,6 +1100,12 @@ void NativeViewport::clearProcessingPreview() {
   mProcessingReferenceScene.reset();
   mProcessingReferenceView.reset();
   mProcessingPreviewView.reset();
+  const bool wasPreviewPaused = mProcessingPreviewPaused;
+  mProcessingPreviewPaused = false;
+  mProcessingPausedImage = {};
+  mProcessingPreviewResumePending = false;
+  mPausedPreviewCandidatePath.clear();
+  mPausedPreviewCandidateCount = 0;
   mProcessingReferenceSelection.clear();
   mProcessingReferenceSelected = false;
   mProcessingStage.clear();
@@ -1086,6 +1117,7 @@ void NativeViewport::clearProcessingPreview() {
   publishActiveSceneState();
   notifySceneSelection();
   emit resourceBudgetStatusChanged();
+  if (wasPreviewPaused) emit processingPreviewPausedChanged(false);
   emit processingPreviewChanged();
   update();
 }
@@ -1220,6 +1252,7 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
       restoreProcessingReferenceGpu();
       mProcessingReferenceImage = {};
     } else prepareProcessingReferenceImage();
+    updateFrameRefreshPolicy();
     emit processingPreviewChanged();
     update();
     return;
@@ -1250,6 +1283,90 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
     mProcessingReferenceImage = {};
   }
   publishActiveSceneState();
+  updateFrameRefreshPolicy();
+  emit processingPreviewChanged();
+  update();
+}
+
+void NativeViewport::setProcessingPreviewPaused(const bool paused) {
+  if (!mProcessingScene || mProcessingPreviewPaused == paused) return;
+  mProcessingPreviewPaused = paused;
+  if (paused) {
+    mTrainingGpuPreviewTimer->stop();
+    // An already started read can finish off-thread, but its result must not
+    // replace the frozen view or upload after the user has paused observation.
+    const auto scene = mProcessingScene;
+    if (scene->previewLoadBusy || scene->resourceLoading) {
+      const QString candidate = scene->queuedPreviewPath.isEmpty()
+          ? scene->mRequestedScenePath : scene->queuedPreviewPath;
+      const qint64 candidateCount = scene->queuedPreviewPath.isEmpty()
+          ? scene->requestedPreviewCount : scene->queuedPreviewCount;
+      if (QFileInfo(candidate).isFile()) {
+        mPausedPreviewCandidatePath = candidate;
+        mPausedPreviewCandidateCount = candidateCount;
+      }
+      ++scene->mSceneGeneration;
+      scene->mRequestedScenePath = scene->mScenePath;
+      scene->previewLoadBusy = false;
+      scene->resourceLoading = false;
+      scene->queuedPreviewPath.clear();
+      scene->queuedPreviewCount = 0;
+    }
+    if (mProcessingHasFrame && context() && context()->isValid() &&
+        isVisible() && !window()->isMinimized()) {
+      const StoredCameraView originalView = currentProcessingView();
+      const bool wasTaskVisible = mScene == mProcessingScene;
+      {
+        QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, mProcessingScene);
+        QScopedValueRollback<bool> visibleScope(mProcessingPreviewVisible, true);
+        QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, false);
+        QScopedValueRollback<bool> captureScope(mCapturingProcessingReferenceImage, true);
+        if (!wasTaskVisible && mProcessingPreviewView)
+          restoreProcessingView(*mProcessingPreviewView);
+        mProcessingPausedImage = grabFramebuffer();
+      }
+      restoreProcessingView(originalView);
+    }
+    // Keeping a shared publisher slot indefinitely would make "pause preview"
+    // consume the optimizer's observation resources. A viewport-sized CPU
+    // image keeps the exact last picture while the consumer mapping is freed.
+    if (!mProcessingPausedImage.isNull() && mTrainingGpuPreview.attached()) {
+      const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+      if (!alreadyCurrent) makeCurrent();
+      {
+        QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, mProcessingScene);
+        const bool gaussianWasAvailable = gaussianRenderingAvailable();
+        mTrainingGpuPreview.release();
+        synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
+      }
+      if (!alreadyCurrent) doneCurrent();
+      mTrainingGpuPreviewCameraFramed = false;
+      emit trainingGpuPreviewStateChanged(false,
+          QCoreApplication::translate("Workbench", "GPU 共享显存"),
+          QCoreApplication::translate("Workbench", "预览已暂停 · 后台处理继续运行；恢复后显示最新画面"));
+    }
+    mProcessingPreviewResumePending = false;
+  } else {
+    mProcessingPreviewResumePending = !mProcessingPausedImage.isNull();
+    if (mLatestTrainingGpuPreviewDescriptor) {
+      mPendingTrainingGpuPreviewDescriptor = mLatestTrainingGpuPreviewDescriptor;
+      mTrainingGpuPreviewStopPending = false;
+      mTrainingGpuPreviewTimer->start();
+    }
+    const QString candidate = mPausedPreviewCandidatePath;
+    const qint64 candidateCount = mPausedPreviewCandidateCount;
+    mPausedPreviewCandidatePath.clear();
+    mPausedPreviewCandidateCount = 0;
+    if (QFileInfo(candidate).isFile()) setPreviewScene(candidate, candidateCount);
+    else if (!mLatestTrainingGpuPreviewDescriptor && !mProcessingScene->mScenePath.isEmpty()) {
+      mProcessingPreviewResumePending = false;
+      mProcessingPausedImage = {};
+    }
+  }
+  updateManagedResourceUsage();
+  updateFrameRefreshPolicy();
+  emit resourceBudgetStatusChanged();
+  emit processingPreviewPausedChanged(paused);
   emit processingPreviewChanged();
   update();
 }
@@ -1298,6 +1415,10 @@ QString NativeViewport::processingPreviewLabel() const {
 
 QString NativeViewport::processingPreviewDetail() const {
   if (mProcessingStage.isEmpty()) return {};
+  if (mProcessingPreviewPaused)
+    return QCoreApplication::translate("Workbench", mProcessingActive
+        ? AppLanguage::source("预览已暂停 · 后台处理继续运行；恢复后显示最新画面")
+        : AppLanguage::source("预览已暂停 · 恢复后显示最新可用画面"));
   if (mProcessingActive)
     return QCoreApplication::translate("Workbench", !mProcessingHasFrame
         ? AppLanguage::source("等待首个三维结果 · 保留当前画面")
@@ -1315,6 +1436,15 @@ QString NativeViewport::processingPreviewDetail() const {
 
 void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
   if (!mProcessingScene) return;
+  if (mProcessingPreviewPaused) {
+    // Snapshot retention may remove older files. Do not let an expired path
+    // discard the newest still-existing candidate, and never parse it here.
+    if (QFileInfo(path).isFile()) {
+      mPausedPreviewCandidatePath = path;
+      mPausedPreviewCandidateCount = count;
+    }
+    return;
+  }
   QSignalBlocker previewSignals(this);
   if (mProcessingPreviewVisible) previewSignals.unblock();
   QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, mProcessingScene);
@@ -1323,6 +1453,13 @@ void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
 }
 
 void NativeViewport::loadContinuousScene(const QString &path, qint64 count) {
+  if (mScene == mProcessingScene && mProcessingPreviewPaused) {
+    if (QFileInfo(path).isFile()) {
+      mPausedPreviewCandidatePath = path;
+      mPausedPreviewCandidateCount = count;
+    }
+    return;
+  }
   if (path.isEmpty() || path == mScene->mRequestedScenePath) return;
   if (mScene->previewLoadBusy) {
     mScene->queuedPreviewPath = path;
@@ -2889,7 +3026,7 @@ void NativeViewport::paintGL() {
   const bool gaussianWasAvailable = gaussianRenderingAvailable();
   QString gpuPreviewError;
   const bool previewChanged =
-      mProcessingPreviewVisible && mProcessingActive && mProcessingScene
+      mProcessingPreviewVisible && !mProcessingPreviewPaused && mProcessingActive && mProcessingScene
           ? mTrainingGpuPreview.poll(&gpuPreviewError) : false;
   synchronizeGaussianRenderingAvailability(gaussianWasAvailable);
   if (!gpuPreviewError.isEmpty() &&
@@ -2919,6 +3056,8 @@ void NativeViewport::paintGL() {
           }
           mProcessingHasFrame = true;
         }
+        mProcessingPreviewResumePending = false;
+        mProcessingPausedImage = {};
       }
     }
     mTrainingGpuPreviewError.clear();
@@ -2943,6 +3082,19 @@ void NativeViewport::paintGL() {
   const QVector4D clearColor = viewportClearColor();
   glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (!mCapturingProcessingReferenceImage && mProcessingPreviewVisible &&
+      mScene == mProcessingScene && !mProcessingPausedImage.isNull() &&
+      (mProcessingPreviewPaused || mProcessingPreviewResumePending)) {
+    QPainter painter(this);
+    painter.drawImage(rect(), mProcessingPausedImage);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawOverlay(painter);
+    drawTransformToolStrip(painter);
+    drawAxisGizmo(painter);
+    painter.end();
+    ++mRenderedFrameSerial;
+    return;
+  }
   if (!mCapturingProcessingReferenceImage && mProcessingActive &&
       mProcessingPreviewVisible && !hasProcessingPreview() &&
       mScene->processingGpuSuspended && !mProcessingReferenceImage.isNull()) {
@@ -3027,8 +3179,10 @@ void NativeViewport::paintGL() {
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
   if (mScene->processingGpuSuspended) return;
-  initializeSceneBuffers();
+  const bool frozenPreview = mProcessingPreviewPaused && mScene == mProcessingScene;
+  if (!frozenPreview) initializeSceneBuffers();
   if (mScene->mRenderMode == RenderMode::Gaussians &&
+      !frozenPreview &&
       (!trainingGpuPreviewForScene() || !mTrainingGpuPreview.hasFrame())) {
     const QVector3D forward = modelMatrix().transposed().mapVector(
         (mTarget - cameraPosition()).normalized()).normalized();
@@ -3043,16 +3197,20 @@ void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 
       }
     }
   }
-  mScene->gaussianGpu.upload();
-  uploadPendingPointCloud();
-  uploadPendingMeshTexture();
-  uploadPendingMesh();
-  finishResourceUpload();
+  if (!frozenPreview) {
+    mScene->gaussianGpu.upload();
+    uploadPendingPointCloud();
+    uploadPendingMeshTexture();
+    uploadPendingMesh();
+    finishResourceUpload();
+  }
   const QMatrix4x4 modelViewProjection = projection * view * modelMatrix();
-  updatePointCacheSelection(modelViewProjection);
-  uploadPendingPointCachePages();
-  updateMeshCacheSelection(modelViewProjection);
-  uploadPendingMeshCachePages();
+  if (!frozenPreview) {
+    updatePointCacheSelection(modelViewProjection);
+    uploadPendingPointCachePages();
+    updateMeshCacheSelection(modelViewProjection);
+    uploadPendingMeshCachePages();
+  }
   if (mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()) {
     drawMesh(modelViewProjection);
   } else if (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame() &&
@@ -3085,7 +3243,7 @@ void NativeViewport::applyPendingTrainingGpuPreview() {
     return;
   }
   if (mPendingTrainingGpuPreviewDescriptor->state == TrainingGpuPreviewState::Ready &&
-      (!mProcessingPreviewVisible || !isVisible() || window()->isMinimized())) return;
+      (mProcessingPreviewPaused || !mProcessingPreviewVisible || !isVisible() || window()->isMinimized())) return;
   const TrainingGpuPreviewDescriptor descriptor =
       *mPendingTrainingGpuPreviewDescriptor;
   mPendingTrainingGpuPreviewDescriptor.reset();
@@ -3199,6 +3357,12 @@ QMatrix4x4 NativeViewport::trainingPreviewCoordinateTransform() const {
 void NativeViewport::startSceneLoad(const QString &scenePath, const bool continuous,
                                     const bool preserveView, const bool forcePaged,
                                     std::shared_ptr<ResourceReservation> reservation) {
+  if (mScene == mProcessingScene && mProcessingPreviewPaused) {
+    setPreviewScene(scenePath, mScene->requestedPreviewCount);
+    mScene->previewLoadBusy = false;
+    mScene->resourceLoading = false;
+    return;
+  }
   mScene->resourceLoading = true;
   const int generation = mScene->mSceneGeneration;
   if (!context() || !context()->isValid()) {
@@ -3387,6 +3551,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             }
             if (continuous && targetScene == mProcessingScene) {
               mProcessingHasFrame = true;
+              mProcessingPreviewResumePending = false;
+              mProcessingPausedImage = {};
               QTimer::singleShot(0, this, [this, weakScene, generation] {
                 const auto scene = weakScene.lock();
                 if (!scene || scene != mProcessingScene || scene->mSceneGeneration != generation) return;
@@ -3589,8 +3755,9 @@ void NativeViewport::updateFrameRefreshPolicy() {
         scene->mMeshTextureUploadPending || !scene->mPendingMeshCachePages.isEmpty() ||
         !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty();
   };
-  const bool shouldRefreshContinuously = needsRefresh(mScene) ||
-      std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), needsRefresh);
+  const bool shouldRefreshContinuously =
+      !(mProcessingPreviewPaused && mProcessingPreviewVisible) &&
+      (needsRefresh(mScene) || std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), needsRefresh));
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {

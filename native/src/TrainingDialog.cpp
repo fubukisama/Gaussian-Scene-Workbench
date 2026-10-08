@@ -16,6 +16,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QJsonArray>
 #include <QLineEdit>
 #include <QLocale>
 #include <QMessageBox>
@@ -159,6 +160,41 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   mRunColmap->setChecked(!hasSparseReconstruction);
   form->addRow(QString(), mRunColmap);
 
+  mReconstructionSummaryLabel = new QLabel(this);
+  mReconstructionSummaryLabel->setObjectName(QStringLiteral("trainingReconstructionSummaryLabel"));
+  mReconstructionSummaryLabel->setTextFormat(Qt::PlainText);
+  mReconstructionSummaryLabel->setWordWrap(true);
+  mReconstructionSummaryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  form->addRow(QCoreApplication::translate("Workbench", "相机与重建来源"), mReconstructionSummaryLabel);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mReconstructionSummaryLabel)),
+                    AppLanguage::source("相机与重建来源"));
+  mReconstructionDecisionLabel = new QLabel(this);
+  mReconstructionDecisionLabel->setObjectName(QStringLiteral("trainingReconstructionDecisionLabel"));
+  mReconstructionDecisionLabel->setTextFormat(Qt::PlainText);
+  mReconstructionDecisionLabel->setWordWrap(true);
+  mReconstructionDecisionLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  form->addRow(QCoreApplication::translate("Workbench", "COLMAP 决策"), mReconstructionDecisionLabel);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mReconstructionDecisionLabel)),
+                    AppLanguage::source("COLMAP 决策"));
+  mReconstructionScanner = new TrainingReconstructionSummaryScanner(this);
+  connect(mReconstructionScanner, &TrainingReconstructionSummaryScanner::summaryReady, this,
+          [this](const TrainingReconstructionSummary &summary) {
+    mReconstructionSummary = summary;
+    mReconstructionSummaryPending = false;
+    if (summary.ready && !mRunColmapEdited && mRunColmap->isChecked() &&
+        summary.report.value(QStringLiteral("sourceKind")).toString() == QStringLiteral("alignment_cache") &&
+        summary.report.value(QStringLiteral("usable")).toBool()) {
+      mRunColmap->setChecked(false);
+      return;
+    }
+    refreshReconstructionSummary();
+  });
+  connect(mRunColmap, &QCheckBox::clicked, this, [this] { mRunColmapEdited = true; });
+  connect(mRunColmap, &QCheckBox::toggled, this, &TrainingDialog::scanReconstructionSummary);
+  connect(this, &QDialog::finished, mReconstructionScanner,
+          &TrainingReconstructionSummaryScanner::cancel);
+  AppLanguage::onChanged(this, [this] { refreshReconstructionSummary(); });
+
   mInputSummaryLabel = new QLabel(this);
   mInputSummaryLabel->setObjectName(QStringLiteral("trainingInputSummaryLabel"));
   mInputSummaryLabel->setTextFormat(Qt::PlainText);
@@ -207,8 +243,9 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
   AppLanguage::text(buttons->button(QDialogButtonBox::Cancel), AppLanguage::source("取消"));
-  auto *startButton = AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "开始训练"), QDialogButtonBox::AcceptRole), AppLanguage::source("开始训练"));
-  startButton->setDefault(true);
+  mStartButton = AppLanguage::text(buttons->addButton(QCoreApplication::translate("Workbench", "开始训练"), QDialogButtonBox::AcceptRole), AppLanguage::source("开始训练"));
+  mStartButton->setObjectName(QStringLiteral("trainingStartButton"));
+  mStartButton->setDefault(true);
   rootLayout->addWidget(buttons);
 
   // Backend-specific optimization defaults are resolved by the worker. The
@@ -219,6 +256,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   connect(buttons, &QDialogButtonBox::rejected, this, &TrainingDialog::reject);
   applyPreset();
   scanInputSummary();
+  refreshReconstructionSummary();
 }
 
 TrainingConfiguration TrainingDialog::configuration() const {
@@ -236,6 +274,12 @@ TrainingConfiguration TrainingDialog::configuration() const {
 }
 
 void TrainingDialog::accept() {
+  if (mReconstructionProbeConfigured &&
+      (!reconstructionPreflightReady() || mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool())) {
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "相机与重建来源不可用"),
+                          reconstructionDecisionText());
+    return;
+  }
   if (!datasetContainsImages()) {
     QMessageBox::critical(
         this, QCoreApplication::translate("Workbench", "数据集不可训练"),
@@ -390,6 +434,126 @@ void TrainingDialog::refreshInputSummary() {
 
 bool TrainingDialog::datasetContainsImages() const {
   return !datasetImageDirectory(mDatasetPath).isEmpty();
+}
+
+void TrainingDialog::setReconstructionProbe(const QString &python, const QString &backendRoot,
+                                             const QProcessEnvironment &environment) {
+  mProbePython = python;
+  mProbeBackendRoot = backendRoot;
+  mProbeEnvironment = environment;
+  mReconstructionProbeConfigured = true;
+  scanReconstructionSummary();
+}
+
+bool TrainingDialog::effectiveRunColmap() const {
+  return reconstructionPreflightReady()
+      ? mReconstructionSummary.report.value(QStringLiteral("effectiveRunColmap")).toBool()
+      : mRunColmap->isChecked();
+}
+
+bool TrainingDialog::reconstructionPreflightReady() const {
+  return !mReconstructionSummaryPending && mReconstructionSummary.ready;
+}
+
+QString TrainingDialog::reconstructionDecisionText() const {
+  return mReconstructionDecisionLabel ? mReconstructionDecisionLabel->text() : QString();
+}
+
+TrainingReconstructionSummary TrainingDialog::reconstructionSummary() const {
+  return mReconstructionSummary;
+}
+
+void TrainingDialog::scanReconstructionSummary() {
+  if (!mReconstructionProbeConfigured) return;
+  mReconstructionSummaryPending = true;
+  refreshReconstructionSummary();
+  mReconstructionScanner->request(mDatasetPath, mRunColmap->isChecked(),
+                                 mProbePython, mProbeBackendRoot, mProbeEnvironment);
+}
+
+void TrainingDialog::refreshReconstructionSummary() {
+  if (!mReconstructionSummaryLabel || !mReconstructionDecisionLabel) return;
+  if (mStartButton && mReconstructionProbeConfigured)
+    mStartButton->setEnabled(reconstructionPreflightReady() &&
+                            !mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool());
+  if (mReconstructionSummaryPending) {
+    const QString pending = QCoreApplication::translate("Workbench", "正在读取相机与重建来源（只读）…");
+    mReconstructionSummaryLabel->setText(pending);
+    mReconstructionDecisionLabel->setText(pending);
+    return;
+  }
+  if (!mReconstructionSummary.ready) {
+    const QString unavailable = mReconstructionProbeConfigured
+        ? QCoreApplication::translate("Workbench", "来源预检失败：%1").arg(mReconstructionSummary.diagnostic)
+        : QCoreApplication::translate("Workbench", "相机来源尚未预检");
+    mReconstructionSummaryLabel->setText(unavailable);
+    mReconstructionDecisionLabel->setText(unavailable);
+    return;
+  }
+  const QJsonObject report = mReconstructionSummary.report;
+  const QLocale locale;
+  const auto number = [&](const char *key) {
+    const auto value = report.value(QLatin1String(key));
+    return value.isDouble() ? locale.toString(qint64(value.toDouble()))
+                           : QCoreApplication::translate("Workbench", "未知");
+  };
+  const QString format = report.value(QStringLiteral("format")).toString();
+  QString formatText = QCoreApplication::translate("Workbench", "未知");
+  if (format == QStringLiteral("colmap_binary")) formatText = QCoreApplication::translate("Workbench", "COLMAP 二进制");
+  else if (format == QStringLiteral("colmap_text")) formatText = QCoreApplication::translate("Workbench", "COLMAP 文本");
+  else if (format == QStringLiteral("transforms_json")) formatText = QCoreApplication::translate("Workbench", "Blender / NeRF transforms JSON");
+  QStringList lines{QCoreApplication::translate("Workbench", "来源格式：%1").arg(formatText)};
+  const QString cameraPath = report.value(QStringLiteral("cameraFile")).toString();
+  const QString imagePath = report.value(QStringLiteral("imageFile")).toString();
+  const QString pointPath = report.value(QStringLiteral("pointFile")).toString();
+  if (!cameraPath.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "相机文件：%1").arg(QDir::toNativeSeparators(cameraPath)));
+  if (!imagePath.isEmpty()) lines.append((format == QStringLiteral("transforms_json")
+      ? QCoreApplication::translate("Workbench", "相机帧文件：%1")
+      : QCoreApplication::translate("Workbench", "注册照片文件：%1")).arg(QDir::toNativeSeparators(imagePath)));
+  if (!pointPath.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "稀疏点文件：%1").arg(QDir::toNativeSeparators(pointPath)));
+  const QString imagesDirectory = QDir::toNativeSeparators(report.value(QStringLiteral("trainingImagesDirectory")).toString());
+  if (!imagesDirectory.isEmpty()) lines.append((format == QStringLiteral("transforms_json")
+      ? QCoreApplication::translate("Workbench", "图像引用根目录：%1")
+      : QCoreApplication::translate("Workbench", "训练图像目录：%1")).arg(imagesDirectory));
+  const QString colmapDirectory = QDir::toNativeSeparators(report.value(QStringLiteral("colmapInputDirectory")).toString());
+  if (!colmapDirectory.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "COLMAP 输入目录：%1").arg(colmapDirectory));
+  if (format == QStringLiteral("transforms_json"))
+    lines.append(QCoreApplication::translate("Workbench", "相机帧 %1；输入照片 %2；相机标定数量不适用于此格式。")
+        .arg(number("frameCount"), number("inputImages")));
+  else
+    lines.append(QCoreApplication::translate("Workbench", "注册照片 %1 / 输入照片 %2；相机标定 %3；有效稀疏点 %4 / %5。")
+        .arg(number("registeredImages"), number("inputImages"), number("cameraCount"), number("validPoints"), number("sparsePoints")));
+  QStringList reasons;
+  for (const auto &reason : report.value(QStringLiteral("reasons")).toArray()) {
+    const QString code = reason.toString();
+    if (code == QStringLiteral("too_few_views")) reasons.append(QCoreApplication::translate("Workbench", "注册照片过少"));
+    else if (code == QStringLiteral("too_few_points")) reasons.append(QCoreApplication::translate("Workbench", "有效稀疏点不足"));
+    else if (code == QStringLiteral("invalid_points")) reasons.append(QCoreApplication::translate("Workbench", "稀疏点或轨迹无效"));
+    else if (code == QStringLiteral("low_coverage")) reasons.append(QCoreApplication::translate("Workbench", "注册覆盖不足"));
+    else if (code == QStringLiteral("input_mismatch")) reasons.append(QCoreApplication::translate("Workbench", "输入照片数量不匹配"));
+    else if (code == QStringLiteral("invalid_camera_metadata")) reasons.append(QCoreApplication::translate("Workbench", "相机标定或图像引用无效"));
+    else reasons.append(QCoreApplication::translate("Workbench", "模型文件无效"));
+  }
+  lines.append(report.value(QStringLiteral("usable")).toBool()
+      ? (format == QStringLiteral("transforms_json")
+         ? QCoreApplication::translate("Workbench", "transforms 参数及引用检查通过（未进行 COLMAP 最低有效性检查）。")
+         : QCoreApplication::translate("Workbench", "最低有效性检查通过（不是重建精度保证）。"))
+      : QCoreApplication::translate("Workbench", "最低有效性检查未通过：%1").arg(reasons.join(QStringLiteral(" / "))));
+  mReconstructionSummaryLabel->setText(lines.join(QLatin1Char('\n')));
+  const QString decision = report.value(QStringLiteral("decision")).toString();
+  QString decisionText;
+  if (decision == QStringLiteral("reuse")) decisionText = QCoreApplication::translate("Workbench", "复用当前重建：已通过最低有效性检查；不运行 COLMAP。");
+  else if (decision == QStringLiteral("reuse_transforms")) decisionText = QCoreApplication::translate("Workbench", "复用 transforms 相机帧：参数及图像引用检查通过；不运行 COLMAP。");
+  else if (decision == QStringLiteral("reuse_cache")) decisionText = QCoreApplication::translate("Workbench", "复用对齐缓存：启动时恢复缓存，不运行 COLMAP。");
+  else if (decision == QStringLiteral("user_rerun")) decisionText = QCoreApplication::translate("Workbench", "用户选择重跑：重新进行相机注册、稀疏重建和去畸变。");
+  else if (decision == QStringLiteral("missing_reconstruction")) decisionText = QCoreApplication::translate("Workbench", "缺少可识别重建：后端将先运行 COLMAP。");
+  else if (decision == QStringLiteral("undistortion_required")) decisionText = QCoreApplication::translate("Workbench", "只有原始 input 图像，没有去畸变 images：后端必须运行 COLMAP 转换。");
+  else if (decision == QStringLiteral("repair_required")) decisionText = QCoreApplication::translate("Workbench", "当前重建不可用：后端将尝试修复重建，而非直接训练。");
+  else if (decision == QStringLiteral("invalid_cache")) decisionText = QCoreApplication::translate("Workbench", "对齐缓存不可训练：后端会拒绝复用；请勾选重跑 COLMAP。");
+  else if (decision == QStringLiteral("invalid_source")) decisionText = QCoreApplication::translate("Workbench", "相机数据不可读取或不受训练器支持：不能直接复用；请勾选重跑 COLMAP。");
+  else if (decision == QStringLiteral("no_images")) decisionText = QCoreApplication::translate("Workbench", "无可用图像：不能开始训练。");
+  else decisionText = QCoreApplication::translate("Workbench", "未知");
+  mReconstructionDecisionLabel->setText(decisionText);
 }
 
 } // namespace gsw

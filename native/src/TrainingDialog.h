@@ -3,12 +3,14 @@
 #include <QDialog>
 #include <QString>
 #include "TrainingInputSummary.h"
+#include "TrainingReconstructionSummary.h"
 
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
 class QLabel;
 class QSpinBox;
+class QPushButton;
 
 namespace gsw {
 
@@ -33,6 +35,12 @@ public:
                  bool twoDgsAvailable, QWidget *parent = nullptr);
 
   [[nodiscard]] TrainingConfiguration configuration() const;
+  void setReconstructionProbe(const QString &python, const QString &backendRoot,
+                              const QProcessEnvironment &environment);
+  [[nodiscard]] bool effectiveRunColmap() const;
+  [[nodiscard]] bool reconstructionPreflightReady() const;
+  [[nodiscard]] QString reconstructionDecisionText() const;
+  [[nodiscard]] TrainingReconstructionSummary reconstructionSummary() const;
 
 protected:
   void accept() override;
@@ -43,6 +51,8 @@ private:
   void refreshInputSummary();
   void scanInputSummary();
   [[nodiscard]] bool datasetContainsImages() const;
+  void scanReconstructionSummary();
+  void refreshReconstructionSummary();
 
   QString mDatasetPath;
   QComboBox *mBackend = nullptr;
@@ -57,6 +67,17 @@ private:
   TrainingInputSummaryScanner *mInputScanner = nullptr;
   TrainingInputSummary mInputSummary;
   bool mInputSummaryPending = false;
+  QLabel *mReconstructionSummaryLabel = nullptr;
+  QLabel *mReconstructionDecisionLabel = nullptr;
+  QPushButton *mStartButton = nullptr;
+  TrainingReconstructionSummaryScanner *mReconstructionScanner = nullptr;
+  TrainingReconstructionSummary mReconstructionSummary;
+  QString mProbePython;
+  QString mProbeBackendRoot;
+  QProcessEnvironment mProbeEnvironment;
+  bool mReconstructionProbeConfigured = false;
+  bool mReconstructionSummaryPending = false;
+  bool mRunColmapEdited = false;
 };
 
 } // namespace gsw

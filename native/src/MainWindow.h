@@ -4,6 +4,7 @@
 #include "ProcessSupervisor.h"
 #include "RecoveryStore.h"
 #include "TrainingOutputLocator.h"
+#include "GenerationHistoryStore.h"
 #include "WorkspaceDocument.h"
 
 #include <QMainWindow>
@@ -58,6 +59,7 @@ private:
   friend bool runMeshGenerationSmokeTest(MainWindow &window);
   friend bool runProcessingCompletionSmokeTest(MainWindow &window);
   friend bool runTaskActionsSmokeTest(MainWindow &window);
+  friend bool runGenerationHistorySmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -79,6 +81,7 @@ private:
     QString resultSceneId;
     ActiveTrainingJob previousRecovery;
     bool launched = false;
+    QString historyId;
   };
 
   struct PendingReconstruction {
@@ -92,6 +95,7 @@ private:
     QString projectRoot;
     QString outputDirectory;
     QString previewPath;
+    QString historyId;
   };
 
   void createActions();
@@ -174,6 +178,13 @@ private:
   void startMeshGeneration();
   void pauseTraining();
   void resumeTraining();
+  void resumeTrainingJob(const ActiveTrainingJob &active, const QString &historyId = {});
+  void showGenerationHistory();
+  void resumeGenerationExperiment(const QString &id);
+  bool retainGenerationExperiment(const GenerationExperiment &experiment);
+  void updateGenerationExperiment(const QString &projectRoot, const QString &id,
+                                  const QString &status, const QString &resultPath = {},
+                                  const QString &resultSceneId = {});
   void updateTrainingActions();
   void updateWorkspaceUi();
   void retranslateUi();
@@ -265,6 +276,7 @@ private:
   QAction *mGenerateMeshAction = nullptr;
   QAction *mPauseTrainingAction = nullptr;
   QAction *mResumeTrainingAction = nullptr;
+  QAction *mGenerationHistoryAction = nullptr;
   bool mPauseRequested = false;
   QAction *mStopAction = nullptr;
   QAction *mGaussianRenderAction = nullptr;
@@ -272,6 +284,7 @@ private:
   QAction *mPointRenderAction = nullptr;
   QAction *mShowCamerasAction = nullptr;
   QAction *mTaskPreviewAction = nullptr;
+  QAction *mPausePreviewAction = nullptr;
   QAction *mInspectAction = nullptr;
   QAction *mLockEditToolsAction = nullptr;
   QAction *mObservationTrackballAction = nullptr;

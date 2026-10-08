@@ -12,7 +12,13 @@
 
 完整状态先写唯一临时文件，再原子发布 `output/<scene>/.gsw-resume/ready.json`；只有新清单发布成功后才回收上一个状态文件。磁盘写入失败保留上一个有效检查点。续训核对 SHA-256、图像/相机文件内容和训练参数；源数据变更时拒绝继续。首次启动和续训需读取训练输入计算指纹，耗时取决于数据量。工程托管路径使用相对记录，另存为时跟随工程迁移；外部数据保持原外部位置。
 
-检查点使用 PyTorch pickle 序列化。只加载可信且未被他人替换的本机训练文件；校验和无法证明来源。恢复需要用户明确确认，不在打开工程时自动反序列化。一次工程只记录一个当前续训入口，新训练会先提醒替换该入口。
+检查点使用 PyTorch pickle 序列化。只加载可信且未被他人替换的本机训练文件；校验和无法证明来源。恢复需要用户明确确认，不在打开工程时自动反序列化。
+
+“工作流 → 实验与生成档案”分别保留每个实验的参数、数据集、输出位置、状态、成果对象 ID 和可用续训入口。新实验不替换先前实验的档案，也不允许复用已归档实验的输出目录；旧版单一活动入口在读取时迁入档案，活动入口仍只是最近任务的快捷指针。选中记录后可以“查看所选成果”或“继续所选实验”。完整状态元数据就绪只说明入口可供核查，续训前仍需验证文件内容、身份与参数并确认信任。已完成实验不会自动重新训练，失效配置或检查点会说明不可续训的原因。
+
+重新打开工程不启动任何任务，也不读取 pickle。上次遗留的运行记录标为中断；档案不是自动执行队列。切换到其他实验的数据集需要明确确认，只有实际启动成功后才采用该数据集，启动失败保留原工程上下文与先前入口。档案以工程内 `.gsw/experiments` 的独立原子 JSON 记录保存，托管路径使用相对位置，外部引用保持原位置；任务面板日志和历史曲线仍不跨会话恢复。
+
+“暂停预览”只冻结任务画面，训练仍继续，也不保存完整状态或释放训练进程持有的显存；需要安全退出训练时仍使用“暂停训练”。四种网格方法及其可选 OpenMVS 纹理阶段也保存参数、成果和状态并支持独立观察，但没有完整优化器状态续训，不能把预览 PLY 或再次启动阶段称为完整恢复。
 
 验证覆盖原子写入失败、损坏与路径越界拒绝、参数/影像变更、暂停和取消区分、续训不覆盖输出、不重跑 COLMAP、三语即时切换、工程重开、CPU Adam 连续/恢复训练完全一致。可选 CUDA 集成测试逐项检查实际模型/优化器/曝光/RNG 的精确恢复，并比较小型合成场景的训练质量连续性。独立 CUDA 连续运行也存在数值波动，因此不承诺恢复后各浮点参数逐位相同，也不把合成样例指标当作真实数据质量保证。
 
@@ -26,6 +32,32 @@ Regression tests cover state safety, worker/desktop lifecycle, immediate triling
 
 Missing reconstruction inputs fail safely instead of invoking automatic alignment/cache recovery. Reopening a safely paused project preserves any model selection and transforms subsequently saved by the user.
 
+**Workflow → Experiments and Generation History** retains separate settings,
+dataset/output locations, status, result object ID and resume availability for
+each experiment. A new experiment does not replace earlier records and cannot
+reuse an archived experiment's output directory. The legacy active resume entry
+is migrated when read; the active entry remains only a latest-task shortcut.
+**View Selected Result** and **Resume Selected Experiment** operate on the
+selected record. Ready full-state metadata is not proof that checkpoint contents
+are valid: resume still verifies content, identity and settings and requires
+explicit trust. Completed experiments are not automatically retrained, and
+unavailable configurations/checkpoints report why resume is blocked.
+
+Opening a project starts no task and deserializes no pickle. Stale running records
+become interrupted; history is not an automatic queue. Resuming another dataset
+requires confirmation, with dataset adoption deferred until an actual successful
+launch; launch failure retains the previous project context and resume entry.
+Independent atomic JSON records live in `.gsw/experiments`, with relative managed
+paths and unchanged external references. Task-panel logs and historical metric
+curves remain session-only.
+
+**Pause Preview** freezes observation without pausing optimization, saving a full
+checkpoint or releasing the training process's GPU allocations; use **Pause
+Training** for a safe training exit. All four mesh methods and their optional
+OpenMVS texturing stages retain settings/results/status and independent
+observation, but have no full optimizer resume. A preview PLY or restarting a
+stage is not full-state restoration.
+
 ## 日本語
 
 ツールバーと「ワークフロー」に「学習を一時停止」「学習を再開」を追加します。新しく開始したネイティブ 3DGS と 2DGS ジョブが対象です。最適化器の更新後に完全な状態と PLY プレビューを保存し、プロセスを終了して GPU メモリを解放します。「タスクを停止」は引き続きキャンセルです。プレビューと再開対象はプロジェクトを開き直しても保持します。COLMAP、インポート、未対応のメッシュ段階、旧チェックポイント、任意の外部 PTH は対象外です。
@@ -36,11 +68,23 @@ Missing reconstruction inputs fail safely instead of invoking automatic alignmen
 
 再構築入力が欠落した場合、自動アラインメントやキャッシュ復元を行わずに再開を拒否します。正常に一時停止したプロジェクトを開き直しても、その後ユーザーが保存したモデルの選択や変換を置き換えません。
 
+「ワークフロー → 実験と生成履歴」で各実験の設定、データセット、出力先、状態、成果オブジェクト ID、再開可否を個別に保持します。新規実験は以前の記録を置き換えず、履歴に登録済みの実験の出力先を再利用できません。旧版の単一の有効な再開入口は読み込み時に移行し、有効な入口は最新タスクへの近道としてのみ残します。「選択した成果を表示」「選択した実験を再開」は選択中の記録を対象とします。完全な状態のメタデータがあっても内容が検証済みとは限らず、再開前にファイル内容、同一性、設定を検証して信頼確認を求めます。完了済みの実験を自動的に再学習せず、設定や状態が使用できない場合は理由を表示します。
+
+プロジェクトを開いてもタスクを起動せず、pickle を読み込みません。残っていた実行中の記録は中断済みとし、自動実行キューにはしません。別の実験のデータセットへの切り替えには確認が必要で、実際の起動成功後にのみ採用します。起動失敗では元の工程コンテキストと再開入口を保持します。`.gsw/experiments` に実験ごとの JSON を原子的に保存し、管理対象パスは相対位置、外部参照は元の位置とします。タスクのログと過去の指標曲線は引き続きセッション内のみです。
+
+「プレビューを一時停止」は表示のみを止め、最適化の一時停止、完全な状態の保存、学習プロセスの GPU 領域の解放は行いません。学習を安全に終了する場合は「学習を一時停止」を使います。四つのメッシュ方式と任意の OpenMVS テクスチャ工程も設定・成果・状態と独立した観察を保持しますが、完全な最適化器状態からの再開はありません。プレビュー PLY や工程の再実行を完全な復元とは呼びません。
+
 2DGS uses the official upstream adapter with two-scale state and no exposure optimizer. The isolated runtime, passing CUDA resume/preview smoke tests and remaining real-data/thin-disk preview limitations are documented in [generation pipeline parity](GENERATION_PIPELINES.md).
 
 2DGS は公式アダプターを使用し、二尺度の状態を保持します。露出最適化器は追加しません。独立環境、合格した実 CUDA の再開・プレビュー試験、実写品質と薄片近似表示の制限は[生成パイプラインの整合](GENERATION_PIPELINES.md)を参照してください。
 
 ## Developer validation
+
+中文：重跑或修复同一数据集的 COLMAP 会改变旧检查点的输入身份。启动前会列出受影响的可续训实验并要求确认；完整状态和成果保留，但不是数据版本快照。需要保留旧实验的可续训输入时，应使用独立数据集。
+
+English: Rerunning or repairing COLMAP in the same dataset changes the input identity of previous checkpoints. Launch lists affected resumable experiments and requires confirmation. States/results are retained, but the archive is not a dataset-version snapshot; use a separate dataset to preserve old resumable inputs.
+
+日本語：同じデータセットで COLMAP を再実行・修復すると、以前のチェックポイントの入力同一性が変わります。開始前に影響を受ける再開可能な実験を表示し、確認を求めます。状態と成果は保持しますが、データのバージョンスナップショットではありません。以前の再開可能な入力を保持するには、別のデータセットを使用してください。
 
 ```text
 python scripts/native_i18n.py
@@ -51,6 +95,17 @@ python -m unittest native.worker.test_training_checkpoint_cuda
 ```
 
 The CUDA fixture creates only temporary synthetic data. `GSW_CHECKPOINT_TEST_ROOT` can point at a packaged backend to exercise installed source. The desktop smoke test uses a test-owned stdin worker; `GSW_PROCESS_OUTPUT_FIXTURE` can locate the build-tree helper when testing an installed executable. Normal application preferences are isolated during all `--smoke-test*` runs.
+
+The 2026-10-08 history acceptance boundary uses the public history dialog and
+test-owned workers: independently retained experiment settings/results, project
+reopen, explicit selection of a resumable native experiment, unavailable-state
+diagnostics and failed-launch rollback. Store tests check atomicity, managed-path
+portability and rejection of linked/traversing paths. Relevant CTests are
+`generation_history`, `native_generation_history`, `native_training_resume` and
+`native_2dgs_training_resume`; these describe test surfaces, not a new CUDA
+quality result or a full persistent task queue. See
+[CONTINUOUS_TRAINING_PREVIEW.md](CONTINUOUS_TRAINING_PREVIEW.md) for the independent
+preview-pause boundary.
 
 ## 验证记录 / Validation / 検証 — 2026-09-23
 
