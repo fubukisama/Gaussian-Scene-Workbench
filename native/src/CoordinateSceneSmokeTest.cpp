@@ -61,7 +61,8 @@ bool useTopOrthographicView(NativeViewport &viewport) {
 bool writeCube(const QString &path, bool second, double unitsPerMetre = 1.0,
                bool declareCoordinates = true,
                const QString &crs = QStringLiteral("gsw-coordinate-smoke-local"),
-               double physicalScale = 1.0, bool nearOrigin = false) {
+               double physicalScale = 1.0, bool nearOrigin = false,
+               double elevationOffset = 0.0) {
   QFile file(path);
   if (!file.open(QIODevice::WriteOnly)) return false;
   QByteArray ply("ply\nformat ascii 1.0\n");
@@ -82,14 +83,15 @@ bool writeCube(const QString &path, bool second, double unitsPerMetre = 1.0,
         .arg(((nearOrigin ? 0.0 : 500000000.0) + ((second ? 3.0 : -3.0) +
               (vertex & 1 ? 1.0 : -1.0)) * physicalScale) * unitsPerMetre, 0, 'f', 3)
         .arg(((nearOrigin ? 0.0 : 400000000.0) + (vertex & 2 ? 1.0 : -1.0) * physicalScale) * unitsPerMetre, 0, 'f', 3)
-        .arg(((second ? 23.0 : 20.0) + (vertex & 4 ? 1.0 : -1.0)) * physicalScale * unitsPerMetre, 0, 'f', 3)
+        .arg((((second ? 23.0 : 20.0) + (vertex & 4 ? 1.0 : -1.0)) * physicalScale + elevationOffset) * unitsPerMetre, 0, 'f', 9)
         .arg(second ? "15 240 240" : "240 15 240").toUtf8();
   }
   ply += "4 0 1 3 2\n4 4 6 7 5\n4 0 4 5 1\n4 2 3 7 6\n4 0 2 6 4\n4 1 5 7 3\n";
   return file.write(ply) == ply.size();
 }
 
-bool writePatch(const QString &path, bool second, const QString &kind) {
+bool writePatch(const QString &path, bool second, const QString &kind,
+                bool nearOrigin = false, double elevationOffset = 0.0) {
   const bool gaussian = kind != "points";
   const bool surfel = kind == "2dgs";
   const double unitsPerMetre = second ? 100.0 : 1.0;
@@ -109,9 +111,9 @@ bool writePatch(const QString &path, bool second, const QString &kind) {
   for (int y = -10; y <= 10; ++y) {
     for (int x = -10; x <= 10; ++x) {
       ply += QString("%1 %2 %3 ")
-          .arg((500000000.0 + (second ? 3.0 : -3.0) + x * 0.1) * unitsPerMetre, 0, 'f', 3)
-          .arg((400000000.0 + y * 0.1) * unitsPerMetre, 0, 'f', 3)
-          .arg((second ? 23.0 : 20.0) * unitsPerMetre, 0, 'f', 3).toUtf8();
+          .arg(((nearOrigin ? 0.0 : 500000000.0) + (second ? 3.0 : -3.0) + x * 0.1) * unitsPerMetre, 0, 'f', 3)
+          .arg(((nearOrigin ? 0.0 : 400000000.0) + y * 0.1) * unitsPerMetre, 0, 'f', 3)
+          .arg(((second ? 23.0 : 20.0) + elevationOffset) * unitsPerMetre, 0, 'f', 9).toUtf8();
       if (gaussian) {
         ply += second ? "-1.5 1.5 1.5 3 " : "1.5 -1.5 1.5 3 ";
         const QByteArray logScale = QByteArray::number(std::log(0.04 * unitsPerMetre), 'g', 12);
@@ -638,6 +640,39 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
   if (!evidence.isEmpty()) check(tinyBefore.save(QDir(evidence).filePath(originalLanguage + "-tiny-before.png")) &&
                                 tinyAfter.save(QDir(evidence).filePath(originalLanguage + "-tiny-after.png")),
                                 "tiny-model projection framebuffer evidence is saved");
+  // Decimal, unshifted source elevations must not round-trip through the GPU's
+  // float bounds before reaching coordinate reports. Cover every model family,
+  // mixed source units, a translated object and selection-stable scene minima.
+  constexpr double preciseElevation = 98.469025;
+  for (const auto &kind : {QStringLiteral("points"), QStringLiteral("3dgs"),
+                          QStringLiteral("2dgs"), QStringLiteral("mesh")}) {
+    viewport.setSceneObjects({}, {});
+    QList<SceneObject> preciseObjects;
+    for (int i = 0; i < 2; ++i) {
+      const QString path = QDir(temporary.path()).filePath(QString("precise-%1-%2.ply").arg(kind).arg(i));
+      const bool written = kind == "mesh"
+          ? writeCube(path, i == 1, i == 0 ? 1.0 : 100.0, true,
+                      QStringLiteral("gsw-coordinate-smoke-local"), 1.0, true, preciseElevation - 19.0)
+          : writePatch(path, i == 1, kind, true, preciseElevation - 20.0);
+      if (!check(written, "decimal elevation fixture is written")) return false;
+      preciseObjects.append({QString("precise-%1-%2").arg(kind).arg(i), path, {}, {}, {1, 1, 1}, kind == "mesh" ? 8 : 441});
+    }
+    viewport.setSceneObjects(preciseObjects, preciseObjects[0].id);
+    for (const auto &object : preciseObjects) {
+      if (!check(viewport.activateSceneObject(object.id), "decimal elevation object can be activated") ||
+          !check(waitUntil([&] { return viewport.scenePath() == object.path && viewport.selectableModelAvailable(); }),
+                 "decimal elevation object finishes loading")) return false;
+    }
+    check(std::abs(viewport.referencePlaneElevation() - preciseElevation) < 1.0e-10,
+          "shared reference elevation retains source double precision in mixed units");
+    preciseObjects[1].translation.setZ(-500.0F); // -5 scene metres in centimetre source units.
+    viewport.setSceneObjects(preciseObjects, preciseObjects[1].id);
+    check(std::abs(viewport.referencePlaneElevation() - (preciseElevation - 2.0)) < 1.0e-10,
+          "translated collection minimum retains decimal precision and source-unit conversion");
+    check(viewport.activateSceneObject(preciseObjects[0].id) &&
+          std::abs(viewport.referencePlaneElevation() - (preciseElevation - 2.0)) < 1.0e-10,
+          "decimal collection elevation remains independent of active-object selection");
+  }
   viewport.setSceneObjects({}, {});
   if (passed) qInfo() << "COORDINATE_SCENE PASS: same-frame and mixed-unit geometry retain physical size, shared grid and coordinate relationship";
   return passed;

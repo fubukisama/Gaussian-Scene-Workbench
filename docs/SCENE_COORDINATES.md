@@ -37,6 +37,21 @@ The saved preference identifier remains `modelBase` for compatibility. Source
 coordinates and original files are not rewritten by changing the reference
 plane or the display language.
 
+The reported scene-base elevation retains source double precision through the
+local model transform and shared length-unit conversion. GPU float bounds are
+not round-tripped into coordinate reports. Regression fixtures cover decimal
+elevations in points, 3DGS, 2DGS and meshes, mixed metre/centimetre sources,
+translated collection minima and active-object changes.
+
+中文：场景底部高程在模型变换和共享长度单位换算中保留源数据双精度，不从 GPU
+单精度范围反算坐标报告。回归覆盖点云、3DGS、2DGS 和网格的小数高程、米／厘米
+混合单位、变换后的集合底部及活动对象切换。
+
+日本語：シーン底面の高さは、モデルのトランスフォームと共通長さ単位への換算を
+通して元データの倍精度を保持します。GPU の単精度の範囲から座標レポートへ
+戻しません。点群、3DGS、2DGS、メッシュの小数の高さ、メートル／センチメートル
+の混在、移動後のシーン底面、アクティブオブジェクトの切り替えを回帰検証します。
+
 ## Import, editing and limits
 
 - **Append** preserves existing objects and adds the source coordinates to the

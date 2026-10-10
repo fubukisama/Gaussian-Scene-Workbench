@@ -2335,10 +2335,33 @@ void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
 }
 
 double NativeViewport::referencePlaneElevation() const {
-  QVector3D minimum, maximum;
-  return mReferencePlaneMode == ReferencePlaneMode::ModelBase &&
-                 collectionReferenceBounds(minimum, maximum)
-             ? sceneReferenceCoordinates().globalFromLocal(minimum).z : 0.0;
+  if (mReferencePlaneMode != ReferencePlaneMode::ModelBase) return 0.0;
+  double minimum = std::numeric_limits<double>::infinity();
+  for (const auto &state : displayedSceneStates()) {
+    const auto &coordinates = state->mSceneCoordinates;
+    if (!coordinates.valid || coordinates.displayScale == 0.0) continue;
+    const auto matrix = ModelTransform{state->mModelTranslation, state->mModelRotation,
+                                       state->mModelScale}.matrix(state->mSceneCenter);
+    const double unitRatio = sourceToReferenceUnitScale(*state);
+    // GPU bounds intentionally use floats. Coordinate reports must instead
+    // retain source doubles through the same local TRS and shared-unit mapping;
+    // rounding a world elevation to QVector3D loses decimal precision even for
+    // an untransformed model without a large-coordinate display shift.
+    for (int corner = 0; corner < 8; ++corner) {
+      const double x = ((corner & 1 ? coordinates.globalMaximum.x : coordinates.globalMinimum.x) +
+                        coordinates.displayShift.x) * coordinates.displayScale;
+      const double y = ((corner & 2 ? coordinates.globalMaximum.y : coordinates.globalMinimum.y) +
+                        coordinates.displayShift.y) * coordinates.displayScale;
+      const double z = ((corner & 4 ? coordinates.globalMaximum.z : coordinates.globalMinimum.z) +
+                        coordinates.displayShift.z) * coordinates.displayScale;
+      const double transformedZ = matrix(2, 0) * x + matrix(2, 1) * y +
+                                  matrix(2, 2) * z + matrix(2, 3);
+      const double elevation = (transformedZ / coordinates.displayScale -
+                                coordinates.displayShift.z) * unitRatio;
+      minimum = std::min(minimum, elevation);
+    }
+  }
+  return std::isfinite(minimum) ? minimum : 0.0;
 }
 
 QString NativeViewport::referencePlaneDescription() const {
