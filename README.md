@@ -1,189 +1,150 @@
 # Gaussian Scene Workbench
 
-**Gaussian Scene Workbench** is a Windows desktop research environment for Gaussian scene reconstruction, experiment management, analysis, editing, rendering, and export. It supports workflows beyond 3DGS training while retaining compatibility with existing 3DGS Editor projects and runtime settings.
+**Gaussian Scene Workbench** is a Windows desktop research workbench for Gaussian Splatting, photogrammetry, point clouds and meshes.
 
-中文名：**高斯场景研究工作台**
-日本語名：**ガウスシーン研究ワークベンチ**
+中文：**高斯场景研究工作台** · 日本語：**ガウスシーン研究ワークベンチ**
 
-## Native 0.3 Development
+[English](#native-desktop-preview) · [简体中文](#简体中文) · [日本語](#日本語)
 
-The application is being rebuilt as a fully native Qt 6/C++ desktop program on the [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3) branch. This target does not embed HTML, a browser engine, Electron, Node.js, or a local web server.
+## Native Desktop Preview
 
-- Current version: `0.3.1-native-preview`
-- Updated: `2026-08-02`
-- Current native slice: guarded COLMAP reconstruction and training, an adaptive coordinate-aware infinite reference grid with depth-occluded XYZ axes and selection bounds, screen-space Gaussian preview with point fallback, Blender-style object Move/Rotate/Scale/Transform gizmos with a spacious layered combined layout and guarded free-trackball hit zone, full-source rectangle/lasso/brush selection, delete/transform undo-redo, and lossless cropped PLY export.
-- Renderer metric: honest CPU submission time; GPU/SIBR timing remains a tracked parity item.
-- Windows builds: the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) publishes a downloadable artifact for each successful branch update.
-- Architecture and parity plan: [docs/NATIVE_MIGRATION.md](docs/NATIVE_MIGRATION.md)
-- COLMAP install and discovery: [docs/COLMAP_SETUP.md](docs/COLMAP_SETUP.md)
-- Managed Windows signing and App Control: [docs/WINDOWS_APPLICATION_CONTROL.md](docs/WINDOWS_APPLICATION_CONTROL.md)
-- Local build instructions: [native/README.md](native/README.md)
+- Version: `0.3.1-native-preview`
+- Documentation updated: `2026-10-12` — not a new release-version announcement.
+- Active branch: [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3)
+- Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
-The released `0.2.4` Electron application remains the stable fallback while the native branch reaches feature parity.
+This README describes the **native desktop branch**, not the legacy HTML/Electron application. Native development remains a preview; a workflow entry does not imply complete legacy feature parity.
 
-## Capabilities
+### Current capabilities
 
-- Prepare image and video datasets with COLMAP-assisted reconstruction tools.
-- Train and manage Gaussian Splatting methods, including 3DGS and 2DGS workflows.
-- Resume checkpoints, clone experiments, compare parameters, inspect curves, and review job history.
-- Load large Gaussian scenes, inspect cameras, select visible Gaussians on the GPU, crop, and edit scene content.
-- Run rendering and PSNR analysis, manage assets, and export splat, GLB, and mesh results.
-- Use resizable persistent panels, adaptive UI scaling, and a SIBR-style 60-frame GPU render-performance meter.
+- **Projects and media:** untitled projects, photo/folder/video import, external dataset links, portable `.gsw.json` projects and managed data, Save As/recovery, and separate dataset/reconstruction/scene/task-history cleanup.
+- **Reconstruction and training:** guarded COLMAP reconstruction, 3DGS/2DGS training, input/runtime preflight, reconstruction reuse explanations, progress, logs and cancellation. CUDA training needs a compatible external environment.
+- **Safe pause/resume:** compatible native 3DGS/2DGS jobs save full optimizer state at an iteration boundary. Resume validates inputs, settings and checkpoint contents and requires explicit trust confirmation. PLY previews and warm starts are not full-state resume.
+- **Independent experiments:** new jobs preserve existing models and transforms, use a separate task-preview layer, and retain individual settings, results and available resume entries. Pause Preview freezes observation, not training. Reference-model display caches can yield resources without deleting project objects.
+- **Native visualization:** Gaussian, 2DGS surfel, point-cloud and triangle-mesh display, Gaussian SH controls, camera trajectories, perspective/orthographic navigation and an adaptive infinite grid. FPS measures completed viewport-frame cadence with 60-frame smoothing, not GPU execution time or the inverse of CPU submission time.
+- **Shared coordinates and editing:** shared scene units/reference, preserved source coordinates, reversible display shifts, coordinate reports, multi-object selection, Move/Rotate/Scale/Transform, Global/Local orientation, numeric input, snapping and undo/redo. The fixed source-base grid does not lock models to the plane; independent reconstructions are not automatically registered.
+- **Large models and export:** complete mesh loading when estimated RAM/GPU costs fit, disk-backed paging otherwise, live automatic/aggressive or manual budgets, textured PLY display, full-source point/Gaussian selection and cropping where supported, and PLY/SPZ plus mesh export subject to format-specific limits.
+- **Desktop UI:** immediate Simplified Chinese/English/Japanese switching, light/dark and local-time automatic appearance, 90–150% scaling, unified vector icons, responsive edit toolbars, remembered file/folder history, persistent panels and save/exit confirmation with worker cleanup.
 
-## License And Intended Use
+Mesh-generation routes include bounded/unbounded TSDF, SuGaR and GS2Mesh, with optional OpenMVS photo texturing. Runtimes, weights and verification gates are backend-specific; mesh stages do **not** provide full optimizer-state resume. See the [pipeline matrix](docs/GENERATION_PIPELINES.md) and [mesh guide](docs/MESH_GENERATION.md).
 
-This repository is intended for open-source research, learning, and evaluation. Original Gaussian Scene Workbench code is MIT licensed. Bundled third-party components keep their original licenses. In particular, `gaussian-splatting/` and related CUDA modules are governed by the Gaussian-Splatting License and are limited to non-commercial research and evaluation unless separate permission is obtained from the original licensors.
+### Download and run on Windows
 
-See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+1. In the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml), select a **successful run for this branch and the desired commit**, then download its artifact. Artifacts expire; a newer source commit does not guarantee a ready binary. Alternatively, build from source below.
+2. Extract the **complete package** to a writable directory and launch `bin/Gaussian Scene Workbench.exe`. Keep the Qt DLLs, plugins and packaged backend files; do not copy only the EXE.
+3. Verify the external runtime before reconstruction/training, then add media or import PLY/SPZ. See [Windows runtime setup](docs/WINDOWS_NATIVE_RUNTIME.md) and [COLMAP setup](docs/COLMAP_SETUP.md).
 
-## Windows Download
+Prefer a non-system drive when available, such as `D:\Apps\GSW`. C:-only devices automatically use the existing writable workspace/build/package location. Windows Application Control may require approved signed binaries/runtimes; the app does not disable or bypass that policy.
 
-- [Gaussian Scene Workbench 0.2.4 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.4)
-- Package: `Gaussian-Scene-Workbench-0.2.4-win-x64.zip`
-- Verify the package with the matching `.sha256` Release asset.
+The old Electron `0.2.4` release and `Setup Gaussian Scene Workbench.cmd` are **not** the native preview installation instructions.
 
-The large Windows package is distributed through GitHub Releases rather than committed to git.
+### Build the native desktop
 
-## Quick Start
-
-1. Download and extract `Gaussian-Scene-Workbench-0.2.4-win-x64.zip` to a writable folder, preferably outside the system drive.
-2. Double-click `Setup Gaussian Scene Workbench.cmd` and choose a runtime folder. Press Enter to use the same-drive default, such as `E:\Gaussian-Scene-Workbench-Runtime`.
-3. Setup launches the application when it finishes. Later, start it with `Gaussian Scene Workbench.exe`.
-
-To inspect the environment without installing components:
+From this branch's checkout, with the dependencies in [native/README.md](native/README.md):
 
 ```powershell
-.\Check Gaussian Scene Workbench Environment.cmd
+powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration Release -Package
 ```
 
-Install or update official COLMAP on a non-system drive:
+The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
+
+Translation and native regression commands:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install_colmap.ps1 -InstallRoot E:\Tools\COLMAP -Variant cuda
+python -B scripts/native_i18n.py
+python -B scripts/test_native_i18n.py
+ctest --test-dir native/build -C Release --output-on-failure
 ```
 
-Existing `GS_EDITOR_*` environment variables, `gaussian_splatting` Conda environments, and legacy `3DGS-Editor-Runtime` installations remain supported.
+Replace `native/build` for custom builds. GUI tests require the configured Qt/OpenGL runtime; optional CUDA integration gates are documented separately.
 
-## Repository Layout
+### Important boundaries
 
-- `crop_editor/` - local web workbench and Python service.
-- `resources/app/` - Electron desktop application.
-- `native/` - Qt 6/C++ desktop replacement and native tests.
-- `docs/NATIVE_MIGRATION.md` - renderer, training, and web-runtime retirement plan.
-- `scripts/` - setup, packaging, environment repair, and utilities.
-- `training_kit/` - Windows conversion and training helpers.
-- `gaussian-splatting/` - bundled training and CUDA extension sources.
+- The OpenGL preview is not the upstream CUDA tile renderer. GPU timing queries and 2DGS shared-GPU-memory live preview remain separate limitations; checkpoint-based previews are available where supported.
+- Mesh budgets are estimates, not a hard quota for all Gaussian buffers, other processes or training allocations. Geometry paging does not page texture atlases.
+- Full-state resume applies to compatible native 3DGS/2DGS checkpoints, not arbitrary external PTH files or mesh stages. Experiment metadata persists; task logs and historical metric curves remain session-only.
+- Do not assume legacy PSNR/evaluation, asset-management or all HTML features are implemented in the native interface.
 
-Generated folders such as `node_modules`, `datasets`, `output`, `desktop_app`, downloaded COLMAP tools, and packaged Electron binaries are excluded from git.
+### Documentation and source layout
 
-## Build A Release
+- [Native build and implementation](native/README.md)
+- [Windows runtimes](docs/WINDOWS_NATIVE_RUNTIME.md) · [App Control/signing](docs/WINDOWS_APPLICATION_CONTROL.md)
+- [Generation pipelines](docs/GENERATION_PIPELINES.md) · [Training resume and experiment history](docs/TRAINING_RESUME.md)
+- [Scene coordinates](docs/SCENE_COORDINATES.md) · [Multiple models](docs/MULTI_SCENE_IMPORT.md)
+- [Resource budgets](docs/RESOURCE_BUDGETS.md) · [Mesh generation](docs/MESH_GENERATION.md)
+- [Icon system](docs/ICON_SYSTEM.md) · [Localization](docs/LOCALIZATION.md)
+- [Migration](docs/NATIVE_MIGRATION.md) · [Parity gates](docs/NATIVE_PARITY.md)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\update_version.ps1 -Version 36.10.4 -PackageVersion 0.2.4 -Bump none -Note "Add direct Gaussian PLY model export"
-powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
-```
+`native/` contains the desktop UI, OpenGL renderer, workers and tests; `docs/` and `scripts/` contain documentation, build/runtime and validation tools; `training_kit/` and `gaussian-splatting/` contain compute helpers and training sources. `crop_editor/` and `resources/app/` retain legacy web/Electron code and shared backend helpers, not a browser dependency of the native UI.
 
-The generated package is written to `release\Gaussian-Scene-Workbench-<version>-win-x64.zip`.
+Generated datasets, outputs, environments, caches, builds and packages are excluded from Git. Legacy interface development belongs to [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main), not this desktop branch.
 
-## Capture Guidance
+### License and intended use
 
-COLMAP and Gaussian Splatting reconstruction require real camera motion and parallax. For small objects or exhibits, capture at least 50-100 overlapping images while moving around the subject. Rotating the camera from one fixed position often prevents sparse reconstruction initialization.
+Original Workbench code is MIT licensed. Training, CUDA, codec, Qt and icon components retain their own licenses; Graphdeco Gaussian-Splatting components have non-commercial research/evaluation restrictions unless separate permission is obtained. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Do not infer one MIT license for every bundled component.
 
----
+## 简体中文
 
-## 中文
+**高斯场景研究工作台**在 `agent/native-desktop-0.3` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-12**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
-**Gaussian Scene Workbench（高斯场景研究工作台）** 是面向 Windows 的高斯场景研究环境，覆盖数据处理、场景重建、训练实验管理、分析评估、可视化编辑、渲染与导出，不再局限于单一的 3DGS 训练或裁剪功能。
+### 当前功能
 
-### 主要功能
+- **工程与素材：**未命名工程，照片/文件夹/视频导入，外部数据集关联，保存/另存为、恢复，以及数据集、重建、场景、任务历史的分别清理。
+- **重建与训练：**COLMAP、3DGS/2DGS、数据与环境预检、复用重建原因、进度、日志和取消。CUDA 训练需要兼容的独立运行环境。
+- **完整进度保存：**原生 3DGS/2DGS 在安全迭代边界保存完整状态并暂停，校验输入、参数和可信检查点后续训；PLY 预览/热启动不等于完整优化器状态恢复。
+- **独立实验：**新任务保留原模型及变换，使用独立预览，分别记录参数、成果和续训入口。“暂停预览”不暂停训练；可让出参考模型显示缓存而不删除对象。
+- **可视化：**高斯、2DGS surfel、点云、纹理网格、球谐、相机轨迹、透视/正交导航及无限自适应网格。FPS 是实际完成的视口帧节奏，采用 60 帧平滑，不是 GPU 执行耗时或 CPU 提交耗时的倒数。
+- **坐标与编辑：**共享场景单位/参考系、源坐标、可逆显示偏移、坐标报告、多对象选择、移动/旋转/缩放/组合工具、全局/局部方向、数字输入、吸附、撤销重做。固定基准面不限制 Z 移动，也不自动配准独立重建模型。
+- **大模型与导出：**网格按实际内存/显存余量自适应加载，预算足够时完整常驻、不足时分页；支持即时激进自动/手动预算、纹理 PLY、受支持数据的完整源点选择/裁剪、PLY/SPZ 和网格导出。
+- **桌面界面：**中英日即时切换，深浅色与本地时间自动切换，90–150% 缩放，统一矢量图标，小视口工具栏适配，常用文件/文件夹记忆，持久面板及保存/退出确认。
 
-- 使用图像或视频准备数据集，并辅助完成 COLMAP 重建。
-- 管理 3DGS、2DGS 等 Gaussian Splatting 训练流程。
-- 恢复检查点、克隆实验、对比参数、查看训练曲线和任务历史。
-- 加载大型高斯场景，查看相机，使用 GPU 选择可见高斯并进行裁剪与编辑。
-- 执行渲染、PSNR 分析、资产管理以及 splat、GLB、网格导出。
-- 支持可调整并持久化的面板、高 DPI 自适应界面缩放，以及 SIBR 风格的 60 帧 GPU 渲染性能监控。
+网格生成含有界/无界 TSDF、SuGaR、GS2Mesh 和可选 OpenMVS 照片纹理阶段。环境、权重及验收状态各不相同，网格阶段没有完整优化器续训；见[管线矩阵](docs/GENERATION_PIPELINES.md)和[网格指南](docs/MESH_GENERATION.md)。
 
-### 许可证与用途
+### 下载、安装与构建
 
-本仓库用于开源研究、学习和评估。Gaussian Scene Workbench 的原创代码采用 MIT 许可证，内置第三方组件仍遵循各自原许可证。特别是 `gaussian-splatting/` 及相关 CUDA 模块受 Gaussian-Splatting License 约束，除非另行获得原始权利方授权，否则仅限非商业研究和评估用途。
+1. 在 [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) 选择对应分支/提交的**成功运行**并下载 artifact；有保存时限，并非每个新提交都有可用安装包。
+2. 完整解压后运行 `bin/Gaussian Scene Workbench.exe`；保留 Qt DLL、插件和后端文件，不要只复制 EXE。
+3. 重建/训练前按[运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)与[COLMAP](docs/COLMAP_SETUP.md)说明验证环境；已有 PLY/SPZ 模型可直接导入。
 
-详情见 [LICENSE](LICENSE) 和 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
+有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。企业应用控制需要获准的签名/运行库，软件不绕过安全策略。旧 Electron `0.2.4` 安装器不是原生版的安装方式。
 
-### Windows 下载
+源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
 
-- [Gaussian Scene Workbench 0.2.4 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.4)
-- 安装包：`Gaussian-Scene-Workbench-0.2.4-win-x64.zip`
-- 使用 Release 中对应的 `.sha256` 文件校验安装包。
+### 能力边界与许可
 
-### 快速开始
+当前仍是预览版，不把旧 HTML 的 PSNR、通用资产管理等功能视为已迁移。OpenGL 预览不等于上游 CUDA 分块渲染器；网格预算不是全程序/训练的硬配额，纹理未分页；2DGS 共享 GPU 实时预览仍有独立限制。实验记录可持久保存，任务日志和历史曲线仍仅保留当前会话。
 
-1. 下载并解压安装包到普通可写目录，建议放在非系统盘。
-2. 双击 `Setup Gaussian Scene Workbench.cmd` 并选择运行时目录。直接回车会使用同盘默认目录，例如 `E:\Gaussian-Scene-Workbench-Runtime`。
-3. 安装完成后软件会自动启动。以后双击 `Gaussian Scene Workbench.exe` 即可运行。
-
-只检查环境、不安装组件时运行：
-
-```powershell
-.\Check Gaussian Scene Workbench Environment.cmd
-```
-
-已有的 `GS_EDITOR_*` 环境变量、`gaussian_splatting` Conda 环境和旧版 `3DGS-Editor-Runtime` 仍然兼容。
-
-### 源码结构与打包
-
-`crop_editor/` 是网页工作台和 Python 服务，`resources/app/` 是 Electron 桌面应用，`scripts/` 与 `training_kit/` 提供环境安装、打包、数据转换和训练辅助工具。
-
-生成发行包：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package_editor_release.ps1
-```
-
-生成文件位于 `release\Gaussian-Scene-Workbench-<version>-win-x64.zip`。
-
-### 原生桌面版开发
-
-`0.3.1-native-preview` 已在 `agent/native-desktop-0.3` 分支继续重构。该版本使用 Qt 6/C++，不加载 HTML、Electron、Node.js 或本地网页服务器。当前原生工作流已支持带路径检查、缓存保护、实时日志、取消和输出验证的 COLMAP 重建；原生视口提供固定在 Y=0 世界平面的无限自适应网格，并支持由缩放、旋转、透明度和 SH-DC 颜色驱动的屏幕空间高斯预览，保留点模式回退；矩形、套索和可调半径连续笔刷均针对完整源数据工作。显示的是 CPU 提交耗时，不冒充 SIBR FPS。GitHub Actions 会在每次推送后自动生成 Windows 预览 artifact；迁移阶段保留 `0.2.4` 作为稳定版本。
-
----
+原创代码为 MIT；第三方训练、CUDA、编解码、Qt、图标遵循各自许可，Graphdeco 相关组件另有非商业研究/评估限制。见 [LICENSE](LICENSE) 和 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
 
 ## 日本語
 
-**Gaussian Scene Workbench（ガウスシーン研究ワークベンチ）** は、Windows 向けの Gaussian Splatting 研究環境です。データ準備、シーン再構成、学習実験管理、解析、編集、レンダリング、エクスポートを一つのデスクトップアプリで扱います。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `agent/native-desktop-0.3` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-12** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
-### 主な機能
+### 現在の機能
 
-- 画像・動画データセットの準備と COLMAP 再構成支援。
-- 3DGS、2DGS を含む Gaussian Splatting 学習ワークフロー。
-- チェックポイント再開、実験の複製、パラメータ比較、学習曲線、ジョブ履歴。
-- GPU による可視 Gaussian 選択、クロップ、シーン編集、カメラ確認。
-- レンダリング、PSNR 解析、アセット管理、splat・GLB・メッシュ出力。
-- 高 DPI 対応 UI スケーリング、状態を保持するパネル、SIBR 方式の 60 フレーム GPU 描画性能表示。
+- **プロジェクトと素材：**未保存プロジェクト、写真/フォルダー/動画追加、外部データセット、保存/名前を付けて保存、復元、データセット・再構築・シーン・履歴の個別整理。
+- **再構築と学習：**COLMAP、3DGS/2DGS、入力と環境の事前確認、再構築を再利用する理由、進捗、ログ、キャンセル。CUDA 学習には互換性のある外部環境が必要です。
+- **完全な状態からの再開：**ネイティブ 3DGS/2DGS は安全な反復境界で状態を保存して一時停止し、入力・設定・信頼できるチェックポイントを検証して再開します。PLY プレビューやウォームスタートは完全な最適化器状態の復元ではありません。
+- **実験の分離：**既存モデル/変換と独立したタスクプレビューを保持し、設定・成果・再開入口を個別に保存します。「プレビューを一時停止」は学習を止めません。表示キャッシュを解放しても参照モデルを削除しません。
+- **表示：**ガウシアン、2DGS surfel、点群、テクスチャ付きメッシュ、SH、カメラ軌跡、透視/平行投影、無限適応グリッド。FPS は実際に完了したフレームの間隔を 60 フレームで平滑化した値で、GPU 実行時間や CPU 送信時間の逆数ではありません。
+- **座標と編集：**共通単位/基準、元の座標、可逆な表示シフト、座標レポート、複数選択、移動/回転/スケール/複合ツール、グローバル/ローカル、数値入力、スナップ、取り消し/やり直し。固定基準面は Z 移動を拘束せず、別々に再構築したモデルの位置合わせを自動では行いません。
+- **大規模モデルと出力：**実際の RAM/GPU メモリ余量に応じ、収まるメッシュは完全常駐、収まらない場合はページングします。積極的な自動/手動予算、テクスチャ付き PLY、対応データの全ソース点選択/クロップ、PLY/SPZ とメッシュ出力を備えます。
+- **UI：**中英日の即時切替、ライト/ダークと現地時刻による自動切替、90–150% スケール、統一ベクターアイコン、小さなビューのツールバー、よく使うファイル/フォルダー履歴、パネル状態、保存/終了確認。
 
-### ライセンス
+メッシュ生成は有界/無界 TSDF、SuGaR、GS2Mesh と任意の OpenMVS 写真テクスチャ工程を含みます。環境・重み・検証状況は方式ごとに異なり、完全な最適化器状態からの再開には対応しません。[パイプライン表](docs/GENERATION_PIPELINES.md)と[メッシュガイド](docs/MESH_GENERATION.md)を参照してください。
 
-本リポジトリは、オープンソースの研究、学習、評価用途向けです。Gaussian Scene Workbench 独自コードは MIT License で提供されます。同梱される第三者コンポーネントは各ライセンスに従い、`gaussian-splatting/` と関連 CUDA モジュールは、別途許可がない限り非商用の研究・評価用途に制限されます。
+### 入手・起動・ビルド
 
-詳細は [LICENSE](LICENSE) と [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+1. [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) で対象ブランチ/コミットの**成功した実行**を選び artifact を取得します。保存期限があり、最新ソースのバイナリーが常に存在するとは限りません。
+2. 全体を展開し `bin/Gaussian Scene Workbench.exe` を実行します。Qt DLL、プラグイン、バックエンドを保持し、EXE だけをコピーしないでください。
+3. 学習/再構築前に[実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と[COLMAP](docs/COLMAP_SETUP.md)を確認します。既存 PLY/SPZ は直接読み込めます。
 
-### Windows 版
+別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。旧 Electron `0.2.4` の導入手順とは別です。
 
-- [Gaussian Scene Workbench 0.2.4 Windows x64](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases/tag/v0.2.4)
-- パッケージ：`Gaussian-Scene-Workbench-0.2.4-win-x64.zip`
+ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
 
-1. パッケージをシステムドライブ以外の書き込み可能なフォルダに展開します。
-2. `Setup Gaussian Scene Workbench.cmd` を実行し、ランタイム先を選択します。既定値は同じドライブ上の `Gaussian-Scene-Workbench-Runtime` です。
-3. セットアップ後は `Gaussian Scene Workbench.exe` で起動します。
+### 制限とライセンス
 
-環境確認のみを行う場合：
+本版はプレビューで、旧 HTML 版の PSNR、汎用アセット管理などが移植済みとは限りません。OpenGL は上流 CUDA タイルレンダラーと同一ではなく、メッシュ予算は全体/学習の強制的な上限ではありません。テクスチャはページングせず、2DGS の共有 GPU ライブプレビューにも制限があります。実験記録は保存されますが、ログと過去の指標曲線はセッション内のみです。
 
-```powershell
-.\Check Gaussian Scene Workbench Environment.cmd
-```
-
-既存の `GS_EDITOR_*` 環境変数、`gaussian_splatting` Conda 環境、旧 `3DGS-Editor-Runtime` は引き続き利用できます。
-
-### ネイティブデスクトップ版の開発
-
-`0.3.1-native-preview` は `agent/native-desktop-0.3` ブランチで開発中です。Qt 6/C++ を使用し、HTML、Electron、Node.js、ローカル Web サーバーを実行しません。ネイティブ COLMAP ワークフローはパス検証、既存キャッシュ保護、ライブログ、キャンセル、出力検証を備えています。現在のネイティブビューはスケール、回転、不透明度、SH-DC 色を使うスクリーンスペース Gaussian プレビューとポイント表示へのフォールバックを備え、矩形、投げ縄、半径可変ブラシは完全なソースデータを選択します。表示値は CPU の送信時間であり、SIBR FPS ではありません。GitHub Actions は各更新から Windows プレビュー artifact を生成します。機能が揃うまでは `0.2.4` を安定版として維持します。
+独自コードは MIT、学習・CUDA・コーデック・Qt・アイコンは各ライセンスに従います。Graphdeco 関連部には非商用研究/評価の制限があります。[LICENSE](LICENSE) と [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
