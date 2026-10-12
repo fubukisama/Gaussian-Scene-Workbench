@@ -62,10 +62,15 @@ permissions:
 jobs:
   build:
     name: Qt 6 native preview
+    # Match the native-only scan scope, including PR head and manual selection.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.
     runs-on: windows-2022
-    # Full native regressions plus compiled-code security analysis.
-    timeout-minutes: 45
+    # The traced build takes about 20 minutes on the hosted runner. Leave room
+    # for code analysis, every native regression and the verified package upload.
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read

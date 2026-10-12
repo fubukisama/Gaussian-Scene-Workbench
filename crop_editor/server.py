@@ -205,12 +205,12 @@ def managed_path(root, *parts, allow_root=False):
 
 
 def unique_path(directory, filename):
-    candidate = directory / filename
+    candidate = managed_path(directory, filename)
     if not candidate.exists():
         return candidate
     stem = Path(filename).stem
     suffix = Path(filename).suffix
-    return directory / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
+    return managed_path(directory, f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")
 
 
 def unlink_if_exists(path):

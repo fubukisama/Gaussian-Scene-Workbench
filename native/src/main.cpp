@@ -46,6 +46,8 @@
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QPushButton>
 #include <QSettings>
 #include <QSurfaceFormat>
@@ -680,6 +682,21 @@ int main(int argc, char *argv[]) {
                  sourceVertexCount, sourceFaceCount,
                  &smokeTestCompleted, &smokeTestFailureCode]() {
                   const QImage frame = viewport->grabFramebuffer();
+                  viewport->makeCurrent();
+                  if (const auto *context = viewport->context()) {
+                    auto *functions = context->functions();
+                    qInfo() << "Reference-axes OpenGL:" << "renderer"
+                            << reinterpret_cast<const char *>(functions->glGetString(GL_RENDERER))
+                            << "version"
+                            << reinterpret_cast<const char *>(functions->glGetString(GL_VERSION))
+                            << "glsl"
+                            << reinterpret_cast<const char *>(functions->glGetString(GL_SHADING_LANGUAGE_VERSION))
+                            << "QT_OPENGL_DLL" << qEnvironmentVariable("QT_OPENGL_DLL")
+                            << "frame" << frame.size();
+                  } else {
+                    qCritical() << "Reference-axes OpenGL: missing viewport context";
+                  }
+                  viewport->doneCurrent();
                   const QRect sampleRect(
                       qRound(frame.width() * 0.25),
                       qRound(frame.height() * 0.10),
@@ -1133,8 +1150,10 @@ int main(int argc, char *argv[]) {
                           << depthOcclusionReady
                           << "resident-mesh-triangles"
                           << viewport->residentMeshTriangleCount()
+                          << "paged-mesh-ready" << pagedMeshReady
                           << "mesh-texture-ready"
                           << viewport->meshTextureAvailable()
+                          << "expected-texture-ready" << meshTextureReady
                           << "coordinate-metadata-ready"
                           << coordinateMetadataReady
                           << "coordinate-report-ready"
@@ -1149,24 +1168,31 @@ int main(int argc, char *argv[]) {
                            << modelMoveReady << "model-rotate-ready"
                             << modelRotateReady << "model-trackball-ready"
                             << modelTrackballReady << "model-scale-ready"
-                            << modelScaleReady;
+                            << modelScaleReady
+                            << "edge-on-rotation-ready" << edgeOnRotationReady
+                            << "gizmo-zoom-ready" << gizmoZoomReady;
                   application.exit(smokeTestFailureCode);
                 });
           });
       QObject::connect(
           viewport, &gsw::NativeViewport::sceneLoadFailed, &application,
-          [&application, &smokeTestFailureCode](const QString &,
-                                                const QString &) {
+          [&application, &smokeTestFailureCode](const QString &path,
+                                                const QString &error) {
+            qCritical() << "Reference-axes scene load failed:" << path << error;
             smokeTestFailureCode = 4;
             application.exit(smokeTestFailureCode);
           });
       viewport->setScene(smokeScenePath, 8);
       QTimer::singleShot(180000, &application,
                          [&application, &smokeTestFailureCode]() {
+                           qCritical() << "Reference-axes scene load timed out";
                            smokeTestFailureCode = 6;
                            application.exit(smokeTestFailureCode);
                          });
     } else {
+      qCritical() << "Reference-axes fixture unavailable:" << smokeScenePath
+                  << "viewport" << (viewport != nullptr)
+                  << "exists" << QFileInfo::exists(smokeScenePath);
       smokeTestFailureCode = 3;
       QTimer::singleShot(0, &application,
                          [&application, &smokeTestFailureCode]() {

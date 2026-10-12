@@ -12,6 +12,8 @@
 #include <QtEndian>
 #include <QtTest>
 #include <bit>
+#include <limits>
+#include <stdexcept>
 
 using namespace gsw;
 namespace {
@@ -67,6 +69,12 @@ private slots:
   void rejectsSourceChangesBeforeCommit();
   void spzRoundTripAndDegreeOptions();
   void spzRejectsInvalidAndCancelledWithoutPublishing();
+  void spzCodecRejectsInvalidHeaderMetadata();
+  void spzCodecChecksPackedIndicesAndBuffers();
+  void spzCodecSaturatesExtremeFiniteSh();
+  void spzCodecChecksLegacyPayloadBeforeAllocation();
+  void spzCodecRejectsIncompleteLargeCloudMetadata();
+  void spzCodecRejectsConstructedFractionalBits();
   void spzRealModelWhenRequested();
 };
 
@@ -566,6 +574,112 @@ void ModelExportTests::rejectsSourceChangesBeforeCommit() {
     const auto result = exportModelFile(o);
     QVERIFY(changed); QVERIFY(!result.success); QVERIFY(!result.cancelled);
     QCOMPARE(read(o.destinationPath), QByteArray("original destination"));
+  }
+}
+
+void ModelExportTests::spzCodecRejectsInvalidHeaderMetadata() {
+  spz::GaussianCloud cloud;
+  cloud.numPoints = 1;
+  cloud.positions = {1, 2, 3}; cloud.colors = {.1F, .2F, .3F};
+  cloud.scales = {-2, -3, -4}; cloud.alphas = {.7F}; cloud.rotations = {0, 0, 0, 1};
+  spz::PackOptions options; options.version = 4;
+  std::vector<uint8_t> bytes;
+  QVERIFY(spz::saveSpz(cloud, options, &bytes));
+  QCOMPARE(spz::loadSpzPacked(bytes).numPoints, 1);
+  for (const auto [offset, value] : {std::pair<size_t, uint8_t>{12, 5}, {13, 31}}) {
+    auto invalid = bytes; invalid[offset] = value;
+    QCOMPARE(spz::loadSpzPacked(invalid).numPoints, 0);
+  }
+}
+
+void ModelExportTests::spzCodecChecksPackedIndicesAndBuffers() {
+  spz::GaussianCloud cloud;
+  cloud.numPoints = 1;
+  cloud.positions = {1, 2, 3}; cloud.colors = {.1F, .2F, .3F};
+  cloud.scales = {-2, -3, -4}; cloud.alphas = {.7F}; cloud.rotations = {0, 0, 0, 1};
+  spz::PackOptions options;
+  std::vector<uint8_t> bytes;
+  QVERIFY(spz::saveSpz(cloud, options, &bytes));
+  auto packed = spz::loadSpzPacked(bytes);
+  const auto first = packed.at(0);
+  for (const auto *coefficients : {&first.shR, &first.shG, &first.shB})
+    for (const auto coefficient : *coefficients) QCOMPARE(coefficient, uint8_t(128));
+  QVERIFY_THROWS_EXCEPTION(std::out_of_range, packed.at(packed.numPoints));
+  QVERIFY_THROWS_EXCEPTION(std::out_of_range, packed.at(-1));
+  packed.colors.resize(2);
+  QVERIFY_THROWS_EXCEPTION(std::out_of_range, packed.at(0));
+  QVERIFY_THROWS_EXCEPTION(std::out_of_range, spz::PackedGaussians{}.at(0));
+}
+
+void ModelExportTests::spzCodecSaturatesExtremeFiniteSh() {
+  spz::GaussianCloud cloud;
+  cloud.numPoints = 1; cloud.shDegree = 1;
+  cloud.positions = {1, 2, 3}; cloud.colors = {.1F, .2F, .3F};
+  cloud.scales = {-2, -3, -4}; cloud.alphas = {.7F}; cloud.rotations = {0, 0, 0, 1};
+  cloud.sh.assign(9, 0); cloud.sh[0] = 1e20F; cloud.sh[1] = -1e20F;
+  spz::PackOptions options; options.from = spz::CoordinateSystem::RUB;
+  std::vector<uint8_t> bytes;
+  QVERIFY(spz::saveSpz(cloud, options, &bytes));
+  const auto packed = spz::loadSpzPacked(bytes);
+  QCOMPARE(packed.numPoints, 1);
+  QCOMPARE(packed.sh[0], uint8_t(255));
+  QCOMPARE(packed.sh[1], uint8_t(0));
+  QCOMPARE(packed.sh[2], uint8_t(128));
+}
+
+void ModelExportTests::spzCodecChecksLegacyPayloadBeforeAllocation() {
+  QByteArray raw(36, '\0');
+  qToLittleEndian<quint32>(spz::NGSP_MAGIC, raw.data());
+  qToLittleEndian<quint32>(3, raw.data() + 4);
+  qToLittleEndian<quint32>(1, raw.data() + 8);
+  raw[13] = 12;
+  std::vector<uint8_t> compressed;
+  const auto encode = [&] {
+    return spz::compressGzipped(reinterpret_cast<const uint8_t *>(raw.constData()), raw.size(), &compressed);
+  };
+  QVERIFY(encode());
+  QCOMPARE(spz::loadSpzPacked(compressed).numPoints, 1);
+  raw[13] = 31;
+  QVERIFY(encode());
+  QCOMPARE(spz::loadSpzPacked(compressed).numPoints, 0);
+  raw[13] = 12;
+  raw.resize(16);
+  // Stay bounded even if the length guard regresses: at most ~20 KiB of attributes.
+  for (quint32 count : {quint32(0), quint32(1), quint32(1024)}) {
+    qToLittleEndian<quint32>(count, raw.data() + 8);
+    QVERIFY(encode());
+    QCOMPARE(spz::loadSpzPacked(compressed).numPoints, 0);
+  }
+  raw.resize(36); raw.fill('\0');
+  qToLittleEndian<quint32>(spz::NGSP_MAGIC, raw.data());
+  qToLittleEndian<quint32>(4, raw.data() + 4);
+  qToLittleEndian<quint32>(1, raw.data() + 8); raw[13] = 12;
+  QVERIFY(encode());
+  QCOMPARE(spz::loadSpzPacked(compressed).numPoints, 0);
+}
+
+void ModelExportTests::spzCodecRejectsIncompleteLargeCloudMetadata() {
+  spz::PackOptions options;
+  for (int32_t count : {int32_t(-1), std::numeric_limits<int32_t>::max(),
+      std::numeric_limits<int32_t>::max() / 9 + 1}) {
+    spz::GaussianCloud cloud; cloud.numPoints = count; cloud.shDegree = 4;
+    const std::vector<uint8_t> sentinel{0x47, 0x53, 0x57};
+    auto output = sentinel;
+    QVERIFY(!spz::saveSpz(cloud, options, &output));
+    QVERIFY(output == sentinel);
+  }
+}
+
+void ModelExportTests::spzCodecRejectsConstructedFractionalBits() {
+  spz::PackedGaussians packed; packed.numPoints = 1;
+  packed.positions.assign(9, 0); packed.scales.assign(3, 0);
+  packed.rotations.assign(4, 0); packed.colors.assign(3, 0); packed.alphas.assign(1, 0);
+  const auto converter = spz::coordinateConverter(spz::CoordinateSystem::RUB, spz::CoordinateSystem::RDF, 0);
+  for (int bits : {-1, 255}) {
+    packed.fractionalBits = bits;
+    QVERIFY_THROWS_EXCEPTION(std::out_of_range, packed.at(0));
+    QVERIFY_THROWS_EXCEPTION(std::out_of_range, packed.unpack(0, converter));
+    QVERIFY_THROWS_EXCEPTION(std::out_of_range, spz::PackedGaussian{}.unpack(false, true, bits, converter));
   }
 }
 

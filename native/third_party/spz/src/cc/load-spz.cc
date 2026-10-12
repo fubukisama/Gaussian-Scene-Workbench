@@ -41,6 +41,7 @@ SOFTWARE.
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -52,7 +53,10 @@ uint8_t toUint8(float x) { return static_cast<uint8_t>(std::clamp(std::round(x),
 
 // Quantizes to 8 bits, then rounds to nearest bucket center. 0 always maps to a bucket center.
 uint8_t quantizeSH(float x, int32_t bucketSize) {
-  int32_t q = static_cast<int>(std::round(x * 128.0f) + 128.0f);
+  // Saturate before integer conversion, including finite values beyond int32.
+  const double shifted = std::round(static_cast<double>(x) * 128.0) + 128.0;
+  int32_t q = std::isnan(shifted) ? 128 :
+      static_cast<int32_t>(std::clamp(shifted, 0.0, 255.0));
   q = (q + bucketSize / 2) / bucketSize * bucketSize;
   return static_cast<uint8_t>(std::clamp(q, 0, 255));
 }
@@ -80,22 +84,33 @@ bool checkSizes(const GaussianCloud &g) {
   CHECK_GE(g.numPoints, 0);
   CHECK_GE(g.shDegree, 0);
   CHECK_LE(g.shDegree, SH_MAX_DEGREE);
-  CHECK_EQ(g.positions.size(), g.numPoints * 3);
-  CHECK_EQ(g.scales.size(), g.numPoints * 3);
-  CHECK_EQ(g.rotations.size(), g.numPoints * 4);
-  CHECK_EQ(g.alphas.size(), g.numPoints);
-  CHECK_EQ(g.colors.size(), g.numPoints * 3);
-  CHECK_EQ(g.sh.size(), g.numPoints * dimForDegree(g.shDegree) * 3);
+  const size_t count = static_cast<size_t>(g.numPoints);
+  const size_t shStride = static_cast<size_t>(dimForDegree(g.shDegree)) * 3;
+  CHECK_LE(count, std::numeric_limits<size_t>::max() / std::max<size_t>(9, shStride));
+  CHECK_EQ(g.positions.size(), count * 3);
+  CHECK_EQ(g.scales.size(), count * 3);
+  CHECK_EQ(g.rotations.size(), count * 4);
+  CHECK_EQ(g.alphas.size(), count);
+  CHECK_EQ(g.colors.size(), count * 3);
+  CHECK_EQ(g.sh.size(), count * shStride);
   return true;
 }
 
 bool checkSizes(const PackedGaussians &packed, int32_t numPoints, int32_t shDim, bool usesFloat16) {
-  CHECK_EQ(packed.positions.size(), numPoints * 3 * (usesFloat16 ? 2 : 3));
-  CHECK_EQ(packed.scales.size(), numPoints * 3);
-  CHECK_EQ(packed.rotations.size(), numPoints * (packed.usesQuaternionSmallestThree ? 4 : 3));
-  CHECK_EQ(packed.alphas.size(), numPoints);
-  CHECK_EQ(packed.colors.size(), numPoints * 3);
-  CHECK_EQ(packed.sh.size(), numPoints * shDim * 3);
+  CHECK_GE(numPoints, 0);
+  CHECK_GE(packed.shDegree, 0);
+  CHECK_LE(packed.shDegree, SH_MAX_DEGREE);
+  CHECK_GE(packed.fractionalBits, 0);
+  CHECK_LE(packed.fractionalBits, 24);
+  const size_t count = static_cast<size_t>(numPoints);
+  const size_t shStride = static_cast<size_t>(shDim) * 3;
+  CHECK_LE(count, std::numeric_limits<size_t>::max() / std::max<size_t>(9, shStride));
+  CHECK_EQ(packed.positions.size(), count * (usesFloat16 ? 6 : 9));
+  CHECK_EQ(packed.scales.size(), count * 3);
+  CHECK_EQ(packed.rotations.size(), count * (packed.usesQuaternionSmallestThree ? 4 : 3));
+  CHECK_EQ(packed.alphas.size(), count);
+  CHECK_EQ(packed.colors.size(), count * 3);
+  CHECK_EQ(packed.sh.size(), count * shStride);
   return true;
 }
 
@@ -309,6 +324,7 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
   }
 
   const int32_t numPoints = g.numPoints;
+  const size_t pointCount = static_cast<size_t>(numPoints);
   const int32_t shDim = dimForDegree(g.shDegree);
   if (o.version < 3 && g.shDegree > 3) {
     SpzLog("[SPZ WARNING] SPZ with SH degrees %d will not be loadable in a legacy loader of version %d",
@@ -335,12 +351,12 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
   // support it.
   packed.usesQuaternionSmallestThree = o.version >= MIN_SMALLEST_THREE_QUATERNIONS_VERSION;
 
-  packed.rotations.resize(numPoints * (packed.usesQuaternionSmallestThree ? 4 : 3));
-  packed.positions.resize(numPoints * 3 * 3);
-  packed.scales.resize(numPoints * 3);
-  packed.alphas.resize(numPoints);
-  packed.colors.resize(numPoints * 3);
-  packed.sh.resize(numPoints * shDim * 3);
+  packed.rotations.resize(pointCount * (packed.usesQuaternionSmallestThree ? 4 : 3));
+  packed.positions.resize(pointCount * 9);
+  packed.scales.resize(pointCount * 3);
+  packed.alphas.resize(pointCount);
+  packed.colors.resize(pointCount * 3);
+  packed.sh.resize(pointCount * static_cast<size_t>(shDim) * 3);
 
 #ifdef SPZ_BUILD_EXTENSIONS
   packed.extensions = g.extensions;
@@ -365,7 +381,7 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
     }
   }
 
-  for (size_t i = 0; i < numPoints * 3; i++) {
+  for (size_t i = 0; i < pointCount * 3; i++) {
     packed.scales[i] = toUint8((g.scales[i] + 10.0f) * 16.0f);
   }
 
@@ -386,7 +402,7 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
     packed.alphas[i] = toUint8(sigmoid(g.alphas[i]) * 255.0f);
   }
 
-  for (size_t i = 0; i < numPoints * 3; i++) {
+  for (size_t i = 0; i < pointCount * 3; i++) {
     // Convert SH DC component to wide RGB (allowing values that are a bit above 1 and below 0).
     packed.colors[i] = toUint8(g.colors[i] * (colorScale * 255.0f) + (0.5f * 255.0f));
   }
@@ -399,7 +415,7 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
     const uint8_t shRestBits = o.shRestBits;
     const int32_t shPerPoint = dimForDegree(g.shDegree) * 3;
     std::array<float, 24> bufSh = {};
-    for (size_t i = 0; i < numPoints * shPerPoint; i += shPerPoint) {
+    for (size_t i = 0; i < pointCount * static_cast<size_t>(shPerPoint); i += shPerPoint) {
       for (size_t channel = 0; channel < 3; channel++) {
         for (size_t k = 0; k < static_cast<size_t>(shDim); ++k) {
           bufSh[k] = g.sh[i + k * 3 + channel];
@@ -424,6 +440,9 @@ PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
 
 UnpackedGaussian PackedGaussian::unpack(
   bool usesFloat16, bool usesQuaternionSmallestThree, int32_t fractionalBits, const CoordinateConverter &c) const {
+  if (fractionalBits < 0 || fractionalBits > 24) {
+    throw std::out_of_range("Invalid packed Gaussian fractional-bit count");
+  }
   UnpackedGaussian result;
   if (usesFloat16) {
     // Decode legacy float16 format. We can remove this at some point as it was never released.
@@ -490,24 +509,37 @@ UnpackedGaussian PackedGaussian::unpack(
 }
 
 PackedGaussian PackedGaussians::at(int32_t i) const {
+  if (i < 0 || i >= numPoints || shDegree < 0 || shDegree > SH_MAX_DEGREE ||
+      fractionalBits < 0 || fractionalBits > 24) {
+    throw std::out_of_range("Invalid packed Gaussian index or degree");
+  }
   PackedGaussian result;
-  int32_t positionBytes = usesFloat16() ? 6 : 9;
-  int32_t start3 = i * 3;
-  const auto *p = &positions[i * positionBytes];
+  const size_t index = static_cast<size_t>(i);
+  const size_t positionBytes = usesFloat16() ? 6 : 9;
+  const size_t rotationBytes = usesQuaternionSmallestThree ? 4 : 3;
+  const int32_t shDim = dimForDegree(shDegree);
+  const size_t shStride = static_cast<size_t>(shDim) * 3;
+  if (index >= positions.size() / positionBytes || index >= scales.size() / 3 ||
+      index >= rotations.size() / rotationBytes || index >= colors.size() / 3 ||
+      index >= alphas.size() || (shStride && index >= sh.size() / shStride)) {
+    throw std::out_of_range("Incomplete packed Gaussian buffers");
+  }
+  const size_t start3 = index * 3;
+  const auto *p = &positions[index * positionBytes];
   std::copy(p, p + positionBytes, result.position.data());
   std::copy(&scales[start3], &scales[start3] + 3, result.scale.data());
-  int32_t rotationBytes = usesQuaternionSmallestThree ? 4 : 3;
-  const auto& r = &rotations[i * rotationBytes];
+  const auto& r = &rotations[index * rotationBytes];
   std::copy(r, r + rotationBytes, result.rotation.data());
   std::copy(&colors[start3], &colors[start3] + 3, result.color.data());
   result.alpha = alphas[i];
 
-  int32_t shDim = dimForDegree(shDegree);
-  const auto *sh = &this->sh[i * shDim * 3];
-  for (int32_t j = 0; j < shDim; ++j, sh += 3) {
-    result.shR[j] = sh[0];
-    result.shG[j] = sh[1];
-    result.shB[j] = sh[2];
+  if (shDim) {
+    const auto *coefficients = &sh[index * shStride];
+    for (int32_t j = 0; j < shDim; ++j, coefficients += 3) {
+      result.shR[j] = coefficients[0];
+      result.shG[j] = coefficients[1];
+      result.shB[j] = coefficients[2];
+    }
   }
   for (int32_t j = shDim; j < SH_MAX_COEFFS; ++j) {
     result.shR[j] = 128;
@@ -522,7 +554,10 @@ UnpackedGaussian PackedGaussians::unpack(int32_t i, const CoordinateConverter &c
   return at(i).unpack(usesFloat16(), usesQuaternionSmallestThree, fractionalBits, c);
 }
 
-bool PackedGaussians::usesFloat16() const { return positions.size() == numPoints * 3 * 2; }
+bool PackedGaussians::usesFloat16() const {
+  return numPoints >= 0 && static_cast<size_t>(numPoints) <= std::numeric_limits<size_t>::max() / 6 &&
+      positions.size() == static_cast<size_t>(numPoints) * 6;
+}
 
 GaussianCloud unpackGaussians(const PackedGaussians &packed, const UnpackOptions &o) {
   const int32_t numPoints = packed.numPoints;
@@ -532,6 +567,7 @@ GaussianCloud unpackGaussians(const PackedGaussians &packed, const UnpackOptions
   if (!checkSizes(packed, numPoints, shDim, usesFloat16)) {
     return {};
   }
+  const size_t pointCount = static_cast<size_t>(numPoints);
 
   GaussianCloud result;
   result.numPoints = packed.numPoints;
@@ -546,23 +582,23 @@ GaussianCloud unpackGaussians(const PackedGaussians &packed, const UnpackOptions
   result.extensions = packed.extensions;
 #endif
 
-  result.positions.resize(numPoints * 3);
-  result.scales.resize(numPoints * 3);
-  result.rotations.resize(numPoints * 4);
-  result.alphas.resize(numPoints);
-  result.colors.resize(numPoints * 3);
-  result.sh.resize(numPoints * shDim * 3);
+  result.positions.resize(pointCount * 3);
+  result.scales.resize(pointCount * 3);
+  result.rotations.resize(pointCount * 4);
+  result.alphas.resize(pointCount);
+  result.colors.resize(pointCount * 3);
+  result.sh.resize(pointCount * static_cast<size_t>(shDim) * 3);
 
   if (usesFloat16) {
     // Decode legacy float16 format. We can remove this at some point as it was never released.
     const auto *halfData = reinterpret_cast<const Half *>(packed.positions.data());
-    for (size_t i = 0; i < numPoints * 3; i++) {
+    for (size_t i = 0; i < pointCount * 3; i++) {
       result.positions[i] = halfToFloat(halfData[i]);
     }
   } else {
     // Decode 24-bit fixed point coordinates
     float scale = 1.0 / (1 << packed.fractionalBits);
-    for (size_t i = 0; i < numPoints * 3; i++) {
+    for (size_t i = 0; i < pointCount * 3; i++) {
       int32_t fixed32 = packed.positions[i * 3 + 0];
       fixed32 |= packed.positions[i * 3 + 1] << 8;
       fixed32 |= packed.positions[i * 3 + 2] << 16;
@@ -571,7 +607,7 @@ GaussianCloud unpackGaussians(const PackedGaussians &packed, const UnpackOptions
     }
   }
 
-  for (size_t i = 0; i < numPoints * 3; i++) {
+  for (size_t i = 0; i < pointCount * 3; i++) {
     result.scales[i] = packed.scales[i] / 16.0f - 10.0f;
   }
 
@@ -587,7 +623,7 @@ GaussianCloud unpackGaussians(const PackedGaussians &packed, const UnpackOptions
     result.alphas[i] = invSigmoid(packed.alphas[i] / 255.0f);
   }
 
-  for (size_t i = 0; i < numPoints * 3; i++) {
+  for (size_t i = 0; i < pointCount * 3; i++) {
     result.colors[i] = ((packed.colors[i] / 255.0f) - 0.5f) / colorScale;
   }
 
@@ -814,42 +850,26 @@ PackedGaussians loadPackedGaussiansFromNgsp(const uint8_t *data, size_t size,
   return result;
 }
 
-PackedGaussians deserializePackedGaussians(std::istream &in) {
+PackedGaussians deserializePackedGaussians(std::istream &in, size_t decompressedSize) {
   LegacyPackedGaussiansHeader header;
   in.read(reinterpret_cast<char *>(&header), sizeof(header));
   if (!in || header.magic != NGSP_MAGIC) {
     SpzLog("[SPZ ERROR] deserializePackedGaussians: header not found");
     return {};
   }
-  if (header.version < 1 || header.version > LATEST_SPZ_HEADER_VERSION) {
+  if (header.version < 1 || header.version >= MIN_ZSTD_SPZ_HEADER_VERSION) {
     SpzLog("[SPZ ERROR] deserializePackedGaussians: version not supported: %d", header.version);
     return {};
   }
-  // Bound numPoints against the bytes actually remaining in the decompressed legacy stream.
-  // Legacy files are already gzip-decompressed at this point, so the ratio of header-claimed
-  // points to remaining bytes can't exceed ~1 point per kMinBytesPerPoint bytes.
-  size_t remaining = 0;
-  {
-    const std::streampos cur = in.tellg();
-    if (cur != std::streampos(-1)) {
-      in.seekg(0, std::ios::end);
-      const std::streampos end = in.tellg();
-      in.seekg(cur);
-      if (end != std::streampos(-1)) remaining = static_cast<size_t>(end - cur);
-    }
-  }
-  // Same INT32_MAX cap as the NGSP path: numPoints is consumed as int32_t below, so values
-  // above INT32_MAX would wrap negative. This also bounds numPoints when the size probe above
-  // fails (remaining == 0), in which case the ratio check is skipped.
+  // The memory streambuf is not seekable. Use its known byte length, not tellg(),
+  // and validate the complete attribute payload before any point-sized allocation.
   if (header.numPoints == 0 ||
-      header.numPoints > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
-      (remaining > 0 &&
-       static_cast<size_t>(header.numPoints) > remaining / kMinBytesPerPoint)) {
+      header.numPoints > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
     SpzLog("[SPZ ERROR] deserializePackedGaussians: invalid point count: %u", header.numPoints);
     return {};
   }
-  if (header.shDegree > SH_MAX_DEGREE) {
-    SpzLog("[SPZ ERROR] deserializePackedGaussians: Unsupported SH degree: %d", header.shDegree);
+  if (header.shDegree > SH_MAX_DEGREE || header.fractionalBits > 24) {
+    SpzLog("[SPZ ERROR] deserializePackedGaussians: invalid attribute metadata");
     return {};
   }
   SpzLog(
@@ -867,6 +887,14 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
   const bool usesFloat16 = header.version == 1;
   const bool usesQuaternionSmallestThree = header.version >= MIN_SMALLEST_THREE_QUATERNIONS_VERSION;
   const bool hasExtensions = (header.flags & FlagHasExtensions) != 0;
+  const size_t pointCount = static_cast<size_t>(numPoints);
+  const size_t bytesPerPoint = (usesFloat16 ? 6 : 9) + 1 + 3 + 3 +
+      (usesQuaternionSmallestThree ? 4 : 3) + static_cast<size_t>(shDim) * 3;
+  if (decompressedSize < sizeof(header) ||
+      pointCount > (decompressedSize - sizeof(header)) / bytesPerPoint) {
+    SpzLog("[SPZ ERROR] deserializePackedGaussians: incomplete attribute payload");
+    return {};
+  }
 
   PackedGaussians result;
   result.version = header.version;
@@ -874,13 +902,13 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
   result.shDegree = header.shDegree;
   result.fractionalBits = header.fractionalBits;
   result.antialiased = (header.flags & FlagAntialiased) != 0;
-  result.positions.resize(numPoints * 3 * (usesFloat16 ? 2 : 3));
-  result.scales.resize(numPoints * 3);
+  result.positions.resize(pointCount * (usesFloat16 ? 6 : 9));
+  result.scales.resize(pointCount * 3);
   result.usesQuaternionSmallestThree = usesQuaternionSmallestThree;
-  result.rotations.resize(numPoints * (usesQuaternionSmallestThree ? 4 : 3));
-  result.alphas.resize(numPoints);
-  result.colors.resize(numPoints * 3);
-  result.sh.resize(numPoints * shDim * 3);
+  result.rotations.resize(pointCount * (usesQuaternionSmallestThree ? 4 : 3));
+  result.alphas.resize(pointCount);
+  result.colors.resize(pointCount * 3);
+  result.sh.resize(pointCount * static_cast<size_t>(shDim) * 3);
   in.read(reinterpret_cast<char *>(result.positions.data()), countBytes(result.positions));
   in.read(reinterpret_cast<char *>(result.alphas.data()), countBytes(result.alphas));
   in.read(reinterpret_cast<char *>(result.colors.data()), countBytes(result.colors));
@@ -909,6 +937,7 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
 }
 
 bool saveSpz(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t> *out) {
+  if (!checkSizes(g)) return false;
   PackedGaussians packed = packGaussians(g, o);
 
   if (g.numPoints > 0 && packed.numPoints == 0) {
@@ -1000,12 +1029,18 @@ PackedGaussians loadSpzPacked(const uint8_t *data, size_t size) {
       SpzLog("[SPZ ERROR] loadSpzPacked: unsupported version: %d", header.version);
       return {};
     }
+    if (header.shDegree > SH_MAX_DEGREE || header.fractionalBits > 24) {
+      SpzLog("[SPZ ERROR] loadSpzPacked: invalid attribute metadata");
+      return {};
+    }
     // numPoints is stored unsigned but consumed as int32_t downstream (loadPackedGaussiansFromNgsp),
     // so reject anything above INT32_MAX up front — otherwise the cast wraps negative. The
     // file-size ratio check below is evaluated in 64-bit to avoid overflowing the multiply on
     // 32-bit targets.
     if (header.numPoints == 0 ||
         header.numPoints > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
+        static_cast<size_t>(header.numPoints) > std::numeric_limits<size_t>::max() /
+          std::max<size_t>(9, static_cast<size_t>(dimForDegree(header.shDegree)) * 3) ||
         static_cast<uint64_t>(header.numPoints) >
           (static_cast<uint64_t>(size) * kMaxCompressionRatio) / kMinBytesPerPoint) {
       SpzLog("[SPZ ERROR] loadSpzPacked: invalid point count: %u (file size %zu)",
@@ -1024,7 +1059,7 @@ PackedGaussians loadSpzPacked(const uint8_t *data, size_t size) {
     if (!decompressGzipped(data, size, &decompressed)) return {};
     membuf buf(decompressed.data(), decompressed.size());
     std::istream stream(&buf);
-    return deserializePackedGaussians(stream);
+    return deserializePackedGaussians(stream, decompressed.size());
 
   } else {
     SpzLog("[SPZ ERROR] loadSpzPacked: unrecognized format");

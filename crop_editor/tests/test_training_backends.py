@@ -2775,10 +2775,13 @@ class TrainingBackendTests(unittest.TestCase):
             try:
                 bin_dir = server.OPENMVS_DIR / "build" / "bin" / "x64" / "Release"
                 bin_dir.mkdir(parents=True, exist_ok=True)
-                interface_colmap = bin_dir / "InterfaceCOLMAP.exe"
-                texture_mesh = bin_dir / "TextureMesh.exe"
-                interface_colmap.write_text("", encoding="utf-8")
-                texture_mesh.write_text("", encoding="utf-8")
+                suffix = ".exe" if sys.platform == "win32" else ""
+                interface_colmap = bin_dir / f"InterfaceCOLMAP{suffix}"
+                texture_mesh = bin_dir / f"TextureMesh{suffix}"
+                for tool in (interface_colmap, texture_mesh):
+                    tool.write_text("" if suffix else "#!/bin/sh\nexit 99\n", encoding="utf-8")
+                    if not suffix:
+                        tool.chmod(0o755)
 
                 dataset = base / "dataset"
                 (dataset / "images").mkdir(parents=True)
@@ -2838,7 +2841,7 @@ class TrainingBackendTests(unittest.TestCase):
                 server.OPENMVS_DIR = original_openmvs
 
     def test_openmvs_texture_commands_reuse_existing_dense_colmap_export(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(server.os.environ, {"OPENMVS_BIN": ""}):
             base = Path(tmp)
             original_output = server.OUTPUT_DIR
             original_openmvs = server.OPENMVS_DIR
@@ -2847,8 +2850,13 @@ class TrainingBackendTests(unittest.TestCase):
             try:
                 bin_dir = server.OPENMVS_DIR / "build" / "bin" / "x64" / "Release"
                 bin_dir.mkdir(parents=True, exist_ok=True)
-                (bin_dir / "InterfaceCOLMAP.exe").write_text("", encoding="utf-8")
-                (bin_dir / "TextureMesh.exe").write_text("", encoding="utf-8")
+                suffix = ".exe" if sys.platform == "win32" else ""
+                interface_colmap = bin_dir / f"InterfaceCOLMAP{suffix}"
+                texture_mesh = bin_dir / f"TextureMesh{suffix}"
+                for tool in (interface_colmap, texture_mesh):
+                    tool.write_text("" if suffix else "#!/bin/sh\nexit 99\n", encoding="utf-8")
+                    if not suffix:
+                        tool.chmod(0o755)
 
                 dataset = base / "dataset"
                 (dataset / "dense" / "images").mkdir(parents=True)
@@ -2871,9 +2879,9 @@ class TrainingBackendTests(unittest.TestCase):
                 )
 
                 self.assertEqual(len(commands), 2)
-                self.assertEqual(commands[0][0].name, "InterfaceCOLMAP.exe")
+                self.assertEqual(commands[0][0], interface_colmap)
                 self.assertIn(str(dataset / "dense"), [str(part) for part in commands[0]])
-                self.assertEqual(commands[1][0].name, "TextureMesh.exe")
+                self.assertEqual(commands[1][0], texture_mesh)
             finally:
                 server.OUTPUT_DIR = original_output
                 server.OPENMVS_DIR = original_openmvs

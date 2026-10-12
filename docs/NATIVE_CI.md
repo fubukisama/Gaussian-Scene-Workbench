@@ -18,6 +18,8 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 
 这些是针对已证明的失败所准备的 CI 配置修复，不代表新运行已经通过。仍须在修复提交对应的真实 Actions 中确认预检、完整测试、安装包上传以及代码扫描上传。
 
+软件渲染可能比实际 GPU 慢。高斯交互测试仍保留 512202 个高斯、160 帧及完整图像／驻留／撤销断言，只将深浅色两项的完成时限设为 600 秒；测试提前完成就立即结束，不改变 FPS 或性能阈值。包含编译追踪与安装包上传的任务总时限为 60 分钟。烟雾测试输出实际 OpenGL 渲染器信息，不能仅凭环境变量认定驱动已生效。
+
 ### 持续代码扫描
 
 使用 CodeQL advanced setup，而不是同时开启另一套 default setup：
@@ -35,6 +37,8 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 Windows worker 检查与 `Native Security` 的独立 Ubuntu 回归任务都运行现有后端测试以及 `test_path_security`、`test_command_security`。它们通过真实回环 HTTP 请求和测试自有子进程验证目录边界、合法 3DGS/2DGS/网格读写、命令操作数隔离和取消；Ubuntu 还覆盖 Windows 可能因权限不可用的文件符号链接。样本位于 runner 临时目录，不读取原始研究工程，也不启动训练。
 
 模型 `cfg_args` 只接受 `Namespace` 及字面值参数，不再使用 `eval`。实验查看回归同时验证合法参数、原始 Unicode 路径与列表/字典不变，以及查看不可信配置时不执行表达式。目录边界在读写、缓存和预览生成前检查，而不只在最终下载时检查。Windows 比较保留大小写不敏感语义，但返回真实路径大小写；不能为消除静态分析告警而改成错误的路径行为。任何残余告警仍须按实际数据流核查，不自动忽略。
+
+导入的原始副本和工作图像写入前也检查候选叶子路径，拒绝指向目录外、包括目标尚不存在的符号链接。用户明确选择的外部照片／视频仍允许读取；这是本地导入功能，不应把来源强制限制到工程目录。测试同时保留正常外部导入与拒绝越界写入的行为。
 
 命令边界测试使用 runner 已有 Node 执行微型参数接收器，它不是 SPZ/SOG 编码器，因此不证明实际编码质量。可选的旧后端转换器只允许已安装的直接 Node 可执行文件与项目内固定 `cli.mjs`，不再回退到 Windows `.cmd`/`.bat` 或全局 shim。原生 SPZ 使用 C++ 编解码器；不向桌面安装包添加 Node、JavaScript 或 Mesa。环境就绪报告必须与实际启动条件保持一致。
 
@@ -62,6 +66,8 @@ After the Python dependency fix, `Native Windows` run #141 reached downstream te
 
 These prepared CI changes address proven failures; they are not a claim that a new run has already passed. Acceptance still requires the repaired commit's real Actions preflight, full suite, package upload and code-scanning upload.
 
+Software rendering may be slower than a physical GPU. Gaussian interaction retains 512202 Gaussians, 160 frames and every image/residency/undo assertion; only the dark/light checks' completion timeout is 600 seconds. Successful checks finish immediately; FPS and performance thresholds are unchanged. The traced-build/package-upload job has a 60-minute total limit. Smoke diagnostics report the actual OpenGL renderer, rather than assuming a driver is active from environment variables alone.
+
 ### Ongoing code scanning
 
 Use CodeQL advanced setup rather than enabling a second default setup:
@@ -79,6 +85,8 @@ Inspect **Security and quality → Code scanning** by branch and analysis catego
 Both the Windows worker checks and an independent Ubuntu regression job in `Native Security` run the existing backend tests plus `test_path_security` and `test_command_security`. Real loopback HTTP requests and test-owned subprocesses verify directory boundaries, legitimate 3DGS/2DGS/mesh IO, isolated command operands and cancellation. Ubuntu also covers file symbolic links that Windows privileges may prevent. Fixtures live in the runner's temporary directory, without reading original research projects or starting training.
 
 Model `cfg_args` accepts only `Namespace` and literal keyword values; `eval` is no longer used. Experiment-view checks preserve legitimate values, original Unicode paths, lists and dictionaries while verifying that untrusted expressions never execute. Directory boundaries are checked before reads, writes, cache and preview generation, not only at the final download. Windows comparisons remain case-insensitive while returning the actual path spelling; runtime correctness must not be sacrificed to silence static-analysis findings. Remaining findings still require reachable-flow review and are not ignored automatically.
+
+Candidate leaf paths are checked before writing imported originals or working images, including dangling symbolic links targeting outside the destination directory. Explicitly selected external photos/videos remain readable: local import must not restrict its source to the project directory. Regression checks preserve legitimate external imports while rejecting escaping writes.
 
 The command checks run a tiny argument receiver with the runner's existing Node. It is not an SPZ/SOG encoder and does not certify encoding quality. The optional legacy backend converter requires an already-installed direct Node executable and the project's fixed `cli.mjs`; Windows `.cmd`/`.bat` and global-shim fallback are refused. Native SPZ uses the C++ codec. Node, JavaScript and Mesa are not added to the desktop package. Readiness reporting must match the actual launch requirements.
 
@@ -106,6 +114,8 @@ Python 依存関係の修正後、`Native Windows` の実行 #141 は後続テ�
 
 これらは確認済みの失敗に対して準備した CI 設定修正であり、新しい実行の成功を示すものではありません。修正コミットの実際の Actions で、事前検査、全テスト、パッケージおよびコードスキャンのアップロードまで確認する必要があります。
 
+ソフトウェア描画は実 GPU より遅い場合があります。ガウシアンの操作テストは 512202 個、160 フレーム、画像・常駐・取り消しの全検証を維持し、ライト／ダークの完了タイムアウトだけを 600 秒にします。完了すれば直ちに終了し、FPS や性能基準は変更しません。コンパイル追跡とパッケージのアップロードを含むジョブの上限は 60 分です。スモークテストの診断で実際の OpenGL レンダラーを報告し、環境変数だけでドライバーの有効化を判断しません。
+
 ### 継続的なコードスキャン
 
 CodeQL の advanced setup を使い、別の default setup を同時に有効化しません。
@@ -123,6 +133,8 @@ CodeQL の advanced setup を使い、別の default setup を同時に有効化
 Windows の worker 検査と `Native Security` の独立した Ubuntu 回帰ジョブは、既存バックエンドのテストに加え、`test_path_security` と `test_command_security` を実行します。実際のループバック HTTP リクエストとテスト専用子プロセスで、ディレクトリ境界、正規の 3DGS/2DGS/メッシュ入出力、コマンド引数の分離、キャンセルを検証します。Ubuntu では Windows の権限制限で使えない場合があるファイルシンボリックリンクも検査します。サンプルは runner の一時ディレクトリに置き、元の研究プロジェクトを読まず、学習を開始しません。
 
 モデルの `cfg_args` は `Namespace` とリテラルのキーワード値だけを受け入れ、`eval` は使いません。実験表示の検査では、正規の値、元の Unicode パス、リスト、辞書を保持し、不信な式を実行しないことを確認します。ディレクトリ境界は最終ダウンロードだけでなく、読み書き、キャッシュ、プレビューの生成前に検査します。Windows は大文字小文字を区別しない比較を維持し、戻り値の実際の表記は保存します。静的解析の警告を消すために正常動作を壊してはいけません。残りのアラートも到達経路を調べ、自動的には無視しません。
+
+読み込んだ元データのコピーと作業画像を書き込む前に、候補の末端パスも検査します。保存先の外部を指すシンボリックリンクは、参照先が未作成でも拒否します。ユーザーが明示的に選んだ外部の写真・動画は引き続き読み込めます。ローカル読み込みの元データをプロジェクト内に制限しません。正規の外部読み込みと、範囲外への書き込み拒否を両方検証します。
 
 コマンド検査は runner に既存の Node で小さな引数受信プログラムを実行します。これは SPZ/SOG エンコーダーではなく、符号化品質の検証ではありません。追加の旧バックエンド変換器は、導入済みの直接 Node 実行ファイルとプロジェクト内の固定 `cli.mjs` だけを使用し、Windows の `.cmd`/`.bat` やグローバル shim には戻りません。ネイティブ SPZ は C++ コーデックを使い、Node、JavaScript、Mesa はデスクトップパッケージに追加しません。環境の準備状況の表示は実際の起動条件と一致させます。
 

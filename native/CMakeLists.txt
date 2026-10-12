@@ -607,7 +607,9 @@ if(BUILD_TESTING)
   add_test(NAME native_gaussian_interaction
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
   set_tests_properties(native_gaussian_interaction PROPERTIES
-    TIMEOUT 90
+    # Keep the full 512202-Gaussian / 160-frame workload under CPU OpenGL too.
+    # This is a completion timeout, not a relaxed rendering or input assertion.
+    TIMEOUT 600
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
@@ -652,6 +654,7 @@ if(BUILD_TESTING)
     native_light_mesh_generation PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  set_tests_properties(native_light_gaussian_interaction PROPERTIES TIMEOUT 600)
   add_test(NAME native_observation_navigation
     COMMAND GaussianSceneWorkbench --smoke-test-observation-navigation)
   set_tests_properties(native_observation_navigation PROPERTIES

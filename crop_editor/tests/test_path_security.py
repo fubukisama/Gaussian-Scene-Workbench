@@ -185,6 +185,34 @@ class BackendPathSecurityTests(unittest.TestCase):
                 self.assertEqual(status, 400)
                 self.assertIn("error", json.loads(body.decode("utf-8")))
 
+    def dangling_import_leaf_fixture(self, part, scene, directory_link=False):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        source = self.write_fixture("external-source/" + scene + "/input.png", image)
+        marker = self.write_fixture("outside/" + scene + "/marker.txt", b"original marker")
+        escaped = marker.parent / "escaped.png"
+        self.make_link("datasets/" + scene + "/" + part + "/input.png", escaped, directory=directory_link)
+        status, _, body = self.request("/api/import-paths", "POST", {
+            "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
+        })
+        self.assertEqual(status, 400, body)
+        self.assertEqual(json.loads(body)["error"], "Unsupported asset file")
+        self.assertFalse(escaped.exists())
+        self.assertEqual(marker.read_bytes(), b"original marker")
+        self.assertEqual(source.read_bytes(), image)
+
+    def test_dangling_import_leaf_file_links_cannot_create_external_files(self):
+        for index, part in enumerate(("source/originals", "images")):
+            with self.subTest(part=part):
+                self.dangling_import_leaf_fixture(part, "dangling-file-" + str(index))
+
+    @unittest.skipUnless(os.name == "nt", "Owned NTFS junction fixture requires Windows")
+    def test_dangling_import_leaf_junctions_are_rejected_before_os_file_operations(self):
+        for index, part in enumerate(("source/originals", "images")):
+            with self.subTest(part=part):
+                self.dangling_import_leaf_fixture(part, "dangling-junction-" + str(index), directory_link=True)
+
     def test_nested_model_directory_link_cannot_download_outside_managed_outputs(self):
         outside = b"private linked point cloud outside managed outputs"
         private = self.write_fixture("outside/iteration_1/point_cloud.ply", outside)
