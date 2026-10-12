@@ -1,6 +1,8 @@
 #include "TaskDetailsDialog.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include "TaskRecord.h"
+#include "WorkbenchIcons.h"
 #include "WindowUi.h"
 
 #include <QApplication>
@@ -24,7 +26,6 @@
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
-#include <QStyle>
 #include <QTextCursor>
 #include <QToolBar>
 #include <QToolButton>
@@ -92,20 +93,20 @@ TaskDetailsDialog::TaskDetailsDialog(const QSharedPointer<TaskRecord> &record, Q
   taskActions->setFloatable(false);
   taskActions->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   taskActions->setMinimumWidth(0);
-  mOpenOutput = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon), {}, this),
+  mOpenOutput = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Folder, palette()), {}, this),
                                 AppLanguage::source("打开任务文件夹"));
-  auto *copy = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), {}, this),
-                               AppLanguage::source("复制任务摘要"));
-  mExportLog = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), {}, this),
+  mCopySummary = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Copy, palette()), {}, this),
+                                 AppLanguage::source("复制任务摘要"));
+  mExportLog = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Save, palette()), {}, this),
                                 AppLanguage::source("导出保留日志..."));
   mOpenOutput->setObjectName(QStringLiteral("taskDetailsOpenOutputAction"));
-  copy->setObjectName(QStringLiteral("taskDetailsCopySummaryAction"));
+  mCopySummary->setObjectName(QStringLiteral("taskDetailsCopySummaryAction"));
   mExportLog->setObjectName(QStringLiteral("taskDetailsExportLogAction"));
   taskActions->addAction(mOpenOutput);
-  taskActions->addAction(copy);
+  taskActions->addAction(mCopySummary);
   taskActions->addAction(mExportLog);
   taskActions->widgetForAction(mOpenOutput)->setObjectName(QStringLiteral("taskDetailsOpenOutput"));
-  taskActions->widgetForAction(copy)->setObjectName(QStringLiteral("taskDetailsCopySummary"));
+  taskActions->widgetForAction(mCopySummary)->setObjectName(QStringLiteral("taskDetailsCopySummary"));
   taskActions->widgetForAction(mExportLog)->setObjectName(QStringLiteral("taskDetailsExportLog"));
   layout->addWidget(taskActions);
   auto *retention = AppLanguage::text(new QLabel(this),
@@ -145,7 +146,7 @@ TaskDetailsDialog::TaskDetailsDialog(const QSharedPointer<TaskRecord> &record, Q
   layout->addWidget(buttons);
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   connect(mOpenOutput, &QAction::triggered, this, &TaskDetailsDialog::openOutputDirectory);
-  connect(copy, &QAction::triggered, this, &TaskDetailsDialog::copySummary);
+  connect(mCopySummary, &QAction::triggered, this, &TaskDetailsDialog::copySummary);
   connect(mExportLog, &QAction::triggered, this, &TaskDetailsDialog::exportRetainedLog);
   connect(mFollow, &QCheckBox::toggled, this, [this](const bool follow) {
     if (follow) TaskRecord::appendToLogView(mLogs, {}, true);
@@ -165,12 +166,28 @@ void TaskDetailsDialog::resizeEvent(QResizeEvent *event) {
 
 void TaskDetailsDialog::changeEvent(QEvent *event) {
   QDialog::changeEvent(event);
-  if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange ||
+  if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
+      event->type() == QEvent::StyleChange ||
       event->type() == QEvent::LanguageChange) refreshLayout();
+  if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange)
+    refreshIcons();
+}
+
+void TaskDetailsDialog::refreshIcons() {
+  if (!mOpenOutput || !mCopySummary || !mExportLog) return;
+  mOpenOutput->setIcon(workbenchIcon(WorkbenchIconId::Folder, palette()));
+  mCopySummary->setIcon(workbenchIcon(WorkbenchIconId::Copy, palette()));
+  mExportLog->setIcon(workbenchIcon(WorkbenchIconId::Save, palette()));
+  if (auto *actions = findChild<QToolBar *>(QStringLiteral("taskDetailsActions"))) {
+    const int scale = qApp->property("gswUiScalePercent").toInt();
+    const int size = qMax(AppTheme::scaled(18, scale), actions->fontMetrics().height());
+    actions->setIconSize(QSize(size, size));
+  }
 }
 
 void TaskDetailsDialog::refreshLayout() {
   if (!mSummaryScroll || !mLogActions || !layout()) return;
+  refreshIcons();
   mSummaryScroll->setMaximumHeight(qMax(fontMetrics().height() * 2, height() / 3));
   int needed = 0;
   int count = 0;

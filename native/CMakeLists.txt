@@ -30,7 +30,7 @@ if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja" AND GSW_MSVC_SHOWINCLUDES_PREFIX)
   set(CMAKE_CL_SHOWINCLUDES_PREFIX "${GSW_MSVC_SHOWINCLUDES_PREFIX}")
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets OpenGL OpenGLWidgets Svg)
 find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
@@ -59,10 +59,15 @@ endif()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
   resources.qrc
+  lucide_icons.qrc
   src/AppTheme.cpp
   src/AppTheme.h
   src/AppLanguage.cpp
   src/AppLanguage.h
+  src/WorkbenchIcons.cpp
+  src/WorkbenchIcons.h
+  src/IconUiSmokeTest.cpp
+  src/IconUiSmokeTest.h
   src/WindowUi.cpp
   src/WindowUi.h
   src/FileDialogHistory.cpp
@@ -257,6 +262,7 @@ target_link_libraries(GaussianSceneWorkbench PRIVATE
   Qt6::Widgets
   Qt6::OpenGL
   Qt6::OpenGLWidgets
+  Qt6::Svg
 )
 target_compile_definitions(GaussianSceneWorkbench PRIVATE
   GSW_VERSION="${PROJECT_VERSION}"
@@ -282,6 +288,7 @@ install(TARGETS GaussianSceneWorkbench
 install(DIRECTORY third_party/spz DESTINATION licenses)
 install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
 install(DIRECTORY third_party/2dgs-surfel DESTINATION licenses)
+install(FILES third_party/lucide/LICENSE third_party/lucide/README.gsw.md DESTINATION licenses/lucide)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/2dgs-surfel RENAME LICENSE.md)
 
 include(CTest)
@@ -303,6 +310,14 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  foreach(icon_locale zh_CN en_US ja_JP)
+    add_test(NAME native_icon_ui_${icon_locale}
+      COMMAND GaussianSceneWorkbench --smoke-test-icon-ui --language ${icon_locale})
+    set_tests_properties(native_icon_ui_${icon_locale} PROPERTIES
+      TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   add_test(NAME native_file_dialog_history
     COMMAND GaussianSceneWorkbench --smoke-test-file-dialog-history --language zh_CN)
   set_tests_properties(native_file_dialog_history PROPERTIES
@@ -997,9 +1012,14 @@ if(BUILD_TESTING)
       src/MultiItemList.h
       src/AppLanguage.cpp
       src/AppLanguage.h
+      src/AppTheme.cpp
+      src/AppTheme.h
+      src/WorkbenchIcons.cpp
+      src/WorkbenchIcons.h
+      lucide_icons.qrc
     )
     target_include_directories(gsw_multi_item_list_tests PRIVATE src)
-    target_link_libraries(gsw_multi_item_list_tests PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Test)
+    target_link_libraries(gsw_multi_item_list_tests PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Test Qt6::Svg)
     if(MSVC)
       target_compile_options(gsw_multi_item_list_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()

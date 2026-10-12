@@ -3,6 +3,7 @@
 #include "ManagedName.h"
 #include "AppLanguage.h"
 #include "WindowUi.h"
+#include "WorkbenchIcons.h"
 
 #include "AppTheme.h"
 #include "BackendLocator.h"
@@ -85,7 +86,6 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QStorageInfo>
-#include <QStyle>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -113,6 +113,20 @@ namespace gsw {
 namespace {
 constexpr int kDockLayoutStateVersion = 5;
 constexpr int kDefaultTaskDockHeight = 105;
+constexpr int kWorkbenchTreeIconRole = Qt::UserRole + 20;
+
+void setWorkbenchActionIcon(QAction *action, const WorkbenchIconId id,
+                            const QPalette &palette) {
+  if (!action) return;
+  action->setProperty("gswWorkbenchIconId", static_cast<int>(id));
+  action->setIcon(workbenchIcon(id, palette));
+}
+
+void setWorkbenchTreeIcon(QTreeWidgetItem *item, const WorkbenchIconId id,
+                          const QPalette &palette) {
+  item->setData(0, kWorkbenchTreeIconRole, static_cast<int>(id));
+  item->setIcon(0, workbenchIcon(id, palette));
+}
 
 QColor taskStateColor(const QString &state) {
   const bool light = AppTheme::currentTheme() == UiTheme::Light;
@@ -183,7 +197,7 @@ public:
     const int paddingY = AppTheme::scaled(1, scalePercent);
     const int spacing = AppTheme::scaled(2, scalePercent);
     const int buttonSize = AppTheme::dockTitleButtonSize(scalePercent);
-    const int iconSize = AppTheme::scaled(10, scalePercent);
+    const int iconSize = AppTheme::scaled(12, scalePercent);
     mLayout->setContentsMargins(paddingX, paddingY, paddingX, paddingY);
     mLayout->setSpacing(spacing);
     for (QToolButton *button : {mFloatButton, mCloseButton}) {
@@ -272,15 +286,13 @@ private:
     mFloatButton->setEnabled(canFloat);
     mFloatButton->setToolTip(floatText);
     mFloatButton->setAccessibleName(floatText);
-    mFloatButton->setIcon(
-        mDock->style()->standardIcon(QStyle::SP_TitleBarNormalButton));
+    mFloatButton->setIcon(workbenchIcon(WorkbenchIconId::FloatPanel, palette()));
 
     mCloseButton->setVisible(canClose);
     mCloseButton->setEnabled(canClose);
     AppLanguage::bind(mCloseButton, "toolTip", AppLanguage::source("关闭面板"));
     AppLanguage::bind(mCloseButton, "accessibleName", AppLanguage::source("关闭面板"));
-    mCloseButton->setIcon(
-        mDock->style()->standardIcon(QStyle::SP_TitleBarCloseButton));
+    mCloseButton->setIcon(workbenchIcon(WorkbenchIconId::Close, palette()));
   }
 
   QDockWidget *mDock = nullptr;
@@ -960,7 +972,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 }
 
 void MainWindow::createActions() {
-  mNewProjectAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileIcon),
+  mNewProjectAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::NewProject, palette()),
                                   QCoreApplication::translate("Workbench", "新建工程"), this), AppLanguage::source("新建工程"));
   mNewProjectAction->setObjectName(QStringLiteral("newProjectAction"));
   mNewProjectAction->setShortcut(QKeySequence::New);
@@ -969,7 +981,7 @@ void MainWindow::createActions() {
           &MainWindow::newProject);
 
   mOpenProjectAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogOpenButton),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::OpenProject, palette()),
                   QCoreApplication::translate("Workbench", "打开工程"), this), AppLanguage::source("打开工程"));
   mOpenProjectAction->setShortcut(QKeySequence::Open);
   AppLanguage::bind(mOpenProjectAction, "toolTip", AppLanguage::source("打开工程"));
@@ -982,7 +994,7 @@ void MainWindow::createActions() {
     }
   });
 
-  mSaveAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
+  mSaveAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Save, palette()),
                             QCoreApplication::translate("Workbench", "保存工程"), this), AppLanguage::source("保存工程"));
   mSaveAction->setObjectName(QStringLiteral("saveProjectAction"));
   mSaveAction->setShortcut(QKeySequence::Save);
@@ -1027,7 +1039,7 @@ void MainWindow::createActions() {
           &MainWindow::showExternalBackups);
 
   mImportDatasetAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirOpenIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::ImportMedia, palette()),
                   QCoreApplication::translate("Workbench", "添加照片/视频..."), this), AppLanguage::source("添加照片/视频..."));
   mImportDatasetAction->setObjectName(QStringLiteral("importDatasetAction"));
   AppLanguage::bind(mImportDatasetAction, "toolTip", AppLanguage::source("直接选择照片或视频；视频会自动抽帧"));
@@ -1035,7 +1047,7 @@ void MainWindow::createActions() {
           &MainWindow::importDataset);
 
   mImportDatasetDirectoryAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Folder, palette()),
                   QCoreApplication::translate("Workbench", "添加媒体目录..."), this), AppLanguage::source("添加媒体目录..."));
   mImportDatasetDirectoryAction->setObjectName(
       QStringLiteral("importDatasetDirectoryAction"));
@@ -1044,7 +1056,7 @@ void MainWindow::createActions() {
           &MainWindow::importDatasetDirectory);
 
   mAttachDatasetAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DirLinkIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Dataset, palette()),
                   QCoreApplication::translate("Workbench", "关联已有数据集..."), this), AppLanguage::source("关联已有数据集..."));
   mAttachDatasetAction->setObjectName(QStringLiteral("attachDatasetAction"));
   AppLanguage::bind(mAttachDatasetAction, "toolTip", AppLanguage::source("直接关联现有 images/input 与 COLMAP sparse 数据，不复制文件"));
@@ -1052,7 +1064,7 @@ void MainWindow::createActions() {
           &MainWindow::attachExistingDataset);
 
   mImportSceneAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::ImportModel, palette()),
                   QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"), this), AppLanguage::source("导入模型（PLY / SPZ）"));
   mImportSceneAction->setObjectName(QStringLiteral("importSceneAction"));
   AppLanguage::bind(mImportSceneAction, "toolTip", AppLanguage::source("导入 PLY 点云、网格或 SPZ 压缩高斯场景"));
@@ -1060,7 +1072,7 @@ void MainWindow::createActions() {
           &MainWindow::importScene);
 
   mClearDatasetAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Delete, palette()),
                   QCoreApplication::translate("Workbench", "清理数据集..."), this), AppLanguage::source("清理数据集..."));
   mClearDatasetAction->setObjectName(QStringLiteral("clearDatasetAction"));
   AppLanguage::bind(mClearDatasetAction, "toolTip", AppLanguage::source("清理托管数据集，或仅解除外部数据集关联"));
@@ -1068,7 +1080,7 @@ void MainWindow::createActions() {
           &MainWindow::clearDatasetImport);
 
   mClearReconstructionAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Delete, palette()),
                   QCoreApplication::translate("Workbench", "清理重建结果..."), this), AppLanguage::source("清理重建结果..."));
   mClearReconstructionAction->setObjectName(
       QStringLiteral("clearReconstructionAction"));
@@ -1077,7 +1089,7 @@ void MainWindow::createActions() {
           &MainWindow::clearReconstructionImport);
 
   mClearSceneAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Remove, palette()),
                   QCoreApplication::translate("Workbench", "卸载所选模型"), this), AppLanguage::source("卸载所选模型"));
   mClearSceneAction->setObjectName(QStringLiteral("clearSceneAction"));
   AppLanguage::bind(mClearSceneAction, "toolTip", AppLanguage::source("仅从工程卸载所选模型，不删除原始模型或训练输出文件。"));
@@ -1085,7 +1097,7 @@ void MainWindow::createActions() {
           &MainWindow::clearSceneImport);
 
   mClearTasksAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::ClearSelection, palette()),
                   QCoreApplication::translate("Workbench", "清空任务记录..."), this), AppLanguage::source("清空任务记录..."));
   mClearTasksAction->setObjectName(QStringLiteral("clearTasksAction"));
   AppLanguage::bind(mClearTasksAction, "toolTip", AppLanguage::source("清空当前窗口中的任务表和日志，不删除任务输出"));
@@ -1093,7 +1105,7 @@ void MainWindow::createActions() {
           &MainWindow::clearTaskHistory);
 
   auto *environmentAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Settings, palette()),
                   QCoreApplication::translate("Workbench", "检查环境"), this), AppLanguage::source("检查环境"));
   environmentAction->setShortcut(QKeySequence(QStringLiteral("F6")));
   AppLanguage::bind(environmentAction, "toolTip", AppLanguage::source("检查训练与重建环境"));
@@ -1102,7 +1114,7 @@ void MainWindow::createActions() {
   environmentAction->setObjectName(QStringLiteral("environmentAction"));
 
   mReconstructAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ComputerIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Reconstruct, palette()),
                   QCoreApplication::translate("Workbench", "COLMAP 重建..."), this), AppLanguage::source("COLMAP 重建..."));
   mReconstructAction->setShortcut(QKeySequence(QStringLiteral("F7")));
   AppLanguage::bind(mReconstructAction, "toolTip", AppLanguage::source("计算相机位姿与稀疏点云 (F7)"));
@@ -1110,7 +1122,7 @@ void MainWindow::createActions() {
   connect(mReconstructAction, &QAction::triggered, this,
           &MainWindow::startReconstruction);
 
-  mTrainAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPlay),
+  mTrainAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Train, palette()),
                              QCoreApplication::translate("Workbench", "开始训练..."), this), AppLanguage::source("开始训练..."));
   AppLanguage::bind(mTrainAction, "toolTip", AppLanguage::source("启动当前工程训练"));
   connect(mTrainAction, &QAction::triggered, this, &MainWindow::startTraining);
@@ -1120,11 +1132,11 @@ void MainWindow::createActions() {
   AppLanguage::bind(mGenerateMeshAction, "toolTip", AppLanguage::source("从训练输出生成网格，并可烘焙照片纹理"));
   connect(mGenerateMeshAction, &QAction::triggered, this, &MainWindow::startMeshGeneration);
 
-  mPauseTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaPause), {}, this), AppLanguage::source("暂停训练"));
+  mPauseTrainingAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Pause, palette()), {}, this), AppLanguage::source("暂停训练"));
   mPauseTrainingAction->setObjectName(QStringLiteral("pauseTrainingAction"));
   AppLanguage::bind(mPauseTrainingAction, "toolTip", AppLanguage::source("保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）"));
   connect(mPauseTrainingAction, &QAction::triggered, this, &MainWindow::pauseTraining);
-  mResumeTrainingAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaSeekForward), {}, this), AppLanguage::source("继续训练"));
+  mResumeTrainingAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Resume, palette()), {}, this), AppLanguage::source("继续训练"));
   mResumeTrainingAction->setObjectName(QStringLiteral("resumeTrainingAction"));
   AppLanguage::bind(mResumeTrainingAction, "toolTip", AppLanguage::source("从当前工程的完整训练检查点继续，保留优化器与迭代进度"));
   connect(mResumeTrainingAction, &QAction::triggered, this, &MainWindow::resumeTraining);
@@ -1132,7 +1144,7 @@ void MainWindow::createActions() {
   mGenerationHistoryAction->setObjectName(QStringLiteral("generationHistoryAction"));
   connect(mGenerationHistoryAction, &QAction::triggered, this, &MainWindow::showGenerationHistory);
 
-  mStopAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_MediaStop),
+  mStopAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Stop, palette()),
                             QCoreApplication::translate("Workbench", "停止任务"), this), AppLanguage::source("停止任务"));
   AppLanguage::bind(mStopAction, "toolTip", AppLanguage::source("停止当前任务"));
   mStopAction->setEnabled(false);
@@ -1140,7 +1152,7 @@ void MainWindow::createActions() {
           &ProcessSupervisor::stop);
 
   auto *resetCameraAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::FitView, palette()),
                   QCoreApplication::translate("Workbench", "重置视图"), this), AppLanguage::source("重置视图"));
   resetCameraAction->setShortcut(QKeySequence(QStringLiteral("Home")));
   AppLanguage::bind(resetCameraAction, "toolTip", AppLanguage::source("重置视图"));
@@ -1223,7 +1235,7 @@ void MainWindow::createActions() {
   mEditModeActionGroup = new QActionGroup(this);
   mEditModeActionGroup->setExclusive(true);
 
-  mInspectAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowUp),
+  mInspectAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Inspect, palette()),
                                QCoreApplication::translate("Workbench", "查看"), this), AppLanguage::source("查看"));
   mInspectAction->setCheckable(true);
   mInspectAction->setChecked(true);
@@ -1247,6 +1259,8 @@ void MainWindow::createActions() {
   connect(mViewport, &NativeViewport::editToolsLockedChanged, this, [this](bool locked) {
     const QSignalBlocker blocker(mLockEditToolsAction);
     mLockEditToolsAction->setChecked(locked);
+    setWorkbenchActionIcon(mLockEditToolsAction,
+        locked ? WorkbenchIconId::Locked : WorkbenchIconId::Unlocked, palette());
     QSettings().setValue(QStringLiteral("view/editToolsLocked"), locked);
     updateEditActions();
   });
@@ -1305,7 +1319,7 @@ void MainWindow::createActions() {
           &NativeViewport::selectModelForScale);
 
   mRectangleAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::BoxSelect, palette()),
                   QCoreApplication::translate("Workbench", "框选"), this), AppLanguage::source("框选"));
   mRectangleAction->setCheckable(true);
   mRectangleAction->setShortcut(QKeySequence(QStringLiteral("Shift+R")));
@@ -1316,7 +1330,7 @@ void MainWindow::createActions() {
   });
 
   mLassoAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Lasso, palette()),
                   QCoreApplication::translate("Workbench", "套索"), this), AppLanguage::source("套索"));
   mLassoAction->setCheckable(true);
   mLassoAction->setShortcut(QKeySequence(QStringLiteral("L")));
@@ -1327,7 +1341,7 @@ void MainWindow::createActions() {
   });
 
   mBrushAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_FileDialogListView),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Brush, palette()),
                   QCoreApplication::translate("Workbench", "笔刷"), this), AppLanguage::source("笔刷"));
   mBrushAction->setCheckable(true);
   mBrushAction->setShortcut(QKeySequence(QStringLiteral("B")));
@@ -1338,7 +1352,7 @@ void MainWindow::createActions() {
   });
 
   mVisibleOnlyAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::VisibleOnly, palette()),
                   QCoreApplication::translate("Workbench", "仅选择可见点"), this), AppLanguage::source("仅选择可见点"));
   mVisibleOnlyAction->setCheckable(true);
   mVisibleOnlyAction->setChecked(true);
@@ -1347,7 +1361,7 @@ void MainWindow::createActions() {
           &NativeViewport::setVisibleOnlySelection);
 
   mClearSelectionAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogResetButton),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::ClearSelection, palette()),
                   QCoreApplication::translate("Workbench", "清除选择"), this), AppLanguage::source("清除选择"));
   mClearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
   AppLanguage::bind(mClearSelectionAction, "toolTip", AppLanguage::source("清除选择 (Esc)"));
@@ -1355,7 +1369,7 @@ void MainWindow::createActions() {
           &NativeViewport::clearSelection);
 
   mInvertSelectionAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_BrowserReload),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::InvertSelection, palette()),
                   QCoreApplication::translate("Workbench", "反选"), this), AppLanguage::source("反选"));
   mInvertSelectionAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
   AppLanguage::bind(mInvertSelectionAction, "toolTip", AppLanguage::source("反选未删除的点 (Ctrl+I)"));
@@ -1363,28 +1377,28 @@ void MainWindow::createActions() {
           &NativeViewport::invertSelection);
 
   mDeleteSelectionAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_TrashIcon),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Delete, palette()),
                   QCoreApplication::translate("Workbench", "删除所选"), this), AppLanguage::source("删除所选"));
   mDeleteSelectionAction->setShortcut(QKeySequence::Delete);
   AppLanguage::bind(mDeleteSelectionAction, "toolTip", AppLanguage::source("删除所选点 (Delete)"));
   connect(mDeleteSelectionAction, &QAction::triggered, mViewport,
           &NativeViewport::deleteSelection);
 
-  mUndoEditAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowBack),
+  mUndoEditAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Undo, palette()),
                                 QCoreApplication::translate("Workbench", "撤销编辑"), this), AppLanguage::source("撤销编辑"));
   mUndoEditAction->setShortcut(QKeySequence::Undo);
   AppLanguage::bind(mUndoEditAction, "toolTip", AppLanguage::source("撤销上一次编辑 (Ctrl+Z)"));
   connect(mUndoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::undoEdit);
 
-  mRedoEditAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_ArrowForward),
+  mRedoEditAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Redo, palette()),
                                 QCoreApplication::translate("Workbench", "重做编辑"), this), AppLanguage::source("重做编辑"));
   mRedoEditAction->setShortcut(QKeySequence::Redo);
   AppLanguage::bind(mRedoEditAction, "toolTip", AppLanguage::source("重做上一次编辑 (Ctrl+Y)"));
   connect(mRedoEditAction, &QAction::triggered, mViewport,
           &NativeViewport::redoEdit);
 
-  mExportModelAction = AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton), {}, this),
+  mExportModelAction = AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::ExportModel, palette()), {}, this),
       AppLanguage::source("导出模型..."));
   mExportModelAction->setObjectName(QStringLiteral("exportModelAction"));
   mExportModelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
@@ -1392,7 +1406,7 @@ void MainWindow::createActions() {
   connect(mExportModelAction, &QAction::triggered, this, &MainWindow::exportModel);
 
   mExportCropAction =
-      AppLanguage::text(new QAction(style()->standardIcon(QStyle::SP_DialogSaveButton),
+      AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Crop, palette()),
                   QCoreApplication::translate("Workbench", "裁剪另存为..."), this), AppLanguage::source("裁剪另存为..."));
   mExportCropAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
   AppLanguage::bind(mExportCropAction, "toolTip", AppLanguage::source("按原始顶点索引无损导出裁剪 PLY"));
@@ -1549,6 +1563,7 @@ void MainWindow::createMenus() {
   viewMenu->addSeparator();
   auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
+  setWorkbenchActionIcon(languageMenu->menuAction(), WorkbenchIconId::Globe, palette());
   auto *languageGroup = new QActionGroup(languageMenu);
   languageGroup->setExclusive(true);
   for (const QString &language : AppLanguage::supported()) {
@@ -1575,6 +1590,7 @@ void MainWindow::createMenus() {
   auto *appearanceMenu = AppLanguage::text(viewMenu->addMenu(QString()),
       AppLanguage::source("外观"), "title");
   appearanceMenu->setObjectName(QStringLiteral("appearanceMenu"));
+  setWorkbenchActionIcon(appearanceMenu->menuAction(), WorkbenchIconId::Settings, palette());
   auto *themeGroup = new QActionGroup(appearanceMenu);
   themeGroup->setExclusive(true);
   auto *automaticTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
@@ -1623,12 +1639,14 @@ void MainWindow::createMenus() {
   });
   viewMenu->addSeparator();
   QMenu *renderMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "title");
+  setWorkbenchActionIcon(renderMenu->menuAction(), WorkbenchIconId::Mesh, palette());
   renderMenu->addAction(mGaussianRenderAction);
   renderMenu->addAction(mMeshRenderAction);
   renderMenu->addAction(mPointRenderAction);
   auto *shMenu = AppLanguage::text(renderMenu->addMenu(QString()),
       AppLanguage::source("球谐显示"), "title");
   shMenu->setObjectName(QStringLiteral("shDisplayMenu"));
+  setWorkbenchActionIcon(shMenu->menuAction(), WorkbenchIconId::Gaussians, palette());
   auto *shGroup = new QActionGroup(shMenu);
   shGroup->setExclusive(true);
   mViewport->setMaximumShDegree(QSettings().value(QStringLiteral("view/maximumShDegree"), -1).toInt());
@@ -1651,6 +1669,7 @@ void MainWindow::createMenus() {
   viewMenu->addAction(mShowCamerasAction);
   QMenu *referencePlaneMenu =
       AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格")), AppLanguage::source("基准面网格"), "title");
+  setWorkbenchActionIcon(referencePlaneMenu->menuAction(), WorkbenchIconId::Scene, palette());
   referencePlaneMenu->addAction(mModelBasePlaneAction);
   referencePlaneMenu->addAction(mWorldZeroPlaneAction);
   viewMenu->addSeparator();
@@ -1662,6 +1681,7 @@ void MainWindow::createMenus() {
 
   QMenu *displayMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "显示与适配")), AppLanguage::source("显示与适配"), "title");
   displayMenu->setObjectName(QStringLiteral("displaySettingsMenu"));
+  setWorkbenchActionIcon(displayMenu->menuAction(), WorkbenchIconId::Settings, palette());
   mAutoScaleAction =
       AppLanguage::text(displayMenu->addAction(QCoreApplication::translate("Workbench", "自动适配界面（推荐）")), AppLanguage::source("自动适配界面（推荐）"));
   mAutoScaleAction->setObjectName(QStringLiteral("autoUiScaleAction"));
@@ -1672,6 +1692,7 @@ void MainWindow::createMenus() {
           [this]() { setAutomaticUiScale(true, true); });
 
   QMenu *scaleMenu = AppLanguage::text(displayMenu->addMenu(QCoreApplication::translate("Workbench", "手动界面比例")), AppLanguage::source("手动界面比例"), "title");
+  setWorkbenchActionIcon(scaleMenu->menuAction(), WorkbenchIconId::Zoom, palette());
   mScaleActionGroup = new QActionGroup(this);
   mScaleActionGroup->setExclusive(true);
   const QList<int> scales = {90, 100, 110, 125, 150};
@@ -1691,6 +1712,7 @@ void MainWindow::createMenus() {
 
   displayMenu->addSeparator();
   QMenu *resolutionMenu = AppLanguage::text(displayMenu->addMenu(QCoreApplication::translate("Workbench", "窗口分辨率")), AppLanguage::source("窗口分辨率"), "title");
+  setWorkbenchActionIcon(resolutionMenu->menuAction(), WorkbenchIconId::FullScreen, palette());
   auto *fitWindowAction =
       AppLanguage::text(resolutionMenu->addAction(QCoreApplication::translate("Workbench", "适合当前屏幕（自动）")), AppLanguage::source("适合当前屏幕（自动）"));
   fitWindowAction->setObjectName(QStringLiteral("fitWindowToScreenAction"));
@@ -1715,6 +1737,7 @@ void MainWindow::createMenus() {
   QMenu *helpMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "帮助")), AppLanguage::source("帮助"), "title");
   auto *aboutAction =
       AppLanguage::text(helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench")), AppLanguage::source("关于 Gaussian Scene Workbench"));
+  setWorkbenchActionIcon(aboutAction, WorkbenchIconId::Info, palette());
   connect(aboutAction, &QAction::triggered, this, [this]() {
     QMessageBox::about(
         this, QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"),
@@ -1737,7 +1760,7 @@ void MainWindow::createToolBars() {
   auto *exportButton = new QToolButton(mainToolbar);
   exportButton->setObjectName(QStringLiteral("exportModelButton"));
   exportButton->setDefaultAction(mExportModelAction);
-  exportButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  exportButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   mainToolbar->addWidget(exportButton);
   mainToolbar->addSeparator();
   mainToolbar->addAction(mImportDatasetAction);
@@ -1747,7 +1770,7 @@ void MainWindow::createToolBars() {
   mainToolbar->addAction(mTrainAction);
   auto *meshButton = new QToolButton(mainToolbar);
   meshButton->setDefaultAction(mGenerateMeshAction);
-  meshButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  meshButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   mainToolbar->addWidget(meshButton);
   mainToolbar->addAction(mPauseTrainingAction);
   mainToolbar->addAction(mResumeTrainingAction);
@@ -1757,12 +1780,14 @@ void MainWindow::createToolBars() {
   mRenderToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "渲染模式")), AppLanguage::source("渲染模式"), "windowTitle");
   mRenderToolbar->setObjectName(QStringLiteral("renderToolbar"));
   mRenderToolbar->setMovable(false);
-  mRenderToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  mRenderToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   mRenderToolbar->addAction(mGaussianRenderAction);
   mRenderToolbar->addAction(mMeshRenderAction);
   mRenderToolbar->addAction(mPointRenderAction);
   auto *shButton = AppLanguage::text(new QToolButton(mRenderToolbar), AppLanguage::source("球谐显示"));
   shButton->setObjectName(QStringLiteral("shDisplayButton"));
+  shButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  shButton->setIcon(workbenchIcon(WorkbenchIconId::Gaussians, shButton->palette()));
   shButton->setPopupMode(QToolButton::InstantPopup);
   shButton->setMenu(findChild<QMenu *>(QStringLiteral("shDisplayMenu")));
   AppLanguage::bind(shButton, "toolTip", AppLanguage::source("即时切换高斯球谐显示阶数（最高不超过源数据）。降低阶数可减少着色开销，不修改模型或导出数据；无可用 SH 时显示基础颜色。"));
@@ -1775,7 +1800,7 @@ void MainWindow::createToolBars() {
   mSelectionToolbar = AppLanguage::text(addToolBar(QCoreApplication::translate("Workbench", "选择模式")), AppLanguage::source("选择模式"), "windowTitle");
   mSelectionToolbar->setObjectName(QStringLiteral("selectionToolbar"));
   mSelectionToolbar->setMovable(false);
-  mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  mSelectionToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
   mSelectionToolbar->addAction(mInspectAction);
   mSelectionToolbar->addAction(mLockEditToolsAction);
   mSelectionToolbar->addAction(mObservationTrackballAction);
@@ -1785,6 +1810,11 @@ void MainWindow::createToolBars() {
   mSelectionToolbar->addAction(mLassoAction);
   mSelectionToolbar->addAction(mBrushAction);
   mSelectionToolbar->addAction(mVisibleOnlyAction);
+  // Persistent state toggles retain their translated captions; selection
+  // tools use distinct shapes and keep their full shortcut tooltips.
+  for (QAction *action : {mLockEditToolsAction, mVisibleOnlyAction})
+    if (auto *button = qobject_cast<QToolButton *>(mSelectionToolbar->widgetForAction(action)))
+      button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   mSelectionToolbar->addSeparator();
   auto *brushRadiusLabel =
       AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "半径"), mSelectionToolbar), AppLanguage::source("半径"));
@@ -2073,6 +2103,7 @@ void MainWindow::createTaskDock() {
   auto *taskBar = new QToolBar(mTaskPage);
   taskBar->setObjectName(QStringLiteral("taskRecordToolbar"));
   taskBar->setMovable(false);
+  taskBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   taskBar->addActions({mTaskDetailsAction, mOpenTaskFolderAction, mCopyTaskSummaryAction});
   AppLanguage::bind(taskBar, "toolTip", AppLanguage::source("任务日志仅在本次会话保留；每项任务最多保留最近 512 Ki 字符。"));
   taskLayout->addWidget(taskBar);
@@ -2091,7 +2122,9 @@ void MainWindow::createTaskDock() {
   logLayout->setContentsMargins(0, 0, 0, 0);
   logLayout->setSpacing(2);
   auto *logBar = new QToolBar(mLogPage);
+  logBar->setObjectName(QStringLiteral("logToolbar"));
   logBar->setMovable(false);
+  logBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   mFollowLogsAction = AppLanguage::text(new QAction(this), AppLanguage::source("跟随最新日志"));
   mFollowLogsAction->setObjectName(QStringLiteral("followLatestLogsAction"));
   mFollowLogsAction->setCheckable(true);
@@ -3235,39 +3268,91 @@ void MainWindow::refreshAutomaticTheme() {
 void MainWindow::refreshThemePresentation() {
   // Rebuild theme-dependent icons only; never rebuild the project tree,
   // reconnect a worker or reload a scene when changing appearance.
-  const std::pair<QAction *, QStyle::StandardPixmap> icons[] = {
-      {mNewProjectAction, QStyle::SP_FileIcon},
-      {mOpenProjectAction, QStyle::SP_DialogOpenButton},
-      {mSaveAction, QStyle::SP_DialogSaveButton},
-      {mImportDatasetAction, QStyle::SP_DirOpenIcon},
-      {mImportDatasetDirectoryAction, QStyle::SP_DirIcon},
-      {mAttachDatasetAction, QStyle::SP_DirLinkIcon},
-      {mImportSceneAction, QStyle::SP_FileDialogDetailedView},
-      {mClearDatasetAction, QStyle::SP_TrashIcon},
-      {mClearReconstructionAction, QStyle::SP_TrashIcon},
-      {mClearSceneAction, QStyle::SP_TrashIcon},
-      {mClearTasksAction, QStyle::SP_TrashIcon},
-      {findChild<QAction *>(QStringLiteral("environmentAction")), QStyle::SP_BrowserReload},
-      {mReconstructAction, QStyle::SP_ComputerIcon},
-      {mTrainAction, QStyle::SP_MediaPlay},
-      {mPauseTrainingAction, QStyle::SP_MediaPause},
-      {mResumeTrainingAction, QStyle::SP_MediaSeekForward},
-      {mStopAction, QStyle::SP_MediaStop},
-      {findChild<QAction *>(QStringLiteral("resetCameraAction")), QStyle::SP_BrowserReload},
-      {mInspectAction, QStyle::SP_ArrowUp},
-      {mRectangleAction, QStyle::SP_FileDialogDetailedView},
-      {mLassoAction, QStyle::SP_FileDialogListView},
-      {mBrushAction, QStyle::SP_FileDialogListView},
-      {mVisibleOnlyAction, QStyle::SP_DialogApplyButton},
-      {mClearSelectionAction, QStyle::SP_DialogResetButton},
-      {mInvertSelectionAction, QStyle::SP_BrowserReload},
-      {mDeleteSelectionAction, QStyle::SP_TrashIcon},
-      {mUndoEditAction, QStyle::SP_ArrowBack},
-      {mRedoEditAction, QStyle::SP_ArrowForward},
-      {mExportModelAction, QStyle::SP_DialogSaveButton},
-      {mExportCropAction, QStyle::SP_DialogSaveButton}};
+  const std::pair<QAction *, WorkbenchIconId> icons[] = {
+      {mNewProjectAction, WorkbenchIconId::NewProject},
+      {mOpenProjectAction, WorkbenchIconId::OpenProject},
+      {mSaveAction, WorkbenchIconId::Save},
+      {mSaveAsAction, WorkbenchIconId::SaveAs},
+      {mRecoveryCenterAction, WorkbenchIconId::Restore},
+      {mSnapshotHistoryAction, WorkbenchIconId::Logs},
+      {mConfigureBackupAction, WorkbenchIconId::Settings},
+      {mExternalBackupsAction, WorkbenchIconId::Folder},
+      {mImportDatasetAction, WorkbenchIconId::ImportMedia},
+      {mImportDatasetDirectoryAction, WorkbenchIconId::Folder},
+      {mAttachDatasetAction, WorkbenchIconId::Dataset},
+      {mImportSceneAction, WorkbenchIconId::ImportModel},
+      {mClearDatasetAction, WorkbenchIconId::Delete},
+      {mClearReconstructionAction, WorkbenchIconId::Delete},
+      {mClearSceneAction, WorkbenchIconId::Remove},
+      {mClearTasksAction, WorkbenchIconId::ClearSelection},
+      {findChild<QAction *>(QStringLiteral("environmentAction")), WorkbenchIconId::Settings},
+      {mReconstructAction, WorkbenchIconId::Reconstruct},
+      {mTrainAction, WorkbenchIconId::Train},
+      {mGenerateMeshAction, WorkbenchIconId::GenerateMesh},
+      {mPauseTrainingAction, WorkbenchIconId::Pause},
+      {mResumeTrainingAction, WorkbenchIconId::Resume},
+      {mGenerationHistoryAction, WorkbenchIconId::Logs},
+      {mStopAction, WorkbenchIconId::Stop},
+      {findChild<QAction *>(QStringLiteral("resetCameraAction")), WorkbenchIconId::FitView},
+      {findChild<QAction *>(QStringLiteral("resetLayoutAction")), WorkbenchIconId::Restore},
+      {findChild<QAction *>(QStringLiteral("exitAction")), WorkbenchIconId::Close},
+      {findChild<QAction *>(QStringLiteral("resourceBudgetAction")), WorkbenchIconId::Settings},
+      {findChild<QAction *>(QStringLiteral("fitWindowToScreenAction")), WorkbenchIconId::FitView},
+      {mGaussianRenderAction, WorkbenchIconId::Gaussians},
+      {mMeshRenderAction, WorkbenchIconId::Mesh},
+      {mPointRenderAction, WorkbenchIconId::Points},
+      {mShowCamerasAction, WorkbenchIconId::Camera},
+      {mTaskPreviewAction, WorkbenchIconId::Inspect},
+      {mPausePreviewAction, WorkbenchIconId::Pause},
+      {mInspectAction, WorkbenchIconId::Inspect},
+      {mLockEditToolsAction, mLockEditToolsAction->isChecked()
+          ? WorkbenchIconId::Locked : WorkbenchIconId::Unlocked},
+      {mObservationTrackballAction, WorkbenchIconId::Orbit},
+      {mFindModelAction, WorkbenchIconId::FitView},
+      {mMoveModelAction, WorkbenchIconId::Move},
+      {mRotateModelAction, WorkbenchIconId::Rotate},
+      {mScaleModelAction, WorkbenchIconId::Scale},
+      {mRectangleAction, WorkbenchIconId::BoxSelect},
+      {mLassoAction, WorkbenchIconId::Lasso},
+      {mBrushAction, WorkbenchIconId::Brush},
+      {mVisibleOnlyAction, WorkbenchIconId::VisibleOnly},
+      {mClearSelectionAction, WorkbenchIconId::ClearSelection},
+      {mInvertSelectionAction, WorkbenchIconId::InvertSelection},
+      {mDeleteSelectionAction, WorkbenchIconId::Delete},
+      {mUndoEditAction, WorkbenchIconId::Undo},
+      {mRedoEditAction, WorkbenchIconId::Redo},
+      {mExportModelAction, WorkbenchIconId::ExportModel},
+      {mExportCropAction, WorkbenchIconId::Crop},
+      {mExportCoordinateReportAction, WorkbenchIconId::Details},
+      {mModelBasePlaneAction, WorkbenchIconId::Scene},
+      {mWorldZeroPlaneAction, WorkbenchIconId::Global},
+      {mTaskDetailsAction, WorkbenchIconId::Details},
+      {mOpenTaskFolderAction, WorkbenchIconId::Folder},
+      {mCopyTaskSummaryAction, WorkbenchIconId::Copy},
+      {mFollowLogsAction, WorkbenchIconId::Logs},
+      {mExportLogsAction, WorkbenchIconId::ExportModel},
+      {mProjectDock->toggleViewAction(), WorkbenchIconId::Folder},
+      {mInspectorDock->toggleViewAction(), WorkbenchIconId::Details},
+      {mTaskDock->toggleViewAction(), WorkbenchIconId::Tasks}};
   for (const auto &[action, icon] : icons)
-    if (action) action->setIcon(style()->standardIcon(icon, nullptr, this));
+    if (action) action->setProperty("gswWorkbenchIconId", static_cast<int>(icon));
+  // Menu and dialog actions with a semantic mapping are refreshed in place.
+  // Their checked state, selection and user data remain untouched.
+  for (QAction *action : findChildren<QAction *>()) {
+    const QVariant id = action->property("gswWorkbenchIconId");
+    if (id.isValid())
+      action->setIcon(workbenchIcon(static_cast<WorkbenchIconId>(id.toInt()), palette()));
+  }
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    const QVariant id = (*it)->data(0, kWorkbenchTreeIconRole);
+    if (id.isValid())
+      (*it)->setIcon(0, workbenchIcon(static_cast<WorkbenchIconId>(id.toInt()), mProjectTree->palette()));
+  }
+  if (auto *button = findChild<QToolButton *>(QStringLiteral("shDisplayButton")))
+    button->setIcon(workbenchIcon(WorkbenchIconId::Gaussians, button->palette()));
+  mTaskTabs->setTabIcon(mTaskTabs->indexOf(mTaskPage), workbenchIcon(WorkbenchIconId::Tasks, palette()));
+  mTaskTabs->setTabIcon(mTaskTabs->indexOf(mTrainingMonitor), workbenchIcon(WorkbenchIconId::Train, palette()));
+  mTaskTabs->setTabIcon(mTaskTabs->indexOf(mLogPage), workbenchIcon(WorkbenchIconId::Logs, palette()));
   updateDockMetrics();
   updateTaskLabels();
   mViewport->update();
@@ -3297,7 +3382,19 @@ void MainWindow::applyUiScale(const int scalePercent, const bool persist) {
                        AppTheme::scaled(20, mUiScalePercent));
   for (QToolBar *toolbar : findChildren<QToolBar *>()) {
     toolbar->setIconSize(iconSize);
+    for (QToolButton *button : toolbar->findChildren<QToolButton *>()) {
+      if (button->defaultAction() || button->menu()) {
+        button->setMinimumHeight(AppTheme::scaled(32, mUiScalePercent));
+        button->setMinimumWidth(AppTheme::scaled(32, mUiScalePercent));
+        button->setAutoRaise(true);
+      }
+    }
   }
+  if (mProjectTree)
+    mProjectTree->setIconSize(QSize(AppTheme::scaled(16, mUiScalePercent), AppTheme::scaled(16, mUiScalePercent)));
+  if (mTaskTabs)
+    mTaskTabs->setIconSize(QSize(AppTheme::scaled(16, mUiScalePercent), AppTheme::scaled(16, mUiScalePercent)));
+  refreshThemePresentation();
   if (mBrushRadiusSpin != nullptr) {
     mBrushRadiusSpin->setMinimumWidth(AppTheme::scaled(86, mUiScalePercent));
     mBrushRadiusSpin->setMaximumWidth(AppTheme::scaled(120, mUiScalePercent));
@@ -6183,7 +6280,7 @@ void MainWindow::rebuildProjectTree() {
                                   ? mWorkspace.projectName()
                                   : QCoreApplication::translate("Workbench", "未打开工程");
   auto *root = new QTreeWidgetItem(mProjectTree, {projectName});
-  root->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
+  setWorkbenchTreeIcon(root, WorkbenchIconId::Folder, mProjectTree->palette());
   root->setData(0, Qt::UserRole, mWorkspace.rootPath());
 
   auto *dataset = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "数据集")});
@@ -6192,7 +6289,7 @@ void MainWindow::rebuildProjectTree() {
         managedDisplayName(mWorkspace.datasetPath()));
     dataset->setToolTip(0, QDir::toNativeSeparators(mWorkspace.datasetPath()));
   }
-  dataset->setIcon(0, style()->standardIcon(QStyle::SP_DirOpenIcon));
+  setWorkbenchTreeIcon(dataset, WorkbenchIconId::Dataset, mProjectTree->palette());
   dataset->setData(0, Qt::UserRole, mWorkspace.datasetPath());
   dataset->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
   auto *datasetState = new QTreeWidgetItem(
@@ -6200,21 +6297,23 @@ void MainWindow::rebuildProjectTree() {
                     ? QCoreApplication::translate("Workbench", "未导入")
                     : QCoreApplication::translate("Workbench", "图像 %1").arg(mWorkspace.imageCount())});
   datasetState->setData(0, Qt::UserRole + 1, QStringLiteral("dataset"));
+  setWorkbenchTreeIcon(datasetState, WorkbenchIconId::Image, mProjectTree->palette());
 
   auto *reconstruction = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "重建")});
   reconstruction->setData(0, Qt::UserRole + 1,
                           QStringLiteral("reconstruction"));
-  reconstruction->setIcon(
-      0, style()->standardIcon(QStyle::SP_FileDialogContentsView));
+  setWorkbenchTreeIcon(reconstruction, WorkbenchIconId::Reconstruct, mProjectTree->palette());
   const bool hasSparse = hasRecognizedColmapScene(mWorkspace.datasetPath());
   auto *reconstructionState = new QTreeWidgetItem(
       reconstruction, {hasSparse ? QCoreApplication::translate("Workbench", "COLMAP sparse")
                                  : QCoreApplication::translate("Workbench", "未检测到稀疏重建")});
   reconstructionState->setData(0, Qt::UserRole + 1,
                                QStringLiteral("reconstruction"));
+  setWorkbenchTreeIcon(reconstructionState,
+      hasSparse ? WorkbenchIconId::Points : WorkbenchIconId::Info, mProjectTree->palette());
 
   auto *scene = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "场景")});
-  scene->setIcon(0, style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+  setWorkbenchTreeIcon(scene, WorkbenchIconId::Scene, mProjectTree->palette());
   scene->setData(0, Qt::UserRole, mWorkspace.scenePath());
   scene->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
   if (mWorkspace.sceneObjects().isEmpty()) {
@@ -6225,6 +6324,7 @@ void MainWindow::rebuildProjectTree() {
     item->setData(0, Qt::UserRole, object.path);
     item->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
     item->setData(0, Qt::UserRole + 2, object.id);
+    setWorkbenchTreeIcon(item, WorkbenchIconId::ImportModel, mProjectTree->palette());
     item->setToolTip(0, QDir::toNativeSeparators(object.path));
     if (object.id == mWorkspace.activeSceneId())
       mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
@@ -6238,6 +6338,7 @@ void MainWindow::rebuildProjectTree() {
                                           : QString())});
     cameras->setData(0, Qt::UserRole, mCameraSourcePath);
     cameras->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
+    setWorkbenchTreeIcon(cameras, WorkbenchIconId::Camera, mProjectTree->palette());
     if (mInvalidCameraCount > 0) {
       cameras->setToolTip(
           0,
@@ -6249,10 +6350,11 @@ void MainWindow::rebuildProjectTree() {
     cameras->setData(0, Qt::UserRole, mCameraSourcePath);
     cameras->setData(0, Qt::UserRole + 1, QStringLiteral("scene"));
     cameras->setToolTip(0, mCameraTrajectoryError);
+    setWorkbenchTreeIcon(cameras, WorkbenchIconId::Warning, mProjectTree->palette());
   }
 
   auto *jobs = new QTreeWidgetItem(root, {QCoreApplication::translate("Workbench", "任务")});
-  jobs->setIcon(0, style()->standardIcon(QStyle::SP_ComputerIcon));
+  setWorkbenchTreeIcon(jobs, WorkbenchIconId::Tasks, mProjectTree->palette());
   jobs->setData(0, Qt::UserRole + 1, QStringLiteral("tasks"));
   QString taskState = QCoreApplication::translate("Workbench", "空闲");
   if (mProcessSupervisor.isRunning()) {

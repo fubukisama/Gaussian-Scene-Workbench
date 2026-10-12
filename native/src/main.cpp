@@ -1,5 +1,6 @@
 #include "AppTheme.h"
 #include "AppLanguage.h"
+#include "IconUiSmokeTest.h"
 #include "WindowUi.h"
 #include "LanguageSmokeTest.h"
 #include "MainWindow.h"
@@ -190,6 +191,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
+  QCommandLineOption iconUiSmokeOption(QStringLiteral("smoke-test-icon-ui"),
+      QStringLiteral("Verify shared icon states, responsive toolbars and real viewport tool controls."));
+  parser.addOption(iconUiSmokeOption);
   QCommandLineOption windowAppearanceSmokeOption(QStringLiteral("smoke-test-window-appearance"),
       QStringLiteral("Verify initial import-dialog width and toolbar label appearance."));
   parser.addOption(windowAppearanceSmokeOption);
@@ -388,7 +392,7 @@ int main(int argc, char *argv[]) {
       parser.isSet(referenceAxesSmokeTestOption);
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
-  const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(taskActionsSmokeOption) ||
+  const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(iconUiSmokeOption) || parser.isSet(taskActionsSmokeOption) ||
                          parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(trainingPreflightSmokeOption) ||
@@ -439,7 +443,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(windowMinimizeSmokeOption)) {
+  if (parser.isSet(iconUiSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runIconUiSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(windowMinimizeSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runWindowMinimizeSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

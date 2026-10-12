@@ -10,6 +10,7 @@
 
 class QCheckBox;
 class QDoubleSpinBox;
+class QEvent;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -33,6 +34,7 @@ public:
 
 protected:
   void accept() override;
+  void changeEvent(QEvent *event) override;
 
 private:
   void addFiles();
@@ -41,6 +43,7 @@ private:
   void clearSources();
   void appendSourcePaths(const QStringList &paths);
   void refreshSummary();
+  void refreshIcons();
 
   QString mInitialDirectory;
   QLineEdit *mSceneName = nullptr;
@@ -48,6 +51,8 @@ private:
   QDoubleSpinBox *mFramesPerSecond = nullptr;
   QCheckBox *mOverwrite = nullptr;
   QLabel *mSummary = nullptr;
+  QPushButton *mAddFilesButton = nullptr;
+  QPushButton *mAddDirectoryButton = nullptr;
   QPushButton *mRemoveButton = nullptr;
   QPushButton *mClearButton = nullptr;
   QPushButton *mImportButton = nullptr;

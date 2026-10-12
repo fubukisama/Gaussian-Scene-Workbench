@@ -9,6 +9,7 @@
 #include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
 #include "ViewportCamera.h"
+#include "WorkbenchIcons.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -69,16 +70,12 @@ struct ViewportColors final {
   QColor hintCard{38, 31, 23};
   QColor hintText{255, 203, 122};
   QColor highlight{255, 224, 118};
-  QColor toolCard{24, 27, 30};
-  QColor toolBorder{63, 68, 72};
-  QColor toolIdle{34, 38, 41};
-  QColor toolHover{62, 67, 72};
-  QColor toolActive{70, 116, 183};
+  QColor toolCard{35, 39, 44};
+  QColor toolBorder{68, 73, 81};
+  QColor toolHover{57, 63, 71};
+  QColor toolActive{43, 104, 192};
   QColor toolIcon{238, 241, 243};
-  QColor toolDisabled{28, 31, 34};
-  QColor disabledBorder{76, 81, 85};
   QColor disabledText{157, 164, 169};
-  QColor orientationText{220, 225, 228};
   QColor handleEdge{228, 232, 234};
   QColor handleFill{48, 53, 57};
   QColor viewRing{225, 229, 232};
@@ -103,16 +100,12 @@ ViewportColors viewportColors() {
   colors.hintCard = QColor(255, 255, 255);
   colors.hintText = QColor(36, 39, 43);
   colors.highlight = QColor(168, 108, 14);
-  colors.toolCard = QColor(250, 250, 251);
-  colors.toolBorder = QColor(131, 141, 152);
-  colors.toolIdle = QColor(255, 255, 255);
-  colors.toolHover = QColor(224, 233, 248);
+  colors.toolCard = QColor(245, 246, 248);
+  colors.toolBorder = QColor(199, 205, 214);
+  colors.toolHover = QColor(225, 229, 235);
   colors.toolActive = QColor(31, 98, 201);
   colors.toolIcon = QColor(27, 31, 36);
-  colors.toolDisabled = QColor(240, 241, 243);
-  colors.disabledBorder = QColor(178, 184, 192);
   colors.disabledText = QColor(113, 121, 131);
-  colors.orientationText = QColor(27, 31, 36);
   colors.handleEdge = QColor(38, 43, 50);
   colors.handleFill = QColor(255, 255, 255);
   colors.viewRing = QColor(48, 55, 64);
@@ -7649,88 +7642,88 @@ void NativeViewport::drawTransformToolStrip(QPainter &painter) {
   static const std::array<TransformGizmoMode, 4> modes = {
       TransformGizmoMode::Move, TransformGizmoMode::Rotate,
       TransformGizmoMode::Scale, TransformGizmoMode::Transform};
+  static const std::array<WorkbenchIconId, 4> icons = {
+      WorkbenchIconId::Move, WorkbenchIconId::Rotate,
+      WorkbenchIconId::Scale, WorkbenchIconId::Transform};
   const ViewportColors colors = viewportColors();
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
-  painter.setPen(QPen(translucent(colors.toolBorder, 220), 1.0));
-  painter.setBrush(overlaySurface(colors.toolCard, 232));
-  painter.drawRoundedRect(layout.background, 6.0, 6.0);
+  if (layout.background.isEmpty()) {
+    painter.restore();
+    return;
+  }
+  const qreal scale = layout.buttons.front().width() / 34.0;
+  const qreal rounding = 4.0 * scale;
+  painter.setPen(QPen(colors.toolBorder, scale));
+  painter.setBrush(colors.toolCard);
+  painter.drawRoundedRect(layout.background, rounding + scale,
+                          rounding + scale);
+
+  const auto drawSeparator = [&](const QRectF &first, const QRectF &second) {
+    painter.setPen(QPen(colors.toolBorder, scale));
+    if (std::abs(first.center().y() - second.center().y()) < scale) {
+      const qreal x = (first.right() + second.left()) * 0.5;
+      painter.drawLine(QPointF(x, first.top() + 8.0 * scale),
+                       QPointF(x, first.bottom() - 8.0 * scale));
+    } else if (std::abs(first.center().x() - second.center().x()) < scale) {
+      const qreal y = (first.bottom() + second.top()) * 0.5;
+      painter.drawLine(QPointF(first.left() + 5.0 * scale, y),
+                       QPointF(first.right() - 5.0 * scale, y));
+    }
+    // Wrapped-row boundaries need no rule through neighbouring controls.
+  };
+  drawSeparator(layout.buttons[2], layout.buttons[3]);
+  drawSeparator(layout.buttons[3], layout.orientationButton);
+
+  const auto iconRect = [scale](const QRectF &button) {
+    const qreal size = 20.0 * scale;
+    return QRectF(button.center() - QPointF(size * 0.5, size * 0.5),
+                  QSizeF(size, size));
+  };
 
   for (int index = 0; index < 4; ++index) {
     const QRectF rect = layout.buttons[static_cast<std::size_t>(index)];
     const bool active =
         mTransformGizmoMode == modes.at(static_cast<std::size_t>(index));
     const bool hover = mTransformToolHover == index;
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(active ? overlaySurface(colors.toolActive, 245)
-                            : hover ? overlaySurface(colors.toolHover, 235)
-                                    : overlaySurface(colors.toolIdle, 210));
-    painter.drawRoundedRect(rect, 4.0, 4.0);
-    const QColor icon = lightViewport() && active ? QColor(255, 255, 255)
-                                                : colors.toolIcon;
-    painter.setPen(QPen(icon, 2.0, Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(icon);
-    const QPointF center = rect.center();
-    const qreal radius = rect.width() * 0.26;
-    if (index == 0 || index == 3) {
-      painter.drawLine(center + QPointF(-radius, 0.0),
-                       center + QPointF(radius, 0.0));
-      painter.drawLine(center + QPointF(0.0, -radius),
-                       center + QPointF(0.0, radius));
-      painter.drawLine(center + QPointF(-radius * 0.72, radius * 0.72),
-                       center + QPointF(radius * 0.72, -radius * 0.72));
-      constexpr qreal head = 4.0;
-      painter.drawLine(center + QPointF(radius, 0.0),
-                       center + QPointF(radius - head, -head));
-      painter.drawLine(center + QPointF(radius, 0.0),
-                       center + QPointF(radius - head, head));
-      painter.drawLine(center + QPointF(0.0, -radius),
-                       center + QPointF(-head, -radius + head));
-      painter.drawLine(center + QPointF(0.0, -radius),
-                       center + QPointF(head, -radius + head));
+    if (active || hover) {
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(active ? colors.toolActive : colors.toolHover);
+      painter.drawRoundedRect(rect, rounding, rounding);
     }
-    if (index == 1 || index == 3) {
-      const QRectF ring(center - QPointF(radius, radius),
-                        QSizeF(radius * 2.0, radius * 2.0));
-      painter.setBrush(Qt::NoBrush);
-      painter.drawArc(ring, 30 * 16, 285 * 16);
-      painter.setBrush(icon);
-      QPolygonF arrow;
-      arrow << ring.topRight() + QPointF(-1.0, 2.0)
-            << ring.topRight() + QPointF(-7.0, 0.0)
-            << ring.topRight() + QPointF(-2.0, 7.0);
-      painter.drawPolygon(arrow);
-    }
-    if (index == 2 || index == 3) {
-      const QPointF start = center + QPointF(-radius * 0.65, radius * 0.65);
-      const QPointF end = center + QPointF(radius * 0.68, -radius * 0.68);
-      painter.drawLine(start, end);
-      painter.setBrush(icon);
-      painter.drawRect(QRectF(end - QPointF(4.0, 4.0), QSizeF(8.0, 8.0)));
-    }
+    paintWorkbenchIcon(painter, icons.at(static_cast<std::size_t>(index)),
+                       iconRect(rect),
+                       active ? QColor(255, 255, 255) : colors.toolIcon);
   }
 
   const bool locked = modelGizmoOrientationLocked();
   const bool local = modelGizmoUsesLocalOrientation();
-  painter.setPen(locked ? QPen(translucent(colors.disabledBorder, 185), 1.0)
-                        : QPen(Qt::NoPen));
-  painter.setBrush(locked ? overlaySurface(colors.toolDisabled, 205)
-                          : mTransformToolHover == 4
-                                ? overlaySurface(colors.toolHover, 235)
-                                : overlaySurface(colors.toolIdle, 210));
-  painter.drawRoundedRect(layout.orientationButton, 4.0, 4.0);
-  QFont small = painter.font();
-  if (small.pointSizeF() > 0.0) {
-    small.setPointSizeF(std::max(8.0, small.pointSizeF() - 1.0));
+  if (!locked && mTransformToolHover == 4) {
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(colors.toolHover);
+    painter.drawRoundedRect(layout.orientationButton, rounding, rounding);
   }
-  painter.setFont(small);
-  painter.setPen(locked ? colors.disabledText : colors.orientationText);
-  painter.drawText(layout.orientationButton, Qt::AlignCenter,
-                   locked && mSelectedSceneIds.size() > 1 ? QCoreApplication::translate("Workbench", "等比\n缩放")
-                          : locked ? QCoreApplication::translate("Workbench", "局部\n锁定")
-                          : local ? QCoreApplication::translate("Workbench", "局部")
-                                  : QCoreApplication::translate("Workbench", "全局"));
+  const bool uniformScale = locked && mSelectedSceneIds.size() > 1;
+  paintWorkbenchIcon(painter,
+                     uniformScale ? WorkbenchIconId::Scale
+                                  : local ? WorkbenchIconId::Local
+                                          : WorkbenchIconId::Global,
+                     iconRect(layout.orientationButton),
+                     locked ? colors.disabledText : colors.toolIcon);
+  if (locked) {
+    // The small lock badge communicates the current constraint; the existing
+    // translated hover text explains why this coordinate control is disabled.
+    const qreal badge = 10.0 * scale;
+    const QRectF badgeRect(layout.orientationButton.right() - badge - scale,
+                           layout.orientationButton.bottom() - badge - scale,
+                           badge, badge);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(colors.toolCard);
+    painter.drawRoundedRect(badgeRect.adjusted(-scale, -scale, scale, scale),
+                            2.0 * scale, 2.0 * scale);
+    paintWorkbenchIcon(painter, WorkbenchIconId::Locked, badgeRect,
+                       colors.disabledText);
+  }
   painter.restore();
 }
 
@@ -7912,7 +7905,22 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QString mode =
       mEditToolsLocked ? QCoreApplication::translate("Workbench", "工具已锁定") :
       mScene->mSelectionBusy ? QCoreApplication::translate("Workbench", "选择处理中") : modeLabel(mMode);
-  const int modeWidth = metrics.horizontalAdvance(mode) + 18;
+  WorkbenchIconId modeIcon = WorkbenchIconId::Inspect;
+  switch (mMode) {
+  case InteractionMode::Move: modeIcon = WorkbenchIconId::Move; break;
+  case InteractionMode::Rotate: modeIcon = WorkbenchIconId::Rotate; break;
+  case InteractionMode::Scale: modeIcon = WorkbenchIconId::Scale; break;
+  case InteractionMode::Select: modeIcon = WorkbenchIconId::Inspect; break;
+  case InteractionMode::Rectangle: modeIcon = WorkbenchIconId::BoxSelect; break;
+  case InteractionMode::Lasso: modeIcon = WorkbenchIconId::Lasso; break;
+  case InteractionMode::Brush: modeIcon = WorkbenchIconId::Brush; break;
+  case InteractionMode::Crop: modeIcon = WorkbenchIconId::Crop; break;
+  case InteractionMode::Inspect: break;
+  }
+  if (mEditToolsLocked) modeIcon = WorkbenchIconId::Locked;
+  else if (mScene->mSelectionBusy) modeIcon = WorkbenchIconId::Refresh;
+  const int modeIconSize = lineHeight;
+  const int modeWidth = metrics.horizontalAdvance(mode) + modeIconSize + 23;
   const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);
   const int widthHint =
       (std::max)(metrics.horizontalAdvance(title),
@@ -8017,7 +8025,12 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   painter.setBrush(overlaySurface(colors.modeCard, 235));
   painter.drawRoundedRect(modeRect, 5, 5);
   painter.setPen(colors.modeText);
-  painter.drawText(modeRect, Qt::AlignCenter, mode);
+  paintWorkbenchIcon(painter, modeIcon,
+                     QRectF(modeRect.left() + 8,
+                            modeRect.center().y() - modeIconSize * 0.5,
+                            modeIconSize, modeIconSize), colors.modeText);
+  painter.drawText(modeRect.adjusted(modeIconSize + 15, 0, -8, 0),
+                   Qt::AlignVCenter | Qt::AlignLeft, mode);
 
   painter.restore();
 }
@@ -8240,91 +8253,65 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   projectionFont.setPixelSize(
       std::clamp(qRound(layout.projectionLabel.height() * 0.56), 10, 14));
   painter.setFont(projectionFont);
-  painter.setPen(projectionActive
+  const QColor projectionInk = projectionActive
                      ? themeInk(QColor(255, 255, 255), QColor(29, 50, 69))
-                     : themeInk(QColor(205, 210, 216, 225), QColor(33, 38, 45, 245)));
-  painter.drawText(layout.projectionLabel, Qt::AlignCenter,
-                   mOrthographic ? QStringLiteral("≡  Iso")
-                                 : QStringLiteral("≡  Persp"));
+                     : themeInk(QColor(205, 210, 216, 225), QColor(33, 38, 45, 245));
+  painter.setPen(projectionInk);
+  const QString projectionText = mOrthographic ? QStringLiteral("Iso")
+                                                : QStringLiteral("Persp");
+  const qreal projectionIconSize = layout.projectionLabel.height() * 0.68;
+  const qreal projectionGap = projectionIconSize * 0.25;
+  const qreal projectionTextWidth =
+      QFontMetricsF(projectionFont).horizontalAdvance(projectionText);
+  const qreal projectionLeft = layout.projectionLabel.center().x() -
+      (projectionIconSize + projectionGap + projectionTextWidth) * 0.5;
+  paintWorkbenchIcon(painter, WorkbenchIconId::Projection,
+                     QRectF(projectionLeft,
+                            layout.projectionLabel.center().y() - projectionIconSize * 0.5,
+                            projectionIconSize, projectionIconSize), projectionInk);
+  painter.drawText(QRectF(projectionLeft + projectionIconSize + projectionGap,
+                          layout.projectionLabel.top(), projectionTextWidth,
+                          layout.projectionLabel.height()),
+                   Qt::AlignCenter, projectionText);
 
+  const ViewportColors colors = viewportColors();
   const auto drawButtonBackground =
-      [this, &painter](const QRectF &rect, const NavigationGizmoPart part) {
-        const bool active =
-            mNavigationHover.part == part ||
-            (mNavigationInteractionActive && mNavigationPress.part == part);
-        painter.setPen(lightViewport()
-                           ? QPen(active ? QColor(31, 98, 201) : QColor(166, 174, 185), 1.0)
-                           : QPen(Qt::NoPen));
-        painter.setBrush(active
-                             ? themeInk(QColor(0, 0, 0, 112), QColor(228, 238, 252))
-                             : themeInk(QColor(0, 0, 0, 42), QColor(255, 255, 255)));
-        painter.drawEllipse(rect);
+      [this, &painter, &colors](const QRectF &rect,
+                               const NavigationGizmoPart part,
+                               const bool selected = false,
+                               const bool enabled = true) {
+        const bool pressed = enabled && mNavigationInteractionActive &&
+                             mNavigationPress.part == part;
+        const bool hover = enabled && mNavigationHover.part == part;
+        const bool active = selected || pressed;
+        const qreal scale = rect.width() / 34.0;
+        painter.setPen(active ? QPen(Qt::NoPen)
+                              : QPen(colors.toolBorder, scale));
+        painter.setBrush(active ? colors.toolActive
+                                : hover ? colors.toolHover : colors.toolCard);
+        painter.drawRoundedRect(rect, 4.0 * scale, 4.0 * scale);
+        return active;
       };
-  const QColor iconColor = themeInk(QColor(216, 220, 224, 225), QColor(28, 33, 40, 255));
-  const qreal iconWidth = std::max(1.5, layout.lineWidth * 0.72);
-
-  drawButtonBackground(layout.zoomButton, NavigationGizmoPart::Zoom);
-  painter.setBrush(Qt::NoBrush);
-  painter.setPen(
-      QPen(iconColor, iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  const QPointF zoomCenter = layout.zoomButton.center() + QPointF(-2.0, -2.0);
-  const qreal zoomRadius = layout.zoomButton.width() * 0.20;
-  painter.drawEllipse(zoomCenter, zoomRadius, zoomRadius);
-  painter.drawLine(zoomCenter + QPointF(zoomRadius * 0.72, zoomRadius * 0.72),
-                   zoomCenter + QPointF(zoomRadius * 1.65, zoomRadius * 1.65));
-
-  drawButtonBackground(layout.panButton, NavigationGizmoPart::Pan);
-  painter.setPen(
-      QPen(iconColor, iconWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  const QPointF panCenter = layout.panButton.center();
-  const qreal panExtent = layout.panButton.width() * 0.23;
-  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
-                   panCenter + QPointF(panExtent, 0.0));
-  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
-                   panCenter + QPointF(0.0, panExtent));
-  const qreal arrow = panExtent * 0.36;
-  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
-                   panCenter + QPointF(-panExtent + arrow, -arrow));
-  painter.drawLine(panCenter + QPointF(-panExtent, 0.0),
-                   panCenter + QPointF(-panExtent + arrow, arrow));
-  painter.drawLine(panCenter + QPointF(panExtent, 0.0),
-                   panCenter + QPointF(panExtent - arrow, -arrow));
-  painter.drawLine(panCenter + QPointF(panExtent, 0.0),
-                   panCenter + QPointF(panExtent - arrow, arrow));
-  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
-                   panCenter + QPointF(-arrow, -panExtent + arrow));
-  painter.drawLine(panCenter + QPointF(0.0, -panExtent),
-                   panCenter + QPointF(arrow, -panExtent + arrow));
-  painter.drawLine(panCenter + QPointF(0.0, panExtent),
-                   panCenter + QPointF(-arrow, panExtent - arrow));
-  painter.drawLine(panCenter + QPointF(0.0, panExtent),
-                   panCenter + QPointF(arrow, panExtent - arrow));
-
-  drawButtonBackground(layout.cameraButton, NavigationGizmoPart::Camera);
-  const QColor cameraIconColor =
-      !camerasAvailable()
-          ? themeInk(QColor(135, 140, 145, 120), QColor(125, 133, 145, 185))
-          : (mCameraViewActive ? themeInk(QColor(114, 190, 255), QColor(31, 98, 201))
-                               : iconColor);
-  painter.setPen(QPen(cameraIconColor, iconWidth, Qt::SolidLine, Qt::RoundCap,
-                      Qt::RoundJoin));
-  painter.setBrush(Qt::NoBrush);
-  const qreal cameraWidth = layout.cameraButton.width() * 0.36;
-  const qreal cameraHeight = layout.cameraButton.height() * 0.27;
-  const QRectF cameraBody(layout.cameraButton.center().x() - cameraWidth * 0.58,
-                          layout.cameraButton.center().y() - cameraHeight * 0.5,
-                          cameraWidth, cameraHeight);
-  painter.drawRoundedRect(cameraBody, cameraHeight * 0.16, cameraHeight * 0.16);
-  QPolygonF cameraLens;
-  cameraLens << QPointF(cameraBody.right(),
-                        cameraBody.top() + cameraHeight * 0.18)
-             << QPointF(cameraBody.right() + cameraWidth * 0.38,
-                        cameraBody.top() - cameraHeight * 0.10)
-             << QPointF(cameraBody.right() + cameraWidth * 0.38,
-                        cameraBody.bottom() + cameraHeight * 0.10)
-             << QPointF(cameraBody.right(),
-                        cameraBody.bottom() - cameraHeight * 0.18);
-  painter.drawPolygon(cameraLens);
+  const auto drawNavigationButton = [&](const QRectF &rect,
+                                         const NavigationGizmoPart part,
+                                         const WorkbenchIconId icon,
+                                         const bool selected = false,
+                                         const bool enabled = true) {
+    const bool active = drawButtonBackground(rect, part, selected, enabled);
+    const qreal iconSize = rect.width() * 20.0 / 34.0;
+    paintWorkbenchIcon(painter, icon,
+                       QRectF(rect.center() - QPointF(iconSize * 0.5, iconSize * 0.5),
+                              QSizeF(iconSize, iconSize)),
+                       !enabled ? colors.disabledText
+                                : active ? QColor(255, 255, 255) : colors.toolIcon);
+  };
+  drawNavigationButton(layout.zoomButton, NavigationGizmoPart::Zoom,
+                        WorkbenchIconId::Zoom);
+  drawNavigationButton(layout.panButton, NavigationGizmoPart::Pan,
+                        WorkbenchIconId::Pan);
+  drawNavigationButton(layout.cameraButton, NavigationGizmoPart::Camera,
+                        WorkbenchIconId::Camera, mCameraViewActive,
+                        camerasAvailable());
 
   painter.restore();
 }

@@ -22,6 +22,7 @@ public:
 protected:
   bool eventFilter(QObject *, QEvent *) override;
 private:
+  void refreshIcons();
   QAbstractItemView *mView;
   QAction *mAll;
   QAction *mNone;

@@ -80,6 +80,7 @@ struct TransformToolStripLayout final {
   QRectF background;
   std::array<QRectF, 4> buttons;
   QRectF orientationButton;
+  bool horizontal = false; // Also true for multi-column compact wrapping.
 };
 
 [[nodiscard]] TransformGizmoLayout

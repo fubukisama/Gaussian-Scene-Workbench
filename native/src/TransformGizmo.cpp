@@ -564,37 +564,96 @@ TransformGizmoHandle hitTestTransformGizmo(const TransformGizmoLayout &layout,
 TransformToolStripLayout transformToolStripLayout(const QSizeF &viewportSize,
                                                   const qreal fontHeight) {
   TransformToolStripLayout layout;
-  const qreal buttonSize = std::clamp(fontHeight * 2.05, 34.0, 46.0);
-  const qreal gap = std::clamp(fontHeight * 0.16, 2.0, 4.0);
+  if (!std::isfinite(viewportSize.width()) || !std::isfinite(viewportSize.height()) ||
+      !std::isfinite(fontHeight) || viewportSize.width() <= 0 || viewportSize.height() <= 0)
+    return layout;
+  // A single compact tool rail, with the same logical-pixel rectangles used
+  // for painting and hit testing. Keep scaling tied to the actual UI font.
+  const qreal buttonSize = std::clamp(fontHeight * 1.90, 32.0, 60.0);
+  const qreal gap = std::clamp(fontHeight * 0.11, 2.0, 4.0);
+  const qreal padding = std::clamp(fontHeight * 0.22, 3.0, 6.0);
+  const qreal sectionGap = std::clamp(fontHeight * 0.40, 6.0, 12.0);
   const qreal margin = std::clamp(fontHeight * 0.55, 8.0, 14.0);
   const qreal top = std::clamp(fontHeight * 4.2, 70.0, 104.0);
-  const qreal left = margin;
-  for (int index = 0; index < 4; ++index) {
-    layout.buttons[static_cast<std::size_t>(index)] =
-        QRectF(left, top + index * (buttonSize + gap), buttonSize, buttonSize);
-  }
-  const qreal orientationTop = top + 4.0 * (buttonSize + gap) + gap * 1.5;
-  const qreal orientationHeight =
-      std::clamp(fontHeight * 1.65, 28.0, 38.0);
-  layout.orientationButton =
-      QRectF(left, orientationTop, buttonSize, orientationHeight);
-  layout.background = QRectF(
-      left - gap, top - gap, buttonSize + gap * 2.0,
-      orientationTop + layout.orientationButton.height() - top + gap * 2.0);
-  if (layout.background.bottom() > viewportSize.height() - margin) {
-    const qreal offset =
-        layout.background.bottom() - (viewportSize.height() - margin);
-    layout.background.translate(0.0, -offset);
-    layout.orientationButton.translate(0.0, -offset);
-    for (QRectF &button : layout.buttons) {
-      button.translate(0.0, -offset);
+  const qreal outerMargin = std::max(0.0, margin - padding);
+  const qreal stripLength = buttonSize * 5 + gap * 2 + sectionGap * 2 + padding * 2;
+  const qreal stripBreadth = buttonSize + padding * 2;
+  const auto setButton = [&layout](const int index, const QRectF &rect) {
+    if (index < 4) layout.buttons[static_cast<std::size_t>(index)] = rect;
+    else layout.orientationButton = rect;
+  };
+  const auto placeLinear = [&](const bool horizontal) {
+    layout.horizontal = horizontal;
+    const QSizeF extent(horizontal ? stripLength : stripBreadth,
+                         horizontal ? stripBreadth : stripLength);
+    const qreal backgroundTop = std::clamp(top - padding, outerMargin,
+        std::max(outerMargin, viewportSize.height() - outerMargin - extent.height()));
+    layout.background = QRectF(QPointF(outerMargin, backgroundTop), extent);
+    for (int index = 0; index < 5; ++index) {
+      const qreal advance = index * (buttonSize + gap) +
+          (index >= 3 ? sectionGap - gap : 0) +
+          (index == 4 ? sectionGap - gap : 0);
+      const QPointF origin = layout.background.topLeft() +
+          QPointF(padding + (horizontal ? advance : 0),
+                   padding + (horizontal ? 0 : advance));
+      setButton(index, QRectF(origin, QSizeF(buttonSize, buttonSize)));
     }
+  };
+  const QSizeF available = viewportSize - QSizeF(outerMargin * 2, outerMargin * 2);
+  if (stripBreadth <= available.width() && stripLength <= available.height()) {
+    placeLinear(false);
+    return layout;
   }
+  if (stripLength <= available.width() && stripBreadth <= available.height()) {
+    placeLinear(true);
+    return layout;
+  }
+  // A short, narrow viewport wraps the five targets. Try normal spacing first,
+  // then compact spacing; preserve the 32 px target minimum even at the edge.
+  // The final flush layout is used only when decorative spacing cannot fit.
+  struct Spacing { qreal outer; qreal padding; qreal gap; };
+  const std::array<Spacing, 3> spacings{{
+      {outerMargin, padding, gap}, {2.0, 2.0, 2.0}, {0.0, 0.0, 0.0}}};
+  for (const auto &spacing : spacings) {
+    int bestColumns = 0;
+    qreal bestSize = 0;
+    for (int columns = 1; columns <= 5; ++columns) {
+      const int rows = (5 + columns - 1) / columns;
+      const qreal widthLimit = (viewportSize.width() - spacing.outer * 2 -
+          spacing.padding * 2 - spacing.gap * (columns - 1)) / columns;
+      const qreal heightLimit = (viewportSize.height() - spacing.outer * 2 -
+          spacing.padding * 2 - spacing.gap * (rows - 1)) / rows;
+      const qreal fittedSize = std::min({buttonSize, widthLimit, heightLimit});
+      if (fittedSize >= 32 && fittedSize >= bestSize) {
+        bestColumns = columns;
+        bestSize = fittedSize;
+      }
+    }
+    if (bestColumns == 0) continue;
+    const int rows = (5 + bestColumns - 1) / bestColumns;
+    const QSizeF extent(bestColumns * bestSize + (bestColumns - 1) * spacing.gap +
+                            spacing.padding * 2,
+                        rows * bestSize + (rows - 1) * spacing.gap + spacing.padding * 2);
+    const qreal backgroundTop = std::clamp(top - spacing.padding, spacing.outer,
+        std::max(spacing.outer, viewportSize.height() - spacing.outer - extent.height()));
+    layout.horizontal = bestColumns > 1;
+    layout.background = QRectF(QPointF(spacing.outer, backgroundTop), extent);
+    for (int index = 0; index < 5; ++index) {
+      const QPointF origin = layout.background.topLeft() + QPointF(
+          spacing.padding + (index % bestColumns) * (bestSize + spacing.gap),
+          spacing.padding + (index / bestColumns) * (bestSize + spacing.gap));
+      setButton(index, QRectF(origin, QSizeF(bestSize, bestSize)));
+    }
+    return layout;
+  }
+  // If five 32 px targets cannot fit in any grid, omit the rail rather than
+  // publishing clipped/inaccessible controls. Menus and shortcuts still exist.
   return layout;
 }
 
 int hitTestTransformToolStrip(const TransformToolStripLayout &layout,
                               const QPointF &position) {
+  if (layout.background.isEmpty()) return -1;
   for (int index = 0; index < 4; ++index) {
     if (layout.buttons[static_cast<std::size_t>(index)].contains(position)) {
       return index;

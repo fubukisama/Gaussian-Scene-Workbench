@@ -26,6 +26,7 @@ protected:
 
 private:
   void refreshLayout();
+  void refreshIcons();
   void refreshSummary();
   void appendRetainedLog(const QString &appendedText, qsizetype removedCharacters);
   void openOutputDirectory();
@@ -44,6 +45,7 @@ private:
   QPlainTextEdit *mLogs = nullptr;
   QCheckBox *mFollow = nullptr;
   QAction *mOpenOutput = nullptr;
+  QAction *mCopySummary = nullptr;
   QAction *mExportLog = nullptr;
   QScrollArea *mSummaryScroll = nullptr;
   QBoxLayout *mLogActions = nullptr;

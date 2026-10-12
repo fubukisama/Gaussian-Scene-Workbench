@@ -21,6 +21,8 @@ private slots:
   void rotatesEdgeOnAxesInBothProjections();
   void preservesFaceOnPlaneRotation();
   void laysOutAndHitsTransformGizmos();
+  void keepsTransformToolsVisible_data();
+  void keepsTransformToolsVisible();
   void scalesTransformHandlesWithViewDistance();
   void projectsWorldAxesAndPlanes();
   void scalesOrthographicHandlesAndRejectsStaleHitAreas();
@@ -391,6 +393,71 @@ void ModelInteractionTests::laysOutAndHitsTransformGizmos() {
   QCOMPARE(hitTestTransformToolStrip(tools, tools.buttons[3].center()), 3);
   QCOMPARE(hitTestTransformToolStrip(tools, tools.orientationButton.center()),
            4);
+}
+
+void ModelInteractionTests::keepsTransformToolsVisible_data() {
+  QTest::addColumn<QSizeF>("viewportSize");
+  QTest::addColumn<qreal>("fontHeight");
+  QTest::addColumn<bool>("horizontal");
+  QTest::addColumn<bool>("visible");
+  QTest::newRow("normal-vertical") << QSizeF(1280, 720) << qreal(16) << false << true;
+  QTest::newRow("short-wide") << QSizeF(800, 180) << qreal(24) << true << true;
+  QTest::newRow("short-large-font") << QSizeF(500, 180) << qreal(32) << true << true;
+  QTest::newRow("short-wrapped") << QSizeF(180, 180) << qreal(24) << true << true;
+  QTest::newRow("narrow-vertical") << QSizeF(90, 400) << qreal(32) << false << true;
+  QTest::newRow("compact-wrapped") << QSizeF(100, 100) << qreal(32) << true << true;
+  QTest::newRow("minimum-horizontal") << QSizeF(160, 32) << qreal(16) << true << true;
+  QTest::newRow("cannot-fit-minimum-hit-width") << QSizeF(31, 200) << qreal(24) << false << false;
+  QTest::newRow("empty-viewport") << QSizeF() << qreal(16) << false << false;
+}
+
+void ModelInteractionTests::keepsTransformToolsVisible() {
+  QFETCH(QSizeF, viewportSize);
+  QFETCH(qreal, fontHeight);
+  QFETCH(bool, horizontal);
+  QFETCH(bool, visible);
+  const auto layout = transformToolStripLayout(viewportSize, fontHeight);
+  QCOMPARE(layout.horizontal, horizontal);
+  const QRectF viewport(QPointF(), viewportSize);
+  if (!visible) {
+    QVERIFY(layout.background.isEmpty());
+    QCOMPARE(hitTestTransformToolStrip(layout, QPointF()), -1);
+    return;
+  }
+  QVERIFY(viewport.contains(layout.background));
+  const std::array<QRectF, 5> buttons{
+      layout.buttons[0], layout.buttons[1], layout.buttons[2],
+      layout.buttons[3], layout.orientationButton};
+  for (std::size_t index = 0; index < buttons.size(); ++index) {
+    const QRectF button = buttons[index];
+    QVERIFY2(button.width() >= 32 && button.height() >= 32,
+             "Fitting must preserve at least 32 logical pixels for every target");
+    QVERIFY(viewport.contains(button));
+    QVERIFY(layout.background.contains(button));
+    const std::array<QPointF, 5> probes{
+        button.center(), button.topLeft() + QPointF(0.25, 0.25),
+        button.topRight() + QPointF(-0.25, 0.25),
+        button.bottomLeft() + QPointF(0.25, -0.25),
+        button.bottomRight() - QPointF(0.25, 0.25)};
+    for (const QPointF &probe : probes)
+      QCOMPARE(hitTestTransformToolStrip(layout, probe), static_cast<int>(index));
+    for (std::size_t other = index + 1; other < buttons.size(); ++other) {
+      QVERIFY2(!button.intersects(buttons[other]), "Tool hit regions must not overlap");
+      const QRectF next = buttons[other];
+      if (qFuzzyCompare(button.top(), next.top()) && next.left() > button.right() &&
+          next.left() - button.right() < 32)
+        QCOMPARE(hitTestTransformToolStrip(layout,
+            QPointF((button.right() + next.left()) * 0.5, button.center().y())), -1);
+      if (qFuzzyCompare(button.left(), next.left()) && next.top() > button.bottom() &&
+          next.top() - button.bottom() < 32)
+        QCOMPARE(hitTestTransformToolStrip(layout,
+            QPointF(button.center().x(), (button.bottom() + next.top()) * 0.5)), -1);
+    }
+  }
+  QCOMPARE(hitTestTransformToolStrip(layout,
+      QPointF(layout.background.left() - 1, layout.background.center().y())), -1);
+  QCOMPARE(hitTestTransformToolStrip(layout,
+      QPointF(layout.background.right() + 1, layout.background.center().y())), -1);
 }
 
 void ModelInteractionTests::mapsPreciseModelPickNeighborhood() {

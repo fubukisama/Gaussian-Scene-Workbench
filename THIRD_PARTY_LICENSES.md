@@ -24,6 +24,14 @@ The `native/` application dynamically links Qt 6.8 Core, Gui, Widgets, OpenGL, O
 
 Local packages built from the Conda Qt environment can also include dynamically linked runtime libraries such as zlib, zstd, PCRE2, double-conversion, libpng, libjpeg-turbo, libtiff, FreeType, WebP, libdeflate, Lerc, and liblzma. Those libraries retain their respective upstream open-source licenses. GitHub Actions builds use the official Qt Windows distribution.
 
+## Native Desktop Icons / 原生桌面图标 / ネイティブデスクトップのアイコン
+
+The desktop semantic icons directly use Lucide SVG assets pinned to commit `70562c1ee1c4fdcf736fe97bc893fb8511927934`: https://github.com/lucide-icons/lucide . Original artwork and the full upstream ISC license, including the MIT notice for Feather-derived icons, are retained in `native/third_party/lucide/`; desktop packages ship the notices in `licenses/lucide/`. Runtime palette substitution does not alter the vendored artwork. Blender, CloudCompare, and Metashape are layout and interaction references only; their source, icon assets, and branding are not bundled by this change.
+
+中文：桌面语义图标直接复用上述固定版本的 Lucide SVG，保留原始图形、ISC 许可和 Feather 衍生图标的 MIT 声明，随安装包分发。Blender、CloudCompare 和 Metashape 仅作为布局与操作参考，本次不分发其源码、图标或品牌标识。
+
+日本語：デスクトップの操作アイコンは上記コミットの Lucide SVG を直接使用し、元の図形・ISC ライセンス・Feather 派生図形の MIT 通知を配布物に同梱します。Blender・CloudCompare・Metashape は配置と操作の参考のみとし、今回の変更で各ソフトのソース・図形・ブランド記号は同梱しません。
+
 ## Native SPZ Codec / 原生 SPZ 编解码 / ネイティブ SPZ コーデック
 
 The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source at commit `affd0ecea7fbb4c265ee119475af7ee5b2997482`: https://github.com/nianticlabs/spz . Copyright notices, the upstream license and the exact vendored source subset are retained in `native/third_party/spz/` and distributed in desktop packages under `licenses/spz/`. This is actual codec reuse, not a reimplementation. Its zlib and Zstandard dependencies retain their existing licenses (https://zlib.net/zlib_license.html and https://github.com/facebook/zstd/blob/dev/LICENSE); these notices are also included under `licenses/spz/dependency-licenses/`.

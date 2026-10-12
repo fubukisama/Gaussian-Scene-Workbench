@@ -1,6 +1,7 @@
 #include "FileDialogHistory.h"
 #include "AppLanguage.h"
 #include "AppTheme.h"
+#include "WorkbenchIcons.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -20,7 +21,6 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSplitter>
-#include <QStyle>
 #include <QTreeWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -282,7 +282,8 @@ private:
     if (mTearingDown || !mDialog) return QObject::eventFilter(watched, event);
     if (watched == mDialog && event->type() == QEvent::Show) scheduleRefresh();
     if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
-        event->type() == QEvent::StyleChange || event->type() == QEvent::LanguageChange)
+        event->type() == QEvent::StyleChange || event->type() == QEvent::LanguageChange ||
+        event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange)
       scheduleMetrics();
     if (watched == mPlacesViewport && event->type() == QEvent::Resize) scheduleMetrics();
     return QObject::eventFilter(watched, event);
@@ -299,6 +300,10 @@ private:
 
   void refreshMetrics() {
     const int scale = qApp->property("gswUiScalePercent").toInt();
+    const int iconSize = std::max(AppTheme::scaled(18, scale), mTree->fontMetrics().height());
+    mTree->setIconSize(QSize(iconSize, iconSize));
+    mClear->setIconSize(QSize(iconSize, iconSize));
+    refreshIcons();
     mColumn->setMaximumWidth(AppTheme::scaled(260, scale));
     QFont font = mTree->font();
     font.setBold(true);
@@ -350,10 +355,25 @@ private:
     auto *item = new QTreeWidgetItem(group);
     item->setText(0, info.fileName().isEmpty() ? QDir::toNativeSeparators(path) : info.fileName());
     item->setToolTip(0, QDir::toNativeSeparators(path));
-    item->setIcon(0, mDialog->style()->standardIcon(
-        directory ? QStyle::SP_DirIcon : QStyle::SP_FileIcon));
+    item->setIcon(0, workbenchIcon(directory ? WorkbenchIconId::Folder : WorkbenchIconId::File,
+                                   mTree->palette()));
     item->setData(0, pathRole, path);
     item->setData(0, directoryRole, directory);
+  }
+
+  void refreshIcons() {
+    // Only the application-owned history uses the shared icon set. Qt's
+    // filesystem provider keeps its drive, shell location and file-type icons.
+    mFolders->setIcon(0, workbenchIcon(WorkbenchIconId::Folder, mTree->palette()));
+    mFiles->setIcon(0, workbenchIcon(WorkbenchIconId::File, mTree->palette()));
+    mClear->setIcon(workbenchIcon(WorkbenchIconId::Delete, mClear->palette()));
+    for (auto *group : {mFolders, mFiles})
+      for (int index = 0; index < group->childCount(); ++index) {
+        auto *item = group->child(index);
+        item->setIcon(0, workbenchIcon(item->data(0, directoryRole).toBool()
+                                       ? WorkbenchIconId::Folder : WorkbenchIconId::File,
+                                     mTree->palette()));
+      }
   }
 
   void refresh() {

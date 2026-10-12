@@ -5,6 +5,7 @@
 #include <QDialog>
 
 class QLabel;
+class QEvent;
 class QPlainTextEdit;
 class QPushButton;
 class QTreeWidget;
@@ -20,8 +21,12 @@ public:
   [[nodiscard]] GenerationExperiment selectedRecord() const;
   void setResumeAllowed(bool allowed);
 
+protected:
+  void changeEvent(QEvent *event) override;
+
 private:
   void refreshPresentation();
+  void refreshIcons();
   void refreshSelection();
   void choose(Action action);
   GenerationHistoryStore mStore;

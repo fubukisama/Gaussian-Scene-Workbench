@@ -1,6 +1,9 @@
 #include "MultiItemList.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
+#include "WorkbenchIcons.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -58,6 +61,20 @@ MultiItemList::MultiItemList(QAbstractItemView *view, const char *removeText,
     });
   }
   refresh();
+  refreshIcons();
+}
+
+void MultiItemList::refreshIcons() {
+  mAll->setIcon(workbenchIcon(WorkbenchIconId::BoxSelect, mView->palette()));
+  mNone->setIcon(workbenchIcon(WorkbenchIconId::ClearSelection, mView->palette()));
+  mRemove->setIcon(workbenchIcon(WorkbenchIconId::Remove, mView->palette()));
+  const int scale = qApp->property("gswUiScalePercent").toInt();
+  for (auto *action : {mAll, mNone, mRemove})
+    for (auto *object : action->associatedObjects())
+      if (auto *button = qobject_cast<QToolButton *>(object)) {
+        const int size = qMax(AppTheme::scaled(18, scale), button->fontMetrics().height());
+        button->setIconSize(QSize(size, size));
+      }
 }
 
 void MultiItemList::refresh() {
@@ -82,6 +99,7 @@ QWidget *MultiItemList::createBar(QWidget *parent) {
   layout->setContentsMargins(0, 0, 0, 0);
   for (auto *action : {mAll, mNone}) {
     auto *button = new QToolButton(bar);
+    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     button->setDefaultAction(action);
     layout->addWidget(button);
   }
@@ -96,12 +114,18 @@ QWidget *MultiItemList::createBar(QWidget *parent) {
   layout->addWidget(count);
   layout->addStretch();
   auto *remove = new QToolButton(bar);
+  remove->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   remove->setDefaultAction(mRemove);
   layout->addWidget(remove);
+  refreshIcons();
   return bar;
 }
 
 bool MultiItemList::eventFilter(QObject *, QEvent *event) {
+  if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange ||
+      event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
+      event->type() == QEvent::ApplicationFontChange)
+    refreshIcons();
   if (event->type() != QEvent::ShortcutOverride && event->type() != QEvent::KeyPress) return false;
   auto *key = static_cast<QKeyEvent *>(event);
   const bool remove = key->key() == Qt::Key_Delete && key->modifiers() == Qt::NoModifier;

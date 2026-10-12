@@ -1,11 +1,15 @@
 #include "GenerationHistoryDialog.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
+#include "WorkbenchIcons.h"
 #include "WindowUi.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QEvent>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QLabel>
@@ -114,8 +118,42 @@ GenerationHistoryDialog::GenerationHistoryDialog(const QString &projectRoot, QWi
   }
   AppLanguage::onChanged(this, [this] { refreshPresentation(); });
   refreshPresentation();
+  refreshIcons();
   if (mList->topLevelItemCount()) mList->setCurrentItem(mList->topLevelItem(0));
   WindowUi::prepare(this);
+}
+
+void GenerationHistoryDialog::changeEvent(QEvent *event) {
+  QDialog::changeEvent(event);
+  if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange ||
+      event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
+      event->type() == QEvent::ApplicationFontChange)
+    refreshIcons();
+}
+
+void GenerationHistoryDialog::refreshIcons() {
+  if (!mList || !mViewResult || !mResume) return;
+  const int scale = qApp->property("gswUiScalePercent").toInt();
+  const int size = qMax(AppTheme::scaled(18, scale), fontMetrics().height());
+  mList->setIconSize(QSize(size, size));
+  mViewResult->setIconSize(QSize(size, size));
+  mResume->setIconSize(QSize(size, size));
+  mViewResult->setIcon(workbenchIcon(WorkbenchIconId::Inspect, mViewResult->palette()));
+  mResume->setIcon(workbenchIcon(WorkbenchIconId::Resume, mResume->palette()));
+  for (int index = 0; index < mList->topLevelItemCount(); ++index) {
+    auto *item = mList->topLevelItem(index);
+    const QString id = item->data(0, Qt::UserRole).toString();
+    for (const auto &record : mRecords) {
+      if (record.id != id) continue;
+      const WorkbenchIconId icon = record.pipeline == QStringLiteral("training") ? WorkbenchIconId::Train
+          : record.pipeline == QStringLiteral("mesh") ? WorkbenchIconId::GenerateMesh
+          : record.pipeline == QStringLiteral("reconstruction") ? WorkbenchIconId::Reconstruct
+          : record.pipeline == QStringLiteral("texturing") ? WorkbenchIconId::Image
+          : WorkbenchIconId::Tasks;
+      item->setIcon(0, workbenchIcon(icon, mList->palette()));
+      break;
+    }
+  }
 }
 
 GenerationExperiment GenerationHistoryDialog::selectedRecord() const {

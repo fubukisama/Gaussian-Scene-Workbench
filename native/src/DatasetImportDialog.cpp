@@ -1,8 +1,10 @@
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include <QCoreApplication>
 #include "DatasetImportDialog.h"
 #include "MultiItemList.h"
 #include "WrappingCheckBox.h"
+#include "WorkbenchIcons.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -20,11 +22,11 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMessageBox>
+#include <QMimeDatabase>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QSet>
-#include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -49,6 +51,16 @@ QString pathKey(const QString &path) {
 #else
   return normalized;
 #endif
+}
+
+WorkbenchIconId sourceIcon(const QFileInfo &info) {
+  if (info.isDir()) return WorkbenchIconId::Folder;
+  // Extension lookup only: the presentation layer never reads or decodes a
+  // pending import simply to select an icon.
+  const QString type = QMimeDatabase().mimeTypeForFile(info, QMimeDatabase::MatchExtension).name();
+  if (type.startsWith(QStringLiteral("image/"))) return WorkbenchIconId::Image;
+  if (type.startsWith(QStringLiteral("video/"))) return WorkbenchIconId::Video;
+  return WorkbenchIconId::File;
 }
 
 // Keep complete action captions without making narrow import windows wider.
@@ -266,8 +278,10 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   rootLayout->addWidget(mSourceList, 1);
 
   auto *addFilesButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加照片/视频..."), this), AppLanguage::source("继续添加照片/视频..."));
+  mAddFilesButton = addFilesButton;
   addFilesButton->setObjectName(QStringLiteral("datasetImportAddFilesButton"));
   auto *addDirectoryButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "继续添加目录..."), this), AppLanguage::source("继续添加目录..."));
+  mAddDirectoryButton = addDirectoryButton;
   addDirectoryButton->setObjectName(
       QStringLiteral("datasetImportAddDirectoryButton"));
   mRemoveButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "移除所选"), this), AppLanguage::source("移除所选"));
@@ -337,6 +351,37 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
     refreshSummary();
   } else {
     appendSourcePaths(initialSourcePaths);
+  }
+  refreshIcons();
+}
+
+void DatasetImportDialog::changeEvent(QEvent *event) {
+  QDialog::changeEvent(event);
+  if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange ||
+      event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
+      event->type() == QEvent::ApplicationFontChange)
+    refreshIcons();
+}
+
+void DatasetImportDialog::refreshIcons() {
+  if (!mSourceList || !mAddFilesButton || !mAddDirectoryButton ||
+      !mRemoveButton || !mClearButton || !mImportButton) return;
+  const int scale = qApp->property("gswUiScalePercent").toInt();
+  const int size = std::max(AppTheme::scaled(18, scale), fontMetrics().height());
+  mSourceList->setIconSize(QSize(size, size));
+  const auto setButton = [size](QPushButton *button, WorkbenchIconId icon) {
+    button->setIcon(workbenchIcon(icon, button->palette()));
+    button->setIconSize(QSize(size, size));
+  };
+  setButton(mAddFilesButton, WorkbenchIconId::ImportMedia);
+  setButton(mAddDirectoryButton, WorkbenchIconId::Folder);
+  setButton(mRemoveButton, WorkbenchIconId::Remove);
+  setButton(mClearButton, WorkbenchIconId::Delete);
+  setButton(mImportButton, WorkbenchIconId::Add);
+  for (int index = 0; index < mSourceList->count(); ++index) {
+    auto *item = mSourceList->item(index);
+    item->setIcon(workbenchIcon(sourceIcon(QFileInfo(item->data(Qt::UserRole).toString())),
+                               mSourceList->palette()));
   }
 }
 
@@ -443,8 +488,7 @@ void DatasetImportDialog::appendSourcePaths(const QStringList &paths) {
     existing.insert(key);
 
     auto *item = new QListWidgetItem(
-        style()->standardIcon(info.isDir() ? QStyle::SP_DirIcon
-                                           : QStyle::SP_FileIcon),
+        workbenchIcon(sourceIcon(info), mSourceList->palette()),
         QDir::toNativeSeparators(normalized), mSourceList);
     item->setData(Qt::UserRole, normalized);
     item->setToolTip(QDir::toNativeSeparators(normalized));

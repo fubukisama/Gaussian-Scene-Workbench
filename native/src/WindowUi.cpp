@@ -2,6 +2,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include "FileDialogHistory.h"
+#include "WorkbenchIcons.h"
 
 #include <QAction>
 #include <QApplication>
@@ -15,7 +16,6 @@
 #include <QListView>
 #include <QMessageBox>
 #include <QPointer>
-#include <QPainter>
 #include <QPalette>
 #include <QStandardPaths>
 #include <QScopedValueRollback>
@@ -31,34 +31,6 @@
 namespace gsw {
 namespace {
 constexpr auto controllerName = "gswWindowController";
-QIcon windowIcon(bool restore, bool fullScreen = false) {
-  QIcon icon;
-  const QPalette palette = qApp->palette();
-  for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled}) {
-    QPixmap pixmap(36, 36);
-    pixmap.setDevicePixelRatio(2);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    const QColor foreground = mode == QIcon::Disabled
-        ? palette.color(QPalette::Disabled, QPalette::ButtonText)
-        : mode == QIcon::Selected ? palette.color(QPalette::Active, QPalette::HighlightedText)
-                                 : palette.color(QPalette::Active, QPalette::ButtonText);
-    painter.setPen(QPen(foreground, 1.5));
-    if (restore) {
-      painter.drawLine(QPointF(6, 3), QPointF(15, 3));
-      painter.drawLine(QPointF(15, 3), QPointF(15, 12));
-      painter.drawRect(QRectF(3, 6, 9, 9));
-    } else if (fullScreen) {
-      for (const QPoint &corner : {QPoint(3, 3), QPoint(15, 3), QPoint(3, 15), QPoint(15, 15)}) {
-        painter.drawLine(corner, corner + QPoint(corner.x() == 3 ? 4 : -4, 0));
-        painter.drawLine(corner, corner + QPoint(0, corner.y() == 3 ? 4 : -4));
-      }
-    } else painter.drawRect(QRectF(3, 3, 12, 12));
-    icon.addPixmap(pixmap, mode);
-  }
-  return icon;
-}
 bool eligible(QWidget *w) {
   return w && w->isWindow() && (qobject_cast<QDialog *>(w) ||
       qobject_cast<QMainWindow *>(w) || qobject_cast<QDockWidget *>(w));
@@ -231,7 +203,8 @@ private:
     const bool full = mWindow->isFullScreen();
     AppLanguage::bind(mFullScreen, "text", full ? AppLanguage::source("退出全屏") : AppLanguage::source("全屏"));
     AppLanguage::bind(mFullScreen, "toolTip", AppLanguage::source("F11 切换全屏；Esc 退出全屏；双击系统标题栏最大化或还原"));
-    mFullScreen->setIcon(windowIcon(full, true));
+    mFullScreen->setIcon(workbenchIcon(full ? WorkbenchIconId::Restore : WorkbenchIconId::FullScreen,
+                                      mWindow->palette()));
     if (auto *dock = qobject_cast<QDockWidget *>(mWindow)) mFullScreen->setShortcut(dock->isFloating() ? QKeySequence(QStringLiteral("F11")) : QKeySequence());
     refreshDesktopLabel();
     refreshFileLayout();
