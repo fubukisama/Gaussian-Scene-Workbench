@@ -97,10 +97,12 @@ using Microsoft::WRL::ComPtr;
 struct MinimizeButtonResult {
   std::atomic_bool done{false};
   std::atomic_bool canceled{false};
+  std::atomic_bool invoked{false};
   HRESULT result = E_PENDING;
 };
 
-HRESULT invokeOwnedMinimizeButton(HWND hwnd, const std::atomic_bool &canceled) {
+HRESULT invokeOwnedMinimizeButton(HWND hwnd, const std::atomic_bool &canceled,
+                                 std::atomic_bool &invoked) {
   // UIA must run on a windowless MTA thread when exercising our own UI.
   // All COM objects stay in this apartment; only the HWND crosses threads.
   const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -183,6 +185,8 @@ HRESULT invokeOwnedMinimizeButton(HWND hwnd, const std::atomic_bool &canceled) {
   if (FAILED(result = minimize->GetCurrentPatternAs(UIA_InvokePatternId,
       __uuidof(IUIAutomationInvokePattern), reinterpret_cast<void **>(action.GetAddressOf())))) return result;
   if (!stillOwned()) return E_ABORT;
+  invoked.store(true, std::memory_order_release);
+  qInfo() << "Native minimize UIA: invoking the owned title-bar button";
   return action->Invoke(); // Real title-bar Button action, not WindowPattern::SetWindowVisualState.
 }
 
@@ -191,27 +195,63 @@ bool captionMinimizeAndRestore(QWidget &window, const char *scenario) {
   DWORD ownedProcess = 0;
   const DWORD ownedThread = GetWindowThreadProcessId(hwnd, &ownedProcess);
   if (ownedProcess != GetCurrentProcessId() || ownedThread != GetCurrentThreadId()) return false;
+  const auto logForeground = [&](const char *stage) {
+    const HWND foreground = GetForegroundWindow();
+    DWORD foregroundProcess = 0;
+    const DWORD foregroundThread = foreground
+        ? GetWindowThreadProcessId(foreground, &foregroundProcess) : 0;
+    // Record identity only: never inspect another window's title or contents.
+    qInfo() << "Native minimize foreground:" << scenario << stage
+            << "target HWND" << Qt::hex << reinterpret_cast<quintptr>(hwnd)
+            << "actual HWND" << reinterpret_cast<quintptr>(foreground) << Qt::dec
+            << "target PID" << ownedProcess << "actual PID" << foregroundProcess
+            << "target thread" << ownedThread << "actual thread" << foregroundThread;
+  };
+  bool inputChecked = false;
+  bool inputHeld = false;
   // Only raise the isolated fixture; never manipulate a user's other windows.
   SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   BringWindowToTop(hwnd);
   window.raise();
   window.activateWindow();
-  SetForegroundWindow(hwnd);
+  const BOOL initiallyActivated = SetForegroundWindow(hwnd);
+  qInfo() << "Native minimize activation:" << scenario << "initial SetForegroundWindow returned"
+          << bool(initiallyActivated);
+  logForeground("after initial activation");
   if (GetForegroundWindow() != hwnd) {
     const HWND previous = GetForegroundWindow();
     const DWORD foregroundThread = previous ? GetWindowThreadProcessId(previous, nullptr) : 0;
     const DWORD currentThread = GetCurrentThreadId();
-    bool inputHeld = false;
+    inputChecked = true;
     for (const int key : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_SHIFT, VK_CONTROL, VK_MENU})
       inputHeld = inputHeld || (GetAsyncKeyState(key) & 0x8000);
-    if (foregroundThread && foregroundThread != currentThread && !inputHeld &&
-        AttachThreadInput(currentThread, foregroundThread, TRUE)) {
-      SetForegroundWindow(hwnd);
-      BOOL detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
-      if (!detached) detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
-      if (!detached) {
-        qWarning() << "Native minimize:" << scenario << "input-queue detach failed";
-        return false;
+    const bool attachEligible = foregroundThread && foregroundThread != currentThread && !inputHeld;
+    qInfo() << "Native minimize activation:" << scenario << "inputHeld" << inputHeld
+            << "AttachThreadInput eligible" << attachEligible;
+    if (attachEligible) {
+      const BOOL attached = AttachThreadInput(currentThread, foregroundThread, TRUE);
+      const DWORD attachError = attached ? ERROR_SUCCESS : GetLastError();
+      qInfo() << "Native minimize activation:" << scenario << "AttachThreadInput returned"
+              << bool(attached) << "error" << attachError;
+      if (attached) {
+        const BOOL attachedActivation = SetForegroundWindow(hwnd);
+        qInfo() << "Native minimize activation:" << scenario << "attached SetForegroundWindow returned"
+                << bool(attachedActivation);
+        BOOL detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
+        DWORD detachError = detached ? ERROR_SUCCESS : GetLastError();
+        qInfo() << "Native minimize activation:" << scenario << "detach returned"
+                << bool(detached) << "error" << detachError;
+        if (!detached) {
+          detached = AttachThreadInput(currentThread, foregroundThread, FALSE);
+          detachError = detached ? ERROR_SUCCESS : GetLastError();
+          qInfo() << "Native minimize activation:" << scenario << "detach retry returned"
+                  << bool(detached) << "error" << detachError;
+        }
+        if (!detached) {
+          qWarning() << "Native minimize:" << scenario << "input-queue detach failed; UIA Invoke not attempted";
+          return false;
+        }
+        logForeground("after attached activation and detach");
       }
     }
   }
@@ -232,14 +272,19 @@ bool captionMinimizeAndRestore(QWidget &window, const char *scenario) {
       !(menuState & (MF_DISABLED | MF_GRAYED)) && IsWindowVisible(hwnd) && IsWindowEnabled(hwnd);
   qInfo() << "Native minimize caption:" << scenario << "style" << Qt::hex << style
           << "system menu" << menuState << Qt::dec << "enabled" << enabled
-          << "owned foreground" << (GetForegroundWindow() == hwnd);
-  if (!enabled || GetForegroundWindow() != hwnd) return false;
+          << "owned foreground" << (GetForegroundWindow() == hwnd)
+          << "inputChecked" << inputChecked << "inputHeld" << inputHeld;
+  logForeground("before caption precondition");
+  if (!enabled || GetForegroundWindow() != hwnd) {
+    qWarning() << "Native minimize:" << scenario << "caption precondition FAIL; UIA Invoke not attempted";
+    return false;
+  }
 
   // UIA's own-window calls need GUI message pumping. Do not leave a detached
   // worker able to invoke a caption button after this fixture is restored.
   auto state = std::make_shared<MinimizeButtonResult>();
   std::thread worker([hwnd, state] {
-    state->result = invokeOwnedMinimizeButton(hwnd, state->canceled);
+    state->result = invokeOwnedMinimizeButton(hwnd, state->canceled, state->invoked);
     state->done.store(true, std::memory_order_release);
   });
   QElapsedTimer deadline;
@@ -266,7 +311,8 @@ bool captionMinimizeAndRestore(QWidget &window, const char *scenario) {
   for (int attempt = 0; attempt < 30 && (!IsIconic(hwnd) || !window.isMinimized()); ++attempt) settle();
   const bool minimized = completed && SUCCEEDED(actionResult) && IsIconic(hwnd) && window.isMinimized();
   qInfo() << "Native minimize result:" << scenario << "UIA Invoke HRESULT" << Qt::hex << actionResult
-          << Qt::dec << "completed" << completed << "OS iconic" << bool(IsIconic(hwnd))
+          << Qt::dec << "invocation attempted" << state->invoked.load(std::memory_order_acquire)
+          << "completed" << completed << "OS iconic" << bool(IsIconic(hwnd))
           << "Qt minimized" << window.isMinimized();
   // Taskbar-equivalent restore keeps the same window and its in-progress state.
   if (IsIconic(hwnd) || window.isMinimized()) PostMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
@@ -283,7 +329,8 @@ bool runWindowMinimizeSmokeTest(QMainWindow &workbench) {
   Q_UNUSED(workbench);
   bool passed = true;
   const auto check = [&](bool condition, const char *message) {
-    if (!condition) { qWarning() << "Window minimize smoke:" << message; passed = false; }
+    if (condition) qInfo() << "Window minimize smoke: PASS" << message;
+    else { qWarning() << "Window minimize smoke: FAIL" << message; passed = false; }
   };
 #ifdef Q_OS_WIN
   // Keep this seam independent of language/appearance/dock QA: unrelated

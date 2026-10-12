@@ -14,11 +14,15 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 
 - [`setup_native_ci_graphics.ps1`](../scripts/setup_native_ci_graphics.ps1) 固定下载 Mesa **26.2.4 MSVC** 发布包，先核对 SHA-256 `351FC8C8B695878FFB3EAA044B3EAD08672A48B1A045E3C3E3975811DF0F6695`，再通过 `QT_OPENGL_DLL` 与 `GALLIUM_DRIVER=llvmpipe` 选择本次 CI 的软件驱动。它不覆盖系统 DLL、不替换用户或应用运行库，也不把 Mesa 放入应用 artifact；没有伪造 OpenGL/GLSL 版本号。
 - [`setup_native_ci_display.ps1`](../scripts/setup_native_ci_display.ps1) 只有在 `GITHUB_ACTIONS=true` 时才允许修改显示模式。它枚举真实支持的 32-bpp 模式，通过 `CDS_TEST` 后应用至少 **1600×900** 的模式，并核实实际结果；不安装显示驱动，也不修改分辨率注册表。工作站只能使用 `-InspectOnly` 枚举与检查，绝不改变本地显示模式。
-- 全量测试前先运行 3 个已有真实图形入口：`native_infinite_reference_grid`、`native_light_gaussian_interaction`、`native_textured_paged_mesh_scene`。bootstrap 或这组测试失败时不进入昂贵的全量测试。**全部 98 个测试仍保留**，通过预检后完整执行；没有降低图像、交互或 UI 断言。
+- 全量测试前运行真实软件内存探测 `system_resource_probe`，以及 3 个已有图形入口：`native_infinite_reference_grid`、`native_light_gaussian_interaction`、`native_textured_paged_mesh_scene`。bootstrap 或这组测试失败时不进入昂贵的全量测试。**原有 98 个测试全部保留，新增 1 个资源探测测试，共 99 个**，通过预检后完整执行；没有降低图像、交互或 UI 断言。
 
 这些是针对已证明的失败所准备的 CI 配置修复，不代表新运行已经通过。仍须在修复提交对应的真实 Actions 中确认预检、完整测试、安装包上传以及代码扫描上传。
 
-软件渲染可能比实际 GPU 慢。高斯交互测试仍保留 512202 个高斯、160 帧及完整图像／驻留／撤销断言，只将深浅色两项的完成时限设为 600 秒；测试提前完成就立即结束，不改变 FPS 或性能阈值。包含编译追踪与安装包上传的任务总时限为 60 分钟。烟雾测试输出实际 OpenGL 渲染器信息，不能仅凭环境变量认定驱动已生效。
+软件渲染可能比实际 GPU 慢。高斯交互测试仍保留 512202 个高斯、160 帧及完整图像／驻留／撤销断言，只将深浅色两项的完成时限设为 600 秒；测试提前完成就立即结束，不改变 FPS 或性能阈值。包含编译追踪与安装包上传的任务总时限为 90 分钟，为实际出现的 20–35 分钟编译及全套测试留足时间。烟雾测试输出实际 OpenGL 渲染器信息，不能仅凭环境变量认定驱动已生效。
+
+实际 `llvmpipe`／`softpipe` 使用系统内存，不应把其 NVX 扩展返回值当成独立显存。资源探测明确保留 GPU 统计“未知”，继续测量真实 RAM；自动安全回退与手动预算语义保持不变。真实硬件 DXGI/NVX 的零余量保护不变。真实无窗口上下文回归防止软件读数随机变化导致连小网格都被拒绝；详见当前 Mesa revision 的[软件内存查询](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c)与[NVX 查询实现](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c)。
+
+分页网格还通过同一真实视口的串行／同时导入回归验证：两个单独可完整加载、合计超过 64 MiB 的模型必须一起显示、归还加载预留，并在静止的连续 12 帧保持稳定。请求只包含当前缺失的目标页；没有可绘制覆盖时增加一个根页作为冷启动回退，不再读取整条祖先链。共享预算、原有回退绘制和显存保护不变。移除常驻模型后，剩余模型仍须自动提升为完整加载。此项适用于各生成流程的网格成果显示，不改变训练参数。
 
 ### 持续代码扫描
 
@@ -62,11 +66,15 @@ After the Python dependency fix, `Native Windows` run #141 reached downstream te
 
 - [`setup_native_ci_graphics.ps1`](../scripts/setup_native_ci_graphics.ps1) pins the **Mesa 26.2.4 MSVC** release and verifies SHA-256 `351FC8C8B695878FFB3EAA044B3EAD08672A48B1A045E3C3E3975811DF0F6695` before selecting the CI software driver through `QT_OPENGL_DLL` and `GALLIUM_DRIVER=llvmpipe`. It does not overwrite system DLLs, replace user/application runtimes or ship Mesa in the application artifact. OpenGL/GLSL version numbers are not spoofed.
 - [`setup_native_ci_display.ps1`](../scripts/setup_native_ci_display.ps1) permits display changes only with `GITHUB_ACTIONS=true`. It enumerates supported 32-bpp modes, requires a successful `CDS_TEST`, applies a mode of at least **1600×900** and verifies the actual result. It installs no display driver and makes no resolution registry changes. Workstations may only use `-InspectOnly`, which enumerates and inspects without changing the local mode.
-- Three existing real graphics checks run first: `native_infinite_reference_grid`, `native_light_gaussian_interaction` and `native_textured_paged_mesh_scene`. A bootstrap or preflight failure prevents the expensive full suite from starting. **All 98 tests remain** and run after the preflight succeeds; image, interaction and UI assertions are not weakened.
+- The real software-memory check `system_resource_probe` and three existing graphics checks run first: `native_infinite_reference_grid`, `native_light_gaussian_interaction` and `native_textured_paged_mesh_scene`. A bootstrap or preflight failure prevents the expensive full suite from starting. **All 98 existing tests remain, plus one new resource-probe test: 99 total**, and run after the preflight succeeds; image, interaction and UI assertions are not weakened.
 
 These prepared CI changes address proven failures; they are not a claim that a new run has already passed. Acceptance still requires the repaired commit's real Actions preflight, full suite, package upload and code-scanning upload.
 
-Software rendering may be slower than a physical GPU. Gaussian interaction retains 512202 Gaussians, 160 frames and every image/residency/undo assertion; only the dark/light checks' completion timeout is 600 seconds. Successful checks finish immediately; FPS and performance thresholds are unchanged. The traced-build/package-upload job has a 60-minute total limit. Smoke diagnostics report the actual OpenGL renderer, rather than assuming a driver is active from environment variables alone.
+Software rendering may be slower than a physical GPU. Gaussian interaction retains 512202 Gaussians, 160 frames and every image/residency/undo assertion; only the dark/light checks' completion timeout is 600 seconds. Successful checks finish immediately; FPS and performance thresholds are unchanged. The job's 90-minute total limit accommodates observed 20–35-minute traced builds, full regressions and package upload. Smoke diagnostics report the actual OpenGL renderer, rather than assuming a driver is active from environment variables alone.
+
+Actual `llvmpipe`/`softpipe` contexts use system memory; their NVX fields must not be treated as dedicated VRAM. GPU statistics remain explicitly unavailable while real RAM probing continues. Automatic safe fallback and manual-budget semantics are unchanged, as is real hardware's DXGI/NVX zero-headroom protection. Real windowless-context regression prevents unstable software counters from refusing even tiny meshes. See the pinned Mesa revision's [software memory query](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c) and [NVX implementation](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c).
+
+Paged meshes also use the same real-viewport serial/same-batch regression: two models that each fit alone but exceed a combined 64 MiB must render together, return loading reservations, and remain stable for 12 consecutive static frames. Requests contain missing desired pages only, with one root page as a cold-start fallback when no drawable coverage exists, instead of reading every ancestor. Shared caps, existing fallback drawing and GPU protections remain unchanged. Removing the resident model must still promote the remaining model without reimport. This covers mesh results from all generation pipelines without changing training parameters.
 
 ### Ongoing code scanning
 
@@ -110,11 +118,15 @@ Python 依存関係の修正後、`Native Windows` の実行 #141 は後続テ�
 
 - [`setup_native_ci_graphics.ps1`](../scripts/setup_native_ci_graphics.ps1) は **Mesa 26.2.4 MSVC** リリースに固定し、SHA-256 `351FC8C8B695878FFB3EAA044B3EAD08672A48B1A045E3C3E3975811DF0F6695` を検証してから、`QT_OPENGL_DLL` と `GALLIUM_DRIVER=llvmpipe` で CI 用ソフトウェアドライバーを選びます。システム DLL、ユーザー環境、アプリのランタイムは置き換えず、Mesa をアプリ artifact に含めません。OpenGL/GLSL のバージョン番号も偽装しません。
 - [`setup_native_ci_display.ps1`](../scripts/setup_native_ci_display.ps1) は `GITHUB_ACTIONS=true` の場合だけ画面モードの変更を許可します。実際に対応する 32-bpp モードを列挙し、`CDS_TEST` が成功した **1600×900** 以上のモードを適用して結果を確認します。ディスプレイドライバーを導入せず、解像度のレジストリも変更しません。ワークステーションでは `-InspectOnly` だけを使い、列挙・確認のみでローカル画面モードを変更しません。
-- 全テストの前に既存の実グラフィックス検査 3 件（`native_infinite_reference_grid`、`native_light_gaussian_interaction`、`native_textured_paged_mesh_scene`）を実行します。bootstrap または事前検査が失敗した場合、負荷の大きい全テストを開始しません。**98 件すべてのテストを維持**し、事前検査の成功後に実行します。画像、操作、UI の検証条件は緩和しません。
+- 全テストの前に、実際のソフトウェアメモリ検査 `system_resource_probe` と既存の実グラフィックス検査 3 件（`native_infinite_reference_grid`、`native_light_gaussian_interaction`、`native_textured_paged_mesh_scene`）を実行します。bootstrap または事前検査が失敗した場合、負荷の大きい全テストを開始しません。**既存 98 件をすべて維持し、資源検査 1 件を追加して計 99 件**を事前検査の成功後に実行します。画像、操作、UI の検証条件は緩和しません。
 
 これらは確認済みの失敗に対して準備した CI 設定修正であり、新しい実行の成功を示すものではありません。修正コミットの実際の Actions で、事前検査、全テスト、パッケージおよびコードスキャンのアップロードまで確認する必要があります。
 
-ソフトウェア描画は実 GPU より遅い場合があります。ガウシアンの操作テストは 512202 個、160 フレーム、画像・常駐・取り消しの全検証を維持し、ライト／ダークの完了タイムアウトだけを 600 秒にします。完了すれば直ちに終了し、FPS や性能基準は変更しません。コンパイル追跡とパッケージのアップロードを含むジョブの上限は 60 分です。スモークテストの診断で実際の OpenGL レンダラーを報告し、環境変数だけでドライバーの有効化を判断しません。
+ソフトウェア描画は実 GPU より遅い場合があります。ガウシアンの操作テストは 512202 個、160 フレーム、画像・常駐・取り消しの全検証を維持し、ライト／ダークの完了タイムアウトだけを 600 秒にします。完了すれば直ちに終了し、FPS や性能基準は変更しません。実測で 20–35 分かかったコンパイル追跡、全テスト、アップロードの時間を確保し、ジョブの上限は 90 分です。スモークテストの診断で実際の OpenGL レンダラーを報告し、環境変数だけでドライバーの有効化を判断しません。
+
+実際の `llvmpipe`／`softpipe` はシステムメモリを使うため、NVX の値を専用 GPU メモリとして扱いません。GPU 統計を明示的に取得不能とし、実際の RAM は引き続き測定します。自動の安全な代替予算、手動予算、実 GPU の DXGI/NVX による余量ゼロの保護は維持します。表示ウィンドウのない実コンテキストで、不安定なソフトウェア統計による小さなメッシュの読み込み拒否を防ぐ回帰検査を実行します。固定 Mesa revision の[ソフトウェアメモリ検査](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c)と[NVX 実装](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c)を参照してください。
+
+ページ化メッシュは同じ実ビューポートで逐次／同時インポートを検査します。単独では完全ロードでき、合計では 64 MiB を超える 2 モデルを同時に表示し、ロード用の予約を返し、静止した連続 12 フレームでも安定していることを確認します。要求するのは現在不足する目標ページのみで、描画可能な範囲がない場合に限り初期表示用のルートページを 1 つ追加します。祖先チェーン全体を読み直しません。共有上限、既存の代替描画、GPU 保護は維持します。常駐モデルを除くと、残ったモデルは再インポートせず完全ロードへ昇格する必要があります。すべての生成パイプラインのメッシュ成果表示が対象で、学習パラメーターは変更しません。
 
 ### 継続的なコードスキャン
 

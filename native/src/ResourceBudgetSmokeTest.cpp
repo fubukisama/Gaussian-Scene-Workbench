@@ -666,23 +666,65 @@ bool runResourceBudgetSharedMeshSmokeTest(MainWindow &window) {
           const auto status = viewport->resourceBudgetStatus();
           return status.residentMeshCount + status.pagedMeshCount == 2 && status.loadingMeshCount == 0;
         }), "both serial or same-batch models finish source loading")) return false;
+    QList<SceneObject> activatedObjects;
+    QList<double> activatedDisplayScales;
     for (const auto &object : both) {
       if (!check(viewport->activateSceneObject(object.id) && viewport->meshRenderingAvailable(),
                  "each imported source is available through ordinary scene activation")) return false;
       viewport->setRenderMode(NativeViewport::RenderMode::Mesh);
+      activatedObjects.append({viewport->activeSceneId(), viewport->scenePath(),
+                               viewport->modelTranslation(), viewport->modelRotation(),
+                               viewport->modelScale(), viewport->renderedPointCount()});
+      activatedDisplayScales.append(viewport->sceneCoordinates().displayScale);
     }
     viewport->setAxisView(NavigationAxis::PositiveZ);
     waitUntil([]() { return false; }, 300); // Let ordinary navigation snap finish.
     viewport->selectAllModels();
+    const QStringList framedIds = viewport->selectedSceneIds();
     if (!check(viewport->focusModel(), "both models are framed through ordinary group navigation")) return false;
     viewport->clearSelection();
     QImage frame;
-    if (!check(waitUntil([&]() {
+    const bool bothVisible = waitUntil([&]() {
           const auto status = viewport->resourceBudgetStatus();
           frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
           return status.loadingMeshCount == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
               !frame.isNull() && modelColorPixels(frame, true) >= 500 && modelColorPixels(frame, false) >= 500;
-        }), "both colored surfaces are visible together and the real loading leases are returned")) return false;
+        });
+    if (!bothVisible) {
+      const auto actual = viewport->resourceBudgetStatus();
+      const auto angles = viewport->viewOrbitAngles();
+      qInfo() << "RESOURCE_BUDGET_SHARED: visibility failure" << (sameBatch ? "same-batch" : "serial")
+              << "resident/paged/loading" << actual.residentMeshCount << actual.pagedMeshCount << actual.loadingMeshCount
+              << "managed RAM/GPU bytes" << actual.managedRamBytes << actual.managedGpuBytes
+              << "effective RAM/GPU bytes" << actual.effectiveRamBudgetBytes << actual.effectiveGpuBudgetBytes
+              << "reserved RAM/GPU bytes" << actual.reservedRamBytes << actual.reservedGpuBytes
+              << "frame size" << frame.size() << "red/blue real surface pixels"
+              << modelColorPixels(frame, true) << modelColorPixels(frame, false);
+      qInfo() << "RESOURCE_BUDGET_SHARED: resource observation"
+              << "renderer" << actual.snapshot.adapterName << "GPU source" << int(actual.snapshot.gpuSource)
+              << "dedicated/budget/usage/available bytes" << actual.snapshot.gpuDedicatedBytes
+              << actual.snapshot.gpuBudgetBytes << actual.snapshot.gpuUsageBytes << actual.snapshot.gpuAvailableBytes
+              << "RAM known/physical available/commit available" << actual.snapshot.systemMemoryKnown
+              << actual.snapshot.physicalAvailableBytes << actual.snapshot.commitAvailableBytes;
+      qInfo() << "RESOURCE_BUDGET_SHARED: failure view" << "object count" << viewport->sceneObjectCount()
+              << "framed IDs" << framedIds << "active ID/path" << viewport->activeSceneId() << viewport->scenePath()
+              << "target/distance" << viewport->viewTarget() << viewport->viewDistance()
+              << "yaw/pitch/roll" << angles.yawDegrees << angles.pitchDegrees << angles.rollDegrees
+              << "orthographic" << viewport->orthographicProjection() << "render mode" << int(viewport->renderMode())
+              << "mesh available/settled/triangles" << viewport->meshRenderingAvailable()
+              << viewport->meshPagingSettled() << viewport->residentMeshTriangleCount()
+              << "active translation/rotation/scale" << viewport->modelTranslation()
+              << viewport->modelRotation() << viewport->modelScale();
+      for (qsizetype i = 0; i < both.size(); ++i) {
+        const auto &expected = both[i];
+        const auto &observed = activatedObjects[i];
+        qInfo() << "RESOURCE_BUDGET_SHARED: object at ordinary activation" << observed.id << observed.path
+                << "source translation/rotation/scale" << expected.translation << expected.rotation << expected.scale
+                << "display translation/rotation/scale" << observed.translation << observed.rotation << observed.scale
+                << "display scale" << activatedDisplayScales[i] << "rendered points" << observed.vertexCount;
+      }
+    }
+    if (!check(bothVisible, "both colored surfaces are visible together and the real loading leases are returned")) return false;
     const auto status = viewport->resourceBudgetStatus();
     qInfo() << "RESOURCE_BUDGET_SHARED:" << (sameBatch ? "same-batch" : "serial")
             << "resident" << status.residentMeshCount << "paged" << status.pagedMeshCount
@@ -694,6 +736,19 @@ bool runResourceBudgetSharedMeshSmokeTest(MainWindow &window) {
     if (!check(status.residentMeshCount <= 1 && status.residentMeshCount + status.pagedMeshCount == 2 &&
                status.managedGpuBytes > 0 && status.managedGpuBytes <= 64LL * 1024LL * 1024LL,
                "models do not each reuse the same 64 MiB total budget")) return false;
+
+    // Readiness must persist through real frames, not occur briefly between
+    // repeated page reads. Use public leases and images, not scheduler IDs.
+    for (int stableFrame = 0; stableFrame < 12; ++stableFrame) {
+      waitUntil([]() { return false; }, 20);
+      const QImage stable = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+      const auto stableStatus = viewport->resourceBudgetStatus();
+      if (!check(viewport->meshPagingSettled() && stableStatus.loadingMeshCount == 0 &&
+                 stableStatus.reservedRamBytes == 0 && stableStatus.reservedGpuBytes == 0 &&
+                 stableStatus.managedGpuBytes <= 64LL * 1024LL * 1024LL &&
+                 modelColorPixels(stable, true) >= 500 && modelColorPixels(stable, false) >= 500,
+                 "the static shared view remains complete without renewed page leases or budget overflow")) return false;
+    }
 
     QString residentId;
     if (status.residentMeshCount == 1) {

@@ -824,6 +824,19 @@ if(BUILD_TESTING)
       TIMEOUT 30
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
+    qt_add_executable(gsw_system_resource_probe_tests tests/SystemResourceProbeTests.cpp src/SystemResourceProbe.cpp)
+    target_link_libraries(gsw_system_resource_probe_tests PRIVATE gsw_resource_budget Qt6::Test Qt6::OpenGL)
+    if(MSVC)
+      target_compile_options(gsw_system_resource_probe_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME system_resource_probe COMMAND gsw_system_resource_probe_tests)
+    set_tests_properties(system_resource_probe PROPERTIES TIMEOUT 30
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    if(GSW_TEST_OPENGL_BACKEND STREQUAL "software")
+      set_property(TEST system_resource_probe APPEND PROPERTY ENVIRONMENT "GSW_EXPECT_SOFTWARE_RENDERER=1")
+    endif()
+
     qt_add_executable(gsw_recovery_store_tests
       tests/RecoveryStoreTests.cpp
       src/RecoveryStore.cpp

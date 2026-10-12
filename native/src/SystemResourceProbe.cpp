@@ -205,6 +205,16 @@ SystemResourceSnapshot SystemResourceProbe::probe(QOpenGLContext *context) {
     snapshot.adapterName = QString::fromLatin1(
         reinterpret_cast<const char *>(renderer));
   }
+  // These Mesa CPU renderers have no dedicated GPU memory. Their NVX
+  // extension may expose unsupported device-memory counters, so keep GPU
+  // headroom unavailable while retaining the real system-memory measurement.
+  // Do not generalize this to Mesa hardware drivers or known zero headroom.
+  if (snapshot.adapterName.startsWith(QStringLiteral("llvmpipe"),
+                                      Qt::CaseInsensitive) ||
+      snapshot.adapterName.startsWith(QStringLiteral("softpipe"),
+                                      Qt::CaseInsensitive)) {
+    return snapshot;
+  }
 #ifdef Q_OS_WIN
   if (probeDxgi(context, functions, snapshot)) {
     return snapshot;

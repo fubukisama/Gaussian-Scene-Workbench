@@ -38,8 +38,34 @@
 
 #include <functional>
 #include <memory>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 namespace gsw {
+namespace {
+void logClipboardFailureDiagnostics() {
+#ifdef Q_OS_WIN
+  // Observe only OS ownership metadata. Do not open the clipboard, read its
+  // contents or inspect another application's title/process details.
+  const HWND opener = GetOpenClipboardWindow();
+  const HWND owner = GetClipboardOwner();
+  DWORD openerPid = 0;
+  DWORD ownerPid = 0;
+  if (opener) GetWindowThreadProcessId(opener, &openerPid);
+  if (owner) GetWindowThreadProcessId(owner, &ownerPid);
+  const auto handleText = [](const HWND handle) {
+    return QStringLiteral("0x") + QString::number(reinterpret_cast<quintptr>(handle), 16);
+  };
+  qWarning().noquote() << "Task actions clipboard diagnostic:"
+      << "test_pid=" << GetCurrentProcessId()
+      << "open_hwnd=" << handleText(opener) << "open_pid=" << openerPid
+      << "owner_hwnd=" << handleText(owner) << "owner_pid=" << ownerPid;
+  // A null opener is inconclusive when another caller used OpenClipboard(NULL).
+  // The owner is the data producer, not necessarily the current lock holder.
+#endif
+}
+} // namespace
 
 // Only the operating-system file opener is replaced. All task actions and
 // dialogs below are the production widgets used by the desktop application.
@@ -56,6 +82,11 @@ bool runTaskActionsSmokeTest(MainWindow &window) {
   const auto check = [&](const bool ok, const char *message) {
     if (!ok) { passed = false; qCritical() << "Task actions FAIL:" << message; }
     return ok;
+  };
+  const auto checkClipboard = [&](const bool ok, const char *message) {
+    const bool result = check(ok, message);
+    if (!result) logClipboardFailureDiagnostics();
+    return result;
   };
   const auto wait = [](const std::function<bool()> &predicate) {
     QElapsedTimer timer; timer.start();
@@ -160,7 +191,7 @@ bool runTaskActionsSmokeTest(MainWindow &window) {
   selectRow(failedRow);
   check(details->isEnabled() && openFolder->isEnabled() && copy->isEnabled(), "failed record exposes actions");
   copy->trigger();
-  check(QApplication::clipboard()->text().contains(failedName) &&
+  checkClipboard(QApplication::clipboard()->text().contains(failedName) &&
         QApplication::clipboard()->text().contains(QDir::toNativeSeparators(root.path())) &&
         QApplication::clipboard()->text().contains(failureResult), "copied summary includes name, folder and failure outcome");
   openFolder->trigger();
@@ -196,7 +227,7 @@ bool runTaskActionsSmokeTest(MainWindow &window) {
     if (!check(wait([&] { return QFileInfo::exists(ready); }), "real worker is alive before UI assertions")) return false;
     check(table->rowCount() == row + 1 && table->item(row, 1)->text() == name, "one new record per accepted task");
     selectRow(row); copy->trigger();
-    check(QApplication::clipboard()->text().contains(QDir::toNativeSeparators(directory)) &&
+    checkClipboard(QApplication::clipboard()->text().contains(QDir::toNativeSeparators(directory)) &&
           !QApplication::clipboard()->text().contains(QDir::toNativeSeparators(working)),
           "pipeline record uses output/dataset directory, not worker working directory");
     openFolder->trigger();
@@ -269,7 +300,7 @@ bool runTaskActionsSmokeTest(MainWindow &window) {
       check(name->text() == failedName && logs->toPlainText() == retained, "details language changes preserve user task name and raw logs");
     }
     copyButton->trigger();
-    check(QApplication::clipboard()->text().contains(failedName), "details copy button exports the selected task summary");
+    checkClipboard(QApplication::clipboard()->text().contains(failedName), "details copy button exports the selected task summary");
     folderButton->trigger();
     check(fileReceiver.urls.constLast() == QUrl::fromLocalFile(root.path()), "details folder button preserves exact output");
     savePath = root.filePath(QStringLiteral("retained-log.txt"));

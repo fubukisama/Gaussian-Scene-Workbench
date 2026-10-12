@@ -21,6 +21,7 @@
 #include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
@@ -52,6 +53,57 @@ namespace gsw {
 
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
+
+bool meshPagingQaEnabled() {
+  static const bool enabled = qEnvironmentVariableIntValue("GSW_MESH_PAGING_QA_DIAGNOSTICS") != 0;
+  return enabled;
+}
+
+enum class MeshPagingQaEvent { Read, Enqueue, Upload, Reject, Evict };
+
+// Explicit QA-only observations: do not affect admission, selection or retries.
+// Bound both retained counters and output (first 64 events, then once a second).
+void logMeshPagingQa(const MeshPagingQaEvent event, const MeshCacheIndex &cache,
+                     const QSet<int> &desired, const int nodeId,
+                     const qint64 bytes, const qint64 residentBytes,
+                     const qint64 budgetBytes, const char *reason = "") {
+  struct SourceCounters {
+    QHash<int, std::array<quint64, 5>> nodes;
+    std::array<quint64, 5> totals{};
+  };
+  static QHash<QString, SourceCounters> sources;
+  static QElapsedTimer outputClock;
+  static quint64 events = 0;
+  if (!sources.contains(cache.sourcePath) && sources.size() >= 16) return;
+  auto &source = sources[cache.sourcePath];
+  if (!source.nodes.contains(nodeId) && source.nodes.size() >= 4096) return;
+  auto &counts = source.nodes[nodeId];
+  const auto eventIndex = static_cast<std::size_t>(event);
+  ++counts[eventIndex];
+  ++source.totals[eventIndex];
+  ++events;
+  if (events > 64 && outputClock.isValid() && outputClock.elapsed() < 1000) return;
+  outputClock.start();
+  bool fallback = false;
+  qint64 desiredBytes = 0;
+  for (const int wanted : desired) {
+    if (wanted < 0 || wanted >= cache.nodes.size()) continue;
+    desiredBytes += cache.nodes.at(wanted).byteCount();
+    int ancestor = cache.nodes.at(wanted).parent;
+    while (ancestor >= 0 && ancestor < cache.nodes.size()) {
+      if (ancestor == nodeId) fallback = true;
+      ancestor = cache.nodes.at(ancestor).parent;
+    }
+  }
+  constexpr std::array<const char *, 5> names = {"read", "enqueue", "upload", "reject", "evict"};
+  qInfo() << "MESH_PAGING_QA:" << cache.sourcePath << names[eventIndex]
+          << "node" << nodeId << (desired.contains(nodeId) ? "desired" : fallback ? "fallback" : "obsolete")
+          << "reason" << reason << "bytes/resident/budget/desired" << bytes << residentBytes << budgetBytes << desiredBytes
+          << "desired count" << desired.size() << "node read/enqueue/upload/reject/evict"
+          << counts[0] << counts[1] << counts[2] << counts[3] << counts[4]
+          << "source read/enqueue/upload/reject/evict" << source.totals[0] << source.totals[1]
+          << source.totals[2] << source.totals[3] << source.totals[4];
+}
 
 // Presentation colours only. Model RGB, material textures, Gaussian attributes
 // and compositing equations are deliberately independent of the UI theme.
@@ -4616,16 +4668,32 @@ void NativeViewport::requestMissingMeshCachePages() {
     queuedNodes.insert(page.nodeId);
   }
   QSet<int> needed;
+  const auto needsRead = [&](const int nodeId) {
+    return !isResident(nodeId) &&
+        !mScene->mMeshCacheReadsInFlight.contains(nodeId) &&
+        !queuedNodes.contains(nodeId) &&
+        !mScene->mMeshCacheFailedNodes.contains(nodeId);
+  };
+  bool drawableCoverage = false;
   for (const int desired : std::as_const(mScene->mDesiredMeshCacheNodes)) {
+    if (needsRead(desired)) needed.insert(desired);
     int nodeId = desired;
-    while (nodeId >= 0 && !isResident(nodeId)) {
-      if (!mScene->mMeshCacheReadsInFlight.contains(nodeId) &&
-          !queuedNodes.contains(nodeId) &&
-          !mScene->mMeshCacheFailedNodes.contains(nodeId)) {
-        needed.insert(nodeId);
+    while (nodeId >= 0) {
+      if (isResident(nodeId)) {
+        drawableCoverage = true;
+        break;
       }
       nodeId = mScene->mMeshCache.nodes.at(nodeId).parent;
     }
+  }
+  // The desired cut is admitted against the shared page pool. Reading every
+  // missing intermediate ancestor adds storage outside that cut and can evict
+  // its endpoints repeatedly, even in a static view. Existing closest-resident
+  // ancestors remain drawable; only fetch one initial root if no desired chain
+  // has resident coverage yet.
+  if (!drawableCoverage && !mScene->mDesiredMeshCacheNodes.isEmpty() &&
+      needsRead(mScene->mMeshCache.rootNode)) {
+    needed.insert(mScene->mMeshCache.rootNode);
   }
   QVector<int> ordered = needed.values();
   std::sort(ordered.begin(), ordered.end(), [this](const int left,
@@ -4661,6 +4729,9 @@ void NativeViewport::requestMissingMeshCachePages() {
     if (!reservation->tryResize(bytes * 3, 0)) continue;
     queuedBytes += bytes;
     mScene->mMeshCacheReadsInFlight.insert(nodeId);
+    if (meshPagingQaEnabled())
+      logMeshPagingQa(MeshPagingQaEvent::Read, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                      nodeId, bytes, mScene->mMeshCacheResidentBytes, pageBudget);
     const int generation = mScene->mSceneGeneration;
     const MeshCacheIndex cache = mScene->mMeshCache;
     auto *watcher = new QFutureWatcher<MeshCachePage>(this);
@@ -4681,9 +4752,17 @@ void NativeViewport::requestMissingMeshCachePages() {
               }
               mScene->mMeshCacheReadsInFlight.remove(nodeId);
               if (page.isValid()) {
+                if (meshPagingQaEnabled())
+                  logMeshPagingQa(MeshPagingQaEvent::Enqueue, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                                  nodeId, mScene->mMeshCache.nodes.at(nodeId).byteCount(),
+                                  mScene->mMeshCacheResidentBytes, sharedPageGpuBudget());
                 mScene->resourceMeshPageReservations.insert(nodeId, reservation);
                 mScene->mPendingMeshCachePages.append(std::move(page));
               } else {
+                if (meshPagingQaEnabled())
+                  logMeshPagingQa(MeshPagingQaEvent::Reject, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                                  nodeId, mScene->mMeshCache.nodes.at(nodeId).byteCount(),
+                                  mScene->mMeshCacheResidentBytes, sharedPageGpuBudget(), "read-error");
                 mScene->mMeshCacheFailedNodes.insert(nodeId);
                 mScene->mMeshCacheError = page.error;
               }
@@ -4756,6 +4835,9 @@ void NativeViewport::evictMeshCacheUntilFits(const qsizetype requiredBytes) {
     }
     mScene->mMeshCacheResidentBytes -= chunk.byteCount;
     updateManagedResourceUsage();
+    if (meshPagingQaEnabled())
+      logMeshPagingQa(MeshPagingQaEvent::Evict, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                      chunk.nodeId, chunk.byteCount, mScene->mMeshCacheResidentBytes, sharedPageGpuBudget());
   }
 }
 
@@ -4794,6 +4876,9 @@ void NativeViewport::uploadPendingMeshCachePages() {
       auto gpuReservation = mResources->createReservation();
       if (byteCount > sharedPageGpuBudget() - mScene->mMeshCacheResidentBytes ||
           !gpuReservation->tryResize(0, byteCount)) {
+        if (meshPagingQaEnabled())
+          logMeshPagingQa(MeshPagingQaEvent::Reject, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                          page.nodeId, byteCount, mScene->mMeshCacheResidentBytes, sharedPageGpuBudget(), "budget");
         mScene->mMeshCacheFailedNodes.insert(page.nodeId);
         continue;
       }
@@ -4841,6 +4926,9 @@ void NativeViewport::uploadPendingMeshCachePages() {
         mScene->mMeshCacheResidentBytes += byteCount;
         mScene->mFullResolutionMeshGpuChunks.append(gpuChunk);
       } else {
+        if (meshPagingQaEnabled())
+          logMeshPagingQa(MeshPagingQaEvent::Reject, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                          page.nodeId, byteCount, mScene->mMeshCacheResidentBytes, sharedPageGpuBudget(), "gl-error");
         glDeleteBuffers(1, &gpuChunk.indexBuffer);
         glDeleteBuffers(1, &gpuChunk.vertexBuffer);
         glDeleteVertexArrays(1, &gpuChunk.vertexArray);
@@ -4852,6 +4940,9 @@ void NativeViewport::uploadPendingMeshCachePages() {
       glBindBuffer(GL_ARRAY_BUFFER, 0);
       glBindVertexArray(0);
       updateManagedResourceUsage();
+      if (meshPagingQaEnabled() && uploadError == GL_NO_ERROR)
+        logMeshPagingQa(MeshPagingQaEvent::Upload, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
+                        page.nodeId, byteCount, mScene->mMeshCacheResidentBytes, sharedPageGpuBudget());
     }
     ++uploadedPages;
   } while (!mScene->mPendingMeshCachePages.isEmpty() && uploadedPages < 8 &&

@@ -68,9 +68,9 @@ jobs:
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.
     runs-on: windows-2022
-    # The traced build takes about 20 minutes on the hosted runner. Leave room
+    # The traced build has taken 20-35 minutes on the hosted runner. Leave room
     # for code analysis, every native regression and the verified package upload.
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: read
@@ -170,7 +170,7 @@ jobs:
         shell: pwsh
         env:
           QT_FORCE_STDERR_LOGGING: "1"
-        run: ctest --test-dir native/build-ci -C Release --no-tests=error -R "^(native_infinite_reference_grid|native_light_gaussian_interaction|native_textured_paged_mesh_scene)$" --output-on-failure
+        run: ctest --test-dir native/build-ci -C Release --no-tests=error -R "^(system_resource_probe|native_infinite_reference_grid|native_light_gaussian_interaction|native_textured_paged_mesh_scene)$" --output-on-failure
 
       - name: Test
         shell: pwsh
