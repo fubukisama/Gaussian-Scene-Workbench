@@ -80,8 +80,48 @@ struct Capture {
   qint64 settlingMilliseconds = 0;
   QVector3D target;
   OrbitAngles angles;
+  OrbitAngles resetAngles;
+  OrbitAngles axisWaitAngles;
+  OrbitAngles framedAngles;
   float distance = 0.0F;
+  bool orthographic = false;
+  float perspectiveFovDegrees = 0.0F;
+  QSize logicalViewportSize;
+  qreal devicePixelRatio = 1.0;
+  QVector3D modelTranslation;
+  QQuaternion modelRotation;
+  QVector3D modelScale;
 };
+
+QString preciseVector(const QVector3D &vector) {
+  return QStringLiteral("(%1, %2, %3)")
+      .arg(vector.x(), 0, 'g', 9).arg(vector.y(), 0, 'g', 9)
+      .arg(vector.z(), 0, 'g', 9);
+}
+
+QString preciseAngles(const OrbitAngles &angles) {
+  return QStringLiteral("(%1, %2, %3)")
+      .arg(angles.yawDegrees, 0, 'g', 9).arg(angles.pitchDegrees, 0, 'g', 9)
+      .arg(angles.rollDegrees, 0, 'g', 9);
+}
+
+void logCapturePose(const char *policy, const Capture &capture) {
+  // Developer-only evidence at the actual comparison frame. Do not change
+  // navigation, framing or readiness merely to make the poses match.
+  qCritical().noquote() << "Mesh surface comparison camera:" << policy
+      << "target" << preciseVector(capture.target)
+      << "distance" << QString::number(capture.distance, 'g', 9)
+      << "yaw/pitch/roll" << preciseAngles(capture.angles)
+      << "orthographic" << capture.orthographic
+      << "perspective FOV" << QString::number(capture.perspectiveFovDegrees, 'g', 9)
+      << "logical viewport/frame/DPR" << capture.logicalViewportSize << capture.surface.size()
+      << capture.devicePixelRatio
+      << "model translation/rotation/scale" << preciseVector(capture.modelTranslation)
+      << capture.modelRotation << preciseVector(capture.modelScale)
+      << "reset/after-axis-wait/after-framing yaw-pitch-roll"
+      << preciseAngles(capture.resetAngles) << preciseAngles(capture.axisWaitAngles)
+      << preciseAngles(capture.framedAngles);
+}
 
 enum class LoadingPolicy { Resident, Paged, Default };
 
@@ -149,11 +189,31 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::WorldZero);
   viewport.setRenderMode(NativeViewport::RenderMode::Mesh);
   viewport.resetCamera();
+  capture.resetAngles = viewport.viewOrbitAngles();
   if (tiledFixture) {
     viewport.setAxisView(NavigationAxis::PositiveZ);
-    processFor(300);
+    // Wait for the public +Z view, not a guessed duration: a busy software
+    // renderer may process the last animation tick after a 300 ms timer.
+    // focusModel() cancels animation, so calling it early freezes two
+    // different poses and invalidates the image comparison.
+    const auto atPositiveZ = [&]() {
+      const auto angles = viewport.viewOrbitAngles();
+      return std::abs(angles.yawDegrees) <= 1.0e-6F &&
+          std::abs(angles.pitchDegrees - 90.0F) <= 1.0e-6F &&
+          std::abs(angles.rollDegrees) <= 1.0e-6F;
+    };
+    QElapsedTimer axisDeadline;
+    axisDeadline.start();
+    while (!atPositiveZ() && axisDeadline.elapsed() < 1500) processFor(20);
+    if (!atPositiveZ()) {
+      qCritical() << "Mesh surface comparison FAIL: public +Z view did not finish snapping"
+                  << preciseAngles(viewport.viewOrbitAngles());
+      return false;
+    }
   }
+  capture.axisWaitAngles = viewport.viewOrbitAngles();
   if (!viewport.focusModel()) return false;
+  capture.framedAngles = viewport.viewOrbitAngles();
   viewport.clearSelection();
   if (viewport.renderMode() != NativeViewport::RenderMode::Mesh) return false;
 
@@ -206,6 +266,13 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   capture.target = viewport.viewTarget();
   capture.angles = viewport.viewOrbitAngles();
   capture.distance = viewport.viewDistance();
+  capture.orthographic = viewport.orthographicProjection();
+  capture.perspectiveFovDegrees = viewport.perspectiveFovDegrees();
+  capture.logicalViewportSize = viewport.size();
+  capture.devicePixelRatio = viewport.devicePixelRatioF();
+  capture.modelTranslation = viewport.modelTranslation();
+  capture.modelRotation = viewport.modelRotation();
+  capture.modelScale = viewport.modelScale();
 
   // Moving the model offscreen through its public transform leaves the camera,
   // world-zero grid, and framebuffer unchanged. This supplies a matching empty
@@ -326,6 +393,17 @@ bool runMeshRenderingSmokeTest(NativeViewport &viewport, const QString &path) {
       std::abs(resident.angles.pitchDegrees - paged.angles.pitchDegrees) > 0.001F ||
       std::abs(resident.angles.rollDegrees - paged.angles.rollDegrees) > 0.001F) {
     qCritical() << "Mesh surface comparison FAIL: public camera poses differ";
+    logCapturePose("resident", resident);
+    logCapturePose(policyName(comparisonPolicy), paged);
+    qCritical().noquote() << "Mesh surface comparison camera deltas: target"
+        << preciseVector(resident.target - paged.target)
+        << "distance" << QString::number(resident.distance - paged.distance, 'g', 9)
+        << "yaw/pitch/roll" << preciseAngles({
+               resident.angles.yawDegrees - paged.angles.yawDegrees,
+               resident.angles.pitchDegrees - paged.angles.pitchDegrees,
+               resident.angles.rollDegrees - paged.angles.rollDegrees})
+        << "position/distance tolerance" << QString::number(poseTolerance, 'g', 9)
+        << "angle tolerance" << 0.001;
     return false;
   }
 

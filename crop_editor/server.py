@@ -2,6 +2,7 @@ import argparse
 import ast
 import cgi
 import concurrent.futures
+import ipaddress
 import json
 import math
 import os
@@ -7956,7 +7957,78 @@ def save_path_dataset(data):
         raise
 
 
+def is_loopback_host(host):
+    if not isinstance(host, str):
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class Handler(BaseHTTPRequestHandler):
+    def reject_local_request(self, message, status):
+        self.close_connection = True
+        # Closing with a small unread POST body can reset the socket before the
+        # client receives the rejection. Drain only a bounded, declared body,
+        # with a short deadline; never wait for an attacker-sized upload.
+        try:
+            lengths = self.headers.get_all("Content-Length", [])
+            length = int(lengths[0]) if len(lengths) == 1 else 0
+            if 0 < length <= 64 * 1024 and not self.headers.get("Transfer-Encoding"):
+                remaining = length
+                deadline = time.monotonic() + 0.25
+                while remaining > 0:
+                    timeout = deadline - time.monotonic()
+                    if timeout <= 0:
+                        break
+                    self.connection.settimeout(timeout)
+                    # read1 performs at most one underlying receive. A large
+                    # read() could reset an idle timeout for every trickle byte.
+                    chunk = self.rfile.read1(remaining)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+        except (ValueError, TypeError, OSError):
+            pass
+        self.send_json({"error": message}, status)
+
+    def accept_local_request(self):
+        # Local path imports are intentionally allowed. Their HTTP caller must
+        # still be local and same-origin: loopback binding alone does not stop
+        # browser CSRF or DNS rebinding. This is not remote authentication.
+        try:
+            if not is_loopback_host(self.server.server_address[0]) or not is_loopback_host(self.client_address[0]):
+                raise ValueError("Non-local HTTP connection")
+            hosts = self.headers.get_all("Host", [])
+            if len(hosts) != 1 or any(character.isspace() for character in hosts[0]):
+                raise ValueError("Invalid HTTP authority")
+            host = urlparse("//" + hosts[0])
+            port = host.port if host.port is not None else 80
+            if (not is_loopback_host(host.hostname) or port != self.server.server_port or
+                    host.username is not None or host.password is not None or
+                    host.path or host.query or host.fragment):
+                raise ValueError("Untrusted HTTP authority")
+            origins = self.headers.get_all("Origin", [])
+            if len(origins) > 1:
+                raise ValueError("Invalid HTTP origin")
+            if origins:
+                origin = urlparse(origins[0])
+                origin_port = origin.port if origin.port is not None else 80
+                if (origin.scheme != "http" or origin.hostname != host.hostname or origin_port != port or
+                        origin.username is not None or origin.password is not None or
+                        origin.path or origin.query or origin.fragment):
+                    raise ValueError("Untrusted HTTP origin")
+            sites = self.headers.get_all("Sec-Fetch-Site", [])
+            if len(sites) > 1 or (sites and sites[0].strip().lower() not in ("same-origin", "none")):
+                raise ValueError("Cross-site HTTP request")
+        except (ValueError, TypeError):
+            self.reject_local_request("Only trusted local HTTP requests are allowed.", 403)
+            return False
+        return True
+
     def send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -7970,6 +8042,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": str(exc)}, status)
 
     def do_GET(self):
+        if not self.accept_local_request():
+            return
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/api/app/health":
@@ -8200,6 +8274,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(exc, 500)
 
     def do_POST(self):
+        if not self.accept_local_request():
+            return
         try:
             parsed_path = urlparse(self.path).path
             if parsed_path == "/api/shutdown":
@@ -8258,6 +8334,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/experiments/checkpoint-delete",
             ):
                 return self.send_json({"error": "Not found"}, 404)
+            if self.headers.get_content_type() != "application/json":
+                return self.reject_local_request("This endpoint requires application/json.", 415)
             length = int(self.headers.get("Content-Length", "0"))
             data = json.loads(self.rfile.read(length).decode("utf-8"))
             if parsed_path == "/api/import-paths":
@@ -8439,6 +8517,12 @@ def main():
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
+
+    # The shared backend has no network authentication. Refuse a public bind
+    # before reading persisted jobs or opening a listener; native workers use
+    # direct owned-process calls and do not need this HTTP interface.
+    if not is_loopback_host(args.host):
+        parser.error("The local backend can bind only to a loopback address or localhost.")
 
     with TRAIN_LOCK:
         TRAIN_JOBS.update(load_persisted_train_jobs())

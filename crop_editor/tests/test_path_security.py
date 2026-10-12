@@ -3,11 +3,13 @@ import errno
 import base64
 import json
 import os
+import socket
 import subprocess
 import struct
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -55,12 +57,13 @@ class BackendPathSecurityTests(unittest.TestCase):
             setattr(server, name, original)
         self.temporary.cleanup()
 
-    def request(self, path, method="GET", data=None):
+    def request(self, path, method="GET", data=None, headers=None, raw_body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=5)
         try:
-            body = None if data is None else json.dumps(data).encode("utf-8")
-            headers = {} if body is None else {"Content-Type": "application/json"}
-            connection.request(method, path, body=body, headers=headers)
+            body = raw_body if raw_body is not None else (None if data is None else json.dumps(data).encode("utf-8"))
+            request_headers = {} if data is None else {"Content-Type": "application/json"}
+            request_headers.update(headers or {})
+            connection.request(method, path, body=body, headers=request_headers)
             response = connection.getresponse()
             return response.status, dict(response.getheaders()), response.read()
         finally:
@@ -184,6 +187,200 @@ class BackendPathSecurityTests(unittest.TestCase):
             with self.subTest(linked_part=linked_part):
                 self.assertEqual(status, 400)
                 self.assertIn("error", json.loads(body.decode("utf-8")))
+
+    def test_local_import_rejects_untrusted_http_context_without_dataset_artifacts(self):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        source = self.write_fixture("external-source/日本語/写真.png", image)
+        port = self.httpd.server_address[1]
+        authority = "127.0.0.1:" + str(port)
+        cases = (
+            ("dns-rebinding-host", {"Host": "attack.invalid:" + str(port)}),
+            ("foreign-host", {"Host": "attack.invalid"}),
+            ("wrong-host-port", {"Host": "127.0.0.1:" + str(port + 1)}),
+            ("host-userinfo", {"Host": authority + "@attack.invalid"}),
+            ("foreign-origin", {"Origin": "http://attacker.invalid"}),
+            ("null-origin", {"Origin": "null"}),
+            ("wrong-origin-port", {"Origin": "http://127.0.0.1:" + str(port + 1)}),
+            ("secure-origin", {"Origin": "https://" + authority}),
+            ("cross-site-fetch", {"Sec-Fetch-Site": "cross-site"}),
+            ("cross-site-text-json", {
+                "Host": "attack.invalid", "Origin": "http://attacker.invalid",
+                "Sec-Fetch-Site": "cross-site", "Content-Type": "text/plain",
+            }),
+        )
+        for label, headers in cases:
+            scene = "owned-reject-" + label
+            with self.subTest(context=label):
+                status, _, body = self.request("/api/import-paths", "POST", {
+                    "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
+                }, headers=headers)
+                self.assertEqual(status, 403, body)
+                self.assertIn("error", json.loads(body.decode("utf-8")))
+                self.assertFalse((server.DATASETS_DIR / scene).exists())
+                self.assertEqual(source.read_bytes(), image)
+
+    def test_local_import_rejects_non_json_media_types_without_dataset_artifacts(self):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        source = self.write_fixture("external-source/日本語/写真.png", image)
+        cases = (
+            ("text-plain", {"Content-Type": "text/plain; charset=utf-8"}),
+            ("form-type", {"Content-Type": "application/x-www-form-urlencoded"}),
+            ("empty-type", {"Content-Type": ""}),
+            ("missing-type", {}),
+        )
+        for label, headers in cases:
+            scene = "owned-media-reject-" + label
+            payload = {"scene": scene, "files": [{"path": str(source), "name": "input.png"}]}
+            with self.subTest(media_type=label):
+                status, _, body = self.request("/api/import-paths", "POST", headers=headers,
+                    raw_body=json.dumps(payload).encode("utf-8"))
+                self.assertEqual(status, 415, body)
+                self.assertIn("error", json.loads(body.decode("utf-8")))
+                self.assertFalse((server.DATASETS_DIR / scene).exists())
+                self.assertEqual(source.read_bytes(), image)
+
+    def test_rejected_small_trickle_body_does_not_extend_rejection_deadline(self):
+        connection = socket.create_connection(("127.0.0.1", self.httpd.server_address[1]), timeout=2)
+        stop = threading.Event()
+        producer_errors = []
+
+        def send_owned_bytes():
+            for index in range(8):
+                if stop.is_set() or (index and stop.wait(0.1)):
+                    return
+                try:
+                    connection.sendall(b"x")
+                except OSError as exc:
+                    if not stop.is_set():
+                        producer_errors.append(repr(exc))
+                    return
+
+        producer = threading.Thread(target=send_owned_bytes, daemon=True)
+        response = bytearray()
+        started = time.monotonic()
+        try:
+            connection.sendall(
+                b"POST /api/import-paths HTTP/1.1\r\nHost: attack.invalid\r\n"
+                b"Content-Type: text/plain\r\nContent-Length: 8\r\nConnection: close\r\n\r\n"
+            )
+            producer.start()
+            # Read while the producer is still sending. Measuring only after
+            # its upload completes would not prove when the 403 first arrives.
+            while b"\r\n" not in response and len(response) < 4096:
+                chunk = connection.recv(4096 - len(response))
+                self.assertTrue(chunk, "The rejected request must receive an actual HTTP response")
+                response.extend(chunk)
+            elapsed = time.monotonic() - started
+        finally:
+            stop.set()
+            connection.close()
+            if producer.ident is not None:
+                producer.join(timeout=2.5)
+
+        self.assertFalse(producer.is_alive(), "Owned trickle sender must stop within its bounded join")
+        self.assertFalse(producer_errors, producer_errors)
+        status_line = bytes(response).split(b"\r\n", 1)[0]
+        self.assertEqual(status_line.split(b" ", 2)[1], b"403", status_line)
+        self.assertLessEqual(elapsed, 0.5, "Rejected trickle body extended response time to {:.3f}s".format(elapsed))
+        self.assertEqual(list(server.DATASETS_DIR.iterdir()), [])
+
+    def test_local_import_preserves_script_and_same_origin_json_with_external_japanese_paths(self):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        source = self.write_fixture("external-source/日本語/写真.png", image)
+        port = self.httpd.server_address[1]
+        authority = "127.0.0.1:" + str(port)
+        cases = (
+            ("script", {}),
+            ("json-charset", {"Content-Type": "application/json; charset=utf-8"}),
+            ("same-origin", {"Origin": "http://" + authority, "Sec-Fetch-Site": "same-origin"}),
+            ("localhost-origin", {"Host": "localhost:" + str(port),
+                "Origin": "http://localhost:" + str(port), "Sec-Fetch-Site": "same-origin"}),
+        )
+        for label, headers in cases:
+            scene = "owned-compatible-" + label
+            status, _, body = self.request("/api/import-paths", "POST", {
+                "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
+            }, headers=headers)
+            with self.subTest(client=label):
+                self.assertEqual(status, 200, body)
+                self.assertEqual(json.loads(body.decode("utf-8"))["image_count"], 1)
+                self.assertEqual((server.DATASETS_DIR / scene / "images" / "input.png").read_bytes(), image)
+                self.assertEqual(source.read_bytes(), image)
+
+    def test_local_import_preserves_same_origin_multipart_upload(self):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        scene = "owned-compatible-multipart"
+        boundary = "GSWOwnedBoundary"
+        body = (
+            ("--" + boundary + '\r\nContent-Disposition: form-data; name="scene"\r\n\r\n'
+             + scene + "\r\n--" + boundary
+             + '\r\nContent-Disposition: form-data; name="files"; filename="input.png"\r\n'
+             + "Content-Type: image/png\r\n\r\n").encode("ascii")
+            + image + ("\r\n--" + boundary + "--\r\n").encode("ascii")
+        )
+        origin = "http://127.0.0.1:" + str(self.httpd.server_address[1])
+        status, _, response = self.request("/api/import", "POST", raw_body=body, headers={
+            "Origin": origin, "Sec-Fetch-Site": "same-origin",
+            "Content-Type": "multipart/form-data; boundary=" + boundary,
+        })
+        self.assertEqual(status, 200, response)
+        self.assertEqual(json.loads(response.decode("utf-8"))["image_count"], 1)
+        self.assertEqual((server.DATASETS_DIR / scene / "images" / "input.png").read_bytes(), image)
+
+    def test_model_downloads_reject_untrusted_http_context_for_both_backends(self):
+        expected = b"owned model configuration, not an untrusted-origin response"
+        for backend in ("3dgs", "2dgs"):
+            scene = "owned-origin-" + backend
+            source = self.write_fixture("output/" + scene + "/training_backend.json", expected)
+            query = urlencode({"scene": scene, "name": "training_backend.json"})
+            for headers in ({"Host": "attack.invalid"}, {"Origin": "http://attacker.invalid"},
+                            {"Origin": "null"}, {"Sec-Fetch-Site": "cross-site"}):
+                status, _, body = self.request("/api/assets/file?" + query, headers=headers)
+                with self.subTest(backend=backend, context=headers):
+                    self.assertEqual(status, 403, body)
+                    self.assertNotEqual(body, expected)
+                    self.assertEqual(source.read_bytes(), expected)
+
+    def test_http_cli_refuses_non_loopback_before_opening_a_listener(self):
+        copied_server = self.write_fixture("owned-startup/crop_editor/server.py", Path(server.__file__).read_bytes())
+        # Invoke the copied public main in its own process. Only the OS listener
+        # boundary is replaced, so a regressed guard cannot expose any service.
+        probe = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('gsw_owned_startup', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+def block_listener(*args, **kwargs):
+    raise SystemExit('OWNED_LISTENER_BLOCKED')
+module.ThreadingHTTPServer = block_listener
+sys.argv = ['owned-server.py', '--host', sys.argv[2], '--port', '0', '--no-open']
+module.main()
+"""
+        environment = os.environ.copy()
+        environment.update({
+            "GS_EDITOR_WORKSPACE_ROOT": str(self.root / "owned-startup/workspace"),
+            "TWO_DGS_DIR": str(self.root / "owned-startup/2dgs"),
+            "PYTHONPATH": str(Path(server.__file__).resolve().parents[1]),
+            "PYTHONUTF8": "1", "TEMP": str(self.root), "TMP": str(self.root),
+        })
+        for host in ("0.0.0.0", "::", "192.0.2.9"):
+            with self.subTest(host=host):
+                result = subprocess.run(
+                    [sys.executable, "-B", "-c", probe, str(copied_server), host],
+                    cwd=self.root, env=environment, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=10,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("loopback", result.stderr.lower())
+                self.assertNotIn("OWNED_LISTENER_BLOCKED", result.stdout + result.stderr)
 
     def dangling_import_leaf_fixture(self, part, scene, directory_link=False):
         image = base64.b64decode(

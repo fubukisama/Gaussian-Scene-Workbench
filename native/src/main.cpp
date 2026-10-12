@@ -60,6 +60,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #ifdef _WIN32
 #include <shobjidl.h>
@@ -1543,13 +1544,28 @@ int main(int argc, char *argv[]) {
           application.exit(exitCode);
         });
   } else if (exitConfirmationSmokeTest) {
-    bool exitPromptFound = false;
-    bool savePromptFound = false;
-    bool exitPromptReset = false;
+    struct ExitSmokeState {
+      bool exitPromptFound = false;
+      bool savePromptFound = false;
+      bool exitPromptReset = false;
+    };
+    // These callbacks run after this branch leaves scope. Own their state by
+    // value rather than retaining references to already-destroyed local bools.
+    const auto state = std::make_shared<ExitSmokeState>();
+    const auto logMissingPrompt = [](const char *stage) {
+      qCritical() << "EXIT_CONFIRMATION FAIL:" << stage << "expected visible prompt not found";
+      for (QWidget *widget : QApplication::topLevelWidgets()) {
+        if (const auto *prompt = qobject_cast<QMessageBox *>(widget)) {
+          qCritical() << "EXIT_CONFIRMATION observed prompt:" << prompt->objectName()
+                      << "visible" << prompt->isVisible() << "title" << prompt->windowTitle()
+                      << "text" << prompt->text();
+        }
+      }
+    };
     QTimer::singleShot(100, &window, [&window]() { window.close(); });
     QTimer::singleShot(
         350, &application,
-        [&exitPromptFound]() {
+        [state, logMissingPrompt]() {
           for (QWidget *widget : QApplication::topLevelWidgets()) {
             auto *prompt = qobject_cast<QMessageBox *>(widget);
             if (prompt == nullptr || !prompt->isVisible() ||
@@ -1559,13 +1575,19 @@ int main(int argc, char *argv[]) {
             }
             const QPushButton *defaultButton = prompt->defaultButton();
             QAbstractButton *escapeButton = prompt->escapeButton();
-            exitPromptFound = defaultButton != nullptr &&
-                              defaultButton->text() == QStringLiteral("取消") &&
-                              escapeButton != nullptr &&
-                              escapeButton->text() == QStringLiteral("取消");
+            state->exitPromptFound = defaultButton != nullptr &&
+                                     defaultButton->text() == QStringLiteral("取消") &&
+                                     escapeButton != nullptr &&
+                                     escapeButton->text() == QStringLiteral("取消");
+            if (!state->exitPromptFound) {
+              qCritical() << "EXIT_CONFIRMATION FAIL: initial prompt default/escape must both cancel"
+                          << "default" << (defaultButton ? defaultButton->text() : QString())
+                          << "escape" << (escapeButton ? escapeButton->text() : QString());
+            }
             prompt->reject();
             return;
           }
+          logMissingPrompt("initial cancel confirmation");
         });
     QTimer::singleShot(650, &window, [&window]() {
       window.setWindowModified(true);
@@ -1573,7 +1595,7 @@ int main(int argc, char *argv[]) {
     });
     QTimer::singleShot(
         900, &application,
-        []() {
+        [logMissingPrompt]() {
           for (QWidget *widget : QApplication::topLevelWidgets()) {
             auto *prompt = qobject_cast<QMessageBox *>(widget);
             if (prompt == nullptr || !prompt->isVisible() ||
@@ -1586,11 +1608,14 @@ int main(int argc, char *argv[]) {
                 return;
               }
             }
+            qCritical() << "EXIT_CONFIRMATION FAIL: modified-window prompt lacks the exit button"
+                        << "title" << prompt->windowTitle();
           }
+          logMissingPrompt("modified-window exit confirmation");
         });
     QTimer::singleShot(
         1150, &application,
-        [&savePromptFound]() {
+        [state, logMissingPrompt]() {
           for (QWidget *widget : QApplication::topLevelWidgets()) {
             auto *prompt = qobject_cast<QMessageBox *>(widget);
             if (prompt == nullptr || !prompt->isVisible() ||
@@ -1599,37 +1624,48 @@ int main(int argc, char *argv[]) {
             }
             QAbstractButton *cancelButton =
                 prompt->button(QMessageBox::Cancel);
-            savePromptFound =
+            state->savePromptFound =
                 cancelButton != nullptr && prompt->defaultButton() != nullptr &&
                 prompt->standardButton(prompt->defaultButton()) ==
                     QMessageBox::Save;
+            if (!state->savePromptFound) {
+              qCritical() << "EXIT_CONFIRMATION FAIL: save prompt must offer cancel and default to save"
+                          << "cancel available" << (cancelButton != nullptr)
+                          << "default standard button"
+                          << (prompt->defaultButton() ? int(prompt->standardButton(prompt->defaultButton())) : -1);
+            }
             if (cancelButton != nullptr) {
               cancelButton->click();
             }
             return;
           }
+          logMissingPrompt("save-before-exit cancellation");
         });
     QTimer::singleShot(1450, &window, [&window]() { window.close(); });
     QTimer::singleShot(
         1700, &application,
-        [&exitPromptReset]() {
+        [state, logMissingPrompt]() {
           for (QWidget *widget : QApplication::topLevelWidgets()) {
             auto *prompt = qobject_cast<QMessageBox *>(widget);
             if (prompt == nullptr || !prompt->isVisible() ||
                 prompt->windowTitle() != QStringLiteral("确认退出")) {
               continue;
             }
-            exitPromptReset = true;
+            state->exitPromptReset = true;
             prompt->reject();
             return;
           }
+          logMissingPrompt("confirmation after save cancellation");
         });
     QTimer::singleShot(
         2050, &application,
-        [&application, &window, &smokeTestCompleted, &exitPromptFound,
-         &savePromptFound, &exitPromptReset]() {
-          smokeTestCompleted = exitPromptFound && savePromptFound &&
-                               exitPromptReset && window.isVisible();
+        [&application, &window, &smokeTestCompleted, state]() {
+          smokeTestCompleted = state->exitPromptFound && state->savePromptFound &&
+                               state->exitPromptReset && window.isVisible();
+          qInfo() << "EXIT_CONFIRMATION:" << (smokeTestCompleted ? "PASS" : "FAIL")
+                  << "initial cancel/save cancellation/confirmation reset/window visible"
+                  << state->exitPromptFound << state->savePromptFound << state->exitPromptReset << window.isVisible()
+                  << "window modified" << window.isWindowModified();
           application.exit(smokeTestCompleted ? 0 : 2);
         });
   } else if (displayLayoutSmokeTest) {
