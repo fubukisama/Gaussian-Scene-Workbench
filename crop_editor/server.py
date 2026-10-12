@@ -8504,7 +8504,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         if download_name:
-            self.send_header("Content-Disposition", f'attachment; filename="{safe_filename(download_name)}"')
+            header_filename = safe_filename(download_name).replace("\r", "").replace("\n", "")
+            self.send_header("Content-Disposition", f'attachment; filename="{header_filename}"')
         self.send_header("Content-Length", str(path.stat().st_size))
         self.end_headers()
         with open(path, "rb") as f:

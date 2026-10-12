@@ -25,6 +25,9 @@ class OwnedAttachmentHandler(server.Handler):
         if parsed.path == "/owned-attachment":
             name = parse_qs(parsed.query).get("name", ["attachment.ply"])[0]
             return self.serve_file(server.OUTPUT_DIR / "attachment.ply", "application/octet-stream", name)
+        if parsed.path == "/owned-source-attachment":
+            path = server.OUTPUT_DIR / "モデル%0D%0A.ply"
+            return self.serve_file(path, "application/octet-stream", path.name)
         return super().do_GET()
 
 
@@ -618,9 +621,11 @@ module.main()
             self.assertEqual(mesh.read_bytes(), original)
 
     def test_attachment_names_cannot_inject_response_headers(self):
-        expected = b"original attachment bytes"
+        expected = "original attachment bytes 中文 日本語".encode("utf-8") + b"\x00\xff"
         self.write_fixture("output/attachment.ply", expected)
-        for name in ("model.ply", 'model\r\nX-Injected: true\r\n".ply', 'model"; name="other.ply'):
+        for name in ("model.ply", 'model\r\nX-Injected: true\r\n".ply',
+                     "model\rX-Injected: true.ply", "model\nX-Injected: true.ply",
+                     'model"; name="other.ply', "model%0D%0AX-Injected.ply", "模型 モデル.ply"):
             with self.subTest(name=name):
                 status, headers, body = self.request("/owned-attachment?" + urlencode({"name": name}))
                 self.assertEqual(status, 200)
@@ -630,6 +635,17 @@ module.main()
                 self.assertNotIn("\r", disposition)
                 self.assertNotIn("\n", disposition)
                 self.assertEqual(disposition.count('"'), 2)
+                self.assertTrue(disposition.isascii())
+                if name == "model.ply":
+                    self.assertEqual(disposition, 'attachment; filename="model.ply"')
+
+        source = self.write_fixture("output/モデル%0D%0A.ply", expected)
+        status, headers, body = self.request("/owned-source-attachment")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, expected)
+        self.assertEqual(source.read_bytes(), expected)
+        self.assertEqual(headers["Content-Disposition"], 'attachment; filename="_0D_0A.ply"')
+        self.assertNotIn("x-injected", {key.lower() for key in headers})
 
     def test_viewing_experiment_does_not_execute_model_configuration(self):
         for backend in ("3dgs", "2dgs"):

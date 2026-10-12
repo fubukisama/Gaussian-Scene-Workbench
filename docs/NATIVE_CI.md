@@ -24,6 +24,8 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 
 分页网格还通过同一真实视口的串行／同时导入回归验证：两个单独可完整加载、合计超过 64 MiB 的模型必须一起显示、归还加载预留，并在静止的连续 12 帧保持稳定。请求只包含当前缺失的目标页；没有可绘制覆盖时增加一个根页作为冷启动回退，不再读取整条祖先链。共享预算、原有回退绘制和显存保护不变。移除常驻模型后，剩余模型仍须自动提升为完整加载。此项适用于各生成流程的网格成果显示，不改变训练参数。
 
+集合事务完成后立即重平衡共享资源，不等待周期回调。资源采样保留 1000 ms 间隔，使用精确定时器，避免 Windows 低优先级 `WM_TIMER` 在连续视口更新时饥饿；[Qt 实现](https://raw.githubusercontent.com/qt/qtbase/6.8/src/corelib/kernel/qeventdispatcher_win.cpp)和 [Windows 说明](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-timer)支持这一调度区别。`GSW_MESH_PAGING_QA_DIAGNOSTICS=1` 可开启有界开发诊断，默认关闭；不修改预算、训练保护或验收期限。
+
 ### 持续代码扫描
 
 使用 CodeQL advanced setup，而不是同时开启另一套 default setup：
@@ -80,6 +82,8 @@ Actual `llvmpipe`/`softpipe` contexts use system memory; their NVX fields must n
 
 Paged meshes also use the same real-viewport serial/same-batch regression: two models that each fit alone but exceed a combined 64 MiB must render together, return loading reservations, and remain stable for 12 consecutive static frames. Requests contain missing desired pages only, with one root page as a cold-start fallback when no drawable coverage exists, instead of reading every ancestor. Shared caps, existing fallback drawing and GPU protections remain unchanged. Removing the resident model must still promote the remaining model without reimport. This covers mesh results from all generation pipelines without changing training parameters.
 
+Rebalance shared resources immediately after the collection transaction. Sampling retains its 1000 ms interval but uses a precise timer to avoid starvation in the low-priority Windows `WM_TIMER` path during continuous viewport updates; see the [Qt implementation](https://raw.githubusercontent.com/qt/qtbase/6.8/src/corelib/kernel/qeventdispatcher_win.cpp) and [Windows documentation](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-timer). Bounded developer diagnostics require `GSW_MESH_PAGING_QA_DIAGNOSTICS=1` and are off by default. Budgets, training protections and acceptance deadlines are unchanged.
+
 ### Ongoing code scanning
 
 Use CodeQL advanced setup rather than enabling a second default setup:
@@ -135,6 +139,8 @@ Python 依存関係の修正後、`Native Windows` の実行 #141 は後続テ�
 実際の `llvmpipe`／`softpipe` はシステムメモリを使うため、NVX の値を専用 GPU メモリとして扱いません。GPU 統計を明示的に取得不能とし、実際の RAM は引き続き測定します。自動の安全な代替予算、手動予算、実 GPU の DXGI/NVX による余量ゼロの保護は維持します。表示ウィンドウのない実コンテキストで、不安定なソフトウェア統計による小さなメッシュの読み込み拒否を防ぐ回帰検査を実行します。固定 Mesa revision の[ソフトウェアメモリ検査](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c)と[NVX 実装](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c)を参照してください。
 
 ページ化メッシュは同じ実ビューポートで逐次／同時インポートを検査します。単独では完全ロードでき、合計では 64 MiB を超える 2 モデルを同時に表示し、ロード用の予約を返し、静止した連続 12 フレームでも安定していることを確認します。要求するのは現在不足する目標ページのみで、描画可能な範囲がない場合に限り初期表示用のルートページを 1 つ追加します。祖先チェーン全体を読み直しません。共有上限、既存の代替描画、GPU 保護は維持します。常駐モデルを除くと、残ったモデルは再インポートせず完全ロードへ昇格する必要があります。すべての生成パイプラインのメッシュ成果表示が対象で、学習パラメーターは変更しません。
+
+集合の更新処理が完了したら共有資源を直ちに再配分します。資源の観測間隔は 1000 ms のまま、精確タイマーを使い、連続描画による低優先度の Windows `WM_TIMER` の遅延を避けます。[Qt 実装](https://raw.githubusercontent.com/qt/qtbase/6.8/src/corelib/kernel/qeventdispatcher_win.cpp)と [Windows の説明](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-timer)を参照してください。有界な開発用診断は `GSW_MESH_PAGING_QA_DIAGNOSTICS=1` の場合のみ有効で、既定では無効です。予算、学習の保護、検証期限は変更しません。
 
 ### 継続的なコードスキャン
 

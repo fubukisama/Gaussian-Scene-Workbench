@@ -475,6 +475,10 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mResources = std::make_shared<ResourceBudgetController>();
   mResourceClock.start();
   mResourceBudgetTimer = new QTimer(this);
+  // On Windows a coarse timer relies on low-priority WM_TIMER dispatch and can
+  // starve behind continuous viewport updates. Keep the one-second interval,
+  // but deliver resource observations independently of that idle-message path.
+  mResourceBudgetTimer->setTimerType(Qt::PreciseTimer);
   mResourceBudgetTimer->setInterval(1000);
   connect(mResourceBudgetTimer, &QTimer::timeout, this,
           &NativeViewport::refreshResourceBudgets);
@@ -627,6 +631,21 @@ void NativeViewport::updateManagedResourceUsage() {
 }
 
 void NativeViewport::refreshResourceBudgets() {
+  if (meshPagingQaEnabled()) {
+    static qint64 lastTickMs = -1000;
+    static int observations = 0;
+    const qint64 now = mResourceClock.elapsed();
+    if (observations < 96 && now - lastTickMs >= 1000) {
+      lastTickMs = now;
+      ++observations;
+      qInfo() << "MESH_BUDGET_TICK_QA:" << "elapsed ms" << now
+              << "timer active/from timer" << (mResourceBudgetTimer && mResourceBudgetTimer->isActive())
+              << (sender() == mResourceBudgetTimer) << "rebalancing/processing"
+              << mResourceRebalancing << mProcessingActive
+              << "context valid/current" << (context() && context()->isValid())
+              << (context() && QOpenGLContext::currentContext() == context());
+    }
+  }
   updateManagedResourceUsage();
   SystemResourceSnapshot snapshot;
   const bool currentAlready = context() && QOpenGLContext::currentContext() == context();
@@ -713,6 +732,39 @@ void NativeViewport::rebalanceResourceResidency() {
   if (!states.contains(mScene)) states.append(mScene);
   const auto active = mScene;
   for (const auto &state : states) {
+    const auto qaObservation = [this, &state](const char *stage,
+                                             const ResourceReservation *lease = nullptr) {
+      if (!meshPagingQaEnabled()) return;
+      // Diagnostic only: at most one observation per source/stage each second.
+      static QHash<QString, qint64> lastObservation;
+      const QString key = state->mRequestedScenePath + QLatin1Char('\n') + QString::fromLatin1(stage);
+      const qint64 now = mResourceClock.elapsed();
+      if (!lastObservation.contains(key) && lastObservation.size() >= 128) return;
+      if (lastObservation.contains(key) && now - lastObservation.value(key) < 1000) return;
+      lastObservation.insert(key, now);
+      const auto observed = mResources->status();
+      const auto policy = mResources->policy();
+      const qint64 replaceableGpu = state->resourcePointGpuBytes + state->resourceMeshGpuBytes +
+          state->resourceTextureGpuBytes + state->mMeshCacheResidentBytes + state->mPointCacheResidentBytes;
+      const qint64 otherGpu = std::max<qint64>(0, observed.managedGpuBytes - replaceableGpu);
+      const qint64 remainingGpu = std::max<qint64>(0,
+          observed.effectiveGpuBudgetBytes - otherGpu - observed.reservedGpuBytes);
+      qInfo() << "MESH_RESIDENCY_QA:" << state->id << state->mRequestedScenePath << stage
+              << "mesh/paged/loading/loadLease/reload/forcePaged/uploadFailed/storageSupported"
+              << state->mHasMesh << state->mMeshCache.isValid() << state->resourceLoading
+              << bool(state->resourceLoadReservation) << state->resourceNeedsReload << state->resourceForcePagedRetry
+              << state->resourceResidentUploadFailed << state->resourceResidentStorageSupported
+              << "retry remaining ms" << state->resourceRetryAfterMs - now
+              << "estimate RAM/GPU" << state->resourceResidentRamPeakBytes << state->resourceResidentGpuBytes
+              << "replaceable/other/remaining GPU" << replaceableGpu << otherGpu << remainingGpu
+              << "managed RAM/GPU" << observed.managedRamBytes << observed.managedGpuBytes
+              << "reserved RAM/GPU" << observed.reservedRamBytes << observed.reservedGpuBytes
+              << "effective RAM/GPU/captured GPU" << observed.effectiveRamBudgetBytes
+              << observed.effectiveGpuBudgetBytes << mMeshCacheGpuBudgetBytes
+              << "policy mode/RAM MiB/GPU MiB" << int(policy.mode) << policy.ramLimitMiB << policy.gpuLimitMiB
+              << "temporary lease refused" << (lease && lease->admissionWasRefused());
+    };
+    qaObservation("candidate");
     if (state == mProcessingScene && mProcessingPreviewPaused) continue;
     if (state->resourceNeedsReload && !state->resourceLoading &&
         state->resourceRetryAfterMs <= mResourceClock.elapsed() &&
@@ -721,6 +773,7 @@ void NativeViewport::rebalanceResourceResidency() {
       QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
       ++state->mSceneGeneration;
       state->resourceRetryAfterMs = mResourceClock.elapsed() + 10000;
+      qaObservation("reload-needed");
       if (state->resourceForcePagedRetry) discardResidentMeshStorage();
       startSceneLoad(state->mRequestedScenePath, false, true, state->resourceForcePagedRetry);
       continue;
@@ -750,6 +803,7 @@ void NativeViewport::rebalanceResourceResidency() {
       auto reservation = mResources->createReservation();
       if (!reservation->tryResize(state->resourceResidentRamPeakBytes,
                                   state->resourceResidentGpuBytes)) {
+        qaObservation("complete-admission-refused", reservation.get());
         // Promotion replaces this model's disposable page storage; requiring
         // both representations to coexist would let a full cache permanently
         // starve a resident mesh that fits the same total budget. Preflight the
@@ -763,7 +817,11 @@ void NativeViewport::rebalanceResourceResidency() {
         const qint64 remainingGpu = std::max<qint64>(0,
             budget.effectiveGpuBudgetBytes - otherGpu - budget.reservedGpuBytes);
         if (state->resourceResidentGpuBytes > remainingGpu ||
-            !reservation->tryResize(state->resourceResidentRamPeakBytes, 0)) continue;
+            !reservation->tryResize(state->resourceResidentRamPeakBytes, 0)) {
+          qaObservation("replacement-admission-refused", reservation.get());
+          continue;
+        }
+        qaObservation("replacement-CPU-admitted", reservation.get());
         ++state->mSceneGeneration;
         state->resourceLoading = true;
         state->mPendingMeshCachePages.clear();
@@ -778,10 +836,13 @@ void NativeViewport::rebalanceResourceResidency() {
         // safely choose paging with this CPU lease instead of overcommitting.
         (void)reservation->tryResize(state->resourceResidentRamPeakBytes,
                                      state->resourceResidentGpuBytes);
+        qaObservation("replacement-after-release", reservation.get());
       } else {
+        qaObservation("complete-admitted", reservation.get());
         ++state->mSceneGeneration;
       }
       state->resourceRetryAfterMs = mResourceClock.elapsed() + 5000;
+      qaObservation("promotion-load", reservation.get());
       startSceneLoad(state->mScenePath, false, true, false, std::move(reservation));
     }
   }
@@ -937,6 +998,21 @@ void NativeViewport::publishActiveSceneState() {
 
 void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
                                     const QString &activeId) {
+  bool qaRemovingObjects = false;
+  if (meshPagingQaEnabled()) {
+    qaRemovingObjects = std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), [&](const auto &state) {
+      return std::none_of(objects.cbegin(), objects.cend(), [&](const auto &object) { return object.id == state->id; });
+    });
+    if (qaRemovingObjects) {
+      qInfo() << "MESH_COLLECTION_REMOVE_QA:" << "begin elapsed ms" << mResourceClock.elapsed()
+              << "old/new objects" << mSceneStates.size() << objects.size()
+              << "active/new active" << mScene->id << activeId
+              << "timer active/rebalancing/processing" << (mResourceBudgetTimer && mResourceBudgetTimer->isActive())
+              << mResourceRebalancing << mProcessingActive
+              << "context valid/current" << (context() && context()->isValid())
+              << (context() && QOpenGLContext::currentContext() == context());
+    }
+  }
   if (mProcessingActive) return;
   const bool collectionChanged = objects.size() != mSceneStates.size() ||
       std::any_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
@@ -1066,7 +1142,20 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     emit processingPreviewPausedChanged(false);
   }
   emit processingPreviewChanged();
+  // Collection changes release or replace shared storage immediately. Do not
+  // leave residency admission to a periodic timer that can be delayed while
+  // the viewport is continuously composing. The collection/selection transaction
+  // and its signal blocker have ended before rebalancing the surviving models.
+  if (collectionChanged) refreshResourceBudgets();
   update();
+  if (qaRemovingObjects) {
+    qInfo() << "MESH_COLLECTION_REMOVE_QA:" << "end elapsed ms" << mResourceClock.elapsed()
+            << "objects/active" << mSceneStates.size() << mScene->id
+            << "timer active/rebalancing/processing" << (mResourceBudgetTimer && mResourceBudgetTimer->isActive())
+            << mResourceRebalancing << mProcessingActive
+            << "context valid/current" << (context() && context()->isValid())
+            << (context() && QOpenGLContext::currentContext() == context());
+  }
 }
 
 bool NativeViewport::activateSceneObject(const QString &id) {
