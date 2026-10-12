@@ -844,9 +844,9 @@ bool NativeViewport::collectionReferenceBounds(QVector3D &minimum,
     if (!coordinates.valid) continue;
     const auto low = coordinates.localMinimum();
     const auto high = coordinates.localMaximum();
-    const auto matrix = sceneDisplayTransform(*state, reference) *
-        ModelTransform{state->mModelTranslation, state->mModelRotation,
-                       state->mModelScale}.matrix(state->mSceneCenter);
+    // Grid position and reference-axis length use source coordinates. An
+    // editable TRS must never move the coordinate reference with the model.
+    const auto matrix = sceneDisplayTransform(*state, reference);
     for (int corner = 0; corner < 8; ++corner) {
       const auto point = matrix.map(QVector3D(corner & 1 ? high.x() : low.x(),
           corner & 2 ? high.y() : low.y(), corner & 4 ? high.z() : low.z()));
@@ -2339,27 +2339,13 @@ double NativeViewport::referencePlaneElevation() const {
   double minimum = std::numeric_limits<double>::infinity();
   for (const auto &state : displayedSceneStates()) {
     const auto &coordinates = state->mSceneCoordinates;
-    if (!coordinates.valid || coordinates.displayScale == 0.0) continue;
-    const auto matrix = ModelTransform{state->mModelTranslation, state->mModelRotation,
-                                       state->mModelScale}.matrix(state->mSceneCenter);
-    const double unitRatio = sourceToReferenceUnitScale(*state);
-    // GPU bounds intentionally use floats. Coordinate reports must instead
-    // retain source doubles through the same local TRS and shared-unit mapping;
-    // rounding a world elevation to QVector3D loses decimal precision even for
-    // an untransformed model without a large-coordinate display shift.
-    for (int corner = 0; corner < 8; ++corner) {
-      const double x = ((corner & 1 ? coordinates.globalMaximum.x : coordinates.globalMinimum.x) +
-                        coordinates.displayShift.x) * coordinates.displayScale;
-      const double y = ((corner & 2 ? coordinates.globalMaximum.y : coordinates.globalMinimum.y) +
-                        coordinates.displayShift.y) * coordinates.displayScale;
-      const double z = ((corner & 4 ? coordinates.globalMaximum.z : coordinates.globalMinimum.z) +
-                        coordinates.displayShift.z) * coordinates.displayScale;
-      const double transformedZ = matrix(2, 0) * x + matrix(2, 1) * y +
-                                  matrix(2, 2) * z + matrix(2, 3);
-      const double elevation = (transformedZ / coordinates.displayScale -
-                                coordinates.displayShift.z) * unitRatio;
-      minimum = std::min(minimum, elevation);
-    }
+    if (!coordinates.valid) continue;
+    // The reference plane belongs to the original source frame, not the
+    // editable model transform. Moving a model must create height above the
+    // plane instead of moving the plane by the same amount. Use source doubles
+    // directly so reports also retain decimal precision after save/reopen.
+    minimum = std::min(minimum, coordinates.globalMinimum.z *
+                                  sourceToReferenceUnitScale(*state));
   }
   return std::isfinite(minimum) ? minimum : 0.0;
 }
@@ -2369,7 +2355,7 @@ QString NativeViewport::referencePlaneDescription() const {
       !sceneReferenceCoordinates().valid) {
     return QCoreApplication::translate("Workbench", "世界坐标 Z=0");
   }
-  return QCoreApplication::translate("Workbench", "场景底部 Z=%1")
+  return QCoreApplication::translate("Workbench", "固定基准 Z=%1")
       .arg(formatSceneCoordinate(referencePlaneElevation(), sceneReferenceCoordinates()));
 }
 

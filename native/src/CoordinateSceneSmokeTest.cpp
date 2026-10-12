@@ -91,14 +91,16 @@ bool writeCube(const QString &path, bool second, double unitsPerMetre = 1.0,
 }
 
 bool writePatch(const QString &path, bool second, const QString &kind,
-                bool nearOrigin = false, double elevationOffset = 0.0) {
+                bool nearOrigin = false, double elevationOffset = 0.0,
+                int resolution = 10) {
   const bool gaussian = kind != "points";
   const bool surfel = kind == "2dgs";
   const double unitsPerMetre = second ? 100.0 : 1.0;
   QByteArray ply("ply\nformat ascii 1.0\n");
   ply += second ? "comment unit cm\n" : "comment unit m\n";
-  ply += "comment crs: gsw-coordinate-smoke-local\nelement vertex 441\n"
-         "property double x\nproperty double y\nproperty double z\n";
+  ply += "comment crs: gsw-coordinate-smoke-local\nelement vertex " +
+         QByteArray::number((2 * resolution + 1) * (2 * resolution + 1)) +
+         "\nproperty double x\nproperty double y\nproperty double z\n";
   if (gaussian) {
     ply += "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
            "property float opacity\nproperty float scale_0\nproperty float scale_1\n";
@@ -108,11 +110,11 @@ bool writePatch(const QString &path, bool second, const QString &kind,
     ply += "property uchar red\nproperty uchar green\nproperty uchar blue\n";
   }
   ply += "end_header\n";
-  for (int y = -10; y <= 10; ++y) {
-    for (int x = -10; x <= 10; ++x) {
+  for (int y = -resolution; y <= resolution; ++y) {
+    for (int x = -resolution; x <= resolution; ++x) {
       ply += QString("%1 %2 %3 ")
-          .arg(((nearOrigin ? 0.0 : 500000000.0) + (second ? 3.0 : -3.0) + x * 0.1) * unitsPerMetre, 0, 'f', 3)
-          .arg(((nearOrigin ? 0.0 : 400000000.0) + y * 0.1) * unitsPerMetre, 0, 'f', 3)
+          .arg(((nearOrigin ? 0.0 : 500000000.0) + (second ? 3.0 : -3.0) + x / static_cast<double>(resolution)) * unitsPerMetre, 0, 'f', 3)
+          .arg(((nearOrigin ? 0.0 : 400000000.0) + y / static_cast<double>(resolution)) * unitsPerMetre, 0, 'f', 3)
           .arg(((second ? 23.0 : 20.0) + elevationOffset) * unitsPerMetre, 0, 'f', 9).toUtf8();
       if (gaussian) {
         ply += second ? "-1.5 1.5 1.5 3 " : "1.5 -1.5 1.5 3 ";
@@ -140,7 +142,8 @@ struct Footprint {
   QRect bounds;
 };
 
-Footprint footprint(const QImage &image, bool cyan, bool fullWidth = false) {
+Footprint footprint(const QImage &image, bool cyan, bool fullWidth = false,
+                    bool allowPastels = false) {
   Footprint result;
   for (int y = 110; y < image.height() - 100; ++y) {
     for (int x = fullWidth ? 0 : 100; x < image.width() - (fullWidth ? 0 : 150); ++x) {
@@ -149,8 +152,10 @@ Footprint footprint(const QImage &image, bool cyan, bool fullWidth = false) {
       const int rejected = cyan ? c.red() : c.green();
       // The fixtures have equal blue/green (cyan) or blue/red (magenta).
       // A blue navigation control in the light theme is not model geometry.
-      if (c.blue() > 60 && other > 60 && std::abs(c.blue() - other) < 20 &&
-          c.blue() > rejected * 2 && other > rejected * 2) {
+      const bool colorContrast = allowPastels
+          ? c.blue() > rejected + 20 && other > rejected + 20
+          : c.blue() > rejected * 2 && other > rejected * 2;
+      if (c.blue() > 60 && other > 60 && std::abs(c.blue() - other) < 20 && colorContrast) {
         result.center += QPointF(x, y);
         result.bounds = result.pixels == 0 ? QRect(x, y, 1, 1)
                                           : result.bounds.united(QRect(x, y, 1, 1));
@@ -642,7 +647,7 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
                                 "tiny-model projection framebuffer evidence is saved");
   // Decimal, unshifted source elevations must not round-trip through the GPU's
   // float bounds before reaching coordinate reports. Cover every model family,
-  // mixed source units, a translated object and selection-stable scene minima.
+  // mixed source units, fixed source bases and active-object switches.
   constexpr double preciseElevation = 98.469025;
   for (const auto &kind : {QStringLiteral("points"), QStringLiteral("3dgs"),
                           QStringLiteral("2dgs"), QStringLiteral("mesh")}) {
@@ -667,12 +672,179 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
           "shared reference elevation retains source double precision in mixed units");
     preciseObjects[1].translation.setZ(-500.0F); // -5 scene metres in centimetre source units.
     viewport.setSceneObjects(preciseObjects, preciseObjects[1].id);
-    check(std::abs(viewport.referencePlaneElevation() - (preciseElevation - 2.0)) < 1.0e-10,
-          "translated collection minimum retains decimal precision and source-unit conversion");
+    check(std::abs(viewport.referencePlaneElevation() - preciseElevation) < 1.0e-10,
+          "model translation leaves the original source base fixed with decimal precision");
     check(viewport.activateSceneObject(preciseObjects[0].id) &&
-          std::abs(viewport.referencePlaneElevation() - (preciseElevation - 2.0)) < 1.0e-10,
+          std::abs(viewport.referencePlaneElevation() - preciseElevation) < 1.0e-10,
           "decimal collection elevation remains independent of active-object selection");
   }
+  viewport.setSceneObjects({}, {});
+  const QString zMovePath = QDir(temporary.path()).filePath("fixed-base-z-move.ply");
+  if (!check(writeCube(zMovePath, false, 1.0, true,
+                      QStringLiteral("gsw-coordinate-smoke-local"), 1.0, true,
+                      preciseElevation - 19.0),
+             "fixed-base Z movement fixture is written")) return false;
+  const SceneObject zMoveObject{"fixed-base-z-move", zMovePath, {}, {}, {1, 1, 1}, 8};
+  viewport.setSceneObjects({zMoveObject}, zMoveObject.id);
+  if (!check(waitUntil([&] { return viewport.meshRenderingAvailable(); }),
+             "fixed-base Z movement fixture finishes loading")) return false;
+  viewport.setEditToolsLocked(false);
+  viewport.selectModel();
+  const double fixedBase = viewport.referencePlaneElevation();
+  key(Qt::Key_G); key(Qt::Key_Z); key(Qt::Key_1, "1"); key(Qt::Key_Return);
+  const auto movedZ = viewport.modelExportOptions().transform.translation;
+  qInfo() << "COORDINATE_SCENE Z movement:" << "source translation" << movedZ
+          << "base before/after" << fixedBase << viewport.referencePlaneElevation();
+  check((movedZ - QVector3D(0, 0, 1)).length() < 1.0e-4F,
+        "numeric G Z 1 commits one scene metre without changing X or Y");
+  check(std::abs(viewport.referencePlaneElevation() - fixedBase) < 1.0e-10,
+        "Z movement leaves the reference plane fixed so the model can leave the ground");
+  viewport.undoEdit();
+  check(viewport.modelExportOptions().transform.translation.isNull(),
+        "Z movement remains undoable");
+  const auto mouse = [&](QEvent::Type type, const QPointF &point,
+                         Qt::MouseButton button, Qt::MouseButtons buttons) {
+    QMouseEvent event(type, point, point, viewport.mapToGlobal(point.toPoint()),
+                      button, buttons, Qt::NoModifier);
+    QApplication::sendEvent(&viewport, &event);
+  };
+  for (const auto &kind : {QStringLiteral("points"), QStringLiteral("3dgs"),
+                          QStringLiteral("2dgs"), QStringLiteral("mesh")}) {
+    viewport.setSceneObjects({}, {});
+    const QString path = QDir(temporary.path()).filePath("z-drag-" + kind + ".ply");
+    const bool written = kind == "mesh"
+        ? writeCube(path, false, 1.0, true, "gsw-coordinate-smoke-local", 1.0, true,
+                    preciseElevation - 19.0)
+        : writePatch(path, false, kind, true, preciseElevation - 20.0, kind == "points" ? 40 : 10);
+    if (!check(written, "Z drag model-family fixture is written")) return false;
+    const SceneObject object{"z-drag-" + kind, path, {}, {}, {1, 1, 1}, kind == "mesh" ? 8 : kind == "points" ? 6561 : 441};
+    viewport.setSceneObjects({object}, object.id);
+    if (!check(waitUntil([&] { return viewport.selectableModelAvailable(); }),
+               "Z drag model-family fixture finishes loading")) return false;
+    viewport.setRenderMode(kind == "mesh" ? NativeViewport::RenderMode::Mesh :
+        kind == "points" ? NativeViewport::RenderMode::Points : NativeViewport::RenderMode::Gaussians);
+    for (const bool orthographic : {false, true}) {
+      viewport.setModelTransform({}, {});
+      viewport.resetCamera();
+      viewport.setModelGizmoMode(TransformGizmoMode::Move);
+      viewport.selectModel();
+      check(viewport.focusModel(), "Z drag fixture can be focused");
+      if (orthographic) {
+        const auto navigation = navigationGizmoLayout({}, viewport.size(), QFontMetricsF(viewport.font()).height());
+        mouse(QEvent::MouseButtonPress, navigation.projectionCube.center(), Qt::LeftButton, Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, navigation.projectionCube.center(), Qt::LeftButton, Qt::NoButton);
+      }
+      // Leave room for the one-metre elevation change instead of clipping the
+      // flat point/surfel fixture against the top of a tightly framed view.
+      const QPointF zZoomCenter = viewport.rect().center();
+      QWheelEvent zoomForMovement(zZoomCenter, viewport.mapToGlobal(zZoomCenter.toPoint()), {}, {0, -480},
+          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+      QApplication::sendEvent(&viewport, &zoomForMovement);
+      processFor(80);
+      const QImage zBefore = viewport.grabFramebuffer();
+      // Subpixel points blend into the white theme as pastel magenta. Require
+      // red and blue contrast against green (white/gray and axes cannot pass),
+      // while retaining the same pixel-count and displacement acceptance.
+      const auto markerBefore = footprint(zBefore, false, false, true);
+      const auto targetBefore = viewport.viewTarget();
+      const auto orbitBefore = viewport.viewOrbitAngles();
+      const double baseBefore = viewport.referencePlaneElevation();
+      key(Qt::Key_G); key(Qt::Key_Z); key(Qt::Key_1, "1"); key(Qt::Key_Return);
+      const QImage zAfter = viewport.grabFramebuffer();
+      const auto markerAfter = footprint(zAfter, false, false, true);
+      const auto numericalTranslation = viewport.modelExportOptions().transform.translation;
+      qInfo() << "COORDINATE_SCENE fixed-base Z:" << kind << "ortho" << orthographic
+              << "translation" << numericalTranslation << "screen delta"
+              << markerAfter.center - markerBefore.center << "base" << baseBefore
+              << viewport.referencePlaneElevation() << "pixels" << markerBefore.pixels << markerAfter.pixels
+              << "target" << targetBefore << viewport.viewTarget();
+      check((numericalTranslation - QVector3D(0, 0, 1)).length() < 1.0e-4F &&
+            std::abs(viewport.referencePlaneElevation() - baseBefore) < 1.0e-10,
+            "each model family moves one metre above a stationary source plane");
+      check(markerBefore.pixels > 100 && markerAfter.pixels > 100 &&
+            markerAfter.center.y() < markerBefore.center.y() - 10.0 &&
+            viewport.viewTarget() == targetBefore &&
+            viewport.viewOrbitAngles().yawDegrees == orbitBefore.yawDegrees &&
+            viewport.viewOrbitAngles().pitchDegrees == orbitBefore.pitchDegrees &&
+            viewport.orthographicProjection() == orthographic,
+            "actual model pixels move upward in a fixed camera for perspective and orthographic views");
+      // The lower-left empty part of the actual framebuffer contains only the
+      // ground grid; changing the model height must not translate those pixels.
+      const QRect ground(120, zBefore.height() - 185, 65, 55);
+      check(zBefore.copy(ground) == zAfter.copy(ground),
+            "ground-grid framebuffer pixels stay fixed while model height changes");
+      if (!evidence.isEmpty()) {
+        const QString suffix = originalLanguage + "-z-" + kind + (orthographic ? "-ortho" : "-persp");
+        check(zBefore.save(QDir(evidence).filePath(suffix + "-before.png")) &&
+              zAfter.save(QDir(evidence).filePath(suffix + "-after.png")),
+              "actual Z movement framebuffer evidence is saved");
+      }
+      viewport.undoEdit();
+      check(viewport.modelExportOptions().transform.translation.isNull(), "numeric Z movement can be undone");
+      viewport.redoEdit();
+      check((viewport.modelExportOptions().transform.translation - QVector3D(0, 0, 1)).length() < 1.0e-4F,
+            "numeric Z movement can be redone");
+      viewport.undoEdit();
+
+      // Find the real Z drag target through the same localized hover feedback
+      // used by the UI, rather than duplicating the gizmo's private layout.
+      const QPointF center(viewport.width() * 0.5, viewport.height() * 0.5);
+      viewport.setEditToolsLocked(false);
+      viewport.selectModel();
+      QPointF zHandle;
+      qreal longest = 0;
+      const QString zTooltip = QCoreApplication::translate("Workbench", "沿 %1 轴移动").arg("Z");
+      for (int dy = -220; dy < -20; dy += 3) {
+        for (int dx = -6; dx <= 6; dx += 3) {
+          const QPointF point = center + QPointF(dx, dy);
+          mouse(QEvent::MouseMove, point, Qt::NoButton, Qt::NoButton);
+          if (viewport.toolTip().startsWith(zTooltip) && QLineF(center, point).length() > longest) {
+            zHandle = point;
+            longest = QLineF(center, point).length();
+          }
+        }
+      }
+      qInfo() << "COORDINATE_SCENE Z arrow target:" << kind << "ortho" << orthographic
+              << "distance" << viewport.viewDistance() << "center" << center
+              << "handle" << zHandle << "selected" << viewport.modelSelected()
+              << "translation" << viewport.modelTranslation();
+      if (!check(longest > 20, "visible Z arrow provides an actual axis drag target")) return false;
+      const QPointF end = zHandle + QPointF(0, -24);
+      mouse(QEvent::MouseButtonPress, zHandle, Qt::LeftButton, Qt::LeftButton);
+      check(viewport.modelTransformActive(), "Z arrow begins a model transform");
+      for (int step = 1; step <= 4; ++step)
+        mouse(QEvent::MouseMove, zHandle + (end - zHandle) * (step / 4.0), Qt::NoButton, Qt::LeftButton);
+      mouse(QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+      const auto dragged = viewport.modelExportOptions().transform.translation;
+      check(dragged.z() > 0.05F && std::abs(dragged.x()) < 1.0e-4F && std::abs(dragged.y()) < 1.0e-4F &&
+            !viewport.modelTransformActive() && std::abs(viewport.referencePlaneElevation() - baseBefore) < 1.0e-10,
+            "dragging the green Z arrow moves only model Z and commits above the fixed plane");
+      viewport.undoEdit();
+      check(viewport.modelExportOptions().transform.translation.isNull(), "Z arrow drag remains undoable");
+      viewport.redoEdit();
+      check((viewport.modelExportOptions().transform.translation - dragged).length() < 1.0e-4F,
+            "Z arrow drag remains redoable");
+      viewport.undoEdit();
+    }
+  }
+  // Save through the document interface and reload into an independent
+  // document/viewport state, keeping the edited height separate from the base.
+  WorkspaceDocument savedZ, reopenedZ;
+  QString saveError;
+  const QString zProjectRoot = QDir(temporary.path()).filePath("z-project");
+  check(QDir().mkpath(zProjectRoot) && savedZ.create(zProjectRoot, &saveError) &&
+        savedZ.addScenePath(zMovePath, &saveError) &&
+        savedZ.setSceneTranslation(QVector3D(0, 0, 1), &saveError) &&
+        savedZ.save(QDir(temporary.path()).filePath("z-project.gsw.json"), &saveError) &&
+        reopenedZ.load(savedZ.projectFilePath(), &saveError),
+        "Z movement can be saved and reopened through an independent project document");
+  if (!saveError.isEmpty()) qCritical() << "COORDINATE_SCENE Z project:" << saveError;
+  viewport.setSceneObjects({}, {});
+  viewport.setSceneObjects(reopenedZ.sceneObjects(), reopenedZ.activeSceneId());
+  check(waitUntil([&] { return viewport.meshRenderingAvailable(); }) &&
+        (viewport.modelExportOptions().transform.translation - QVector3D(0, 0, 1)).length() < 1.0e-4F &&
+        std::abs(viewport.referencePlaneElevation() - preciseElevation) < 1.0e-10,
+        "save/reopen retains edited model height and the original fixed reference plane");
   viewport.setSceneObjects({}, {});
   if (passed) qInfo() << "COORDINATE_SCENE PASS: same-frame and mixed-unit geometry retain physical size, shared grid and coordinate relationship";
   return passed;

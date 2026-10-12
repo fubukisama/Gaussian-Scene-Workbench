@@ -31,26 +31,40 @@ the camera, not the model's source coordinates.
 The isolated task-preview layer retains its own reference; observing a running
 task does not assert that its reconstruction is registered to existing objects.
 
-**Scene Base** places the reference plane beneath the collection, not beneath
-whichever model is selected. **World Z=0** continues to use the shared zero plane.
-The saved preference identifier remains `modelBase` for compatibility. Source
+**Source Scene Base (Fixed)** derives the reference plane from the union of the
+collection's unedited source bounds, converting declared length units into the
+shared scene unit. Selection, translation, rotation and scale do not move the
+plane; adding, removing or replacing a source model can change that union.
+Saving and reopening the same sources preserves this baseline independently of
+the saved object transforms. The plane is a visual reference, not a geometry
+constraint: models can move above or below it. **World Z=0** continues to use the
+shared zero plane. The saved preference identifier remains `modelBase` for
+compatibility, and no new persistence field or schema is required. Source
 coordinates and original files are not rewritten by changing the reference
 plane or the display language.
 
-The reported scene-base elevation retains source double precision through the
-local model transform and shared length-unit conversion. GPU float bounds are
-not round-tripped into coordinate reports. Regression fixtures cover decimal
-elevations in points, 3DGS, 2DGS and meshes, mixed metre/centimetre sources,
-translated collection minima and active-object changes.
+The reported fixed-reference elevation retains source double precision through
+the shared length-unit conversion and never applies editable object transforms.
+GPU float bounds are not round-tripped into coordinate reports. Regression
+fixtures cover decimal elevations in points, 3DGS, 2DGS and meshes, mixed
+metre/centimetre sources, fixed planes during model edits, active-object changes
+and save/reopen.
 
-中文：场景底部高程在模型变换和共享长度单位换算中保留源数据双精度，不从 GPU
-单精度范围反算坐标报告。回归覆盖点云、3DGS、2DGS 和网格的小数高程、米／厘米
-混合单位、变换后的集合底部及活动对象切换。
+中文：“原始场景底部（固定）”按整组场景未经编辑的源范围并集确定基准面，
+将已声明的长度单位换算到共享场景单位。选择、移动、旋转、缩放及保存重开不会
+改变基准面；新增、移除或替换源模型可能改变并集。基准面只提供观察参考，不约束
+模型几何，模型可以移到基准面上方或下方。固定基准高程保留源数据双精度，
+不应用编辑变换，不从 GPU 单精度范围反算报告。“世界坐标 Z=0”保持不变，
+沿用 `modelBase` 设置标识，无需新增持久化字段或改变工程格式。
 
-日本語：シーン底面の高さは、モデルのトランスフォームと共通長さ単位への換算を
-通して元データの倍精度を保持します。GPU の単精度の範囲から座標レポートへ
-戻しません。点群、3DGS、2DGS、メッシュの小数の高さ、メートル／センチメートル
-の混在、移動後のシーン底面、アクティブオブジェクトの切り替えを回帰検証します。
+日本語：「元のシーン底面（固定）」は、シーン全体の編集前のソース範囲の和集合
+から基準面を決め、宣言済みの長さ単位を共通のシーン単位へ換算します。選択、
+移動、回転、スケール、保存後の再読み込みでは基準面を変えず、ソースモデルの
+追加、削除、置換で和集合が変わる場合に更新します。基準面は観察用であり、
+形状を拘束しません。モデルは基準面の上にも下にも移動できます。固定基準の
+高さは元データの倍精度を保持し、編集トランスフォームを適用せず、GPU の
+単精度の範囲からレポートへ戻しません。「ワールド座標 Z=0」は変わらず、
+設定識別子 `modelBase` を使い続け、保存用の項目やプロジェクトの形式を追加しません。
 
 ## Import, editing and limits
 
@@ -153,8 +167,10 @@ Official references:
 保证模型间的真实物理关系，未知单位仍保留原始数值。
 
 “同时导入”不自动居中或配准；同图层、同目录、同照片和相似文件名都不是已配准
-的证据。“场景底部”基准面使用整组对象的底部，不随选择跳到某一模型底部。
-原文件和已保存的用户变换保留。本次不新增 CRS 重投影、控制点或 ICP 功能，不
+的证据。“原始场景底部（固定）”基准面使用整组对象未经编辑的源范围并集，不随
+选择、移动、旋转或缩放变化；增加、移除或替换源模型时重新计算。基准面仅为
+观察参考，不限制模型沿 Z 轴移动。原文件和已保存的用户变换保留。本次不新增
+CRS 重投影、控制点或 ICP 功能，不
 修改 3DGS／2DGS 及网格生成算法或训练检查点。
 数字移动和网格吸附使用共享场景单位。例如以米为参考时，`G X 1` 会将厘米模型
 移动 100 cm；工程保存的逐对象位移和源坐标属性仍使用源单位。
@@ -184,8 +200,10 @@ CRS、個別の編集トランスフォームを保持します。基準はプ�
 
 「同時にインポート」は自動的な中心合わせや位置合わせを行いません。同じ
 レイヤー、フォルダー、写真、似た名前は位置合わせ済みの証拠ではありません。
-「シーン底面」はオブジェクト全体の底面を使い、選択に応じて移動しません。
-元ファイルと保存済みのユーザー変換を保持します。本変更は CRS 再投影、対応点、
+「元のシーン底面（固定）」は全オブジェクトの編集前のソース範囲の和集合を
+使い、選択、移動、回転、スケールに応じて移動しません。ソースモデルの追加、
+削除、置換時に再計算します。観察用の基準面であり、Z 軸方向の移動を制限
+しません。元ファイルと保存済みのユーザー変換を保持します。本変更は CRS 再投影、対応点、
 ICP を追加せず、3DGS／2DGS、メッシュ生成処理、学習状態を変更しません。
 数値移動とグリッドスナップは共通のシーン単位を使います。メートルが基準なら、
 `G X 1` はセンチメートルのモデルを 100 cm 移動します。保存する各オブジェクトの

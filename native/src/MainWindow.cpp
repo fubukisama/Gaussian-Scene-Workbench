@@ -1410,12 +1410,12 @@ void MainWindow::createActions() {
   mReferencePlaneActionGroup = new QActionGroup(this);
   mReferencePlaneActionGroup->setExclusive(true);
   mModelBasePlaneAction =
-      AppLanguage::text(new QAction(this), AppLanguage::source("场景底部（推荐）"));
+      AppLanguage::text(new QAction(this), AppLanguage::source("原始场景底部（固定）"));
   mModelBasePlaneAction->setObjectName(
       QStringLiteral("modelBaseReferencePlaneAction"));
   mModelBasePlaneAction->setCheckable(true);
   AppLanguage::bind(mModelBasePlaneAction, "toolTip",
-                    AppLanguage::source("使用整组模型的底部作为基准面，不随当前选择变化。"));
+                    AppLanguage::source("以整组场景未经编辑的源模型范围确定固定基准面。选择、移动、旋转和缩放不改变基准面；新增、移除或替换源模型时重新计算。"));
   mWorldZeroPlaneAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "世界坐标 Z=0"), this), AppLanguage::source("世界坐标 Z=0"));
   mWorldZeroPlaneAction->setObjectName(
       QStringLiteral("worldZeroReferencePlaneAction"));

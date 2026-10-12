@@ -117,7 +117,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 导出模型 / 导出坐标 | Export Model / Export Coordinates | モデルをエクスポート / エクスポート座標 |
 | 原始坐标 / 场景坐标 | Source Coordinates / Scene Coordinates | 元の座標 / シーン座標 |
 | 场景坐标关系 | Scene Coordinate Relationship | シーン座標の関係 |
-| 场景底部 | Scene Base | シーン底面 |
+| 原始场景底部（固定） / 固定基准 | Source Scene Base (Fixed) / Fixed Reference | 元のシーン底面（固定） / 固定基準 |
 | 场景参考 / 单位换算 / 配准未确认 | Scene Reference / Unit Conversion / Registration Unconfirmed | シーン基準 / 単位換算 / 位置合わせ未確認 |
 | 烘焙变换 | Bake Transforms | トランスフォームをベイク |
 | 坐标系 | Coordinate System | 座標系 |
@@ -240,21 +240,34 @@ The Properties panel's **Scene Coordinate Relationship** summary and tooltip
 refresh through the existing `updateInspector` language path. **Append** explains
 that source coordinates are retained and that declared-unit conversion is not
 registration or CRS reprojection; its open dialog and buttons also follow live
-language changes. **Scene Base** replaces the former active-model-base caption:
-the plane belongs to the collection and does not jump when selection changes.
-The machine-facing `modelBase` preference remains unchanged. Source filenames,
-CRS text and numerical coordinate data are never translated or rewritten.
+language changes. **Source Scene Base (Fixed)** describes the union of the
+collection's unedited source bounds after declared-unit conversion. Selection,
+translation, rotation and scale do not change the plane; adding, removing or
+replacing a source model recalculates it. The **Fixed reference Z=%1** overlay
+retains the placeholder and source double precision, and never implies a model
+movement constraint. The tooltip explains the same distinction in all three
+languages. The machine-facing `modelBase` preference and persistence schema
+remain unchanged. Saving/reopening with the same sources preserves the plane;
+source filenames, CRS text and numerical coordinate data are never translated
+or rewritten.
 See [SCENE_COORDINATES.md](SCENE_COORDINATES.md) for the shared-frame contract and
 the distinction between object transforms, display precision and registration.
 
 中文：“场景坐标关系”摘要与提示通过现有属性刷新即时切换语言。导入窗口明确
-保留源坐标，区分单位换算与配准／CRS 重投影。“场景底部”指整组对象的底部，
-不会因切换选择改变；内部设置标识仍为 `modelBase`。文件名、CRS 和坐标数据不翻译。
+保留源坐标，区分单位换算与配准／CRS 重投影。“原始场景底部（固定）”使用
+换算已声明单位后的未经编辑源范围并集，不随选择、移动、旋转、缩放和保存重开
+变化；新增、移除或替换源模型时重新计算。“固定基准 Z=%1”保留占位符和源数据
+双精度；提示明确其只是观察参考，不限制模型移动。内部设置标识仍为 `modelBase`，
+工程格式不变。文件名、CRS 和坐标数据不翻译。
 
 日本語：「シーン座標の関係」の概要とヒントは既存のプロパティ更新で即時に
 言語を切り替えます。インポートでは元の座標を保持し、単位換算と位置合わせ／
-CRS 再投影を区別します。「シーン底面」は全オブジェクトの底面を指し、選択を
-変えても移動しません。内部設定の `modelBase`、ファイル名、CRS、座標値は保持します。
+CRS 再投影を区別します。「元のシーン底面（固定）」は宣言済み単位を換算した
+編集前のソース範囲の和集合を使い、選択、移動、回転、スケール、保存後の
+再読み込みでは変えません。ソースモデルの追加、削除、置換時に再計算します。
+「固定基準 Z=%1」はプレースホルダーと元データの倍精度を保持します。ヒントは
+観察用の基準であり、モデルの移動を拘束しないことを説明します。内部設定の
+`modelBase` とプロジェクトの形式、ファイル名、CRS、座標値は保持します。
 
 ## Editing guard
 
