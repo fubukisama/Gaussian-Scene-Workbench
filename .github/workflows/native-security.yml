@@ -13,6 +13,36 @@ permissions:
   security-events: write
 
 jobs:
+  regression:
+    name: Backend security regression
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up QA Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+
+      - name: Install QA dependencies
+        run: python -m pip install -r scripts/requirements-native-checks.txt
+
+      - name: Verify owned HTTP and command boundaries
+        env:
+          GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
+        run: |
+          node --version
+          python -B -m unittest crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
+
   analyze:
     name: CodeQL (${{ matrix.language }})
     # pull_request branch filters refer to the base, not the head branch.

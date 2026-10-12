@@ -1718,7 +1718,10 @@ class TrainingBackendTests(unittest.TestCase):
             try:
                 model = server.OUTPUT_DIR / "scene_splat" / "point_cloud" / "iteration_7"
                 write_test_ply(model / "point_cloud.ply", np.array([[0.0, 0.0, 0.0]], dtype=np.float32))
-                with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
+                with (
+                    mock.patch.object(server, "splat_transform_executable", return_value=Path(sys.executable).resolve()),
+                    mock.patch.object(server, "splat_transform_entrypoint", return_value=Path(tmp) / "cli.mjs"),
+                ):
                     with mock.patch.object(server.subprocess, "Popen") as popen:
                         popen.return_value.communicate.return_value = ("", "")
                         popen.return_value.returncode = 0
@@ -1755,7 +1758,10 @@ class TrainingBackendTests(unittest.TestCase):
                 "process": None,
             }
             try:
-                with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
+                with (
+                    mock.patch.object(server, "splat_transform_executable", return_value=Path(sys.executable).resolve()),
+                    mock.patch.object(server, "splat_transform_entrypoint", return_value=Path(tmp) / "cli.mjs"),
+                ):
                     with mock.patch.object(server.subprocess, "Popen", return_value=process):
                         with self.assertRaisesRegex(RuntimeError, "cancelled"):
                             server.run_splat_transform(source, target, job=job)
@@ -1787,7 +1793,8 @@ class TrainingBackendTests(unittest.TestCase):
             original_output = server.OUTPUT_DIR
             server.OUTPUT_DIR = Path(tmp) / "output"
             try:
-                def fake_popen(command, cwd=None, stdout=None, stderr=None, text=False, encoding=None, errors=None):
+                def fake_popen(command, cwd=None, stdout=None, stderr=None, text=False, encoding=None, errors=None,
+                               executable=None, shell=False):
                     Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
                     write_test_ply(Path(command[-1]), np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
                     process = mock.Mock()
@@ -1796,7 +1803,10 @@ class TrainingBackendTests(unittest.TestCase):
                     return process
 
                 upload = FakeUploadItem("scan.spz", b"spz-bytes")
-                with mock.patch.object(server, "splat_transform_executable", return_value=Path("splat-transform.cmd")):
+                with (
+                    mock.patch.object(server, "splat_transform_executable", return_value=Path(sys.executable).resolve()),
+                    mock.patch.object(server, "splat_transform_entrypoint", return_value=Path(tmp) / "cli.mjs"),
+                ):
                     with mock.patch.object(server.subprocess, "Popen", side_effect=fake_popen):
                         result = server.import_splat_scene(upload, "imported_spz", overwrite=False)
 

@@ -1,4 +1,5 @@
 import argparse
+import ast
 import cgi
 import concurrent.futures
 import json
@@ -188,6 +189,21 @@ def safe_filename(name):
     return name or f"file_{uuid.uuid4().hex}"
 
 
+def managed_path(root, *parts, allow_root=False):
+    """Resolve a managed path without allowing sibling prefixes or escaping links."""
+    root = os.path.realpath(os.fspath(root))
+    target = os.path.realpath(os.path.join(root, *(os.fspath(part) for part in parts)))
+    root_key = os.path.normcase(root)
+    target_key = os.path.normcase(target)
+    if target_key == root_key:
+        if not allow_root:
+            raise ValueError("Unsupported asset file")
+    elif not target_key.startswith(root_key.rstrip(os.sep) + os.sep):
+        raise ValueError("Unsupported asset file")
+    # Keep the actual canonical spelling; normcase is only for Windows comparison.
+    return Path(target)
+
+
 def unique_path(directory, filename):
     candidate = directory / filename
     if not candidate.exists():
@@ -345,36 +361,48 @@ def safe_training_backend(backend):
 
 
 def model_dir(scene):
-    return OUTPUT_DIR / safe_name(scene)
+    return managed_path(OUTPUT_DIR, safe_name(scene))
 
 
 def ply_path(scene, iteration):
-    return model_dir(scene) / "point_cloud" / f"iteration_{int(iteration)}" / "point_cloud.ply"
+    root = model_dir(scene)
+    try:
+        return managed_path(root, "point_cloud", f"iteration_{int(iteration)}", "point_cloud.ply")
+    except ValueError as exc:
+        raise FileNotFoundError(str(exc)) from exc
 
 
 def splat_transform_executable():
-    bin_dir = Path(__file__).resolve().parent / "node_modules" / ".bin"
-    candidates = [
-        bin_dir / ("splat-transform.cmd" if os.name == "nt" else "splat-transform"),
-        bin_dir / "splat-transform",
-        shutil.which("splat-transform"),
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = Path(candidate)
-        if path.exists() or shutil.which(str(candidate)):
+    # Windows may interpret .cmd/.bat through a shell even with shell=False.
+    # Use the already installed Node executable, never the npm batch shim.
+    candidate = shutil.which("node.exe" if os.name == "nt" else "node")
+    if candidate:
+        path = Path(candidate).resolve(strict=True)
+        if (path.is_file() and path.suffix.lower() not in {".cmd", ".bat"}
+                and (os.name != "nt" or path.suffix.lower() == ".exe")):
             return path
-    raise FileNotFoundError("Missing splat-transform. Run npm install in crop_editor.")
+    raise FileNotFoundError("Missing a direct Node executable for the optional splat converter.")
+
+
+def splat_transform_entrypoint():
+    # This fixed package entry is declared by @playcanvas/splat-transform's bin.
+    # Native SPZ import/export uses the C++ codec and does not need Node.
+    path = Path(__file__).resolve().parent / "node_modules" / "@playcanvas" / "splat-transform" / "bin" / "cli.mjs"
+    if not path.is_file():
+        raise FileNotFoundError("Missing splat-transform. Run npm install in crop_editor.")
+    return path.resolve(strict=True)
 
 
 def run_splat_transform(input_path, output_path, job=None):
-    input_path = Path(input_path)
-    output_path = Path(output_path)
+    input_path = Path(input_path).resolve()
+    output_path = Path(output_path).resolve()
+    executable = splat_transform_executable()
+    entrypoint = splat_transform_entrypoint()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [splat_transform_executable(), "-w", input_path, output_path]
     process = subprocess.Popen(
-        [str(part) for part in command],
+        [str(executable), str(entrypoint), "-w", "--", str(input_path), str(output_path)],
+        executable=str(executable),
+        shell=False,
         cwd=str(Path(__file__).resolve().parent),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -417,7 +445,7 @@ def export_splat_format(scene, iteration, fmt, job=None):
     source = ply_path(scene, iteration)
     if fmt == "ply":
         return source
-    output = source.with_name(f"point_cloud.{fmt}")
+    output = managed_path(source.parent, f"point_cloud.{fmt}")
     if output.exists() and output.stat().st_mtime >= source.stat().st_mtime:
         return output
     return run_splat_transform(source, output, job=job)
@@ -460,7 +488,11 @@ def import_splat_scene(upload_item, scene, overwrite=False):
 
 
 def latest_iteration(scene):
-    pc_dir = model_dir(scene) / "point_cloud"
+    root = model_dir(scene)
+    try:
+        pc_dir = managed_path(root, "point_cloud")
+    except ValueError as exc:
+        raise FileNotFoundError(str(exc)) from exc
     if not pc_dir.exists():
         return None
     iterations = []
@@ -549,7 +581,7 @@ def inspect_training_point_cloud(path):
 
 def training_point_cloud(scene, expected_iteration=None):
     """Locate and validate the requested or latest usable training checkpoint."""
-    point_cloud_root = model_dir(scene) / "point_cloud"
+    point_cloud_root = managed_path(model_dir(scene), "point_cloud")
     if expected_iteration is not None:
         iterations = [int(expected_iteration)]
     elif point_cloud_root.is_dir():
@@ -564,8 +596,8 @@ def training_point_cloud(scene, expected_iteration=None):
 
     last_error = None
     for iteration in iterations:
-        candidate = point_cloud_root / f"iteration_{iteration}" / "point_cloud.ply"
         try:
+            candidate = ply_path(scene, iteration)
             summary = inspect_training_point_cloud(candidate)
             summary["iteration"] = iteration
             return summary
@@ -591,7 +623,7 @@ def detect_ply_backend(scene, iteration=None):
 
 
 def scene_backend(scene, iteration=None):
-    metadata_path = model_dir(scene) / "training_backend.json"
+    metadata_path = managed_path(model_dir(scene), "training_backend.json")
     if metadata_path.exists():
         try:
             with open(metadata_path, "r", encoding="utf-8") as f:
@@ -684,7 +716,7 @@ def scene_source_path(scene):
             return Path(source)
     except Exception:
         pass
-    return DATASETS_DIR / scene
+    return managed_path(DATASETS_DIR, safe_name(scene))
 
 
 def scene_config_assets(scene):
@@ -757,11 +789,11 @@ def psnr_report_file_path(scene, run, name):
     name = safe_filename(name)
     if name not in {"psnr_results.json", "psnr_results.csv"}:
         raise ValueError("Unsupported PSNR asset file")
-    path = (PSNR_REPORTS_DIR / scene / run / name).resolve()
-    root = (PSNR_REPORTS_DIR / scene).resolve()
-    if not str(path).startswith(str(root)):
-        raise ValueError("Invalid PSNR asset path")
-    return path
+    try:
+        root = managed_path(PSNR_REPORTS_DIR, scene)
+        return managed_path(root, run, name)
+    except ValueError as exc:
+        raise ValueError("Invalid PSNR asset path") from exc
 
 
 def open_psnr_report_dir(scene, run):
@@ -777,11 +809,12 @@ def open_psnr_report_dir(scene, run):
 
 def scene_psnr_assets(scene):
     scene = safe_name(scene)
-    base = PSNR_REPORTS_DIR / scene
+    base = managed_path(PSNR_REPORTS_DIR, scene)
     if not base.exists():
         return []
     reports = []
     for result_json in base.glob("*/psnr_results.json"):
+        result_json = managed_path(base, result_json)
         run_dir = result_json.parent
         run = run_dir.name
         result = {}
@@ -789,7 +822,7 @@ def scene_psnr_assets(scene):
             result = json.loads(result_json.read_text(encoding="utf-8"))
         except Exception:
             result = {}
-        csv_path = run_dir / "psnr_results.csv"
+        csv_path = managed_path(run_dir, "psnr_results.csv")
         backend = str(result.get("backend") or run.split("_iter_", 1)[0] or "").upper()
         iteration = result.get("iteration")
         rendered = result.get("rendered_count")
@@ -879,7 +912,7 @@ def checkpoint_iteration_from_name(path):
 
 
 def checkpoint_metadata_path(scene):
-    return model_dir(scene) / "experiment_checkpoints.json"
+    return managed_path(model_dir(scene), "experiment_checkpoints.json")
 
 
 def checkpoint_metadata(scene):
@@ -957,7 +990,7 @@ def scene_checkpoints(scene):
     marks = checkpoint_metadata(scene)
     pinned = set(marks.get("pinned") or [])
     best = marks.get("best")
-    pc_root = model / "point_cloud"
+    pc_root = managed_path(model, "point_cloud")
     if pc_root.exists():
         for child in pc_root.iterdir():
             if not child.is_dir() or not child.name.startswith("iteration_"):
@@ -966,7 +999,7 @@ def scene_checkpoints(scene):
                 iteration = int(child.name.split("_", 1)[1])
             except ValueError:
                 continue
-            point_cloud = child / "point_cloud.ply"
+            point_cloud = managed_path(model, child, "point_cloud.ply")
             item = by_iteration.setdefault(iteration, {"iteration": iteration})
             item["point_cloud_path"] = str(point_cloud)
             item["point_cloud_exists"] = point_cloud.exists()
@@ -976,6 +1009,9 @@ def scene_checkpoints(scene):
     if model.exists():
         for pattern in ("chkpnt*.pth", "checkpoint*.pth", "*.ckpt"):
             for checkpoint in model.glob(pattern):
+                # Validate the target, but keep the original entry for unlink:
+                # deleting an owned link must not delete its target instead.
+                managed_path(model, checkpoint)
                 if not checkpoint.is_file():
                     continue
                 iteration = checkpoint_iteration_from_name(checkpoint)
@@ -1489,7 +1525,7 @@ def asset_config_file_path(scene, name):
     allowed = {"scene.json", "training_backend.json", "cfg_args", "cameras.json", "exposure.json", "input.ply"}
     if name not in allowed:
         raise ValueError("Unsupported asset file")
-    return model_dir(scene) / name
+    return managed_path(model_dir(scene), name)
 
 
 def open_asset_dir(scene, target):
@@ -1606,7 +1642,7 @@ def point_payload(scene, iteration):
 
 
 def camera_payload(scene):
-    path = model_dir(scene) / "cameras.json"
+    path = managed_path(model_dir(scene), "cameras.json")
     if not path.exists():
         return {"cameras": []}
     with open(path, "r", encoding="utf-8") as f:
@@ -1629,11 +1665,12 @@ def camera_payload(scene):
 
 
 def copy_model_sidecars(src_model, dst_model):
+    files = [(managed_path(src_model, name), managed_path(dst_model, name))
+             for name in ("cfg_args", "cameras.json", "input.ply")]
     dst_model.mkdir(parents=True, exist_ok=True)
-    for name in ("cfg_args", "cameras.json", "input.ply"):
-        src = src_model / name
+    for src, dst in files:
         if src.exists():
-            shutil.copy2(src, dst_model / name)
+            shutil.copy2(src, dst)
 
 
 def filtered_ply(src_ply, dst_ply, delete_indices):
@@ -1779,11 +1816,23 @@ def save_trimmed_mesh(scene, iteration, output_scene, mode, ply_text, overwrite=
 
 
 def load_cfg_args(model_path):
-    cfg_path = Path(model_path) / "cfg_args"
+    cfg_path = managed_path(model_path, "cfg_args")
     if not cfg_path.exists():
         return argparse.Namespace()
     text = cfg_path.read_text(encoding="utf-8")
-    return eval(text, {"Namespace": argparse.Namespace})
+    # cfg_args is serialized model metadata, never a Python program. Accept the
+    # normal argparse representation, with literal keyword values only.
+    expression = ast.parse(text, mode="eval").body
+    if (not isinstance(expression, ast.Call)
+            or not isinstance(expression.func, ast.Name)
+            or expression.func.id != "Namespace" or expression.args):
+        raise ValueError("Unsupported asset file")
+    values = {}
+    for keyword in expression.keywords:
+        if keyword.arg is None or keyword.arg in values:
+            raise ValueError("Unsupported asset file")
+        values[keyword.arg] = ast.literal_eval(keyword.value)
+    return argparse.Namespace(**values)
 
 
 def safe_mesh_mode(mode):
@@ -1813,7 +1862,7 @@ def mesh_output_path(scene, iteration, mode="bounded", post=True):
         name = "fuse_unbounded.ply" if mode == "unbounded" else "fuse.ply"
     if post:
         name = name.replace(".ply", "_post.ply")
-    return model_dir(scene) / "train" / f"ours_{int(iteration)}" / name
+    return managed_path(model_dir(scene), "train", f"ours_{int(iteration)}", name)
 
 
 def mesh_file_url(scene, iteration, mode="bounded", post=True):
@@ -1844,7 +1893,7 @@ def mesh_chunk_file_url(scene, iteration, mode, post, key, index):
 
 def mesh_texture_dir(scene, iteration, mode="bounded", post=True):
     source = mesh_output_path(scene, iteration, mode, post)
-    return source.parent / f"{source.stem}_texture"
+    return managed_path(source.parent, f"{source.stem}_texture")
 
 
 def mesh_texture_paths(scene, iteration, mode="bounded", post=True):
@@ -1855,11 +1904,11 @@ def mesh_texture_paths(scene, iteration, mode="bounded", post=True):
     stem = mesh_output_path(scene, iteration, mode, post).stem
     return {
         "dir": out_dir,
-        "obj": out_dir / f"{stem}_textured.obj",
-        "mtl": out_dir / f"{stem}_textured.mtl",
-        "png": out_dir / f"{stem}_texture.png",
-        "zip": out_dir / f"{stem}_textured.zip",
-        "glb": out_dir / f"{stem}_textured.glb",
+        "obj": managed_path(out_dir, f"{stem}_textured.obj"),
+        "mtl": managed_path(out_dir, f"{stem}_textured.mtl"),
+        "png": managed_path(out_dir, f"{stem}_texture.png"),
+        "zip": managed_path(out_dir, f"{stem}_textured.zip"),
+        "glb": managed_path(out_dir, f"{stem}_textured.glb"),
     }
 
 
@@ -1894,8 +1943,9 @@ def safe_texture_kind(kind):
 
 def mesh_texture_asset_payload(scene, iteration, mode="bounded", post=True):
     paths = mesh_texture_paths(scene, iteration, mode, post)
-    textured_ply = paths["dir"] / "colmap_texturer" / "output" / "mesh.ply"
-    textured_texture = paths["dir"] / "colmap_texturer" / "output" / "texture.png"
+    texturer_output = managed_path(paths["dir"], "colmap_texturer", "output")
+    textured_ply = managed_path(texturer_output, "mesh.ply")
+    textured_texture = managed_path(texturer_output, "texture.png")
     files = {}
     for kind in ("obj", "mtl", "png", "zip", "glb"):
         path = paths[kind]
@@ -1990,10 +2040,10 @@ def mesh_preview_path(scene, iteration, mode="bounded", post=True, max_faces=MES
     if not source.exists():
         raise FileNotFoundError(source)
     max_faces = max(1, int(max_faces or MESH_PREVIEW_MAX_FACES))
-    cache_dir = source.parent / ".mesh_preview"
+    cache_dir = managed_path(source.parent, ".mesh_preview")
     cache_dir.mkdir(parents=True, exist_ok=True)
     stat = source.stat()
-    preview = cache_dir / f"{source.stem}_{stat.st_mtime_ns}_{stat.st_size}_{max_faces}.ply"
+    preview = managed_path(cache_dir, f"{source.stem}_{stat.st_mtime_ns}_{stat.st_size}_{max_faces}.ply")
     if preview.exists():
         return preview
     return write_mesh_preview(source, preview, max_faces)
@@ -2099,8 +2149,9 @@ def mesh_chunk_cache_paths(source, max_faces):
     source = Path(source)
     stat = source.stat()
     key = f"{source.stem}_{stat.st_mtime_ns}_{stat.st_size}_{int(max_faces)}"
-    directory = source.parent / ".mesh_chunks" / key
-    return key, directory, directory / "manifest.json"
+    cache_root = managed_path(source.parent, ".mesh_chunks")
+    directory = managed_path(cache_root, key)
+    return key, directory, managed_path(directory, "manifest.json")
 
 
 def write_mesh_chunk(chunk_path, positions, colors, triangles, remap, source_has_colors):
@@ -2189,7 +2240,7 @@ def build_mesh_chunk_cache(source, cache_dir, manifest_path, max_faces):
         nonlocal triangles, remap
         if not triangles:
             return
-        chunk_path = cache_dir / f"chunk_{len(chunks):05d}.bin"
+        chunk_path = managed_path(cache_dir, f"chunk_{len(chunks):05d}.bin")
         chunks.append(write_mesh_chunk(chunk_path, positions, colors, triangles, remap, has_rgb))
         triangles = []
         remap = {}
@@ -2254,16 +2305,17 @@ def mesh_chunk_manifest(scene, iteration, mode="bounded", post=True, max_faces=M
 
 def textured_mesh_source_paths(scene, iteration, mode="bounded", post=True):
     paths = mesh_texture_paths(scene, iteration, mode, post)
-    texturer_output = paths["dir"] / "colmap_texturer" / "output"
-    return texturer_output / "mesh.ply", texturer_output / "texture.png"
+    texturer_output = managed_path(paths["dir"], "colmap_texturer", "output")
+    return managed_path(texturer_output, "mesh.ply"), managed_path(texturer_output, "texture.png")
 
 
 def textured_mesh_chunk_cache_paths(source, max_faces):
     source = Path(source)
     stat = source.stat()
     key = f"{source.stem}_textured_{stat.st_mtime_ns}_{stat.st_size}_{int(max_faces)}"
-    directory = source.parent / ".textured_mesh_chunks" / key
-    return key, directory, directory / "manifest.json"
+    cache_root = managed_path(source.parent, ".textured_mesh_chunks")
+    directory = managed_path(cache_root, key)
+    return key, directory, managed_path(directory, "manifest.json")
 
 
 def ply_binary_mesh_layout(path):
@@ -2396,7 +2448,7 @@ def build_textured_mesh_chunk_cache(source, texture_path, cache_dir, manifest_pa
         nonlocal triangles, remap
         if not triangles:
             return
-        chunk_path = cache_dir / f"chunk_{len(chunks):05d}.bin"
+        chunk_path = managed_path(cache_dir, f"chunk_{len(chunks):05d}.bin")
         chunks.append(write_textured_mesh_chunk(chunk_path, positions, triangles, remap))
         triangles = []
         remap = {}
@@ -2598,10 +2650,10 @@ def copytree_replace(source, target):
 
 
 def remove_tree_inside(root, target):
-    root = Path(root).resolve()
-    target = Path(target).resolve()
-    if not str(target).lower().startswith(str(root).lower()):
-        raise RuntimeError(f"Refusing to remove path outside staging root: {target}")
+    try:
+        target = managed_path(root, target)
+    except ValueError as exc:
+        raise RuntimeError(f"Refusing to remove path outside staging root: {target}") from exc
     if target.exists():
         shutil.rmtree(target)
 
@@ -3656,7 +3708,7 @@ def openmvs_texture_commands(scene, iteration, options, work_subdir="openmvs"):
     cfg = load_cfg_args(model_dir(scene))
     dataset_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
     output_paths = mesh_texture_paths(scene, iteration, options["mode"], options["post"])
-    work_dir = output_paths["dir"] / work_subdir
+    work_dir = managed_path(output_paths["dir"], work_subdir)
     work_dir.mkdir(parents=True, exist_ok=True)
     colmap_input, images_dir, undistort_command = prepare_openmvs_colmap_input(dataset_path, work_dir)
     scene_mvs = work_dir / "scene.mvs"
@@ -3738,10 +3790,10 @@ def colmap_texturer_command(scene, iteration, options):
     cfg = load_cfg_args(model_dir(scene))
     dataset_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
     output_paths = mesh_texture_paths(scene, iteration, options["mode"], options["post"])
-    work_dir = output_paths["dir"] / "colmap_texturer"
+    work_dir = managed_path(output_paths["dir"], "colmap_texturer")
     work_dir.mkdir(parents=True, exist_ok=True)
     workspace = prepare_colmap_texturer_workspace(dataset_path, work_dir)
-    texturer_output = work_dir / "output"
+    texturer_output = managed_path(work_dir, "output")
     if texturer_output.exists():
         shutil.rmtree(texturer_output)
     texturer_output.mkdir(parents=True, exist_ok=True)
@@ -4693,7 +4745,15 @@ def training_environment_report(backend="3dgs"):
     git_path = command_path("git")
     npm_path = command_path("npm")
     vs_install = vs_build_tools_installation()
-    crop_helper = ROOT / "crop_editor" / "node_modules" / ".bin" / ("splat-transform.cmd" if os.name == "nt" else "splat-transform")
+    crop_helper = ROOT / "crop_editor" / "node_modules" / "@playcanvas" / "splat-transform" / "bin" / "cli.mjs"
+    crop_helper_ready = False
+    try:
+        # Report the same direct executable + fixed entrypoint required by launch.
+        splat_transform_executable()
+        crop_helper = splat_transform_entrypoint()
+        crop_helper_ready = True
+    except (OSError, ValueError):
+        pass
     opencv_ok, opencv_detail = python_probe(
         python_path,
         env,
@@ -4735,7 +4795,7 @@ def training_environment_report(backend="3dgs"):
         "ffmpeg": str(ffmpeg_path),
         "ffmpeg_exists": ffmpeg_path.exists(),
         "crop_node_helper": str(crop_helper),
-        "crop_node_helper_exists": crop_helper.exists(),
+        "crop_node_helper_exists": crop_helper_ready,
         "gaussian_dir": str(GAUSSIAN_DIR),
         "gaussian_dir_exists": GAUSSIAN_DIR.exists(),
         "two_dgs_dir": str(TWO_DGS_DIR),
@@ -5982,6 +6042,8 @@ def training_milestone_iterations(iterations):
 
 
 def write_training_metadata(output, backend, quality=None, options=None, summary=None):
+    backend_path = managed_path(output, "training_backend.json")
+    scene_path = managed_path(output, "scene.json") if options else None
     metadata = {
         "backend": backend,
         "created_at": time.time(),
@@ -5990,7 +6052,7 @@ def write_training_metadata(output, backend, quality=None, options=None, summary
     if quality:
         metadata["quality"] = quality
     output.mkdir(parents=True, exist_ok=True)
-    with open(output / "training_backend.json", "w", encoding="utf-8") as f:
+    with open(backend_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     if options:
         scene_metadata = {
@@ -6006,7 +6068,7 @@ def write_training_metadata(output, backend, quality=None, options=None, summary
         normalized_summary = normalize_training_summary(summary)
         if normalized_summary is not None and normalized_summary["backend"] == backend:
             scene_metadata["training"]["summary"] = normalized_summary
-        with open(output / "scene.json", "w", encoding="utf-8") as f:
+        with open(scene_path, "w", encoding="utf-8") as f:
             json.dump(scene_metadata, f, indent=2)
 
 
@@ -6938,7 +7000,8 @@ def psnr_job_snapshot(job):
 
 def psnr_output_dir(scene, iteration, backend, count):
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return PSNR_REPORTS_DIR / safe_name(scene) / f"{backend}_iter_{int(iteration)}_n{int(count)}_{stamp}"
+    root = managed_path(PSNR_REPORTS_DIR, safe_name(scene))
+    return managed_path(root, f"{safe_training_backend(backend)}_iter_{int(iteration)}_n{int(count)}_{stamp}")
 
 
 def psnr_width_attempts(requested_width):
@@ -7540,12 +7603,12 @@ def extract_video_frames(video_path, images_dir, fps):
 
 
 def prepare_dataset_import(scene, overwrite):
-    dataset = DATASETS_DIR / scene
-    images_dir = dataset / "images"
-    source_dir = dataset / "source"
-    originals_dir = source_dir / "originals"
+    dataset = managed_path(DATASETS_DIR, safe_name(scene))
+    images_dir = managed_path(dataset, "images")
+    source_dir = managed_path(dataset, "source")
+    originals_dir = managed_path(source_dir, "originals")
     if dataset.exists() and overwrite:
-        shutil.rmtree(dataset)
+        remove_tree_inside(DATASETS_DIR, dataset)
     images_dir.mkdir(parents=True, exist_ok=True)
     originals_dir.mkdir(parents=True, exist_ok=True)
     return dataset, images_dir, source_dir, originals_dir
@@ -8096,11 +8159,11 @@ class Handler(BaseHTTPRequestHandler):
                 iteration = int(qs.get("iteration", [latest_iteration(scene)])[0])
                 mode = safe_mesh_mode(qs.get("mode", ["bounded"])[0])
                 post = qs.get("post", ["true"])[0].lower() != "false"
-                key = safe_filename(qs.get("key", [""])[0])
+                key = safe_name(qs.get("key", [""])[0])
                 index = int(qs.get("index", ["0"])[0])
                 source = mesh_output_path(scene, iteration, mode, post)
                 _, cache_dir, _ = mesh_chunk_cache_paths(source, MESH_CHUNK_MAX_FACES)
-                path = cache_dir.parent / key / f"chunk_{index:05d}.bin"
+                path = managed_path(cache_dir.parent, key, f"chunk_{index:05d}.bin")
                 return self.serve_file(path, "application/octet-stream", path.name)
             if parsed.path == "/api/mesh/texture/chunk_file":
                 qs = parse_qs(parsed.query)
@@ -8108,11 +8171,11 @@ class Handler(BaseHTTPRequestHandler):
                 iteration = int(qs.get("iteration", [latest_iteration(scene)])[0])
                 mode = safe_mesh_mode(qs.get("mode", ["bounded"])[0])
                 post = qs.get("post", ["true"])[0].lower() != "false"
-                key = safe_filename(qs.get("key", [""])[0])
+                key = safe_name(qs.get("key", [""])[0])
                 index = int(qs.get("index", ["0"])[0])
                 source, _ = textured_mesh_source_paths(scene, iteration, mode, post)
                 _, cache_dir, _ = textured_mesh_chunk_cache_paths(source, MESH_CHUNK_MAX_FACES)
-                path = cache_dir.parent / key / f"chunk_{index:05d}.bin"
+                path = managed_path(cache_dir.parent, key, f"chunk_{index:05d}.bin")
                 return self.serve_file(path, "application/octet-stream", path.name)
             if parsed.path == "/api/mesh/texture/file":
                 qs = parse_qs(parsed.query)
@@ -8131,6 +8194,8 @@ class Handler(BaseHTTPRequestHandler):
                 }[kind]
                 return self.serve_file(path, mime, path.name)
             self.serve_static(parsed.path)
+        except FileNotFoundError as exc:
+            self.send_error_json(exc, 404)
         except Exception as exc:
             self.send_error_json(exc, 500)
 
@@ -8322,8 +8387,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("", "/"):
             path = "/index.html"
         rel = Path(path.lstrip("/"))
-        target = (STATIC_DIR / rel).resolve()
-        if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.exists():
+        try:
+            target = managed_path(STATIC_DIR, rel)
+        except ValueError:
+            self.send_json({"error": "Not found"}, 404)
+            return
+        if not target.is_file():
             self.send_json({"error": "Not found"}, 404)
             return
         content_type = "text/html; charset=utf-8"
@@ -8340,8 +8409,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def serve_file(self, path, content_type, download_name=None):
-        path = Path(path)
-        if not path.exists():
+        for root in (OUTPUT_DIR, PREVIEW_DIR, PSNR_REPORTS_DIR):
+            try:
+                managed = managed_path(root, path)
+                break
+            except ValueError:
+                continue
+        else:
+            self.send_json({"error": "Not found"}, 404)
+            return
+        path = managed
+        if not path.is_file():
             self.send_json({"error": "Not found"}, 404)
             return
         self.send_response(200)

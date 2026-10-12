@@ -1787,7 +1787,7 @@ int NativeViewport::observationTrackballAxisAt(const QPointF &position) const {
       world[(axis + 1) % 3] = std::cos(angle);
       world[(axis + 2) % 3] = std::sin(angle);
       const QVector3D point = view.mapVector(world);
-      const QPointF screen = center + QPointF(point.x() * radius, -point.y() * radius);
+      const QPointF screen = center + QPointF(qreal(point.x()) * radius, -qreal(point.y()) * radius);
       if (step > 0 && point.z() > 0.05F) {
         const QPointF segment = screen - previous;
         const qreal length = QPointF::dotProduct(segment, segment);
@@ -1911,7 +1911,7 @@ void NativeViewport::drawObservationTrackball(QPainter &painter) {
       world[(axis + 1) % 3] = std::cos(angle);
       world[(axis + 2) % 3] = std::sin(angle);
       const auto point = view.mapVector(world);
-      const QPointF screen = center + QPointF(point.x() * radius, -point.y() * radius);
+      const QPointF screen = center + QPointF(qreal(point.x()) * radius, -qreal(point.y()) * radius);
       QColor color = navigationAxisColor(axis);
       color.setAlpha(lightViewport()
                          ? point.z() < 0 ? 45 : activeAxis == axis ? 245 : hover ? 190 : 135
@@ -7187,8 +7187,8 @@ NativeViewport::projectPoint(const QVector3D &point,
   if (normalized.z() < -1.0F || normalized.z() > 1.0F) {
     return std::nullopt;
   }
-  return QPointF((normalized.x() * 0.5F + 0.5F) * width(),
-                 (1.0F - (normalized.y() * 0.5F + 0.5F)) * height());
+  return QPointF((qreal(normalized.x()) * 0.5 + 0.5) * width(),
+                 (1.0 - (qreal(normalized.y()) * 0.5 + 0.5)) * height());
 }
 
 void NativeViewport::drawDepthAwareLines(

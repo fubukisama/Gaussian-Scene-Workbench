@@ -9,6 +9,7 @@ on:
       - "crop_editor/server.py"
       - "crop_editor/video_extract.py"
       - "crop_editor/tests/test_training_backends.py"
+      - "crop_editor/tests/test_*security.py"
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
@@ -34,6 +35,7 @@ on:
       - "crop_editor/server.py"
       - "crop_editor/video_extract.py"
       - "crop_editor/tests/test_training_backends.py"
+      - "crop_editor/tests/test_*security.py"
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
@@ -175,8 +177,11 @@ jobs:
         shell: pwsh
         env:
           QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
+          GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
         run: |
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw "The hosted runner is missing Node for the test-owned argv receiver." }
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts

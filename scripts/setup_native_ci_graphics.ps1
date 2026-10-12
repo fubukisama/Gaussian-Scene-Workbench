@@ -22,9 +22,33 @@ if (-not (Test-Path -LiteralPath $archive)) {
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $digest) {
     throw "Mesa $version release checksum mismatch; refusing extraction."
 }
+# Windows' bundled bsdtar does not support the LZMA codec used by this .7z
+# release on every hosted image. Use the runner's existing real 7-Zip CLI;
+# never install a new extractor or silently fall back to a partial extraction.
+$sevenZip = $null
+$candidates = @()
+if ($env:ProgramFiles) {
+    $candidates += Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+}
+$candidates += @(
+    Get-Command 7z.exe, 7z -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Source
+)
+foreach ($candidate in $candidates) {
+    if ([IO.Path]::IsPathRooted($candidate) -and
+        [IO.Path]::GetExtension($candidate) -ieq '.exe' -and
+        (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        $sevenZip = [IO.Path]::GetFullPath($candidate)
+        break
+    }
+}
+if (-not $sevenZip) {
+    throw 'Mesa CI extraction requires an already installed 7-Zip 7z.exe. No extractor will be installed, and native graphics tests will not be skipped.'
+}
 $unpacked = Join-Path $root "mesa-$version"
 New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
-& tar.exe -xf $archive -C $unpacked x64/opengl32.dll x64/libgallium_wgl.dll readme.txt
+Write-Output "Mesa CI extractor: $sevenZip"
+& $sevenZip x -y "-o$unpacked" $archive x64/opengl32.dll x64/libgallium_wgl.dll readme.txt
 if ($LASTEXITCODE -ne 0) { throw 'Mesa CI extraction failed.' }
 $dll = Join-Path $unpacked 'x64/opengl32.dll'
 $driver = Join-Path $unpacked 'x64/libgallium_wgl.dll'

@@ -343,8 +343,8 @@ float axisRotationDragDegrees(
   const QVector4D direction = viewProjection * QVector4D(tangent, 0.0F);
   const double w = clip.w();
   QPointF screenTangent(
-      (direction.x() * w - clip.x() * direction.w()) / (w * w) * viewportSize.width(),
-      -(direction.y() * w - clip.y() * direction.w()) / (w * w) * viewportSize.height());
+      (direction.x() * w - static_cast<double>(clip.x()) * direction.w()) / (w * w) * viewportSize.width(),
+      -(direction.y() * w - static_cast<double>(clip.y()) * direction.w()) / (w * w) * viewportSize.height());
   const qreal length = std::hypot(screenTangent.x(), screenTangent.y());
   if (!std::isfinite(length) || length <= 1.0e-12) {
     return 0.0F;

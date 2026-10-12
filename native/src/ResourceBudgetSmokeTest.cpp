@@ -154,7 +154,7 @@ qint64 modelColorPixels(const QImage &frame, const bool red) {
 QImage firstHudDigit(const QImage &frame, const qreal scale) {
   const int width = std::min(frame.width(), qRound(280 * scale));
   const int height = std::min(frame.height(), qRound(100 * scale));
-  QVector<quint8> pixels(width * height, 0);
+  QVector<quint8> pixels(qsizetype(width) * height, 0);
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       const auto color = frame.pixelColor(x, y);

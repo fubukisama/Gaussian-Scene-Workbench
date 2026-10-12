@@ -30,6 +30,14 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 
 结果在仓库 **Security and quality → Code scanning** 中按分支与分析类别查看。成功上传只表示检测已执行，并不保证没有漏洞。真实告警需要检查触发路径与风险后修复；不通过过滤查询、隐藏告警或删除历史失败记录冒充修复。
 
+### 共享后端安全回归
+
+Windows worker 检查与 `Native Security` 的独立 Ubuntu 回归任务都运行现有后端测试以及 `test_path_security`、`test_command_security`。它们通过真实回环 HTTP 请求和测试自有子进程验证目录边界、合法 3DGS/2DGS/网格读写、命令操作数隔离和取消；Ubuntu 还覆盖 Windows 可能因权限不可用的文件符号链接。样本位于 runner 临时目录，不读取原始研究工程，也不启动训练。
+
+模型 `cfg_args` 只接受 `Namespace` 及字面值参数，不再使用 `eval`。实验查看回归同时验证合法参数、原始 Unicode 路径与列表/字典不变，以及查看不可信配置时不执行表达式。目录边界在读写、缓存和预览生成前检查，而不只在最终下载时检查。Windows 比较保留大小写不敏感语义，但返回真实路径大小写；不能为消除静态分析告警而改成错误的路径行为。任何残余告警仍须按实际数据流核查，不自动忽略。
+
+命令边界测试使用 runner 已有 Node 执行微型参数接收器，它不是 SPZ/SOG 编码器，因此不证明实际编码质量。可选的旧后端转换器只允许已安装的直接 Node 可执行文件与项目内固定 `cli.mjs`，不再回退到 Windows `.cmd`/`.bat` 或全局 shim。原生 SPZ 使用 C++ 编解码器；不向桌面安装包添加 Node、JavaScript 或 Mesa。环境就绪报告必须与实际启动条件保持一致。
+
 ### 依赖漏洞告警的边界
 
 Dependabot alerts 是管理员在仓库设置中启用的独立功能，不依赖 `dependabot.yml`，也不等于自动版本升级。它根据 GitHub 支持的依赖图和已审核公告检查**默认分支**，因此旧 HTML `main` 的告警不代表桌面开发分支的 pinned runtime 已完成审计。Python/CUDA 扩展、Conda 环境、外部 COLMAP/OpenMVS、模型权重及本机实际安装版本不保证被依赖图完整覆盖。运行库升级需要分别验证 3DGS、2DGS 与网格后端的兼容性，不能直接把 QA 环境或默认分支依赖当作训练环境。
@@ -66,6 +74,14 @@ The new scanning accepts pushes to `agent/native-desktop-0.3` and pull requests 
 
 Inspect **Security and quality → Code scanning** by branch and analysis category. A successful upload means the detection ran, not that the repository is vulnerability-free. Investigate the reachable path and risk of real findings before fixing them; do not substitute query exclusions, hidden alerts or deleted failed runs for remediation.
 
+### Shared-backend security regression
+
+Both the Windows worker checks and an independent Ubuntu regression job in `Native Security` run the existing backend tests plus `test_path_security` and `test_command_security`. Real loopback HTTP requests and test-owned subprocesses verify directory boundaries, legitimate 3DGS/2DGS/mesh IO, isolated command operands and cancellation. Ubuntu also covers file symbolic links that Windows privileges may prevent. Fixtures live in the runner's temporary directory, without reading original research projects or starting training.
+
+Model `cfg_args` accepts only `Namespace` and literal keyword values; `eval` is no longer used. Experiment-view checks preserve legitimate values, original Unicode paths, lists and dictionaries while verifying that untrusted expressions never execute. Directory boundaries are checked before reads, writes, cache and preview generation, not only at the final download. Windows comparisons remain case-insensitive while returning the actual path spelling; runtime correctness must not be sacrificed to silence static-analysis findings. Remaining findings still require reachable-flow review and are not ignored automatically.
+
+The command checks run a tiny argument receiver with the runner's existing Node. It is not an SPZ/SOG encoder and does not certify encoding quality. The optional legacy backend converter requires an already-installed direct Node executable and the project's fixed `cli.mjs`; Windows `.cmd`/`.bat` and global-shim fallback are refused. Native SPZ uses the C++ codec. Node, JavaScript and Mesa are not added to the desktop package. Readiness reporting must match the actual launch requirements.
+
 ### Dependency-alert coverage
 
 Dependabot alerts are a separate administrator-enabled repository setting; they do not require `dependabot.yml` and are not automatic version upgrades. They inspect the **default branch**, using supported dependency graphs and reviewed advisories. Alerts for legacy HTML `main` are not an audit of the desktop branch's pinned runtimes. Python/CUDA extensions, Conda environments, external COLMAP/OpenMVS, model weights and actual local installations are not guaranteed complete graph coverage. Runtime upgrades require separate 3DGS, 2DGS and mesh-backend compatibility checks; neither QA dependencies nor default-branch dependencies represent the training runtime.
@@ -101,6 +117,14 @@ CodeQL の advanced setup を使い、別の default setup を同時に有効化
 追加スキャンの対象は `agent/native-desktop-0.3` への push と、このデスクトップブランチを head とする pull request です。手動実行も同じ ref に限定します。pull request は GitHub の merge commit を検査します。`workflow_dispatch` の利用可否には、GitHub のワークフロー登録およびデフォルトブランチ要件が適用されます。このブランチの自動起動経路は push です。旧 HTML の `main` は変更しません。定期スキャンも保証しません。GitHub の `schedule` はワークフローがデフォルトブランチに存在する必要があります。最初の実行では YAML の構文だけでなく、初期化、抽出/ビルド、解析、SARIF アップロードまで確認します。
 
 結果は **Security and quality → Code scanning** でブランチと解析カテゴリを指定して確認します。アップロード成功は検査実行の確認であり、脆弱性がないことの保証ではありません。実際のアラートは到達経路とリスクを調べて修正します。クエリ除外、アラートの非表示、失敗履歴の削除を修正の代わりにしません。
+
+### 共有バックエンドのセキュリティ回帰テスト
+
+Windows の worker 検査と `Native Security` の独立した Ubuntu 回帰ジョブは、既存バックエンドのテストに加え、`test_path_security` と `test_command_security` を実行します。実際のループバック HTTP リクエストとテスト専用子プロセスで、ディレクトリ境界、正規の 3DGS/2DGS/メッシュ入出力、コマンド引数の分離、キャンセルを検証します。Ubuntu では Windows の権限制限で使えない場合があるファイルシンボリックリンクも検査します。サンプルは runner の一時ディレクトリに置き、元の研究プロジェクトを読まず、学習を開始しません。
+
+モデルの `cfg_args` は `Namespace` とリテラルのキーワード値だけを受け入れ、`eval` は使いません。実験表示の検査では、正規の値、元の Unicode パス、リスト、辞書を保持し、不信な式を実行しないことを確認します。ディレクトリ境界は最終ダウンロードだけでなく、読み書き、キャッシュ、プレビューの生成前に検査します。Windows は大文字小文字を区別しない比較を維持し、戻り値の実際の表記は保存します。静的解析の警告を消すために正常動作を壊してはいけません。残りのアラートも到達経路を調べ、自動的には無視しません。
+
+コマンド検査は runner に既存の Node で小さな引数受信プログラムを実行します。これは SPZ/SOG エンコーダーではなく、符号化品質の検証ではありません。追加の旧バックエンド変換器は、導入済みの直接 Node 実行ファイルとプロジェクト内の固定 `cli.mjs` だけを使用し、Windows の `.cmd`/`.bat` やグローバル shim には戻りません。ネイティブ SPZ は C++ コーデックを使い、Node、JavaScript、Mesa はデスクトップパッケージに追加しません。環境の準備状況の表示は実際の起動条件と一致させます。
 
 ### 依存関係アラートの範囲
 

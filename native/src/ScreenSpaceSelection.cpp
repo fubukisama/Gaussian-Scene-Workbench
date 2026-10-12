@@ -171,7 +171,7 @@ QVector<quint32> selectSourcePoints(
     gridWidth = std::max(1, qRound(viewport.width() * scale));
     gridHeight = std::max(1, qRound(viewport.height() * scale));
     depthGrid.fill(std::numeric_limits<float>::infinity(),
-                   gridWidth * gridHeight);
+                   qsizetype(gridWidth) * gridHeight);
 
     for (qsizetype index = 0; index < positions.size(); ++index) {
       if (isDeleted(deleted, index)) {
