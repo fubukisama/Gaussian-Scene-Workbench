@@ -1,0 +1,58 @@
+name: Native Security
+
+on:
+  push:
+    branches:
+      - agent/native-desktop-0.3
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    # pull_request branch filters refer to the base, not the head branch.
+    # Never analyze the legacy branch or a manually selected unrelated ref.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          # Interpreted analysis only: no Torch/CUDA or research runtime install.
+          # Language-specific extraction selects Python files or workflows from
+          # this shared source allowlist; native C/C++ is traced in Native Windows.
+          config: |
+            paths:
+              - native/worker
+              - native/tests
+              - crop_editor
+              - scripts
+              - gaussian-splatting
+              - training_kit
+              - .github/workflows
+            paths-ignore:
+              - gaussian-splatting/SIBR_viewers
+              - gaussian-splatting/submodules
+
+      - name: Analyze and upload code scanning results
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

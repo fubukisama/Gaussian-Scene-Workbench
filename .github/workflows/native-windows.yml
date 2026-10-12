@@ -13,6 +13,7 @@ on:
       - "training_kit/**"
       - "scripts/build_native.ps1"
       - "scripts/requirements-native-checks.txt"
+      - "scripts/setup_native_ci_*.ps1"
       - "scripts/*native_i18n.py"
       - "docs/LOCALIZATION.md"
       - "scripts/bootstrap_3dgs_editor.ps1"
@@ -21,6 +22,7 @@ on:
       - "scripts/sign_windows_artifacts.ps1"
       - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
+      - "docs/NATIVE_CI.md"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
       - "docs/COLMAP_SETUP.md"
@@ -36,6 +38,7 @@ on:
       - "training_kit/**"
       - "scripts/build_native.ps1"
       - "scripts/requirements-native-checks.txt"
+      - "scripts/setup_native_ci_*.ps1"
       - "scripts/*native_i18n.py"
       - "docs/LOCALIZATION.md"
       - "scripts/bootstrap_3dgs_editor.ps1"
@@ -44,6 +47,7 @@ on:
       - "scripts/sign_windows_artifacts.ps1"
       - "scripts/stage_native_backend.ps1"
       - ".github/workflows/native-windows.yml"
+      - "docs/NATIVE_CI.md"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
       - "docs/COLMAP_SETUP.md"
@@ -58,7 +62,12 @@ jobs:
     name: Qt 6 native preview
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.
     runs-on: windows-2022
-    timeout-minutes: 30
+    # Full native regressions plus compiled-code security analysis.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
 
     steps:
       - name: Checkout source
@@ -104,6 +113,17 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw "SPZ codec dependencies failed to build." }
 
+      - name: Initialize native C++ code scanning
+        id: native-codeql
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
+          (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended
+
       - name: Configure
         shell: pwsh
         env:
@@ -124,6 +144,26 @@ jobs:
         id: native-build
         shell: pwsh
         run: cmake --build native/build-ci --config Release --parallel
+
+      - name: Analyze native C++ code
+        if: ${{ !cancelled() && steps.native-codeql.outcome == 'success' && steps.native-build.outcome == 'success' }}
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /native/c-cpp
+
+      - name: Prepare native test display
+        shell: pwsh
+        run: ./scripts/setup_native_ci_display.ps1
+
+      - name: Prepare modern software OpenGL
+        shell: pwsh
+        run: ./scripts/setup_native_ci_graphics.ps1
+
+      - name: Verify native graphics bootstrap
+        shell: pwsh
+        env:
+          QT_FORCE_STDERR_LOGGING: "1"
+        run: ctest --test-dir native/build-ci -C Release --no-tests=error -R "^(native_infinite_reference_grid|native_light_gaussian_interaction|native_textured_paged_mesh_scene)$" --output-on-failure
 
       - name: Test
         shell: pwsh
@@ -148,7 +188,9 @@ jobs:
             "scripts/check_3dgs_env.ps1",
             "scripts/install_colmap.ps1",
             "scripts/sign_windows_artifacts.ps1",
-            "scripts/stage_native_backend.ps1"
+            "scripts/stage_native_backend.ps1",
+            "scripts/setup_native_ci_display.ps1",
+            "scripts/setup_native_ci_graphics.ps1"
           )
           foreach ($script in $scripts) {
             $tokens = $null
