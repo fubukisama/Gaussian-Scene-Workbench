@@ -196,6 +196,12 @@ English: Axis-view snapping starts an independent monotonic clock at the user's 
 
 ## Official references / 官方资料 / 公式資料
 
+中文：后续完整验收发现，参考轴／侧视旋转测试仍通过查找私有 `QVariantAnimation` 强制跳到终点。视角计时实现改变后，这段测试会在默认视角立即发送鼠标输入并取消尚未完成的吸附，导致并未真正进入侧视的错误验收。现在只在公开 +X 视角确实到达后才开始旋转，使用与网格验收相同的 1500 ms 有界等待和 `1e-6` 角度容差；保留全部旋转、修饰键、数字输入、撤销和重做断言，不设置内部状态。本机可见界面测试已停止；未经用户允许不自动弹出或置顶窗口，剩余可见界面验收由 GitHub runner 完成。
+
+English: Follow-up full acceptance found that the reference-axis/edge-on rotation smoke still searched for a private `QVariantAnimation` and forced it to its endpoint. After the timing implementation changed, that obsolete test immediately sent mouse input at the default pose and cancelled the unfinished snap, so it never actually reached the required side view. It now observes the public +X pose before rotation, with the same bounded 1500 ms wait and `1e-6` angle tolerance as mesh acceptance. All rotation, modifier, numeric-input, undo and redo assertions remain; no private state is set. Local visible GUI testing has stopped. Windows must not open or rise to the foreground without user consent; remaining visible acceptance runs on GitHub runners.
+
+日本語：追加の全体検査では、参照軸／側面の回転テストが私有の `QVariantAnimation` を検索し、終点へ強制的に進めていたことが分かりました。計時の実装変更後、この古い検査は既定の視点で直ちにマウス入力を送り、未完了のスナップをキャンセルしていたため、必要な側面ビューに到達していませんでした。今は公開されている +X の姿勢に到達してから回転を開始し、メッシュ検査と同じ 1500 ms の有限待機と `1e-6` の角度許容差を用います。回転、修飾キー、数値入力、元に戻す／やり直すの検証はすべて維持し、内部状態を設定しません。ローカルの可視 GUI 検査は停止しました。ユーザーの同意なくウィンドウを開いたり前面に出したりせず、残りの可視検査は GitHub runner で実行します。
+
 - [CodeQL workflow configuration](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)
 - [CodeQL init inputs](https://github.com/github/codeql-action/blob/v4/init/action.yml) and [analyze inputs](https://github.com/github/codeql-action/blob/v4/analyze/action.yml)
 - [Dependabot alerts and coverage](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-alerts)

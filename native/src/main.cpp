@@ -37,6 +37,8 @@
 #include <QDebug>
 #include <QDir>
 #include <QDockWidget>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -54,7 +56,6 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
-#include <QVariantAnimation>
 #include <QWheelEvent>
 #include <QWidget>
 
@@ -980,9 +981,29 @@ int main(int argc, char *argv[]) {
                       viewport->setModelTransform({}, {});
                       edgeOnRotationReady &= viewport->focusModel();
                       viewport->setAxisView(gsw::NavigationAxis::PositiveX);
-                      if (auto *animation = viewport->findChild<QVariantAnimation *>()) {
-                        animation->setCurrentTime(animation->duration());
+                      // Observe the requested public pose before interaction:
+                      // mouse input cancels an unfinished snap. Do not force
+                      // private animation state or depend on its implementation.
+                      const auto atPositiveX = [&]() {
+                        const auto angles = viewport->viewOrbitAngles();
+                        return std::abs(angles.yawDegrees - 90.0F) <= 1.0e-6F &&
+                               std::abs(angles.pitchDegrees) <= 1.0e-6F &&
+                               std::abs(angles.rollDegrees) <= 1.0e-6F;
+                      };
+                      QElapsedTimer axisDeadline;
+                      axisDeadline.start();
+                      while (!atPositiveX() && axisDeadline.elapsed() < 1500) {
+                        QEventLoop events;
+                        QTimer::singleShot(20, &events, &QEventLoop::quit);
+                        events.exec(QEventLoop::ExcludeUserInputEvents);
                       }
+                      const bool axisViewReady = atPositiveX();
+                      edgeOnRotationReady &= axisViewReady;
+                      qInfo() << "Edge-on +X view:" << "ready" << axisViewReady
+                              << "elapsed milliseconds" << axisDeadline.elapsed()
+                              << "yaw/pitch/roll" << viewport->viewOrbitAngles().yawDegrees
+                              << viewport->viewOrbitAngles().pitchDegrees
+                              << viewport->viewOrbitAngles().rollDegrees;
                       viewport->setModelGizmoMode(gsw::TransformGizmoMode::Rotate);
                       const QPointF start(viewport->width() * 0.5 + 45.0,
                                           viewport->height() * 0.5);
