@@ -14,6 +14,7 @@ class ViewportCameraTests final : public QObject {
   Q_OBJECT
 
 private slots:
+  void cameraSnapUsesElapsedRequestTime();
   void mapsHorizontalAndVerticalLeftDragDirections();
   void recognizesTemporaryTrimOrbitShortcut();
   void allowsVerticalOrbitPastBothPoles();
@@ -39,6 +40,19 @@ private slots:
   void keepsReferenceMarkerConsistentAcrossSceneUnits();
   void hidesReferenceMarkerOutsideView();
 };
+
+void ViewportCameraTests::cameraSnapUsesElapsedRequestTime() {
+  const OrbitAngles start{42.0F, 24.0F, 10.0F};
+  const OrbitAngles target{0.0F, 90.0F, 0.0F};
+  QCOMPARE(cameraSnapAngles(start, target, 0), start);
+  const auto half = cameraSnapAngles(start, target, 110);
+  QCOMPARE(half.yawDegrees, 5.25F);
+  QCOMPARE(half.pitchDegrees, 81.75F);
+  QCOMPARE(half.rollDegrees, 1.25F);
+  QCOMPARE(cameraSnapAngles(start, target, 220), target);
+  QCOMPARE(cameraSnapAngles(start, target, 1700), target);
+  QCOMPARE(cameraSnapAngles(start, {360.0F, 90.0F, 0.0F}, 1700), target);
+}
 
 void ViewportCameraTests::mapsHorizontalAndVerticalLeftDragDirections() {
   const OrbitAngles horizontal =

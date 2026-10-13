@@ -49,6 +49,22 @@ public:
     if (auto *dock = qobject_cast<QDockWidget *>(window))
       connect(dock, &QDockWidget::topLevelChanged, this, [this] { refresh(); });
     window->installEventFilter(this);
+    connect(AppLanguage::instance(), &AppLanguage::languageChangeStarted, this, [this] {
+      mLanguagePresentations.append({mWindow->windowState(), mStateRevision, mWindow->isVisible()});
+    });
+    connect(AppLanguage::instance(), &AppLanguage::languageChangeCompleted, this, [this] {
+      if (mLanguagePresentations.isEmpty()) return;
+      const auto saved = mLanguagePresentations.takeLast();
+      if (!saved.visible || !mWindow->isVisible() || mWindow->isMinimized() ||
+          saved.revision != mStateRevision) return;
+      if (saved.state.testFlag(Qt::WindowFullScreen) || saved.state.testFlag(Qt::WindowMaximized)) {
+        const QScopedValueRollback<bool> changing(mChangingState, true);
+        allowExpansion();
+        if (saved.state.testFlag(Qt::WindowFullScreen)) mWindow->showFullScreen();
+        else mWindow->showMaximized();
+      }
+      refresh();
+    });
     AppLanguage::onChanged(this, [this] { refresh(); });
     refresh();
   }
@@ -304,6 +320,12 @@ private:
   bool mChangingState = false;
   bool mInitialFileWidthApplied = false;
   quint64 mStateRevision = 0;
+  struct LanguagePresentation {
+    Qt::WindowStates state;
+    quint64 revision;
+    bool visible;
+  };
+  QList<LanguagePresentation> mLanguagePresentations;
 };
 
 WindowController *controller(QWidget *w) {

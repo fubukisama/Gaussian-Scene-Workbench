@@ -6,6 +6,19 @@
 
 namespace gsw {
 
+OrbitAngles cameraSnapAngles(const OrbitAngles start, const OrbitAngles target,
+                             const qint64 elapsedMilliseconds) {
+  if (elapsedMilliseconds >= cameraSnapDurationMilliseconds)
+    return {std::remainder(target.yawDegrees, 360.0F), target.pitchDegrees, target.rollDegrees};
+  const float t = std::clamp(static_cast<float>(elapsedMilliseconds) /
+                                 cameraSnapDurationMilliseconds, 0.0F, 1.0F);
+  const float remaining = 1.0F - t;
+  const float eased = 1.0F - remaining * remaining * remaining;
+  return {start.yawDegrees + (target.yawDegrees - start.yawDegrees) * eased,
+          start.pitchDegrees + (target.pitchDegrees - start.pitchDegrees) * eased,
+          start.rollDegrees + (target.rollDegrees - start.rollDegrees) * eased};
+}
+
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
 constexpr float kMinimumGridStep = 0.001F;

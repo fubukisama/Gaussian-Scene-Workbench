@@ -98,6 +98,7 @@ bool AppLanguage::apply(const QString &language, const bool persist) {
     delete applicationCatalog;
     return false;
   }
+  emit service->languageChangeStarted();
   if (service->mApplicationCatalog) qApp->removeTranslator(service->mApplicationCatalog);
   if (service->mQtCatalog) qApp->removeTranslator(service->mQtCatalog);
   delete service->mApplicationCatalog;
@@ -110,6 +111,10 @@ bool AppLanguage::apply(const QString &language, const bool persist) {
   // Native Windows file dialogs follow the OS locale, not the selected app locale.
   QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
   emit service->languageChanged();
+  // Deliver Qt's queued retranslation before completing the presentation
+  // transaction. No input, model loading or worker events are pumped here.
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::LanguageChange);
+  emit service->languageChangeCompleted();
   return true;
 }
 

@@ -44,7 +44,6 @@ class QEnterEvent;
 class QEvent;
 class QKeyEvent;
 class QWheelEvent;
-class QVariantAnimation;
 class QTimer;
 
 namespace gsw {
@@ -689,7 +688,9 @@ private:
   float mYawDegrees = 42.0F;
   float mPitchDegrees = 24.0F;
   float mRollDegrees = 0.0F;
-  float mSnapStartRoll = 0.0F;
+  OrbitAngles mSnapStartAngles;
+  OrbitAngles mSnapTargetAngles;
+  QElapsedTimer mViewSnapClock;
   float mDistance = 12.0F;
   float mPerspectiveFovDegrees = 46.0F;
   float mFocalAspectCorrection = 1.0F;
@@ -717,7 +718,7 @@ private:
   QString mTrainingGpuPreviewError;
   QTimer *mTrainingGpuPreviewTimer = nullptr;
   QTimer *mFrameRefreshTimer = nullptr;
-  QVariantAnimation *mViewSnapAnimation = nullptr;
+  QTimer *mViewSnapTimer = nullptr;
   FrameRateCounter mFrameRateCounter;
 };
 

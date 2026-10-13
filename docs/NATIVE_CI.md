@@ -180,6 +180,20 @@ Dependabot alerts は管理者が設定で有効にする別機能です。`depe
 
 シークレットスキャンと push protection は GitHub の提供機能、権限、リポジトリ設定に依存し、CodeQL や Dependabot とは別の検査境界です。設定画面とアラート画面で状態を確認してください。アクセストークン、パスワード、ローカル環境の認証情報をコミットしないでください。
 
+## 2026-10-13 follow-up / 后续修复 / 追加修正
+
+中文：第 #148 次运行保留全部 99 项测试，97 项通过，剩余为中文全屏对话框的语言切换和大网格的 +Z 视角吸附。回归捕获到 `QMessageBox` 在字体／样式重建期间先退出全屏，旧的延后恢复随后只能读取普通窗口状态。语言更新现在在替换目录前保存显示状态，完成动态文本和 Qt `LanguageChange` 事件后恢复；用户明确改变状态或已关闭的窗口不会被恢复。测试新增立即投递翻译事件后的全屏保持断言，原有 Esc、输入值和进度检查全部保留。可选 `GSW_WINDOW_STATE_DIAGNOSTICS=1` 只记录测试自有对话框的有界状态轨迹，不改变状态或验收。
+
+English: Run #148 retained all 99 tests; 97 passed, leaving Chinese full-screen dialog retranslation and large-mesh +Z view snapping. Regression evidence showed `QMessageBox` leaving full screen during font/style rebuilding before deferred restoration could capture the original state. Language updates now snapshot presentation before replacing catalogs and restore it after dynamic text and Qt `LanguageChange` delivery, without reopening closed windows or overriding explicit state changes. Immediate language-delivery retention is an additional assertion; existing Escape, input and progress checks remain. Optional `GSW_WINDOW_STATE_DIAGNOSTICS=1` records a bounded trace of test-owned dialogs without changing state or acceptance.
+
+日本語：第 #148 回は 99 件をすべて維持し、97 件が成功しました。残りは中国語の全画面ダイアログの言語変更と、大きなメッシュの +Z 軸ビューです。回帰検査では、フォント／スタイルの再構築により `QMessageBox` が全画面を解除し、遅延した復元では元の状態を取得できないことを確認しました。言語変更はカタログの置換前に表示状態を保存し、動的テキストと Qt の `LanguageChange` の処理後に復元します。閉じたウィンドウを再表示せず、明示的な状態変更を上書きしません。即時の言語イベント処理後の全画面保持を追加検査し、Esc、入力値、進捗の検証をすべて維持します。任意の `GSW_WINDOW_STATE_DIAGNOSTICS=1` はテスト所有のダイアログの状態を有限件だけ記録し、状態や合格条件を変更しません。
+
+中文：视角吸附从用户请求时刻启动独立单调时钟，精确定时器只负责调度更新；延迟回调按实际经过时间追上，不再把延后的全局动画驱动初始化当作起点。原来的 220 ms、OutCubic 缓出、最短偏航路径、取消行为和全部模型渲染路径保持一致。没有修改帧率、1500 ms 等待、10 秒完整显示和 90% 表面覆盖门槛，也没有在测试中直接推进动画时间或设置目标视角。新增相机计算回归覆盖起点、中点、终点、长回调延迟与偏航环绕；这仍需修复提交的真实完整 Actions 验收。
+
+English: Axis-view snapping starts an independent monotonic clock at the user's request; a precise timer only schedules updates. Late callbacks catch up to real elapsed time instead of treating deferred global animation-driver initialization as the start. The original 220 ms, OutCubic easing, shortest yaw path, cancellation and every model-rendering path are retained. FPS policy, the 1500 ms wait, 10-second complete-display gate and 90% surface coverage are unchanged; tests do not directly advance animation time or set the target pose. Added camera regression covers start, midpoint, endpoint, long dispatch delays and yaw wrapping. The fixed commit still requires actual complete Actions acceptance.
+
+日本語：軸ビューへのスナップはユーザーの要求時刻に独立した単調時計を開始し、精密タイマーは更新の実行だけを担当します。遅延したコールバックは実際の経過時間に追いつき、遅れた全体アニメーションの初期化を開始時刻としません。従来の 220 ms、OutCubic、最短の yaw 経路、キャンセルと全モデルの描画経路を維持します。FPS 方針、1500 ms の待機、完全表示 10 秒、表面被覆率 90% の基準は変更せず、テストからアニメーション時間や目標姿勢を直接設定しません。開始、中間、終了、長い実行遅延、yaw の折り返しを検査します。修正コミットの実際の Actions 全体での確認は引き続き必要です。
+
 ## Official references / 官方资料 / 公式資料
 
 - [CodeQL workflow configuration](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)

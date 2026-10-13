@@ -18,6 +18,10 @@ struct OrbitAngles {
   [[nodiscard]] bool operator==(const OrbitAngles &) const = default;
 };
 
+inline constexpr int cameraSnapDurationMilliseconds = 220;
+[[nodiscard]] OrbitAngles cameraSnapAngles(OrbitAngles start, OrbitAngles target,
+                                           qint64 elapsedMilliseconds);
+
 struct OrbitFrame {
   QVector3D cameraOffsetDirection;
   QVector3D upDirection;

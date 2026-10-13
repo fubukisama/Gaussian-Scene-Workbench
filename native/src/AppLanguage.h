@@ -31,7 +31,9 @@ public:
   }
 
 signals:
+  void languageChangeStarted();
   void languageChanged();
+  void languageChangeCompleted();
 
 private:
   explicit AppLanguage(QObject *parent) : QObject(parent) {}

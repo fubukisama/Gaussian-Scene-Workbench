@@ -13,7 +13,6 @@
 
 #include <QApplication>
 #include <QDebug>
-#include <QEasingCurve>
 #include <QEnterEvent>
 #include <QEvent>
 #include <QFileInfo>
@@ -34,7 +33,6 @@
 #include <QSizePolicy>
 #include <QTimer>
 #include <QToolTip>
-#include <QVariantAnimation>
 #include <QVector2D>
 #include <QVector4D>
 #include <QWheelEvent>
@@ -501,21 +499,20 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   });
   resetModelTransformHistory();
 
-  mViewSnapAnimation = new QVariantAnimation(this);
-  mViewSnapAnimation->setDuration(220);
-  mViewSnapAnimation->setEasingCurve(QEasingCurve::OutCubic);
-  connect(mViewSnapAnimation, &QVariantAnimation::valueChanged, this,
-          [this](const QVariant &value) {
-            const QPointF angles = value.toPointF();
-            mYawDegrees = static_cast<float>(angles.x());
-            mPitchDegrees = static_cast<float>(angles.y());
-            mRollDegrees = mSnapStartRoll * (1.0F - static_cast<float>(
-                mViewSnapAnimation->easingCurve().valueForProgress(
-                    static_cast<qreal>(mViewSnapAnimation->currentTime()) / mViewSnapAnimation->duration())));
-            update();
-          });
-  connect(mViewSnapAnimation, &QVariantAnimation::finished, this, [this]() {
-    mYawDegrees = std::remainder(mYawDegrees, 360.0F);
+  mViewSnapTimer = new QTimer(this);
+  mViewSnapTimer->setObjectName(QStringLiteral("viewSnapTimer"));
+  mViewSnapTimer->setTimerType(Qt::PreciseTimer);
+  mViewSnapTimer->setInterval(16);
+  connect(mViewSnapTimer, &QTimer::timeout, this, [this]() {
+    // Start time belongs to the user's request, not to a deferred global
+    // animation-driver initialization. Delayed GUI dispatch catches up to
+    // real elapsed time without extending the original 220-ms transition.
+    const auto elapsed = mViewSnapClock.elapsed();
+    const auto angles = cameraSnapAngles(mSnapStartAngles, mSnapTargetAngles, elapsed);
+    mYawDegrees = angles.yawDegrees;
+    mPitchDegrees = angles.pitchDegrees;
+    mRollDegrees = angles.rollDegrees;
+    if (elapsed >= cameraSnapDurationMilliseconds) mViewSnapTimer->stop();
     update();
   });
   mTrainingGpuPreviewTimer = new QTimer(this);
@@ -1498,7 +1495,7 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
     mProcessingReferenceScene = mScene;
     mProcessingReferenceView = currentProcessingView();
   }
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   mScene = next;
   mLayerDisplayTransform.setToIdentity();
   mProcessingPreviewPresent = mScene == mProcessingScene;
@@ -1950,7 +1947,7 @@ void NativeViewport::updateObservationNavigationToolTip() {
 }
 
 void NativeViewport::beginObservationRotation(const QPointF &position, const bool pickAxis) {
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   leaveCameraView();
   mObservationDragActive = true;
   mObservationDragStart = position;
@@ -2012,7 +2009,7 @@ bool NativeViewport::centerObservationAt(const QPointF &position) {
         QCoreApplication::translate("Workbench", "未命中模型表面，旋转中心保持不变"), this);
     return false;
   }
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   leaveCameraView();
   mObservationDragActive = false;
   mPressedButtons = Qt::NoButton;
@@ -2167,7 +2164,7 @@ bool NativeViewport::focusModel() {
     return false;
   }
 
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   leaveCameraView();
   mTarget = frame->target;
   mDistance = clampViewportDistance(frame->distance, frame->radius);
@@ -2286,7 +2283,7 @@ void NativeViewport::setBrushRadius(const int pixels) {
 
 void NativeViewport::resetCamera() {
   mObservationDragActive = false;
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   mTarget = transformedSceneCenter();
   mYawDegrees = 42.0F;
   mPitchDegrees = 24.0F;
@@ -4213,8 +4210,7 @@ void NativeViewport::updatePointCacheSelection(
   ++mScene->mPointCacheFrameSerial;
   const bool interacting =
       mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
-      (mViewSnapAnimation != nullptr &&
-       mViewSnapAnimation->state() == QAbstractAnimation::Running);
+      mViewSnapTimer->isActive();
   const float refinementThresholdPixels = interacting ? 140.0F : 28.0F;
   const qsizetype pointBudget = sharedPageGpuBudget() / sizeof(PointPreviewVertex);
   const QVector3D eye = cameraPosition();
@@ -4637,8 +4633,7 @@ void NativeViewport::updateMeshCacheSelection(
   ++mScene->mMeshCacheFrameSerial;
   const bool interacting =
       mPressedButtons != Qt::NoButton || mNavigationInteractionActive ||
-      (mViewSnapAnimation != nullptr &&
-       mViewSnapAnimation->state() == QAbstractAnimation::Running);
+      mViewSnapTimer->isActive();
   // Ancestor pages contain sampled original triangles, not a continuous
   // simplified surface. Never stop at them just because their projected size
   // is small or navigation is active; refine to exact pages when budget allows.
@@ -5737,7 +5732,7 @@ void NativeViewport::mouseMoveEvent(QMouseEvent *event) {
                      mPressedButtons.testFlag(Qt::RightButton) ||
                      (left && event->modifiers().testFlag(Qt::ControlModifier));
     const bool zoom = left && event->modifiers().testFlag(Qt::ShiftModifier);
-    mViewSnapAnimation->stop();
+    mViewSnapTimer->stop();
     if (pan || zoom) {
       // Modifiers take priority even during a drag. Discard the rotation
       // anchor so resuming orbit cannot jump back to the pre-pan camera.
@@ -5909,7 +5904,7 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
   }
   if (!mNavigationDragging) {
     mNavigationDragging = true;
-    mViewSnapAnimation->stop();
+    mViewSnapTimer->stop();
     if (mNavigationPress.part == NavigationGizmoPart::Rotate ||
         mNavigationPress.part == NavigationGizmoPart::Zoom ||
         mNavigationPress.part == NavigationGizmoPart::Pan) {
@@ -5980,18 +5975,18 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
     return;
   }
 
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   leaveCameraView();
   const float targetYaw =
       shortestEquivalentAngle(mYawDegrees, target->yawDegrees);
-  mViewSnapAnimation->setStartValue(QPointF(mYawDegrees, mPitchDegrees));
-  mSnapStartRoll = mRollDegrees;
-  mViewSnapAnimation->setEndValue(QPointF(targetYaw, target->pitchDegrees));
-  mViewSnapAnimation->start();
+  mSnapStartAngles = viewOrbitAngles();
+  mSnapTargetAngles = {targetYaw, target->pitchDegrees, 0.0F};
+  mViewSnapClock.start();
+  mViewSnapTimer->start();
 }
 
 void NativeViewport::orbitCamera(const QPoint &delta) {
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   // Editing and the navigation gizmo must follow the current screen axes,
   // just like locked observation. World yaw/pitch reverses drags after a
   // rolled/upside-down view and collapses horizontal orbit at the poles.
@@ -6046,7 +6041,7 @@ bool NativeViewport::setSourceCameraView(const qsizetype index) {
     mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
         mDistance, mOrthographic, mRollDegrees, mPerspectiveFovDegrees,
         mFocalAspectCorrection};
-  mViewSnapAnimation->stop();
+  mViewSnapTimer->stop();
   mRollDegrees = 0.0F;
   const QVector3D cameraOffset = -forward;
   mPitchDegrees =

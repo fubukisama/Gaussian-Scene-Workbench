@@ -57,6 +57,87 @@ void settle() {
   QTimer::singleShot(100, &loop, &QEventLoop::quit);
   loop.exec();
 }
+class DialogWindowStateTrace final : public QObject {
+public:
+  explicit DialogWindowStateTrace(QDialog &dialog) : mDialog(dialog) {
+    mEnabled = qEnvironmentVariableIntValue("GSW_WINDOW_STATE_DIAGNOSTICS") != 0;
+    if (!mEnabled) return;
+    mClock.start();
+    mDialog.installEventFilter(this);
+    QObject::connect(&mDialog, &QDialog::finished, this, [this](int) {
+      ++mFinishedCount;
+      record("finished");
+    });
+    record("trace-start");
+  }
+  ~DialogWindowStateTrace() override {
+    if (mEnabled) mDialog.removeEventFilter(this);
+  }
+  void record(const char *stage) {
+    if (!mEnabled) return;
+    QString row;
+    {
+      QDebug stream(&row);
+      stream.noquote() << "elapsed-ms" << mClock.elapsed()
+          << "observed-event-revision" << mObservedRevision << "stage" << stage
+          << "locale" << AppLanguage::current() << "state" << mDialog.windowState()
+          << "visible" << mDialog.isVisible() << "geometry" << mDialog.geometry()
+          << "maximum-size" << mDialog.maximumSize() << "minimum-size" << mDialog.minimumSize()
+          << "result" << mDialog.result() << "finished-count" << mFinishedCount;
+    }
+    // Keep a bounded tail of this test's own dialog events. The trace never
+    // changes state, dispatches input or inspects any other application window.
+    if (mRows.size() == 96) mRows.removeFirst();
+    mRows.append(row);
+  }
+  void dump(const char *reason) const {
+    if (!mEnabled) return;
+    qWarning() << "WINDOW_STATE_DIAGNOSTIC:" << reason << "dialog" << &mDialog
+               << "class" << mDialog.metaObject()->className();
+    for (const auto &row : mRows)
+      qWarning().noquote() << "WINDOW_STATE_DIAGNOSTIC:" << row;
+  }
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    if (watched != &mDialog || !mEnabled) return false;
+    const char *stage = nullptr;
+    switch (event->type()) {
+    case QEvent::LanguageChange: stage = "LanguageChange"; break;
+    case QEvent::StyleChange: stage = "StyleChange"; break;
+    case QEvent::FontChange: stage = "FontChange"; break;
+    case QEvent::PaletteChange: stage = "PaletteChange"; break;
+    case QEvent::ApplicationPaletteChange: stage = "ApplicationPaletteChange"; break;
+    case QEvent::WindowStateChange: stage = "WindowStateChange"; break;
+    default: break;
+    }
+    if (stage != nullptr) {
+      // This is an observer's monotonically increasing revision, not the
+      // production controller's private revision or an acceptance predicate.
+      ++mObservedRevision;
+      record(stage);
+    } else {
+      switch (event->type()) {
+      case QEvent::Show: record("Show"); break;
+      case QEvent::Hide: record("Hide"); break;
+      case QEvent::Resize: record("Resize"); break;
+      case QEvent::LayoutRequest: record("LayoutRequest"); break;
+      case QEvent::KeyPress:
+        if (static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape)
+          record("Escape-KeyPress");
+        break;
+      default: break;
+      }
+    }
+    return false;
+  }
+private:
+  QDialog &mDialog;
+  bool mEnabled = false;
+  quint64 mObservedRevision = 0;
+  int mFinishedCount = 0;
+  QElapsedTimer mClock;
+  QStringList mRows;
+};
 void key(QWidget &target, int code) {
   QKeyEvent press(QEvent::KeyPress, code, Qt::NoModifier);
   QApplication::sendEvent(&target, &press);
@@ -1039,20 +1120,43 @@ bool runWindowUiSmokeTest(QMainWindow &workbench) {
   QProgressDialog progress(&host); progress.setValue(37);
   QMessageBox message(QMessageBox::Information, QStringLiteral("QA"), QStringLiteral("QA"), QMessageBox::Ok, &host);
   for (QDialog *dialog : {static_cast<QDialog *>(&input), static_cast<QDialog *>(&progress), static_cast<QDialog *>(&message)}) {
+    DialogWindowStateTrace trace(*dialog);
+    const auto checkDialog = [&](bool condition, const char *description) {
+      if (!condition) {
+        qCritical() << "Window dialog state failure:" << description
+                    << dialog->metaObject()->className() << dialog->windowState()
+                    << "visible" << dialog->isVisible() << "geometry" << dialog->geometry()
+                    << "minimum/maximum" << dialog->minimumSize() << dialog->maximumSize();
+        trace.dump(description);
+      }
+      check(condition, description);
+    };
     dialog->show(); settle();
+    trace.record("shown-and-settled");
     WindowUi::fullScreenAction(dialog)->trigger(); settle();
+    trace.record("fullscreen-entered-and-settled");
     if (!dialog->isFullScreen()) qWarning() << "Dialog full-screen state:" << dialog->metaObject()->className() << dialog->windowState() << dialog->maximumSize();
-    check(dialog->isFullScreen(), "input/progress/message dialog can enter full screen");
+    checkDialog(dialog->isFullScreen(), "input/progress/message dialog can enter full screen");
+    trace.record("before-alternate-language");
     AppLanguage::apply(locale == QStringLiteral("en_US") ? QStringLiteral("ja_JP") : QStringLiteral("en_US"), false);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::LanguageChange);
+    checkDialog(dialog->isVisible() && dialog->isFullScreen(),
+                "language delivery retains the full-screen dialog before deferred callbacks");
+    trace.record("after-alternate-language-call");
     settle();
-    check(dialog->isFullScreen(), "full-screen message/input/progress survives language changes");
+    trace.record("after-alternate-language-settle");
+    checkDialog(dialog->isFullScreen(), "full-screen message/input/progress survives language changes");
     AppLanguage::apply(locale, false); settle();
+    trace.record("after-original-language-settle-before-Escape");
     key(*dialog, Qt::Key_Escape);
-    check(dialog->isVisible() && !dialog->isFullScreen(), "input/progress/message dialog remains open after Esc");
+    trace.record("after-Escape");
+    checkDialog(dialog->isVisible() && !dialog->isFullScreen(), "input/progress/message dialog remains open after Esc");
     WindowUi::toggleMaximized(dialog); settle();
-    check(dialog->isMaximized(), "input/progress/message maximize");
+    trace.record("maximized-and-settled");
+    checkDialog(dialog->isMaximized(), "input/progress/message maximize");
     WindowUi::toggleMaximized(dialog); settle();
-    check(!dialog->isMaximized() && dialog->isVisible(), "input/progress/message restore");
+    trace.record("restored-and-settled");
+    checkDialog(!dialog->isMaximized() && dialog->isVisible(), "input/progress/message restore");
     if (dialog == &message && !shots.isEmpty())
       check(dialog->grab().save(QDir(shots).filePath(locale + QStringLiteral("-message-dialog.png"))), "message-dialog screenshot");
     dialog->hide();
