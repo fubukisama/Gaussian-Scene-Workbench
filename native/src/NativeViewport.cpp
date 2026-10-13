@@ -6,6 +6,7 @@
 #include <QSignalBlocker>
 
 #include "ModelInteraction.h"
+#include "TransformGizmoRenderer.h"
 #include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
 #include "ViewportCamera.h"
@@ -7623,190 +7624,18 @@ void NativeViewport::drawModelSelection(
 
 void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
   if (mEditToolsLocked) return;
-  const TransformGizmoLayout layout = modelTransformGizmo();
-  if (!layout.valid) {
-    return;
-  }
-  const ViewportColors colors = viewportColors();
-  const bool drawMove = mTransformGizmoMode == TransformGizmoMode::Move ||
-                        mTransformGizmoMode == TransformGizmoMode::Transform;
-  const bool drawRotate = mTransformGizmoMode == TransformGizmoMode::Rotate ||
-                          mTransformGizmoMode == TransformGizmoMode::Transform;
-  const bool drawScale = mTransformGizmoMode == TransformGizmoMode::Scale ||
-                         mTransformGizmoMode == TransformGizmoMode::Transform;
-  const auto highlighted = [this](const TransformGizmoHandleKind kind,
-                                  const int axis) {
-    const TransformGizmoHandle candidate{kind, axis};
-    return (mTransformGizmoPress.isValid() ? mTransformGizmoPress
-                                           : mTransformGizmoHover) == candidate;
-  };
-  const auto displayColor = [&highlighted, &colors](const int axis,
-                                           const TransformGizmoHandleKind kind) {
-    return highlighted(kind, axis) ? colors.highlight
-                                    : navigationAxisColor(axis);
-  };
-
-  painter.save();
-  painter.setRenderHint(QPainter::Antialiasing, true);
-
-  if (drawRotate) {
-    for (int axis = 0; axis < 3; ++axis) {
-      const auto &ring =
-          layout.axes[static_cast<std::size_t>(axis)].rotationSegments;
-      if (ring.isEmpty()) {
-        continue;
-      }
-      const bool ringHighlight =
-          highlighted(TransformGizmoHandleKind::RotateAxis, axis);
-      QColor color = displayColor(axis, TransformGizmoHandleKind::RotateAxis);
-      painter.setBrush(Qt::NoBrush);
-      const qreal ringWidth =
-          layout.lineWidth + (ringHighlight ? 1.4 : 0.0);
-      if (mTransformGizmoMode == TransformGizmoMode::Transform) {
-        QColor contextColor = color;
-        contextColor.setAlpha(ringHighlight ? 135 : 62);
-        painter.setPen(QPen(contextColor, ringWidth, Qt::SolidLine,
-                            Qt::RoundCap, Qt::RoundJoin));
-        painter.drawLines(ring);
-
-        color.setAlpha(ringHighlight ? 255 : 215);
-        painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
-                            Qt::RoundJoin));
-        for (const QLineF &segment : ring) {
-          const QPointF start = segment.p1();
-          const QPointF end = segment.p2();
-          if (QLineF(layout.center, start).length() >=
-                  layout.rotationHitInnerRadius &&
-              QLineF(layout.center, end).length() >=
-                  layout.rotationHitInnerRadius) {
-            painter.drawLine(start, end);
-          }
-        }
-      } else {
-        color.setAlpha(ringHighlight ? 255 : 205);
-        painter.setPen(QPen(color, ringWidth, Qt::SolidLine, Qt::RoundCap,
-                            Qt::RoundJoin));
-        painter.drawLines(ring);
-      }
-    }
-    const bool viewHighlight =
-        highlighted(TransformGizmoHandleKind::RotateView, -1);
-    painter.setPen(QPen(viewHighlight ? colors.highlight
-                                     : translucent(colors.viewRing, 220),
-                        layout.lineWidth + (viewHighlight ? 1.2 : 0.0),
-                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawPolygon(layout.viewRing);
-    if (highlighted(TransformGizmoHandleKind::RotateTrackball, -1)) {
-      painter.setPen(QPen(translucent(colors.highlight, 210), 1.4, Qt::DashLine));
-      painter.setBrush(translucent(colors.highlight, 24));
-      QPainterPath trackball;
-      trackball.setFillRule(Qt::OddEvenFill);
-      trackball.addEllipse(layout.trackballBounds);
-      if (layout.trackballInnerRadius > 0.0) {
-        const QRectF inner(
-            layout.center - QPointF(layout.trackballInnerRadius,
-                                    layout.trackballInnerRadius),
-            QSizeF(layout.trackballInnerRadius * 2.0,
-                   layout.trackballInnerRadius * 2.0));
-        trackball.addEllipse(inner);
-      }
-      painter.drawPath(trackball);
-    }
-  }
-
-  if (drawMove || drawScale) {
-    const TransformGizmoHandleKind planeKind =
-        drawMove ? TransformGizmoHandleKind::MovePlane
-                 : TransformGizmoHandleKind::ScalePlane;
-    for (int excludedAxis = 0; excludedAxis < 3; ++excludedAxis) {
-      const QPolygonF &plane =
-          layout.planeHandles[static_cast<std::size_t>(excludedAxis)];
-      if (plane.size() < 3) {
-        continue;
-      }
-      const int firstAxis = (excludedAxis + 1) % 3;
-      const int secondAxis = (excludedAxis + 2) % 3;
-      QColor color = mixColor(navigationAxisColor(firstAxis),
-                              navigationAxisColor(secondAxis), 0.5);
-      const bool active = highlighted(planeKind, excludedAxis);
-      if (active) {
-        color = colors.highlight;
-      }
-      QColor fill = color;
-      fill.setAlpha(active ? 105 : 42);
-      color.setAlpha(active ? 245 : 165);
-      painter.setPen(QPen(color, active ? 2.0 : 1.1));
-      painter.setBrush(fill);
-      painter.drawPolygon(plane);
-    }
-  }
-
-  for (int axis = 0; axis < 3; ++axis) {
-    const TransformGizmoAxisLayout &axisLayout =
-        layout.axes[static_cast<std::size_t>(axis)];
-    if (!axisLayout.visible) {
-      continue;
-    }
-    if (drawMove) {
-      const bool moveActive =
-          highlighted(TransformGizmoHandleKind::MoveAxis, axis);
-      const QColor moveColor = moveActive ? colors.highlight
-                                          : navigationAxisColor(axis);
-      painter.setPen(QPen(moveColor,
-                          layout.lineWidth + (moveActive ? 1.3 : 0.0),
-                          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-      painter.setBrush(moveColor);
-      painter.drawLine(axisLayout.moveLine);
-      painter.drawPolygon(axisLayout.moveArrow);
-    }
-    if (drawScale) {
-      const bool scaleActive =
-          highlighted(TransformGizmoHandleKind::ScaleAxis, axis);
-      QColor scaleColor = scaleActive ? colors.highlight
-                                      : navigationAxisColor(axis);
-      if (mTransformGizmoMode == TransformGizmoMode::Transform &&
-          !scaleActive) {
-        scaleColor.setAlpha(190);
-      }
-      painter.setPen(QPen(
-          scaleColor, scaleActive ? 2.2 : 1.45,
-          mTransformGizmoMode == TransformGizmoMode::Transform
-              ? Qt::DashLine
-              : Qt::SolidLine,
-          Qt::RoundCap, Qt::RoundJoin));
-      painter.setBrush(scaleColor);
-      if (!axisLayout.scaleHandle.isEmpty()) {
-        painter.drawLine(axisLayout.scaleLine);
-        painter.drawRect(axisLayout.scaleHandle);
-      }
-    }
-  }
-
-  if (mTransformGizmoMode == TransformGizmoMode::Move ||
-      mTransformGizmoMode == TransformGizmoMode::Transform) {
-    const bool active = highlighted(TransformGizmoHandleKind::MoveView, -1);
-    painter.setPen(QPen(active ? colors.highlight : colors.handleEdge,
-                        active ? 2.2 : 1.5));
-    painter.setBrush(active ? translucent(colors.highlight, 155)
-                            : translucent(colors.handleFill, 220));
-    painter.drawEllipse(layout.centerHandle);
-  } else if (mTransformGizmoMode == TransformGizmoMode::Scale) {
-    const bool active = highlighted(TransformGizmoHandleKind::ScaleUniform, -1);
-    const QPointF center = layout.center;
-    QPolygonF diamond;
-    const qreal extent = layout.centerHandle.width() * 0.5;
-    diamond << center + QPointF(0.0, -extent)
-            << center + QPointF(extent, 0.0)
-            << center + QPointF(0.0, extent)
-            << center + QPointF(-extent, 0.0);
-    painter.setPen(QPen(active ? colors.highlight : colors.handleEdge,
-                        active ? 2.2 : 1.5));
-    painter.setBrush(active ? translucent(colors.highlight, 190)
-                            : translucent(colors.handleFill, 230));
-    painter.drawPolygon(diamond);
-  }
-  painter.restore();
+  const auto layout = modelTransformGizmo();
+  if (!layout.valid) return;
+  const auto colors = viewportColors();
+  TransformGizmoStyle style;
+  style.axes = {navigationAxisColor(0), navigationAxisColor(1), navigationAxisColor(2)};
+  style.highlight = colors.highlight;
+  style.neutral = colors.viewRing;
+  style.centerEdge = colors.handleEdge;
+  style.light = lightViewport();
+  paintTransformGizmo(painter, layout, mTransformGizmoMode, style,
+                        mTransformGizmoPress.isValid() ? mTransformGizmoPress : mTransformGizmoHover,
+                        mTransformGizmoDragActive || mModelDragActive);
 }
 
 void NativeViewport::drawTransformToolStrip(QPainter &painter) {

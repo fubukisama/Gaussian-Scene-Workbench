@@ -166,6 +166,8 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_import_extracts_video_frames_from_archived_original(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Match managed canonical paths even when TEMP uses an 8.3 name or junction.
+            tmp = Path(tmp).resolve()
             original_datasets = server.DATASETS_DIR
             server.DATASETS_DIR = Path(tmp) / "datasets"
             try:
@@ -202,6 +204,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_import_local_paths_archives_without_http_uploading_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_datasets = server.DATASETS_DIR
             server.DATASETS_DIR = Path(tmp) / "datasets"
             source = Path(tmp) / "source" / "clip.mov"
@@ -1389,6 +1392,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_resume_experiment_training_uses_start_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = server.OUTPUT_DIR
             original_datasets = server.DATASETS_DIR
             original_train_jobs = server.TRAIN_JOBS
@@ -1969,6 +1973,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_save_trimmed_mesh_registers_mesh_under_derived_scene(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = server.OUTPUT_DIR
             server.OUTPUT_DIR = Path(tmp)
             try:
@@ -2052,6 +2057,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_2dgs_mesh_command_uses_render_script_and_expected_output_path(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = server.OUTPUT_DIR
             server.OUTPUT_DIR = Path(tmp)
             try:
@@ -2101,6 +2107,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_sugar_mesh_command_uses_existing_3dgs_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = server.OUTPUT_DIR
             original_datasets = server.DATASETS_DIR
             original_sugar = server.SUGAR_DIR
@@ -2308,6 +2315,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_gs2mesh_mesh_command_uses_existing_3dgs_checkpoint_and_colmap(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = server.OUTPUT_DIR
             original_datasets = server.DATASETS_DIR
             original_gs2mesh = getattr(server, "GS2MESH_DIR", None)
@@ -2767,6 +2775,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_openmvs_texture_commands_stage_colmap_scene_before_texturemesh(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(server.os.environ, {"OPENMVS_BIN": ""}):
+            tmp = Path(tmp).resolve()
             base = Path(tmp)
             original_output = server.OUTPUT_DIR
             original_openmvs = server.OPENMVS_DIR

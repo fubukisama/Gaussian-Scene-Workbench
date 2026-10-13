@@ -21,15 +21,262 @@ private slots:
   void rotatesEdgeOnAxesInBothProjections();
   void preservesFaceOnPlaneRotation();
   void laysOutAndHitsTransformGizmos();
+  void keepsCompactCentreEasyToPick();
+  void projectsFrontAndBackRingDepths();
+  void projectsShadedSolidHandleFaces();
+  void picksNearestOverlappingRing();
+  void picksSolidHandleSilhouettes();
+  void picksNearestOverlappingSolidHandles();
+  void picksNearestOverlappingShaftsAndPlanes();
   void keepsTransformToolsVisible_data();
   void keepsTransformToolsVisible();
   void scalesTransformHandlesWithViewDistance();
   void projectsWorldAxesAndPlanes();
   void scalesOrthographicHandlesAndRejectsStaleHitAreas();
   void keepsClippedRotationRingInteractive();
+  void picksNearHandlesForSmallResolvableDepthDifferences();
+  void doesNotPickInvisibleLegacyHeadAreasWhenSolidFacesExist();
   void modelsTransformOrientationLocking();
   void mapsPreciseModelPickNeighborhood();
 };
+
+void ModelInteractionTests::picksNearHandlesForSmallResolvableDepthDifferences() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.center = QPointF(200, 200);
+  layout.radius = 100;
+  const QLineF crossing(100, 150, 300, 150);
+  layout.axes[0].rotationSegments = {crossing};
+  layout.axes[1].rotationSegments = {crossing};
+  layout.axes[0].depthSegments = {{crossing, 0.2499999F, 0.2499999F}};
+  layout.axes[1].depthSegments = {{crossing, 0.25F, 0.25F}};
+  QCOMPARE(hitTestTransformGizmo(layout, QPointF(200, 150), TransformGizmoMode::Rotate),
+           (TransformGizmoHandle{TransformGizmoHandleKind::RotateAxis, 0}));
+  QPolygonF head;
+  head << QPointF(200, 130) << QPointF(190, 155) << QPointF(210, 155);
+  for (int axis = 0; axis < 2; ++axis) {
+    layout.axes[axis].visible = true;
+    layout.axes[axis].moveArrow = head;
+    layout.axes[axis].moveEndpointDepth = axis == 0 ? 0.25F : 0.2499999F;
+  }
+  QCOMPARE(hitTestTransformGizmo(layout, QPointF(200, 145), TransformGizmoMode::Move),
+           (TransformGizmoHandle{TransformGizmoHandleKind::MoveAxis, 1}));
+}
+
+void ModelInteractionTests::doesNotPickInvisibleLegacyHeadAreasWhenSolidFacesExist() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.center = QPointF(400, 400);
+  layout.radius = 100;
+  auto &axis = layout.axes[0];
+  axis.visible = true;
+  axis.moveArrow << QPointF(40,80) << QPointF(140,80) << QPointF(90,160);
+  axis.scaleHandle = QRectF(40,80,100,80);
+  const TransformGizmoFace actual{QPolygonF(QRectF(80,90,20,20)), 0.1F, 1};
+  axis.moveFaces = {actual};
+  axis.scaleFaces = {actual};
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Scale}) {
+    QVERIFY2(!hitTestTransformGizmo(layout, QPointF(45,85), mode).isValid(),
+             "Invisible legacy heads must not remain clickable outside actual solid geometry.");
+    QCOMPARE(hitTestTransformGizmo(layout, QPointF(90,100), mode),
+             (TransformGizmoHandle{mode == TransformGizmoMode::Move ?
+                  TransformGizmoHandleKind::MoveAxis : TransformGizmoHandleKind::ScaleAxis, 0}));
+  }
+}
+
+void ModelInteractionTests::keepsCompactCentreEasyToPick() {
+  QMatrix4x4 view;
+  view.lookAt({0, 0, 10}, {}, {0, 1, 0});
+  QMatrix4x4 projection;
+  projection.ortho(-4, 4, -4, 4, 0.1F, 100.0F);
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Scale,
+                          TransformGizmoMode::Transform}) {
+    const auto layout = transformGizmoLayout({}, {}, projection * view,
+                                            {800, 800}, mode, 1);
+    QVERIFY(layout.valid);
+    QVERIFY2(layout.centerHandle.width() <= 11.0,
+             "The centre grip must be compact at a 100 px gizmo radius");
+    const auto expected = mode == TransformGizmoMode::Scale
+                              ? TransformGizmoHandleKind::ScaleUniform
+                              : TransformGizmoHandleKind::MoveView;
+    QCOMPARE(hitTestTransformGizmo(layout, layout.center, mode).kind, expected);
+    // A compact visual must not make the pre-existing safe centre target
+    // harder to reach; this point is outside the new visible grip.
+    QCOMPARE(hitTestTransformGizmo(layout, layout.center + QPointF(6, 0), mode).kind,
+             expected);
+  }
+}
+
+void ModelInteractionTests::projectsFrontAndBackRingDepths() {
+  QMatrix4x4 view;
+  view.lookAt({0, 0, 10}, {}, {0, 1, 0});
+  for (const bool orthographic : {false, true}) {
+    QMatrix4x4 projection;
+    if (orthographic) projection.ortho(-4, 4, -4, 4, 0.1F, 100.0F);
+    else projection.perspective(50, 1, 0.1F, 100.0F);
+    const auto layout = transformGizmoLayout({}, {}, projection * view,
+                                            {800, 800}, TransformGizmoMode::Rotate, 1);
+    QVERIFY(layout.valid);
+    // These depths follow independently from the fixture's near/far planes
+    // and 10-unit view distance, not another call to the projection code.
+    const float expectedPivot = orthographic ? -0.8018018F : 0.981982F;
+    QVERIFY(std::abs(layout.pivotDepth - expectedPivot) < 0.0001F);
+    bool front = false, back = false;
+    QVERIFY(!layout.axes[0].depthSegments.isEmpty());
+    for (const auto &stroke : layout.axes[0].depthSegments) {
+      QVERIFY(std::isfinite(stroke.startDepth) && std::isfinite(stroke.endDepth));
+      QVERIFY(stroke.startDepth >= -1 && stroke.startDepth <= 1);
+      QVERIFY(stroke.endDepth >= -1 && stroke.endDepth <= 1);
+      const float middleDepth = (stroke.startDepth + stroke.endDepth) * 0.5F;
+      front |= middleDepth < layout.pivotDepth - 0.00001F;
+      back |= middleDepth > layout.pivotDepth + 0.00001F;
+    }
+    QVERIFY2(front && back, "A tilted ring must expose both spatial half-rings");
+  }
+}
+
+void ModelInteractionTests::projectsShadedSolidHandleFaces() {
+  QMatrix4x4 view;
+  view.lookAt({5, 4, 8}, {}, {0, 1, 0});
+  for (const bool orthographic : {false, true}) {
+    QMatrix4x4 projection;
+    if (orthographic) projection.ortho(-4, 4, -4, 4, 0.1F, 100.0F);
+    else projection.perspective(50, 1, 0.1F, 100.0F);
+    const auto layout = transformGizmoLayout({}, {}, projection * view,
+                                            {800, 800}, TransformGizmoMode::Transform, 1);
+    QVERIFY(layout.valid);
+    float darkest = 1, brightest = 0;
+    for (int axis = 0; axis < 3; ++axis) {
+      const auto &grip = layout.axes[static_cast<std::size_t>(axis)];
+      QVERIFY(!grip.moveFaces.isEmpty());
+      QVERIFY(!grip.scaleFaces.isEmpty());
+      for (const auto &faces : {grip.moveFaces, grip.scaleFaces}) {
+        for (const auto &face : faces) {
+          QVERIFY(face.polygon.size() >= 3);
+          QVERIFY(std::isfinite(face.normalizedDepth));
+          QVERIFY(face.normalizedDepth >= -1 && face.normalizedDepth <= 1);
+          QVERIFY(face.light >= 0.45F && face.light <= 1);
+          darkest = std::min(darkest, face.light);
+          brightest = std::max(brightest, face.light);
+          for (const auto &point : face.polygon) {
+            QVERIFY(std::isfinite(point.x()) && std::isfinite(point.y()));
+            QVERIFY(QRectF(0, 0, 800, 800).contains(point));
+          }
+        }
+      }
+    }
+    QVERIFY2(brightest - darkest > 0.15F,
+             "Different solid faces must convey an observable lighting contrast");
+  }
+}
+
+void ModelInteractionTests::picksNearestOverlappingRing() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.radius = 100;
+  layout.center = {100, 100};
+  const QLineF sharedStroke({150, 100}, {190, 100});
+  for (const int nearAxis : {0, 1}) {
+    for (int axis = 0; axis < 2; ++axis) {
+      const float depth = axis == nearAxis ? -0.5F : 0.5F;
+      auto &ring = layout.axes[static_cast<std::size_t>(axis)];
+      ring.rotationSegments = {sharedStroke};
+      ring.depthSegments = {{sharedStroke, depth, depth}};
+    }
+    QCOMPARE(hitTestTransformGizmo(layout, {170, 100}, TransformGizmoMode::Rotate),
+             (TransformGizmoHandle{TransformGizmoHandleKind::RotateAxis, nearAxis}));
+  }
+}
+
+void ModelInteractionTests::picksSolidHandleSilhouettes() {
+  QMatrix4x4 view;
+  view.lookAt({5, 4, 8}, {}, {0, 1, 0});
+  QMatrix4x4 projection;
+  projection.ortho(-1.2F, 1.2F, -1.2F, 1.2F, 0.1F, 100.0F);
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Scale}) {
+    const auto layout = transformGizmoLayout({}, {}, projection * view,
+                                            {800, 800}, mode, 1);
+    bool reachedExpandedSilhouette = false;
+    for (int axis = 0; axis < 3; ++axis) {
+      const auto &grip = layout.axes[static_cast<std::size_t>(axis)];
+      const auto &faces = mode == TransformGizmoMode::Move ? grip.moveFaces : grip.scaleFaces;
+      for (const auto &face : faces) {
+        QPointF centre;
+        for (const auto &point : face.polygon) centre += point;
+        centre /= face.polygon.size();
+        for (const auto &corner : face.polygon) {
+          const QPointF point = corner * 0.85 + centre * 0.15;
+          const bool legacyHead = mode == TransformGizmoMode::Move
+              ? grip.moveArrow.containsPoint(point, Qt::OddEvenFill) ||
+                    pointPolylineDistance(point, grip.moveArrow, true) <= 3
+              : grip.scaleHandle.adjusted(-3, -3, 3, 3).contains(point);
+          const QLineF line = mode == TransformGizmoMode::Move ? grip.moveLine : grip.scaleLine;
+          if (legacyHead || pointPolylineDistance(point, {line.p1(), line.p2()}, false) <= 8.1)
+            continue;
+          reachedExpandedSilhouette = true;
+          QCOMPARE(hitTestTransformGizmo(layout, point, mode),
+                   (TransformGizmoHandle{mode == TransformGizmoMode::Move
+                       ? TransformGizmoHandleKind::MoveAxis : TransformGizmoHandleKind::ScaleAxis,
+                       axis}));
+        }
+      }
+    }
+    QVERIFY2(reachedExpandedSilhouette,
+             "The oblique solid silhouette must extend beyond the old flat grip");
+  }
+}
+
+void ModelInteractionTests::picksNearestOverlappingSolidHandles() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.radius = 100;
+  layout.center = {100, 100};
+  const QPolygonF arrow{{160, 100}, {145, 95}, {145, 105}};
+  for (const int nearAxis : {1, 0}) {
+    for (int axis = 0; axis < 2; ++axis) {
+      auto &grip = layout.axes[static_cast<std::size_t>(axis)];
+      grip.visible = true;
+      grip.moveArrow = arrow;
+      grip.scaleHandle = {145, 95, 15, 10};
+      grip.moveEndpointDepth = grip.scaleEndpointDepth = axis == nearAxis ? -0.5F : 0.5F;
+    }
+    QCOMPARE(hitTestTransformGizmo(layout, {150, 100}, TransformGizmoMode::Move),
+             (TransformGizmoHandle{TransformGizmoHandleKind::MoveAxis, nearAxis}));
+    QCOMPARE(hitTestTransformGizmo(layout, {150, 100}, TransformGizmoMode::Scale),
+             (TransformGizmoHandle{TransformGizmoHandleKind::ScaleAxis, nearAxis}));
+  }
+}
+
+void ModelInteractionTests::picksNearestOverlappingShaftsAndPlanes() {
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Scale}) {
+    for (const int nearAxis : {0, 1}) {
+      TransformGizmoLayout layout;
+      layout.valid = true;
+      layout.radius = 100;
+      layout.center = {100, 100};
+      for (int axis = 0; axis < 2; ++axis) {
+        auto &grip = layout.axes[static_cast<std::size_t>(axis)];
+        grip.visible = true;
+        grip.moveLine = grip.scaleLine = {{150, 100}, {190, 100}};
+        grip.moveEndpoint = grip.scaleEndpoint = {190, 100};
+        grip.moveEndpointDepth = grip.scaleEndpointDepth = axis == nearAxis ? -0.5F : 0.5F;
+      }
+      QCOMPARE(hitTestTransformGizmo(layout, {170, 100}, mode),
+               (TransformGizmoHandle{mode == TransformGizmoMode::Move
+                   ? TransformGizmoHandleKind::MoveAxis : TransformGizmoHandleKind::ScaleAxis,
+                   nearAxis}));
+      for (int axis = 0; axis < 2; ++axis) {
+        layout.axes[static_cast<std::size_t>(axis)].visible = false;
+        layout.planeHandles[static_cast<std::size_t>(axis)] = QPolygonF(QRectF(150, 95, 40, 10));
+        layout.planeDepths[static_cast<std::size_t>(axis)] = axis == nearAxis ? -0.5F : 0.5F;
+      }
+      QCOMPARE(hitTestTransformGizmo(layout, {170, 100}, mode),
+               (TransformGizmoHandle{mode == TransformGizmoMode::Move
+                   ? TransformGizmoHandleKind::MovePlane : TransformGizmoHandleKind::ScalePlane,
+                   nearAxis}));
+    }
+  }
+}
 
 void ModelInteractionTests::scalesTransformHandlesWithViewDistance() {
   QMatrix4x4 projection;

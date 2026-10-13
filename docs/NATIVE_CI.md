@@ -208,6 +208,14 @@ English: The actual RED regression returned `200` in all eight requests, includi
 
 日本語：実際の RED 回帰では、外部のテキストを PNG 名として指定した場合を含む 8 件すべてが `200` でした。修正後の同じ実 HTTP 検査は、`410`、新しいデータセットがないこと、入力元のバイトが変わらないことを要求します。同一オリジンのアップロード、Host／Origin／Fetch、JSON のメディア型と保存先／リンクの逸脱検査は維持します。保存先の検証は、引き続き対応する直接のバックエンド入口で行い、条件を削除しません。エラー識別子は機械向けのプロトコル値であり、新しいネイティブ UI 文言ではありません。修正コミットでテストと CodeQL を実行して確認し、アラートの却下、クエリ除外や過去の失敗記録の削除で成功を装いません。
 
+## Canonical Windows fixtures / Windows 规范路径夹具 / Windows の正規化パス
+
+中文：第 #150 次实际 Windows 运行的图形启动检查 4/4 和原生 CTest 99/99 均通过，包括三语言和侧视旋转。后续 worker 检查的 8 个失败来自测试期望保留 `RUNNER~1` 短名，而安全路径规范化正确返回 `runneradmin` 长名。仅在这 8 个用例的临时目录入口执行 `Path(tmp).resolve()`；全部精确路径断言、生产 `realpath` 及目录边界检查保留。D 盘自有 junction 复现了同样的 8 个失败，规范夹具后同一 146 项测试通过，未增加跳过项。新操作器额外加入一个纯 `QImage` 的 CTest 目标；真实窗口验收保留在 GitHub runner，不在用户桌面抢焦点。
+
+English: Actual Windows run #150 passed graphics bootstrap 4/4 and native CTest 99/99, including all three languages and edge-on rotation. Eight later worker failures came from fixture expectations retaining the `RUNNER~1` short name while secure canonical paths correctly expanded it to `runneradmin`. Only the temporary roots in those eight cases now use `Path(tmp).resolve()`; exact path assertions, production `realpath` and directory containment remain. An owned D-drive junction reproduced the same eight failures, and the same 146-test matrix passed with canonical fixtures and no added skips. The new gizmo adds one pure `QImage` CTest target; actual-window acceptance remains on GitHub runners without taking desktop focus.
+
+日本語：実際の Windows 第 #150 回は、描画起動検査 4/4 とネイティブ CTest 99/99 に成功し、三言語と側面回転も通過しました。その後の worker の 8 件の失敗は、テスト期待値が短名 `RUNNER~1` を保持し、安全な正規化パスが正しく長名 `runneradmin` を返したためです。対象 8 件の一時ディレクトリ入口だけを `Path(tmp).resolve()` で正規化し、厳密なパス比較、製品の `realpath` とディレクトリ制約を維持します。D ドライブのテスト専用 junction で同じ 8 件の失敗を再現し、同じ 146 件の検査が正規化後に成功しました。新しいスキップはありません。新操作器は純 `QImage` の CTest を 1 つ追加し、実ウィンドウの検査は GitHub runner で行ってユーザーのフォーカスを奪いません。
+
 ## Official references / 官方资料 / 公式資料
 
 中文：后续完整验收发现，参考轴／侧视旋转测试仍通过查找私有 `QVariantAnimation` 强制跳到终点。视角计时实现改变后，这段测试会在默认视角立即发送鼠标输入并取消尚未完成的吸附，导致并未真正进入侧视的错误验收。现在只在公开 +X 视角确实到达后才开始旋转，使用与网格验收相同的 1500 ms 有界等待和 `1e-6` 角度容差；保留全部旋转、修饰键、数字输入、撤销和重做断言，不设置内部状态。本机可见界面测试已停止；未经用户允许不自动弹出或置顶窗口，剩余可见界面验收由 GitHub runner 完成。

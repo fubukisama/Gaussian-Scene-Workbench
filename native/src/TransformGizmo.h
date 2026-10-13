@@ -48,6 +48,18 @@ struct TransformGizmoHandle final {
                          const TransformGizmoHandle &right) = default;
 };
 
+struct TransformGizmoDepthSegment final {
+  QLineF line;
+  float startDepth = 0.0F;
+  float endDepth = 0.0F;
+};
+
+struct TransformGizmoFace final {
+  QPolygonF polygon;
+  float normalizedDepth = 0.0F;
+  float light = 1.0F;
+};
+
 struct TransformGizmoAxisLayout final {
   QVector3D direction;
   QLineF moveLine;
@@ -58,6 +70,11 @@ struct TransformGizmoAxisLayout final {
   QRectF scaleHandle;
   QPolygonF rotationRing;
   QList<QLineF> rotationSegments;
+  QList<TransformGizmoDepthSegment> depthSegments;
+  QList<TransformGizmoFace> moveFaces;
+  QList<TransformGizmoFace> scaleFaces;
+  float moveEndpointDepth = 0.0F;
+  float scaleEndpointDepth = 0.0F;
   bool visible = false;
 };
 
@@ -65,14 +82,17 @@ struct TransformGizmoLayout final {
   bool valid = false;
   QPointF center;
   qreal radius = 0.0; // Projected world radius, in logical pixels; never clamped.
+  float pivotDepth = 0.0F;
   qreal lineWidth = 2.2;
   qreal rotationHitInnerRadius = 0.0;
   qreal trackballInnerRadius = 0.0;
   qreal trackballOuterRadius = 0.0;
   std::array<TransformGizmoAxisLayout, 3> axes;
   std::array<QPolygonF, 3> planeHandles;
+  std::array<float, 3> planeDepths{};
   QPolygonF viewRing;
   QRectF centerHandle;
+  qreal centerHitRadius = 0.0; // Compact visible grip, original safe hit radius.
   QRectF trackballBounds;
 };
 
