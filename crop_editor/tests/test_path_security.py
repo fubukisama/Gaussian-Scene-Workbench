@@ -178,18 +178,54 @@ class BackendPathSecurityTests(unittest.TestCase):
         )
         source = self.write_fixture("external-source/input.png", image)
         files = [{"path": str(source), "name": "input.png"}]
-        status, _, body = self.request("/api/import-paths", "POST", {"scene": "legal-import_42.a", "files": files})
-        self.assertEqual(status, 200, body)
-        self.assertEqual(json.loads(body.decode("utf-8"))["image_count"], 1)
+        result = server.save_path_dataset({"scene": "legal-import_42.a", "files": files})
+        self.assertEqual(result["image_count"], 1)
+        self.assertEqual((server.DATASETS_DIR / "legal-import_42.a" / "images" / "input.png").read_bytes(), image)
+        self.assertEqual(source.read_bytes(), image)
 
         for linked_part in ("", "/images", "/source/originals"):
             scene = "linked-import_42.a" + str(len(linked_part))
             outside = self.write_fixture("outside/import-{}-target/marker.txt".format(len(linked_part)), b"owned external target")
             self.make_link("datasets/" + scene + linked_part, outside.parent, directory=True)
-            status, _, body = self.request("/api/import-paths", "POST", {"scene": scene, "files": files})
             with self.subTest(linked_part=linked_part):
-                self.assertEqual(status, 400)
-                self.assertIn("error", json.loads(body.decode("utf-8")))
+                with self.assertRaisesRegex(ValueError, "^Unsupported asset file$"):
+                    server.save_path_dataset({"scene": scene, "files": files})
+                self.assertEqual(outside.read_bytes(), b"owned external target")
+                self.assertEqual([path.name for path in outside.parent.iterdir()], ["marker.txt"])
+                self.assertEqual(source.read_bytes(), image)
+
+    def test_http_local_path_import_is_disabled_without_reading_external_files(self):
+        image = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
+        )
+        sources = (
+            ("media", self.write_fixture("external-source/日本語/写真.png", image), "写真.png", image),
+            ("disguised-secret", self.write_fixture("external-source/private/secret.txt", b"owned private source"),
+             "input.png", b"owned private source"),
+        )
+        port = self.httpd.server_address[1]
+        authority = "127.0.0.1:" + str(port)
+        contexts = (
+            ("script", {}),
+            ("json-charset", {"Content-Type": "application/json; charset=utf-8"}),
+            ("same-origin", {"Origin": "http://" + authority, "Sec-Fetch-Site": "same-origin"}),
+            ("localhost-origin", {"Host": "localhost:" + str(port),
+                "Origin": "http://localhost:" + str(port), "Sec-Fetch-Site": "same-origin"}),
+        )
+        for source_label, source, filename, expected in sources:
+            for context_label, headers in contexts:
+                scene = "owned-disabled-" + source_label + "-" + context_label
+                with self.subTest(source=source_label, context=context_label):
+                    status, response_headers, body = self.request("/api/import-paths", "POST", {
+                        "scene": scene, "overwrite": True,
+                        "files": [{"path": str(source), "name": filename}],
+                    }, headers=headers)
+                    self.assertEqual(status, 410, body)
+                    self.assertEqual(response_headers["Content-Type"], "application/json; charset=utf-8")
+                    self.assertIn("upload", json.loads(body.decode("utf-8"))["error"].lower())
+                    self.assertFalse((server.DATASETS_DIR / scene).exists())
+                    self.assertEqual(list(server.DATASETS_DIR.iterdir()), [])
+                    self.assertEqual(source.read_bytes(), expected)
 
     def test_local_import_rejects_untrusted_http_context_without_dataset_artifacts(self):
         image = base64.b64decode(
@@ -224,7 +260,7 @@ class BackendPathSecurityTests(unittest.TestCase):
                 self.assertFalse((server.DATASETS_DIR / scene).exists())
                 self.assertEqual(source.read_bytes(), image)
 
-    def test_local_import_rejects_non_json_media_types_without_dataset_artifacts(self):
+    def test_json_routes_reject_non_json_media_types_without_dataset_artifacts(self):
         image = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
         )
@@ -237,9 +273,9 @@ class BackendPathSecurityTests(unittest.TestCase):
         )
         for label, headers in cases:
             scene = "owned-media-reject-" + label
-            payload = {"scene": scene, "files": [{"path": str(source), "name": "input.png"}]}
+            payload = {"id": "owned-no-job-" + label}
             with self.subTest(media_type=label):
-                status, _, body = self.request("/api/import-paths", "POST", headers=headers,
+                status, _, body = self.request("/api/jobs/cancel", "POST", headers=headers,
                     raw_body=json.dumps(payload).encode("utf-8"))
                 self.assertEqual(status, 415, body)
                 self.assertIn("error", json.loads(body.decode("utf-8")))
@@ -291,30 +327,34 @@ class BackendPathSecurityTests(unittest.TestCase):
         self.assertLessEqual(elapsed, 0.5, "Rejected trickle body extended response time to {:.3f}s".format(elapsed))
         self.assertEqual(list(server.DATASETS_DIR.iterdir()), [])
 
-    def test_local_import_preserves_script_and_same_origin_json_with_external_japanese_paths(self):
+    def test_native_backend_import_preserves_external_japanese_paths_and_metadata(self):
         image = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/X2sAAAAASUVORK5CYII="
         )
         source = self.write_fixture("external-source/日本語/写真.png", image)
-        port = self.httpd.server_address[1]
-        authority = "127.0.0.1:" + str(port)
         cases = (
-            ("script", {}),
-            ("json-charset", {"Content-Type": "application/json; charset=utf-8"}),
-            ("same-origin", {"Origin": "http://" + authority, "Sec-Fetch-Site": "same-origin"}),
-            ("localhost-origin", {"Host": "localhost:" + str(port),
-                "Origin": "http://localhost:" + str(port), "Sec-Fetch-Site": "same-origin"}),
+            ("source-name", {}, "_.png"),
+            ("renamed", {"name": "input.png"}, "input.png"),
+            ("unicode-name", {"name": "模型 写真.png"}, "_.png"),
+            ("unicode-metadata", {"name": "input.png", "relativePath": "撮影/写真.png",
+                "type": "image/png", "size": len(image), "lastModified": 1710000000123}, "input.png"),
         )
-        for label, headers in cases:
+        for label, metadata, filename in cases:
             scene = "owned-compatible-" + label
-            status, _, body = self.request("/api/import-paths", "POST", {
-                "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
-            }, headers=headers)
-            with self.subTest(client=label):
-                self.assertEqual(status, 200, body)
-                self.assertEqual(json.loads(body.decode("utf-8"))["image_count"], 1)
-                self.assertEqual((server.DATASETS_DIR / scene / "images" / "input.png").read_bytes(), image)
+            with self.subTest(source_metadata=label):
+                result = server.save_path_dataset({
+                    "scene": scene, "files": [{"path": str(source), **metadata}],
+                })
+                self.assertEqual(result["image_count"], 1)
+                dataset = server.DATASETS_DIR / scene
+                self.assertEqual((dataset / "images" / filename).read_bytes(), image)
+                self.assertEqual((dataset / "source" / "originals" / filename).read_bytes(), image)
                 self.assertEqual(source.read_bytes(), image)
+                record = json.loads((dataset / "source" / "metadata_manifest.json").read_text(encoding="utf-8"))["files"][0]
+                self.assertEqual(record["sourcePath"], str(source))
+                if label == "unicode-metadata":
+                    self.assertEqual(record["relativePath"], "撮影/写真.png")
+                    self.assertEqual(record["lastModified"], 1710000000123)
 
     def test_local_import_preserves_same_origin_multipart_upload(self):
         image = base64.b64decode(
@@ -393,11 +433,10 @@ module.main()
         marker = self.write_fixture("outside/" + scene + "/marker.txt", b"original marker")
         escaped = marker.parent / "escaped.png"
         self.make_link("datasets/" + scene + "/" + part + "/input.png", escaped, directory=directory_link)
-        status, _, body = self.request("/api/import-paths", "POST", {
-            "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
-        })
-        self.assertEqual(status, 400, body)
-        self.assertEqual(json.loads(body)["error"], "Unsupported asset file")
+        with self.assertRaisesRegex(ValueError, "^Unsupported asset file$"):
+            server.save_path_dataset({
+                "scene": scene, "files": [{"path": str(source), "name": "input.png"}],
+            })
         self.assertFalse(escaped.exists())
         self.assertEqual(marker.read_bytes(), b"original marker")
         self.assertEqual(source.read_bytes(), image)

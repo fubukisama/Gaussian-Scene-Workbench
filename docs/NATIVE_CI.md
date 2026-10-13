@@ -194,6 +194,20 @@ English: Axis-view snapping starts an independent monotonic clock at the user's 
 
 日本語：軸ビューへのスナップはユーザーの要求時刻に独立した単調時計を開始し、精密タイマーは更新の実行だけを担当します。遅延したコールバックは実際の経過時間に追いつき、遅れた全体アニメーションの初期化を開始時刻としません。従来の 220 ms、OutCubic、最短の yaw 経路、キャンセルと全モデルの描画経路を維持します。FPS 方針、1500 ms の待機、完全表示 10 秒、表面被覆率 90% の基準は変更せず、テストからアニメーション時間や目標姿勢を直接設定しません。開始、中間、終了、長い実行遅延、yaw の折り返しを検査します。修正コミットの実際の Actions 全体での確認は引き続き必要です。
 
+## HTTP local-path import retirement / HTTP 本地路径导入停用 / HTTP ローカルパス取込の廃止
+
+中文：桌面分支停用兼容 HTTP 的 `POST /api/import-paths`。通过原有本地 Host／Origin／Fetch 检查后，该入口返回 `410` 和稳定的协议错误标识 `http_path_import_disabled_use_upload_or_native_import`，不解析 JSON，也不调用本地路径读取函数。兼容客户端应通过 `/api/import` 上传文件内容；旧的 HTTP 快速本地路径导入不再支持。原生桌面端仍通过自有 worker 的导入事务读取用户明确选择的外部照片／视频，不启动 HTTP，不把来源限制到工程目录。3DGS、2DGS 和网格流程共用这一数据集入口。此更改不修改旧 HTML `main` 分支。
+
+English: The desktop branch retires compatibility HTTP `POST /api/import-paths`. After the existing local Host/Origin/Fetch checks, it returns `410` with the stable protocol error identifier `http_path_import_disabled_use_upload_or_native_import`, without parsing JSON or invoking local-source reads. Compatibility clients must upload file bytes through `/api/import`; the former fast HTTP local-path route is unavailable. Native desktop imports still read explicitly chosen external photos/videos in the owned worker's import transaction, without starting HTTP or restricting sources to project directories. 3DGS, 2DGS and mesh workflows share this dataset entry point. The legacy HTML `main` branch is unchanged.
+
+日本語：デスクトップ分岐では、互換 HTTP の `POST /api/import-paths` を廃止します。従来のローカル Host／Origin／Fetch 検査後、JSON を解析せず、ローカルの入力ファイルを読み取る関数も呼ばずに、`410` と固定のプロトコル識別子 `http_path_import_disabled_use_upload_or_native_import` を返します。互換クライアントは `/api/import` でファイル内容をアップロードしてください。従来の高速な HTTP ローカルパス取込は非対応になります。ネイティブ版は、自身が所有する worker の取込トランザクションで、ユーザーが明示的に選んだ外部の写真／動画を引き続き読み取ります。HTTP を開始せず、入力元をプロジェクト内に制限しません。3DGS、2DGS とメッシュの処理は同じデータセット入口を使用し、旧 HTML の `main` 分岐は変更しません。
+
+中文：实际 RED 回归捕获到 8 组请求均返回 `200`，包含将外部文本来源伪装为 PNG 文件名的请求。修复后的同一真实 HTTP 回归要求 `410`、零新数据集及原始字节不变。原有同源上传、Host／Origin／Fetch、JSON 类型和目标目录／链接防逃逸检查保留；目标安全检查改在仍受支持的直接后端入口验证，不删除其断言。这里的错误标识是机器协议值，不是新增原生 UI 文案。所有测试和 CodeQL 仍需对修复提交实际验收；不通过关闭告警、排除查询或删除旧失败记录装作成功。
+
+English: The actual RED regression returned `200` in all eight requests, including an external text source disguised as a PNG filename. The same real HTTP regression now requires `410`, no new dataset and unchanged source bytes. Same-origin uploads, Host/Origin/Fetch, JSON media types and target-directory/link containment checks remain; target checks use the still-supported direct backend entry rather than deleting their assertions. The error identifier is a machine protocol value, not new native UI text. Tests and CodeQL must certify the fixed commit; alerts are not dismissed, queries excluded or old failures deleted to manufacture success.
+
+日本語：実際の RED 回帰では、外部のテキストを PNG 名として指定した場合を含む 8 件すべてが `200` でした。修正後の同じ実 HTTP 検査は、`410`、新しいデータセットがないこと、入力元のバイトが変わらないことを要求します。同一オリジンのアップロード、Host／Origin／Fetch、JSON のメディア型と保存先／リンクの逸脱検査は維持します。保存先の検証は、引き続き対応する直接のバックエンド入口で行い、条件を削除しません。エラー識別子は機械向けのプロトコル値であり、新しいネイティブ UI 文言ではありません。修正コミットでテストと CodeQL を実行して確認し、アラートの却下、クエリ除外や過去の失敗記録の削除で成功を装いません。
+
 ## Official references / 官方资料 / 公式資料
 
 中文：后续完整验收发现，参考轴／侧视旋转测试仍通过查找私有 `QVariantAnimation` 强制跳到终点。视角计时实现改变后，这段测试会在默认视角立即发送鼠标输入并取消尚未完成的吸附，导致并未真正进入侧视的错误验收。现在只在公开 +X 视角确实到达后才开始旋转，使用与网格验收相同的 1500 ms 有界等待和 `1e-6` 角度容差；保留全部旋转、修饰键、数字输入、撤销和重做断言，不设置内部状态。本机可见界面测试已停止；未经用户允许不自动弹出或置顶窗口，剩余可见界面验收由 GitHub runner 完成。

@@ -7889,6 +7889,7 @@ def save_uploaded_dataset(form):
 
 
 def save_path_dataset(data):
+    """Import sources explicitly selected by the owned native worker, not HTTP."""
     scene = safe_name(data.get("scene", ""))
     overwrite = bool(data.get("overwrite", False))
     fps = float(data.get("fps", 2))
@@ -7996,8 +7997,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": message}, status)
 
     def accept_local_request(self):
-        # Local path imports are intentionally allowed. Their HTTP caller must
-        # still be local and same-origin: loopback binding alone does not stop
+        # Compatibility uploads and API callers must be local and same-origin:
+        # loopback binding alone does not stop
         # browser CSRF or DNS rebinding. This is not remote authentication.
         try:
             if not is_loopback_host(self.server.server_address[0]) or not is_loopback_host(self.client_address[0]):
@@ -8278,6 +8279,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             parsed_path = urlparse(self.path).path
+            if parsed_path == "/api/import-paths":
+                # An HTTP caller cannot authorize the backend to read local
+                # source paths. Native workers import selected files directly;
+                # compatibility clients must send file bytes as an upload.
+                return self.reject_local_request(
+                    "http_path_import_disabled_use_upload_or_native_import",
+                    410,
+                )
             if parsed_path == "/api/shutdown":
                 stopped = shutdown_active_jobs("desktop app shutdown")
                 self.send_json({"ok": True, "stopped": stopped})
@@ -8309,7 +8318,6 @@ class Handler(BaseHTTPRequestHandler):
                     form.getfirst("overwrite", "false").lower() == "true",
                 ))
             if parsed_path not in (
-                "/api/import-paths",
                 "/api/save",
                 "/api/preview",
                 "/api/train/start",
@@ -8338,8 +8346,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reject_local_request("This endpoint requires application/json.", 415)
             length = int(self.headers.get("Content-Length", "0"))
             data = json.loads(self.rfile.read(length).decode("utf-8"))
-            if parsed_path == "/api/import-paths":
-                return self.send_json(save_path_dataset(data))
             if parsed_path == "/api/jobs/cancel":
                 return self.send_json(cancel_unified_job(data["id"]))
             if parsed_path == "/api/jobs/retry":
