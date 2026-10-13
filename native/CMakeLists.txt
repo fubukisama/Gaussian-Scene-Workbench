@@ -425,8 +425,10 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME native_language_${language} COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
     set_tests_properties(native_language_${language} PROPERTIES
-      # Includes normal/maximized/full-screen, scale and live locale matrices.
-      TIMEOUT 90
+      # This is the complete live-locale/theme/form/window-control matrix, not
+      # a loading benchmark. Hosted software rendering exceeded 90 seconds;
+      # keep every phase assertion and its own bounded wait unchanged.
+      TIMEOUT 300
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()

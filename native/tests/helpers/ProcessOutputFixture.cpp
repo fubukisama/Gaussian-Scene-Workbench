@@ -82,6 +82,15 @@ int main(int argc, char *argv[]) {
     std::fflush(stdout);
     return 75;
   }
+  if (arguments.size() == 2 && arguments.at(1) == QStringLiteral("lifetime-worker")) {
+    // Own the stdin pipe until the test shuts down or its parent exits. A fixed
+    // wall-clock lifetime would make a slow UI matrix look like a stopped task.
+    char command[32] = {};
+    while (std::fgets(command, sizeof(command), stdin)) {
+      if (QByteArray(command).trimmed() == "release") return 0;
+    }
+    return 0;
+  }
   if (arguments.size() >= 2 && arguments.at(1) == QStringLiteral("tree-child")) {
     QDeadlineTimer deadline(60000);
     while (!deadline.hasExpired()) {

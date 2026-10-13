@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QMetaMethod>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -50,6 +51,8 @@ class ProcessSupervisorTests final : public QObject {
 
 private slots:
   void initTestCase();
+  void lifetimeFixtureWaitsForOwnedStdinRelease_data();
+  void lifetimeFixtureWaitsForOwnedStdinRelease();
   void failedLaunchRemainsObservableAsAnAcceptedAttempt();
   void failedLaunchRestoresThePreviousTrainingResumeRecord_data();
   void failedLaunchRestoresThePreviousTrainingResumeRecord();
@@ -65,6 +68,47 @@ private slots:
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
+}
+
+void ProcessSupervisorTests::lifetimeFixtureWaitsForOwnedStdinRelease_data() {
+  QTest::addColumn<bool>("explicitRelease");
+  QTest::newRow("release-line") << true;
+  QTest::newRow("write-channel-eof") << false;
+}
+
+void ProcessSupervisorTests::lifetimeFixtureWaitsForOwnedStdinRelease() {
+  QFETCH(bool, explicitRelease);
+  const QString helper = processOutputFixturePath();
+  QVERIFY2(QFileInfo::exists(helper), qPrintable(helper));
+  QProcess worker;
+  const auto cleanup = qScopeGuard([&worker] {
+    if (worker.state() == QProcess::NotRunning) return;
+    worker.closeWriteChannel();
+    if (!worker.waitForFinished(1000)) {
+      worker.kill();
+      worker.waitForFinished(1000);
+    }
+  });
+  worker.start(helper, {QStringLiteral("lifetime-worker")});
+  QVERIFY2(worker.waitForStarted(5000), qPrintable(worker.errorString()));
+  QCOMPARE(worker.state(), QProcess::Running);
+  QVERIFY2(!worker.waitForFinished(150), "An open owned stdin pipe must keep the fixture alive.");
+  QCOMPARE(worker.state(), QProcess::Running);
+
+  if (explicitRelease) {
+    // A partial command is not a release until its line terminator arrives.
+    QCOMPARE(worker.write("release"), qint64(7));
+    QVERIFY(worker.waitForBytesWritten(1000));
+    QVERIFY2(!worker.waitForFinished(100), "An unterminated release command must not end the fixture.");
+    QCOMPARE(worker.write("\n"), qint64(1));
+    QVERIFY(worker.waitForBytesWritten(1000));
+  } else {
+    worker.closeWriteChannel();
+  }
+  QVERIFY2(worker.waitForFinished(5000), qPrintable(worker.errorString()));
+  QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+  QCOMPARE(worker.exitCode(), 0);
+  QCOMPARE(worker.state(), QProcess::NotRunning);
 }
 
 void ProcessSupervisorTests::failedLaunchRemainsObservableAsAnAcceptedAttempt() {

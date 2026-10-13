@@ -49,6 +49,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -59,6 +60,7 @@
 #include <QTreeView>
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
+#include <QWindow>
 
 #include <functional>
 #include <cmath>
@@ -655,6 +657,12 @@ bool runListInteractionSmokeTest(MainWindow &window) {
 
 bool runLanguageSmokeTest(MainWindow &window) {
   const QString locale = AppLanguage::current();
+  QElapsedTimer matrixClock;
+  matrixClock.start();
+  const auto stage = [&](const char *name) {
+    qInfo() << "LANGUAGE_MATRIX_STAGE:" << locale << name << "elapsed ms" << matrixClock.elapsed();
+  };
+  stage("begin");
   const QString screenshotDirectory = qEnvironmentVariable("GSW_LANGUAGE_SCREENSHOT_DIR");
   const int index = AppLanguage::supported().indexOf(locale);
   bool passed = index >= 0 && window.isVisible();
@@ -807,6 +815,15 @@ bool runLanguageSmokeTest(MainWindow &window) {
   auto *monitor = window.findChild<TrainingMonitorWidget *>();
   auto *tree = window.findChild<QTreeWidget *>(QStringLiteral("projectTree"));
   if (!viewport || !document || !supervisor || !monitor || !tree) return false;
+  // This matrix owns its window. Establish a real, exposed viewport before
+  // recording the state that live language/theme changes must preserve.
+  window.showNormal();
+  const bool viewportReady = waitUntil([&] {
+    return window.windowHandle() && window.windowHandle()->isExposed() &&
+        !window.isMinimized() && viewport->isVisible() && viewport->isValid();
+  });
+  check(viewportReady, "language matrix starts with an exposed initialized viewport");
+  if (!viewportReady) return false;
   QTemporaryDir temporary;
   if (!temporary.isValid()) return false;
   const auto media = QDir(temporary.path()).filePath(QStringLiteral("images/frame.jpg"));
@@ -834,6 +851,16 @@ bool runLanguageSmokeTest(MainWindow &window) {
   viewport->selectModelForRotate();
   viewport->setAxisView(NavigationAxis::PositiveZ);
   waitUntil([] { return false; }, 400);
+  const QImage firstModelFrame = viewport->grabFramebuffer();
+  bool paintedModelFrame = false;
+  if (!firstModelFrame.isNull()) {
+    const QRgb firstPixel = firstModelFrame.pixel(0, 0);
+    for (int y = 0; y < firstModelFrame.height() && !paintedModelFrame; ++y)
+      for (int x = 0; x < firstModelFrame.width(); ++x)
+        if (firstModelFrame.pixel(x, y) != firstPixel) { paintedModelFrame = true; break; }
+  }
+  check(paintedModelFrame, "model fixture has a real nonblank viewport frame before live appearance changes");
+  if (!paintedModelFrame) return false;
   auto *lockTools = window.findChild<QAction *>(QStringLiteral("lockEditToolsAction"));
   auto *trackball = window.findChild<QAction *>(QStringLiteral("observationTrackballAction"));
   if (!trackball) return false;
@@ -965,7 +992,11 @@ bool runLanguageSmokeTest(MainWindow &window) {
       QDir(QCoreApplication::applicationDirPath())
           .filePath(QStringLiteral("gsw_process_output_fixture.exe")));
   const bool testProcess = QFileInfo::exists(fixture);
-  if (testProcess) check(supervisor->start(name, fixture, {QStringLiteral("tree-child")}), "start test worker");
+  if (testProcess) check(supervisor->start(name, fixture, {QStringLiteral("lifetime-worker")}), "start test worker");
+  const auto stopOwnedWorker = qScopeGuard([supervisor, testProcess] {
+    if (testProcess) supervisor->shutdown();
+  });
+  stage("owned-worker-started");
   monitor->beginTraining(name, QStringLiteral("3dgs"), 30000);
   WorkerStatus status;
   status.state = QStringLiteral("running");
@@ -1061,6 +1092,28 @@ bool runLanguageSmokeTest(MainWindow &window) {
         if (qAlpha(pixels[x]) != 255) { opaque = false; break; }
     }
     check(opaque, "manual/automatic viewport stays opaque through overlay alpha blending");
+    // Measure the actual displayed framebuffer, not only the next-clear GL
+    // state. Fixed side regions avoid HUDs, the central trackball and gizmo;
+    // thin grid/axis lines may occupy up to 30% of each region.
+    const int expectedRgb[3] = {light ? 255 : 12, light ? 255 : 13, light ? 255 : 14};
+    const QRectF backgroundRegions[] = {{.08, .28, .16, .15}, {.76, .28, .16, .15},
+        {.08, .48, .16, .15}, {.76, .48, .16, .15}};
+    for (const auto &region : backgroundRegions) {
+      qint64 matches = 0, samples = 0;
+      for (int y = int(region.top() * frame.height()); y < int(region.bottom() * frame.height()); ++y)
+        for (int x = int(region.left() * frame.width()); x < int(region.right() * frame.width()); ++x) {
+          const QRgb pixel = frame.pixel(x, y);
+          ++samples;
+          if (std::abs(qRed(pixel) - expectedRgb[0]) <= 2 &&
+              std::abs(qGreen(pixel) - expectedRgb[1]) <= 2 &&
+              std::abs(qBlue(pixel) - expectedRgb[2]) <= 2) ++matches;
+        }
+      const bool backgroundMatches = samples > 0 && matches * 10 >= samples * 7;
+      if (!backgroundMatches)
+        qWarning() << "VIEWPORT_THEME_PIXELS:" << "light" << light << "region" << region
+            << "matches" << matches << "samples" << samples;
+      check(backgroundMatches, "manual/automatic appearance reaches the actual framebuffer background");
+    }
     viewport->makeCurrent();
     GLfloat clearColor[4] = {};
     if (viewport->context())
@@ -1068,6 +1121,17 @@ bool runLanguageSmokeTest(MainWindow &window) {
     viewport->doneCurrent();
     const float expectedClear[4] = {light ? 1.0F : .047F,
         light ? 1.0F : .051F, light ? 1.0F : .055F, 1.0F};
+    if (!frame.isNull() && (std::abs(clearColor[0] - expectedClear[0]) >= .002F ||
+        std::abs(clearColor[1] - expectedClear[1]) >= .002F ||
+        std::abs(clearColor[2] - expectedClear[2]) >= .002F))
+      qWarning() << "VIEWPORT_THEME_DIAGNOSTIC:" << "light" << light
+          << "clear" << clearColor[0] << clearColor[1] << clearColor[2] << clearColor[3]
+          << "frame" << frame.size() << "corner" << frame.pixelColor(frame.width() - 2, 2)
+          << "visible" << viewport->isVisible() << "valid" << viewport->isValid()
+          << "minimized" << window.isMinimized() << "state" << window.windowState()
+          << "auto-fill" << viewport->autoFillBackground()
+          << "preview-visible" << viewport->processingPreviewVisible()
+          << "preview-label" << viewport->processingPreviewLabel();
     for (int channel = 0; channel < 4; ++channel)
       check(std::abs(clearColor[channel] - expectedClear[channel]) < .002F,
             "manual/automatic appearance reaches the actual OpenGL viewport background");
@@ -1080,7 +1144,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
       {QTime(23, 59, 59, 999), UiTheme::Dark},
       {QTime(0, 0), UiTheme::Dark}};
   lightTheme->trigger();
+  stage("live-language-theme-begin");
   for (int step = 1; step <= 6; ++step) {
+    stage("live-language-theme-step");
     const int next = (index + step) % 3;
     const QString language = AppLanguage::supported()[next];
     languageMenu->actions()[next]->trigger();
@@ -1355,6 +1421,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto settleLayout = [] {
     for (int pass = 0; pass < 4; ++pass) QApplication::processEvents();
   };
+  stage("responsive-monitor-begin");
   auto *displaySettings = window.findChild<QMenu *>(QStringLiteral("displaySettingsMenu"));
   auto *automaticScale = window.findChild<QAction *>(QStringLiteral("autoUiScaleAction"));
   const auto scaleAction = [displaySettings](const int percent) -> QAction * {
@@ -1617,6 +1684,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
         "application-scale changes preserve the live monitor and loaded model");
   if (testProcess) check(supervisor->isRunning() && supervisor->activeTask() == name,
                         "application-scale changes do not interrupt the worker");
+  stage("application-scale-complete");
   if (!screenshotDirectory.isEmpty()) {
     // Expand only the isolated QA layout to inspect translated monitor labels.
     if (tabs) {
@@ -1691,9 +1759,12 @@ bool runLanguageSmokeTest(MainWindow &window) {
     }
     restoreThemeMode();
   }
+  stage("list-interactions-begin");
   check(runListInteractionSmokeTest(window), "all item-list interactions");
   if (testProcess) supervisor->shutdown();
+  stage("window-controls-begin");
   check(runWindowUiSmokeTest(window), "native window and dock controls");
+  stage("complete");
   qInfo().noquote() << "Language smoke:" << locale << (passed ? "PASS" : "FAIL");
   return passed;
 }

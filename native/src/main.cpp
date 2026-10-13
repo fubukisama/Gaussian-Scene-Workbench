@@ -1545,13 +1545,33 @@ int main(int argc, char *argv[]) {
         });
   } else if (exitConfirmationSmokeTest) {
     struct ExitSmokeState {
+      enum class Step {
+        InitialPrompt,
+        InitialCloseReturned,
+        ModifiedPrompt,
+        SavePrompt,
+        ModifiedCloseReturned,
+        ResetPrompt,
+        ResetCloseReturned
+      };
+      Step step = Step::InitialPrompt;
       bool exitPromptFound = false;
       bool savePromptFound = false;
       bool exitPromptReset = false;
+      bool initialCancelPreserved = false;
+      bool saveCancelPreserved = false;
+      bool closeReturned = false;
+      bool closeAccepted = false;
+      bool finished = false;
     };
     // These callbacks run after this branch leaves scope. Own their state by
     // value rather than retaining references to already-destroyed local bools.
     const auto state = std::make_shared<ExitSmokeState>();
+    auto *driver = new QTimer(&application);
+    driver->setInterval(20);
+    auto *deadline = new QTimer(&application);
+    deadline->setSingleShot(true);
+    deadline->setInterval(10000);
     const auto logMissingPrompt = [](const char *stage) {
       qCritical() << "EXIT_CONFIRMATION FAIL:" << stage << "expected visible prompt not found";
       for (QWidget *widget : QApplication::topLevelWidgets()) {
@@ -1562,112 +1582,192 @@ int main(int argc, char *argv[]) {
         }
       }
     };
-    QTimer::singleShot(100, &window, [&window]() { window.close(); });
-    QTimer::singleShot(
-        350, &application,
-        [state, logMissingPrompt]() {
-          for (QWidget *widget : QApplication::topLevelWidgets()) {
-            auto *prompt = qobject_cast<QMessageBox *>(widget);
-            if (prompt == nullptr || !prompt->isVisible() ||
-                prompt->windowTitle() != QStringLiteral("确认退出") ||
-                !prompt->text().contains(QStringLiteral("退出"))) {
-              continue;
-            }
-            const QPushButton *defaultButton = prompt->defaultButton();
-            QAbstractButton *escapeButton = prompt->escapeButton();
-            state->exitPromptFound = defaultButton != nullptr &&
-                                     defaultButton->text() == QStringLiteral("取消") &&
-                                     escapeButton != nullptr &&
-                                     escapeButton->text() == QStringLiteral("取消");
-            if (!state->exitPromptFound) {
-              qCritical() << "EXIT_CONFIRMATION FAIL: initial prompt default/escape must both cancel"
-                          << "default" << (defaultButton ? defaultButton->text() : QString())
-                          << "escape" << (escapeButton ? escapeButton->text() : QString());
-            }
-            prompt->reject();
+    const auto findPrompt = [&window](const char *title) -> QMessageBox * {
+      for (QWidget *widget : QApplication::topLevelWidgets()) {
+        auto *prompt = qobject_cast<QMessageBox *>(widget);
+        if (prompt != nullptr && prompt->parentWidget() == &window &&
+            prompt->isVisible() &&
+            prompt->windowTitle() == QCoreApplication::translate("Workbench", title)) {
+          return prompt;
+        }
+      }
+      return nullptr;
+    };
+    const auto finish = [&application, &window, &smokeTestCompleted, state,
+                         driver, deadline](bool passed) {
+      if (state->finished) {
+        return;
+      }
+      state->finished = true;
+      driver->stop();
+      deadline->stop();
+      smokeTestCompleted = passed;
+      qInfo() << "EXIT_CONFIRMATION:" << (smokeTestCompleted ? "PASS" : "FAIL")
+              << "initial cancel/save cancellation/confirmation reset/window visible"
+              << state->exitPromptFound << state->savePromptFound
+              << state->exitPromptReset << window.isVisible()
+              << "window modified" << window.isWindowModified()
+              << "cancellation preserved" << state->initialCancelPreserved
+              << state->saveCancelPreserved
+              << "close returned/accepted" << state->closeReturned << state->closeAccepted;
+      application.exit(smokeTestCompleted ? 0 : 2);
+    };
+    const auto startClose = [&application, &window, state]() {
+      state->closeReturned = false;
+      state->closeAccepted = false;
+      // closeEvent enters QMessageBox::exec(). Dispatch the close separately
+      // from the polling timer so that timer can answer the real modal prompt.
+      // A later close is not issued until this entire close() call returns:
+      // fixed wall-clock timers could otherwise hit Qt's close reentry guard.
+      QTimer::singleShot(0, &application, [&window, state]() {
+        state->closeAccepted = window.close();
+        state->closeReturned = true;
+      });
+    };
+    QObject::connect(driver, &QTimer::timeout, &application,
+                     [&window, state, findPrompt, finish, startClose]() {
+      using Step = ExitSmokeState::Step;
+      switch (state->step) {
+      case Step::InitialPrompt: {
+        auto *prompt = findPrompt("确认退出");
+        if (prompt == nullptr) {
+          return;
+        }
+        const QPushButton *defaultButton = prompt->defaultButton();
+        QAbstractButton *escapeButton = prompt->escapeButton();
+        const QString cancelText = QCoreApplication::translate("Workbench", "取消");
+        state->exitPromptFound =
+            prompt->text().contains(QCoreApplication::translate(
+                "Workbench", "确定要退出 Gaussian Scene Workbench Native 吗？")) &&
+            defaultButton != nullptr && defaultButton->text() == cancelText &&
+            escapeButton != nullptr && escapeButton->text() == cancelText;
+        if (!state->exitPromptFound) {
+          qCritical() << "EXIT_CONFIRMATION FAIL: initial prompt default/escape must both cancel"
+                      << "default" << (defaultButton ? defaultButton->text() : QString())
+                      << "escape" << (escapeButton ? escapeButton->text() : QString());
+          finish(false);
+          return;
+        }
+        state->step = Step::InitialCloseReturned;
+        escapeButton->click();
+        return;
+      }
+      case Step::InitialCloseReturned:
+        if (!state->closeReturned) {
+          return;
+        }
+        state->initialCancelPreserved = !state->closeAccepted && window.isVisible() &&
+                                        !window.isWindowModified();
+        if (!state->initialCancelPreserved) {
+          qCritical() << "EXIT_CONFIRMATION FAIL: initial cancellation must preserve the unmodified window";
+          finish(false);
+          return;
+        }
+        window.setWindowModified(true);
+        state->step = Step::ModifiedPrompt;
+        startClose();
+        return;
+      case Step::ModifiedPrompt: {
+        auto *prompt = findPrompt("确认退出");
+        if (prompt == nullptr) {
+          return;
+        }
+        for (QAbstractButton *button : prompt->buttons()) {
+          if (button->text() == QCoreApplication::translate("Workbench", "退出")) {
+            state->step = Step::SavePrompt;
+            button->click();
             return;
           }
-          logMissingPrompt("initial cancel confirmation");
-        });
-    QTimer::singleShot(650, &window, [&window]() {
-      window.setWindowModified(true);
-      window.close();
+        }
+        qCritical() << "EXIT_CONFIRMATION FAIL: modified-window prompt lacks the exit button";
+        finish(false);
+        return;
+      }
+      case Step::SavePrompt: {
+        auto *prompt = findPrompt("退出前保存进度");
+        if (prompt == nullptr) {
+          return;
+        }
+        QAbstractButton *cancelButton = prompt->button(QMessageBox::Cancel);
+        state->savePromptFound =
+            cancelButton != nullptr && prompt->defaultButton() != nullptr &&
+            prompt->standardButton(prompt->defaultButton()) == QMessageBox::Save;
+        if (!state->savePromptFound) {
+          qCritical() << "EXIT_CONFIRMATION FAIL: save prompt must offer cancel and default to save"
+                      << "cancel available" << (cancelButton != nullptr)
+                      << "default standard button"
+                      << (prompt->defaultButton() ? int(prompt->standardButton(prompt->defaultButton())) : -1);
+          finish(false);
+          return;
+        }
+        state->step = Step::ModifiedCloseReturned;
+        cancelButton->click();
+        return;
+      }
+      case Step::ModifiedCloseReturned:
+        if (!state->closeReturned) {
+          return;
+        }
+        state->saveCancelPreserved = !state->closeAccepted && window.isVisible() &&
+                                     window.isWindowModified();
+        if (!state->saveCancelPreserved) {
+          qCritical() << "EXIT_CONFIRMATION FAIL: cancelling save must preserve the modified window";
+          finish(false);
+          return;
+        }
+        state->step = Step::ResetPrompt;
+        startClose();
+        return;
+      case Step::ResetPrompt: {
+        auto *prompt = findPrompt("确认退出");
+        if (prompt == nullptr) {
+          return;
+        }
+        QAbstractButton *cancelButton = prompt->escapeButton();
+        state->exitPromptReset = cancelButton != nullptr &&
+            cancelButton->text() == QCoreApplication::translate("Workbench", "取消");
+        if (!state->exitPromptReset) {
+          qCritical() << "EXIT_CONFIRMATION FAIL: reset confirmation must still offer cancellation";
+          finish(false);
+          return;
+        }
+        state->step = Step::ResetCloseReturned;
+        cancelButton->click();
+        return;
+      }
+      case Step::ResetCloseReturned:
+        if (!state->closeReturned) {
+          return;
+        }
+        finish(state->exitPromptFound && state->savePromptFound &&
+               state->exitPromptReset && state->initialCancelPreserved &&
+               state->saveCancelPreserved && !state->closeAccepted &&
+               window.isVisible() && window.isWindowModified());
+        return;
+      }
     });
-    QTimer::singleShot(
-        900, &application,
-        [logMissingPrompt]() {
-          for (QWidget *widget : QApplication::topLevelWidgets()) {
-            auto *prompt = qobject_cast<QMessageBox *>(widget);
-            if (prompt == nullptr || !prompt->isVisible() ||
-                prompt->windowTitle() != QStringLiteral("确认退出")) {
-              continue;
-            }
-            for (QAbstractButton *button : prompt->buttons()) {
-              if (button->text() == QStringLiteral("退出")) {
-                button->click();
-                return;
-              }
-            }
-            qCritical() << "EXIT_CONFIRMATION FAIL: modified-window prompt lacks the exit button"
-                        << "title" << prompt->windowTitle();
-          }
-          logMissingPrompt("modified-window exit confirmation");
-        });
-    QTimer::singleShot(
-        1150, &application,
-        [state, logMissingPrompt]() {
-          for (QWidget *widget : QApplication::topLevelWidgets()) {
-            auto *prompt = qobject_cast<QMessageBox *>(widget);
-            if (prompt == nullptr || !prompt->isVisible() ||
-                prompt->windowTitle() != QStringLiteral("退出前保存进度")) {
-              continue;
-            }
-            QAbstractButton *cancelButton =
-                prompt->button(QMessageBox::Cancel);
-            state->savePromptFound =
-                cancelButton != nullptr && prompt->defaultButton() != nullptr &&
-                prompt->standardButton(prompt->defaultButton()) ==
-                    QMessageBox::Save;
-            if (!state->savePromptFound) {
-              qCritical() << "EXIT_CONFIRMATION FAIL: save prompt must offer cancel and default to save"
-                          << "cancel available" << (cancelButton != nullptr)
-                          << "default standard button"
-                          << (prompt->defaultButton() ? int(prompt->standardButton(prompt->defaultButton())) : -1);
-            }
-            if (cancelButton != nullptr) {
-              cancelButton->click();
-            }
-            return;
-          }
-          logMissingPrompt("save-before-exit cancellation");
-        });
-    QTimer::singleShot(1450, &window, [&window]() { window.close(); });
-    QTimer::singleShot(
-        1700, &application,
-        [state, logMissingPrompt]() {
-          for (QWidget *widget : QApplication::topLevelWidgets()) {
-            auto *prompt = qobject_cast<QMessageBox *>(widget);
-            if (prompt == nullptr || !prompt->isVisible() ||
-                prompt->windowTitle() != QStringLiteral("确认退出")) {
-              continue;
-            }
-            state->exitPromptReset = true;
-            prompt->reject();
-            return;
-          }
-          logMissingPrompt("confirmation after save cancellation");
-        });
-    QTimer::singleShot(
-        2050, &application,
-        [&application, &window, &smokeTestCompleted, state]() {
-          smokeTestCompleted = state->exitPromptFound && state->savePromptFound &&
-                               state->exitPromptReset && window.isVisible();
-          qInfo() << "EXIT_CONFIRMATION:" << (smokeTestCompleted ? "PASS" : "FAIL")
-                  << "initial cancel/save cancellation/confirmation reset/window visible"
-                  << state->exitPromptFound << state->savePromptFound << state->exitPromptReset << window.isVisible()
-                  << "window modified" << window.isWindowModified();
-          application.exit(smokeTestCompleted ? 0 : 2);
-        });
+    QObject::connect(deadline, &QTimer::timeout, &application,
+                     [state, logMissingPrompt, finish]() {
+      using Step = ExitSmokeState::Step;
+      qCritical() << "EXIT_CONFIRMATION FAIL: bounded condition-driven sequence timed out"
+                  << "stage" << int(state->step)
+                  << "close returned/accepted" << state->closeReturned << state->closeAccepted;
+      const char *stage = "close call has not returned after cancellation";
+      switch (state->step) {
+      case Step::InitialPrompt: stage = "initial cancel confirmation"; break;
+      case Step::ModifiedPrompt: stage = "modified-window exit confirmation"; break;
+      case Step::SavePrompt: stage = "save-before-exit cancellation"; break;
+      case Step::ResetPrompt: stage = "confirmation after save cancellation"; break;
+      case Step::InitialCloseReturned:
+      case Step::ModifiedCloseReturned:
+      case Step::ResetCloseReturned: break;
+      }
+      logMissingPrompt(stage);
+      finish(false);
+    });
+    driver->start();
+    deadline->start();
+    startClose();
   } else if (displayLayoutSmokeTest) {
     QTimer::singleShot(
         350, &application,

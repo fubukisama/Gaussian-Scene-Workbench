@@ -15,6 +15,7 @@
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QVariantAnimation>
 
 #include <algorithm>
 #include <cmath>
@@ -151,12 +152,14 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   processFor(30);
   bool loaded = false;
   bool failed = false;
+  int loadEvents = 0;
   const auto loadedConnection = QObject::connect(
       &viewport, &NativeViewport::sceneLoaded, &viewport,
       [&](qint64 vertices, qsizetype, qint64 faces, qsizetype triangles) {
         capture.sourceVertices = vertices;
         capture.sourceFaces = faces;
         capture.previewTriangles = triangles;
+        ++loadEvents;
         loaded = true;
       });
   const auto failedConnection = QObject::connect(
@@ -191,6 +194,27 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
   viewport.resetCamera();
   capture.resetAngles = viewport.viewOrbitAngles();
   if (tiledFixture) {
+    // sceneLoaded announces parsed CPU data, not the first GPU upload/draw.
+    // Complete one real readback before timing navigation so a cold software
+    // renderer's initial buffer upload/shader work is not an animation timeout.
+    // Keep the original setScene clock: this cost still counts toward the
+    // first-visible and complete-display performance gates. Do not wait for
+    // all pages at this temporary default view; paging is measured at +Z.
+    QElapsedTimer initialFrame;
+    initialFrame.start();
+    const QImage initialImage = viewport.grabFramebuffer();
+    const qint64 initialFrameMilliseconds = initialFrame.elapsed();
+    if (initialImage.isNull() || !viewport.meshRenderingAvailable()) {
+      qCritical() << "Mesh surface comparison FAIL: initial mesh frame is unavailable"
+                  << policyName(policy) << "readback milliseconds" << initialFrameMilliseconds
+                  << "elapsed from source request" << loading.elapsed();
+      return false;
+    }
+    qInfo() << "Mesh initial frame:" << "policy" << policyName(policy)
+            << "readback milliseconds" << initialFrameMilliseconds
+            << "elapsed from source request" << loading.elapsed()
+            << "frame size" << initialImage.size()
+            << "mesh settled" << viewport.meshPagingSettled();
     viewport.setAxisView(NavigationAxis::PositiveZ);
     // Wait for the public +Z view, not a guessed duration: a busy software
     // renderer may process the last animation tick after a 300 ms timer.
@@ -204,10 +228,40 @@ bool capturePolicy(NativeViewport &viewport, const QString &path,
     };
     QElapsedTimer axisDeadline;
     axisDeadline.start();
-    while (!atPositiveZ() && axisDeadline.elapsed() < 1500) processFor(20);
+    bool observedAngleProgress = false;
+    int observations = 0;
+    while (!atPositiveZ() && axisDeadline.elapsed() < 1500) {
+      processFor(20);
+      ++observations;
+      const auto current = viewport.viewOrbitAngles();
+      observedAngleProgress |= current.yawDegrees != capture.resetAngles.yawDegrees ||
+          current.pitchDegrees != capture.resetAngles.pitchDegrees ||
+          current.rollDegrees != capture.resetAngles.rollDegrees;
+    }
     if (!atPositiveZ()) {
       qCritical() << "Mesh surface comparison FAIL: public +Z view did not finish snapping"
                   << preciseAngles(viewport.viewOrbitAngles());
+      const auto status = viewport.resourceBudgetStatus();
+      qCritical() << "Mesh surface comparison axis diagnostics: policy/elapsed/observations/progress/load events"
+                  << policyName(policy) << axisDeadline.elapsed() << observations
+                  << observedAngleProgress << loadEvents
+                  << "resident/paged/loading" << status.residentMeshCount
+                  << status.pagedMeshCount << status.loadingMeshCount
+                  << "reserved RAM/GPU" << status.reservedRamBytes << status.reservedGpuBytes
+                  << "visible/minimized/mesh settled" << viewport.isVisible()
+                  << viewport.window()->isMinimized() << viewport.meshPagingSettled();
+      // Failure-only developer diagnostics. These QObject properties are not
+      // acceptance predicates, and must never drive or complete the animation.
+      // They distinguish a cancelled snap from a running driver that did not
+      // advance while the public event loop remained responsive.
+      const auto animations = viewport.findChildren<QVariantAnimation *>(
+          QString(), Qt::FindDirectChildrenOnly);
+      for (const auto *animation : animations) {
+        qCritical() << "Mesh surface comparison axis animation: state/time/duration/start/current/end"
+                    << int(animation->state()) << animation->currentTime()
+                    << animation->duration() << animation->startValue()
+                    << animation->currentValue() << animation->endValue();
+      }
       return false;
     }
   }
