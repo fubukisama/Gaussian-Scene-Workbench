@@ -685,9 +685,13 @@ bool runResourceBudgetSharedMeshSmokeTest(MainWindow &window) {
     viewport->clearSelection();
     QImage frame;
     const bool bothVisible = waitUntil([&]() {
-          const auto status = viewport->resourceBudgetStatus();
+          // Rendering can queue finer pages after drawing an ancestor fallback.
+          // Observe leases after that frame and await exact-page readiness before
+          // starting the unchanged twelve-frame static stability acceptance.
           frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
-          return status.loadingMeshCount == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
+          const auto status = viewport->resourceBudgetStatus();
+          return viewport->meshPagingSettled() && status.loadingMeshCount == 0 &&
+              status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
               !frame.isNull() && modelColorPixels(frame, true) >= 500 && modelColorPixels(frame, false) >= 500;
         });
     if (!bothVisible) {
