@@ -218,13 +218,16 @@ bool runPointStreamingSmokeTest(NativeViewport &viewport) {
              << "frameSwapped" << firstVisibleFrames
              << "resident/source points" << viewport.residentPointCount() << kSourcePoints
              << "viewport/framebuffer" << viewport.size() << frame.size();
+  // Observe the actual refresh/event-loop path while it streams. Qt's
+  // grabFramebuffer renders synchronously, so calling it on every poll adds
+  // a second paint and can delay GUI-thread delivery of read completions.
   const bool ready = waitUntil([&]() {
-        frame = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
         const auto status = viewport.resourceBudgetStatus();
         return viewport.pointPagingSettled() && viewport.residentPointCount() >= kSourcePoints &&
                status.loadingMeshCount == 0 && status.reservedRamBytes == 0 &&
-               status.reservedGpuBytes == 0 && coloredPointPixels(frame) >= 64;
+               status.reservedGpuBytes == 0;
       });
+  frame = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
   if (!ready) {
     const auto stalled = viewport.resourceBudgetStatus();
     qCritical() << "POINT_STREAMING_STATE:" << "elapsed milliseconds" << clock.elapsed()
@@ -249,6 +252,8 @@ bool runPointStreamingSmokeTest(NativeViewport &viewport) {
     }
   }
   if (!check(ready, "all requested point pages settle and release their loading leases")) return false;
+  if (!check(coloredPointPixels(frame) >= 64,
+             "completed real framebuffer still presents colored point pages")) return false;
   const qint64 readyMs = clock.elapsed();
   const quint64 readyFrames = presentedFrames;
   const auto status = viewport.resourceBudgetStatus();

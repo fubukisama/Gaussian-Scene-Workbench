@@ -114,3 +114,6 @@ separate research training licenses are not changed.
   production loading. Its original 30-second readiness wait and full requested
   cut, resource-lease release and source-byte assertions remain unchanged;
   failure logs include observed residency, leases, frame composites and an image.
+  Readiness polling observes the public state without forcing an extra render
+  every iteration; real framebuffer checks still run at first visibility and
+  after readiness. Raw window compositions are not product FPS measurements.
