@@ -564,27 +564,6 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
     qInfo() << "COORDINATE_SCENE capability matrix:" << kind << "pixels" << firstPatch.pixels << secondPatch.pixels
             << "physical width ratio" << matrixWidthRatio << "orthographic" << viewport.orthographicProjection()
             << "full color bounds" << fullFirstPatch.bounds << fullSecondPatch.bounds;
-    if (kind == "points") {
-      const auto pastelFirstPatch = footprint(matrixBefore, false, false, true);
-      const auto pastelSecondPatch = footprint(matrixBefore, true, false, true);
-      const double pastelWidthRatio = pastelFirstPatch.bounds.width() > 0
-          ? static_cast<double>(pastelSecondPatch.bounds.width()) / pastelFirstPatch.bounds.width() : -1.0;
-      qInfo() << "[DEBUG-coordinate-oct14] points same-frame sampling:"
-              << "strict pixels/bounds" << firstPatch.pixels << firstPatch.bounds
-              << secondPatch.pixels << secondPatch.bounds << "strict width ratio" << matrixWidthRatio
-              << "pastel pixels/bounds" << pastelFirstPatch.pixels << pastelFirstPatch.bounds
-              << pastelSecondPatch.pixels << pastelSecondPatch.bounds << "pastel width ratio" << pastelWidthRatio
-              << "viewport" << viewport.size() << "framebuffer" << matrixBefore.size()
-              << "DPR" << viewport.devicePixelRatioF() << "target" << viewport.viewTarget()
-              << "distance" << viewport.viewDistance() << "orthographic" << viewport.orthographicProjection()
-              << "active rendered/resident points" << viewport.renderedPointCount() << viewport.residentPointCount();
-      if (!(firstPatch.pixels > 100 && secondPatch.pixels > 100 && std::abs(matrixWidthRatio - 1.0) < 0.04) &&
-          !evidence.isEmpty()) {
-        const QString failurePath = QDir(evidence).filePath(originalLanguage + "-points-physical-size-failure.png");
-        check(matrixBefore.save(failurePath), "failed point physical-size framebuffer evidence is saved");
-        qInfo() << "[DEBUG-coordinate-oct14] points failed strict oracle frame:" << failurePath;
-      }
-    }
     check(firstPatch.pixels > 100 && secondPatch.pixels > 100 && std::abs(matrixWidthRatio - 1.0) < 0.04,
           "point, 3DGS and 2DGS renderers honor equal physical size across metre and centimetre sources");
     const QString matrixDescription = viewport.referencePlaneDescription();
