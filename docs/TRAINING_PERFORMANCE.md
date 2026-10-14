@@ -6,6 +6,10 @@ Both native trainers use the same bounded image staging, pre-growth memory
 admission, full-step telemetry and quality-first policy. 2DGS keeps its surfel
 renderer and depth/distortion/normal terms. Mesh-generation stages consume the
 result as before; they do not gain an optimizer-state resume capability.
+In the new 2DGS runtime, zero-weight depth/distortion/normal regularization
+does not construct its unused loss/autograd path. Active terms retain the
+original formula/order and schedules. This does not disable the surfel
+rasterizer's auxiliary forward outputs; the legacy runtime keeps its old graph.
 
 | Capability | 3DGS | 2DGS |
 | --- | --- | --- |

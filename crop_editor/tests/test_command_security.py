@@ -108,6 +108,8 @@ class CommandSecurityTests(unittest.TestCase):
             'crop_editor/server.py',
             'crop_editor/reconstruction_quality.py',
             'native/worker/training_summary.py',
+            'native/worker/training_step_profile.py',
+            'native/worker/training_resource_policy.py',
         ):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)

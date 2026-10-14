@@ -54,6 +54,7 @@ from native.worker.training_preview_policy import TrainingPreviewPolicy, close_p
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
 from native.worker.training_runtime import NativeTrainingRuntime
+from native.worker.surfel_regularization import surfel_regularization
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -166,12 +167,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
         lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
 
-        rend_dist = render_pkg["rend_dist"]
-        rend_normal  = render_pkg['rend_normal']
-        surf_normal = render_pkg['surf_normal']
-        normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
-        normal_loss = lambda_normal * (normal_error).mean()
-        dist_loss = lambda_dist * (rend_dist).mean()
+        if native_runtime.configuration['enabled']:
+            normal_loss, dist_loss = surfel_regularization(torch, render_pkg, lambda_normal, lambda_dist)
+        else:
+            rend_dist = render_pkg["rend_dist"]
+            rend_normal = render_pkg['rend_normal']
+            surf_normal = render_pkg['surf_normal']
+            normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
+            normal_loss = lambda_normal * (normal_error).mean()
+            dist_loss = lambda_dist * (rend_dist).mean()
 
         # loss
         total_loss = loss + dist_loss + normal_loss
