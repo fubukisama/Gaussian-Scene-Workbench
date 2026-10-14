@@ -1035,7 +1035,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME training_telemetry COMMAND gsw_training_telemetry_tests)
     set_tests_properties(training_telemetry PROPERTIES TIMEOUT 30
-      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Test>;PATH=path_list_prepend:${Qt6_DIR}/../../../bin")
 
     qt_add_executable(gsw_training_input_summary_tests
       tests/TrainingInputSummaryTests.cpp

@@ -553,4 +553,3 @@ torch::Tensor fused_loss_backward(torch::Tensor image, torch::Tensor target, dou
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return buffers[6].view_as(image);
 }
-

@@ -2630,13 +2630,20 @@ void main() {
                                              R"GLSL(#version 330 core
 in vec3 vertexColor;
 uniform float selected;
+uniform float pointSize;
 out vec4 fragmentColor;
 void main() {
-  float radialDistance = length(gl_PointCoord - vec2(0.5)) * 2.0;
-  if (radialDistance > 1.0) {
-    discard;
+  float alpha = 1.0;
+  // A one-pixel circular sprite can disappear at a pixel boundary when its
+  // only fragment samples the zero-alpha edge. Preserve its requested size
+  // with solid coverage; resolvable circles retain the original antialiasing.
+  if (pointSize > 1.5) {
+    float radialDistance = length(gl_PointCoord - vec2(0.5)) * 2.0;
+    if (radialDistance > 1.0) {
+      discard;
+    }
+    alpha = 1.0 - smoothstep(0.72, 1.0, radialDistance);
   }
-  float alpha = 1.0 - smoothstep(0.72, 1.0, radialDistance);
   vec3 displayColor = mix(vertexColor, vec3(1.0, 0.58, 0.22),
                           selected * 0.18);
   fragmentColor = vec4(displayColor, alpha);

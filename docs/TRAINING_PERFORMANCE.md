@@ -107,6 +107,25 @@ runs use the same resolution/cameras/model size/schedule; they are not a
 30,000-step convergence or final-quality benchmark. Artifacts remain local,
 including photos and source hashes. No user photos are uploaded to CI.
 
+On this RTX4080Laptop12GiB, the high-resolution-clock paired60-step experiments
+gave the following medians (final-save step excluded):
+
+| Test-owned workload | Legacy wall step | Optimized wall step | Torch job peak, legacy→optimized | Host image tensors |
+| --- | --- | --- | --- | --- |
+| 3DGS,1M copied PLY points,fixed density,standard Adam |117.8ms|90.6ms|3.27→3.37GiB|7.16→1.34GiB|
+| 2DGS,49,811initial surfels,fixed density |338.7ms|218.4ms|3.23→2.21GiB|5.37→1.34GiB|
+
+These single short pairs suggest about23%/36% lower step latency, not a universal
+speed guarantee. 3DGS peak allocation slightly increased, so the result is not
+described as a GPU-memory reduction for every backend. Maximum paired loss
+differences were4.53e-6/3.58e-6 and PSNR differences0.00227/0.00018dB; this is
+short-run numerical evidence, not final convergence/quality equivalence.
+Both original input hash sets remained unchanged. A separate copied full-size
+2,969,358-point3DGS pressure case with all59photos safely paused at iteration6
+after three growth denials, saved complete new optimizer state and peaked at
+about6.87GiB Torch allocation. That test was a new PLY warm start, not a resume
+of the user's original4407-step optimizer checkpoint, which was untouched.
+
 Tests cover both real CUDA runtimes, exact host pixels/masks/depth/camera
 matrices, bounded stream lifetime, optimizer/RNG recovery, joint-loss values and
 gradients, resource-denial preservation, and three-language real Qt monitor
