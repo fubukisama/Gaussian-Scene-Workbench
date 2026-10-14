@@ -53,6 +53,7 @@ from native.worker.training_preview import TrainingPreviewPublisher
 from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
+from native.worker.training_runtime import NativeTrainingRuntime
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -72,10 +73,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     control = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
     if not control:
         raise RuntimeError("This entry point is for supervised native 2DGS jobs only")
+    native_runtime = NativeTrainingRuntime(json.loads(control), torch, emit_gsw_event, "2dgs")
+    from native.worker.training_image_pipeline import install_two_dgs_camera_adapter
+    install_two_dgs_camera_adapter()
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
+    native_runtime.report_images(scene.getTrainCameras())
     gaussians.training_setup(opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
@@ -102,10 +107,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     cameras.sort(key=lambda camera: (camera.image_name, camera.colmap_id))
     camera_names = [(camera.image_name, camera.colmap_id) for camera in cameras]
     viewpoint_indices = list(range(len(cameras)))
+    checkpoint_engine = None
     if native_checkpoint.control.get("resume"):
         state = native_checkpoint.load(torch, identity)
         restore_state(torch, np, gaussians, opt, state, identity, camera_names, backend="2dgs")
         density_control.restore(state["density_control"])
+        checkpoint_engine = state.get("renderer_engine", "stock")
+        native_runtime.restore_quality(state)
         first_iter = state["iteration"]
         viewpoint_indices = state["pending_indices"]
         started -= state["elapsed"]
@@ -113,6 +121,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         ema_dist_for_log = state["ema_depth"]
         ema_normal_for_log = state["ema_normal"]
         del state
+    render_training = native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
     preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
     file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
     try:
@@ -123,11 +132,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         file_preview = None
     paused = False
     progress_interval = max(1, min(100, opt.iterations // 100))
+    photometric = native_runtime.photometric_loss(l1_loss, ssim)
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):
 
+        native_runtime.profiler.begin(iteration)
         iter_start.record()
 
         gaussians.update_learning_rate(iteration)
@@ -141,12 +152,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             viewpoint_indices = list(range(len(cameras)))
         viewpoint_cam = cameras[viewpoint_indices.pop(randint(0, len(viewpoint_indices)-1))]
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background)
+        native_runtime.profiler.mark('transfer')
+        ready_image = native_runtime.image(viewpoint_cam)
+        native_runtime.profiler.mark('render')
+        render_pkg = render_training(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        native_runtime.profiler.mark('loss')
+        gt_image = ready_image.image
+        loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
 
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
@@ -162,11 +176,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # loss
         total_loss = loss + dist_loss + normal_loss
 
+        native_runtime.profiler.mark('backward')
         total_loss.backward()
 
         iter_end.record()
 
         with torch.no_grad():
+            native_runtime.profiler.mark('report')
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log
@@ -200,8 +216,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 tb_writer.add_scalar('train_loss_patches/dist_loss', ema_dist_for_log, iteration)
                 tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
 
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render_training, (pipe, background))
             if (iteration in saving_iterations):
+                native_runtime.profiler.mark('checkpoint')
                 if file_preview is not None and iteration == opt.iterations:
                     close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
@@ -211,30 +228,35 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
             # Densification
+            native_runtime.profiler.mark('densification')
             if iteration < opt.densify_until_iter:
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    density_control.densify_and_prune(
-                        gaussians, opt.densify_grad_threshold, opt.opacity_cull, size_threshold,
-                        iteration, opt.opacity_reset_interval,
-                        white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
+                    if native_runtime.admit(gaussians, opt.densify_grad_threshold, scene.cameras_extent, iteration):
+                        density_control.densify_and_prune(
+                            gaussians, opt.densify_grad_threshold, opt.opacity_cull, size_threshold,
+                            iteration, opt.opacity_reset_interval,
+                            white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
             # Optimizer step
+            native_runtime.profiler.mark('optimizer')
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
             if (iteration in checkpoint_iterations):
+                native_runtime.profiler.mark('checkpoint')
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-            if iteration < opt.iterations and native_checkpoint.pause_requested():
+            if iteration < opt.iterations and (native_checkpoint.pause_requested() or native_runtime.pause_for_resources()):
+                native_runtime.profiler.mark('checkpoint')
                 # AFTER optimizer and density updates: continue at iteration + 1.
                 if file_preview is not None:
                     close_preview_safely(file_preview, emit_gsw_event)
@@ -245,11 +267,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                       ema_loss_for_log, ema_dist_for_log, backend="2dgs")
                 state["ema_normal"] = ema_normal_for_log
                 state["density_control"] = density_control.capture()
+                native_runtime.capture(state)
+                if native_runtime.pause_for_resources():
+                    state['pause_reason'] = 'vram_pressure'
                 native_checkpoint.save(torch, state)
                 emit_checkpoint_preview(scene, iteration)
                 paused = True
                 progress_bar.close()
+                native_runtime.profiler.finish()
                 break
+            native_runtime.profiler.mark('preview')
             if file_preview is not None:
                 try:
                     file_preview.publish_gaussians(gaussians, iteration)
@@ -257,7 +284,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     emit_gsw_event("[gsw-preview-warning]", str(error))
                     close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
+            native_runtime.profiler.finish()
+            ready_image = gt_image = render_pkg = image = None
+            viewspace_point_tensor = visibility_filter = radii = None
+            rend_dist = rend_normal = surf_normal = normal_error = None
 
+    native_runtime.close()
     if file_preview is not None:
         close_preview_safely(file_preview, emit_gsw_event)
     if tb_writer:

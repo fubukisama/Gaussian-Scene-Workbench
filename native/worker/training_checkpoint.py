@@ -168,6 +168,11 @@ class TrainingCheckpoint:
                         "backend": state.get("backend", "3dgs"),
                         "total": state["total"], "identity": state["identity"],
                         "sha256": file_digest(path), "session": self.control["session"]}
+            if "performance" in state:
+                manifest["performance"] = state["performance"]
+                manifest["renderer_engine"] = state.get("renderer_engine", "stock")
+            if state.get("pause_reason") == "vram_pressure":
+                manifest["pause_reason"] = "vram_pressure"
             atomic_json(self.root / "ready.json", manifest)
         finally:
             if temporary.exists():
@@ -191,4 +196,7 @@ class TrainingCheckpoint:
                 state.get("iteration") != manifest["iteration"] or
                 state.get("total") != manifest["total"]):
             raise ValueError("Checkpoint payload and manifest disagree")
+        if "performance" in manifest and (manifest["performance"] != state.get("performance") or
+                manifest.get("renderer_engine", "stock") != state.get("renderer_engine", "stock")):
+            raise ValueError("Checkpoint performance policy and manifest disagree")
         return state

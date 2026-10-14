@@ -134,6 +134,52 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   connect(mResolution, &QComboBox::currentIndexChanged, this, updateResolutionHint);
   updateResolutionHint();
 
+  mPerformanceOptimization = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("自动性能优化（图像流水线与显存增密保护）"));
+  mPerformanceOptimization->setObjectName(QStringLiteral("trainingPerformanceOptimization"));
+  mPerformanceOptimization->setChecked(true);
+  form->addRow(QString(), mPerformanceOptimization);
+  mTrainingMemoryPercent = new QSpinBox(this);
+  mTrainingMemoryPercent->setObjectName(QStringLiteral("trainingMemoryPercent"));
+  mTrainingMemoryPercent->setRange(50, 95);
+  mTrainingMemoryPercent->setSuffix(QStringLiteral("%"));
+  mTrainingMemoryPercent->setValue(90);
+  form->addRow(QCoreApplication::translate("Workbench", "训练显存目标"), mTrainingMemoryPercent);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mTrainingMemoryPercent)),
+                    AppLanguage::source("训练显存目标"));
+  auto *performanceHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
+      "默认目标 90%，至少保留 512 MiB；按实际空闲显存与增密临时峰值判断。资源不足仅暂缓新增高斯，不删除已有高斯、不降低照片分辨率。"));
+  performanceHint->setObjectName(QStringLiteral("trainingPerformanceHint"));
+  performanceHint->setWordWrap(true);
+  form->addRow(performanceHint);
+  mGrowthMode = new QComboBox(this);
+  mGrowthMode->setObjectName(QStringLiteral("trainingGrowthModeCombo"));
+  mGrowthMode->addItem(QString(), QStringLiteral("pause"));
+  AppLanguage::bindComboItem(mGrowthMode, 0, AppLanguage::source("质量优先：保存完整状态并安全暂停"));
+  mGrowthMode->addItem(QString(), QStringLiteral("defer"));
+  AppLanguage::bindComboItem(mGrowthMode, 1, AppLanguage::source("继续训练：暂缓增密并提示质量风险"));
+  form->addRow(QCoreApplication::translate("Workbench", "显存持续不足时"), mGrowthMode);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mGrowthMode)), AppLanguage::source("显存持续不足时"));
+  auto *growthHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
+      "质量优先模式在连续 3 次增密被资源保护拒绝后，于优化器更新完成后保存完整检查点并暂停；不会降采样或删除已有高斯。释放资源后可继续原进度。"));
+  growthHint->setWordWrap(true);
+  form->addRow(growthHint);
+  mTrainingEngine = new QComboBox(this);
+  mTrainingEngine->setObjectName(QStringLiteral("trainingEngineCombo"));
+  mTrainingEngine->addItem(QString(), QStringLiteral("stock"));
+  AppLanguage::bindComboItem(mTrainingEngine, 0, AppLanguage::source("标准（兼容完整增密与续训）"));
+  mTrainingEngine->addItem(QString(), QStringLiteral("fastergs"));
+  AppLanguage::bindComboItem(mTrainingEngine, 1, AppLanguage::source("Fast-GS（实验性，兼容时启用）"));
+  form->addRow(QCoreApplication::translate("Workbench", "训练渲染后端"), mTrainingEngine);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mTrainingEngine)),
+                    AppLanguage::source("训练渲染后端"));
+  auto *engineHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
+      "Fast-GS 需独立验证过的运行库；目前仅支持不增密的 3DGS 标准 Adam。2DGS、稀疏 Adam、深度约束或旧检查点自动保留标准后端，不关闭这些功能来凑兼容。"));
+  engineHint->setWordWrap(true);
+  form->addRow(engineHint);
+  connect(mPerformanceOptimization, &QCheckBox::toggled, mTrainingMemoryPercent, &QWidget::setEnabled);
+  connect(mPerformanceOptimization, &QCheckBox::toggled, mGrowthMode, &QWidget::setEnabled);
+
   mOutputScene = new QLineEdit(projectName + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss")), this);
   mOutputScene->setObjectName(QStringLiteral("trainingOutputNameEdit"));
   mOutputScene->setMaxLength(std::numeric_limits<int>::max());
@@ -270,6 +316,10 @@ TrainingConfiguration TrainingDialog::configuration() const {
   result.resolution = mResolution->currentData().toInt();
   result.runColmap = mRunColmap->isChecked();
   result.overwrite = mOverwrite->isChecked();
+  result.performanceOptimization = mPerformanceOptimization->isChecked();
+  result.trainingMemoryPercent = mTrainingMemoryPercent->value();
+  result.trainingEngine = mTrainingEngine->currentData().toString();
+  result.growthMode = mGrowthMode->currentData().toString();
   return result;
 }
 

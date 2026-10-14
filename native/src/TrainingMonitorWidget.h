@@ -68,6 +68,8 @@ private:
   QLabel *mDensityWarning = nullptr;
   QLabel *mReconstructionQuality = nullptr;
   QLabel *mEffectiveParameters = nullptr;
+  QLabel *mPerformanceDetails = nullptr;
+  QLabel *mGrowthWarning = nullptr;
   QProgressBar *mProgress = nullptr;
 };
 

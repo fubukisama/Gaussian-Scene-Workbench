@@ -113,6 +113,16 @@ class OriginalResolutionCudaTests(unittest.TestCase):
                             trainDimensionKinds=1, trainDimensions=[[width, height, count]],
                             trainPixels=width * height * count)
             self.assertEqual(json.loads(events[0]), expected)
+            performance_prefix = "[gsw-training-performance] "
+            performance = [json.loads(line[len(performance_prefix):]) for line in result.stdout.splitlines()
+                           if line.startswith(performance_prefix)]
+            self.assertTrue(performance, result.stdout[-12000:])
+            sample = performance[0]
+            self.assertEqual(sample["backend"], backend)
+            self.assertEqual(sample["iteration"], 1)
+            self.assertGreater(sample["wall_step_ms"], 0)
+            self.assertIn("optimizer", sample["stages_ms"])
+            self.assertIn("torch_peak_allocated_bytes", sample)
             cameras = json.loads((output / "cameras.json").read_text(encoding="utf-8"))
             self.assertEqual(len(cameras), count)
             self.assertEqual([(camera["width"], camera["height"]) for camera in cameras],

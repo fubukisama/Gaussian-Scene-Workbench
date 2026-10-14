@@ -20,6 +20,7 @@ This README describes the **native desktop branch**, not the legacy HTML/Electro
 - **Projects and media:** untitled projects, photo/folder/video import, external dataset links, portable `.gsw.json` projects and managed data, Save As/recovery, and separate dataset/reconstruction/scene/task-history cleanup.
 - **Reconstruction and training:** guarded COLMAP reconstruction, 3DGS/2DGS training, input/runtime preflight, reconstruction reuse explanations, progress, logs and cancellation. CUDA training needs a compatible external environment.
 - **Safe pause/resume:** compatible native 3DGS/2DGS jobs save full optimizer state at an iteration boundary. Resume validates inputs, settings and checkpoint contents and requires explicit trust confirmation. PLY previews and warm starts are not full-state resume.
+- **Training performance and quality:** bounded exact-pixel image staging, VRAM-aware growth admission and quality-first full-state pause, optional numerically verified MIT fused L1/SSIM, and truthful whole-step/stage/memory monitoring. Experimental Faster-GS is capability-gated, not a replacement for default densification or 2DGS. See[training performance](docs/TRAINING_PERFORMANCE.md).
 - **Independent experiments:** new jobs preserve existing models and transforms, use a separate task-preview layer, and retain individual settings, results and available resume entries. Pause Preview freezes observation, not training. Reference-model display caches can yield resources without deleting project objects.
 - **Native visualization:** Gaussian, 2DGS surfel, point-cloud and triangle-mesh display, Gaussian SH controls, camera trajectories, perspective/orthographic navigation and an adaptive infinite grid. FPS measures completed viewport-frame cadence with 60-frame smoothing, not GPU execution time or the inverse of CPU submission time.
 - **Shared coordinates and editing:** shared scene units/reference, preserved source coordinates, reversible display shifts, coordinate reports, multi-object selection, Move/Rotate/Scale/Transform, Global/Local orientation, numeric input, snapping and undo/redo. The fixed source-base grid does not lock models to the plane; independent reconstructions are not automatically registered.
@@ -91,6 +92,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 - **工程与素材：**未命名工程，照片/文件夹/视频导入，外部数据集关联，保存/另存为、恢复，以及数据集、重建、场景、任务历史的分别清理。
 - **重建与训练：**COLMAP、3DGS/2DGS、数据与环境预检、复用重建原因、进度、日志和取消。CUDA 训练需要兼容的独立运行环境。
+- **训练性能与质量：**有上限的无损图像缓存与传输、显存增密保护、质量优先的完整状态暂停、经过数值验证的可选MIT联合L1/SSIM，以及整步/阶段/显存监测。Fast-GS实验路径按能力回退，不代替默认增密或2DGS。见[训练性能](docs/TRAINING_PERFORMANCE.md)。
 - **完整进度保存：**原生 3DGS/2DGS 在安全迭代边界保存完整状态并暂停，校验输入、参数和可信检查点后续训；PLY 预览/热启动不等于完整优化器状态恢复。
 - **独立实验：**新任务保留原模型及变换，使用独立预览，分别记录参数、成果和续训入口。“暂停预览”不暂停训练；可让出参考模型显示缓存而不删除对象。
 - **可视化：**高斯、2DGS surfel、点云、纹理网格、球谐、相机轨迹、透视/正交导航及无限自适应网格。FPS 是实际完成的视口帧节奏，采用 60 帧平滑，不是 GPU 执行耗时或 CPU 提交耗时的倒数。
@@ -124,6 +126,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 - **プロジェクトと素材：**未保存プロジェクト、写真/フォルダー/動画追加、外部データセット、保存/名前を付けて保存、復元、データセット・再構築・シーン・履歴の個別整理。
 - **再構築と学習：**COLMAP、3DGS/2DGS、入力と環境の事前確認、再構築を再利用する理由、進捗、ログ、キャンセル。CUDA 学習には互換性のある外部環境が必要です。
+- **学習の性能と品質：**上限付き可逆画像転送、GPUメモリ増密保護、品質優先の完全状態一時停止、数値検証済みの任意MIT融合L1/SSIM、全体/区間/メモリ測定。実験的Fast-GSは互換性で判定し、既定の増密や2DGSを置き換えません。[学習の性能](docs/TRAINING_PERFORMANCE.md)を参照してください。
 - **完全な状態からの再開：**ネイティブ 3DGS/2DGS は安全な反復境界で状態を保存して一時停止し、入力・設定・信頼できるチェックポイントを検証して再開します。PLY プレビューやウォームスタートは完全な最適化器状態の復元ではありません。
 - **実験の分離：**既存モデル/変換と独立したタスクプレビューを保持し、設定・成果・再開入口を個別に保存します。「プレビューを一時停止」は学習を止めません。表示キャッシュを解放しても参照モデルを削除しません。
 - **表示：**ガウシアン、2DGS surfel、点群、テクスチャ付きメッシュ、SH、カメラ軌跡、透視/平行投影、無限適応グリッド。FPS は実際に完了したフレームの間隔を 60 フレームで平滑化した値で、GPU 実行時間や CPU 送信時間の逆数ではありません。

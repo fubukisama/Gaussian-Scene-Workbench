@@ -17,9 +17,13 @@ from pathlib import Path
 
 try:
     from native.worker.training_summary import normalize_training_summary
+    from native.worker.training_step_profile import normalize_performance
+    from native.worker.training_resource_policy import normalize_growth
 except ModuleNotFoundError:
     # Direct execution uses this file's directory, not the repository root.
     from training_summary import normalize_training_summary
+    from training_step_profile import normalize_performance
+    from training_resource_policy import normalize_growth
 
 
 FINAL_STATES = {"done", "failed", "cancelled", "paused"}
@@ -113,6 +117,14 @@ def status_telemetry(snapshot):
         return {}
 
     telemetry = {}
+    performance = (normalize_performance(snapshot.get("trainingPerformance"))
+                   if snapshot.get("kind") in (None, "training") else None)
+    if performance is not None:
+        telemetry["trainingPerformance"] = performance
+    growth = (normalize_growth(snapshot.get("trainingGrowth"))
+              if snapshot.get("kind") in (None, "training") else None)
+    if growth is not None:
+        telemetry["trainingGrowth"] = growth
     summary = (normalize_training_summary(snapshot.get("trainingSummary"))
                if snapshot.get("kind") in (None, "training") else None)
     if summary is not None:
@@ -165,7 +177,7 @@ def status_telemetry(snapshot):
     if phase in ("accepted", "partial", "repairing", "rejected"):
         telemetry["reconstructionQuality"] = phase
     issue = snapshot.get("generation_issue") or snapshot.get("generationIssue")
-    if issue in ("reconstruction_quality", "source_frames_missing"):
+    if issue in ("reconstruction_quality", "source_frames_missing", "training_renderer_resume"):
         telemetry["generationIssue"] = issue
     return telemetry
 
@@ -1001,6 +1013,10 @@ def run_training(config, resume=False):
         native_options["native_control"] = {
             "output": str(output), "request": str(request_path), "session": session, "resume": resume,
             "backend": config["backend"]}
+        if "performanceOptions" in config:
+            from native.worker.training_runtime import performance_configuration
+            native_options["native_control"]["performance"] = performance_configuration(
+                {"performance": config["performanceOptions"], "resume": resume})
         pause_callback = lambda: atomic_json(request_path, {"session": session})
         if resume:
             manifest, _ = read_manifest(output)

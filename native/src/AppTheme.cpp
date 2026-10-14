@@ -484,7 +484,7 @@ QLabel#sectionTitle {
 }
 QLabel#mutedLabel, QLabel#uiScaleStatus { color: @MUTED_TEXT@; }
 QLabel#statusGood { color: @GOOD_TEXT@; }
-QLabel#statusWarn, QLabel#densityGuardWarning { color: @WARN_TEXT@; }
+  QLabel#statusWarn, QLabel#densityGuardWarning, QLabel#trainingGrowthWarning { color: @WARN_TEXT@; }
 QFrame#inspectorPanel { background: @SURFACE@; }
 QSplitter::handle { background: @BORDER@; }
 QProgressBar {

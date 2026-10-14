@@ -29,6 +29,11 @@ public:
   [[nodiscard]] std::optional<qint64> gaussianCount() const;
   [[nodiscard]] std::optional<double> iterationMilliseconds() const;
   [[nodiscard]] std::optional<double> elapsedSeconds() const;
+  [[nodiscard]] const QJsonObject &performance() const;
+  [[nodiscard]] const QJsonObject &growth() const;
+  [[nodiscard]] std::optional<double> wallStepMilliseconds() const;
+  [[nodiscard]] std::optional<double> iterationsPerSecond() const;
+  [[nodiscard]] std::optional<double> estimatedRemainingSeconds() const;
 
 private:
   QVector<TrainingSample> mSamples;
@@ -39,6 +44,8 @@ private:
   std::optional<qint64> mGaussianCount;
   std::optional<double> mIterationMilliseconds;
   std::optional<double> mElapsedSeconds;
+  QJsonObject mPerformance;
+  QJsonObject mGrowth;
 };
 
 } // namespace gsw

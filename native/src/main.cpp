@@ -17,6 +17,7 @@
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
 #include "TrainingPreflightSmokeTest.h"
+#include "TrainingPerformanceSmokeTest.h"
 #include "GenerationHistorySmokeTest.h"
 #include "BackendLocator.h"
 #include "ProcessingCompletionSmokeTest.h"
@@ -334,6 +335,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption coordinateSceneOption(QStringLiteral("smoke-test-scene-coordinates"),
       QStringLiteral("Verify shared scene coordinate frames and selection-independent reference grids."));
   parser.addOption(coordinateSceneOption);
+  QCommandLineOption trainingPerformanceOption(QStringLiteral("smoke-test-training-performance"),
+      QStringLiteral("Verify whole-step metrics, quality-risk warnings and live languages in a test-owned monitor."));
+  parser.addOption(trainingPerformanceOption);
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
@@ -417,6 +421,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(editNavigationOption) ||
                          parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
+                         parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
@@ -594,6 +599,11 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingPerformanceOption)) {
+    QTimer::singleShot(0, &application, [&] {
+      smokeTestCompleted = gsw::runTrainingPerformanceSmokeTest();
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(coordinateSceneOption)) {

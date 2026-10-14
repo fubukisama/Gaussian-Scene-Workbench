@@ -37,7 +37,12 @@ struct WorkerStatus final {
   std::optional<int> densityGuardIteration;
   std::optional<int> densityGuardDeferred;
   QJsonObject trainingSummary;
+  QJsonObject trainingPerformance;
+  QJsonObject trainingGrowth;
 };
+
+[[nodiscard]] QJsonObject normalizeTrainingPerformance(const QJsonObject &payload);
+[[nodiscard]] QJsonObject normalizeTrainingGrowth(const QJsonObject &payload);
 
 class ProcessSupervisor final : public QObject {
   Q_OBJECT
@@ -49,6 +54,8 @@ public:
   [[nodiscard]] bool isRunning() const;
   [[nodiscard]] QString activeTask() const;
   [[nodiscard]] bool wasStopRequested() const;
+  // Pure observer decoding; callers and regression tests use the same seam.
+  [[nodiscard]] static std::optional<WorkerStatus> decodeStatusEvent(const QByteArray &payload);
   bool start(const QString &taskName, const QString &program, const QStringList &arguments,
              const QString &workingDirectory = {},
              const QProcessEnvironment &environment = {},

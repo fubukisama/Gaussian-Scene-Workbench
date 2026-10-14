@@ -65,9 +65,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
 
     first_iter = 0
+    native_runtime = None
+    control_json = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
+    if control_json:
+        repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        if repository_root not in sys.path:
+            sys.path.insert(0, repository_root)
+        from native.worker.training_runtime import NativeTrainingRuntime
+        native_runtime = NativeTrainingRuntime(json.loads(control_json), torch, emit_gsw_event, "3dgs")
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
     scene = Scene(dataset, gaussians, load_iteration=load_iteration)
+    if native_runtime:
+        native_runtime.report_images(scene.getTrainCameras())
     gaussians.training_setup(opt)
     if load_iteration and not checkpoint:
         first_iter = load_iteration
@@ -92,6 +102,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     native_checkpoint = None
     native_identity = None
     density_control = None
+    checkpoint_engine = None
     paused = False
     control_json = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
     if control_json:
@@ -116,6 +127,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             state = native_checkpoint.load(torch, native_identity)
             restore_state(torch, np, gaussians, opt, state, native_identity, camera_names)
             density_control.restore(state["density_control"])
+            native_runtime.restore_quality(state)
+            checkpoint_engine = state.get("renderer_engine", "stock")
             first_iter = state["iteration"]
             viewpoint_indices = state["pending_indices"]
             viewpoint_stack = [scene.getTrainCameras()[index] for index in viewpoint_indices]
@@ -123,6 +136,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             ema_loss_for_log = state["ema_loss"]
             ema_Ll1depth_for_log = state["ema_depth"]
             del state
+    render_training = (native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
+                       if native_runtime is not None else render)
+    stock_ssim = (lambda image, target: fused_ssim(image.unsqueeze(0), target.unsqueeze(0))) if FUSED_SSIM_AVAILABLE else ssim
+    photometric = native_runtime.photometric_loss(l1_loss, stock_ssim) if native_runtime else None
     gpu_preview = None
     gpu_preview_emit = None
     file_preview = None
@@ -176,6 +193,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             except Exception as e:
                 network_gui.conn = None
 
+        if native_runtime:
+            native_runtime.profiler.begin(iteration)
         iter_start.record()
 
         gaussians.update_learning_rate(iteration)
@@ -198,29 +217,38 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
+        if native_runtime:
+            native_runtime.profiler.mark('transfer')
+            ready_image = native_runtime.image(viewpoint_cam)
+            native_runtime.profiler.mark('render')
+        render_pkg = render_training(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        if viewpoint_cam.alpha_mask is not None:
-            alpha_mask = viewpoint_cam.alpha_mask.cuda()
+        alpha_mask = ready_image.alpha_mask if native_runtime else (viewpoint_cam.alpha_mask.cuda() if viewpoint_cam.alpha_mask is not None else None)
+        if alpha_mask is not None:
             image *= alpha_mask
 
         # Loss
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        if FUSED_SSIM_AVAILABLE:
+        if native_runtime:
+            native_runtime.profiler.mark('loss')
+        gt_image = ready_image.image if native_runtime else viewpoint_cam.original_image.cuda()
+        if photometric:
+            loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
+        elif FUSED_SSIM_AVAILABLE:
+            Ll1 = l1_loss(image, gt_image)
             ssim_value = fused_ssim(image.unsqueeze(0), gt_image.unsqueeze(0))
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
         else:
+            Ll1 = l1_loss(image, gt_image)
             ssim_value = ssim(image, gt_image)
-
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
 
         # Depth regularization
         Ll1depth_pure = 0.0
         if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
             invDepth = render_pkg["depth"]
-            mono_invdepth = viewpoint_cam.invdepthmap.cuda()
-            depth_mask = viewpoint_cam.depth_mask.cuda()
+            mono_invdepth = ready_image.invdepthmap if native_runtime else viewpoint_cam.invdepthmap.cuda()
+            depth_mask = ready_image.depth_mask if native_runtime else viewpoint_cam.depth_mask.cuda()
 
             Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean()
             Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure 
@@ -229,11 +257,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         else:
             Ll1depth = 0
 
+        if native_runtime:
+            native_runtime.profiler.mark('backward')
         loss.backward()
 
         iter_end.record()
 
         with torch.no_grad():
+            if native_runtime:
+                native_runtime.profiler.mark('report')
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
@@ -261,8 +293,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background, 1., SPARSE_ADAM_AVAILABLE, None, dataset.train_test_exp), dataset.train_test_exp)
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render_training, (pipe, background, 1., SPARSE_ADAM_AVAILABLE, None, dataset.train_test_exp), dataset.train_test_exp)
             if (iteration in saving_iterations):
+                if native_runtime:
+                    native_runtime.profiler.mark('checkpoint')
                 # Drain a pending older observation frame before announcing the
                 # durable checkpoint; the receiver also rejects out-of-order frames.
                 if file_preview is not None and iteration == opt.iterations:
@@ -285,6 +319,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 )
 
             # Densification
+            if native_runtime:
+                native_runtime.profiler.mark('densification')
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
@@ -292,18 +328,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    if density_control is not None:
+                    if density_control is not None and native_runtime.admit(
+                            gaussians, opt.densify_grad_threshold, scene.cameras_extent, iteration):
                         density_control.densify_and_prune(
                             gaussians, opt.densify_grad_threshold, .005, size_threshold,
                             iteration, opt.opacity_reset_interval, radii=radii,
                             white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
-                    else:
+                    elif density_control is None:
                         gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii)
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
             # Optimizer step
+            if native_runtime:
+                native_runtime.profiler.mark('optimizer')
             if iteration < opt.iterations:
                 gaussians.exposure_optimizer.step()
                 gaussians.exposure_optimizer.zero_grad(set_to_none = True)
@@ -315,6 +354,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
 
+            if native_runtime:
+                native_runtime.profiler.mark('preview')
             if gpu_preview is not None:
                 try:
                     gpu_preview.publish(gaussians, iteration)
@@ -340,11 +381,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     file_preview = None
 
             if (iteration in checkpoint_iterations):
+                if native_runtime:
+                    native_runtime.profiler.mark('checkpoint')
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
             if (native_checkpoint is not None and iteration < opt.iterations
-                    and native_checkpoint.pause_requested()):
+                    and (native_checkpoint.pause_requested() or native_runtime.pause_for_resources())):
+                native_runtime.profiler.mark('checkpoint')
                 # This boundary is AFTER densification and optimizer.step(). A
                 # resumed run starts at iteration + 1 with the original schedule.
                 if file_preview is not None:
@@ -356,6 +400,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     camera_names, viewpoint_indices, time.monotonic() - training_started_at,
                     ema_loss_for_log, ema_Ll1depth_for_log)
                 native_state["density_control"] = density_control.capture()
+                native_runtime.capture(native_state)
+                if native_runtime.pause_for_resources():
+                    native_state['pause_reason'] = 'vram_pressure'
                 native_checkpoint.save(torch, native_state)
                 emit_gsw_event("[gsw-training-preview]", {
                     "iteration": iteration,
@@ -363,8 +410,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                         scene.model_path, "point_cloud", "iteration_{}".format(iteration), "point_cloud.ply"))})
                 paused = True
                 progress_bar.close()
+                native_runtime.profiler.finish()
                 break
+            if native_runtime:
+                native_runtime.profiler.finish()
+                # Do not keep the previous GT/render alive while the next
+                # bounded staging slot and rasterizer allocate their buffers.
+                ready_image = gt_image = alpha_mask = render_pkg = image = None
+                viewspace_point_tensor = visibility_filter = radii = None
+                mono_invdepth = depth_mask = None
 
+    if native_runtime:
+        native_runtime.close()
     if file_preview is not None:
         close_preview_safely(file_preview, emit_gsw_event)
     if gpu_preview is not None:

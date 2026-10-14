@@ -44,3 +44,5 @@ dist/
 *.exp
 *.lib
 *.pdb
+gaussian-splatting/gsw_loss_cuda/build/
+gaussian-splatting/gsw_loss_cuda/*.egg-info/

@@ -118,6 +118,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ProcessingCompletionSmokeTest.h
   src/TrainingPreflightSmokeTest.cpp
   src/TrainingPreflightSmokeTest.h
+  src/TrainingPerformanceSmokeTest.cpp
+  src/TrainingPerformanceSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -373,6 +375,11 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  add_test(NAME native_training_performance_policy COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.worker.test_training_runtime native.worker.test_training_step_profile
+    native.worker.test_training_resource_policy native.worker.test_training_acceleration)
+  set_tests_properties(native_training_performance_policy PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 60)
   foreach(icon_locale zh_CN en_US ja_JP)
     add_test(NAME native_icon_ui_${icon_locale}
       COMMAND GaussianSceneWorkbench --smoke-test-icon-ui --language ${icon_locale})
@@ -497,6 +504,10 @@ if(BUILD_TESTING)
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
+  add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
+  set_tests_properties(native_training_performance_ui PROPERTIES TIMEOUT 90
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_generation_history COMMAND GaussianSceneWorkbench --smoke-test-generation-history)
   foreach(upstream_locale zh_CN en_US ja_JP)
     add_test(NAME native_upstream_navigation_${upstream_locale}
@@ -1012,6 +1023,10 @@ if(BUILD_TESTING)
       tests/TrainingTelemetryTests.cpp
       src/TrainingTelemetry.cpp
       src/TrainingTelemetry.h
+      src/ProcessSupervisor.cpp
+      src/ProcessSupervisor.h
+      src/TrainingGpuPreviewProtocol.cpp
+      src/TrainingGpuPreviewProtocol.h
     )
     target_include_directories(gsw_training_telemetry_tests PRIVATE src)
     target_link_libraries(gsw_training_telemetry_tests PRIVATE Qt6::Core Qt6::Test)
@@ -1019,6 +1034,8 @@ if(BUILD_TESTING)
       target_compile_options(gsw_training_telemetry_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME training_telemetry COMMAND gsw_training_telemetry_tests)
+    set_tests_properties(training_telemetry PROPERTIES TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_training_input_summary_tests
       tests/TrainingInputSummaryTests.cpp

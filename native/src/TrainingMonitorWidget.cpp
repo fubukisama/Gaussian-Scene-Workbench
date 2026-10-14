@@ -21,13 +21,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gsw {
 
 namespace {
 
 QString formattedDuration(const double seconds) {
-  if (!std::isfinite(seconds) || seconds < 0.0) {
+  if (!std::isfinite(seconds) || seconds < 0.0 ||
+      seconds >= static_cast<double>(std::numeric_limits<qint64>::max())) {
     return QStringLiteral("-");
   }
   const qint64 rounded = static_cast<qint64>(std::round(seconds));
@@ -80,6 +82,44 @@ QLabel *metricCaption(const char *source, QLabel *value) {
   captionLabel->setObjectName(QStringLiteral("mutedLabel"));
   captionLabel->setWordWrap(true);
   return captionLabel;
+}
+
+QString profileStageLabel(const QString &stage) {
+  if (stage == QStringLiteral("setup")) return QCoreApplication::translate("Workbench", "准备");
+  if (stage == QStringLiteral("transfer")) return QCoreApplication::translate("Workbench", "图像传输");
+  if (stage == QStringLiteral("render")) return QCoreApplication::translate("Workbench", "渲染");
+  if (stage == QStringLiteral("loss")) return QCoreApplication::translate("Workbench", "损失计算");
+  if (stage == QStringLiteral("backward")) return QCoreApplication::translate("Workbench", "反向传播");
+  if (stage == QStringLiteral("densification")) return QCoreApplication::translate("Workbench", "增密");
+  if (stage == QStringLiteral("optimizer")) return QCoreApplication::translate("Workbench", "优化器更新");
+  if (stage == QStringLiteral("preview")) return QCoreApplication::translate("Workbench", "预览");
+  if (stage == QStringLiteral("checkpoint")) return QCoreApplication::translate("Workbench", "检查点");
+  if (stage == QStringLiteral("report")) return QCoreApplication::translate("Workbench", "上报");
+  return {}; // Only the strict observer parser can supply these identifiers.
+}
+
+QString profileTimings(const QJsonObject &timings, const QLocale &locale) {
+  QStringList entries;
+  for (const QString &stage : {QStringLiteral("setup"), QStringLiteral("transfer"),
+      QStringLiteral("render"), QStringLiteral("loss"), QStringLiteral("backward"),
+      QStringLiteral("densification"), QStringLiteral("optimizer"), QStringLiteral("preview"),
+      QStringLiteral("checkpoint"), QStringLiteral("report")}) {
+    if (timings.contains(stage)) entries.append(QStringLiteral("%1 %2 ms")
+        .arg(profileStageLabel(stage), locale.toString(timings.value(stage).toDouble(), 'f', 1)));
+  }
+  return entries.isEmpty() ? QStringLiteral("-") : entries.join(QStringLiteral(" · "));
+}
+
+QString observerMebibytes(const QJsonObject &sample, const QString &key, const QLocale &locale) {
+  return sample.contains(key) ? locale.toString(sample.value(key).toDouble() / 1048576.0, 'f', 0)
+                              : QStringLiteral("-");
+}
+
+QString growthReasonLabel(const QString &reason) {
+  if (reason == QStringLiteral("vram_pressure")) return QCoreApplication::translate("Workbench", "显存压力");
+  if (reason == QStringLiteral("probe_unavailable")) return QCoreApplication::translate("Workbench", "显存观测不可用");
+  if (reason == QStringLiteral("invalid_observation")) return QCoreApplication::translate("Workbench", "显存观测无效");
+  return QCoreApplication::translate("Workbench", "增密开销无法估算");
 }
 
 } // namespace
@@ -302,6 +342,27 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   }
   layout->addLayout(mMetricsGrid);
 
+  mPerformanceDetails = new QLabel(content);
+  mPerformanceDetails->setObjectName(QStringLiteral("trainingPerformanceDetails"));
+  mPerformanceDetails->setWordWrap(true);
+  mPerformanceDetails->setTextFormat(Qt::PlainText);
+  mPerformanceDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mPerformanceDetails->setMinimumWidth(0);
+  AppLanguage::bind(mPerformanceDetails, "accessibleName", AppLanguage::source("整步性能与显存"));
+  AppLanguage::bind(mPerformanceDetails, "toolTip", AppLanguage::source("整步时间包含优化器、增密和预览。主机与 CUDA 阶段可能重叠，不应相加；速度与预计剩余仅使用整步墙钟时间。"));
+  mPerformanceDetails->hide();
+  layout->addWidget(mPerformanceDetails);
+
+  mGrowthWarning = new QLabel(content);
+  mGrowthWarning->setObjectName(QStringLiteral("trainingGrowthWarning"));
+  mGrowthWarning->setWordWrap(true);
+  mGrowthWarning->setTextFormat(Qt::PlainText);
+  mGrowthWarning->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mGrowthWarning->setMinimumWidth(0);
+  AppLanguage::bind(mGrowthWarning, "accessibleName", AppLanguage::source("增密资源警告"));
+  mGrowthWarning->hide();
+  layout->addWidget(mGrowthWarning);
+
   mDensityWarning = new QLabel(content);
   mDensityWarning->setObjectName(QStringLiteral("densityGuardWarning"));
   mDensityWarning->setWordWrap(true);
@@ -411,7 +472,10 @@ void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
        status.trainingSummary.value(QStringLiteral("phase")).toString() == QStringLiteral("loaded")))
     mTrainingSummary = status.trainingSummary;
   mLastStage = status.stage;
-  if (!status.reconstructionQuality.isEmpty() || !status.generationIssue.isEmpty()) {
+  const bool knownIssue = QStringList{QStringLiteral("reconstruction_quality"),
+      QStringLiteral("source_frames_missing"), QStringLiteral("training_renderer_resume")}
+      .contains(status.generationIssue);
+  if (!status.reconstructionQuality.isEmpty() || knownIssue) {
     mReconstructionStatus = status;
   }
   if (status.densityGuardIteration.has_value() && status.densityGuardDeferred.has_value()) {
@@ -511,7 +575,9 @@ void TrainingMonitorWidget::refreshMetrics() {
   const WorkerStatus &quality = mReconstructionStatus;
   mReconstructionQuality->setVisible(!quality.reconstructionQuality.isEmpty() || !quality.generationIssue.isEmpty());
   QString message;
-  if (quality.generationIssue == QStringLiteral("source_frames_missing")) {
+  if (quality.generationIssue == QStringLiteral("training_renderer_resume")) {
+    message = QCoreApplication::translate("Workbench", "检查点使用的训练渲染后端不可用或已改变。请恢复同一实验环境后续训；未自动切换后端或重置优化器。");
+  } else if (quality.generationIssue == QStringLiteral("source_frames_missing")) {
     message = QCoreApplication::translate("Workbench", "原始帧无法完整恢复。请重新导入原始照片或视频；已保留当前模型，不会使用缺失照片的子集继续训练。");
   } else if (!quality.reconstructionQuality.isEmpty()) {
     const QString phase = quality.reconstructionQuality == QStringLiteral("repairing")
@@ -553,18 +619,11 @@ void TrainingMonitorWidget::refreshMetrics() {
       mTelemetry.gaussianCount().has_value()
           ? locale.toString(*mTelemetry.gaussianCount())
           : QStringLiteral("-"));
-  if (mTelemetry.iterationMilliseconds().has_value() &&
-      *mTelemetry.iterationMilliseconds() > 0.0) {
-    const double milliseconds = *mTelemetry.iterationMilliseconds();
+  if (const auto rate = mTelemetry.iterationsPerSecond()) {
     mSpeed->setText(QStringLiteral("%1 it/s")
-                        .arg(locale.toString(1000.0 / milliseconds, 'f', 1)));
-    if (mTelemetry.iteration().has_value() && total > 0) {
-      const int remaining = std::max(total - *mTelemetry.iteration(), 0);
-      mRemaining->setText(
-          formattedDuration(remaining * milliseconds / 1000.0));
-    } else {
-      mRemaining->setText(QStringLiteral("-"));
-    }
+                        .arg(locale.toString(*rate, 'f', 1)));
+    const auto remaining = mTelemetry.estimatedRemainingSeconds();
+    mRemaining->setText(remaining ? formattedDuration(*remaining) : QStringLiteral("-"));
   } else {
     mSpeed->setText(QStringLiteral("-"));
     mRemaining->setText(QStringLiteral("-"));
@@ -573,6 +632,57 @@ void TrainingMonitorWidget::refreshMetrics() {
                         ? formattedDuration(*mTelemetry.elapsedSeconds())
                         : QStringLiteral("-"));
   if (mFinished) mRemaining->setText(QStringLiteral("-"));
+  const QJsonObject &performance = mTelemetry.performance();
+  QStringList profileLines;
+  if (!performance.isEmpty()) {
+    profileLines.append(QCoreApplication::translate("Workbench", "全步：%1 ms · 样本迭代 %2")
+        .arg(locale.toString(*mTelemetry.wallStepMilliseconds(), 'f', 1),
+             locale.toString(performance.value(QStringLiteral("iteration")).toInteger())));
+    if (performance.contains(QStringLiteral("renderer_engine")) ||
+        performance.contains(QStringLiteral("loss_engine"))) {
+      const QString renderer = performance.value(QStringLiteral("renderer_engine")).toString();
+      const QString loss = performance.value(QStringLiteral("loss_engine")).toString();
+      profileLines.append(QCoreApplication::translate("Workbench", "实际渲染后端：%1 · 损失计算：%2")
+          .arg(renderer.isEmpty() ? QStringLiteral("-") : renderer == QStringLiteral("fastergs")
+                   ? QCoreApplication::translate("Workbench", "Fast-GS")
+                   : QCoreApplication::translate("Workbench", "标准"),
+               loss.isEmpty() ? QStringLiteral("-") : loss == QStringLiteral("fused_l1_ssim")
+                   ? QCoreApplication::translate("Workbench", "融合 L1 + SSIM")
+                   : QCoreApplication::translate("Workbench", "标准")));
+    }
+    profileLines.append(QCoreApplication::translate("Workbench", "主机阶段（含 GPU 提交）：%1")
+        .arg(profileTimings(performance.value(QStringLiteral("stages_ms")).toObject(), locale)));
+    const QJsonObject gpuStages = performance.value(QStringLiteral("gpu_stages_ms")).toObject();
+    if (!gpuStages.isEmpty()) profileLines.append(QCoreApplication::translate("Workbench", "CUDA 阶段（非整步）：%1")
+        .arg(profileTimings(gpuStages, locale)));
+    if (performance.contains(QStringLiteral("torch_allocated_bytes")) ||
+        performance.contains(QStringLiteral("device_total_bytes")))
+      profileLines.append(QCoreApplication::translate("Workbench", "GPU 内存：Torch %1 MiB · 保留 %2 MiB · 峰值 %3 MiB · 设备空闲 %4 / %5 MiB")
+          .arg(observerMebibytes(performance, QStringLiteral("torch_allocated_bytes"), locale),
+               observerMebibytes(performance, QStringLiteral("torch_reserved_bytes"), locale),
+               observerMebibytes(performance, QStringLiteral("torch_peak_allocated_bytes"), locale),
+               observerMebibytes(performance, QStringLiteral("device_free_bytes"), locale),
+               observerMebibytes(performance, QStringLiteral("device_total_bytes"), locale)));
+  } else if (const auto cuda = mTelemetry.iterationMilliseconds()) {
+    profileLines.append(QCoreApplication::translate("Workbench", "CUDA 阶段（非整步）：%1")
+        .arg(QStringLiteral("%1 ms").arg(locale.toString(*cuda, 'f', 1))));
+  }
+  mPerformanceDetails->setVisible(!profileLines.isEmpty());
+  mPerformanceDetails->setText(profileLines.join(QLatin1Char('\n')));
+  const QJsonObject &growth = mTelemetry.growth();
+  const bool deferred = growth.value(QStringLiteral("state")).toString() == QStringLiteral("deferred");
+  mGrowthWarning->setVisible(deferred);
+  if (deferred) {
+    const QString reason = growth.value(QStringLiteral("reason")).toString();
+    const bool observed = growth.value(QStringLiteral("observation_valid")).toBool();
+    mGrowthWarning->setText(QCoreApplication::translate("Workbench", "暂缓增密（迭代 %1 · %2）：空闲 %3 MiB · 本次预计新增峰值 %4 MiB · 可用于增密 %5 MiB。持续受限可能减少细节；保留完整检查点后调整资源续训。")
+        .arg(locale.toString(growth.value(QStringLiteral("iteration")).toInteger()),
+             growthReasonLabel(reason),
+             observed ? observerMebibytes(growth, QStringLiteral("free_bytes"), locale) : QStringLiteral("-"),
+             reason == QStringLiteral("estimate_unavailable") ? QStringLiteral("-")
+                 : observerMebibytes(growth, QStringLiteral("additional_peak_bytes"), locale),
+             observed ? observerMebibytes(growth, QStringLiteral("available_bytes"), locale) : QStringLiteral("-")));
+  }
   mCurves->setSamples(mTelemetry.samples());
   relayoutMetrics();
   refreshTaskTitle();

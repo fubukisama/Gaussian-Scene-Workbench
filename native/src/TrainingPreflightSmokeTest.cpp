@@ -112,6 +112,21 @@ bool runTrainingPreflightSmokeTest(const QString &python, const QString &backend
   auto *iterations = dialog.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
   auto *start = dialog.findChild<QPushButton *>(QStringLiteral("trainingStartButton"));
   if (!runColmap || !backend || !iterations || !start) return false;
+  auto *performance = dialog.findChild<QCheckBox *>(QStringLiteral("trainingPerformanceOptimization"));
+  auto *memory = dialog.findChild<QSpinBox *>(QStringLiteral("trainingMemoryPercent"));
+  auto *engine = dialog.findChild<QComboBox *>(QStringLiteral("trainingEngineCombo"));
+  auto *growthMode = dialog.findChild<QComboBox *>(QStringLiteral("trainingGrowthModeCombo"));
+  if (!check(performance && memory && engine && performance->isChecked() && memory->value() == 90 &&
+             dialog.configuration().trainingEngine == QStringLiteral("stock"),
+             "native training defaults to bounded optimization, aggressive90% admission and stock renderer")) return false;
+  if (!check(growthMode && dialog.configuration().growthMode == QStringLiteral("pause"),
+             "quality priority defaults to full-state safe pause rather than silently running with limited growth")) return false;
+  memory->setValue(95);
+  engine->setCurrentIndex(engine->findData(QStringLiteral("fastergs")));
+  performance->click();
+  if (!check(!memory->isEnabled() && !dialog.configuration().performanceOptimization,
+             "disabling optimization disables its budget without starting any process")) return false;
+  performance->click();
   iterations->setValue(12000);
   runColmap->click();
   if (!check(!start->isEnabled() && waitFor([&] { return dialog.reconstructionPreflightReady(); }) &&
@@ -133,6 +148,9 @@ bool runTrainingPreflightSmokeTest(const QString &python, const QString &backend
           ? QString::fromUtf8("Reuse the current reconstruction") : QString::fromUtf8("現在の再構築を再利用");
       if (!check(decision.startsWith(expected) && statistics.match(source->text()).hasMatch() &&
                  dialog.configuration().backend == backendId && dialog.configuration().iterations == 12000 &&
+                 dialog.configuration().performanceOptimization && dialog.configuration().trainingMemoryPercent == 95 &&
+                 dialog.configuration().trainingEngine == QStringLiteral("fastergs") && !performance->text().isEmpty() &&
+                 dialog.configuration().growthMode == QStringLiteral("pause") && !growthMode->currentText().isEmpty() &&
                  !dialog.configuration().runColmap && !dialog.effectiveRunColmap(),
                  "live language and backend edits preserve the actual decision and user parameters")) return false;
     }

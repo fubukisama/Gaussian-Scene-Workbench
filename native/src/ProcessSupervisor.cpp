@@ -87,6 +87,28 @@ bool parseOptionalReal(const QJsonObject &object, const QString &name,
   return true;
 }
 
+// JSON numbers remain exactly representable through every Python/Qt hop.
+constexpr double MaximumExactJsonInteger = 9007199254740991.0;
+
+bool nonnegativeInteger(const QJsonValue &value) {
+  if (!value.isDouble()) return false;
+  const double number = value.toDouble();
+  return std::isfinite(number) && number >= 0.0 &&
+         number <= MaximumExactJsonInteger && std::floor(number) == number;
+}
+
+bool nonnegativeReal(const QJsonValue &value) {
+  return value.isDouble() && std::isfinite(value.toDouble()) && value.toDouble() >= 0.0;
+}
+
+bool observerHeader(const QJsonObject &payload) {
+  const auto version = payload.value(QStringLiteral("version"));
+  const QString backend = payload.value(QStringLiteral("backend")).toString();
+  return version.isDouble() && version.toDouble() == 1.0 &&
+         (backend == QStringLiteral("3dgs") || backend == QStringLiteral("2dgs")) &&
+         nonnegativeInteger(payload.value(QStringLiteral("iteration")));
+}
+
 bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
   const QByteArray jsonPayload = jsonObjectPrefix(payload);
   if (jsonPayload.isEmpty()) {
@@ -181,7 +203,8 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
     if (value.isUndefined()) continue;
     const QStringList allowed = key == QStringLiteral("reconstructionQuality")
         ? QStringList{QStringLiteral("accepted"), QStringLiteral("partial"), QStringLiteral("repairing"), QStringLiteral("rejected")}
-        : QStringList{QStringLiteral("reconstruction_quality"), QStringLiteral("source_frames_missing")};
+        : QStringList{QStringLiteral("reconstruction_quality"), QStringLiteral("source_frames_missing"),
+                      QStringLiteral("training_renderer_resume")};
     if (!value.isString() || !allowed.contains(value.toString())) return false;
     if (key == QStringLiteral("reconstructionQuality")) parsedStatus.reconstructionQuality = value.toString();
     else parsedStatus.generationIssue = value.toString();
@@ -256,12 +279,108 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       summaryValid = summaryValid && listedImages == totalImages && listedPixels == totalPixels;
   }
   if (summaryValid) parsedStatus.trainingSummary = summary;
+  parsedStatus.trainingPerformance = normalizeTrainingPerformance(
+      object.value(QStringLiteral("trainingPerformance")).toObject());
+  parsedStatus.trainingGrowth = normalizeTrainingGrowth(
+      object.value(QStringLiteral("trainingGrowth")).toObject());
 
   *status = std::move(parsedStatus);
   return true;
 }
 
 } // namespace
+
+QJsonObject normalizeTrainingPerformance(const QJsonObject &payload) {
+  if (!observerHeader(payload) || !nonnegativeReal(payload.value(QStringLiteral("wall_step_ms"))))
+    return {};
+  QJsonObject result;
+  for (const QString &key : {QStringLiteral("version"), QStringLiteral("backend"),
+                            QStringLiteral("iteration"), QStringLiteral("wall_step_ms")})
+    result.insert(key, payload.value(key));
+  const QStringList stages{QStringLiteral("setup"), QStringLiteral("transfer"),
+      QStringLiteral("render"), QStringLiteral("loss"), QStringLiteral("backward"),
+      QStringLiteral("densification"), QStringLiteral("optimizer"), QStringLiteral("preview"),
+      QStringLiteral("checkpoint"), QStringLiteral("report")};
+  for (const QString &key : {QStringLiteral("stages_ms"), QStringLiteral("gpu_stages_ms")}) {
+    const auto value = payload.value(key);
+    if (!value.isUndefined() && !value.isObject()) return {};
+    const QJsonObject timings = value.toObject();
+    for (auto it = timings.begin(); it != timings.end(); ++it)
+      if (!stages.contains(it.key()) || !nonnegativeReal(it.value())) return {};
+    result.insert(key, timings);
+  }
+  for (const QString &key : {QStringLiteral("torch_allocated_bytes"),
+      QStringLiteral("torch_reserved_bytes"), QStringLiteral("torch_peak_allocated_bytes"),
+      QStringLiteral("device_free_bytes"), QStringLiteral("device_total_bytes")}) {
+    const auto value = payload.value(key);
+    if (value.isUndefined()) continue;
+    if (!nonnegativeInteger(value)) return {};
+    result.insert(key, value);
+  }
+  for (const QString &key : {QStringLiteral("renderer_engine"), QStringLiteral("loss_engine")}) {
+    const auto value = payload.value(key);
+    if (value.isUndefined()) continue;
+    const QStringList engines = key == QStringLiteral("renderer_engine")
+        ? QStringList{QStringLiteral("stock"), QStringLiteral("fastergs")}
+        : QStringList{QStringLiteral("stock"), QStringLiteral("fused_l1_ssim")};
+    if (!value.isString() || !engines.contains(value.toString())) return {};
+    result.insert(key, value);
+  }
+  if (result.contains(QStringLiteral("device_free_bytes")) &&
+      result.contains(QStringLiteral("device_total_bytes")) &&
+      result.value(QStringLiteral("device_free_bytes")).toDouble() >
+          result.value(QStringLiteral("device_total_bytes")).toDouble()) return {};
+  return result;
+}
+
+QJsonObject normalizeTrainingGrowth(const QJsonObject &payload) {
+  if (!observerHeader(payload)) return {};
+  const QString state = payload.value(QStringLiteral("state")).toString();
+  const QString reason = payload.value(QStringLiteral("reason")).toString();
+  const bool admitted = state == QStringLiteral("admitted");
+  if ((!admitted && state != QStringLiteral("deferred")) ||
+      !QStringList{QStringLiteral("admitted"), QStringLiteral("vram_pressure"),
+          QStringLiteral("probe_unavailable"), QStringLiteral("invalid_observation"),
+          QStringLiteral("estimate_unavailable")}.contains(reason) ||
+      admitted != (reason == QStringLiteral("admitted"))) return {};
+  QJsonObject result;
+  for (const QString &key : {QStringLiteral("version"), QStringLiteral("backend"),
+      QStringLiteral("iteration"), QStringLiteral("state"), QStringLiteral("reason")})
+    result.insert(key, payload.value(key));
+  for (const QString &key : {QStringLiteral("point_count"), QStringLiteral("transient_point_count"),
+      QStringLiteral("final_point_count"), QStringLiteral("parameter_bytes"),
+      QStringLiteral("optimizer_state_bytes"), QStringLiteral("additional_peak_bytes"),
+      QStringLiteral("free_bytes"), QStringLiteral("total_bytes"), QStringLiteral("spare_bytes"),
+      QStringLiteral("available_bytes"), QStringLiteral("cache_credit_bytes"),
+      QStringLiteral("clone_count"), QStringLiteral("split_count")}) {
+    if (!nonnegativeInteger(payload.value(key))) return {};
+    result.insert(key, payload.value(key));
+  }
+  for (const QString &key : {QStringLiteral("allowed"), QStringLiteral("observation_valid"),
+                            QStringLiteral("candidate_counts_known")}) {
+    const auto value = payload.value(key);
+    if (value.isUndefined()) continue;
+    if (!value.isBool()) return {};
+    result.insert(key, value);
+  }
+  if (result.contains(QStringLiteral("allowed")) &&
+      result.value(QStringLiteral("allowed")).toBool() != admitted) return {};
+  if (admitted && result.value(QStringLiteral("observation_valid")).isBool() &&
+      !result.value(QStringLiteral("observation_valid")).toBool()) return {};
+  if (result.value(QStringLiteral("observation_valid")).toBool()) {
+    const double total = result.value(QStringLiteral("total_bytes")).toDouble();
+    const double free = result.value(QStringLiteral("free_bytes")).toDouble();
+    if (total <= 0.0 || free > total ||
+        result.value(QStringLiteral("cache_credit_bytes")).toDouble() > total - free) return {};
+  }
+  return result;
+}
+
+std::optional<WorkerStatus> ProcessSupervisor::decodeStatusEvent(const QByteArray &payload) {
+  WorkerStatus status;
+  if (!parseWorkerStatus(payload, &status)) return std::nullopt;
+  return status;
+}
 
 ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
   qRegisterMetaType<TrainingGpuPreviewDescriptor>();
@@ -531,10 +650,9 @@ void ProcessSupervisor::handleOutputLine(const QByteArray &line) {
   }
 
   if (content.startsWith(kWorkerEventPrefix)) {
-    WorkerStatus status;
     const QByteArray payload = content.mid(kWorkerEventPrefix.size());
-    if (parseWorkerStatus(payload, &status)) {
-      emit workerStatusReady(status);
+    if (const auto status = decodeStatusEvent(payload)) {
+      emit workerStatusReady(*status);
       return;
     }
   }

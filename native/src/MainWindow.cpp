@@ -23,6 +23,7 @@
 #include "ResourceBudgetDialog.h"
 #include "ResourceBudget.h"
 #include "TrainingDialog.h"
+#include "WrappingCheckBox.h"
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
 #include "TrainingOutputLocator.h"
@@ -40,6 +41,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
+#include <QCheckBox>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -5753,9 +5755,28 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
   const QString backend = config.value(QStringLiteral("backend")).toString();
   if ((backend != QStringLiteral("3dgs") && backend != QStringLiteral("2dgs")) ||
       !config.value(QStringLiteral("nativeCheckpoint")).toBool()) return;
-  if (QMessageBox::question(this, QCoreApplication::translate("Workbench", "继续训练"),
-          QCoreApplication::translate("Workbench", "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。")
-              .arg(iteration), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+  QMessageBox resumePrompt(QMessageBox::Question, QCoreApplication::translate("Workbench", "继续训练"),
+      QCoreApplication::translate("Workbench", "从迭代 %1 继续训练？\n\n检查点包含 Python 序列化数据，只能加载你信任且未被他人替换的本机训练文件。校验和仅检查损坏，不能证明来源。继续前将检查数据与训练参数是否一致。")
+          .arg(iteration), QMessageBox::Yes | QMessageBox::No, this);
+  resumePrompt.setDefaultButton(QMessageBox::No);
+  QCheckBox *legacyOptimization = nullptr;
+  if (!config.contains(QStringLiteral("performanceOptions"))) {
+    legacyOptimization = AppLanguage::text(new WrappingCheckBox(&resumePrompt),
+        AppLanguage::source("为旧检查点启用无损图像缓存与质量优先显存保护"));
+    legacyOptimization->setChecked(true);
+    AppLanguage::bind(legacyOptimization, "toolTip", AppLanguage::source(
+        "保留原优化器、随机采样、分辨率和损失后端；仅改变图像存储与传输，并在持续无法增密时保存完整状态暂停。取消勾选则保留旧执行模式。"));
+    resumePrompt.setCheckBox(legacyOptimization);
+  }
+  if (resumePrompt.exec() != QMessageBox::Yes) return;
+  if (legacyOptimization && legacyOptimization->isChecked()) {
+    config.insert(QStringLiteral("performanceOptions"), QJsonObject{
+        {QStringLiteral("version"), 1}, {QStringLiteral("enabled"), true},
+        {QStringLiteral("usage_fraction"), 0.9}, {QStringLiteral("minimum_spare_mib"), 512},
+        {QStringLiteral("growth_mode"), QStringLiteral("pause")},
+        {QStringLiteral("loss_mode"), QStringLiteral("stock")},
+        {QStringLiteral("engine"), QStringLiteral("stock")}});
+  }
   if (!confirmDiscardSceneEdits()) return;
 
   // Managed paths migrate with Save As. External datasets/output stay external.
@@ -6052,6 +6073,13 @@ void MainWindow::startTraining() {
                       QDir::cleanPath(trainingJobStore));
   workerConfig.insert(QStringLiteral("colmapOptions"), QJsonObject());
   workerConfig.insert(QStringLiteral("trainOptions"), trainOptions);
+  workerConfig.insert(QStringLiteral("performanceOptions"), QJsonObject{
+      {QStringLiteral("version"), 1},
+      {QStringLiteral("enabled"), config.performanceOptimization},
+      {QStringLiteral("usage_fraction"), config.trainingMemoryPercent / 100.0},
+      {QStringLiteral("minimum_spare_mib"), 512},
+      {QStringLiteral("growth_mode"), config.growthMode},
+      {QStringLiteral("engine"), config.trainingEngine}});
   workerConfig.insert(QStringLiteral("reconstructionPreflight"), dialog.reconstructionSummary().report);
 
   const QString configPath = QDir(jobsRoot).filePath(

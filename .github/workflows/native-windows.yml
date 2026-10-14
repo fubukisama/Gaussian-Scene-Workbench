@@ -108,7 +108,7 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw "Acceptance configure failed." }
-          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests
+          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests gsw_training_telemetry_tests
           if ($LASTEXITCODE -ne 0) { throw "Acceptance build failed." }
       - name: Prepare real Windows display and OpenGL
         shell: pwsh
@@ -120,10 +120,11 @@ jobs:
         env:
           QT_FORCE_STDERR_LOGGING: "1"
           GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/acceptance-artifact
+          GSW_COORDINATE_SCENE_SCREENSHOT_DIR: ${{ github.workspace }}/native/acceptance-artifact/coordinates
         run: |
           ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
             --output-log native/acceptance.log `
-            -R '^(native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests)$'
+            -R '^(native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
       - name: Upload acceptance evidence
         if: always()
@@ -263,7 +264,7 @@ jobs:
         run: |
           node --version
           if ($LASTEXITCODE -ne 0) { throw "The hosted runner is missing Node for the test-owned argv receiver." }
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_training_checkpoint crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts

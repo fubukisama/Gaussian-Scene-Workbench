@@ -35,6 +35,8 @@ if str(ROOT) not in sys.path:
 from native.worker.training_summary import (
     configured_training_summary, normalize_training_summary, PARAMETER_FIELDS,
 )
+from native.worker.training_step_profile import normalize_performance
+from native.worker.training_resource_policy import normalize_growth
 WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
 DATASETS_DIR = WORKSPACE_ROOT / "datasets"
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
@@ -86,6 +88,8 @@ COLMAP_POINT_PREVIEW_INTERVAL_SECONDS = 0.5
 COLMAP_SNAPSHOT_TARGET_COUNT = 48
 TRAINING_PROGRESS_PATTERN = re.compile(r"\[gsw-training-progress\]\s+(\d+)\s*/\s*(\d+)")
 TRAINING_METRICS_PREFIX = "[gsw-training-metrics]"
+TRAINING_PERFORMANCE_PREFIX = "[gsw-training-performance]"
+TRAINING_GROWTH_PREFIX = "[gsw-training-growth]"
 TRAINING_INPUT_PREFIX = "[gsw-training-input]"
 TRAINING_DENSITY_PREFIX = "[gsw-density-control]"
 TRAINING_PREVIEW_PREFIX = "[gsw-training-preview]"
@@ -4390,6 +4394,8 @@ def job_snapshot(job):
         "iteration": job.get("iteration"),
         "total_iterations": job.get("total_iterations"),
         "trainingSummary": normalize_training_summary(job.get("trainingSummary")),
+        "trainingPerformance": normalize_performance(job.get("trainingPerformance")),
+        "trainingGrowth": normalize_growth(job.get("trainingGrowth")),
         "progressPercent": job.get("progressPercent"),
         "loss": job.get("loss"),
         "psnr": job.get("psnr"),
@@ -4530,6 +4536,17 @@ def add_job_log(job, message):
             preview_payload = training_event_payload(line, TRAINING_PREVIEW_PREFIX)
             density_payload = training_event_payload(line, TRAINING_DENSITY_PREFIX)
             input_payload = training_event_payload(line, TRAINING_INPUT_PREFIX)
+            performance_payload = normalize_performance(training_event_payload(line, TRAINING_PERFORMANCE_PREFIX))
+            growth_payload = normalize_growth(training_event_payload(line, TRAINING_GROWTH_PREFIX))
+            acceleration_payload = training_event_payload(line, "[gsw-training-acceleration]")
+            if acceleration_payload is not None and acceleration_payload.get("resumeBlocked") is True:
+                job["generation_issue"] = "training_renderer_resume"
+            if growth_payload is not None and growth_payload["iteration"] >= int(
+                    (job.get("trainingGrowth") or {}).get("iteration", 0)):
+                job["trainingGrowth"] = growth_payload
+            if performance_payload is not None and performance_payload["iteration"] >= int(
+                    (job.get("trainingPerformance") or {}).get("iteration", 0)):
+                job["trainingPerformance"] = performance_payload
             if metrics_payload is not None:
                 apply_training_metrics(job, metrics_payload)
             if preview_payload is not None:
@@ -4571,6 +4588,9 @@ def training_env(backend="3dgs"):
     backend = safe_training_backend(backend)
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    loss_path = env.get("GSW_TRAINING_LOSS_MODULE_PATH_" + backend.upper())
+    if loss_path:
+        env["GSW_TRAINING_LOSS_MODULE_PATH"] = loss_path
     env_root = gaussian_env_root()
     colmap_bin = colmap_executable().parent
     path_parts = [
@@ -6205,7 +6225,11 @@ def run_training_job(job, run_convert, quality, overwrite):
                 run_convert = True
 
         set_job_stage(job, "running", "prepare")
-        run_logged(job, ["cmd.exe", "/d", "/s", "/c", TRAINING_KIT_DIR / "apply_local_fixes.bat"], ROOT, "3dgs")
+        if not job.get("native_control"):
+            # Compatibility web callers may still use an old source checkout.
+            # Native packages already stage the patched trainer and must not
+            # rewrite installed source/manifest bytes on each training launch.
+            run_logged(job, ["cmd.exe", "/d", "/s", "/c", TRAINING_KIT_DIR / "apply_local_fixes.bat"], ROOT, "3dgs")
 
         if run_convert:
             set_job_stage(job, "running", "colmap")
@@ -6289,6 +6313,17 @@ def run_training_job(job, run_convert, quality, overwrite):
                 f"Training command completed but iteration {options['iterations']} produced no point_cloud.ply"
             )
         write_training_metadata(output, backend, quality, options, job.get("trainingSummary"))
+        performance_record = {
+            "version": 1, "backend": backend,
+            "policy": (job.get("native_control") or {}).get("performance"),
+            "lastSample": normalize_performance(job.get("trainingPerformance")),
+            "lastGrowth": normalize_growth(job.get("trainingGrowth")),
+            "qualityMayBeConstrained": (job.get("trainingGrowth") or {}).get("state") == "deferred",
+        }
+        if job.get("native_control"):
+            from native.worker.training_checkpoint import atomic_json
+            output.mkdir(parents=True, exist_ok=True)
+            atomic_json(output / "training-performance.json", performance_record)
         if job.get("reconstruction_quality"):
             (output / "reconstruction_quality.json").write_text(json.dumps(job["reconstruction_quality"], indent=2), encoding="utf-8")
         with TRAIN_LOCK:

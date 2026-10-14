@@ -24,6 +24,10 @@ struct TrainingConfiguration {
   int resolution = 2;
   bool runColmap = true;
   bool overwrite = false;
+  bool performanceOptimization = true;
+  int trainingMemoryPercent = 90;
+  QString trainingEngine = QStringLiteral("stock");
+  QString growthMode = QStringLiteral("pause");
 };
 
 class TrainingDialog final : public QDialog {
@@ -63,6 +67,10 @@ private:
   QLineEdit *mOutputScene = nullptr;
   QCheckBox *mRunColmap = nullptr;
   QCheckBox *mOverwrite = nullptr;
+  QCheckBox *mPerformanceOptimization = nullptr;
+  QSpinBox *mTrainingMemoryPercent = nullptr;
+  QComboBox *mTrainingEngine = nullptr;
+  QComboBox *mGrowthMode = nullptr;
   QLabel *mInputSummaryLabel = nullptr;
   TrainingInputSummaryScanner *mInputScanner = nullptr;
   TrainingInputSummary mInputSummary;

@@ -1,5 +1,28 @@
 # Third-Party Licenses
 
+## Optional native training accelerators
+
+The independent combined L1/SSIM extension in `gaussian-splatting/gsw_loss_cuda/`
+is newly derived from Rahul Goel's MIT fused-ssim commit
+`1272e21a282342e89537159e4bad508b19b34157`, retaining its original copyright and
+MIT license. GSW additions fuse the L1 reduction/gradient and add bounded
+workspaces and numerical/source/ABI gates. It is not a relicensing of the
+private GPL LichtFeld prototype. See its `README.gsw.md` and complete `LICENSE`.
+
+The optional Faster-GS CUDA package is fetched separately at Apache-2.0 commit
+`c60ea269b7cf3ebda527d640b6fdd31462f91b41`. Original GSW adapter/control helpers
+outside the GPL desktop main-program scope carry MIT notices. Neither extension
+nor the main-program GPL grant overrides the research/evaluation restrictions
+on Graphdeco/2DGS trainers. Prebuilt experimental CUDA libraries and private
+prototype artifacts are not bundled in native staging.
+
+中文：发布版联合损失重新基于MIT fused-ssim原代码，并保留原版权及许可；不是给
+GPL私用原型换许可证。Faster-GS另按Apache-2.0下载。研究训练后端的原有限制不变。
+
+日本語：公開の融合損失はMIT fused-ssim原コードから新たに派生し、元の著作権と
+ライセンスを保持します。GPL私用原型のライセンス変更ではありません。
+Faster-GSは別途Apache-2.0で取得し、研究用学習バックエンドの制限は維持します。
+
 Gaussian Scene Workbench contains components under several licenses. From the 2026-10-14 licensing change, the original native desktop main program is GPL-3.0-or-later within the scope in [native/LICENSE.md](native/LICENSE.md). Earlier MIT grants and original code outside that scope retain the root MIT terms. Neither grant overrides third-party licenses or grants commercial rights to restricted research components. The project's research purpose is not an additional use restriction on its GPL or MIT code.
 
 ## Blender Transform Geometry / Blender 变换几何 / Blender 変換形状

@@ -21,7 +21,7 @@ $ExcludedDirectories = @(
   "doc",
   "docs"
 )
-$ExcludedExtensions = @(".css", ".html", ".js", ".map", ".pyc")
+$ExcludedExtensions = @(".css", ".html", ".js", ".map", ".pyc", ".pyd")
 
 function Copy-FilteredTree {
   param(
@@ -33,7 +33,7 @@ function Copy-FilteredTree {
   Get-ChildItem -LiteralPath $ResolvedSource -Recurse -File | ForEach-Object {
     $RelativePath = $_.FullName.Substring($ResolvedSource.Length).TrimStart("\", "/")
     $Segments = $RelativePath -split "[\\/]"
-    if ($Segments | Where-Object { $ExcludedDirectories -contains $_ }) {
+    if ($Segments | Where-Object { $ExcludedDirectories -contains $_ -or $_ -like '*.egg-info' }) {
       return
     }
     if ($ExcludedExtensions -contains $_.Extension.ToLowerInvariant()) {
@@ -59,6 +59,12 @@ $StaticFiles = @(
   @{ Source = "native\worker\training_checkpoint.py"; Destination = "native\worker\training_checkpoint.py" },
   @{ Source = "native\worker\training_density_control.py"; Destination = "native\worker\training_density_control.py" },
   @{ Source = "native\worker\training_summary.py"; Destination = "native\worker\training_summary.py" },
+  @{ Source = "native\worker\training_runtime.py"; Destination = "native\worker\training_runtime.py" },
+  @{ Source = "native\worker\training_image_pipeline.py"; Destination = "native\worker\training_image_pipeline.py" },
+  @{ Source = "native\worker\training_resource_policy.py"; Destination = "native\worker\training_resource_policy.py" },
+  @{ Source = "native\worker\training_step_profile.py"; Destination = "native\worker\training_step_profile.py" },
+  @{ Source = "native\worker\training_acceleration.py"; Destination = "native\worker\training_acceleration.py" },
+  @{ Source = "native\worker\training_loss.py"; Destination = "native\worker\training_loss.py" },
   @{ Source = "native\worker\two_dgs_train.py"; Destination = "native\worker\two_dgs_train.py" },
   @{ Source = "native\worker\generation_capabilities.py"; Destination = "native\worker\generation_capabilities.py" },
   @{ Source = "native\worker\mesh_generation.py"; Destination = "native\worker\mesh_generation.py" },
@@ -109,6 +115,12 @@ $Manifest = [ordered]@{
     "native/worker/training_reconstruction_summary.py",
     "native/worker/training_checkpoint.py",
     "native/worker/training_summary.py",
+    "native/worker/training_runtime.py",
+    "native/worker/training_image_pipeline.py",
+    "native/worker/training_resource_policy.py",
+    "native/worker/training_step_profile.py",
+    "native/worker/training_acceleration.py",
+    "native/worker/training_loss.py",
     "native/worker/training_density_control.py",
     "native/worker/two_dgs_train.py",
     "native/worker/generation_capabilities.py",
