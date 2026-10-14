@@ -207,13 +207,41 @@ bool runPointStreamingSmokeTest(NativeViewport &viewport) {
       }), "actual framebuffer presents colored point pages")) return false;
   const qint64 firstVisibleMs = clock.elapsed();
   const quint64 firstVisibleFrames = presentedFrames;
-  if (!check(waitUntil([&]() {
+  qWarning() << "POINT_STREAMING_VISIBLE:" << "elapsed milliseconds" << firstVisibleMs
+             << "frameSwapped" << firstVisibleFrames
+             << "resident/source points" << viewport.residentPointCount() << kSourcePoints
+             << "viewport/framebuffer" << viewport.size() << frame.size();
+  const bool ready = waitUntil([&]() {
         frame = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
         const auto status = viewport.resourceBudgetStatus();
         return viewport.pointPagingSettled() && viewport.residentPointCount() >= kSourcePoints &&
                status.loadingMeshCount == 0 && status.reservedRamBytes == 0 &&
                status.reservedGpuBytes == 0 && coloredPointPixels(frame) >= 64;
-      }), "all requested point pages settle and release their loading leases")) return false;
+      });
+  if (!ready) {
+    const auto stalled = viewport.resourceBudgetStatus();
+    qCritical() << "POINT_STREAMING_STATE:" << "elapsed milliseconds" << clock.elapsed()
+                << "first-visible milliseconds/frameSwapped" << firstVisibleMs << firstVisibleFrames
+                << "current frameSwapped" << presentedFrames
+                << "resident/source points" << viewport.residentPointCount() << kSourcePoints
+                << "paging settled/loading" << viewport.pointPagingSettled() << stalled.loadingMeshCount
+                << "reserved RAM/GPU bytes" << stalled.reservedRamBytes << stalled.reservedGpuBytes
+                << "managed RAM/GPU bytes" << stalled.managedRamBytes << stalled.managedGpuBytes
+                << "effective RAM/GPU budgets" << stalled.effectiveRamBudgetBytes << stalled.effectiveGpuBudgetBytes
+                << "colored framebuffer pixels" << coloredPointPixels(frame)
+                << "viewport/framebuffer" << viewport.size() << frame.size()
+                << "view distance/orthographic/angles" << viewport.viewDistance()
+                << viewport.orthographicProjection() << viewport.viewOrbitAngles().yawDegrees
+                << viewport.viewOrbitAngles().pitchDegrees << viewport.viewOrbitAngles().rollDegrees
+                << "scene/source unchanged" << (viewport.scenePath() == path)
+                << (sourceHash(path) == originalHash);
+    const QString output = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+    if (!output.isEmpty() && QFileInfo(output).isAbsolute() && QDir().mkpath(output)) {
+      const QString capture = QDir(output).filePath(QStringLiteral("point-streaming-failed.png"));
+      qCritical() << "POINT_STREAMING_FAILURE_CAPTURE:" << capture << frame.save(capture);
+    }
+  }
+  if (!check(ready, "all requested point pages settle and release their loading leases")) return false;
   const qint64 readyMs = clock.elapsed();
   const quint64 readyFrames = presentedFrames;
   const auto status = viewport.resourceBudgetStatus();
