@@ -4350,8 +4350,13 @@ void NativeViewport::requestMissingPointCachePages() {
     return a.pointCount < b.pointCount;
   });
   constexpr qsizetype kMaximumReadsInFlight = 2;
+  // Stage at most two eight-page upload batches. Completed reads replenish
+  // this bounded window without waiting for another viewport paint.
+  constexpr qsizetype kMaximumQueuedPages = 16;
   for (const int nodeId : std::as_const(ordered)) {
-    if (mScene->mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight) {
+    if (mScene->mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight ||
+        mScene->mPendingPointCachePages.size() +
+            mScene->mPointCacheReadsInFlight.size() >= kMaximumQueuedPages) {
       break;
     }
     const qint64 pageBytes = mScene->mPointCache.nodes.at(nodeId).pointCount *
@@ -4386,6 +4391,7 @@ void NativeViewport::requestMissingPointCachePages() {
                 mScene->mPointCacheFailedNodes.insert(nodeId);
                 mScene->mPointCacheError = page.error;
               }
+              requestMissingPointCachePages();
               updateFrameRefreshPolicy();
               update();
             });

@@ -15,7 +15,9 @@
 批次额度不是模型大小限制，也不是整个帧的全局预算；多个对象/队列分别采用
 同一策略，单次 GL 上传可能超过 4 ms。额度只在整页之间检查，不拆页、不抽面、
 不改文件，不突破共享资源账本。重复、无效或被拒绝页也计入尝试次数；批次结束
-统一重新计费、补读和刷新。点云读取并发仍为 2，因此不能从“最多 8 页”推断
+统一重新计费、补读和刷新。每个点云队列最多 2 路并发，待上传及读取中合计最多
+16 页；读取完成后立即按资源准入补充这个有界窗口，不再等下一次绘制才续读。
+因此不能从“最多 8 页”推断
 加载快 8 倍。普通点云、高斯显示、2DGS、导入/生成网格和训练预览共用相机；
 批量上传改进覆盖点云与网格分页，不替换训练器或 CUDA/OpenGL 共享预览协议。
 
@@ -33,8 +35,10 @@ Point and mesh queues share the same per-batch policy: 32 MiB, eight attempts,
 four milliseconds between pages. The first indivisible page can exceed this
 scheduling allowance but never actual shared RAM/VRAM admission. This is not a
 model-size or global-frame cap. Invalid/duplicate/refused pages count as work;
-accounting/refill is finalized after each batch. Two concurrent point reads
-remain, so batching does not imply an eightfold loading or FPS improvement.
+accounting/refill is finalized after each batch. Each point queue retains two
+concurrent reads, with at most sixteen pending plus in-flight pages. Completion
+refills this bounded window under the original RAM admission rather than
+waiting for the next paint. Batching does not imply an eightfold loading or FPS improvement.
 Camera changes apply to every model/display backend; optimizer and model data
 are unchanged. Undo byte budgets and pending-read priority are future work.
 
@@ -52,7 +56,9 @@ CUDA 学習器全体の導入ではありません。「ビュー → カーソ�
 共有 RAM／GPU メモリの実際の准入を超えません。モデルサイズやフレーム全体の
 上限ではなく、単一 GL 転送は 4 ms を超える場合があります。無効・重複・拒否
 ページも試行数に含み、終了時に使用量・追加読込・表示を更新します。点群の
-読込同時数は 2 のままで、8 倍の高速化や FPS 向上を保証しません。元モデル・
+各キューの読込同時数は 2 のまま、転送待ちと読込中は合計 16 ページ以内です。
+読込完了時に元の RAM 准入でこの有界キューを補充し、次の描画を待ちません。
+8 倍の高速化や FPS 向上を保証しません。元モデル・
 学習状態は変更しません。履歴のバイト予算や読込優先順位は今後の対象です。
 
 ## Fixed source and license
