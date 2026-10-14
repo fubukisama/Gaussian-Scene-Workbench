@@ -60,6 +60,83 @@ permissions:
   contents: read
 
 jobs:
+  upstream-acceptance:
+    name: Upstream viewport acceptance
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Set up QA Python
+        id: qa-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Install acceptance dependencies
+        shell: pwsh
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw "Acceptance QA dependencies failed." }
+          $root = Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw "Acceptance codec dependencies failed." }
+      # This is an additional short public-behavior gate, not a replacement for
+      # the traced full build, all native tests, worker tests or security scans.
+      - name: Configure and build acceptance
+        shell: pwsh
+        run: |
+          $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-acceptance -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            '-DPython3_EXECUTABLE=${{ steps.qa-python.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw "Acceptance configure failed." }
+          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests
+          if ($LASTEXITCODE -ne 0) { throw "Acceptance build failed." }
+      - name: Prepare real Windows display and OpenGL
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Verify actual upstream viewport behavior
+        shell: pwsh
+        env:
+          QT_FORCE_STDERR_LOGGING: "1"
+          GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/acceptance-artifact
+        run: |
+          ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
+            --output-log native/acceptance.log `
+            -R '^(native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests)$'
+          if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-upstream-viewport-acceptance
+          path: |
+            native/acceptance.log
+            native/acceptance-artifact/
+            native/build-acceptance/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 7
+
   build:
     name: Qt 6 native preview
     # Match the native-only scan scope, including PR head and manual selection.

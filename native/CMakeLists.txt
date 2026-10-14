@@ -35,6 +35,22 @@ find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
+add_library(gsw_lichtfeld_streaming STATIC
+  third_party/lichtfeld-streaming/UploadDrainBudget.cpp
+  third_party/lichtfeld-streaming/UploadDrainBudget.h)
+target_link_libraries(gsw_lichtfeld_streaming PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(gsw_lichtfeld_streaming PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
+add_library(gsw_blender_view_navigation STATIC
+  third_party/blender-navigation/BlenderViewNavigation.cpp
+  third_party/blender-navigation/BlenderViewNavigation.h)
+target_link_libraries(gsw_blender_view_navigation PUBLIC Qt6::Core Qt6::Gui)
+if(MSVC)
+  target_compile_options(gsw_blender_view_navigation PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
 add_library(gsw_blender_gizmo_geometry STATIC
   third_party/blender-gizmo/BlenderGizmoGeometry.cpp
   third_party/blender-gizmo/BlenderGizmoGeometry.h)
@@ -133,6 +149,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ObservationNavigationSmokeTest.h
   src/EditNavigationSmokeTest.cpp
   src/EditNavigationSmokeTest.h
+  src/UpstreamNavigationSmokeTest.cpp
+  src/UpstreamNavigationSmokeTest.h
+  src/PointStreamingSmokeTest.cpp
+  src/PointStreamingSmokeTest.h
   src/CoordinateSceneSmokeTest.cpp
   src/CoordinateSceneSmokeTest.h
   src/ProcessingPreviewSmokeTest.cpp
@@ -264,6 +284,8 @@ endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
+  gsw_blender_view_navigation
+  gsw_lichtfeld_streaming
   gsw_blender_gizmo_geometry
   gsw_spz
   gsw_resource_budget
@@ -299,6 +321,8 @@ install(TARGETS GaussianSceneWorkbench
 install(DIRECTORY third_party/spz DESTINATION licenses)
 install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
 install(DIRECTORY third_party/blender-gizmo DESTINATION licenses)
+install(DIRECTORY third_party/lichtfeld-streaming DESTINATION licenses)
+install(DIRECTORY third_party/blender-navigation DESTINATION licenses)
 install(FILES third_party/lucide/LICENSE third_party/lucide/README.gsw.md DESTINATION licenses/lucide)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/training-2dgs RENAME LICENSE.md)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
@@ -322,6 +346,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source RENAME BUILD.md)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION source/docs)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -472,6 +498,20 @@ if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
   add_test(NAME native_generation_history COMMAND GaussianSceneWorkbench --smoke-test-generation-history)
+  foreach(upstream_locale zh_CN en_US ja_JP)
+    add_test(NAME native_upstream_navigation_${upstream_locale}
+      COMMAND GaussianSceneWorkbench --smoke-test-upstream-navigation --language ${upstream_locale})
+    set_tests_properties(native_upstream_navigation_${upstream_locale} PROPERTIES
+      TIMEOUT 60
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
+  add_test(NAME native_point_streaming
+    COMMAND GaussianSceneWorkbench --smoke-test-point-streaming --language zh_CN)
+  set_tests_properties(native_point_streaming PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_generation_history PROPERTIES
     TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
@@ -1189,6 +1229,22 @@ if(BUILD_TESTING)
     set_tests_properties(gaussian_depth_sorter PROPERTIES
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin"
     )
+
+    qt_add_executable(gsw_upload_drain_budget_tests tests/UploadDrainBudgetTests.cpp)
+    target_include_directories(gsw_upload_drain_budget_tests PRIVATE third_party/lichtfeld-streaming)
+    target_link_libraries(gsw_upload_drain_budget_tests PRIVATE gsw_lichtfeld_streaming Qt6::Core Qt6::Test)
+    qt_add_executable(gsw_blender_view_navigation_tests tests/BlenderViewNavigationTests.cpp)
+    target_include_directories(gsw_blender_view_navigation_tests PRIVATE src third_party/blender-navigation)
+    target_link_libraries(gsw_blender_view_navigation_tests PRIVATE gsw_blender_view_navigation Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_upload_drain_budget_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+      target_compile_options(gsw_blender_view_navigation_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME upload_drain_budget COMMAND gsw_upload_drain_budget_tests)
+    add_test(NAME blender_view_navigation COMMAND gsw_blender_view_navigation_tests)
+    set_tests_properties(upload_drain_budget blender_view_navigation PROPERTIES
+      TIMEOUT 20 ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin")
 
     qt_add_executable(gsw_navigation_gizmo_tests
       tests/NavigationGizmoTests.cpp

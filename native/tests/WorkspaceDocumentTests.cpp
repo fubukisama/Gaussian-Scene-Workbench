@@ -11,6 +11,7 @@
 #include <QtEndian>
 
 #include <QDir>
+#include <QCryptographicHash>
 #include <QDataStream>
 #include <QElapsedTimer>
 #include <QFile>
@@ -33,6 +34,9 @@ private slots:
   void removesMultipleModelsWithoutDeletingFiles();
   void loadsAsciiPointColorsAndSamplesDeterministically();
   void loadsOversizedBinaryPointCloudAtFullResolution();
+  void diagnosticPointPagingIsOptIn();
+  void diagnosticPagingDoesNotReplaceGaussianOrSurfelAttributes_data();
+  void diagnosticPagingDoesNotReplaceGaussianOrSurfelAttributes();
   void loadsOversizedAsciiPointCloudIntoDiskCache();
   void preservesGlobalCoordinatesWhilePagingLocalDisplayData();
   void parsesUnitsAndExportsCoordinateReport();
@@ -686,6 +690,147 @@ void WorkspaceDocumentTests::loadsOversizedBinaryPointCloudAtFullResolution() {
       gsw::PlyPointCloudLoader::load(plyPath, 2, 2);
   QVERIFY2(reused.isValid(), qPrintable(reused.error));
   QCOMPARE(reused.pointCache.dataPath, cacheDataPath);
+}
+
+void WorkspaceDocumentTests::diagnosticPointPagingIsOptIn() {
+  const bool wasSet = qEnvironmentVariableIsSet("GSW_FORCE_POINT_PAGING");
+  const QByteArray previous = qgetenv("GSW_FORCE_POINT_PAGING");
+  const auto restoreEnvironment = qScopeGuard([&]() {
+    if (wasSet) qputenv("GSW_FORCE_POINT_PAGING", previous);
+    else qunsetenv("GSW_FORCE_POINT_PAGING");
+  });
+  qputenv("GSW_FORCE_POINT_PAGING", "1");
+
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QFile source(temporary.filePath(QStringLiteral("diagnostic-colored.ply")));
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  const QByteArray header(
+      "ply\nformat binary_little_endian 1.0\nelement vertex 4\n"
+      "property float x\nproperty float y\nproperty float z\n"
+      "property uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n");
+  QCOMPARE(source.write(header), qint64(header.size()));
+  for (int index = 0; index < 4; ++index) {
+    writeLittleEndianFloat(source, float(index));
+    writeLittleEndianFloat(source, float(index * 2));
+    writeLittleEndianFloat(source, float(-index));
+    const auto color = QByteArray::fromHex("dc23b4");
+    QCOMPARE(source.write(color), qint64(3));
+  }
+  source.close();
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  const auto originalHash = QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256);
+  source.close();
+
+  const auto paged = gsw::PlyPointCloudLoader::load(source.fileName());
+  QVERIFY2(paged.isValid(), qPrintable(paged.error));
+  QVERIFY2(paged.previewOnly && paged.pointCache.isValid(),
+           "An exact opt-in diagnostic flag must exercise the real read-only point cache.");
+  QCOMPARE(paged.sourceVertexCount, 4);
+  QCOMPARE(paged.pointCache.fullPointCount, 4);
+  QVERIFY(paged.sourcePositions.isEmpty());
+  QVERIFY(paged.vertices.isEmpty());
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  QCOMPARE(QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256), originalHash);
+  source.close();
+
+  for (const auto &flag : {QByteArray(), QByteArray("0"), QByteArray("true"),
+                          QByteArray("01"), QByteArray(" 1"), QByteArray(""),
+                          QByteArray("invalid")}) {
+    if (flag.isNull()) qunsetenv("GSW_FORCE_POINT_PAGING");
+    else qputenv("GSW_FORCE_POINT_PAGING", flag);
+    const auto resident = gsw::PlyPointCloudLoader::load(source.fileName());
+    QVERIFY2(resident.isValid(), qPrintable(resident.error));
+    QVERIFY(!resident.previewOnly);
+    QVERIFY(!resident.pointCache.isValid());
+    QCOMPARE(resident.sourcePositions.size(), 4);
+    QCOMPARE(resident.vertices.size(), 4);
+    QCOMPARE(resident.sourceVertexCount, 4);
+  }
+  qputenv("GSW_FORCE_POINT_PAGING", "1");
+  QFile mesh(temporary.filePath(QStringLiteral("triangle.ply")));
+  QVERIFY(mesh.open(QIODevice::WriteOnly));
+  const QByteArray meshBytes(
+      "ply\nformat ascii 1.0\nelement vertex 3\n"
+      "property float x\nproperty float y\nproperty float z\n"
+      "element face 1\nproperty list uchar int vertex_indices\nend_header\n"
+      "0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n");
+  QCOMPARE(mesh.write(meshBytes), qint64(meshBytes.size()));
+  mesh.close();
+  const auto unchangedMesh = gsw::PlyPointCloudLoader::load(mesh.fileName());
+  QVERIFY2(unchangedMesh.isValid(), qPrintable(unchangedMesh.error));
+  QVERIFY(unchangedMesh.hasMesh());
+  QVERIFY(!unchangedMesh.pointCache.isValid());
+  QVERIFY(!unchangedMesh.meshCache.isValid());
+  QCOMPARE(unchangedMesh.meshIndices.size(), 3);
+}
+
+void WorkspaceDocumentTests::diagnosticPagingDoesNotReplaceGaussianOrSurfelAttributes_data() {
+  QTest::addColumn<bool>("surfel");
+  QTest::newRow("3DGS") << false;
+  QTest::newRow("2DGS") << true;
+}
+
+void WorkspaceDocumentTests::diagnosticPagingDoesNotReplaceGaussianOrSurfelAttributes() {
+  QFETCH(bool, surfel);
+  const bool wasSet = qEnvironmentVariableIsSet("GSW_FORCE_POINT_PAGING");
+  const QByteArray previous = qgetenv("GSW_FORCE_POINT_PAGING");
+  const auto restoreEnvironment = qScopeGuard([&]() {
+    if (wasSet) qputenv("GSW_FORCE_POINT_PAGING", previous);
+    else qunsetenv("GSW_FORCE_POINT_PAGING");
+  });
+  qputenv("GSW_FORCE_POINT_PAGING", "1");
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QFile source(temporary.filePath(QStringLiteral("diagnostic-gaussian.ply")));
+  QVERIFY(source.open(QIODevice::WriteOnly));
+  QByteArray header(
+      "ply\nformat binary_little_endian 1.0\nelement vertex 2\n"
+      "property float x\nproperty float y\nproperty float z\n"
+      "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
+      "property float opacity\nproperty float scale_0\nproperty float scale_1\n");
+  if (!surfel) header += "property float scale_2\n";
+  header += "property float rot_0\nproperty float rot_1\nproperty float rot_2\n"
+            "property float rot_3\nend_header\n";
+  QCOMPARE(source.write(header), qint64(header.size()));
+  for (int index = 0; index < 2; ++index) {
+    for (const float value : {float(index + 1), 2.0F, 3.0F, 0.0F, 0.0F,
+                             0.0F, 0.0F, 0.0F, 0.69314718056F}) {
+      writeLittleEndianFloat(source, value);
+    }
+    if (!surfel) writeLittleEndianFloat(source, -0.69314718056F);
+    for (const float value : {2.0F, 0.0F, 0.0F, 0.0F}) {
+      writeLittleEndianFloat(source, value);
+    }
+  }
+  source.close();
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  const auto originalHash = QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256);
+  source.close();
+
+  const auto resident = gsw::PlyPointCloudLoader::load(source.fileName());
+  QVERIFY2(resident.isValid(), qPrintable(resident.error));
+  QVERIFY2(!resident.previewOnly && !resident.pointCache.isValid(),
+           "The ordinary-point diagnostic must not replace Gaussian/surfel attributes with RGB pages.");
+  QVERIFY(resident.hasGaussianAttributes);
+  QCOMPARE(resident.hasSurfelAttributes, surfel);
+  QCOMPARE(resident.sourcePositions.size(), 2);
+  QCOMPARE(resident.vertices.size(), 2);
+  QCOMPARE(resident.sphericalHarmonics.degree, 0);
+  const auto &vertex = resident.vertices.constFirst();
+  QVERIFY(qAbs(vertex.opacity - 0.5F) < 1.0e-6F);
+  QVERIFY(qAbs(vertex.scaleX - 1.0F) < 1.0e-6F);
+  QVERIFY(qAbs(vertex.scaleY - 2.0F) < 1.0e-5F);
+  QVERIFY(qAbs(vertex.rotationW - 1.0F) < 1.0e-6F);
+
+  // The pre-existing count ceiling remains active even with the diagnostic
+  // override ignored; a small literal sample exercises the same branch safely.
+  const auto limited = gsw::PlyPointCloudLoader::load(source.fileName(), 1, 1);
+  QVERIFY2(limited.isValid(), qPrintable(limited.error));
+  QVERIFY(limited.previewOnly && limited.pointCache.isValid());
+  QCOMPARE(limited.pointCache.fullPointCount, 2);
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  QCOMPARE(QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256), originalHash);
 }
 
 void WorkspaceDocumentTests::loadsOversizedAsciiPointCloudIntoDiskCache() {

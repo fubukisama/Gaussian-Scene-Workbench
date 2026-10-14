@@ -113,6 +113,7 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 轨迹球 / 吸附 | Trackball / Snap | トラックボール / スナップ |
 | 锁定编辑工具 / 操作手柄 | Lock Editing Tools / Gizmo | 編集ツールをロック / ギズモ |
 | 观察轨迹球 / 旋转中心 | View Trackball / Rotation Center | ビュートラックボール / 回転中心 |
+| 缩放到光标 / 视点目标平面 | Zoom to Cursor / View-target Plane | カーソル位置へズーム / 注視点を通る平面 |
 | 自由旋转 / 按轴旋转 | Free Orbit / Axis-Constrained Rotation | 自由回転 / 軸回転 |
 | 导出模型 / 导出坐标 | Export Model / Export Coordinates | モデルをエクスポート / エクスポート座標 |
 | 原始坐标 / 场景坐标 | Source Coordinates / Scene Coordinates | 元の座標 / シーン座標 |

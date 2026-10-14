@@ -1,5 +1,7 @@
 #include <QCoreApplication>
 #include "NativeViewport.h"
+#include "../third_party/blender-navigation/BlenderViewNavigation.h"
+#include "../third_party/lichtfeld-streaming/UploadDrainBudget.h"
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include <QScopedValueRollback>
@@ -2535,6 +2537,20 @@ bool NativeViewport::meshRenderingAvailable() const {
          (mScene->mRenderedMeshIndexCount > 0 || pagedMeshAvailable());
 }
 
+bool NativeViewport::pointPagingSettled() const {
+  if (mScene->resourceLoading ||
+      mScene->mPointUploadPending || mScene->mFullResolutionPointClearPending ||
+      !mScene->mPointCacheReadsInFlight.isEmpty() || !mScene->mPendingPointCachePages.isEmpty())
+    return false;
+  if (!mScene->mPointCache.isValid()) return true;
+  return std::all_of(mScene->mDesiredPointCacheNodes.cbegin(), mScene->mDesiredPointCacheNodes.cend(),
+      [this](const int nodeId) {
+        return std::any_of(mScene->mFullResolutionPointGpuChunks.cbegin(),
+                          mScene->mFullResolutionPointGpuChunks.cend(),
+                          [nodeId](const FullResolutionGpuChunk &chunk) { return chunk.nodeId == nodeId; });
+      });
+}
+
 bool NativeViewport::meshPagingSettled() const {
   if (mScene->mMeshUploadPending || mScene->mMeshTextureUploadPending) {
     return false;
@@ -4448,64 +4464,73 @@ void NativeViewport::uploadPendingPointCachePages() {
       !mPointProgram->isLinked()) {
     return;
   }
-  PointCloudCachePage page = mScene->mPendingPointCachePages.takeFirst();
-  auto ramReservation = mScene->resourcePointPageReservations.take(page.nodeId);
-  const bool alreadyResident = std::any_of(
-      mScene->mFullResolutionPointGpuChunks.cbegin(),
-      mScene->mFullResolutionPointGpuChunks.cend(),
-      [&page](const FullResolutionGpuChunk &chunk) {
-        return chunk.nodeId == page.nodeId;
-      });
-  if (!alreadyResident && page.nodeId >= 0 &&
-      page.nodeId < mScene->mPointCache.nodes.size()) {
-    const qsizetype byteCount =
-        page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
-    evictPointCacheUntilFits(byteCount);
-    updateManagedResourceUsage();
-    auto gpuReservation = mResources->createReservation();
-    if (byteCount > sharedPageGpuBudget() - mScene->mPointCacheResidentBytes ||
-        !gpuReservation->tryResize(0, byteCount)) {
-      mScene->mPointCacheFailedNodes.insert(page.nodeId);
-      return;
-    }
-    FullResolutionGpuChunk gpuChunk;
-    gpuChunk.nodeId = page.nodeId;
-    gpuChunk.pointCount = static_cast<GLsizei>(page.vertices.size());
-    gpuChunk.byteCount = byteCount;
-    gpuChunk.lastUsedFrame = mScene->mPointCacheFrameSerial;
-    const PointCloudCacheNode &node = mScene->mPointCache.nodes.at(page.nodeId);
-    gpuChunk.boundsMinimum = node.boundsMinimum;
-    gpuChunk.boundsMaximum = node.boundsMaximum;
-    while (glGetError() != GL_NO_ERROR) {
-    }
-    glGenVertexArrays(1, &gpuChunk.vertexArray);
-    glGenBuffers(1, &gpuChunk.buffer);
-    glBindVertexArray(gpuChunk.vertexArray);
-    glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.buffer);
-    glBufferData(GL_ARRAY_BUFFER, byteCount, page.vertices.constData(),
-                 GL_STATIC_DRAW);
-    const GLenum uploadError = glGetError();
-    if (uploadError == GL_NO_ERROR) {
-      glEnableVertexAttribArray(0);
-      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                            sizeof(PointPreviewVertex), nullptr);
-      glEnableVertexAttribArray(1);
-      glVertexAttribPointer(
-          1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
-          reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
-      mScene->mPointCacheResidentBytes += byteCount;
-      mScene->mFullResolutionPointGpuChunks.append(gpuChunk);
+  QElapsedTimer uploadTime;
+  uploadTime.start();
+  lichtfeld::UploadDrainBudget batch;
+  while (!mScene->mPendingPointCachePages.isEmpty()) {
+    const auto nextBytes = static_cast<std::uint64_t>(mScene->mPendingPointCachePages.constFirst().vertices.size()) * sizeof(PointPreviewVertex);
+    if (!batch.permits(nextBytes, static_cast<std::uint64_t>(uploadTime.nsecsElapsed()))) break;
+    PointCloudCachePage page = mScene->mPendingPointCachePages.takeFirst();
+    batch.recordPage(nextBytes);
+    auto ramReservation = mScene->resourcePointPageReservations.take(page.nodeId);
+    const bool alreadyResident = std::any_of(
+        mScene->mFullResolutionPointGpuChunks.cbegin(),
+        mScene->mFullResolutionPointGpuChunks.cend(),
+        [&page](const FullResolutionGpuChunk &chunk) {
+          return chunk.nodeId == page.nodeId;
+        });
+    if (!alreadyResident && page.nodeId >= 0 &&
+        page.nodeId < mScene->mPointCache.nodes.size()) {
+      const qsizetype byteCount =
+          page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
+      evictPointCacheUntilFits(byteCount);
       updateManagedResourceUsage();
-    } else {
-      glDeleteBuffers(1, &gpuChunk.buffer);
-      glDeleteVertexArrays(1, &gpuChunk.vertexArray);
-      mScene->mPointCacheFailedNodes.insert(page.nodeId);
-      mScene->mPointCacheError = QCoreApplication::translate("Workbench", "GPU memory could not accept point-cache node %1.")
-                             .arg(page.nodeId);
+      auto gpuReservation = mResources->createReservation();
+      if (byteCount > sharedPageGpuBudget() - mScene->mPointCacheResidentBytes ||
+          !gpuReservation->tryResize(0, byteCount)) {
+        mScene->mPointCacheFailedNodes.insert(page.nodeId);
+        continue;
+      }
+      FullResolutionGpuChunk gpuChunk;
+      gpuChunk.nodeId = page.nodeId;
+      gpuChunk.pointCount = static_cast<GLsizei>(page.vertices.size());
+      gpuChunk.byteCount = byteCount;
+      gpuChunk.lastUsedFrame = mScene->mPointCacheFrameSerial;
+      const PointCloudCacheNode &node = mScene->mPointCache.nodes.at(page.nodeId);
+      gpuChunk.boundsMinimum = node.boundsMinimum;
+      gpuChunk.boundsMaximum = node.boundsMaximum;
+      while (glGetError() != GL_NO_ERROR) {
+      }
+      glGenVertexArrays(1, &gpuChunk.vertexArray);
+      glGenBuffers(1, &gpuChunk.buffer);
+      glBindVertexArray(gpuChunk.vertexArray);
+      glBindBuffer(GL_ARRAY_BUFFER, gpuChunk.buffer);
+      glBufferData(GL_ARRAY_BUFFER, byteCount, page.vertices.constData(),
+                   GL_STATIC_DRAW);
+      const GLenum uploadError = glGetError();
+      if (uploadError == GL_NO_ERROR) {
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                              sizeof(PointPreviewVertex), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(
+            1, 3, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PointPreviewVertex),
+            reinterpret_cast<const void *>(offsetof(PointPreviewVertex, red)));
+        mScene->mPointCacheResidentBytes += byteCount;
+        mScene->mFullResolutionPointGpuChunks.append(gpuChunk);
+        updateManagedResourceUsage();
+      } else {
+        glDeleteBuffers(1, &gpuChunk.buffer);
+        glDeleteVertexArrays(1, &gpuChunk.vertexArray);
+        mScene->mPointCacheFailedNodes.insert(page.nodeId);
+        mScene->mPointCacheError = QCoreApplication::translate("Workbench", "GPU memory could not accept point-cache node %1.")
+                               .arg(page.nodeId);
+      }
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glBindVertexArray(0);
     }
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
   }
+  updateManagedResourceUsage(); // all dequeued pages and temporary leases are now released
   mScene->mUploadedFullResolutionPointCount = 0;
   for (const FullResolutionGpuChunk &chunk :
        std::as_const(mScene->mFullResolutionPointGpuChunks)) {
@@ -4940,9 +4965,14 @@ void NativeViewport::uploadPendingMeshCachePages() {
   // rather than leaving the upload queue limited to one page per painted frame.
   QElapsedTimer uploadBudget;
   uploadBudget.start();
-  int uploadedPages = 0;
-  do {
+  lichtfeld::UploadDrainBudget batch;
+  while (!mScene->mPendingMeshCachePages.isEmpty()) {
+    const auto &next = mScene->mPendingMeshCachePages.constFirst();
+    const auto nextBytes = static_cast<std::uint64_t>(next.vertices.size()) * sizeof(MeshVertex) +
+        static_cast<std::uint64_t>(next.indices.size()) * sizeof(quint32);
+    if (!batch.permits(nextBytes, static_cast<std::uint64_t>(uploadBudget.nsecsElapsed()))) break;
     MeshCachePage page = mScene->mPendingMeshCachePages.takeFirst();
+    batch.recordPage(nextBytes);
     auto ramReservation = mScene->resourceMeshPageReservations.take(page.nodeId);
     const bool alreadyResident = std::any_of(
         mScene->mFullResolutionMeshGpuChunks.cbegin(),
@@ -5030,9 +5060,8 @@ void NativeViewport::uploadPendingMeshCachePages() {
         logMeshPagingQa(MeshPagingQaEvent::Upload, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
                         page.nodeId, byteCount, mScene->mMeshCacheResidentBytes, sharedPageGpuBudget());
     }
-    ++uploadedPages;
-  } while (!mScene->mPendingMeshCachePages.isEmpty() && uploadedPages < 8 &&
-           uploadBudget.elapsed() < 4);
+  }
+  updateManagedResourceUsage(); // include trailing rejected/duplicate/invalid page releases
   mScene->mUploadedFullResolutionMeshTriangleCount = 0;
   for (const FullResolutionMeshGpuChunk &chunk :
        std::as_const(mScene->mFullResolutionMeshGpuChunks)) {
@@ -5829,12 +5858,26 @@ void NativeViewport::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void NativeViewport::wheelEvent(QWheelEvent *event) {
-  leaveCameraView();
-  const float steps = static_cast<float>(event->angleDelta().y()) / 120.0F;
-  mDistance = clampViewportDistance(
-      mDistance * std::pow(0.84F, steps), transformedSceneRadius());
-  update();
+  const float steps = event->angleDelta().y() != 0
+      ? static_cast<float>(event->angleDelta().y()) / 120.0F
+      : static_cast<float>(event->pixelDelta().y()) / 120.0F;
+  zoomCamera(std::pow(0.84F, steps), event->position());
   event->accept();
+}
+
+void NativeViewport::zoomCamera(const float factor, const QPointF &cursor) {
+  if (!std::isfinite(factor) || factor <= 0 ||
+      !std::isfinite(cursor.x()) || !std::isfinite(cursor.y())) return;
+  leaveCameraView();
+  mViewSnapTimer->stop();
+  const auto beforeView = viewMatrix();
+  const auto beforeProjection = projectionMatrix();
+  mDistance = clampViewportDistance(mDistance * factor, transformedSceneRadius());
+  if (mZoomToCursorEnabled) {
+    if (const auto target = blenderViewZoomTarget(mTarget, beforeView, beforeProjection,
+            viewMatrix(), projectionMatrix(), size(), cursor)) mTarget = *target;
+  }
+  update();
 }
 
 NavigationGizmoLayout NativeViewport::navigationGizmo() const {
@@ -6000,12 +6043,9 @@ void NativeViewport::orbitCamera(const QPoint &delta) {
 }
 
 void NativeViewport::panCamera(const QPoint &delta) {
-  const QMatrix4x4 view = viewMatrix();
-  const QVector3D right(view(0, 0), view(0, 1), view(0, 2));
-  const QVector3D up(view(1, 0), view(1, 1), view(1, 2));
-  const float scale = mDistance * 0.0018F;
-  mTarget += right * (-static_cast<float>(delta.x()) * scale);
-  mTarget += up * (static_cast<float>(delta.y()) * scale);
+  mViewSnapTimer->stop();
+  if (const auto target = blenderViewPanTarget(mTarget, viewMatrix(), projectionMatrix(),
+          size(), QPointF(delta))) mTarget = *target;
 }
 
 void NativeViewport::toggleCameraView() {

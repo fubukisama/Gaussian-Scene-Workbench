@@ -11,6 +11,8 @@
 #include "TextureTextSmokeTest.h"
 #include "ObservationNavigationSmokeTest.h"
 #include "EditNavigationSmokeTest.h"
+#include "UpstreamNavigationSmokeTest.h"
+#include "PointStreamingSmokeTest.h"
 #include "CoordinateSceneSmokeTest.h"
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
@@ -323,6 +325,12 @@ int main(int argc, char *argv[]) {
   QCommandLineOption editNavigationOption(QStringLiteral("smoke-test-edit-navigation"),
       QStringLiteral("Verify editing view navigation follows screen directions without changing models."));
   parser.addOption(editNavigationOption);
+  QCommandLineOption upstreamNavigationOption(QStringLiteral("smoke-test-upstream-navigation"),
+      QStringLiteral("Verify source-ported cursor zoom and projected pan through real viewport input."));
+  parser.addOption(upstreamNavigationOption);
+  QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
+      QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
+  parser.addOption(pointStreamingOption);
   QCommandLineOption coordinateSceneOption(QStringLiteral("smoke-test-scene-coordinates"),
       QStringLiteral("Verify shared scene coordinate frames and selection-independent reference grids."));
   parser.addOption(coordinateSceneOption);
@@ -407,6 +415,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
+                         parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
@@ -591,6 +600,18 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runCoordinateSceneSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(upstreamNavigationOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runUpstreamNavigationSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(pointStreamingOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runPointStreamingSmokeTest(*viewport);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(editNavigationOption)) {

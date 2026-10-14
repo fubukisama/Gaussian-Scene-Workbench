@@ -2374,7 +2374,14 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     }
   }
 
-  if (!containsMeshFaces && vertexElement.count > maximumEditablePoints) {
+  // Explicit diagnostics exercise the production read-only octree with a
+  // bounded fixture; ordinary imports retain their existing resident policy.
+  // Surfels are a subset of hasGaussianAttributes, so this excludes both
+  // Gaussian render paths without disabling their pre-existing count ceiling.
+  const bool forcePointPaging = !result.hasGaussianAttributes &&
+                               qgetenv("GSW_FORCE_POINT_PAGING") == "1";
+  if (!containsMeshFaces &&
+      (vertexElement.count > maximumEditablePoints || forcePointPaging)) {
     loadFullResolutionPointPreview(
         file, header, vertexElement, xIndex, yIndex, zIndex, redIndex,
         greenIndex, blueIndex, sphericalHarmonicColor, coordinateMetadata,

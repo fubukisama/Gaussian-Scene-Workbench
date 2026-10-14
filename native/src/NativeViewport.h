@@ -113,6 +113,8 @@ public:
   [[nodiscard]] bool editToolsLocked() const { return mEditToolsLocked; }
   void setShowObservationTrackball(bool visible);
   [[nodiscard]] bool observationTrackballVisible() const;
+  void setZoomToCursorEnabled(bool enabled) { mZoomToCursorEnabled = enabled; }
+  [[nodiscard]] bool zoomToCursorEnabled() const { return mZoomToCursorEnabled; }
   [[nodiscard]] bool centerObservationAt(const QPointF &position);
   void selectModel();
   [[nodiscard]] bool focusModel();
@@ -163,6 +165,10 @@ public:
   [[nodiscard]] qsizetype renderedPointCount() const { return mScene->mRenderedPointCount; }
   [[nodiscard]] bool meshRenderingAvailable() const;
   [[nodiscard]] bool meshPagingSettled() const;
+  [[nodiscard]] bool pointPagingSettled() const;
+  [[nodiscard]] qsizetype residentPointCount() const {
+    return mScene->mUploadedFullResolutionPointCount;
+  }
   [[nodiscard]] qsizetype residentMeshTriangleCount() const {
     return mScene->mUploadedFullResolutionMeshTriangleCount;
   }
@@ -538,6 +544,7 @@ private:
   void finishNavigationGizmoInteraction();
   void orbitCamera(const QPoint &delta);
   void panCamera(const QPoint &delta);
+  void zoomCamera(float factor, const QPointF &cursor);
   void toggleCameraView();
   void leaveCameraView();
   void beginModelTransform(InteractionMode mode, bool trackball = false);
@@ -719,6 +726,7 @@ private:
   QTimer *mTrainingGpuPreviewTimer = nullptr;
   QTimer *mFrameRefreshTimer = nullptr;
   QTimer *mViewSnapTimer = nullptr;
+  bool mZoomToCursorEnabled = true;
   FrameRateCounter mFrameRateCounter;
 };
 

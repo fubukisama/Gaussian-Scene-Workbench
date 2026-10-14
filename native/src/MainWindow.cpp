@@ -1558,6 +1558,18 @@ void MainWindow::createMenus() {
   viewMenu->addSeparator();
   viewMenu->addAction(mLockEditToolsAction);
   viewMenu->addAction(mObservationTrackballAction);
+  auto *zoomToCursorAction = AppLanguage::text(viewMenu->addAction(QString()),
+      AppLanguage::source("缩放到光标"));
+  zoomToCursorAction->setObjectName(QStringLiteral("zoomToCursorAction"));
+  setWorkbenchActionIcon(zoomToCursorAction, WorkbenchIconId::Zoom, palette());
+  zoomToCursorAction->setCheckable(true);
+  mViewport->setZoomToCursorEnabled(QSettings().value(QStringLiteral("view/zoomToCursor"), true).toBool());
+  zoomToCursorAction->setChecked(mViewport->zoomToCursorEnabled());
+  AppLanguage::bind(zoomToCursorAction, "toolTip", AppLanguage::source("滚轮围绕光标在视点目标平面上的位置缩放；关闭后围绕视图中心缩放。立即生效并记住选择，不修改模型坐标。"));
+  connect(zoomToCursorAction, &QAction::toggled, this, [this](const bool enabled) {
+    mViewport->setZoomToCursorEnabled(enabled);
+    QSettings().setValue(QStringLiteral("view/zoomToCursor"), enabled);
+  });
   viewMenu->addAction(mTaskPreviewAction);
   viewMenu->addAction(mPausePreviewAction);
   viewMenu->addSeparator();

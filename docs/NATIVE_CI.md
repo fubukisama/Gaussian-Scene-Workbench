@@ -1,5 +1,26 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
+## Upstream adaptation acceptance / 源码移植验收 / ソース移植の検証
+
+中文：`Upstream viewport acceptance` 并行执行三语言真实滚轮／平移／菜单操作、
+小样本真实点云分页及两处纯模块回归，上传实际帧缓冲和日志。它没有 CodeQL
+跟踪构建的耗时，但不替代原全量构建、107 项原生测试、worker 或安全扫描。
+`GSW_FORCE_POINT_PAGING=1` 仅是默认关闭的诊断入口；常规模型加载不改变。
+详见 [来源、范围与测量边界](UPSTREAM_NATIVE_UPGRADES.md)。
+
+English: `Upstream viewport acceptance` runs real wheel/pan/menu operations in
+three locales, controlled actual point paging and both pure adapter regressions
+in parallel. It uploads framebuffers/logs without the traced CodeQL build cost,
+but does not replace the full build, 107 native tests, worker or security scans.
+`GSW_FORCE_POINT_PAGING=1` is default-off diagnostic input, not a production
+loading-policy change. See [scope and measurement limits](UPSTREAM_NATIVE_UPGRADES.md).
+
+日本語：`Upstream viewport acceptance` は三言語の実際のホイール・パン・メニュー
+操作、小サンプルの実点群ページング、両アダプターの回帰を並行して実行し、
+フレームバッファとログを保存します。CodeQL トレースの時間は不要ですが、
+全ビルド・原生 107 テスト・worker・安全検査の代替ではありません。
+`GSW_FORCE_POINT_PAGING=1` は既定無効の診断で、通常の読込方針は変えません。
+
 ## GPL Blender geometry and independent surfel gate (2026-10-14)
 
 中文：主程序按 GPL-3.0-or-later 分发，并附对应源码与哈希清单。Blender 锥头／

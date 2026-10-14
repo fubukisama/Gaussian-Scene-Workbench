@@ -103,7 +103,30 @@ appropriate separate permission from the relevant rights holders.
 
 ## LichtFeld Studio Reference
 
-LichtFeld Studio is studied as an architecture and workflow reference under GPL-3.0-or-later. No LichtFeld implementation source is copied or linked into the current native preview. The main program's GPL migration does not by itself import LichtFeld code; any future reuse requires a separate source, dependency and attribution review: https://github.com/MrNeRF/LichtFeld-Studio
+The native desktop now directly adapts LichtFeld Studio's whole-page byte-budget
+and at-least-one upload policy from `lod_page_cache.cpp`, pinned to
+`a8d2feafbe0abd91211e20f46b7793b8839b2922`, in
+`native/third_party/lichtfeld-streaming/`. Original 2026 LichtFeld Studio Authors
+copyright and GPL-3.0-or-later notices, original-file hash and modification
+record are retained and packaged. The adapter handles variable page sizes,
+attempt/time bounds and overflow-safe accounting in GSW's existing point/mesh
+queues. No LichtFeld CUDA/Vulkan runtime, NVIDIA library or training engine is
+linked by this CPU policy port. Other LichtFeld code remains a reference unless
+its own reviewed adaptation is explicitly documented.
+
+The native camera also adapts Blender v4.5.0 cursor zoom and projected pan in
+`native/third_party/blender-navigation/`. Pinned version, full source hashes,
+2008/2023 Blender notices, GPL-2.0-or-later and Qt modifications are retained
+there and packaged; the combined main program selects GPL version 3.
+
+中文：实际移植 LichtFeld 的整页上传预算及 Blender 的光标缩放／投影平移，保留
+固定来源、原作者版权、GPL 与修改说明。不链接它们的完整渲染器／训练器，不改变
+第三方训练许可。源码与说明随主程序分发。
+
+日本語：LichtFeld のページ転送予算と Blender のカーソルズーム／投影パンを
+実際に移植し、固定した出典・元著作権・GPL・変更通知を保持して配布します。
+各ソフトのレンダラー／学習器全体をリンクせず、第三者の学習ライセンスを
+変更しません。
 
 ## Compute Component and Distribution Boundary
 

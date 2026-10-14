@@ -2,9 +2,11 @@
 
 `native/` is the Qt 6/C++ desktop replacement for the legacy Electron and HTML interface. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime.
 
-Documentation updated: `2026-10-12`. Product version remains `0.3.1-native-preview`; this documentation date does not change the build manifest's release date.
+Documentation updated: `2026-10-14`. Product version remains `0.3.1-native-preview`; this documentation date does not change the build manifest's release date.
 
 ## Current preview
+
+- Source-ported Blender cursor wheel zoom (persistent View → Zoom to Cursor) and projection-correct pan cover all model displays; zoom anchors the view-target plane, not an automatically picked surface. Source-ported LichtFeld whole-page upload budgeting is shared by paged points/meshes, with first-page progress and unchanged actual RAM/VRAM admission. See [fixed sources, capability matrix and acceptance limits](../docs/UPSTREAM_NATIVE_UPGRADES.md).
 
 - Simplified Chinese, English and Japanese UI: choose View → Language to switch immediately, without restarting or interrupting running tasks. The preference is remembered; model, camera, selection, dialog parameters and training curves are preserved. New/changed features must maintain all three catalogs and live text bindings, and pass the build-time translation gate. See [localization and terminology](../docs/LOCALIZATION.md).
 - Scene and training-output display names support all scripts, spaces, emoji and punctuation, without the former 120-character limit. Blank names are rejected. Names are preserved in project data while safe ASCII storage identifiers protect backend paths; import name metadata participates in the atomic publish/rollback transaction.
@@ -186,8 +188,10 @@ The GPL main program embeds the independently implemented
 `third_party/2dgs-surfel/evaluate_surfel.glsl` stays preserved under its original
 license but is neither embedded nor loaded by the GPL desktop. This display
 replacement does not relicense training components or change optimizer-state
-resume capabilities. No LichtFeld Studio source is copied or linked; it remains
-an architecture/workflow reference, and future reuse needs its own review.
+resume capabilities. The native desktop now also adapts a reviewed LichtFeld
+whole-page upload policy and Blender projected-navigation code; see
+[the scoped source-port and acceptance record](../docs/UPSTREAM_NATIVE_UPGRADES.md).
+No complete LichtFeld training/rendering engine is linked by these CPU/Qt ports.
 
 Redistributors must satisfy corresponding-source, license and notice duties
 for the actual binaries and dependencies they supply. Separate compute
