@@ -99,8 +99,12 @@ separate research training licenses are not changed.
 - `--smoke-test-upstream-navigation` drives real wheel/pan/menu input and
   framebuffer checks in three locales, verifies original bytes/TRS/selection
   and stores frames. `--smoke-test-point-streaming` uses 110,592 colored points
-  (~1.6 MiB source), 512 leaves, real framebuffers, bounded resource admission
+  (~1.6 MiB source), 512 leaves, a fixed 640x400 real framebuffer, bounded resource admission
   and explicit cleanup. It reports first-visible/ready time and composed frames.
 - Real-window tests run on remote Windows, not the user's foreground desktop.
   A compile or helper-only pass is not evidence that those window gates passed.
   No same-data/hardware speed comparison with LichtFeld or Blender is claimed.
+  The point gate normalizes software-GL pixel work, not source/page count or
+  production loading. Its original 30-second readiness wait and full requested
+  cut, resource-lease release and source-byte assertions remain unchanged;
+  failure logs include observed residency, leases, frame composites and an image.

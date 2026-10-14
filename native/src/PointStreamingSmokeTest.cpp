@@ -97,12 +97,19 @@ bool runPointStreamingSmokeTest(NativeViewport &viewport) {
   const bool oldLocked = viewport.editToolsLocked();
   const bool oldTrackball = viewport.observationTrackballVisible();
   const auto oldReferencePlane = viewport.referencePlaneMode();
+  const QSize oldMinimum = viewport.minimumSize();
+  const QSize oldMaximum = viewport.maximumSize();
   const auto restorePolicy = qScopeGuard([&]() {
     viewport.setResourceBudgetPolicy(oldPolicy);
     viewport.setEditToolsLocked(oldLocked);
     viewport.setShowObservationTrackball(oldTrackball);
     viewport.setReferencePlaneMode(oldReferencePlane);
+    viewport.setMinimumSize(oldMinimum);
+    viewport.setMaximumSize(oldMaximum);
   });
+  // Normalize the acceptance framebuffer's pixel work, as the navigation
+  // smoke does. This does not change the production loader or paging policy.
+  viewport.setFixedSize(QSize(640, 400));
   ResourceBudgetPolicy bounded;
   bounded.mode = ResourceBudgetPolicy::Mode::Manual;
   bounded.ramLimitMiB = 128;
