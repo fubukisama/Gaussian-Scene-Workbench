@@ -35,6 +35,14 @@ find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
+add_library(gsw_blender_gizmo_geometry STATIC
+  third_party/blender-gizmo/BlenderGizmoGeometry.cpp
+  third_party/blender-gizmo/BlenderGizmoGeometry.h)
+target_link_libraries(gsw_blender_gizmo_geometry PUBLIC Qt6::Core Qt6::Gui)
+if(MSVC)
+  target_compile_options(gsw_blender_gizmo_geometry PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
 add_library(gsw_resource_budget STATIC src/ResourceBudget.cpp src/ResourceBudget.h)
 target_include_directories(gsw_resource_budget PUBLIC src)
 target_link_libraries(gsw_resource_budget PUBLIC Qt6::Core)
@@ -256,6 +264,7 @@ endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
+  gsw_blender_gizmo_geometry
   gsw_spz
   gsw_resource_budget
   Qt6::Core
@@ -289,12 +298,38 @@ install(TARGETS GaussianSceneWorkbench
 )
 install(DIRECTORY third_party/spz DESTINATION licenses)
 install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
-install(DIRECTORY third_party/2dgs-surfel DESTINATION licenses)
+install(DIRECTORY third_party/blender-gizmo DESTINATION licenses)
 install(FILES third_party/lucide/LICENSE third_party/lucide/README.gsw.md DESTINATION licenses/lucide)
-install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/2dgs-surfel RENAME LICENSE.md)
+install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/training-2dgs RENAME LICENSE.md)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_LICENSES.md" DESTINATION .)
+install(FILES LICENSE.md DESTINATION native)
+# Corresponding original native source and build resources accompany binaries.
+# Restricted training components remain separate; the obsolete shader is not
+# compiled, loaded or represented as GPL source in this desktop source bundle.
+install(DIRECTORY src tests assets i18n DESTINATION source/native)
+install(DIRECTORY third_party/ DESTINATION source/native/third_party PATTERN "2dgs-surfel" EXCLUDE)
+install(FILES CMakeLists.txt resources.qrc lucide_icons.qrc build_manifest.json README.md LICENSE.md
+  DESTINATION source/native)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_LICENSES.md" DESTINATION source)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
+install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source RENAME BUILD.md)
 
 include(CTest)
 if(BUILD_TESTING)
+  if(WIN32)
+    add_test(NAME native_surfel_projection_gl COMMAND "${Python3_EXECUTABLE}"
+      -B "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py")
+    set_tests_properties(native_surfel_projection_gl PROPERTIES TIMEOUT 30)
+  endif()
   execute_process(
     COMMAND "${Python3_EXECUTABLE}" -c "import numpy; from PIL import Image"
     RESULT_VARIABLE GSW_FRAMEBUFFER_QA_IMPORT_RESULT
@@ -1089,6 +1124,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(gsw_model_interaction_tests PRIVATE src)
     target_link_libraries(gsw_model_interaction_tests PRIVATE
+      gsw_blender_gizmo_geometry
       Qt6::Core
       Qt6::Gui
       Qt6::Test
@@ -1105,7 +1141,7 @@ if(BUILD_TESTING)
       src/TransformGizmo.cpp src/TransformGizmo.h
       src/TransformGizmoRenderer.cpp src/TransformGizmoRenderer.h)
     target_include_directories(gsw_transform_gizmo_visual_tests PRIVATE src)
-    target_link_libraries(gsw_transform_gizmo_visual_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    target_link_libraries(gsw_transform_gizmo_visual_tests PRIVATE gsw_blender_gizmo_geometry Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)
       target_compile_options(gsw_transform_gizmo_visual_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()

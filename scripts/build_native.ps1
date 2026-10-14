@@ -652,6 +652,9 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\COLMAP_SETUP.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_APPLICATION_CONTROL.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "COPYING") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $NativeRoot "LICENSE.md") -Destination (Join-Path $PackageRoot "native/LICENSE.md") -Force
+  & (Join-Path $Root 'scripts/write_native_source_manifest.ps1') -PackageRoot $PackageRoot
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\LOCALIZATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\RESOURCE_BUDGETS.md") -Destination $PackageRoot -Force

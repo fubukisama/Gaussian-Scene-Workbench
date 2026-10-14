@@ -1,4 +1,5 @@
 #include "TransformGizmo.h"
+#include "../third_party/blender-gizmo/BlenderGizmoGeometry.h"
 
 #include <QVector4D>
 
@@ -166,9 +167,10 @@ std::optional<HandleHit> solidHandleHit(const TransformGizmoAxisLayout &axis,
     const qreal faceDistance = face.polygon.containsPoint(position, Qt::OddEvenFill) ? 0
         : pointPolylineDistance(position, face.polygon, true);
     if (faceDistance > padding) continue;
+    const float localDepth = transformGizmoFaceDepthAt(face, position);
     if (!hit || faceDistance < hit->distance - 0.5 ||
-        (std::abs(faceDistance - hit->distance) <= 0.5 && face.normalizedDepth < hit->depth))
-      hit = HandleHit{faceDistance, face.normalizedDepth};
+        (std::abs(faceDistance - hit->distance) <= 0.5 && localDepth < hit->depth))
+      hit = HandleHit{faceDistance, localDepth};
   }
   return hit;
 }
@@ -292,7 +294,9 @@ projectFace(const QList<QVector3D> &vertices, const QVector3D &normal,
                          (1 - point.y() / point.w()) * size.height() * 0.5);
     face.polygon.append(screen);
     screenCenter += screen;
-    face.normalizedDepth += std::clamp(point.z() / point.w(), -1.0F, 1.0F);
+    const float depth = std::clamp(point.z() / point.w(), -1.0F, 1.0F);
+    face.vertexDepths.append(depth);
+    face.normalizedDepth += depth;
   }
   if (polygonArea(face.polygon) < 1.0e-6) return std::nullopt;
   const float count = static_cast<float>(face.polygon.size());
@@ -323,41 +327,23 @@ void addSolidHandleFaces(TransformGizmoAxisLayout &axisLayout,
   const QVector3D second = orientation.rotatedVector(unitAxis((axis + 2) % 3));
   const QVector3D tip = pivot + direction * moveExtent;
   const QVector3D baseCenter = tip - direction * coneHeight;
-  constexpr int coneSegments = 12;
-  QList<QVector3D> base;
-  for (int segment = 0; segment < coneSegments; ++segment) {
-    const float angle = static_cast<float>(segment * 2 * kPi / coneSegments);
-    base.append(baseCenter + (first * std::cos(angle) +
-                             second * std::sin(angle)) * coneRadius);
-  }
-  for (int segment = 0; segment < coneSegments; ++segment) {
-    const auto &start = base[segment];
-    const auto &end = base[(segment + 1) % coneSegments];
-    const QVector3D normal = QVector3D::crossProduct(start - tip, end - tip).normalized();
-    if (const auto face = projectFace({tip, start, end}, normal, lightDirection,
-                                     vp, inverseVp, size))
+  for (const auto &localFace : blenderGizmoCone(coneRadius, coneHeight)) {
+    QList<QVector3D> vertices;
+    for (const auto &vertex : localFace)
+      vertices.append(baseCenter + first * vertex.x() + second * vertex.y() + direction * vertex.z());
+    const auto normal = QVector3D::crossProduct(vertices[1] - vertices[0],
+                                               vertices[2] - vertices[0]).normalized();
+    if (const auto face = projectFace(vertices, normal, lightDirection, vp, inverseVp, size))
       axisLayout.moveFaces.append(*face);
   }
-  std::reverse(base.begin(), base.end());
-  if (const auto face = projectFace(base, -direction, lightDirection,
-                                   vp, inverseVp, size))
-    axisLayout.moveFaces.append(*face);
-
   const QVector3D cubeCenter = pivot + direction * scaleExtent;
-  const float half = cubeSize * 0.5F;
-  for (int component = 0; component < 3; ++component) {
-    const auto outward = orientation.rotatedVector(unitAxis(component));
-    const auto u = orientation.rotatedVector(unitAxis((component + 1) % 3)) * half;
-    const auto v = orientation.rotatedVector(unitAxis((component + 2) % 3)) * half;
-    for (const float side : {-1.0F, 1.0F}) {
-      const auto center = cubeCenter + outward * (side * half);
-      QList<QVector3D> faceVertices{center - u - v, center + u - v,
-                                   center + u + v, center - u + v};
-      if (side < 0) std::reverse(faceVertices.begin(), faceVertices.end());
-      if (const auto face = projectFace(faceVertices, outward * side,
-                                       lightDirection, vp, inverseVp, size))
-        axisLayout.scaleFaces.append(*face);
-    }
+  for (const auto &localFace : blenderGizmoCube(cubeSize * 0.5F)) {
+    QList<QVector3D> vertices;
+    for (const auto &vertex : localFace) vertices.append(cubeCenter + orientation.rotatedVector(vertex));
+    const auto normal = QVector3D::crossProduct(vertices[1] - vertices[0],
+                                               vertices[2] - vertices[0]).normalized();
+    if (const auto face = projectFace(vertices, normal, lightDirection, vp, inverseVp, size))
+      axisLayout.scaleFaces.append(*face);
   }
   const auto farToNear = [](const TransformGizmoFace &left,
                             const TransformGizmoFace &right) {
@@ -549,9 +535,12 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
     return layout;
   }
   const qreal shapeScale = layout.radius / (combined ? 148.0 : 84.0);
-  layout.lineWidth = std::clamp(layout.radius / 36.0, 1.8, 3.2);
+  layout.lineWidth = 1.5; // Blender-style thin screen-space stem, not a heavy outlined rod.
   const qreal moveExtent = layout.radius * (combined ? 0.43 : 0.86);
   const qreal scaleExtent = layout.radius * (combined ? 0.67 : 0.86);
+  const qreal coneHeight = moveExtent * blenderGizmoHeadFraction;
+  const qreal coneRadius = moveExtent * blenderGizmoHeadRadiusFraction;
+  const qreal cubeSize = scaleExtent * blenderGizmoBoxFraction;
   const qreal rotationExtent = layout.radius * (combined ? 0.84 : 0.78);
   const qreal viewRingRadius = layout.radius * (combined ? 1.0 : 1.04);
   const qreal centerClearance = (combined ? 15.0 : 13.0) * shapeScale;
@@ -603,32 +592,40 @@ TransformGizmoLayout transformGizmoLayout(const QVector3D &pivot,
     axisLayout.scaleEndpoint = scaleEnd->screen;
     axisLayout.moveEndpointDepth = moveEnd->normalizedDepth;
     axisLayout.scaleEndpointDepth = scaleEnd->normalizedDepth;
-    axisLayout.moveLine = QLineF(moveStart->screen, moveEnd->screen);
-    axisLayout.scaleLine = QLineF(scaleStart->screen, scaleLineEnd->screen);
+    // A stem joins the solid head at its base, never at its tip/centre. Its
+    // real clipped depths are retained independently of the interaction tip.
+    axisLayout.moveShaft = projectSegment(worldOnAxis(centerClearance),
+        worldOnAxis(moveExtent - coneHeight),
+        viewProjection, viewportSize);
+    axisLayout.scaleShaft = projectSegment(worldOnAxis(scaleLineStart),
+        worldOnAxis(scaleExtent - cubeSize * 0.5),
+        viewProjection, viewportSize);
+    axisLayout.moveLine = axisLayout.moveShaft ? axisLayout.moveShaft->line : QLineF{};
+    axisLayout.scaleLine = axisLayout.scaleShaft ? axisLayout.scaleShaft->line : QLineF{};
     const QPointF normal(-screenDirection.y(), screenDirection.x());
     const qreal moveShapeScale = shapeScale * pivotClipW /
         (viewProjection * QVector4D(worldOnAxis(moveExtent), 1.0F)).w();
     const qreal scaleShapeScale = shapeScale * pivotClipW /
         (viewProjection * QVector4D(worldOnAxis(scaleExtent), 1.0F)).w();
-    const qreal arrowLength = (combined ? 12.0 : 11.0) * moveShapeScale;
-    const qreal arrowHalfWidth = (combined ? 6.0 : 5.0) * moveShapeScale;
+    const qreal arrowLength = coneHeight * moveShapeScale / shapeScale;
+    const qreal arrowHalfWidth = coneRadius * moveShapeScale / shapeScale;
     axisLayout.moveArrow
         << axisLayout.moveEndpoint
         << axisLayout.moveEndpoint - screenDirection * arrowLength +
                normal * arrowHalfWidth
         << axisLayout.moveEndpoint - screenDirection * arrowLength -
                normal * arrowHalfWidth;
-    const qreal scaleHandleSize = (combined ? 15.0 : 12.0) * scaleShapeScale;
+    const qreal scaleHandleSize = cubeSize * scaleShapeScale / shapeScale;
     axisLayout.scaleHandle =
         QRectF(axisLayout.scaleEndpoint -
                    QPointF(scaleHandleSize * 0.5, scaleHandleSize * 0.5),
                QSizeF(scaleHandleSize, scaleHandleSize));
     addSolidHandleFaces(axisLayout, pivot, normalizedOrientation, axis,
         static_cast<float>(worldRadius * moveExtent / layout.radius),
-        static_cast<float>(worldRadius * (combined ? 12.0 / 148.0 : 11.0 / 84.0)),
-        static_cast<float>(worldRadius * (combined ? 6.0 / 148.0 : 5.0 / 84.0)),
+        static_cast<float>(worldRadius * coneHeight / layout.radius),
+        static_cast<float>(worldRadius * coneRadius / layout.radius),
         static_cast<float>(worldRadius * scaleExtent / layout.radius),
-        static_cast<float>(worldRadius * (combined ? 15.0 / 148.0 : 12.0 / 84.0)),
+        static_cast<float>(worldRadius * cubeSize / layout.radius),
         lightDirection, viewProjection, inverseViewProjection, viewportSize);
   }
 
@@ -735,6 +732,26 @@ qreal pointPolylineDistance(const QPointF &point, const QPolygonF &polyline,
                   point, QLineF(polyline.constLast(), polyline.constFirst())));
   }
   return best;
+}
+
+float transformGizmoFaceDepthAt(const TransformGizmoFace &face,
+                                const QPointF &position) {
+  if (face.vertexDepths.size() != face.polygon.size() || face.polygon.size() < 3)
+    return face.normalizedDepth;
+  const QPointF origin = face.polygon[0];
+  for (qsizetype index = 1; index + 1 < face.polygon.size(); ++index) {
+    const QPointF first = face.polygon[index] - origin;
+    const QPointF second = face.polygon[index + 1] - origin;
+    const qreal determinant = first.x() * second.y() - first.y() * second.x();
+    if (std::abs(determinant) <= 1.0e-12) continue;
+    const QPointF offset = position - origin;
+    const qreal a = (offset.x() * second.y() - offset.y() * second.x()) / determinant;
+    const qreal b = (first.x() * offset.y() - first.y() * offset.x()) / determinant;
+    return static_cast<float>(face.vertexDepths[0] +
+        a * (face.vertexDepths[index] - face.vertexDepths[0]) +
+        b * (face.vertexDepths[index + 1] - face.vertexDepths[0]));
+  }
+  return face.normalizedDepth;
 }
 
 TransformGizmoHandle hitTestTransformGizmo(const TransformGizmoLayout &layout,

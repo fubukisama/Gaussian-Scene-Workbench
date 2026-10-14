@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTest>
 
 #include <algorithm>
@@ -18,8 +19,70 @@ private slots:
   void centerHasReadableOutlineWithoutOpaqueDisc();
   void ringsUseDepthAndDistinguishTheirFrontAndBack();
   void projectedScaleBoxesHaveVisibleLitFaces();
+  void opaqueArrowSidesDoNotShowTheirOwnShaft();
+  void shaftsRespectLocalFaceDepthInsteadOfWholeLineAverage();
+  void headsKeepBlenderReferenceSlenderProportions();
   void rendersEveryModeInBothThemesAndProjections();
 };
+
+void TransformGizmoVisualTests::headsKeepBlenderReferenceSlenderProportions() {
+  QMatrix4x4 view;
+  view.lookAt({0, 0, 10}, {}, {0, 1, 0});
+  QMatrix4x4 projection;
+  projection.ortho(-3, 3, -3, 3, 0.01F, 100);
+  for (const auto mode : {TransformGizmoMode::Move, TransformGizmoMode::Scale,
+                          TransformGizmoMode::Transform}) {
+    const auto layout = transformGizmoLayout({}, {}, projection * view, {600,600}, mode, 2);
+    QVERIFY(layout.valid);
+    const auto &x = layout.axes[0];
+    if (mode != TransformGizmoMode::Scale) {
+      QRectF silhouette;
+      for (const auto &face : x.moveFaces) silhouette = silhouette.united(face.polygon.boundingRect());
+      const qreal axisLength = QLineF(layout.center, x.moveEndpoint).length();
+      QVERIFY2(silhouette.height() / axisLength < 0.11,
+               "A Blender-style move head must be slender, not the previous broad cone.");
+    }
+    if (mode != TransformGizmoMode::Move) {
+      QRectF silhouette;
+      for (const auto &face : x.scaleFaces) silhouette = silhouette.united(face.polygon.boundingRect());
+      const qreal axisLength = QLineF(layout.center, x.scaleEndpoint).length();
+      QVERIFY2(silhouette.height() / axisLength < 0.10,
+               "Scale blocks use the same compact reference family as the move heads.");
+    }
+  }
+}
+
+void TransformGizmoVisualTests::shaftsRespectLocalFaceDepthInsteadOfWholeLineAverage() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.center = {40, 350};
+  layout.radius = 200;
+  layout.lineWidth = 2;
+  auto &red = layout.axes[0];
+  red.visible = true;
+  const QPolygonF surface(QRectF(120, 170, 160, 60));
+  red.moveArrow = surface;
+  red.moveFaces = {{surface, 0, 1, {0, 0, 0, 0}}};
+  auto &blue = layout.axes[1];
+  blue.visible = true;
+  blue.moveLine = QLineF(80, 200, 320, 200);
+  for (const auto depths : {QPointF(-0.8, 0.9), QPointF(-0.9, 0.8)}) {
+    blue.moveShaft = TransformGizmoDepthSegment{blue.moveLine,
+        static_cast<float>(depths.x()), static_cast<float>(depths.y())};
+    QImage image(400, 400, QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(244, 242, 236));
+    TransformGizmoStyle style;
+    QPainter painter(&image);
+    paintTransformGizmo(painter, layout, TransformGizmoMode::Move, style);
+    painter.end();
+    const QColor front = image.pixelColor(150, 200);
+    QVERIFY2(front.blue() > front.red() + 60,
+             "The physically nearer exterior stem remains visible in front of a head.");
+    const QColor behind = image.pixelColor(250, 200);
+    QVERIFY2(behind.red() > behind.blue() + 60,
+             "A shaft behind an opaque head cannot show through its surface.");
+  }
+}
 
 void TransformGizmoVisualTests::centerHasReadableOutlineWithoutOpaqueDisc() {
   for (const bool light : {true, false}) {
@@ -135,6 +198,76 @@ void TransformGizmoVisualTests::projectedScaleBoxesHaveVisibleLitFaces() {
                "Visible cube faces need meaningful light/shade, not a flat square.");
     }
   }
+}
+
+void TransformGizmoVisualTests::opaqueArrowSidesDoNotShowTheirOwnShaft() {
+  // Close oblique observation from the pivot side exposes the former stem
+  // painted through the cone, rather than merely across its external silhouette.
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(-0.5F, 1.6F, 1.2F), {}, QVector3D(0, 0, 1));
+  QMatrix4x4 projection;
+  projection.perspective(64, 5.0F / 4.0F, 0.01F, 100);
+  auto layout = transformGizmoLayout({}, {}, projection * view, {1000, 800},
+                                      TransformGizmoMode::Move, 2);
+  QVERIFY(layout.valid);
+  QVERIFY(layout.axes[0].visible);
+  QVERIFY(!layout.axes[0].moveFaces.isEmpty());
+  // Isolate the actual X arrow through the public layout/painter boundary. No
+  // synthetic head polygon or test-only drawing algorithm supplies the result.
+  layout.axes[1].visible = false;
+  layout.axes[2].visible = false;
+  for (auto &plane : layout.planeHandles) plane.clear();
+  QPainterPath sideSurface;
+  for (const auto &face : layout.axes[0].moveFaces) {
+    // The base cap can legitimately meet the external stem. Only opaque side
+    // facets beyond that junction are asserted to hide the stem completely.
+    if (face.polygon.size() != 3) continue;
+    QPainterPath facet;
+    facet.addPolygon(face.polygon);
+    facet.closeSubpath();
+    sideSurface = sideSurface.united(facet);
+  }
+  QVERIFY(!sideSurface.isEmpty());
+  const QColor background(244, 242, 236);
+  const auto render = [&background](const TransformGizmoLayout &geometry) {
+    QImage image(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    image.fill(background);
+    QPainter painter(&image);
+    paintTransformGizmo(painter, geometry, TransformGizmoMode::Move, {});
+    painter.end();
+    return image;
+  };
+  const QImage actual = render(layout);
+  auto withoutShaft = layout;
+  withoutShaft.axes[0].moveLine = {};
+  const QImage opaqueHead = render(withoutShaft);
+  int sampled = 0;
+  int shaftPixelsThroughHead = 0;
+  const QRect bounds = sideSurface.boundingRect().toAlignedRect().intersected(actual.rect());
+  for (int y = bounds.top(); y <= bounds.bottom(); ++y) {
+    for (int x = bounds.left(); x <= bounds.right(); ++x) {
+      const QPointF point(x + 0.5, y + 0.5);
+      // Leave a two-pixel antialiasing margin at the silhouette/junction. This
+      // follows the real facets and remains valid when the cone becomes slimmer.
+      if (!sideSurface.contains(point) ||
+          !sideSurface.contains(point + QPointF(2, 0)) ||
+          !sideSurface.contains(point - QPointF(2, 0)) ||
+          !sideSurface.contains(point + QPointF(0, 2)) ||
+          !sideSurface.contains(point - QPointF(0, 2))) continue;
+      ++sampled;
+      if (actual.pixel(x, y) != opaqueHead.pixel(x, y)) ++shaftPixelsThroughHead;
+    }
+  }
+  qInfo() << "Opaque arrow side samples:" << sampled
+          << "visible internal shaft pixels:" << shaftPixelsThroughHead;
+  const QString output = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+  if (!output.isEmpty()) {
+    QVERIFY(QDir().mkpath(output));
+    QVERIFY(actual.save(QDir(output).filePath(QStringLiteral("arrow-shaft-close.png"))));
+    QVERIFY(opaqueHead.save(QDir(output).filePath(QStringLiteral("arrow-head-reference.png"))));
+  }
+  QVERIFY2(sampled >= 20, "The close oblique cone must expose a measurable opaque side surface.");
+  QCOMPARE(shaftPixelsThroughHead, 0);
 }
 
 void TransformGizmoVisualTests::rendersEveryModeInBothThemesAndProjections() {

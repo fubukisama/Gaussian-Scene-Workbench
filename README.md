@@ -9,7 +9,7 @@
 ## Native Desktop Preview
 
 - Version: `0.3.1-native-preview`
-- Documentation updated: `2026-10-12` — not a new release-version announcement.
+- Documentation updated: `2026-10-14` — not a new release-version announcement.
 - Active branch: [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
@@ -81,11 +81,11 @@ Generated datasets, outputs, environments, caches, builds and packages are exclu
 
 ### License and intended use
 
-Original Workbench code is MIT licensed. Training, CUDA, codec, Qt and icon components retain their own licenses; Graphdeco Gaussian-Splatting components have non-commercial research/evaluation restrictions unless separate permission is obtained. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Do not infer one MIT license for every bundled component.
+The original native desktop main program is **GPL-3.0-or-later** from the 2026-10-14 licensing change; its scope and exceptions are in [native/LICENSE.md](native/LICENSE.md), with the complete GPL text in [COPYING](COPYING). The Blender v4.5.0 cone/cube geometry port retains upstream notices; existing GSW drag, constraint and undo logic is retained rather than importing Blender's complete operator system. Earlier MIT grants and original code outside this scope remain under [LICENSE](LICENSE). Third-party training, CUDA, codec, Qt and icon components retain their own licenses. Graphdeco research components still have non-commercial research/evaluation restrictions unless separate permission is obtained. The GPL main-program grant does not grant commercial rights to every backend. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## 简体中文
 
-**高斯场景研究工作台**在 `agent/native-desktop-0.3` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-12**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在 `agent/native-desktop-0.3` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-14**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
 ### 当前功能
 
@@ -114,11 +114,11 @@ Original Workbench code is MIT licensed. Training, CUDA, codec, Qt and icon comp
 
 当前仍是预览版，不把旧 HTML 的 PSNR、通用资产管理等功能视为已迁移。OpenGL 预览不等于上游 CUDA 分块渲染器；网格预算不是全程序/训练的硬配额，纹理未分页；2DGS 共享 GPU 实时预览仍有独立限制。实验记录可持久保存，任务日志和历史曲线仍仅保留当前会话。
 
-原创代码为 MIT；第三方训练、CUDA、编解码、Qt、图标遵循各自许可，Graphdeco 相关组件另有非商业研究/评估限制。见 [LICENSE](LICENSE) 和 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
+自 2026-10-14 本次许可变更起，原生桌面主程序的原创代码采用 **GPL-3.0-or-later**；范围及例外见 [native/LICENSE.md](native/LICENSE.md)，完整 GPL 文本见 [COPYING](COPYING)。实际移植 Blender v4.5.0 的圆锥/立方体几何并保留上游声明，但不是复制完整 Blender 操作器系统；拖动、约束和撤销仍由 GSW 处理。此前授予的 MIT 权利及此范围以外的原创代码保留 [LICENSE](LICENSE) 条款。第三方训练、CUDA、编解码、Qt、图标仍遵循各自许可；Graphdeco 相关组件仍有非商业研究/评估限制，不因主程序 GPL 而获得商用权。见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
 
 ## 日本語
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `agent/native-desktop-0.3` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-12** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `agent/native-desktop-0.3` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-14** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
 ### 現在の機能
 
@@ -147,4 +147,4 @@ Original Workbench code is MIT licensed. Training, CUDA, codec, Qt and icon comp
 
 本版はプレビューで、旧 HTML 版の PSNR、汎用アセット管理などが移植済みとは限りません。OpenGL は上流 CUDA タイルレンダラーと同一ではなく、メッシュ予算は全体/学習の強制的な上限ではありません。テクスチャはページングせず、2DGS の共有 GPU ライブプレビューにも制限があります。実験記録は保存されますが、ログと過去の指標曲線はセッション内のみです。
 
-独自コードは MIT、学習・CUDA・コーデック・Qt・アイコンは各ライセンスに従います。Graphdeco 関連部には非商用研究/評価の制限があります。[LICENSE](LICENSE) と [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+2026-10-14 の本変更から、独自のネイティブ主プログラムは **GPL-3.0-or-later** です。範囲と例外は [native/LICENSE.md](native/LICENSE.md)、全 GPL 本文は [COPYING](COPYING) にあります。Blender v4.5.0 の円錐/立方体形状を実際に移植して元の通知を保持しますが、操作器システム全体の移植ではありません。ドラッグ・制約・取り消しは GSW が処理します。過去の MIT の権利と対象外の独自コードは [LICENSE](LICENSE) の条件を維持します。学習・CUDA・コーデック・Qt・アイコンは各ライセンスに従い、Graphdeco 関連部の非商用研究/評価制限も維持します。GPL 主プログラムは全バックエンドの商用許諾を意味しません。[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。

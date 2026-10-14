@@ -164,6 +164,47 @@ Public regression commands include `--smoke-test-window-appearance`, `--smoke-te
 
 ## License boundary
 
-LichtFeld Studio is used as an architecture and workflow reference. Its source is GPL-3.0-or-later. No LichtFeld source code is copied into this MIT-licensed native preview. Any future direct reuse must be isolated and licensed compatibly before it is merged.
+The original native desktop main program is GPL-3.0-or-later from the
+2026-10-14 licensing change. See [LICENSE.md](LICENSE.md) for scope and exceptions,
+[COPYING](../COPYING) for the full GPL text, and
+[THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) for upstream components.
+Earlier MIT grants are not revoked; original code outside the main-program
+scope retains the root terms. Separate worker and third-party files keep
+their existing licenses, including Graphdeco's research/evaluation restrictions.
 
-Blender's infinite-grid behavior and public line-primitive rendering approach are used as visual and algorithmic references. The native viewport implementation was written independently for this project's Z-up coordinate system and GLSL 1.30 compatibility; no Blender source or shader code is copied into this MIT-licensed application.
+`third_party/blender-gizmo/` directly adapts Blender v4.5.0 cone generation and
+cube vertex/index geometry, with upstream copyright, GPL-2.0-or-later notices
+and modification records retained. The combined main program selects GPL
+version 3. This is a native Qt geometry/presentation adapter, not Blender's
+complete operator or windowing system: GSW retains its own drag, constraints,
+numeric input, undo and model/project logic. Blender's infinite-grid behavior
+remains a visual/algorithmic reference; that viewport grid was independently
+implemented for GSW's Z-up coordinates and is not a newly copied Blender shader.
+
+The GPL main program embeds the independently implemented
+`src/shaders/SurfelProjection.glsl`. The old research-licensed
+`third_party/2dgs-surfel/evaluate_surfel.glsl` stays preserved under its original
+license but is neither embedded nor loaded by the GPL desktop. This display
+replacement does not relicense training components or change optimizer-state
+resume capabilities. No LichtFeld Studio source is copied or linked; it remains
+an architecture/workflow reference, and future reuse needs its own review.
+
+Redistributors must satisfy corresponding-source, license and notice duties
+for the actual binaries and dependencies they supply. Separate compute
+processes do not automatically guarantee that every distribution is legally
+an aggregate. This scope statement is not a blanket legal assurance or a
+commercial license for restricted training backends.
+
+中文：自本次变更起，原创原生桌面主程序为 GPL-3.0-or-later，旧 MIT 权利不撤销。
+Blender v4.5.0 移植是圆锥/立方体几何与 Qt 展示适配，不是完整操作器系统；
+交互、约束和撤销仍由 GSW 管理。独立实现的二维高斯 shader 替代旧研究许可衍生
+shader 的主程序嵌入，旧源码保留原许可。独立 worker 及其他第三方仍遵循各自条款，
+不因 GPL 主程序而获准商用；分发须提供对应源码及声明，进程边界不等于法律保证。
+
+日本語：本変更以降、独自のネイティブ主プログラムは GPL-3.0-or-later とし、
+過去の MIT の権利は維持します。Blender v4.5.0 の移植は円錐/立方体と Qt 表示で、
+操作器全体ではなく、操作・制約・取り消しは GSW が管理します。独自実装の 2DGS
+shader が従来の研究ライセンス派生 shader の組込みを置き換え、旧ソースは
+元の許諾を維持します。独立 worker と第三者は各条件に従い、主プログラムの GPL
+で商用許諾を得るわけではありません。配布時は対応ソースと通知が必要であり、
+プロセスを分けるだけで法的な互換性を保証するものではありません。

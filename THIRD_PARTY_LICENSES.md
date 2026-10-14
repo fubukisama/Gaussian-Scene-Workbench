@@ -1,6 +1,36 @@
 # Third-Party Licenses
 
-Gaussian Scene Workbench is distributed for open-source research, learning, and evaluation use. The repository includes third-party components with their own licenses. The root MIT terms apply only to original Gaussian Scene Workbench code and do not override these third-party licenses.
+Gaussian Scene Workbench contains components under several licenses. From the 2026-10-14 licensing change, the original native desktop main program is GPL-3.0-or-later within the scope in [native/LICENSE.md](native/LICENSE.md). Earlier MIT grants and original code outside that scope retain the root MIT terms. Neither grant overrides third-party licenses or grants commercial rights to restricted research components. The project's research purpose is not an additional use restriction on its GPL or MIT code.
+
+## Blender Transform Geometry / Blender 变换几何 / Blender 変換形状
+
+The native desktop directly adapts the cone-generation routine from Blender
+v4.5.0 `source/blender/gpu/intern/gpu_immediate_util.cc` and cube vertex/index
+data from `source/blender/editors/gizmo_library/geometry/geom_cube_gizmo.cc`.
+The retained subset and Qt adapter are in `native/third_party/blender-gizmo/`.
+This is actual source/geometry reuse, not merely a visual reference. See that
+directory's provenance and change records for the exact upstream files and
+their fixed revision. Upstream Blender Authors copyright and
+GPL-2.0-or-later notices are preserved; GPL version 3 is selected for the
+combined desktop program. The complete GPL version 3 text is in [COPYING](COPYING).
+
+The port supplies cone/cube geometry and presentation through the native Qt
+adapter; it does not embed Blender's application, windowing engine, complete
+operator system or all transform interaction code. GSW retains its own
+axis/plane dragging, numeric input, constraint, undo and project context.
+Blender branding and application icons are not included. Official source:
+<https://github.com/blender/blender/tree/v4.5.0>.
+
+中文：桌面端实际移植 Blender v4.5.0 的圆锥生成及立方体顶点/索引子集，
+保留上游版权、GPL-2.0-or-later 声明、固定来源和修改说明，与主程序按 GPL
+第 3 版组合。移植限于几何与原生 Qt 展示适配，不等于嵌入完整 Blender 操作器、
+窗口系统或全部交互代码；拖动、约束、数字输入、撤销和工程上下文仍由 GSW 处理。
+
+日本語：Blender v4.5.0 の円錐生成と立方体の頂点・インデックスを実際に移植し、
+元の著作権、GPL-2.0-or-later 通知、固定した出典と変更記録を保持します。
+主プログラムとの組合せには GPL 第 3 版を適用します。形状と Qt 表示の移植であり、
+Blender 全体の操作器・ウィンドウ・全操作コードを組み込むものではありません。
+ドラッグ、制約、数値入力、取り消しとプロジェクトの状態は GSW が処理します。
 
 ## SIBR FPSCounter Design Reference
 
@@ -16,7 +46,7 @@ Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual officia
 
 The native executable also embeds Qt base Chinese and Japanese translation catalogs for standard Qt controls. Their upstream sources and license notices are available in the Qt translations module: https://code.qt.io/cgit/qt/qttranslations.git/ . Workbench-specific Chinese, English and Japanese messages are original project translations; CloudCompare, Metashape and Blender are terminology references only.
 
-The `native/` application dynamically links Qt 6.8 Core, Gui, Widgets, OpenGL, OpenGLWidgets, Network, and SVG modules. Open-source Qt modules are available under the GNU Lesser General Public License v3 and/or the alternative licenses stated by each Qt module. The application does not statically link Qt, and deployed Qt DLLs can be replaced by the user.
+The native desktop main program dynamically links Qt 6.8 Core, Concurrent, Gui, Widgets, OpenGL, OpenGLWidgets and SVG modules. Open-source Qt modules are available under the GNU Lesser General Public License v3 and/or the alternative licenses stated by each Qt module. The application does not statically link Qt, and deployed Qt DLLs can be replaced by the user. Distributors must preserve the applicable Qt notices and satisfy the source and other obligations of their chosen Qt licenses; the main program's GPL notice does not replace those obligations.
 
 - Qt licensing: https://www.qt.io/licensing/open-source-lgpl-obligations
 - Qt source archives: https://download.qt.io/archive/qt/6.8/6.8.3/submodules/
@@ -26,11 +56,11 @@ Local packages built from the Conda Qt environment can also include dynamically 
 
 ## Native Desktop Icons / 原生桌面图标 / ネイティブデスクトップのアイコン
 
-The desktop semantic icons directly use Lucide SVG assets pinned to commit `70562c1ee1c4fdcf736fe97bc893fb8511927934`: https://github.com/lucide-icons/lucide . Original artwork and the full upstream ISC license, including the MIT notice for Feather-derived icons, are retained in `native/third_party/lucide/`; desktop packages ship the notices in `licenses/lucide/`. Runtime palette substitution does not alter the vendored artwork. Blender, CloudCompare, and Metashape are layout and interaction references only; their source, icon assets, and branding are not bundled by this change.
+The desktop semantic icons directly use Lucide SVG assets pinned to commit `70562c1ee1c4fdcf736fe97bc893fb8511927934`: https://github.com/lucide-icons/lucide . Original artwork and the full upstream ISC license, including the MIT notice for Feather-derived icons, are retained in `native/third_party/lucide/`; desktop packages ship the notices in `licenses/lucide/`. Runtime palette substitution does not alter the vendored artwork. Blender, CloudCompare and Metashape icon assets and branding are not bundled. The separately licensed Blender geometry port is described above; CloudCompare and Metashape remain behavior references.
 
-中文：桌面语义图标直接复用上述固定版本的 Lucide SVG，保留原始图形、ISC 许可和 Feather 衍生图标的 MIT 声明，随安装包分发。Blender、CloudCompare 和 Metashape 仅作为布局与操作参考，本次不分发其源码、图标或品牌标识。
+中文：桌面语义图标直接复用上述固定版本的 Lucide SVG，保留原始图形、ISC 许可和 Feather 衍生图标的 MIT 声明，随安装包分发。不分发 Blender、CloudCompare、Metashape 的应用图标或品牌标识；单独许可的 Blender 几何移植见上方，后两者仍仅作为行为参考。
 
-日本語：デスクトップの操作アイコンは上記コミットの Lucide SVG を直接使用し、元の図形・ISC ライセンス・Feather 派生図形の MIT 通知を配布物に同梱します。Blender・CloudCompare・Metashape は配置と操作の参考のみとし、今回の変更で各ソフトのソース・図形・ブランド記号は同梱しません。
+日本語：デスクトップの操作アイコンは上記コミットの Lucide SVG を直接使用し、元の図形・ISC ライセンス・Feather 派生図形の MIT 通知を配布物に同梱します。Blender・CloudCompare・Metashape のアプリアイコンとブランド記号は同梱しません。別ライセンスの Blender 形状移植は上記、後者二つは操作の参考のみです。
 
 ## Native SPZ Codec / 原生 SPZ 编解码 / ネイティブ SPZ コーデック
 
@@ -42,11 +72,26 @@ The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source a
 
 ## Native 2DGS Surface Projection / 原生 2DGS 表面投影 / ネイティブ 2DGS サーフェル投影
 
-`native/third_party/2dgs-surfel/evaluate_surfel.glsl` directly adapts the bounding-box and ray/surfel intersection routines from `cuda_rasterizer/forward.cu` in hbb1/diff-surfel-rasterization, commit `e0ed0207b3e0669960cfad70852200a4a5847f61`: https://github.com/hbb1/diff-surfel-rasterization . Original Inria GRAPHDECO notices and the complete research/evaluation license are retained in that directory and distributed under `licenses/2dgs-surfel/`. The GLSL adapter adds OpenGL pixel-center conventions, orthographic projection and finite/projection-pole guards. This derivative code is not MIT and grants no commercial-use permission.
+The GPL desktop embeds the original `native/src/shaders/SurfelProjection.glsl`
+implementation for native 2DGS projection. Its geometric calculations are
+independently implemented; the previous restricted derivative is neither
+embedded nor loaded by the GPL desktop. This changes the display-code
+licensing boundary, not the research licenses or optimizer-state capabilities
+of separate training components.
 
-中文：桌面端二维高斯投影直接改编上述官方源码，保留 Inria GRAPHDECO 版权及研究/评估用途许可证，随安装包分发，不以 MIT 重新授权，不授予商用许可。
+The former `native/third_party/2dgs-surfel/evaluate_surfel.glsl` is preserved
+as separately licensed historical material. It directly adapted routines
+from hbb1/diff-surfel-rasterization `cuda_rasterizer/forward.cu`, commit
+`e0ed0207b3e0669960cfad70852200a4a5847f61`:
+<https://github.com/hbb1/diff-surfel-rasterization>.
+Original Inria GRAPHDECO notices and the full research/evaluation license
+remain in its directory. It has not been relabeled GPL or granted commercial
+rights. It must not be linked or embedded in the GPL main program without
+appropriate separate permission from the relevant rights holders.
 
-日本語：ネイティブの 2DGS 投影は上記公式ソースを直接移植し、Inria GRAPHDECO の著作権と研究・評価用途のライセンスを同梱します。MIT への変更や商用利用許諾はありません。
+中文：GPL 桌面端使用独立实现的 SurfelProjection.glsl，不嵌入或加载旧研究许可衍生 shader。旧文件保留原版权及完整许可，不改标为 GPL，不授予商用权，也不在未经适当另行许可时与 GPL 主程序链接或嵌入。独立训练后端的研究许可和完整状态续训能力不受此显示代码替换影响。
+
+日本語：GPL デスクトップは独自実装の SurfelProjection.glsl を使い、従来の研究ライセンス派生 shader を組み込んだり読み込んだりしません。旧ファイルは著作権と全ライセンスを維持し、GPL への変更や商用許諾はありません。権利者の適切な別許諾なしに GPL 主プログラムへリンク・組込みはできません。独立学習バックエンドの研究ライセンスと完全状態再開の機能は変更しません。
 
 ## Native SH Evaluation / 原生球谐求值 / ネイティブ SH 評価
 
@@ -58,7 +103,28 @@ The native desktop directly compiles the MIT-licensed Niantic/Adobe SPZ source a
 
 ## LichtFeld Studio Reference
 
-LichtFeld Studio is studied as an architecture and workflow reference under GPL-3.0-or-later. No LichtFeld implementation source is copied or linked into the current MIT-licensed native preview. Direct future reuse requires a compatible GPL release and an explicit licensing change: https://github.com/MrNeRF/LichtFeld-Studio
+LichtFeld Studio is studied as an architecture and workflow reference under GPL-3.0-or-later. No LichtFeld implementation source is copied or linked into the current native preview. The main program's GPL migration does not by itself import LichtFeld code; any future reuse requires a separate source, dependency and attribution review: https://github.com/MrNeRF/LichtFeld-Studio
+
+## Compute Component and Distribution Boundary
+
+The desktop launches compute components as external processes and exchanges
+task information, files and supported GPU-preview frames. Their source and
+licenses remain separate from the original desktop main program. A process
+boundary is not, by itself, a legal determination that every integration or
+distribution is an aggregate. Changes to dependencies, data interchange or
+packaging require reassessing that boundary. These notices record audited
+components and intended boundaries, not a blanket legal guarantee or
+commercial authorization for all bundled training code.
+
+中文：桌面与计算组件通过外部进程、任务信息、文件及受支持的 GPU 预览帧协作，
+保留独立源码和许可；“不同进程”本身不保证每种集成或分发在法律上属于独立聚合。
+依赖、数据交换或包装变化须重新核查，不把 GPL 主程序误解为全部训练代码的商用授权。
+
+日本語：デスクトップと計算コンポーネントは外部プロセス、タスク情報、ファイル、
+対応する GPU プレビューフレームで連携し、ソースとライセンスを分けます。
+別プロセスという事実だけで、すべての組合せ・配布が法的に独立した集合と
+保証されるわけではありません。依存・通信・包装変更は再確認が必要であり、
+GPL 主プログラムを全学習コードの商用許諾と解釈しないでください。
 
 ## Key License Constraints
 
@@ -72,11 +138,14 @@ LichtFeld Studio is studied as an architecture and workflow reference under GPL-
 
 You may use this repository for research, learning, experiments, and evaluation, subject to the included licenses.
 
-Do not assume the full repository is available for commercial use under MIT. Commercial use of the bundled Gaussian Splatting components requires permission from the original licensors.
+Do not assume the full repository or every bundled component is available for commercial use under the main program's GPL or the remaining MIT grants. Commercial use of restricted Gaussian Splatting components requires permission from the original licensors. Binary distributions of the GPL main program must also meet the corresponding-source and notice requirements described in `native/LICENSE.md` and `COPYING`.
 
 ## Included License Files
 
 - `LICENSE`
+- `COPYING`
+- `native/LICENSE.md`
+- `native/third_party/blender-gizmo/` provenance and upstream notices
 - `gaussian-splatting/LICENSE.md`
 - `gaussian-splatting/submodules/diff-gaussian-rasterization/LICENSE.md`
 - `gaussian-splatting/submodules/simple-knn/LICENSE.md`

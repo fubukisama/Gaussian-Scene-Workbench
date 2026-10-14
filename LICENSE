@@ -11,14 +11,33 @@ English
 -------
 
 This repository contains original Gaussian Scene Workbench code and bundled third-party
-components. It is published for open-source research, learning, and evaluation
-use.
+components under several licenses. Research, learning and evaluation describe
+the project's intended use, not an additional restriction on its GPL or MIT code.
+
+Native Desktop Main Program: GPL-3.0-or-later
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+From the licensing change dated 2026-10-14, the original native desktop main
+program is licensed under the GNU General Public License, version 3 or (at
+your option) any later version. See native/LICENSE.md for the precise scope
+and COPYING for the complete GPL version 3 text.
+
+This scope covers the original native/src, native/tests and native/i18n files,
+native/CMakeLists.txt, and original native build resources, except material
+with its own license notice. Third-party files and the separate native/worker
+compute components retain their applicable existing licenses. The Blender
+geometry adaptation retains its GPL-2.0-or-later upstream notices and is
+combined with the desktop main program under GPL version 3 or later.
+
+Earlier MIT grants are not revoked. Code outside the scope above remains
+under the following MIT terms unless a file or directory states otherwise.
 
 Original Gaussian Scene Workbench Code
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unless a file or directory states otherwise, original code written for this
-Gaussian Scene Workbench project is licensed under the MIT License:
+Outside the native desktop main-program scope above, and for previously
+published MIT versions, original code written for this Gaussian Scene
+Workbench project is licensed under the MIT License:
 
 MIT License
 
@@ -67,12 +86,19 @@ directory for details.
 
 重要说明：本节是为了方便中文读者理解的非正式翻译和说明。正式授权文本以英文部分为准。
 
-本仓库包含 Gaussian Scene Workbench（高斯场景研究工作台）的原创代码，也包含第三方组件。本仓库用于开源研究、学习和评估用途。
+本仓库包含 Gaussian Scene Workbench（高斯场景研究工作台）的原创代码及适用不同许可证的第三方组件。研究、学习和评估是项目用途说明，不是附加到 GPL 或 MIT 代码上的使用限制。
+
+原生桌面主程序：GPL-3.0-or-later
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+自 2026-10-14 本次许可变更起，原生桌面主程序的原创代码按 GNU General Public License 第 3 版或（由您选择）任何后续版本提供。范围包括原创 native/src、native/tests、native/i18n、native/CMakeLists.txt 及原创原生构建资源，但有独立许可声明的材料除外。精确范围见 native/LICENSE.md；GPL 第 3 版完整英文文本见 COPYING。
+
+第三方文件和独立 native/worker 计算组件保留各自既有许可。Blender 几何移植保留上游 GPL-2.0-or-later 声明，与桌面主程序按 GPL 第 3 版或后续版本组合。此前已经授予的 MIT 权利不会被撤销。除另有声明外，上述范围以外的原创代码仍适用下方 MIT 条款。
 
 Gaussian Scene Workbench 原创代码
 ~~~~~~~~~~~~~~~~~~~~
 
-除非具体文件或目录另有说明，Gaussian Scene Workbench 项目的原创代码采用 MIT 许可证：
+原生桌面主程序范围以外的原创代码，以及此前已经按 MIT 发布的版本，适用 MIT 许可证（具体文件或目录另有说明的除外）：
 
 MIT License
 
@@ -101,12 +127,19 @@ Copyright (c) 2026 fubukisama
 
 重要: このセクションは日本語読者向けの非公式な翻訳および説明です。正式なライセンス本文は英語セクションに従います。
 
-このリポジトリには、Gaussian Scene Workbench の独自コードと第三者コンポーネントが含まれています。オープンソースの研究、学習、評価用途向けに公開されています。
+このリポジトリには、Gaussian Scene Workbench の独自コードと、それぞれ異なるライセンスに従う第三者コンポーネントが含まれています。研究・学習・評価はプロジェクトの用途説明であり、GPL または MIT のコードに追加する利用制限ではありません。
+
+ネイティブデスクトップ主プログラム：GPL-3.0-or-later
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+2026-10-14 の本ライセンス変更以降、ネイティブデスクトップ主プログラムの独自コードは GNU General Public License 第 3 版、または利用者が選択する以降の版で提供します。対象は独自の native/src、native/tests、native/i18n、native/CMakeLists.txt と原生ビルド資源です。独自のライセンス通知がある素材は除きます。正確な範囲は native/LICENSE.md、GPL 第 3 版の完全な英語本文は COPYING を参照してください。
+
+第三者ファイルと独立した native/worker 計算コンポーネントは既存の各ライセンスを維持します。Blender の形状移植は元の GPL-2.0-or-later 通知を保持し、主プログラムとの組合せには GPL 第 3 版以降を適用します。過去に与えられた MIT の権利は撤回しません。別途明記がない限り、上記対象外の独自コードには下記の MIT 条件を適用します。
 
 Gaussian Scene Workbench 独自コード
 ~~~~~~~~~~~~~~~~~~~~~~
 
-ファイルまたはディレクトリで別途明記されていない限り、この Gaussian Scene Workbench プロジェクトの独自コードは MIT License の下で提供されます。
+ネイティブデスクトップ主プログラムの対象外の独自コード、および過去に MIT で公開した版は、ファイルまたはディレクトリで別途明記されていない限り MIT License の下で提供されます。
 
 MIT License
 

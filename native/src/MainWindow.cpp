@@ -1741,11 +1741,14 @@ void MainWindow::createMenus() {
   connect(aboutAction, &QAction::triggered, this, [this]() {
     QMessageBox::about(
         this, QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"),
-        QCoreApplication::translate("Workbench", "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>"
+        QCoreApplication::translate("Workbench", "<b>Gaussian Scene Workbench %1 Native Preview</b><br>"
             "高斯场景研究工作台<br><br>"
-            "Qt 6 原生桌面架构，构建日期 %1。<br>"
-            "当前为原生桌面预览通道；稳定版仍保留在 main。")
-            .arg(QStringLiteral(GSW_RELEASE_DATE)));
+            "Qt 6 原生桌面架构，构建日期 %2。<br>"
+            "原生主程序：GPL-3.0-or-later；不提供任何担保。<br>"
+            "Blender 操作柄几何保留原始 GPL 版权声明。<br>"
+            "第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>"
+            "对应源码及构建材料随安装包提供于 source 目录。")
+            .arg(QStringLiteral(GSW_VERSION), QStringLiteral(GSW_RELEASE_DATE)));
   });
 }
 

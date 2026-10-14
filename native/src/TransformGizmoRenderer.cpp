@@ -67,6 +67,8 @@ struct Primitive final {
   float light = 1;
   TransformGizmoHandle handle;
   bool front = true;
+  std::optional<TransformGizmoDepthSegment> segment;
+  QList<float> vertexDepths;
 };
 
 QList<Primitive> primitives(const TransformGizmoLayout &layout, const TransformGizmoMode mode) {
@@ -82,35 +84,92 @@ QList<Primitive> primitives(const TransformGizmoLayout &layout, const TransformG
     const auto &geometry = layout.axes[static_cast<std::size_t>(axis)];
     const auto addAxis = [&](const bool enabled, const TransformGizmoHandleKind kind,
                              const QLineF &line, const float endpointDepth,
-                             const QList<TransformGizmoFace> &faces, const QPolygonF &fallback) {
+                             const QList<TransformGizmoFace> &faces, const QPolygonF &fallback,
+                             const std::optional<TransformGizmoDepthSegment> &segment) {
       if (!enabled || !geometry.visible) return;
-      result.append({PrimitiveKind::Shaft, line, {}, (endpointDepth + layout.pivotDepth) * 0.5F,
-                      1, {kind, axis}});
+      if (!line.isNull()) {
+        const auto depths = segment.value_or(TransformGizmoDepthSegment{
+            line, layout.pivotDepth, endpointDepth});
+        result.append({PrimitiveKind::Shaft, line, {}, (depths.startDepth + depths.endDepth) * 0.5F,
+                        1, {kind, axis}});
+        result.last().segment = depths;
+      }
       if (faces.isEmpty()) {
         if (!fallback.isEmpty())
           result.append({PrimitiveKind::Face, {}, fallback, endpointDepth, 1, {kind, axis}});
       } else {
-        for (const auto &face : faces)
+        for (const auto &face : faces) {
           result.append({PrimitiveKind::Face, {}, face.polygon, face.normalizedDepth,
                           face.light, {kind, axis}});
+          result.last().vertexDepths = face.vertexDepths;
+        }
       }
     };
     addAxis(move, TransformGizmoHandleKind::MoveAxis, geometry.moveLine,
-             geometry.moveEndpointDepth, geometry.moveFaces, geometry.moveArrow);
+             geometry.moveEndpointDepth, geometry.moveFaces, geometry.moveArrow, geometry.moveShaft);
     // A multi-object selection intentionally has no per-axis scaling. The
     // viewport disables it by clearing the shared scale target, not its faces.
     addAxis(scale && !geometry.scaleHandle.isEmpty(), TransformGizmoHandleKind::ScaleAxis,
              geometry.scaleLine, geometry.scaleEndpointDepth, geometry.scaleFaces,
-             QPolygonF(geometry.scaleHandle));
+             QPolygonF(geometry.scaleHandle), geometry.scaleShaft);
     if ((move || scale) && layout.planeHandles[static_cast<std::size_t>(axis)].size() >= 3)
       result.append({PrimitiveKind::Plane, {}, layout.planeHandles[static_cast<std::size_t>(axis)],
                       layout.planeDepths[static_cast<std::size_t>(axis)], 1,
                       {move ? TransformGizmoHandleKind::MovePlane : TransformGizmoHandleKind::ScalePlane, axis}});
   }
   std::stable_sort(result.begin(), result.end(), [](const auto &left, const auto &right) {
+    // Stems are painted after solids with their rear portions masked by local
+    // face depth. Otherwise an average-far stem's locally-near portion could
+    // be overwritten by a later face despite being physically in front.
+    if ((left.type == PrimitiveKind::Shaft) != (right.type == PrimitiveKind::Shaft))
+      return right.type == PrimitiveKind::Shaft;
     return left.depth > right.depth;
   });
   return result;
+}
+
+// Compare each part of a stem with the actual surface depth, not the average
+// depth of either long shape. The half-plane is affine in projected space.
+// This preserves an exterior stem in front while concealing a stem behind a
+// cone/cube even when extreme perspective makes their silhouettes overlap.
+void clipStemBehindFaces(QPainter &painter, const Primitive &stem,
+                         const QList<Primitive> &shapes) {
+  if (!stem.segment) return;
+  const QPointF direction = stem.line.p2() - stem.line.p1();
+  const qreal squaredLength = QPointF::dotProduct(direction, direction);
+  if (squaredLength <= 1.0e-12) return;
+  const auto lineDepthAt = [&](const QPointF &point) {
+    const qreal amount = QPointF::dotProduct(point - stem.line.p1(), direction) / squaredLength;
+    return stem.segment->startDepth + amount *
+        (stem.segment->endDepth - stem.segment->startDepth);
+  };
+  const QRectF strokeBounds = QRectF(stem.line.p1(), stem.line.p2()).normalized().adjusted(-5,-5,5,5);
+  QPainterPath hidden;
+  hidden.setFillRule(Qt::WindingFill);
+  for (const auto &shape : shapes) {
+    if (shape.type != PrimitiveKind::Face || shape.polygon.size() < 3 ||
+        !strokeBounds.intersects(shape.polygon.boundingRect())) continue;
+    const TransformGizmoFace face{shape.polygon, shape.depth, shape.light, shape.vertexDepths};
+    const auto difference = [&](const QPointF &point) {
+      return transformGizmoFaceDepthAt(face, point) - lineDepthAt(point);
+    };
+    QPolygonF nearer;
+    QPointF previous = face.polygon.constLast();
+    qreal previousDepth = difference(previous);
+    for (const auto &point : face.polygon) {
+      const qreal depth = difference(point);
+      if ((depth < 0) != (previousDepth < 0))
+        nearer.append(previous + (point - previous) * (previousDepth / (previousDepth - depth)));
+      if (depth < 0) nearer.append(point);
+      previous = point;
+      previousDepth = depth;
+    }
+    if (nearer.size() >= 3) hidden.addPolygon(nearer);
+  }
+  if (hidden.isEmpty()) return;
+  QPainterPath visible;
+  visible.addRect(painter.hasClipping() ? painter.clipBoundingRect() : QRectF(painter.window()));
+  painter.setClipPath(visible.subtracted(hidden), Qt::IntersectClip);
 }
 
 QColor lit(QColor base, const float intensity, const int opacity) {
@@ -196,7 +255,8 @@ void paintTransformGizmo(QPainter &painter, const TransformGizmoLayout &layout,
     }
   }
   paintRingUnderlay(painter, layout, mode, style, highlighted, dragging);
-  for (const auto &primitive : primitives(layout, mode)) {
+  const auto shapes = primitives(layout, mode);
+  for (const auto &primitive : shapes) {
     const bool active = highlighted == primitive.handle;
     const bool subdued = dragging && highlighted.isValid() && !active;
     const QColor base = active ? style.highlight : style.axes[static_cast<std::size_t>(primitive.handle.axis)];
@@ -204,30 +264,24 @@ void paintTransformGizmo(QPainter &painter, const TransformGizmoLayout &layout,
       paintRing(painter, primitive, layout, mode, style, active, subdued);
     } else if (primitive.type == PrimitiveKind::Face) {
       const int opacity = subdued ? 100 : 255;
-      painter.setPen(QPen(alpha(base.darker(170), subdued ? 45 : 130),
-                          primitive.handle.kind == TransformGizmoHandleKind::MoveAxis ? 0.45 : 0.8,
-                          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-      painter.setBrush(lit(base, primitive.light, opacity));
+      // Blender's arrows are restrained axis-colour surfaces, not dark
+      // outlined facets. Keep cube lighting but eliminate internal mesh seams.
+      painter.setPen(Qt::NoPen);
+      const bool arrow = primitive.handle.kind == TransformGizmoHandleKind::MoveAxis;
+      painter.setBrush(lit(base, arrow ? 0.84F + 0.16F * primitive.light : primitive.light, opacity));
       painter.drawPolygon(primitive.polygon);
     } else if (primitive.type == PrimitiveKind::Shaft) {
-      const qreal width = primitive.handle.kind == TransformGizmoHandleKind::MoveAxis ?
-                              layout.lineWidth : std::max(1.5, layout.lineWidth * 0.7);
+      painter.save();
+      clipStemBehindFaces(painter, primitive, shapes);
+      const qreal width = layout.lineWidth;
       painter.setBrush(Qt::NoBrush);
-      painter.setPen(QPen(QColor(8, 12, 17, subdued ? 25 : 90), width + 1,
-                          Qt::SolidLine, Qt::RoundCap));
+      painter.setPen(QPen(alpha(base, subdued ? 80 : 255), width + (active ? 0.7 : 0),
+                          Qt::SolidLine, Qt::FlatCap));
       painter.drawLine(primitive.line);
-      QLinearGradient shade(primitive.line.p1(), primitive.line.p2());
-      shade.setColorAt(0, alpha(base.darker(130), subdued ? 80 : 245));
-      shade.setColorAt(1, alpha(base.lighter(108), subdued ? 80 : 255));
-      painter.setPen(QPen(QBrush(shade), width + (active ? 0.7 : 0), Qt::SolidLine, Qt::RoundCap));
-      painter.drawLine(primitive.line);
+      painter.restore();
     } else {
-      const int excluded = primitive.handle.axis;
-      const QColor first = style.axes[static_cast<std::size_t>((excluded + 1) % 3)];
-      const QColor second = style.axes[static_cast<std::size_t>((excluded + 2) % 3)];
-      const QColor tint = active ? style.highlight :
-          QColor((first.red() + second.red()) / 2, (first.green() + second.green()) / 2,
-                  (first.blue() + second.blue()) / 2);
+      // Plane handle colour denotes its excluded normal axis, as in Blender.
+      const QColor tint = active ? style.highlight : base;
       painter.setPen(QPen(alpha(tint, active ? 240 : subdued ? 65 : 170), active ? 1.7 : 1));
       painter.setBrush(alpha(tint, active ? 65 : subdued ? 10 : 26));
       painter.drawPolygon(primitive.polygon);

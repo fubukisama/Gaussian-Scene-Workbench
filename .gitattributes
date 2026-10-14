@@ -1,0 +1,2 @@
+# Preserve the exact official GPL license bytes on every checkout.
+/COPYING text eol=lf

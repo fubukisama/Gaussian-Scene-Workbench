@@ -11,6 +11,7 @@
 #include <QVector3D>
 
 #include <array>
+#include <optional>
 
 namespace gsw {
 
@@ -58,6 +59,7 @@ struct TransformGizmoFace final {
   QPolygonF polygon;
   float normalizedDepth = 0.0F;
   float light = 1.0F;
+  QList<float> vertexDepths; // NDC depth is affine across each projected face.
 };
 
 struct TransformGizmoAxisLayout final {
@@ -75,8 +77,13 @@ struct TransformGizmoAxisLayout final {
   QList<TransformGizmoFace> scaleFaces;
   float moveEndpointDepth = 0.0F;
   float scaleEndpointDepth = 0.0F;
+  std::optional<TransformGizmoDepthSegment> moveShaft;
+  std::optional<TransformGizmoDepthSegment> scaleShaft;
   bool visible = false;
 };
+
+[[nodiscard]] float transformGizmoFaceDepthAt(const TransformGizmoFace &face,
+                                             const QPointF &position);
 
 struct TransformGizmoLayout final {
   bool valid = false;

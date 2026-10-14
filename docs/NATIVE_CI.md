@@ -1,5 +1,29 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
+## GPL Blender geometry and independent surfel gate (2026-10-14)
+
+中文：主程序按 GPL-3.0-or-later 分发，并附对应源码与哈希清单。Blender 锥头／
+方块几何实际移植，原受限 2DGS 显示着色器不再嵌入，替换为论文公式独立实现。
+新增 `native_surfel_projection_gl`：隐藏 OpenGL 上下文实际编译、执行 GLSL，
+19 项覆盖包围范围、求交、透视／正交深度和极端尺度。在 NVIDIA 和 Mesa llvmpipe
+均通过。既有 3DGS／2DGS 视口、三语言、变换和 worker 测试全部保留。
+
+English: GPL-3.0-or-later desktop packages include matching source and a hash
+manifest. Blender cone/box geometry is actually ported. The restricted embedded
+2DGS display shader is replaced by an independent paper-based implementation.
+`native_surfel_projection_gl` compiles and executes real GLSL in a hidden OpenGL
+context: nineteen bounds, intersection, perspective/orthographic depth and
+extreme-scale cases pass on NVIDIA and Mesa llvmpipe. All existing 3DGS/2DGS
+viewport, three-language, transformation and worker tests remain enabled.
+
+日本語：GPL-3.0-or-later の主プログラム配布物に対応ソースとハッシュ一覧を
+同梱します。Blender の円錐／ブロック形状を実際に移植し、制限付き 2DGS 描画
+シェーダーの埋め込みを、論文に基づく独立実装へ置き換えます。追加の
+`native_surfel_projection_gl` は非表示 OpenGL コンテキストで実際に GLSL を
+コンパイル・実行します。範囲・交点・透視／平行深度・極端スケールの 19 項目が
+NVIDIA と Mesa llvmpipe で通過しました。既存の視口・三言語・変換・worker
+検査はすべて維持します。
+
 ## 简体中文（zh_CN）
 
 ### 构建与回归测试

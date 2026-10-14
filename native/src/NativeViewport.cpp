@@ -2819,8 +2819,9 @@ void main() {
       center = 0.5 * viewportPixels;
       extent = 0.5 * viewportPixels;
     }
-    surfelFilterCenter = bounded ? center :
-        0.5 * viewportPixels * (clipCenter.xy / clipCenter.w + 1.0);
+    // Paper Eq. (11): low-pass filter is centred on the projected local origin,
+    // which need not equal a tilted disk's projected AABB centre.
+    surfelFilterCenter = 0.5 * viewportPixels * (clipCenter.xy / clipCenter.w + 1.0);
     vec2 lower = max(center - extent, vec2(0.0));
     vec2 upper = min(center + extent, viewportPixels);
     if (any(lessThanEqual(upper, lower))) {
