@@ -110,6 +110,15 @@ Shell interface, not the lossy ANSI values returned by WScript on some hosts.
 The non-GUI shortcut regression retains both readings and the unchanged link
 hash; installed shortcut acceptance still requires the exact expected paths.
 The regular native app/render/training checks are not replaced by installer tests.
+Automatic wizard checks cover real controls, language, directory editing,
+navigation and cancellation. Caption screenshots require separate visual review:
+Inno's theme style hook can draw with a different font from `WM_GETFONT`, so
+external font measurements are diagnostics, not an automatic clipping verdict.
+Production preparation requires an accepted `packaging/windows/ui-review.json`
+matching the canonical UTF-8/LF installer definition, generated three-language
+custom messages and pinned compiler. Changed layout/messages require a new
+review; `-TestBuild` remains available to generate the next review's screenshots.
+An automatic navigation pass never claims that a pending visual review passed.
 The small Windows Installer workflow uses an explicitly marked synthetic
 file fixture to exercise the **real Setup wizard and transactions**, without
 executing a dummy application. This separate installer-only test was approved

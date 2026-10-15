@@ -241,15 +241,23 @@ function Capture-Page([object]$Wizard, [string]$Locale, [string]$Page) {
     try { $uia += [pscustomobject]@{ name=$element.Current.Name; type=$element.Current.ControlType.ProgrammaticName; enabled=$element.Current.IsEnabled; offscreen=$element.Current.IsOffscreen } } catch { }
   }
   $measured = @()
-  foreach ($control in $controls | Where-Object { $_.ClassName -match 'StaticText$|Button$' -and $_.Text.Trim() }) {
-    $measurement = [GswInstallerUiNative]::MeasureCaption($control)
+  $captions = @($controls | Where-Object { $_.ClassName -match 'StaticText$|Button$' -and $_.Text.Trim() })
+  if (-not $captions.Count) { throw "No visible nonempty wizard captions were found ($Locale/$Page)." }
+  foreach ($control in $captions) {
+    $measurement = $null
+    $measurementError = $null
+    try { $measurement = [GswInstallerUiNative]::MeasureCaption($control) } catch { $measurementError = $_.Exception.Message }
     $measured += [pscustomobject]@{ text=$control.Text; className=$control.ClassName; width=$control.Width; height=$control.Height
-      fitsHeight=$measurement.FitsHeight; fitsWidth=$measurement.FitsWidth; nativeMeasurement=$measurement }
+      authority='diagnostic-only'; captionReview='manual-required'; nativeMeasurement=$measurement; measurementError=$measurementError }
   }
-  $record = [ordered]@{ locale=$Locale; page=$Page; screenshot=$picture; window=$Wizard; controls=$controls; automation=$uia; measuredCaptions=$measured }
-  [IO.File]::WriteAllText((Join-Path $root ($Locale + '-' + $Page + '.json')), ($record | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
-  $clipped = @($measured | Where-Object { -not $_.fitsHeight -or -not $_.fitsWidth })
-  if ($clipped.Count) { throw "Visible wizard caption exceeds its native control bounds ($Locale/$Page): $($clipped[0].text)" }
+  # VCL's TNewStaticTextStyleHook can draw through the style service rather
+  # than WM_GETFONT. These external metrics are not an authoritative clipping
+  # verdict. Real page screenshots require a separately recorded human review.
+  $record = [ordered]@{ locale=$Locale; page=$Page; screenshot=$picture; window=$Wizard; controls=$controls; automation=$uia
+    captionReview='manual-required'; captionMeasurementAuthority='diagnostic-only'; measuredCaptions=$measured }
+  $evidencePath = Join-Path $root ($Locale + '-' + $Page + '.json')
+  [IO.File]::WriteAllText($evidencePath, ($record | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+  $report.captionEvidence += [pscustomobject]@{locale=$Locale;page=$Page;screenshot=$picture;controlsJson=$evidencePath;captionReview='manual-required'}
   return $controls
 }
 
@@ -259,8 +267,10 @@ $patterns = @{
   ja_JP = @{ next='次へ'; back='戻る'; cancel='キャンセル'; accept='同意する' }
 }
 $oldTemp, $oldTmp = $env:TEMP, $env:TMP
-$report = [ordered]@{ schema='gsw-installer-ui-acceptance-v1'; setupSha256=$metadata.setupSha256; appId=$metadata.appId
-  runRoot=$root; passed=$false; applicationLaunched=$false; installationPerformed=$false; locales=@(); cancelConfirmations=@() }
+$report = [ordered]@{ schema='gsw-installer-ui-acceptance-v2'; setupSha256=$metadata.setupSha256; appId=$metadata.appId
+  runRoot=$root; passed=$false; fullUiAccepted=$false; navigationAndLanguagePassed=$false
+  captionReview='manual-required'; manualCaptionReviewRequired=$true; automaticCaptionClippingVerified=$false; captionEvidence=@()
+  applicationLaunched=$false; installationPerformed=$false; locales=@(); cancelConfirmations=@() }
 $failure = $null
 $process = $null
 try {
@@ -338,9 +348,9 @@ try {
     $report.locales += [pscustomobject]@{ locale=$locale; welcome=$true; license=$true; runtime=$true; directory=$true; back=$true; cancel=$true; exitCode=$process.ExitCode }
     $process.Dispose()
     $process = $null
-    Write-Output "Remote installer wizard acceptance passed: $locale."
+    Write-Output "Remote installer navigation/language checks passed: $locale; page captions require screenshot review."
   }
-  $report.passed = $true
+  $report.navigationAndLanguagePassed = $true
 } catch {
   $failure = $_
   $report['error'] = $_.Exception.Message
@@ -366,4 +376,5 @@ try {
   }
 }
 Write-Output ('Remote wizard evidence: ' + (Join-Path $root 'wizard-acceptance.json'))
+Write-Output 'Full UI acceptance remains pending: review every listed screenshot and record manual-review.json separately.'
 if ($failure) { throw $failure }

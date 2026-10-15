@@ -366,6 +366,52 @@ class InstallerTranslationTests(InstallerFixture):
                 self.assert_rejected()
 
 
+class InstallerVisualReviewTests(InstallerFixture):
+    def write_review(self):
+        review = {
+            "schema": "gsw-installer-visual-review-v1", "status": "accepted",
+            "compilerVersion": "7.1.0", "locales": list(installer.LOCALES),
+            "definitionSha256": hashlib.sha256((self.sources / "packaging/windows/gsw.iss").read_text(encoding="utf-8-sig").encode()).hexdigest(),
+            "messagesSha256": hashlib.sha256(installer.render_messages(self.catalog).encode()).hexdigest(),
+            "reviewedScreens": {locale: ["welcome", "license", "runtime", "directory", "runtime-back", "cancel-confirmation"] for locale in installer.LOCALES},
+        }
+        write_json(self.sources / "packaging/windows/ui-review.json", review)
+        return review
+
+    def test_production_requires_accepted_review_of_current_definition_and_messages(self):
+        self.write_review()
+        record, _ = self.assert_prepared(test_build=False)
+        self.assertTrue(record["visualReviewAccepted"])
+        self.assertEqual(record["appId"], "Fubukisama.GaussianSceneWorkbench.Native")
+
+    def test_missing_or_pending_review_cannot_build_production(self):
+        self.write_review()
+        path = self.sources / "packaging/windows/ui-review.json"
+        path.unlink()
+        self.assert_rejected(test_build=False)
+        review = self.write_review()
+        review["status"] = "pending"
+        write_json(path, review)
+        self.assert_rejected(test_build=False)
+
+    def test_definition_or_translations_changed_since_review_require_new_review(self):
+        self.write_review()
+        definition = self.sources / "packaging/windows/gsw.iss"
+        original = definition.read_bytes()
+        definition.write_bytes(original + b"changed layout\n")
+        self.assert_rejected(test_build=False)
+        definition.write_bytes(original)
+        self.catalog[installer.MESSAGES["GswRuntimeTitle"]]["en_US"] += " changed"
+        self.save_catalog()
+        self.assert_rejected(test_build=False)
+
+    def test_review_must_cover_every_language_and_required_screen(self):
+        review = self.write_review()
+        review["reviewedScreens"]["ja_JP"].remove("license")
+        write_json(self.sources / "packaging/windows/ui-review.json", review)
+        self.assert_rejected(test_build=False)
+
+
 class RemoteFixtureCliTests(InstallerFixture):
     def fixture_cli(self, *, output=None, remote=True):
         output = output or self.root / "remote installer fixture"

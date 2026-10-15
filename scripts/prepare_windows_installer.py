@@ -41,7 +41,7 @@ REQUIRED = (
 SOURCE_MATERIALS = (
     ".github/workflows/native-windows.yml", ".github/workflows/windows-installer.yml",
     "THIRD_PARTY_LICENSES.md",
-    "packaging/windows/gsw.iss", "scripts/prepare_windows_installer.py",
+    "packaging/windows/gsw.iss", "packaging/windows/ui-review.json", "scripts/prepare_windows_installer.py",
     "scripts/build_windows_installer.ps1", "scripts/bootstrap_inno_setup.ps1",
     "scripts/test_windows_installer.py", "scripts/test_windows_installer.ps1",
     "scripts/test_windows_installer_ui.ps1",
@@ -134,11 +134,38 @@ def render_messages(catalog):
     return "\n".join(lines) + "\n"
 
 
+def review_identity(source_root, catalog):
+    definition = (source_root / "packaging/windows/gsw.iss").read_text(encoding="utf-8-sig")
+    return {
+        "definitionSha256": hashlib.sha256(definition.encode("utf-8")).hexdigest(),
+        "messagesSha256": hashlib.sha256(render_messages(catalog).encode("utf-8")).hexdigest(),
+    }
+
+
+def validate_visual_review(source_root, catalog):
+    path = source_root / "packaging/windows/ui-review.json"
+    if not path.is_file():
+        raise ValueError("Production Setup requires an accepted visual review")
+    review = json.loads(path.read_text(encoding="utf-8-sig"))
+    screens = {"welcome", "license", "runtime", "directory", "runtime-back", "cancel-confirmation"}
+    if (review.get("schema") != "gsw-installer-visual-review-v1" or review.get("status") != "accepted"
+            or review.get("compilerVersion") != "7.1.0" or review.get("locales") != list(LOCALES)
+            or any(review.get(key) != value for key, value in review_identity(source_root, catalog).items())
+            or any(not screens.issubset(review.get("reviewedScreens", {}).get(locale, [])) for locale in LOCALES)):
+        raise ValueError("Production Setup visual review is pending, incomplete or does not match this definition/messages")
+    return review
+
+
 def prepare(package, work, output, source_root, test_build=False):
     package, work, output, source_root = (Path(p).resolve() for p in (package, work, output, source_root))
     if output.is_relative_to(package) or work.is_relative_to(package) or work.exists():
         raise ValueError("Fresh work directory outside the immutable input payload is required")
     build = validate_payload(package, allow_fixture=test_build)
+    catalog = load_catalog(source_root / "native/i18n/catalog.json")
+    if not all(source in catalog for source in MESSAGES.values()):
+        catalog = load_catalog(source_root / "packaging/windows/installer-catalog.json")
+    if not test_build:
+        validate_visual_review(source_root, catalog)
     work.mkdir(parents=True)
     payload = work / "payload"
     shutil.copytree(package, payload)
@@ -154,11 +181,6 @@ def prepare(package, work, output, source_root, test_build=False):
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_root / relative, target)
-    catalog = load_catalog(source_root / "native/i18n/catalog.json")
-    if not all(source in catalog for source in MESSAGES.values()):
-        # Rebuilding only the installer around an older accepted binary must not
-        # replace that binary's matching native translation source.
-        catalog = load_catalog(source_root / "packaging/windows/installer-catalog.json")
     (payload / "source/packaging/windows/installer-catalog.json").write_text(
         json.dumps({source: catalog[source] for source in MESSAGES.values()}, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8")
@@ -188,6 +210,7 @@ def prepare(package, work, output, source_root, test_build=False):
             "payloadRoot": str(payload), "setupPath": str(output / (name + ".exe")),
             "executableSha256": sha256(package / REQUIRED[0]), "locales": list(LOCALES),
             "preservedNativeBuildTools": sorted(preserved_tools),
+            "visualReviewAccepted": not test_build,
             "trainingRuntimesBundled": False, "automaticAppLaunch": False}
 
 
