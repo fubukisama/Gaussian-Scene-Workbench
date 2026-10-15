@@ -1,9 +1,139 @@
 {
   "schema": "gsw-installer-visual-review-v1",
-  "status": "pending",
+  "status": "accepted",
   "compilerVersion": "7.1.0",
-  "locales": ["zh_CN", "en_US", "ja_JP"],
-  "definitionSha256": "pending",
-  "messagesSha256": "pending",
-  "reviewedScreens": {}
+  "locales": [
+    "zh_CN",
+    "en_US",
+    "ja_JP"
+  ],
+  "definitionSha256": "e47a867da121246ac78d21a370df65bff51e273f180b10de9eec7207cd17611a",
+  "messagesSha256": "5143abbc862625b8e77f072b0b2d4999fe9ca3cb9b8914638160d65cff5091f7",
+  "evidenceRun": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/38715334245",
+  "evidenceHead": "b430d4a7e68010a6c0e6e417a6bc8bb7f4e6baab",
+  "reviewer": "Codex visual inspection",
+  "reviewedDate": "2026-10-15",
+  "reviewedScreens": {
+    "zh_CN": [
+      "welcome",
+      "license",
+      "runtime",
+      "directory",
+      "runtime-back",
+      "cancel-confirmation"
+    ],
+    "en_US": [
+      "welcome",
+      "license",
+      "runtime",
+      "directory",
+      "runtime-back",
+      "cancel-confirmation"
+    ],
+    "ja_JP": [
+      "welcome",
+      "license",
+      "runtime",
+      "directory",
+      "runtime-back",
+      "cancel-confirmation"
+    ]
+  },
+  "screenshots": [
+    {
+      "file": "en_US-cancel-confirmation.png",
+      "bytes": 6003,
+      "sha256": "a679f00038adb5791800800a7e70e859d071d87548aa1860294aa51266055db9"
+    },
+    {
+      "file": "en_US-directory.png",
+      "bytes": 18847,
+      "sha256": "0450c6a69a1678f3ee183980b97f8180b823e5ef20326c30182b0836ef4532a3"
+    },
+    {
+      "file": "en_US-license.png",
+      "bytes": 26118,
+      "sha256": "04b9772ac6f83cdf1a826bbb578355363dd09a26999e427d56e927cf5cc9aad7"
+    },
+    {
+      "file": "en_US-runtime-back.png",
+      "bytes": 22248,
+      "sha256": "5b59f333ae59c617777a6ce574a965f9e8f73de3504253116f8ad6961f44e22e"
+    },
+    {
+      "file": "en_US-runtime.png",
+      "bytes": 22248,
+      "sha256": "5b59f333ae59c617777a6ce574a965f9e8f73de3504253116f8ad6961f44e22e"
+    },
+    {
+      "file": "en_US-welcome.png",
+      "bytes": 27325,
+      "sha256": "8f15ec64126d03d565d48ad94500f603c61d4b1074f7049824a7ea6eb55b5760"
+    },
+    {
+      "file": "ja_JP-cancel-confirmation.png",
+      "bytes": 6035,
+      "sha256": "abeabbb6ef05e25226e91188ba5c0bd0793755b9cafcf67e77ce0d1ad08cbe04"
+    },
+    {
+      "file": "ja_JP-directory.png",
+      "bytes": 19284,
+      "sha256": "9ca9ee2332041bbfd8638ae53814802ed95b797a2c69c5dc2a69d1f2b5bd5abb"
+    },
+    {
+      "file": "ja_JP-license.png",
+      "bytes": 26718,
+      "sha256": "f4e4c9d11f59c97435482dc715b33a004d81533342cfa340cb96a9c7f4f350ab"
+    },
+    {
+      "file": "ja_JP-runtime-back.png",
+      "bytes": 20215,
+      "sha256": "464dcc8157219562121b90a9eeaa468f70e6871eee82d299e819b4cd2161f28e"
+    },
+    {
+      "file": "ja_JP-runtime.png",
+      "bytes": 20215,
+      "sha256": "464dcc8157219562121b90a9eeaa468f70e6871eee82d299e819b4cd2161f28e"
+    },
+    {
+      "file": "ja_JP-welcome.png",
+      "bytes": 27226,
+      "sha256": "ed6368e228f8fd5f2d17be344b2ff4e17e2524d8c2c5b2d3ba6f351b629d3a12"
+    },
+    {
+      "file": "zh_CN-cancel-confirmation.png",
+      "bytes": 5481,
+      "sha256": "46336f315df0eea4ac5dee56e812120943111c5ac6e8a1decb9a21ff357091d5"
+    },
+    {
+      "file": "zh_CN-directory.png",
+      "bytes": 18980,
+      "sha256": "e0c508c5063cf5f55ceae59ca95632e1adab412e8e92cdb3a1e4392d1291865d"
+    },
+    {
+      "file": "zh_CN-license.png",
+      "bytes": 27405,
+      "sha256": "7b03bb65570df698eb4ff9625415e4e2aeda137cffc7e7984c88bbff69eb457b"
+    },
+    {
+      "file": "zh_CN-runtime-back.png",
+      "bytes": 20946,
+      "sha256": "bd0263e321a350c63911ce238335d0081570da2f5dcea8ac7b8f60f0846f494c"
+    },
+    {
+      "file": "zh_CN-runtime.png",
+      "bytes": 20946,
+      "sha256": "bd0263e321a350c63911ce238335d0081570da2f5dcea8ac7b8f60f0846f494c"
+    },
+    {
+      "file": "zh_CN-welcome.png",
+      "bytes": 27237,
+      "sha256": "814f4bfa5bd90a55dda0c49ccba6ef3e1afc9e06297a134985b6cb3b4bf2183e"
+    }
+  ],
+  "notes": [
+    "All 18 real window captures reviewed individually: captions complete, controls visible, no clipping or overlap found within these six pages per language.",
+    "Long destination paths scroll horizontally as expected. Native Yes/No button captions follow the Windows runner language; dialog text follows the selected installer language.",
+    "This is installer-only fixture visual acceptance, not native application or complete native-package acceptance. External font metrics remain diagnostic-only."
+  ]
 }
