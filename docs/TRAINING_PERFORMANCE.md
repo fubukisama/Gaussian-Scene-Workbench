@@ -46,6 +46,10 @@ growth counters. PLY warm starts are never labelled full-state resume.
 
 ## Timing and observability
 
+The next-stage exact-semantics controls and user-defined quality comparison
+contract are documented in[Controllable quality](TRAINING_QUALITY.md). Training
+PSNR and a completed progress bar are not independent quality validation.
+
 The speed and ETA use a completed, synchronized **whole-step wall sample**,
 including optimizer, growth and preview/checkpoint work. The high-resolution
 `perf_counter` uses QPC on the installed older Windows Python; its coarse

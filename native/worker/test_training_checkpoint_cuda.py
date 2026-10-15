@@ -30,6 +30,9 @@ class CudaResumeTests(unittest.TestCase):
         backend = os.environ.get("GSW_CHECKPOINT_TEST_BACKEND", "3dgs")
         self.assertIn(backend, ("3dgs", "2dgs"))
         iterations = int(os.environ.get("GSW_CHECKPOINT_TEST_ITERATIONS", "16"))
+        optimizer_type = os.environ.get('GSW_CHECKPOINT_TEST_OPTIMIZER', 'default')
+        self.assertIn(optimizer_type, ('default', 'sparse_adam'))
+        density_threshold = os.environ.get('GSW_CHECKPOINT_TEST_DENSIFY_THRESHOLD', '1000')
         self.assertGreaterEqual(iterations, 16)
         source = (Path(os.environ["TWO_DGS_DIR"]) if backend == "2dgs"
                   else repository / "gaussian-splatting")
@@ -94,10 +97,10 @@ class CudaResumeTests(unittest.TestCase):
                            "--iterations", str(iterations), "-r", "1", "--data_device", "cpu",
                            "--test_iterations", str(iterations), "--save_iterations", str(iterations), "--checkpoint_iterations", str(iterations),
                            "--densify_from_iter", "0", "--densify_until_iter", "14",
-                           "--densification_interval", "2", "--densify_grad_threshold", "1000",
+                           "--densification_interval", "2", "--densify_grad_threshold", density_threshold,
                            "--opacity_reset_interval", "8"]
                 command += (["--opacity_cull", "0.001"] if backend == "2dgs" else [
-                    "--disable_viewer", "--optimizer_type", "default", "--random_background", "--train_test_exp"])
+                    "--disable_viewer", "--optimizer_type", optimizer_type, "--random_background", "--train_test_exp"])
                 result = subprocess.run(command, cwd=str(source), env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         encoding="utf-8", errors="replace", timeout=300)
@@ -123,6 +126,13 @@ class CudaResumeTests(unittest.TestCase):
             self.assertEqual(manifest["iteration"], 1)
             self.assertEqual(manifest["backend"], backend)
             state = torch.load(str(state_path))
+            quality_execution = state['quality_profile']['execution']
+            self.assertNotEqual(quality_execution['loss'], 'unobserved')
+            self.assertEqual(sum(quality_execution['loss_history']['counts'].values()), 1)
+            self.assertEqual(quality_execution['features']['capacity_storage']['requested'], True)
+            if optimizer_type == 'default' or backend == '2dgs':
+                self.assertTrue(quality_execution['features']['capacity_storage']['enabled'], quality_execution)
+            self.assertEqual(state['quality_profile']['validation']['status'], 'unverified')
             self.assertEqual(state["density_control"]["backend"], backend)
             self.assertEqual(len(state["pending_indices"]), 3)
             if backend == "3dgs":
@@ -141,9 +151,9 @@ class CudaResumeTests(unittest.TestCase):
             from native.worker.training_checkpoint import restore_state
             parser = ArgumentParser()
             params = OptimizationParams(parser)
-            options = ["--iterations", str(iterations)] + (["--optimizer_type", "default"] if backend == "3dgs" else [])
+            options = ["--iterations", str(iterations)] + (["--optimizer_type", optimizer_type] if backend == "3dgs" else [])
             opt = params.extract(parser.parse_args(options))
-            restored = GaussianModel(3, "default") if backend == "3dgs" else GaussianModel(3)
+            restored = GaussianModel(3, optimizer_type) if backend == "3dgs" else GaussianModel(3)
             restore_state(torch, np, restored, opt, state, manifest["identity"], state["camera_names"], backend=backend)
 
             def equal_tree(expected, actual):
@@ -198,6 +208,10 @@ class CudaResumeTests(unittest.TestCase):
             repeat = run("reference-repeat", resume=True)
             interrupted = run("interrupted", resume=True, pause=True)
             self.assertEqual(read_manifest(interrupted)[0]["iteration"], 2)
+            _, interrupted_state_path = read_manifest(interrupted)
+            interrupted_state = torch.load(str(interrupted_state_path))
+            self.assertEqual(sum(interrupted_state['quality_profile']['execution']['loss_history']['counts'].values()), 2)
+            del interrupted_state
             run("interrupted", resume=True)
             final = "point_cloud/iteration_{}/point_cloud.ply".format(iterations)
             expected = PlyData.read(str(reference / final), mmap=False)["vertex"]

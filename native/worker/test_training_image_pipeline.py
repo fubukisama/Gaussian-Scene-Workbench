@@ -230,6 +230,41 @@ class TrainingImagePipelineTests(unittest.TestCase):
         pipeline.close()
         self.assertEqual(pipeline.stats()["resident_slots"], 0)
 
+    def test_one_slot_keeps_current_pixels_and_reports_skipped_lookahead(self):
+        first = self.HostCameraImage(self.torch.zeros((3, 1, 2), dtype=self.torch.uint8))
+        second = self.HostCameraImage(self.torch.full((3, 1, 2), 255, dtype=self.torch.uint8))
+        with self.Pipeline(self.torch, device="cpu",
+                           config=self.Config(slots=1, pinned_bytes=0)) as pipeline:
+            ready = pipeline.prepare(first, next_camera=second)
+            self.assertTrue(self.torch.equal(ready.image, self.torch.zeros((3, 1, 2))))
+            self.assertEqual(pipeline.stats()["resident_slots"], 1)
+            self.assertEqual(pipeline.stats()["transfers"], 1)
+            self.assertEqual(pipeline.stats()["prefetch_skips"], 1)
+            ready = pipeline.prepare(second)
+            self.assertTrue(self.torch.equal(ready.image, self.torch.ones((3, 1, 2))))
+
+    def test_lookahead_pipeline_preserves_python_numpy_and_torch_rng_states(self):
+        import random
+        import numpy as np
+        from native.worker.training_camera_lookahead import predict_next_camera
+        cameras = [self.HostCameraImage(self.torch.arange(12, dtype=self.torch.uint8)
+                   .reshape(3, 2, 2)),
+                   self.HostCameraImage(self.torch.full((3, 2, 2), 255, dtype=self.torch.uint8))]
+        python_state, numpy_state, torch_state = random.getstate(), np.random.get_state(), self.torch.get_rng_state()
+        with self.Pipeline(self.torch, device="cpu", config=self.Config(pinned_bytes=0)) as pipeline:
+            predicted = predict_next_camera(cameras, [1])
+            prepared = pipeline.prepare(cameras[0], next_camera=predicted)
+            cached = pipeline.prepare(predicted)
+            self.assertTrue(self.torch.equal(prepared.image, cameras[0].rgb.float().div(255.0)))
+            self.assertTrue(self.torch.equal(cached.image, self.torch.ones((3, 2, 2))))
+            self.assertEqual(pipeline.stats()["cache_hits"], 1)
+        self.assertEqual(random.getstate(), python_state)
+        observed_numpy = np.random.get_state()
+        self.assertEqual(observed_numpy[0], numpy_state[0])
+        self.assertTrue(np.array_equal(observed_numpy[1], numpy_state[1]))
+        self.assertEqual(observed_numpy[2:], numpy_state[2:])
+        self.assertTrue(self.torch.equal(self.torch.get_rng_state(), torch_state))
+
     def test_device_budget_refuses_before_image_allocation(self):
         if not self.torch.cuda.is_available():
             self.skipTest("CUDA is required for the controlled allocation gate")
@@ -274,6 +309,60 @@ class TrainingImagePipelineTests(unittest.TestCase):
         self.assertTrue(self.torch.equal(cached.image.cpu(), second.rgb.float().div(255.0)))
         self.assertGreaterEqual(pipeline.stats()["cache_hits"], 1)
         pipeline.close()
+
+    def test_cuda_optional_prefetch_oom_keeps_current_image_and_next_step_retries(self):
+        if not self.torch.cuda.is_available():
+            self.skipTest("CUDA is required for controlled H2D allocator failure")
+        from unittest.mock import patch
+        first = self.HostCameraImage(self.torch.zeros((3, 16, 16), dtype=self.torch.uint8))
+        second = self.HostCameraImage(self.torch.full((3, 16, 16), 255, dtype=self.torch.uint8),
+                                      self.torch.full((1, 16, 16), 128, dtype=self.torch.uint8))
+        original_to = self.torch.Tensor.to
+        torch = self.torch
+        def unavailable_second_allocation(tensor, *args, **kwargs):
+            device = args[0] if args else kwargs.get("device")
+            if (isinstance(device, torch.device) and device.type == "cuda"
+                    and tensor.device.type == "cpu" and tuple(tensor.shape) == (1, 16, 16)
+                    and tensor.dtype == torch.uint8 and int(tensor[0, 0, 0]) == 128):
+                raise torch.cuda.OutOfMemoryError("controlled test allocator failure; no memory exhausted")
+            return original_to(tensor, *args, **kwargs)
+        with self.Pipeline(self.torch, device="cuda",
+                           config=self.Config(slots=2, pinned_bytes=4096, device_bytes=65536)) as pipeline:
+            with patch.object(self.torch.Tensor, "to", unavailable_second_allocation):
+                ready = pipeline.prepare(first, next_camera=second)
+            self.assertTrue(self.torch.equal(ready.image.cpu(), self.torch.zeros((3, 16, 16))))
+            self.assertEqual(pipeline.stats()["resident_slots"], 1)
+            self.assertEqual(pipeline.stats()["prefetch_skips"], 1)
+            ready = pipeline.prepare(second)
+            self.assertTrue(self.torch.equal(ready.image.cpu(), self.torch.ones((3, 16, 16))))
+            self.assertTrue(self.torch.equal(ready.alpha_mask.cpu(), second.alpha_mask.float().div(255.0)))
+        # An unavailable current image is not a successful step. Only optional
+        # lookahead may degrade to the ordinary current-step transfer path.
+        with self.Pipeline(self.torch, device="cuda",
+                           config=self.Config(slots=2, pinned_bytes=4096, device_bytes=65536)) as pipeline:
+            with patch.object(self.torch.Tensor, "to", unavailable_second_allocation):
+                with self.assertRaises(self.torch.cuda.OutOfMemoryError):
+                    pipeline.prepare(second)
+            self.assertEqual(pipeline.stats()["resident_slots"], 0)
+            self.assertEqual(pipeline.stats()["prefetch_skips"], 0)
+            ready = pipeline.prepare(second)
+            self.assertTrue(self.torch.equal(ready.image.cpu(), self.torch.ones((3, 16, 16))))
+
+    def test_cuda_two_image_budget_falls_back_without_rejecting_a_valid_current_step(self):
+        if not self.torch.cuda.is_available():
+            self.skipTest("CUDA is required for the controlled staging-budget gate")
+        first = self.HostCameraImage(self.torch.zeros((3, 16, 16), dtype=self.torch.uint8))
+        second = self.HostCameraImage(self.torch.full((3, 16, 16), 255, dtype=self.torch.uint8))
+        with self.Pipeline(self.torch, device="cuda",
+                           config=self.Config(slots=2, pinned_bytes=4096, device_bytes=4000)) as pipeline:
+            ready = pipeline.prepare(first, next_camera=second)
+            self.assertTrue(self.torch.equal(ready.image.cpu(), self.torch.zeros((3, 16, 16))))
+            self.assertEqual(pipeline.stats()["resident_slots"], 1)
+            self.assertEqual(pipeline.stats()["prefetch_skips"], 1)
+            del ready
+            ready = pipeline.prepare(second)
+            self.assertTrue(self.torch.equal(ready.image.cpu(), self.torch.ones((3, 16, 16))))
+            self.assertLessEqual(pipeline.stats()["device_bytes"], 4000)
 
     def test_legacy_mode_preserves_float_contract_without_new_residency(self):
         from types import SimpleNamespace

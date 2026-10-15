@@ -139,6 +139,41 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   mPerformanceOptimization->setObjectName(QStringLiteral("trainingPerformanceOptimization"));
   mPerformanceOptimization->setChecked(true);
   form->addRow(QString(), mPerformanceOptimization);
+  mCameraPrefetch = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("跨步图像预取"));
+  mCameraPrefetch->setObjectName(QStringLiteral("trainingCameraPrefetch"));
+  mCameraPrefetch->setChecked(true);
+  AppLanguage::bind(mCameraPrefetch, "toolTip", AppLanguage::source(
+      "提前准备下一训练视图并与当前计算重叠；保持原始像素、相机采样顺序和随机状态，不改变照片分辨率。"));
+  form->addRow(QString(), mCameraPrefetch);
+  mCapacityStorage = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("FP32 容量缓冲复用"));
+  mCapacityStorage->setObjectName(QStringLiteral("trainingCapacityStorage"));
+  mCapacityStorage->setChecked(true);
+  AppLanguage::bind(mCapacityStorage, "toolTip", AppLanguage::source(
+      "复用 FP32 参数与 Adam 缓冲，减少增密时的重复分配；保持原始精度、增密算法和完整状态续训，不支持时保留原执行路径。"));
+  form->addRow(QString(), mCapacityStorage);
+  mSurfelAuxiliary = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("按需计算曲面法线"));
+  mSurfelAuxiliary->setObjectName(QStringLiteral("trainingSurfelAuxiliary"));
+  mSurfelAuxiliary->setChecked(true);
+  AppLanguage::bind(mSurfelAuxiliary, "toolTip", AppLanguage::source(
+      "仅在法线项权重为零时跳过未使用的 Python 曲面法线计算；保留所有活跃约束，不代表关闭 CUDA 辅助缓冲。"));
+  form->addRow(QString(), mSurfelAuxiliary);
+  auto *independentPerformanceHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
+      "这三个开关不改变照片分辨率或增密算法；速度与质量取舍仍由质量预设及显式训练参数控制。"));
+  independentPerformanceHint->setObjectName(QStringLiteral("trainingIndependentPerformanceHint"));
+  independentPerformanceHint->setWordWrap(true);
+  form->addRow(independentPerformanceHint);
+  const auto updateIndependentPerformanceControls = [this]() {
+    const bool enabled = mPerformanceOptimization->isChecked();
+    mCameraPrefetch->setEnabled(enabled);
+    mCapacityStorage->setEnabled(enabled);
+    mSurfelAuxiliary->setEnabled(enabled && mBackend->currentData().toString() == QStringLiteral("2dgs"));
+  };
+  connect(mPerformanceOptimization, &QCheckBox::toggled, this, updateIndependentPerformanceControls);
+  connect(mBackend, &QComboBox::currentIndexChanged, this, updateIndependentPerformanceControls);
+  updateIndependentPerformanceControls();
   mTrainingMemoryPercent = new QSpinBox(this);
   mTrainingMemoryPercent->setObjectName(QStringLiteral("trainingMemoryPercent"));
   mTrainingMemoryPercent->setRange(50, 95);
@@ -317,6 +352,9 @@ TrainingConfiguration TrainingDialog::configuration() const {
   result.runColmap = mRunColmap->isChecked();
   result.overwrite = mOverwrite->isChecked();
   result.performanceOptimization = mPerformanceOptimization->isChecked();
+  result.cameraPrefetch = mCameraPrefetch->isChecked();
+  result.capacityStorage = mCapacityStorage->isChecked();
+  result.surfelAuxiliary = mSurfelAuxiliary->isChecked();
   result.trainingMemoryPercent = mTrainingMemoryPercent->value();
   result.trainingEngine = mTrainingEngine->currentData().toString();
   result.growthMode = mGrowthMode->currentData().toString();

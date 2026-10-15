@@ -124,6 +124,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/WorkspaceDropSmokeTest.h
   src/WorkspaceDropPlan.cpp
   src/WorkspaceDropPlan.h
+  src/QualityComparisonDialog.h
+  src/QualityComparisonDialog.cpp
+  src/QualityComparisonSmokeTest.cpp
+  src/QualityComparisonSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -358,6 +362,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DEST
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION source/docs)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -385,7 +391,10 @@ if(BUILD_TESTING)
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
   add_test(NAME native_training_performance_policy COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.worker.test_training_runtime native.worker.test_training_step_profile
-    native.worker.test_training_resource_policy native.worker.test_training_acceleration)
+    native.worker.test_training_resource_policy native.worker.test_training_acceleration
+    native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline
+    native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter
+    native.worker.test_training_quality native.worker.test_training_stress)
   set_tests_properties(native_training_performance_policy PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 60)
   foreach(icon_locale zh_CN en_US ja_JP)
@@ -518,6 +527,10 @@ if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
   add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
+  add_test(NAME native_quality_comparison_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-comparison)
+  set_tests_properties(native_quality_comparison_ui PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_training_performance_ui PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")

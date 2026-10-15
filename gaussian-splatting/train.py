@@ -140,6 +140,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                        if native_runtime is not None else render)
     stock_ssim = (lambda image, target: fused_ssim(image.unsqueeze(0), target.unsqueeze(0))) if FUSED_SSIM_AVAILABLE else ssim
     photometric = native_runtime.photometric_loss(l1_loss, stock_ssim) if native_runtime else None
+    if native_runtime:
+        native_runtime.bind_model(gaussians)
+        native_runtime.report_profile(dataset, opt, pipe)
     gpu_preview = None
     gpu_preview_emit = None
     file_preview = None
@@ -219,7 +222,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         if native_runtime:
             native_runtime.profiler.mark('transfer')
-            ready_image = native_runtime.image(viewpoint_cam)
+            ready_image = native_runtime.image(viewpoint_cam, scene.getTrainCameras(), viewpoint_indices)
             native_runtime.profiler.mark('render')
         render_pkg = render_training(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
@@ -234,6 +237,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = ready_image.image if native_runtime else viewpoint_cam.original_image.cuda()
         if photometric:
             loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
+            native_runtime.observe_loss(iteration)
         elif FUSED_SSIM_AVAILABLE:
             Ll1 = l1_loss(image, gt_image)
             ssim_value = fused_ssim(image.unsqueeze(0), gt_image.unsqueeze(0))

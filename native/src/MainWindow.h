@@ -39,6 +39,7 @@ namespace gsw {
 class TrainingMonitorWidget;
 class TaskRecord;
 class ResourceBudgetDialog;
+class QualityComparisonDialog;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -196,6 +197,7 @@ private:
   void resumeTraining();
   void resumeTrainingJob(const ActiveTrainingJob &active, const QString &historyId = {});
   void showGenerationHistory();
+  void showQualityComparison();
   void resumeGenerationExperiment(const QString &id);
   bool retainGenerationExperiment(const GenerationExperiment &experiment);
   void updateGenerationExperiment(const QString &projectRoot, const QString &id,
@@ -225,6 +227,7 @@ private:
   ProcessSupervisor mProcessSupervisor;
   NativeViewport *mViewport = nullptr;
   QPointer<ResourceBudgetDialog> mResourceBudgetDialog;
+  QPointer<QualityComparisonDialog> mQualityComparisonDialog;
   QDockWidget *mProjectDock = nullptr;
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;

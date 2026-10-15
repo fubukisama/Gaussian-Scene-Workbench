@@ -19,6 +19,7 @@
 #include "TrainingPreflightSmokeTest.h"
 #include "TrainingPerformanceSmokeTest.h"
 #include "WorkspaceDropSmokeTest.h"
+#include "QualityComparisonSmokeTest.h"
 #include "GenerationHistorySmokeTest.h"
 #include "BackendLocator.h"
 #include "ProcessingCompletionSmokeTest.h"
@@ -342,6 +343,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption trainingPerformanceOption(QStringLiteral("smoke-test-training-performance"),
       QStringLiteral("Verify whole-step metrics, quality-risk warnings and live languages in a test-owned monitor."));
   parser.addOption(trainingPerformanceOption);
+  QCommandLineOption qualityComparisonOption(QStringLiteral("smoke-test-quality-comparison"),
+      QStringLiteral("Verify adjustable quality contracts using a real dialog and an owned comparison process."));
+  parser.addOption(qualityComparisonOption);
   QCommandLineOption processingPreviewOption(QStringLiteral("smoke-test-processing-preview"),
       QStringLiteral("Verify continuous point-cloud to Gaussian preview handoffs."));
   parser.addOption(processingPreviewOption);
@@ -426,6 +430,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
+                         parser.isSet(qualityComparisonOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
                          parser.isSet(textureTextOption) ||
@@ -608,6 +613,11 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(qualityComparisonOption)) {
+    QTimer::singleShot(0, &application, [&] {
+      smokeTestCompleted = gsw::runQualityComparisonSmokeTest();
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(trainingPerformanceOption)) {

@@ -182,10 +182,16 @@ def _estimate(model, backend, clone_count, split_count):
     future_peak = ((clone_count + split_count) *
                    (parameter_per_point + optimizer_per_point + statistic_per_point) +
                    max(0, final * gradient_per_point - gradient_bytes))
+    storage = getattr(model, '_gsw_capacity_storage', None)
+    capacity_peak = 0
+    if storage is not None:
+        capacity_peak = storage.estimate_growth(clone_count, split_count)['capacity_additional_peak_bytes']
+        if type(capacity_peak) is not int or capacity_peak < 0:
+            raise ValueError('Invalid capacity storage estimate')
     return dict(point_count=points, transient_point_count=transient,
                 final_point_count=final, parameter_bytes=parameter_bytes,
                 optimizer_state_bytes=moment_bytes,
-                additional_peak_bytes=max(growth_peak, future_peak))
+                additional_peak_bytes=max(growth_peak, future_peak) + capacity_peak)
 
 
 class GrowthAdmission:

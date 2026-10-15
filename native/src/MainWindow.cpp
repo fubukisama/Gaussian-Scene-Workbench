@@ -24,6 +24,7 @@
 #include "ResourceBudgetDialog.h"
 #include "ResourceBudget.h"
 #include "TrainingDialog.h"
+#include "QualityComparisonDialog.h"
 #include "WrappingCheckBox.h"
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
@@ -1699,6 +1700,10 @@ void MainWindow::createMenus() {
   workflowMenu->addAction(mPauseTrainingAction);
   workflowMenu->addAction(mResumeTrainingAction);
   workflowMenu->addAction(mGenerationHistoryAction);
+  auto *qualityComparison = AppLanguage::text(workflowMenu->addAction(
+      QCoreApplication::translate("Workbench", "质量对照…")), AppLanguage::source("质量对照…"));
+  qualityComparison->setObjectName(QStringLiteral("qualityComparisonAction"));
+  connect(qualityComparison, &QAction::triggered, this, &MainWindow::showQualityComparison);
   workflowMenu->addAction(mStopAction);
 
   QMenu *sceneMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景")), AppLanguage::source("场景"), "title");
@@ -5801,6 +5806,23 @@ void MainWindow::updateGenerationExperiment(const QString &projectRoot, const QS
   if (!store.upsert(record, &error)) appendTaskEvent(error);
 }
 
+void MainWindow::showQualityComparison() {
+  if (mQualityComparisonDialog) return; // Never raise an already-open window.
+  const QString root = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = findTrainingPython(root);
+  if (root.isEmpty() || python.isEmpty() ||
+      !QFileInfo(QDir(root).filePath(QStringLiteral("scripts/compare_training_quality.py"))).isFile()) {
+    showError(QCoreApplication::translate("Workbench", "质量对照工具不可用"),
+        QCoreApplication::translate("Workbench", "请检查已配置的 Python 与安装目录中的质量比较脚本；不会自动安装或启动训练。"));
+    return;
+  }
+  mQualityComparisonDialog = new QualityComparisonDialog(
+      python, root, mWorkspace.rootPath(), pythonProcessEnvironment(python), this);
+  mQualityComparisonDialog->setAttribute(Qt::WA_DeleteOnClose);
+  mQualityComparisonDialog->show(); // Only the explicit workflow-menu action opens it.
+}
+
 void MainWindow::showGenerationHistory() {
   if (!mWorkspace.hasProject() || mProcessSupervisor.isRunning()) return;
   GenerationHistoryStore store(mWorkspace.rootPath());
@@ -6255,6 +6277,9 @@ void MainWindow::startTraining() {
   workerConfig.insert(QStringLiteral("performanceOptions"), QJsonObject{
       {QStringLiteral("version"), 1},
       {QStringLiteral("enabled"), config.performanceOptimization},
+      {QStringLiteral("camera_prefetch"), config.cameraPrefetch},
+      {QStringLiteral("capacity_storage"), config.capacityStorage},
+      {QStringLiteral("surfel_auxiliary"), config.surfelAuxiliary},
       {QStringLiteral("usage_fraction"), config.trainingMemoryPercent / 100.0},
       {QStringLiteral("minimum_spare_mib"), 512},
       {QStringLiteral("growth_mode"), config.growthMode},

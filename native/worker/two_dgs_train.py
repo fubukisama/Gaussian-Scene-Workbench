@@ -123,6 +123,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         ema_normal_for_log = state["ema_normal"]
         del state
     render_training = native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
+    if native_runtime.configuration['enabled'] and native_runtime.configuration['surfel_auxiliary']:
+        from native.worker.surfel_render_adapter import SurfelRenderAdapter
+        render_training = SurfelRenderAdapter(render_training)
+        native_runtime.register_surfel_adapter(render_training.capability)
+        emit_gsw_event('[gsw-surfel-auxiliary]', render_training.capability)
     preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
     file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
     try:
@@ -134,6 +139,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     paused = False
     progress_interval = max(1, min(100, opt.iterations // 100))
     photometric = native_runtime.photometric_loss(l1_loss, ssim)
+    native_runtime.bind_model(gaussians)
+    native_runtime.report_profile(dataset, opt, pipe)
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -154,14 +161,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         viewpoint_cam = cameras[viewpoint_indices.pop(randint(0, len(viewpoint_indices)-1))]
 
         native_runtime.profiler.mark('transfer')
-        ready_image = native_runtime.image(viewpoint_cam)
+        ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices)
         native_runtime.profiler.mark('render')
-        render_pkg = render_training(viewpoint_cam, gaussians, pipe, background)
+        if native_runtime.configuration['enabled'] and native_runtime.configuration['surfel_auxiliary']:
+            render_pkg = render_training(viewpoint_cam, gaussians, pipe, background,
+                surface_normal_required=bool(opt.lambda_normal and iteration > 7000))
+            native_runtime.register_surfel_adapter(render_training.capability)
+            native_runtime.observe_surfel_output(bool(opt.lambda_normal and iteration > 7000), render_pkg)
+        else:
+            render_pkg = render_training(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         native_runtime.profiler.mark('loss')
         gt_image = ready_image.image
         loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
+        native_runtime.observe_loss(iteration)
 
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0

@@ -25,6 +25,9 @@ struct TrainingConfiguration {
   bool runColmap = true;
   bool overwrite = false;
   bool performanceOptimization = true;
+  bool cameraPrefetch = true;
+  bool capacityStorage = true;
+  bool surfelAuxiliary = true;
   int trainingMemoryPercent = 90;
   QString trainingEngine = QStringLiteral("stock");
   QString growthMode = QStringLiteral("pause");
@@ -68,6 +71,9 @@ private:
   QCheckBox *mRunColmap = nullptr;
   QCheckBox *mOverwrite = nullptr;
   QCheckBox *mPerformanceOptimization = nullptr;
+  QCheckBox *mCameraPrefetch = nullptr;
+  QCheckBox *mCapacityStorage = nullptr;
+  QCheckBox *mSurfelAuxiliary = nullptr;
   QSpinBox *mTrainingMemoryPercent = nullptr;
   QComboBox *mTrainingEngine = nullptr;
   QComboBox *mGrowthMode = nullptr;

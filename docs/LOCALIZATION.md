@@ -45,6 +45,57 @@ The change is presentation-only and shared by 3DGS, 2DGS, reconstruction and all
 左右のドックパネルとビューポートの間に、タイトルバーと統一したライトグレーの区切りと柔らかな細線を表示します。基準幅を控えめに 8 ピクセルへ広げ、UI スケールに追従します。ホバー時もグレーを保ち、ドラッグによる幅の調整は引き続き利用できます。
 両テーマで、ラベル、チェックボックス／ラジオボタンの文字領域、ダイアログのボタン領域、一括選択ツールバー、サイズ変更グリップは親領域の背景を表示し、白や暗色の矩形が浮く状態を防ぎます。入力欄、ボタン、リストの選択行、進捗バー、ビューポートの情報カードは必要な固有の背景を維持します。実際の描画ピクセルによる検証は、3 言語、ライト／ダークの往復切替、90%／100%／150% の UI スケールを対象とします。
 
+## Explicit quality comparison
+
+**Workflow → Compare Quality…** opens only on an explicit user action. It compares
+two supplied JSON measurement reports against the user's enabled regression and
+absolute limits; it does not train, render or measure quality. PSNR, SSIM, LPIPS
+and optional depth/normal/mesh errors use the reports' metric-protocol identity,
+without guessing or converting geometry units. No limit is enabled by default.
+The shared Python comparison module owns every delta and verdict. The dialog
+localizes pass/regression/unverified/incomparable states and reasons, while
+retaining raw setting paths, values and protocol identifiers. Editing an input
+or limit clears the old verdict; changing language does not change inputs,
+thresholds, the process or its retained report.
+
+Input snapshots and the contract are created only in a fresh workspace-owned
+temporary directory. Each input and the combined helper output are bounded at
+16 MiB; original reports are never overwritten. Cancel and window close stop
+only this dialog's JSON comparison helper, not a training worker. Missing
+metrics, absent independent evidence or training-fit-only results remain
+unverified. A contract pass applies to those supplied reports, not all views or
+an unrelated active experiment; it does not automatically relabel the training
+monitor's quality-evidence warning.
+**Save Comparison Report…** is available only for a current valid machine
+report, including an explicit unverified/incomparable result. It writes a new
+JSON file containing the complete comparison and selected contract, never
+overwriting an existing file or either input report. Changing inputs/limits
+disables saving until comparison completes again. No report opens automatically.
+The settings table displays at most 512 changes and summarizes long values;
+the machine result and exported JSON retain their complete original values.
+
+中文：“工作流 → 质量对照…”仅由用户主动打开。选择两份 JSON 实测报告后，可独立
+启用允许退化、绝对上下限和几何证据要求，默认不启用任何门限。界面展示同一 Python
+比较模块给出的逐项变化、状态、原因及原始参数差异，不启动训练、渲染或质量测量。
+缺少指标、缺少独立证据或只有训练拟合结果时保持“未验证”；通过只适用于所选报告
+与门限，不会替无关联的训练任务宣称质量通过。编辑输入或门限清除旧判定，切换
+语言保留数据和进程。原报告不改写，取消和关闭只停止本窗口自己的比较辅助进程。
+“保存对照报告…”仅保存当前有效的机器结果与所选门限，拒绝覆盖已有文件或输入报告，
+不会自动打开文件。表格最多展示 512 项参数差异并摘要长值，导出的 JSON 保留完整内容。
+
+日本語：「ワークフロー → 品質を比較…」はユーザーの明示操作でのみ開きます。
+2 つの JSON 測定報告に対し、許容する品質低下、絶対上下限、幾何品質の根拠を
+個別に設定します。既定ではしきい値は無効です。同じ Python 比較モジュールの
+変化量・判定・理由・元の設定差分を表示し、学習・描画・品質測定は開始しません。
+指標や独立した根拠が不足する場合、または学習への適合結果だけの場合は未検証を
+維持します。合格は選択した報告としきい値に限り、無関係な学習の品質合格には
+しません。入力・しきい値の編集で古い判定を消去し、言語変更ではデータとプロセスを
+保持します。元の報告は変更せず、キャンセルと終了は本ウィンドウ自身の比較用
+補助プロセスのみを停止します。
+「比較報告を保存…」は現在の有効な機械判定と選択したしきい値を新しい JSON に
+保存し、既存ファイルや入力報告は上書きせず、自動で開きません。表の設定差分は
+最大 512 件で長い値を要約しますが、JSON には完全な内容を保持します。
+
 ## Terminology
 
 Scene and training-output names accept arbitrary Unicode text, spaces and symbols (including characters forbidden in Windows filenames). Only blank names are rejected. `ManagedName.h` maps display names to backend-safe ASCII storage identifiers; matching Python validation must stay in sync. Legacy safe ASCII names keep their paths, except the reserved `gsw-name-` namespace. Names requiring encoding use that prefix plus the full SHA-256 of the exact UTF-8 name. Do not trim, case-fold, translate or sanitize the display name. `.gsw-name.json` retains the original name alongside the dataset and travels with project migration/backup; import publishes it in the same transaction as the data. Existing job configurations without display metadata remain supported. Actual export filenames still obey operating-system filesystem rules.
@@ -106,6 +157,13 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 预计尺寸 / 实际训练图像 | Estimated Dimensions / Loaded Training Images | 予想寸法 / 読み込み済み学習画像 |
 | 稀疏 Adam / 曝光补偿 | Sparse Adam / Exposure Compensation | スパース Adam / 露出補正 |
 | 高斯点 / 增密 | Gaussian Splat / Densification | ガウシアンスプラット / 高密度化 |
+| 跨步图像预取 | Cross-step Image Prefetch | ステップ間の画像先読み |
+| FP32 容量缓冲复用 | FP32 Capacity Buffer Reuse | FP32 容量バッファの再利用 |
+| 按需计算曲面法线 | On-demand Surface Normals | 必要時のみ曲面法線を計算 |
+| 质量验证 / 独立验证结果 | Quality Validation / Independent Validation Results | 品質検証 / 独立した検証結果 |
+| 质量对照 / 允许退化 | Quality Comparison / Allowed Regression | 品質比較 / 許容する品質低下 |
+| 绝对下限 / 绝对上限 | Absolute Minimum / Absolute Maximum | 絶対下限 / 絶対上限 |
+| 按所选门限通过 / 超出质量门限 / 未验证 / 不具可比性 | Within Selected Limits / Outside Quality Limits / Unverified / Not Comparable | 選択したしきい値を満たしています / 品質のしきい値を超えています / 未検証 / 比較不可 |
 | 显存常驻 / 深度顺序 | GPU-Resident / Depth Order | GPU メモリ常駐 / 深度順序 |
 | 移动 / 旋转 / 缩放 | Move / Rotate / Scale | 移動 / 回転 / スケール |
 | 等比缩放 | Uniform Scale | 均等スケール |

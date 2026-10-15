@@ -342,6 +342,16 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   }
   layout->addLayout(mMetricsGrid);
 
+  mQualityEvidence = AppLanguage::text(new QLabel(content), AppLanguage::source(
+      "质量验证：未提供独立验证结果；训练 PSNR 不等于最终质量。"));
+  mQualityEvidence->setObjectName(QStringLiteral("trainingQualityEvidence"));
+  mQualityEvidence->setWordWrap(true);
+  mQualityEvidence->setTextFormat(Qt::PlainText);
+  mQualityEvidence->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mQualityEvidence->setMinimumWidth(0);
+  mQualityEvidence->hide();
+  layout->addWidget(mQualityEvidence);
+
   mPerformanceDetails = new QLabel(content);
   mPerformanceDetails->setObjectName(QStringLiteral("trainingPerformanceDetails"));
   mPerformanceDetails->setWordWrap(true);
@@ -524,6 +534,7 @@ const TrainingTelemetry &TrainingMonitorWidget::telemetry() const {
 
 void TrainingMonitorWidget::refreshMetrics() {
   const QLocale locale;
+  mQualityEvidence->setVisible(mHasTraining);
   mEffectiveParameters->setVisible(!mTrainingSummary.isEmpty());
   if (!mTrainingSummary.isEmpty()) {
     const auto &summary = mTrainingSummary;

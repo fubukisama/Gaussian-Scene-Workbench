@@ -110,6 +110,10 @@ class CommandSecurityTests(unittest.TestCase):
             'native/worker/training_summary.py',
             'native/worker/training_step_profile.py',
             'native/worker/training_resource_policy.py',
+            'native/worker/training_camera_lookahead.py',
+            'native/worker/training_capacity_storage.py',
+            'native/worker/training_quality.py',
+            'native/worker/surfel_render_adapter.py',
         ):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)

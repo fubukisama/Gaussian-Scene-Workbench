@@ -353,7 +353,18 @@ class TrainingImagePipeline:
             self._evict(victim)
         used = {entry.slot for entry in self._transfers.values()}
         slot = next(index for index in range(self.config.slots) if index not in used)
-        ready, event, start = self._convert(payload, slot)
+        try:
+            ready, event, start = self._convert(payload, slot)
+        except self.torch.cuda.OutOfMemoryError:
+            # Available headroom can change after the configured-budget check.
+            # A partially copied optional image must not abort a valid step or
+            # allow its pinned region to be reused before queued H2D completes.
+            if self._copy_stream is not None:
+                self._copy_stream.synchronize()
+            if keep is None:
+                raise
+            self._prefetch_skips += 1
+            return None
         entry = _Transfer(camera, payload, ready, slot, event, start,
                           output_bytes if self.device.type == "cuda" else 0)
         self._transfers[key] = entry
@@ -441,8 +452,11 @@ class TrainingImagePipeline:
             return ReadyImage(legacy(payload.rgb), legacy(payload.alpha_mask),
                               legacy(payload.invdepthmap), legacy(payload.depth_mask))
         entry = self._stage(camera)
-        if next_camera is not None and self.config.slots > 1:
-            self._stage(next_camera, keep=id(camera))
+        if next_camera is not None and next_camera is not camera:
+            if self.config.slots > 1:
+                self._stage(next_camera, keep=id(camera))
+            else:
+                self._prefetch_skips += 1
         if entry.event is not None:
             consumer = self.torch.cuda.current_stream(self.device)
             consumer.wait_event(entry.event)

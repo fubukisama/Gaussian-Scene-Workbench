@@ -24,6 +24,31 @@ def digest(path):
     return value.hexdigest()
 
 
+def memory_observer_command(repository, trainer_pid, windows_root=None):
+    """Use the Windows component's absolute location, not a Conda PATH lookup."""
+    system = Path(windows_root or os.environ.get('SystemRoot', 'C:/Windows'))
+    executable = system / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    if not executable.is_file():
+        raise FileNotFoundError('Windows PowerShell is unavailable: ' + str(executable))
+    return [str(executable), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            str(Path(repository) / 'scripts/training_memory_monitor.ps1'),
+            '-TrainerPid', str(trainer_pid)]
+
+
+def pause_owned_process(process, request, session, grace=45):
+    """A failed observer must not leave this harness's trainer unsupervised."""
+    request.write_text(json.dumps({'session': session}), encoding='utf-8')
+    try:
+        process.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+
+
 def child(arguments):
     import runpy
     import torch
@@ -43,11 +68,13 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--python', type=Path)
     parser.add_argument('--backend', choices=('3dgs', '2dgs'), default='3dgs')
-    parser.add_argument('--case', choices=('legacy', 'automatic', 'pressure'), default='automatic')
+    parser.add_argument('--case', choices=('legacy', 'automatic', 'pressure', 'growth'), default='automatic')
     parser.add_argument('--points', type=int, default=1000000)
     parser.add_argument('--iterations', type=int, default=60)
     parser.add_argument('--timeout', type=int, default=180)
     parser.add_argument('--memory-observer', action='store_true')
+    parser.add_argument('--baseline-runtime', action='store_true',
+                        help='Keep the previous bounded runtime but disable the new exact-storage/prefetch/auxiliary features.')
     args = parser.parse_args()
     if args.child is not None:
         child(args.child)
@@ -61,6 +88,8 @@ def main():
     if not 1 <= args.points <= 3000000 or not 2 <= args.iterations <= 200 or not 10 <= args.timeout <= 600:
         raise ValueError('Stress limits exceed bounded acceptance scope')
     repository = Path(__file__).resolve().parents[1]
+    if args.memory_observer and os.name == 'nt':
+        memory_observer_command(repository, 0)  # Resolve before any trainer is launched.
     files = [path for folder in ('images', 'sparse') for path in (source / folder).rglob('*') if path.is_file()]
     if args.model_ply:
         files.append(args.model_ply.resolve(strict=True))
@@ -89,6 +118,8 @@ def main():
     performance = {'enabled': args.case != 'legacy', 'profile_interval': 1,
                    'usage_fraction': .5 if args.case == 'pressure' else .9,
                    'minimum_spare_mib': 8192 if args.case == 'pressure' else 512}
+    if args.baseline_runtime:
+        performance.update(camera_prefetch=False, capacity_storage=False, surfel_auxiliary=False)
     control = {'backend': args.backend, 'output': str(output), 'request': str(request),
                'session': session, 'resume': False, 'performance': performance}
     env = os.environ.copy()
@@ -105,7 +136,7 @@ def main():
                '-s', str(dataset), '-m', str(output), '-r', '1', '--data_device', 'cpu',
                '--iterations', str(total), '--test_iterations', str(total + 1), '--save_iterations', str(total),
                '--densify_from_iter', '0',
-               '--densify_until_iter', str(total) if args.case == 'pressure' else '0',
+               '--densify_until_iter', str(total) if args.case in ('pressure', 'growth') else '0',
                '--densification_interval', '2', '--densify_grad_threshold', '0.00000001']
     if args.backend == '3dgs':
         command += ['--disable_viewer', '--optimizer_type', 'default', '--antialiasing']
@@ -121,9 +152,13 @@ def main():
         monitor_log = None
         if args.memory_observer and os.name == 'nt':
             monitor_log = (root / 'memory-observations.jsonl').open('w', encoding='utf-8')
-            monitor = subprocess.Popen(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-                '-File', str(repository / 'scripts/training_memory_monitor.ps1'), '-TrainerPid', str(process.pid)],
-                stdout=monitor_log, stderr=subprocess.STDOUT, creationflags=flags)
+            try:
+                monitor = subprocess.Popen(memory_observer_command(repository, process.pid),
+                    stdout=monitor_log, stderr=subprocess.STDOUT, creationflags=flags)
+            except OSError:
+                monitor_log.close()
+                pause_owned_process(process, request, session)
+                raise
         while process.poll() is None:
             elapsed = time.monotonic() - started
             if elapsed > args.timeout and not interrupted:
@@ -147,7 +182,8 @@ def main():
             monitor_log.close()
     events = []
     for line in (root / 'training.log').read_text(encoding='utf-8', errors='replace').splitlines():
-        for name in ('performance', 'growth', 'runtime', 'image-cache'):
+        for name in ('performance', 'growth', 'runtime', 'image-cache', 'image-staging',
+                     'capacity-storage', 'metrics', 'quality-profile'):
             prefix = '[gsw-training-' + name + '] '
             if prefix in line:
                 encoded = line.split(prefix, 1)[1]
@@ -158,6 +194,7 @@ def main():
                     pass
     unchanged = all(path.is_file() and digest(path) == before[str(path)] for path in files)
     report = {'version': 1, 'backend': args.backend, 'case': args.case,
+              'baseline_runtime': args.baseline_runtime,
               'source_unchanged': unchanged, 'source_hashes': before,
               'photos': len(list((dataset / 'images').glob('*'))),
               'warm_start_only': bool(warm_iteration), 'optimizer_resume': False,

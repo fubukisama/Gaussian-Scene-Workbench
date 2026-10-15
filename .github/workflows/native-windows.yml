@@ -264,7 +264,7 @@ jobs:
         run: |
           node --version
           if ($LASTEXITCODE -ne 0) { throw "The hosted runner is missing Node for the test-owned argv receiver." }
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts

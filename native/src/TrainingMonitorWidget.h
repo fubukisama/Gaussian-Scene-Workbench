@@ -69,6 +69,7 @@ private:
   QLabel *mReconstructionQuality = nullptr;
   QLabel *mEffectiveParameters = nullptr;
   QLabel *mPerformanceDetails = nullptr;
+  QLabel *mQualityEvidence = nullptr;
   QLabel *mGrowthWarning = nullptr;
   QProgressBar *mProgress = nullptr;
 };
