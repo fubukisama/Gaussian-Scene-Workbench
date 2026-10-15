@@ -12,6 +12,14 @@ checkout as the binary, not reconstructed from a moving branch URL. The
 package's `source-manifest.json` records the executable hash and source-file
 hashes; preserve it with the corresponding package when redistributing.
 
+Setup EXE distributions also contain `source/packaging/windows/gsw.iss`, its
+catalog subset and the installer build/bootstrap/acceptance tools under
+`source/scripts/`. They are mandatory, not an optional unchecked component.
+Wrapping an already accepted desktop binary adds these build materials without
+altering its matching native source or EXE, then regenerates the manifest with
+the same EXE identity. See `docs/WINDOWS_INSTALLER.md` for reproduction and the
+independent Inno Setup license. Training components retain their own notices.
+
 ## Rebuild the main program
 
 Use a C++20 compiler (MSVC 2022 on Windows), CMake >=3.24, Python 3.12,

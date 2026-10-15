@@ -1,5 +1,14 @@
 # Native desktop localization
 
+## Separate Windows setup wizard
+
+Setup offers `zh_CN`, `en_US` and `ja_JP` before opening its pages. Its custom
+runtime/safety/finish text is generated from `native/i18n/catalog.json` and
+validated by the same command below. Its exact subset accompanies the installer
+under `source/packaging/windows/installer-catalog.json`; standard wizard controls
+use maintained Inno translations. This separate process does not change the
+desktop application's language, settings, model or worker state.
+
 ## Language switching
 
 Open **View → Language** (`视图 → 语言 / Language`, `ビュー → 言語 / Language`) and choose **简体中文**, **English**, or **日本語**. The language changes immediately in the current window and is remembered for future launches. No restart or confirmation is needed. Switching refreshes text and fonts without reloading the model, resetting its transforms/camera/selection, or interrupting processing and backup jobs. Dock layout, active tabs, edited dialog parameters, training progress and curve samples are retained.

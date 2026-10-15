@@ -259,7 +259,11 @@ jobs:
             "scripts/sign_windows_artifacts.ps1",
             "scripts/stage_native_backend.ps1",
             "scripts/setup_native_ci_display.ps1",
-            "scripts/setup_native_ci_graphics.ps1"
+            "scripts/setup_native_ci_graphics.ps1",
+            "scripts/bootstrap_inno_setup.ps1",
+            "scripts/build_windows_installer.ps1",
+            "scripts/test_windows_installer.ps1",
+            "scripts/test_windows_installer_ui.ps1"
           )
           foreach ($script in $scripts) {
             $tokens = $null
@@ -344,6 +348,42 @@ jobs:
           }
           & $env:QA_PYTHON -I -B native/artifact/native/worker/import_preflight.py --backend-root native/artifact
           if ($LASTEXITCODE -ne 0) { throw "Packaged native compute import failed." }
+
+      - name: Build and verify Windows setup wizard
+        shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
+        run: |
+          & $env:QA_PYTHON -B scripts/test_windows_installer.py
+          if ($LASTEXITCODE -ne 0) { throw "Installer contract tests failed." }
+          $compiler = ./scripts/bootstrap_inno_setup.ps1 -InstallRoot "$env:RUNNER_TEMP/gsw-inno-7.1.0" -CacheRoot "$env:RUNNER_TEMP/gsw-inno-cache"
+          ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler
+          ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup-test" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler -TestBuild
+          $testSetup = (Get-ChildItem native/setup-test -File -Filter '*.exe').FullName
+          ./scripts/test_windows_installer.ps1 -SetupPath $testSetup -TestRoot "$env:RUNNER_TEMP/gsw-installer-validation"
+          ./scripts/test_windows_installer_ui.ps1 -SetupPath $testSetup -TestRoot "$PWD/native/setup-validation"
+
+      - name: Upload Windows setup installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: Gaussian-Scene-Workbench-windows-x64-setup
+          path: |
+            native/setup/*.exe
+            native/setup/*.exe.sha256
+            native/setup/*.exe.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload installer acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-installer-acceptance
+          path: |
+            native/setup-validation/
+            ${{ runner.temp }}/gsw-installer-validation/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload Windows preview
         uses: actions/upload-artifact@v7

@@ -6,6 +6,15 @@ Documentation updated: `2026-10-15`. Product version remains `0.3.1-native-previ
 
 ## Current preview
 
+Windows has a real setup wizard definition, not only a portable ZIP. See
+[Windows Installer](../docs/WINDOWS_INSTALLER.md) for build and acceptance.
+The complete native/Qt/backend/source payload, shortcuts and Windows uninstall
+entry are installed without auto-starting GSW or training; research runtimes
+remain separate.
+
+中文：Setup 安装向导支持目录选择、快捷方式和系统卸载，保留用户新增数据与独立训练环境。
+日本語：Setup は導入先、ショートカット、アンインストールに対応し、追加データと独立した学習環境を保持します。
+
 - Source-ported Blender cursor wheel zoom (persistent View → Zoom to Cursor) and projection-correct pan cover all model displays; zoom anchors the view-target plane, not an automatically picked surface. Source-ported LichtFeld whole-page upload budgeting is shared by paged points/meshes, with first-page progress and unchanged actual RAM/VRAM admission. See [fixed sources, capability matrix and acceptance limits](../docs/UPSTREAM_NATIVE_UPGRADES.md).
 
 - Simplified Chinese, English and Japanese UI: choose View → Language to switch immediately, without restarting or interrupting running tasks. The preference is remembered; model, camera, selection, dialog parameters and training curves are preserved. New/changed features must maintain all three catalogs and live text bindings, and pass the build-time translation gate. See [localization and terminology](../docs/LOCALIZATION.md).

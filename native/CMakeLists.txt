@@ -371,6 +371,16 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATIO
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION source/docs)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/windows" DESTINATION source/packaging)
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/bootstrap_inno_setup.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_windows_installer.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/prepare_windows_installer.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer_ui.ps1"
+  DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION source/docs)
 
 include(CTest)
 if(BUILD_TESTING)

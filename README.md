@@ -31,13 +31,13 @@ Mesh-generation routes include bounded/unbounded TSDF, SuGaR and GS2Mesh, with o
 
 ### Download and run on Windows
 
-1. In the [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml), select a **successful run for this branch and the desired commit**, then download its artifact. Artifacts expire; a newer source commit does not guarantee a ready binary. Alternatively, build from source below.
-2. Extract the **complete package** to a writable directory and launch `bin/Gaussian Scene Workbench.exe`. Keep the Qt DLLs, plugins and packaged backend files; do not copy only the EXE.
+1. The actual installer is `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`, with a destination/shortcut wizard and Windows uninstall support. Obtain it from native [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases) when published, or the **Windows setup installer** artifact of a fully successful [Native Windows run](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml). If no accepted Setup exists yet, use the [installer guide](docs/WINDOWS_INSTALLER.md); an in-progress run is not a release.
+2. The separate portable artifact is only a ZIP: extract the **complete package** to a writable directory and launch `bin/Gaussian Scene Workbench.exe`. Keep Qt DLLs, plugins, backend files, licenses and corresponding source. Setup prefers a writable non-system drive, remembers the chosen directory and preserves user-added data on uninstall.
 3. Verify the external runtime before reconstruction/training, then add media or import PLY/SPZ. See [Windows runtime setup](docs/WINDOWS_NATIVE_RUNTIME.md) and [COLMAP setup](docs/COLMAP_SETUP.md).
 
 Prefer a non-system drive when available, such as `D:\Apps\GSW`. C:-only devices automatically use the existing writable workspace/build/package location. Windows Application Control may require approved signed binaries/runtimes; the app does not disable or bypass that policy.
 
-Use the native package and runtime instructions above. Old application releases remain historical artifacts and are not the current installation route.
+The old HTML/Electron Releases have been retired. Setup never auto-launches GSW or training. Unsigned previews may require an approved code-signing/runtime policy; no Windows security policy is bypassed.
 
 ### Build the native desktop
 
@@ -106,11 +106,11 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ### 下载、安装与构建
 
-1. 在 [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) 选择对应分支/提交的**成功运行**并下载 artifact；有保存时限，并非每个新提交都有可用安装包。
-2. 完整解压后运行 `bin/Gaussian Scene Workbench.exe`；保留 Qt DLL、插件和后端文件，不要只复制 EXE。
+1. 真正的安装器为 `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`，带目录选择、快捷方式和系统卸载。正式发布后从 [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases) 获取，或下载 [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) **完整成功运行**的 **Windows setup installer** 附件；尚无验收通过的 Setup 时按[安装器指南](docs/WINDOWS_INSTALLER.md)构建，不能把运行中的任务当作已发布版本。
+2. 另一个便携附件只是 ZIP：完整解压后运行 `bin/Gaussian Scene Workbench.exe`，保留 Qt DLL、插件、后端、许可证和对应源码。Setup 默认优先可写非系统盘，升级记住所选目录，卸载保留用户新增数据。
 3. 重建/训练前按[运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)与[COLMAP](docs/COLMAP_SETUP.md)说明验证环境；已有 PLY/SPZ 模型可直接导入。
 
-有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。企业应用控制需要获准的签名/运行库，软件不绕过安全策略。请使用上方原生安装包与运行环境说明；历史发行包不作为当前安装入口。
+有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。旧 HTML/Electron Releases 已下架；Setup 不自动启动程序或训练，未签名预览版可能需要获准的签名/运行策略，软件不绕过安全策略。
 
 源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
 
@@ -142,8 +142,8 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ### 入手・起動・ビルド
 
-1. [Native Windows workflow](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) で対象ブランチ/コミットの**成功した実行**を選び artifact を取得します。保存期限があり、最新ソースのバイナリーが常に存在するとは限りません。
-2. 全体を展開し `bin/Gaussian Scene Workbench.exe` を実行します。Qt DLL、プラグイン、バックエンドを保持し、EXE だけをコピーしないでください。
+1. 正式なインストーラーは `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe` で、導入先、ショートカット、システムのアンインストールに対応します。公開後の [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases)、または [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) の**全検査に成功した実行**の **Windows setup installer** から取得します。Setup がまだない場合は[インストーラーの手順](docs/WINDOWS_INSTALLER.md)を参照してください。実行中のジョブは公開版ではありません。
+2. 別のポータブル配布は ZIP です。全体を展開して `bin/Gaussian Scene Workbench.exe` を実行し、Qt DLL、プラグイン、バックエンド、ライセンス、対応ソースを保持してください。Setup は書き込み可能な非システムドライブを優先し、更新先を記憶し、削除時も追加データを保持します。
 3. 学習/再構築前に[実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と[COLMAP](docs/COLMAP_SETUP.md)を確認します。既存 PLY/SPZ は直接読み込めます。
 
 別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。上記のネイティブパッケージと実行環境の手順を使用し、過去の配布物を現在の導入先とは扱いません。
