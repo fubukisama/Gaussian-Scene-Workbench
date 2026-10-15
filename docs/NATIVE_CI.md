@@ -4,21 +4,21 @@
 
 中文：`Upstream viewport acceptance` 并行执行三语言真实滚轮／平移／菜单操作、
 小样本真实点云分页及两处纯模块回归，上传实际帧缓冲和日志。它没有 CodeQL
-跟踪构建的耗时，但不替代原全量构建、107 项原生测试、worker 或安全扫描。
+跟踪构建的耗时，但不替代原全量构建、115 项原生测试、worker 或安全扫描。
 `GSW_FORCE_POINT_PAGING=1` 仅是默认关闭的诊断入口；常规模型加载不改变。
 详见 [来源、范围与测量边界](UPSTREAM_NATIVE_UPGRADES.md)。
 
 English: `Upstream viewport acceptance` runs real wheel/pan/menu operations in
 three locales, controlled actual point paging and both pure adapter regressions
 in parallel. It uploads framebuffers/logs without the traced CodeQL build cost,
-but does not replace the full build, 107 native tests, worker or security scans.
+but does not replace the full build, 115 native tests, worker or security scans.
 `GSW_FORCE_POINT_PAGING=1` is default-off diagnostic input, not a production
 loading-policy change. See [scope and measurement limits](UPSTREAM_NATIVE_UPGRADES.md).
 
 日本語：`Upstream viewport acceptance` は三言語の実際のホイール・パン・メニュー
 操作、小サンプルの実点群ページング、両アダプターの回帰を並行して実行し、
 フレームバッファとログを保存します。CodeQL トレースの時間は不要ですが、
-全ビルド・原生 107 テスト・worker・安全検査の代替ではありません。
+全ビルド・原生 115 テスト・worker・安全検査の代替ではありません。
 `GSW_FORCE_POINT_PAGING=1` は既定無効の診断で、通常の読込方針は変えません。
 
 ## GPL Blender geometry and independent surfel gate (2026-10-14)
@@ -63,7 +63,7 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 
 这些是针对已证明的失败所准备的 CI 配置修复，不代表新运行已经通过。仍须在修复提交对应的真实 Actions 中确认预检、完整测试、安装包上传以及代码扫描上传。
 
-软件渲染可能比实际 GPU 慢。高斯交互测试仍保留 512202 个高斯、160 帧及完整图像／驻留／撤销断言，只将深浅色两项的完成时限设为 600 秒；测试提前完成就立即结束，不改变 FPS 或性能阈值。包含编译追踪与安装包上传的任务总时限为 90 分钟，为实际出现的 20–35 分钟编译及全套测试留足时间。烟雾测试输出实际 OpenGL 渲染器信息，不能仅凭环境变量认定驱动已生效。
+软件渲染可能比实际 GPU 慢。高斯交互测试仍保留 512202 个高斯、160 帧及完整图像／驻留／撤销断言，只将深浅色两项的完成时限设为 600 秒；测试提前完成就立即结束，不改变 FPS 或性能阈值。运行 [38698219759](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/38698219759) 的编译追踪耗时 55 分钟，90 分钟总时限在 58/115 项全部通过、正在运行第 59 项时取消了任务。因此总预算改为 150 分钟，并对编译／C++ 分析／完整 CTest 分别设 75／20／50 分钟阶段上限；所有单项 CTest 时限、质量与性能门槛保持不变。完整串行测试不筛选或跳过用例，其日志另存为 `native-full-test-evidence`，在测试失败后也保留诊断。烟雾测试输出实际 OpenGL 渲染器信息，不能仅凭环境变量认定驱动已生效。
 
 实际 `llvmpipe`／`softpipe` 使用系统内存，不应把其 NVX 扩展返回值当成独立显存。资源探测明确保留 GPU 统计“未知”，继续测量真实 RAM；自动安全回退与手动预算语义保持不变。真实硬件 DXGI/NVX 的零余量保护不变。真实无窗口上下文回归防止软件读数随机变化导致连小网格都被拒绝；详见当前 Mesa revision 的[软件内存查询](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c)与[NVX 查询实现](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c)。
 
@@ -123,7 +123,7 @@ After the Python dependency fix, `Native Windows` run #141 reached downstream te
 
 These prepared CI changes address proven failures; they are not a claim that a new run has already passed. Acceptance still requires the repaired commit's real Actions preflight, full suite, package upload and code-scanning upload.
 
-Software rendering may be slower than a physical GPU. Gaussian interaction retains 512202 Gaussians, 160 frames and every image/residency/undo assertion; only the dark/light checks' completion timeout is 600 seconds. Successful checks finish immediately; FPS and performance thresholds are unchanged. The job's 90-minute total limit accommodates observed 20–35-minute traced builds, full regressions and package upload. Smoke diagnostics report the actual OpenGL renderer, rather than assuming a driver is active from environment variables alone.
+Software rendering may be slower than a physical GPU. Gaussian interaction retains 512202 Gaussians, 160 frames and every image/residency/undo assertion; only the dark/light checks' completion timeout is 600 seconds. Successful checks finish immediately; FPS and performance thresholds are unchanged. Run [38698219759](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/38698219759) took 55 minutes for traced compilation; the 90-minute job cap cancelled it during test 59/115 after all 58 completed tests passed. The total budget is now 150 minutes, with 75/20/50-minute phase limits for compilation/C++ analysis/full CTest. Every individual CTest timeout, quality gate and performance threshold is unchanged. The complete serial suite has no test filtering or skipped cases; `native-full-test-evidence` retains its logs, including after test failure. Smoke diagnostics report the actual OpenGL renderer, rather than assuming a driver is active from environment variables alone.
 
 Actual `llvmpipe`/`softpipe` contexts use system memory; their NVX fields must not be treated as dedicated VRAM. GPU statistics remain explicitly unavailable while real RAM probing continues. Automatic safe fallback and manual-budget semantics are unchanged, as is real hardware's DXGI/NVX zero-headroom protection. Real windowless-context regression prevents unstable software counters from refusing even tiny meshes. See the pinned Mesa revision's [software memory query](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c) and [NVX implementation](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c).
 
@@ -183,7 +183,7 @@ Python 依存関係の修正後、`Native Windows` の実行 #141 は後続テ�
 
 これらは確認済みの失敗に対して準備した CI 設定修正であり、新しい実行の成功を示すものではありません。修正コミットの実際の Actions で、事前検査、全テスト、パッケージおよびコードスキャンのアップロードまで確認する必要があります。
 
-ソフトウェア描画は実 GPU より遅い場合があります。ガウシアンの操作テストは 512202 個、160 フレーム、画像・常駐・取り消しの全検証を維持し、ライト／ダークの完了タイムアウトだけを 600 秒にします。完了すれば直ちに終了し、FPS や性能基準は変更しません。実測で 20–35 分かかったコンパイル追跡、全テスト、アップロードの時間を確保し、ジョブの上限は 90 分です。スモークテストの診断で実際の OpenGL レンダラーを報告し、環境変数だけでドライバーの有効化を判断しません。
+ソフトウェア描画は実 GPU より遅い場合があります。ガウシアンの操作テストは 512202 個、160 フレーム、画像・常駐・取り消しの全検証を維持し、ライト／ダークの完了タイムアウトだけを 600 秒にします。完了すれば直ちに終了し、FPS や性能基準は変更しません。[実行 38698219759](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/38698219759) の追跡コンパイルは 55 分かかり、90 分の全体上限で 58/115 件がすべて成功した後、第 59 件の実行中に取り消されました。全体予算を 150 分、コンパイル／C++ 解析／全 CTest の段階上限を 75／20／50 分とします。個別 CTest のタイムアウト、品質・性能基準は変更しません。全件を逐次実行し、対象の絞り込みやスキップを追加せず、失敗時も `native-full-test-evidence` にログを保存します。スモークテストの診断で実際の OpenGL レンダラーを報告し、環境変数だけでドライバーの有効化を判断しません。
 
 実際の `llvmpipe`／`softpipe` はシステムメモリを使うため、NVX の値を専用 GPU メモリとして扱いません。GPU 統計を明示的に取得不能とし、実際の RAM は引き続き測定します。自動の安全な代替予算、手動予算、実 GPU の DXGI/NVX による余量ゼロの保護は維持します。表示ウィンドウのない実コンテキストで、不安定なソフトウェア統計による小さなメッシュの読み込み拒否を防ぐ回帰検査を実行します。固定 Mesa revision の[ソフトウェアメモリ検査](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/gallium/auxiliary/util/u_helpers.c)と[NVX 実装](https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa/+/9a0169f2a7/src/mesa/main/get.c)を参照してください。
 
