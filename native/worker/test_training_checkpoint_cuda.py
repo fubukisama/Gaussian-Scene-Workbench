@@ -4,7 +4,11 @@ Run with the configured training Python, its DLL PATH and TEMP on a data drive:
     python -m unittest native.worker.test_training_checkpoint_cuda
 Only test-owned synthetic data and subprocesses are used. No user models touched.
 Set GSW_CHECKPOINT_TEST_BACKEND=2dgs to test the separate surfel runtime.
+Failed fixtures and child logs are retained under the checkout's .planning
+directory. Set GSW_CHECKPOINT_TEST_EVIDENCE_ROOT to retain successful fixtures
+too, in an explicitly selected writable directory. No assertion is relaxed.
 """
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -17,6 +21,36 @@ import shutil
 import uuid
 
 from native.worker.training_checkpoint import atomic_json, read_manifest
+
+
+@contextmanager
+def resume_acceptance_fixture(evidence_root=None):
+    """Keep failed acceptance evidence without changing numerical assertions."""
+    explicit = evidence_root or os.environ.get("GSW_CHECKPOINT_TEST_EVIDENCE_ROOT")
+    base = Path(explicit) if explicit else Path(__file__).resolve().parents[2] / ".planning/checkpoint-test-evidence"
+    base.mkdir(parents=True, exist_ok=True)
+    base = base.resolve()
+    root = Path(tempfile.mkdtemp(prefix="native-cuda-resume-", dir=str(base))).resolve()
+    try:
+        yield root
+    except BaseException as error:
+        try:
+            atomic_json(root / "acceptance-status.json", {
+                "version": 1, "status": "failed", "exception_type": type(error).__name__,
+                "message": str(error)[:8192]})
+        except OSError as write_error:
+            print("Acceptance status could not be written: {}".format(write_error), file=sys.stderr)
+        print("Failed CUDA acceptance evidence retained: {}".format(root), file=sys.stderr)
+        raise
+    else:
+        atomic_json(root / "acceptance-status.json", {"version": 1, "status": "passed"})
+        if explicit:
+            print("CUDA acceptance evidence retained: {}".format(root), file=sys.stderr)
+        else:
+            # Delete only the freshly created child of this exact evidence root.
+            if root.resolve().parent != base or root.is_symlink():
+                raise ValueError("Refusing to remove a fixture outside its evidence directory")
+            shutil.rmtree(str(root))
 
 
 class CudaResumeTests(unittest.TestCase):
@@ -36,7 +70,7 @@ class CudaResumeTests(unittest.TestCase):
         self.assertGreaterEqual(iterations, 16)
         source = (Path(os.environ["TWO_DGS_DIR"]) if backend == "2dgs"
                   else repository / "gaussian-splatting")
-        with tempfile.TemporaryDirectory(prefix="native-cuda-resume-") as temporary:
+        with resume_acceptance_fixture() as temporary:
             root = Path(temporary)
             dataset = root / "dataset"
             (dataset / "images").mkdir(parents=True)
@@ -80,6 +114,8 @@ class CudaResumeTests(unittest.TestCase):
                 self.assertTrue(report["ready"], report)
                 self.assertEqual(Path(report["python"]).resolve(), Path(sys.executable).resolve())
 
+            runs = []
+
             def run(name, resume=False, pause=False):
                 output = root / name
                 request = root / (name + "-pause.json")
@@ -101,9 +137,26 @@ class CudaResumeTests(unittest.TestCase):
                            "--opacity_reset_interval", "8"]
                 command += (["--opacity_cull", "0.001"] if backend == "2dgs" else [
                     "--disable_viewer", "--optimizer_type", optimizer_type, "--random_background", "--train_test_exp"])
-                result = subprocess.run(command, cwd=str(source), env=env,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        encoding="utf-8", errors="replace", timeout=300)
+                sequence = len(runs) + 1
+                entry = {"sequence": sequence, "name": name, "resume": resume,
+                         "pause": pause, "command": command, "cwd": str(source)}
+                runs.append(entry)
+                atomic_json(root / "child-runs.json", {"version": 1, "backend": backend, "runs": runs})
+                try:
+                    result = subprocess.run(command, cwd=str(source), env=env,
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            encoding="utf-8", errors="replace", timeout=300)
+                except subprocess.TimeoutExpired as error:
+                    text = error.stdout or ""
+                    if isinstance(text, bytes):
+                        text = text.decode("utf-8", errors="replace")
+                    (root / "child-{:02d}.log".format(sequence)).write_text(text[-4 * 1024 * 1024:], encoding="utf-8")
+                    entry["timed_out"] = True
+                    atomic_json(root / "child-runs.json", {"version": 1, "backend": backend, "runs": runs})
+                    raise
+                (root / "child-{:02d}.log".format(sequence)).write_text(result.stdout[-4 * 1024 * 1024:], encoding="utf-8")
+                entry.update(returncode=result.returncode, log_truncated=len(result.stdout) > 4 * 1024 * 1024)
+                atomic_json(root / "child-runs.json", {"version": 1, "backend": backend, "runs": runs})
                 self.assertEqual(result.returncode, 75 if pause else 0, result.stdout[-12000:])
                 metrics[name] = [json.loads(line.split("[gsw-training-metrics] ", 1)[1])
                                  for line in result.stdout.splitlines() if "[gsw-training-metrics] " in line]

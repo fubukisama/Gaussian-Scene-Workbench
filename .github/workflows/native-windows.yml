@@ -122,7 +122,7 @@ jobs:
         run: |
           ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
             --output-log native/acceptance.log `
-            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
+            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
       - name: Upload acceptance evidence
         if: always()
@@ -262,7 +262,7 @@ jobs:
           QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
           GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
         run: |
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_training_stress native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_image_quality_measurement native.worker.test_training_stress native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts

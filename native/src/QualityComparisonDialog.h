@@ -3,6 +3,7 @@
 #include <QDialog>
 #include <QJsonObject>
 #include <QProcessEnvironment>
+#include <QPointer>
 #include <array>
 #include <memory>
 
@@ -17,6 +18,7 @@ class QTemporaryDir;
 class QTimer;
 
 namespace gsw {
+class QualityMeasurementDialog;
 
 class QualityComparisonDialog final : public QDialog {
   Q_OBJECT
@@ -36,6 +38,7 @@ public:
 public slots:
   void startComparison();
   void cancelComparison();
+  void showMeasurement();
 
 signals:
   void comparisonFinished(const QJsonObject &report);
@@ -78,6 +81,7 @@ private:
   QLabel *mSummary = nullptr;
   QLabel *mProtocol = nullptr;
   QPushButton *mCompare = nullptr;
+  QPushButton *mMeasure = nullptr;
   QPushButton *mSave = nullptr;
   QPushButton *mCancel = nullptr;
   QProcess *mProcess = nullptr;
@@ -95,6 +99,7 @@ private:
   bool mCancelled = false;
   bool mClosePending = false;
   quint64 mRunId = 0;
+  QPointer<QualityMeasurementDialog> mMeasurementDialog;
 };
 
 } // namespace gsw

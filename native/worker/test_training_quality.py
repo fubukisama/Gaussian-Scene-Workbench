@@ -334,6 +334,31 @@ class QualityComparisonTests(unittest.TestCase):
             baseline["metrics"]["psnr"]["reason"] = "mutated-after-comparison"
             self.assertEqual(result["metrics"]["psnr"]["baseline"]["reason"], "zero_mse")
 
+    def test_measured_image_pairs_without_split_proof_are_comparable_but_not_independently_validated(self):
+        from native.worker.training_quality import compare_quality
+        baseline, candidate = measured({"psnr": 30.}, "unverified"), measured({"psnr": 29.9}, "unverified")
+        for report in (baseline, candidate):
+            report["evidence"] = {"version": 1, "producer": "gsw-image-quality-v1",
+                                  "held_out_verified": False, "views": [{"id": "one", "mse": .001}]}
+        contract = {"version": 1, "required_domains": ["image"], "metrics": {"psnr": {"max_regression": .2}}}
+        result = compare_quality(baseline, candidate, contract)
+        self.assertEqual(result["status"], "unverified")
+        self.assertEqual(result["metrics"]["psnr"]["threshold_status"], "pass")
+        self.assertFalse(result["independent_validation"])
+        # Editing only the split label must not override a producer's explicit
+        # absence of held-out evidence.
+        baseline["split"] = candidate["split"] = "held_out"
+        self.assertEqual(compare_quality(baseline, candidate, contract)["status"], "unverified")
+
+    def test_list_settings_changes_do_not_treat_boolean_and_numeric_values_as_equal(self):
+        from native.worker.training_quality import compare_quality
+        baseline, candidate = measured({"psnr": 30.}), measured({"psnr": 30.})
+        baseline["settings"], candidate["settings"] = {"flags": [True, {"nested": False}]}, {"flags": [1, {"nested": 0}]}
+        result = compare_quality(baseline, candidate, {"version": 1, "required_domains": ["image"],
+                                                    "metrics": {"psnr": {"max_regression": 0}}})
+        self.assertEqual(len(result["settings_changes"]), 1)
+        self.assertEqual(result["settings_changes"][0]["path"], ["flags"])
+
 
 if __name__ == "__main__":
     unittest.main()

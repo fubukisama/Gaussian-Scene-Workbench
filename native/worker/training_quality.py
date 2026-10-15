@@ -57,6 +57,16 @@ def _validate_settings(value, location, depth=0):
         raise ValueError(location + " requires finite JSON settings")
 
 
+def _same_json_value(before, after):
+    if type(before) is not type(after):
+        return False
+    if type(before) is list:
+        return len(before) == len(after) and all(_same_json_value(a, b) for a, b in zip(before, after))
+    if type(before) is dict:
+        return set(before) == set(after) and all(_same_json_value(before[key], after[key]) for key in before)
+    return before == after
+
+
 def _settings_changes(before, after, path=()):
     changes = []
     for key in sorted(set(before) | set(after)):
@@ -64,7 +74,7 @@ def _settings_changes(before, after, path=()):
         old_present, new_present = key in before, key in after
         if old_present and new_present and type(old) is dict and type(new) is dict:
             changes.extend(_settings_changes(old, new, path + (key,)))
-        elif old_present != new_present or type(old) is not type(new) or old != new:
+        elif old_present != new_present or not _same_json_value(old, new):
             changes.append({"path": list(path + (key,)), "before_present": old_present,
                             "after_present": new_present, "before": deepcopy(old), "after": deepcopy(new)})
     return changes
@@ -73,7 +83,7 @@ def _settings_changes(before, after, path=()):
 def _validate_report(report, location):
     _object(report, location)
     if (not {"version", "identity", "split", "metrics"}.issubset(report)
-            or set(report) - {"version", "identity", "split", "metrics", "settings"}):
+            or set(report) - {"version", "identity", "split", "metrics", "settings", "evidence"}):
         raise ValueError(location + " has missing or unknown fields")
     _version(report["version"], location)
     _object(report["identity"], location + ".identity")
@@ -81,11 +91,16 @@ def _validate_report(report, location):
             type(report["identity"][key]) is not str or not report["identity"][key].strip()
             for key in _IDENTITY):
         raise ValueError(location + " requires explicit dataset, views, resolution, mask and metric protocol identities")
-    if report["split"] not in ("held_out", "training_fit"):
-        raise ValueError(location + ".split requires held_out or training_fit")
+    if report["split"] not in ("held_out", "training_fit", "unverified"):
+        raise ValueError(location + ".split requires held_out, training_fit or unverified")
     if "settings" in report:
         _object(report["settings"], location + ".settings")
         _validate_settings(report["settings"], location + ".settings")
+    if "evidence" in report:
+        _object(report["evidence"], location + ".evidence")
+        _validate_settings(report["evidence"], location + ".evidence")
+        if "held_out_verified" in report["evidence"] and type(report["evidence"]["held_out_verified"]) is not bool:
+            raise ValueError(location + ".evidence.held_out_verified requires a boolean")
     _object(report["metrics"], location + ".metrics")
     for name, value in report["metrics"].items():
         if name not in _METRICS:
@@ -173,7 +188,9 @@ def compare_quality(baseline, candidate, contract):
                             if _METRICS[name][0] == domain], "required_metrics": [name for name in contract["metrics"]
                             if _METRICS[name][0] == domain]} for domain in ("image", "geometry")}}
     results = {}
-    independent = baseline["split"] == "held_out" and any(
+    independent = baseline["split"] == "held_out" and all(
+        "evidence" not in report or report["evidence"].get("held_out_verified") is True
+        for report in (baseline, candidate)) and any(
         baseline["metrics"].get(name) is not None and candidate["metrics"].get(name) is not None for name in names)
     for name in names:
         limits = contract["metrics"].get(name, {})
