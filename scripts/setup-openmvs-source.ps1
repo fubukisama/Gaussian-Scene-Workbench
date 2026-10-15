@@ -1,5 +1,5 @@
 param(
-  [string]$Root = "C:\Users\Ishida_Lab\Desktop\3dgs",
+  [string]$Root = "",
   [string]$OpenMvsDir = "",
   [string]$VcpkgRoot = "",
   [string]$Triplet = "x64-windows-release",
@@ -10,6 +10,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $Root) {
+  if ($env:GS_EDITOR_WORKSPACE_ROOT) {
+    $Root = [System.IO.Path]::GetFullPath($env:GS_EDITOR_WORKSPACE_ROOT)
+  } else {
+    $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+  }
+}
 
 if (-not $OpenMvsDir) {
   $OpenMvsDir = Join-Path $Root "openMVS"

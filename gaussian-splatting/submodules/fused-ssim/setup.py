@@ -5,12 +5,7 @@ import os
 nvcc_flags = []
 if os.name == 'nt':
     nvcc_flags.append("-allow-unsupported-compiler")
-    nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
-import os
-
-nvcc_flags = []
-if os.name == 'nt':
-    nvcc_flags.append("-allow-unsupported-compiler")
+    nvcc_flags.append("-Xcompiler=/Zc:preprocessor")
     nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
 
 setup(

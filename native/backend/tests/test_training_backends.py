@@ -1,8 +1,10 @@
 import sys
 import io
 import json
+import os
 import shutil
 import struct
+import subprocess
 import tempfile
 import types
 import unittest
@@ -11,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+from PIL import Image
 from plyfile import PlyData, PlyElement
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -1269,7 +1272,6 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_sugar_mesh_command_uses_existing_3dgs_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp).resolve()
             original_output = compute.OUTPUT_DIR
             original_datasets = compute.DATASETS_DIR
             original_sugar = compute.SUGAR_DIR
@@ -1309,7 +1311,8 @@ class TrainingBackendTests(unittest.TestCase):
                 )
 
                 self.assertEqual(cwd, compute.SUGAR_DIR)
-                self.assertIn("train.py", [str(part) for part in command])
+                self.assertEqual(command[1], compute.SUGAR_RUNNER)
+                self.assertEqual(command[2], compute.SUGAR_DIR / "train.py")
                 self.assertIn("-c", [str(part) for part in command])
                 stage = model / "_sugar_input"
                 self.assertEqual(command[command.index("-c") + 1], f"{stage.as_posix()}/")
@@ -1477,7 +1480,6 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_gs2mesh_mesh_command_uses_existing_3dgs_checkpoint_and_colmap(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp).resolve()
             original_output = compute.OUTPUT_DIR
             original_datasets = compute.DATASETS_DIR
             original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
@@ -1513,6 +1515,7 @@ class TrainingBackendTests(unittest.TestCase):
                     7000,
                     {
                         "mode": "gs2mesh",
+                        "task_port": 6113,
                         "gs2mesh_downsample": 2,
                         "gs2mesh_baseline_percentage": 7,
                         "gs2mesh_tsdf_voxel": 2,
@@ -1531,6 +1534,7 @@ class TrainingBackendTests(unittest.TestCase):
                 self.assertIn("--skip_GS", command_text)
                 self.assertNotIn("--skip_rendering", command_text)
                 self.assertEqual(command_text[command_text.index("--GS_iterations") + 1], "7000")
+                self.assertEqual(command_text[command_text.index("--GS_port") + 1], "6113")
                 self.assertEqual(command_text[command_text.index("--colmap_name") + 1], "mesh_scene")
                 self.assertNotIn("--renderer_max_images", command_text)
                 self.assertEqual(command_text[command_text.index("--downsample") + 1], "2")
@@ -1645,27 +1649,6 @@ class TrainingBackendTests(unittest.TestCase):
                 if original_gs2mesh is not None:
                     compute.GS2MESH_DIR = original_gs2mesh
 
-    def test_collect_gs2mesh_output_copies_latest_cleaned_mesh(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            original_output = compute.OUTPUT_DIR
-            original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
-            compute.OUTPUT_DIR = Path(tmp) / "output"
-            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
-            try:
-                source = compute.GS2MESH_DIR / "output" / "custom_nw_iterations7" / "mesh_scene" / "result_cleaned_mesh.ply"
-                source.parent.mkdir(parents=True, exist_ok=True)
-                source.write_text("ply\n", encoding="utf-8")
-
-                result = compute.collect_gs2mesh_mesh_output("mesh_scene", 7, 0)
-
-                target = compute.mesh_output_path("mesh_scene", 7, "gs2mesh", post=True)
-                self.assertEqual(result["mesh"], str(target))
-                self.assertEqual(target.read_text(encoding="utf-8"), "ply\n")
-                self.assertEqual(result["source"], str(source))
-            finally:
-                compute.OUTPUT_DIR = original_output
-                if original_gs2mesh is not None:
-                    compute.GS2MESH_DIR = original_gs2mesh
 
     def test_collect_sugar_outputs_creates_preview_mesh_and_texture_package(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2226,6 +2209,949 @@ class TrainingBackendTests(unittest.TestCase):
             self.assertIn("vt 1 0", obj_text)
             self.assertIn("f 1/1 2/2 3/3", obj_text)
             self.assertTrue(paths["zip"].exists())
+
+
+    def test_gs2mesh_environment_rejects_shared_sugar_python(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh_dir = compute.GS2MESH_DIR
+            original_sugar_dir = compute.SUGAR_DIR
+            gs2mesh_dir = Path(tmp) / "gs2mesh"
+            sugar_dir = Path(tmp) / "sugar"
+            shared_python = Path(tmp) / "envs" / "shared" / "python.exe"
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_dir.mkdir(parents=True)
+            shared_python.parent.mkdir(parents=True)
+            shared_python.write_bytes(b"")
+            (gs2mesh_dir / "run_single.py").write_text("print('gs2mesh')", encoding="utf-8")
+            compute.GS2MESH_DIR = gs2mesh_dir
+            compute.SUGAR_DIR = sugar_dir
+            try:
+                with mock.patch.object(compute, "gs2mesh_python", return_value=shared_python), \
+                        mock.patch.object(compute, "sugar_python", return_value=shared_python):
+                    with self.assertRaisesRegex(RuntimeError, "must use different Python environments"):
+                        compute.ensure_gs2mesh_environment()
+            finally:
+                compute.GS2MESH_DIR = original_gs2mesh_dir
+                compute.SUGAR_DIR = original_sugar_dir
+
+    def test_recover_2dgs_post_mesh_uses_fresh_raw_mesh_and_runtime_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = compute.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                post_mesh = compute.mesh_output_path("mesh_scene", 7, "bounded", post=True)
+                raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                raw_mesh.write_bytes(b"fresh raw mesh")
+                started_at = raw_mesh.stat().st_mtime
+
+                def fake_run_logged(job, command, cwd, backend):
+                    self.assertEqual(command[0], Path("runtime-python.exe"))
+                    self.assertEqual(command[1], compute.ROOT / "scripts" / "postprocess_2dgs_mesh.py")
+                    self.assertEqual(Path(command[command.index("--input") + 1]), raw_mesh)
+                    self.assertEqual(Path(command[command.index("--output") + 1]), post_mesh)
+                    self.assertEqual(command[command.index("--num-cluster") + 1], "50")
+                    self.assertEqual(cwd, compute.ROOT)
+                    self.assertEqual(backend, "2dgs")
+                    post_mesh.write_bytes(b"processed mesh")
+
+                job = {"backend": "2dgs", "log": []}
+                with mock.patch.object(compute, "training_python", return_value=Path("runtime-python.exe")), \
+                        mock.patch.object(compute, "run_logged", side_effect=fake_run_logged):
+                    recovered = compute.recover_2dgs_post_mesh(
+                        job, "mesh_scene", 7, "bounded", 50, started_at
+                    )
+
+                self.assertTrue(recovered)
+                self.assertTrue(post_mesh.exists())
+            finally:
+                compute.OUTPUT_DIR = original_output
+
+    def test_gs2mesh_environment_does_not_inherit_other_conda_or_sugar_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_root = base / "miniforge3" / "envs" / "gs2mesh"
+            other_env = base / "miniforge3" / "envs" / "gaussian_splatting"
+            sugar_source = base / "SuGaR" / "gaussian_splatting"
+            system_bin = base / "system-bin"
+            inherited = compute.os.pathsep.join([str(other_env), str(system_bin)])
+
+            with mock.patch.dict(
+                compute.os.environ,
+                {"PATH": inherited, "PYTHONPATH": str(sugar_source)},
+                clear=True,
+            ), mock.patch.object(compute, "gs2mesh_env_root", return_value=env_root):
+                environment = compute.gs2mesh_env()
+
+            self.assertNotIn(str(other_env), environment["PATH"])
+            self.assertIn(str(system_bin), environment["PATH"])
+            self.assertNotIn("PYTHONPATH", environment)
+            self.assertEqual(environment["CONDA_PREFIX"], str(env_root))
+            self.assertEqual(environment["PYTHONNOUSERSITE"], "1")
+
+    def test_2dgs_bounded_mesh_command_derives_voxel_from_gaussian_extent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            compute.OUTPUT_DIR = Path(tmp)
+            try:
+                model = compute.OUTPUT_DIR / "mesh_scene"
+                model.mkdir(parents=True, exist_ok=True)
+                (model / "training_backend.json").write_text(json.dumps({"backend": "2dgs"}), encoding="utf-8")
+                (model / "cfg_args").write_text("Namespace(source_path=r'C:\\\\datasets\\\\mesh_scene')", encoding="utf-8")
+                core = np.column_stack(
+                    [
+                        np.linspace(-10.0, 10.0, 100, dtype=np.float32),
+                        np.zeros(100, dtype=np.float32),
+                        np.zeros(100, dtype=np.float32),
+                    ]
+                )
+                xyz = np.vstack([core, np.array([[10000.0, 0.0, 0.0]], dtype=np.float32)])
+                write_test_ply(model / "point_cloud" / "iteration_7000" / "point_cloud.ply", xyz)
+
+                command, _cwd, _output_path = compute.mesh_export_command(
+                    "mesh_scene",
+                    7000,
+                    {"mode": "bounded", "mesh_res": 512},
+                )
+
+                command_text = [str(part) for part in command]
+                voxel_size = float(command_text[command_text.index("--voxel_size") + 1])
+                sdf_trunc = float(command_text[command_text.index("--sdf_trunc") + 1])
+                expected_extent = float(np.max(np.diff(np.percentile(xyz, [1.0, 99.0], axis=0), axis=0)))
+                self.assertAlmostEqual(voxel_size, expected_extent / 512, places=7)
+                self.assertAlmostEqual(sdf_trunc, voxel_size * 5.0, places=7)
+                self.assertLess(voxel_size, 0.05)
+                self.assertNotIn("--depth_trunc", command_text)
+            finally:
+                compute.OUTPUT_DIR = original_output
+
+    def test_gs2mesh_env_root_uses_dedicated_conda_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conda_root = Path(tmp) / "miniforge3"
+            gs2mesh_python = conda_root / "envs" / "gs2mesh" / "python.exe"
+            gs2mesh_python.parent.mkdir(parents=True)
+            gs2mesh_python.write_bytes(b"")
+
+            with mock.patch.dict(compute.os.environ, {}, clear=True), \
+                    mock.patch.object(compute, "conda_root_candidates", return_value=[conda_root]), \
+                    mock.patch.object(compute, "install_drive_root", return_value=None), \
+                    mock.patch.object(compute.Path, "home", return_value=Path(tmp) / "home"):
+                resolved = compute.gs2mesh_env_root()
+
+            self.assertEqual(resolved, gs2mesh_python.parent.resolve())
+
+    def test_gs2mesh_two_stage_commands_keep_source_scale(self):
+        options = compute.mesh_export_options(
+            {"mode": "gs2mesh", "task_port": 6113, "gs2mesh_auto_scale": True}
+        )
+        render = [str(value) for value in compute.build_gs2mesh_command("mesh_scene", 7000, options, skip_tsdf=True)]
+        fusion = [str(value) for value in compute.build_gs2mesh_command("mesh_scene", 7000, options, skip_rendering=True)]
+
+        self.assertIn("--skip_TSDF", render)
+        self.assertNotIn("--skip_rendering", render)
+        self.assertIn("--skip_rendering", fusion)
+        self.assertNotIn("--skip_TSDF", fusion)
+        self.assertEqual(fusion[fusion.index("--TSDF_scale") + 1], "1.0")
+
+    def test_2dgs_mesh_job_recovers_when_upstream_post_process_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = compute.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                post_mesh = compute.mesh_output_path("mesh_scene", 7, "bounded", post=True)
+                calls = []
+
+                def fake_run_logged(job, command, cwd, backend):
+                    calls.append([str(part) for part in command])
+                    if len(calls) == 1:
+                        raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                        raw_mesh.write_bytes(b"fresh raw mesh")
+                        raise RuntimeError("upstream connected-component post-process failed")
+                    post_mesh.write_bytes(b"recovered mesh")
+
+                job = {
+                    "id": "mesh-job",
+                    "kind": "mesh",
+                    "scene": "mesh_scene",
+                    "iteration": 7,
+                    "mode": "bounded",
+                    "options": {"mode": "bounded", "num_cluster": 50},
+                    "status": "queued",
+                    "stage": "queued",
+                    "log": [],
+                    "cancel_requested": False,
+                }
+                with mock.patch.object(compute, "ensure_mesh_environment"), \
+                        mock.patch.object(
+                            compute,
+                            "mesh_export_command",
+                            return_value=([Path("runtime-python.exe"), "render.py"], Path(tmp), post_mesh),
+                        ), \
+                        mock.patch.object(compute, "training_python", return_value=Path("runtime-python.exe")), \
+                        mock.patch.object(compute, "run_logged", side_effect=fake_run_logged):
+                    compute.run_mesh_export_job(job)
+
+                self.assertEqual(job["status"], "done")
+                self.assertEqual(job["stage"], "done")
+                self.assertEqual(Path(job["output_mesh"]), post_mesh)
+                self.assertTrue(post_mesh.exists())
+                self.assertEqual(len(calls), 2)
+                self.assertIn("postprocess_2dgs_mesh.py", calls[1][1])
+            finally:
+                compute.OUTPUT_DIR = original_output
+
+    def test_collect_gs2mesh_output_copies_fresh_mesh_from_current_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = (
+                    compute.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(
+                    "\n".join([
+                        "ply",
+                        "format ascii 1.0",
+                        "element vertex 3",
+                        "property float x",
+                        "property float y",
+                        "property float z",
+                        "element face 1",
+                        "property list uchar int vertex_indices",
+                        "end_header",
+                        "0 0 0",
+                        "1 0 0",
+                        "0 1 0",
+                        "3 0 1 2",
+                        "",
+                    ]),
+                    encoding="utf-8",
+                )
+
+                result = compute.collect_gs2mesh_mesh_output(
+                    "mesh_scene",
+                    7,
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                    0,
+                )
+
+                target = compute.mesh_output_path("mesh_scene", 7, "gs2mesh", post=True)
+                self.assertEqual(result["mesh"], str(target))
+                self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+                self.assertEqual(result["source"], str(source))
+            finally:
+                compute.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_task_port_allocator_skips_external_and_app_managed_conflicts(self):
+        job_a = {"id": "job-a"}
+        job_b = {"id": "job-b"}
+        compute.TASK_PORT_OWNERS.clear()
+        try:
+            with mock.patch.object(compute, "task_port_available", side_effect=lambda port: port != 6009):
+                port_a = compute.reserve_task_port(job_a, "3DGS training", preferred=6009, start=6110, end=6111)
+                port_b = compute.reserve_task_port(job_b, "2DGS training", preferred=6009, start=6110, end=6111)
+
+            self.assertEqual(port_a, 6110)
+            self.assertEqual(port_b, 6111)
+            self.assertEqual(job_a["task_port"], 6110)
+            self.assertEqual(job_b["task_port"], 6111)
+        finally:
+            compute.release_task_port(job_a)
+            compute.release_task_port(job_b)
+            compute.TASK_PORT_OWNERS.clear()
+
+    def test_gs2mesh_auto_scale_expands_depth_window_and_voxel_without_transform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            model = Path(tmp) / "output" / "mesh_scene"
+            camera_data = []
+            for index, depth_value in enumerate((10.0, 15.0)):
+                stereo = cache / f"{index:03d}" / "out_DLNR_Middlebury"
+                stereo.mkdir(parents=True)
+                np.save(stereo / "depth.npy", np.full((32, 32), depth_value, dtype=np.float32))
+                np.save(stereo / "occlusion_mask.npy", np.ones((32, 32), dtype=np.uint8))
+                camera_data.append({"left": {"baseline": 0.25, "pos": [float(index), 0.0, 0.0]}})
+            (cache / "camera_data.json").write_text(json.dumps(camera_data), encoding="utf-8")
+            write_test_ply(
+                model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                np.array([[-12.0, 0.0, 0.0], [12.0, 0.0, 0.0]], dtype=np.float32),
+            )
+            requested = compute.mesh_export_options(
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_tsdf_voxel": 2,
+                    "gs2mesh_tsdf_min_depth_baselines": 4,
+                    "gs2mesh_tsdf_max_depth_baselines": 20,
+                    "gs2mesh_auto_scale": True,
+                }
+            )
+
+            profile = compute.profile_gs2mesh_render_cache(cache, requested)
+            effective, report = compute.resolve_gs2mesh_scale_options(requested, profile, model, 7000)
+
+            self.assertEqual(profile["requested_coverage"], 0.0)
+            self.assertEqual(effective["gs2mesh_tsdf_voxel"], 8)
+            self.assertEqual(effective["gs2mesh_tsdf_min_depth_baselines"], 4)
+            self.assertEqual(effective["gs2mesh_tsdf_max_depth_baselines"], 80)
+            self.assertEqual(report["source_coordinates"], "preserved")
+            self.assertEqual(report["tsdf_scale"], 1.0)
+
+    def test_collect_gs2mesh_output_rejects_stale_mesh_from_same_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = (
+                    compute.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+                os.utime(source, (10, 10))
+
+                with self.assertRaisesRegex(FileNotFoundError, "fresh cleaned mesh"):
+                    compute.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        100,
+                    )
+            finally:
+                compute.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_2dgs_bounded_mesh_command_preserves_manual_tsdf_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            compute.OUTPUT_DIR = Path(tmp)
+            try:
+                model = compute.OUTPUT_DIR / "mesh_scene"
+                model.mkdir(parents=True, exist_ok=True)
+                (model / "training_backend.json").write_text(json.dumps({"backend": "2dgs"}), encoding="utf-8")
+                (model / "cfg_args").write_text("Namespace(source_path=r'C:\\\\datasets\\\\mesh_scene')", encoding="utf-8")
+                write_test_ply(
+                    model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                    np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]], dtype=np.float32),
+                )
+
+                command, _cwd, _output_path = compute.mesh_export_command(
+                    "mesh_scene",
+                    7000,
+                    {
+                        "mode": "bounded",
+                        "mesh_res": 512,
+                        "voxel_size": 0.25,
+                        "depth_trunc": 80.0,
+                        "sdf_trunc": 1.5,
+                    },
+                )
+
+                command_text = [str(part) for part in command]
+                self.assertEqual(command_text[command_text.index("--voxel_size") + 1], "0.25")
+                self.assertEqual(command_text[command_text.index("--depth_trunc") + 1], "80.0")
+                self.assertEqual(command_text[command_text.index("--sdf_trunc") + 1], "1.5")
+            finally:
+                compute.OUTPUT_DIR = original_output
+
+    def test_2dgs_mesh_options_validate_manual_quality_controls(self):
+        options = compute.mesh_export_options(
+            {
+                "mode": "bounded",
+                "mesh_res": 1024,
+                "num_cluster": 12,
+                "depth_ratio": 0.25,
+                "voxel_size": 0.01,
+                "sdf_trunc": 0.05,
+                "depth_trunc": 40.0,
+            }
+        )
+        self.assertEqual(options["mesh_res"], 1024)
+        self.assertEqual(options["num_cluster"], 12)
+        self.assertEqual(options["depth_ratio"], 0.25)
+        self.assertEqual(options["voxel_size"], 0.01)
+        self.assertEqual(options["sdf_trunc"], 0.05)
+        self.assertEqual(options["depth_trunc"], 40.0)
+
+        for key in ("voxel_size", "sdf_trunc", "depth_trunc"):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
+                compute.mesh_export_options({"mode": "bounded", key: 0})
+        with self.assertRaisesRegex(ValueError, "depth_ratio"):
+            compute.mesh_export_options({"mode": "bounded", "depth_ratio": 1.1})
+        with self.assertRaisesRegex(ValueError, "finite"):
+            compute.mesh_export_options({"mode": "bounded", "voxel_size": float("nan")})
+
+    def test_sugar_environment_does_not_inherit_gs2mesh_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_root = base / "miniforge3" / "envs" / "sugar"
+            gs2mesh_env = base / "miniforge3" / "envs" / "gs2mesh"
+            system_bin = base / "system-bin"
+            inherited = compute.os.pathsep.join([str(gs2mesh_env), str(system_bin)])
+
+            with mock.patch.dict(
+                compute.os.environ,
+                {"PATH": inherited, "PYTHONPATH": str(base / "gs2mesh")},
+                clear=True,
+            ), mock.patch.object(compute, "sugar_env_root", return_value=env_root):
+                environment = compute.sugar_env()
+
+            self.assertNotIn(str(gs2mesh_env), environment["PATH"])
+            self.assertIn(str(system_bin), environment["PATH"])
+            self.assertNotIn("PYTHONPATH", environment)
+            self.assertEqual(environment["CONDA_PREFIX"], str(env_root))
+
+    def test_gs2mesh_legacy_cache_rejects_changed_orientation_and_maps_camera_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            colmap = Path(tmp) / "colmap"
+            sparse = colmap / "sparse" / "0"
+            sparse.mkdir(parents=True)
+            (sparse / "cameras.txt").write_text(
+                "7 PINHOLE 200 100 150 151 100 50\n"
+                "9 PINHOLE 400 300 320 321 200 150\n",
+                encoding="utf-8",
+            )
+            (sparse / "images.txt").write_text(
+                "2 1 0 0 0 -1 0 0 9 second.jpg\n\n"
+                "1 1 0 0 0 0 0 0 7 first.jpg\n\n",
+                encoding="utf-8",
+            )
+            cache = Path(tmp) / "cache"
+            cache.mkdir()
+            camera_data = [
+                {
+                    "left": {
+                        "baseline": 0.035,
+                        "pos": [0.0, 0.0, 0.0],
+                        "width": 200,
+                        "height": 100,
+                        "fx": 150,
+                        "fy": 151,
+                        "cx": 100,
+                        "cy": 50,
+                        "extrinsic": np.eye(4).tolist(),
+                    }
+                },
+                {
+                    "left": {
+                        "baseline": 0.035,
+                        "pos": [1.0, 0.0, 0.0],
+                        "width": 400,
+                        "height": 300,
+                        "fx": 320,
+                        "fy": 321,
+                        "cx": 200,
+                        "cy": 150,
+                        "extrinsic": np.asarray(
+                            [[1, 0, 0, 1], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                            dtype=float,
+                        ).tolist(),
+                    }
+                },
+            ]
+            camera_data_path = cache / "camera_data.json"
+            camera_data_path.write_text(json.dumps(camera_data), encoding="utf-8")
+            signature = {
+                "scene_360": True,
+                "baseline_percentage": 7.0,
+                "point_cloud": {"mtime_ns": 0},
+                "runner": {"mtime_ns": 0},
+            }
+
+            self.assertTrue(compute.gs2mesh_legacy_cache_matches(cache, colmap, signature))
+
+            camera_data[0]["left"]["extrinsic"][0][0] = -1.0
+            camera_data_path.write_text(json.dumps(camera_data), encoding="utf-8")
+            self.assertFalse(compute.gs2mesh_legacy_cache_matches(cache, colmap, signature))
+
+    def test_gs2mesh_environment_check_rejects_missing_dedicated_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_dir = compute.GS2MESH_DIR
+            gs2mesh_dir = Path(tmp) / "gs2mesh"
+            python_path = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            gs2mesh_dir.mkdir(parents=True)
+            python_path.parent.mkdir(parents=True)
+            (gs2mesh_dir / "run_single.py").write_text("print('gs2mesh')", encoding="utf-8")
+            python_path.write_bytes(b"")
+            compute.GS2MESH_DIR = gs2mesh_dir
+            try:
+                with mock.patch.object(compute, "gs2mesh_python", return_value=python_path), \
+                        mock.patch.object(compute, "python_probe", return_value=(False, "No module named simple_knn")):
+                    with self.assertRaisesRegex(RuntimeError, "GS2Mesh runtime imports failed"):
+                        compute.ensure_gs2mesh_environment()
+            finally:
+                compute.GS2MESH_DIR = original_dir
+
+    def test_recover_2dgs_post_mesh_rejects_stale_raw_mesh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            try:
+                raw_mesh = compute.mesh_output_path("mesh_scene", 7, "bounded", post=False)
+                raw_mesh.parent.mkdir(parents=True, exist_ok=True)
+                raw_mesh.write_bytes(b"stale raw mesh")
+                started_at = raw_mesh.stat().st_mtime + 60.0
+
+                job = {"backend": "2dgs", "log": []}
+                with mock.patch.object(compute, "run_logged") as run_mock:
+                    recovered = compute.recover_2dgs_post_mesh(
+                        job, "mesh_scene", 7, "bounded", 50, started_at
+                    )
+
+                self.assertFalse(recovered)
+                run_mock.assert_not_called()
+            finally:
+                compute.OUTPUT_DIR = original_output
+
+    def test_sugar_environment_check_imports_native_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_sugar_dir = compute.SUGAR_DIR
+            original_gs2mesh_dir = compute.GS2MESH_DIR
+            sugar_dir = Path(tmp) / "SuGaR"
+            gs2mesh_dir = Path(tmp) / "GS2Mesh"
+            sugar_python = Path(tmp) / "envs" / "sugar" / "python.exe"
+            gs2mesh_python = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            sugar_dir.mkdir(parents=True)
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_python.parent.mkdir(parents=True)
+            gs2mesh_python.parent.mkdir(parents=True)
+            sugar_python.write_bytes(b"")
+            gs2mesh_python.write_bytes(b"")
+            (sugar_dir / "train.py").write_text("print('sugar')", encoding="utf-8")
+            compute.SUGAR_DIR = sugar_dir
+            compute.GS2MESH_DIR = gs2mesh_dir
+            try:
+                with mock.patch.object(compute, "sugar_python", return_value=sugar_python), \
+                        mock.patch.object(compute, "gs2mesh_python", return_value=gs2mesh_python), \
+                        mock.patch.object(compute, "python_probe", return_value=(True, "runtime ok")) as probe:
+                    report = compute.ensure_sugar_environment()
+
+                self.assertEqual(report["python"], str(sugar_python))
+                probe_code = probe.call_args.args[2]
+                self.assertIn("import torch", probe_code)
+                self.assertIn("import pytorch3d", probe_code)
+                self.assertIn("from pytorch3d import _C", probe_code)
+                self.assertIn("import open3d", probe_code)
+            finally:
+                compute.SUGAR_DIR = original_sugar_dir
+                compute.GS2MESH_DIR = original_gs2mesh_dir
+
+    def test_gs2mesh_manual_scale_options_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            model = Path(tmp) / "output" / "mesh_scene"
+            stereo = cache / "000" / "out_DLNR_Middlebury"
+            stereo.mkdir(parents=True)
+            np.save(stereo / "depth.npy", np.full((8, 8), 10.0, dtype=np.float32))
+            np.save(stereo / "occlusion_mask.npy", np.ones((8, 8), dtype=np.uint8))
+            (cache / "camera_data.json").write_text(
+                json.dumps([{"left": {"baseline": 0.25, "pos": [0.0, 0.0, 0.0]}}]),
+                encoding="utf-8",
+            )
+            write_test_ply(
+                model / "point_cloud" / "iteration_7000" / "point_cloud.ply",
+                np.array([[0.0, 0.0, 0.0], [24.0, 0.0, 0.0]], dtype=np.float32),
+            )
+            requested = compute.mesh_export_options(
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_tsdf_voxel": 3,
+                    "gs2mesh_tsdf_min_depth_baselines": 5,
+                    "gs2mesh_tsdf_max_depth_baselines": 30,
+                    "gs2mesh_auto_scale": False,
+                }
+            )
+
+            profile = compute.profile_gs2mesh_render_cache(cache, requested)
+            effective, _report = compute.resolve_gs2mesh_scale_options(requested, profile, model, 7000)
+
+            self.assertEqual(effective["gs2mesh_tsdf_voxel"], 3)
+            self.assertEqual(effective["gs2mesh_tsdf_min_depth_baselines"], 5)
+            self.assertEqual(effective["gs2mesh_tsdf_max_depth_baselines"], 30)
+
+    def test_gs2mesh_depth_profile_honors_disabled_occlusion_mask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            stereo = cache / "000" / "out_DLNR_Middlebury"
+            stereo.mkdir(parents=True)
+            np.save(stereo / "depth.npy", np.full((8, 8), 10.0, dtype=np.float32))
+            np.save(stereo / "occlusion_mask.npy", np.zeros((8, 8), dtype=np.uint8))
+            (cache / "camera_data.json").write_text(
+                json.dumps([{"left": {"baseline": 0.25, "pos": [0.0, 0.0, 0.0]}}]),
+                encoding="utf-8",
+            )
+
+            profile = compute.profile_gs2mesh_render_cache(
+                cache,
+                {
+                    "mode": "gs2mesh",
+                    "gs2mesh_use_occlusion_mask": False,
+                    "gs2mesh_tsdf_min_depth_baselines": 4,
+                    "gs2mesh_tsdf_max_depth_baselines": 80,
+                },
+            )
+
+            self.assertEqual(profile["sampled_after_mask"], 64)
+            self.assertEqual(profile["depth"]["p50"], 10.0)
+            self.assertTrue(profile["occlusion_mask_usable"])
+
+    def test_collect_gs2mesh_output_rejects_empty_mesh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = (
+                    compute.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "mesh_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 0\nelement face 0\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "no vertices or faces"):
+                    compute.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        0,
+                    )
+            finally:
+                compute.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_sugar_runner_imports_modules_next_to_upstream_entry_point(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_torch = Path(tmp) / "torch"
+            fake_torch.mkdir()
+            (fake_torch / "__init__.py").write_text("", encoding="utf-8")
+            upstream = Path(tmp) / "SuGaR"
+            upstream.mkdir()
+            (upstream / "sugar_sibling.py").write_text("VALUE = 'sugar import ok'\n", encoding="utf-8")
+            entry = upstream / "train.py"
+            entry.write_text("from sugar_sibling import VALUE\nprint(VALUE)\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(compute.SUGAR_RUNNER),
+                    str(entry),
+                ],
+                cwd=compute.ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("sugar import ok", result.stdout)
+
+    def test_gs2mesh_invalid_signed_cache_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = compute.GS2MESH_DIR
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                options = compute.mesh_export_options(
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2, "gs2mesh_baseline_percentage": 7}
+                )
+                runtime = compute.GS2MESH_DIR / "data" / "custom" / "mesh_scene_downsample2"
+                sparse = runtime / "sparse" / "0"
+                sparse.mkdir(parents=True)
+                (sparse / "images.txt").write_text(
+                    "1 1 0 0 0 0 0 0 1 frame.jpg\n\n", encoding="utf-8"
+                )
+                cache = compute.gs2mesh_output_dirs("mesh_scene", 7000, options)[1]
+                stereo = cache / "000" / "out_DLNR_Middlebury"
+                stereo.mkdir(parents=True)
+                (cache / "000" / "left.png").write_bytes(b"left")
+                np.save(stereo / "depth.npy", np.ones((2, 2), dtype=np.float32))
+                np.save(stereo / "occlusion_mask.npy", np.ones((2, 2), dtype=np.uint8))
+                compute.write_gs2mesh_cache_manifest(cache, {"version": 1, "scene": "wrong"})
+                signature = {"version": 1, "scene": "mesh_scene", "scene_360": True, "baseline_percentage": 7.0}
+
+                reused = compute.prepare_gs2mesh_render_cache_dir(
+                    "mesh_scene",
+                    7000,
+                    options,
+                    signature=signature,
+                    quarantine_invalid=True,
+                )
+
+                self.assertIsNone(reused)
+                self.assertFalse(cache.exists())
+                self.assertTrue(any((cache.parent / ".stale").iterdir()))
+            finally:
+                compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_collect_gs2mesh_output_preserves_nonempty_raw_mesh_when_cleaning_removes_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            original_gs2mesh = compute.GS2MESH_DIR
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                root = compute.GS2MESH_DIR / "output" / "app" / "mesh_scene_d2"
+                stem = (
+                    "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20"
+                )
+                root.mkdir(parents=True)
+                cleaned = root / f"{stem}_cleaned_mesh.ply"
+                raw = root / f"{stem}_mesh.ply"
+                cleaned.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 0\nelement face 0\nend_header\n",
+                    encoding="utf-8",
+                )
+                raw.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                result = compute.collect_gs2mesh_mesh_output(
+                    "mesh_scene",
+                    7,
+                    {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                    0,
+                )
+
+                self.assertFalse(result["cleaned"])
+                self.assertEqual(result["source"], str(raw))
+                self.assertIn("raw TSDF mesh", result["warning"])
+            finally:
+                compute.OUTPUT_DIR = original_output
+                compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_gs2mesh_staging_keeps_aligned_camera_source_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = compute.GS2MESH_DIR
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = Path(tmp) / "source"
+                images = source / "images"
+                sparse = source / "sparse" / "0"
+                images.mkdir(parents=True)
+                sparse.mkdir(parents=True)
+                (images / "frame.jpg").write_bytes(b"image")
+                originals = {
+                    "cameras.txt": b"# cameras\n1 PINHOLE 100 50 80 80 50 25\n",
+                    "images.txt": b"# images\n1 1 0 0 0 0 0 0 1 frame.jpg\n\n",
+                    "points3D.txt": b"# points\n1 0 0 0 255 255 255 0\n",
+                }
+                for name, value in originals.items():
+                    (sparse / name).write_bytes(value)
+
+                compute.prepare_gs2mesh_dataset("mesh_scene", source, downsample=2)
+
+                for name, value in originals.items():
+                    self.assertEqual((sparse / name).read_bytes(), value)
+            finally:
+                compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_sugar_environment_reports_deterministic_pytorch3d_policy_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_sugar_dir = compute.SUGAR_DIR
+            original_gs2mesh_dir = compute.GS2MESH_DIR
+            sugar_dir = Path(tmp) / "SuGaR"
+            gs2mesh_dir = Path(tmp) / "GS2Mesh"
+            sugar_python = Path(tmp) / "envs" / "sugar" / "python.exe"
+            gs2mesh_python = Path(tmp) / "envs" / "gs2mesh" / "python.exe"
+            sugar_dir.mkdir(parents=True)
+            gs2mesh_dir.mkdir(parents=True)
+            sugar_python.parent.mkdir(parents=True)
+            gs2mesh_python.parent.mkdir(parents=True)
+            sugar_python.write_bytes(b"")
+            gs2mesh_python.write_bytes(b"")
+            (sugar_dir / "train.py").write_text("print('sugar')", encoding="utf-8")
+            compute.SUGAR_DIR = sugar_dir
+            compute.GS2MESH_DIR = gs2mesh_dir
+            blocked = "OSError: [WinError 4551] application control policy blocked pytorch3d\\_C.pyd"
+            try:
+                with mock.patch.object(compute, "sugar_python", return_value=sugar_python), \
+                        mock.patch.object(compute, "gs2mesh_python", return_value=gs2mesh_python), \
+                        mock.patch.object(compute, "smart_app_control_state", return_value="on"), \
+                        mock.patch.object(compute, "python_probe", return_value=(False, blocked)) as probe:
+                    with self.assertRaisesRegex(RuntimeError, "unsigned PyTorch3D native module") as raised:
+                        compute.ensure_sugar_environment()
+
+                self.assertEqual(probe.call_count, 1)
+                self.assertIn("no per-file allow rule", str(raised.exception))
+                self.assertIn("Linux/WSL", str(raised.exception))
+                self.assertNotIn("replace the conda-forge Open3D", str(raised.exception))
+            finally:
+                compute.SUGAR_DIR = original_sugar_dir
+                compute.GS2MESH_DIR = original_gs2mesh_dir
+
+    def test_collect_gs2mesh_output_never_falls_back_to_another_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_output = compute.OUTPUT_DIR
+            original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)
+            compute.OUTPUT_DIR = Path(tmp) / "output"
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                wrong = (
+                    compute.GS2MESH_DIR
+                    / "output"
+                    / "app"
+                    / "other_scene_d2"
+                    / "mesh_scene_downsample2_custom_nw_iterations7_DLNR_Middlebury_baseline7_0p_"
+                    "mask0_occ1_scale1_0_voxel2_512_trunc4_20_cleaned_mesh.ply"
+                )
+                wrong.parent.mkdir(parents=True, exist_ok=True)
+                wrong.write_text(
+                    "ply\nformat ascii 1.0\nelement vertex 3\nelement face 1\nend_header\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(FileNotFoundError, "mesh_scene"):
+                    compute.collect_gs2mesh_mesh_output(
+                        "mesh_scene",
+                        7,
+                        {"mode": "gs2mesh", "gs2mesh_downsample": 2},
+                        0,
+                    )
+                self.assertFalse(compute.mesh_output_path("mesh_scene", 7, "gs2mesh", post=True).exists())
+            finally:
+                compute.OUTPUT_DIR = original_output
+                if original_gs2mesh is not None:
+                    compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_gs2mesh_staging_expands_multi_camera_mapping_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original_gs2mesh = compute.GS2MESH_DIR
+            compute.GS2MESH_DIR = Path(tmp) / "gs2mesh"
+            try:
+                source = Path(tmp) / "source"
+                (source / "images").mkdir(parents=True)
+                sparse = source / "sparse" / "0"
+                sparse.mkdir(parents=True)
+                (source / "images" / "first.jpg").write_bytes(b"first")
+                (source / "images" / "second.jpg").write_bytes(b"second")
+                cameras = (
+                    "# Camera list\n"
+                    "# Number of cameras: 2\n"
+                    "7 PINHOLE 200 100 150 151 100 50\n"
+                    "9 PINHOLE 400 300 320 321 200 150\n"
+                )
+                images = (
+                    "# Image list\n"
+                    "2 1 0 0 0 -1 0 0 9 second.jpg\n\n"
+                    "1 1 0 0 0 0 0 0 7 first.jpg\n\n"
+                )
+                (sparse / "cameras.txt").write_text(cameras, encoding="utf-8")
+                (sparse / "images.txt").write_text(images, encoding="utf-8")
+                (sparse / "points3D.txt").write_text("# points\n", encoding="utf-8")
+
+                staged = compute.prepare_gs2mesh_dataset("mesh_scene", source, downsample=1)
+
+                self.assertEqual((sparse / "cameras.txt").read_text(encoding="utf-8"), cameras)
+                self.assertEqual((sparse / "images.txt").read_text(encoding="utf-8"), images)
+                staged_sparse = staged / "sparse" / "0"
+                staged_cameras = compute.gs2mesh_colmap_renderer_intrinsics(
+                    staged_sparse / "cameras.txt",
+                    compute.gs2mesh_colmap_image_records(staged_sparse / "images.txt"),
+                )
+                self.assertEqual(staged_cameras[0][:2], (200, 100))
+                self.assertEqual(staged_cameras[1][:2], (400, 300))
+                staged_records = compute.gs2mesh_colmap_image_records(staged_sparse / "images.txt")
+                self.assertEqual(
+                    [record["camera_id"] for record in staged_records],
+                    [record["image_id"] for record in staged_records],
+                )
+            finally:
+                compute.GS2MESH_DIR = original_gs2mesh
+
+    def test_sugar_env_root_prefers_machine_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_app_data = Path(tmp) / "LocalAppData"
+            runtime_root = Path(tmp) / "runtime"
+            env_root = runtime_root / "envs" / "sugar"
+            (env_root / "Scripts").mkdir(parents=True)
+            (env_root / "Scripts" / "python.exe").write_bytes(b"")
+            legacy_env_root = Path(tmp) / "legacy" / "sugar"
+            legacy_env_root.mkdir(parents=True)
+            (legacy_env_root / "python.exe").write_bytes(b"")
+            config_path = local_app_data / "Gaussian Scene Workbench" / "runtime.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"schema_version": 1, "runtime_root": str(runtime_root), "sugar_env_root": str(env_root)}),
+                encoding="utf-8",
+            )
+
+            resolved = compute.sugar_env_root(
+                environ={"LOCALAPPDATA": str(local_app_data), "SUGAR_CONDA_PREFIX": str(legacy_env_root)},
+                home=Path(tmp) / "home",
+            )
+
+            self.assertEqual(resolved, env_root)
+            self.assertEqual(compute.environment_python_path(resolved), env_root / "Scripts" / "python.exe")
+
+
+    def test_cancelled_2dgs_mesh_does_not_start_or_recover(self):
+        job = {
+            "id": "cancelled-mesh", "scene": "mesh_scene", "iteration": 7,
+            "mode": "bounded", "options": {"mode": "bounded"},
+            "status": "queued", "stage": "queued", "log": [],
+            "cancel_requested": True,
+        }
+        with mock.patch.object(compute, "ensure_mesh_environment") as environment, \
+                mock.patch.object(compute, "run_logged") as run, \
+                mock.patch.object(compute, "recover_2dgs_post_mesh") as recover:
+            compute.run_mesh_export_job(job)
+
+        self.assertEqual(job["status"], "cancelled")
+        environment.assert_not_called()
+        run.assert_not_called()
+        recover.assert_not_called()
+
+    def test_gs2mesh_failure_releases_its_reserved_renderer_port(self):
+        job = {
+            "id": "owned-gs2mesh", "scene": "mesh_scene", "iteration": 7,
+            "mode": "gs2mesh", "options": {"mode": "gs2mesh"},
+            "status": "queued", "stage": "queued", "log": [],
+            "cancel_requested": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(compute, "OUTPUT_DIR", Path(tmp) / "output"), \
+                mock.patch.object(compute, "ensure_gs2mesh_environment"), \
+                mock.patch.object(compute, "task_port_available", return_value=True), \
+                mock.patch.object(compute, "run_gs2mesh_mesh_job", side_effect=RuntimeError("owned stage failure")):
+            compute.run_mesh_export_job(job)
+
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("owned stage failure", job["error"])
+        self.assertTrue(job["task_port_released"])
+        self.assertNotIn(job["task_port"], compute.TASK_PORT_OWNERS)
 
 
 if __name__ == "__main__":

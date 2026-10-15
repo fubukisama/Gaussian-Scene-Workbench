@@ -17,11 +17,7 @@ os.path.dirname(os.path.abspath(__file__))
 nvcc_flags = ["-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]
 if os.name == 'nt':
     nvcc_flags.append("-allow-unsupported-compiler")
-    nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
-
-nvcc_flags = ["-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]
-if os.name == 'nt':
-    nvcc_flags.append("-allow-unsupported-compiler")
+    nvcc_flags.append("-Xcompiler=/Zc:preprocessor")
     nvcc_flags.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
     host_compiler = os.environ.get("CUDAHOSTCXX")
     if not host_compiler:

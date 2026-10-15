@@ -3,11 +3,13 @@
 import argparse
 import ast
 import concurrent.futures
+import hashlib
 import json
 import math
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -19,6 +21,11 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 from plyfile import PlyData
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -57,6 +64,11 @@ TRAIN_JOBS = {}
 TRAIN_LOCK = threading.Lock()
 MESH_JOBS = {}
 MESH_LOCK = threading.Lock()
+TASK_PORT_LOCK = threading.Lock()
+TASK_PORT_OWNERS = {}
+TASK_PORT_START = 6100
+TASK_PORT_END = 6999
+RUNTIME_PROBE_TIMEOUT_SECONDS = 90
 IMPORT_JOBS = {}
 IMPORT_LOCK = threading.Lock()
 TRAINING_BACKENDS = {"3dgs", "2dgs"}
@@ -77,6 +89,1087 @@ WINDOWS_DEVICE_NAMES = {
     *(f"COM{index}" for index in range(1, 10)),
     *(f"LPT{index}" for index in range(1, 10)),
 }
+
+
+def canonicalize_gs2mesh_camera_mapping(sparse_dir):
+    """Expand multi-camera COLMAP intrinsics in the staged copy only.
+
+    GS2Mesh indexes sorted camera rows by sorted image position. COLMAP instead
+    maps each image to an arbitrary CAMERA_ID, so mixed-camera datasets need a
+    one-camera-row-per-image staging representation to preserve that mapping.
+    """
+    sparse_dir = Path(sparse_dir)
+    cameras_path = sparse_dir / "cameras.txt"
+    images_path = sparse_dir / "images.txt"
+    cameras_text = cameras_path.read_text(encoding="utf-8")
+    images_text = images_path.read_text(encoding="utf-8")
+    cameras = {}
+    camera_comments = []
+    for line in cameras_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            camera_comments.append(line)
+            continue
+        fields = stripped.split()
+        if len(fields) < 5:
+            raise ValueError(f"Invalid COLMAP camera record: {line}")
+        cameras[int(fields[0])] = fields[1:]
+    if not cameras:
+        raise ValueError(f"No COLMAP cameras found: {cameras_path}")
+
+    image_lines = images_text.splitlines()
+    image_records = []
+    expecting_image = True
+    for line_index, line in enumerate(image_lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if expecting_image:
+            if not stripped:
+                continue
+            fields = stripped.split()
+            if len(fields) < 10:
+                raise ValueError(f"Invalid COLMAP image record: {line}")
+            image_id = int(fields[0])
+            camera_id = int(fields[8])
+            if camera_id not in cameras:
+                raise ValueError(
+                    f"COLMAP image {image_id} references missing camera {camera_id}: {images_path}"
+                )
+            image_records.append((image_id, camera_id, line_index, fields))
+            expecting_image = False
+        else:
+            expecting_image = True
+
+    if len(cameras) == 1:
+        return {"expanded": False, "camera_count": 1, "image_count": len(image_records)}
+
+    expanded_rows = []
+    for image_id, camera_id, line_index, fields in image_records:
+        fields[8] = str(image_id)
+        image_lines[line_index] = " ".join(fields)
+        expanded_rows.append((image_id, cameras[camera_id]))
+    expanded_rows.sort(key=lambda item: item[0])
+    header = [
+        line
+        for line in camera_comments
+        if not line.lstrip().startswith("# Number of cameras:")
+    ]
+    header.append(f"# Number of cameras: {len(expanded_rows)}")
+    camera_lines = header + [
+        f"{image_id} {' '.join(fields)}" for image_id, fields in expanded_rows
+    ]
+    trailing_cameras = "\n" if cameras_text.endswith("\n") else ""
+    trailing_images = "\n" if images_text.endswith("\n") else ""
+    cameras_path.write_text("\n".join(camera_lines) + trailing_cameras, encoding="utf-8")
+    images_path.write_text("\n".join(image_lines) + trailing_images, encoding="utf-8")
+    return {
+        "expanded": True,
+        "camera_count": len(expanded_rows),
+        "image_count": len(image_records),
+    }
+
+
+def gs2mesh_file_identity(path, *, digest=False, include_mtime=True):
+    path = Path(path)
+    if not path.exists() or not path.is_file():
+        return {"exists": False}
+    stat = path.stat()
+    identity = {"exists": True, "size": int(stat.st_size)}
+    if include_mtime:
+        identity["mtime_ns"] = int(stat.st_mtime_ns)
+    if digest:
+        hasher = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        identity["sha256"] = hasher.hexdigest()
+    return identity
+
+
+def gs2mesh_cache_signature(scene, iteration, options, model_path):
+    opts = mesh_export_options(options)
+    runtime_scene = gs2mesh_runtime_colmap_name(scene, opts["gs2mesh_downsample"])
+    sparse = GS2MESH_DIR / "data" / "custom" / runtime_scene / "sparse" / "0"
+    point_cloud = (
+        Path(model_path)
+        / "point_cloud"
+        / f"iteration_{int(iteration)}"
+        / "point_cloud.ply"
+    )
+    return {
+        "version": GS2MESH_CACHE_SIGNATURE_VERSION,
+        "scene": safe_name(scene),
+        "iteration": int(iteration),
+        "downsample": opts["gs2mesh_downsample"],
+        "baseline_percentage": opts["gs2mesh_baseline_percentage"],
+        "scene_360": opts["gs2mesh_scene_360"],
+        "point_cloud": gs2mesh_file_identity(point_cloud),
+        "cameras": gs2mesh_file_identity(
+            sparse / "cameras.txt", digest=True, include_mtime=False
+        ),
+        "images": gs2mesh_file_identity(
+            sparse / "images.txt", digest=True, include_mtime=False
+        ),
+        "points3d": gs2mesh_file_identity(
+            sparse / "points3D.txt", digest=True, include_mtime=False
+        ),
+        "runner": gs2mesh_file_identity(
+            GS2MESH_DIR / "run_single.py", digest=True, include_mtime=False
+        ),
+    }
+
+
+def gs2mesh_source_camera_identity(source_path):
+    sparse = Path(source_path) / "sparse" / "0"
+    return {
+        name: gs2mesh_file_identity(sparse / name, digest=True, include_mtime=False)
+        for name in ("cameras.txt", "images.txt", "cameras.bin", "images.bin")
+    }
+
+
+def gs2mesh_cache_manifest_path(output_dir):
+    return Path(output_dir) / GS2MESH_CACHE_MANIFEST
+
+
+def read_gs2mesh_cache_manifest(output_dir):
+    path = gs2mesh_cache_manifest_path(output_dir)
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def write_gs2mesh_cache_manifest(output_dir, signature):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = gs2mesh_cache_manifest_path(output_dir)
+    temporary = target.with_suffix(f".tmp-{uuid.uuid4().hex}")
+    payload = dict(signature)
+    payload["written_at"] = time.time()
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, target)
+    return target
+
+
+def gs2mesh_cache_manifest_matches(output_dir, signature):
+    manifest = read_gs2mesh_cache_manifest(output_dir)
+    if not manifest:
+        return False
+    return all(manifest.get(key) == value for key, value in signature.items())
+
+
+def gs2mesh_colmap_image_records(images_txt):
+    records = []
+    expecting_image = True
+    with open(images_txt, "r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if expecting_image:
+                if not stripped:
+                    continue
+                fields = stripped.split()
+                if len(fields) < 10:
+                    raise ValueError(f"Invalid COLMAP image record: {line.rstrip()}")
+                image_id = int(fields[0])
+                w, x, y, z = (float(value) for value in fields[1:5])
+                translation = np.asarray([float(value) for value in fields[5:8]], dtype=np.float64)
+                camera_id = int(fields[8])
+                rotation = np.asarray(
+                    [
+                        [1 - 2 * y * y - 2 * z * z, 2 * x * y - 2 * w * z, 2 * x * z + 2 * w * y],
+                        [2 * x * y + 2 * w * z, 1 - 2 * x * x - 2 * z * z, 2 * y * z - 2 * w * x],
+                        [2 * x * z - 2 * w * y, 2 * y * z + 2 * w * x, 1 - 2 * x * x - 2 * y * y],
+                    ],
+                    dtype=np.float64,
+                )
+                records.append(
+                    {
+                        "image_id": image_id,
+                        "camera_id": camera_id,
+                        "name": fields[9],
+                        "center": -(rotation.T @ translation),
+                        "camera_to_world_rotation": rotation.T,
+                    }
+                )
+                expecting_image = False
+            else:
+                expecting_image = True
+    return sorted(records, key=lambda record: record["image_id"])
+
+
+def gs2mesh_colmap_camera_centers(images_txt):
+    records = gs2mesh_colmap_image_records(images_txt)
+    return np.asarray([record["center"] for record in records], dtype=np.float64)
+
+
+def gs2mesh_colmap_renderer_intrinsics(cameras_txt, image_records):
+    cameras = {}
+    with open(cameras_txt, "r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            fields = stripped.split()
+            if len(fields) < 7:
+                raise ValueError(f"Invalid COLMAP camera record: {line.rstrip()}")
+            camera_id = int(fields[0])
+            model = fields[1].upper()
+            width, height = int(fields[2]), int(fields[3])
+            params = [float(value) for value in fields[4:]]
+            if model in {"SIMPLE_PINHOLE", "SIMPLE_RADIAL", "RADIAL"}:
+                fx = fy = params[0]
+                cx, cy = params[1:3]
+            else:
+                fx, fy, cx, cy = params[:4]
+            cameras[camera_id] = (width, height, fx, fy, cx, cy)
+    if not cameras:
+        raise ValueError(f"No COLMAP cameras found: {cameras_txt}")
+    intrinsics = []
+    for record in image_records:
+        camera_id = record["camera_id"]
+        if camera_id not in cameras:
+            raise ValueError(
+                f"COLMAP image {record['image_id']} references missing camera {camera_id}: {cameras_txt}"
+            )
+        intrinsics.append(cameras[camera_id])
+    return intrinsics
+
+
+def gs2mesh_legacy_cache_matches(output_dir, colmap_dir, signature):
+    output_dir = Path(output_dir)
+    camera_data_path = output_dir / "camera_data.json"
+    if not camera_data_path.exists():
+        return False
+    try:
+        camera_data = json.loads(camera_data_path.read_text(encoding="utf-8"))
+        positions = np.asarray(
+            [camera["left"]["pos"] for camera in camera_data], dtype=np.float64
+        )
+        baselines = np.asarray(
+            [camera["left"]["baseline"] for camera in camera_data], dtype=np.float64
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    images_txt = Path(colmap_dir) / "sparse" / "0" / "images.txt"
+    if (
+        positions.ndim != 2
+        or positions.shape[1] != 3
+        or len(positions) != count_colmap_images(images_txt)
+        or not np.all(np.isfinite(positions))
+        or not np.all(np.isfinite(baselines))
+        or np.any(baselines <= 0)
+    ):
+        return False
+    if not signature.get("scene_360"):
+        return False
+    try:
+        image_records = gs2mesh_colmap_image_records(images_txt)
+        current_positions = np.asarray(
+            [record["center"] for record in image_records], dtype=np.float64
+        )
+        current_rotations = np.asarray(
+            [record["camera_to_world_rotation"] for record in image_records],
+            dtype=np.float64,
+        )
+        current_intrinsics = gs2mesh_colmap_renderer_intrinsics(
+            Path(colmap_dir) / "sparse" / "0" / "cameras.txt",
+            image_records,
+        )
+        cached_extrinsics = np.asarray(
+            [camera["left"]["extrinsic"] for camera in camera_data],
+            dtype=np.float64,
+        )
+        cached_intrinsics = [
+            (
+                int(camera["left"]["width"]),
+                int(camera["left"]["height"]),
+                float(camera["left"]["fx"]),
+                float(camera["left"]["fy"]),
+                float(camera["left"]["cx"]),
+                float(camera["left"]["cy"]),
+            )
+            for camera in camera_data
+        ]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if current_positions.shape != positions.shape or not np.allclose(
+        current_positions, positions, rtol=1e-6, atol=1e-6
+    ):
+        return False
+    if (
+        cached_extrinsics.shape != (len(current_rotations), 4, 4)
+        or not np.all(np.isfinite(cached_extrinsics))
+        or not np.allclose(
+            cached_extrinsics[:, :3, :3],
+            current_rotations,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        or not np.allclose(
+            cached_extrinsics[:, :3, 3],
+            current_positions,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+    ):
+        return False
+    if len(current_intrinsics) != len(cached_intrinsics) or any(
+        left[:2] != right[:2]
+        or not np.allclose(left[2:], right[2:], rtol=1e-6, atol=1e-6)
+        for left, right in zip(current_intrinsics, cached_intrinsics)
+    ):
+        return False
+    radius = float(np.median(np.linalg.norm(positions - positions.mean(axis=0), axis=1)))
+    expected_baseline = radius * float(signature["baseline_percentage"]) / 100.0
+    if not math.isclose(float(np.median(baselines)), expected_baseline, rel_tol=1e-4, abs_tol=1e-7):
+        return False
+    dependency_mtimes = [
+        identity.get("mtime_ns", 0)
+        for key, identity in signature.items()
+        if key in {"point_cloud", "runner"} and isinstance(identity, dict)
+    ]
+    runner = GS2MESH_DIR / "run_single.py"
+    if runner.exists():
+        dependency_mtimes.append(runner.stat().st_mtime_ns)
+    return camera_data_path.stat().st_mtime_ns + 5_000_000_000 >= max(dependency_mtimes or [0])
+
+
+def quarantine_gs2mesh_render_cache(output_dir):
+    output_dir = Path(output_dir)
+    if not output_dir.exists():
+        return None
+    quarantine = output_dir.parent / ".stale"
+    quarantine.mkdir(parents=True, exist_ok=True)
+    target = quarantine / f"{output_dir.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    shutil.move(str(output_dir), str(target))
+    return target
+
+
+def gs2mesh_camera_data(output_dir):
+    path = Path(output_dir) / "camera_data.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list) or not data:
+        raise RuntimeError(f"GS2Mesh camera cache is empty: {path}")
+    baselines = np.asarray([camera["left"]["baseline"] for camera in data], dtype=np.float64)
+    positions = np.asarray([camera["left"]["pos"] for camera in data], dtype=np.float64)
+    if (
+        not np.all(np.isfinite(baselines))
+        or np.any(baselines <= 0)
+        or not np.all(np.isfinite(positions))
+    ):
+        raise RuntimeError(f"GS2Mesh camera cache contains invalid coordinates: {path}")
+    baseline = float(np.median(baselines))
+    if np.max(np.abs(baselines - baseline)) > max(1e-7, baseline * 1e-4):
+        raise RuntimeError(f"GS2Mesh camera cache contains inconsistent baselines: {path}")
+    return data, baseline, positions
+
+
+def profile_gs2mesh_render_cache(output_dir, options, max_samples=2_000_000):
+    output_dir = Path(output_dir)
+    opts = mesh_export_options(options)
+    use_occlusion_mask = opts["gs2mesh_use_occlusion_mask"]
+    camera_data, baseline, positions = gs2mesh_camera_data(output_dir)
+    depth_paths = sorted(output_dir.glob("[0-9][0-9][0-9]/out_DLNR_Middlebury/depth.npy"))
+    if len(depth_paths) != len(camera_data):
+        raise RuntimeError(
+            f"GS2Mesh cache has {len(depth_paths)} depth maps for {len(camera_data)} cameras: {output_dir}"
+        )
+    per_view_target = max(4096, int(max_samples) // max(1, len(depth_paths)))
+    sampled = []
+    sampled_unmasked = []
+    sampled_positive = 0
+    sampled_masked = 0
+    for depth_path in depth_paths:
+        depth = np.load(depth_path, mmap_mode="r")
+        if depth.ndim != 2:
+            depth = np.squeeze(depth)
+        if depth.ndim != 2:
+            raise RuntimeError(f"Unsupported GS2Mesh depth shape {depth.shape}: {depth_path}")
+        stride = max(1, int(math.ceil(math.sqrt(depth.size / per_view_target))))
+        depth_sample = np.asarray(depth[::stride, ::stride], dtype=np.float32).reshape(-1)
+        positive = np.isfinite(depth_sample) & (depth_sample > 0)
+        sampled_positive += int(np.count_nonzero(positive))
+        unmasked_values = depth_sample[positive]
+        if unmasked_values.size:
+            sampled_unmasked.append(unmasked_values)
+        mask_path = depth_path.with_name("occlusion_mask.npy")
+        if use_occlusion_mask and mask_path.exists():
+            mask = np.load(mask_path, mmap_mode="r")
+            if mask.ndim != 2:
+                mask = np.squeeze(mask)
+            if mask.shape == depth.shape:
+                positive &= np.asarray(mask[::stride, ::stride], dtype=bool).reshape(-1)
+        values = depth_sample[positive]
+        sampled_masked += int(values.size)
+        if values.size:
+            sampled.append(values)
+    occlusion_mask_usable = bool(sampled) or not use_occlusion_mask
+    if not sampled and sampled_unmasked:
+        sampled = sampled_unmasked
+        sampled_masked = sampled_positive
+    if not sampled:
+        raise RuntimeError(
+            "GS2Mesh rendered depth maps contain no positive finite samples. "
+            "The stereo cache must be regenerated before TSDF fusion."
+        )
+    depths = np.concatenate(sampled).astype(np.float64, copy=False)
+    percentiles = np.percentile(depths, [0.5, 1.0, 50.0, 99.0, 99.5])
+    requested_min = opts["gs2mesh_tsdf_min_depth_baselines"] * baseline
+    requested_max = opts["gs2mesh_tsdf_max_depth_baselines"] * baseline
+    requested_coverage = float(np.mean((depths >= requested_min) & (depths <= requested_max)))
+    return {
+        "output_dir": str(output_dir),
+        "camera_count": len(camera_data),
+        "baseline": baseline,
+        "camera_positions": positions.tolist(),
+        "sampled_positive": sampled_positive,
+        "sampled_after_mask": sampled_masked,
+        "masked_fraction": float(sampled_masked / max(1, sampled_positive)),
+        "occlusion_mask_usable": occlusion_mask_usable,
+        "requested_min_world": float(requested_min),
+        "requested_max_world": float(requested_max),
+        "requested_coverage": requested_coverage,
+        "depth": {
+            "min": float(depths.min()),
+            "p0_5": float(percentiles[0]),
+            "p1": float(percentiles[1]),
+            "p50": float(percentiles[2]),
+            "p99": float(percentiles[3]),
+            "p99_5": float(percentiles[4]),
+            "max": float(depths.max()),
+        },
+    }
+
+
+def gs2mesh_scene_scale(model_path, iteration, profile, max_samples=250_000):
+    point_cloud = (
+        Path(model_path)
+        / "point_cloud"
+        / f"iteration_{int(iteration)}"
+        / "point_cloud.ply"
+    )
+    try:
+        vertices = PlyData.read(str(point_cloud), mmap="r")["vertex"].data
+        count = len(vertices)
+        stride = max(1, int(math.ceil(count / max_samples)))
+        xyz = np.column_stack(
+            [
+                np.asarray(vertices[axis][::stride], dtype=np.float64)
+                for axis in ("x", "y", "z")
+            ]
+        )
+        xyz = xyz[np.all(np.isfinite(xyz), axis=1)]
+        if len(xyz) >= 2:
+            bounds = np.percentile(xyz, [1.0, 99.0], axis=0) if len(xyz) >= 100 else np.asarray([xyz.min(axis=0), xyz.max(axis=0)])
+            diagonal = float(np.linalg.norm(bounds[1] - bounds[0]))
+            if math.isfinite(diagonal) and diagonal > 0:
+                return {"diagonal": diagonal, "source": "3DGS point cloud p1-p99", "sample_count": int(len(xyz))}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    positions = np.asarray(profile.get("camera_positions", []), dtype=np.float64)
+    camera_diagonal = 0.0
+    if positions.ndim == 2 and positions.shape[1] == 3 and len(positions) >= 2:
+        bounds = np.percentile(positions, [1.0, 99.0], axis=0)
+        camera_diagonal = float(np.linalg.norm(bounds[1] - bounds[0]))
+    fallback = max(camera_diagonal, float(profile["depth"]["p99_5"]))
+    if not math.isfinite(fallback) or fallback <= 0:
+        raise RuntimeError("Could not estimate a safe GS2Mesh scene scale from the point cloud or camera cache")
+    return {"diagonal": fallback, "source": "camera/depth fallback", "sample_count": len(positions)}
+
+
+def two_dgs_gaussian_extent(scene, iteration, max_samples=1_000_000):
+    point_cloud = ply_path(scene, iteration)
+    try:
+        vertices = PlyData.read(str(point_cloud), mmap="r")["vertex"].data
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(f"Could not read the 2DGS point cloud for automatic mesh sizing: {point_cloud}") from exc
+
+    count = len(vertices)
+    stride = max(1, int(math.ceil(count / max_samples)))
+    xyz = np.column_stack(
+        [
+            np.asarray(vertices[axis][::stride], dtype=np.float64)
+            for axis in ("x", "y", "z")
+        ]
+    )
+    xyz = xyz[np.all(np.isfinite(xyz), axis=1)]
+    if len(xyz) < 2:
+        raise RuntimeError("At least two finite 2DGS points are required for automatic mesh sizing")
+
+    if len(xyz) >= 100:
+        bounds = np.percentile(xyz, [1.0, 99.0], axis=0)
+        source = "2DGS point cloud p1-p99"
+    else:
+        bounds = np.asarray([xyz.min(axis=0), xyz.max(axis=0)])
+        source = "2DGS point cloud bounds"
+    axis_extents = bounds[1] - bounds[0]
+    extent = float(np.max(axis_extents))
+    if not math.isfinite(extent) or extent <= 0:
+        raise RuntimeError("Could not estimate a positive 2DGS Gaussian extent for automatic mesh sizing")
+    return {
+        "extent": extent,
+        "axis_extents": [float(value) for value in axis_extents],
+        "source": source,
+        "sample_count": int(len(xyz)),
+    }
+
+
+def apply_2dgs_bounded_tsdf_defaults(scene, iteration, options):
+    opts = dict(options)
+    if opts.get("mode") != "bounded" or float(opts.get("voxel_size", -1.0)) > 0:
+        return opts, None
+
+    extent_info = two_dgs_gaussian_extent(scene, iteration)
+    voxel_size = extent_info["extent"] / int(opts["mesh_res"])
+    if not math.isfinite(voxel_size) or voxel_size <= 0:
+        raise RuntimeError("Could not derive a positive 2DGS voxel size")
+    opts["voxel_size"] = voxel_size
+    if float(opts.get("sdf_trunc", -1.0)) <= 0:
+        opts["sdf_trunc"] = voxel_size * 5.0
+    return opts, extent_info
+
+
+def resolve_gs2mesh_scale_options(options, profile, model_path, iteration):
+    requested = mesh_export_options(options)
+    effective = dict(requested)
+    scene_scale = gs2mesh_scene_scale(model_path, iteration, profile)
+    if requested["gs2mesh_auto_scale"]:
+        baseline = float(profile["baseline"])
+        low_baselines = float(profile["depth"]["p0_5"]) / baseline
+        high_baselines = float(profile["depth"]["p99_5"]) / baseline
+        safe_min = max(1, int(math.floor(low_baselines * 0.85)))
+        safe_max = max(safe_min + 1, int(math.ceil((high_baselines * 1.20) / 16.0) * 16))
+        safe_voxel = max(1, int(math.ceil(float(scene_scale["diagonal"]) * 512.0 / 1600.0)))
+        effective["gs2mesh_tsdf_min_depth_baselines"] = min(
+            requested["gs2mesh_tsdf_min_depth_baselines"], safe_min
+        )
+        effective["gs2mesh_tsdf_max_depth_baselines"] = min(
+            100000,
+            max(requested["gs2mesh_tsdf_max_depth_baselines"], safe_max),
+        )
+        effective["gs2mesh_tsdf_voxel"] = min(
+            4096,
+            max(requested["gs2mesh_tsdf_voxel"], safe_voxel),
+        )
+        if not profile.get("occlusion_mask_usable", True):
+            effective["gs2mesh_use_occlusion_mask"] = False
+    effective_min_world = effective["gs2mesh_tsdf_min_depth_baselines"] * profile["baseline"]
+    effective_max_world = effective["gs2mesh_tsdf_max_depth_baselines"] * profile["baseline"]
+    report = {
+        "source_coordinates": "preserved",
+        "tsdf_scale": 1.0,
+        "scene_scale": scene_scale,
+        "baseline": profile["baseline"],
+        "depth": profile["depth"],
+        "sampled_after_mask": profile["sampled_after_mask"],
+        "requested_coverage": profile["requested_coverage"],
+        "occlusion_mask_usable": profile.get("occlusion_mask_usable", True),
+        "requested": {
+            "voxel": requested["gs2mesh_tsdf_voxel"],
+            "min_depth_baselines": requested["gs2mesh_tsdf_min_depth_baselines"],
+            "max_depth_baselines": requested["gs2mesh_tsdf_max_depth_baselines"],
+        },
+        "effective": {
+            "voxel": effective["gs2mesh_tsdf_voxel"],
+            "voxel_world": effective["gs2mesh_tsdf_voxel"] / 512.0,
+            "min_depth_baselines": effective["gs2mesh_tsdf_min_depth_baselines"],
+            "max_depth_baselines": effective["gs2mesh_tsdf_max_depth_baselines"],
+            "min_depth_world": effective_min_world,
+            "max_depth_world": effective_max_world,
+        },
+    }
+    return effective, report
+
+
+def prepare_gs2mesh_render_cache_dir(
+    scene,
+    iteration,
+    options,
+    *,
+    signature=None,
+    quarantine_invalid=False,
+):
+    legacy, short = gs2mesh_output_dirs(scene, iteration, options)
+    runtime_scene = gs2mesh_runtime_colmap_name(scene, options["gs2mesh_downsample"])
+    runtime_colmap_dir = GS2MESH_DIR / "data" / "custom" / runtime_scene
+    if gs2mesh_cache_complete(short, runtime_colmap_dir):
+        if signature is None or gs2mesh_cache_manifest_matches(short, signature):
+            return short
+        if gs2mesh_legacy_cache_matches(short, runtime_colmap_dir, signature):
+            write_gs2mesh_cache_manifest(short, signature)
+            return short
+        if quarantine_invalid:
+            quarantine_gs2mesh_render_cache(short)
+    if gs2mesh_cache_complete(legacy, runtime_colmap_dir):
+        if signature is not None:
+            if not gs2mesh_cache_manifest_matches(legacy, signature) and not gs2mesh_legacy_cache_matches(
+                legacy, runtime_colmap_dir, signature
+            ):
+                return None
+        link_or_copy_tree(legacy, short)
+        if signature is not None:
+            write_gs2mesh_cache_manifest(short, signature)
+        return short
+    return None
+
+
+def gs2mesh_cleaned_mesh_pattern(scene, iteration, options):
+    runtime_scene = gs2mesh_runtime_colmap_name(scene, options["gs2mesh_downsample"])
+    dataset_name = gs2mesh_dataset_string(iteration, options["gs2mesh_baseline_percentage"])
+    voxel = options["gs2mesh_tsdf_voxel"]
+    min_depth = options["gs2mesh_tsdf_min_depth_baselines"]
+    max_depth = options["gs2mesh_tsdf_max_depth_baselines"]
+    return f"{runtime_scene}_{dataset_name}_*voxel{voxel}_512_trunc{min_depth}_{max_depth}_cleaned_mesh.ply"
+
+
+def ply_mesh_element_counts(path):
+    vertex_count = None
+    face_count = None
+    header_complete = False
+    header_bytes = 0
+    with open(path, "rb") as handle:
+        if handle.readline(256).strip() != b"ply":
+            raise RuntimeError(f"GS2Mesh output is not a PLY file: {path}")
+        for _ in range(256):
+            line = handle.readline(4096)
+            if not line:
+                break
+            header_bytes += len(line)
+            if header_bytes > 65536:
+                break
+            fields = line.decode("ascii", errors="replace").strip().split()
+            if len(fields) == 3 and fields[:2] == ["element", "vertex"]:
+                vertex_count = int(fields[2])
+            elif len(fields) == 3 and fields[:2] == ["element", "face"]:
+                face_count = int(fields[2])
+            elif fields == ["end_header"]:
+                header_complete = True
+                break
+    if not header_complete:
+        raise RuntimeError(f"GS2Mesh output has an invalid PLY header: {path}")
+    return int(vertex_count or 0), int(face_count or 0)
+
+
+def build_gs2mesh_command(
+    scene,
+    iteration,
+    options,
+    *,
+    skip_rendering=False,
+    skip_tsdf=False,
+):
+    opts = mesh_export_options(options)
+    command = [
+        gs2mesh_python(),
+        "run_single.py",
+        "--colmap_name",
+        safe_name(scene),
+        "--dataset_name",
+        "custom",
+        "--experiment_folder_name",
+        "app",
+        "--renderer_folder_name",
+        gs2mesh_renderer_folder(scene, opts["gs2mesh_downsample"]),
+        "--skip_video_extraction",
+        "--skip_colmap",
+        "--skip_GS",
+        "--skip_masking",
+        "--GS_iterations",
+        str(int(iteration)),
+        "--downsample",
+        str(opts["gs2mesh_downsample"]),
+        "--renderer_baseline_percentage",
+        str(opts["gs2mesh_baseline_percentage"]),
+        "--TSDF_scale",
+        "1.0",
+        "--TSDF_voxel",
+        str(opts["gs2mesh_tsdf_voxel"]),
+        "--TSDF_min_depth_baselines",
+        str(opts["gs2mesh_tsdf_min_depth_baselines"]),
+        "--TSDF_max_depth_baselines",
+        str(opts["gs2mesh_tsdf_max_depth_baselines"]),
+        "--TSDF_cleaning_threshold",
+        str(opts["gs2mesh_tsdf_cleaning_threshold"]),
+    ]
+    if opts["task_port"]:
+        command.extend(["--GS_port", str(opts["task_port"])])
+    if not opts["gs2mesh_scene_360"]:
+        command.append("--no-renderer_scene_360")
+    if not opts["gs2mesh_use_occlusion_mask"]:
+        command.append("--no-TSDF_use_occlusion_mask")
+    if skip_rendering:
+        command.append("--skip_rendering")
+    if skip_tsdf:
+        command.append("--skip_TSDF")
+    return command
+
+
+def probe_sugar_runtime(python_path):
+    probe_code = (
+        "from scripts.run_sugar import install_eager_dynamo_shim\n"
+        "torch=install_eager_dynamo_shim()\n"
+        "import torch\n"
+        "import pytorch3d\n"
+        "try:\n"
+        " from pytorch3d import _C as pytorch3d_native\n"
+        "except Exception as exc:\n"
+        " raise RuntimeError(f'PyTorch3D native module probe failed: {exc}') from exc\n"
+        "try:\n"
+        " import open3d\n"
+        "except Exception as exc:\n"
+        " raise RuntimeError(f'Open3D native module probe failed: {exc}') from exc\n"
+        "parameter=torch.nn.Parameter(torch.zeros(1))\n"
+        "optimizer=torch.optim.Adam([parameter])\n"
+        "parameter.sum().backward()\n"
+        "optimizer.step()\n"
+        "optimizer.zero_grad()\n"
+        "print('torch', torch.__version__)\n"
+        "print('pytorch3d', getattr(pytorch3d, '__version__', 'unknown'))\n"
+        "print('open3d', open3d.__version__)\n"
+        "print('adam', 'ok')\n"
+    )
+    return python_probe(
+        python_path,
+        sugar_env(),
+        probe_code,
+        timeout=RUNTIME_PROBE_TIMEOUT_SECONDS,
+    )
+
+
+def sugar_blocked_component(detail):
+    text = str(detail or "").lower().replace("/", "\\")
+    if "pytorch3d" in text or "tinyobjloader" in text:
+        return "PyTorch3D"
+    if "open3d" in text or "pybind" in text:
+        return "Open3D"
+    if any(marker in text for marker in ("torch\\", "c10.dll", "torch_cpu.dll", "torch_cuda.dll")):
+        return "PyTorch"
+    return "SuGaR native runtime"
+
+
+def isolated_conda_path(env_root, inherited_path=""):
+    env_root = Path(env_root).resolve()
+    selected = os.path.normcase(str(env_root))
+    envs_root = env_root.parent
+    entries = [
+        env_root,
+        env_root / "Library" / "bin",
+        env_root / "Library" / "usr" / "bin",
+        env_root / "Scripts",
+    ]
+    seen = {os.path.normcase(str(path)) for path in entries}
+    for item in str(inherited_path or "").split(os.pathsep):
+        if not item:
+            continue
+        path = Path(item)
+        normalized = os.path.normcase(str(path.resolve()))
+        try:
+            path.resolve().relative_to(envs_root)
+            belongs_to_conda_envs = True
+        except ValueError:
+            belongs_to_conda_envs = False
+        if belongs_to_conda_envs and normalized != selected and not normalized.startswith(selected + os.sep):
+            continue
+        if normalized not in seen:
+            entries.append(path)
+            seen.add(normalized)
+    return os.pathsep.join(str(path) for path in entries)
+
+
+def runtime_config_path(*, environ=None, home=None):
+    environment = os.environ if environ is None else environ
+    configured = environment.get("GS_EDITOR_RUNTIME_CONFIG")
+    if configured:
+        return Path(configured).expanduser()
+    local_app_data = environment.get("LOCALAPPDATA")
+    if local_app_data:
+        base = Path(local_app_data)
+    else:
+        user_home = Path.home() if home is None else Path(home)
+        base = user_home / "AppData" / "Local"
+    return base / "Gaussian Scene Workbench" / "runtime.json"
+
+
+def load_runtime_config(*, path=None, environ=None, home=None):
+    config_path = Path(path) if path is not None else runtime_config_path(environ=environ, home=home)
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def environment_python_path(env_root):
+    root = Path(env_root)
+    candidates = [root / "python.exe", root / "Scripts" / "python.exe"]
+    return first_existing_path(candidates) or candidates[0]
+
+
+def same_resolved_path(left, right):
+    return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(str(Path(right).resolve()))
+
+
+
+
+def smart_app_control_state():
+    if os.name != "nt" or winreg is None:
+        return "not_applicable"
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\CI\Policy",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")
+    except OSError:
+        return "unknown"
+    return {0: "off", 1: "on", 2: "evaluation"}.get(int(value), "unknown")
+
+
+def native_extension_policy_blocked(error_text, smart_app_state):
+    if smart_app_state != "on":
+        return False
+    text = str(error_text or "").lower()
+    markers = (
+        "winerror 4551",
+        "application control policy",
+        "application-control policy",
+        "アプリケーション制御ポリシー",
+    )
+    return any(marker in text for marker in markers)
+
+
+def recover_2dgs_post_mesh(job, scene, iteration, mode, num_cluster, started_at):
+    """Recover a fresh raw mesh when upstream 2DGS post-processing fails."""
+    source_path = mesh_output_path(scene, iteration, mode, post=False)
+    output_path = mesh_output_path(scene, iteration, mode, post=True)
+    if not source_path.is_file():
+        return False
+    if source_path.stat().st_mtime < float(started_at) - 5.0:
+        add_job_log(job, f"2DGS recovery ignored stale raw mesh: {source_path}")
+        return False
+
+    helper_path = ROOT / "scripts" / "postprocess_2dgs_mesh.py"
+    if not helper_path.is_file():
+        raise RuntimeError(f"Missing 2DGS mesh recovery helper: {helper_path}")
+    add_job_log(
+        job,
+        "2DGS produced a fresh raw mesh but its connected-component post-process failed; "
+        "recovering without rerunning rendering or TSDF integration.",
+    )
+    run_logged(
+        job,
+        [
+            training_python("2dgs"),
+            helper_path,
+            "--input",
+            source_path,
+            "--output",
+            output_path,
+            "--num-cluster",
+            str(int(num_cluster)),
+        ],
+        ROOT,
+        "2dgs",
+    )
+    if not output_path.is_file():
+        raise RuntimeError(f"2DGS mesh recovery finished without an output file: {output_path}")
+    return True
+
+
+def run_gs2mesh_mesh_job(job, options):
+    scene = safe_name(job["scene"])
+    iteration = int(job["iteration"])
+    model_path = model_dir(scene)
+    if scene_backend(scene, iteration) != "3dgs":
+        raise ValueError("GS2Mesh mesh export is only available for 3DGS scenes")
+    cfg = load_cfg_args(model_path)
+    source_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
+    requested = mesh_export_options(options)
+    source_identity = gs2mesh_source_camera_identity(source_path)
+    prepare_gs2mesh_inputs(
+        scene,
+        model_path,
+        source_path,
+        iteration,
+        requested["gs2mesh_downsample"],
+    )
+    if gs2mesh_source_camera_identity(source_path) != source_identity:
+        raise RuntimeError(
+            "GS2Mesh staging changed the aligned source camera files. The task was stopped to protect source coordinates."
+        )
+    add_job_log(job, f"Aligned source: {source_path}")
+    add_job_log(
+        job,
+        "Coordinate policy: source cameras are read-only; world coordinates are preserved; TSDF_scale is fixed at 1.0.",
+    )
+    add_job_log(job, "Aligned camera source verification: unchanged after GS2Mesh staging.")
+
+    signature = gs2mesh_cache_signature(scene, iteration, requested, model_path)
+    cache_dir = prepare_gs2mesh_render_cache_dir(
+        scene,
+        iteration,
+        requested,
+        signature=signature,
+        quarantine_invalid=True,
+    )
+    profile = None
+    if cache_dir is not None and requested["gs2mesh_auto_scale"]:
+        try:
+            profile = profile_gs2mesh_render_cache(cache_dir, requested)
+            add_job_log(job, f"Reusing verified GS2Mesh render/depth cache: {cache_dir}")
+        except Exception as exc:
+            quarantined = quarantine_gs2mesh_render_cache(cache_dir)
+            add_job_log(
+                job,
+                f"WARNING: Cached GS2Mesh depth data failed validation ({exc}); moved to {quarantined} and regenerating.",
+            )
+            cache_dir = None
+
+    if cache_dir is None and requested["gs2mesh_auto_scale"]:
+        add_job_log(job, "GS2Mesh stage 1/2: rendering stereo pairs and depth cache without TSDF fusion.")
+        set_job_stage(job, "running", "render_depth")
+        render_command = build_gs2mesh_command(
+            scene,
+            iteration,
+            requested,
+            skip_tsdf=True,
+        )
+        run_logged(job, render_command, GS2MESH_DIR, "gs2mesh")
+        cache_dir = gs2mesh_output_dirs(scene, iteration, requested)[1]
+        runtime_scene = gs2mesh_runtime_colmap_name(scene, requested["gs2mesh_downsample"])
+        runtime_colmap_dir = GS2MESH_DIR / "data" / "custom" / runtime_scene
+        if not gs2mesh_cache_complete(cache_dir, runtime_colmap_dir):
+            raise RuntimeError(
+                f"GS2Mesh render/depth stage finished with an incomplete cache: {cache_dir}"
+            )
+        write_gs2mesh_cache_manifest(cache_dir, signature)
+        try:
+            profile = profile_gs2mesh_render_cache(cache_dir, requested)
+        except Exception as exc:
+            quarantined = quarantine_gs2mesh_render_cache(cache_dir)
+            raise RuntimeError(
+                f"GS2Mesh generated invalid render/depth data ({exc}); moved to {quarantined}"
+            ) from exc
+        add_job_log(job, f"GS2Mesh render/depth cache complete: {cache_dir}")
+
+    effective = dict(requested)
+    scale_report = None
+    if requested["gs2mesh_auto_scale"]:
+        if profile is None:
+            profile = profile_gs2mesh_render_cache(cache_dir, requested)
+        effective, scale_report = resolve_gs2mesh_scale_options(
+            requested,
+            profile,
+            model_path,
+            iteration,
+        )
+        with MESH_LOCK:
+            job["effective_options"] = dict(effective)
+            job["scale_report"] = scale_report
+        add_job_log(
+            job,
+            "GS2Mesh depth profile: "
+            f"baseline={scale_report['baseline']:.9g}, "
+            f"p0.5={scale_report['depth']['p0_5']:.6g}, "
+            f"p99.5={scale_report['depth']['p99_5']:.6g}, "
+            f"requested coverage={scale_report['requested_coverage'] * 100:.4f}%.",
+        )
+        add_job_log(
+            job,
+            "GS2Mesh auto scale: "
+            f"voxel {scale_report['requested']['voxel']} -> {scale_report['effective']['voxel']} "
+            f"(world {scale_report['effective']['voxel_world']:.9g}), "
+            f"depth {scale_report['requested']['min_depth_baselines']}.."
+            f"{scale_report['requested']['max_depth_baselines']} -> "
+            f"{scale_report['effective']['min_depth_baselines']}.."
+            f"{scale_report['effective']['max_depth_baselines']} baselines "
+            f"(world {scale_report['effective']['min_depth_world']:.6g}.."
+            f"{scale_report['effective']['max_depth_world']:.6g}).",
+        )
+        add_job_log(
+            job,
+            f"Scene scale: {scale_report['scene_scale']['diagonal']:.6g} "
+            f"({scale_report['scene_scale']['source']}); source transform remains unchanged.",
+        )
+        if not scale_report["occlusion_mask_usable"]:
+            add_job_log(
+                job,
+                "WARNING: Occlusion masks removed all valid depth samples; TSDF will use finite stereo depth without that mask.",
+            )
+    else:
+        with MESH_LOCK:
+            job["effective_options"] = dict(effective)
+        add_job_log(job, "GS2Mesh auto scale is disabled; using manual TSDF parameters without changing source coordinates.")
+
+    cache_ready = cache_dir is not None
+    add_job_log(job, "GS2Mesh stage 2/2: TSDF fusion in preserved source coordinates.")
+    set_job_stage(job, "running", "tsdf_fusion")
+    command = build_gs2mesh_command(
+        scene,
+        iteration,
+        effective,
+        skip_rendering=cache_ready,
+    )
+    started_at = time.time()
+    run_logged(job, command, GS2MESH_DIR, "gs2mesh")
+    result = collect_gs2mesh_mesh_output(scene, iteration, effective, started_at)
+    return mesh_output_path(scene, iteration, "gs2mesh", post=True), effective, result
+
+
+def task_port_available(port):
+    port = int(port)
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        probe.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def reserve_task_port(job, purpose, preferred=6009, start=TASK_PORT_START, end=TASK_PORT_END):
+    preferred = int(preferred)
+    start = int(start)
+    end = int(end)
+    if start > end:
+        raise ValueError("Task port range is invalid")
+    candidates = [preferred, *range(start, end + 1)]
+    with TASK_PORT_LOCK:
+        for port in candidates:
+            if port < 1024 or port > 65535 or port in TASK_PORT_OWNERS:
+                continue
+            if not task_port_available(port):
+                continue
+            owner = str(job.get("id") or uuid.uuid4().hex)
+            TASK_PORT_OWNERS[port] = {"job_id": owner, "purpose": str(purpose)}
+            job["task_port"] = port
+            job["task_port_purpose"] = str(purpose)
+            job["task_port_released"] = False
+            return port
+    raise RuntimeError(
+        f"No free task port is available (preferred {preferred}, range {start}-{end}). "
+        "Stop the process using those ports and retry."
+    )
+
+
+def release_task_port(job):
+    port = job.get("task_port")
+    if port is None:
+        return
+    with TASK_PORT_LOCK:
+        owner = TASK_PORT_OWNERS.get(int(port))
+        if owner is None or owner.get("job_id") == str(job.get("id")):
+            TASK_PORT_OWNERS.pop(int(port), None)
+    job["task_port_released"] = True
 
 
 def install_drive_root():
@@ -528,6 +1621,9 @@ def mesh_texture_paths(scene, iteration, mode="bounded", post=True):
 def mesh_export_options(options):
     options = options or {}
     mode = safe_mesh_mode(options.get("mode", "bounded"))
+    task_port = int(options.get("task_port", 0) or 0)
+    if task_port and (task_port < 1024 or task_port > 65535):
+        raise ValueError("task_port must be between 1024 and 65535")
     mesh_res = int(options.get("mesh_res", 512 if mode == "bounded" else 1024))
     num_cluster = int(options.get("num_cluster", 50))
     depth_ratio = float(options.get("depth_ratio", 0.0))
@@ -535,6 +1631,17 @@ def mesh_export_options(options):
         raise ValueError("mesh_res must be between 64 and 4096")
     if num_cluster < 1 or num_cluster > 500:
         raise ValueError("num_cluster must be between 1 and 500")
+    if not math.isfinite(depth_ratio) or depth_ratio < 0.0 or depth_ratio > 1.0:
+        raise ValueError("depth_ratio must be finite and between 0 and 1")
+
+    manual_tsdf = {}
+    for name in ("voxel_size", "depth_trunc", "sdf_trunc"):
+        value = float(options.get(name, -1.0))
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+        if value != -1.0 and value <= 0.0:
+            raise ValueError(f"{name} must be positive or -1 for automatic sizing")
+        manual_tsdf[name] = value
     sugar_quality = (options.get("sugar_quality") or "high").lower()
     if sugar_quality not in {"low", "high"}:
         sugar_quality = "high"
@@ -563,25 +1670,29 @@ def mesh_export_options(options):
     if gs2mesh_baseline_percentage <= 0 or gs2mesh_baseline_percentage > 50:
         raise ValueError("gs2mesh_baseline_percentage must be between 0 and 50")
     gs2mesh_tsdf_voxel = int(options.get("gs2mesh_tsdf_voxel", 2))
-    if gs2mesh_tsdf_voxel < 1 or gs2mesh_tsdf_voxel > 8:
-        raise ValueError("gs2mesh_tsdf_voxel must be between 1 and 8")
+    if gs2mesh_tsdf_voxel < 1 or gs2mesh_tsdf_voxel > 4096:
+        raise ValueError("gs2mesh_tsdf_voxel must be between 1 and 4096")
     gs2mesh_tsdf_min_depth_baselines = int(options.get("gs2mesh_tsdf_min_depth_baselines", 4))
     if gs2mesh_tsdf_min_depth_baselines < 1 or gs2mesh_tsdf_min_depth_baselines > 100:
         raise ValueError("gs2mesh_tsdf_min_depth_baselines must be between 1 and 100")
     gs2mesh_tsdf_max_depth_baselines = int(options.get("gs2mesh_tsdf_max_depth_baselines", 20))
-    if gs2mesh_tsdf_max_depth_baselines < gs2mesh_tsdf_min_depth_baselines or gs2mesh_tsdf_max_depth_baselines > 200:
-        raise ValueError("gs2mesh_tsdf_max_depth_baselines must be greater than min and no more than 200")
+    if (
+        gs2mesh_tsdf_max_depth_baselines < gs2mesh_tsdf_min_depth_baselines
+        or gs2mesh_tsdf_max_depth_baselines > 100000
+    ):
+        raise ValueError("gs2mesh_tsdf_max_depth_baselines must be greater than min and no more than 100000")
     gs2mesh_tsdf_cleaning_threshold = int(options.get("gs2mesh_tsdf_cleaning_threshold", 100000))
     if gs2mesh_tsdf_cleaning_threshold < 0 or gs2mesh_tsdf_cleaning_threshold > 10000000:
         raise ValueError("gs2mesh_tsdf_cleaning_threshold must be between 0 and 10000000")
     return {
         "mode": mode,
+        "task_port": task_port,
         "mesh_res": mesh_res,
         "num_cluster": num_cluster,
         "depth_ratio": depth_ratio,
-        "voxel_size": float(options.get("voxel_size", -1.0)),
-        "depth_trunc": float(options.get("depth_trunc", -1.0)),
-        "sdf_trunc": float(options.get("sdf_trunc", -1.0)),
+        "voxel_size": manual_tsdf["voxel_size"],
+        "depth_trunc": manual_tsdf["depth_trunc"],
+        "sdf_trunc": manual_tsdf["sdf_trunc"],
         "sugar_quality": sugar_quality,
         "sugar_regularization": sugar_regularization,
         "sugar_refinement_time": sugar_refinement_time,
@@ -593,6 +1704,8 @@ def mesh_export_options(options):
         "gs2mesh_downsample": gs2mesh_downsample,
         "gs2mesh_baseline_percentage": gs2mesh_baseline_percentage,
         "gs2mesh_scene_360": safe_bool(options.get("gs2mesh_scene_360"), True),
+        "gs2mesh_auto_scale": safe_bool(options.get("gs2mesh_auto_scale"), True),
+        "gs2mesh_use_occlusion_mask": safe_bool(options.get("gs2mesh_use_occlusion_mask"), True),
         "gs2mesh_tsdf_voxel": gs2mesh_tsdf_voxel,
         "gs2mesh_tsdf_min_depth_baselines": gs2mesh_tsdf_min_depth_baselines,
         "gs2mesh_tsdf_max_depth_baselines": gs2mesh_tsdf_max_depth_baselines,
@@ -741,17 +1854,25 @@ def gs2mesh_output_dirs(scene, iteration, options):
     return legacy, short
 
 
+GS2MESH_CACHE_MANIFEST = ".gs_editor_cache.json"
+GS2MESH_CACHE_SIGNATURE_VERSION = 2
+
+
 def count_colmap_images(images_txt):
     count = 0
-    data_line_index = 0
+    expecting_image = True
     with open(images_txt, "r", encoding="utf-8") as handle:
         for line in handle:
             stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+            if stripped.startswith("#"):
                 continue
-            if data_line_index % 2 == 0:
+            if expecting_image:
+                if not stripped:
+                    continue
                 count += 1
-            data_line_index += 1
+                expecting_image = False
+            else:
+                expecting_image = True
     return count
 
 
@@ -774,15 +1895,7 @@ def gs2mesh_cache_complete(output_dir, colmap_dir):
 
 
 def prepare_gs2mesh_render_cache(scene, iteration, options):
-    legacy, short = gs2mesh_output_dirs(scene, iteration, options)
-    runtime_scene = gs2mesh_runtime_colmap_name(scene, options["gs2mesh_downsample"])
-    runtime_colmap_dir = GS2MESH_DIR / "data" / "custom" / runtime_scene
-    if gs2mesh_cache_complete(short, runtime_colmap_dir):
-        return True
-    if gs2mesh_cache_complete(legacy, runtime_colmap_dir):
-        link_or_copy_tree(legacy, short)
-        return True
-    return False
+    return prepare_gs2mesh_render_cache_dir(scene, iteration, options) is not None
 
 
 def sugar_camera_name(name):
@@ -993,6 +2106,7 @@ def prepare_gs2mesh_dataset(scene, source_path, downsample=1):
     link_or_copy_tree(images_dir, dataset_dir / "images")
     copytree_replace(sparse_dir, dataset_dir / "sparse")
     convert_colmap_model_to_text(dataset_dir / "sparse" / "0")
+    canonicalize_gs2mesh_camera_mapping(dataset_dir / "sparse" / "0")
     prepare_gs2mesh_downsampled_sparse(dataset_dir, downsample)
     return dataset_dir
 
@@ -1029,28 +2143,58 @@ def prepare_gs2mesh_inputs(scene, model_path, source_path, iteration, downsample
     return dataset_dir, checkpoint_dir
 
 
-def find_latest_gs2mesh_cleaned_mesh(started_at):
-    output_root = GS2MESH_DIR / "output"
-    if not output_root.exists():
-        raise FileNotFoundError(f"GS2Mesh output directory was not created: {output_root}")
-    threshold = float(started_at) - 5.0
-    candidates = [
-        path for path in output_root.rglob("*cleaned_mesh.ply")
-        if path.is_file() and path.stat().st_mtime >= threshold
-    ]
+def find_latest_gs2mesh_cleaned_mesh(scene, iteration, options, started_at):
+    expected_roots = gs2mesh_output_dirs(scene, iteration, options)
+    threshold = max(0.0, float(started_at) - 5.0)
+    pattern = gs2mesh_cleaned_mesh_pattern(scene, iteration, options)
+    candidates = []
+    for root in expected_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob(pattern):
+            if path.is_file() and path.stat().st_mtime >= threshold:
+                candidates.append(path)
     if not candidates:
-        candidates = [path for path in output_root.rglob("*cleaned_mesh.ply") if path.is_file()]
-    if not candidates:
-        raise FileNotFoundError(f"GS2Mesh completed but no *_cleaned_mesh.ply was found under {output_root}")
+        roots = ", ".join(str(path) for path in expected_roots)
+        raise FileNotFoundError(
+            f"GS2Mesh did not create a fresh cleaned mesh for scene '{scene}'. "
+            f"Expected {pattern} under: {roots}. Existing render/depth caches were preserved."
+        )
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
-def collect_gs2mesh_mesh_output(scene, iteration, started_at):
-    source = find_latest_gs2mesh_cleaned_mesh(started_at)
+def collect_gs2mesh_mesh_output(scene, iteration, options, started_at):
+    opts = mesh_export_options(options)
+    source = find_latest_gs2mesh_cleaned_mesh(scene, iteration, opts, started_at)
+    vertex_count, face_count = ply_mesh_element_counts(source)
+    used_raw_fallback = False
+    if vertex_count <= 0 or face_count <= 0:
+        raw_source = Path(str(source).replace("_cleaned_mesh.ply", "_mesh.ply"))
+        if raw_source.exists() and raw_source.stat().st_mtime >= max(0.0, float(started_at) - 5.0):
+            raw_vertices, raw_faces = ply_mesh_element_counts(raw_source)
+            if raw_vertices > 0 and raw_faces > 0:
+                source = raw_source
+                vertex_count, face_count = raw_vertices, raw_faces
+                used_raw_fallback = True
+        if vertex_count <= 0 or face_count <= 0:
+            raise RuntimeError(
+                f"GS2Mesh produced a cleaned mesh with no vertices or faces for scene '{scene}': {source}"
+            )
     target = mesh_output_path(scene, iteration, "gs2mesh", post=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return {"source": str(source), "mesh": str(target)}
+    return {
+        "source": str(source),
+        "mesh": str(target),
+        "vertices": vertex_count,
+        "faces": face_count,
+        "cleaned": not used_raw_fallback,
+        "warning": (
+            "GS2Mesh cleaning removed every face; the non-empty raw TSDF mesh was preserved instead."
+            if used_raw_fallback
+            else None
+        ),
+    }
 
 
 def mesh_export_command(scene, iteration, options=None):
@@ -1071,7 +2215,8 @@ def mesh_export_command(scene, iteration, options=None):
         sugar_model_path = posix_dir_with_trailing_slash(sugar_checkpoint_path)
         command = [
             sugar_python(),
-            "train.py",
+            SUGAR_RUNNER,
+            SUGAR_DIR / "train.py",
             "-s",
             sugar_source_path,
             "-c",
@@ -1107,45 +2252,18 @@ def mesh_export_command(scene, iteration, options=None):
         source_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
         prepare_gs2mesh_inputs(scene, model_path, source_path, iteration, opts["gs2mesh_downsample"])
         can_reuse_render_cache = prepare_gs2mesh_render_cache(scene, iteration, opts)
-        command = [
-            gs2mesh_python(),
-            "run_single.py",
-            "--colmap_name",
+        command = build_gs2mesh_command(
             scene,
-            "--dataset_name",
-            "custom",
-            "--experiment_folder_name",
-            "app",
-            "--renderer_folder_name",
-            gs2mesh_renderer_folder(scene, opts["gs2mesh_downsample"]),
-            "--skip_video_extraction",
-            "--skip_colmap",
-            "--skip_GS",
-            "--skip_masking",
-            "--GS_iterations",
-            str(iteration),
-            "--downsample",
-            str(opts["gs2mesh_downsample"]),
-            "--renderer_baseline_percentage",
-            str(opts["gs2mesh_baseline_percentage"]),
-            "--TSDF_voxel",
-            str(opts["gs2mesh_tsdf_voxel"]),
-            "--TSDF_min_depth_baselines",
-            str(opts["gs2mesh_tsdf_min_depth_baselines"]),
-            "--TSDF_max_depth_baselines",
-            str(opts["gs2mesh_tsdf_max_depth_baselines"]),
-            "--TSDF_cleaning_threshold",
-            str(opts["gs2mesh_tsdf_cleaning_threshold"]),
-        ]
-        if not opts["gs2mesh_scene_360"]:
-            command.append("--no-renderer_scene_360")
-        if can_reuse_render_cache:
-            command.append("--skip_rendering")
+            iteration,
+            opts,
+            skip_rendering=can_reuse_render_cache,
+        )
         return command, GS2MESH_DIR, mesh_output_path(scene, iteration, opts["mode"], post=True)
     if backend != "2dgs":
         raise ValueError("Mesh export is only available for 2DGS scenes")
     if not ply_path(scene, iteration).exists():
         raise FileNotFoundError(f"Missing point cloud for mesh export: {ply_path(scene, iteration)}")
+    opts, _extent_info = apply_2dgs_bounded_tsdf_defaults(scene, iteration, opts)
     cfg = load_cfg_args(model_path)
     source_path = Path(getattr(cfg, "source_path", "") or DATASETS_DIR / scene)
     command = [
@@ -1195,10 +2313,11 @@ def sugar_python():
     configured = os.environ.get("SUGAR_PYTHON")
     if configured:
         return Path(configured)
-    env_python = sugar_env_root() / "python.exe"
-    if env_python.exists():
-        return env_python
-    return training_python("3dgs")
+    env_python = environment_python_path(sugar_env_root())
+    return env_python
+
+
+SUGAR_RUNNER = ROOT / "scripts" / "run_sugar.py"
 
 
 def ensure_sugar_environment():
@@ -1211,32 +2330,27 @@ def ensure_sugar_environment():
         problems.append(f"Missing SuGaR Python executable: {python_path}")
     if not script_path.exists():
         problems.append(f"Missing SuGaR train.py: {script_path}")
+    if not SUGAR_RUNNER.exists():
+        problems.append(f"Missing SuGaR compatibility runner: {SUGAR_RUNNER}")
+    if same_resolved_path(SUGAR_DIR, GS2MESH_DIR):
+        problems.append("SuGaR and GS2Mesh source directories must be different")
+    if same_resolved_path(python_path, gs2mesh_python()):
+        problems.append("SuGaR and GS2Mesh must use different Python environments")
     if not problems:
-        probe = (
-            "import importlib.util\n"
-            "missing=[m for m in ('torch','pytorch3d','open3d') if importlib.util.find_spec(m) is None]\n"
-            "print(','.join(missing))\n"
-        )
-        try:
-            result = subprocess.run(
-                [str(python_path), "-c", probe],
-                cwd=str(SUGAR_DIR),
-                env=sugar_env(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=20,
-                check=False,
-            )
-            missing = (result.stdout or "").strip()
-            if result.returncode != 0:
-                problems.append(f"SuGaR dependency probe failed: {(result.stderr or result.stdout or '').strip()}")
-            elif missing:
-                problems.append(f"Missing SuGaR Python modules in {python_path}: {missing}")
-        except Exception as exc:
-            problems.append(f"SuGaR dependency probe failed: {exc}")
+        runtime_ok, runtime_detail = probe_sugar_runtime(python_path)
+        if not runtime_ok:
+            if native_extension_policy_blocked(runtime_detail, smart_app_control_state()):
+                component = sugar_blocked_component(runtime_detail)
+                problems.append(
+                    f"Windows Smart App Control blocked the unsigned {component} native module required by SuGaR. "
+                    "Smart App Control has no per-file allow rule, and reinstalling or running as administrator will "
+                    "not make an unsigned module trusted. Keep Windows security enabled and use either a PyTorch3D "
+                    "build signed by a CA in the Microsoft Trusted Root Program or a Linux/WSL SuGaR worker. "
+                    "GS2Mesh remains available as the Windows-native mesh backend. "
+                    f"Detail: {runtime_detail}"
+                )
+            else:
+                problems.append(f"SuGaR native runtime imports failed: {runtime_detail}")
     if problems:
         raise RuntimeError("; ".join(problems))
     return {"sugar_dir": str(SUGAR_DIR), "python": str(python_path), "script": str(script_path)}
@@ -1246,7 +2360,7 @@ def gs2mesh_python():
     configured = os.environ.get("GS2MESH_PYTHON")
     if configured:
         return Path(configured)
-    return gs2mesh_env_root() / "python.exe"
+    return environment_python_path(gs2mesh_env_root())
 
 
 def ensure_gs2mesh_environment():
@@ -1259,6 +2373,26 @@ def ensure_gs2mesh_environment():
         problems.append(f"Missing GS2Mesh Python executable: {python_path}")
     if not script_path.exists():
         problems.append(f"Missing GS2Mesh run_single.py: {script_path}")
+    if same_resolved_path(GS2MESH_DIR, SUGAR_DIR):
+        problems.append("GS2Mesh and SuGaR source directories must be different")
+    if same_resolved_path(python_path, sugar_python()):
+        problems.append("GS2Mesh and SuGaR must use different Python environments")
+    if not problems:
+        probe = (
+            "import torch, cv2, open3d, matplotlib.pyplot\n"
+            "import diff_gaussian_rasterization, simple_knn\n"
+            "print('cuda', torch.cuda.is_available())\n"
+        )
+        runtime_ok, detail = python_probe(
+            python_path,
+            gs2mesh_env(),
+            probe,
+            timeout=90,
+        )
+        if not runtime_ok:
+            problems.append(
+                f"GS2Mesh runtime imports failed in {python_path}: {detail}"
+            )
     if problems:
         raise RuntimeError("; ".join(problems))
     return {"gs2mesh_dir": str(GS2MESH_DIR), "python": str(python_path), "script": str(script_path)}
@@ -2327,61 +3461,64 @@ def training_env(backend="3dgs"):
     return env
 
 
-def sugar_env_root():
-    configured = os.environ.get("SUGAR_CONDA_PREFIX")
-    if configured:
-        return Path(configured)
-    return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "miniforge3" / "envs" / "sugar"
+def sugar_env_root(*, environ=None, home=None):
+    environment = os.environ if environ is None else environ
+    runtime_config = load_runtime_config(environ=environment, home=home)
+    configured = [
+        runtime_config.get("sugar_env_root"),
+        environment.get("SUGAR_CONDA_PREFIX"),
+    ]
+    runtime_root = environment.get("GS_EDITOR_RUNTIME_ROOT") or runtime_config.get("runtime_root")
+    if runtime_root:
+        configured.append(Path(runtime_root) / "envs" / "sugar")
+    for candidate in configured:
+        if candidate and environment_python_path(candidate).exists():
+            return Path(candidate)
+    user_home = Path.home() if home is None else Path(home)
+    return user_home / "miniforge3" / "envs" / "sugar"
 
 
 def sugar_env():
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
     env_root = sugar_env_root()
-    path_parts = [
-        str(env_root),
-        str(env_root / "Library" / "bin"),
-        str(env_root / "Library" / "usr" / "bin"),
-        str(env_root / "Scripts"),
-        env.get("PATH", ""),
-    ]
-    env["PATH"] = os.pathsep.join(path_parts)
+    env["PATH"] = isolated_conda_path(env_root, env.get("PATH", ""))
     env["CONDA_PREFIX"] = str(env_root)
+    env.pop("PYTHONPATH", None)
     return env
 
 
 def gs2mesh_env_root():
     configured = os.environ.get("GS2MESH_CONDA_PREFIX")
     if configured:
-        return Path(configured)
-    # GS2Mesh reuses the SuGaR environment by default because that environment
-    # already carries the Windows-compatible 3DGS rasterizer extensions.
-    return sugar_env_root()
+        return Path(configured).expanduser().resolve()
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix and Path(conda_prefix).name.lower() == "gs2mesh":
+        return Path(conda_prefix).resolve()
+    drive = install_drive_root()
+    candidates = [
+        drive / "miniforge3" / "envs" / "gs2mesh" if drive else None,
+        drive / "conda" / "envs" / "gs2mesh" if drive else None,
+        drive / "anaconda" / "envs" / "gs2mesh" if drive else None,
+        Path.home() / "miniforge3" / "envs" / "gs2mesh",
+        *[root / "envs" / "gs2mesh" for root in conda_root_candidates()],
+    ]
+    usable = [Path(candidate) for candidate in candidates if candidate]
+    for candidate in usable:
+        if (candidate / "python.exe").exists():
+            return candidate.resolve()
+    return usable[0].resolve()
 
 
 def gs2mesh_env():
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
     env_root = gs2mesh_env_root()
-    path_parts = [
-        str(env_root),
-        str(env_root / "Library" / "bin"),
-        str(env_root / "Library" / "usr" / "bin"),
-        str(env_root / "Scripts"),
-        env.get("PATH", ""),
-    ]
-    env["PATH"] = os.pathsep.join(path_parts)
+    env["PATH"] = isolated_conda_path(env_root, env.get("PATH", ""))
     env["CONDA_PREFIX"] = str(env_root)
-    # Only the legacy shared prefix can reuse SuGaR's in-place extensions.
-    # An independent GS2Mesh prefix must load its own installed CUDA packages:
-    # SuGaR's source paths can shadow them with a different PyTorch ABI.
-    if env_root.resolve() == sugar_env_root().resolve():
-        sugar_extension_paths = [
-            str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "diff-gaussian-rasterization"),
-            str(SUGAR_DIR / "gaussian_splatting" / "submodules" / "simple-knn"),
-        ]
-        existing_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = os.pathsep.join([*sugar_extension_paths, existing_pythonpath])
+    env.pop("PYTHONPATH", None)
     return env
 
 
@@ -4286,6 +5423,11 @@ def mesh_job_snapshot(job):
         "error": job.get("error"),
         "dataset_path": job.get("dataset_path"),
         "output_mesh": job.get("output_mesh"),
+        "options": job.get("options"),
+        "effective_options": job.get("effective_options"),
+        "scale_report": job.get("scale_report"),
+        "task_port": job.get("task_port"),
+        "task_port_released": bool(job.get("task_port_released")),
         "texture": job.get("texture"),
         "output_dir": job.get("output_dir"),
         "alignment": job.get("alignment"),
@@ -4319,15 +5461,27 @@ def cancel_mesh_job(job_id):
 
 def run_mesh_export_job(job):
     try:
+        if job.get("cancel_requested"):
+            raise RuntimeError("Mesh export cancelled by user")
         set_job_stage(job, "running", "environment")
-        options = job.get("options", {})
+        options = dict(job.get("options", {}))
         if options.get("mode") == "sugar":
             ensure_sugar_environment()
         elif options.get("mode") == "gs2mesh":
             ensure_gs2mesh_environment()
+            task_port = reserve_task_port(job, "GS2Mesh Gaussian renderer")
+            options["task_port"] = task_port
+            job["options"] = options
+            add_job_log(job, f"Task port: {task_port} (GS2Mesh Gaussian renderer)")
         else:
             ensure_mesh_environment()
-        command, cwd, output_path = mesh_export_command(job["scene"], job["iteration"], options)
+        command = None
+        cwd = None
+        output_path = mesh_output_path(job["scene"], job["iteration"], options.get("mode"), post=True)
+        gs2mesh_result = None
+        effective_options = options
+        if options.get("mode") != "gs2mesh":
+            command, cwd, output_path = mesh_export_command(job["scene"], job["iteration"], options)
         if options.get("mode") == "sugar":
             backend_label = "SuGaR"
             run_backend = "sugar"
@@ -4337,13 +5491,64 @@ def run_mesh_export_job(job):
         else:
             backend_label = "2DGS"
             run_backend = "2dgs"
+        if run_backend == "2dgs":
+            effective_options = mesh_export_options(options)
+            command_text = [str(part) for part in command]
+            for arg_name in ("voxel_size", "depth_trunc", "sdf_trunc"):
+                flag = f"--{arg_name}"
+                if flag in command_text:
+                    effective_options[arg_name] = float(command_text[command_text.index(flag) + 1])
+            with MESH_LOCK:
+                job["effective_options"] = dict(effective_options)
+            if (
+                effective_options["mode"] == "bounded"
+                and float(options.get("voxel_size", -1.0)) <= 0
+                and effective_options["voxel_size"] > 0
+            ):
+                gaussian_extent = effective_options["voxel_size"] * effective_options["mesh_res"]
+                add_job_log(
+                    job,
+                    "2DGS automatic TSDF sizing: "
+                    f"Gaussian extent {gaussian_extent:.6g}, mesh resolution {effective_options['mesh_res']}, "
+                    f"voxel {effective_options['voxel_size']:.6g}, SDF truncation {effective_options['sdf_trunc']:.6g}. "
+                    "Source camera poses and model coordinates are unchanged.",
+                )
         add_job_log(job, f"Backend: {backend_label}")
         add_job_log(job, f"Scene: output/{job['scene']}")
         add_job_log(job, f"Mode: {job['mode']}")
         add_job_log(job, f"Output mesh: {output_path}")
         set_job_stage(job, "running", "mesh")
         started_at = time.time()
-        run_logged(job, command, cwd, run_backend)
+        if job.get("cancel_requested"):
+            raise RuntimeError("Mesh export cancelled by user")
+        if options.get("mode") == "gs2mesh":
+            output_path, effective_options, gs2mesh_result = run_gs2mesh_mesh_job(job, options)
+        else:
+            try:
+                run_logged(job, command, cwd, run_backend)
+            except Exception:
+                if (
+                    run_backend != "2dgs"
+                    or job.get("cancel_requested")
+                    or not recover_2dgs_post_mesh(
+                        job,
+                        job["scene"],
+                        job["iteration"],
+                        options.get("mode", "bounded"),
+                        options.get("num_cluster", 50),
+                        started_at,
+                    )
+                ):
+                    raise
+        if run_backend == "2dgs" and not output_path.exists():
+            recover_2dgs_post_mesh(
+                job,
+                job["scene"],
+                job["iteration"],
+                options.get("mode", "bounded"),
+                options.get("num_cluster", 50),
+                started_at,
+            )
         texture_result = None
         if options.get("mode") == "sugar":
             cfg = load_cfg_args(model_dir(job["scene"]))
@@ -4352,8 +5557,18 @@ def run_mesh_export_job(job):
             if texture_result.get("glb_error"):
                 add_job_log(job, f"WARNING: GLB export skipped: {texture_result['glb_error']}")
         elif options.get("mode") == "gs2mesh":
-            gs2mesh_result = collect_gs2mesh_mesh_output(job["scene"], job["iteration"], started_at)
-            add_job_log(job, f"GS2Mesh cleaned mesh: {gs2mesh_result['source']}")
+            add_job_log(
+                job,
+                f"GS2Mesh {'cleaned' if gs2mesh_result.get('cleaned', True) else 'raw fallback'} mesh: "
+                f"{gs2mesh_result['source']}",
+            )
+            if gs2mesh_result.get("warning"):
+                add_job_log(job, f"WARNING: {gs2mesh_result['warning']}")
+            add_job_log(
+                job,
+                f"GS2Mesh geometry: {gs2mesh_result['vertices']:,} vertices, "
+                f"{gs2mesh_result['faces']:,} faces",
+            )
         if not output_path.exists():
             raise RuntimeError(f"Mesh export finished but output file was not found: {output_path}")
         with MESH_LOCK:
@@ -4377,6 +5592,8 @@ def run_mesh_export_job(job):
             job["returncode"] = 1
             job["updated_at"] = time.time()
         add_job_log(job, f"ERROR: {exc}")
+    finally:
+        release_task_port(job)
 
 
 def start_mesh_export(scene, iteration, options=None):

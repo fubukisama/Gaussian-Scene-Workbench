@@ -12,7 +12,7 @@ if defined MINIFORGE_ROOT (
 ) else (
   set "MINIFORGE=%USERPROFILE%\miniforge3"
 )
-set "VS2022=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
+set "VS2022=%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 
 if not exist "%SRC%\environment.yml" (
   echo Missing gaussian-splatting source at %SRC%

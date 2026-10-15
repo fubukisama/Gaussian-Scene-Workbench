@@ -11,6 +11,8 @@ BACKEND_FILES = (
     "native/backend/compute.py",
     "native/backend/reconstruction_quality.py",
     "native/backend/video_extract.py",
+    "scripts/postprocess_2dgs_mesh.py",
+    "scripts/run_sugar.py",
 )
 RETIRED_TREES = ("crop_editor", "desktop_app", "resources/app")
 WEB_IMPORTS = ("http.server", "cgi", "cgitb", "webbrowser", "socketserver", "wsgiref")
