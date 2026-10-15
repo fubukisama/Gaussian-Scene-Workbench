@@ -10,6 +10,7 @@
 #include <QColor>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEvent>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -40,6 +41,11 @@ bool waitFor(const std::function<bool()> &condition) {
     QEventLoop loop;
     QTimer::singleShot(10, &loop, &QEventLoop::quit);
     loop.exec();
+    // This smoke runs synchronously in an outer event-loop callback. Nested
+    // loops do not dispatch deleteLater() posted at that outer loop level.
+    // Deliver its deferred deletes here, as the real application's return to
+    // the owning loop would, without changing the production dialog lifetime.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
   }
   return condition();
 }
@@ -199,10 +205,13 @@ bool runQualityMeasurementSmokeTest() {
   child->findChild<QPushButton *>(QStringLiteral("qualityUseAsCandidate"))->click();
   const QString publishedCandidate = child->reportPath();
   child->close();
-  check(waitFor([&] { return child.isNull(); }) && QFileInfo(publishedCandidate).isFile() &&
-      comparisonBaseline->text() == QStringLiteral("original-baseline.json") &&
+  check(waitFor([&] { return child.isNull(); }),
+      "closing the measurement child actually destroys its test-owned window");
+  check(QFileInfo(publishedCandidate).isFile(),
+      "the explicitly adopted candidate persists after measurement child deletion");
+  check(comparisonBaseline->text() == QStringLiteral("original-baseline.json") &&
       QDir::fromNativeSeparators(comparisonCandidate->text()) == QDir::fromNativeSeparators(publishedCandidate),
-      "explicit candidate adoption fills only the chosen input with a durable path after child-window deletion");
+      "explicit candidate adoption fills only the chosen comparison input");
 
   measureImages->click();
   child = comparison.findChild<QualityMeasurementDialog *>();
