@@ -21,6 +21,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QPointer>
+#include <QPixmap>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -142,6 +143,14 @@ bool runQualityMeasurementSmokeTest() {
   const int retainedSelectionCount = selected;
   const QString retainedPath = dialog.reportPath();
   const QByteArray retainedHash = digest(retainedPath);
+  const auto capture = [&](QWidget &window, const QString &name) {
+    const QString output = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+    if (output.isEmpty()) return;
+    QApplication::processEvents();
+    const QString directory = QDir(output).filePath(QStringLiteral("quality-measurement"));
+    check(QDir().mkpath(directory) && window.grab().save(QDir(directory).filePath(name + QStringLiteral(".png"))),
+        "the remote acceptance captures the actual translated quality controls");
+  };
   auto *summary = dialog.findChild<QLabel *>(QStringLiteral("qualityMeasurementSummary"));
   for (const QString &language : AppLanguage::supported()) {
     AppLanguage::apply(language, false);
@@ -153,6 +162,7 @@ bool runQualityMeasurementSmokeTest() {
         dialog.measurementReport() == retainedReport && dialog.manifestPath() == manifest &&
         dialog.reportPath() == retainedPath && selected == retainedSelectionCount,
         "all three live languages retain measurements, the manifest and explicit selection without claiming validation");
+    capture(dialog, language + QStringLiteral("-manifest"));
   }
   check(digest(reference) == referenceHash && digest(render) == renderHash && digest(manifest) == manifestHash,
       "measurement leaves all original image and manifest bytes unchanged");
@@ -243,6 +253,7 @@ bool runQualityMeasurementSmokeTest() {
     check(referenceField && referenceField->text() == referenceFolder && pairs->rowCount() == 1 &&
         folders.measurementReport() == folderReport && pairs->selectionModel()->isSelected(pairs->model()->index(0, 0)),
         "live language changes preserve folder choices, the exact pairing list and measured values");
+    capture(folders, language + QStringLiteral("-folders"));
   }
   const QString maskFolder = QDir(fixture.path()).filePath(QStringLiteral("masks"));
   QDir().mkpath(maskFolder);

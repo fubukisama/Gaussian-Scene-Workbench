@@ -40,6 +40,70 @@ def _read(path):
     return json.loads(contents.decode("utf-8-sig"), object_pairs_hook=_object, parse_constant=_constant)
 
 
+class _StdinCancellation:
+    """Poll the owned input pipe without blocking computation or process exit."""
+    def __init__(self, cancellation):
+        self._cancellation = cancellation
+        self._descriptor = None
+        self._pending = b""
+        try:
+            descriptor = sys.stdin.fileno()
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+                import msvcrt
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.GetFileType.argtypes = [wintypes.HANDLE]
+                kernel.GetFileType.restype = wintypes.DWORD
+                kernel.PeekNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                                                wintypes.LPDWORD, wintypes.LPDWORD, wintypes.LPDWORD]
+                kernel.PeekNamedPipe.restype = wintypes.BOOL
+                handle = wintypes.HANDLE(msvcrt.get_osfhandle(descriptor))
+                if kernel.GetFileType(handle) != 3:  # FILE_TYPE_PIPE; console uses Ctrl+C instead.
+                    return
+                def available():
+                    count = wintypes.DWORD()
+                    if not kernel.PeekNamedPipe(handle, None, 0, None, ctypes.byref(count), None):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    return count.value
+            else:
+                import select
+                def available():
+                    return 256 if select.select([descriptor], [], [], 0)[0] else 0
+            self._available = available
+            self._descriptor = descriptor
+        except (OSError, ValueError, AttributeError):
+            pass  # No usable stdin; SIGINT and the desktop's owned-process cancel still work.
+
+    def is_set(self):
+        if self._cancellation.is_set():
+            return True
+        if self._descriptor is not None:
+            try:
+                # Bound each poll, including malformed/unterminated input. There
+                # is no other stdin reader and no pending synchronous pipe I/O.
+                for _ in range(16):
+                    count = self._available()
+                    if not count:
+                        break
+                    block = os.read(self._descriptor, min(count, 256))
+                    if not block:
+                        self._descriptor = None
+                        break
+                    self._pending += block
+                    while b"\n" in self._pending:
+                        line, self._pending = self._pending.split(b"\n", 1)
+                        if line.strip().lower() == b"cancel":
+                            self._cancellation.set()
+                            return True
+                    if len(self._pending) > 4096:
+                        self._descriptor = None
+                        break
+            except (OSError, ValueError):
+                self._descriptor = None
+        return self._cancellation.is_set()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
@@ -47,26 +111,7 @@ def main(argv=None):
     parser.add_argument("--base-dir", help="Original manifest directory for relative image paths")
     args = parser.parse_args(argv)
     cancellation = threading.Event()
-    def listen():
-        try:
-            # os.read avoids a daemon holding TextIOWrapper's buffered-reader
-            # lock when a QProcess keeps stdin open during interpreter exit.
-            descriptor, pending = sys.stdin.fileno(), b""
-            while True:
-                block = os.read(descriptor, 256)
-                if not block:
-                    return
-                pending += block
-                while b"\n" in pending:
-                    line, pending = pending.split(b"\n", 1)
-                    if line.strip().lower() == b"cancel":
-                        cancellation.set()
-                        return
-                if len(pending) > 4096:
-                    return
-        except (OSError, ValueError):
-            pass
-    threading.Thread(target=listen, name="gsw-image-quality-cancel", daemon=True).start()
+    input_cancellation = _StdinCancellation(cancellation)
     previous_signal = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, lambda signum, frame: cancellation.set())
     try:
@@ -78,10 +123,10 @@ def main(argv=None):
             sys.stderr.write(json.dumps(value, separators=(",", ":"), ensure_ascii=True) + "\n")
             sys.stderr.flush()
         report = measure_image_quality(manifest, args.base_dir or Path(args.manifest).resolve().parent,
-                                       progress=progress, cancelled=cancellation.is_set)
+                                       progress=progress, cancelled=input_cancellation.is_set)
         contents = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
                               allow_nan=False) + "\n"
-        if cancellation.is_set():
+        if input_cancellation.is_set():
             raise InterruptedError("image_quality_measurement_cancelled")
         with destination.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(contents)

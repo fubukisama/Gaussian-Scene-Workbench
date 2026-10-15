@@ -311,6 +311,68 @@ class ImageQualityMeasurementTests(unittest.TestCase):
 class ImageQualityMeasurementCliTests(unittest.TestCase):
     setUp = ImageQualityMeasurementTests.setUp
     image = ImageQualityMeasurementTests.image
+
+    def _run_with_open_stdin(self, cancel=False):
+        import json
+        import subprocess
+        import sys
+        import threading
+        reference, rendered = self.image("gt.png", (0, 0, 0)), self.image("render.png", (1, 1, 1))
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps({"version": 1, "views": [{"id": "front", "reference": reference,
+                                                               "render": rendered}]}), encoding="utf-8")
+        output = self.root / "measurement.json"
+        script = Path(__file__).resolve().parents[2] / "scripts/measure_image_quality.py"
+        process = subprocess.Popen([sys.executable, str(script), "--manifest", str(manifest),
+                                    "--output", str(output)], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        captured = {}
+        def drain(name, stream):
+            captured[name] = stream.read()
+        readers = [threading.Thread(target=drain, args=(name, stream), daemon=True)
+                   for name, stream in (("stdout", process.stdout), ("stderr", process.stderr))]
+        for reader in readers:
+            reader.start()
+        try:
+            if cancel:
+                process.stdin.write(b"cancel\n")
+                process.stdin.flush()
+            # QProcess leaves its input channel open. Completion/cancellation
+            # must not depend on EOF from the desktop owner.
+            try:
+                code = process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                self.fail("Measurement helper did not exit while its stdin pipe remained open")
+            for reader in readers:
+                reader.join(timeout=5)
+                self.assertFalse(reader.is_alive(), "Measurement output pipe was not closed")
+            self.assertFalse(process.stdin.closed)
+            return code, captured, output
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            process.stdin.close()
+            for reader in readers:
+                reader.join(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
+
+    def test_cli_completes_and_publishes_report_without_input_eof(self):
+        import json
+        code, captured, output = self._run_with_open_stdin()
+        self.assertEqual(code, 0, captured["stderr"])
+        self.assertEqual(output.read_bytes(), captured["stdout"].replace(b"\r\n", b"\n"))
+        self.assertAlmostEqual(json.loads(captured["stdout"])["metrics"]["psnr"], 48.1308036086791, places=10)
+
+    def test_cli_cancel_is_observed_without_input_eof_or_published_report(self):
+        code, captured, output = self._run_with_open_stdin(cancel=True)
+        self.assertEqual(code, 3, captured["stderr"])
+        self.assertEqual(captured["stdout"], b"")
+        self.assertIn(b'"event":"cancelled"', captured["stderr"])
+        self.assertFalse(output.exists())
+
     def test_cli_measures_real_files_progress_and_never_overwrites_inputs(self):
         import hashlib
         import json
