@@ -59,6 +59,7 @@ jobs:
           $fixture = Get-Content "$env:RUNNER_TEMP/gsw-installer-fixture/fixture.json" -Raw | ConvertFrom-Json
           if (-not $fixture.installerFixture -or $fixture.productionReleaseAllowed -or $fixture.applicationExecutable) { throw 'Fixture safety identity is invalid.' }
       - name: Build isolated test installer
+        id: build-setup
         shell: pwsh
         run: |
           $fixture = Get-Content "$env:RUNNER_TEMP/gsw-installer-fixture/fixture.json" -Raw | ConvertFrom-Json
@@ -70,6 +71,7 @@ jobs:
           $setup = (Get-ChildItem "$env:RUNNER_TEMP/gsw-setup-test" -File -Filter '*.exe').FullName
           ./scripts/test_windows_installer.ps1 -SetupPath $setup -TestRoot "$env:RUNNER_TEMP/gsw-setup-validation"
       - name: Verify actual three-language wizard
+        if: ${{ !cancelled() && steps.build-setup.outcome == 'success' }}
         shell: pwsh
         run: |
           ./scripts/setup_native_ci_display.ps1

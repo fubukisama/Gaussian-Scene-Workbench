@@ -91,6 +91,54 @@ public sealed class GswInstallerMutationWatcher : IDisposable {
 '@
 }
 
+# Read-only path probes explain Shell-link differences without changing the
+# existing correct-target assertions (including 8.3 aliases and reparse paths).
+if (-not ('GswInstallerPathProbe' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public static class GswInstallerPathProbe {
+  public sealed class Details {
+    public string LongPath {get;set;} public string FinalPath {get;set;}
+    public string Error {get;set;}
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern uint GetLongPathNameW(string path, StringBuilder output, uint capacity);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern SafeFileHandle CreateFileW(string path, uint access, uint shareMode,
+    IntPtr security, uint creation, uint attributes, IntPtr template);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder output,
+    uint capacity, uint flags);
+  public static Details Read(string path) {
+    var result = new Details();
+    var buffer = new StringBuilder(32768);
+    uint length = GetLongPathNameW(path, buffer, (uint)buffer.Capacity);
+    if(length > 0 && length < buffer.Capacity) result.LongPath=buffer.ToString();
+    else result.Error="GetLongPathNameW: " + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+    // FILE_READ_ATTRIBUTES, share read/write/delete, OPEN_EXISTING and backup
+    // semantics allow the same non-writing probe for files and directories.
+    using(var handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+      if(handle.IsInvalid) {
+        result.Error=(result.Error ?? "") + "; CreateFileW(read attributes): " +
+          new Win32Exception(Marshal.GetLastWin32Error()).Message;
+        return result;
+      }
+      buffer.Clear();
+      length=GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
+      if(length > 0 && length < buffer.Capacity) result.FinalPath=buffer.ToString();
+      else result.Error=(result.Error ?? "") + "; GetFinalPathNameByHandleW: " +
+        new Win32Exception(Marshal.GetLastWin32Error()).Message;
+    }
+    return result;
+  }
+}
+'@
+}
+
 function Assert-Condition([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
 }
@@ -287,9 +335,42 @@ function Test-InstalledShortcut([string]$Path, [string]$InstallRoot) {
   $shell = New-Object -ComObject WScript.Shell
   try {
     $shortcut = $shell.CreateShortcut($Path)
-    Assert-Condition (Test-SamePath $shortcut.TargetPath (Join-Path $InstallRoot 'bin/Gaussian Scene Workbench.exe')) 'Shortcut target is not the installed bin executable.'
-    Assert-Condition (Test-SamePath $shortcut.WorkingDirectory $InstallRoot) 'Shortcut working directory mismatch.'
+    $actualTarget = [string]$shortcut.TargetPath
+    $actualWorkingDirectory = [string]$shortcut.WorkingDirectory
+    $expectedTarget = Join-Path $InstallRoot 'bin/Gaussian Scene Workbench.exe'
+    $evidence = [ordered]@{ schema='gsw-shortcut-evidence-v1'; observedAtUtc=[DateTime]::UtcNow.ToString('o')
+      shortcutPath=$Path; shortcutSha256=Get-Sha256 $Path
+      actualTargetPath=$actualTarget; expectedTargetPath=$expectedTarget
+      actualWorkingDirectory=$actualWorkingDirectory; expectedWorkingDirectory=$InstallRoot
+      actualTarget=Get-ShortcutPathEvidence $actualTarget; expectedTarget=Get-ShortcutPathEvidence $expectedTarget
+      actualDirectory=Get-ShortcutPathEvidence $actualWorkingDirectory; expectedDirectory=Get-ShortcutPathEvidence $InstallRoot }
+    $evidenceDirectory = Join-Path $script:runRoot 'shortcut-evidence'
+    New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+    $evidencePath = Join-Path $evidenceDirectory ('shortcut-' + [guid]::NewGuid().ToString('N') + '.json')
+    [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    Write-Output "Shortcut evidence: $evidencePath"
+    Assert-Condition (Test-SamePath $actualTarget $expectedTarget) "Shortcut target is not the installed bin executable. Actual='$actualTarget'; expected='$expectedTarget'; evidence='$evidencePath'."
+    Assert-Condition (Test-SamePath $actualWorkingDirectory $InstallRoot) "Shortcut working directory mismatch. Actual='$actualWorkingDirectory'; expected='$InstallRoot'; evidence='$evidencePath'."
   } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+}
+
+function Get-ShortcutPathEvidence([string]$Path) {
+  $record = [ordered]@{ rawPath=$Path; characterCount=$Path.Length; absolutePath=$null; exists=$false
+    providerPath=$null; longPath=$null; finalPhysicalPath=$null; sha256=$null; error=$null }
+  try {
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Shell returned an empty path.' }
+    $record.absolutePath = [IO.Path]::GetFullPath($Path)
+    $record.exists = Test-Path -LiteralPath $Path
+    if ($record.exists) {
+      $record.providerPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+      $physical = [GswInstallerPathProbe]::Read($record.absolutePath)
+      $record.longPath = $physical.LongPath
+      $record.finalPhysicalPath = $physical.FinalPath
+      $record.error = $physical.Error
+      if (Test-Path -LiteralPath $Path -PathType Leaf) { $record.sha256 = Get-Sha256 $Path }
+    }
+  } catch { $record.error = $_.Exception.Message }
+  return [pscustomobject]$record
 }
 
 function New-Sentinel([string]$Path, [string]$Text) {
