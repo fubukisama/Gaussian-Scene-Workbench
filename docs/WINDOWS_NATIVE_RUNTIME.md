@@ -22,7 +22,7 @@ after changing runtime locator variables.
 
 | Runtime | Python | PyTorch / CUDA wheel | Main source |
 | --- | --- | --- | --- |
-| Native build/checks | 3.12.14 | Not required | This desktop branch; Qt 6.8.3 |
+| Native build/checks | 3.12.14 | Not required | Native `main`; Qt 6.8.3 |
 | 3DGS | 3.8.20 | 2.0.1+cu118 | Packaged `gaussian-splatting` |
 | 2DGS | 3.10.21 | 2.0.1+cu118 | hbb1/2d-gaussian-splatting `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678` |
 | SuGaR | 3.10.21 | 2.0.1+cu118 | Anttwo/SuGaR `7c10c4ae4a267dece512f5c7f40ed212a0a2ab44` |

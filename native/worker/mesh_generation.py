@@ -169,7 +169,7 @@ def run(config, server, emit):
         values = _validate_configuration(source / "cfg_args")
         dataset = Path(values.get("source_path") or "")
         if values.get("source_path") and (dataset / "sparse" / "0").is_dir():
-            from crop_editor.reconstruction_quality import require_dataset
+            from native.backend.reconstruction_quality import require_dataset
             report = require_dataset(dataset)
             record["reconstructionQuality"] = report
             stage("environment", None, {"reconstruction_quality": report,

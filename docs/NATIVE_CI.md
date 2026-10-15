@@ -76,24 +76,24 @@ Qt 安装器的 Python 与测试后端的 Python 分开管理。测试固定使�
 使用 CodeQL advanced setup，而不是同时开启另一套 default setup：
 
 - C/C++：在 `Native Windows` 的真实原生构建前初始化 CodeQL，采用 `manual` 模式追踪编译，使用 `security-extended` 查询集分析所构建的源代码。
-- Python：[`Native Security`](../.github/workflows/native-security.yml) 的独立矩阵任务检查 `native/worker`、`native/tests`、`crop_editor`、`scripts`、`gaussian-splatting` 与 `training_kit`；不包含 vendored SIBR 或 CUDA 子模块，不安装 Torch/CUDA 或可选研究运行库。
+- Python：[`Native Security`](../.github/workflows/native-security.yml) 的独立矩阵任务检查 `native/worker`、`native/tests`、`native/backend`、`scripts`、`gaussian-splatting` 与 `training_kit`；不包含 vendored SIBR 或 CUDA 子模块，不安装 Torch/CUDA 或可选研究运行库。
 - GitHub Actions：同一矩阵中的 `actions` 任务检查 `.github/workflows`。Python 与 Actions 都使用 `build-mode: none`，保留默认安全查询，分别上传分析类别。
 
-新增的代码扫描只接受桌面分支 `agent/native-desktop-0.3` 的 push 或以该分支为 head 的 pull request；手动运行也限制到该 ref。扫描 pull request 时采用 GitHub 的 merge commit。`workflow_dispatch` 的可用性取决于 GitHub 的工作流注册和默认分支要求；push 是本分支的自动运行入口。本轮不修改旧 HTML `main`，也不承诺定时扫描：GitHub 的 `schedule` 需要工作流存在于默认分支。首次运行必须核实初始化、提取/构建、分析与 SARIF 上传，而非仅验证 YAML 能解析。
+当前原生桌面端以默认 `main` 为开发与发布入口。代码扫描覆盖 `main` 的 push、以 `main` 为目标分支的 pull request，以及该 ref 的手动运行；PR 使用 GitHub 的 merge commit，因此功能分支无需取名为 `main`。`workflow_dispatch` 通过默认分支工作流注册；是否定时执行以实际 workflow 的 `schedule` 为准。验收必须核实初始化、提取/构建、分析与 SARIF 上传，而非仅验证 YAML 能解析。
 
 结果在仓库 **Security and quality → Code scanning** 中按分支与分析类别查看。成功上传只表示检测已执行，并不保证没有漏洞。真实告警需要检查触发路径与风险后修复；不通过过滤查询、隐藏告警或删除历史失败记录冒充修复。
 
 ### 共享后端安全回归
 
-Windows worker 检查与 `Native Security` 的独立 Ubuntu 回归任务都运行现有后端测试以及 `test_path_security`、`test_command_security`。它们通过真实回环 HTTP 请求和测试自有子进程验证目录边界、合法 3DGS/2DGS/网格读写、命令操作数隔离和取消；Ubuntu 还覆盖 Windows 可能因权限不可用的文件符号链接。样本位于 runner 临时目录，不读取原始研究工程，也不启动训练。
+Windows worker 检查与 `Native Security` 的独立 Ubuntu 回归任务运行 `native/backend/tests` 及原生 worker 测试，直接调用计算入口并使用测试自有子进程，验证目录边界、合法 3DGS/2DGS/网格读写、命令参数和取消。Ubuntu 还覆盖 Windows 可能因权限不可用的文件符号链接。样本位于 runner 临时目录，不读取原始研究工程，也不启动真实训练。
 
 模型 `cfg_args` 只接受 `Namespace` 及字面值参数，不再使用 `eval`。实验查看回归同时验证合法参数、原始 Unicode 路径与列表/字典不变，以及查看不可信配置时不执行表达式。目录边界在读写、缓存和预览生成前检查，而不只在最终下载时检查。Windows 比较保留大小写不敏感语义，但返回真实路径大小写；不能为消除静态分析告警而改成错误的路径行为。任何残余告警仍须按实际数据流核查，不自动忽略。
 
 导入的原始副本和工作图像写入前也检查候选叶子路径，拒绝指向目录外、包括目标尚不存在的符号链接。用户明确选择的外部照片／视频仍允许读取；这是本地导入功能，不应把来源强制限制到工程目录。测试同时保留正常外部导入与拒绝越界写入的行为。
 
-命令边界测试使用 runner 已有 Node 执行微型参数接收器，它不是 SPZ/SOG 编码器，因此不证明实际编码质量。可选的旧后端转换器只允许已安装的直接 Node 可执行文件与项目内固定 `cli.mjs`，不再回退到 Windows `.cmd`/`.bat` 或全局 shim。原生 SPZ 使用 C++ 编解码器；不向桌面安装包添加 Node、JavaScript 或 Mesa。环境就绪报告必须与实际启动条件保持一致。
+原生后端不再保留 Node 转换器或浏览器用导出入口。SPZ 使用 C++ 编解码器，后端与安装包测试确认原生依赖完整，同时拒绝重新引入旧网页、Electron、Node 清单与 HTTP 监听入口。计算进程的参数和取消边界仍需验证；环境就绪报告必须与实际启动条件一致。
 
-兼容 HTTP 接口只接受 loopback 监听与客户端，并在路由／正文处理前校验 Host 的本地地址和实际端口、同源 Origin 与 Fetch Metadata。跨站和 DNS rebinding 样式请求返回 403；JSON 路由拒绝非 `application/json` 的请求（415），同源 multipart 导入仍保留。非 loopback 的 `--host` 在读取持久任务或打开监听器前退出。拒绝连接最多清理 64 KiB 的已声明小正文，使用单调时钟与单次读取把总等待限制为 250 ms，防止慢速发送延长等待。真实 HTTP 微样本要求正确响应及零产物，不把连接错误当成功。原生 worker 仍通过自有进程直接导入用户选定的外部文件，不启动 HTTP 服务。这些检查不是远程身份认证，也不隔离不可信的本地进程；网络共享不受支持。参考 [OWASP CSRF 防护](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)与 [Fetch Metadata](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Sec-Fetch-Site)。
+原生 worker 通过自有进程直接导入用户选定的外部文件。HTTP 服务与路由已删除，因此不再运行已退役路由的 Host／Origin／上传协议测试；仍在使用的路径约束、符号链接防逃逸、配置解析、导入事务和取消行为在直接计算入口验证。后端不是网络共享服务，也不承担对不可信本地进程的隔离。
 
 退出确认回归的异步状态通过共享所有权存活至最后一个回调，不引用已结束作用域的布尔变量。每次 `close()` 完整返回后才发起下一次关闭，避免模态事件循环中的关闭重入；只点击已经可见的真实对话框，保留默认／escape 取消按钮、保存提示和取消后重新确认的全部断言。整体 watchdog 为 10 秒，CTest 上限仍为 15 秒。网格图像对比先完成一次真实首帧 readback，再等待实际 +Z 视角到达并取景，不把固定 300 ms 等待当成动画已完成，也不强制推进动画。加载计时仍从 `setScene()` 前开始，首帧开销计入加载耗时；默认策略受控样本完整显示的 10 秒性能门槛、+Z 的 1500 ms 等待、相机容差和至少 90% 的连续表面覆盖率均保留。不更改生产退出或导航逻辑。
 
@@ -101,7 +101,7 @@ Windows worker 检查与 `Native Security` 的独立 Ubuntu 回归任务都运�
 
 ### 依赖漏洞告警的边界
 
-Dependabot alerts 是管理员在仓库设置中启用的独立功能，不依赖 `dependabot.yml`，也不等于自动版本升级。它根据 GitHub 支持的依赖图和已审核公告检查**默认分支**，因此旧 HTML `main` 的告警不代表桌面开发分支的 pinned runtime 已完成审计。Python/CUDA 扩展、Conda 环境、外部 COLMAP/OpenMVS、模型权重及本机实际安装版本不保证被依赖图完整覆盖。运行库升级需要分别验证 3DGS、2DGS 与网格后端的兼容性，不能直接把 QA 环境或默认分支依赖当作训练环境。
+Dependabot alerts 是管理员在仓库设置中启用的独立功能，不依赖 `dependabot.yml`，也不等于自动版本升级。它根据 GitHub 支持的依赖图和已审核公告检查默认分支 `main`，现在对应原生桌面端源码。旧网页依赖移除后，仍需检查原生分支实际声明的依赖；Python/CUDA 扩展、Conda 环境、外部 COLMAP/OpenMVS、模型权重及本机安装版本不保证被依赖图完整覆盖。运行库升级仍分别验证 3DGS、2DGS 与网格后端，QA 依赖不能当作实际训练环境。
 
 密钥扫描/推送保护由 GitHub 仓库功能、权限和配置决定，与 CodeQL 或 Dependabot 是不同检测边界；应在设置页和告警页核实状态。不要提交访问令牌、密码或本机运行库凭据。
 
@@ -136,24 +136,24 @@ Rebalance shared resources immediately after the collection transaction. Samplin
 Use CodeQL advanced setup rather than enabling a second default setup:
 
 - C/C++: `Native Windows` initializes CodeQL before the real native build, traces compilation with `manual` build mode and analyzes the built sources with the `security-extended` query suite.
-- Python: an independent [`Native Security`](../.github/workflows/native-security.yml) matrix job covers `native/worker`, `native/tests`, `crop_editor`, `scripts`, `gaussian-splatting` and `training_kit`. Vendored SIBR and CUDA submodules are excluded; Torch/CUDA and optional research runtimes are not installed.
+- Python: an independent [`Native Security`](../.github/workflows/native-security.yml) matrix job covers `native/worker`, `native/tests`, `native/backend`, `scripts`, `gaussian-splatting` and `training_kit`. Vendored SIBR and CUDA submodules are excluded; Torch/CUDA and optional research runtimes are not installed.
 - GitHub Actions: the matrix's `actions` job checks `.github/workflows`. Both interpreted jobs use `build-mode: none`, retain the default security queries and upload separate analysis categories.
 
-The new scanning accepts pushes to `agent/native-desktop-0.3` and pull requests whose head is that desktop branch; manual runs are also restricted to that ref. Pull requests use GitHub's merge commit. Availability of `workflow_dispatch` depends on GitHub's workflow registration and default-branch requirements; push is this branch's automatic entry point. The legacy HTML `main` branch is not changed, and no scheduled scan is promised: GitHub requires scheduled workflows to exist on the default branch. Verify initialization, extraction/build, analysis and SARIF upload on the first real run, not only YAML parsing.
+The default `main` branch is the native desktop development and release entry point. Scanning covers pushes to `main`, pull requests targeting `main`, and manual runs on that ref. Pull requests use GitHub's merge commit, so feature branches do not need to be named `main`. The default-branch workflow registers `workflow_dispatch`; scheduled execution exists only if the actual workflow declares `schedule`. Verify initialization, extraction/build, analysis and SARIF upload, not only YAML parsing.
 
 Inspect **Security and quality → Code scanning** by branch and analysis category. A successful upload means the detection ran, not that the repository is vulnerability-free. Investigate the reachable path and risk of real findings before fixing them; do not substitute query exclusions, hidden alerts or deleted failed runs for remediation.
 
 ### Shared-backend security regression
 
-Both the Windows worker checks and an independent Ubuntu regression job in `Native Security` run the existing backend tests plus `test_path_security` and `test_command_security`. Real loopback HTTP requests and test-owned subprocesses verify directory boundaries, legitimate 3DGS/2DGS/mesh IO, isolated command operands and cancellation. Ubuntu also covers file symbolic links that Windows privileges may prevent. Fixtures live in the runner's temporary directory, without reading original research projects or starting training.
+Both the Windows worker checks and an independent Ubuntu regression job in `Native Security` run `native/backend/tests` and native worker checks. Direct compute calls and test-owned subprocesses verify directory boundaries, legitimate 3DGS/2DGS/mesh IO, command arguments and cancellation. Ubuntu also covers file symbolic links that Windows privileges may prevent. Fixtures live in the runner's temporary directory, without reading original research projects or starting real training.
 
 Model `cfg_args` accepts only `Namespace` and literal keyword values; `eval` is no longer used. Experiment-view checks preserve legitimate values, original Unicode paths, lists and dictionaries while verifying that untrusted expressions never execute. Directory boundaries are checked before reads, writes, cache and preview generation, not only at the final download. Windows comparisons remain case-insensitive while returning the actual path spelling; runtime correctness must not be sacrificed to silence static-analysis findings. Remaining findings still require reachable-flow review and are not ignored automatically.
 
 Candidate leaf paths are checked before writing imported originals or working images, including dangling symbolic links targeting outside the destination directory. Explicitly selected external photos/videos remain readable: local import must not restrict its source to the project directory. Regression checks preserve legitimate external imports while rejecting escaping writes.
 
-The command checks run a tiny argument receiver with the runner's existing Node. It is not an SPZ/SOG encoder and does not certify encoding quality. The optional legacy backend converter requires an already-installed direct Node executable and the project's fixed `cli.mjs`; Windows `.cmd`/`.bat` and global-shim fallback are refused. Native SPZ uses the C++ codec. Node, JavaScript and Mesa are not added to the desktop package. Readiness reporting must match the actual launch requirements.
+The native backend no longer retains the Node converter or browser export routes. SPZ uses the C++ codec. Backend and package checks verify required native dependencies and reject retired web/Electron assets, Node manifests and HTTP listener entry points. Compute-process arguments and cancellation remain tested; readiness reports must match actual launch requirements.
 
-The compatibility HTTP interface accepts loopback listeners/clients only and validates the local Host authority and actual port, same-origin Origin and Fetch Metadata before routing or reading bodies. Cross-site/DNS-rebinding-style requests receive 403; JSON routes reject non-application/json requests with 415, while same-origin multipart imports remain supported. Non-loopback --host exits before reading persisted jobs or opening a listener. Denied connections drain at most 64 KiB of a declared small body with a monotonic 250 ms total deadline and single receives, not a renewable idle timeout. Owned HTTP regressions require the actual response and no artifacts; receive errors are not accepted as success. Native workers still import explicitly chosen external paths through owned-process calls and do not start HTTP. These checks are not remote authentication or isolation from untrusted local processes; network sharing is unsupported. See [OWASP CSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html) and [Fetch Metadata](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Sec-Fetch-Site).
+Native workers import explicitly chosen external paths through owned processes. HTTP listeners and routes have been removed, so tests of retired Host/Origin/upload protocols are retired with them. Live path containment, symbolic-link escape prevention, configuration parsing, import transactions and cancellation are tested through direct compute entry points. This backend is not a network-sharing service or isolation from untrusted local processes.
 
 Exit-confirmation regression state has shared ownership until the last asynchronous callback instead of referencing expired block-local booleans. Each `close()` must return fully before the next close is issued, avoiding close reentry within a modal event loop. Checks click visible real dialogs and retain every assertion for the default/escape cancel buttons, the save prompt, and renewed confirmation after cancellation. The overall watchdog is 10 seconds and the CTest limit remains 15 seconds. Mesh-image comparisons complete one real first-frame readback before awaiting the actual +Z view and framing; neither a fixed 300 ms delay nor forced animation advancement stands in for completion. Loading time still starts before `setScene()`, including the first-frame cost. The bounded default-policy sample's 10-second complete-display performance gate, 1500 ms +Z wait, camera tolerances and at least 90% continuous-surface coverage remain unchanged. Production exit/navigation behavior is not modified.
 
@@ -161,7 +161,7 @@ The complete language/appearance/scale/form/window matrices in `native_language_
 
 ### Dependency-alert coverage
 
-Dependabot alerts are a separate administrator-enabled repository setting; they do not require `dependabot.yml` and are not automatic version upgrades. They inspect the **default branch**, using supported dependency graphs and reviewed advisories. Alerts for legacy HTML `main` are not an audit of the desktop branch's pinned runtimes. Python/CUDA extensions, Conda environments, external COLMAP/OpenMVS, model weights and actual local installations are not guaranteed complete graph coverage. Runtime upgrades require separate 3DGS, 2DGS and mesh-backend compatibility checks; neither QA dependencies nor default-branch dependencies represent the training runtime.
+Dependabot alerts are a separate administrator-enabled repository setting; they do not require `dependabot.yml` and are not automatic version upgrades. They inspect the default `main` branch, now the native desktop source, using supported dependency graphs and reviewed advisories. Removing old web dependencies does not remove the need to review declared native dependencies. Python/CUDA extensions, Conda environments, external COLMAP/OpenMVS, model weights and actual local installations are not guaranteed complete graph coverage. Runtime upgrades still require separate 3DGS, 2DGS and mesh-backend checks; QA dependencies do not represent the training runtime.
 
 Secret scanning and push protection depend on GitHub features, permissions and repository configuration and are separate from CodeQL and Dependabot. Verify their state in settings and alert pages. Never commit access tokens, passwords or local runtime credentials.
 
@@ -196,24 +196,24 @@ Python 依存関係の修正後、`Native Windows` の実行 #141 は後続テ�
 CodeQL の advanced setup を使い、別の default setup を同時に有効化しません。
 
 - C/C++：`Native Windows` の実際のネイティブビルド前に CodeQL を初期化し、`manual` モードでコンパイルを追跡して、`security-extended` クエリでビルドしたソースを解析します。
-- Python：[`Native Security`](../.github/workflows/native-security.yml) の独立したマトリクスジョブが `native/worker`、`native/tests`、`crop_editor`、`scripts`、`gaussian-splatting`、`training_kit` を検査します。同梱 SIBR と CUDA サブモジュールは対象外です。Torch/CUDA や追加研究ランタイムはインストールしません。
+- Python：[`Native Security`](../.github/workflows/native-security.yml) の独立したマトリクスジョブが `native/worker`、`native/tests`、`native/backend`、`scripts`、`gaussian-splatting`、`training_kit` を検査します。同梱 SIBR と CUDA サブモジュールは対象外です。Torch/CUDA や追加研究ランタイムはインストールしません。
 - GitHub Actions：マトリクスの `actions` ジョブが `.github/workflows` を検査します。両インタープリター言語のジョブは `build-mode: none` と既定のセキュリティクエリを使い、解析カテゴリを分けてアップロードします。
 
-追加スキャンの対象は `agent/native-desktop-0.3` への push と、このデスクトップブランチを head とする pull request です。手動実行も同じ ref に限定します。pull request は GitHub の merge commit を検査します。`workflow_dispatch` の利用可否には、GitHub のワークフロー登録およびデフォルトブランチ要件が適用されます。このブランチの自動起動経路は push です。旧 HTML の `main` は変更しません。定期スキャンも保証しません。GitHub の `schedule` はワークフローがデフォルトブランチに存在する必要があります。最初の実行では YAML の構文だけでなく、初期化、抽出/ビルド、解析、SARIF アップロードまで確認します。
+既定の `main` がネイティブ版の開発・配布入口です。`main` への push、`main` を対象とする pull request、同 ref の手動実行を検査します。PR は GitHub の merge commit を使うため、機能ブランチを `main` と名付ける必要はありません。`workflow_dispatch` は既定ブランチの workflow で登録し、定期実行の有無は実際の `schedule` 設定に従います。YAML 構文だけでなく、初期化、抽出/ビルド、解析、SARIF アップロードを確認します。
 
 結果は **Security and quality → Code scanning** でブランチと解析カテゴリを指定して確認します。アップロード成功は検査実行の確認であり、脆弱性がないことの保証ではありません。実際のアラートは到達経路とリスクを調べて修正します。クエリ除外、アラートの非表示、失敗履歴の削除を修正の代わりにしません。
 
 ### 共有バックエンドのセキュリティ回帰テスト
 
-Windows の worker 検査と `Native Security` の独立した Ubuntu 回帰ジョブは、既存バックエンドのテストに加え、`test_path_security` と `test_command_security` を実行します。実際のループバック HTTP リクエストとテスト専用子プロセスで、ディレクトリ境界、正規の 3DGS/2DGS/メッシュ入出力、コマンド引数の分離、キャンセルを検証します。Ubuntu では Windows の権限制限で使えない場合があるファイルシンボリックリンクも検査します。サンプルは runner の一時ディレクトリに置き、元の研究プロジェクトを読まず、学習を開始しません。
+Windows の worker 検査と `Native Security` の独立した Ubuntu 回帰は、`native/backend/tests` とネイティブ worker を検査します。計算入口の直接呼出しとテスト専用子プロセスで、ディレクトリ境界、正規の 3DGS/2DGS/メッシュ入出力、引数、キャンセルを確認します。Ubuntu は Windows の権限制限で使えないファイルシンボリックリンクも対象にします。サンプルは runner の一時ディレクトリに置き、元の研究データを読み込まず、実際の学習を開始しません。
 
 モデルの `cfg_args` は `Namespace` とリテラルのキーワード値だけを受け入れ、`eval` は使いません。実験表示の検査では、正規の値、元の Unicode パス、リスト、辞書を保持し、不信な式を実行しないことを確認します。ディレクトリ境界は最終ダウンロードだけでなく、読み書き、キャッシュ、プレビューの生成前に検査します。Windows は大文字小文字を区別しない比較を維持し、戻り値の実際の表記は保存します。静的解析の警告を消すために正常動作を壊してはいけません。残りのアラートも到達経路を調べ、自動的には無視しません。
 
 読み込んだ元データのコピーと作業画像を書き込む前に、候補の末端パスも検査します。保存先の外部を指すシンボリックリンクは、参照先が未作成でも拒否します。ユーザーが明示的に選んだ外部の写真・動画は引き続き読み込めます。ローカル読み込みの元データをプロジェクト内に制限しません。正規の外部読み込みと、範囲外への書き込み拒否を両方検証します。
 
-コマンド検査は runner に既存の Node で小さな引数受信プログラムを実行します。これは SPZ/SOG エンコーダーではなく、符号化品質の検証ではありません。追加の旧バックエンド変換器は、導入済みの直接 Node 実行ファイルとプロジェクト内の固定 `cli.mjs` だけを使用し、Windows の `.cmd`/`.bat` やグローバル shim には戻りません。ネイティブ SPZ は C++ コーデックを使い、Node、JavaScript、Mesa はデスクトップパッケージに追加しません。環境の準備状況の表示は実際の起動条件と一致させます。
+ネイティブバックエンドから Node 変換器とブラウザー用の出力ルートを削除し、SPZ は C++ コーデックを使います。バックエンドとパッケージ検査は必要な依存関係を確認し、旧 Web/Electron、Node の依存一覧、HTTP リスナーの再導入を拒否します。計算プロセスの引数と取消は引き続き検査し、準備状況は実際の起動条件に合わせます。
 
-互換 HTTP インターフェイスは loopback のリスナー／クライアントだけを許可し、ルーティングや本文の処理前に Host のローカルアドレスと実ポート、同一オリジンの Origin、Fetch Metadata を確認します。クロスサイト／DNS rebinding 型の要求は 403、JSON ルートの application/json 以外は 415 です。同一オリジンの multipart インポートは維持します。非 loopback の --host は永続タスクの読み込みやリスナーを開く前に終了します。拒否時は宣言された小さな本文を最大 64 KiB だけ処理し、単調時計と単回受信で待機全体を 250 ms に制限します。短い空き時間ごとに期限を更新しません。実 HTTP 回帰は正しい応答と成果物がないことを検査し、受信エラーを成功と扱いません。ネイティブ worker は自有プロセスから選択された外部ファイルを直接インポートし、HTTP を起動しません。これらはリモート認証や信頼できないローカルプロセスの隔離ではなく、ネットワーク共有は非対応です。[OWASP CSRF 防御](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)と [Fetch Metadata](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Sec-Fetch-Site)を参照してください。
+ネイティブ worker は自身が所有するプロセスで選択された外部ファイルを直接取り込みます。HTTP リスナーとルートを削除したため、廃止済み Host/Origin/アップロードプロトコルの検査も終了します。現在使うパス境界、シンボリックリンクによる逸脱防止、設定解析、取込トランザクション、取消は直接の計算入口で確認します。バックエンドはネットワーク共有サービスでも、不信なローカルプロセスを隔離する仕組みでもありません。
 
 終了確認の回帰テスト状態は最後の非同期コールバックまで共有所有され、寿命が終わったブロック内の bool を参照しません。各 `close()` が完全に戻ってから次の終了操作を開始し、モーダルイベントループ中の終了処理への再入を避けます。表示済みの実ダイアログをクリックし、既定／escape のキャンセルボタン、保存確認、キャンセル後の再確認に関する全検証条件を維持します。全体の watchdog は 10 秒、CTest 上限は 15 秒のままです。メッシュ画像比較は最初の実フレームを一度 readback してから、実際の +Z 視点への到達を待ってフレーミングします。固定 300 ms の待機を完了と見なさず、アニメーションも強制的に進めません。読み込み時間は引き続き `setScene()` の直前から測り、最初のフレームの処理時間も含めます。既定ポリシーの管理サンプルに適用する完全表示 10 秒の性能基準、+Z の 1500 ms 待機、カメラ許容誤差、90% 以上の連続面被覆率は維持し、製品の終了／ナビゲーション動作は変更しません。
 
@@ -221,7 +221,7 @@ Windows の worker 検査と `Native Security` の独立した Ubuntu 回帰ジ�
 
 ### 依存関係アラートの範囲
 
-Dependabot alerts は管理者が設定で有効にする別機能です。`dependabot.yml` は不要で、自動バージョン更新とも異なります。対応する依存関係グラフと審査済みアドバイザリを使って**デフォルトブランチ**を検査します。旧 HTML `main` のアラートは、デスクトップ開発ブランチの固定ランタイムを監査した結果ではありません。Python/CUDA 拡張、Conda 環境、外部 COLMAP/OpenMVS、モデルの重み、ローカルに実際に導入したバージョンを完全に検査できるとは限りません。ランタイム更新時は 3DGS、2DGS、メッシュバックエンドごとに互換性を検証し、QA 用やデフォルトブランチ用の依存関係を学習環境と同一視しません。
+Dependabot alerts は管理者が設定で有効にする独立機能です。`dependabot.yml` は不要で、自動バージョン更新とも異なります。対応する依存グラフと審査済みアドバイザリで既定の `main` を検査し、現在はネイティブ版ソースが対象です。旧 Web 依存を削除した後も、現在宣言する依存関係を確認します。Python/CUDA 拡張、Conda、外部 COLMAP/OpenMVS、モデルの重み、本機の導入版を完全に網羅する保証はありません。ランタイム更新では 3DGS、2DGS、メッシュを個別に検証し、QA 依存を実学習環境と同一視しません。
 
 シークレットスキャンと push protection は GitHub の提供機能、権限、リポジトリ設定に依存し、CodeQL や Dependabot とは別の検査境界です。設定画面とアラート画面で状態を確認してください。アクセストークン、パスワード、ローカル環境の認証情報をコミットしないでください。
 
@@ -239,19 +239,13 @@ English: Axis-view snapping starts an independent monotonic clock at the user's 
 
 日本語：軸ビューへのスナップはユーザーの要求時刻に独立した単調時計を開始し、精密タイマーは更新の実行だけを担当します。遅延したコールバックは実際の経過時間に追いつき、遅れた全体アニメーションの初期化を開始時刻としません。従来の 220 ms、OutCubic、最短の yaw 経路、キャンセルと全モデルの描画経路を維持します。FPS 方針、1500 ms の待機、完全表示 10 秒、表面被覆率 90% の基準は変更せず、テストからアニメーション時間や目標姿勢を直接設定しません。開始、中間、終了、長い実行遅延、yaw の折り返しを検査します。修正コミットの実際の Actions 全体での確認は引き続き必要です。
 
-## HTTP local-path import retirement / HTTP 本地路径导入停用 / HTTP ローカルパス取込の廃止
+## Retired web runtime / 旧网页运行时退役 / 旧 Web ランタイムの廃止
 
-中文：桌面分支停用兼容 HTTP 的 `POST /api/import-paths`。通过原有本地 Host／Origin／Fetch 检查后，该入口返回 `410` 和稳定的协议错误标识 `http_path_import_disabled_use_upload_or_native_import`，不解析 JSON，也不调用本地路径读取函数。兼容客户端应通过 `/api/import` 上传文件内容；旧的 HTTP 快速本地路径导入不再支持。原生桌面端仍通过自有 worker 的导入事务读取用户明确选择的外部照片／视频，不启动 HTTP，不把来源限制到工程目录。3DGS、2DGS 和网格流程共用这一数据集入口。此更改不修改旧 HTML `main` 分支。
+中文：2026-10-15 起，共享后端位于 `native/backend/compute.py`，旧网页、Electron 和 HTTP 服务从默认原生 `main` 分支删除。当前测试不再依赖 `crop_editor` 或 `resources/app` 存在。迁移后的后端与打包回归必须覆盖照片/视频导入、COLMAP、3DGS/2DGS、网格/纹理、任务状态与路径保护；源码移位不放宽现有数据与完整状态续训校验。GitHub 历史失败、标签和旧发行记录保留。参见[迁移说明](NATIVE_MIGRATION.md)。
 
-English: The desktop branch retires compatibility HTTP `POST /api/import-paths`. After the existing local Host/Origin/Fetch checks, it returns `410` with the stable protocol error identifier `http_path_import_disabled_use_upload_or_native_import`, without parsing JSON or invoking local-source reads. Compatibility clients must upload file bytes through `/api/import`; the former fast HTTP local-path route is unavailable. Native desktop imports still read explicitly chosen external photos/videos in the owned worker's import transaction, without starting HTTP or restricting sources to project directories. 3DGS, 2DGS and mesh workflows share this dataset entry point. The legacy HTML `main` branch is unchanged.
+English: From 2026-10-15, shared compute code resides in `native/backend/compute.py`; the old web, Electron and HTTP runtime is removed from the default native `main` branch. Current tests must not require `crop_editor` or `resources/app`. Migrated backend and package regression cover photo/video import, COLMAP, 3DGS/2DGS, mesh/texturing, job state and path protection. Relocation does not relax data or full-state-resume validation. GitHub historical failures, tags and previous releases remain. See [migration](NATIVE_MIGRATION.md).
 
-日本語：デスクトップ分岐では、互換 HTTP の `POST /api/import-paths` を廃止します。従来のローカル Host／Origin／Fetch 検査後、JSON を解析せず、ローカルの入力ファイルを読み取る関数も呼ばずに、`410` と固定のプロトコル識別子 `http_path_import_disabled_use_upload_or_native_import` を返します。互換クライアントは `/api/import` でファイル内容をアップロードしてください。従来の高速な HTTP ローカルパス取込は非対応になります。ネイティブ版は、自身が所有する worker の取込トランザクションで、ユーザーが明示的に選んだ外部の写真／動画を引き続き読み取ります。HTTP を開始せず、入力元をプロジェクト内に制限しません。3DGS、2DGS とメッシュの処理は同じデータセット入口を使用し、旧 HTML の `main` 分岐は変更しません。
-
-中文：实际 RED 回归捕获到 8 组请求均返回 `200`，包含将外部文本来源伪装为 PNG 文件名的请求。修复后的同一真实 HTTP 回归要求 `410`、零新数据集及原始字节不变。原有同源上传、Host／Origin／Fetch、JSON 类型和目标目录／链接防逃逸检查保留；目标安全检查改在仍受支持的直接后端入口验证，不删除其断言。这里的错误标识是机器协议值，不是新增原生 UI 文案。所有测试和 CodeQL 仍需对修复提交实际验收；不通过关闭告警、排除查询或删除旧失败记录装作成功。
-
-English: The actual RED regression returned `200` in all eight requests, including an external text source disguised as a PNG filename. The same real HTTP regression now requires `410`, no new dataset and unchanged source bytes. Same-origin uploads, Host/Origin/Fetch, JSON media types and target-directory/link containment checks remain; target checks use the still-supported direct backend entry rather than deleting their assertions. The error identifier is a machine protocol value, not new native UI text. Tests and CodeQL must certify the fixed commit; alerts are not dismissed, queries excluded or old failures deleted to manufacture success.
-
-日本語：実際の RED 回帰では、外部のテキストを PNG 名として指定した場合を含む 8 件すべてが `200` でした。修正後の同じ実 HTTP 検査は、`410`、新しいデータセットがないこと、入力元のバイトが変わらないことを要求します。同一オリジンのアップロード、Host／Origin／Fetch、JSON のメディア型と保存先／リンクの逸脱検査は維持します。保存先の検証は、引き続き対応する直接のバックエンド入口で行い、条件を削除しません。エラー識別子は機械向けのプロトコル値であり、新しいネイティブ UI 文言ではありません。修正コミットでテストと CodeQL を実行して確認し、アラートの却下、クエリ除外や過去の失敗記録の削除で成功を装いません。
+日本語：2026-10-15 以降、共通計算コードは `native/backend/compute.py` に配置し、旧 Web・Electron・HTTP 実行部を既定のネイティブ `main` 分岐から削除します。現在の検査は `crop_editor` や `resources/app` の存在に依存しません。移行した後端とパッケージで写真/動画取込、COLMAP、3DGS/2DGS、メッシュ/テクスチャ、状態とパス保護を検証し、データや完全状態再開の検証は緩和しません。GitHub の過去の失敗・タグ・配布記録は保持します。[移行説明](NATIVE_MIGRATION.md)を参照してください。
 
 ## Canonical Windows fixtures / Windows 规范路径夹具 / Windows の正規化パス
 

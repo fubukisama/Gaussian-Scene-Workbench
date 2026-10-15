@@ -1,5 +1,7 @@
 # Native material-preview acceptance — 2026-09-30
 
+> Historical acceptance record / 历史验收记录 / 過去の検証記録: branch names, paths and results below describe this document's original date. Current native development and releases use `main`; see [migration](../NATIVE_MIGRATION.md).
+
 Branch: `agent/native-desktop-0.3`. This follows the staged-mesh batch; HTML `main` and external algorithm sources are unchanged.
 
 简体中文：生成网格的原始贴图经验证后自动显示，多材质逐面角 UV 保留，不简化几何；材质失败时保留已完成几何，不标为成功。

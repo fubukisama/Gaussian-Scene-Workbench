@@ -9,11 +9,11 @@
 ## Native Desktop Preview
 
 - Version: `0.3.1-native-preview`
-- Documentation updated: `2026-10-14` — not a new release-version announcement.
-- Active branch: [`agent/native-desktop-0.3`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/agent/native-desktop-0.3)
+- Documentation updated: `2026-10-15` — not a new release-version announcement.
+- Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
-This README describes the **native desktop branch**, not the legacy HTML/Electron application. Native development remains a preview; a workflow entry does not imply complete legacy feature parity.
+The default `main` branch contains the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
 
 ### Current capabilities
 
@@ -37,7 +37,7 @@ Mesh-generation routes include bounded/unbounded TSDF, SuGaR and GS2Mesh, with o
 
 Prefer a non-system drive when available, such as `D:\Apps\GSW`. C:-only devices automatically use the existing writable workspace/build/package location. Windows Application Control may require approved signed binaries/runtimes; the app does not disable or bypass that policy.
 
-The old Electron `0.2.4` release and `Setup Gaussian Scene Workbench.cmd` are **not** the native preview installation instructions.
+Use the native package and runtime instructions above. Old application releases remain historical artifacts and are not the current installation route.
 
 ### Build the native desktop
 
@@ -76,9 +76,9 @@ Replace `native/build` for custom builds. GUI tests require the configured Qt/Op
 - [Icon system](docs/ICON_SYSTEM.md) · [Localization](docs/LOCALIZATION.md)
 - [Migration](docs/NATIVE_MIGRATION.md) · [Parity gates](docs/NATIVE_PARITY.md)
 
-`native/` contains the desktop UI, OpenGL renderer, workers and tests; `docs/` and `scripts/` contain documentation, build/runtime and validation tools; `training_kit/` and `gaussian-splatting/` contain compute helpers and training sources. `crop_editor/` and `resources/app/` retain legacy web/Electron code and shared backend helpers, not a browser dependency of the native UI.
+`native/` contains the desktop UI, OpenGL renderer, workers and tests. `native/backend/compute.py` contains shared dataset, reconstruction, training and mesh orchestration; workers call it directly without an HTTP listener. `docs/` and `scripts/` contain documentation, build/runtime and validation tools; `training_kit/` and `gaussian-splatting/` contain compute helpers and training sources. See [backend migration and compatibility](docs/NATIVE_MIGRATION.md).
 
-Generated datasets, outputs, environments, caches, builds and packages are excluded from Git. Legacy interface development belongs to [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main), not this desktop branch.
+Generated datasets, outputs, environments, caches, builds and packages are excluded from Git. Earlier versions remain recoverable from Git history and published tags; deleting retired code from this branch does not delete research data or rewrite that history.
 
 ### License and intended use
 
@@ -86,7 +86,9 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ## 简体中文
 
-**高斯场景研究工作台**在 `agent/native-desktop-0.3` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-14**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-15**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+
+本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
 
 ### 当前功能
 
@@ -108,7 +110,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 2. 完整解压后运行 `bin/Gaussian Scene Workbench.exe`；保留 Qt DLL、插件和后端文件，不要只复制 EXE。
 3. 重建/训练前按[运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)与[COLMAP](docs/COLMAP_SETUP.md)说明验证环境；已有 PLY/SPZ 模型可直接导入。
 
-有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。企业应用控制需要获准的签名/运行库，软件不绕过安全策略。旧 Electron `0.2.4` 安装器不是原生版的安装方式。
+有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。企业应用控制需要获准的签名/运行库，软件不绕过安全策略。请使用上方原生安装包与运行环境说明；历史发行包不作为当前安装入口。
 
 源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
 
@@ -120,7 +122,9 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ## 日本語
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `agent/native-desktop-0.3` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-14** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-15** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+
+この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
 
 ### 現在の機能
 
@@ -142,7 +146,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 2. 全体を展開し `bin/Gaussian Scene Workbench.exe` を実行します。Qt DLL、プラグイン、バックエンドを保持し、EXE だけをコピーしないでください。
 3. 学習/再構築前に[実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と[COLMAP](docs/COLMAP_SETUP.md)を確認します。既存 PLY/SPZ は直接読み込めます。
 
-別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。旧 Electron `0.2.4` の導入手順とは別です。
+別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。上記のネイティブパッケージと実行環境の手順を使用し、過去の配布物を現在の導入先とは扱いません。
 
 ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
 

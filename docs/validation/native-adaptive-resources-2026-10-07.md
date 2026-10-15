@@ -1,5 +1,7 @@
 # Native adaptive model resources — 2026-10-07
 
+> Historical acceptance record / 历史验收记录 / 過去の検証記録: branch names, paths and results below describe this document's original date. Current native development and releases use `main`; see [migration](../NATIVE_MIGRATION.md).
+
 Desktop branch: `agent/native-desktop-0.3`. This change affects the native mesh-loading/display path, not the legacy HTML branch or training-worker parameters. Original research assets are read-only.
 
 ## Policy and scope

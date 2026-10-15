@@ -149,7 +149,7 @@ def _transforms_summary(dataset, input_images):
 
 
 def summarize_reconstruction(dataset, run_colmap=False):
-    from crop_editor import reconstruction_quality
+    from native.backend import reconstruction_quality
     dataset = Path(dataset).resolve()
     model = dataset / "sparse" / "0"
     quality = reconstruction_quality.assess_dataset(dataset)

@@ -5,4 +5,3 @@ Pillow>=9.5
 trimesh>=4.0
 moderngl==5.13.0
 glcontext==3.1.0
-legacy-cgi>=2.6; python_version >= "3.13"

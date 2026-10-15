@@ -12,8 +12,8 @@ bool hasBackendMarkers(const QString &directoryPath) {
   static const QStringList markers = {
       QStringLiteral("native/worker/gsw_worker.py"),
       QStringLiteral("native/worker/import_preflight.py"),
-      QStringLiteral("crop_editor/server.py"),
-      QStringLiteral("crop_editor/video_extract.py"),
+      QStringLiteral("native/backend/compute.py"),
+      QStringLiteral("native/backend/video_extract.py"),
       QStringLiteral("scripts/check_3dgs_env.ps1"),
       QStringLiteral("gaussian-splatting/train.py"),
   };

@@ -9,15 +9,15 @@ import sys
 from pathlib import Path
 
 
-def load_server_module(backend_root):
+def load_compute_module(backend_root):
     root = Path(backend_root).resolve()
-    server_path = root / "crop_editor" / "server.py"
+    server_path = root / "native" / "backend" / "compute.py"
     if not server_path.is_file():
-        raise FileNotFoundError("staged crop_editor/server.py was not found: {}".format(server_path))
+        raise FileNotFoundError("staged native/backend/compute.py was not found: {}".format(server_path))
     # Loading a file by spec does not add its package root to the search path.
     # Match the worker's selected-backend imports, independent of launch cwd.
     sys.path.insert(0, str(root))
-    spec = importlib.util.spec_from_file_location("gsw_staged_crop_server", str(server_path))
+    spec = importlib.util.spec_from_file_location("gsw_staged_compute", str(server_path))
     if spec is None or spec.loader is None:
         raise RuntimeError("could not create an import spec for {}".format(server_path))
     module = importlib.util.module_from_spec(spec)
@@ -47,10 +47,10 @@ def _ffmpeg_video_backend(ffmpeg, backend_root):
 
 
 def _conda_video_backend(server, backend_root):
-    helper = Path(backend_root).resolve() / "crop_editor" / "video_extract.py"
+    helper = Path(backend_root).resolve() / "native" / "backend" / "video_extract.py"
     conda = server.conda_executable()
     if not conda or not Path(conda).is_file() or not helper.is_file():
-        return False, "Conda or crop_editor/video_extract.py is unavailable"
+        return False, "Conda or native/backend/video_extract.py is unavailable"
     command = [
         str(conda),
         "run",
@@ -84,16 +84,16 @@ def probe_import_environment(backend_root, require_video=False):
         "version": 1,
         "ready": False,
         "python": str(Path(sys.executable).resolve()),
-        "server": str(root / "crop_editor" / "server.py"),
+        "server": str(root / "native" / "backend" / "compute.py"),
         "videoRequired": bool(require_video),
         "videoBackend": None,
     }
     try:
-        server = load_server_module(root)
+        server = load_compute_module(root)
         importlib.import_module("numpy")
         importlib.import_module("plyfile")
     except Exception as exc:
-        report["error"] = "Unable to load staged crop_editor/server.py with numpy and plyfile: {}: {}".format(
+        report["error"] = "Unable to load staged native/backend/compute.py with numpy and plyfile: {}: {}".format(
             type(exc).__name__, exc
         )
         return report

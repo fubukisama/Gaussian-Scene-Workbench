@@ -136,8 +136,8 @@ class OriginalResolutionCudaTests(unittest.TestCase):
         from PIL import Image
 
         repository = Path(os.environ.get("GSW_RESOLUTION_TEST_ROOT", Path(__file__).resolve().parents[2]))
-        sys.path.insert(0, str(repository / "crop_editor"))
-        import server
+        from native.worker.import_preflight import load_compute_module
+        server = load_compute_module(repository)
         with tempfile.TemporaryDirectory(prefix="original-undistortion-") as temporary:
             dataset = Path(temporary)
             (dataset / "input").mkdir()
@@ -169,9 +169,9 @@ class OriginalResolutionCudaTests(unittest.TestCase):
         repository = Path(os.environ.get("GSW_RESOLUTION_TEST_ROOT", Path(__file__).resolve().parents[2]))
         backend = os.environ.get("GSW_RESOLUTION_TEST_BACKEND", "3dgs")
         self.assertIn(backend, ("3dgs", "2dgs"))
-        sys.path.insert(0, str(repository / "crop_editor"))
-        import server
-        self.assertEqual(Path(server.__file__).resolve().parent, (repository / "crop_editor").resolve())
+        from native.worker.import_preflight import load_compute_module
+        server = load_compute_module(repository)
+        self.assertEqual(Path(server.__file__).resolve().parent, (repository / "native/backend").resolve())
         from native.worker.training_summary import configured_training_summary, emit_loaded_training_summary
         source = Path(os.environ["TWO_DGS_DIR"]) if backend == "2dgs" else repository / "gaussian-splatting"
         sys.path.insert(0, str(source))

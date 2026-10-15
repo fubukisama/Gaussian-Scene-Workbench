@@ -1,8 +1,8 @@
 # Gaussian Scene Workbench Native
 
-`native/` is the Qt 6/C++ desktop replacement for the legacy Electron and HTML interface. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime.
+The default `main` branch is the native desktop source. `native/` contains the Qt 6/C++ desktop and its supervised Python compute backend. The retired web/Electron implementation has been removed from this branch. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime. Shared workflow code lives in `native/backend/compute.py`; see [migration and compatibility](../docs/NATIVE_MIGRATION.md).
 
-Documentation updated: `2026-10-14`. Product version remains `0.3.1-native-preview`; this documentation date does not change the build manifest's release date.
+Documentation updated: `2026-10-15`. Product version remains `0.3.1-native-preview`; this documentation date does not change the build manifest's release date.
 
 ## Current preview
 
@@ -50,7 +50,7 @@ Feature parity and release gates are tracked in `docs/NATIVE_PARITY.md` (package
 
 The Windows preview package includes the native worker, GPU-preview publisher, and compute source needed to launch training. A compatible external Conda/CUDA environment is still required and may be located outside the system drive. Before 3DGS training starts, the desktop validates the selected dataset, sparse reconstruction, CUDA device, PyTorch, and both native 3DGS extensions. Iteration progress is streamed into the task table; on compatible NVIDIA/Windows drivers the viewport also consumes the live shared-GPU-memory frames, otherwise it reports the reason and stays on the checkpoint-based PLY path. A successful process is accepted only after the requested iteration contains a non-empty Gaussian `point_cloud.ply`; that result is then attached to the project, saved, and loaded into the viewport automatically. Cancelled and failed jobs report the latest usable checkpoint instead of discarding it. Windows Application Control failures are reported explicitly and are never bypassed by the application.
 
-Before managed media import starts, the desktop probes the exact selected Python against the packaged `crop_editor/server.py` and requires `numpy` plus `plyfile`. Video import additionally requires at least one verified extraction route: FFmpeg, OpenCV in that Python, or the existing `gaussian_splatting` Conda `video_extract.py` fallback.
+Before managed media import starts, the desktop probes the exact selected Python against the packaged `native/backend/compute.py` and requires `numpy` plus `plyfile`. Video import additionally requires at least one verified extraction route: FFmpeg, OpenCV in that Python, or the existing `gaussian_splatting` Conda `video_extract.py` fallback.
 
 Python discovery prefers `GAUSSIAN_SPLATTING_CONDA_PREFIX`, then `GS_CONDA_PREFIX`, an active `gaussian_splatting` Conda environment, and conventional Miniforge/Conda/Anaconda environment locations on the install drive or in the user profile. An arbitrary `python.exe` on `PATH` is not accepted as a Gaussian environment.
 

@@ -1,79 +1,109 @@
-# Native Desktop Migration
+# Native backend migration / 原生后端迁移 / ネイティブバックエンドへの移行
 
-## Decision
+Updated: 2026-10-15. The default `main` branch now contains the native desktop application; it is the sole active development and installation entry point.
 
-Gaussian Scene Workbench 0.3 is being rebuilt as a native Windows desktop application. Qt 6/C++ owns the application shell, workspace state, docking UI, process lifecycle, and viewport. Existing Python/CUDA training code remains a compute backend and is launched as a supervised worker rather than through a local website.
+## English
 
-The stable Electron 0.2.x implementation remains on `main` until the native branch reaches workflow parity. The native executable never embeds the legacy HTML UI.
+The shared Python workflow code formerly located under `crop_editor/` now lives
+in `native/backend/compute.py`. Dataset import, COLMAP reconstruction, 3DGS/2DGS,
+mesh generation, texturing, path validation and job control remain compute
+functions invoked by supervised native workers. The module has no HTTP server
+or browser startup entry point.
 
-## Product reference model
+The retired interface has been removed from this branch: HTML/CSS/JavaScript
+assets, browser-only tests and package manifests, the Electron shell, local HTTP
+routes and old desktop launch/release scripts. Optional Node-based conversion is
+not part of the native package; native SPZ uses the compiled C++ codec. Removing
+the interface does not add unsupported native features such as SOG export.
 
-The workspace follows the mature desktop layout used by photogrammetry and radiance-field tools:
+The current structure is:
 
-- Postshot: main tools, viewport tools, central viewport, scene tree, selected-node parameters, timeline, and processing progress.
-- Agisoft Metashape: project-centric workspace, explicit processing jobs, persistent panes, and inspectable intermediate reconstruction stages.
-- LichtFeld Studio: separate scene, selection, training, rendering, tool-registry, and plugin services around a native renderer.
-
-Primary references:
-
-- https://www.jawset.com/docs/d/Postshot%20User%20Guide/Interface
-- https://github.com/MrNeRF/LichtFeld-Studio
-- https://lichtfeld.io/
-
-## Architecture
-
-```mermaid
-flowchart LR
-  UI["Qt desktop shell"] --> Workspace["Workspace document"]
-  UI --> Tools["Tool and command registry"]
-  UI --> Tasks["Task supervisor"]
-  UI --> Viewport["Native viewport"]
-  Workspace --> Scene["Scene service"]
-  Tasks --> Python["Python/CUDA workers"]
-  Tasks --> Colmap["COLMAP/OpenMVS workers"]
-  Viewport --> RenderAPI["Renderer boundary"]
-  RenderAPI --> SIBR["SIBR Gaussian renderer"]
-  Scene --> RenderAPI
+```text
+native/src/                 Qt UI, viewport and native process supervision
+native/worker/              Worker entry points and training-state adapters
+native/backend/compute.py   Shared dataset/reconstruction/training/mesh services
+native/backend/tests/       Direct backend and security regression tests
+gaussian-splatting/         Separate research training implementation
+training_kit/               Compute helpers
+scripts/                   Native build, runtime and validation tools
 ```
 
-The first implementation intentionally keeps these boundaries small:
+The worker and packaged backend must come from the same revision. Source-tree
+development may explicitly select a trusted checkout with `GSW_BACKEND_ROOT`;
+an arbitrary current directory is not an implicit backend. A package includes
+the backend it uses, the corresponding native source and the applicable licenses.
 
-- `WorkspaceDocument` owns portable project metadata and asset references.
-- `ProcessSupervisor` owns one external worker lifecycle and streams logs into the native task panel.
-- `NativeViewport` owns OpenGL context, asynchronous point-scene upload, navigation, full-source selection projection, overlays, and interaction-mode state.
-- `SceneEditModel` owns compact selection/deletion masks, original vertex identity, and bounded undo/redo history.
-- `MainWindow` composes UI only; training and scene behavior move into dedicated managers as their state models mature.
+Existing native `.gsw.json` projects, model files and full-state checkpoints are
+data, not retired application code. Their format and trust checks remain in
+place. Existing external runtime environment variables remain the configuration
+route described in [runtime setup](WINDOWS_NATIVE_RUNTIME.md); this cleanup does
+not automatically convert an Electron runtime JSON file into native settings.
+Back up and retain earlier projects and outputs when switching installations.
+Native checkpoint compatibility remains subject to backend, input and settings
+validation; a PLY warm start is not a full optimizer-state resume.
 
-The next internal services will follow the same proven separation visible in LichtFeld Studio without copying GPL implementation code: `SceneManager`, `TrainingStateMachine`, `ToolRegistry`, and a renderer frame-lifecycle service.
+Older application versions remain available in Git history and existing tags.
+This branch cleanup does not rewrite history or remove research assets. It also
+does not establish complete old-interface feature parity: use the current
+[native matrix](NATIVE_PARITY.md), [pipeline gates](GENERATION_PIPELINES.md) and
+[training limits](TRAINING_PERFORMANCE.md).
 
-## Migration phases
+Validation covers the migrated direct backend, native workers, three-language
+desktop behavior and a staged native package without the retired folders.
+Real CUDA and optional mesh-runtime checks remain separate capability gates;
+the source relocation alone is not proof of their availability on every PC.
 
-### 0.3.0 native preview
+## 简体中文
 
-- Buildable Qt 6 application and Windows CI artifact.
-- Adaptive DPI/manual UI scale, dock layout persistence, and compact professional workspace.
-- Project creation/open/save, dataset import, PLY metadata and point import, task logs, environment checks, and supervised 3DGS training launch.
-- Native OpenGL point preview with deterministic sampling and explicit separation from future SIBR splat metrics.
-- Object-level point/Mesh/Gaussian picking, depth-occluded world axes and selection bounds, plus a Blender-style Move/Rotate/Scale/Transform gizmo strip and modal transforms (`G`, `R`, `R R`, `S`, axis/plane/view handles, free trackball, snapping, precision, numeric entry, confirm/cancel) through one non-destructive, source-coordinate and recovery-safe pivoted TRS matrix. The combined gizmo separates centre/plane, move, scale, axis-rotation, and view-rotation controls into constant-screen-space bands with guarded hit priorities, and places its shortcut hint outside the active controls; full-source rectangle/lasso/brush selection, visible-only depth filtering, original-index delete history, undo/redo, and native lossless cropped PLY export remain available.
+默认 `main` 分支现为原生桌面端，是唯一活跃开发与安装入口。原 `crop_editor/` 中的共享计算逻辑迁入 `native/backend/compute.py`，保留数据集
+导入、COLMAP、3DGS/2DGS、网格、纹理、路径校验和任务控制，由原生 worker 直接
+调用。模块不再提供 HTTP 服务或浏览器启动入口。
 
-### 0.3.x renderer integration
+本分支移除旧 HTML/CSS/JavaScript、浏览器专用测试与依赖清单、Electron 外壳、
+HTTP 路由及旧启动/发行脚本。原生 SPZ 使用 C++ 编解码器，不依赖旧 Node 转换器。
+删除旧界面不代表补齐 SOG 等尚未支持的原生能力。
 
-- Introduce the renderer boundary and embed the bundled SIBR Gaussian renderer in the Qt-owned graphics context.
-- Load scene data once and keep it in native/GPU memory.
-- Report renderer frame time, presented FPS, GPU time, and Gaussian count separately. Never infer thousands of FPS by dividing a sub-millisecond UI paint duration.
-- Add camera frustums, point/splat modes, brush/GPU ID selection, crop volumes, and additional export formats.
+worker 与安装包后端应来自同一提交。源码开发可显式通过 `GSW_BACKEND_ROOT`
+选择可信仓库，不把当前工作目录自动当作后端。安装包保留匹配的后端、原生对应
+源码和许可证。上方目录表列出新的职责边界。
 
-### 0.4 training and reconstruction parity
+已有原生 `.gsw.json`、模型和完整状态检查点属于数据，格式与信任检查保持。
+独立运行环境继续使用[环境说明](WINDOWS_NATIVE_RUNTIME.md)中的变量；本轮不会
+把 Electron 的运行环境 JSON 自动转换为原生设置。切换安装版时保留并备份已有
+工程与成果；续训仍验证后端、输入和参数，PLY 热启动不等于完整优化器状态恢复。
 
-- Replace generic worker launch with typed jobs and a training state machine.
-- Add conversion, COLMAP reconstruction, method profiles, checkpoint resume, metrics, and experiment comparison.
-- Persist job manifests and recover interrupted jobs.
+历史版本保留在 Git 历史和现有标签中，本次不改写历史、不删除研究资产。
+旧界面退役不等于所有功能已移植，能力以[原生矩阵](NATIVE_PARITY.md)、
+[管线验收](GENERATION_PIPELINES.md)和[训练限制](TRAINING_PERFORMANCE.md)为准。
+验收覆盖迁移后的直接后端、原生 worker、三语言界面及无旧目录的安装包；
+真实 CUDA 与可选网格运行库仍分别验证。
 
-### 0.5 platform cleanup
+## 日本語
 
-- Remove Electron, HTML, CSS, JavaScript, Node, and local HTTP runtime code only after native parity tests pass.
-- Ship a native installer with a selectable installation path and separate user data/cache locations.
+既定の `main` はネイティブデスクトップ版となり、唯一の開発・導入入口です。従来の `crop_editor/` 内にあった共通処理は `native/backend/compute.py` に移しました。
+データセット取込、COLMAP、3DGS/2DGS、メッシュ、テクスチャ、パス検証、タスク
+制御をネイティブ worker が直接呼び出します。HTTP サーバーやブラウザーの
+起動入口は提供しません。
 
-## License rule
+この分岐から旧 HTML/CSS/JavaScript、ブラウザー専用テストと依存一覧、Electron、
+HTTP ルート、旧起動・配布スクリプトを削除します。ネイティブ SPZ は C++ の
+コーデックを使用し、旧 Node 変換器に依存しません。旧 UI の削除で SOG などの
+未対応機能が追加されるわけではありません。
 
-LichtFeld Studio is GPL-3.0-or-later. Reading its source to understand architecture and behavior does not change this repository's license. Copying, adapting, or linking GPL implementation code into the native application requires a compatible GPL release and an explicit repository licensing change. The current preview is an independent implementation.
+worker と同梱バックエンドは同じコミットを使います。ソース開発では
+`GSW_BACKEND_ROOT` で信頼するリポジトリを明示でき、作業ディレクトリを
+暗黙のバックエンドとして扱いません。パッケージは対応するバックエンド・
+ネイティブソース・ライセンスを保持します。役割ごとの配置は上記の表の通りです。
+
+既存のネイティブ `.gsw.json`、モデル、完全状態チェックポイントはデータであり、
+形式と信頼性の検証を維持します。外部環境は引き続き[実行環境](WINDOWS_NATIVE_RUNTIME.md)
+にある変数で指定し、Electron のランタイム JSON を自動でネイティブ設定へ変換
+する機能は追加しません。切替時は既存のプロジェクトと成果を保管・バックアップ
+してください。再開には方式・入力・設定の検証が必要で、PLY ウォームスタートは
+完全な最適化器状態の再開ではありません。
+
+過去の版は Git 履歴と既存タグに残し、研究資産は削除しません。旧 UI の廃止は
+全機能移植済みという意味ではなく、[ネイティブ機能表](NATIVE_PARITY.md)、
+[パイプライン検証](GENERATION_PIPELINES.md)、[学習の制限](TRAINING_PERFORMANCE.md)
+が対応範囲を示します。移行後の直接バックエンド、worker、三言語 UI、旧ディレクトリ
+のないパッケージを検査し、実 CUDA と追加メッシュ環境は別途検証します。

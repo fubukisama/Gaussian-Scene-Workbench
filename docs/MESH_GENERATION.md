@@ -49,7 +49,7 @@ OpenMVS compatibility / OpenMVS 兼容 / OpenMVS 互換性：Only the OpenMVS co
 ```text
 python -B -m unittest native.worker.test_mesh_generation
 python -B -m unittest native.worker.test_mesh_material_preview
-python -B -m unittest crop_editor.tests.test_training_telemetry
+python -B -m unittest native.backend.tests.test_training_telemetry
 python -B -m unittest native.worker.test_mesh_generation_cuda
 python scripts/native_i18n.py
 python scripts/test_native_i18n.py

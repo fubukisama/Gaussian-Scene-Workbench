@@ -19,15 +19,15 @@ def configure_stdio():
         pass
 
 
-def load_server_module(backend_root):
+def load_compute_module(backend_root):
     root = Path(backend_root).resolve()
-    server_path = root / "crop_editor" / "server.py"
+    server_path = root / "native" / "backend" / "compute.py"
     if not server_path.is_file():
-        raise FileNotFoundError("crop_editor/server.py is missing: {}".format(server_path))
+        raise FileNotFoundError("native/backend/compute.py is missing: {}".format(server_path))
     # Loading a file by spec does not add its package root to the search path.
     # Match the worker's selected-backend imports, independent of launch cwd.
     sys.path.insert(0, str(root))
-    spec = importlib.util.spec_from_file_location("gsw_training_preflight_server", str(server_path))
+    spec = importlib.util.spec_from_file_location("gsw_training_preflight_compute", str(server_path))
     if spec is None or spec.loader is None:
         raise RuntimeError("could not load {}".format(server_path))
     module = importlib.util.module_from_spec(spec)
@@ -118,7 +118,7 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         if image_count <= 0:
             raise RuntimeError("训练数据集中没有可用图像：{}".format(images_path))
 
-        server = load_server_module(root)
+        server = load_compute_module(root)
         from native.worker.training_reconstruction_summary import summarize_reconstruction
         reconstruction = summarize_reconstruction(dataset, run_colmap)
         report["reconstructionSummary"] = reconstruction

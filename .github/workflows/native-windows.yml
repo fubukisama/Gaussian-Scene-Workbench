@@ -3,21 +3,18 @@ name: Native Windows
 on:
   push:
     branches:
-      - agent/native-desktop-0.3
+      - main
     paths:
       - "native/**"
-      - "crop_editor/server.py"
-      - "crop_editor/video_extract.py"
-      - "crop_editor/tests/test_training_backends.py"
-      - "crop_editor/tests/test_*security.py"
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/verify_native_backend.py"
       - "scripts/requirements-native-checks.txt"
       - "scripts/setup_native_ci_*.ps1"
       - "scripts/*native_i18n.py"
       - "docs/LOCALIZATION.md"
-      - "scripts/bootstrap_3dgs_editor.ps1"
+      - "scripts/bootstrap_native.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
       - "scripts/sign_windows_artifacts.ps1"
@@ -30,20 +27,19 @@ on:
       - "docs/WINDOWS_APPLICATION_CONTROL.md"
       - "README.md"
   pull_request:
+    branches:
+      - main
     paths:
       - "native/**"
-      - "crop_editor/server.py"
-      - "crop_editor/video_extract.py"
-      - "crop_editor/tests/test_training_backends.py"
-      - "crop_editor/tests/test_*security.py"
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/build_native.ps1"
+      - "scripts/verify_native_backend.py"
       - "scripts/requirements-native-checks.txt"
       - "scripts/setup_native_ci_*.ps1"
       - "scripts/*native_i18n.py"
       - "docs/LOCALIZATION.md"
-      - "scripts/bootstrap_3dgs_editor.ps1"
+      - "scripts/bootstrap_native.ps1"
       - "scripts/check_3dgs_env.ps1"
       - "scripts/install_colmap.ps1"
       - "scripts/sign_windows_artifacts.ps1"
@@ -63,8 +59,8 @@ jobs:
   upstream-acceptance:
     name: Upstream viewport acceptance
     if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
-      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -91,6 +87,8 @@ jobs:
         run: |
           & '${{ steps.qa-python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
           if ($LASTEXITCODE -ne 0) { throw "Acceptance QA dependencies failed." }
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
+          if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
           $root = Join-Path $PWD 'native/.deps'
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
             "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
@@ -140,10 +138,10 @@ jobs:
 
   build:
     name: Qt 6 native preview
-    # Match the native-only scan scope, including PR head and manual selection.
+    # Feature PRs into native main run the same gates as main pushes.
     if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
-      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.
     runs-on: windows-2022
     # The traced build has taken 20-35 minutes on the hosted runner. Leave room
@@ -186,6 +184,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native QA dependency installation failed." }
           & $env:QA_PYTHON -c "import sys, numpy, plyfile, trimesh; from PIL import Image; print('Native QA Python:', sys.executable, sys.version)"
           if ($LASTEXITCODE -ne 0) { throw "Native QA dependency import check failed." }
+          & $env:QA_PYTHON -I -B scripts/verify_native_backend.py --root .
+          if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 
       - name: Install SPZ codec dependencies
         shell: pwsh
@@ -201,8 +201,8 @@ jobs:
       - name: Initialize native C++ code scanning
         id: native-codeql
         if: >-
-          (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
-          (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+          (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+          (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
         uses: github/codeql-action/init@v4
         with:
           languages: c-cpp
@@ -262,9 +262,7 @@ jobs:
           QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
           GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
         run: |
-          node --version
-          if ($LASTEXITCODE -ne 0) { throw "The hosted runner is missing Node for the test-owned argv receiver." }
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_training_stress crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_training_stress native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts
@@ -273,7 +271,7 @@ jobs:
           $scripts = @(
             "scripts/build_native.ps1",
             "scripts/write_native_source_manifest.ps1",
-            "scripts/bootstrap_3dgs_editor.ps1",
+            "scripts/bootstrap_native.ps1",
             "scripts/check_3dgs_env.ps1",
             "scripts/install_colmap.ps1",
             "scripts/sign_windows_artifacts.ps1",
@@ -319,27 +317,23 @@ jobs:
 
       - name: Stage native compute backend
         shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
         run: >-
           ./scripts/stage_native_backend.ps1
           -SourceRoot $PWD
           -DestinationRoot (Join-Path $PWD "native/artifact")
+          -PythonExecutable $env:QA_PYTHON
 
       - name: Verify native-only package
         shell: pwsh
         env:
           QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
         run: |
-          & $env:QA_PYTHON -B -c "from pathlib import Path; files=[Path('native/artifact/native/worker/gsw_worker.py'),Path('native/artifact/native/worker/import_preflight.py'),Path('native/artifact/native/worker/training_preflight.py'),Path('native/artifact/crop_editor/server.py'),Path('native/artifact/crop_editor/video_extract.py')]; [compile(path.read_bytes(),str(path),'exec') for path in files]"
+          & $env:QA_PYTHON -B -c "from pathlib import Path; files=[Path('native/artifact/native/worker/gsw_worker.py'),Path('native/artifact/native/worker/import_preflight.py'),Path('native/artifact/native/worker/training_preflight.py'),Path('native/artifact/native/backend/compute.py'),Path('native/artifact/native/backend/reconstruction_quality.py'),Path('native/artifact/native/backend/video_extract.py')]; [compile(path.read_bytes(),str(path),'exec') for path in files]"
           if ($LASTEXITCODE -ne 0) { throw "Packaged Python syntax check failed." }
-          $forbidden = Get-ChildItem native/artifact -Recurse -File | Where-Object {
-            $_.Name -match '^(node|electron)\.exe$' -or
-            $_.Name -match '^Qt6WebEngine' -or
-            $_.Extension -in '.html', '.js', '.css'
-          }
-          if ($forbidden) {
-            $forbidden | Select-Object -ExpandProperty FullName
-            throw "Native artifact contains a forbidden web runtime file."
-          }
+          & $env:QA_PYTHON -I -B scripts/verify_native_backend.py --root native/artifact --package
+          if ($LASTEXITCODE -ne 0) { throw "Native package boundary verification failed." }
           $exe = "native/artifact/bin/Gaussian Scene Workbench.exe"
           if (-not (Test-Path -LiteralPath $exe)) {
             throw "Native executable is missing."
@@ -348,8 +342,10 @@ jobs:
             "native/artifact/native/worker/gsw_worker.py",
             "native/artifact/native/worker/import_preflight.py",
             "native/artifact/native/worker/training_preflight.py",
-            "native/artifact/crop_editor/server.py",
-            "native/artifact/crop_editor/video_extract.py",
+            "native/artifact/native/backend/__init__.py",
+            "native/artifact/native/backend/compute.py",
+            "native/artifact/native/backend/reconstruction_quality.py",
+            "native/artifact/native/backend/video_extract.py",
             "native/artifact/scripts/check_3dgs_env.ps1",
             "native/artifact/gaussian-splatting/train.py",
             "native/artifact/training_kit/apply_local_fixes.bat",
@@ -364,6 +360,8 @@ jobs:
             $missingBackend
             throw "Native artifact is missing required compute backend files."
           }
+          & $env:QA_PYTHON -I -B native/artifact/native/worker/import_preflight.py --backend-root native/artifact
+          if ($LASTEXITCODE -ne 0) { throw "Packaged native compute import failed." }
 
       - name: Upload Windows preview
         uses: actions/upload-artifact@v7
@@ -378,6 +376,8 @@ jobs:
       - name: Collect failed-run diagnostic build
         if: failure() && steps.native-build.outcome == 'success'
         shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
         run: |
           $root = Join-Path $PWD "native/diagnostic-artifact"
           cmake --install native/build-ci --config Release --prefix $root
@@ -385,7 +385,7 @@ jobs:
           windeployqt --release --no-translations --compiler-runtime "$root/bin/Gaussian Scene Workbench.exe"
           if ($LASTEXITCODE -ne 0) { throw "Diagnostic runtime deployment failed." }
           Copy-Item native/build_manifest.json "$root/build_manifest.json"
-          ./scripts/stage_native_backend.ps1 -SourceRoot $PWD -DestinationRoot $root
+          ./scripts/stage_native_backend.ps1 -SourceRoot $PWD -DestinationRoot $root -PythonExecutable $env:QA_PYTHON
           Copy-Item native/build-ci/Testing "$root/Testing" -Recurse
           Copy-Item native/build-ci/Release/gsw_gaussian_sh_tests.exe "$root/bin/"
 

@@ -1,6 +1,10 @@
 # Native Feature Parity
 
-This matrix is the release gate for replacing the legacy desktop application. A visible control is not considered implemented until its state, failure behavior, and automated or repeatable acceptance check exist.
+The default `main` branch is the native desktop application. This matrix records native capability and acceptance limits against historical workflows. The old web/Electron implementation was removed from this branch on 2026-10-15 after the shared compute backend moved to `native/backend/compute.py`. Retirement does not make missing features available. A visible control is not considered implemented until its state, failure behavior, and automated or repeatable acceptance check exist. Newer focused workflow documents linked below supersede older dated snapshots in this matrix.
+
+中文：默认 `main` 分支为原生桌面端，此表对照历史工作流记录原生能力与验收边界。共享后端迁入 `native/backend/compute.py` 后，本分支于 2026-10-15 移除旧网页/Electron 实现；删除旧界面不代表未完成的功能已可用。下方链接的较新专题文档优先于旧日期的验收快照。
+
+日本語：既定の `main` はネイティブデスクトップ版です。この表は過去のワークフローに対するネイティブ機能と検証範囲を記録します。共通バックエンドを `native/backend/compute.py` へ移した後、2026-10-15 に旧 Web/Electron をこの分岐から削除しました。削除は未対応機能の実装を意味しません。古い検証記録より、下記の新しい機能別文書を優先してください。
 
 Status: `available`, `partial`, `missing`, `hidden`.
 

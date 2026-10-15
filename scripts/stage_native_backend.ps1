@@ -2,11 +2,30 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$SourceRoot,
   [Parameter(Mandatory = $true)]
-  [string]$DestinationRoot
+  [string]$DestinationRoot,
+  [string]$PythonExecutable = ""
 )
 
 $ErrorActionPreference = "Stop"
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
+if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
+  $PathPython = Get-Command python.exe, python -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
+    Select-Object -First 1
+  $PythonCandidates = @(
+    $env:QA_PYTHON,
+    $env:GSW_NATIVE_CHECK_PYTHON,
+    $(if ($env:GAUSSIAN_SPLATTING_CONDA_PREFIX) { Join-Path $env:GAUSSIAN_SPLATTING_CONDA_PREFIX 'python.exe' }),
+    $(if ($env:CONDA_PREFIX) { Join-Path $env:CONDA_PREFIX 'python.exe' }),
+    $(if ($PathPython) { $PathPython.Source })
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+  $PythonExecutable = $PythonCandidates | Select-Object -First 1
+}
+if (-not $PythonExecutable) {
+  throw "Python is required to verify the native backend. Pass -PythonExecutable with the QA interpreter."
+}
+& $PythonExecutable -I -B (Join-Path $SourceRoot 'scripts/verify_native_backend.py') --root $SourceRoot
+if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 if (-not (Test-Path -LiteralPath $DestinationRoot)) {
   New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
 }
@@ -21,7 +40,7 @@ $ExcludedDirectories = @(
   "doc",
   "docs"
 )
-$ExcludedExtensions = @(".css", ".html", ".js", ".map", ".pyc", ".pyd")
+$ExcludedExtensions = @(".css", ".htm", ".html", ".js", ".mjs", ".cjs", ".asar", ".wasm", ".map", ".pyc", ".pyd")
 
 function Copy-FilteredTree {
   param(
@@ -75,9 +94,10 @@ $StaticFiles = @(
   @{ Source = "native\worker\mesh_generation.py"; Destination = "native\worker\mesh_generation.py" },
   @{ Source = "native\worker\mesh_material_preview.py"; Destination = "native\worker\mesh_material_preview.py" },
   @{ Source = "native\worker\licenses\2dgs-LICENSE.md"; Destination = "native\worker\licenses\2dgs-LICENSE.md" },
-  @{ Source = "crop_editor\server.py"; Destination = "crop_editor\server.py" },
-  @{ Source = "crop_editor\reconstruction_quality.py"; Destination = "crop_editor\reconstruction_quality.py" },
-  @{ Source = "crop_editor\video_extract.py"; Destination = "crop_editor\video_extract.py" },
+  @{ Source = "native\backend\__init__.py"; Destination = "native\backend\__init__.py" },
+  @{ Source = "native\backend\compute.py"; Destination = "native\backend\compute.py" },
+  @{ Source = "native\backend\reconstruction_quality.py"; Destination = "native\backend\reconstruction_quality.py" },
+  @{ Source = "native\backend\video_extract.py"; Destination = "native\backend\video_extract.py" },
   @{ Source = "scripts\check_3dgs_env.ps1"; Destination = "scripts\check_3dgs_env.ps1" },
   @{ Source = "scripts\compare_training_quality.py"; Destination = "scripts\compare_training_quality.py" },
   @{ Source = "scripts\requirements-native-3dgs.txt"; Destination = "scripts\requirements-native-3dgs.txt" },
@@ -138,9 +158,10 @@ $Manifest = [ordered]@{
     "native/worker/mesh_generation.py",
     "native/worker/mesh_material_preview.py",
     "native/worker/licenses/2dgs-LICENSE.md",
-    "crop_editor/server.py",
-    "crop_editor/reconstruction_quality.py",
-    "crop_editor/video_extract.py",
+    "native/backend/__init__.py",
+    "native/backend/compute.py",
+    "native/backend/reconstruction_quality.py",
+    "native/backend/video_extract.py",
     "gaussian-splatting",
     "training_kit",
     "scripts/check_3dgs_env.ps1",
@@ -162,6 +183,9 @@ $ManifestPath = Join-Path $DestinationRoot "backend_manifest.json"
   ($Manifest | ConvertTo-Json -Depth 5),
   [System.Text.UTF8Encoding]::new($false)
 )
+
+& $PythonExecutable -I -B (Join-Path $SourceRoot 'scripts/verify_native_backend.py') --root $DestinationRoot --package
+if ($LASTEXITCODE -ne 0) { throw "Staged native package boundary verification failed." }
 
 Write-Host "Native compute backend staged at:"
 Write-Host $DestinationRoot

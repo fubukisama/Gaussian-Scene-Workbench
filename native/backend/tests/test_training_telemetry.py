@@ -1,0 +1,340 @@
+import io
+import json
+import struct
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from native.backend import compute  # noqa: E402
+
+
+def write_colmap_points(path, points):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as stream:
+        stream.write(struct.pack("<Q", len(points)))
+        for index, (x, y, z, red, green, blue) in enumerate(points, start=1):
+            stream.write(
+                struct.pack(
+                    "<QdddBBBdQ", index, x, y, z, red, green, blue, 0.25, 1
+                )
+            )
+            stream.write(struct.pack("<II", index, index - 1))
+
+
+class TrainingTelemetryTests(unittest.TestCase):
+    def test_loaded_training_input_event_persists_and_preserves_effective_options(self):
+        from native.worker.training_summary import configured_training_summary, loaded_training_summary
+        for backend in ("3dgs", "2dgs"):
+            options = compute.training_options_from_payload(backend, "original_quality")
+            if backend == "3dgs":
+                with mock.patch.object(compute, "sparse_adam_available", return_value=False):
+                    options = compute.resolve_training_options_for_environment(backend, options)
+            configured = configured_training_summary(backend, "original_quality", options)
+            job = dict(id="summary", scene="scene", output_scene="out", backend=backend,
+                       status="running", stage="train", created_at=1, updated_at=1,
+                       log=[], trainingSummary=configured)
+            loaded = loaded_training_summary(configured, [types.SimpleNamespace(image_width=1928, image_height=1084),
+                                                          types.SimpleNamespace(image_width=961, image_height=541)])
+            with tempfile.TemporaryDirectory() as temporary, mock.patch.object(compute, "TRAIN_JOBS_DIR", Path(temporary)):
+                compute.add_job_log(job, "[gsw-training-input] " + json.dumps(loaded))
+                persisted = json.loads((Path(temporary) / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(persisted["trainingSummary"], loaded)
+            self.assertEqual(compute.job_snapshot(job)["trainingSummary"], loaded)
+            self.assertEqual(loaded["optimizer"], "default" if backend == "3dgs" else "adam")
+            self.assertEqual(loaded["trainImageCount"], 2)
+            self.assertEqual(loaded["trainDimensionKinds"], 2)
+            # Stale, malformed, wrong-backend or different-option events cannot overwrite the real input.
+            for changed in (configured, {"version": 2}, dict(loaded, resolution=2),
+                            dict(loaded, trainPixels=1), dict(loaded, backend="unknown")):
+                compute.apply_training_input(job, changed)
+                self.assertEqual(job["trainingSummary"], loaded)
+            mesh = dict(kind="mesh", log=[], updated_at=1)
+            compute.add_job_log(mesh, "[gsw-training-input] " + json.dumps(loaded))
+            self.assertNotIn("trainingSummary", mesh)
+            self.assertIsNone(compute.job_snapshot(dict(job, trainingSummary=None))["trainingSummary"])
+
+    def test_effective_summary_passed_to_trainers_without_mutating_checkpoint_control(self):
+        from native.worker.training_summary import configured_training_summary
+        for backend in ("3dgs", "2dgs"):
+            control = {"output": "out", "session": "same", "resume": True}
+            summary = configured_training_summary(backend, "original_quality",
+                                                  compute.training_options_from_payload(backend, "original_quality"))
+            job = {"log": [], "native_control": control, "trainingSummary": summary}
+            process = mock.Mock(stdout=io.StringIO(), wait=mock.Mock(return_value=0))
+            with mock.patch.object(compute, "training_env", return_value={}), \
+                 mock.patch.object(compute.subprocess, "Popen", return_value=process) as launch:
+                compute.run_logged(job, ["python", "train.py"], "source", backend)
+            passed = json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"])
+            self.assertEqual(passed["trainingSummary"], summary)
+            self.assertEqual(passed["session"], "same")
+            self.assertEqual(control, {"output": "out", "session": "same", "resume": True})
+
+    def test_density_protection_survives_job_snapshot_and_rejects_invalid_events(self):
+        job = dict(id="density", scene="scene", output_scene="out", status="running",
+                   stage="train", created_at=1, updated_at=1, log=[])
+        with mock.patch.object(compute, "persist_train_job"):
+            compute.add_job_log(job, '[gsw-density-control] {"version":1,"iteration":3100,"deferred":3300}')
+        snapshot = compute.job_snapshot(job)
+        self.assertEqual(snapshot["density_guard_iteration"], 3100)
+        self.assertEqual(snapshot["density_guard_deferred"], 3300)
+        for payload in ({"version":2,"iteration":3200,"deferred":1},
+                        {"version":1,"iteration":3000,"deferred":1},
+                        {"version":1,"iteration":3200,"deferred":False},
+                        {"version":1,"iteration":3200,"deferred":1.5},
+                        {"version":1,"iteration":3200,"deferred":float("nan")},
+                        {"version":1,"iteration":3200,"deferred":2**32}):
+            compute.apply_density_control(job, payload)
+            self.assertEqual(job["density_guard_iteration"], 3100)
+            self.assertEqual(job["density_guard_deferred"], 3300)
+
+    def test_two_dgs_runtime_discovery_and_explicit_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "2dgs"
+            source.mkdir()
+            (source / "train.py").touch()
+            local_python = source / ".venv/Scripts/python.exe"
+            local_python.parent.mkdir(parents=True)
+            local_python.touch()
+            with mock.patch.object(compute, "ROOT", root), \
+                 mock.patch.object(compute, "TWO_DGS_DIR", source), \
+                 mock.patch.dict(compute.os.environ, {"TWO_DGS_DIR": "", "TWO_DGS_PYTHON": ""}):
+                self.assertEqual(compute.two_dgs_source_root(), source)
+                self.assertEqual(compute.training_python("2dgs"), local_python)
+                with mock.patch.dict(compute.os.environ, {"TWO_DGS_DIR": str(root / "missing"),
+                                                        "TWO_DGS_PYTHON": str(root / "missing.exe")}):
+                    self.assertEqual(compute.two_dgs_source_root(), root / "missing")
+                    self.assertEqual(compute.training_python("2dgs"), root / "missing.exe")
+
+    def test_two_dgs_native_entry_and_preflight_use_surfel_runtime(self):
+        from native.worker.training_preflight import runtime_probe_code
+        self.assertIn("import diff_surfel_rasterization", runtime_probe_code("2dgs"))
+        self.assertNotIn("import diff_gaussian_rasterization", runtime_probe_code("2dgs"))
+        control = {"output": "output", "session": "native", "backend": "2dgs"}
+        job = {"id": "2dgs-entry", "backend": "2dgs", "native_control": control, "log": []}
+        process = mock.Mock(stdout=io.StringIO(), wait=mock.Mock(return_value=0))
+        with mock.patch.object(compute, "persist_train_job"), \
+             mock.patch.object(compute, "training_env", return_value={}), \
+             mock.patch.object(compute.subprocess, "Popen", return_value=process) as launch:
+            compute.run_logged(job, ["python", "train.py", "-s", "dataset"], compute.TWO_DGS_DIR, "2dgs")
+            self.assertEqual(Path(launch.call_args.args[0][1]).name, "two_dgs_train.py")
+            self.assertEqual(launch.call_args.args[0][2:], ["-s", "dataset"])
+            self.assertEqual(json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"]), control)
+            # A direct backend invocation keeps its upstream training entry.
+            job.pop("native_control")
+            self.assertTrue(process.stdout.closed)
+            process.stdout = io.StringIO()
+            compute.run_logged(job, ["python", "train.py"], compute.TWO_DGS_DIR, "2dgs")
+            self.assertEqual(launch.call_args.args[0][1], "train.py")
+
+    def test_every_generation_backend_has_an_explicit_parity_gate(self):
+        from native.worker.generation_capabilities import PIPELINES, supports_checkpoint
+        self.assertEqual(set(PIPELINES), compute.TRAINING_BACKENDS | compute.MESH_MODES | {"openmvs"})
+        for backend, entry in PIPELINES.items():
+            self.assertTrue(entry["native_entry"])
+            self.assertTrue(entry["limitation"])
+            self.assertTrue(entry["acceptance"])
+            self.assertEqual(supports_checkpoint(backend), backend in compute.TRAINING_BACKENDS)
+            expected_density = {"3dgs":"native_guarded", "2dgs":"native_guarded",
+                                "bounded":"2dgs_input_only", "unbounded":"2dgs_input_only",
+                                "sugar":"3dgs_input_only", "gs2mesh":"3dgs_input_only",
+                                "openmvs":"not_applicable"}
+            self.assertEqual(entry["density_control"], expected_density[backend])
+            if backend in compute.MESH_MODES | {"openmvs"}:
+                self.assertEqual(entry["live_preview"], "completed_mesh_stage")
+                self.assertEqual(entry["material_preview"], "validated_diffuse_atlas")
+        self.assertFalse(supports_checkpoint("unknown-backend"))
+
+    def test_pause_exit_requires_current_session_checkpoint(self):
+        from native.worker.training_checkpoint import TrainingCheckpoint
+        import pickle
+        with tempfile.TemporaryDirectory() as temporary:
+            control = {"output": temporary, "session": "current"}
+            TrainingCheckpoint(temporary, control).save(types.SimpleNamespace(save=pickle.dump),
+                {"iteration": 3, "total": 10, "identity": "test"})
+            job = {"id": "pause-test", "backend": "3dgs", "native_control": control, "log": []}
+            process = mock.Mock(stdout=io.StringIO(), wait=mock.Mock(return_value=75))
+            with mock.patch.object(compute, "persist_train_job"), \
+                 mock.patch.object(compute, "training_env", return_value={}), \
+                 mock.patch.object(compute.subprocess, "Popen", return_value=process) as launch:
+                with self.assertRaises(compute.NativeTrainingPaused) as paused:
+                    compute.run_logged(job, ["python", "train.py"], temporary, "3dgs")
+                self.assertEqual(paused.exception.manifest["iteration"], 3)
+                self.assertEqual(json.loads(launch.call_args.kwargs["env"]["GSW_NATIVE_TRAINING_CONTROL"]), control)
+                control["session"] = "next-session"
+                self.assertTrue(process.stdout.closed)
+                process.stdout = io.StringIO()
+                with self.assertRaisesRegex(RuntimeError, "this training session"):
+                    compute.run_logged(job, ["python", "train.py"], temporary, "3dgs")
+                self.assertIsNone(job["process"])
+
+    def test_native_resume_never_reconstructs_missing_alignment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = Path(temporary) / "dataset"
+            (dataset / "images").mkdir(parents=True)
+            (dataset / "images/a.jpg").write_bytes(b"fixture")
+            job = {"id": "resume-test", "scene": "test", "output_scene": "test", "backend": "3dgs",
+                   "dataset_path": str(dataset), "native_control": {"resume": True}, "log": []}
+            with mock.patch.object(compute, "OUTPUT_DIR", Path(temporary) / "output"), \
+                 mock.patch.object(compute, "ensure_training_environment", return_value={"python": "test", "colmap": "test"}), \
+                 mock.patch.object(compute, "persist_train_job"), mock.patch.object(compute, "run_logged"), \
+                 mock.patch.object(compute, "restore_alignment_cache", return_value=False) as restore, \
+                 mock.patch.object(compute, "run_colmap_convert", side_effect=RuntimeError("COLMAP must not run")) as convert, \
+                 mock.patch.object(compute, "training_point_cloud", return_value=None):
+                compute.run_training_job(job, False, "quick", False)
+            convert.assert_not_called()
+            restore.assert_not_called()
+            self.assertEqual(job["status"], "failed")
+            self.assertIn("resume", job["error"].lower())
+
+    def test_initial_gaussians_follow_sparse_generation_and_ignore_late_frames(self):
+        job = {"preview_kind": "colmap_sparse", "preview_iteration": 40}
+        compute.apply_training_preview(job, {"iteration": 0, "preview_kind": "gaussian_initial",
+            "point_cloud_path": "E:/initial.ply", "gaussian_count": 12})
+        self.assertEqual(job["preview_iteration"], 0)
+        self.assertEqual(job["preview_kind"], "gaussian_initial")
+        compute.apply_training_preview(job, {"iteration": 30, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/live.ply"})
+        compute.apply_training_preview(job, {"iteration": 20, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/old.ply"})
+        self.assertEqual(job["partial_point_cloud_path"], "E:/live.ply")
+        self.assertEqual(job["gaussian_count"], 12)
+        compute.apply_training_preview(job, {"iteration": 30, "point_cloud_path": "E:/checkpoint.ply"})
+        compute.apply_training_preview(job, {"iteration": 30, "preview_kind": "gaussian_live",
+            "point_cloud_path": "E:/late.ply"})
+        self.assertEqual(job["partial_point_cloud_path"], "E:/checkpoint.ply")
+
+    def test_training_log_updates_live_visualization_metrics(self):
+        job = {
+            "id": "train-telemetry",
+            "scene": "scene",
+            "output_scene": "scene-output",
+            "backend": "3dgs",
+            "status": "running",
+            "stage": "train",
+            "created_at": 1,
+            "updated_at": 1,
+            "log": [],
+        }
+        metrics = {
+            "iteration": 11100,
+            "total_iterations": 30000,
+            "loss": 0.0234,
+            "psnr": 27.5,
+            "gaussian_count": 123456,
+            "iteration_milliseconds": 12.5,
+            "elapsed_seconds": 144.0,
+        }
+
+        with mock.patch.object(compute, "persist_train_job"):
+            compute.add_job_log(
+                job,
+                "[gsw-training-metrics] "
+                + json.dumps(metrics)
+                + " [30/07 02:25:25]",
+            )
+            compute.add_job_log(
+                job,
+                "[gsw-training-preview] " + json.dumps({
+                    "iteration": 10000,
+                    "point_cloud_path": "E:/model/point_cloud.ply",
+                }) + " [30/07 02:25:25]",
+            )
+
+        snapshot = compute.job_snapshot(job)
+        self.assertEqual(snapshot["iteration"], 11100)
+        self.assertEqual(snapshot["total_iterations"], 30000)
+        self.assertEqual(snapshot["progressPercent"], 37)
+        self.assertEqual(snapshot["loss"], 0.0234)
+        self.assertEqual(snapshot["psnr"], 27.5)
+        self.assertEqual(snapshot["gaussian_count"], 123456)
+        self.assertEqual(snapshot["iteration_milliseconds"], 12.5)
+        self.assertEqual(snapshot["elapsed_seconds"], 144.0)
+        self.assertEqual(snapshot["latest_iteration"], 10000)
+        self.assertEqual(snapshot["partial_point_cloud_path"], "E:/model/point_cloud.ply")
+
+    def test_colmap_binary_preview_is_bounded_and_preserves_color(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "points3D.bin"
+            write_colmap_points(
+                source,
+                [
+                    (1.0, 2.0, 3.0, 10, 20, 30),
+                    (4.0, 5.0, 6.0, 40, 50, 60),
+                    (7.0, 8.0, 9.0, 70, 80, 90),
+                ],
+            )
+
+            source_count, points = compute.read_colmap_points3d_binary(
+                source, max_points=2
+            )
+
+            self.assertEqual(source_count, 3)
+            self.assertEqual(points, [(1.0, 2.0, 3.0, 10, 20, 30),
+                                      (7.0, 8.0, 9.0, 70, 80, 90)])
+
+    def test_colmap_preview_publisher_updates_live_job_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "dataset"
+            snapshot = dataset / "distorted" / "snapshots" / "2"
+            write_colmap_points(
+                snapshot / "points3D.bin",
+                [(1.25, -2.5, 3.75, 120, 121, 122)],
+            )
+            job = {
+                "id": "colmap-preview",
+                "kind": "colmap",
+                "scene": "scene",
+                "status": "running",
+                "stage": "colmap",
+                "created_at": 1,
+                "updated_at": 1,
+                "log": [],
+            }
+            publisher = compute.ColmapPointCloudPreviewPublisher(
+                job, dataset, [snapshot.parent], interval=60
+            )
+
+            self.assertTrue(publisher.publish_latest(force=True))
+
+            preview = Path(job["partial_point_cloud_path"])
+            self.assertTrue(preview.is_file())
+            self.assertEqual(job["preview_kind"], "colmap_sparse")
+            self.assertEqual(job["latest_iteration"], 1)
+            self.assertEqual(job["point_count"], 1)
+            header = preview.read_bytes().split(b"end_header\n", 1)[0]
+            self.assertIn(b"element vertex 1", header)
+
+    def test_colmap_snapshot_cadence_limits_preview_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "dataset"
+            images = dataset / "images"
+            images.mkdir(parents=True)
+            for index in range(97):
+                (images / f"{index:04d}.jpg").write_bytes(b"image")
+
+            self.assertEqual(
+                compute.colmap_snapshot_frames_frequency(dataset, target_count=48),
+                3,
+            )
+            command = ["colmap.exe", "mapper"]
+            compute.configure_colmap_mapper_snapshots(
+                command, dataset / "snapshots", 3
+            )
+            self.assertEqual(
+                command[command.index("--Mapper.snapshot_frames_freq") + 1],
+                "3",
+            )
+            self.assertEqual(
+                Path(command[command.index("--Mapper.snapshot_path") + 1]),
+                dataset / "snapshots",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

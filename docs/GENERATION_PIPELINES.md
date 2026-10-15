@@ -174,7 +174,7 @@ Real-data regression: the original nine-image, 2503-point COLMAP reconstruction 
 
 ```text
 python -B -m unittest native.worker.test_two_dgs_adapter native.worker.test_training_checkpoint native.worker.test_training_preview native.worker.test_training_density_control
-python -B -m unittest crop_editor.tests.test_training_telemetry
+python -B -m unittest native.backend.tests.test_training_telemetry
 python scripts/native_i18n.py
 python scripts/test_native_i18n.py
 ctest --test-dir native/build-unity-gizmo --output-on-failure

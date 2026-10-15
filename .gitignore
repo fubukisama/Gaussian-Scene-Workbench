@@ -1,10 +1,11 @@
 # Runtime data
 datasets/
 output/
+*.log
+
+# Retired local application artifacts must never re-enter the native source.
 desktop_app/
 .playwright-cli/
-setup_3dgs_editor.log
-*.log
 
 # Release artifacts
 *.zip
@@ -20,7 +21,7 @@ release/
 /third_party/
 !/third_party/.gitkeep
 
-# Node/Python generated files
+# Generated dependency caches (including remnants of retired checkouts)
 node_modules/
 __pycache__/
 *.py[cod]

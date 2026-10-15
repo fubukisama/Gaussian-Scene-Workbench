@@ -342,6 +342,8 @@ install(FILES LICENSE.md DESTINATION native)
 # Restricted training components remain separate; the obsolete shader is not
 # compiled, loaded or represented as GPL source in this desktop source bundle.
 install(DIRECTORY src tests assets i18n DESTINATION source/native)
+install(DIRECTORY backend DESTINATION source/native
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 install(DIRECTORY third_party/ DESTINATION source/native/third_party PATTERN "2dgs-surfel" EXCLUDE)
 install(FILES CMakeLists.txt resources.qrc lucide_icons.qrc build_manifest.json README.md LICENSE.md
   DESTINATION source/native)
@@ -351,6 +353,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
@@ -388,6 +391,9 @@ if(BUILD_TESTING)
     message(FATAL_ERROR "GSW_TEST_OPENGL_BACKEND must be desktop or software")
   endif()
   add_test(NAME native_translation_catalog COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py")
+  add_test(NAME native_compute_import COMMAND "${Python3_EXECUTABLE}" -B -m unittest native.worker.test_native_compute_package)
+  set_tests_properties(native_compute_import PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
   add_test(NAME native_training_performance_policy COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.worker.test_training_runtime native.worker.test_training_step_profile

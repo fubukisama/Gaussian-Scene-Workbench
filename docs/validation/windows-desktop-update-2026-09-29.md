@@ -1,5 +1,7 @@
 # Windows desktop update verification — 2026-09-29
 
+> Historical acceptance record / 历史验收记录 / 過去の検証記録: branch names, paths and results below describe this document's original date. Current native development and releases use `main`; see [migration](../NATIVE_MIGRATION.md).
+
 ## Installed build
 
 - Desktop branch: `agent/native-desktop-0.3`.

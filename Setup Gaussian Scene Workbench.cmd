@@ -20,7 +20,7 @@ if "%INSTALL_ROOT%"=="" set "INSTALL_ROOT=%DEFAULT_RUNTIME%"
 echo.
 echo Runtime folder: %INSTALL_ROOT%
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\bootstrap_3dgs_editor.ps1" -NonInteractive -InstallRoot "%INSTALL_ROOT%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\bootstrap_native.ps1" -NonInteractive -InstallRoot "%INSTALL_ROOT%"
 if errorlevel 1 (
   echo.
   echo Setup failed. See setup_gaussian_scene_workbench.log in this folder.
@@ -28,14 +28,5 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 echo.
-echo Setup finished. Starting Gaussian Scene Workbench...
-if not exist "%ROOT%Gaussian Scene Workbench.exe" (
-  echo.
-  echo Gaussian Scene Workbench.exe was not found in this folder:
-  echo %ROOT%
-  pause
-  exit /b 1
-)
-start "" "%ROOT%Gaussian Scene Workbench.exe"
-timeout /t 2 /nobreak >nul
+echo Runtime setup finished. Open Gaussian Scene Workbench Native from its desktop shortcut.
 exit /b 0

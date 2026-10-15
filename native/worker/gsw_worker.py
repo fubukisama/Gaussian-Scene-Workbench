@@ -73,13 +73,11 @@ def load_configuration(path, requested_task=None):
 
 
 def import_backend(repository_root):
-    crop_editor = Path(repository_root) / "crop_editor"
-    server_path = crop_editor / "server.py"
-    if not server_path.exists():
-        raise FileNotFoundError("Training backend is missing: {}".format(server_path))
-    sys.path.insert(0, str(crop_editor))
-    import server  # pylint: disable=import-error,import-outside-toplevel
-    return server
+    try:
+        from native.worker.import_preflight import load_compute_module
+    except ModuleNotFoundError:
+        from import_preflight import load_compute_module
+    return load_compute_module(repository_root)
 
 
 def watch_cancel_input(cancel_callback, job_id, pause_callback=None):

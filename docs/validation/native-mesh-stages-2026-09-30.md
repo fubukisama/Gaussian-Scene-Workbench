@@ -1,5 +1,7 @@
 # Native staged mesh acceptance — 2026-09-30
 
+> Historical acceptance record / 历史验收记录 / 過去の検証記録: branch names, paths and results below describe this document's original date. Current native development and releases use `main`; see [migration](../NATIVE_MIGRATION.md).
+
 Branch: `agent/native-desktop-0.3`. Desktop-only batch; no changes to HTML `main` or installed external algorithm sources.
 
 ## Delivered scope

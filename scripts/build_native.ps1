@@ -601,11 +601,13 @@ Invoke-WindowsArtifactSigning `
 if ($LASTEXITCODE -ne 0) { throw "Native tests failed with exit code $LASTEXITCODE." }
 
 $CheckPython = Find-PythonForNativeChecks
+& $CheckPython -I -B (Join-Path $Root 'scripts/verify_native_backend.py') --root $Root
+if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 $PreviousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = "1"
 Push-Location $Root
 try {
-  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter native.worker.test_three_dgs_preview_adapter native.worker.test_training_density_control native.worker.test_training_summary native.worker.test_reconstruction_quality native.worker.test_training_reconstruction_summary native.worker.test_training_preflight crop_editor.tests.test_training_telemetry
+  & $CheckPython -B -m unittest native.worker.test_gsw_worker native.worker.test_mesh_generation native.worker.test_mesh_material_preview native.worker.test_import_preflight native.worker.test_gpu_preview_publisher native.worker.test_training_preview native.worker.test_training_checkpoint native.worker.test_two_dgs_adapter native.worker.test_three_dgs_preview_adapter native.worker.test_training_density_control native.worker.test_training_summary native.worker.test_reconstruction_quality native.worker.test_training_reconstruction_summary native.worker.test_training_preflight native.backend.tests.test_training_telemetry native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
   if ($LASTEXITCODE -ne 0) {
     throw "Native worker tests failed with exit code $LASTEXITCODE."
   }
@@ -668,7 +670,8 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_NATIVE_RUNTIME.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `
-    -DestinationRoot $PackageRoot
+    -DestinationRoot $PackageRoot `
+    -PythonExecutable $CheckPython
   Invoke-PythonSyntaxGate -Python $CheckPython -SourceRoot $PackageRoot
   $RequiredBackendFiles = @(
     "native\worker\gsw_worker.py",
@@ -686,9 +689,10 @@ if ($Package) {
     "native\worker\mesh_generation.py",
     "native\worker\mesh_material_preview.py",
     "native\worker\licenses\2dgs-LICENSE.md",
-    "crop_editor\server.py",
-    "crop_editor\reconstruction_quality.py",
-    "crop_editor\video_extract.py",
+    "native\backend\__init__.py",
+    "native\backend\compute.py",
+    "native\backend\reconstruction_quality.py",
+    "native\backend\video_extract.py",
     "scripts\check_3dgs_env.ps1",
     "scripts\requirements-native-3dgs.txt",
     "scripts\requirements-native-2dgs.txt",
@@ -709,7 +713,7 @@ if ($Package) {
     throw "Native package is missing backend files: $($MissingBackendFiles -join ', ')"
   }
   # Exercise the installed entrypoint in isolation: repository PYTHONPATH must
-  # not hide missing imports in the staged server or its sibling modules.
+  # not hide missing imports in the staged compute backend or its sibling modules.
   & $CheckPython -I -B (Join-Path $PackageRoot "native\worker\import_preflight.py") `
     --backend-root $PackageRoot
   if ($LASTEXITCODE -ne 0) {

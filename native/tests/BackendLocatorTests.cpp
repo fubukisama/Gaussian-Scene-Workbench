@@ -57,8 +57,8 @@ void BackendLocatorTests::ignoresRepositoryMarkersInTheWorkingDirectory() {
   QVERIFY(QDir().mkpath(applicationDirectory));
   QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("native/worker/gsw_worker.py"))));
   QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("native/worker/import_preflight.py"))));
-  QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("crop_editor/server.py"))));
-  QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("crop_editor/video_extract.py"))));
+  QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("native/backend/compute.py"))));
+  QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("native/backend/video_extract.py"))));
   QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("scripts/check_3dgs_env.ps1"))));
   QVERIFY(touchFile(QDir(untrustedDirectory).filePath(QStringLiteral("gaussian-splatting/train.py"))));
 
@@ -76,7 +76,7 @@ void BackendLocatorTests::rejectsBackendWithoutVideoExtractionHelper() {
   const QDir root(temporary.path());
   QVERIFY(touchFile(root.filePath(QStringLiteral("native/worker/gsw_worker.py"))));
   QVERIFY(touchFile(root.filePath(QStringLiteral("native/worker/import_preflight.py"))));
-  QVERIFY(touchFile(root.filePath(QStringLiteral("crop_editor/server.py"))));
+  QVERIFY(touchFile(root.filePath(QStringLiteral("native/backend/compute.py"))));
   QVERIFY(touchFile(root.filePath(QStringLiteral("scripts/check_3dgs_env.ps1"))));
   QVERIFY(touchFile(root.filePath(QStringLiteral("gaussian-splatting/train.py"))));
 
@@ -88,8 +88,8 @@ void BackendLocatorTests::rejectsBackendWithoutImportPreflight() {
   QVERIFY(temporary.isValid());
   const QDir root(temporary.path());
   QVERIFY(touchFile(root.filePath(QStringLiteral("native/worker/gsw_worker.py"))));
-  QVERIFY(touchFile(root.filePath(QStringLiteral("crop_editor/server.py"))));
-  QVERIFY(touchFile(root.filePath(QStringLiteral("crop_editor/video_extract.py"))));
+  QVERIFY(touchFile(root.filePath(QStringLiteral("native/backend/compute.py"))));
+  QVERIFY(touchFile(root.filePath(QStringLiteral("native/backend/video_extract.py"))));
   QVERIFY(touchFile(root.filePath(QStringLiteral("scripts/check_3dgs_env.ps1"))));
   QVERIFY(touchFile(root.filePath(QStringLiteral("gaussian-splatting/train.py"))));
 
@@ -105,8 +105,8 @@ void BackendLocatorTests::locatesCompletePackagedBackendAboveBinDirectory() {
   const QStringList markers = {
       QStringLiteral("native/worker/gsw_worker.py"),
       QStringLiteral("native/worker/import_preflight.py"),
-      QStringLiteral("crop_editor/server.py"),
-      QStringLiteral("crop_editor/video_extract.py"),
+      QStringLiteral("native/backend/compute.py"),
+      QStringLiteral("native/backend/video_extract.py"),
       QStringLiteral("scripts/check_3dgs_env.ps1"),
       QStringLiteral("gaussian-splatting/train.py"),
   };

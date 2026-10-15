@@ -28,7 +28,7 @@ def write_model(root, images=9, points=500):
 
 class ReconstructionQualityTests(unittest.TestCase):
     def test_retries_are_bounded_and_explicit_camera_calibration_is_preserved(self):
-        from crop_editor import server
+        from native.backend import compute as server
         for payload, expected in (({}, 3), ({"camera_model": "PINHOLE"}, 2),
                                   ({"quality_recovery": False}, 1)):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
@@ -55,7 +55,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                     self.assertEqual(features[0][features[0].index("--ImageReader.camera_model") + 1], "PINHOLE")
 
     def test_viability_covers_both_gaussian_backends_before_overwrite(self):
-        from crop_editor import server, reconstruction_quality
+        from native.backend import compute as server, reconstruction_quality
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -78,7 +78,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                 self.assertEqual((output / "previous.ply").read_bytes(), b"keep")
 
     def test_missing_archived_frames_fail_without_publishing_partial_input(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp)
             originals = dataset / "source" / "originals"
@@ -92,7 +92,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual((dataset / "images" / "frame.jpg").read_bytes(), b"undistorted")
 
     def test_existing_output_conflict_rejects_before_colmap_or_source_mutation(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dataset = root / "dataset"
@@ -119,7 +119,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertFalse((dataset / "input").exists())
 
     def test_corrupt_binary_and_low_coverage_models_are_not_admitted(self):
-        from crop_editor import reconstruction_quality as quality
+        from native.backend import reconstruction_quality as quality
         with tempfile.TemporaryDirectory() as tmp:
             model = write_model(Path(tmp) / "model", 3, 500)
             self.assertFalse(quality.assess_model(model, 9)["usable"])
@@ -128,7 +128,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual(quality.assess_model(model, 9)["reasons"], ["invalid_model"])
 
     def test_quick_2dgs_includes_normal_phase_and_respects_manual_settings(self):
-        from crop_editor import server
+        from native.backend import compute as server
         preset = server.training_options_from_payload("2dgs", "quick", {})
         self.assertEqual(preset["iterations"], 10000)
         self.assertEqual(preset["resolution"], 2)
@@ -137,7 +137,7 @@ class ReconstructionQualityTests(unittest.TestCase):
         self.assertEqual(manual["resolution"], 8)
 
     def test_quick_presets_match_without_copying_backend_specific_regularization(self):
-        from crop_editor import server
+        from native.backend import compute as server
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend):
                 preset = server.training_options_from_payload(backend, "quick", {})
@@ -159,7 +159,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                     self.assertNotIn("--antialiasing", command)
 
     def test_manual_and_historical_quick_parameters_remain_explicit(self):
-        from crop_editor import server
+        from native.backend import compute as server
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend):
                 requested = {"iterations": 7000, "resolution": 8, "densify_until_iter": 6000}
@@ -174,7 +174,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                 self.assertLessEqual(shortened["densify_until_iter"], 2000)
 
     def test_original_resolution_preset_uses_full_size_in_both_backends(self):
-        from crop_editor import server
+        from native.backend import compute as server
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend):
                 original = server.training_options_from_payload(backend, "original_quality", {})
@@ -192,7 +192,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                     self.assertNotIn("--antialiasing", command)
 
     def test_original_resolution_preset_preserves_explicit_manual_options(self):
-        from crop_editor import server
+        from native.backend import compute as server
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend):
                 manual = server.training_options_from_payload(backend, "original_quality", {"iterations": 2000, "resolution": 4})
@@ -201,7 +201,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                 self.assertLessEqual(manual["densify_until_iter"], 2000)
 
     def test_colmap_training_images_have_no_resolution_cap(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp)
             (dataset / "input").mkdir()
@@ -215,7 +215,7 @@ class ReconstructionQualityTests(unittest.TestCase):
                         self.assertEqual(Path(undistorter[undistorter.index("--image_path") + 1]), dataset / "input")
 
     def test_legacy_archived_video_uses_matching_import_rate_and_keeps_frames(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dataset = root / "datasets" / "C0001"
@@ -239,7 +239,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual(list(dataset.glob(".colmap-source-*")), [])
 
     def test_incomplete_existing_input_is_not_silently_reused(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp)
             (dataset / "input").mkdir()
@@ -251,7 +251,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual((dataset / "input" / "frame.jpg").read_bytes(), b"keep")
 
     def test_text_models_preserve_empty_observations_and_reject_invalid_tracks(self):
-        from crop_editor import reconstruction_quality as quality
+        from native.backend import reconstruction_quality as quality
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "cameras.txt").write_text("1 PINHOLE 1920 1080 1600 1600 960 540\n")
@@ -263,7 +263,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertFalse(quality.assess_model(root, 3)["usable"])
 
     def test_does_not_undistort_first_degenerate_component(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp) / "scene"
             images = dataset / "images"
@@ -292,7 +292,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual((dataset / "input" / "frame00.jpg").read_bytes(), b"raw")
 
     def test_bad_candidates_never_reach_training_or_replace_old_model(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp) / "scene"
             images = dataset / "images"
@@ -318,7 +318,7 @@ class ReconstructionQualityTests(unittest.TestCase):
             self.assertEqual((images / "frame00.jpg").read_bytes(), b"keep")
 
     def test_published_subset_does_not_destroy_raw_frames_for_second_run(self):
-        from crop_editor import server
+        from native.backend import compute as server
         with tempfile.TemporaryDirectory() as tmp:
             dataset = Path(tmp)
             images = dataset / "images"

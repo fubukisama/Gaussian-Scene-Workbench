@@ -55,10 +55,6 @@ Blender branding and application icons are not included. Official source:
 Blender 全体の操作器・ウィンドウ・全操作コードを組み込むものではありません。
 ドラッグ、制約、数値入力、取り消しとプロジェクトの状態は GSW が処理します。
 
-## SIBR FPSCounter Design Reference
-
-The render-performance meter is a JavaScript adaptation of the rolling frame-time design used by SIBR's `FPSCounter` (Inria GRAPHDECO). No SIBR binaries are bundled. The reference implementation is distributed for non-commercial research and evaluation use: https://gitlab.inria.fr/sibr/sibr_core/-/blob/gaussian_code_release_union/src/core/view/FPSCounter.cpp
-
 ## Native Qt 6 Preview
 
 Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual official hbb1/2d-gaussian-splatting `train.py`, commit `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678`: https://github.com/hbb1/2d-gaussian-splatting . Original Inria GRAPHDECO notices are retained. The complete upstream Gaussian-Splatting research/evaluation license is shipped at `native/worker/licenses/2dgs-LICENSE.md`. Changes add native state control, telemetry and observation snapshots. `native/worker/training_density_control.py` adapts the final densification/pruning orchestration from that model and the vendored Graphdeco `scene/gaussian_model.py`, under their existing research/evaluation licenses. It adds a robust geometry-aware size limit, reset-recovery grace and bounded final pruning. Upstream clone/split and optimizer surgery remain in their original modules. No commercial-use permission is implied.

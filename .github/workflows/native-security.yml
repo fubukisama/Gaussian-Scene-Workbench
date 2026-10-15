@@ -3,8 +3,10 @@ name: Native Security
 on:
   push:
     branches:
-      - agent/native-desktop-0.3
+      - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -16,8 +18,8 @@ jobs:
   regression:
     name: Backend security regression
     if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
-      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -36,20 +38,22 @@ jobs:
       - name: Install QA dependencies
         run: python -m pip install -r scripts/requirements-native-checks.txt
 
-      - name: Verify owned HTTP and command boundaries
+      - name: Verify native compute source boundary
+        run: python -I -B scripts/verify_native_backend.py --root .
+
+      - name: Verify native compute path and command boundaries
         env:
           GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
         run: |
-          node --version
-          python -B -m unittest crop_editor.tests.test_training_backends crop_editor.tests.test_path_security crop_editor.tests.test_command_security
+          python -B -m unittest native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
 
   analyze:
     name: CodeQL (${{ matrix.language }})
     # pull_request branch filters refer to the base, not the head branch.
-    # Never analyze the legacy branch or a manually selected unrelated ref.
+    # Analyze every feature PR to native main; manual runs target main only.
     if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'agent/native-desktop-0.3') ||
-      (github.event_name != 'pull_request' && github.ref == 'refs/heads/agent/native-desktop-0.3')
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -73,7 +77,7 @@ jobs:
             paths:
               - native/worker
               - native/tests
-              - crop_editor
+              - native/backend
               - scripts
               - gaussian-splatting
               - training_kit
