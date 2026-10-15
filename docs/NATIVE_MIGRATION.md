@@ -15,6 +15,9 @@ assets, browser-only tests and package manifests, the Electron shell, local HTTP
 routes and old desktop launch/release scripts. Optional Node-based conversion is
 not part of the native package; native SPZ uses the compiled C++ codec. Removing
 the interface does not add unsupported native features such as SOG export.
+The former web-only Metashape COLMAP project-conversion command is also retired.
+Native users can link an existing supported COLMAP dataset; automatic camera-format
+conversion and dedicated project import still require separate implementation and acceptance.
 
 The current structure is:
 
@@ -61,7 +64,9 @@ the source relocation alone is not proof of their availability on every PC.
 
 本分支移除旧 HTML/CSS/JavaScript、浏览器专用测试与依赖清单、Electron 外壳、
 HTTP 路由及旧启动/发行脚本。原生 SPZ 使用 C++ 编解码器，不依赖旧 Node 转换器。
-删除旧界面不代表补齐 SOG 等尚未支持的原生能力。
+删除旧界面不代表补齐 SOG 等尚未支持的原生能力。旧网页的 Metashape COLMAP
+项目转换入口也不恢复为 HTTP 服务；原生目前可以链接已有的受支持 COLMAP 数据集，
+自动相机格式转换与专用项目导入仍需独立实现和验收。
 
 worker 与安装包后端应来自同一提交。源码开发可显式通过 `GSW_BACKEND_ROOT`
 选择可信仓库，不把当前工作目录自动当作后端。安装包保留匹配的后端、原生对应
@@ -88,7 +93,10 @@ worker 与安装包后端应来自同一提交。源码开发可显式通过 `GS
 この分岐から旧 HTML/CSS/JavaScript、ブラウザー専用テストと依存一覧、Electron、
 HTTP ルート、旧起動・配布スクリプトを削除します。ネイティブ SPZ は C++ の
 コーデックを使用し、旧 Node 変換器に依存しません。旧 UI の削除で SOG などの
-未対応機能が追加されるわけではありません。
+未対応機能が追加されるわけではありません。旧 Web 版の Metashape COLMAP
+プロジェクト変換コマンドも廃止します。ネイティブ版では対応する既存の COLMAP
+データセットをリンクでき、カメラ形式の自動変換と専用プロジェクト取込は別途実装・
+検証が必要です。
 
 worker と同梱バックエンドは同じコミットを使います。ソース開発では
 `GSW_BACKEND_ROOT` で信頼するリポジトリを明示でき、作業ディレクトリを
