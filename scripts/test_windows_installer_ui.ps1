@@ -70,11 +70,34 @@ public static class GswInstallerUiNative {
     public int Width {get;set;} public int Height {get;set;}
     public bool Enabled {get;set;}
   }
+  [StructLayout(LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+  public struct LOGFONT {
+    public int Height, Width, Escapement, Orientation, Weight;
+    public byte Italic, Underline, StrikeOut, CharSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string FaceName;
+  }
+  public class CaptionMeasurement {
+    public int Width {get;set;} public int Height {get;set;}
+    public int ClientWidth {get;set;} public int ClientHeight {get;set;}
+    public string FontName {get;set;} public int FontPixelHeight {get;set;}
+    public int FontWeight {get;set;} public int FontCharSet {get;set;}
+    public long FontHandle {get;set;} public uint WindowStyle {get;set;}
+    public uint DrawTextFlags {get;set;} public bool WordWrap {get;set;}
+    public bool FitsHeight {get;set;} public bool FitsWidth {get;set;}
+  }
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr parameter);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
   [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr handle);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr handle, out RECT rect);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr handle, out RECT rect);
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr handle);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr handle, IntPtr dc);
+  [DllImport("user32.dll", EntryPoint="GetWindowLongW")] static extern uint GetWindowStyle(IntPtr handle, int index);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int DrawText(IntPtr dc, string text, int count, ref RECT rect, uint flags);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+  [DllImport("gdi32.dll")] static extern IntPtr GetCurrentObject(IntPtr dc, uint type);
+  [DllImport("gdi32.dll", CharSet=CharSet.Unicode, EntryPoint="GetObjectW")] static extern int GetFontObject(IntPtr obj, int size, out LOGFONT font);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr handle);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr handle, StringBuilder text, int count);
@@ -125,14 +148,47 @@ public static class GswInstallerUiNative {
       image.Save(path, ImageFormat.Png); return true;
     }
   }
-  public static bool CaptionFits(Control control) {
-    if(String.IsNullOrWhiteSpace(control.Text) || control.Width < 1 || control.Height < 1) return true;
-    IntPtr fontHandle = SendMessage(new IntPtr(control.Handle), 0x0031, IntPtr.Zero, IntPtr.Zero);
-    using(var font = fontHandle == IntPtr.Zero ? (Font)SystemFonts.MessageBoxFont.Clone() : Font.FromHfont(fontHandle)) {
-      var flags = System.Windows.Forms.TextFormatFlags.WordBreak | System.Windows.Forms.TextFormatFlags.NoPrefix;
-      var size = System.Windows.Forms.TextRenderer.MeasureText(control.Text.Replace("&", ""), font,
-        new Size(control.Width, Int32.MaxValue), flags);
-      return size.Height <= control.Height + 3;
+  public static CaptionMeasurement MeasureCaption(Control control) {
+    IntPtr handle = new IntPtr(control.Handle);
+    RECT client;
+    if(!GetClientRect(handle, out client)) throw new InvalidOperationException("Cannot read caption client bounds.");
+    var result = new CaptionMeasurement {ClientWidth=client.Right-client.Left, ClientHeight=client.Bottom-client.Top};
+    result.WindowStyle = GetWindowStyle(handle, -16);
+    bool isStatic = control.ClassName.EndsWith("StaticText", StringComparison.Ordinal) || control.ClassName == "Static";
+    uint staticType = result.WindowStyle & 0x1F;
+    result.WordWrap = isStatic ? staticType != 0x0C && staticType != 0x0B : (result.WindowStyle & 0x2000) != 0;
+    // Match Inno TNewStaticText.CalcBounds: original HFONT, GDI DrawText and
+    // the control's wrapping/prefix style. Converting HFONT to a GDI+ Font and
+    // using TextRenderer adds different metrics/padding (notably for CJK).
+    uint flags = 0x0400 | 0x0040; // DT_CALCRECT | DT_EXPANDTABS
+    if(result.WordWrap) flags |= 0x0010; // DT_WORDBREAK
+    else if(!isStatic) flags |= 0x0020; // DT_SINGLELINE for ordinary buttons
+    if(isStatic && (result.WindowStyle & 0x0080) != 0) flags |= 0x0800; // SS_NOPREFIX -> DT_NOPREFIX
+    if((GetWindowStyle(handle, -20) & 0x2000) != 0) flags |= 0x20000; // WS_EX_RTLREADING -> DT_RTLREADING
+    result.DrawTextFlags = flags;
+    IntPtr dc = GetDC(handle);
+    if(dc == IntPtr.Zero) throw new InvalidOperationException("Cannot acquire caption device context.");
+    IntPtr previousFont = IntPtr.Zero;
+    try {
+      IntPtr font = SendMessage(handle, 0x0031, IntPtr.Zero, IntPtr.Zero); // WM_GETFONT
+      if(font != IntPtr.Zero) previousFont = SelectObject(dc, font);
+      else font = GetCurrentObject(dc, 6); // OBJ_FONT: native default, not a substitute GDI+ font
+      result.FontHandle = font.ToInt64();
+      LOGFONT description;
+      if(GetFontObject(font, Marshal.SizeOf<LOGFONT>(), out description) == 0)
+        throw new InvalidOperationException("Cannot read the actual caption HFONT.");
+      result.FontName=description.FaceName; result.FontPixelHeight=description.Height;
+      result.FontWeight=description.Weight; result.FontCharSet=description.CharSet;
+      RECT measured = new RECT {Right=result.ClientWidth};
+      if(!String.IsNullOrWhiteSpace(control.Text) && DrawText(dc, control.Text, control.Text.Length, ref measured, flags) == 0)
+        throw new InvalidOperationException("Native caption measurement failed.");
+      result.Width=measured.Right-measured.Left; result.Height=measured.Bottom-measured.Top;
+      result.FitsHeight=result.Height <= result.ClientHeight;
+      result.FitsWidth=result.Width <= result.ClientWidth;
+      return result;
+    } finally {
+      if(previousFont != IntPtr.Zero) SelectObject(dc, previousFont);
+      ReleaseDC(handle, dc);
     }
   }
 }
@@ -186,13 +242,14 @@ function Capture-Page([object]$Wizard, [string]$Locale, [string]$Page) {
   }
   $measured = @()
   foreach ($control in $controls | Where-Object { $_.ClassName -match 'StaticText$|Button$' -and $_.Text.Trim() }) {
-    $fits = [GswInstallerUiNative]::CaptionFits($control)
-    $measured += [pscustomobject]@{ text=$control.Text; className=$control.ClassName; width=$control.Width; height=$control.Height; fitsHeight=$fits }
+    $measurement = [GswInstallerUiNative]::MeasureCaption($control)
+    $measured += [pscustomobject]@{ text=$control.Text; className=$control.ClassName; width=$control.Width; height=$control.Height
+      fitsHeight=$measurement.FitsHeight; fitsWidth=$measurement.FitsWidth; nativeMeasurement=$measurement }
   }
   $record = [ordered]@{ locale=$Locale; page=$Page; screenshot=$picture; window=$Wizard; controls=$controls; automation=$uia; measuredCaptions=$measured }
   [IO.File]::WriteAllText((Join-Path $root ($Locale + '-' + $Page + '.json')), ($record | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
-  $clipped = @($measured | Where-Object { -not $_.fitsHeight })
-  if ($clipped.Count) { throw "Visible wizard caption height is clipped ($Locale/$Page): $($clipped[0].text)" }
+  $clipped = @($measured | Where-Object { -not $_.fitsHeight -or -not $_.fitsWidth })
+  if ($clipped.Count) { throw "Visible wizard caption exceeds its native control bounds ($Locale/$Page): $($clipped[0].text)" }
   return $controls
 }
 

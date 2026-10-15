@@ -19,7 +19,7 @@ The installer/native acceptance workflows also accompany them under
 `source/.github/workflows/`, including the non-GUI Unicode shortcut regression
 and optional existing-certificate signing tool in `source/scripts/`.
 Wrapping an already accepted desktop binary adds these build materials without
-altering its matching native source or EXE, then regenerates the manifest with
+altering its matching native source, existing native build helpers or EXE, then regenerates the manifest with
 the same EXE identity. See `docs/WINDOWS_INSTALLER.md` for reproduction and the
 independent Inno Setup license. Training components retain their own notices.
 

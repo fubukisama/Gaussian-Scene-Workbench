@@ -67,6 +67,7 @@ jobs:
         run: |
           $fixture = Get-Content "$env:RUNNER_TEMP/gsw-installer-fixture/fixture.json" -Raw | ConvertFrom-Json
           $compiler = ./scripts/bootstrap_inno_setup.ps1 -InstallRoot "$env:RUNNER_TEMP/gsw-inno-7.1.0" -CacheRoot "$env:RUNNER_TEMP/gsw-inno-cache"
+          ./scripts/test_windows_installer_build.ps1 -TestRoot "$env:RUNNER_TEMP/gsw-wrapper-validation" -InnoCompiler $compiler -PythonExecutable '${{ steps.python.outputs.python-path }}'
           ./scripts/build_windows_installer.ps1 -PackageRoot $fixture.packageRoot -OutputDirectory "$env:RUNNER_TEMP/gsw-setup-test" -InnoCompiler $compiler -PythonExecutable '${{ steps.python.outputs.python-path }}' -TestBuild
       - name: Test install upgrade and data-preserving uninstall
         shell: pwsh
@@ -90,5 +91,6 @@ jobs:
             ${{ runner.temp }}/gsw-setup-validation/
             ${{ runner.temp }}/gsw-setup-ui/
             ${{ runner.temp }}/gsw-shortcut-validation/
+            ${{ runner.temp }}/gsw-wrapper-validation/
           if-no-files-found: warn
           retention-days: 14

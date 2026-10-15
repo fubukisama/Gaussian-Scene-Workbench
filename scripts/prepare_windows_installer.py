@@ -46,12 +46,18 @@ SOURCE_MATERIALS = (
     "scripts/test_windows_installer.py", "scripts/test_windows_installer.ps1",
     "scripts/test_windows_installer_ui.ps1",
     "scripts/test_windows_shortcut_unicode.ps1",
+    "scripts/test_windows_installer_build.ps1",
     "docs/WINDOWS_INSTALLER.md", "scripts/native_i18n.py",
     "scripts/verify_native_backend.py", "scripts/write_native_source_manifest.ps1",
     "scripts/create_windows_installer_fixture.py", "scripts/stage_native_crt.ps1",
     "scripts/test_native_crt.ps1",
     "scripts/sign_windows_artifacts.ps1",
+    "scripts/setup_native_ci_display.ps1", "scripts/test_native_i18n.py",
 )
+PRESERVE_NATIVE_BUILD_TOOLS = {
+    "scripts/native_i18n.py", "scripts/test_native_i18n.py",
+    "scripts/verify_native_backend.py", "scripts/write_native_source_manifest.ps1",
+}
 
 
 def sha256(path):
@@ -140,8 +146,12 @@ def prepare(package, work, output, source_root, test_build=False):
     for notice in (payload / "THIRD_PARTY_LICENSES.md", payload / "source/THIRD_PARTY_LICENSES.md"):
         shutil.copyfile(source_root / "THIRD_PARTY_LICENSES.md", notice)
     # Installer definition and build tools accompany the program's exact source.
+    preserved_tools = []
     for relative in SOURCE_MATERIALS:
         target = payload / "source" / relative
+        if relative in PRESERVE_NATIVE_BUILD_TOOLS and target.is_file():
+            preserved_tools.append(relative)
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_root / relative, target)
     catalog = load_catalog(source_root / "native/i18n/catalog.json")
@@ -177,6 +187,7 @@ def prepare(package, work, output, source_root, test_build=False):
             "version": build["version"], "packageRoot": str(package), "workRoot": str(work),
             "payloadRoot": str(payload), "setupPath": str(output / (name + ".exe")),
             "executableSha256": sha256(package / REQUIRED[0]), "locales": list(LOCALES),
+            "preservedNativeBuildTools": sorted(preserved_tools),
             "trainingRuntimesBundled": False, "automaticAppLaunch": False}
 
 

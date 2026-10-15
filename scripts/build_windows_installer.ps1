@@ -18,7 +18,6 @@ if(-not $InnoCompiler){$command=Get-Command ISCC.exe -ErrorAction SilentlyContin
 if(-not $InnoCompiler -or -not(Test-Path -LiteralPath $InnoCompiler -PathType Leaf)){throw 'Inno Setup 7.1.0 is required. Run scripts/bootstrap_inno_setup.ps1 first.'}
 $compilerVersion=(& $InnoCompiler '--version') -join "`n"
 if($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '(?m)^7\.1\.0(?:\s|$)'){throw "Expected pinned Inno Setup 7.1.0; got $compilerVersion"}
-New-Item -ItemType Directory -Path $OutputDirectory -Force|Out-Null
 $work=Join-Path $OutputDirectory ('build-'+[guid]::NewGuid().ToString('N'))
 $arguments=@('-I','-B',(Join-Path $PSScriptRoot 'prepare_windows_installer.py'),'--package-root',$PackageRoot,
   '--work-root',$work,'--output-root',$OutputDirectory,'--source-root',$sourceRoot)

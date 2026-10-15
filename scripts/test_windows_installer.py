@@ -178,6 +178,22 @@ class PayloadValidationTests(InstallerFixture):
                 self.assertEqual((work / "payload/source" / relative).read_bytes(),
                                  (self.sources / relative).read_bytes())
 
+    def test_wrapping_an_older_binary_preserves_its_original_native_build_tools(self):
+        originals = {}
+        for relative in ("scripts/native_i18n.py", "scripts/test_native_i18n.py",
+                         "scripts/verify_native_backend.py", "scripts/write_native_source_manifest.ps1"):
+            target = self.package / "source" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            originals[relative] = ("original native build tool: " + relative + "\r\n").encode()
+            target.write_bytes(originals[relative])
+        self.refresh_manifest()
+        record, work = self.assert_prepared()
+        for relative, original in originals.items():
+            with self.subTest(material=relative):
+                self.assertEqual((work / "payload/source" / relative).read_bytes(), original)
+                self.assertEqual((self.package / "source" / relative).read_bytes(), original)
+        self.assertEqual(set(record["preservedNativeBuildTools"]), set(originals))
+
     def test_upgrade_marker_is_ascii_without_bom_and_has_exact_installation_identity(self):
         record, work = self.assert_prepared()
         marker = (work / "payload/gsw-installation.ini").read_bytes()

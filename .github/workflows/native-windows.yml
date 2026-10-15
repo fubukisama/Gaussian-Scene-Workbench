@@ -284,6 +284,7 @@ jobs:
             "scripts/test_windows_installer.ps1",
             "scripts/test_windows_installer_ui.ps1",
             "scripts/test_windows_shortcut_unicode.ps1",
+            "scripts/test_windows_installer_build.ps1",
             "scripts/stage_native_crt.ps1",
             "scripts/test_native_crt.ps1"
           )
@@ -383,6 +384,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer contract tests failed." }
           ./scripts/test_windows_shortcut_unicode.ps1 -TestRoot "$env:RUNNER_TEMP/gsw-shortcut-validation"
           $compiler = ./scripts/bootstrap_inno_setup.ps1 -InstallRoot "$env:RUNNER_TEMP/gsw-inno-7.1.0" -CacheRoot "$env:RUNNER_TEMP/gsw-inno-cache"
+          ./scripts/test_windows_installer_build.ps1 -TestRoot "$env:RUNNER_TEMP/gsw-wrapper-validation" -InnoCompiler $compiler -PythonExecutable $env:QA_PYTHON
           ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler
           ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup-test" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler -TestBuild
           $testSetup = (Get-ChildItem native/setup-test -File -Filter '*.exe').FullName
@@ -409,6 +411,7 @@ jobs:
             native/setup-validation/
             ${{ runner.temp }}/gsw-installer-validation/
             ${{ runner.temp }}/gsw-shortcut-validation/
+            ${{ runner.temp }}/gsw-wrapper-validation/
           if-no-files-found: warn
           retention-days: 14
 

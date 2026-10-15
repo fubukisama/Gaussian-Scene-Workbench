@@ -380,10 +380,12 @@ install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer_ui.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_shortcut_unicode.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_windows_installer_build.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/create_windows_installer_fixture.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_crt.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_crt.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/sign_windows_artifacts.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/setup_native_ci_display.ps1"
   DESTINATION source/scripts)
 install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-windows.yml"

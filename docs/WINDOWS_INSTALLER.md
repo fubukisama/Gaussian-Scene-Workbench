@@ -74,7 +74,9 @@ required Qt files, native-only boundary and absence of reparse/private data are
 validated before a fresh private build copy is made. The original payload is
 not modified. Installer definition/tools/catalog subset are added to the
 corresponding source, and its manifest is recalculated around the **unchanged**
-native EXE. `installer-payload.json` hashes the full payload for acceptance.
+native EXE. Existing native translation/build/manifest helpers retain their
+original bytes and are listed in `preservedNativeBuildTools`; installer-specific
+tools and CI recipes are added separately. `installer-payload.json` hashes the full payload for acceptance.
 Setup, `.sha256` and `.exe.json` build metadata are produced together.
 
 Pass `-CertificateThumbprint` to sign the final Setup with an existing trusted
@@ -89,6 +91,8 @@ python -B scripts/native_i18n.py
 python -B scripts/test_native_i18n.py
 python -B scripts/test_windows_installer.py
 ./scripts/test_windows_shortcut_unicode.ps1 -TestRoot 'D:/Codex/validation/GSW-shortcuts'
+./scripts/test_windows_installer_build.ps1 -TestRoot 'D:/Codex/validation/GSW-wrapper' `
+  -InnoCompiler '<ISCC.exe>' -PythonExecutable '<QA Python>'
 ./scripts/build_windows_installer.ps1 -PackageRoot '<verified native package>' `
   -OutputDirectory 'D:/Codex/validation/GSW-setup-test' -InnoCompiler '<ISCC.exe>' `
   -PythonExecutable '<QA Python>' -TestBuild
