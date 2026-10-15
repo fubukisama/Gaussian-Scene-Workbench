@@ -74,6 +74,46 @@ disables saving until comparison completes again. No report opens automatically.
 The settings table displays at most 512 changes and summarizes long values;
 the machine result and exported JSON retain their complete original values.
 
+**Measure Images…** opens a separate dialog only when explicitly requested.
+It runs the CPU-only image measurement command on existing reference/render
+pairs listed in a JSON manifest, preserving relative paths against the original
+manifest directory. It does not train, render, resize images or claim geometry
+accuracy. The dialog displays per-view and aggregate PSNR/SSIM, localized
+progress/cancellation/errors, and an explicit missing-independent-validation
+notice. The raw view identifiers and numeric metric protocol remain unchanged.
+Only **Use as Baseline / Use as Candidate** publishes a fresh report under the
+current workspace's `.gsw/quality/measurements` directory and fills the chosen
+comparison input. The report survives closing the measurement dialog; originals
+and existing reports are never overwritten. Without that choice, temporary
+results are discarded on close. No report or unrelated window opens
+automatically. Inputs and combined helper output are capped at 16 MiB; the
+helper has a ten-minute limit. Cancel/close terminate only this owned CPU helper.
+Language changes retain the manifest, live process, results and explicit choice.
+The saved measurement is a persistent workspace report with a visible path,
+not an automatic experiment association. Its migration through Save As and
+backup is not established by this feature. Every adoption rechecks the report's
+owned canonical path and exact bytes. If an adopted file was externally changed
+or deleted, explicit adoption publishes a new UUID from the still-trusted
+temporary result without overwriting the changed file.
+Adopted reports use the application workspace base outside disposable project children;
+they are not automatically attached to an experiment or its backup.
+The default **Pair Folders (Exact Filenames)** mode accepts reference/render
+folders and an optional mask folder. It lists all exact top-level, non-hidden
+PNG/JPEG filename pairs (case and extension included), without image decoding,
+recursion, links, stem guessing, resizing or sampling. Every reference must
+match; choosing masks requires every matching mask too. Missing/ambiguous pairs
+block measurement rather than evaluating a subset. The advanced JSON manifest
+remains available for distinct filenames, including PNG masks for JPEG images.
+At most 4096 pairs are accepted. If the preview table displays only its first
+512 rows, an explicit notice states that the manifest and measurement retain
+every pair. Directory contents are rechecked before starting.
+**Refresh Pairs** explicitly rereads folder entries after files are repaired
+without changing the folder paths; it is disabled during measurement. A compact
+protocol caption/tooltip states encoded RGB8 without color conversion, PSNR
+from pooled valid-channel MSE and Gaussian 11×11 sigma-1.5 valid-window SSIM,
+distinct from training-loss SSIM. Validation failures show translated format,
+dimension and mask guidance before clearly labelled original technical logs.
+
 中文：“工作流 → 质量对照…”仅由用户主动打开。选择两份 JSON 实测报告后，可独立
 启用允许退化、绝对上下限和几何证据要求，默认不启用任何门限。界面展示同一 Python
 比较模块给出的逐项变化、状态、原因及原始参数差异，不启动训练、渲染或质量测量。
@@ -82,6 +122,19 @@ the machine result and exported JSON retain their complete original values.
 语言保留数据和进程。原报告不改写，取消和关闭只停止本窗口自己的比较辅助进程。
 “保存对照报告…”仅保存当前有效的机器结果与所选门限，拒绝覆盖已有文件或输入报告，
 不会自动打开文件。表格最多展示 512 项参数差异并摘要长值，导出的 JSON 保留完整内容。
+“图像实测…”由用户主动打开，按 JSON 清单在 CPU 上测量已有参考图／渲染图的
+逐视图及汇总 PSNR、SSIM；不训练、不渲染、不缩放或证明几何精度。相对路径仍以
+原清单目录为准，缺少留出集来源证明保持未验证。只有点击“用作基准／用作候选”
+才将新报告持久保存到当前工作区并填入所选输入；关闭窗口后报告保留，不覆盖原图、
+清单或旧报告。不选择则关闭时清理临时结果，取消只停止本窗口的 CPU 辅助进程。
+默认文件夹模式列出第一层非隐藏 PNG/JPEG 的严格同名配对，不读取图像像素、
+递归、跟随链接、猜测同名主干或抽样。每张参考图及已选择目录中的遮罩都必须
+完全同名匹配，否则阻止实测；不同名称可使用高级 JSON 清单。最多 4096 对，
+表格超过 512 行会明确说明仅预览截断、清单和实测仍处理全部配对。
+报告保存于应用工作区基目录、独立于可清理的未命名工程子目录，显示实际路径；
+不自动关联实验，也不保证随工程另存为或备份迁移。每次采用
+都复查工作区归属和原始字节；若已被外部修改或删除，会从仍可信的临时结果生成
+新 UUID 报告，不覆盖已修改文件。
 
 日本語：「ワークフロー → 品質を比較…」はユーザーの明示操作でのみ開きます。
 2 つの JSON 測定報告に対し、許容する品質低下、絶対上下限、幾何品質の根拠を
@@ -95,6 +148,23 @@ the machine result and exported JSON retain their complete original values.
 「比較報告を保存…」は現在の有効な機械判定と選択したしきい値を新しい JSON に
 保存し、既存ファイルや入力報告は上書きせず、自動で開きません。表の設定差分は
 最大 512 件で長い値を要約しますが、JSON には完全な内容を保持します。
+「画像を測定…」は明示操作でのみ開き、JSON の対応表に記載した既存の参照画像と
+描画画像を CPU で測定し、ビューごとと集計の PSNR・SSIM を表示します。学習、
+描画、リサイズはせず、幾何精度も保証しません。相対パスは元の対応表のフォルダー
+を基準とし、ホールドアウトの出所を証明できなければ未検証を維持します。
+「基準として使用／候補として使用」を押した場合のみ新しい報告を現在の
+ワークスペースに保存して選択した入力に設定し、ウィンドウを閉じても報告は保持
+します。元画像、対応表、既存報告は上書きしません。採用しない一時結果は終了時に
+削除し、キャンセルはこのウィンドウの CPU 補助プロセスのみを停止します。
+既定のフォルダーモードでは、直下の非表示でない PNG/JPEG を完全に同じ名前で
+対応付けし、画素の読み込み、再帰探索、リンク追跡、名前の推測や間引きはしません。
+すべての参照画像と任意に指定したマスクの対応が必要で、不一致なら測定を止めます。
+異なる名前には詳細 JSON 対応表を使えます。最大 4096 組で、表が 512 行を超える
+場合も表示のみの省略であることを明記し、測定では全組を処理します。
+実際の保存パスを表示し、実験への自動関連付けや、名前を付けて保存・バックアップ
+による移行は保証しません。採用のたびにワークスペースの所属と元のバイト列を
+確認します。外部で変更・削除された場合は、信頼できる一時結果から新しい UUID の
+報告を作成し、変更済みファイルは上書きしません。
 
 ## Terminology
 
@@ -162,6 +232,8 @@ Scene and training-output names accept arbitrary Unicode text, spaces and symbol
 | 按需计算曲面法线 | On-demand Surface Normals | 必要時のみ曲面法線を計算 |
 | 质量验证 / 独立验证结果 | Quality Validation / Independent Validation Results | 品質検証 / 独立した検証結果 |
 | 质量对照 / 允许退化 | Quality Comparison / Allowed Regression | 品質比較 / 許容する品質低下 |
+| 图像质量实测 / 图像配对清单 | Image Quality Measurement / Image Pair Manifest | 画像品質の測定 / 画像の対応表 |
+| 用作基准 / 用作候选 | Use as Baseline / Use as Candidate | 基準として使用 / 候補として使用 |
 | 绝对下限 / 绝对上限 | Absolute Minimum / Absolute Maximum | 絶対下限 / 絶対上限 |
 | 按所选门限通过 / 超出质量门限 / 未验证 / 不具可比性 | Within Selected Limits / Outside Quality Limits / Unverified / Not Comparable | 選択したしきい値を満たしています / 品質のしきい値を超えています / 未検証 / 比較不可 |
 | 显存常驻 / 深度顺序 | GPU-Resident / Depth Order | GPU メモリ常駐 / 深度順序 |

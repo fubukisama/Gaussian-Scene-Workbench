@@ -13,6 +13,31 @@ from native.worker import training_checkpoint as checkpoint
 from native.worker import gsw_worker
 
 
+class ResumeAcceptanceEvidenceTests(unittest.TestCase):
+    def test_failed_acceptance_preserves_its_owned_fixture(self):
+        from native.worker.test_training_checkpoint_cuda import resume_acceptance_fixture
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(RuntimeError, "controlled acceptance failure"):
+                with resume_acceptance_fixture(temporary) as root:
+                    marker = root / "diagnostic.txt"
+                    marker.write_text("owned evidence", encoding="utf-8")
+                    raise RuntimeError("controlled acceptance failure")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "owned evidence")
+            status = json.loads((root / "acceptance-status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["exception_type"], "RuntimeError")
+
+    def test_successful_acceptance_retains_an_explicit_evidence_directory(self):
+        from native.worker.test_training_checkpoint_cuda import resume_acceptance_fixture
+        with tempfile.TemporaryDirectory() as temporary:
+            with resume_acceptance_fixture(temporary) as root:
+                marker = root / "diagnostic.txt"
+                marker.write_text("passed evidence", encoding="utf-8")
+            self.assertTrue(marker.is_file())
+            status = json.loads((root / "acceptance-status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "passed")
+
+
 class PickleStore:
     save = staticmethod(pickle.dump)
 

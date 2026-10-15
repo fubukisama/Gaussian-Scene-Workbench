@@ -128,6 +128,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/QualityComparisonDialog.cpp
   src/QualityComparisonSmokeTest.cpp
   src/QualityComparisonSmokeTest.h
+  src/QualityMeasurementDialog.h
+  src/QualityMeasurementDialog.cpp
+  src/QualityMeasurementSmokeTest.cpp
+  src/QualityMeasurementSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -394,7 +398,8 @@ if(BUILD_TESTING)
     native.worker.test_training_resource_policy native.worker.test_training_acceleration
     native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline
     native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter
-    native.worker.test_training_quality native.worker.test_training_stress)
+    native.worker.test_training_quality native.worker.test_image_quality_measurement
+    native.worker.test_training_stress)
   set_tests_properties(native_training_performance_policy PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 60)
   foreach(icon_locale zh_CN en_US ja_JP)
@@ -528,6 +533,10 @@ if(BUILD_TESTING)
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
   add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
   add_test(NAME native_quality_comparison_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-comparison)
+  add_test(NAME native_quality_measurement_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-measurement)
+  set_tests_properties(native_quality_measurement_ui PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_quality_comparison_ui PROPERTIES TIMEOUT 120
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")

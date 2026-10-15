@@ -1,4 +1,5 @@
 #include "QualityComparisonDialog.h"
+#include "QualityMeasurementDialog.h"
 #include "AppLanguage.h"
 
 #include <QCheckBox>
@@ -195,6 +196,10 @@ QualityComparisonDialog::QualityComparisonDialog(const QString &python, const QS
   scroll->setWidget(body);
   root->addWidget(scroll, 1);
   auto *buttons = new QHBoxLayout;
+  mMeasure = AppLanguage::text(new QPushButton(this), AppLanguage::source("图像实测…"));
+  mMeasure->setObjectName(QStringLiteral("qualityMeasureImagesButton"));
+  AppLanguage::bind(mMeasure, "toolTip", AppLanguage::source("主动测量已有参考图与渲染图；不启动训练，完成后由你选择是否用作基准或候选。"));
+  buttons->addWidget(mMeasure);
   buttons->addStretch();
   mCompare = AppLanguage::text(new QPushButton(this), AppLanguage::source("开始比较"));
   mCompare->setObjectName(QStringLiteral("qualityCompareButton"));
@@ -207,6 +212,7 @@ QualityComparisonDialog::QualityComparisonDialog(const QString &python, const QS
   buttons->addWidget(mCancel);
   root->addLayout(buttons);
   connect(mCompare, &QPushButton::clicked, this, &QualityComparisonDialog::startComparison);
+  connect(mMeasure, &QPushButton::clicked, this, &QualityComparisonDialog::showMeasurement);
   connect(mSave, &QPushButton::clicked, this, [this] {
     const QString path = QFileDialog::getSaveFileName(this,
         text(AppLanguage::source("保存对照报告…")),
@@ -352,9 +358,23 @@ bool QualityComparisonDialog::saveComparisonReport(const QString &path) {
 void QualityComparisonDialog::refreshEnabled() {
   mInputs->setEnabled(!mBusy);
   mCompare->setEnabled(!mBusy);
+  mMeasure->setEnabled(!mBusy);
   mSave->setEnabled(!mBusy && !mReport.isEmpty());
   for (const auto &metric : mMetrics)
     for (const auto &limit : metric.limits) limit.value->setEnabled(limit.enabled->isChecked());
+}
+void QualityComparisonDialog::showMeasurement() {
+  if (mBusy || mMeasurementDialog) return; // Do not raise an existing window.
+  mMeasurementDialog = new QualityMeasurementDialog(mPython, mBackendRoot, mWorkspaceRoot, mEnvironment, this);
+  mMeasurementDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(mMeasurementDialog, &QualityMeasurementDialog::reportChosen, this,
+      [this](const QString &path, const bool useAsBaseline) {
+    if (!mBusy) (useAsBaseline ? mBaseline : mCandidate)->setText(QDir::toNativeSeparators(path));
+  });
+  connect(mMeasurementDialog, &QualityMeasurementDialog::measurementFinished, this, [this] {
+    if (mClosePending && !mBusy) QTimer::singleShot(0, this, [this] { QDialog::reject(); });
+  });
+  mMeasurementDialog->show(); // Only the explicit measurement action opens this dialog.
 }
 void QualityComparisonDialog::chooseReport(QLineEdit *target) {
   const QString path = QFileDialog::getOpenFileName(this, text(AppLanguage::source("选择质量实测报告")),
@@ -494,7 +514,7 @@ void QualityComparisonDialog::finishProcess(const int exitCode, const bool norma
   refreshEnabled();
   refreshPresentation();
   emit comparisonFinished(mReport);
-  if (mClosePending) QDialog::reject();
+  if (mClosePending && (!mMeasurementDialog || !mMeasurementDialog->isRunning())) QDialog::reject();
 }
 void QualityComparisonDialog::cancelComparison() {
   if (!mBusy) return;
@@ -508,11 +528,21 @@ void QualityComparisonDialog::cancelComparison() {
   });
 }
 void QualityComparisonDialog::reject() {
-  if (mBusy) { mClosePending = true; cancelComparison(); return; }
+  if (mBusy || (mMeasurementDialog && mMeasurementDialog->isRunning())) {
+    mClosePending = true;
+    if (mMeasurementDialog) mMeasurementDialog->close();
+    if (mBusy) cancelComparison();
+    return;
+  }
   QDialog::reject();
 }
 void QualityComparisonDialog::closeEvent(QCloseEvent *event) {
-  if (mBusy) { mClosePending = true; cancelComparison(); event->ignore(); }
+  if (mBusy || (mMeasurementDialog && mMeasurementDialog->isRunning())) {
+    mClosePending = true;
+    if (mMeasurementDialog) mMeasurementDialog->close();
+    if (mBusy) cancelComparison();
+    event->ignore();
+  }
   else QDialog::closeEvent(event);
 }
 void QualityComparisonDialog::refreshPresentation() {

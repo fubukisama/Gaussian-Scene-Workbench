@@ -5817,8 +5817,16 @@ void MainWindow::showQualityComparison() {
         QCoreApplication::translate("Workbench", "请检查已配置的 Python 与安装目录中的质量比较脚本；不会自动安装或启动训练。"));
     return;
   }
+  // Reports must outlive a disposable untitled project's recovery directory.
+  // This application-owned base is deliberately not an experiment association.
+  QString qualityStorageError;
+  const QString qualityStorage = defaultUntitledWorkspaceBase(&qualityStorageError);
+  if (qualityStorage.isEmpty()) {
+    showError(QCoreApplication::translate("Workbench", "质量对照工具不可用"), qualityStorageError);
+    return;
+  }
   mQualityComparisonDialog = new QualityComparisonDialog(
-      python, root, mWorkspace.rootPath(), pythonProcessEnvironment(python), this);
+      python, root, qualityStorage, pythonProcessEnvironment(python), this);
   mQualityComparisonDialog->setAttribute(Qt::WA_DeleteOnClose);
   mQualityComparisonDialog->show(); // Only the explicit workflow-menu action opens it.
 }
