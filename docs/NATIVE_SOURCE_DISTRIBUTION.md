@@ -15,6 +15,9 @@ hashes; preserve it with the corresponding package when redistributing.
 Setup EXE distributions also contain `source/packaging/windows/gsw.iss`, its
 catalog subset and the installer build/bootstrap/acceptance tools under
 `source/scripts/`. They are mandatory, not an optional unchecked component.
+The installer/native acceptance workflows also accompany them under
+`source/.github/workflows/`, including the non-GUI Unicode shortcut regression
+and optional existing-certificate signing tool in `source/scripts/`.
 Wrapping an already accepted desktop binary adds these build materials without
 altering its matching native source or EXE, then regenerates the manifest with
 the same EXE identity. See `docs/WINDOWS_INSTALLER.md` for reproduction and the

@@ -465,5 +465,16 @@ class InnoStringBoundaryTests(unittest.TestCase):
                     installer.inno_string(text)
 
 
+class InstallerWorkflowTests(unittest.TestCase):
+    def test_definition_changes_trigger_full_native_acceptance_for_push_and_pr(self):
+        workflow = (ROOT / ".github/workflows/native-windows.yml").read_text(encoding="utf-8")
+        triggers = workflow.split("\npermissions:", 1)[0]
+        for event in ("push", "pull_request"):
+            with self.subTest(event=event):
+                block = re.search(r"(?ms)^  " + event + r":\n(.*?)(?=^  \w|\Z)", triggers)
+                self.assertIsNotNone(block)
+                self.assertRegex(block.group(1), r"(?m)^      - [\"']packaging/windows/\*\*[\"']$")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

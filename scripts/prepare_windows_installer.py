@@ -39,15 +39,18 @@ REQUIRED = (
     "source/native/third_party/blender-gizmo/BlenderGizmoGeometry.cpp",
 )
 SOURCE_MATERIALS = (
+    ".github/workflows/native-windows.yml", ".github/workflows/windows-installer.yml",
     "THIRD_PARTY_LICENSES.md",
     "packaging/windows/gsw.iss", "scripts/prepare_windows_installer.py",
     "scripts/build_windows_installer.ps1", "scripts/bootstrap_inno_setup.ps1",
     "scripts/test_windows_installer.py", "scripts/test_windows_installer.ps1",
     "scripts/test_windows_installer_ui.ps1",
+    "scripts/test_windows_shortcut_unicode.ps1",
     "docs/WINDOWS_INSTALLER.md", "scripts/native_i18n.py",
     "scripts/verify_native_backend.py", "scripts/write_native_source_manifest.ps1",
     "scripts/create_windows_installer_fixture.py", "scripts/stage_native_crt.ps1",
     "scripts/test_native_crt.ps1",
+    "scripts/sign_windows_artifacts.ps1",
 )
 
 

@@ -139,6 +139,73 @@ public static class GswInstallerPathProbe {
 '@
 }
 
+if (-not ('GswInstallerShellLinkUnicode' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+public static class GswInstallerShellLinkUnicode {
+  [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, IntPtr findData, uint flags);
+    void GetIDList(out IntPtr idList);
+    void SetIDList(IntPtr idList);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int capacity);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int capacity);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int capacity);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+    void GetHotkey(out short hotkey);
+    void SetHotkey(short hotkey);
+    void GetShowCmd(out int showCommand);
+    void SetShowCmd(int showCommand);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, out int iconIndex);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int iconIndex);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+    void Resolve(IntPtr window, uint flags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+  }
+  public sealed class Details {
+    public string TargetPath {get;set;} public string WorkingDirectory {get;set;}
+    public string Arguments {get;set;}
+  }
+  static object NewLink() {
+    return Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+  }
+  public static Details Read(string shortcut) {
+    object instance=NewLink();
+    try {
+      // STGM_READ. Do not resolve, save, modify or launch the existing link.
+      ((IPersistFile)instance).Load(shortcut, 0);
+      var link=(IShellLinkW)instance;
+      var target=new StringBuilder(32768);
+      var directory=new StringBuilder(32768);
+      var arguments=new StringBuilder(32768);
+      link.GetPath(target, target.Capacity, IntPtr.Zero, 4); // SLGP_RAWPATH
+      link.GetWorkingDirectory(directory, directory.Capacity);
+      link.GetArguments(arguments, arguments.Capacity);
+      return new Details {TargetPath=target.ToString(), WorkingDirectory=directory.ToString(), Arguments=arguments.ToString()};
+    } finally { Marshal.FinalReleaseComObject(instance); }
+  }
+  public static void CreateOwnedFixture(string shortcut, string target, string directory) {
+    if(File.Exists(shortcut)) throw new IOException("Fixture link must be new.");
+    if(!File.Exists(target) || !Directory.Exists(directory)) throw new IOException("Fixture target must exist without execution.");
+    object instance=NewLink();
+    try {
+      var link=(IShellLinkW)instance;
+      link.SetPath(target);
+      link.SetWorkingDirectory(directory);
+      link.SetDescription("GSW non-executable Unicode shortcut fixture; never launch");
+      ((IPersistFile)instance).Save(shortcut, true);
+    } finally { Marshal.FinalReleaseComObject(instance); }
+  }
+}
+'@
+}
+
 function Assert-Condition([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
 }
@@ -332,26 +399,41 @@ function Invoke-HiddenInstaller([string]$Executable, [string[]]$Arguments, [swit
 
 function Test-InstalledShortcut([string]$Path, [string]$InstallRoot) {
   Assert-Condition (Test-Path -LiteralPath $Path -PathType Leaf) "Installed shortcut missing: $Path"
-  $shell = New-Object -ComObject WScript.Shell
+  $beforeRead = Get-Sha256 $Path
+  $native = [GswInstallerShellLinkUnicode]::Read($Path)
+  $actualTarget = [string]$native.TargetPath
+  $actualWorkingDirectory = [string]$native.WorkingDirectory
+  $expectedTarget = Join-Path $InstallRoot 'bin/Gaussian Scene Workbench.exe'
+  $legacyTarget, $legacyDirectory, $legacyError = $null, $null, $null
+  $shell = $null
   try {
+    # WScript reads lose non-ACP characters on affected Windows systems. Keep
+    # the observation for diagnostics only; IShellLinkW owns the strict gate.
+    $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($Path)
-    $actualTarget = [string]$shortcut.TargetPath
-    $actualWorkingDirectory = [string]$shortcut.WorkingDirectory
-    $expectedTarget = Join-Path $InstallRoot 'bin/Gaussian Scene Workbench.exe'
-    $evidence = [ordered]@{ schema='gsw-shortcut-evidence-v1'; observedAtUtc=[DateTime]::UtcNow.ToString('o')
-      shortcutPath=$Path; shortcutSha256=Get-Sha256 $Path
-      actualTargetPath=$actualTarget; expectedTargetPath=$expectedTarget
-      actualWorkingDirectory=$actualWorkingDirectory; expectedWorkingDirectory=$InstallRoot
-      actualTarget=Get-ShortcutPathEvidence $actualTarget; expectedTarget=Get-ShortcutPathEvidence $expectedTarget
-      actualDirectory=Get-ShortcutPathEvidence $actualWorkingDirectory; expectedDirectory=Get-ShortcutPathEvidence $InstallRoot }
-    $evidenceDirectory = Join-Path $script:runRoot 'shortcut-evidence'
-    New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
-    $evidencePath = Join-Path $evidenceDirectory ('shortcut-' + [guid]::NewGuid().ToString('N') + '.json')
-    [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
-    Write-Output "Shortcut evidence: $evidencePath"
-    Assert-Condition (Test-SamePath $actualTarget $expectedTarget) "Shortcut target is not the installed bin executable. Actual='$actualTarget'; expected='$expectedTarget'; evidence='$evidencePath'."
-    Assert-Condition (Test-SamePath $actualWorkingDirectory $InstallRoot) "Shortcut working directory mismatch. Actual='$actualWorkingDirectory'; expected='$InstallRoot'; evidence='$evidencePath'."
-  } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    $legacyTarget = [string]$shortcut.TargetPath
+    $legacyDirectory = [string]$shortcut.WorkingDirectory
+  } catch { $legacyError = $_.Exception.Message }
+  finally { if ($shell) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) } }
+  $evidenceDirectory = Join-Path $script:runRoot 'shortcut-evidence'
+  New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+  $evidenceStem = Join-Path $evidenceDirectory ('shortcut-' + [guid]::NewGuid().ToString('N'))
+  $evidencePath = $evidenceStem + '.json'
+  [IO.File]::Copy($Path, ($evidenceStem + '.lnk'), $false)
+  $afterRead = Get-Sha256 $Path
+  $evidence = [ordered]@{ schema='gsw-shortcut-evidence-v1'; observedAtUtc=[DateTime]::UtcNow.ToString('o')
+    pathReader='IShellLinkW'; shortcutPath=$Path; shortcutSha256=$afterRead; shortcutUnchanged=$beforeRead -eq $afterRead
+    rawShortcutEvidence=$evidenceStem + '.lnk'; rawShortcutSha256=Get-Sha256 ($evidenceStem + '.lnk')
+    actualTargetPath=$actualTarget; expectedTargetPath=$expectedTarget
+    actualWorkingDirectory=$actualWorkingDirectory; expectedWorkingDirectory=$InstallRoot
+    wscriptTargetPath=$legacyTarget; wscriptWorkingDirectory=$legacyDirectory; wscriptError=$legacyError
+    actualTarget=Get-ShortcutPathEvidence $actualTarget; expectedTarget=Get-ShortcutPathEvidence $expectedTarget
+    actualDirectory=Get-ShortcutPathEvidence $actualWorkingDirectory; expectedDirectory=Get-ShortcutPathEvidence $InstallRoot }
+  [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+  Write-Output "Shortcut evidence: $evidencePath"
+  Assert-Condition ($beforeRead -eq $afterRead) 'Reading a shortcut unexpectedly changed its original bytes.'
+  Assert-Condition (Test-SamePath $actualTarget $expectedTarget) "Shortcut target is not the installed bin executable. Actual='$actualTarget'; expected='$expectedTarget'; evidence='$evidencePath'."
+  Assert-Condition (Test-SamePath $actualWorkingDirectory $InstallRoot) "Shortcut working directory mismatch. Actual='$actualWorkingDirectory'; expected='$InstallRoot'; evidence='$evidencePath'."
 }
 
 function Get-ShortcutPathEvidence([string]$Path) {

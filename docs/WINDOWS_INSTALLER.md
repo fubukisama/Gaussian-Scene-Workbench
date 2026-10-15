@@ -88,6 +88,7 @@ application-control policy. Setup does not disable any Windows security policy.
 python -B scripts/native_i18n.py
 python -B scripts/test_native_i18n.py
 python -B scripts/test_windows_installer.py
+./scripts/test_windows_shortcut_unicode.ps1 -TestRoot 'D:/Codex/validation/GSW-shortcuts'
 ./scripts/build_windows_installer.ps1 -PackageRoot '<verified native package>' `
   -OutputDirectory 'D:/Codex/validation/GSW-setup-test' -InnoCompiler '<ISCC.exe>' `
   -PythonExecutable '<QA Python>' -TestBuild
@@ -100,6 +101,10 @@ installs, reinstalls and uninstalls in a fresh space/Unicode test path for all
 three languages; checks installed files, corresponding source, uninstall entry,
 unique test Start Menu shortcut and preservation of sentinel user/runtime data;
 never launches GSW or touches the actual desktop shortcut. Logs remain on D.
+Shortcut target and working-directory checks use the native Unicode Windows
+Shell interface, not the lossy ANSI values returned by WScript on some hosts.
+The non-GUI shortcut regression retains both readings and the unchanged link
+hash; installed shortcut acceptance still requires the exact expected paths.
 The regular native app/render/training checks are not replaced by installer tests.
 The small Windows Installer workflow uses an explicitly marked synthetic
 file fixture to exercise the **real Setup wizard and transactions**, without

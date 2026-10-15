@@ -9,6 +9,7 @@ on:
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/**"
+      - "packaging/windows/**"
       - "docs/LOCALIZATION.md"
       - ".github/workflows/native-windows.yml"
       - "docs/NATIVE_CI.md"
@@ -25,6 +26,7 @@ on:
       - "gaussian-splatting/**"
       - "training_kit/**"
       - "scripts/**"
+      - "packaging/windows/**"
       - "docs/LOCALIZATION.md"
       - ".github/workflows/native-windows.yml"
       - "docs/NATIVE_CI.md"
@@ -281,6 +283,7 @@ jobs:
             "scripts/build_windows_installer.ps1",
             "scripts/test_windows_installer.ps1",
             "scripts/test_windows_installer_ui.ps1",
+            "scripts/test_windows_shortcut_unicode.ps1",
             "scripts/stage_native_crt.ps1",
             "scripts/test_native_crt.ps1"
           )
@@ -378,6 +381,7 @@ jobs:
         run: |
           & $env:QA_PYTHON -B scripts/test_windows_installer.py
           if ($LASTEXITCODE -ne 0) { throw "Installer contract tests failed." }
+          ./scripts/test_windows_shortcut_unicode.ps1 -TestRoot "$env:RUNNER_TEMP/gsw-shortcut-validation"
           $compiler = ./scripts/bootstrap_inno_setup.ps1 -InstallRoot "$env:RUNNER_TEMP/gsw-inno-7.1.0" -CacheRoot "$env:RUNNER_TEMP/gsw-inno-cache"
           ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler
           ./scripts/build_windows_installer.ps1 -PackageRoot "$PWD/native/artifact" -OutputDirectory "$PWD/native/setup-test" -PythonExecutable $env:QA_PYTHON -InnoCompiler $compiler -TestBuild
@@ -404,6 +408,7 @@ jobs:
           path: |
             native/setup-validation/
             ${{ runner.temp }}/gsw-installer-validation/
+            ${{ runner.temp }}/gsw-shortcut-validation/
           if-no-files-found: warn
           retention-days: 14
 

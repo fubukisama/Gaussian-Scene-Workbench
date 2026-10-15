@@ -7,6 +7,7 @@ on:
       - 'packaging/windows/**'
       - 'scripts/*windows_installer*'
       - 'scripts/*native_crt*'
+      - 'scripts/test_windows_shortcut_unicode.ps1'
       - 'scripts/bootstrap_inno_setup.ps1'
       - '.github/workflows/windows-installer.yml'
       - 'native/i18n/catalog.json'
@@ -16,6 +17,7 @@ on:
       - 'packaging/windows/**'
       - 'scripts/*windows_installer*'
       - 'scripts/*native_crt*'
+      - 'scripts/test_windows_shortcut_unicode.ps1'
       - 'scripts/bootstrap_inno_setup.ps1'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
@@ -47,6 +49,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Translation regression failed.' }
           python -B scripts/test_windows_installer.py
           if ($LASTEXITCODE -ne 0) { throw 'Installer contract tests failed.' }
+          ./scripts/test_windows_shortcut_unicode.ps1 -TestRoot "$env:RUNNER_TEMP/gsw-shortcut-validation"
       # This is an explicitly synthetic, never-executed file payload for testing
       # the real installer shell. It is not an accepted native app or release.
       # Actual candidate installation is tested separately; published Setup is
@@ -86,5 +89,6 @@ jobs:
             ${{ runner.temp }}/gsw-installer-fixture/fixture.json
             ${{ runner.temp }}/gsw-setup-validation/
             ${{ runner.temp }}/gsw-setup-ui/
+            ${{ runner.temp }}/gsw-shortcut-validation/
           if-no-files-found: warn
           retention-days: 14

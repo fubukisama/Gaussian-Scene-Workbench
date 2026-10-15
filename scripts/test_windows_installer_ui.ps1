@@ -64,6 +64,7 @@ public static class GswInstallerUiNative {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   public class Control {
     public long Handle {get;set;} public uint ProcessId {get;set;}
+    public int ControlId {get;set;}
     public string ClassName {get;set;} public string Text {get;set;}
     public int Left {get;set;} public int Top {get;set;}
     public int Width {get;set;} public int Height {get;set;}
@@ -78,6 +79,7 @@ public static class GswInstallerUiNative {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr handle);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr handle, StringBuilder text, int count);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+  [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr handle);
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr handle, IntPtr device, uint flags);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
   [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
@@ -88,7 +90,7 @@ public static class GswInstallerUiNative {
     var className = new StringBuilder(256);
     GetWindowText(handle, text, text.Capacity); GetClassName(handle, className, className.Capacity);
     uint processId; GetWindowThreadProcessId(handle, out processId);
-    return new Control {Handle=handle.ToInt64(), ProcessId=processId, Text=text.ToString(), ClassName=className.ToString(),
+    return new Control {Handle=handle.ToInt64(), ProcessId=processId, ControlId=GetDlgCtrlID(handle), Text=text.ToString(), ClassName=className.ToString(),
       Left=rect.Left, Top=rect.Top, Width=rect.Right-rect.Left, Height=rect.Bottom-rect.Top, Enabled=IsWindowEnabled(handle)};
   }
   public static Control[] Windows() {
@@ -195,14 +197,15 @@ function Capture-Page([object]$Wizard, [string]$Locale, [string]$Page) {
 }
 
 $patterns = @{
-  zh_CN = @{ next='下一步'; back='上一步'; cancel='取消'; accept='我同意|我接受'; yes='^是|^确定' }
-  en_US = @{ next='Next'; back='Back'; cancel='Cancel'; accept='I accept'; yes='^Yes' }
-  ja_JP = @{ next='次へ'; back='戻る'; cancel='キャンセル'; accept='同意する'; yes='^はい' }
+  zh_CN = @{ next='下一步'; back='上一步'; cancel='取消'; accept='我同意|我接受' }
+  en_US = @{ next='Next'; back='Back'; cancel='Cancel'; accept='I accept' }
+  ja_JP = @{ next='次へ'; back='戻る'; cancel='キャンセル'; accept='同意する' }
 }
 $oldTemp, $oldTmp = $env:TEMP, $env:TMP
 $report = [ordered]@{ schema='gsw-installer-ui-acceptance-v1'; setupSha256=$metadata.setupSha256; appId=$metadata.appId
-  runRoot=$root; passed=$false; applicationLaunched=$false; installationPerformed=$false; locales=@() }
+  runRoot=$root; passed=$false; applicationLaunched=$false; installationPerformed=$false; locales=@(); cancelConfirmations=@() }
 $failure = $null
+$process = $null
 try {
   $env:TEMP, $env:TMP = $temp, $temp
   foreach ($locale in @('zh_CN', 'en_US', 'ja_JP')) {
@@ -245,29 +248,65 @@ try {
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.next).Handle)
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.cancel).Handle)
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $confirmed = $false
     do {
       $dialogs = @(Get-OwnedWindows $process.Id | Where-Object { $_.Handle -ne $wizard.Handle })
-      $yes = @($dialogs | ForEach-Object { [GswInstallerUiNative]::Children($_.Handle) } | Where-Object {
-        $_.ClassName -match 'Button$' -and $_.Text.Replace('&','') -match $pattern.yes -and $_.Enabled
+      $confirmations = @(foreach ($dialog in $dialogs) {
+        $controls = @([GswInstallerUiNative]::Children($dialog.Handle))
+        # Inno's system-style ExitSetupMsgBox uses native MessageBox buttons.
+        # Their captions follow Windows, not /LANG. IDYES is always 6.
+        $yes = @($controls | Where-Object { $_.ClassName -match 'Button$' -and $_.ControlId -eq 6 -and $_.Enabled })
+        $selection = 'Win32-IDYES-6'
+        if ($yes.Count -eq 1) { [pscustomobject]@{ dialog=$dialog; button=$yes[0]; controls=$controls; selection=$selection } }
       })
-      if ($yes.Count -eq 1) { [GswInstallerUiNative]::Click($yes[0].Handle); break }
+      if ($confirmations.Count -eq 1) {
+        $confirmation = $confirmations[0]
+        $evidence = [ordered]@{locale=$locale;selection=$confirmation.selection;window=$confirmation.dialog
+          selectedButton=$confirmation.button;controls=$confirmation.controls}
+        [IO.File]::WriteAllText((Join-Path $root ($locale + '-cancel-selection.json')), ($evidence | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+        [void](Capture-Page $confirmation.dialog $locale 'cancel-confirmation')
+        [GswInstallerUiNative]::Click($confirmation.button.Handle)
+        $report.cancelConfirmations += [pscustomobject]@{locale=$locale;selection=$confirmation.selection
+          controlId=$confirmation.button.ControlId;caption=$confirmation.button.Text}
+        $confirmed = $true
+        break
+      }
+      if ($confirmations.Count -gt 1) { throw 'More than one test-owned cancellation confirmation was found; no button was pressed.' }
       if ($process.HasExited) { break }
       Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $confirmed -and -not $process.HasExited) { throw 'No unique test-owned IDYES cancellation confirmation appeared; no force termination was attempted.' }
     if (-not $process.WaitForExit(10000)) { throw 'Wizard did not cancel cleanly; no force termination was attempted.' }
     if (Test-Path -LiteralPath (Join-Path $directory 'bin/Gaussian Scene Workbench.exe')) { throw 'UI-only acceptance unexpectedly installed the program.' }
     $report.locales += [pscustomobject]@{ locale=$locale; welcome=$true; license=$true; runtime=$true; directory=$true; back=$true; cancel=$true; exitCode=$process.ExitCode }
     $process.Dispose()
+    $process = $null
     Write-Output "Remote installer wizard acceptance passed: $locale."
   }
   $report.passed = $true
 } catch {
   $failure = $_
   $report['error'] = $_.Exception.Message
+  $report['errorDetail'] = $_.ToString()
+  $report['scriptStackTrace'] = $_.ScriptStackTrace
+  # Failure diagnostics are best-effort and must never replace the first error.
+  if ($process) {
+    try {
+      $windows = @(Get-OwnedWindows $process.Id)
+      $state = @(foreach ($window in $windows) {
+        [pscustomobject]@{window=$window;controls=@([GswInstallerUiNative]::Children($window.Handle))}
+      })
+      [IO.File]::WriteAllText((Join-Path $root 'failure-windows.json'), ($state | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    } catch { $report['diagnosticsError'] = $_.Exception.Message }
+  }
 } finally {
   $env:TEMP, $env:TMP = $oldTemp, $oldTmp
   $report['finishedAtUtc'] = [DateTime]::UtcNow.ToString('o')
-  [IO.File]::WriteAllText((Join-Path $root 'wizard-acceptance.json'), ($report | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+  try {
+    [IO.File]::WriteAllText((Join-Path $root 'wizard-acceptance.json'), ($report | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+  } catch {
+    if (-not $failure) { $failure = $_ } else { [Console]::Error.WriteLine('Wizard evidence write also failed: ' + $_.Exception.Message) }
+  }
 }
 Write-Output ('Remote wizard evidence: ' + (Join-Path $root 'wizard-acceptance.json'))
 if ($failure) { throw $failure }
