@@ -363,7 +363,7 @@ class ImageQualityMeasurementCliTests(unittest.TestCase):
         import json
         code, captured, output = self._run_with_open_stdin()
         self.assertEqual(code, 0, captured["stderr"])
-        self.assertEqual(output.read_bytes(), captured["stdout"].replace(b"\r\n", b"\n"))
+        self.assertEqual(output.read_bytes(), captured["stdout"])
         self.assertAlmostEqual(json.loads(captured["stdout"])["metrics"]["psnr"], 48.1308036086791, places=10)
 
     def test_cli_cancel_is_observed_without_input_eof_or_published_report(self):

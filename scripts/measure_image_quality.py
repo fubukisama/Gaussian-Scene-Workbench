@@ -132,8 +132,11 @@ def main(argv=None):
             handle.write(contents)
             handle.flush()
             os.fsync(handle.fileno())
-        sys.stdout.write(contents)
-        sys.stdout.flush()
+        # stdout is an integrity-checked machine channel, not console text:
+        # Windows TextIOWrapper would otherwise rewrite LF to CRLF, making
+        # the actual pipe bytes differ from the newly written report file.
+        sys.stdout.buffer.write(contents.encode("utf-8"))
+        sys.stdout.buffer.flush()
         return 0
     except (InterruptedError, KeyboardInterrupt):
         sys.stderr.write('{"event":"cancelled"}\n')
