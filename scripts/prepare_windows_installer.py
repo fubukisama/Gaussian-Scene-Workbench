@@ -28,6 +28,8 @@ REQUIRED = (
     "bin/Gaussian Scene Workbench.exe", "bin/Qt6Core.dll", "bin/Qt6Gui.dll",
     "bin/Qt6Widgets.dll", "bin/Qt6OpenGL.dll", "bin/Qt6OpenGLWidgets.dll",
     "bin/Qt6Svg.dll", "bin/platforms/qwindows.dll", "COPYING", "LICENSE",
+    "bin/MSVCP140.dll", "bin/MSVCP140_1.dll", "bin/MSVCP140_2.dll",
+    "bin/VCRUNTIME140.dll", "bin/VCRUNTIME140_1.dll",
     "THIRD_PARTY_LICENSES.md", "native/LICENSE.md", "source-manifest.json",
     "build_manifest.json", "backend_manifest.json", "source/native/CMakeLists.txt",
     "source/native/assets/gsw-app-icon.ico", "native/worker/gsw_worker.py",
@@ -37,12 +39,15 @@ REQUIRED = (
     "source/native/third_party/blender-gizmo/BlenderGizmoGeometry.cpp",
 )
 SOURCE_MATERIALS = (
+    "THIRD_PARTY_LICENSES.md",
     "packaging/windows/gsw.iss", "scripts/prepare_windows_installer.py",
     "scripts/build_windows_installer.ps1", "scripts/bootstrap_inno_setup.ps1",
     "scripts/test_windows_installer.py", "scripts/test_windows_installer.ps1",
     "scripts/test_windows_installer_ui.ps1",
     "docs/WINDOWS_INSTALLER.md", "scripts/native_i18n.py",
     "scripts/verify_native_backend.py", "scripts/write_native_source_manifest.ps1",
+    "scripts/create_windows_installer_fixture.py", "scripts/stage_native_crt.ps1",
+    "scripts/test_native_crt.ps1",
 )
 
 
@@ -51,7 +56,7 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def validate_payload(root):
+def validate_payload(root, allow_fixture=False):
     root = Path(root).resolve(strict=True)
     missing = [name for name in REQUIRED if not (root / name).is_file()]
     if missing:
@@ -90,6 +95,10 @@ def validate_payload(root):
     build = json.loads((root / "build_manifest.json").read_text(encoding="utf-8-sig"))
     if build.get("product") != "Gaussian Scene Workbench" or build.get("legacyWebRuntimeIncluded") is not False:
         raise ValueError("Not a native GSW package")
+    if type(build.get("installerFixture", False)) is not bool:
+        raise ValueError("Invalid installer fixture marker")
+    if build.get("installerFixture", False) and not allow_fixture:
+        raise ValueError("Installer fixtures may only be used with an isolated test build")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", build.get("version", "")):
         raise ValueError("Invalid package version")
     return build
@@ -120,10 +129,13 @@ def prepare(package, work, output, source_root, test_build=False):
     package, work, output, source_root = (Path(p).resolve() for p in (package, work, output, source_root))
     if output.is_relative_to(package) or work.is_relative_to(package) or work.exists():
         raise ValueError("Fresh work directory outside the immutable input payload is required")
-    build = validate_payload(package)
+    build = validate_payload(package, allow_fixture=test_build)
     work.mkdir(parents=True)
     payload = work / "payload"
     shutil.copytree(package, payload)
+    shutil.copyfile(source_root / "docs/WINDOWS_INSTALLER.md", payload / "WINDOWS_INSTALLER.md")
+    for notice in (payload / "THIRD_PARTY_LICENSES.md", payload / "source/THIRD_PARTY_LICENSES.md"):
+        shutil.copyfile(source_root / "THIRD_PARTY_LICENSES.md", notice)
     # Installer definition and build tools accompany the program's exact source.
     for relative in SOURCE_MATERIALS:
         target = payload / "source" / relative
@@ -158,6 +170,7 @@ def prepare(package, work, output, source_root, test_build=False):
         "\n".join(f"#define {key} {inno_string(value)}" for key, value in values.items()) + "\n",
         encoding="utf-8-sig")
     return {"schema": "gsw-windows-installer-v1", "appId": app_id, "testBuild": bool(test_build),
+            "installerFixture": build.get("installerFixture", False),
             "version": build["version"], "packageRoot": str(package), "workRoot": str(work),
             "payloadRoot": str(payload), "setupPath": str(output / (name + ".exe")),
             "executableSha256": sha256(package / REQUIRED[0]), "locales": list(LOCALES),

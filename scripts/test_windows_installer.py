@@ -29,6 +29,60 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_fixture_source_manifest(package):
+    """Record the exact synthetic source/executable identity, without executing it."""
+    package = Path(package)
+    source = package / "source"
+    manifest = {
+        "schema": "gsw-native-corresponding-source-v1",
+        "executableSha256": file_hash(package / "bin/Gaussian Scene Workbench.exe"),
+        "license": "GPL-3.0-or-later",
+        "files": [
+            {"path": path.relative_to(source).as_posix(), "size": path.stat().st_size,
+             "sha256": file_hash(path)}
+            for path in sorted(source.rglob("*")) if path.is_file()
+        ],
+    }
+    manifest["sourceFileCount"] = len(manifest["files"])
+    write_json(package / "source-manifest.json", manifest)
+    return manifest
+
+
+def create_fixture_payload(package, *, version="0.3.1-native-preview", installer_fixture=False):
+    """Create controlled non-executable test bytes for the installer boundary.
+
+    This helper does not create a desktop application or a training runtime.
+    Remote fixture callers must mark the payload and use a test-only Setup.
+    """
+    package = Path(package)
+    package.mkdir(parents=True, exist_ok=False)
+    for relative in set(installer.REQUIRED) | set(BACKEND_FILES):
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"# GPL-3.0-or-later fixture, never execute\n" if path.suffix == ".py"
+                         else b"GSW synthetic GPL installer fixture; not executable.\n")
+    for relative in (
+        "source/native/src/main.cpp", "source/native/src/shaders/SurfelProjection.glsl",
+        "source/native/resources.qrc", "source/native/lucide_icons.qrc",
+        "source/native/build_manifest.json", "source/COPYING", "source/LICENSE",
+        "source/THIRD_PARTY_LICENSES.md", "source/native/LICENSE.md",
+    ):
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GPL-3.0-or-later synthetic fixture source; never compile or execute.\n")
+    build = {"product": "Gaussian Scene Workbench", "version": version,
+             "legacyWebRuntimeIncluded": False}
+    if installer_fixture:
+        build["installerFixture"] = True
+        build["channel"] = "installer-fixture"
+    write_json(package / "build_manifest.json", build)
+    write_json(package / "source/native/build_manifest.json", build)
+    write_json(package / "backend_manifest.json", {"runtime": "External Python/Conda environment required",
+                                                    "purpose": "Synthetic installer boundary fixture only"})
+    write_fixture_source_manifest(package)
+    return build
+
+
 class InstallerFixture(unittest.TestCase):
     def setUp(self):
         base = Path(os.environ.get("GSW_INSTALLER_UNIT_ROOT", ROOT / "native/dist/installer-unit-tests"))
@@ -37,24 +91,7 @@ class InstallerFixture(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.package = self.root / "payload 空白 日本語"
-        self.package.mkdir()
-        for relative in set(installer.REQUIRED) | set(BACKEND_FILES):
-            path = self.package / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"# fixture, never execute\n" if path.suffix == ".py" else b"fixture-data\n")
-        for relative in (
-            "source/native/src/main.cpp", "source/native/src/shaders/SurfelProjection.glsl",
-            "source/native/resources.qrc", "source/native/lucide_icons.qrc",
-            "source/native/build_manifest.json", "source/COPYING", "source/LICENSE",
-            "source/THIRD_PARTY_LICENSES.md", "source/native/LICENSE.md",
-        ):
-            path = self.package / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"fixture source\n")
-        self.build = {"product": "Gaussian Scene Workbench", "version": "0.3.1-native-preview",
-                      "legacyWebRuntimeIncluded": False}
-        write_json(self.package / "build_manifest.json", self.build)
-        write_json(self.package / "backend_manifest.json", {"runtime": "External Python/Conda environment required"})
+        self.build = create_fixture_payload(self.package)
         self.refresh_manifest()
         self.sources = self.root / "source checkout"
         for relative in installer.SOURCE_MATERIALS:
@@ -70,19 +107,7 @@ class InstallerFixture(unittest.TestCase):
         self.attempt = 0
 
     def refresh_manifest(self):
-        source = self.package / "source"
-        self.manifest = {
-            "schema": "gsw-native-corresponding-source-v1",
-            "executableSha256": file_hash(self.package / "bin/Gaussian Scene Workbench.exe"),
-            "license": "GPL-3.0-or-later",
-            "files": [
-                {"path": path.relative_to(source).as_posix(), "size": path.stat().st_size,
-                 "sha256": file_hash(path)}
-                for path in sorted(source.rglob("*")) if path.is_file()
-            ],
-        }
-        self.manifest["sourceFileCount"] = len(self.manifest["files"])
-        self.save_manifest()
+        self.manifest = write_fixture_source_manifest(self.package)
 
     def save_manifest(self):
         write_json(self.package / "source-manifest.json", self.manifest)
@@ -91,12 +116,12 @@ class InstallerFixture(unittest.TestCase):
         write_json(self.sources / "native/i18n/catalog.json", self.catalog)
         write_json(self.sources / "packaging/windows/installer-catalog.json", self.catalog)
 
-    def prepare_cli(self, *, work=None, output=None, test_build=True):
+    def prepare_cli(self, *, work=None, output=None, package=None, test_build=True):
         self.attempt += 1
         work = work or self.root / ("work " + str(self.attempt))
         output = output or self.root / "output"
         arguments = [sys.executable, "-B", str(ROOT / "scripts/prepare_windows_installer.py"),
-                     "--package-root", str(self.package), "--work-root", str(work),
+                     "--package-root", str(package or self.package), "--work-root", str(work),
                      "--output-root", str(output), "--source-root", str(self.sources)]
         if test_build:
             arguments.append("--test-build")
@@ -323,6 +348,72 @@ class InstallerTranslationTests(InstallerFixture):
                 entry["en_US"] = text
                 self.save_catalog()
                 self.assert_rejected()
+
+
+class RemoteFixtureCliTests(InstallerFixture):
+    def fixture_cli(self, *, output=None, remote=True):
+        output = output or self.root / "remote installer fixture"
+        environment = dict(os.environ, GITHUB_ACTIONS="true" if remote else "",
+                           PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
+        result = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/create_windows_installer_fixture.py"),
+             "--output-root", str(output)], capture_output=True, text=True, encoding="utf-8",
+            env=environment, cwd=self.root, timeout=30, check=False)
+        return result, Path(output)
+
+    def create_remote_fixture(self):
+        result, output = self.fixture_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)
+        self.assertEqual(record, json.loads((output / "fixture.json").read_text(encoding="utf-8")))
+        return record
+
+    def test_fixture_creator_refuses_local_environment_before_creating_output(self):
+        result, output = self.fixture_cli(remote=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("remote GitHub Actions", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_fixture_creator_never_overwrites_an_existing_output_directory(self):
+        output = self.root / "existing fixture output"
+        output.mkdir()
+        sentinel = output / "user-file.txt"
+        sentinel.write_bytes(b"preserve this original")
+        result, _ = self.fixture_cli(output=output)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(sentinel.read_bytes(), b"preserve this original")
+        self.assertEqual([path.name for path in output.iterdir()], ["user-file.txt"])
+
+    def test_remote_fixture_is_clearly_nonexecutable_marked_and_uses_repository_icon(self):
+        record = self.create_remote_fixture()
+        package = Path(record["packageRoot"])
+        self.assertEqual(record["schema"], "gsw-installer-fixture-v1")
+        self.assertEqual(record["version"], "0.0.0-installer-fixture")
+        self.assertIs(record["installerFixture"], True)
+        self.assertIs(record["applicationExecutable"], False)
+        self.assertIs(record["productionReleaseAllowed"], False)
+        self.assertFalse((package / "bin/Gaussian Scene Workbench.exe").read_bytes().startswith(b"MZ"))
+        self.assertEqual(file_hash(package / "source/native/assets/gsw-app-icon.ico"),
+                         file_hash(ROOT / "native/assets/gsw-app-icon.ico"))
+        self.assertEqual((package / "COPYING").read_bytes(), (ROOT / "COPYING").read_bytes())
+        self.assertIn("INSTALLER ACCEPTANCE FIXTURE ONLY", (package / "FIXTURE-ONLY.md").read_text(encoding="utf-8"))
+        manifest = json.loads((package / "source-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["executableSha256"], file_hash(package / "bin/Gaussian Scene Workbench.exe"))
+        for entry in manifest["files"]:
+            self.assertEqual(file_hash(package / "source" / entry["path"]), entry["sha256"])
+
+    def test_marked_remote_fixture_is_rejected_by_production_installer_cli(self):
+        record = self.create_remote_fixture()
+        result = self.assert_rejected(package=Path(record["packageRoot"]), test_build=False)
+        self.assertIn("fixture", result.stderr.lower())
+
+    def test_marked_remote_fixture_can_only_prepare_a_separate_test_installer(self):
+        fixture = self.create_remote_fixture()
+        record, _ = self.assert_prepared(package=Path(fixture["packageRoot"]), test_build=True)
+        self.assertIs(record["testBuild"], True)
+        self.assertIs(record["installerFixture"], True)
+        self.assertEqual(record["version"], "0.0.0-installer-fixture")
+        self.assertRegex(record["appId"], r"^GSW\.Test\.[a-f0-9]{32}$")
 
 
 class InstallerDefinitionTests(unittest.TestCase):

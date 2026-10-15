@@ -1,5 +1,20 @@
 # Third-Party Licenses
 
+## Microsoft Visual C++ app-local runtime
+
+Native Windows setup packages include unmodified redistributable MSVC x64
+runtime DLLs required by the application and Qt. They remain Microsoft software,
+not GPL-relicensed application source. Staging uses the applicable Visual Studio
+`VC/Redist/MSVC/<version>/x64/Microsoft.VC143.CRT` distribution folder and records
+source directory, original filename, version, Microsoft signature and SHA-256
+in `native-crt-manifest.json`. Existing app-local files are verified without
+inventing their historical source. Never redistribute `debug_nonredist` files
+or copy from System32/WinSxS. Redistribution remains subject to the applicable
+Visual Studio license and Microsoft's distribution list:
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution .
+Setup does not install/remove a shared global CRT. This notice does not grant
+additional Microsoft redistribution rights.
+
 ## Optional native training accelerators
 
 The independent combined L1/SSIM extension in `gaussian-splatting/gsw_loss_cuda/`

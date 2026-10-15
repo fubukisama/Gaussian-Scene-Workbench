@@ -6,6 +6,7 @@ on:
     paths:
       - 'packaging/windows/**'
       - 'scripts/*windows_installer*'
+      - 'scripts/*native_crt*'
       - 'scripts/bootstrap_inno_setup.ps1'
       - '.github/workflows/windows-installer.yml'
       - 'native/i18n/catalog.json'
@@ -14,19 +15,23 @@ on:
     paths:
       - 'packaging/windows/**'
       - 'scripts/*windows_installer*'
+      - 'scripts/*native_crt*'
       - 'scripts/bootstrap_inno_setup.ps1'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   installer:
     name: Windows setup acceptance
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -42,47 +47,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Translation regression failed.' }
           python -B scripts/test_windows_installer.py
           if ($LASTEXITCODE -ne 0) { throw 'Installer contract tests failed.' }
-      # Reuse a fully accepted native main build; this job tests packaging only,
-      # never rebuilds/retrains the primary task or publishes an older binary.
-      - name: Obtain accepted native payload for installer testing
-        timeout-minutes: 20
+      # This is an explicitly synthetic, never-executed file payload for testing
+      # the real installer shell. It is not an accepted native app or release.
+      # Actual candidate installation is tested separately; published Setup is
+      # still gated by the complete Native Windows app/worker/package workflow.
+      - name: Create marked installer-only fixture
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $repo = '${{ github.repository }}'
-          $runs = (gh api "repos/$repo/actions/workflows/native-windows.yml/runs?branch=main&status=success&per_page=20" | ConvertFrom-Json).workflow_runs
-          $accepted = $null
-          foreach ($run in $runs) {
-            if ($run.head_repository.full_name -ne $repo -or $run.conclusion -ne 'success') { continue }
-            $artifacts = (gh api "repos/$repo/actions/runs/$($run.id)/artifacts" | ConvertFrom-Json).artifacts
-            $artifact = @($artifacts | Where-Object { -not $_.expired -and $_.name -like 'Gaussian-Scene-Workbench-*-native-preview-win-x64' })
-            if ($artifact.Count -eq 1) { $accepted = $run; break }
-          }
-          if (-not $accepted) {
-            # During the first native-main migration there may be no successful
-            # main run yet. Wait for its full workflow, not the short viewport job.
-            $main = (gh api "repos/$repo/git/ref/heads/main" | ConvertFrom-Json).object.sha
-            $pending = (gh api "repos/$repo/actions/workflows/native-windows.yml/runs?branch=main&per_page=20" | ConvertFrom-Json).workflow_runs |
-              Where-Object { $_.head_sha -eq $main -and $_.head_repository.full_name -eq $repo } | Select-Object -First 1
-            if (-not $pending) { throw 'No accepted or pending matching native-main workflow exists. Do not substitute an untested build.' }
-            gh run watch $pending.id --repo $repo --exit-status --interval 30
-            if ($LASTEXITCODE -ne 0) { throw 'Matching full native workflow did not pass; installer acceptance cannot use its package.' }
-            $accepted = gh api "repos/$repo/actions/runs/$($pending.id)" | ConvertFrom-Json
-            if ($accepted.conclusion -ne 'success') { throw 'Full native workflow is not successful.' }
-            $artifacts = (gh api "repos/$repo/actions/runs/$($accepted.id)/artifacts" | ConvertFrom-Json).artifacts
-            $artifact = @($artifacts | Where-Object { -not $_.expired -and $_.name -like 'Gaussian-Scene-Workbench-*-native-preview-win-x64' })
-            if ($artifact.Count -ne 1) { throw 'Successful native workflow has no unique complete desktop package.' }
-          }
-          $payload = "$env:RUNNER_TEMP/gsw-accepted-native"
-          gh run download $accepted.id --repo $repo --name $artifact[0].name --dir $payload
-          if ($LASTEXITCODE -ne 0) { throw 'Accepted native artifact download failed.' }
-          [ordered]@{nativeRun=$accepted.id;nativeCommit=$accepted.head_sha;installerCommit='${{ github.sha }}';testOnly=$true;publicReleaseCreated=$false} | ConvertTo-Json | Set-Content -LiteralPath "$env:RUNNER_TEMP/gsw-native-package-origin.json" -Encoding utf8
+          python -I -B scripts/create_windows_installer_fixture.py --output-root "$env:RUNNER_TEMP/gsw-installer-fixture"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer fixture creation failed.' }
+          $fixture = Get-Content "$env:RUNNER_TEMP/gsw-installer-fixture/fixture.json" -Raw | ConvertFrom-Json
+          if (-not $fixture.installerFixture -or $fixture.productionReleaseAllowed -or $fixture.applicationExecutable) { throw 'Fixture safety identity is invalid.' }
       - name: Build isolated test installer
         shell: pwsh
         run: |
+          $fixture = Get-Content "$env:RUNNER_TEMP/gsw-installer-fixture/fixture.json" -Raw | ConvertFrom-Json
           $compiler = ./scripts/bootstrap_inno_setup.ps1 -InstallRoot "$env:RUNNER_TEMP/gsw-inno-7.1.0" -CacheRoot "$env:RUNNER_TEMP/gsw-inno-cache"
-          ./scripts/build_windows_installer.ps1 -PackageRoot "$env:RUNNER_TEMP/gsw-accepted-native" -OutputDirectory "$env:RUNNER_TEMP/gsw-setup-test" -InnoCompiler $compiler -PythonExecutable '${{ steps.python.outputs.python-path }}' -TestBuild
+          ./scripts/build_windows_installer.ps1 -PackageRoot $fixture.packageRoot -OutputDirectory "$env:RUNNER_TEMP/gsw-setup-test" -InnoCompiler $compiler -PythonExecutable '${{ steps.python.outputs.python-path }}' -TestBuild
       - name: Test install upgrade and data-preserving uninstall
         shell: pwsh
         run: |
@@ -100,7 +81,7 @@ jobs:
         with:
           name: windows-installer-acceptance
           path: |
-            ${{ runner.temp }}/gsw-native-package-origin.json
+            ${{ runner.temp }}/gsw-installer-fixture/fixture.json
             ${{ runner.temp }}/gsw-setup-validation/
             ${{ runner.temp }}/gsw-setup-ui/
           if-no-files-found: warn

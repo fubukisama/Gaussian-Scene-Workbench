@@ -44,6 +44,17 @@ First create and verify the complete staged package using the existing native
 CMake/Qt/backend pipeline. Never package only an EXE, a development checkout,
 an arbitrary folder, or this machine's Python environment.
 
+Build tools: PowerShell >=7.2, QA Python >=3.12, Inno Setup 7.1.0 and the official
+MSVC `dumpbin.exe` inspector for a real native payload. Before packaging,
+`scripts/stage_native_crt.ps1 -PackageRoot <staged-root>` resolves the five-file
+baseline and numeric MSVC import closure from official Visual Studio Redist
+directories. Existing valid app-local CRT files are preserved; `-VerifyOnly`
+is read-only. Original filenames, x64 PE headers, Microsoft signatures, versions
+and hashes are recorded. System32/WinSxS/debug libraries are never input.
+The Setup builder independently verifies this closure, so a system-wide CRT
+cannot mask a missing DLL. The installer never runs `vc_redist.exe` or requires
+elevation to install these app-local files.
+
 ```powershell
 $compiler = ./scripts/bootstrap_inno_setup.ps1
 ./scripts/build_windows_installer.ps1 -PackageRoot '<verified native package>' `
@@ -90,10 +101,13 @@ three languages; checks installed files, corresponding source, uninstall entry,
 unique test Start Menu shortcut and preservation of sentinel user/runtime data;
 never launches GSW or touches the actual desktop shortcut. Logs remain on D.
 The regular native app/render/training checks are not replaced by installer tests.
-The small Windows Installer workflow reuses only a complete successful native
-main artifact; during the first migration it waits for the pending full native
-workflow. It never substitutes an upstream-viewport-only success, an older web
-package or an unaccepted native build, and uploads test evidence only.
+The small Windows Installer workflow uses an explicitly marked synthetic
+file fixture to exercise the **real Setup wizard and transactions**, without
+executing a dummy application. This separate installer-only test was approved
+by the user; its `0.0.0-installer-fixture` output is never publishable and normal
+production builds reject it. Local full-candidate installation evidence is
+retained separately. A published Setup still requires the complete native app,
+worker and package workflow; fixture success is never native-program acceptance.
 
 The verified Setup artifact is uploaded by CI only after the complete native
 package gate and installer acceptance pass. Main-task publication remains the

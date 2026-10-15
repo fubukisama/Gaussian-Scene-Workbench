@@ -1,3 +1,4 @@
+#requires -Version 7.2
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$PackageRoot,
@@ -26,6 +27,10 @@ if($TestBuild){$arguments+='--test-build'}
 if($LASTEXITCODE -ne 0){throw 'Native installer preparation failed.'}
 $record=Get-Content -LiteralPath (Join-Path $work 'installer-build.json') -Raw|ConvertFrom-Json
 if(Test-Path -LiteralPath $record.setupPath){throw 'Installer output already exists; choose a fresh output directory.'}
+if(-not $record.installerFixture){
+  $crt=(& (Join-Path $PSScriptRoot 'stage_native_crt.ps1') -PackageRoot $record.payloadRoot -VerifyOnly) -join "`n"
+  [IO.File]::WriteAllText((Join-Path $record.payloadRoot 'native-crt-manifest.json'),$crt,[Text.UTF8Encoding]::new($false))
+}
 & (Join-Path $PSScriptRoot 'write_native_source_manifest.ps1') -PackageRoot $record.payloadRoot
 if($LASTEXITCODE -and $LASTEXITCODE -ne 0){throw 'Installer source manifest failed.'}
 & $PythonExecutable -I -B (Join-Path $PSScriptRoot 'verify_native_backend.py') --root $record.payloadRoot --package
