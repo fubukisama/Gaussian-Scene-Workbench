@@ -120,6 +120,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TrainingPreflightSmokeTest.h
   src/TrainingPerformanceSmokeTest.cpp
   src/TrainingPerformanceSmokeTest.h
+  src/WorkspaceDropSmokeTest.cpp
+  src/WorkspaceDropSmokeTest.h
+  src/WorkspaceDropPlan.cpp
+  src/WorkspaceDropPlan.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -352,6 +356,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION source/docs)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -490,6 +496,11 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   foreach(language zh_CN en_US ja_JP)
+    add_test(NAME native_workspace_drop_${language} COMMAND GaussianSceneWorkbench --smoke-test-workspace-drop --language ${language})
+    set_tests_properties(native_workspace_drop_${language} PROPERTIES
+      TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME native_window_appearance_${language} COMMAND GaussianSceneWorkbench --smoke-test-window-appearance --language ${language})
     set_tests_properties(native_window_appearance_${language} PROPERTIES
       TIMEOUT 30

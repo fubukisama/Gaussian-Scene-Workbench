@@ -18,6 +18,7 @@
 #include "TrainingIsolationSmokeTest.h"
 #include "TrainingPreflightSmokeTest.h"
 #include "TrainingPerformanceSmokeTest.h"
+#include "WorkspaceDropSmokeTest.h"
 #include "GenerationHistorySmokeTest.h"
 #include "BackendLocator.h"
 #include "ProcessingCompletionSmokeTest.h"
@@ -255,6 +256,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption fileDialogHistoryGuardSmokeOption(QStringLiteral("smoke-test-file-dialog-history-guard"),
       QStringLiteral("Verify distinct Unicode targets and newly accepted files survive a full history."));
   parser.addOption(fileDialogHistoryGuardSmokeOption);
+  QCommandLineOption workspaceDropSmokeOption(QStringLiteral("smoke-test-workspace-drop"),
+      QStringLiteral("Verify native workspace file drops and safe import routing."));
+  parser.addOption(workspaceDropSmokeOption);
   QCommandLineOption taskActionsSmokeOption(QStringLiteral("smoke-test-task-actions"),
       QStringLiteral("Verify shared task details, retained logs and failed-launch records."));
   parser.addOption(taskActionsSmokeOption);
@@ -408,7 +412,7 @@ int main(int argc, char *argv[]) {
       parser.isSet(referenceAxesSmokeTestOption);
   const bool gpuPreviewInteropProbe =
       parser.isSet(gpuPreviewInteropProbeOption);
-  const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(iconUiSmokeOption) || parser.isSet(taskActionsSmokeOption) ||
+  const bool smokeTest = parser.isSet(smokeTestOption) || parser.isSet(workspaceDropSmokeOption) || parser.isSet(iconUiSmokeOption) || parser.isSet(taskActionsSmokeOption) ||
                          parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(trainingPreflightSmokeOption) ||
@@ -461,7 +465,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(iconUiSmokeOption)) {
+  if (parser.isSet(workspaceDropSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      smokeTestCompleted = gsw::runWorkspaceDropSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(iconUiSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runIconUiSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

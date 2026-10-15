@@ -486,6 +486,10 @@ QLabel#mutedLabel, QLabel#uiScaleStatus { color: @MUTED_TEXT@; }
 QLabel#statusGood { color: @GOOD_TEXT@; }
   QLabel#statusWarn, QLabel#densityGuardWarning, QLabel#trainingGrowthWarning { color: @WARN_TEXT@; }
 QFrame#inspectorPanel { background: @SURFACE@; }
+QFrame#workspaceDropCard { background: @SURFACE@; border: 2px dashed @FOCUS@; border-radius: 8px; }
+QFrame#workspaceDropCard QLabel { background: transparent; border: 0; padding: 0; }
+QLabel#workspaceDropTitle { font-weight: 600; color: @TEXT@; }
+QLabel#workspaceDropDetail { color: @MUTED_TEXT@; }
 QSplitter::handle { background: @BORDER@; }
 QProgressBar {
   background: @FIELD@;

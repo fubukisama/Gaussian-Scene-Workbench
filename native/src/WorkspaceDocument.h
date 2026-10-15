@@ -66,7 +66,8 @@ public:
   [[nodiscard]] QString activeSceneId() const { return mActiveSceneId; }
   [[nodiscard]] QJsonObject sceneCollectionJson(const QString &rootPath = {}) const;
   void restoreSceneCollection(const QJsonObject &state);
-  bool addScenePath(const QString &path, QString *errorMessage = nullptr);
+  bool addScenePath(const QString &path, QString *errorMessage = nullptr,
+                    bool activateNew = true);
   // A generation result owns a stable object slot, independent of selection.
   bool publishGeneratedScene(const QString &path, const QString &resultSceneId,
                              QString *errorMessage = nullptr);

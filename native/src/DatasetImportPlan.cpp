@@ -45,6 +45,11 @@ QString absoluteCleanPath(const QString &path) {
 
 } // namespace
 
+bool DatasetImportPlan::supportsFile(const QString &path) {
+  const QString suffix = QFileInfo(path).suffix().toLower();
+  return kImageExtensions.contains(suffix) || kVideoExtensions.contains(suffix);
+}
+
 std::optional<DatasetImportPlan>
 DatasetImportPlan::create(const DatasetImportRequest &request,
                           QString *errorMessage) {

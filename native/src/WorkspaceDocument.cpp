@@ -1023,17 +1023,22 @@ bool WorkspaceDocument::removeSceneObjects(const QStringList &ids) {
   return true;
 }
 
-bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage) {
+bool WorkspaceDocument::addScenePath(const QString &path, QString *errorMessage,
+                                     const bool activateNew) {
   const PlyMetadata metadata = inspectPly(path, errorMessage);
   if (!metadata.valid) return false;
   storeActiveScene();
-  mActiveSceneId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  mScenePath = normalizedAbsolutePath(path);
-  mSceneTranslation = {};
-  mSceneRotation = {};
-  mSceneScale = {1, 1, 1};
-  mSceneMetadata = metadata;
-  mSceneObjects.append({mActiveSceneId, mScenePath, {}, {}, {1, 1, 1}, metadata.vertexCount});
+  const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const QString scenePath = normalizedAbsolutePath(path);
+  mSceneObjects.append({id, scenePath, {}, {}, {1, 1, 1}, metadata.vertexCount});
+  if (activateNew || mActiveSceneId.isEmpty()) {
+    mActiveSceneId = id;
+    mScenePath = scenePath;
+    mSceneTranslation = {};
+    mSceneRotation = {};
+    mSceneScale = {1, 1, 1};
+    mSceneMetadata = metadata;
+  }
   setModified(true);
   emit changed();
   return true;

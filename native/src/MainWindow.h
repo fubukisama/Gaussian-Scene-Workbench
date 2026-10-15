@@ -6,6 +6,7 @@
 #include "TrainingOutputLocator.h"
 #include "GenerationHistoryStore.h"
 #include "WorkspaceDocument.h"
+#include "WorkspaceDropPlan.h"
 
 #include <QMainWindow>
 #include <QHash>
@@ -21,6 +22,7 @@ class QAction;
 class QActionGroup;
 class QCloseEvent;
 class QDockWidget;
+class QFrame;
 class QLabel;
 class QMoveEvent;
 class QPlainTextEdit;
@@ -49,11 +51,25 @@ public:
   void offerStartupRecovery();
 
 protected:
+  bool eventFilter(QObject *watched, QEvent *event) override;
   void closeEvent(QCloseEvent *event) override;
   void moveEvent(QMoveEvent *event) override;
   void resizeEvent(QResizeEvent *event) override;
 
 private:
+  enum class SceneImportMode { Ask, Append };
+  bool importSceneFile(const QString &filePath, SceneImportMode mode);
+  bool mHandlingFileDrop = false;
+  QString workspaceDropRejection(const WorkspaceDropPlan &plan, bool blocked) const;
+  void refreshWorkspaceDropFeedback();
+  void showWorkspaceDropSummary(int completed, int total);
+  QFrame *mWorkspaceDropCard = nullptr;
+  QLabel *mWorkspaceDropTitle = nullptr;
+  QLabel *mWorkspaceDropDetail = nullptr;
+  WorkspaceDropPlan mWorkspaceDropPreview;
+  QString mWorkspaceDropSummary;
+  int mWorkspaceDropCompleted = 0;
+  int mWorkspaceDropTotal = 0;
   friend bool runListInteractionSmokeTest(MainWindow &window);
   friend bool runTrainingResumeSmokeTest(MainWindow &window);
   friend bool runMeshGenerationSmokeTest(MainWindow &window);

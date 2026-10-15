@@ -4,6 +4,7 @@
 #include "AppLanguage.h"
 #include "WindowUi.h"
 #include "WorkbenchIcons.h"
+#include "WorkspaceDropPlan.h"
 
 #include "AppTheme.h"
 #include "BackendLocator.h"
@@ -49,6 +50,8 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -69,6 +72,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QMoveEvent>
 #include <QPlainTextEdit>
@@ -698,6 +702,35 @@ MainWindow::MainWindow(QWidget *parent)
 
   mViewport = new NativeViewport(this);
   setCentralWidget(mViewport);
+  mViewport->setAcceptDrops(true);
+  mViewport->installEventFilter(this);
+  setAcceptDrops(true);
+  installEventFilter(this);
+  mWorkspaceDropCard = new QFrame(mViewport);
+  mWorkspaceDropCard->setObjectName(QStringLiteral("workspaceDropCard"));
+  mWorkspaceDropCard->setAttribute(Qt::WA_TransparentForMouseEvents);
+  auto *dropLayout = new QVBoxLayout(mWorkspaceDropCard);
+  dropLayout->setContentsMargins(16, 12, 16, 12);
+  dropLayout->setSpacing(6);
+  mWorkspaceDropTitle = new QLabel(mWorkspaceDropCard);
+  mWorkspaceDropTitle->setObjectName(QStringLiteral("workspaceDropTitle"));
+  mWorkspaceDropDetail = new QLabel(mWorkspaceDropCard);
+  mWorkspaceDropDetail->setObjectName(QStringLiteral("workspaceDropDetail"));
+  for (auto *label : {mWorkspaceDropTitle, mWorkspaceDropDetail}) {
+    label->setTextFormat(Qt::PlainText);
+    label->setWordWrap(true);
+    dropLayout->addWidget(label);
+  }
+  mWorkspaceDropCard->hide();
+  AppLanguage::bind(mWorkspaceDropCard, "accessibleName", AppLanguage::source("拖放导入"));
+  AppLanguage::onChanged(this, [this] {
+    if (mWorkspaceDropCard->isVisible()) refreshWorkspaceDropFeedback();
+    if (!mWorkspaceDropSummary.isEmpty() && statusBar()->currentMessage() == mWorkspaceDropSummary)
+      showWorkspaceDropSummary(mWorkspaceDropCompleted, mWorkspaceDropTotal);
+  });
+  connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this, [this] {
+    if (mWorkspaceDropCard->isVisible()) refreshWorkspaceDropFeedback();
+  });
   {
     QSettings settings;
     ResourceBudgetPolicy policy;
@@ -756,6 +789,137 @@ MainWindow::~MainWindow() {
   if (mDiscardRecoveryOnDestruction) {
     discardCurrentRecovery();
   }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  const bool dropSurface = watched == this || watched == mViewport ||
+      (mProjectTree && watched == mProjectTree->viewport());
+  if (watched == mViewport && event->type() == QEvent::Resize &&
+      mWorkspaceDropCard && mWorkspaceDropCard->isVisible()) refreshWorkspaceDropFeedback();
+  if (dropSurface && event->type() == QEvent::DragLeave) {
+    mWorkspaceDropCard->hide();
+    event->accept();
+    return true;
+  }
+  if (dropSurface && (event->type() == QEvent::DragEnter ||
+      event->type() == QEvent::DragMove || event->type() == QEvent::Drop)) {
+    auto *drop = static_cast<QDropEvent *>(event);
+    if (!drop->mimeData()->hasUrls()) {
+      mWorkspaceDropCard->hide();
+      drop->ignore();
+      return true;
+    }
+    WorkspaceDropPlan plan = WorkspaceDropPlan::fromUrls(drop->mimeData()->urls());
+    const bool canCopy = drop->possibleActions().testFlag(Qt::CopyAction);
+    if (!canCopy) {
+      plan.kind = WorkspaceDropPlan::Kind::Invalid;
+      plan.error = WorkspaceDropPlan::Error::CopyRequired;
+    }
+    const bool blocked = mHandlingFileDrop || mProcessSupervisor.isRunning() || mRecoveryBlocked;
+    QString projectError;
+    if (!blocked && event->type() == QEvent::Drop && plan.kind == WorkspaceDropPlan::Kind::Project) {
+      // Validate in an isolated document before save/discard prompts can touch
+      // current edits. This never creates a worker or writes the source.
+      WorkspaceDocument candidate;
+      if (!candidate.load(plan.paths.constFirst(), &projectError)) {
+        plan.kind = WorkspaceDropPlan::Kind::Invalid;
+        plan.error = WorkspaceDropPlan::Error::InvalidProject;
+        plan.problemPath = plan.paths.constFirst();
+      }
+    }
+    mWorkspaceDropPreview = plan;
+    const bool accepted = !blocked && plan.kind != WorkspaceDropPlan::Kind::Invalid && canCopy;
+    if (event->type() != QEvent::Drop) {
+      refreshWorkspaceDropFeedback();
+      mWorkspaceDropCard->show();
+      mWorkspaceDropCard->raise();
+    } else mWorkspaceDropCard->hide();
+    if (!accepted) {
+      drop->ignore();
+      if (event->type() == QEvent::Drop && canCopy && !mHandlingFileDrop) {
+        QScopedValueRollback<bool> active(mHandlingFileDrop, true);
+        QMessageBox rejection(QMessageBox::Information, {}, {}, QMessageBox::Ok, this);
+        rejection.setObjectName(QStringLiteral("workspaceDropRejectedDialog"));
+        rejection.setTextFormat(Qt::PlainText);
+        AppLanguage::bind(&rejection, "windowTitle", AppLanguage::source("无法拖入这些文件"));
+        const auto refresh = [this, &rejection, plan, blocked] {
+          rejection.setText(workspaceDropRejection(plan, blocked));
+        };
+        AppLanguage::onChanged(&rejection, refresh);
+        refresh();
+        if (!projectError.isEmpty()) rejection.setDetailedText(projectError);
+        rejection.exec();
+      }
+    } else {
+      drop->setDropAction(Qt::CopyAction);
+      drop->accept();
+      if (event->type() == QEvent::Drop) {
+        QScopedValueRollback<bool> active(mHandlingFileDrop, true);
+        if (plan.kind == WorkspaceDropPlan::Kind::Project) openProjectFile(plan.paths.constFirst());
+        else if (plan.kind == WorkspaceDropPlan::Kind::Media) importDatasetSources(plan.paths);
+        else {
+          int completed = 0;
+          for (const QString &path : plan.paths) {
+            if (!importSceneFile(path, SceneImportMode::Append)) break;
+            ++completed;
+          }
+          showWorkspaceDropSummary(completed, plan.paths.size());
+        }
+      }
+    }
+    return true;
+  }
+  return QMainWindow::eventFilter(watched, event);
+}
+
+QString MainWindow::workspaceDropRejection(const WorkspaceDropPlan &plan, const bool blocked) const {
+  if (blocked) return QCoreApplication::translate("Workbench", "请先等待当前任务或导入操作结束，再拖入文件。");
+  switch (plan.error) {
+  case WorkspaceDropPlan::Error::Unreadable:
+    return QCoreApplication::translate("Workbench", "文件不存在或无法读取：%1").arg(QDir::toNativeSeparators(plan.problemPath));
+  case WorkspaceDropPlan::Error::Unsupported:
+    return QCoreApplication::translate("Workbench", "不支持此文件类型：%1").arg(QFileInfo(plan.problemPath).fileName());
+  case WorkspaceDropPlan::Error::Mixed:
+    return QCoreApplication::translate("Workbench", "工程文件必须单独拖入") + QLatin1Char('\n') +
+        QCoreApplication::translate("Workbench", "模型与媒体请分批拖入。");
+  case WorkspaceDropPlan::Error::InvalidProject:
+    return QCoreApplication::translate("Workbench", "无法打开工程") + QLatin1Char('\n') + QDir::toNativeSeparators(plan.problemPath);
+  case WorkspaceDropPlan::Error::CopyRequired:
+    return QCoreApplication::translate("Workbench", "拖放仅支持复制；原文件不会被移动。");
+  default:
+    return QCoreApplication::translate("Workbench", "仅支持本地文件和目录；不接受网页链接。");
+  }
+}
+
+void MainWindow::refreshWorkspaceDropFeedback() {
+  const auto &plan = mWorkspaceDropPreview;
+  const bool blocked = mHandlingFileDrop || mProcessSupervisor.isRunning() || mRecoveryBlocked;
+  if (blocked || plan.kind == WorkspaceDropPlan::Kind::Invalid) {
+    mWorkspaceDropTitle->setText(QCoreApplication::translate("Workbench", "无法拖入这些文件"));
+    mWorkspaceDropDetail->setText(workspaceDropRejection(plan, blocked));
+  } else if (plan.kind == WorkspaceDropPlan::Kind::Models) {
+    mWorkspaceDropTitle->setText(QCoreApplication::translate("Workbench", "松开以追加 %1 个模型").arg(plan.paths.size()));
+    mWorkspaceDropDetail->setText(QCoreApplication::translate("Workbench", "保留现有对象、源坐标和裁剪；不自动配准。"));
+  } else if (plan.kind == WorkspaceDropPlan::Kind::Media) {
+    mWorkspaceDropTitle->setText(QCoreApplication::translate("Workbench", "松开以添加 %1 个媒体来源").arg(plan.paths.size()));
+    mWorkspaceDropDetail->setText(QCoreApplication::translate("Workbench", "支持照片、视频和目录；确认抽帧设置后再导入，不自动训练。"));
+  } else {
+    mWorkspaceDropTitle->setText(QCoreApplication::translate("Workbench", "松开以打开工程"));
+    mWorkspaceDropDetail->setText(QCoreApplication::translate("Workbench", "切换前会询问保存当前修改。"));
+  }
+  const int width = qMax(160, qMin(640, mViewport->width() - 32));
+  mWorkspaceDropCard->setFixedWidth(width);
+  mWorkspaceDropCard->adjustSize();
+  mWorkspaceDropCard->move((mViewport->width() - width) / 2,
+      qMax(16, (mViewport->height() - mWorkspaceDropCard->height()) / 2));
+}
+
+void MainWindow::showWorkspaceDropSummary(const int completed, const int total) {
+  mWorkspaceDropCompleted = completed;
+  mWorkspaceDropTotal = total;
+  mWorkspaceDropSummary = QCoreApplication::translate("Workbench", "已追加 %1 / %2 个模型").arg(completed).arg(total)
+      + QStringLiteral(" · ") + QCoreApplication::translate("Workbench", "原有对象与原文件保持不变。");
+  statusBar()->showMessage(mWorkspaceDropSummary, 8000);
 }
 
 void MainWindow::moveEvent(QMoveEvent *event) {
@@ -1889,6 +2053,8 @@ void MainWindow::createProjectDock() {
   mProjectTree->setAlternatingRowColors(false);
   mProjectTree->setUniformRowHeights(true);
   mProjectTree->setObjectName(QStringLiteral("projectTree"));
+  mProjectTree->viewport()->setAcceptDrops(true);
+  mProjectTree->viewport()->installEventFilter(this);
   mProjectTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
   AppLanguage::bind(mProjectTree, "toolTip", AppLanguage::source("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -5178,10 +5344,18 @@ void MainWindow::importScene() {
 }
 
 bool MainWindow::importSceneFile(const QString &filePath) {
+  return importSceneFile(filePath, SceneImportMode::Ask);
+}
+
+bool MainWindow::importSceneFile(const QString &filePath, const SceneImportMode mode) {
+  if (mProcessSupervisor.isRunning()) {
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "请先等待当前任务或导入操作结束，再拖入文件。"), 8000);
+    return false;
+  }
   if (filePath.isEmpty() || !ensureProjectRecoveryReady() ||
       !ensureProjectForDataAction(QCoreApplication::translate("Workbench", "导入模型（PLY / SPZ）"))) return false;
-  bool append = false;
-  if (!mWorkspace.sceneObjects().isEmpty()) {
+  bool append = mode == SceneImportMode::Append;
+  if (mode == SceneImportMode::Ask && !mWorkspace.sceneObjects().isEmpty()) {
     QMessageBox choice(QMessageBox::Question, QString(), QString(),
                        QMessageBox::NoButton, this);
     choice.setObjectName(QStringLiteral("sceneImportChoiceDialog"));
@@ -5251,9 +5425,14 @@ bool MainWindow::importSceneFile(const QString &filePath) {
   }
   // A failed/cancelled decode must not discard edits on the current model.
   // Ask only once the replacement is ready to be adopted.
-  if (!confirmDiscardSceneEdits()) return false;
+  if (mProcessSupervisor.isRunning()) return false;
+  if (!append && !confirmDiscardSceneEdits()) return false;
+  // Crops are transient per-object state, not persisted in project JSON.
+  // Keep an edited object active so the existing export/discard/cancel guard
+  // still runs before any later project switch, exit or tree activation.
+  const bool keepEditedSceneActive = append && mViewport->hasUnsavedSceneEdits();
   QString error;
-  if (!(append ? mWorkspace.addScenePath(scenePath, &error)
+  if (!(append ? mWorkspace.addScenePath(scenePath, &error, !keepEditedSceneActive)
                : mWorkspace.setScenePath(scenePath, &error))) {
     showError(QCoreApplication::translate("Workbench", "无法导入场景"), error);
     return false;
@@ -5262,7 +5441,7 @@ bool MainWindow::importSceneFile(const QString &filePath) {
     spzDirectory->setAutoRemove(false);
     appendTaskEvent(QCoreApplication::translate("Workbench", "SPZ 已解码为工程内 PLY 工作副本：%1；保留高斯参数，不能恢复压缩前丢失的精度。").arg(QDir::toNativeSeparators(scenePath)));
   }
-  const PlyMetadata metadata = mWorkspace.sceneMetadata();
+  const PlyMetadata metadata = WorkspaceDocument::inspectPly(scenePath);
   const QString sceneType =
       metadata.looksLikeGaussianSplat()
           ? QCoreApplication::translate("Workbench", "Gaussian Splat")

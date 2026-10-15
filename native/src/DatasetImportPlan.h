@@ -17,6 +17,7 @@ struct DatasetImportRequest {
 
 class DatasetImportPlan final {
 public:
+  [[nodiscard]] static bool supportsFile(const QString &path);
   [[nodiscard]] static std::optional<DatasetImportPlan>
   create(const DatasetImportRequest &request, QString *errorMessage = nullptr);
 
