@@ -34,7 +34,9 @@ def atomic_json(path, value):
             temporary.unlink()
 
 
-def file_digest(path):
+def file_digest(path, text_source=False):
+    if text_source:
+        return hashlib.sha256(Path(path).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
@@ -86,8 +88,9 @@ def training_identity(dataset, opt, pipe):
                 # Density policy changes invalidate old optimizer-state resumes.
                 "native_density_source": file_digest(Path(__file__).with_name("training_density_control.py"))}
     if getattr(dataset, "_gsw_camera_contract", None) is not None:
-        settings["native_camera_training_source"] = file_digest(Path(__file__).with_name("canonical_training.py"))
-        settings["native_camera_dataset_source"] = file_digest(Path(__file__).parents[1] / "backend" / "camera_dataset.py")
+        settings["native_density_source"] = file_digest(Path(__file__).with_name("training_density_control.py"), text_source=True)
+        settings["native_camera_training_source"] = file_digest(Path(__file__).with_name("canonical_training.py"), text_source=True)
+        settings["native_camera_dataset_source"] = file_digest(Path(__file__).parents[1] / "backend" / "camera_dataset.py", text_source=True)
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
 
 

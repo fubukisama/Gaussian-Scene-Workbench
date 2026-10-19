@@ -41,7 +41,13 @@ def select_camera_rasterizer(repository_root, runtime_root):
                 raise ValueError('camera_pinhole_rasterizer_unsafe_path')
             resolved = path.resolve()
             resolved.relative_to(base)
-            if not resolved.is_file() or file_sha256(resolved) != expected:
+            if not resolved.is_file():
+                raise ValueError('camera_pinhole_rasterizer_integrity_mismatch: ' + relative)
+            if key == 'source_files' and proof.get('source_hash_mode') == 'text-lf-v1':
+                actual = hashlib.sha256(resolved.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+            else:
+                actual = file_sha256(resolved)
+            if actual != expected:
                 raise ValueError('camera_pinhole_rasterizer_integrity_mismatch: ' + relative)
     return {'root': str(runtime_root), 'proof': proof, 'proofSha256': file_sha256(proof_path)}
 

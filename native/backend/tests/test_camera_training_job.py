@@ -10,6 +10,17 @@ from native.backend import compute
 
 
 class CameraTrainingJobTests(unittest.TestCase):
+    def test_source_code_identity_normalizes_only_line_endings_not_binary_payloads(self):
+        from native.worker.training_checkpoint import file_digest
+        base = Path('D:/Codex/qa-camera-p0')
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temporary:
+            a, b = Path(temporary) / 'lf.py', Path(temporary) / 'crlf.py'
+            a.write_bytes(b'line1\nline2\n')
+            b.write_bytes(b'line1\r\nline2\r\n')
+            self.assertNotEqual(file_digest(a), file_digest(b))
+            self.assertEqual(file_digest(a, text_source=True), file_digest(b, text_source=True))
+
     def test_solve_resume_verifies_owned_version_provenance_and_image_bytes(self):
         from native.backend import camera_admission
         from scripts.verify_camera_scale_gpu import fixture

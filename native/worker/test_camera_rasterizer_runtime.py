@@ -29,6 +29,23 @@ class CameraRasterizerRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'integrity_mismatch'):
                 select_camera_rasterizer(source, runtime)
 
+    def test_source_text_identity_is_portable_across_git_line_endings(self):
+        base = Path('D:/Codex/qa-camera-p0')
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temporary:
+            root = Path(temporary)
+            source, runtime = root / 'source', root / 'runtime'
+            source.mkdir(); runtime.mkdir()
+            (source / 'kernel.cu').write_bytes(b'line1\r\nline2\r\n')
+            (runtime / 'kernel.pyd').write_bytes(b'binary')
+            proof = {'schema': 'gsw.camera_rasterizer_runtime/1', 'pinhole_covariance_version': 1,
+                     'python': '{}.{}'.format(sys.version_info.major, sys.version_info.minor),
+                     'source_hash_mode': 'text-lf-v1',
+                     'source_files': {'kernel.cu': hashlib.sha256(b'line1\nline2\n').hexdigest()},
+                     'runtime_files': {'kernel.pyd': hashlib.sha256(b'binary').hexdigest()}}
+            (runtime / 'camera-rasterizer-proof.json').write_text(json.dumps(proof), encoding='utf-8')
+            self.assertEqual(select_camera_rasterizer(source, runtime)['root'], str(runtime.resolve()))
+
 
 if __name__ == '__main__':
     unittest.main()
