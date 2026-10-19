@@ -172,6 +172,17 @@ jobs:
           & $env:QA_PYTHON -I -B scripts/verify_native_backend.py --root .
           if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 
+      # Fail fast on CPU/backend regressions before the traced C++ build.
+      # This is the same complete worker suite, not a filtered replacement.
+      - name: Test native worker
+        shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
+          GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
+        run: |
+          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_image_quality_measurement native.worker.test_training_stress native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
+          if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
+
       - name: Install SPZ codec dependencies
         shell: pwsh
         run: |
@@ -256,15 +267,6 @@ jobs:
             native/build-ci/Testing/Temporary/CTestCostData.txt
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Test native worker
-        shell: pwsh
-        env:
-          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
-          GSW_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/gsw-security-fixtures
-        run: |
-          & $env:QA_PYTHON -B -m unittest native.worker.test_gsw_worker native.worker.test_import_preflight native.worker.test_training_runtime native.worker.test_training_step_profile native.worker.test_training_resource_policy native.worker.test_training_acceleration native.worker.test_training_loss native.worker.test_surfel_regularization native.worker.test_training_checkpoint native.worker.test_training_camera_lookahead native.worker.test_training_image_pipeline native.worker.test_training_capacity_storage native.worker.test_surfel_render_adapter native.worker.test_training_quality native.worker.test_image_quality_measurement native.worker.test_training_stress native.backend.tests.test_training_backends native.backend.tests.test_path_security native.backend.tests.test_command_security native.backend.tests.test_training_telemetry native.backend.tests.test_texture_collection native.backend.tests.test_scene_workspace
-          if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
 
       - name: Parse setup scripts
         shell: pwsh

@@ -1272,6 +1272,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_sugar_mesh_command_uses_existing_3dgs_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = compute.OUTPUT_DIR
             original_datasets = compute.DATASETS_DIR
             original_sugar = compute.SUGAR_DIR
@@ -1480,6 +1481,7 @@ class TrainingBackendTests(unittest.TestCase):
 
     def test_gs2mesh_mesh_command_uses_existing_3dgs_checkpoint_and_colmap(self):
         with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
             original_output = compute.OUTPUT_DIR
             original_datasets = compute.DATASETS_DIR
             original_gs2mesh = getattr(compute, "GS2MESH_DIR", None)

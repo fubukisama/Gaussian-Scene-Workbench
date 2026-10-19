@@ -17,7 +17,7 @@ class BackendPathSecurityTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gsw-native-path-")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         for name, relative in (("OUTPUT_DIR", "output"), ("DATASETS_DIR", "datasets")):
             path = self.root / relative
             path.mkdir()

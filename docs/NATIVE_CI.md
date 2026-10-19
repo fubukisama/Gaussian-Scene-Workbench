@@ -257,6 +257,14 @@ English: Actual Windows run #150 passed graphics bootstrap 4/4 and native CTest 
 
 ## Official references / 官方资料 / 公式資料
 
+### Canonical worker fixtures and early feedback / 后端规范夹具与提前反馈 / 後端の正規化と早期検査
+
+中文：2026-10-19 复核确认，扩预算后的运行和安装器并行更新均通过全部 115 项原生测试，剩余 3 项 worker 失败来自 SuGaR、GS2Mesh 和托管路径夹具仍保留 Windows 临时根目录别名（`RUNNER~1`），而生产安全模块正确返回规范长名。只在这 3 处夹具根目录入口解析实际路径，精确路径、Unicode、目录边界、恶意嵌套链接和所有后端断言保持不变；自有 D 盘目录别名先复现 3 项失败，修复后同一 346 项 worker／后端矩阵通过，无新增跳过。完整 worker 步骤移到 QA 依赖安装之后、编译和 CodeQL 初始化之前，内容、环境与失败条件不变，避免简单后端错误耗费完整编译时间才反馈。安装器、全部原生 CTest 和安全扫描门槛仍完整执行。
+
+English: The 2026-10-19 audit confirmed that the budget-repaired run and the parallel installer update both passed all 115 native tests. Three remaining worker failures came from SuGaR, GS2Mesh and managed-path fixtures retaining a Windows temporary-root alias (`RUNNER~1`) while production security correctly returned canonical long paths. Only those three fixture-root entry points are resolved; exact paths, Unicode, containment, malicious nested links and every backend assertion remain. An owned D-drive alias reproduced all three failures before the fix; the same 346-test worker/backend matrix then passed without new skips. The unchanged full worker step now runs immediately after QA dependencies, before compilation and CodeQL initialization, so simple backend regressions fail early. Installer acceptance, every native CTest and all security scans still run.
+
+日本語：2026-10-19 の再確認で、予算修正後の実行と並行して追加されたインストーラー更新は、いずれもネイティブ 115 テストをすべて通過しました。残る worker の 3 件は、SuGaR、GS2Mesh、管理パスのテスト用一時ルートが Windows の別名（`RUNNER~1`）を保持し、製品の安全処理が正しく返す正規の長いパスと一致しないためでした。3 か所のテスト用ルート入口だけを正規化し、厳密なパス、Unicode、ディレクトリ境界、後段の悪意あるリンク、全後端の検証条件は維持します。D ドライブの専用別名で先に 3 件の失敗を再現し、修正後は同じ worker／後端 346 テストが新たなスキップなしで通過しました。内容・環境・失敗条件を変えず、全 worker 検査を QA 依存導入直後、コンパイルと CodeQL 初期化の前へ移し、後端の単純な回帰を早期に検出します。インストーラー、全ネイティブ CTest、安全検査は引き続きすべて実行します。
+
 中文：后续完整验收发现，参考轴／侧视旋转测试仍通过查找私有 `QVariantAnimation` 强制跳到终点。视角计时实现改变后，这段测试会在默认视角立即发送鼠标输入并取消尚未完成的吸附，导致并未真正进入侧视的错误验收。现在只在公开 +X 视角确实到达后才开始旋转，使用与网格验收相同的 1500 ms 有界等待和 `1e-6` 角度容差；保留全部旋转、修饰键、数字输入、撤销和重做断言，不设置内部状态。本机可见界面测试已停止；未经用户允许不自动弹出或置顶窗口，剩余可见界面验收由 GitHub runner 完成。
 
 English: Follow-up full acceptance found that the reference-axis/edge-on rotation smoke still searched for a private `QVariantAnimation` and forced it to its endpoint. After the timing implementation changed, that obsolete test immediately sent mouse input at the default pose and cancelled the unfinished snap, so it never actually reached the required side view. It now observes the public +X pose before rotation, with the same bounded 1500 ms wait and `1e-6` angle tolerance as mesh acceptance. All rotation, modifier, numeric-input, undo and redo assertions remain; no private state is set. Local visible GUI testing has stopped. Windows must not open or rise to the foreground without user consent; remaining visible acceptance runs on GitHub runners.
