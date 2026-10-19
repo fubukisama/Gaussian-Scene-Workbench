@@ -3,6 +3,7 @@
 #include "ModelInteraction.h"
 #include "SceneCoordinates.h"
 #include <QBitArray>
+#include <QJsonObject>
 #include <QStringList>
 #include <functional>
 
@@ -26,6 +27,10 @@ struct ModelExportOptions {
   int spzVersion = 4;
   int spzMaximumShDegree = -1; // -1 retains the source degree.
   int spzQuality = 1; // 0 compact (4/3), 1 balanced (5/4), 2 high (8/8).
+  // Explicit recorded-camera recovery, separate from arbitrary scene TRS.
+  QString cameraCoordinateRecovery; // empty, source, metric, training, preserve
+  QString recoveryPythonPath;
+  QString recoveryRepositoryRoot;
   // Called on the export thread. A true return requests cancellation.
   std::function<bool(int)> progress;
 };
@@ -34,7 +39,16 @@ struct ModelExportResult {
   bool success = false;
   bool cancelled = false;
   QString error;
+  QJsonObject coordinateRecovery;
 };
+
+struct CameraScaleRecoveryCapability {
+  bool preserve = false;
+  bool source = false;
+  bool metric = false;
+};
+[[nodiscard]] QString cameraScaleMetadataPath(const QString &source);
+[[nodiscard]] CameraScaleRecoveryCapability cameraScaleRecoveryCapability(const QString &source);
 
 [[nodiscard]] SceneCoordinate3D exportPosition(const SceneCoordinate3D &position,
                                               const ModelExportOptions &options);

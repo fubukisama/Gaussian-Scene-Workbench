@@ -178,37 +178,48 @@ def first_title_mask(image: np.ndarray, scale: float, theme: str) -> np.ndarray:
     return mask
 
 
-def mode_text_mask(image: np.ndarray, scale: float) -> np.ndarray:
+def projection_text_mask(image: np.ndarray, scale: float, theme: str) -> np.ndarray:
     height, width, _ = image.shape
-    left, right = max(0, width - round(250 * scale)), width - round(5 * scale)
-    top, bottom = round(5 * scale), min(round(48 * scale), height)
+    left, right = max(0, width - round(260 * scale)), width - round(5 * scale)
+    top, bottom = round(5 * scale), min(round(300 * scale), height)
     crop = image[top:bottom, left:right].astype(np.int16)
-    # Discover the densely filled badge in the known-good control rather than
-    # relying on its translated width, theme color, or private layout rectangle.
-    # A thin blue world axis can cross this broad region: taking the bounding
-    # box of every colored pixel would include white background as "glyphs".
+    # The former top-right filled tool-state badge no longer exists. Observe
+    # the actual Blender-style navigation's projection caption instead: it is
+    # static across texture controls, unlike the width-dependent mesh statistics.
+    # Broad framebuffer regions and discovered ink rows remain independent of
+    # private navigation rectangles, translated strings and font calculations.
     colored = crop.max(axis=2) - crop.min(axis=2) > 40
-    row_counts = colored.sum(axis=1)
-    dense_rows = np.flatnonzero(row_counts >= max(round(8 * scale), row_counts.max() * 0.20))
-    row_groups = np.split(dense_rows, np.flatnonzero(np.diff(dense_rows) > 1) + 1)
-    row_groups = [group for group in row_groups if len(group) >= round(8 * scale)]
-    if not row_groups:
-        raise AssertionError("Control image has no densely filled tool-state badge")
-    rows = max(row_groups, key=lambda group: int(row_counts[group].sum()))
-    column_counts = colored[rows[0]:rows[-1] + 1].sum(axis=0)
-    dense_columns = np.flatnonzero(column_counts >= max(round(3 * scale), len(rows) * 0.25))
-    column_groups = np.split(dense_columns, np.flatnonzero(np.diff(dense_columns) > 1) + 1)
-    column_groups = [group for group in column_groups if len(group) >= round(10 * scale)]
-    if not column_groups:
-        raise AssertionError("Control image has no continuously filled tool-state badge")
-    columns = max(column_groups, key=lambda group: int(column_counts[group].sum()))
-    inset = max(2, round(3 * scale))
-    x0, x1 = columns[0] + inset, columns[-1] - inset + 1
-    y0, y1 = rows[0] + inset, rows[-1] - inset + 1
-    interior = crop[y0:y1, x0:x1]
-    ink = (interior.min(axis=2) > 170) & (interior.max(axis=2) - interior.min(axis=2) < 32)
+    axis_region = colored[:min(len(colored), round(175 * scale))]
+    row_counts = axis_region.sum(axis=1)
+    # A long one-pixel world axis may have a much larger row total than the
+    # navigation handles. Require consecutive dense rows, not a fraction of
+    # that unrelated maximum, so the thin line cannot hide the real widget.
+    dense_rows = np.flatnonzero(row_counts >= max(1, round(8 * scale)))
+    groups = np.split(dense_rows, np.flatnonzero(np.diff(dense_rows) > 1) + 1)
+    groups = [group for group in groups if len(group) >= round(6 * scale)]
+    if not groups:
+        raise AssertionError("Control image has no visible colored navigation axes")
+    axis_bottom = max(int(group[-1]) for group in groups)
+    neutral = crop.max(axis=2) - crop.min(axis=2) <= 32
+    ink = neutral & ((crop.max(axis=2) < 170) if theme == "light"
+                     else (crop.min(axis=2) > 110))
+    ink[:axis_bottom + 1] = False
+    rows = np.flatnonzero(ink.sum(axis=1) >= max(3, round(3 * scale)))
+    lines = np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1)
+    line = None
+    for group in lines:
+        if len(group) < round(6 * scale):
+            continue
+        columns = np.flatnonzero(ink[group[0]:group[-1] + 1].any(axis=0))
+        # A translated caption has at least two characters. Navigation button
+        # artwork below it is not an acceptable substitute for missing text.
+        if len(columns) and columns[-1] - columns[0] + 1 >= len(group) * 1.6:
+            line = group
+            break
+    if line is None:
+        raise AssertionError("Control image has no meaningful projection-state caption")
     mask = np.zeros((height, width), dtype=bool)
-    mask[top + y0:top + y1, left + x0:left + x1] = ink
+    mask[top + line[0]:top + line[-1] + 1, left:right] = ink[line[0]:line[-1] + 1]
     return mask
 
 
@@ -236,7 +247,7 @@ def compare_capture(control_path: Path, textured_path: Path, metadata: dict,
             failed_regions.append("model_texture_sampling")
     for name, mask, minimum in (
         ("title", first_title_mask(control, scale, theme), 500),
-        ("tool_state", mode_text_mask(control, scale), 50),
+        ("projection_state", projection_text_mask(control, scale, theme), 50),
     ):
         count = int(mask.sum())
         if count < round(minimum * scale * scale):

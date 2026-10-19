@@ -10,6 +10,13 @@
 #
 
 import os
+import sys
+if os.environ.get("GSW_POSE_POLICY") == "locked" and os.environ.get("GSW_CAMERA_DATASET"):
+    _repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if _repository_root not in sys.path:
+        sys.path.insert(0, _repository_root)
+    from native.worker.camera_rasterizer_runtime import configure_camera_rasterizer
+    configure_camera_rasterizer(_repository_root)
 import json
 import torch
 import time
@@ -79,6 +86,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     if native_runtime:
         native_runtime.report_images(scene.getTrainCameras())
     gaussians.training_setup(opt)
+    from native.worker.canonical_training import assert_camera_optimizer_locked
+    assert_camera_optimizer_locked(scene, gaussians)
     if load_iteration and not checkpoint:
         first_iter = load_iteration
     if checkpoint:
@@ -126,6 +135,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if native_checkpoint.control.get("resume"):
             state = native_checkpoint.load(torch, native_identity)
             restore_state(torch, np, gaussians, opt, state, native_identity, camera_names)
+            assert_camera_optimizer_locked(scene, gaussians)
             density_control.restore(state["density_control"])
             native_runtime.restore_quality(state)
             checkpoint_engine = state.get("renderer_engine", "stock")
@@ -213,6 +223,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         rand_idx = randint(0, len(viewpoint_indices) - 1)
         viewpoint_cam = viewpoint_stack.pop(rand_idx)
         vind = viewpoint_indices.pop(rand_idx)
+        if hasattr(scene, "audit_sample"):
+            scene.audit_sample(viewpoint_cam, iteration)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -471,7 +483,8 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
+        validation_configs = ({'name': 'val', 'cameras': scene.getValCameras() if hasattr(scene, 'getValCameras') else []},
+                              {'name': 'test', 'cameras' : scene.getTestCameras()},
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
 
         for config in validation_configs:
@@ -479,9 +492,12 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 l1_test = 0.0
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
-                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                    actual_render_args = renderArgs
+                    if (getattr(viewpoint, 'split', None) in ('val', 'test') and train_test_exp):
+                        actual_render_args = tuple(renderArgs[:-1]) + (False,)
+                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *actual_render_args)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if train_test_exp:
+                    if train_test_exp and not hasattr(viewpoint, 'view_id'):
                         image = image[..., image.shape[-1] // 2:]
                         gt_image = gt_image[..., gt_image.shape[-1] // 2:]
                     if tb_writer and (idx < 5):

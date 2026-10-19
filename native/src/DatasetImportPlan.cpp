@@ -78,6 +78,31 @@ DatasetImportPlan::create(const DatasetImportRequest &request,
   plan.mOverwrite = request.overwrite;
   plan.mSourceCount = request.sourcePaths.size();
 
+  if (!request.cameraInput.isEmpty()) {
+    const QString adapter = request.cameraInput.value(QStringLiteral("adapter")).toString();
+    const QString policy = request.cameraInput.value(QStringLiteral("posePolicy")).toString();
+    const QFileInfo source(request.cameraInput.value(QStringLiteral("sourcePath")).toString());
+    const QSet<QString> adapters{QStringLiteral("auto"), QStringLiteral("blender_transforms"),
+        QStringLiteral("colmap"), QStringLiteral("generic_json"), QStringLiteral("research_json")};
+    if (!adapters.contains(adapter) || policy != QStringLiteral("locked")) {
+      if (errorMessage) *errorMessage = QCoreApplication::translate(
+          "Workbench", "已知相机导入需要受支持的适配器和锁定位姿策略；不会回退到 SfM。");
+      return std::nullopt;
+    }
+    if (request.cameraInput.value(QStringLiteral("sourcePath")).toString().trimmed().isEmpty() ||
+        !source.exists() || (!source.isFile() && !source.isDir()) || !source.isReadable()) {
+      if (errorMessage) *errorMessage = QCoreApplication::translate(
+          "Workbench", "相机来源不存在或不可读取；请重新选择文件或目录。不会运行 COLMAP。");
+      return std::nullopt;
+    }
+    plan.mCameraInput = request.cameraInput;
+    plan.mCameraInput.insert(QStringLiteral("sourcePath"), absoluteCleanPath(source.absoluteFilePath()));
+    plan.mSourceCount = 1;
+    // Formats, image mappings, projection, splits and units are validated once
+    // by the shared Python adapter, not guessed again by the desktop planner.
+    return plan;
+  }
+
   QSet<QString> seenPaths;
   QSet<QString> usedDirectoryLabels;
   const QMimeDatabase mimeDatabase;
@@ -175,6 +200,10 @@ qsizetype DatasetImportPlan::videoCount() const { return mVideoCount; }
 
 qint64 DatasetImportPlan::totalBytes() const { return mTotalBytes; }
 
+bool DatasetImportPlan::hasCameraInput() const { return !mCameraInput.isEmpty(); }
+
+QJsonObject DatasetImportPlan::cameraInput() const { return mCameraInput; }
+
 QString DatasetImportPlan::managedDatasetPath(const QString &datasetRoot) const {
   return QDir(datasetRoot).filePath(managedStorageName(mSceneName));
 }
@@ -206,7 +235,7 @@ bool DatasetImportPlan::writeWorkerConfiguration(
     });
   }
 
-  const QJsonObject config{
+  QJsonObject config{
       {QStringLiteral("task"), QStringLiteral("import")},
       {QStringLiteral("repositoryRoot"), absoluteCleanPath(repositoryRoot)},
       {QStringLiteral("projectRoot"),
@@ -218,6 +247,7 @@ bool DatasetImportPlan::writeWorkerConfiguration(
       {QStringLiteral("overwrite"), mOverwrite},
       {QStringLiteral("files"), files},
   };
+  if (!mCameraInput.isEmpty()) config.insert(QStringLiteral("cameraInput"), mCameraInput);
   const QByteArray data = QJsonDocument(config).toJson(QJsonDocument::Indented);
 
   QSaveFile output(configInfo.absoluteFilePath());

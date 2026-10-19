@@ -158,9 +158,32 @@ QImage firstHudDigit(const QImage &frame, const qreal scale) {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       const auto color = frame.pixelColor(x, y);
-      pixels[y * width + x] = color.blue() > color.red() + 60 && color.blue() > color.green() + 25;
+      const int maximum = std::max({color.red(), color.green(), color.blue()});
+      const int minimum = std::min({color.red(), color.green(), color.blue()});
+      pixels[y * width + x] = maximum - minimum <= 32 && maximum < 170;
     }
   }
+  // The Blender-style public HUD now has two unframed neutral caption lines,
+  // not a blue statistics card. Locate their actual ink rows in a broad
+  // screen region; do not duplicate the renderer's private rectangles/metrics.
+  QVector<QPair<int, int>> lines;
+  int start = -1;
+  for (int y = 0; y <= height; ++y) {
+    int ink = 0;
+    if (y < height)
+      for (int x = 0; x < width; ++x) ink += pixels[y * width + x] == 1;
+    const bool occupied = y < height && ink >= std::max(3, qRound(3 * scale));
+    if (occupied && start < 0) start = y;
+    if (!occupied && start >= 0) {
+      if (y - start >= std::max(6, qRound(6 * scale))) lines.append({start, y});
+      start = -1;
+    }
+  }
+  if (lines.size() < 2) return {};
+  const auto statistics = lines.at(1);
+  for (int y = 0; y < height; ++y)
+    if (y < statistics.first || y >= statistics.second)
+      for (int x = 0; x < width; ++x) pixels[y * width + x] = 0;
   QRect first;
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {

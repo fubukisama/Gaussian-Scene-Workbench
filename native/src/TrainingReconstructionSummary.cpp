@@ -23,7 +23,9 @@ void TrainingReconstructionSummaryScanner::cancel() {
 
 void TrainingReconstructionSummaryScanner::request(
     const QString &datasetPath, const bool runColmap, const QString &python,
-    const QString &backendRoot, const QProcessEnvironment &environment) {
+    const QString &backendRoot, const QProcessEnvironment &environment,
+    const QString &posePolicy, const QString &cameraDatasetPath,
+    const QString &cameraDatasetIdentity) {
   cancel();
   const auto generation = mGeneration;
   const QString script = QDir(backendRoot).filePath(
@@ -44,6 +46,9 @@ void TrainingReconstructionSummaryScanner::request(
                         QStringLiteral("--backend-root"), backendRoot,
                         QStringLiteral("--dataset"), datasetPath};
   if (runColmap) arguments.append(QStringLiteral("--run-colmap"));
+  if (!posePolicy.isEmpty()) arguments.append({QStringLiteral("--pose-policy"), posePolicy});
+  if (!cameraDatasetPath.isEmpty()) arguments.append({QStringLiteral("--camera-dataset"), cameraDatasetPath});
+  if (!cameraDatasetIdentity.isEmpty()) arguments.append({QStringLiteral("--camera-dataset-identity"), cameraDatasetIdentity});
   process->setArguments(arguments);
   auto *timeout = new QTimer(process);
   timeout->setSingleShot(true);

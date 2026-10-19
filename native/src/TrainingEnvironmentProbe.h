@@ -5,6 +5,14 @@
 
 namespace gsw {
 
+struct TrainingCameraProbeOptions {
+  QString posePolicy;
+  QString cameraDatasetPath;
+  QString cameraDatasetIdentity;
+  QString resolutionPolicy;
+  int resolution = 1;
+};
+
 struct TrainingEnvironmentProbeResult final {
   bool ready = false;
   bool policyBlocked = false;
@@ -23,7 +31,8 @@ public:
   run(const QString &python, const QString &backendRoot,
       const QString &datasetPath, const QString &backend, bool runColmap,
       const QProcessEnvironment &environment,
-      int timeoutMilliseconds = 60000);
+      int timeoutMilliseconds = 60000,
+      const TrainingCameraProbeOptions &cameraOptions = {});
 };
 
 } // namespace gsw

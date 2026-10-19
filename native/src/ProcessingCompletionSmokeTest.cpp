@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -114,11 +115,38 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (kind == "2dgs") { bytes.replace("property float scale_2\n", ""); bytes.replace("-3 -3 -3", "-3 -3"); }
       if (kind == "2dgs" && !realBytes.isEmpty()) bytes = realBytes;
       if (!check(write(final, bytes) && write(preview, bytes), "write independent preview/final fixtures")) return false;
+      QByteArray trainingScaleBytes;
       if (training) {
         check(write(QDir(output).filePath("cameras.json"),
             "[{\"img_name\":\"fixture\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]],\"width\":1920,\"height\":1080,\"fx\":1300,\"fy\":1300}]"), "write source camera fixture");
         check(write(QDir(output).filePath("reconstruction_quality.json"),
             "{\"registeredImages\":9,\"inputImages\":9}"), "write quality report fixture");
+        QJsonObject cameraContract{
+            {QStringLiteral("schema"), QStringLiteral("gsw.training_camera_contract/1")},
+            {QStringLiteral("backend"), kind},
+            {QStringLiteral("data_identity"), QString(64, QLatin1Char('a'))},
+            {QStringLiteral("pose_policy"), QStringLiteral("locked")},
+            {QStringLiteral("scale"), QJsonObject{
+                {QStringLiteral("status"), QStringLiteral("source_declared")},
+                {QStringLiteral("source_unit"), QStringLiteral("cm")},
+                {QStringLiteral("meters_per_unit"), .01},
+                {QStringLiteral("canonical_unit"), QStringLiteral("m")},
+                {QStringLiteral("evidence"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("fixture_declaration")}}}}}},
+            {QStringLiteral("transforms"), QJsonObject{
+                {QStringLiteral("source_to_canonical"), QJsonObject{{QStringLiteral("s"), .01},
+                    {QStringLiteral("R"), QJsonArray{QJsonArray{1, 0, 0}, QJsonArray{0, 1, 0}, QJsonArray{0, 0, 1}}},
+                    {QStringLiteral("t"), QJsonArray{0, 0, 0}}, {QStringLiteral("applied"), true}}},
+                {QStringLiteral("canonical_to_training"), QJsonObject{{QStringLiteral("s"), 20},
+                    {QStringLiteral("R"), QJsonArray{QJsonArray{1, 0, 0}, QJsonArray{0, 1, 0}, QJsonArray{0, 0, 1}}},
+                    {QStringLiteral("t"), QJsonArray{0, 0, -.5}}, {QStringLiteral("applied"), true}}}}}};
+        check(write(QDir(output).filePath(QStringLiteral("training-camera-contract.json")),
+                    QJsonDocument(cameraContract).toJson()), "write independent scale-contract fixture");
+        cameraContract.insert(QStringLiteral("ply_sha256"),
+            QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()));
+        trainingScaleBytes = QJsonDocument(cameraContract).toJson();
+        const QFileInfo finalInfo(final);
+        check(write(finalInfo.dir().filePath(finalInfo.completeBaseName() + QStringLiteral(".camera-scale.json")), trainingScaleBytes),
+              "pair each generated Gaussian fixture with its own checksum-bound scale record");
       }
       const QString task = kind + "-completion";
       GenerationExperiment experiment;
@@ -178,6 +206,10 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
         check(wait([&] { return window.mViewport->cameraCount() == 1; }), "protected training result retains source cameras");
         const auto directory = QFileInfo(window.mViewport->scenePath()).absoluteDir();
         check(QFileInfo::exists(directory.filePath("reconstruction_quality.json")), "protected result retains quality report");
+        const QFileInfo protectedInfo(window.mWorkspace.scenePath());
+        QFile protectedScale(directory.filePath(protectedInfo.completeBaseName() + QStringLiteral(".camera-scale.json")));
+        check(protectedScale.open(QIODevice::ReadOnly) && protectedScale.readAll() == trainingScaleBytes,
+              "both training backends publish the exact matching scale contract beside the durable PLY");
       }
       check(window.mViewport->editToolsLocked() == locked, "explicit editing-lock preference survives completion");
       check(window.mRectangleAction->isEnabled() == (training && !locked), "trim availability follows final geometry and lock");
@@ -328,6 +360,73 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
             secondSource.open(QIODevice::ReadOnly) && secondSource.readAll() == secondBytes,
             "both original experiment output sources remain byte-identical after completion");
       }
+    }
+  }
+  // A valid PLY header is not sufficient for a camera-aware result. Exercise
+  // the public terminal controller path, including the former legacy fallback
+  // to the original output when protected publication fails.
+  for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+    for (const bool missingRecord : {false, true}) {
+      const QString name = backend + (missingRecord ? QStringLiteral("-missing-scale") : QStringLiteral("-wrong-scale-hash"));
+      const QString project = root.filePath(name + QStringLiteral(".files"));
+      const QString original = QDir(project).filePath(QStringLiteral("reference.ply"));
+      QString error;
+      if (!check(QDir().mkpath(project) && window.mWorkspace.create(project, &error) &&
+          window.mWorkspace.saveManifest(root.filePath(name + QStringLiteral(".gsw")), &error) &&
+          write(original, points) && window.mWorkspace.setScenePath(original, &error),
+          "retain an independent reference for rejected camera-scale output")) return false;
+      const QString referenceId = window.mWorkspace.activeSceneId();
+      const QString output = QDir(project).filePath(QStringLiteral("output/rejected"));
+      const QString final = QDir(output).filePath(QStringLiteral("point_cloud/iteration_2/point_cloud.ply"));
+      const QString preview = QDir(output).filePath(QStringLiteral("live.ply"));
+      QByteArray bytes = gaussian;
+      if (backend == QStringLiteral("2dgs")) {
+        bytes.replace("property float scale_2\n", "");
+        bytes.replace("-3 -3 -3", "-3 -3");
+      }
+      if (!check(write(final, bytes) && write(preview, bytes) &&
+          write(QDir(output).filePath(QStringLiteral("training-camera-contract.json")), "{}"),
+          "write a camera-aware training result with a deliberately invalid scale artifact")) return false;
+      if (!missingRecord) {
+        const QFileInfo info(final);
+        check(write(info.dir().filePath(info.completeBaseName() + QStringLiteral(".camera-scale.json")),
+            QJsonDocument(QJsonObject{{QStringLiteral("schema"), QStringLiteral("gsw.training_camera_contract/1")},
+                {QStringLiteral("ply_sha256"), QString(64, QLatin1Char('0'))}}).toJson()),
+            "write a mismatched scale checksum without changing PLY bytes");
+      }
+      GenerationExperiment experiment;
+      experiment.id = name;
+      experiment.pipeline = QStringLiteral("training");
+      experiment.backend = backend;
+      experiment.displayName = name;
+      experiment.configurationPath = QDir(project).filePath(QStringLiteral(".gsw/jobs/rejected.json"));
+      experiment.outputRoot = output;
+      experiment.resultSceneId = name;
+      experiment.status = QStringLiteral("queued");
+      experiment.parameters = {{QStringLiteral("backend"), backend},
+          {QStringLiteral("trainOptions"), QJsonObject{{QStringLiteral("iterations"), 2}}}};
+      if (!check(write(experiment.configurationPath, QJsonDocument(experiment.parameters).toJson()) &&
+          GenerationHistoryStore(project).upsert(experiment, &error), "retain the rejected experiment's own archive")) return false;
+      const QString task = name + QStringLiteral("-completion");
+      window.mPendingTraining = MainWindow::PendingTraining{task, project, {}, output, backend, 2, name};
+      window.mPendingTraining->historyId = name;
+      const QString release = QDir(output).filePath(QStringLiteral("release"));
+      if (!check(window.mProcessSupervisor.start(task, helper,
+          {"completion-worker", preview, release, "gaussian"}, {}, {}, true),
+          "start a test-owned completion process for invalid scale metadata")) return false;
+      if (!check(wait([&] { return window.mViewport->scenePath() == preview; }),
+          "a preview can look valid while the final scale artifact remains invalid")) return false;
+      check(write(release, "done"), "release the invalid-scale completion process");
+      if (!check(wait([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTraining; }),
+          "invalid-scale completion reaches its public terminal event")) return false;
+      const auto archived = GenerationHistoryStore(project).record(name);
+      check(archived.status == QStringLiteral("failed") && archived.resultPath.isEmpty() &&
+          window.mWorkspace.activeSceneId() == referenceId && window.mWorkspace.scenePath() == original &&
+          window.mWorkspace.sceneObjects().size() == 1,
+          "invalid or missing scale metadata cannot use original-file fallback or replace a reference object");
+      QFile source(final);
+      check(source.open(QIODevice::ReadOnly) && source.readAll() == bytes,
+          "rejected camera-scale output remains available unchanged for investigation");
     }
   }
   if (!realModel.isEmpty()) {

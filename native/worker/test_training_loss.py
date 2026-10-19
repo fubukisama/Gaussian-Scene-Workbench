@@ -4,6 +4,8 @@ import importlib.util
 import math
 from pathlib import Path
 import sys
+from types import SimpleNamespace
+from unittest import mock
 
 from native.worker.training_loss import validate_loss_weight, PhotometricLoss
 
@@ -34,6 +36,90 @@ class TensorLossTests(unittest.TestCase):
         from utils.loss_utils import l1_loss, ssim
         cls.l1 = staticmethod(l1_loss)
         cls.ssim = staticmethod(ssim)
+
+    def test_fused_public_loss_alternates_dimensions_without_capacity_becoming_gradient_shape(self):
+        """CPU external-device/kernel boundary reproduces the actual ABI view.
+
+        This does not certify CUDA arithmetic; real-kernel acceptance runs in
+        the dedicated training environment. The mock retains the native ABI's
+        buffers[6].view_as(image), which exposed the production failure.
+        """
+        from native.worker.training_loss import reference_ssim, FUSED_SSIM_UPSTREAM_COMMIT
+        torch = self.torch
+
+        class CudaBoundaryTensor(torch.Tensor):
+            @property
+            def is_cuda(self):
+                return True
+
+        class CpuCudaBoundary:
+            cuda = SimpleNamespace(is_available=lambda: True, synchronize=lambda: None)
+
+            def __getattr__(self, name):
+                return getattr(torch, name)
+
+            def _create(self, name, *args, **kwargs):
+                if str(kwargs.get("device", "")).startswith("cuda"):
+                    kwargs["device"] = "cpu"
+                return getattr(torch, name)(*args, **kwargs).as_subclass(CudaBoundaryTensor)
+
+            def linspace(self, *args, **kwargs):
+                return self._create("linspace", *args, **kwargs)
+
+            def arange(self, *args, **kwargs):
+                return self._create("arange", *args, **kwargs)
+
+            def empty(self, *args, **kwargs):
+                return self._create("empty", *args, **kwargs)
+
+        class ExternalKernelBoundary:
+            SOURCE_COMMIT = FUSED_SSIM_UPSTREAM_COMMIT
+            LICENSE_ID, KERNEL_ABI, KERNEL_VERSION = "MIT", 2, "cpu-abi-contract-only"
+            __file__ = __file__
+
+            @staticmethod
+            def forward(image, target, weight, buffers):
+                # External CUDA execution is represented by the independently
+                # defined CPU objective; workspace sizing/view ABI is exact.
+                with torch.enable_grad():
+                    reference = image.detach().clone().requires_grad_()
+                    truth = target.float() / 255 if target.dtype == torch.uint8 else target
+                    l1 = (reference - truth).abs().mean()
+                    loss = (1 - weight) * l1 + weight * (1 - reference_ssim(torch, reference, truth))
+                    gradient = torch.autograd.grad(loss, reference)[0]
+                with torch.no_grad():
+                    buffers[6][:image.numel()].copy_(gradient.flatten())
+                    buffers[5][:2].copy_(torch.stack((loss.detach(), l1.detach())))
+                return buffers[5]
+
+            @staticmethod
+            def backward(image, target, weight, grad_loss, buffers):
+                return buffers[6].view_as(image) * grad_loss
+
+        threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        self.addCleanup(torch.set_num_threads, threads)
+        with mock.patch("native.worker.training_loss.importlib.import_module", return_value=ExternalKernelBoundary):
+            implementation = PhotometricLoss(CpuCudaBoundary(), self.l1, self.ssim, mode="fused_l1_ssim")
+        self.assertTrue(implementation.status()["proof"]["ready"])
+        for shape in ((3, 4, 5), (3, 6, 7), (3, 5, 4), (3, 4, 5),
+                      (2, 3, 3, 4), (3, 3, 4), (3, 6, 7)):
+            for target_bytes in (False, True):
+                for weight in (0., .2, 1.):
+                    with self.subTest(shape=shape, bytes=target_bytes, weight=weight):
+                        image = torch.linspace(.12, .88, math.prod(shape)).reshape(shape).as_subclass(CudaBoundaryTensor).detach().requires_grad_()
+                        target = image.detach().flip(-1).contiguous()
+                        if target_bytes:
+                            target = (target * 255).round().to(torch.uint8)
+                        truth = target.float() / 255 if target_bytes else target
+                        reference = image.detach().clone().requires_grad_()
+                        expected = (1-weight)*self.l1(reference, truth) + weight*(1-reference_ssim(torch, reference, truth))
+                        (2.7 * expected).backward()
+                        loss, _ = implementation.compute(image, target, weight)
+                        (2.7 * loss).backward()
+                        self.assertEqual(implementation.status()["effective"], "fused_l1_ssim")
+                        self.assertLess(float((image.grad-reference.grad).abs().max()), 2e-6)
+                        self.assertLess(abs(float(loss.detach()) - float(expected.detach())), 1e-6)
 
     def test_cuda_combined_loss_and_gradient_match_current_same_padding_objective(self):
         torch = self.torch

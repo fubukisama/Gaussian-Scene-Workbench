@@ -173,7 +173,9 @@ private:
   void newProject();
   void importDataset();
   void importDatasetDirectory();
-  void importDatasetSources(const QStringList &sourcePaths);
+  void importCameraDataset();
+  void importDatasetSources(const QStringList &sourcePaths,
+                            const QJsonObject &cameraInput = {});
   void attachExistingDataset();
   void importScene();
   void clearDatasetImport();
@@ -257,6 +259,7 @@ private:
   QLabel *mDatasetValue = nullptr;
   QLabel *mDatasetNameValue = nullptr;
   QLabel *mImageCountValue = nullptr;
+  QLabel *mCameraDatasetInfoValue = nullptr;
   QLabel *mSceneValue = nullptr;
   QLabel *mGaussianCountValue = nullptr;
   QLabel *mPlyFormatValue = nullptr;
@@ -285,6 +288,7 @@ private:
   QAction *mExternalBackupsAction = nullptr;
   QAction *mImportDatasetAction = nullptr;
   QAction *mImportDatasetDirectoryAction = nullptr;
+  QAction *mImportCameraDatasetAction = nullptr;
   QAction *mAttachDatasetAction = nullptr;
   QAction *mImportSceneAction = nullptr;
   QAction *mClearDatasetAction = nullptr;

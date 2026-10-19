@@ -22,7 +22,10 @@ public:
   ~TrainingReconstructionSummaryScanner() override;
   void request(const QString &datasetPath, bool runColmap,
                const QString &python, const QString &backendRoot,
-               const QProcessEnvironment &environment);
+               const QProcessEnvironment &environment,
+               const QString &posePolicy = {},
+               const QString &cameraDatasetPath = {},
+               const QString &cameraDatasetIdentity = {});
   void cancel();
 signals:
   void summaryReady(const gsw::TrainingReconstructionSummary &summary);

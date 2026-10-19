@@ -155,7 +155,13 @@ Footprint footprint(const QImage &image, bool cyan, bool fullWidth = false,
       const bool colorContrast = allowPastels
           ? c.blue() > rejected + 20 && other > rejected + 20
           : c.blue() > rejected * 2 && other > rejected * 2;
-      if (c.blue() > 60 && other > 60 && std::abs(c.blue() - other) < 20 && colorContrast) {
+      // One-pixel GL points are multisampled over the already drawn grid.
+      // A red/green axis in the background changes the surviving channels by
+      // different amounts: equal source R/B (or G/B) need not stay equal in
+      // the captured framebuffer. Require both marker channels to contrast
+      // against the rejected channel; single colored axes/gray cannot pass.
+      const bool sourceChannelBalance = allowPastels || std::abs(c.blue() - other) < 20;
+      if (c.blue() > 60 && other > 60 && sourceChannelBalance && colorContrast) {
         result.center += QPointF(x, y);
         result.bounds = result.pixels == 0 ? QRect(x, y, 1, 1)
                                           : result.bounds.united(QRect(x, y, 1, 1));
@@ -198,6 +204,26 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
     }
     return condition;
   };
+  // Calibrate the pixel oracle independently of the renderer under test.
+  // These literal colors include source-marker coverage over a red/green
+  // background (unequal surviving channels), plus subpixel edge coverage.
+  // The extent/count gates below are unchanged; this prevents the oracle
+  // from dropping an entire real point row merely because an axis is behind it.
+  QImage coverageOracle(800, 500, QImage::Format_RGB32);
+  coverageOracle.fill(Qt::white);
+  for (const QPoint corner : {QPoint(200,200), QPoint(220,200), QPoint(200,220), QPoint(220,220)}) {
+    coverageOracle.setPixelColor(corner, corner.y() == 200 ? QColor(221,21,194) : QColor(87,43,68));
+    coverageOracle.setPixelColor(corner + QPoint(100,0), corner.y() == 200 ? QColor(21,221,194) : QColor(43,87,68));
+  }
+  coverageOracle.setPixelColor(450, 200, QColor(221,21,21));
+  coverageOracle.setPixelColor(451, 200, QColor(21,221,21));
+  coverageOracle.setPixelColor(452, 200, QColor(21,21,221));
+  coverageOracle.setPixelColor(453, 200, QColor(130,130,130));
+  const auto magentaCoverage = footprint(coverageOracle, false, false, true);
+  const auto cyanCoverage = footprint(coverageOracle, true, false, true);
+  check(magentaCoverage.pixels == 4 && magentaCoverage.bounds == QRect(200,200,21,21) &&
+        cyanCoverage.pixels == 4 && cyanCoverage.bounds == QRect(300,200,21,21),
+        "point coverage oracle includes grid-blended marker pixels but excludes axes and gray grid");
   QList<SceneObject> objects;
   for (int i = 0; i < 2; ++i) {
     const QString path = QDir(temporary.path()).filePath(QString("same-frame-%1.ply").arg(i));
@@ -551,10 +577,11 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
     if (!requireVisible()) return false;
     const QImage matrixBefore = viewport.grabFramebuffer();
     if (!requireVisible()) return false;
-    const auto firstPatch = footprint(matrixBefore, false);
-    const auto secondPatch = footprint(matrixBefore, true);
-    const auto fullFirstPatch = footprint(matrixBefore, false, true);
-    const auto fullSecondPatch = footprint(matrixBefore, true, true);
+    const bool pointCoverage = kind == QStringLiteral("points");
+    const auto firstPatch = footprint(matrixBefore, false, false, pointCoverage);
+    const auto secondPatch = footprint(matrixBefore, true, false, pointCoverage);
+    const auto fullFirstPatch = footprint(matrixBefore, false, true, pointCoverage);
+    const auto fullSecondPatch = footprint(matrixBefore, true, true, pointCoverage);
     const QRect matrixRoi(100, 110, matrixBefore.width() - 250, matrixBefore.height() - 210);
     check(matrixRoi.adjusted(2, 2, -2, -2).contains(fullFirstPatch.bounds) &&
           matrixRoi.adjusted(2, 2, -2, -2).contains(fullSecondPatch.bounds),
@@ -573,8 +600,8 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
     if (!requireVisible()) return false;
     const QImage matrixAfter = viewport.grabFramebuffer();
     if (!requireVisible()) return false;
-    const auto firstPatchAfter = footprint(matrixAfter, false);
-    const auto secondPatchAfter = footprint(matrixAfter, true);
+    const auto firstPatchAfter = footprint(matrixAfter, false, false, pointCoverage);
+    const auto secondPatchAfter = footprint(matrixAfter, true, false, pointCoverage);
     qInfo() << "COORDINATE_SCENE matrix active switch:" << kind << "body changed fraction"
             << changedBodyFraction(matrixBefore, matrixAfter) << "marker shifts"
             << QLineF(firstPatch.center, firstPatchAfter.center).length()

@@ -11,6 +11,7 @@
 
 #include "backward.h"
 #include "auxiliary.h"
+#include "pinhole_bounds.h"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -153,6 +154,7 @@ __global__ void computeCov2DCUDA(int P,
 	const float h_x, float h_y,
 	const float tan_fovx, float tan_fovy,
 	const float* view_matrix,
+	const float* projmatrix,
 	const float* opacities,
 	const float* dL_dconics,
 	float* dL_dopacity,
@@ -174,15 +176,14 @@ __global__ void computeCov2DCUDA(int P,
 	float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };
 	float3 t = transformPoint4x3(mean, view_matrix);
 	
-	const float limx = 1.3f * tan_fovx;
-	const float limy = 1.3f * tan_fovy;
+	const auto bounds = gsw_pinhole::covariance_bounds(view_matrix, projmatrix, tan_fovx, tan_fovy);
 	const float txtz = t.x / t.z;
 	const float tytz = t.y / t.z;
-	t.x = min(limx, max(-limx, txtz)) * t.z;
-	t.y = min(limy, max(-limy, tytz)) * t.z;
+	t.x = gsw_pinhole::clamp_coordinate(txtz, bounds.min_x, bounds.max_x) * t.z;
+	t.y = gsw_pinhole::clamp_coordinate(tytz, bounds.min_y, bounds.max_y) * t.z;
 	
-	const float x_grad_mul = txtz < -limx || txtz > limx ? 0 : 1;
-	const float y_grad_mul = tytz < -limy || tytz > limy ? 0 : 1;
+	const float x_grad_mul = gsw_pinhole::unclamped_gradient(txtz, bounds.min_x, bounds.max_x);
+	const float y_grad_mul = gsw_pinhole::unclamped_gradient(tytz, bounds.min_y, bounds.max_y);
 
 	glm::mat3 J = glm::mat3(h_x / t.z, 0.0f, -(h_x * t.x) / (t.z * t.z),
 		0.0f, h_y / t.z, -(h_y * t.y) / (t.z * t.z),
@@ -699,6 +700,7 @@ void BACKWARD::preprocess(
 		tan_fovx,
 		tan_fovy,
 		viewmatrix,
+		projmatrix,
 		opacities,
 		dL_dconic,
 		dL_dopacity,

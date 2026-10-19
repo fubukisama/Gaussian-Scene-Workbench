@@ -31,6 +31,10 @@ struct TrainingConfiguration {
   int trainingMemoryPercent = 90;
   QString trainingEngine = QStringLiteral("stock");
   QString growthMode = QStringLiteral("pause");
+  QString posePolicy = QStringLiteral("solve");
+  QString cameraDatasetPath;
+  QString cameraDatasetIdentity;
+  QString resolutionPolicy = QStringLiteral("manual");
 };
 
 class TrainingDialog final : public QDialog {
@@ -48,6 +52,10 @@ public:
   [[nodiscard]] bool reconstructionPreflightReady() const;
   [[nodiscard]] QString reconstructionDecisionText() const;
   [[nodiscard]] TrainingReconstructionSummary reconstructionSummary() const;
+  void setCameraDatasetReference(const QString &metadataPath,
+                                const QString &dataIdentity = {},
+                                const QString &posePolicy = QStringLiteral("locked"));
+  [[nodiscard]] QJsonObject cameraDatasetSummary() const;
 
 protected:
   void accept() override;
@@ -60,11 +68,15 @@ private:
   [[nodiscard]] bool datasetContainsImages() const;
   void scanReconstructionSummary();
   void refreshReconstructionSummary();
+  void refreshCameraPolicy();
+  void refreshResolutionPolicy();
 
   QString mDatasetPath;
   QComboBox *mBackend = nullptr;
   QComboBox *mQuality = nullptr;
   QComboBox *mResolution = nullptr;
+  QComboBox *mResolutionPolicy = nullptr;
+  QComboBox *mPosePolicy = nullptr;
   QSpinBox *mIterations = nullptr;
   QLineEdit *mOutputRoot = nullptr;
   QLineEdit *mOutputScene = nullptr;
@@ -92,6 +104,12 @@ private:
   bool mReconstructionProbeConfigured = false;
   bool mReconstructionSummaryPending = false;
   bool mRunColmapEdited = false;
+  bool mUpdatingPolicy = false;
+  bool mPreviousLocked = false;
+  int mSolveResolution = 2;
+  QString mCameraDatasetPath;
+  QString mCameraDatasetIdentity;
+  QString mExpectedCameraDatasetIdentity;
 };
 
 } // namespace gsw

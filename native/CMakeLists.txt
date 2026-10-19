@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.1
+  VERSION 0.3.2
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-07-16" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-19" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -146,6 +146,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/BackendLocator.h
   src/CameraTrajectory.cpp
   src/CameraTrajectory.h
+  src/CameraDatasetInfo.cpp
+  src/CameraDatasetInfo.h
   src/ColmapSupport.cpp
   src/ColmapSupport.h
   src/DatasetImportDialog.cpp
@@ -360,6 +362,14 @@ install(FILES LICENSE.md DESTINATION native)
 install(DIRECTORY src tests assets i18n DESTINATION source/native)
 install(DIRECTORY backend DESTINATION source/native
   PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+install(DIRECTORY worker DESTINATION source/native
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+# The independently built research rasterizer retains its upstream license.
+# These sources are not linked into or relicensed as the native GPL GUI.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../gaussian-splatting/submodules/diff-gaussian-rasterization"
+  DESTINATION source/gaussian-splatting/submodules
+  PATTERN "build" EXCLUDE PATTERN "dist" EXCLUDE PATTERN "__pycache__" EXCLUDE
+  PATTERN "*.pyc" EXCLUDE PATTERN "*.egg-info" EXCLUDE)
 install(DIRECTORY third_party/ DESTINATION source/native/third_party PATTERN "2dgs-surfel" EXCLUDE)
 install(FILES CMakeLists.txt resources.qrc lucide_icons.qrc build_manifest.json README.md LICENSE.md
   DESTINATION source/native)
@@ -371,6 +381,12 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text_masks.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/camera_scale_fixtures.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_gpu.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_worker.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_pinhole_rasterizer_gpu.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source/docs)
@@ -407,6 +423,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINA
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION .)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -435,6 +453,18 @@ if(BUILD_TESTING)
   set_tests_properties(native_compute_import PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
   add_test(NAME native_translation_validator_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py")
+  add_test(NAME native_texture_text_masks COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text_masks.py")
+  set_tests_properties(native_texture_text_masks PROPERTIES TIMEOUT 30)
+  add_test(NAME native_camera_scale_p0 COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.backend.tests.test_camera_dataset native.worker.test_camera_admission
+    native.backend.tests.test_camera_scale_export native.backend.tests.test_camera_training_job
+    native.backend.tests.test_camera_training_review
+    native.worker.test_camera_import native.worker.test_canonical_training native.worker.test_camera_rasterizer_runtime)
+  set_tests_properties(native_camera_scale_p0 PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
+  add_executable(gsw_rasterizer_pinhole_oracle tests/RasterizerPinholeOracle.cpp)
+  add_test(NAME rasterizer_pinhole_bounds COMMAND gsw_rasterizer_pinhole_oracle)
+  set_tests_properties(rasterizer_pinhole_bounds PROPERTIES TIMEOUT 30)
   add_test(NAME native_training_performance_policy COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.worker.test_training_runtime native.worker.test_training_step_profile
     native.worker.test_training_resource_policy native.worker.test_training_acceleration

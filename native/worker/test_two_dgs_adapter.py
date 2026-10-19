@@ -22,6 +22,7 @@ from native.worker.training_preview import TrainingPreviewPublisher
 from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
+from native.worker.training_runtime import NativeTrainingRuntime
 
 
 class TwoDgsAdapterTests(unittest.TestCase):
@@ -99,7 +100,8 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 self.model_path = dataset.model_path
                 self.cameras_extent = 2.
                 self.cameras = [SimpleNamespace(image_name=str(i), colmap_id=i,
-                                original_image=torch.full((4, 3), i * .1)) for i in range(4)]
+                                image_width=3, image_height=4,
+                                original_image=torch.full((1, 4, 3), i * .1)) for i in range(4)]
                 random.shuffle(self.cameras)
                 models[self.model_path] = model
 
@@ -115,6 +117,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
             # All RNG families influence subsequent updates. The renderer is a
             # deterministic differentiable test double, not the CUDA rasterizer.
             image = model._xyz * (1 + model._scaling.mean()) + torch.rand(1) * .01 + np.random.rand() * .01
+            image = image.unsqueeze(0)
             return dict(render=image, viewspace_points=model._xyz,
                         visibility_filter=torch.ones(4, dtype=torch.bool), radii=torch.ones(4),
                         rend_dist=image * .1, rend_normal=image, surf_normal=image * .5)
@@ -149,6 +152,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                       TrainingPreviewPolicy=TrainingPreviewPolicy,
                       close_preview_safely=close_preview_safely,
                       NativeDensityControl=NativeDensityControl,
+                      NativeTrainingRuntime=NativeTrainingRuntime,
                       emit_loaded_training_summary=emit_loaded_training_summary,
                       l1_loss=lambda a, b: (a - b).abs().mean(), ssim=lambda a, b: 1 - ((a - b)**2).mean(),
                       psnr=lambda a, b: -10 * torch.log10(((a-b)**2).mean()),
@@ -158,9 +162,17 @@ class TwoDgsAdapterTests(unittest.TestCase):
                                   densify_until_iter=10, densify_from_iter=0, densification_interval=2,
                                   opacity_reset_interval=4, densify_grad_threshold=.1, opacity_cull=.005)
             original_tensor = torch.tensor
+            original_to = torch.Tensor.to
             def tensor(*args, **kwargs):
                 if kwargs.get("device") == "cuda": kwargs["device"] = "cpu"
                 return original_tensor(*args, **kwargs)
+            def cpu_target(value, *args, **kwargs):
+                args = list(args)
+                if args and str(args[0]).startswith("cuda"):
+                    args[0] = "cpu"
+                if str(kwargs.get("device", "")).startswith("cuda"):
+                    kwargs["device"] = "cpu"
+                return original_to(value, *args, **kwargs)
             event = SimpleNamespace(record=lambda: None, elapsed_time=lambda other: 1.)
 
             def run(name, pause=False, resume=False, free_vram=8 * 1024**3):
@@ -169,13 +181,15 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 torch.manual_seed(999 if resume else 42)
                 output = root / name
                 request = root / (name + "-pause.json")
-                control = dict(output=str(output), request=str(request), session="test", backend="2dgs", resume=resume)
+                control = dict(output=str(output), request=str(request), session="test", backend="2dgs", resume=resume,
+                               performance={"version": 1, "enabled": False})
                 if pause: cp.atomic_json(request, {"session": "test"})
                 elif request.exists(): request.unlink()
                 data = SimpleNamespace(source_path=str(dataset), model_path=str(output), white_background=False, sh_degree=3)
                 with mock.patch.dict(os.environ, {cp.CONTROL_ENV: json.dumps(control)}), \
                      mock.patch.object(torch, "tensor", side_effect=tensor), \
                      mock.patch.object(torch.Tensor, "cuda", lambda self: self), \
+                     mock.patch.object(torch.Tensor, "to", cpu_target), \
                      mock.patch.object(torch.cuda, "Event", return_value=event), \
                      mock.patch.object(torch.cuda, "is_available", return_value=False), \
                      mock.patch.object(torch.cuda, "mem_get_info", return_value=(free_vram, 12 * 1024**3)), \

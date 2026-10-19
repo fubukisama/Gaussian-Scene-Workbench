@@ -148,9 +148,51 @@ def _transforms_summary(dataset, input_images):
     return report
 
 
-def summarize_reconstruction(dataset, run_colmap=False):
-    from native.backend import reconstruction_quality
+def summarize_reconstruction(dataset, run_colmap=False, pose_policy=None,
+                             camera_dataset_path=None, expected_identity=None):
     dataset = Path(dataset).resolve()
+    selected = Path(camera_dataset_path) if camera_dataset_path else dataset / "camera_dataset.json"
+    if not selected.is_absolute():
+        selected = dataset / selected
+    if pose_policy not in (None, "solve", "locked"):
+        raise ValueError("Unsupported camera pose policy")
+    planned_solve = pose_policy == "solve" and (bool(camera_dataset_path) or selected.is_file())
+    if pose_policy == "locked" or planned_solve or (pose_policy is None and (camera_dataset_path or selected.is_file())):
+        from native.backend.camera_admission import admit_locked_dataset
+        from native.backend.camera_dataset import CameraDatasetError
+        report = dict(version=1, ready=True, dataset=str(dataset), sourceKind="canonical_solve" if planned_solve else "canonical",
+                      format="gsw_camera_dataset", registeredImages=None, cameraCount=None,
+                      frameCount=0, inputImages=0, sparsePoints=None, validPoints=None,
+                      cameraFile=str(selected), imageFile=str(selected), pointFile="",
+                      usable=False, minimumViabilityPassed=False, blocked=True,
+                      decision="locked_invalid", effectiveRunColmap=False,
+                      colmapInputDirectory="", trainingImagesDirectory=str(selected.parent), reasons=[])
+        try:
+            admission = admit_locked_dataset(selected, expected_identity, False if planned_solve else run_colmap)
+            canonical = admission["dataset"]
+            count = len(canonical["views"])
+            report.update(usable=True, blocked=False, decision="reuse_locked", frameCount=count,
+                          cameraCount=count, inputImages=count, minimumViabilityPassed=True,
+                          trainingImagesDirectory=admission["root"], cameraDataset=admission["cameraDataset"])
+            if planned_solve:
+                summary = dict(admission["cameraDataset"])
+                summary.update(requestedPosePolicy="solve", posePolicy="solve", newVersionRequired=True,
+                    sourceScale=summary["scale"], sourceTransforms=summary["transforms"], sourceCounts=summary["counts"],
+                    sourceSplits=summary["splits"],
+                    scale={"status": "arbitrary", "source_unit": "unknown", "meters_per_unit": None,
+                           "canonical_unit": "arbitrary", "evidence": []},
+                    transforms={}, counts={"train": len(canonical["splits"]["train"]), "val": 0, "test": 0},
+                    splits={"train": canonical["splits"]["train"], "val": [], "test": []},
+                    independentTest=False, scaleResetReason="free_sfm_does_not_preserve_source_scale")
+                report.update(decision="new_solve_version", inputImages=len(canonical["splits"]["train"]),
+                              effectiveRunColmap=True, minimumViabilityPassed=False, cameraDataset=summary,
+                              colmapInputDirectory="", plannedImageSource="canonical_train_references")
+        except CameraDatasetError as error:
+            report.update(reasons=[error.code], detail=error.detail, cameraDataset={
+                "version": 1, "blocked": True, "posePolicy": "solve" if planned_solve else "locked", "metadataPath": str(selected),
+                "errors": [{"code": error.code, "detail": error.detail}], "warnings": []})
+        return report
+    from native.backend import reconstruction_quality
     model = dataset / "sparse" / "0"
     quality = reconstruction_quality.assess_dataset(dataset)
     source_kind = "colmap" if _has_colmap(model) else "none"
@@ -225,10 +267,14 @@ def main():
     parser.add_argument("--backend-root", required=True)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--run-colmap", action="store_true")
+    parser.add_argument("--pose-policy", choices=("solve", "locked"))
+    parser.add_argument("--camera-dataset")
+    parser.add_argument("--camera-dataset-identity")
     arguments = parser.parse_args()
     sys.path.insert(0, str(Path(arguments.backend_root).resolve()))
     try:
-        report = summarize_reconstruction(arguments.dataset, arguments.run_colmap)
+        report = summarize_reconstruction(arguments.dataset, arguments.run_colmap, arguments.pose_policy,
+                                           arguments.camera_dataset, arguments.camera_dataset_identity)
     except (OSError, ValueError, TypeError, struct.error) as error:
         report = dict(version=1, ready=False, diagnostic=str(error))
     print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))

@@ -3,6 +3,7 @@
 #include "TrainingDialog.h"
 #include "ManagedName.h"
 #include "WrappingCheckBox.h"
+#include "CameraDatasetInfo.h"
 
 #include "ColmapSupport.h"
 
@@ -24,6 +25,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <limits>
@@ -124,14 +126,27 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::bind(mResolution, "toolTip", AppLanguage::source("比例分别作用于图像宽度和高度；原始分辨率不额外降采样。"));
   form->addRow(QCoreApplication::translate("Workbench", "训练分辨率"), mResolution);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mResolution)), AppLanguage::source("训练分辨率"));
+  mResolutionPolicy = new QComboBox(this);
+  mResolutionPolicy->setObjectName(QStringLiteral("trainingResolutionPolicyCombo"));
+  mResolutionPolicy->addItem(QString(), QStringLiteral("preserve"));
+  AppLanguage::bindComboItem(mResolutionPolicy, 0, AppLanguage::source("保留输入尺寸（1:1，不自动缩图）"));
+  mResolutionPolicy->addItem(QString(), QStringLiteral("manual"));
+  AppLanguage::bindComboItem(mResolutionPolicy, 1, AppLanguage::source("显式缩放（使用所选倍率）"));
+  mResolutionPolicy->setCurrentIndex(1);
+  form->addRow(QCoreApplication::translate("Workbench", "分辨率策略"), mResolutionPolicy);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mResolutionPolicy)), AppLanguage::source("分辨率策略"));
   auto *resolutionHint = AppLanguage::text(new QLabel(this), AppLanguage::source("原始分辨率按 1:1 训练，不自动降采样；显存占用和耗时会明显增加。去畸变仍会进行；已缩小的数据需从原图重新重建。"));
   resolutionHint->setObjectName(QStringLiteral("trainingResolutionHint"));
   resolutionHint->setWordWrap(true);
   form->addRow(resolutionHint);
   const auto updateResolutionHint = [this, resolutionHint]() {
     resolutionHint->setVisible(mResolution->currentData().toInt() == 1);
+    resolutionHint->setText(mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")
+        ? QCoreApplication::translate("Workbench", "锁定相机使用已验证的图像与投影；不自动缩图、不重求解，不支持的畸变或投影会拒绝。")
+        : QCoreApplication::translate("Workbench", "原始分辨率按 1:1 训练，不自动降采样；显存占用和耗时会明显增加。去畸变仍会进行；已缩小的数据需从原图重新重建。"));
   };
   connect(mResolution, &QComboBox::currentIndexChanged, this, updateResolutionHint);
+  AppLanguage::onChanged(this, updateResolutionHint);
   updateResolutionHint();
 
   mPerformanceOptimization = AppLanguage::text(new WrappingCheckBox(this),
@@ -236,6 +251,19 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(QCoreApplication::translate("Workbench", "输出目录"), outputRow);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(outputRow)), AppLanguage::source("输出目录"));
 
+  mPosePolicy = new QComboBox(this);
+  mPosePolicy->setObjectName(QStringLiteral("trainingPosePolicyCombo"));
+  mPosePolicy->addItem(QString(), QStringLiteral("solve"));
+  AppLanguage::bindComboItem(mPosePolicy, 0, AppLanguage::source("求解／复用 SfM 相机（保留质量检查）"));
+  mPosePolicy->addItem(QString(), QStringLiteral("locked"));
+  AppLanguage::bindComboItem(mPosePolicy, 1, AppLanguage::source("锁定已知相机（禁止重求解）"));
+  connect(mPosePolicy, &QComboBox::currentIndexChanged, this, updateResolutionHint);
+  form->addRow(QCoreApplication::translate("Workbench", "位姿策略"), mPosePolicy);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mPosePolicy)), AppLanguage::source("位姿策略"));
+  auto *cameraPolicyHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
+      "锁定模式验证图像、投影、划分和尺度，不要求 SfM 稀疏点；错误时停止，不回退求相机。切换为求解会生成新的数据版本。"));
+  cameraPolicyHint->setWordWrap(true);
+  form->addRow(cameraPolicyHint);
   mRunColmap = AppLanguage::text(new WrappingCheckBox(QCoreApplication::translate("Workbench", "训练前运行 COLMAP 重建"), this), AppLanguage::source("训练前运行 COLMAP 重建"));
   mRunColmap->setObjectName(QStringLiteral("trainingRunColmapCheckBox"));
   mRunColmap->setChecked(!hasSparseReconstruction);
@@ -262,6 +290,20 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
           [this](const TrainingReconstructionSummary &summary) {
     mReconstructionSummary = summary;
     mReconstructionSummaryPending = false;
+    auto camera = summary.report.value(QStringLiteral("cameraDataset")).toObject();
+    if (mPosePolicy->currentData().toString() == QStringLiteral("locked") && !camera.isEmpty() &&
+        !mExpectedCameraDatasetIdentity.isEmpty() &&
+        camera.value(QStringLiteral("dataIdentity")).toString() != mExpectedCameraDatasetIdentity) {
+      camera.insert(QStringLiteral("blocked"), true);
+      camera.insert(QStringLiteral("errors"), QJsonArray{QStringLiteral("camera_data_identity_mismatch")});
+      camera.insert(QStringLiteral("dataIdentity"), mExpectedCameraDatasetIdentity);
+      mReconstructionSummary.report.insert(QStringLiteral("cameraDataset"), camera);
+      mReconstructionSummary.report.insert(QStringLiteral("blocked"), true);
+    }
+    if (!camera.isEmpty()) {
+      mCameraDatasetPath = camera.value(QStringLiteral("metadataPath")).toString(mCameraDatasetPath);
+      mCameraDatasetIdentity = camera.value(QStringLiteral("dataIdentity")).toString(mCameraDatasetIdentity);
+    }
     if (summary.ready && !mRunColmapEdited && mRunColmap->isChecked() &&
         summary.report.value(QStringLiteral("sourceKind")).toString() == QStringLiteral("alignment_cache") &&
         summary.report.value(QStringLiteral("usable")).toBool()) {
@@ -272,6 +314,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   });
   connect(mRunColmap, &QCheckBox::clicked, this, [this] { mRunColmapEdited = true; });
   connect(mRunColmap, &QCheckBox::toggled, this, &TrainingDialog::scanReconstructionSummary);
+  connect(mPosePolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshCameraPolicy);
   connect(this, &QDialog::finished, mReconstructionScanner,
           &TrainingReconstructionSummaryScanner::cancel);
   AppLanguage::onChanged(this, [this] { refreshReconstructionSummary(); });
@@ -293,6 +336,12 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
           });
   connect(mResolution, &QComboBox::currentIndexChanged, this,
           &TrainingDialog::refreshInputSummary);
+  connect(mResolution, &QComboBox::currentIndexChanged, this, [this] {
+    if (!mUpdatingPolicy) {
+      if (mPosePolicy->currentData().toString() != QStringLiteral("locked")) mSolveResolution = mResolution->currentData().toInt();
+    }
+  });
+  connect(mResolutionPolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshResolutionPolicy);
   connect(mRunColmap, &QCheckBox::toggled, this, &TrainingDialog::scanInputSummary);
   connect(this, &QDialog::finished, mInputScanner,
           &TrainingInputSummaryScanner::cancel);
@@ -309,6 +358,13 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
       this), AppLanguage::source("训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
+  const auto updateTrainingNote = [this, note] {
+    note->setText(mPosePolicy->currentData().toString() == QStringLiteral("locked")
+        ? QCoreApplication::translate("Workbench", "3DGS / 2DGS 共用锁定相机与数据划分策略。原图、相机和尺度来源保持可追溯；预览正常不代表训练、尺度或模型质量已验证。")
+        : QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
+  };
+  connect(mPosePolicy, &QComboBox::currentIndexChanged, this, updateTrainingNote);
+  AppLanguage::onChanged(this, updateTrainingNote);
   bodyLayout->addWidget(note);
   bodyLayout->addStretch(1);
 
@@ -336,6 +392,8 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   connect(buttons, &QDialogButtonBox::accepted, this, &TrainingDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, this, &TrainingDialog::reject);
   applyPreset();
+  const QString canonicalManifest = QDir(datasetPath).filePath(QStringLiteral("camera_dataset.json"));
+  if (QFileInfo(canonicalManifest).isFile()) setCameraDatasetReference(canonicalManifest);
   scanInputSummary();
   refreshReconstructionSummary();
 }
@@ -349,7 +407,11 @@ TrainingConfiguration TrainingDialog::configuration() const {
   result.outputStorageName = managedStorageName(result.outputScene);
   result.iterations = mIterations->value();
   result.resolution = mResolution->currentData().toInt();
-  result.runColmap = mRunColmap->isChecked();
+  result.posePolicy = mPosePolicy->currentData().toString();
+  result.runColmap = result.posePolicy != QStringLiteral("locked") && mRunColmap->isChecked();
+  result.cameraDatasetPath = mCameraDatasetPath;
+  result.cameraDatasetIdentity = mCameraDatasetIdentity;
+  result.resolutionPolicy = mResolutionPolicy->currentData().toString();
   result.overwrite = mOverwrite->isChecked();
   result.performanceOptimization = mPerformanceOptimization->isChecked();
   result.cameraPrefetch = mCameraPrefetch->isChecked();
@@ -371,7 +433,9 @@ void TrainingDialog::accept() {
   if (!datasetContainsImages()) {
     QMessageBox::critical(
         this, QCoreApplication::translate("Workbench", "数据集不可训练"),
-        QCoreApplication::translate("Workbench", "所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。"));
+        mPosePolicy->currentData().toString() == QStringLiteral("locked")
+            ? QCoreApplication::translate("Workbench", "规范相机数据没有通过验证的训练视图；不会扫描目录补入测试图，也不会运行 COLMAP。")
+            : QCoreApplication::translate("Workbench", "所选目录必须包含 images 或 input 子目录，并且其中至少有一张图像。请重新导入数据集根目录。"));
     return;
   }
 
@@ -424,10 +488,67 @@ void TrainingDialog::applyPreset() {
     resolution = 1;
   }
   mIterations->setValue(iterations);
+  // A fidelity preset is not permission to change an imported camera dataset's
+  // training pixels. Locked input only changes ratio after an explicit policy edit.
+  if (mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")) return;
+  mUpdatingPolicy = true;
+  mResolutionPolicy->setCurrentIndex(mResolutionPolicy->findData(QStringLiteral("manual")));
   const int resolutionIndex = mResolution->findData(resolution);
   if (resolutionIndex >= 0) {
     mResolution->setCurrentIndex(resolutionIndex);
   }
+  mSolveResolution = resolution;
+  mResolution->setEnabled(true);
+  mUpdatingPolicy = false;
+}
+
+void TrainingDialog::setCameraDatasetReference(const QString &metadataPath,
+                                              const QString &dataIdentity,
+                                              const QString &posePolicy) {
+  mCameraDatasetPath = metadataPath;
+  mCameraDatasetIdentity = dataIdentity;
+  mExpectedCameraDatasetIdentity = dataIdentity;
+  const int index = mPosePolicy->findData(posePolicy);
+  if (index >= 0) mPosePolicy->setCurrentIndex(index);
+  refreshCameraPolicy();
+}
+
+QJsonObject TrainingDialog::cameraDatasetSummary() const {
+  return mReconstructionSummary.report.value(QStringLiteral("cameraDataset")).toObject();
+}
+
+void TrainingDialog::refreshCameraPolicy() {
+  if (!mRunColmap || !mResolutionPolicy) return;
+  const bool locked = mPosePolicy->currentData().toString() == QStringLiteral("locked");
+  mUpdatingPolicy = true;
+  if (locked) {
+    mRunColmap->setChecked(false);
+    if (!mPreviousLocked) {
+      mSolveResolution = mResolution->currentData().toInt();
+      mResolutionPolicy->setCurrentIndex(mResolutionPolicy->findData(QStringLiteral("preserve")));
+      mResolution->setCurrentIndex(mResolution->findData(1));
+    }
+  } else if (mPreviousLocked) {
+    mRunColmap->setChecked(true);
+    mResolutionPolicy->setCurrentIndex(mResolutionPolicy->findData(QStringLiteral("manual")));
+    mResolution->setCurrentIndex(mResolution->findData(mSolveResolution));
+  }
+  mRunColmap->setEnabled(!locked);
+  mResolution->setEnabled(mResolutionPolicy->currentData().toString() == QStringLiteral("manual"));
+  mPreviousLocked = locked;
+  mUpdatingPolicy = false;
+  scanInputSummary();
+  scanReconstructionSummary();
+}
+
+void TrainingDialog::refreshResolutionPolicy() {
+  if (mUpdatingPolicy) return;
+  const bool preserve = mResolutionPolicy->currentData().toString() == QStringLiteral("preserve");
+  mUpdatingPolicy = true;
+  if (preserve) mResolution->setCurrentIndex(mResolution->findData(1));
+  mResolution->setEnabled(!preserve);
+  mUpdatingPolicy = false;
+  refreshInputSummary();
 }
 
 void TrainingDialog::chooseOutputRoot() {
@@ -439,6 +560,17 @@ void TrainingDialog::chooseOutputRoot() {
 }
 
 void TrainingDialog::scanInputSummary() {
+  if (mUpdatingPolicy) return;
+  if (mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")) {
+    mInputSummaryPending = false;
+    refreshInputSummary();
+    return;
+  }
+  if (mReconstructionSummary.report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version")) {
+    mInputSummaryPending = false;
+    refreshInputSummary();
+    return;
+  }
   mInputSummaryPending = true;
   refreshInputSummary();
   mInputScanner->request(mDatasetPath, mRunColmap->isChecked());
@@ -446,6 +578,18 @@ void TrainingDialog::scanInputSummary() {
 
 void TrainingDialog::refreshInputSummary() {
   if (!mInputSummaryLabel) {
+    return;
+  }
+  if (mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")) {
+    mInputSummaryLabel->setText(mResolutionPolicy->currentData().toString() == QStringLiteral("preserve")
+        ? QCoreApplication::translate("Workbench", "保留每个视图的输入尺寸和完整内参；最终尺寸及缩放后的 K 记录在实际训练相机报告中。")
+        : QCoreApplication::translate("Workbench", "明确使用 1/%1 宽高倍率；主点与焦距同步变换，最终尺寸及 K 记录在实际训练相机报告中。")
+            .arg(mResolution->currentData().toInt()));
+    return;
+  }
+  if (mReconstructionSummary.report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version")) {
+    mInputSummaryLabel->setText(QCoreApplication::translate("Workbench", "仅复制规范清单中的训练图像后求解；明确使用 1/%1 宽高倍率，实际尺寸和新相机内参将在训练报告中记录。")
+        .arg(mResolution->currentData().toInt()));
     return;
   }
   if (mInputSummaryPending) {
@@ -521,6 +665,13 @@ void TrainingDialog::refreshInputSummary() {
 }
 
 bool TrainingDialog::datasetContainsImages() const {
+  if (mPosePolicy->currentData().toString() == QStringLiteral("locked") ||
+      mReconstructionSummary.report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version")) {
+    const auto camera = cameraDatasetSummary();
+    const auto train = camera.value(QStringLiteral("counts")).toObject().value(QStringLiteral("train"));
+    return reconstructionPreflightReady() && !CameraDatasetInfo::blocked(camera) &&
+        (train.isDouble() ? train.toInteger() > 0 : !camera.value(QStringLiteral("splits")).toObject().value(QStringLiteral("train")).toArray().isEmpty());
+  }
   return !datasetImageDirectory(mDatasetPath).isEmpty();
 }
 
@@ -534,13 +685,15 @@ void TrainingDialog::setReconstructionProbe(const QString &python, const QString
 }
 
 bool TrainingDialog::effectiveRunColmap() const {
+  if (mPosePolicy->currentData().toString() == QStringLiteral("locked")) return false;
   return reconstructionPreflightReady()
       ? mReconstructionSummary.report.value(QStringLiteral("effectiveRunColmap")).toBool()
       : mRunColmap->isChecked();
 }
 
 bool TrainingDialog::reconstructionPreflightReady() const {
-  return !mReconstructionSummaryPending && mReconstructionSummary.ready;
+  return !mReconstructionSummaryPending && mReconstructionSummary.ready &&
+      (mPosePolicy->currentData().toString() != QStringLiteral("locked") || !cameraDatasetSummary().isEmpty());
 }
 
 QString TrainingDialog::reconstructionDecisionText() const {
@@ -552,11 +705,13 @@ TrainingReconstructionSummary TrainingDialog::reconstructionSummary() const {
 }
 
 void TrainingDialog::scanReconstructionSummary() {
-  if (!mReconstructionProbeConfigured) return;
+  if (!mReconstructionProbeConfigured || mUpdatingPolicy) return;
   mReconstructionSummaryPending = true;
   refreshReconstructionSummary();
   mReconstructionScanner->request(mDatasetPath, mRunColmap->isChecked(),
-                                 mProbePython, mProbeBackendRoot, mProbeEnvironment);
+                                 mProbePython, mProbeBackendRoot, mProbeEnvironment,
+                                 mPosePolicy->currentData().toString(),
+                                 mCameraDatasetPath, mExpectedCameraDatasetIdentity);
 }
 
 void TrainingDialog::refreshReconstructionSummary() {
@@ -579,6 +734,15 @@ void TrainingDialog::refreshReconstructionSummary() {
     return;
   }
   const QJsonObject report = mReconstructionSummary.report;
+  if (mPosePolicy->currentData().toString() == QStringLiteral("locked") ||
+      report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version")) {
+    const auto camera = cameraDatasetSummary();
+    mReconstructionSummaryLabel->setText(CameraDatasetInfo::summaryText(camera));
+    mReconstructionDecisionLabel->setText(CameraDatasetInfo::decisionText(camera));
+    if (mStartButton) mStartButton->setEnabled(reconstructionPreflightReady() && !CameraDatasetInfo::blocked(camera));
+    refreshInputSummary();
+    return;
+  }
   const QLocale locale;
   const auto number = [&](const char *key) {
     const auto value = report.value(QLatin1String(key));

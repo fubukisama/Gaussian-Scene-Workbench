@@ -3,6 +3,7 @@
 #include "SpzIO.h"
 #include <load-spz.h>
 #include <QDataStream>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -76,6 +77,13 @@ private slots:
   void spzCodecRejectsIncompleteLargeCloudMetadata();
   void spzCodecRejectsConstructedFractionalBits();
   void spzRealModelWhenRequested();
+  void trainingCoordinateScaleReachesMeasurementAndJsonReport();
+  void arbitraryCameraScaleDoesNotInventMetres();
+  void cameraScaleSidecarIsBoundToExactPlyBytes();
+  void cameraScaleMetadataRefreshesAnExistingGeometryCache();
+  void unknownScaleCannotBeExportedAsImplicitMetreGlb();
+  void recordedCameraCoordinatesUseRealNativeExportProcess();
+  void realGpuTrainingModelMeasurementAndCoordinateExports();
 };
 
 void ModelExportTests::preservesPlyAndCroppedGaussianAttributes() {
@@ -467,6 +475,7 @@ void ModelExportTests::exportsCompleteMeshAndEmbeddedGlb() {
 void ModelExportTests::exportsPointGlbWithoutInventingFaces() {
   QTemporaryDir dir;
   ModelExportOptions o; o.format = ModelExportFormat::Glb;
+  o.coordinates.unit = SceneLengthUnit::Centimetres; o.coordinates.unitDeclared = true;
   o.sourcePath = dir.filePath(QStringLiteral("source.ply")); o.destinationPath = dir.filePath(QStringLiteral("points.glb"));
   QVERIFY(save(o.sourcePath, pointPly()));
   o.deletedVertices.resize(4); o.deletedVertices.setBit(0);
@@ -481,6 +490,7 @@ void ModelExportTests::exportsPointGlbWithoutInventingFaces() {
 void ModelExportTests::keepsExistingFilesOnCancellationAndFailure() {
   QTemporaryDir dir;
   ModelExportOptions o; o.sourcePath = dir.filePath(QStringLiteral("source.ply")); o.destinationPath = dir.filePath(QStringLiteral("out"));
+  o.coordinates.unit = SceneLengthUnit::Centimetres; o.coordinates.unitDeclared = true;
   QVERIFY(save(o.sourcePath, pointPly())); QVERIFY(save(o.destinationPath, "existing data"));
   for (auto format : {ModelExportFormat::Ply, ModelExportFormat::Csv, ModelExportFormat::Glb}) {
     o.format = format; o.progress = [](int) { return true; };
@@ -560,6 +570,7 @@ void ModelExportTests::usesFullSourceAcrossDiskPages() {
 void ModelExportTests::rejectsSourceChangesBeforeCommit() {
   QTemporaryDir dir;
   ModelExportOptions o;
+  o.coordinates.unit = SceneLengthUnit::Centimetres; o.coordinates.unitDeclared = true;
   o.sourcePath = dir.filePath(QStringLiteral("source.ply")); o.destinationPath = dir.filePath(QStringLiteral("out"));
   for (auto format : {ModelExportFormat::Ply, ModelExportFormat::Glb}) {
     QVERIFY(save(o.sourcePath, pointPly())); QVERIFY(save(o.destinationPath, "original destination"));
@@ -809,6 +820,306 @@ void ModelExportTests::spzRealModelWhenRequested() {
   QVERIFY((a.boundsMaximum - b.boundsMaximum).length() < 0.001F);
   qInfo() << "SPZ real round trip:" << a.sourceVertexCount << "gaussians; PLY bytes" << QFileInfo(source).size()
           << "SPZ bytes" << QFileInfo(o.destinationPath).size();
+}
+
+void ModelExportTests::trainingCoordinateScaleReachesMeasurementAndJsonReport() {
+  QTemporaryDir dir;
+  const QString source = dir.filePath("training.ply");
+  QVERIFY(save(source, gaussianPly(0, 1.)));
+  const QJsonObject scale{{"status", "source_declared"}, {"source_unit", "mm"},
+      {"meters_per_unit", .001}, {"canonical_unit", "m"},
+      {"evidence", QJsonArray{QJsonObject{{"kind", "source_declaration"}}}}};
+  const QJsonObject training{{"s", 8.}, {"R", QJsonArray{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}}},
+      {"t", QJsonArray{0,0,0}}, {"applied", true}};
+  const QString identity(64, QLatin1Char('a'));
+  const QJsonObject sidecar{{"schema", "gsw.training_camera_contract/1"}, {"scale", scale},
+      {"transforms", QJsonObject{{"canonical_to_training", training}}},
+      {"input_data_identity", identity},
+      {"ply_sha256", QString::fromLatin1(QCryptographicHash::hash(read(source), QCryptographicHash::Sha256).toHex())}};
+  QVERIFY(save(dir.filePath("training.camera-scale.json"), QJsonDocument(sidecar).toJson()));
+  const auto loaded = PlyPointCloudLoader::load(source);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QCOMPARE(loaded.coordinates.globalMinimum.x, 1.); // Rendering/source XYZ stays untouched.
+  QCOMPARE(formatSceneLength(2., loaded.coordinates), QString("25 cm"));
+  QCOMPARE(formatSceneCoordinate(1., loaded.coordinates), QString("0.125 m"));
+  QCOMPARE(loaded.coordinates.dataIdentity, identity);
+  QVERIFY(loaded.coordinates.metersPerCoordinate.has_value());
+  QCOMPARE(*loaded.coordinates.metersPerCoordinate, .125);
+  QCOMPARE(loaded.coordinates.scaleStatus, QString("source_declared"));
+  QCOMPARE(loaded.coordinates.sourceUnit, QString("mm"));
+  SceneCoordinateInfo restored;
+  QVERIFY(sceneCoordinateInfoFromJson(sceneCoordinateInfoToJson(loaded.coordinates), restored));
+  QCOMPARE(formatSceneLength(2., restored), QString("25 cm"));
+  QCOMPARE(restored.provenance, loaded.coordinates.provenance);
+  const QString report = dir.filePath("coordinate-report.json");
+  QString error;
+  QVERIFY2(writeSceneCoordinateReport(report, source, restored, 0., "source", &error), qPrintable(error));
+  const auto json = QJsonDocument::fromJson(read(report)).object();
+  SceneCoordinateInfo reopened;
+  QVERIFY(sceneCoordinateInfoFromJson(json["coordinates"].toObject(), reopened));
+  QCOMPARE(formatSceneLength(2., reopened), QString("25 cm"));
+  QCOMPARE(reopened.dataIdentity, identity);
+}
+
+void ModelExportTests::arbitraryCameraScaleDoesNotInventMetres() {
+  QTemporaryDir dir;
+  const QString source = dir.filePath("arbitrary.ply");
+  QVERIFY(save(source, gaussianPly(0)));
+  const QJsonObject sidecar{{"schema", "gsw.training_camera_contract/1"},
+      {"scale", QJsonObject{{"status", "arbitrary"}, {"source_unit", "unknown"},
+                           {"meters_per_unit", QJsonValue::Null}, {"canonical_unit", "arbitrary"}}},
+      {"transforms", QJsonObject{{"canonical_to_training", QJsonObject{{"s", 8.}, {"applied", true},
+        {"R", QJsonArray{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}}}, {"t", QJsonArray{0,0,0}}}}}},
+      {"input_data_identity", QString(64, QLatin1Char('b'))},
+      {"ply_sha256", QString::fromLatin1(QCryptographicHash::hash(read(source), QCryptographicHash::Sha256).toHex())}};
+  QVERIFY(save(dir.filePath("arbitrary.camera-scale.json"), QJsonDocument(sidecar).toJson()));
+  const auto loaded = PlyPointCloudLoader::load(source);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QVERIFY(!loaded.coordinates.metersPerCoordinate.has_value());
+  QCOMPARE(loaded.coordinates.unit, SceneLengthUnit::Unknown);
+  QCOMPARE(loaded.coordinates.scaleStatus, QString("arbitrary"));
+  QCOMPARE(formatSceneLength(2., loaded.coordinates), QString("2 u"));
+}
+
+void ModelExportTests::cameraScaleSidecarIsBoundToExactPlyBytes() {
+  QTemporaryDir dir;
+  const QString source = dir.filePath("mismatch.ply");
+  QVERIFY(save(source, gaussianPly(0)));
+  const QJsonObject sidecar{{"schema", "gsw.training_camera_contract/1"},
+      {"scale", QJsonObject{{"status", "source_declared"}, {"source_unit", "m"}, {"meters_per_unit", 1.}, {"canonical_unit", "m"}}},
+      {"transforms", QJsonObject{{"canonical_to_training", QJsonObject{{"s", 3.}, {"applied", true}}}}},
+      {"input_data_identity", QString(64, QLatin1Char('c'))}, {"ply_sha256", QString(64, QLatin1Char('0'))}};
+  QVERIFY(save(dir.filePath("mismatch.camera-scale.json"), QJsonDocument(sidecar).toJson()));
+  const auto loaded = PlyPointCloudLoader::load(source);
+  QVERIFY(!loaded.isValid());
+  QVERIFY(loaded.error.contains("camera_scale_ply_hash_mismatch"));
+}
+
+void ModelExportTests::cameraScaleMetadataRefreshesAnExistingGeometryCache() {
+  QTemporaryDir dir;
+  const QString source = dir.filePath("cached-points.ply");
+  auto bytes = pointPly(); bytes.replace("comment units cm\n", "");
+  QVERIFY(save(source, bytes));
+  const auto before = PlyPointCloudLoader::load(source, 1, 1);
+  QVERIFY2(before.isValid(), qPrintable(before.error));
+  QVERIFY(before.pointCache.isValid());
+  QVERIFY(!sceneMetresPerCoordinate(before.coordinates));
+  const QJsonObject sidecar{{"schema", "gsw.training_camera_contract/1"},
+      {"scale", QJsonObject{{"status", "source_declared"}, {"source_unit", "m"},
+                           {"meters_per_unit", 1.}, {"canonical_unit", "m"}}},
+      {"transforms", QJsonObject{{"canonical_to_training", QJsonObject{{"s", 8.}, {"applied", true},
+        {"R", QJsonArray{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}}}, {"t", QJsonArray{0,0,0}}}}}},
+      {"input_data_identity", QString(64, QLatin1Char('d'))},
+      {"ply_sha256", QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex())}};
+  QVERIFY(save(dir.filePath("cached-points.camera-scale.json"), QJsonDocument(sidecar).toJson()));
+  const auto after = PlyPointCloudLoader::load(source, 1, 1);
+  QVERIFY2(after.isValid(), qPrintable(after.error));
+  QVERIFY(after.pointCache.isValid());
+  QCOMPARE(after.coordinates.globalMinimum.x, before.coordinates.globalMinimum.x);
+  QCOMPARE(formatSceneLength(2., after.coordinates), QString("25 cm"));
+  QVERIFY(after.pointCache.coordinates.metersPerCoordinate.has_value());
+  QCOMPARE(*after.pointCache.coordinates.metersPerCoordinate, *after.coordinates.metersPerCoordinate);
+}
+
+void ModelExportTests::unknownScaleCannotBeExportedAsImplicitMetreGlb() {
+  QTemporaryDir dir;
+  ModelExportOptions options;
+  options.sourcePath = dir.filePath("unknown.ply");
+  options.destinationPath = dir.filePath("unknown.glb");
+  options.format = ModelExportFormat::Glb;
+  auto bytes = pointPly(); bytes.replace("comment units cm\n", "");
+  QVERIFY(save(options.sourcePath, bytes));
+  QVERIFY(save(options.destinationPath, "existing destination"));
+  const auto result = exportModelFile(options);
+  QVERIFY(!result.success);
+  QCOMPARE(read(options.destinationPath), QByteArray("existing destination"));
+  QCOMPARE(read(options.sourcePath), bytes);
+}
+
+void ModelExportTests::recordedCameraCoordinatesUseRealNativeExportProcess() {
+  const QString python = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_PYTHON");
+  const QString root = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_ROOT");
+  if (python.isEmpty() || root.isEmpty()) QSKIP("Real native export helper runtime not selected");
+  QVERIFY(QFileInfo::exists(python));
+  QVERIFY(QFileInfo::exists(QDir(root).filePath("native/backend/camera_scale_export.py")));
+  QTemporaryDir dir;
+  const QString source = dir.filePath("actual-training.ply");
+  QVERIFY(save(source, gaussianPly(0, 2.)));
+  const QJsonArray identity{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}};
+  const QJsonObject sidecar{{"schema", "gsw.training_camera_contract/1"},
+      {"scale", QJsonObject{{"status", "source_declared"}, {"source_unit", "cm"},
+                           {"meters_per_unit", .01}, {"canonical_unit", "m"},
+                           {"evidence", QJsonArray{QJsonObject{{"kind", "user_declaration"}}}}}},
+      {"transforms", QJsonObject{
+        {"source_to_canonical", QJsonObject{{"s", .01}, {"R", identity}, {"t", QJsonArray{0,0,0}}, {"applied", true}}},
+        {"canonical_to_training", QJsonObject{{"s", 4.}, {"R", identity}, {"t", QJsonArray{1,2,3}}, {"applied", true}}}}},
+      {"input_data_identity", QString(64, QLatin1Char('e'))},
+      {"ply_sha256", QString::fromLatin1(QCryptographicHash::hash(read(source), QCryptographicHash::Sha256).toHex())}};
+  QVERIFY(save(dir.filePath("actual-training.camera-scale.json"), QJsonDocument(sidecar).toJson()));
+  const QByteArray original = read(source);
+  for (const QString &mode : {QStringLiteral("metric"), QStringLiteral("source")}) {
+    ModelExportOptions options;
+    options.sourcePath = source;
+    options.destinationPath = dir.filePath(mode + ".ply");
+    options.cameraCoordinateRecovery = mode;
+    options.recoveryPythonPath = python;
+    options.recoveryRepositoryRoot = root;
+    const auto result = exportModelFile(options);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto loaded = PlyPointCloudLoader::load(options.destinationPath);
+    QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+    const bool metric = mode == QStringLiteral("metric");
+    QVERIFY(std::abs(loaded.coordinates.globalMinimum.x - (metric ? .25 : 25.)) < 1e-10);
+    QVERIFY(std::abs(loaded.coordinates.globalMinimum.y - (metric ? -1.0625 : -106.25)) < 1e-10);
+    QCOMPARE(formatSceneLength(loaded.coordinates.globalSize().z, loaded.coordinates), QString("50 cm"));
+    double logScale = std::numeric_limits<double>::quiet_NaN();
+    PlyGaussianVisitor visitor;
+    visitor.gaussian = [&](qint64 index, const std::array<double,86> &values) {
+      if (index == 0) logScale = values[7];
+      return true;
+    };
+    QString error;
+    QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(options.destinationPath, visitor, error), qPrintable(error));
+    QVERIFY(std::abs(logScale - (-2. + std::log(metric ? .25 : 25.))) < 1e-10);
+    QVERIFY(loaded.coordinates.metersPerCoordinate.has_value());
+    QCOMPARE(*loaded.coordinates.metersPerCoordinate, metric ? 1. : .01);
+    QCOMPARE(loaded.coordinates.scaleStatus, QString("source_declared"));
+    QCOMPARE(read(source), original);
+  }
+}
+
+void ModelExportTests::realGpuTrainingModelMeasurementAndCoordinateExports() {
+  const QString source = qEnvironmentVariable("GSW_CAMERA_SCALE_GPU_PLY");
+  if (source.isEmpty()) QSKIP("Set GSW_CAMERA_SCALE_GPU_PLY to an explicitly selected, test-owned real GPU training output");
+  const QString python = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_PYTHON");
+  const QString root = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_ROOT");
+  QVERIFY(QFileInfo::exists(source));
+  QVERIFY(QFileInfo::exists(python));
+  QVERIFY(QFileInfo::exists(QDir(root).filePath("native/backend/camera_scale_export.py")));
+  const QByteArray original = read(source);
+  const QByteArray originalHash = QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex();
+  const auto contract = QJsonDocument::fromJson(read(cameraScaleMetadataPath(source))).object();
+  QCOMPARE(contract["schema"].toString(), QString("gsw.training_camera_contract/1"));
+  QCOMPARE(contract["ply_sha256"].toString().toLatin1(), originalHash);
+  const auto loaded = PlyPointCloudLoader::load(source);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QVERIFY(loaded.hasGaussianAttributes);
+  const auto physical = sceneMetresPerCoordinate(loaded.coordinates);
+  QVERIFY(physical.has_value());
+  const auto transforms = contract["transforms"].toObject();
+  const auto normalization = transforms["canonical_to_training"].toObject();
+  const auto sourceToCanonical = transforms["source_to_canonical"].toObject();
+  QVERIFY(normalization["s"].toDouble() > 0);
+  QVERIFY(std::abs(*physical - 1. / normalization["s"].toDouble()) < 1e-12);
+  QCOMPARE(loaded.coordinates.scaleStatus, contract["scale"].toObject()["status"].toString());
+  QCOMPARE(loaded.coordinates.dataIdentity, contract["input_data_identity"].toString());
+  SceneCoordinateInfo reopened;
+  QVERIFY(sceneCoordinateInfoFromJson(sceneCoordinateInfoToJson(loaded.coordinates), reopened));
+  QCOMPARE(sceneMetresPerCoordinate(reopened), physical);
+  // This reader is independent of the export implementation and supports the
+  // actual 2D/3D Gaussian parameter dimensions without SPZ's 3-scale contract.
+  const auto firstVertex = [](const QString &path) {
+    QHash<QString, double> result;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return result;
+    QList<QPair<QByteArray,QByteArray>> fields;
+    bool vertex = false, little = true, binary = false;
+    while (!file.atEnd()) {
+      const auto line = file.readLine().trimmed();
+      const auto tokens = line.split(' ');
+      if (line.startsWith("format ")) { binary = !line.contains(" ascii "); little = !line.contains("binary_big_endian"); }
+      if (line.startsWith("element ")) vertex = line.startsWith("element vertex ");
+      if (vertex && tokens.size() == 3 && tokens[0] == "property") fields.append({tokens[1], tokens[2]});
+      if (line == "end_header") break;
+    }
+    if (!binary) {
+      const auto values = file.readLine().simplified().split(' ');
+      if (values.size() != fields.size()) return QHash<QString,double>{};
+      for (int index = 0; index < fields.size(); ++index) result.insert(QString::fromLatin1(fields[index].second), values[index].toDouble());
+      return result;
+    }
+    QDataStream data(&file);
+    data.setByteOrder(little ? QDataStream::LittleEndian : QDataStream::BigEndian);
+    for (const auto &field : fields) {
+      double value = 0;
+      if (field.first == "float" || field.first == "float32") {
+        float single = 0; data.setFloatingPointPrecision(QDataStream::SinglePrecision); data >> single; value = single;
+      } else if (field.first == "double" || field.first == "float64") {
+        data.setFloatingPointPrecision(QDataStream::DoublePrecision); data >> value;
+      } else return QHash<QString,double>{};
+      result.insert(QString::fromLatin1(field.second), value);
+    }
+    return data.status() == QDataStream::Ok ? result : QHash<QString,double>{};
+  };
+  const auto before = firstVertex(source);
+  QVERIFY(before.contains("x") && before.contains("scale_0") && before.contains("scale_1"));
+  QTemporaryDir directory(QFileInfo(source).dir().filePath("gsw-native-scale-export-XXXXXX"));
+  QVERIFY(directory.isValid());
+  directory.setAutoRemove(false); // Retain generated acceptance artifacts, never the input.
+  QString error;
+  const QString measurement = directory.filePath("training-measurement.json");
+  QVERIFY2(writeSceneCoordinateReport(measurement, source, reopened, 0., "source", &error), qPrintable(error));
+  const auto reportCoordinates = QJsonDocument::fromJson(read(measurement)).object()["coordinates"].toObject();
+  SceneCoordinateInfo reportState;
+  QVERIFY(sceneCoordinateInfoFromJson(reportCoordinates, reportState));
+  QCOMPARE(sceneMetresPerCoordinate(reportState), physical);
+  const auto inversePoint = [](std::array<double,3> p, const QJsonObject &transform) {
+    const auto t = transform["t"].toArray();
+    const auto r = transform["R"].toArray();
+    const double scale = transform["s"].toDouble();
+    std::array<double,3> value{};
+    for (int column = 0; column < 3; ++column)
+      for (int row = 0; row < 3; ++row)
+        value[column] += r[row].toArray()[column].toDouble() * (p[row] - t[row].toDouble()) / scale;
+    return value;
+  };
+  for (const QString &mode : {QStringLiteral("source"), QStringLiteral("metric")}) {
+    ModelExportOptions options;
+    options.sourcePath = source;
+    options.destinationPath = directory.filePath(mode + ".ply");
+    options.coordinates = loaded.coordinates;
+    options.cameraCoordinateRecovery = mode;
+    options.recoveryPythonPath = python;
+    options.recoveryRepositoryRoot = root;
+    const auto result = exportModelFile(options);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto actual = firstVertex(options.destinationPath);
+    auto expected = inversePoint({before["x"], before["y"], before["z"]}, normalization);
+    if (mode == QStringLiteral("source")) expected = inversePoint(expected, sourceToCanonical);
+    for (int axis = 0; axis < 3; ++axis) {
+      const QString name = QString::fromLatin1(axis == 0 ? "x" : axis == 1 ? "y" : "z");
+      QVERIFY(std::abs(actual[name] - expected[axis]) <= 1e-9 + std::abs(expected[axis]) * 1e-12);
+    }
+    double multiplier = 1. / normalization["s"].toDouble();
+    if (mode == QStringLiteral("source")) multiplier /= sourceToCanonical["s"].toDouble();
+    int dimensions = 0;
+    for (auto field = before.cbegin(); field != before.cend(); ++field) {
+      if (field.key().startsWith("scale_")) {
+        ++dimensions;
+        QVERIFY(actual.contains(field.key()));
+        QVERIFY(std::abs(actual[field.key()] - (field.value() + std::log(multiplier))) < 2e-6);
+      } else if (field.key() == "opacity" || field.key().startsWith("f_") || field.key().startsWith("rot_")) {
+        QCOMPARE(actual[field.key()], field.value());
+      }
+    }
+    QVERIFY(dimensions == 2 || dimensions == 3);
+    QCOMPARE(actual.contains("scale_2"), before.contains("scale_2"));
+    const auto exported = PlyPointCloudLoader::load(options.destinationPath);
+    QVERIFY2(exported.isValid(), qPrintable(exported.error));
+    QCOMPARE(exported.sourceVertexCount, loaded.sourceVertexCount);
+    const auto outputRatio = sceneMetresPerCoordinate(exported.coordinates);
+    QVERIFY(outputRatio.has_value());
+    const double expectedRatio = mode == QStringLiteral("metric") ? 1. : contract["scale"].toObject()["meters_per_unit"].toDouble();
+    QVERIFY(std::abs(*outputRatio - expectedRatio) < 1e-12);
+    QVERIFY(std::abs(exported.coordinates.globalSize().z * *outputRatio - loaded.coordinates.globalSize().z * *physical) < 2e-6);
+    const auto outputMetadata = QJsonDocument::fromJson(read(cameraScaleMetadataPath(options.destinationPath))).object();
+    QCOMPARE(outputMetadata["schema"].toString(), QString("gsw.coordinate_export/1"));
+    QCOMPARE(outputMetadata["ply_sha256"].toString().toLatin1(), QCryptographicHash::hash(read(options.destinationPath), QCryptographicHash::Sha256).toHex());
+    QCOMPARE(result.coordinateRecovery["output_sha256"], outputMetadata["output_sha256"]);
+    QCOMPARE(read(source), original);
+  }
+  qInfo() << "Actual GPU-trained Gaussian PLY native measurement/export accepted:" << source
+          << "vertices" << loaded.sourceVertexCount << "generated evidence" << directory.path();
 }
 
 QTEST_GUILESS_MAIN(ModelExportTests)

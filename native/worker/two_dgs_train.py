@@ -80,9 +80,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    from native.worker.canonical_training import create_canonical_scene
+    scene = create_canonical_scene(dataset, gaussians, "2dgs")
+    if scene is None:
+        if (Path(dataset.source_path) / "transforms_test.json").is_file():
+            dataset.eval = True
+        scene = Scene(dataset, gaussians)
     native_runtime.report_images(scene.getTrainCameras())
     gaussians.training_setup(opt)
+    from native.worker.canonical_training import assert_camera_optimizer_locked
+    assert_camera_optimizer_locked(scene, gaussians)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -112,6 +119,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     if native_checkpoint.control.get("resume"):
         state = native_checkpoint.load(torch, identity)
         restore_state(torch, np, gaussians, opt, state, identity, camera_names, backend="2dgs")
+        assert_camera_optimizer_locked(scene, gaussians)
         density_control.restore(state["density_control"])
         checkpoint_engine = state.get("renderer_engine", "stock")
         native_runtime.restore_quality(state)
@@ -159,6 +167,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_indices:
             viewpoint_indices = list(range(len(cameras)))
         viewpoint_cam = cameras[viewpoint_indices.pop(randint(0, len(viewpoint_indices)-1))]
+        if hasattr(scene, "audit_sample"):
+            scene.audit_sample(viewpoint_cam, iteration)
 
         native_runtime.profiler.mark('transfer')
         ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices)
@@ -353,7 +363,8 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()},
+        validation_configs = ({'name': 'val', 'cameras': scene.getValCameras() if hasattr(scene, 'getValCameras') else []},
+                              {'name': 'test', 'cameras' : scene.getTestCameras()},
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
 
         for config in validation_configs:
@@ -416,6 +427,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--camera_manifest", type=str, default=None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -426,7 +438,9 @@ if __name__ == "__main__":
 
     # Start GUI server, configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    paused = training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
+    dataset = lp.extract(args)
+    dataset.camera_manifest = args.camera_manifest
+    paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
 
     # All done
     print("\nTraining paused." if paused else "\nTraining complete.")

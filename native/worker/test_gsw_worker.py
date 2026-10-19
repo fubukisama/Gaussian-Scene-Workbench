@@ -481,6 +481,26 @@ class WorkerTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
 
+    def test_locked_training_preserves_explicit_camera_policy_at_backend_boundary(self):
+        base = Path('D:/Codex/qa-camera-p0')
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temporary:
+            root = Path(temporary)
+            config = self.configuration(root)
+            config.update(posePolicy='locked', cameraDatasetPath=str(root / 'camera_dataset.json'),
+                          cameraDatasetIdentity='a' * 64, resolutionPolicy='preserve', runColmap=False)
+            backend = FakeBackend()
+            idle_thread = mock.Mock()
+            with (mock.patch.object(gsw_worker, 'import_backend', return_value=backend),
+                  mock.patch.object(gsw_worker.threading, 'Thread', return_value=idle_thread),
+                  contextlib.redirect_stdout(io.StringIO())):
+                self.assertEqual(gsw_worker.run_training(config), 0)
+            self.assertEqual(backend.call[1]['pose_policy'], 'locked')
+            self.assertEqual(backend.call[1]['camera_dataset_path'], config['cameraDatasetPath'])
+            self.assertEqual(backend.call[1]['camera_dataset_identity'], 'a' * 64)
+            self.assertEqual(backend.call[1]['resolution_policy'], 'preserve')
+            self.assertFalse(backend.call[0][3])
+
     def test_training_status_event_exposes_visualization_telemetry(self):
         output = io.StringIO()
         snapshot = {

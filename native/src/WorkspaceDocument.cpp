@@ -75,6 +75,60 @@ QString remapManagedPath(const QString &absolutePath,
              : QDir::cleanPath(QDir(newRootPath).filePath(relative));
 }
 
+QJsonObject cameraInfoWithPortablePath(QJsonObject info, const QString &oldRoot,
+                                     const QString &newRoot, bool portable) {
+  if (info.isEmpty()) return info;
+  const QString path = remapManagedPath(info.value(QStringLiteral("metadataPath")).toString(), oldRoot, newRoot);
+  info.insert(QStringLiteral("metadataPath"), portable ? portablePathForRoot(path, newRoot) : path);
+  return info;
+}
+
+// This is a cached presentation/identity record only. Actual camera/image/K
+// admission is always revalidated by the shared backend before training.
+QJsonObject cameraInfoForDataset(const QString &datasetPath, const QJsonObject &expected = {}) {
+  if (datasetPath.isEmpty()) return {};
+  const QDir dataset(datasetPath);
+  const QString metadata = dataset.filePath(QStringLiteral("camera_dataset.json"));
+  const QString infoPath = dataset.filePath(QStringLiteral("camera_dataset_info.json"));
+  const auto failure = [&](const char *code) {
+    QJsonObject info = expected;
+    info.insert(QStringLiteral("version"), 1);
+    info.insert(QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1"));
+    info.insert(QStringLiteral("posePolicy"), QStringLiteral("locked"));
+    info.insert(QStringLiteral("metadataPath"), expected.value(QStringLiteral("metadataPath")).toString(metadata));
+    info.insert(QStringLiteral("blocked"), true);
+    info.insert(QStringLiteral("errors"), QJsonArray{QString::fromLatin1(code)});
+    return info;
+  };
+  const QFileInfo infoFile(infoPath);
+  if (!infoFile.exists()) {
+    return (!expected.isEmpty() || QFileInfo(metadata).exists())
+        ? failure("camera_dataset_info_missing") : QJsonObject();
+  }
+  if (!infoFile.isFile() || infoFile.isSymLink() || infoFile.size() > 4 * 1024 * 1024)
+    return failure("camera_dataset_info_invalid");
+  QFile file(infoPath);
+  if (!file.open(QIODevice::ReadOnly)) return failure("camera_dataset_info_unreadable");
+  const auto document = QJsonDocument::fromJson(file.readAll());
+  if (!document.isObject()) return failure("camera_dataset_info_invalid");
+  QJsonObject info = document.object();
+  if (info.value(QStringLiteral("version")).toInt() != 1 ||
+      info.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.camera_dataset/1") ||
+      info.value(QStringLiteral("posePolicy")).toString() != QStringLiteral("locked") ||
+      info.value(QStringLiteral("dataIdentity")).toString().isEmpty())
+    return failure("camera_dataset_info_invalid");
+  const QString storedPath = info.value(QStringLiteral("metadataPath")).toString();
+  const QString canonicalPath = QDir::cleanPath(QDir::isAbsolutePath(storedPath)
+      ? storedPath : dataset.filePath(storedPath));
+  if (storedPath.isEmpty() || !relativePathInside(datasetPath, canonicalPath))
+    return failure("camera_dataset_info_path_invalid");
+  const QString expectedIdentity = expected.value(QStringLiteral("dataIdentity")).toString();
+  if (!expectedIdentity.isEmpty() && expectedIdentity != info.value(QStringLiteral("dataIdentity")).toString())
+    return failure("camera_data_identity_mismatch");
+  info.insert(QStringLiteral("metadataPath"), canonicalPath);
+  return info;
+}
+
 QString projectStem(const QString &projectFilePath) {
   QString name = QFileInfo(projectFilePath).fileName();
   const QString suffix = QStringLiteral(".gsw.json");
@@ -388,6 +442,10 @@ QString WorkspaceDocument::projectName() const { return mProjectName; }
 QString WorkspaceDocument::rootPath() const { return mRootPath; }
 QString WorkspaceDocument::projectFilePath() const { return mProjectFilePath; }
 QString WorkspaceDocument::datasetPath() const { return mDatasetPath; }
+QString WorkspaceDocument::cameraDatasetPath() const { return mCameraDatasetInfo.value(QStringLiteral("metadataPath")).toString(); }
+QString WorkspaceDocument::cameraDatasetIdentity() const { return mCameraDatasetInfo.value(QStringLiteral("dataIdentity")).toString(); }
+QString WorkspaceDocument::cameraPosePolicy() const { return mCameraDatasetInfo.value(QStringLiteral("posePolicy")).toString(QStringLiteral("solve")); }
+QJsonObject WorkspaceDocument::cameraDatasetInfo() const { return mCameraDatasetInfo; }
 QString WorkspaceDocument::scenePath() const { return mScenePath; }
 QVector3D WorkspaceDocument::sceneTranslation() const {
   return mSceneTranslation;
@@ -431,6 +489,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   }
   mProjectFilePath.clear();
   mDatasetPath.clear();
+  mCameraDatasetInfo = {};
   mScenePath.clear();
   mSceneObjects.clear();
   mActiveSceneId.clear();
@@ -461,6 +520,7 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
                                                  : displayName.trimmed();
   mProjectFilePath.clear();
   mDatasetPath.clear();
+  mCameraDatasetInfo = {};
   mScenePath.clear();
   mSceneObjects.clear();
   mActiveSceneId.clear();
@@ -516,6 +576,10 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
                      .toString(QDir(mRootPath).dirName());
   mDatasetPath =
       resolvePortablePath(root.value(QStringLiteral("datasetPath")).toString());
+  mCameraDatasetInfo = root.value(QStringLiteral("cameraDataset")).toObject();
+  if (!mCameraDatasetInfo.isEmpty())
+    mCameraDatasetInfo.insert(QStringLiteral("metadataPath"), resolvePortablePath(mCameraDatasetInfo.value(QStringLiteral("metadataPath")).toString()));
+  mCameraDatasetInfo = cameraInfoForDataset(mDatasetPath, mCameraDatasetInfo);
   mScenePath =
       resolvePortablePath(root.value(QStringLiteral("scenePath")).toString());
   mSceneTranslation = sceneTranslationFromJson(
@@ -627,6 +691,8 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   root.insert(QStringLiteral("rootPath"), storedRoot);
   root.insert(QStringLiteral("datasetPath"),
               portablePathForRoot(savedDatasetPath, savedRootPath));
+  if (!mCameraDatasetInfo.isEmpty()) root.insert(QStringLiteral("cameraDataset"),
+      cameraInfoWithPortablePath(mCameraDatasetInfo, oldRootPath, savedRootPath, true));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(savedScenePath, savedRootPath));
   root.insert(QStringLiteral("sceneTransform"),
@@ -671,6 +737,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
   mRootPath = savedRootPath;
   mProjectFilePath = targetPath;
   mDatasetPath = savedDatasetPath;
+  mCameraDatasetInfo = cameraInfoWithPortablePath(mCameraDatasetInfo, oldRootPath, savedRootPath, false);
   mScenePath = savedScenePath;
   restoreSceneCollection(root.value(QStringLiteral("sceneCollection")).toObject());
   mPendingDataRoot.clear();
@@ -738,6 +805,8 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
                   : mRootPath);
   root.insert(QStringLiteral("datasetPath"),
               portablePathForRoot(mDatasetPath, mRootPath));
+  if (!mCameraDatasetInfo.isEmpty()) root.insert(QStringLiteral("cameraDataset"),
+      cameraInfoWithPortablePath(mCameraDatasetInfo, mRootPath, mRootPath, true));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
   root.insert(QStringLiteral("sceneTransform"),
@@ -797,6 +866,8 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
   root.insert(QStringLiteral("rootPath"), mRootPath);
   root.insert(QStringLiteral("datasetPath"),
               portablePathForRoot(mDatasetPath, mRootPath));
+  if (!mCameraDatasetInfo.isEmpty()) root.insert(QStringLiteral("cameraDataset"),
+      cameraInfoWithPortablePath(mCameraDatasetInfo, mRootPath, mRootPath, true));
   root.insert(QStringLiteral("scenePath"),
               portablePathForRoot(mScenePath, mRootPath));
   root.insert(QStringLiteral("sceneTransform"),
@@ -871,11 +942,13 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
   }
 
   const QString oldDatasetPath = mDatasetPath;
+  const auto oldCameraDatasetInfo = mCameraDatasetInfo;
   const QString oldScenePath = mScenePath;
   const auto oldCollection = sceneCollectionJson();
   const auto migratedCollection = sceneCollectionJson(targetDataRoot);
   mRootPath = normalizedAbsolutePath(targetDataRoot);
   mDatasetPath = remapManagedPath(oldDatasetPath, oldRootPath, mRootPath);
+  mCameraDatasetInfo = cameraInfoWithPortablePath(oldCameraDatasetInfo, oldRootPath, mRootPath, false);
   mScenePath = remapManagedPath(oldScenePath, oldRootPath, mRootPath);
   restoreSceneCollection(migratedCollection);
   mPendingDataRoot.clear();
@@ -883,6 +956,7 @@ bool WorkspaceDocument::finalizeDataMigration(QString *errorMessage) {
   if (!saveManifest({}, errorMessage)) {
     mRootPath = oldRootPath;
     mDatasetPath = oldDatasetPath;
+    mCameraDatasetInfo = oldCameraDatasetInfo;
     mScenePath = oldScenePath;
     restoreSceneCollection(oldCollection);
     mPendingDataRoot = targetDataRoot;
@@ -905,6 +979,7 @@ bool WorkspaceDocument::setDatasetPath(const QString &path,
     return false;
   }
   mDatasetPath = normalizedAbsolutePath(path);
+  mCameraDatasetInfo = cameraInfoForDataset(mDatasetPath);
   mImageCount = countDatasetImages(mDatasetPath);
   setModified(true);
   emit changed();
@@ -1236,6 +1311,7 @@ bool WorkspaceDocument::clearImportedData(
   }
 
   const QString previousDatasetPath = mDatasetPath;
+  const auto previousCameraDatasetInfo = mCameraDatasetInfo;
   const QString previousScenePath = mScenePath;
   const auto previousCollection = sceneCollectionJson();
   const qint64 previousImageCount = mImageCount;
@@ -1278,6 +1354,7 @@ bool WorkspaceDocument::clearImportedData(
 
   if (clearDataset) {
     mDatasetPath.clear();
+    mCameraDatasetInfo = {};
     mImageCount = 0;
   }
   if (clearScene) {
@@ -1302,6 +1379,7 @@ bool WorkspaceDocument::clearImportedData(
   }
   if (!committed) {
     mDatasetPath = previousDatasetPath;
+    mCameraDatasetInfo = previousCameraDatasetInfo;
     mScenePath = previousScenePath;
     mImageCount = previousImageCount;
     mSceneMetadata = previousSceneMetadata;
@@ -1526,6 +1604,29 @@ qint64 WorkspaceDocument::countDatasetImages(const QString &directoryPath) {
   }
 
   const QDir datasetRoot(directoryPath);
+  QFile canonical(datasetRoot.filePath(QStringLiteral("camera_dataset.json")));
+  if (canonical.exists()) {
+    // The canonical manifest is the authoritative view list. Do not scan a
+    // neighbouring images directory and silently count unrelated/test files as
+    // another training source. Full hashes and split admission stay in Python.
+    if (QFileInfo(canonical).isSymLink() || canonical.size() > 128 * 1024 * 1024 || !canonical.open(QIODevice::ReadOnly)) return 0;
+    const auto manifest = QJsonDocument::fromJson(canonical.readAll()).object();
+    if (manifest.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.camera_dataset/1")) return 0;
+    QSet<QString> seen;
+    qint64 count = 0;
+    for (const auto &entry : manifest.value(QStringLiteral("views")).toArray()) {
+      const auto view = entry.toObject();
+      const QString relative = view.value(QStringLiteral("image_path")).toString();
+      const QString path = QDir::cleanPath(datasetRoot.filePath(relative));
+      const QFileInfo info(path);
+      if (relative.isEmpty() || QDir::isAbsolutePath(relative) || !relativePathInside(directoryPath, path) ||
+          !info.isFile() || info.isSymLink() ||
+          !relativePathInside(QFileInfo(directoryPath).canonicalFilePath(), info.canonicalFilePath()) || seen.contains(path)) continue;
+      seen.insert(path);
+      ++count;
+    }
+    return count;
+  }
   for (const QString &standardDirectory :
        {QStringLiteral("input"), QStringLiteral("images")}) {
     const QString candidate = datasetRoot.filePath(standardDirectory);

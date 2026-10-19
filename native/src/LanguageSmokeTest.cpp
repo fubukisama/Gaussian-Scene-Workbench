@@ -760,6 +760,37 @@ bool runLanguageSmokeTest(MainWindow &window) {
   }
   DatasetImportDialog import({}, name, {}, QCoreApplication::applicationDirPath(), true, &window);
   check(import.request().sceneName == name, "user scene name must remain unchanged");
+  auto *importCamerasAction = window.findChild<QAction *>(QStringLiteral("importCameraDatasetAction"));
+  check(importCamerasAction && importCamerasAction->text() == QCoreApplication::translate("Workbench", "导入已知相机数据集…"),
+        "known-camera import has a real localized native menu action");
+  DatasetImportDialog cameraImport(trainingImages.path(), name, {}, trainingImages.path(), true, &window);
+  cameraImport.setCameraInput({
+      {QStringLiteral("adapter"), QStringLiteral("generic_json")},
+      {QStringLiteral("sourcePath"), QDir(trainingImages.path()).filePath(QStringLiteral("camera_fixture.json"))},
+      {QStringLiteral("posePolicy"), QStringLiteral("locked")},
+      {QStringLiteral("scale"), QJsonObject{{QStringLiteral("status"), QStringLiteral("source_declared")},
+          {QStringLiteral("source_unit"), QStringLiteral("cm")}, {QStringLiteral("meters_per_unit"), .01},
+          {QStringLiteral("evidence"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("user_declaration")},
+              {QStringLiteral("description"), QStringLiteral("camera_fixture_cm")}}}}}},
+      {QStringLiteral("normalization"), QJsonObject{{QStringLiteral("mode"), QStringLiteral("none")}}},
+      {QStringLiteral("initialization"), QJsonObject{{QStringLiteral("kind"), QStringLiteral("random")},
+          {QStringLiteral("seed"), 17}, {QStringLiteral("count"), 123},
+          {QStringLiteral("bounds"), QJsonArray{QJsonArray{-4, -3, -2}, QJsonArray{4, 3, 2}}}}}});
+  const auto retainedCameraImport = cameraImport.request().cameraInput;
+  auto *cameraMode = cameraImport.findChild<QComboBox *>(QStringLiteral("datasetImportInputMode"));
+  auto *cameraAdapter = cameraImport.findChild<QComboBox *>(QStringLiteral("datasetImportCameraAdapter"));
+  auto *cameraUnit = cameraImport.findChild<QComboBox *>(QStringLiteral("datasetImportSourceUnit"));
+  check(cameraMode && cameraAdapter && cameraUnit && cameraMode->currentData() == QStringLiteral("locked") &&
+        cameraAdapter->currentData() == QStringLiteral("generic_json") && cameraUnit->currentData() == QStringLiteral("cm"),
+        "camera adapter, locked policy and declared units are native controls, not preview guesses");
+  TrainingDialog lockedSettings(trainingImages.path(), name, trainingImages.path(), false, true, &window);
+  lockedSettings.setCameraDatasetReference(QDir(trainingImages.path()).filePath(QStringLiteral("camera_dataset.json")),
+      QString(64, QLatin1Char('d')), QStringLiteral("locked"));
+  auto *lockedBackend = lockedSettings.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo"));
+  auto *lockedIterations = lockedSettings.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
+  if (lockedBackend) lockedBackend->setCurrentIndex(lockedBackend->findData(QStringLiteral("2dgs")));
+  if (lockedIterations) lockedIterations->setValue(9876);
+  const auto retainedLockedSettings = lockedSettings.configuration();
   // This source lives in the catalog under the original English diagnostic.
   const QString error = QCoreApplication::translate("Workbench", "Unable to open PLY file %1: %2")
                             .arg(name, QStringLiteral("test"));
@@ -979,6 +1010,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // Window controls are installed lazily when a dialog is polished. Warm
   // existing dialogs before asserting that language changes add no actions.
   for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
+       static_cast<QDialog *>(&cameraImport), static_cast<QDialog *>(&lockedSettings),
        static_cast<QDialog *>(&meshing),
        static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
        static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog),
@@ -1152,6 +1184,18 @@ bool runLanguageSmokeTest(MainWindow &window) {
     languageMenu->actions()[next]->trigger();
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
+    check(importCamerasAction && importCamerasAction->text() == QCoreApplication::translate("Workbench", "导入已知相机数据集…") &&
+          cameraImport.windowTitle() == QCoreApplication::translate("Workbench", "导入已知相机数据集") &&
+          cameraMode && cameraMode->currentText() == QCoreApplication::translate("Workbench", "已知相机数据集（锁定位姿）") &&
+          cameraAdapter && cameraAdapter->currentText() == QCoreApplication::translate("Workbench", "GSW 通用相机 JSON"),
+          "known-camera action, dialog title, policy and adapter labels switch immediately in all languages");
+    check(cameraImport.request().sceneName == name && cameraImport.request().cameraInput == retainedCameraImport &&
+          lockedSettings.configuration().posePolicy == QStringLiteral("locked") &&
+          !lockedSettings.configuration().runColmap && !lockedSettings.effectiveRunColmap() &&
+          lockedSettings.configuration().resolutionPolicy == QStringLiteral("preserve") && lockedSettings.configuration().resolution == 1 &&
+          lockedSettings.configuration().cameraDatasetIdentity == retainedLockedSettings.cameraDatasetIdentity &&
+          lockedSettings.configuration().backend == QStringLiteral("2dgs") && lockedSettings.configuration().iterations == 9876,
+          "live language changes retain explicit source units, initialization bounds, locked identity and training pixels");
     check(AppTheme::currentTheme() == UiTheme::Light && AppTheme::currentThemeMode() == UiThemeMode::Light &&
           lightTheme->isChecked() && !darkTheme->isChecked() && !automaticTheme->isChecked() &&
           !automaticThemeTimer->isActive(), "live language switching preserves the selected manual theme");
@@ -1569,6 +1613,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
     action->trigger();
     settleLayout();
     for (QDialog *dialog : {static_cast<QDialog *>(&training),
+                           static_cast<QDialog *>(&lockedSettings),
+                           static_cast<QDialog *>(&cameraImport),
                            static_cast<QDialog *>(&twoDSettings),
                            static_cast<QDialog *>(&reconstruction),
                            static_cast<QDialog *>(&meshing),

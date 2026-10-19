@@ -43,6 +43,7 @@ jobs:
   upstream-acceptance:
     name: Upstream viewport acceptance
     if: >-
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.base_ref == 'main') ||
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: windows-2022
@@ -103,10 +104,12 @@ jobs:
           QT_FORCE_STDERR_LOGGING: "1"
           GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/acceptance-artifact
           GSW_COORDINATE_SCENE_SCREENSHOT_DIR: ${{ github.workspace }}/native/acceptance-artifact/coordinates
+          GSW_RESOURCE_HUD_CAPTURE_PATH: ${{ github.workspace }}/native/acceptance-artifact/resource-hud.png
+          GSW_LANGUAGE_SCREENSHOT_DIR: ${{ github.workspace }}/native/acceptance-artifact/languages
         run: |
           ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
             --output-log native/acceptance.log `
-            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
+            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_training_performance_policy|native_training_preflight|native_processing_completion|native_language_(zh_CN|en_US|ja_JP)|native_resource_budget_hud|native_texture_text_masks|native_texture_text_(zh_CN|en_US|ja_JP)_(light|dark)|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
       - name: Upload acceptance evidence
         if: always()
@@ -117,6 +120,7 @@ jobs:
             native/acceptance.log
             native/acceptance-artifact/
             native/build-acceptance/blender-viewport-evidence/
+            native/build-acceptance/texture-text-captures/
             native/build-acceptance/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 7
@@ -125,6 +129,7 @@ jobs:
     name: Qt 6 native preview
     # Feature PRs into native main run the same gates as main pushes.
     if: >-
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.base_ref == 'main') ||
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.

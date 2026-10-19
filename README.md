@@ -8,14 +8,16 @@
 
 ## Native Desktop Preview
 
-- Version: `0.3.1-native-preview`
-- Documentation updated: `2026-10-15` — not a new release-version announcement.
+- Version: `0.3.2-native-preview`
+- Documentation updated: `2026-10-19`; camera/scale P0 implementation and acceptance status are documented below.
 - Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
 The default `main` branch contains the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
 
 ### Current capabilities
+
+- **Known cameras and scale (P0):** Blender transforms, COLMAP text/binary, canonical JSON and an independent research-JSON adapter share explicit locked/solve policies. Locked cameras are not re-solved, full pinhole K and user-selected resolution are recorded, and validation/test views cannot enter training. Hash-bound transform/scale records accompany native measurement, complete-state resume and separate Gaussian-aware restored exports. Source-declared units are not independent geometry-accuracy evidence. See [protocol, capability matrix and acceptance limits](docs/CAMERA_SCALE_P0.md).
 
 - **Projects and media:** untitled projects, photo/folder/video import, external dataset links, portable `.gsw.json` projects and managed data, Save As/recovery, and separate dataset/reconstruction/scene/task-history cleanup.
 - **Reconstruction and training:** guarded COLMAP reconstruction, 3DGS/2DGS training, input/runtime preflight, reconstruction reuse explanations, progress, logs and cancellation. CUDA training needs a compatible external environment.
@@ -47,7 +49,7 @@ From this branch's checkout, with the dependencies in [native/README.md](native/
 powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration Release -Package
 ```
 
-The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
+The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.2-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
 
 Translation and native regression commands:
 
@@ -86,11 +88,13 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ## 简体中文
 
-**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.1-native-preview`。本页文档更新日期为 **2026-10-15**，不代表另行发布新版本。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.2-native-preview`。本页文档更新日期为 **2026-10-19**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
 本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
 
 ### 当前功能
+
+- **已知相机与尺度（P0）：**标准 transforms、COLMAP 文本／二进制、规范 JSON 与独立研究 JSON 适配器共用明确的锁定／求解策略。锁定相机不重求解，保留完整针孔 K 和用户选择的分辨率；验证／测试视图不进入训练。哈希绑定的尺度和变换记录贯通原生测量、完整状态续训与独立高斯坐标恢复导出。来源声明单位不是独立几何精度证明。见[协议、能力矩阵及验收边界](docs/CAMERA_SCALE_P0.md)。
 
 - **工程与素材：**未命名工程，照片/文件夹/视频导入，外部数据集关联，保存/另存为、恢复，以及数据集、重建、场景、任务历史的分别清理。
 - **重建与训练：**COLMAP、3DGS/2DGS、数据与环境预检、复用重建原因、进度、日志和取消。CUDA 训练需要兼容的独立运行环境。
@@ -112,7 +116,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。旧 HTML/Electron Releases 已下架；Setup 不自动启动程序或训练，未签名预览版可能需要获准的签名/运行策略，软件不绕过安全策略。
 
-源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
+源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.2-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
 
 ### 能力边界与许可
 
@@ -122,11 +126,13 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ## 日本語
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.1-native-preview`、本ページの文書更新日は **2026-10-15** です。新しい製品バージョンの公開日を意味しません。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.2-native-preview`、本ページの文書更新日は **2026-10-19** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
 この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
 
 ### 現在の機能
+
+- **既知カメラとスケール（P0）：**標準 transforms、COLMAP テキスト／バイナリ、正規 JSON、独立した研究 JSON アダプターで、固定／推定方針を明示します。固定カメラは再推定せず、全ピンホール K と選択した画像サイズを記録し、検証／テスト視点を学習から除外します。ハッシュで結び付けたスケール・座標変換を、ネイティブ測定、完全状態の学習再開、別ファイルへのガウス座標復元で共有します。ソースの単位宣言は独立した形状精度の証明ではありません。[プロトコルと対応範囲](docs/CAMERA_SCALE_P0.md)を参照してください。
 
 - **プロジェクトと素材：**未保存プロジェクト、写真/フォルダー/動画追加、外部データセット、保存/名前を付けて保存、復元、データセット・再構築・シーン・履歴の個別整理。
 - **再構築と学習：**COLMAP、3DGS/2DGS、入力と環境の事前確認、再構築を再利用する理由、進捗、ログ、キャンセル。CUDA 学習には互換性のある外部環境が必要です。
@@ -148,7 +154,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。上記のネイティブパッケージと実行環境の手順を使用し、過去の配布物を現在の導入先とは扱いません。
 
-ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
+ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.2-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
 
 ### 制限とライセンス
 

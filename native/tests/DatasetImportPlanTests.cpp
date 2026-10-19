@@ -38,6 +38,9 @@ private slots:
   void fallsBackToSystemTempWhenNoDataDriveIsAvailable();
   void suggestsSceneNamesFromFoldersAndVideos();
   void usesMeaningfulParentForGenericImageFolders();
+  void cameraImportKeepsExplicitLockedPolicyWithoutMediaFallback();
+  void cameraImportRejectsMissingSourceInsteadOfScanningPhotographs();
+  void cameraImportRejectsSolvePolicyAndUnsupportedAdapter();
 };
 
 void DatasetImportPlanTests::collectsSupportedMediaFromFilesAndFolders() {
@@ -370,6 +373,69 @@ void DatasetImportPlanTests::usesMeaningfulParentForGenericImageFolders() {
 
   QCOMPARE(suggestedMediaProjectName({imagePath}), QStringLiteral("temple"));
   QCOMPARE(suggestedMediaSceneName({imagePath}), QStringLiteral("temple"));
+}
+
+void DatasetImportPlanTests::cameraImportKeepsExplicitLockedPolicyWithoutMediaFallback() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  const QString source = root.filePath(QStringLiteral("transforms_train.json"));
+  QVERIFY(writeBytes(source, QByteArrayLiteral("{}")));
+  DatasetImportRequest request;
+  request.sceneName = QStringLiteral("known-cameras");
+  request.cameraInput = {{QStringLiteral("adapter"), QStringLiteral("blender_transforms")},
+                        {QStringLiteral("sourcePath"), source},
+                        {QStringLiteral("posePolicy"), QStringLiteral("locked")}};
+  QString error;
+  const auto plan = DatasetImportPlan::create(request, &error);
+  QVERIFY2(plan.has_value(), qPrintable(error));
+  QVERIFY(plan->hasCameraInput());
+  QCOMPARE(plan->videoCount(), 0);
+  const QString configPath = root.filePath(QStringLiteral("import.json"));
+  QVERIFY(plan->writeWorkerConfiguration(configPath, root.path(),
+                                         root.filePath(QStringLiteral("datasets")), &error));
+  QFile file(configPath);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  const auto config = QJsonDocument::fromJson(file.readAll()).object();
+  const auto cameraInput = config.value(QStringLiteral("cameraInput")).toObject();
+  QCOMPARE(cameraInput.value(QStringLiteral("posePolicy")).toString(), QStringLiteral("locked"));
+  QCOMPARE(cameraInput.value(QStringLiteral("sourcePath")).toString(), QDir::cleanPath(source));
+  QVERIFY(!cameraInput.contains(QStringLiteral("scale"))); // Preserve source declarations, never guess metres.
+  QVERIFY(config.value(QStringLiteral("files")).toArray().isEmpty());
+  QVERIFY(!config.contains(QStringLiteral("runColmap")));
+}
+
+void DatasetImportPlanTests::cameraImportRejectsMissingSourceInsteadOfScanningPhotographs() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString image = QDir(temporary.path()).filePath(QStringLiteral("photo.jpg"));
+  QVERIFY(writeBytes(image, QByteArrayLiteral("image")));
+  DatasetImportRequest request;
+  request.sceneName = QStringLiteral("missing-camera-source");
+  request.sourcePaths = {image};
+  request.cameraInput = {{QStringLiteral("adapter"), QStringLiteral("auto")},
+                        {QStringLiteral("sourcePath"), QDir(temporary.path()).filePath(QStringLiteral("missing.json"))},
+                        {QStringLiteral("posePolicy"), QStringLiteral("locked")}};
+  QString error;
+  QVERIFY(!DatasetImportPlan::create(request, &error));
+  QVERIFY(!error.isEmpty());
+}
+
+void DatasetImportPlanTests::cameraImportRejectsSolvePolicyAndUnsupportedAdapter() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  for (const auto &options : {QJsonObject{{QStringLiteral("adapter"), QStringLiteral("auto")},
+                                         {QStringLiteral("posePolicy"), QStringLiteral("solve")}},
+                              QJsonObject{{QStringLiteral("adapter"), QStringLiteral("guess_any_format")},
+                                         {QStringLiteral("posePolicy"), QStringLiteral("locked")}}}) {
+    DatasetImportRequest request;
+    request.sceneName = QStringLiteral("invalid-camera-policy");
+    request.cameraInput = options;
+    request.cameraInput.insert(QStringLiteral("sourcePath"), temporary.path());
+    QString error;
+    QVERIFY(!DatasetImportPlan::create(request, &error));
+    QVERIFY(!error.isEmpty());
+  }
 }
 
 QTEST_GUILESS_MAIN(DatasetImportPlanTests)

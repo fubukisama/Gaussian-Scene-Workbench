@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 namespace gsw {
@@ -67,6 +68,18 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   mCoordinates->addItem({}); mCoordinates->addItem({});
   AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("原始坐标（不应用模型变换）"));
   AppLanguage::bindComboItem(mCoordinates, 1, AppLanguage::source("场景坐标（应用位移、旋转、缩放）"));
+  const auto recovery = cameraScaleRecoveryCapability(source.sourcePath);
+  if (gaussian && recovery.preserve && !recovery.source)
+    AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("当前文件坐标（保留尺度与来源记录）"));
+  if (gaussian && recovery.source) {
+    AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("训练输出坐标（保留高斯原属性）"));
+    mCoordinates->addItem({}, QStringLiteral("source"));
+    AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复来源坐标与单位（另存高斯 PLY）"));
+    if (recovery.metric) {
+      mCoordinates->addItem({}, QStringLiteral("metric"));
+      AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复为米制规范坐标（另存高斯 PLY）"));
+    }
+  }
   mCoordinates->setCurrentIndex(gaussian ? 0 : 1);
   form->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("导出坐标")), mCoordinates);
   mSpzOptions = new QWidget(this);
@@ -135,6 +148,7 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
     mPath->setText(path.dir().filePath(base + QLatin1Char('.') + modelExportSuffix(format)));
     refreshDescription();
   });
+  connect(mCoordinates, &QComboBox::currentIndexChanged, this, [this] { refreshDescription(); });
   AppLanguage::onChanged(this, [this] { refreshDescription(); });
   refreshDescription();
 }
@@ -144,6 +158,12 @@ ModelExportOptions ModelExportDialog::options() const {
   result.format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
   result.destinationPath = mPath->text();
   result.applyTransform = mCoordinates->currentIndex() == 1;
+  result.cameraCoordinateRecovery = result.format == ModelExportFormat::Ply && mCoordinates->currentIndex() >= 2
+      ? mCoordinates->currentData().toString() : QString();
+  if (mGaussian && result.format == ModelExportFormat::Ply && mCoordinates->currentIndex() == 0) {
+    const auto capability = cameraScaleRecoveryCapability(mSource.sourcePath);
+    if (capability.preserve) result.cameraCoordinateRecovery = capability.source ? QStringLiteral("training") : QStringLiteral("preserve");
+  }
   result.spzVersion = mSpzVersion->currentData().toInt();
   result.spzQuality = mSpzQuality->currentIndex();
   result.spzMaximumShDegree = mSpzShDegree->currentData().toInt();
@@ -155,8 +175,15 @@ void ModelExportDialog::refreshDescription() {
   const bool gaussianPly = mGaussian && format == ModelExportFormat::Ply;
   const bool spz = format == ModelExportFormat::Spz;
   mSpzOptions->setVisible(spz);
-  mCoordinates->setEnabled(!gaussianPly && !spz);
-  if (gaussianPly || spz) mCoordinates->setCurrentIndex(0);
+  const bool recoveryAvailable = cameraScaleRecoveryCapability(mSource.sourcePath).source;
+  mCoordinates->setEnabled(!spz && (!gaussianPly || recoveryAvailable));
+  if (spz || (gaussianPly && mCoordinates->currentIndex() == 1) || (!gaussianPly && mCoordinates->currentIndex() >= 2))
+    mCoordinates->setCurrentIndex(0);
+  if (auto *model = qobject_cast<QStandardItemModel *>(mCoordinates->model())) {
+    if (model->item(1)) model->item(1)->setEnabled(!gaussianPly && !spz);
+    for (int index = 2; index < mCoordinates->count(); ++index)
+      if (model->item(index)) model->item(index)->setEnabled(gaussianPly);
+  }
   QString description;
   switch (format) {
   case ModelExportFormat::Spz:
@@ -168,7 +195,7 @@ void ModelExportDialog::refreshDescription() {
   case ModelExportFormat::Stl:
     description = QCoreApplication::translate("Workbench", "STL 仅保存三角形几何，不包含颜色、贴图或单位信息。"); break;
   case ModelExportFormat::Glb:
-    description = QCoreApplication::translate("Workbench", "GLB 保存完整网格或点云，嵌入颜色、法线、UV 与贴图；转换为 Y 向上和米制。未声明单位时按 1 单位 = 1 m 处理。单文件须小于 4 GiB。"); break;
+    description = QCoreApplication::translate("Workbench", "GLB 保存完整网格或点云，嵌入颜色、法线、UV 与贴图；按可追溯尺度转换为 Y 向上和米制。绝对尺度未知时拒绝导出，不假定 1 单位 = 1 m。单文件须小于 4 GiB。"); break;
   case ModelExportFormat::Xyz:
   case ModelExportFormat::Csv:
     description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性。"); break;
@@ -177,7 +204,9 @@ void ModelExportDialog::refreshDescription() {
     description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
         "原始坐标保留源单位；场景坐标应用模型变换，并在源单位与场景参考单位均已声明时换算到场景参考单位。单位未知时保留数值，不猜测物理比例。GLB 随后按格式约定转换为米制。");
   }
-  if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
+  if (gaussianPly && mCoordinates->currentIndex() >= 2) {
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "按已验证的相机尺度记录恢复高斯中心、尺寸与协方差，并保留来源证据。仅支持正相似变换；方向相关球谐的旋转尚不支持时会拒绝。不会修改原训练模型，也不会叠加当前场景变换。");
+  } else if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
       ? QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.")
       : QCoreApplication::translate("Workbench", "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。"));
   mDescription->setText(description);
@@ -199,6 +228,13 @@ void ModelExportDialog::confirmExport() {
   if (!path.endsWith(suffix, Qt::CaseInsensitive)) path += suffix;
   mPath->setText(path);
   const QFileInfo target(path);
+  if (format == ModelExportFormat::Ply && (mCoordinates->currentIndex() >= 2 ||
+      (mGaussian && cameraScaleRecoveryCapability(mSource.sourcePath).preserve)) &&
+      (target.exists() || QFileInfo::exists(cameraScaleMetadataPath(path)))) {
+    QMessageBox::warning(this, QCoreApplication::translate("Workbench", "无法导出模型"),
+        QCoreApplication::translate("Workbench", "坐标恢复必须另存为新文件，不能覆盖已有模型或尺度记录。"));
+    return;
+  }
   for (const QString &protectedPath : mProtectedPaths) {
     const QFileInfo source(protectedPath);
     if (target.absoluteFilePath().compare(source.absoluteFilePath(), Qt::CaseInsensitive) == 0 ||

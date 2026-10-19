@@ -74,11 +74,12 @@ class ThreeDgsPreviewAdapterTests(unittest.TestCase):
                 self.cameras_extent = 2.
                 self.cameras = [SimpleNamespace(image_name="a", colmap_id=1,
                                  alpha_mask=None, depth_reliable=False,
-                                 original_image=torch.zeros(4, 3))]
+                                 image_width=3, image_height=4,
+                                 original_image=torch.zeros(1, 4, 3))]
             def getTrainCameras(self): return self.cameras
 
         def render(camera, model, pipe, background, **kwargs):
-            return dict(render=model._xyz, viewspace_points=model._xyz,
+            return dict(render=model._xyz.unsqueeze(0), viewspace_points=model._xyz,
                         visibility_filter=torch.ones(4, dtype=torch.bool), radii=torch.ones(4))
 
         class Progress:
@@ -126,24 +127,39 @@ class ThreeDgsPreviewAdapterTests(unittest.TestCase):
         event = SimpleNamespace(record=lambda *args: None, elapsed_time=lambda other: 1.,
                                 query=lambda: True, synchronize=lambda: None)
         original_tensor = torch.tensor
+        original_to = torch.Tensor.to
         def tensor(*args, **kwargs):
             if kwargs.get("device") == "cuda": kwargs["device"] = "cpu"
             return original_tensor(*args, **kwargs)
+        def cpu_target(value, *args, **kwargs):
+            args = list(args)
+            if args and str(args[0]).startswith("cuda"):
+                args[0] = "cpu"
+            if str(kwargs.get("device", "")).startswith("cuda"):
+                kwargs["device"] = "cpu"
+            return original_to(value, *args, **kwargs)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             data = SimpleNamespace(source_path=str(root / "dataset"), model_path=str(root / "output"),
                                    sh_degree=3, white_background=False, train_test_exp=False)
-            control = dict(output=data.model_path, request=str(root / "pause.json"), session="cpu-test", backend="3dgs")
+            control = dict(output=data.model_path, request=str(root / "pause.json"), session="cpu-test", backend="3dgs",
+                           performance={"version": 1, "enabled": False})
             with mock.patch.dict(os.environ, {"GSW_NATIVE_TRAINING_CONTROL": json.dumps(control)}), \
                  mock.patch.object(torch, "tensor", side_effect=tensor), \
                  mock.patch.object(torch.Tensor, "cuda", lambda self: self), \
+                 mock.patch.object(torch.Tensor, "to", cpu_target), \
                  mock.patch.object(torch.cuda, "Event", return_value=event), \
                  mock.patch.object(torch.cuda, "is_available", return_value=True), \
                  mock.patch.object(torch.cuda, "current_device", return_value=0), \
                  mock.patch.object(torch.cuda, "current_stream", return_value=SimpleNamespace(cuda_stream=0)), \
                  mock.patch.object(torch.cuda, "mem_get_info", return_value=(free_vram, 12 * 1024**3)), \
                  mock.patch.object(torch.cuda, "get_device_name", return_value="CPU CUDA boundary"), \
+                 mock.patch.object(torch.cuda, "reset_peak_memory_stats"), \
+                 mock.patch.object(torch.cuda, "memory_allocated", return_value=0), \
+                 mock.patch.object(torch.cuda, "memory_reserved", return_value=0), \
+                 mock.patch.object(torch.cuda, "max_memory_allocated", return_value=0), \
+                 mock.patch.object(torch.cuda, "synchronize"), \
                  mock.patch.object(ctypes, "WinDLL", side_effect=windll):
                 self.assertFalse(ns["training"](data, opt, SimpleNamespace(debug=False), [], [], [], None,
                                                   -1, enable_gpu_preview=True))

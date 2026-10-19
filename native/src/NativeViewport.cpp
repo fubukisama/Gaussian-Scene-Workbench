@@ -847,14 +847,11 @@ SceneCoordinateInfo NativeViewport::sceneReferenceCoordinates() const {
 double NativeViewport::sourceToReferenceUnitScale(const SceneState &state) const {
   const auto &source = state.mSceneCoordinates;
   const auto reference = sceneReferenceCoordinates();
-  if (!source.unitDeclared || !reference.unitDeclared ||
-      source.unit == SceneLengthUnit::Unknown || reference.unit == SceneLengthUnit::Unknown)
+  const auto sourceRatio = sceneMetresPerCoordinate(source);
+  const auto referenceRatio = sceneMetresPerCoordinate(reference);
+  if (!sourceRatio || !referenceRatio)
     return 1.0; // Unknown units are not silently assumed to be metres.
-  const auto metres = [](SceneLengthUnit unit) {
-    return unit == SceneLengthUnit::Millimetres ? 0.001 :
-           unit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
-  };
-  return metres(source.unit) / metres(reference.unit);
+  return *sourceRatio / *referenceRatio;
 }
 
 double NativeViewport::sourceToSceneUnitScale() const {

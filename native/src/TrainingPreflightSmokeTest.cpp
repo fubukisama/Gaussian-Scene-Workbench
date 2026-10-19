@@ -227,6 +227,88 @@ bool runTrainingPreflightSmokeTest(const QString &python, const QString &backend
              transforms.findChild<QLabel *>(QStringLiteral("trainingReconstructionSummaryLabel"))->text().contains(QStringLiteral("transforms_train.json")) &&
              !transforms.effectiveRunColmap(),
              "transforms frames are identified explicitly rather than fabricated COLMAP registration")) return false;
+
+  // The canonical manifest deliberately uses nested images outside images/input
+  // and no sparse points. Its test view must never be filled into train by a
+  // directory scan, nor trigger an implicit SfM retry.
+  QTemporaryDir lockedDirectory;
+  if (!lockedDirectory.isValid()) return false;
+  QDir lockedRoot(lockedDirectory.path());
+  QJsonArray lockedViews;
+  for (int index = 0; index < 3; ++index) {
+    const QString relative = QStringLiteral("capture/%1/shared.png").arg(index);
+    if (!lockedRoot.mkpath(QFileInfo(relative).path())) return false;
+    QImage image(24 + index * 2, 16, QImage::Format_RGB32);
+    image.fill(QColor(50 + index * 30, 70, 100));
+    if (!image.save(lockedRoot.filePath(relative))) return false;
+    lockedViews.append(QJsonObject{
+        {QStringLiteral("view_id"), QStringLiteral("locked-view-%1").arg(index)},
+        {QStringLiteral("image_path"), relative},
+        {QStringLiteral("width"), image.width()}, {QStringLiteral("height"), image.height()},
+        {QStringLiteral("K"), QJsonArray{QJsonArray{20, 0, 3}, QJsonArray{0, 30, 2}, QJsonArray{0, 0, 1}}},
+        {QStringLiteral("c2w_opencv"), QJsonArray{
+            QJsonArray{1, 0, 0, index * 10.0}, QJsonArray{0, 1, 0, 0},
+            QJsonArray{0, 0, 1, 0}, QJsonArray{0, 0, 0, 1}}},
+        {QStringLiteral("split"), index == 0 ? QStringLiteral("train") : index == 1 ? QStringLiteral("val") : QStringLiteral("test")}});
+  }
+  const QString metadataPath = lockedRoot.filePath(QStringLiteral("camera_dataset.json"));
+  if (!writeJson(metadataPath, {
+      {QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1")},
+      {QStringLiteral("source"), QJsonObject{{QStringLiteral("kind"), QStringLiteral("synthetic")}}},
+      {QStringLiteral("pose_policy"), QStringLiteral("locked")},
+      {QStringLiteral("scale"), QJsonObject{{QStringLiteral("status"), QStringLiteral("source_declared")},
+          {QStringLiteral("source_unit"), QStringLiteral("cm")}, {QStringLiteral("meters_per_unit"), .01},
+          {QStringLiteral("evidence"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("user_declaration")},
+              {QStringLiteral("description"), QStringLiteral("fixture_exporter_unit")}}}}}},
+      {QStringLiteral("views"), lockedViews}})) return false;
+  TrainingDialog locked(lockedRoot.path(), QStringLiteral("locked-fixture"), lockedRoot.path(), false, true);
+  locked.setReconstructionProbe(python, backendRoot, QProcessEnvironment::systemEnvironment());
+  locked.show();
+  auto *lockedPose = locked.findChild<QComboBox *>(QStringLiteral("trainingPosePolicyCombo"));
+  auto *lockedColmap = locked.findChild<QCheckBox *>(QStringLiteral("trainingRunColmapCheckBox"));
+  auto *lockedRatio = locked.findChild<QComboBox *>(QStringLiteral("trainingResolutionCombo"));
+  auto *lockedResolution = locked.findChild<QComboBox *>(QStringLiteral("trainingResolutionPolicyCombo"));
+  auto *lockedPreset = locked.findChild<QComboBox *>(QStringLiteral("trainingQualityCombo"));
+  auto *lockedSource = locked.findChild<QLabel *>(QStringLiteral("trainingReconstructionSummaryLabel"));
+  auto *lockedStart = locked.findChild<QPushButton *>(QStringLiteral("trainingStartButton"));
+  if (!check(lockedPose && lockedColmap && lockedRatio && lockedResolution && lockedPreset && lockedSource && lockedStart &&
+             waitFor([&] { return locked.reconstructionPreflightReady(); }) && lockedStart->isEnabled(),
+             "the real locked-camera dialog admits nested train/val/test images without sparse points")) return false;
+  const auto lockedSummary = locked.cameraDatasetSummary();
+  const auto splitCounts = lockedSummary.value(QStringLiteral("counts")).toObject();
+  if (!check(locked.configuration().posePolicy == QStringLiteral("locked") &&
+             !locked.configuration().runColmap && !locked.effectiveRunColmap() && !lockedColmap->isEnabled() &&
+             locked.configuration().resolutionPolicy == QStringLiteral("preserve") && locked.configuration().resolution == 1 &&
+             splitCounts.value(QStringLiteral("train")).toInt() == 1 && splitCounts.value(QStringLiteral("val")).toInt() == 1 &&
+             splitCounts.value(QStringLiteral("test")).toInt() == 1 &&
+             locked.configuration().cameraDatasetPath == metadataPath && !locked.configuration().cameraDatasetIdentity.isEmpty(),
+             "locked policy, preserved pixels, split isolation and dataset identity are explicit public configuration")) return false;
+  lockedPreset->setCurrentIndex(lockedPreset->findData(QStringLiteral("full")));
+  if (!check(locked.configuration().resolution == 1 && locked.configuration().resolutionPolicy == QStringLiteral("preserve"),
+             "changing a locked-camera quality preset never silently resizes input images")) return false;
+  lockedResolution->setCurrentIndex(lockedResolution->findData(QStringLiteral("manual")));
+  lockedRatio->setCurrentIndex(lockedRatio->findData(2));
+  const QString identityBeforeLanguage = locked.configuration().cameraDatasetIdentity;
+  for (const QString &language : AppLanguage::supported()) {
+    AppLanguage::apply(language, false);
+    QApplication::processEvents();
+    if (!check(locked.configuration().resolution == 2 && locked.configuration().resolutionPolicy == QStringLiteral("manual") &&
+               locked.configuration().cameraDatasetIdentity == identityBeforeLanguage &&
+               locked.configuration().posePolicy == QStringLiteral("locked") && !locked.effectiveRunColmap() &&
+               lockedSource->text().contains(QStringLiteral("cm")) && lockedSource->text().contains(identityBeforeLanguage),
+               "all three live UI languages retain explicit manual resolution, source units and locked dataset identity")) return false;
+  }
+  AppLanguage::apply(oldLanguage, false);
+  lockedPose->setCurrentIndex(lockedPose->findData(QStringLiteral("solve")));
+  if (!check(waitFor([&] { return locked.reconstructionPreflightReady(); }) &&
+             locked.reconstructionSummary().report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version") &&
+             !locked.reconstructionSummary().report.value(QStringLiteral("minimumViabilityPassed")).toBool() &&
+             locked.configuration().posePolicy == QStringLiteral("solve") && locked.configuration().runColmap &&
+             locked.effectiveRunColmap() &&
+             locked.cameraDatasetSummary().value(QStringLiteral("scale")).toObject().value(QStringLiteral("status")).toString() == QStringLiteral("arbitrary") &&
+             locked.cameraDatasetSummary().value(QStringLiteral("sourceCounts")).toObject().value(QStringLiteral("test")).toInt() == 1,
+             "explicit solve plans a new train-only version, preserves source test provenance and does not claim SfM quality or metric scale")) return false;
+  locked.close();
   return true;
 }
 }

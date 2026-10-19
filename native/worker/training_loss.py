@@ -64,7 +64,13 @@ class PhotometricLoss:
             self._busy = bool(image.requires_grad and self.torch.is_grad_enabled())
             self._effective, self._reason = "fused_l1_ssim", ""
             try:
-                return self._function.apply(prediction, truth, weight, self)
+                # The allocator retains peak capacity, but the extension ABI
+                # returns buffers[6].view_as(image). Pass exact active extents,
+                # not the larger previous image's backing allocation. Narrow
+                # views reuse storage without changing the numerical kernel.
+                active_buffers = [buffer.narrow(0, 0, count)
+                                  for buffer, count in zip(self._buffers, required)]
+                return self._function.apply(prediction, truth, weight, self, active_buffers)
             except Exception:
                 self._busy = False
                 raise
@@ -83,10 +89,10 @@ class PhotometricLoss:
 
         class CombinedLoss(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, image, target, weight, owner):
+            def forward(ctx, image, target, weight, owner, active_buffers):
                 ctx.owner, ctx.weight = owner, weight
-                ctx.save_for_backward(image, target, *owner._buffers)
-                scalar = owner._module.forward(image, target, weight, owner._buffers)
+                ctx.save_for_backward(image, target, *active_buffers)
+                scalar = owner._module.forward(image, target, weight, active_buffers)
                 loss, l1 = scalar[0], scalar[1]
                 ctx.mark_non_differentiable(l1)
                 return loss, l1
@@ -97,7 +103,7 @@ class PhotometricLoss:
                 try:
                     gradient = ctx.owner._module.backward(image, target, ctx.weight,
                         grad_loss.contiguous(), buffers)
-                    return gradient, None, None, None
+                    return gradient, None, None, None, None
                 finally:
                     ctx.owner._busy = False
 

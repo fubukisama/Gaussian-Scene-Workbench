@@ -3246,6 +3246,11 @@ def job_snapshot(job):
         "error": job.get("error"),
         "dataset_path": job.get("dataset_path"),
         "resume_from_scene": job.get("resume_from_scene"),
+        "pose_policy": job.get("pose_policy"),
+        "camera_dataset_path": job.get("camera_dataset_path"),
+        "camera_dataset_identity": job.get("camera_dataset_identity"),
+        "resolution_policy": job.get("resolution_policy"),
+        "cameraDataset": job.get("cameraDataset"),
         "resume_checkpoint": job.get("resume_checkpoint"),
         "resume_checkpoint_iteration": job.get("resume_checkpoint_iteration"),
         "iteration": job.get("iteration"),
@@ -3576,6 +3581,7 @@ def python_probe(python_path, env, code, timeout=20):
             [str(python_path), "-c", code],
             cwd=str(ROOT),
             env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
@@ -3588,7 +3594,7 @@ def python_probe(python_path, env, code, timeout=20):
     return False, ((result.stderr or result.stdout or "").strip() or f"exit {result.returncode}")
 
 
-def training_environment_report(backend="3dgs"):
+def training_environment_report(backend="3dgs", camera_policy=None):
     backend = safe_training_backend(backend)
     env = training_env(backend)
     env_root = Path(env["CONDA_PREFIX"])
@@ -3611,15 +3617,18 @@ def training_environment_report(backend="3dgs"):
         env,
         "import cv2, imageio, imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())",
     )
-    runtime_ok, runtime_detail = python_probe(
-        python_path,
-        env,
-        "import torch, cv2; from PIL import Image; import " +
+    runtime_code = ("import torch, cv2; from PIL import Image; import " +
         ("diff_surfel_rasterization; " if backend == "2dgs" else "diff_gaussian_rasterization; ") +
         "from simple_knn._C import distCUDA2; "
         "assert torch.cuda.is_available(), 'PyTorch cannot access a CUDA device'; "
-        "print('cuda', torch.cuda.get_device_name(0))",
-    )
+        "print('cuda', torch.cuda.get_device_name(0))")
+    if camera_policy == 'locked' and backend == '3dgs':
+        env['GSW_POSE_POLICY'] = 'locked'
+        env['GSW_CAMERA_DATASET'] = 'explicit-known-camera-runtime-admission'
+        runtime_code = ('import sys; sys.path.insert(0,' + repr(str(ROOT)) + '); '
+                        'from native.worker.camera_rasterizer_runtime import configure_camera_rasterizer; '
+                        'configure_camera_rasterizer(' + repr(str(ROOT)) + '); ') + runtime_code
+    runtime_ok, runtime_detail = python_probe(python_path, env, runtime_code)
     report = {
         "backend": backend,
         "root": str(ROOT),
@@ -3661,9 +3670,10 @@ def training_environment_report(backend="3dgs"):
     return report
 
 
-def ensure_training_environment(backend="3dgs"):
+def ensure_training_environment(backend="3dgs", require_colmap=True, camera_policy=None):
     backend = safe_training_backend(backend)
-    report = training_environment_report(backend)
+    report = (training_environment_report(backend, camera_policy=camera_policy) if camera_policy
+              else training_environment_report(backend))
     problems = []
     if not report["python_exists"]:
         problems.append(f"Missing Python executable: {report['python']}")
@@ -3676,7 +3686,7 @@ def ensure_training_environment(backend="3dgs"):
             problems.append(f"Missing 2DGS Python: {report['two_dgs_python']}")
         if not report["two_dgs_train_exists"]:
             problems.append(f"Missing 2DGS train.py: {report['two_dgs_train']}")
-    if not report["colmap_exists"]:
+    if require_colmap and not report["colmap_exists"]:
         problems.append(f"Missing COLMAP executable: {report['colmap']}")
     if not report["opencv_ok"]:
         problems.append(
@@ -3773,6 +3783,8 @@ class NativeTrainingPaused(Exception):
 
 
 def run_logged(job, args, cwd, backend=None):
+    if job.get("cancel_requested"):
+        raise RuntimeError("Training cancelled by user")
     add_job_log(job, f"> {' '.join(str(a) for a in args)}")
     if backend == "sugar":
         process_env = sugar_env()
@@ -3781,6 +3793,17 @@ def run_logged(job, args, cwd, backend=None):
     else:
         process_env = training_env(backend or job.get("backend", "3dgs"))
     native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS else None
+    camera_training = len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS
+    if camera_training:
+        process_env.pop("GSW_CAMERA_DATASET", None)
+        process_env.pop("GSW_CAMERA_IMAGE_ROOT", None)
+        process_env.pop("GSW_POSE_POLICY", None)
+        if job.get("pose_policy"):
+            process_env["GSW_POSE_POLICY"] = job["pose_policy"]
+        prepared = job.get("camera_prepared")
+        if prepared:
+            process_env["GSW_CAMERA_DATASET"] = prepared["manifestPath"]
+            process_env["GSW_CAMERA_IMAGE_ROOT"] = prepared["imageRoot"]
     if native_control:
         control_payload = dict(native_control)
         summary = normalize_training_summary(job.get("trainingSummary"))
@@ -3793,10 +3816,15 @@ def run_logged(job, args, cwd, backend=None):
             args = list(args)
             args[1] = ROOT / "native" / "worker" / "two_dgs_train.py"
             process_env["GSW_TWO_DGS_SOURCE"] = str(Path(cwd).resolve())
+    elif camera_training and backend == "2dgs" and job.get("camera_prepared"):
+        args = list(args)
+        args[1] = ROOT / "native" / "worker" / "two_dgs_train.py"
+        process_env["GSW_TWO_DGS_SOURCE"] = str(Path(cwd).resolve())
     process = subprocess.Popen(
         [str(a) for a in args],
         cwd=str(cwd),
         env=process_env,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -5006,9 +5034,56 @@ def training_command(backend, dataset, output, options, start_checkpoint=None):
 
 def run_training_job(job, run_convert, quality, overwrite):
     try:
+        if job.get("cancel_requested"):
+            raise RuntimeError("Training cancelled by user")
+        if (job.get("native_control") or {}).get("resume") and (overwrite or run_convert or job.get("resume_checkpoint")):
+            raise ValueError("Native resume cannot overwrite output, rerun COLMAP or use a legacy checkpoint")
         backend = safe_training_backend(job.get("backend", "3dgs"))
+        source_dataset = Path(job.get("dataset_path") or (DATASETS_DIR / job["scene"]))
+        canonical_path = source_dataset / "camera_dataset.json"
+        if job.get("pose_policy") is None and (job.get("camera_dataset_path") or canonical_path.is_file()):
+            raise ValueError("camera_explicit_pose_policy_required")
+        if job.get("pose_policy") == "solve" and not job.get("camera_dataset_path") and canonical_path.is_file():
+            job["camera_dataset_path"] = str(canonical_path.resolve())
+        if job.get("pose_policy") == "locked" and job.get("resume_checkpoint"):
+            raise ValueError("camera_locked_legacy_checkpoint_forbidden")
+        locked_admission = None
+        camera_prepared = None
+        if job.get("pose_policy") == "locked":
+            from native.backend.camera_admission import admit_locked_dataset
+            locked_admission = admit_locked_dataset(
+                job["camera_dataset_path"], job.get("camera_dataset_identity"), run_convert)
+            if Path(locked_admission["root"]).resolve() != Path(job["dataset_path"]).resolve():
+                raise ValueError("camera_dataset_root_mismatch")
+        elif job.get("pose_policy") == "solve" and job.get("camera_dataset_path"):
+            from native.backend.camera_admission import admit_locked_dataset, prepare_solve_dataset_version, validate_solve_dataset_version
+            if (job.get("native_control") or {}).get("resume"):
+                admit_locked_dataset(job["camera_dataset_path"], job.get("camera_dataset_identity"))
+                record_path = OUTPUT_DIR / safe_name(job["output_scene"]) / "training-source.json"
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                if record.get("posePolicy") != "solve" or record.get("cameraDatasetIdentity") != job.get("camera_dataset_identity"):
+                    raise ValueError("camera_solve_resume_source_mismatch")
+                saved_dataset = Path(record["datasetPath"])
+                if not saved_dataset.is_absolute():
+                    saved_dataset = record_path.parent / saved_dataset
+                version = {"datasetPath": str(saved_dataset.resolve())}
+                validate_solve_dataset_version(version["datasetPath"], record_path.parent,
+                                               job.get("camera_dataset_identity"))
+                run_convert = False
+            else:
+                version = prepare_solve_dataset_version(
+                    job["camera_dataset_path"], TRAIN_JOBS_DIR / "camera-solve" / job["id"],
+                    expected_identity=job.get("camera_dataset_identity"),
+                    cancelled=lambda: bool(job.get("cancel_requested")))
+                run_convert = True
+            job["source_camera_dataset_path"] = job["camera_dataset_path"]
+            job["source_dataset_path"] = job.get("dataset_path")
+            job["dataset_path"] = version["datasetPath"]
+            job["camera_dataset_identity"] = version.get("sourceDataIdentity", job.get("camera_dataset_identity"))
+            job["cameraDataset"] = version.get("cameraDataset")
         set_job_stage(job, "running", "environment")
-        report = ensure_training_environment(backend)
+        report = (ensure_training_environment(backend, require_colmap=False, camera_policy='locked') if locked_admission is not None
+                  else ensure_training_environment(backend))
         add_job_log(job, f"Backend: {backend.upper()}")
         add_job_log(job, f"Python: {report['python']}")
         if backend == "2dgs":
@@ -5030,39 +5105,60 @@ def run_training_job(job, run_convert, quality, overwrite):
             # deferred until reconstruction admission succeeds below.
             if not overwrite and not job.get("allow_existing_output"):
                 raise ValueError(f"Output already exists: {output}. Enable overwrite or choose another output name.")
-        if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
-            raise ValueError(f"No training images found: {images_dir}")
-        if (job.get("native_control") or {}).get("resume"):
-            if run_convert or overwrite or not dataset_has_recognized_training_scene(dataset):
-                raise ValueError("Native resume requires the original reconstruction and cannot overwrite output or rerun COLMAP")
-            if images_dir.name == "input" and not (dataset / "images").exists():
-                raise ValueError("Native resume requires the original undistorted training images")
-        if images_dir.name == "input" and not (dataset / "images").exists() and not run_convert:
-            add_job_log(job, "Dataset contains input images but no undistorted images; enabling COLMAP conversion.")
-            run_convert = True
-        if dataset_has_colmap_scene(dataset):
-            quality_report = reconstruction_quality.assess_dataset(dataset)
-            if not quality_report["usable"]:
-                report_reconstruction_quality(job, quality_report, "repairing")
-                if (job.get("native_control") or {}).get("resume"):
-                    raise reconstruction_quality.ReconstructionQualityError(quality_report)
+        if locked_admission is not None:
+            from native.worker.canonical_training import prepare_training_dataset
+            camera_options = training_options_from_payload(backend, quality, job.get("train_options"))
+            resolution = 1 if job.get("resolution_policy") in (None, "preserve") else camera_options["resolution"]
+            prepared_root = (output / ".gsw" / "camera-input" if
+                             (job.get("native_control") or {}).get("resume") else
+                             TRAIN_JOBS_DIR / "camera-input" / job["id"])
+            if (job.get("native_control") or {}).get("resume") and not (prepared_root / "training-camera-dataset.json").is_file():
+                raise ValueError("camera_resume_prepared_manifest_missing")
+            camera_prepared = prepare_training_dataset(
+                locked_admission["manifestPath"], prepared_root,
+                {"resolution": resolution, "resolutionPolicy": job.get("resolution_policy") or "preserve"},
+                cancelled=lambda: bool(job.get("cancel_requested")))
+            job["cameraDataset"] = locked_admission["cameraDataset"]
+            job["camera_prepared"] = camera_prepared
+            job["camera_dataset_identity"] = locked_admission["dataset"]["data_identity"]
+            set_job_stage(job, "running", "prepare")
+            add_job_log(job, "Locked cameras admitted; COLMAP disabled; training views are isolated from validation/test views.")
+        else:
+            if not images_dir.exists() or not any(p.suffix.lower() in IMAGE_EXTS for p in images_dir.iterdir()):
+                raise ValueError(f"No training images found: {images_dir}")
+            if (job.get("native_control") or {}).get("resume"):
+                if run_convert or overwrite or not dataset_has_recognized_training_scene(dataset):
+                    raise ValueError("Native resume requires the original reconstruction and cannot overwrite output or rerun COLMAP")
+                if images_dir.name == "input" and not (dataset / "images").exists():
+                    raise ValueError("Native resume requires the original undistorted training images")
+            if images_dir.name == "input" and not (dataset / "images").exists() and not run_convert:
+                add_job_log(job, "Dataset contains input images but no undistorted images; enabling COLMAP conversion.")
                 run_convert = True
+            if dataset_has_colmap_scene(dataset):
+                quality_report = reconstruction_quality.assess_dataset(dataset)
+                if not quality_report["usable"]:
+                    report_reconstruction_quality(job, quality_report, "repairing")
+                    if (job.get("native_control") or {}).get("resume"):
+                        raise reconstruction_quality.ReconstructionQualityError(quality_report)
+                    run_convert = True
 
-        set_job_stage(job, "running", "prepare")
+            set_job_stage(job, "running", "prepare")
 
-        if run_convert:
-            set_job_stage(job, "running", "colmap")
-            run_colmap_convert(job, dataset, job.get("colmap_options") or colmap_options_from_payload({}))
-        elif not dataset_has_recognized_training_scene(dataset):
-            if not restore_alignment_cache(dataset, job):
-                add_job_log(job, "Existing dataset has no recognized sparse/0 or transforms_train.json; running COLMAP alignment first.")
+            if run_convert:
                 set_job_stage(job, "running", "colmap")
                 run_colmap_convert(job, dataset, job.get("colmap_options") or colmap_options_from_payload({}))
+            elif not dataset_has_recognized_training_scene(dataset):
+                if not restore_alignment_cache(dataset, job):
+                    add_job_log(job, "Existing dataset has no recognized sparse/0 or transforms_train.json; running COLMAP alignment first.")
+                    set_job_stage(job, "running", "colmap")
+                    run_colmap_convert(job, dataset, job.get("colmap_options") or colmap_options_from_payload({}))
 
-        if dataset_has_colmap_scene(dataset):
-            quality_report = reconstruction_quality.require_dataset(dataset)
-            report_reconstruction_quality(job, quality_report, "accepted" if quality_report["preferred"] else "partial")
+            if dataset_has_colmap_scene(dataset):
+                quality_report = reconstruction_quality.require_dataset(dataset)
+                report_reconstruction_quality(job, quality_report, "accepted" if quality_report["preferred"] else "partial")
         # Do not discard an existing output until reconstruction admission passes.
+        if job.get("cancel_requested"):
+            raise RuntimeError("Training cancelled by user")
         if output.exists() and any(output.iterdir()):
             ensure_output_backend_compatible(job["output_scene"], backend)
             if overwrite:
@@ -5075,6 +5171,41 @@ def run_training_job(job, run_convert, quality, overwrite):
 
         options = training_options_from_payload(backend, quality, job.get("train_options"))
         options = resolve_training_options_for_environment(backend, options, job)
+        if job.get("source_camera_dataset_path"):
+            if not (job.get("native_control") or {}).get("resume"):
+                portable_dataset = output / ".gsw" / "solve-dataset"
+                if portable_dataset.exists():
+                    raise ValueError("camera_solve_output_version_exists")
+                shutil.copytree(dataset, portable_dataset)
+                dataset = portable_dataset
+                job["dataset_path"] = str(dataset.resolve())
+            atomic_write_json(output / "training-source.json", {
+                "version": 1, "posePolicy": "solve", "datasetPath": ".gsw/solve-dataset",
+                "cameraDatasetPath": job["source_camera_dataset_path"],
+                "cameraDatasetIdentity": job.get("camera_dataset_identity"),
+                "resolutionPolicy": job.get("resolution_policy") or "manual",
+            })
+        if camera_prepared is not None:
+            if job.get("resolution_policy") in (None, "preserve"):
+                options["resolution"] = 1
+            destination = output / ".gsw" / "camera-input"
+            destination.mkdir(parents=True, exist_ok=True)
+            source_manifest = Path(camera_prepared["manifestPath"])
+            if source_manifest.parent.resolve() != destination.resolve():
+                for key in ("manifestPath", "contractPath", "initializationPath"):
+                    source_file = Path(camera_prepared[key])
+                    target = destination / source_file.name
+                    if target.exists():
+                        raise ValueError("camera_training_preparation_output_exists")
+                    shutil.copy2(source_file, target)
+                    camera_prepared[key] = str(target)
+            job["camera_prepared"] = camera_prepared
+            atomic_write_json(output / "training-source.json", {
+                "version": 1, "posePolicy": "locked", "datasetPath": str(dataset.resolve()),
+                "cameraDatasetPath": job["camera_dataset_path"],
+                "cameraDatasetIdentity": job["camera_dataset_identity"],
+                "resolutionPolicy": job.get("resolution_policy") or "preserve",
+            })
         with TRAIN_LOCK:
             job["trainingSummary"] = configured_training_summary(backend, quality, options)
             job["effective_train_options"] = dict(options)
@@ -5119,7 +5250,7 @@ def run_training_job(job, run_convert, quality, overwrite):
         command = training_command(backend, dataset, output, options, start_checkpoint=start_checkpoint)
         # Existing reconstructions need the same first point-cloud view as a
         # newly run COLMAP job. This also covers starting training after restart.
-        if job.get("preview_kind") != "colmap_sparse":
+        if locked_admission is None and job.get("preview_kind") != "colmap_sparse":
             sparse_preview = ColmapPointCloudPreviewPublisher(job, dataset, [dataset / "sparse"])
             sparse_preview.publish_latest(force=True)
         # Keep sparse path/count correctly typed until a Gaussian frame exists;
@@ -5303,7 +5434,29 @@ def start_training(
     resume_checkpoint_iteration=None,
     resume_from_scene=None,
     native_control=None,
+    pose_policy=None,
+    camera_dataset_path=None,
+    camera_dataset_identity=None,
+    resolution_policy=None,
 ):
+    if pose_policy not in (None, "locked", "solve"):
+        raise ValueError("camera_pose_policy_invalid")
+    source_dataset = Path(dataset_path) if dataset_path else DATASETS_DIR / safe_name(scene)
+    canonical_path = source_dataset / "camera_dataset.json"
+    if pose_policy is None and (camera_dataset_path or canonical_path.is_file()):
+        raise ValueError("camera_explicit_pose_policy_required")
+    if pose_policy == "solve" and not camera_dataset_path and canonical_path.is_file():
+        camera_dataset_path = str(canonical_path.resolve())
+    if pose_policy == "locked" and run_convert:
+        raise ValueError("camera_locked_colmap_conflict")
+    if (native_control or {}).get("resume") and (overwrite or run_convert or resume_checkpoint):
+        raise ValueError("Native resume cannot overwrite output, rerun COLMAP or use a legacy checkpoint")
+    if pose_policy == "locked" and resume_checkpoint:
+        raise ValueError("camera_locked_legacy_checkpoint_forbidden")
+    if pose_policy == "locked" and not camera_dataset_path:
+        raise ValueError("camera_dataset_manifest_required")
+    if resolution_policy not in (None, "preserve", "manual", "manual_scale"):
+        raise ValueError("camera_resolution_policy_invalid")
     scene = safe_name(scene)
     output_scene = safe_name(output_scene or scene)
     backend = safe_training_backend(backend)
@@ -5327,6 +5480,10 @@ def start_training(
         "resume_checkpoint_iteration": int(resume_checkpoint_iteration) if resume_checkpoint_iteration is not None else None,
         "resume_from_scene": safe_name(resume_from_scene) if resume_from_scene else None,
         "native_control": native_control,
+        "pose_policy": pose_policy,
+        "camera_dataset_path": str(camera_dataset_path) if camera_dataset_path else None,
+        "camera_dataset_identity": camera_dataset_identity,
+        "resolution_policy": resolution_policy,
         "process": None,
         "colmap_options": colmap_options_from_payload(colmap_options or {}),
         "train_options": train_options if isinstance(train_options, dict) else {},

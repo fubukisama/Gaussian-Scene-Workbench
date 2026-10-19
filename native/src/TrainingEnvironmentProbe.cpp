@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "TrainingEnvironmentProbe.h"
+#include "CameraDatasetInfo.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -13,7 +14,8 @@ namespace gsw {
 TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
     const QString &python, const QString &backendRoot,
     const QString &datasetPath, const QString &backend, const bool runColmap,
-    const QProcessEnvironment &environment, const int timeoutMilliseconds) {
+    const QProcessEnvironment &environment, const int timeoutMilliseconds,
+    const TrainingCameraProbeOptions &cameraOptions) {
   TrainingEnvironmentProbeResult result;
   result.python = QDir::toNativeSeparators(python);
 
@@ -37,6 +39,11 @@ TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
   if (runColmap) {
     arguments.append(QStringLiteral("--run-colmap"));
   }
+  if (!cameraOptions.posePolicy.isEmpty()) arguments.append({QStringLiteral("--pose-policy"), cameraOptions.posePolicy});
+  if (!cameraOptions.cameraDatasetPath.isEmpty()) arguments.append({QStringLiteral("--camera-dataset"), cameraOptions.cameraDatasetPath});
+  if (!cameraOptions.cameraDatasetIdentity.isEmpty()) arguments.append({QStringLiteral("--camera-dataset-identity"), cameraOptions.cameraDatasetIdentity});
+  if (!cameraOptions.resolutionPolicy.isEmpty()) arguments.append({QStringLiteral("--resolution-policy"), cameraOptions.resolutionPolicy,
+      QStringLiteral("--resolution"), QString::number(cameraOptions.resolution)});
 
   QProcess process;
   process.setWorkingDirectory(backendRoot);
@@ -95,10 +102,16 @@ TrainingEnvironmentProbeResult TrainingEnvironmentProbe::run(
   }
   if (!result.ready) {
     QString detail = report.value(QStringLiteral("error")).toString().trimmed();
+    if (report.value(QStringLiteral("errorCode")).toString() == QStringLiteral("camera_pinhole_runtime_unavailable")) {
+      detail = QCoreApplication::translate("Workbench", "锁定相机需要经过验证的 3DGS 针孔投影运行库。请补齐匹配的独立运行库；不会改用旧内核或重求解相机。\n\n%1").arg(detail);
+    }
     if (report.value(QStringLiteral("sourceBlocked")).toBool()) {
       const QString decision = report.value(QStringLiteral("reconstructionSummary")).toObject()
           .value(QStringLiteral("decision")).toString();
-      detail = decision == QStringLiteral("invalid_cache")
+      detail = cameraOptions.posePolicy == QStringLiteral("locked")
+          ? CameraDatasetInfo::decisionText(report.value(QStringLiteral("reconstructionSummary")).toObject()
+                .value(QStringLiteral("cameraDataset")).toObject())
+          : decision == QStringLiteral("invalid_cache")
           ? QCoreApplication::translate("Workbench", "对齐缓存不可训练：后端会拒绝复用；请勾选重跑 COLMAP。")
           : decision == QStringLiteral("no_images")
           ? QCoreApplication::translate("Workbench", "无可用图像：不能开始训练。")

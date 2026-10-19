@@ -65,6 +65,8 @@ def load_configuration(path, requested_task=None):
     if task not in required_by_task:
         raise ValueError("Unsupported worker task: {}".format(task))
     required = required_by_task[task]
+    if task == "import" and "cameraInput" in config:
+        required = tuple(name for name in required if name != "files")
     missing = [name for name in required if not config.get(name)]
     if missing:
         raise ValueError("Missing worker configuration fields: " + ", ".join(missing))
@@ -785,7 +787,7 @@ def _run_import_locked(config, server, dataset_root, scene):
         "scene": staging_scene,
         "overwrite": False,
         "fps": config.get("fps", 2),
-        "files": config["files"],
+        "files": config.get("files", []),
         "import_job_id": job_id,
     }
 
@@ -795,7 +797,7 @@ def _run_import_locked(config, server, dataset_root, scene):
         except Exception as exc:  # surfaced after status polling completes
             outcome["error"] = exc
 
-    print("[worker] Importing {} media file(s) into staging.".format(len(config["files"])))
+    print("[worker] Importing {} media file(s) into staging.".format(len(config.get("files", []))))
     emit_status("running", "queued", 0)
     import_thread = threading.Thread(
         target=invoke_import,
@@ -864,12 +866,21 @@ def _run_import_locked(config, server, dataset_root, scene):
             commit_callback=mark_committed,
         )
         result = outcome.get("result") or {}
+        if result.get("cameraDatasetInfo"):
+            print("[worker-camera-dataset] " + json.dumps(
+                {"version": 1, "cameraDatasetInfo": dict(result["cameraDatasetInfo"],
+                 metadataPath=str(final_path / "camera_dataset.json"))},
+                ensure_ascii=False, separators=(",", ":")), flush=True)
         print("[worker] Media import completed successfully.")
         print("[worker] Dataset: {}".format(final_path))
         print("[worker] Images: {}".format(result.get("image_count", 0)))
         emit_status("done", "done", 100)
         return 0
     except Exception as exc:
+        if (last_snapshot or {}).get("status") == "cancelled" or getattr(exc, "code", "") == "camera_import_cancelled":
+            emit_status("cancelled", "cancelled", import_progress_percent(last_snapshot or {}))
+            print("[worker] Fixed-camera import cancelled; original dataset remains unchanged.")
+            return 130
         stage = (last_snapshot or {}).get("stage") or "failed"
         progress = import_progress_percent(last_snapshot or {})
         emit_status("failed", stage, progress)
@@ -883,6 +894,10 @@ def _run_import_locked(config, server, dataset_root, scene):
 
 
 def validate_import_files(config, server):
+    if "cameraInput" in config:
+        from native.worker.camera_import import validate_camera_input
+        validate_camera_input(config)
+        return
     files = config.get("files")
     if not isinstance(files, list) or not files:
         raise ValueError("Import configuration must contain at least one media file")
@@ -900,7 +915,17 @@ def validate_import_files(config, server):
 def run_import(config):
     _project_root, dataset_root, scene = resolve_import_location(config)
     dataset_root.mkdir(parents=True, exist_ok=True)
-    server = import_backend(config["repositoryRoot"])
+    if "cameraInput" in config:
+        # Explicit camera input is handled before media scanning or compute
+        # backend loading. Incidental sparse directories never change policy.
+        root = Path(config["repositoryRoot"]).resolve()
+        if not (root / "native/backend/camera_dataset.py").is_file():
+            raise FileNotFoundError("Selected native camera-dataset backend is unavailable")
+        sys.path.insert(0, str(root))
+        from native.worker.camera_import import CameraImportService
+        server = CameraImportService(config)
+    else:
+        server = import_backend(config["repositoryRoot"])
     validate_import_files(config, server)
     with import_transaction_lock(dataset_root, scene):
         recovery = _recover_import_artifacts(dataset_root, scene)
@@ -1023,6 +1048,21 @@ def run_training(config, resume=False):
             native_options["resume_checkpoint_iteration"] = manifest["iteration"]
     elif resume:
         raise ValueError("This task has no native training checkpoint support")
+
+    # Keep policy explicit across queueing, retry and complete-state resume.
+    # A nearby calibration file must never silently select a different policy.
+    if config.get("posePolicy") is not None:
+        policy = config["posePolicy"]
+        if policy not in ("locked", "solve"):
+            raise ValueError("camera_pose_policy_invalid")
+        if policy == "locked" and config.get("runColmap", False):
+            raise ValueError("camera_locked_colmap_conflict")
+        native_options.update(
+            pose_policy=policy,
+            camera_dataset_path=config.get("cameraDatasetPath"),
+            camera_dataset_identity=config.get("cameraDatasetIdentity"),
+            resolution_policy=config.get("resolutionPolicy", "preserve" if policy == "locked" else "manual"),
+        )
 
     snapshot = server.start_training(
         config.get("scene") or "native-project",

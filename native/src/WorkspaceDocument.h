@@ -56,6 +56,10 @@ public:
   [[nodiscard]] QString rootPath() const;
   [[nodiscard]] QString projectFilePath() const;
   [[nodiscard]] QString datasetPath() const;
+  [[nodiscard]] QString cameraDatasetPath() const;
+  [[nodiscard]] QString cameraDatasetIdentity() const;
+  [[nodiscard]] QString cameraPosePolicy() const;
+  [[nodiscard]] QJsonObject cameraDatasetInfo() const;
   [[nodiscard]] QString scenePath() const;
   [[nodiscard]] QVector3D sceneTranslation() const;
   [[nodiscard]] QQuaternion sceneRotation() const;
@@ -124,6 +128,7 @@ private:
   QString mRootPath;
   QString mProjectFilePath;
   QString mDatasetPath;
+  QJsonObject mCameraDatasetInfo;
   QString mScenePath;
   QList<SceneObject> mSceneObjects;
   QString mActiveSceneId;

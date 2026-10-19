@@ -9,6 +9,7 @@
 #include <optional>
 
 class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QEvent;
 class QLabel;
@@ -31,6 +32,9 @@ public:
 
   [[nodiscard]] DatasetImportRequest request() const;
   [[nodiscard]] const std::optional<DatasetImportPlan> &validatedPlan() const;
+  // Opens the same native transactional importer in explicit camera mode.
+  // The request remains unvalidated until the shared worker adapter runs.
+  void setCameraInput(const QJsonObject &input);
 
 protected:
   void accept() override;
@@ -44,6 +48,8 @@ private:
   void appendSourcePaths(const QStringList &paths);
   void refreshSummary();
   void refreshIcons();
+  void refreshInputMode();
+  void chooseCameraSource(bool directory);
 
   QString mInitialDirectory;
   QLineEdit *mSceneName = nullptr;
@@ -56,6 +62,20 @@ private:
   QPushButton *mRemoveButton = nullptr;
   QPushButton *mClearButton = nullptr;
   QPushButton *mImportButton = nullptr;
+  QComboBox *mInputMode = nullptr;
+  QComboBox *mCameraAdapter = nullptr;
+  QLineEdit *mCameraSource = nullptr;
+  QComboBox *mCameraUnit = nullptr;
+  QLineEdit *mScaleEvidence = nullptr;
+  QComboBox *mNormalization = nullptr;
+  QComboBox *mInitialization = nullptr;
+  QLineEdit *mInitializationPath = nullptr;
+  QLineEdit *mBoundsMinimum = nullptr;
+  QLineEdit *mBoundsMaximum = nullptr;
+  QWidget *mCameraPanel = nullptr;
+  QWidget *mMediaActions = nullptr;
+  QLabel *mSourceTitle = nullptr;
+  QJsonObject mCameraInputTemplate;
   std::optional<DatasetImportPlan> mValidatedPlan;
 };
 

@@ -15,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QCoreApplication>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QtEndian>
 #include <array>
 #include <algorithm>
@@ -23,7 +25,73 @@
 #include <cstring>
 #include <limits>
 
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace gsw {
+QString cameraScaleMetadataPath(const QString &source) {
+  const QFileInfo info(source);
+  return info.dir().filePath(info.completeBaseName() + QStringLiteral(".camera-scale.json"));
+}
+
+CameraScaleRecoveryCapability cameraScaleRecoveryCapability(const QString &source) {
+  CameraScaleRecoveryCapability capability;
+  QFile file(cameraScaleMetadataPath(source));
+  if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return capability;
+  const auto document = QJsonDocument::fromJson(file.readAll());
+  const auto object = document.object();
+  if (!document.isObject() || object.value(QStringLiteral("ply_sha256")).toString().size() != 64) return capability;
+  const QString schema = object.value(QStringLiteral("schema")).toString();
+  if (schema == QStringLiteral("gsw.coordinate_export/1")) {
+    const QString frame = object.value(QStringLiteral("output_frame")).toString();
+    capability.preserve = (frame == QStringLiteral("source") || frame == QStringLiteral("canonical")) &&
+        object.value(QStringLiteral("output_unit")).isString();
+    return capability;
+  }
+  if (schema != QStringLiteral("gsw.training_camera_contract/1")) return capability;
+  const auto transforms = object.value(QStringLiteral("transforms")).toObject();
+  for (const QString &name : {QStringLiteral("source_to_canonical"), QStringLiteral("canonical_to_training")}) {
+    const auto transform = transforms.value(name).toObject();
+    const double scale = transform.value(QStringLiteral("s")).toDouble(-1);
+    const auto rotation = transform.value(QStringLiteral("R")).toArray();
+    const auto translation = transform.value(QStringLiteral("t")).toArray();
+    if (!std::isfinite(scale) || scale <= 0 || !transform.value(QStringLiteral("applied")).toBool() ||
+        rotation.size() != 3 || translation.size() != 3) return capability;
+    double r[3][3]{};
+    for (int row = 0; row < 3; ++row) {
+      const auto values = rotation[row].toArray();
+      if (values.size() != 3 || !translation[row].isDouble() || !std::isfinite(translation[row].toDouble())) return capability;
+      for (int column = 0; column < 3; ++column) {
+        if (!values[column].isDouble() || !std::isfinite(values[column].toDouble())) return capability;
+        r[row][column] = values[column].toDouble();
+      }
+    }
+    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+      double dot = 0;
+      for (int k = 0; k < 3; ++k) dot += r[k][a] * r[k][b];
+      if (std::abs(dot - (a == b ? 1.0 : 0.0)) > 2e-5) return capability;
+    }
+    const double determinant = r[0][0] * (r[1][1]*r[2][2] - r[1][2]*r[2][1]) -
+        r[0][1] * (r[1][0]*r[2][2] - r[1][2]*r[2][0]) + r[0][2] * (r[1][0]*r[2][1] - r[1][1]*r[2][0]);
+    if (std::abs(determinant - 1.0) > 2e-5) return capability;
+  }
+  capability.source = true;
+  capability.preserve = true;
+  const auto scale = object.value(QStringLiteral("scale")).toObject();
+  const double meters = scale.value(QStringLiteral("meters_per_unit")).toDouble(-1);
+  capability.metric = scale.value(QStringLiteral("canonical_unit")).toString() == QStringLiteral("m") &&
+      scale.value(QStringLiteral("status")).toString() != QStringLiteral("arbitrary") &&
+      std::isfinite(meters) && meters > 0 && !scale.value(QStringLiteral("evidence")).toArray().isEmpty();
+  return capability;
+}
+
 SceneCoordinate3D exportPosition(const SceneCoordinate3D &p, const ModelExportOptions &o) {
   if (!o.applyTransform) return p;
   // Double-precision source coordinates; viewport recentering is never baked.
@@ -114,6 +182,120 @@ bool sameFile(const QString &a, const QString &b) {
   };
   return canonical(a).compare(canonical(b), Qt::CaseInsensitive) == 0;
 }
+
+ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
+  ModelExportResult result;
+  if (o.progress && o.progress(0)) {
+    result.cancelled = true;
+    return result;
+  }
+  const auto fail = [&](const char *message) {
+    result.error = QCoreApplication::translate("Workbench", message);
+    return result;
+  };
+  if (o.format != ModelExportFormat::Ply || o.applyTransform ||
+      (o.cameraCoordinateRecovery != QStringLiteral("source") && o.cameraCoordinateRecovery != QStringLiteral("metric") &&
+       o.cameraCoordinateRecovery != QStringLiteral("training") && o.cameraCoordinateRecovery != QStringLiteral("preserve")))
+    return fail("相机坐标恢复仅支持独立的高斯 PLY 导出，不能同时烘焙场景变换。");
+  const auto capability = cameraScaleRecoveryCapability(o.sourcePath);
+  const bool preserve = o.cameraCoordinateRecovery == QStringLiteral("training") || o.cameraCoordinateRecovery == QStringLiteral("preserve");
+  if ((preserve && !capability.preserve) || (!preserve && !capability.source) ||
+      (o.cameraCoordinateRecovery == QStringLiteral("metric") && !capability.metric))
+    return fail("缺少有效的相机尺度记录，或绝对尺度未知；不能恢复为米制。");
+  if (!QFileInfo::exists(o.recoveryPythonPath) ||
+      !QFileInfo::exists(QDir(o.recoveryRepositoryRoot).filePath(QStringLiteral("native/backend/camera_scale_export.py"))))
+    return fail("坐标恢复需要有效的原生后端与 Python 运行环境。");
+  if (QFileInfo::exists(o.destinationPath) || QFileInfo::exists(cameraScaleMetadataPath(o.destinationPath)))
+    return fail("坐标恢复必须另存为新文件，不能覆盖已有模型或尺度记录。");
+  QTemporaryDir control(QFileInfo(o.destinationPath).dir().filePath(QStringLiteral(".gsw-coordinate-export-XXXXXX")));
+  if (!control.isValid()) return fail("无法创建坐标恢复的临时控制目录。");
+  const QString cancelPath = control.filePath(QStringLiteral("cancel.request"));
+  QStringList arguments{QStringLiteral("-B"), QStringLiteral("-m"), QStringLiteral("native.backend.camera_scale_export"),
+      QStringLiteral("--input"), o.sourcePath, QStringLiteral("--output"), o.destinationPath,
+      QStringLiteral("--coordinates"), o.cameraCoordinateRecovery,
+      QStringLiteral("--cancel-file"), cancelPath, QStringLiteral("--progress-json")};
+  if (!o.deletedVertices.isEmpty())
+    arguments << QStringLiteral("--deleted-vertex-count") << QString::number(o.deletedVertices.size());
+  if (o.deletedVertices.count(true)) {
+    QJsonArray indices;
+    for (qsizetype index = 0; index < o.deletedVertices.size(); ++index)
+      if (o.deletedVertices.testBit(index)) indices.append(static_cast<qint64>(index));
+    const QString path = control.filePath(QStringLiteral("deleted.json"));
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(indices).toJson(QJsonDocument::Compact)) < 0 || !file.commit())
+      return fail("无法写入坐标恢复的裁剪记录。");
+    arguments << QStringLiteral("--deleted-indices") << path;
+  }
+  QProcess process;
+  auto environment = QProcessEnvironment::systemEnvironment();
+  environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+  environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+  environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+  environment.insert(QStringLiteral("PYTHONPATH"), o.recoveryRepositoryRoot);
+  process.setProcessEnvironment(environment);
+  process.setWorkingDirectory(o.recoveryRepositoryRoot);
+  process.setProcessChannelMode(QProcess::SeparateChannels);
+#ifdef Q_OS_WIN
+  process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *processArguments) {
+    processArguments->flags |= CREATE_NO_WINDOW;
+    processArguments->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+    processArguments->startupInfo->wShowWindow = SW_HIDE;
+  });
+#endif
+  process.start(o.recoveryPythonPath, arguments);
+  if (!process.waitForStarted(10000)) return fail("无法启动坐标恢复子进程。");
+  process.closeWriteChannel();
+  QByteArray pending;
+  QJsonObject response;
+  int percent = 0;
+  bool requested = false;
+  const auto consume = [&] {
+    pending += process.readAllStandardOutput();
+    while (true) {
+      const auto end = pending.indexOf('\n');
+      if (end < 0) break;
+      const QByteArray line = pending.left(end).trimmed();
+      pending.remove(0, end + 1);
+      if (line.startsWith("[gsw-coordinate-export-progress] ")) {
+        const auto progress = QJsonDocument::fromJson(line.mid(33)).object();
+        percent = std::clamp(progress.value(QStringLiteral("progress")).toInt(), 0, 100);
+      } else {
+        const auto document = QJsonDocument::fromJson(line);
+        if (document.isObject()) response = document.object();
+      }
+    }
+  };
+  while (process.state() != QProcess::NotRunning) {
+    process.waitForFinished(100);
+    consume();
+    if (!requested && o.progress && o.progress(percent)) {
+      QSaveFile file(cancelPath);
+      if (!file.open(QIODevice::WriteOnly) || file.write("cancel\n") != 7 || !file.commit()) {
+        process.terminate();
+        process.waitForFinished(5000);
+        return fail("无法发送坐标恢复取消请求。");
+      }
+      requested = true;
+    }
+  }
+  consume();
+  const QByteArray errorText = process.readAllStandardError().right(4096);
+  if (process.exitCode() == 3 || response.value(QStringLiteral("code")).toString() == QStringLiteral("camera_scale_export_cancelled")) {
+    result.cancelled = true;
+    return result;
+  }
+  if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !response.value(QStringLiteral("success")).toBool()) {
+    const QString code = response.value(QStringLiteral("code")).toString();
+    if (code == QStringLiteral("camera_scale_export_rotation_SH_unsupported"))
+      return fail("该坐标链包含旋转和方向相关球谐；尚未支持正确烘焙，请保留训练坐标与变换记录。");
+    result.error = QCoreApplication::translate("Workbench", "坐标恢复失败：%1")
+        .arg(response.isEmpty() ? QString::fromUtf8(errorText) : response.value(QStringLiteral("detail")).toString(code));
+    return result;
+  }
+  result.coordinateRecovery = response;
+  result.success = true;
+  return result;
+}
 float linearColor(float v) {
   v = std::isfinite(v) ? std::clamp(v, 0.0F, 1.0F) : 0.0F;
   return v <= 0.04045F ? v / 12.92F : std::pow((v + 0.055F) / 1.055F, 2.4F);
@@ -125,6 +307,7 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
   auto fail = [&](const QString &error) { result.error = error; return result; };
   if (sameFile(o.sourcePath, o.destinationPath))
     return fail(QCoreApplication::translate("Workbench", "Choose a new file name; model export cannot overwrite its source."));
+  if (!o.cameraCoordinateRecovery.isEmpty()) return exportRecordedCameraCoordinates(o);
   if (o.applyTransform && (!o.transform.isValid() || !o.pivot.isFinite() ||
       !std::isfinite(o.sceneUnitScale) || o.sceneUnitScale <= 0.0))
     return fail(QCoreApplication::translate("Workbench", "The model transform is invalid."));
@@ -269,10 +452,15 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
     result.error = QCoreApplication::translate("Workbench", "Unable to read temporary export geometry.");
     return false;
   };
-  const SceneLengthUnit outputUnit = o.applyTransform && o.sceneUnitDeclared
-      ? o.sceneUnit : o.coordinates.unit;
-  const double metres = outputUnit == SceneLengthUnit::Millimetres ? 0.001 :
-                        outputUnit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
+  auto metricRatio = sceneMetresPerCoordinate(o.coordinates);
+  if (o.applyTransform && o.sceneUnitDeclared) {
+    metricRatio = o.sceneUnit == SceneLengthUnit::Millimetres ? std::optional<double>(0.001) :
+                  o.sceneUnit == SceneLengthUnit::Centimetres ? std::optional<double>(0.01) :
+                  o.sceneUnit == SceneLengthUnit::Metres ? std::optional<double>(1.0) : std::nullopt;
+  }
+  if (glb && !metricRatio.has_value())
+    return fail(QCoreApplication::translate("Workbench", "绝对尺度未知，不能将任意单位静默导出为米制 GLB。请先提供可追溯的尺度依据。"));
+  const double metres = metricRatio.value_or(1.0);
   const auto anchor = exportPosition(o.pivot, o);
   std::array<double, 3> minimum{INFINITY, INFINITY, INFINITY}, maximum{-INFINITY, -INFINITY, -INFINITY};
   QByteArray binaryBuffer;

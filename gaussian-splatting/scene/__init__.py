@@ -12,6 +12,7 @@
 import os
 import random
 import json
+import sys
 import torch
 import torch
 from utils.system_utils import searchForMaxIteration
@@ -31,6 +32,16 @@ class Scene:
         self.model_path = args.model_path
         self.loaded_iter = None
         self.gaussians = gaussians
+
+        repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if repository_root not in sys.path:
+            sys.path.append(repository_root)
+        from native.worker.canonical_training import create_canonical_scene
+        canonical = create_canonical_scene(args, gaussians, "3dgs", load_iteration)
+        if canonical is not None:
+            self._canonical_scene = canonical
+            self.__dict__.update(canonical.__dict__)
+            return
 
         if load_iteration:
             if load_iteration == -1:
@@ -88,6 +99,8 @@ class Scene:
             self.gaussians.create_from_pcd(scene_info.point_cloud, scene_info.train_cameras, self.cameras_extent)
 
     def save(self, iteration):
+        if hasattr(self, "_canonical_scene"):
+            return self._canonical_scene.save(iteration)
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         exposure_dict = {
@@ -103,3 +116,10 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
+
+    def getValCameras(self, scale=1.0):
+        return getattr(self, "val_cameras", {}).get(scale, [])
+
+    def audit_sample(self, camera, iteration):
+        if hasattr(self, "_canonical_scene"):
+            self._canonical_scene.audit_sample(camera, iteration)

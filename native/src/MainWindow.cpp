@@ -11,6 +11,7 @@
 #include "ColmapSupport.h"
 #include "DatasetImportDialog.h"
 #include "DatasetImportPlan.h"
+#include "CameraDatasetInfo.h"
 #include "DurableArtifactStore.h"
 #include "ExternalBackupStore.h"
 #include "ImportEnvironmentProbe.h"
@@ -405,6 +406,13 @@ struct ResolvedTrainingPointCloud final {
   PlyMetadata metadata;
 };
 
+bool hasRecordedTrainingCoordinates(const ResolvedTrainingPointCloud &checkpoint,
+                                    const QString &outputDirectory) {
+  const QFileInfo info(checkpoint.path);
+  return QFileInfo(info.dir().filePath(info.completeBaseName() + QStringLiteral(".camera-scale.json"))).exists() ||
+      QFileInfo(QDir(outputDirectory).filePath(QStringLiteral("training-camera-contract.json"))).exists();
+}
+
 struct ExternalBackupTaskResult final {
   std::optional<ExternalBackupSnapshot> snapshot;
   QString error;
@@ -490,6 +498,33 @@ std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
                         "point_cloud.ply")
                         .arg(group)
                         .arg(checkpoint.iteration));
+  const QFileInfo checkpointInfo(checkpoint.path);
+  const QString sourceScalePath = checkpointInfo.dir().filePath(
+      checkpointInfo.completeBaseName() + QStringLiteral(".camera-scale.json"));
+  const QFileInfo sourceScaleInfo(sourceScalePath);
+  QString expectedPlySha;
+  QString expectedScaleSha;
+  if (sourceScaleInfo.exists()) {
+    QFile scaleFile(sourceScalePath);
+    const bool readable = sourceScaleInfo.isFile() && !sourceScaleInfo.isSymLink() &&
+        sourceScaleInfo.size() <= 16 * 1024 * 1024 && scaleFile.open(QIODevice::ReadOnly);
+    const QByteArray scaleBytes = readable ? scaleFile.readAll() : QByteArray();
+    const QJsonObject scale = QJsonDocument::fromJson(scaleBytes).object();
+    expectedScaleSha = QString::fromLatin1(QCryptographicHash::hash(scaleBytes, QCryptographicHash::Sha256).toHex());
+    expectedPlySha = scale.value(QStringLiteral("ply_sha256")).toString();
+    QFile sourcePly(checkpoint.path);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const bool plyReadable = sourcePly.open(QIODevice::ReadOnly) && hash.addData(&sourcePly);
+    const QString actualSha = plyReadable ? QString::fromLatin1(hash.result().toHex()) : QString();
+    if (scale.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.training_camera_contract/1") ||
+        expectedPlySha.size() != 64 || actualSha != expectedPlySha) {
+      if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "训练模型的尺度记录缺失、损坏或与 PLY 校验和不匹配；未发布该模型。");
+      return std::nullopt;
+    }
+  } else if (QFileInfo(QDir(outputDirectory).filePath(QStringLiteral("training-camera-contract.json"))).exists()) {
+    if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "训练模型缺少对应的 camera-scale 记录；不会猜测或借用其他模型的尺度。");
+    return std::nullopt;
+  }
   // Camera calibration and backend identity belong to the protected result,
   // not only to the disposable training-output directory.
   for (const QString &name : {QStringLiteral("cameras.json"),
@@ -504,6 +539,22 @@ std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
       checkpoint.path, destination, errorMessage);
   if (!artifact.isValid()) {
     return std::nullopt;
+  }
+  if (!expectedPlySha.isEmpty()) {
+    if (artifact.sha256 != expectedPlySha) {
+      if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "训练模型在发布时发生变化，尺度记录不再匹配；未关联该模型。");
+      return std::nullopt;
+    }
+    const QFileInfo durableInfo(destination);
+    const QString durableScalePath = durableInfo.dir().filePath(
+        durableInfo.completeBaseName() + QStringLiteral(".camera-scale.json"));
+    const auto scaleArtifact = DurableArtifactStore::publish(sourceScalePath, durableScalePath, errorMessage);
+    if (!scaleArtifact.isValid()) return std::nullopt;
+    if (scaleArtifact.sha256 != expectedScaleSha) {
+      if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "训练模型在发布时发生变化，尺度记录不再匹配；未关联该模型。");
+      return std::nullopt;
+    }
+    if (!DurableArtifactStore::verify(durableScalePath, errorMessage)) return std::nullopt;
   }
   return ResolvedTrainingPointCloud{artifact.path, checkpoint.iteration,
                                     checkpoint.metadata};
@@ -1222,6 +1273,14 @@ void MainWindow::createActions() {
   connect(mImportDatasetDirectoryAction, &QAction::triggered, this,
           &MainWindow::importDatasetDirectory);
 
+  mImportCameraDatasetAction = AppLanguage::text(new QAction(
+      workbenchIcon(WorkbenchIconId::Camera, palette()),
+      QCoreApplication::translate("Workbench", "导入已知相机数据集…"), this), AppLanguage::source("导入已知相机数据集…"));
+  mImportCameraDatasetAction->setObjectName(QStringLiteral("importCameraDatasetAction"));
+  AppLanguage::bind(mImportCameraDatasetAction, "toolTip", AppLanguage::source(
+      "导入 Blender transforms、COLMAP 或规范 JSON；锁定相机，保留划分和尺度来源，不重跑 SfM"));
+  connect(mImportCameraDatasetAction, &QAction::triggered, this, &MainWindow::importCameraDataset);
+
   mAttachDatasetAction =
       AppLanguage::text(new QAction(workbenchIcon(WorkbenchIconId::Dataset, palette()),
                   QCoreApplication::translate("Workbench", "关联已有数据集..."), this), AppLanguage::source("关联已有数据集..."));
@@ -1664,6 +1723,7 @@ void MainWindow::createMenus() {
   fileMenu->addSeparator();
   fileMenu->addAction(mImportDatasetAction);
   fileMenu->addAction(mImportDatasetDirectoryAction);
+  fileMenu->addAction(mImportCameraDatasetAction);
   fileMenu->addAction(mAttachDatasetAction);
   fileMenu->addAction(mImportSceneAction);
   QMenu *fileCleanupMenu = AppLanguage::text(fileMenu->addMenu(QCoreApplication::translate("Workbench", "清理")), AppLanguage::source("清理"), "title");
@@ -1685,6 +1745,7 @@ void MainWindow::createMenus() {
   QMenu *workflowMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "工作流")), AppLanguage::source("工作流"), "title");
   workflowMenu->addAction(mImportDatasetAction);
   workflowMenu->addAction(mImportDatasetDirectoryAction);
+  workflowMenu->addAction(mImportCameraDatasetAction);
   QMenu *workflowCleanupMenu =
       AppLanguage::text(workflowMenu->addMenu(QCoreApplication::translate("Workbench", "清理")), AppLanguage::source("清理"), "title");
   workflowCleanupMenu->addAction(mClearDatasetAction);
@@ -2175,6 +2236,11 @@ void MainWindow::createInspectorDock() {
   AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mDatasetValue)), AppLanguage::source("目录"));
   datasetForm->addRow(QCoreApplication::translate("Workbench", "图像"), mImageCountValue);
   AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mImageCountValue)), AppLanguage::source("图像"));
+  mCameraDatasetInfoValue = createValueLabel(panel);
+  mCameraDatasetInfoValue->setObjectName(QStringLiteral("cameraDatasetInfoValue"));
+  mCameraDatasetInfoValue->setTextFormat(Qt::PlainText);
+  datasetForm->addRow(QCoreApplication::translate("Workbench", "相机／尺度记录"), mCameraDatasetInfoValue);
+  AppLanguage::text(qobject_cast<QLabel *>(datasetForm->labelForField(mCameraDatasetInfoValue)), AppLanguage::source("相机／尺度记录"));
   layout->addLayout(datasetForm);
 
   layout->addWidget(createSectionTitle(AppLanguage::source("场景"), panel));
@@ -2807,6 +2873,13 @@ void MainWindow::connectServices() {
                       QCoreApplication::translate("Workbench", "训练结果有效，但保护副本发布失败；"
                                      "仍保留原始输出：%1")
                           .arg(durableError));
+                  if (hasRecordedTrainingCoordinates(*result, pending.outputDirectory)) {
+                    // A camera-aware result cannot escape its scale admission
+                    // failure through the legacy original-file fallback.
+                    result.reset();
+                    effectiveSucceeded = false;
+                    completionDetail = QCoreApplication::translate("Workbench", "训练输出无效");
+                  }
                 }
               }
               if (result.has_value() &&
@@ -2867,7 +2940,9 @@ void MainWindow::connectServices() {
                   appendTaskEvent(
                       QCoreApplication::translate("Workbench", "最近检查点有效，但保护副本发布失败：%1")
                           .arg(durableError));
+                  if (hasRecordedTrainingCoordinates(*partial, pending.outputDirectory)) partial.reset();
                 }
+                if (partial.has_value()) {
                 archivedResultPath = partial->path;
                 completionDetail =
                     QCoreApplication::translate("Workbench", "保留迭代 %1").arg(partial->iteration);
@@ -2901,6 +2976,7 @@ void MainWindow::connectServices() {
                         QCoreApplication::translate("Workbench", "无法将保留的训练检查点关联到工程：%1")
                             .arg(sceneError));
                   }
+                }
                 }
               }
             }
@@ -3467,6 +3543,7 @@ void MainWindow::refreshThemePresentation() {
       {mExternalBackupsAction, WorkbenchIconId::Folder},
       {mImportDatasetAction, WorkbenchIconId::ImportMedia},
       {mImportDatasetDirectoryAction, WorkbenchIconId::Folder},
+      {mImportCameraDatasetAction, WorkbenchIconId::Camera},
       {mAttachDatasetAction, WorkbenchIconId::Dataset},
       {mImportSceneAction, WorkbenchIconId::ImportModel},
       {mClearDatasetAction, WorkbenchIconId::Delete},
@@ -4719,6 +4796,12 @@ bool MainWindow::exportModel() {
       mViewport->sourceHasGaussianAttributes(), protectedPaths, this);
   if (dialog.exec() != QDialog::Accepted) return false;
   auto options = dialog.options();
+  if (!options.cameraCoordinateRecovery.isEmpty()) {
+    const QString root = BackendLocator::findRepositoryRoot(
+        QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+    options.recoveryRepositoryRoot = root;
+    options.recoveryPythonPath = findTrainingPython(root);
+  }
   std::atomic_bool cancelled{false};
   std::atomic_int percent{0};
   options.progress = [&](int value) { percent.store(value); return cancelled.load(); };
@@ -5148,24 +5231,33 @@ void MainWindow::importDatasetDirectory() {
   }
 }
 
-void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
-  if (sourcePaths.isEmpty() || !ensureProjectRecoveryReady() ||
+void MainWindow::importCameraDataset() {
+  importDatasetSources({}, {{QStringLiteral("adapter"), QStringLiteral("auto")},
+                            {QStringLiteral("posePolicy"), QStringLiteral("locked")}});
+}
+
+void MainWindow::importDatasetSources(const QStringList &sourcePaths, const QJsonObject &cameraInput) {
+  if ((sourcePaths.isEmpty() && cameraInput.isEmpty()) || !ensureProjectRecoveryReady() ||
       mProcessSupervisor.isRunning()) {
     return;
   }
 
   QString error;
-  if (!ensureProjectForDataAction(QCoreApplication::translate("Workbench", "添加照片与视频"))) {
+  if (!ensureProjectForDataAction(cameraInput.isEmpty()
+          ? QCoreApplication::translate("Workbench", "添加照片与视频")
+          : QCoreApplication::translate("Workbench", "导入已知相机数据集"))) {
     return;
   }
 
-  const QFileInfo firstSource(sourcePaths.constFirst());
+  const QFileInfo firstSource(sourcePaths.isEmpty() ? mWorkspace.rootPath() : sourcePaths.constFirst());
   const QString initialDirectory = firstSource.isDir()
                                        ? firstSource.absoluteFilePath()
                                        : firstSource.absolutePath();
   DatasetImportDialog dialog(
-      initialDirectory, suggestedMediaSceneName(sourcePaths), sourcePaths,
+      initialDirectory, cameraInput.isEmpty() ? suggestedMediaSceneName(sourcePaths)
+          : QCoreApplication::translate("Workbench", "已知相机数据集"), sourcePaths,
       mWorkspace.rootPath(), mWorkspace.isUntitled(), this);
+  if (!cameraInput.isEmpty()) dialog.setCameraInput(cameraInput);
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }
@@ -5228,7 +5320,9 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths) {
   }
 
   const qsizetype mediaCount = plan.imageCount() + plan.videoCount();
-  const QString taskName = QCoreApplication::translate("Workbench", "媒体导入 | %1 | %2 项")
+  const QString taskName = plan.hasCameraInput()
+      ? QCoreApplication::translate("Workbench", "相机数据集导入 | %1").arg(plan.sceneName())
+      : QCoreApplication::translate("Workbench", "媒体导入 | %1 | %2 项")
                                .arg(plan.sceneName())
                                .arg(mediaCount);
   const PendingDatasetImport pending{taskName,
@@ -5990,8 +6084,9 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
 
   // Managed paths migrate with Save As. External datasets/output stay external.
   const QString oldRoot = config.value(QStringLiteral("projectRoot")).toString();
-  for (const QString &key : {QStringLiteral("datasetPath"), QStringLiteral("outputRoot"), QStringLiteral("jobStore")}) {
+  for (const QString &key : {QStringLiteral("datasetPath"), QStringLiteral("outputRoot"), QStringLiteral("jobStore"), QStringLiteral("cameraDatasetPath")}) {
     const QString path = config.value(key).toString();
+    if (path.isEmpty()) continue;
     const QString relative = QDir(oldRoot).relativeFilePath(path);
     if (!oldRoot.isEmpty() && !relative.startsWith(QStringLiteral("../")) && !QDir::isAbsolutePath(relative))
       config.insert(key, QDir(mWorkspace.rootPath()).absoluteFilePath(relative));
@@ -6019,8 +6114,15 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
     return;
   }
   QApplication::setOverrideCursor(Qt::WaitCursor);
+  const auto archivedTrainingOptions = config.value(QStringLiteral("trainOptions")).toObject();
+  const TrainingCameraProbeOptions resumeCameraOptions{
+      config.value(QStringLiteral("posePolicy")).toString(QStringLiteral("solve")),
+      config.value(QStringLiteral("cameraDatasetPath")).toString(),
+      config.value(QStringLiteral("cameraDatasetIdentity")).toString(),
+      config.value(QStringLiteral("resolutionPolicy")).toString(QStringLiteral("manual")),
+      archivedTrainingOptions.value(QStringLiteral("resolution")).toInt(2)};
   const auto preflight = TrainingEnvironmentProbe::run(python, root, dataset,
-      backend, false, pythonProcessEnvironment(python));
+      backend, false, pythonProcessEnvironment(python), 60000, resumeCameraOptions);
   QApplication::restoreOverrideCursor();
   if (!preflight.ready) {
     showError(QCoreApplication::translate("Workbench", "无法继续训练"), preflight.errorMessage);
@@ -6189,6 +6291,8 @@ void MainWindow::startTraining() {
                         defaultOutputRoot,
                         hasRecognizedTrainingScene(mWorkspace.datasetPath()),
                         twoDgsAvailable(root), this);
+  if (!mWorkspace.cameraDatasetInfo().isEmpty()) dialog.setCameraDatasetReference(
+      mWorkspace.cameraDatasetPath(), mWorkspace.cameraDatasetIdentity(), mWorkspace.cameraPosePolicy());
   dialog.setReconstructionProbe(python, root, pythonProcessEnvironment(python));
   if (dialog.exec() != QDialog::Accepted) {
     return;
@@ -6226,7 +6330,9 @@ void MainWindow::startTraining() {
   const TrainingEnvironmentProbeResult preflight =
       TrainingEnvironmentProbe::run(python, root, mWorkspace.datasetPath(),
                                     config.backend, dialog.effectiveRunColmap(),
-                                    pythonProcessEnvironment(python));
+                                    pythonProcessEnvironment(python), 60000,
+                                    {config.posePolicy, config.cameraDatasetPath, config.cameraDatasetIdentity,
+                                     config.resolutionPolicy, config.resolution});
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!preflight.ready) {
@@ -6277,6 +6383,10 @@ void MainWindow::startTraining() {
   workerConfig.insert(QStringLiteral("backend"), config.backend);
   workerConfig.insert(QStringLiteral("quality"), config.quality);
   workerConfig.insert(QStringLiteral("runColmap"), config.runColmap);
+  workerConfig.insert(QStringLiteral("posePolicy"), config.posePolicy);
+  workerConfig.insert(QStringLiteral("cameraDatasetPath"), config.cameraDatasetPath);
+  workerConfig.insert(QStringLiteral("cameraDatasetIdentity"), config.cameraDatasetIdentity);
+  workerConfig.insert(QStringLiteral("resolutionPolicy"), config.resolutionPolicy);
   workerConfig.insert(QStringLiteral("overwrite"), config.overwrite);
   workerConfig.insert(QStringLiteral("jobStore"),
                       QDir::cleanPath(trainingJobStore));
@@ -6497,6 +6607,7 @@ void MainWindow::updateActionAvailability() {
       workspaceReady && !mWorkspace.projectFilePath().isEmpty());
   mImportDatasetAction->setEnabled(dataEntryReady);
   mImportDatasetDirectoryAction->setEnabled(dataEntryReady);
+  mImportCameraDatasetAction->setEnabled(dataEntryReady);
   mAttachDatasetAction->setEnabled(dataEntryReady);
   mImportSceneAction->setEnabled(dataEntryReady);
   mExportCoordinateReportAction->setEnabled(
@@ -6675,6 +6786,9 @@ void MainWindow::updateInspector() {
       mWorkspace.datasetPath().isEmpty()
           ? QStringLiteral("-")
           : QCoreApplication::translate("Workbench", "%1 张").arg(mWorkspace.imageCount()));
+  if (mCameraDatasetInfoValue) mCameraDatasetInfoValue->setText(mWorkspace.cameraDatasetInfo().isEmpty()
+      ? QCoreApplication::translate("Workbench", "普通 SfM 流程；未声明绝对尺度")
+      : CameraDatasetInfo::summaryText(mWorkspace.cameraDatasetInfo()));
   mSceneValue->setText(compactPath(mWorkspace.scenePath()));
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   mGaussianCountValue->setText(
@@ -6752,7 +6866,14 @@ void MainWindow::updateInspector() {
                  coordinates.sourceUsesFloat64 ? QStringLiteral("float64")
                                                : QStringLiteral("float32")));
     mSceneUnitValue->setToolTip(
-        coordinates.unitDeclared
+        !coordinates.provenance.isEmpty()
+            ? (sceneMetresPerCoordinate(coordinates).has_value()
+                ? QCoreApplication::translate("Workbench", "当前模型每坐标单位对应 %1 m；源单位 %2，尺度状态 %3，数据身份 %4。比例来自与此 PLY 校验和匹配的变换链，不把训练坐标直接当米。")
+                    .arg(QString::number(*sceneMetresPerCoordinate(coordinates), 'g', 15),
+                         coordinates.sourceUnit, coordinates.scaleStatus, coordinates.dataIdentity)
+                : QCoreApplication::translate("Workbench", "当前模型保留任意单位；尺度状态 %1，数据身份 %2。记录存在不等于具有公制依据，不擅自换算为米。")
+                    .arg(coordinates.scaleStatus, coordinates.dataIdentity))
+            : coordinates.unitDeclared
             ? QCoreApplication::translate("Workbench", "单位由 PLY 元数据或同名 .prj 辅助信息识别。")
             : QCoreApplication::translate("Workbench", "PLY 标准没有强制单位字段；本文件未声明单位，数值按原始单位 u 显示，不擅自换算为米。"));
     mSceneCenterValue->setText(

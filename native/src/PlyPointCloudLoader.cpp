@@ -36,6 +36,23 @@ constexpr qsizetype kAsciiSpoolBufferPoints = 262'144;
 constexpr qint64 kStaleAsciiSpoolMilliseconds =
     24LL * 60LL * 60LL * 1000LL;
 
+void refreshCoordinateMetadata(SceneCoordinateInfo &coordinates,
+                               const SceneCoordinateMetadata &metadata) {
+  // Disposable geometry caches may predate an adjacent scale record, or a
+  // separately verified scale record may have changed without changing XYZ.
+  // Geometry bounds/shift stay cached; physical provenance always comes from
+  // this load's hash-verified source metadata.
+  coordinates.unit = metadata.unit;
+  coordinates.unitDeclared = metadata.unitDeclared;
+  coordinates.coordinateReferenceSystem = metadata.coordinateReferenceSystem;
+  coordinates.sourceUsesFloat64 = metadata.sourceUsesFloat64;
+  coordinates.metersPerCoordinate = metadata.metersPerCoordinate;
+  coordinates.scaleStatus = metadata.scaleStatus;
+  coordinates.sourceUnit = metadata.sourceUnit;
+  coordinates.dataIdentity = metadata.dataIdentity;
+  coordinates.provenance = metadata.provenance;
+}
+
 enum class PlyFormat {
   Unknown,
   Ascii,
@@ -1126,6 +1143,8 @@ bool loadOutOfCoreMesh(
     result.boundsMinimum = existing.boundsMinimum;
     result.boundsMaximum = existing.boundsMaximum;
     result.coordinates = existing.coordinates;
+    refreshCoordinateMetadata(result.coordinates, coordinateMetadata);
+    result.meshCache.coordinates = result.coordinates;
     result.previewOnly = true;
     return true;
   }
@@ -1602,6 +1621,8 @@ bool loadFullResolutionPointPreview(
     result.boundsMinimum = existingCache.boundsMinimum;
     result.boundsMaximum = existingCache.boundsMaximum;
     result.coordinates = existingCache.coordinates;
+    refreshCoordinateMetadata(result.coordinates, coordinateMetadata);
+    result.pointCache.coordinates = result.coordinates;
     result.previewOnly = true;
     return true;
   }
@@ -2130,6 +2151,11 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
   const SceneCoordinateMetadata coordinateMetadata =
       parsePlyCoordinateMetadata(header.coordinateMetadata, file.fileName(),
                                  sourceUsesFloat64);
+  if (!coordinateMetadata.validationError.isEmpty()) {
+    result.error = QCoreApplication::translate("Workbench", "模型尺度元数据无效：%1")
+        .arg(coordinateMetadata.validationError);
+    return result;
+  }
 
   int redIndex = findProperty(vertexElement, {QStringLiteral("red"), QStringLiteral("r"),
                                                QStringLiteral("diffuse_red")});

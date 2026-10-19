@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector3D>
+#include <optional>
 
 namespace gsw {
 
@@ -27,6 +28,12 @@ struct SceneCoordinateMetadata final {
   bool unitDeclared = false;
   QString coordinateReferenceSystem;
   bool sourceUsesFloat64 = false;
+  std::optional<double> metersPerCoordinate;
+  QString scaleStatus;
+  QString sourceUnit;
+  QString dataIdentity;
+  QJsonObject provenance;
+  QString validationError;
 };
 
 struct SceneCoordinateInfo final {
@@ -40,6 +47,11 @@ struct SceneCoordinateInfo final {
   QString coordinateReferenceSystem;
   bool sourceUsesFloat64 = false;
   bool automaticDisplayShift = false;
+  std::optional<double> metersPerCoordinate;
+  QString scaleStatus;
+  QString sourceUnit;
+  QString dataIdentity;
+  QJsonObject provenance;
 
   [[nodiscard]] SceneCoordinate3D globalCenter() const;
   [[nodiscard]] SceneCoordinate3D globalSize() const;
@@ -73,6 +85,10 @@ private:
     bool sourceUsesFloat64);
 
 [[nodiscard]] QString sceneLengthUnitSymbol(SceneLengthUnit unit);
+// Physical scale of raw coordinates, not the viewport's numerical shift/scale.
+// A missing result means arbitrary/unknown units, never an implicit metre.
+[[nodiscard]] std::optional<double> sceneMetresPerCoordinate(
+    const SceneCoordinateInfo &coordinates);
 [[nodiscard]] QString sceneLengthUnitDescription(
     const SceneCoordinateInfo &coordinates);
 [[nodiscard]] QString formatSceneCoordinate(double value,

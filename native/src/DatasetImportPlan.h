@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QJsonObject>
 #include <QString>
 #include <QStringList>
 
@@ -13,6 +14,9 @@ struct DatasetImportRequest {
   QStringList sourcePaths;
   double framesPerSecond = 1.0;
   bool overwrite = false;
+  // Explicit adapter request. Empty retains the ordinary media/SfM flow;
+  // non-empty requests locked cameras and must never fall back to SfM.
+  QJsonObject cameraInput;
 };
 
 class DatasetImportPlan final {
@@ -26,6 +30,8 @@ public:
   [[nodiscard]] qsizetype imageCount() const;
   [[nodiscard]] qsizetype videoCount() const;
   [[nodiscard]] qint64 totalBytes() const;
+  [[nodiscard]] bool hasCameraInput() const;
+  [[nodiscard]] QJsonObject cameraInput() const;
   [[nodiscard]] QString managedDatasetPath(const QString &datasetRoot) const;
   bool writeWorkerConfiguration(const QString &configPath,
                                 const QString &repositoryRoot,
@@ -50,6 +56,7 @@ private:
   qsizetype mImageCount = 0;
   qsizetype mVideoCount = 0;
   qint64 mTotalBytes = 0;
+  QJsonObject mCameraInput;
 };
 
 } // namespace gsw

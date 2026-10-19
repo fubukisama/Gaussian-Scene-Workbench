@@ -7,6 +7,12 @@ import sys
 
 
 BACKEND_FILES = (
+    "native/backend/camera_dataset.py",
+    "native/backend/camera_admission.py",
+    "native/backend/camera_scale_export.py",
+    "native/worker/camera_import.py",
+    "native/worker/canonical_training.py",
+    "native/worker/camera_rasterizer_runtime.py",
     "native/backend/__init__.py",
     "native/backend/compute.py",
     "native/backend/reconstruction_quality.py",

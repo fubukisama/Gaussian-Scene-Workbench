@@ -68,6 +68,12 @@ function Copy-FilteredTree {
 }
 
 $StaticFiles = @(
+  @{ Source = "native\backend\camera_dataset.py"; Destination = "native\backend\camera_dataset.py" },
+  @{ Source = "native\backend\camera_admission.py"; Destination = "native\backend\camera_admission.py" },
+  @{ Source = "native\backend\camera_scale_export.py"; Destination = "native\backend\camera_scale_export.py" },
+  @{ Source = "native\worker\camera_import.py"; Destination = "native\worker\camera_import.py" },
+  @{ Source = "native\worker\canonical_training.py"; Destination = "native\worker\canonical_training.py" },
+  @{ Source = "native\worker\camera_rasterizer_runtime.py"; Destination = "native\worker\camera_rasterizer_runtime.py" },
   @{ Source = "native\worker\gsw_worker.py"; Destination = "native\worker\gsw_worker.py" },
   @{ Source = "native\worker\import_preflight.py"; Destination = "native\worker\import_preflight.py" },
   @{ Source = "native\worker\training_preflight.py"; Destination = "native\worker\training_preflight.py" },
@@ -136,6 +142,12 @@ $Manifest = [ordered]@{
   purpose = "Native compute backend"
   runtime = "External Python/Conda environment required"
   components = @(
+    "native/backend/camera_dataset.py",
+    "native/backend/camera_admission.py",
+    "native/backend/camera_scale_export.py",
+    "native/worker/camera_import.py",
+    "native/worker/canonical_training.py",
+    "native/worker/camera_rasterizer_runtime.py",
     "native/worker/gsw_worker.py",
     "native/worker/import_preflight.py",
     "native/worker/training_preflight.py",

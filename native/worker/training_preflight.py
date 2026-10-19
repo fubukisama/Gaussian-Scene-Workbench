@@ -95,7 +95,9 @@ def runtime_probe_code(backend="3dgs"):
     ))
 
 
-def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_colmap=False):
+def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_colmap=False,
+                               pose_policy=None, camera_dataset_path=None, expected_identity=None,
+                               resolution_policy="preserve", resolution=1):
     root = Path(backend_root).resolve()
     dataset = Path(dataset_path).resolve()
     report = {
@@ -107,32 +109,47 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         "imageCount": 0,
         "hasReconstruction": False,
         "policyBlocked": False,
+        "resolutionPolicy": resolution_policy,
+        "resolution": resolution,
     }
     try:
+        if resolution_policy not in ("preserve", "manual") or resolution not in (1, 2, 4, 8):
+            raise ValueError("Unsupported explicit training resolution policy")
+        if resolution_policy == "preserve" and resolution != 1:
+            raise ValueError("Preserve resolution policy cannot silently downsample images")
         if not dataset.is_dir():
             raise FileNotFoundError("训练数据集不存在：{}".format(dataset))
-        image_count, images_path = count_images(dataset)
-        report["imageCount"] = image_count
-        report["imagesPath"] = str(images_path)
-        report["hasReconstruction"] = has_reconstruction(dataset)
-        if image_count <= 0:
-            raise RuntimeError("训练数据集中没有可用图像：{}".format(images_path))
-
         server = load_compute_module(root)
         from native.worker.training_reconstruction_summary import summarize_reconstruction
-        reconstruction = summarize_reconstruction(dataset, run_colmap)
+        reconstruction = summarize_reconstruction(dataset, run_colmap, pose_policy,
+                                                    camera_dataset_path, expected_identity)
         report["reconstructionSummary"] = reconstruction
+        locked = reconstruction["sourceKind"] == "canonical"
+        canonical_source = reconstruction["sourceKind"] in ("canonical", "canonical_solve")
+        if canonical_source:
+            report["imageCount"] = reconstruction["inputImages"]
+            report["imagesPath"] = reconstruction["trainingImagesDirectory"]
+            report["cameraDataset"] = reconstruction["cameraDataset"]
+        else:
+            image_count, images_path = count_images(dataset)
+            report["imageCount"] = image_count
+            report["imagesPath"] = str(images_path)
+            report["hasReconstruction"] = has_reconstruction(dataset)
+            if image_count <= 0:
+                raise RuntimeError("训练数据集中没有可用图像：{}".format(images_path))
         # Current reconstruction is deliberately distinct from a reusable
         # cache. Full optimizer resume requires the former; this read-only
         # environment probe never restores a cache or regenerates alignment.
-        report["hasReconstruction"] = server.dataset_has_recognized_training_scene(dataset)
+        report["hasReconstruction"] = (reconstruction["usable"] if locked else False if canonical_source
+                                        else server.dataset_has_recognized_training_scene(dataset))
         report["colmapRequired"] = reconstruction["effectiveRunColmap"]
         report["reconstructionRepairRequired"] = reconstruction["decision"] == "repair_required"
         if reconstruction["sourceKind"] == "colmap":
             report["reconstructionQuality"] = reconstruction
         if reconstruction["blocked"]:
             report["sourceBlocked"] = True
-            report["errorCode"] = "reconstruction_source_unusable"
+            report["errorCode"] = (reconstruction["reasons"][0] if canonical_source and reconstruction["reasons"]
+                                   else "reconstruction_source_unusable")
             raise RuntimeError("reconstruction_source_unusable: " + reconstruction["decision"])
         python_path = Path(server.training_python(backend)).resolve()
         report["python"] = str(python_path)
@@ -141,10 +158,12 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         gaussian_dir = Path(server.TWO_DGS_DIR if backend == "2dgs" else server.GAUSSIAN_DIR)
         if not (gaussian_dir / "train.py").is_file():
             raise FileNotFoundError("训练源码不存在：{}".format(gaussian_dir / "train.py"))
-        colmap = server.colmap_executable()
-        if not colmap or not Path(colmap).is_file():
-            raise FileNotFoundError("COLMAP 不可用，无法完成训练数据准备。")
-        report["colmap"] = str(Path(colmap).resolve())
+        colmap = None
+        if not locked:
+            colmap = server.colmap_executable()
+            if not colmap or not Path(colmap).is_file():
+                raise FileNotFoundError("COLMAP 不可用，无法完成训练数据准备。")
+            report["colmap"] = str(Path(colmap).resolve())
         process_environment = server.training_env(backend)
         if report["colmapRequired"]:
             colmap_probe = subprocess.run(
@@ -173,10 +192,18 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
                     )
                 )
 
+        probe_code = runtime_probe_code(backend)
+        if locked and backend == '3dgs':
+            process_environment['GSW_POSE_POLICY'] = 'locked'
+            process_environment['GSW_CAMERA_DATASET'] = str(camera_dataset_path or dataset / 'camera_dataset.json')
+            probe_code = ('import sys; sys.path.insert(0,' + repr(str(root)) + '); '
+                          'from native.worker.camera_rasterizer_runtime import configure_camera_rasterizer; '
+                          'configure_camera_rasterizer(' + repr(str(root)) + ');\n') + probe_code
         completed = subprocess.run(
-            [str(python_path), "-B", "-c", runtime_probe_code(backend)],
+            [str(python_path), "-B", "-c", probe_code],
             cwd=str(gaussian_dir),
             env=process_environment,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
@@ -208,6 +235,8 @@ def probe_training_environment(backend_root, dataset_path, backend="3dgs", run_c
         return report
     except Exception as exc:
         detail = str(exc)
+        if 'camera_pinhole_rasterizer_' in detail:
+            report['errorCode'] = 'camera_pinhole_runtime_unavailable'
         report["policyBlocked"] = report["policyBlocked"] or policy_blocked(detail)
         report["error"] = detail
         return report
@@ -220,12 +249,22 @@ def main(argv=None):
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--backend", choices=("3dgs", "2dgs"), default="3dgs")
     parser.add_argument("--run-colmap", action="store_true")
+    parser.add_argument("--pose-policy", choices=("solve", "locked"))
+    parser.add_argument("--camera-dataset")
+    parser.add_argument("--camera-dataset-identity")
+    parser.add_argument("--resolution-policy", choices=("preserve", "manual"), default="preserve")
+    parser.add_argument("--resolution", choices=(1, 2, 4, 8), type=int, default=1)
     arguments = parser.parse_args(argv)
     report = probe_training_environment(
         arguments.backend_root,
         arguments.dataset,
         arguments.backend,
         arguments.run_colmap,
+        arguments.pose_policy,
+        arguments.camera_dataset,
+        arguments.camera_dataset_identity,
+        arguments.resolution_policy,
+        arguments.resolution,
     )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0 if report["ready"] else 1

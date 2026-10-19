@@ -76,6 +76,8 @@ private slots:
   void finalizesPendingMigrationWithDataWrittenAfterManifestSave();
   void resumesMigrationAfterDataDirectoryWasPublished();
   void savesAndLoadsPortableProject();
+  void persistsCanonicalCameraIdentityAndUnitsAcrossSaveAs();
+  void countsOnlyCanonicalViewsAndRejectsChangedSummaryIdentity();
   void saveAsCopiesManagedDataIntoANewLinkedDirectory();
   void firstSaveKeepsExternalDatasetAsALink();
   void clearsManagedDatasetAndPersistsSceneAssociation();
@@ -2832,6 +2834,84 @@ void WorkspaceDocumentTests::removesMultipleModelsWithoutDeletingFiles() {
   QVERIFY(document.scenePath().isEmpty());
   QVERIFY(document.activeSceneId().isEmpty());
   for (const auto &path : files) QVERIFY(QFileInfo::exists(path));
+}
+
+void WorkspaceDocumentTests::persistsCanonicalCameraIdentityAndUnitsAcrossSaveAs() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("working/datasets/known/nested")));
+  const QString dataset = root.filePath(QStringLiteral("working/datasets/known"));
+  QFile photo(QDir(dataset).filePath(QStringLiteral("nested/a.png")));
+  QVERIFY(photo.open(QIODevice::WriteOnly));
+  photo.write("fixture"); photo.close();
+  QVERIFY(writeJson(QDir(dataset).filePath(QStringLiteral("camera_dataset.json")), QJsonDocument(QJsonObject{
+      {QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1")},
+      {QStringLiteral("views"), QJsonArray{QJsonObject{{QStringLiteral("view_id"), QStringLiteral("view-a")},
+          {QStringLiteral("image_path"), QStringLiteral("nested/a.png")}, {QStringLiteral("split"), QStringLiteral("train")}}}}})));
+  const QString identity(64, QLatin1Char('a'));
+  const QJsonObject info{{QStringLiteral("version"), 1}, {QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1")},
+      {QStringLiteral("metadataPath"), QStringLiteral("camera_dataset.json")}, {QStringLiteral("dataIdentity"), identity},
+      {QStringLiteral("posePolicy"), QStringLiteral("locked")}, {QStringLiteral("blocked"), false},
+      {QStringLiteral("scale"), QJsonObject{{QStringLiteral("status"), QStringLiteral("source_declared")},
+          {QStringLiteral("source_unit"), QStringLiteral("cm")}, {QStringLiteral("meters_per_unit"), .01}}},
+      {QStringLiteral("counts"), QJsonObject{{QStringLiteral("train"), 1}, {QStringLiteral("val"), 0}, {QStringLiteral("test"), 0}}}};
+  QVERIFY(writeJson(QDir(dataset).filePath(QStringLiteral("camera_dataset_info.json")), QJsonDocument(info)));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(root.filePath(QStringLiteral("working")), QStringLiteral("known"), &error), qPrintable(error));
+  QVERIFY2(document.setDatasetPath(dataset, &error), qPrintable(error));
+  QCOMPARE(document.cameraPosePolicy(), QStringLiteral("locked"));
+  QCOMPARE(document.cameraDatasetIdentity(), identity);
+  QCOMPARE(document.imageCount(), qint64(1));
+  QVERIFY2(document.save(root.filePath(QStringLiteral("saved.gsw.json")), &error), qPrintable(error));
+  const QString newMetadata = root.filePath(QStringLiteral("saved.files/datasets/known/camera_dataset.json"));
+  QCOMPARE(document.cameraDatasetPath(), newMetadata);
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(root.filePath(QStringLiteral("saved.gsw.json")), &error), qPrintable(error));
+  QCOMPARE(reopened.cameraDatasetPath(), newMetadata);
+  QCOMPARE(reopened.cameraDatasetIdentity(), identity);
+  QCOMPARE(reopened.cameraPosePolicy(), QStringLiteral("locked"));
+  QCOMPARE(reopened.cameraDatasetInfo().value(QStringLiteral("scale")).toObject().value(QStringLiteral("source_unit")).toString(), QStringLiteral("cm"));
+  QCOMPARE(reopened.cameraDatasetInfo().value(QStringLiteral("scale")).toObject().value(QStringLiteral("meters_per_unit")).toDouble(), .01);
+  QVERIFY(!reopened.cameraDatasetInfo().value(QStringLiteral("blocked")).toBool());
+}
+
+void WorkspaceDocumentTests::countsOnlyCanonicalViewsAndRejectsChangedSummaryIdentity() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("project/dataset/a")));
+  QVERIFY(root.mkpath(QStringLiteral("project/dataset/b")));
+  QVERIFY(root.mkpath(QStringLiteral("project/dataset/images")));
+  const QString dataset = root.filePath(QStringLiteral("project/dataset"));
+  for (const QString &relative : {QStringLiteral("a/same.png"), QStringLiteral("b/same.png"), QStringLiteral("images/not-a-view.png")}) {
+    QFile image(QDir(dataset).filePath(relative));
+    QVERIFY(image.open(QIODevice::WriteOnly)); image.write("fixture");
+  }
+  QVERIFY(writeJson(QDir(dataset).filePath(QStringLiteral("camera_dataset.json")), QJsonDocument(QJsonObject{
+      {QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1")},
+      {QStringLiteral("views"), QJsonArray{
+          QJsonObject{{QStringLiteral("view_id"), QStringLiteral("train-a")}, {QStringLiteral("image_path"), QStringLiteral("a/same.png")}, {QStringLiteral("split"), QStringLiteral("train")}},
+          QJsonObject{{QStringLiteral("view_id"), QStringLiteral("test-b")}, {QStringLiteral("image_path"), QStringLiteral("b/same.png")}, {QStringLiteral("split"), QStringLiteral("test")}}}}})));
+  QJsonObject info{{QStringLiteral("version"), 1}, {QStringLiteral("schema"), QStringLiteral("gsw.camera_dataset/1")},
+      {QStringLiteral("metadataPath"), QStringLiteral("camera_dataset.json")}, {QStringLiteral("dataIdentity"), QString(64, QLatin1Char('b'))},
+      {QStringLiteral("posePolicy"), QStringLiteral("locked")}, {QStringLiteral("blocked"), false}};
+  const QString infoPath = QDir(dataset).filePath(QStringLiteral("camera_dataset_info.json"));
+  QVERIFY(writeJson(infoPath, QJsonDocument(info)));
+  QCOMPARE(gsw::WorkspaceDocument::countDatasetImages(dataset), qint64(2));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.create(root.filePath(QStringLiteral("project")), &error));
+  QVERIFY(document.setDatasetPath(dataset, &error));
+  QVERIFY(document.saveManifest(root.filePath(QStringLiteral("current.gsw.json")), &error));
+  info.insert(QStringLiteral("dataIdentity"), QString(64, QLatin1Char('c')));
+  QVERIFY(writeJson(infoPath, QJsonDocument(info)));
+  gsw::WorkspaceDocument reopened;
+  QVERIFY(reopened.load(root.filePath(QStringLiteral("current.gsw.json")), &error));
+  QCOMPARE(reopened.cameraDatasetIdentity(), QString(64, QLatin1Char('b')));
+  QCOMPARE(reopened.cameraPosePolicy(), QStringLiteral("locked"));
+  QVERIFY(reopened.cameraDatasetInfo().value(QStringLiteral("blocked")).toBool());
 }
 
 QTEST_GUILESS_MAIN(WorkspaceDocumentTests)

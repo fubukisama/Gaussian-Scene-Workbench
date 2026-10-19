@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import random
+import copy
 import re
 import uuid
 
@@ -74,7 +75,8 @@ def training_identity(dataset, opt, pipe):
             continue
         if (relative.parts[0] not in ("sparse", "images", "images_2", "images_4", "images_8", "depths")
                 and path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr")
-                and path.name not in ("transforms_train.json", "transforms_test.json", "points3d.ply")):
+                and path.name not in ("transforms_train.json", "transforms_val.json", "transforms_test.json",
+                                      "points3d.ply", "camera_dataset.json")):
             continue
         info = path.stat()
         files.append((relative.as_posix(), info.st_size, file_digest(path)))
@@ -83,6 +85,9 @@ def training_identity(dataset, opt, pipe):
                 "optimization": vars(opt), "pipeline": vars(pipe), "files": files,
                 # Density policy changes invalidate old optimizer-state resumes.
                 "native_density_source": file_digest(Path(__file__).with_name("training_density_control.py"))}
+    if getattr(dataset, "_gsw_camera_contract", None) is not None:
+        settings["native_camera_training_source"] = file_digest(Path(__file__).with_name("canonical_training.py"))
+        settings["native_camera_dataset_source"] = file_digest(Path(__file__).parents[1] / "backend" / "camera_dataset.py")
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -99,6 +104,8 @@ def capture_state(torch, numpy, gaussians, iteration, total, identity,
         "camera_names": camera_names, "pending_indices": list(pending_indices),
         "elapsed": elapsed, "ema_loss": ema_loss, "ema_depth": ema_depth,
     }
+    if getattr(gaussians, "_gsw_camera_contract", None) is not None:
+        state["camera_contract"] = copy.deepcopy(gaussians._gsw_camera_contract)
     if backend == "3dgs":
         state.update(exposure=gaussians._exposure,
                      exposure_optimizer=gaussians.exposure_optimizer.state_dict(),
@@ -110,6 +117,8 @@ def capture_state(torch, numpy, gaussians, iteration, total, identity,
 
 
 def restore_state(torch, numpy, gaussians, opt, state, identity, camera_names, backend="3dgs"):
+    if state.get("camera_contract") != getattr(gaussians, "_gsw_camera_contract", None):
+        raise ValueError("Camera/scale contract changed; cannot resume this checkpoint")
     if (state.get("version") != 1 or state.get("identity") != identity or
             state.get("total") != opt.iterations or state.get("camera_names") != camera_names or
             state.get("backend", "3dgs") != backend or backend not in ("3dgs", "2dgs")):
@@ -168,6 +177,8 @@ class TrainingCheckpoint:
                         "backend": state.get("backend", "3dgs"),
                         "total": state["total"], "identity": state["identity"],
                         "sha256": file_digest(path), "session": self.control["session"]}
+            if "camera_contract" in state:
+                manifest["camera_contract"] = copy.deepcopy(state["camera_contract"])
             if "performance" in state:
                 manifest["performance"] = state["performance"]
                 manifest["renderer_engine"] = state.get("renderer_engine", "stock")
@@ -196,6 +207,8 @@ class TrainingCheckpoint:
                 state.get("iteration") != manifest["iteration"] or
                 state.get("total") != manifest["total"]):
             raise ValueError("Checkpoint payload and manifest disagree")
+        if state.get("camera_contract") != manifest.get("camera_contract"):
+            raise ValueError("Checkpoint camera/scale contract and manifest disagree")
         if "performance" in manifest and (manifest["performance"] != state.get("performance") or
                 manifest.get("renderer_engine", "stock") != state.get("renderer_engine", "stock")):
             raise ValueError("Checkpoint performance policy and manifest disagree")
