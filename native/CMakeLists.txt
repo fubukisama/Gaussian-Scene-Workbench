@@ -387,6 +387,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/camera_scale_fixtures.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_gpu.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_worker.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_density_resume.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_pinhole_rasterizer_gpu.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
@@ -460,7 +461,8 @@ if(BUILD_TESTING)
     native.backend.tests.test_camera_dataset native.worker.test_camera_admission
     native.backend.tests.test_camera_scale_export native.backend.tests.test_camera_training_job
     native.backend.tests.test_camera_training_review
-    native.worker.test_camera_import native.worker.test_canonical_training native.worker.test_camera_rasterizer_runtime)
+    native.worker.test_camera_import native.worker.test_canonical_training native.worker.test_camera_rasterizer_runtime
+    native.worker.test_mesh_generation)
   set_tests_properties(native_camera_scale_p0 PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
   add_executable(gsw_rasterizer_pinhole_oracle tests/RasterizerPinholeOracle.cpp)
@@ -938,6 +940,8 @@ if(BUILD_TESTING)
 
     qt_add_executable(gsw_native_tests
       tests/WorkspaceDocumentTests.cpp
+      src/CameraDatasetInfo.cpp
+      src/CameraDatasetInfo.h
       src/ModelExport.cpp
       src/SpzIO.cpp
       src/ModelInteraction.cpp

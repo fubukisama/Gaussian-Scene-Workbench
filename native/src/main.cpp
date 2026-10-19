@@ -65,6 +65,7 @@
 #include <QToolButton>
 #include <QWheelEvent>
 #include <QWidget>
+#include <QWindow>
 
 #include <algorithm>
 #include <cmath>
@@ -1503,63 +1504,115 @@ int main(int argc, char *argv[]) {
           application.exit(smokeTestFailureCode);
         });
   } else if (infiniteGridSmokeTest) {
-    QTimer::singleShot(
-        450, &application, [&window]() {
+    struct InfiniteGridSmokeState {
+      enum class Stage { InitialFrame, AxisPose, AxisFrame };
+      Stage stage = Stage::InitialFrame;
+      QElapsedTimer deadline;
+      quint64 poseFrameSerial = 0;
+    };
+    const auto gridState = std::make_shared<InfiniteGridSmokeState>();
+    gridState->deadline.start();
+    auto *gridPoll = new QTimer(&application);
+    gridPoll->setTimerType(Qt::PreciseTimer);
+    gridPoll->setInterval(16);
+    QObject::connect(gridPoll, &QTimer::timeout, &application,
+        [&application, &window, &smokeTestCompleted, &smokeTestFailureCode,
+         gridState, gridPoll]() {
           auto *viewport =
               qobject_cast<gsw::NativeViewport *>(window.centralWidget());
           if (viewport == nullptr) {
+            gridPoll->stop();
+            smokeTestFailureCode = 2;
+            application.exit(smokeTestFailureCode);
             return;
           }
-          const QPointF start(viewport->width() * 0.5,
-                              viewport->height() * 0.5);
-          const QPointF moved = start + QPointF(5000.0, 0.0);
-          const QPointF globalStart(
-              viewport->mapToGlobal(start.toPoint()));
-          const QPointF globalMoved(
-              viewport->mapToGlobal(moved.toPoint()));
-          QMouseEvent press(QEvent::MouseButtonPress, start, start,
-                            globalStart,
-                            Qt::MiddleButton, Qt::MiddleButton,
-                            Qt::NoModifier);
-          QMouseEvent move(QEvent::MouseMove, moved, moved, globalMoved,
-                           Qt::NoButton,
-                           Qt::MiddleButton, Qt::NoModifier);
-          QMouseEvent release(QEvent::MouseButtonRelease, moved, moved,
-                              globalMoved,
-                              Qt::MiddleButton, Qt::NoButton,
-                              Qt::NoModifier);
-          QCoreApplication::sendEvent(viewport, &press);
-          QCoreApplication::sendEvent(viewport, &move);
-          QCoreApplication::sendEvent(viewport, &release);
-          QWheelEvent zoomOut(
-              start, globalStart, QPoint(), QPoint(0, -24 * 120),
-              Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-          QCoreApplication::sendEvent(viewport, &zoomOut);
-          const gsw::NavigationGizmoLayout gizmo =
-              gsw::navigationGizmoLayout(
-                  QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
-                  QFontMetricsF(viewport->font()).height());
-          const QPointF projectionPosition = gizmo.projectionCube.center();
-          const QPointF globalProjectionPosition =
-              viewport->mapToGlobal(projectionPosition.toPoint());
-          QMouseEvent projectionPress(
-              QEvent::MouseButtonPress, projectionPosition,
-              projectionPosition, globalProjectionPosition, Qt::LeftButton,
-              Qt::LeftButton, Qt::NoModifier);
-          QMouseEvent projectionRelease(
-              QEvent::MouseButtonRelease, projectionPosition,
-              projectionPosition, globalProjectionPosition, Qt::LeftButton,
-              Qt::NoButton, Qt::NoModifier);
-          QCoreApplication::sendEvent(viewport, &projectionPress);
-          QCoreApplication::sendEvent(viewport, &projectionRelease);
-          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
-        });
-    QTimer::singleShot(
-        950, &application,
-        [&application, &window, &smokeTestCompleted,
-         &smokeTestFailureCode]() {
-          auto *viewport =
-              qobject_cast<gsw::NativeViewport *>(window.centralWidget());
+          const auto angles = viewport->viewOrbitAngles();
+          const bool atPositiveX =
+              std::abs(angles.yawDegrees - 90.0F) <= 1.0e-6F &&
+              std::abs(angles.pitchDegrees) <= 1.0e-6F &&
+              std::abs(angles.rollDegrees) <= 1.0e-6F;
+          if (gridState->deadline.elapsed() >= 10000) {
+            gridPoll->stop();
+            viewport->grabFramebuffer().save(QDir::temp().filePath(
+                QStringLiteral("gsw-infinite-grid-smoke.png")));
+            qCritical() << "Infinite-grid synchronization timed out: stage"
+                        << static_cast<int>(gridState->stage)
+                        << "yaw/pitch/roll" << angles.yawDegrees
+                        << angles.pitchDegrees << angles.rollDegrees
+                        << "orthographic" << viewport->orthographicProjection()
+                        << "rendered-frame" << viewport->renderedFrameSerial();
+            smokeTestFailureCode = 7;
+            application.exit(smokeTestFailureCode);
+            return;
+          }
+          if (gridState->stage == InfiniteGridSmokeState::Stage::InitialFrame) {
+            if (window.windowHandle() == nullptr ||
+                !window.windowHandle()->isExposed() || !viewport->isValid() ||
+                viewport->context() == nullptr || !viewport->context()->isValid() ||
+                viewport->renderedFrameSerial() == 0) {
+              return;
+            }
+            viewport->grabFramebuffer().save(QDir::temp().filePath(
+                QStringLiteral("gsw-infinite-grid-initial.png")));
+            const QPointF start(viewport->width() * 0.5,
+                                viewport->height() * 0.5);
+            const QPointF moved = start + QPointF(5000.0, 0.0);
+            const QPointF globalStart(
+                viewport->mapToGlobal(start.toPoint()));
+            const QPointF globalMoved(
+                viewport->mapToGlobal(moved.toPoint()));
+            QMouseEvent press(QEvent::MouseButtonPress, start, start,
+                             globalStart,
+                             Qt::MiddleButton, Qt::MiddleButton,
+                             Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, moved, moved, globalMoved,
+                            Qt::NoButton,
+                            Qt::MiddleButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, moved, moved,
+                               globalMoved,
+                               Qt::MiddleButton, Qt::NoButton,
+                               Qt::NoModifier);
+            QCoreApplication::sendEvent(viewport, &press);
+            QCoreApplication::sendEvent(viewport, &move);
+            QCoreApplication::sendEvent(viewport, &release);
+            QWheelEvent zoomOut(
+                start, globalStart, QPoint(), QPoint(0, -24 * 120),
+                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(viewport, &zoomOut);
+            const gsw::NavigationGizmoLayout gizmo =
+                gsw::navigationGizmoLayout(
+                    QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
+                    QFontMetricsF(viewport->font()).height());
+            const QPointF projectionPosition = gizmo.projectionCube.center();
+            const QPointF globalProjectionPosition =
+                viewport->mapToGlobal(projectionPosition.toPoint());
+            QMouseEvent projectionPress(
+                QEvent::MouseButtonPress, projectionPosition,
+                projectionPosition, globalProjectionPosition, Qt::LeftButton,
+                Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent projectionRelease(
+                QEvent::MouseButtonRelease, projectionPosition,
+                projectionPosition, globalProjectionPosition, Qt::LeftButton,
+                Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(viewport, &projectionPress);
+            QCoreApplication::sendEvent(viewport, &projectionRelease);
+            viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+            gridState->stage = InfiniteGridSmokeState::Stage::AxisPose;
+            return;
+          }
+          // Cold software-GL frames may delay both old wall-clock timers into
+          // the legitimate near-edge-on fade during the 220-ms camera snap.
+          // Observe the requested public pose, then require a newer paint;
+          // never wait for the pixel oracle itself to become favourable.
+          if (!atPositiveX || !viewport->orthographicProjection()) return;
+          if (gridState->stage == InfiniteGridSmokeState::Stage::AxisPose) {
+            gridState->poseFrameSerial = viewport->renderedFrameSerial();
+            gridState->stage = InfiniteGridSmokeState::Stage::AxisFrame;
+            viewport->update();
+            return;
+          }
+          if (viewport->renderedFrameSerial() <= gridState->poseFrameSerial) return;
+          gridPoll->stop();
           int visibleGridPixels = 0;
           int distantGridPixels = 0;
           bool gridRenderingAvailable = false;
@@ -1633,10 +1686,16 @@ int main(int argc, char *argv[]) {
                   << gridOriginFixed << "visible-pixels" << visibleGridPixels
                   << "required" << sampleRect.width()
                   << "distant-pixels" << distantGridPixels
-                  << "distant-required" << distantSampleRect.width() / 2;
+                  << "distant-required" << distantSampleRect.width() / 2
+                  << "yaw/pitch/roll" << angles.yawDegrees
+                  << angles.pitchDegrees << angles.rollDegrees
+                  << "orthographic" << viewport->orthographicProjection()
+                  << "rendered-frame" << viewport->renderedFrameSerial()
+                  << "elapsed-ms" << gridState->deadline.elapsed();
           smokeTestFailureCode = exitCode;
           application.exit(exitCode);
         });
+    gridPoll->start();
   } else if (exitConfirmationSmokeTest) {
     struct ExitSmokeState {
       enum class Step {

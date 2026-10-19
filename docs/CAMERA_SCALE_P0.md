@@ -143,10 +143,16 @@ new_version = prepare_solve_dataset_version(source, fresh_destination,
 |---|---|---|
 | 3DGS | 共享规范数据/锁定/实际 K/分辨率/split/恢复路线已实现；最终核验以真实 GPU 记录为准 | 实际生成 PLY 与相机尺度合同需成对验证 |
 | 2DGS | 同等共享路线，使用 surfel 后端实现与其完整状态恢复 | 二维尺度、深度/法向投影实现需独立验证，不能用 3DGS 单例替代 |
-| TSDF | 本次不宣称新增通用锁定相机训练接口 | 已有明确量纲、格式受支持的模型可进入原生尺度测量；不能按管线名推定米制 |
-| OpenMVS | 本次不宣称已接入该规范的相机处理/训练路线 | 同上；普通重建流程和其质量门槛保留 |
-| SuGaR | 不能用基础 3DGS 成功宣称其已完成已知相机训练适配 | 合法已定尺度模型可测量；专用运行库及训练接口仍按能力矩阵限制 |
-| GS2Mesh | 本次没有将其外部专用训练/生成接口冒充共享已知相机训练 | 模型自身具备合法单位/来源记录时可测量，缺失时仍为未知尺度 |
+| 有界 / 无界 TSDF | **规范相机训练产物不准进入当前外部 TSDF 网格管线** | 现有外部 `Scene` / 深度读取器没有消费完整规范 K、训练框架与来源框架变换及 split；已安装运行库或 2DGS 训练成功不能替代该能力。普通 legacy 2DGS 网格流程及原 SfM 质量保护保留 |
+| OpenMVS 贴图 | **规范相机训练产物不准借旧相机转换路线烘焙贴图** | 旧贴图路径未建立规范逐图相机与模型坐标映射；规范产物在上游网格启动前被拒绝，不会先生成几何再借偶然存在的 sparse 补相机。普通受支持的 legacy 照片贴图流程保留 |
+| SuGaR | **规范相机训练产物不准进入当前外部细化 / 网格 / 贴图管线** | 外部细化读取器未接规范完整 K、尺度变换和划分；基础 3DGS 的验收不为它背书。旧版受支持的 SuGaR 原生作业仍保留原门槛 |
+| GS2Mesh | **规范相机训练产物不准进入当前外部立体深度 / 融合管线** | 外部深度与融合读取器未核验规范相机、深度 / 法向约定、来源尺度及 split；不能以可读 PLY 代表已适配。旧版受支持的 GS2Mesh 原生作业保留 |
+
+该拒绝在原生网格入口和 `native.worker.mesh_generation.run` 两处生效。后台作业只检查所选模型目录的 `training-camera-contract.json` 和所选迭代 PLY 旁的 `.camera-scale.json` 两个 GSW 保留标记；标记损坏或不可读也停止，不能把损坏元数据当成使用旧读取器的许可。后台返回机器错误码 `camera_dataset_mesh_backend_unavailable`，保存失败记录，且在任何外部环境准备、`Scene` 读取、稀疏质量读取、网格或贴图命令前拒绝。不会重跑 SfM、修复 sparse 或删除已有模型 / 已完成结果。
+
+即便某个高斯 PLY 已恢复为来源 / 米制坐标，也没有因此补齐这些后端的相机、深度、法向或划分适配；只要所选模型根仍带训练合同或所选 PLY 带来源侧车，仍明确拒绝。不会扫描其他迭代，普通 `.prj` 不会触发该规范相机限制。对 legacy 输入原有流程不作全局禁用；退化 SfM 仍按原有质量门槛拒绝。
+
+后续解除能力限制必须同时实现并验收：逐图完整 K 和投影、深度 / 法向坐标约定、训练到来源尺度链、train / val / test 隔离，以及真实生成网格和贴图的跨后端验证。单独安装依赖、恢复 PLY 的 XYZ 或看到预览，均不能解除此门槛。`generation_capabilities.py` 中 3DGS / 2DGS 使用 `explicit_pose_policy`（`solve → shared_colmap_viability`、`locked → canonical_locked_v1`）；下游管线明确为 `canonical_camera_input=false` 并保留技术原因及待验收项。
 
 ## 验收证据与未完成门槛
 
@@ -166,6 +172,8 @@ python -B -m unittest native.backend.tests.test_camera_dataset `
   native.backend.tests.test_camera_training_review native.worker.test_canonical_training
 ```
 
+真实增密与完整状态恢复的独立短程工具为 `scripts/verify_camera_density_resume.py`。默认执行 3DGS / 2DGS × clone / split 四组生成夹具；`--plan-only` 只准备 CPU 数据，不能算 GPU 验收。实际 GPU 模式使用有界短日程触发增密，并通过只读 Python profile 记录真实统计、增密与恢复调用，核对模型、Adam、统计量、随机状态、相机与待采样栈。测试参数只属于独立验收命令，不改变产品默认训练日程；该结果不宣称重建几何质量或默认长程训练已被全面验证。
+
 原生核心目标为 `gsw_model_export_tests`。选择真实后端环境的 `GSW_CAMERA_SCALE_EXPORT_PYTHON` 和仓库根 `GSW_CAMERA_SCALE_EXPORT_ROOT` 后，`recordedCameraCoordinatesUseRealNativeExportProcess` 执行真实 CPU 子进程，而不是用字符串检查代替导出。
 
 阶段性证据（待最终匹配提交与安装版重新核对，不能当作最终交付全绿）：
@@ -173,6 +181,7 @@ python -B -m unittest native.backend.tests.test_camera_dataset `
 - [本轮计划与验收门槛](../.planning/2026-10-19-camera-scale-p0/task_plan.md)。
 - 原生核心日志：`D:/Codex/qa-camera-p0/native-model-export-final.txt`，当时 31 通过、0 失败、1 个既存可选真实 SPZ 输入用例未选择。
 - 直接 GPU 多尺度/原点矩阵：`D:/Apps/GSW/validation/camera-scale-p0-oct19/gpu-matrix-2/RESULTS.json`。其源码身份和后续原生 job / 安装候选身份必须在最终报告对齐；开发中修改后的旧结果不能替代重新验证。
+- 冻结训练实现的最终 GPU 来源 / 尺度矩阵为 `gpu-final-2/RESULTS.json`（14 组）；真实原生 worker、手动分辨率与原生测量导出分别见 `worker-final-2`、`manual-worker-final` 和 `native-final-3dgs.txt` / `native-final-2dgs.txt`。路径均在本轮 D 盘验收根目录。实际增密补验为 `density-final-1/RESULTS.json`：四组均记录 3 次真实增密、两次完整状态暂停 / 恢复和 train-only 增密统计；补足此前关闭增密的短程运行范围，不替代最终安装版和真实窗口门槛。
 - 匹配旧版真实窗口像素问题：`baseline-native-windows-failures.log` 与同提交截图。点云例的原 opaque 颜色检测漏掉 MSAA/网格背景混合后的真实边缘像素，产生 172/181 的错误宽比；修复只校正点覆盖检测，原 ROI、像素数、4% 物理宽比和状态保留门槛不变。修复后的真实窗口结果仍须重新验收。
 
 最终交付报告还必须填写：完整 3DGS / 2DGS 原生 worker GPU 日志、实际采样/检查点/输出与单位验证、三语言真实窗口与旧流程回归、匹配提交 CI、生产 Setup 的哈希/对应源码及安装后快捷方式目标。未完成前不得写成“P0 已全部验收”或“安装版已完成”。

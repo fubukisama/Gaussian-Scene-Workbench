@@ -82,8 +82,103 @@ class Backend:
         self.MESH_JOBS[job_id]["status"] = "cancelled"
 
 
+class GenerationCanonicalCapabilitiesTests(unittest.TestCase):
+    def test_camera_policy_and_downstream_limits_are_declared_per_backend(self):
+        from native.worker.generation_capabilities import PIPELINES
+        for name in ("3dgs", "2dgs"):
+            with self.subTest(backend=name):
+                capability = PIPELINES[name]
+                self.assertTrue(capability["canonical_camera_input"])
+                self.assertEqual(capability["reconstruction_gate"], "explicit_pose_policy")
+                self.assertEqual(capability["reconstruction_gates"]["locked"], "canonical_locked_v1")
+                self.assertEqual(capability["reconstruction_gates"]["solve"], "shared_colmap_viability")
+        for name in ("bounded", "unbounded", "sugar", "gs2mesh", "openmvs"):
+            with self.subTest(backend=name):
+                capability = PIPELINES[name]
+                self.assertFalse(capability["canonical_camera_input"])
+                self.assertTrue(capability["canonical_camera_reason"])
+                self.assertTrue(capability["canonical_camera_acceptance"])
+                self.assertEqual(capability["reconstruction_gate"], "shared_colmap_viability")
+
+
 @unittest.skipUnless(NUMERIC_RUNTIME, "Run with a training Python containing NumPy and plyfile")
 class MeshJobTests(unittest.TestCase):
+    def test_canonical_outputs_are_rejected_before_all_external_readers_and_environments(self):
+        class TrackedExternalBackend(Backend):
+            def scene_backend(self, *args):
+                self.calls.append("external_scene_reader")
+                return super().scene_backend(*args)
+
+            def start_mesh_export(self, *args):
+                self.calls.append("external_mesh_command")
+                return super().start_mesh_export(*args)
+
+        original = (self.source / "point_cloud/iteration_7/point_cloud.ply").read_bytes()
+        original_configuration = (self.source / "cfg_args").read_bytes()
+        previous = self.root / "output" / "previous-result.json"
+        previous.parent.mkdir()
+        previous.write_bytes(b"previous valid artifact remains")
+        markers = [
+            (self.source / "training-camera-contract.json", {"schema": "gsw.training_camera_contract/1", "pose_policy": "locked"}),
+            (self.source / "point_cloud/iteration_7/point_cloud.camera-scale.json", {"schema": "gsw.training_camera_contract/1"}),
+            (self.source / "point_cloud/iteration_7/point_cloud.camera-scale.json", {"schema": "gsw.coordinate_export/1",
+                "output_frame": "canonical", "training_contract": {"schema": "gsw.training_camera_contract/1"}}),
+        ]
+        for marker_index, (marker, metadata) in enumerate(markers):
+            marker.write_text(json.dumps(metadata), encoding="utf-8")
+            for mode in mesh_generation.MODES:
+                with self.subTest(marker=marker.name, mode=mode):
+                    self.config.update(mode=mode, runName="canonical-{}-{}".format(marker_index, mode))
+                    backend = TrackedExternalBackend(mesh_generation.MODES[mode], own_texture=mode == "sugar")
+                    self.assertEqual(self.run_job(backend), 1)
+                    record = json.loads((self.root / "output" / self.config["runName"] / "result.json").read_text())
+                    self.assertEqual(record.get("errorCode"), "camera_dataset_mesh_backend_unavailable")
+                    self.assertEqual(record["state"], "failed")
+                    self.assertEqual(record["completedStages"], [])
+                    self.assertFalse((self.root / "output" / self.config["runName"] / self.config["runName"]).exists())
+                    self.assertEqual(backend.calls, [])
+                    self.assertEqual(backend.MESH_JOBS, {})
+                    self.assertEqual(self.events[-1][3]["generation_issue"], "camera_dataset_mesh_backend_unavailable")
+            marker.unlink()
+        self.assertEqual((self.source / "point_cloud/iteration_7/point_cloud.ply").read_bytes(), original)
+        self.assertEqual((self.source / "cfg_args").read_bytes(), original_configuration)
+        self.assertEqual(previous.read_bytes(), b"previous valid artifact remains")
+
+    def test_corrupt_canonical_marker_does_not_fall_back_to_a_legacy_reader(self):
+        for index, relative in enumerate(("training-camera-contract.json", "point_cloud/iteration_7/point_cloud.camera-scale.json")):
+            marker = self.source / relative
+            marker.write_bytes(b"{truncated canonical metadata")
+            self.config["runName"] = "corrupt-contract-" + str(index)
+            backend = Backend("2dgs")
+            self.assertEqual(self.run_job(backend), 1)
+            record = json.loads((self.root / "output" / self.config["runName"] / "result.json").read_text())
+            self.assertEqual(record.get("errorCode"), "camera_dataset_mesh_backend_unavailable")
+            self.assertEqual(backend.calls, [])
+            marker.unlink()
+
+    def test_incidental_sparse_does_not_override_canonical_downstream_rejection(self):
+        dataset = self.root / "managed-dataset"
+        (dataset / "sparse/0").mkdir(parents=True)
+        (dataset / "sparse/0/cameras.bin").write_bytes(b"not a camera source for this canonical model")
+        (self.source / "cfg_args").write_text("Namespace(source_path={!r})".format(str(dataset)))
+        (self.source / "training-camera-contract.json").write_text('{"schema":"gsw.training_camera_contract/1"}')
+        for mode in mesh_generation.MODES:
+            self.config.update(mode=mode, runName="incidental-sparse-" + mode)
+            backend = Backend(mesh_generation.MODES[mode])
+            self.assertEqual(self.run_job(backend), 1)
+            record = json.loads((self.root / "output" / self.config["runName"] / "result.json").read_text())
+            self.assertEqual(record["errorCode"], "camera_dataset_mesh_backend_unavailable")
+            self.assertNotIn("reconstructionQuality", record)
+            self.assertEqual(backend.calls, [])
+
+    def test_unselected_iteration_and_ordinary_projection_metadata_do_not_ban_legacy_mesh(self):
+        other = self.source / "point_cloud/iteration_6"
+        other.mkdir()
+        (other / "point_cloud.camera-scale.json").write_text('{"schema":"gsw.training_camera_contract/1"}')
+        (self.source / "point_cloud/iteration_7/point_cloud.prj").write_text('LOCAL_CS["legacy",UNIT["metre",1]]')
+        self.assertEqual(self.run_job(Backend("2dgs")), 0)
+        self.assertEqual(self.record()["completedStages"], ["mesh"])
+
     def test_all_mesh_methods_reject_degenerate_colmap_before_external_work(self):
         from native.worker.test_reconstruction_quality import write_model
         with tempfile.TemporaryDirectory() as tmp:

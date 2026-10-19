@@ -6215,8 +6215,14 @@ void MainWindow::startMeshGeneration() {
     }
   }
   MeshGenerationDialog dialog(source, this);
-  if (dialog.exec() != QDialog::Accepted || !confirmDiscardSceneEdits()) return;
+  if (dialog.exec() != QDialog::Accepted) return;
   QJsonObject config = dialog.configuration();
+  if (CameraDatasetInfo::meshGenerationBlocked(config)) {
+    showError(QCoreApplication::translate("Workbench", "无法生成网格"),
+        QCoreApplication::translate("Workbench", "所选已知相机训练产物尚未通过此网格后端的完整内参与尺度验收。已停止，原模型和编辑保持不变，不会重新求解相机。请使用受支持的原有流程。"));
+    return;
+  }
+  if (!confirmDiscardSceneEdits()) return;
   const QString run = QStringLiteral("mesh-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   const QString outputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes"));
   config.insert(QStringLiteral("task"), QStringLiteral("mesh"));

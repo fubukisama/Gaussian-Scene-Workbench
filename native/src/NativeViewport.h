@@ -208,6 +208,9 @@ public:
     return mModelDragActive;
   }
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
+  [[nodiscard]] quint64 renderedFrameSerial() const {
+    return mRenderedFrameSerial;
+  }
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
   [[nodiscard]] OrbitAngles viewOrbitAngles() const {

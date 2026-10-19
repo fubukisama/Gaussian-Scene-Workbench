@@ -1,4 +1,5 @@
 #include "CameraTrajectory.h"
+#include "CameraDatasetInfo.h"
 #include "ColmapSupport.h"
 #include "PlyPointCloudLoader.h"
 #include "ResourceBudget.h"
@@ -78,6 +79,7 @@ private slots:
   void savesAndLoadsPortableProject();
   void persistsCanonicalCameraIdentityAndUnitsAcrossSaveAs();
   void countsOnlyCanonicalViewsAndRejectsChangedSummaryIdentity();
+  void rejectsCanonicalMeshBackendsBeforeChangingTheScene();
   void saveAsCopiesManagedDataIntoANewLinkedDirectory();
   void firstSaveKeepsExternalDatasetAsALink();
   void clearsManagedDatasetAndPersistsSceneAssociation();
@@ -2912,6 +2914,49 @@ void WorkspaceDocumentTests::countsOnlyCanonicalViewsAndRejectsChangedSummaryIde
   QCOMPARE(reopened.cameraDatasetIdentity(), QString(64, QLatin1Char('b')));
   QCOMPARE(reopened.cameraPosePolicy(), QStringLiteral("locked"));
   QVERIFY(reopened.cameraDatasetInfo().value(QStringLiteral("blocked")).toBool());
+}
+
+void WorkspaceDocumentTests::rejectsCanonicalMeshBackendsBeforeChangingTheScene() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  QVERIFY(root.mkpath(QStringLiteral("point_cloud/iteration_12")));
+  QVERIFY(root.mkpath(QStringLiteral("point_cloud/iteration_24")));
+  const auto write = [](const QString &path, const QByteArray &bytes) {
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+  };
+  const QJsonObject selected{{QStringLiteral("modelDirectory"), root.absolutePath()},
+      {QStringLiteral("iteration"), 12}, {QStringLiteral("mode"), QStringLiteral("sugar")}};
+  // A legacy output and unrelated project metadata must remain usable.
+  QVERIFY(write(root.filePath(QStringLiteral("cfg_args")), "Namespace(source_path='legacy')"));
+  QVERIFY(write(root.filePath(QStringLiteral("project.prj")), "{\"cameraDataset\":true}"));
+  QVERIFY(!gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  const QByteArray contract("{\"schema\":\"gsw.training_camera_contract/1\",\"pose_policy\":\"locked\"}");
+  const QString other = root.filePath(QStringLiteral("point_cloud/iteration_24/point_cloud.camera-scale.json"));
+  QVERIFY(write(other, contract));
+  QVERIFY(!gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  const QString marker = root.filePath(QStringLiteral("training-camera-contract.json"));
+  QVERIFY(write(marker, contract));
+  for (const QString mode : {QStringLiteral("bounded"), QStringLiteral("unbounded"),
+      QStringLiteral("sugar"), QStringLiteral("gs2mesh")}) {
+    QJsonObject configuration = selected;
+    configuration.insert(QStringLiteral("mode"), mode);
+    QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(configuration));
+  }
+  // A damaged reserved contract must not bypass the capability gate.
+  QVERIFY(write(marker, "{broken"));
+  QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  QVERIFY(QFile::remove(marker));
+  const QString sidecar = root.filePath(QStringLiteral("point_cloud/iteration_12/point_cloud.camera-scale.json"));
+  QVERIFY(write(sidecar, contract));
+  QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  QVERIFY(write(sidecar, "{\"schema\":\"gsw.coordinate_export/1\",\"training_contract\":{\"schema\":\"gsw.training_camera_contract/1\"}}"));
+  QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  QVERIFY(write(sidecar, "{\"schema\":\"unrelated.legacy.metadata/1\"}"));
+  QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+  QVERIFY(write(sidecar, "not JSON"));
+  QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
 }
 
 QTEST_GUILESS_MAIN(WorkspaceDocumentTests)

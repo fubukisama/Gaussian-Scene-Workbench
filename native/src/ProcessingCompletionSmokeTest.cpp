@@ -1,6 +1,7 @@
 #include "ProcessingCompletionSmokeTest.h"
 #include "AppLanguage.h"
 #include "MainWindow.h"
+#include "SceneCoordinates.h"
 #include <QAction>
 #include <QApplication>
 #include <QDebug>
@@ -124,7 +125,7 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
         QJsonObject cameraContract{
             {QStringLiteral("schema"), QStringLiteral("gsw.training_camera_contract/1")},
             {QStringLiteral("backend"), kind},
-            {QStringLiteral("data_identity"), QString(64, QLatin1Char('a'))},
+            {QStringLiteral("input_data_identity"), QString(64, QLatin1Char('a'))},
             {QStringLiteral("pose_policy"), QStringLiteral("locked")},
             {QStringLiteral("scale"), QJsonObject{
                 {QStringLiteral("status"), QStringLiteral("source_declared")},
@@ -147,6 +148,12 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
         const QFileInfo finalInfo(final);
         check(write(finalInfo.dir().filePath(finalInfo.completeBaseName() + QStringLiteral(".camera-scale.json")), trainingScaleBytes),
               "pair each generated Gaussian fixture with its own checksum-bound scale record");
+        const auto admittedCoordinates = parsePlyCoordinateMetadata({}, final, false);
+        if (!check(admittedCoordinates.validationError.isEmpty() &&
+                   admittedCoordinates.dataIdentity == QString(64, QLatin1Char('a')) &&
+                   admittedCoordinates.metersPerCoordinate.has_value() &&
+                   std::abs(*admittedCoordinates.metersPerCoordinate - .05) < 1e-12,
+                   "final fixture passes the actual scale and data-identity reader before publication")) return false;
       }
       const QString task = kind + "-completion";
       GenerationExperiment experiment;

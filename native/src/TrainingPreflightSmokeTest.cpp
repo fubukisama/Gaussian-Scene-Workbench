@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QLabel>
 #include <QElapsedTimer>
@@ -276,13 +277,28 @@ bool runTrainingPreflightSmokeTest(const QString &python, const QString &backend
              "the real locked-camera dialog admits nested train/val/test images without sparse points")) return false;
   const auto lockedSummary = locked.cameraDatasetSummary();
   const auto splitCounts = lockedSummary.value(QStringLiteral("counts")).toObject();
-  if (!check(locked.configuration().posePolicy == QStringLiteral("locked") &&
-             !locked.configuration().runColmap && !locked.effectiveRunColmap() && !lockedColmap->isEnabled() &&
-             locked.configuration().resolutionPolicy == QStringLiteral("preserve") && locked.configuration().resolution == 1 &&
-             splitCounts.value(QStringLiteral("train")).toInt() == 1 && splitCounts.value(QStringLiteral("val")).toInt() == 1 &&
-             splitCounts.value(QStringLiteral("test")).toInt() == 1 &&
-             locked.configuration().cameraDatasetPath == metadataPath && !locked.configuration().cameraDatasetIdentity.isEmpty(),
-             "locked policy, preserved pixels, split isolation and dataset identity are explicit public configuration")) return false;
+  const auto lockedConfiguration = locked.configuration();
+  if (!check(lockedConfiguration.posePolicy == QStringLiteral("locked") &&
+             !lockedConfiguration.runColmap && !locked.effectiveRunColmap() && !lockedColmap->isEnabled(),
+             "locked camera policy disables both explicit and effective SfM execution")) return false;
+  if (!check(lockedConfiguration.resolutionPolicy == QStringLiteral("preserve") && lockedConfiguration.resolution == 1,
+             "locked cameras preserve the original image pixels by default")) return false;
+  if (!check(splitCounts.value(QStringLiteral("train")).toInt() == 1 && splitCounts.value(QStringLiteral("val")).toInt() == 1 &&
+             splitCounts.value(QStringLiteral("test")).toInt() == 1,
+             "locked camera summary keeps train, validation and test images separate")) return false;
+  // Python pathlib returns native separators on Windows; admission identifies a
+  // real file, not a particular spelling of its absolute path.
+  const QFileInfo suppliedMetadata(metadataPath);
+  const QFileInfo admittedMetadata(lockedConfiguration.cameraDatasetPath);
+  if (!check(suppliedMetadata.isFile() && admittedMetadata.isFile() &&
+             !suppliedMetadata.canonicalFilePath().isEmpty() &&
+             admittedMetadata.canonicalFilePath() == suppliedMetadata.canonicalFilePath() &&
+             !lockedConfiguration.cameraDatasetIdentity.isEmpty(),
+             "locked configuration references the same validated metadata file and a nonempty dataset identity")) {
+    std::fprintf(stderr, "Training preflight metadata path: supplied=%s admitted=%s\n",
+        qPrintable(metadataPath), qPrintable(lockedConfiguration.cameraDatasetPath));
+    return false;
+  }
   lockedPreset->setCurrentIndex(lockedPreset->findData(QStringLiteral("full")));
   if (!check(locked.configuration().resolution == 1 && locked.configuration().resolutionPolicy == QStringLiteral("preserve"),
              "changing a locked-camera quality preset never silently resizes input images")) return false;

@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QLocale>
 #include <QStringList>
@@ -39,6 +40,23 @@ bool CameraDatasetInfo::blocked(const QJsonObject &summary) {
   return summary.isEmpty() || !blocked.isBool() || blocked.toBool() ||
       (policy != QStringLiteral("locked") && policy != QStringLiteral("solve")) ||
       !summary.value(QStringLiteral("errors")).toArray().isEmpty();
+}
+
+bool CameraDatasetInfo::meshGenerationBlocked(const QJsonObject &configuration) {
+  const QString directory = configuration.value(QStringLiteral("modelDirectory")).toString();
+  if (directory.trimmed().isEmpty()) return false;
+  const QDir output(directory);
+  // These are reserved GSW provenance markers, not arbitrary project metadata.
+  // Their existence is sufficient: damaged, unreadable or unknown-version
+  // contracts must not fall back to an external loader that ignores full K.
+  const auto marked = [](const QString &path) {
+    const QFileInfo info(path);
+    return info.exists() || info.isSymLink();
+  };
+  if (marked(output.filePath(QStringLiteral("training-camera-contract.json")))) return true;
+  const int iteration = configuration.value(QStringLiteral("iteration")).toInt();
+  return iteration > 0 && marked(output.filePath(
+      QStringLiteral("point_cloud/iteration_%1/point_cloud.camera-scale.json").arg(iteration)));
 }
 
 QString CameraDatasetInfo::summaryText(const QJsonObject &summary) {

@@ -224,6 +224,71 @@ bool runMeshGenerationSmokeTest(MainWindow &window) {
   for (const auto &object : objects)
     if (object.id == originalId) originalPreserved = object.translation == QVector3D(1, 2, 3);
   check(originalPreserved, "source transform preserved");
+
+  // Exercise the actual mesh action without a GPU worker. A contract-bearing
+  // source must be rejected before the existing discard-edits confirmation.
+  const QString blockedOutput = root.filePath(QStringLiteral("known-camera-output"));
+  check(write(QDir(blockedOutput).filePath(QStringLiteral("cfg_args")), "Namespace()") &&
+      write(QDir(blockedOutput).filePath(QStringLiteral("point_cloud/iteration_12/point_cloud.ply")), points) &&
+      write(QDir(blockedOutput).filePath(QStringLiteral("training-camera-contract.json")),
+          "{\"schema\":\"gsw.training_camera_contract/1\"}"), "create owned marked training output");
+  const QString fakeRuntime = root.filePath(QStringLiteral("never-launched-runtime"));
+  check(QDir().mkpath(fakeRuntime) && QFile::copy(helper,
+      QDir(fakeRuntime).filePath(QStringLiteral("python.exe"))), "prepare safe process-boundary fixture");
+  const QByteArray oldPrefix = qgetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  const QString oldLanguage = AppLanguage::current();
+  const bool oldLocked = window.mViewport->editToolsLocked();
+  const auto restoreMeshEnvironment = qScopeGuard([&] {
+    qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX", oldPrefix);
+    window.mViewport->discardSceneEdits();
+    window.mViewport->setEditToolsLocked(oldLocked);
+    AppLanguage::apply(oldLanguage, false);
+  });
+  qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX", fakeRuntime.toUtf8());
+  check(window.mViewport->activateSceneObject(originalId), "select original before blocked mesh admission");
+  check(waitUntil([&] { return window.mViewport->scenePath() == original &&
+      window.mViewport->renderedPointCount() == 3; }), "prepare real editable original");
+  window.mViewport->setEditToolsLocked(false);
+  window.mViewport->clearSelection();
+  window.mViewport->invertSelection();
+  window.mViewport->deleteSelection();
+  check(window.mViewport->hasUnsavedSceneEdits(), "retain unsaved edits across capability rejection");
+  const auto originalTransform = window.mWorkspace.sceneTranslation();
+  const auto sceneCount = window.mWorkspace.sceneObjects().size();
+  const int taskCount = window.mTaskTable->rowCount();
+  for (const QString &language : AppLanguage::supported()) {
+    AppLanguage::apply(language, false);
+    for (const QString &mode : {QStringLiteral("bounded"), QStringLiteral("unbounded"),
+        QStringLiteral("sugar"), QStringLiteral("gs2mesh")}) {
+      check(write(QDir(blockedOutput).filePath(QStringLiteral("training_backend.json")),
+          QJsonDocument(QJsonObject{{"backend", mode == QStringLiteral("bounded") ||
+              mode == QStringLiteral("unbounded") ? "2dgs" : "3dgs"}}).toJson()), "select owned backend metadata");
+      bool capabilityShown = false;
+      QTimer admissionDialogs;
+      QObject::connect(&admissionDialogs, &QTimer::timeout, &window, [&] {
+        if (auto *dialog = qobject_cast<MeshGenerationDialog *>(QApplication::activeModalWidget())) {
+          auto *sourceField = dialog->findChild<QLineEdit *>(QStringLiteral("meshSourceDirectory"));
+          auto *method = dialog->findChild<QComboBox *>(QStringLiteral("meshMethodCombo"));
+          if (!sourceField || !method) { check(false, "mesh source controls available"); dialog->reject(); return; }
+          sourceField->setText(blockedOutput);
+          method->setCurrentIndex(method->findData(mode));
+          QMetaObject::invokeMethod(dialog, "accept");
+        } else if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+          capabilityShown = box->text() == QCoreApplication::translate("Workbench", "所选已知相机训练产物尚未通过此网格后端的完整内参与尺度验收。已停止，原模型和编辑保持不变，不会重新求解相机。请使用受支持的原有流程。");
+          check(capabilityShown, "show localized capability rejection, never discard-edits prompt");
+          box->reject();
+        }
+      });
+      admissionDialogs.start(10);
+      window.mGenerateMeshAction->trigger();
+      admissionDialogs.stop();
+      check(capabilityShown && !window.mProcessSupervisor.isRunning() && !window.mPendingMesh &&
+          window.mTaskTable->rowCount() == taskCount, "rejected mesh source creates no task or process");
+      check(window.mViewport->hasUnsavedSceneEdits() && window.mWorkspace.activeSceneId() == originalId &&
+          window.mWorkspace.sceneTranslation() == originalTransform &&
+          window.mWorkspace.sceneObjects().size() == sceneCount, "rejection preserves edits, model identity and transform");
+    }
+  }
   qInfo() << "Mesh generation desktop smoke:" << (passed ? "PASS" : "FAIL");
   return passed;
 }
@@ -791,6 +856,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   if (lockedBackend) lockedBackend->setCurrentIndex(lockedBackend->findData(QStringLiteral("2dgs")));
   if (lockedIterations) lockedIterations->setValue(9876);
   const auto retainedLockedSettings = lockedSettings.configuration();
+  stage("dialog-fixtures-ready");
   // This source lives in the catalog under the original English diagnostic.
   const QString error = QCoreApplication::translate("Workbench", "Unable to open PLY file %1: %2")
                             .arg(name, QStringLiteral("test"));
@@ -855,6 +921,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   });
   check(viewportReady, "language matrix starts with an exposed initialized viewport");
   if (!viewportReady) return false;
+  stage("viewport-ready");
   QTemporaryDir temporary;
   if (!temporary.isValid()) return false;
   const auto media = QDir(temporary.path()).filePath(QStringLiteral("images/frame.jpg"));
@@ -874,7 +941,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
         "training display and storage names separated");
   QFile ply(QDir(temporary.path()).filePath(QStringLiteral("点云_日本語.ply")));
   if (!ply.open(QIODevice::WriteOnly)) return false;
-  ply.write("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nend_header\n-1 -1 0\n1 -1 0\n0 1 0\n0 0 1\n");
+  // This fixture exercises a successful metric GLB export. Arbitrary-unit PLY
+  // is intentionally rejected by the public export core, covered separately.
+  ply.write("ply\nformat ascii 1.0\ncomment units m\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nend_header\n-1 -1 0\n1 -1 0\n0 1 0\n0 0 1\n");
   ply.close();
   check(window.importSceneFile(ply.fileName()), "import test model");
   check(waitUntil([&] { return viewport->selectableModelAvailable(); }), "model is loaded");
@@ -903,23 +972,35 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // Exercise the actual menu action, options dialog and asynchronous writer.
   const QString uiExportPath = QDir(temporary.path()).filePath(QStringLiteral("ui-export.glb"));
   bool exportDialogSeen = false;
+  bool exportSubmitted = false;
   QTimer exportClick;
   QObject::connect(&exportClick, &QTimer::timeout, &window, [&] {
+    // Never let an unexpected validation error wait for human input in CI.
+    // Keep watching after submission: the asynchronous writer may reject it.
+    if (auto *errorBox = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+      qCritical() << "Language smoke unexpected export dialog:" << errorBox->text();
+      check(false, "successful metric GLB export must not produce a validation error");
+      errorBox->reject();
+      return;
+    }
+    if (exportSubmitted) return;
     auto *activeDialog = window.findChild<QDialog *>(QStringLiteral("modelExportDialog"));
     if (!activeDialog || !activeDialog->isVisible()) return;
     auto *format = activeDialog->findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
     auto *path = activeDialog->findChild<QLineEdit *>(QStringLiteral("modelExportPath"));
     auto *confirm = activeDialog->findChild<QAbstractButton *>(QStringLiteral("confirmModelExport"));
     if (!format || !path || !confirm) { activeDialog->reject(); return; }
-    exportClick.stop(); exportDialogSeen = true;
+    exportSubmitted = true; exportDialogSeen = true;
     format->setCurrentIndex(format->findData(static_cast<int>(ModelExportFormat::Glb)));
     path->setText(uiExportPath); confirm->click();
   });
+  stage("metric-model-export-begin");
   exportClick.start(20);
   if (exportAction) exportAction->trigger();
   exportClick.stop();
   check(exportDialogSeen && QFileInfo(uiExportPath).size() > 28 && viewport->editToolsLocked(),
         "model export action writes a standalone GLB while locked");
+  stage("metric-model-export-complete");
   ModelExportDialog exportDialog(viewport->modelExportOptions(), true, false, {ply.fileName()}, &window);
   auto spzOptions = viewport->modelExportOptions();
   spzOptions.spzVersion = 3; spzOptions.spzQuality = 2; spzOptions.spzMaximumShDegree = 2;

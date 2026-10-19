@@ -6,6 +6,7 @@ later texture stage fails; this is an artifact, not an optimizer checkpoint.
 """
 
 import ast
+import json
 import math
 import sys
 import threading
@@ -17,6 +18,60 @@ from native.worker.mesh_material_preview import prepare_material_preview
 
 
 MODES = {"bounded": "2dgs", "unbounded": "2dgs", "sugar": "3dgs", "gs2mesh": "3dgs"}
+
+
+class CanonicalMeshCapabilityError(ValueError):
+    """Typed release gate, not an environment-installation or SfM failure."""
+    code = "camera_dataset_mesh_backend_unavailable"
+
+    def __init__(self, source, iteration, mode, markers):
+        self.capability = {
+            "canonical_camera_input": False, "mode": mode, "source": str(source), "iteration": iteration,
+            "markers": markers,
+            "reason": "external_scene_reader_does_not_consume_canonical_full_k_split_and_transform_chain",
+            "remaining_acceptance": ["per_view_full_pinhole_projection", "depth_and_normal_camera_conventions",
+                                     "training_to_source_scale_chain", "held_out_split_isolation",
+                                     "mesh_and_texture_cross_backend_validation"],
+        }
+        super().__init__(self.code)
+
+
+def require_mesh_camera_capability(source, iteration, mode):
+    """Refuse tracked canonical outputs before external readers or processes.
+
+    Only the selected model root and iteration are checked. These are reserved
+    GSW marker names, so corrupt/unreadable markers cannot silently turn a
+    canonical job into a legacy one. Other iterations and ordinary .prj files
+    do not identify the selected input as a canonical training output.
+    """
+    source = Path(source)
+    selected = source / "point_cloud" / ("iteration_{}".format(iteration)) / "point_cloud.camera-scale.json"
+    found = []
+    for path in (source / "training-camera-contract.json", selected):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            found.append({"path": str(path), "schema": None, "state": "unreadable_marker"})
+            continue
+        evidence = {"path": str(path), "schema": None, "state": "present"}
+        try:
+            if path.stat().st_size > 128 * 1024 * 1024:
+                raise ValueError("marker_too_large")
+            with path.open(encoding="utf-8-sig") as stream:
+                metadata = json.load(stream)
+            if not isinstance(metadata, dict):
+                raise ValueError("marker_not_object")
+            schema = metadata.get("schema")
+            frame = metadata.get("output_frame", "training")
+            evidence["schema"] = schema if isinstance(schema, str) else None
+            evidence["coordinate_frame"] = frame if isinstance(frame, str) else "unknown"
+        except (OSError, ValueError, TypeError):
+            evidence["state"] = "invalid_or_unreadable_marker"
+        found.append(evidence)
+    if found:
+        raise CanonicalMeshCapabilityError(source, iteration, mode, found)
 
 
 def _within(path, root):
@@ -164,6 +219,7 @@ def run(config, server, emit):
 
     try:
         stage("environment")
+        require_mesh_camera_capability(source, iteration, mode)
         if not source.is_dir() or not (source / "cfg_args").is_file():
             raise ValueError("Select a training output directory containing cfg_args")
         values = _validate_configuration(source / "cfg_args")
@@ -245,7 +301,14 @@ def run(config, server, emit):
     except Exception as exc:
         state = "cancelled" if cancel.is_set() or isinstance(exc, InterruptedError) else "failed"
         record.update(state=state, error=str(exc))
+        if isinstance(exc, CanonicalMeshCapabilityError):
+            record.update(errorCode=exc.code, capability=exc.capability)
         atomic_json(record_path, record)
+        if isinstance(exc, CanonicalMeshCapabilityError):
+            emit(state, state, None, {"generation_issue": exc.code, "canonical_camera_input": False,
+                                    "capability": exc.capability})
+            print("[worker] Mesh job {}: {}".format(state, exc), flush=True)
+            return 1
         quality = getattr(exc, "report", None)
         if isinstance(quality, dict):
             record["reconstructionQuality"] = quality
