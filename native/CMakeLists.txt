@@ -368,7 +368,8 @@ install(DIRECTORY worker DESTINATION source/native
 # These sources are not linked into or relicensed as the native GPL GUI.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../gaussian-splatting/submodules/diff-gaussian-rasterization"
   DESTINATION source/gaussian-splatting/submodules
-  PATTERN "build" EXCLUDE PATTERN "dist" EXCLUDE PATTERN "__pycache__" EXCLUDE
+  PATTERN "build" EXCLUDE PATTERN "dist" EXCLUDE PATTERN "doc" EXCLUDE PATTERN "docs" EXCLUDE
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyd" EXCLUDE
   PATTERN "*.pyc" EXCLUDE PATTERN "*.egg-info" EXCLUDE)
 install(DIRECTORY third_party/ DESTINATION source/native/third_party PATTERN "2dgs-surfel" EXCLUDE)
 install(FILES CMakeLists.txt resources.qrc lucide_icons.qrc build_manifest.json README.md LICENSE.md
