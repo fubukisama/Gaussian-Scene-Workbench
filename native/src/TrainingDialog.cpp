@@ -141,9 +141,9 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(resolutionHint);
   const auto updateResolutionHint = [this, resolutionHint]() {
     resolutionHint->setVisible(mResolution->currentData().toInt() == 1);
-    resolutionHint->setText(mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")
-        ? QCoreApplication::translate("Workbench", "锁定相机使用已验证的图像与投影；不自动缩图、不重求解，不支持的畸变或投影会拒绝。")
-        : QCoreApplication::translate("Workbench", "原始分辨率按 1:1 训练，不自动降采样；显存占用和耗时会明显增加。去畸变仍会进行；已缩小的数据需从原图重新重建。"));
+    AppLanguage::bind(resolutionHint, "text", mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")
+        ? AppLanguage::source("锁定相机使用已验证的图像与投影；不自动缩图、不重求解，不支持的畸变或投影会拒绝。")
+        : AppLanguage::source("原始分辨率按 1:1 训练，不自动降采样；显存占用和耗时会明显增加。去畸变仍会进行；已缩小的数据需从原图重新重建。"));
   };
   connect(mResolution, &QComboBox::currentIndexChanged, this, updateResolutionHint);
   AppLanguage::onChanged(this, updateResolutionHint);
@@ -359,9 +359,9 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   note->setObjectName(QStringLiteral("mutedLabel"));
   note->setWordWrap(true);
   const auto updateTrainingNote = [this, note] {
-    note->setText(mPosePolicy->currentData().toString() == QStringLiteral("locked")
-        ? QCoreApplication::translate("Workbench", "3DGS / 2DGS 共用锁定相机与数据划分策略。原图、相机和尺度来源保持可追溯；预览正常不代表训练、尺度或模型质量已验证。")
-        : QCoreApplication::translate("Workbench", "训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
+    AppLanguage::bind(note, "text", mPosePolicy->currentData().toString() == QStringLiteral("locked")
+        ? AppLanguage::source("3DGS / 2DGS 共用锁定相机与数据划分策略。原图、相机和尺度来源保持可追溯；预览正常不代表训练、尺度或模型质量已验证。")
+        : AppLanguage::source("训练前检查相机覆盖和稀疏点；退化重建会有限重试，原始照片与已有输出保留。3DGS / 2DGS 快速预览默认 10,000 次迭代、1/2 分辨率。3DGS 增密后继续优化，2DGS 包含法线约束阶段；手动参数不被覆盖。"));
   };
   connect(mPosePolicy, &QComboBox::currentIndexChanged, this, updateTrainingNote);
   AppLanguage::onChanged(this, updateTrainingNote);

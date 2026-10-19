@@ -474,9 +474,9 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
           &DatasetImportDialog::reject);
 
   const auto updateContext = [this, introduction, projectPath, unsavedProject, projectRoot]() {
-    setWindowTitle(mInputMode->currentData().toString() == QStringLiteral("locked")
-        ? QCoreApplication::translate("Workbench", "导入已知相机数据集")
-        : QCoreApplication::translate("Workbench", "添加照片与视频"));
+    AppLanguage::bind(this, "windowTitle", mInputMode->currentData().toString() == QStringLiteral("locked")
+        ? AppLanguage::source("导入已知相机数据集")
+        : AppLanguage::source("添加照片与视频"));
     introduction->setText(mInputMode->currentData().toString() == QStringLiteral("locked")
         ? QCoreApplication::translate("Workbench", "导入已有相机与原图的托管副本，不重新求解位姿。格式、投影、数据划分和尺度将在后台统一验证；失败会停止，不切换为 SfM。")
         : unsavedProject

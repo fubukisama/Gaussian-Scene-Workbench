@@ -853,6 +853,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
       QString(64, QLatin1Char('d')), QStringLiteral("locked"));
   auto *lockedBackend = lockedSettings.findChild<QComboBox *>(QStringLiteral("trainingBackendCombo"));
   auto *lockedIterations = lockedSettings.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
+  auto *lockedResolutionHint = lockedSettings.findChild<QLabel *>(QStringLiteral("trainingResolutionHint"));
   if (lockedBackend) lockedBackend->setCurrentIndex(lockedBackend->findData(QStringLiteral("2dgs")));
   if (lockedIterations) lockedIterations->setValue(9876);
   const auto retainedLockedSettings = lockedSettings.configuration();
@@ -1277,6 +1278,15 @@ bool runLanguageSmokeTest(MainWindow &window) {
           lockedSettings.configuration().cameraDatasetIdentity == retainedLockedSettings.cameraDatasetIdentity &&
           lockedSettings.configuration().backend == QStringLiteral("2dgs") && lockedSettings.configuration().iterations == 9876,
           "live language changes retain explicit source units, initialization bounds, locked identity and training pixels");
+    bool lockedPolicyNoteTranslated = false;
+    for (auto *label : lockedSettings.findChildren<QLabel *>()) {
+      if (label->text() == QCoreApplication::translate("Workbench",
+          "3DGS / 2DGS 共用锁定相机与数据划分策略。原图、相机和尺度来源保持可追溯；预览正常不代表训练、尺度或模型质量已验证。"))
+        lockedPolicyNoteTranslated = true;
+    }
+    check(lockedResolutionHint && lockedResolutionHint->text() == QCoreApplication::translate("Workbench",
+          "锁定相机使用已验证的图像与投影；不自动缩图、不重求解，不支持的畸变或投影会拒绝。") && lockedPolicyNoteTranslated,
+          "locked resolution and training policy notes keep their current semantics in every live language");
     check(AppTheme::currentTheme() == UiTheme::Light && AppTheme::currentThemeMode() == UiThemeMode::Light &&
           lightTheme->isChecked() && !darkTheme->isChecked() && !automaticTheme->isChecked() &&
           !automaticThemeTimer->isActive(), "live language switching preserves the selected manual theme");
@@ -1471,8 +1481,18 @@ bool runLanguageSmokeTest(MainWindow &window) {
             (source == "尚未开始训练" || source == "空闲" || source == "未打开工程" ||
              source == "选择 0 | 删除 0" || source == "点预览 | 未载入场景 | FPS — (— ms)" ||
              source == "正在读取 PLY 场景"))) continue;
-        check(object->property(targetProperty.constData()).toString() ==
-              QCoreApplication::translate("Workbench", source.constData()), "live property binding");
+        const QString actualText = object->property(targetProperty.constData()).toString();
+        const QString expectedText = QCoreApplication::translate("Workbench", source.constData());
+        if (actualText != expectedText) {
+          const auto *widget = qobject_cast<QWidget *>(object);
+          qCritical() << "LANGUAGE_BINDING_MISMATCH:" << "language" << language
+              << "class" << object->metaObject()->className() << "objectName" << object->objectName()
+              << "parent" << (object->parent() ? object->parent()->metaObject()->className() : "<none>")
+              << "window" << (widget ? widget->window()->objectName() : QString())
+              << "property" << targetProperty << "source" << source
+              << "actual" << actualText << "expected" << expectedText;
+        }
+        check(actualText == expectedText, "live property binding");
       }
     }
     check(import.request().sceneName == name && training.configuration().outputScene == editedConfiguration.outputScene,
@@ -1863,6 +1883,29 @@ bool runLanguageSmokeTest(MainWindow &window) {
       }
     }
     training.hide();
+    const auto captureKnownCameraDialog = [&](QDialog &dialog, const QString &suffix) {
+      const QSize retainedSize = dialog.size();
+      dialog.showNormal();
+      dialog.resize(1000, 900);
+      auto *scroll = dialog.findChild<QScrollArea *>(QStringLiteral("dialogBodyScroll"));
+      if (scroll) scroll->verticalScrollBar()->setValue(0);
+      settleLayout();
+      check(dialog.grab().save(QDir(screenshotDirectory).filePath(locale + suffix + QStringLiteral(".png"))),
+            "actual known-camera dialog screenshot");
+      if (scroll && scroll->verticalScrollBar()->maximum() > 0) {
+        // Preserve a second actual scroll position so the locked strategy,
+        // disabled SfM control and bottom policy note can be reviewed too.
+        scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+        settleLayout();
+        check(dialog.grab().save(QDir(screenshotDirectory).filePath(locale + suffix + QStringLiteral("-details.png"))),
+              "actual known-camera policy and initialization details screenshot");
+        scroll->verticalScrollBar()->setValue(0);
+      }
+      dialog.hide();
+      dialog.resize(retainedSize);
+    };
+    captureKnownCameraDialog(cameraImport, QStringLiteral("-known-camera-import"));
+    captureKnownCameraDialog(lockedSettings, QStringLiteral("-known-camera-training"));
     meshing.show(); meshing.adjustSize(); QApplication::processEvents();
     check(meshing.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-meshing.png"))), "mesh dialog screenshot");
     meshing.hide();
