@@ -3735,15 +3735,25 @@
     "en_US": "No usable cameras in the scene",
     "ja_JP": "シーンに有効なカメラがありません"
   },
-  "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视": {
-    "zh_CN": "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视",
-    "en_US": "Center cube / Iso: perspective; Shift-click restores default perspective",
-    "ja_JP": "中心キューブ / Iso: 透視投影へ切替、Shift クリックで既定の透視ビュー"
+  "正交": {
+    "zh_CN": "正交",
+    "en_US": "Ortho",
+    "ja_JP": "平行"
   },
-  "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视": {
-    "zh_CN": "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视",
-    "en_US": "Center cube / Persp: orthographic; Shift-click restores default perspective",
-    "ja_JP": "中心キューブ / Persp: 平行投影へ切替、Shift クリックで既定の透視ビュー"
+  "透视": {
+    "zh_CN": "透视",
+    "en_US": "Persp",
+    "ja_JP": "透視"
+  },
+  "中心投影控件：切换到透视；Shift+单击恢复默认透视": {
+    "zh_CN": "中心投影控件：切换到透视；Shift+单击恢复默认透视",
+    "en_US": "Center projection control: switch to perspective; Shift-click restores default perspective",
+    "ja_JP": "中央の投影コントロール：透視投影へ切替、Shift クリックで既定の透視ビュー"
+  },
+  "中心投影控件：切换到正交；Shift+单击恢复默认透视": {
+    "zh_CN": "中心投影控件：切换到正交；Shift+单击恢复默认透视",
+    "en_US": "Center projection control: switch to orthographic; Shift-click restores default perspective",
+    "ja_JP": "中央の投影コントロール：平行投影へ切替、Shift クリックで既定の透視ビュー"
   },
   "沿 %1 轴移动": {
     "zh_CN": "沿 %1 轴移动",

@@ -11,6 +11,21 @@ desktop application's language, settings, model or worker state.
 
 ## Language switching
 
+Blender-derived viewport navigation uses localized **Perspective / Orthographic**
+labels (`透视 / 正交`, `透視 / 平行`) rather than calling every orthographic view
+`Iso`. Its center projection-control tooltips are translated in all three
+languages and refresh through the existing live viewport language callback.
+The unframed captions retain translated scene/task information. These changes
+only redraw presentation; they do not rebuild the camera, model or worker.
+Blender's separate 3D cursor is not added as a coordinate-origin marker.
+
+中文：Blender 风格视口的“透视／正交”和中心投影控件提示均随语言即时更新，
+不把所有正交视图误称为等轴视图，也不把三维游标当作坐标原点或编辑手柄。
+
+日本語：Blender 由来のビューポートでは「透視／平行」と中央投影コントロール
+の説明を即時に翻訳します。平行投影をすべて等角投影と呼ぶことはなく、
+3D カーソルを座標原点や編集ハンドルとして追加しません。
+
 Open **View → Language** (`视图 → 语言 / Language`, `ビュー → 言語 / Language`) and choose **简体中文**, **English**, or **日本語**. The language changes immediately in the current window and is remembered for future launches. No restart or confirmation is needed. Switching refreshes text and fonts without reloading the model, resetting its transforms/camera/selection, or interrupting processing and backup jobs. Dock layout, active tabs, edited dialog parameters, training progress and curve samples are retained.
 
 The initial default is Simplified Chinese, independent of the Windows display language. Menus, panels, dialogs, viewport/transform hints, training-monitor labels, validation errors, and recovery/backup messages use the selected language. Qt file dialogs are used so their standard controls follow this choice too.

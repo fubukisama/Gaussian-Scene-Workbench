@@ -16,6 +16,7 @@ class TransformGizmoVisualTests final : public QObject {
   Q_OBJECT
 
 private slots:
+  void defaultAxisPaletteMatchesBlenderConvention();
   void centerHasReadableOutlineWithoutOpaqueDisc();
   void ringsUseDepthAndDistinguishTheirFrontAndBack();
   void projectedScaleBoxesHaveVisibleLitFaces();
@@ -24,6 +25,32 @@ private slots:
   void headsKeepBlenderReferenceSlenderProportions();
   void rendersEveryModeInBothThemesAndProjections();
 };
+
+void TransformGizmoVisualTests::defaultAxisPaletteMatchesBlenderConvention() {
+  TransformGizmoLayout layout;
+  layout.valid = true;
+  layout.center = {20, 170};
+  layout.lineWidth = 3;
+  for (int axis = 0; axis < 3; ++axis) {
+    layout.axes[axis].visible = true;
+    const qreal y = 40 + axis * 40;
+    layout.axes[axis].moveLine = QLineF(40, y, 160, y);
+  }
+  QImage image(200, 200, QImage::Format_ARGB32_Premultiplied);
+  image.fill(Qt::white);
+  QPainter painter(&image);
+  paintTransformGizmo(painter, layout, TransformGizmoMode::Move, TransformGizmoStyle{});
+  painter.end();
+  const QColor x = image.pixelColor(100, 40);
+  const QColor y = image.pixelColor(100, 80);
+  const QColor z = image.pixelColor(100, 120);
+  QVERIFY2(x.red() > x.green() + 50 && x.red() > x.blue() + 50,
+           "Blender convention draws the source X axis red.");
+  QVERIFY2(y.green() > y.red() + 40 && y.green() > y.blue() + 40,
+           "Blender convention draws the source Y axis green, not blue.");
+  QVERIFY2(z.blue() > z.red() + 50 && z.blue() > z.green() + 20,
+           "Blender convention draws the source Z axis blue, not green.");
+}
 
 void TransformGizmoVisualTests::headsKeepBlenderReferenceSlenderProportions() {
   QMatrix4x4 view;
@@ -72,6 +99,8 @@ void TransformGizmoVisualTests::shaftsRespectLocalFaceDepthInsteadOfWholeLineAve
     QImage image(400, 400, QImage::Format_ARGB32_Premultiplied);
     image.fill(QColor(244, 242, 236));
     TransformGizmoStyle style;
+    // Explicit fixture ink: this case tests local depth, not the default axis palette.
+    style.axes[1] = QColor(27, 74, 184);
     QPainter painter(&image);
     paintTransformGizmo(painter, layout, TransformGizmoMode::Move, style);
     painter.end();
@@ -120,6 +149,8 @@ void TransformGizmoVisualTests::ringsUseDepthAndDistinguishTheirFrontAndBack() {
     const QColor background = light ? QColor(244, 242, 236) : QColor(16, 18, 22);
     TransformGizmoStyle style;
     style.light = light;
+    // Explicit fixture ink: reversing depth must reverse the visible red/green crossing.
+    style.axes[2] = QColor(18, 132, 53);
     TransformGizmoLayout layout;
     layout.valid = true;
     layout.center = QPointF(200, 200);

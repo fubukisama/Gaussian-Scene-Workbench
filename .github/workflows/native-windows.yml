@@ -106,7 +106,7 @@ jobs:
         run: |
           ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
             --output-log native/acceptance.log `
-            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
+            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_training_performance_policy|native_training_preflight|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
       - name: Upload acceptance evidence
         if: always()
@@ -116,6 +116,7 @@ jobs:
           path: |
             native/acceptance.log
             native/acceptance-artifact/
+            native/build-acceptance/blender-viewport-evidence/
             native/build-acceptance/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 7

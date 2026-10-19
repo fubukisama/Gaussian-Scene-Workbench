@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include "NativeViewport.h"
 #include "../third_party/blender-navigation/BlenderViewNavigation.h"
+#include "../third_party/blender-grid/BlenderGridShaders.h"
 #include "../third_party/lichtfeld-streaming/UploadDrainBudget.h"
 #include "AppLanguage.h"
 #include "AppTheme.h"
@@ -12,6 +13,8 @@
 #include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
 #include "ViewportCamera.h"
+#include "ViewportPresentation.h"
+#include "BlenderNavigationPresentation.h"
 #include "WorkbenchIcons.h"
 
 #include <QApplication>
@@ -184,6 +187,18 @@ QColor themeInk(const QColor &night, const QColor &day) {
   return lightViewport() ? day : night;
 }
 
+void drawViewportCaption(QPainter &painter, const QRect &bounds,
+                         const int alignment, const QString &text,
+                         const QColor &ink) {
+  painter.save();
+  painter.setPen(lightViewport() ? QColor(255, 255, 255, 220)
+                                : QColor(0, 0, 0, 230));
+  painter.drawText(bounds.translated(1, 1), alignment, text);
+  painter.setPen(ink);
+  painter.drawText(bounds, alignment, text);
+  painter.restore();
+}
+
 QVector4D viewportClearColor() {
   // Preserve the original night clear value exactly, not its 8-bit rounding.
   if (!lightViewport()) return QVector4D(0.047F, 0.051F, 0.055F, 1.0F);
@@ -200,12 +215,13 @@ struct ReferenceGridFrame final {
 };
 
 ReferenceGridFrame referenceGridFrame(const ReferenceGridPlane plane) {
-  const QVector3D xColor = lightViewport() ? QVector3D(0.75F, 0.10F, 0.16F)
-                                          : QVector3D(0.72F, 0.26F, 0.26F);
-  const QVector3D yColor = lightViewport() ? QVector3D(0.11F, 0.29F, 0.72F)
-                                          : QVector3D(0.25F, 0.42F, 0.76F);
-  const QVector3D zColor = lightViewport() ? QVector3D(0.07F, 0.52F, 0.21F)
-                                          : QVector3D(0.38F, 0.68F, 0.25F);
+  const auto axisInk = [](int axis) {
+    const QColor color = blenderAxisColor(axis, lightViewport());
+    return QVector3D(color.redF(), color.greenF(), color.blueF());
+  };
+  const QVector3D xColor = axisInk(0);
+  const QVector3D yColor = axisInk(1);
+  const QVector3D zColor = axisInk(2);
   switch (plane) {
   case ReferenceGridPlane::XY:
     return {QVector3D(0.0F, 0.0F, 1.0F),
@@ -236,58 +252,9 @@ QColor mixColor(const QColor &background, const QColor &foreground,
 }
 
 QColor navigationAxisColor(const int axisIndex) {
-  static const std::array<QColor, 3> nightColors = {
-      QColor(226, 67, 67), QColor(62, 116, 232), QColor(104, 185, 57)};
-  static const std::array<QColor, 3> dayColors = {
-      QColor(191, 26, 42), QColor(27, 74, 184), QColor(18, 132, 53)};
-  const auto &colors = lightViewport() ? dayColors : nightColors;
-  return colors[static_cast<std::size_t>(axisIndex)];
+  return blenderAxisColor(axisIndex, lightViewport());
 }
 
-void styleReferenceAxesForDay(QVector<ReferenceAxisVertex> &vertices) {
-  if (!lightViewport()) return;
-  // The geometry builder's three face colours and their bevel/letter shades
-  // are a presentation palette, not source model RGB. Recolour those exact
-  // inks only; retain every position, depth, shaft width, collar and endpoint.
-  const std::array<QVector3D, 3> nightBases = {
-      QVector3D(0.94F, 0.36F, 0.38F), QVector3D(0.32F, 0.58F, 0.96F),
-      QVector3D(0.38F, 0.83F, 0.57F)};
-  std::array<QVector3D, 3> dayBases;
-  for (int axis = 0; axis < 3; ++axis) {
-    const QColor ink = navigationAxisColor(axis);
-    dayBases[static_cast<std::size_t>(axis)] =
-        QVector3D(ink.redF(), ink.greenF(), ink.blueF());
-  }
-  const QVector3D white(1.0F, 1.0F, 1.0F);
-  const auto sameInk = [](const QVector3D &left, const QVector3D &right) {
-    return (left - right).lengthSquared() < 1.0e-8F;
-  };
-  for (ReferenceAxisVertex &vertex : vertices) {
-    const QVector3D ink(vertex.red, vertex.green, vertex.blue);
-    if (sameInk(ink, QVector3D(0.025F, 0.035F, 0.045F))) {
-      // A soft silhouette on white, not the night palette's heavy black edge.
-      vertex.red = 0.15F;
-      vertex.green = 0.17F;
-      vertex.blue = 0.20F;
-      vertex.alpha = 0.22F;
-      continue;
-    }
-    for (int axis = 0; axis < 3; ++axis) {
-      const QVector3D &base = nightBases[static_cast<std::size_t>(axis)];
-      const QVector3D &dayBase = dayBases[static_cast<std::size_t>(axis)];
-      QVector3D replacement;
-      if (sameInk(ink, base)) replacement = dayBase;
-      else if (sameInk(ink, base * 0.66F + white * 0.34F))
-        replacement = dayBase * 0.88F + white * 0.12F;
-      else if (sameInk(ink, base * 0.48F)) replacement = dayBase * 0.58F;
-      else continue;
-      vertex.red = replacement.x();
-      vertex.green = replacement.y();
-      vertex.blue = replacement.z();
-      break;
-    }
-  }
-}
 
 QString navigationAxisLabel(const NavigationAxis axis) {
   switch (axis) {
@@ -2961,96 +2928,16 @@ void main() {
                             .arg(mGaussianProgram->log());
   }
 
-  // Follow Blender's current overlay approach: emit actual line primitives
-  // from gl_VertexID and let the multisampled framebuffer rasterize them. A
-  // fullscreen periodic fragment shader cannot keep phase precision near the
-  // perspective horizon and turns shallow lines into a comb of short dashes.
-  // Perspective uses the fixed Z-up ground plane; orthographic axis views use
-  // the matching world plane so the scale remains visible in all six views.
+  // Actual Blender overlay filtering/LOD source, adapted to camera-relative
+  // analytic intersections. Reduced per-level phases preserve nearby fine
+  // cells without feeding large absolute source coordinates into GLSL modulo.
   mGridProgram = new QOpenGLShaderProgram(this);
   const bool gridVertexCompiled =
       mGridProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
-                                            R"GLSL(#version 130
-uniform mat4 viewProjection;
-uniform vec3 gridPlaneOrigin;
-uniform vec3 gridAxisU;
-uniform vec3 gridAxisV;
-uniform vec2 gridCenter;
-uniform float gridStep;
-uniform float gridHalfSpan;
-uniform int gridLineCount;
-uniform int drawAxis;
-out float lineCoverage;
-
-void main() {
-  vec3 world;
-  if (drawAxis == 1 || drawAxis == 2) {
-    int vertexInLine = gl_VertexID;
-    float endpoint = vertexInLine == 0
-                         ? -gridHalfSpan
-                         : (vertexInLine == 3 ? gridHalfSpan : 0.0);
-    float crossCoordinate;
-    if (drawAxis == 1) {
-      world = gridPlaneOrigin +
-              gridAxisU * (gridCenter.x + endpoint);
-      crossCoordinate = gridCenter.y;
-    } else {
-      world = gridPlaneOrigin +
-              gridAxisV * (gridCenter.y + endpoint);
-      crossCoordinate = gridCenter.x;
-    }
-    float crossFade = 1.0 - smoothstep(
-        gridHalfSpan * 0.72, gridHalfSpan, abs(crossCoordinate));
-    float alongFade =
-        (vertexInLine == 0 || vertexInLine == 3) ? 0.0 : 1.0;
-    lineCoverage = crossFade * alongFade;
-  } else {
-    // Two GL_LINES segments form each logical line: edge->centre and
-    // centre->edge. This gives the rasterizer a continuous alpha ramp at the
-    // finite level boundary rather than exposing an abrupt rectangular edge.
-    int lineIndex = gl_VertexID / 4;
-    int vertexInLine = gl_VertexID - lineIndex * 4;
-    float endpoint = vertexInLine == 0
-                         ? -gridHalfSpan
-                         : (vertexInLine == 3 ? gridHalfSpan : 0.0);
-    int halfCount = gridLineCount / 2;
-    float offset;
-    if (lineIndex < gridLineCount) {
-      offset = float(lineIndex - halfCount) * gridStep;
-      world = gridPlaneOrigin +
-              gridAxisU * (gridCenter.x + endpoint) +
-              gridAxisV * (gridCenter.y + offset);
-    } else {
-      offset = float(lineIndex - gridLineCount - halfCount) * gridStep;
-      world = gridPlaneOrigin +
-              gridAxisU * (gridCenter.x + offset) +
-              gridAxisV * (gridCenter.y + endpoint);
-    }
-    float offsetFade = 1.0 - smoothstep(
-        gridHalfSpan * 0.72, gridHalfSpan, abs(offset));
-    float alongFade =
-        (vertexInLine == 0 || vertexInLine == 3) ? 0.0 : 1.0;
-    lineCoverage = offsetFade * alongFade;
-  }
-  gl_Position = viewProjection * vec4(world, 1.0);
-  // The reference plane is a background overlay and must not disappear when
-  // an orthographic pan places world zero just beyond the scene far clip.
-  // Preserve projected XY/W, but keep the line inside the clip-depth range;
-  // depth testing and writes are disabled for this pass.
-  gl_Position.z = 0.0;
-}
-)GLSL");
+                                            blender_grid::vertexShader());
   const bool gridFragmentCompiled =
       mGridProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
-                                            R"GLSL(#version 130
-out vec4 fragmentColor;
-uniform vec4 lineColor;
-in float lineCoverage;
-
-void main() {
-  fragmentColor = vec4(lineColor.rgb, lineColor.a * lineCoverage);
-}
-)GLSL");
+                                            blender_grid::fragmentShader());
   mGridShaderReady =
       gridVertexCompiled && gridFragmentCompiled && mGridProgram->link();
   if (!mGridShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
@@ -3384,7 +3271,6 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 viewProjection = projection * view;
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
   drawInfiniteGrid(viewProjection);
-  drawDepthAwareReferenceAxes(viewProjection);
   const auto active = mScene;
   for (const auto &state : displayedSceneStates()) {
     if (!mSelectedSceneIds.contains(state->id)) continue;
@@ -5426,86 +5312,73 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   glLineWidth(1.0F);
   mGridProgram->bind();
   const ReferenceGridScale scale = sceneGridScale();
-  const ReferenceGridDrawSpans drawSpans =
-      referenceGridDrawSpans(scale);
   const ReferenceGridPlane plane =
       referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
   const ReferenceGridFrame grid = referenceGridFrame(plane);
   const QVector3D gridPlaneOrigin = gridOrigin(plane);
   const QVector3D relativeCamera = cameraPosition() - gridPlaneOrigin;
-
-  mGridProgram->setUniformValue("viewProjection", viewProjection);
-  mGridProgram->setUniformValue("gridPlaneOrigin", gridPlaneOrigin);
-  mGridProgram->setUniformValue("gridAxisU", grid.axisU);
-  mGridProgram->setUniformValue("gridAxisV", grid.axisV);
-
-  {
-    QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGridVertexArray);
-    const auto drawGridLevel =
-        [this, &relativeCamera, &grid](const float step,
-                                      const int lineCount,
-                                      const QVector4D &color) {
-          if (!std::isfinite(step) || step <= 0.0F || lineCount < 3) {
-            return;
-          }
-          const float cameraU =
-              QVector3D::dotProduct(relativeCamera, grid.axisU);
-          const float cameraV =
-              QVector3D::dotProduct(relativeCamera, grid.axisV);
-          const QVector2D snappedCenter(
-              std::round(cameraU / step) * step,
-              std::round(cameraV / step) * step);
-          mGridProgram->setUniformValue("gridCenter", snappedCenter);
-          mGridProgram->setUniformValue("gridStep", step);
-          mGridProgram->setUniformValue("gridHalfSpan",
-                                        step * (lineCount / 2));
-          mGridProgram->setUniformValue("gridLineCount", lineCount);
-          mGridProgram->setUniformValue("drawAxis", 0);
-          mGridProgram->setUniformValue("lineColor", color);
-          glDrawArrays(GL_LINES, 0, lineCount * 8);
-        };
-
-    // Choose one concrete 1-2-5 minor level, then draw the 10x emphasis level
-    // over it. Actual MSAA line primitives stay continuous at shallow angles
-    // and avoid the periodic-fragment phase loss seen on dense point clouds.
-    const float minorStep = scale.displayMajorStep * 0.1F;
-    // Neutral day-grid levels carry scale, not a coloured wash. Keep minor
-    // intersections quiet while retaining a distinct major level; geometry,
-    // fade spans, projection and physical spacing are identical in both themes.
-    drawGridLevel(minorStep, 161,
-                  lightViewport() ? QVector4D(0.70F, 0.70F, 0.70F, 0.12F)
-                                  : QVector4D(0.17F, 0.19F, 0.20F, 0.38F));
-    drawGridLevel(scale.displayMajorStep, 81,
-                  lightViewport() ? QVector4D(0.42F, 0.42F, 0.42F, 0.28F)
-                                  : QVector4D(0.29F, 0.31F, 0.33F, 0.58F));
-
-    // Keep the coloured origin axes inside the same camera-relative patch as
-    // the major grid. Extending them farther than the grey lines makes a
-    // coplanar axis appear to lift into the sky after the grid has faded.
-    const float cameraU =
-        QVector3D::dotProduct(relativeCamera, grid.axisU);
-    const float cameraV =
-        QVector3D::dotProduct(relativeCamera, grid.axisV);
-    const QVector2D axisCenter(
-        std::round(cameraU / scale.displayMajorStep) *
-            scale.displayMajorStep,
-        std::round(cameraV / scale.displayMajorStep) *
-            scale.displayMajorStep);
-    mGridProgram->setUniformValue("gridCenter", axisCenter);
-    mGridProgram->setUniformValue("gridHalfSpan", drawSpans.axisHalfSpan);
-    mGridProgram->setUniformValue("drawAxis", 1);
-    mGridProgram->setUniformValue(
-        "lineColor",
-        QVector4D(grid.axisUColor.x(), grid.axisUColor.y(),
-                  grid.axisUColor.z(), 0.48F));
-    glDrawArrays(GL_LINES, 0, 4);
-    mGridProgram->setUniformValue("drawAxis", 2);
-    mGridProgram->setUniformValue(
-        "lineColor",
-        QVector4D(grid.axisVColor.x(), grid.axisVColor.y(),
-                  grid.axisVColor.z(), 0.48F));
-    glDrawArrays(GL_LINES, 0, 4);
+  Q_UNUSED(viewProjection);
+  bool invertible = false;
+  const QMatrix4x4 projection = projectionMatrix();
+  const QMatrix4x4 inverseProjection = projection.inverted(&invertible);
+  if (!invertible) {
+    mGridProgram->release();
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+    return;
   }
+  const QMatrix4x4 inverseView = viewMatrix().inverted();
+  QMatrix3x3 inverseRotation;
+  QMatrix3x3 planeBasis;
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column)
+      inverseRotation(row, column) = inverseView(row, column);
+    planeBasis(row, 0) = grid.axisU[row];
+    planeBasis(row, 1) = grid.axisV[row];
+    planeBasis(row, 2) = grid.normal[row];
+  }
+  const QVector3D cameraInPlane(
+      QVector3D::dotProduct(relativeCamera, grid.axisU),
+      QVector3D::dotProduct(relativeCamera, grid.axisV),
+      QVector3D::dotProduct(relativeCamera, grid.normal));
+  // Keep eight real decimal scales around the visible resolution. Sliding the
+  // window never changes a visible scale; the shader blends levels per pixel.
+  const double minimumStep = std::max(static_cast<double>(scale.minimumStep), 1e-20);
+  const double worldPerPixel = (mOrthographic ? 2.0 : 2.0 * mDistance) /
+      std::max(1e-12, static_cast<double>(std::abs(projection(1, 1)))) /
+      std::max(1.0, height() * devicePixelRatioF());
+  const double startExponent = std::max(0.0,
+      std::floor(std::log10(std::max(worldPerPixel * 4.0 / minimumStep, 1.0))) - 2.0);
+  std::array<GLfloat, blender_grid::StepCount> steps;
+  std::array<QVector2D, blender_grid::StepCount> phases;
+  for (int level = 0; level < blender_grid::StepCount; ++level) {
+    steps[level] = static_cast<float>(minimumStep * std::pow(10.0, startExponent + level));
+    phases[level] = QVector2D(
+        static_cast<float>(std::remainder(static_cast<double>(cameraInPlane.x()), static_cast<double>(steps[level]))),
+        static_cast<float>(std::remainder(static_cast<double>(cameraInPlane.y()), static_cast<double>(steps[level]))));
+  }
+  mGridProgram->setUniformValue("inverseProjection", inverseProjection);
+  mGridProgram->setUniformValue("inverseViewRotation", inverseRotation);
+  mGridProgram->setUniformValue("planeBasis", planeBasis);
+  mGridProgram->setUniformValue("cameraPlanePosition", cameraInPlane);
+  mGridProgram->setUniformValueArray("gridSteps", steps.data(), blender_grid::StepCount, 1);
+  mGridProgram->setUniformValueArray("gridPhase", phases.data(), blender_grid::StepCount);
+  mGridProgram->setUniformValue("gridDistance", std::max(mDistance * 8.0F, scale.minimumStep * 40.0F));
+  mGridProgram->setUniformValue("gridLineSize", static_cast<float>(std::max(devicePixelRatioF() - 1.0, 0.0) * 0.5));
+  mGridProgram->setUniformValue("isOrthographic", mOrthographic ? 1 : 0);
+  mGridProgram->setUniformValue("showGrid", 1);
+  mGridProgram->setUniformValue("showAxes", 1);
+  mGridProgram->setUniformValue("gridColor", lightViewport()
+      ? QVector4D(0.33F, 0.33F, 0.33F, 0.18F)
+      : QVector4D(0.50F, 0.50F, 0.50F, 0.28F));
+  mGridProgram->setUniformValue("gridEmphasisColor", lightViewport()
+      ? QVector4D(0.26F, 0.26F, 0.26F, 0.28F)
+      : QVector4D(0.62F, 0.62F, 0.62F, 0.45F));
+  mGridProgram->setUniformValue("axisUColor", QVector4D(grid.axisUColor, 0.72F));
+  mGridProgram->setUniformValue("axisVColor", QVector4D(grid.axisVColor, 0.72F));
+  QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mGridVertexArray);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
   mGridProgram->release();
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
@@ -5942,8 +5815,8 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
   case NavigationGizmoPart::Projection:
     tooltip =
         mOrthographic
-            ? QCoreApplication::translate("Workbench", "中心方块 / Iso：切换到透视；Shift+单击恢复默认透视")
-            : QCoreApplication::translate("Workbench", "中心方块 / Persp：切换到正交；Shift+单击恢复默认透视");
+            ? QCoreApplication::translate("Workbench", "中心投影控件：切换到透视；Shift+单击恢复默认透视")
+            : QCoreApplication::translate("Workbench", "中心投影控件：切换到正交；Shift+单击恢复默认透视");
     setCursor(Qt::PointingHandCursor);
     break;
   case NavigationGizmoPart::None:
@@ -6300,6 +6173,14 @@ ReferenceGridScale NativeViewport::sceneGridScale() const {
   scale.upperMinorStep *= inverseRatio;
   scale.displayMajorStep *= inverseRatio;
   scale.visibleDistance *= inverseRatio;
+  // Report the central emphasized Blender level, not the retired 1-2-5
+  // finite-patch spacing. Other pixels may show the adjacent blended levels.
+  const double worldPerPixel = (mOrthographic ? 2.0 : 2.0 * mDistance) /
+      std::max(1e-12, static_cast<double>(std::abs(projectionMatrix()(1, 1)))) /
+      std::max(1.0, height() * devicePixelRatioF());
+  const double level = std::max(0.0, std::floor(std::log10(
+      std::max(worldPerPixel * 4.0 / scale.minimumStep, 1e-20))) + 1.0);
+  scale.displayMajorStep = static_cast<float>(scale.minimumStep * std::pow(10.0, level + 1.0));
   return scale;
 }
 
@@ -7466,28 +7347,6 @@ void NativeViewport::drawDepthAwareLines(
   glDisable(GL_BLEND);
 }
 
-void NativeViewport::drawDepthAwareReferenceAxes(
-    const QMatrix4x4 &viewProjection) {
-  const ReferenceGridPlane plane =
-      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
-  const float uiScale = static_cast<float>(QFontMetricsF(font()).height() / 18.0);
-  // Use source scene extent, not view distance or adaptive grid spacing: a
-  // camera zoom must not cancel its own size cue or jump at grid-level changes.
-  QVector3D collectionMinimum, collectionMaximum;
-  const float referenceRadius = collectionReferenceBounds(collectionMinimum, collectionMaximum)
-      ? sceneDisplayTransform(coordinateReferenceScene(), *mScene)
-            .mapVector(collectionMaximum - collectionMinimum).length() * 0.5F
-      : mScene->mSceneRadius;
-  const float referenceLength = std::max(referenceRadius * 0.3F, 1.0e-6F);
-  auto vertices = referenceAxisGeometry(
-      viewProjection, gridOrigin(plane), QSizeF(width(), height()), uiScale,
-      referenceLength);
-  styleReferenceAxesForDay(vertices);
-  // Triangle strokes keep their intended width even on drivers that clamp
-  // glLineWidth to one pixel. Their NDC Z still participates in model occlusion.
-  drawDepthAwareLines(vertices, QMatrix4x4(), 1.0F, GL_TRIANGLES);
-}
-
 void NativeViewport::drawDepthAwareModelBounds(
     const QMatrix4x4 &modelViewProjection) {
   if (mEditToolsLocked || !mModelSelected || !selectableModelAvailable()) {
@@ -7963,26 +7822,12 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QString mode =
       mEditToolsLocked ? QCoreApplication::translate("Workbench", "工具已锁定") :
       mScene->mSelectionBusy ? QCoreApplication::translate("Workbench", "选择处理中") : modeLabel(mMode);
-  WorkbenchIconId modeIcon = WorkbenchIconId::Inspect;
-  switch (mMode) {
-  case InteractionMode::Move: modeIcon = WorkbenchIconId::Move; break;
-  case InteractionMode::Rotate: modeIcon = WorkbenchIconId::Rotate; break;
-  case InteractionMode::Scale: modeIcon = WorkbenchIconId::Scale; break;
-  case InteractionMode::Select: modeIcon = WorkbenchIconId::Inspect; break;
-  case InteractionMode::Rectangle: modeIcon = WorkbenchIconId::BoxSelect; break;
-  case InteractionMode::Lasso: modeIcon = WorkbenchIconId::Lasso; break;
-  case InteractionMode::Brush: modeIcon = WorkbenchIconId::Brush; break;
-  case InteractionMode::Crop: modeIcon = WorkbenchIconId::Crop; break;
-  case InteractionMode::Inspect: break;
-  }
-  if (mEditToolsLocked) modeIcon = WorkbenchIconId::Locked;
-  else if (mScene->mSelectionBusy) modeIcon = WorkbenchIconId::Refresh;
-  const int modeIconSize = lineHeight;
-  const int modeWidth = metrics.horizontalAdvance(mode) + modeIconSize + 23;
+  const int modeWidth = qRound(navigationGizmo().rotateBounds.width());
+  const QString compactCount = count + QStringLiteral(" · ") + mode;
   const QString title = QStringLiteral("%1  ·  %2").arg(project, sceneName);
   const int widthHint =
       (std::max)(metrics.horizontalAdvance(title),
-                 metrics.horizontalAdvance(count)) +
+                 metrics.horizontalAdvance(compactCount)) +
       headerPaddingX * 2;
   const int headerHeight =
       headerPaddingY * 2 + lineHeight * 2 + lineGap;
@@ -7992,25 +7837,23 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QRect headerRect(
       viewportMargin, viewportMargin,
       std::clamp(widthHint, headerMinWidth, headerMaxWidth), headerHeight);
-  painter.setBrush(overlaySurface(colors.card, 215));
-  painter.drawRoundedRect(headerRect, 5, 5);
-
-  painter.setPen(colors.text);
+  // Blender-style unobtrusive viewport captions: no permanent card, border or
+  // background wash. A one-pixel shadow keeps text readable over actual models.
   QFont strongFont = compactFont;
   strongFont.setWeight(QFont::DemiBold);
   painter.setFont(strongFont);
   QRect lineRect(headerRect.left() + headerPaddingX,
                  headerRect.top() + headerPaddingY,
                  headerRect.width() - headerPaddingX * 2, lineHeight);
-  painter.drawText(
+  drawViewportCaption(painter,
       lineRect, Qt::AlignLeft | Qt::AlignVCenter,
       QFontMetrics(strongFont).elidedText(title, Qt::ElideMiddle,
-                                          lineRect.width()));
+                                          lineRect.width()), colors.text);
   painter.setFont(compactFont);
   painter.setPen(colors.accent);
   lineRect.translate(0, lineHeight + lineGap);
-  painter.drawText(lineRect, Qt::AlignLeft | Qt::AlignVCenter,
-                   metrics.elidedText(count, Qt::ElideRight, lineRect.width()));
+  drawViewportCaption(painter, lineRect, Qt::AlignLeft | Qt::AlignVCenter,
+                   metrics.elidedText(compactCount, Qt::ElideRight, lineRect.width()), colors.muted);
 
   if (!mProcessingStage.isEmpty()) {
     const QString phase = processingPreviewLabel();
@@ -8068,310 +7911,24 @@ void NativeViewport::drawOverlay(QPainter &painter) {
       viewportMargin, height() - badgeHeight - viewportMargin,
       (std::min)(statusWidth, qMax(1, width() - viewportMargin * 2)),
       badgeHeight);
-  painter.setPen(overlayBorder());
-  painter.setBrush(overlaySurface(colors.card, 215));
-  painter.drawRoundedRect(statusRect, 5, 5);
-  painter.setPen(colors.muted);
-  painter.drawText(
+  drawViewportCaption(painter,
       statusRect.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft,
       metrics.elidedText(statusText, Qt::ElideRight,
-                         statusRect.width() - 16));
-
-  const QRect modeRect(width() - modeWidth - viewportMargin, viewportMargin,
-                       modeWidth, badgeHeight);
-  painter.setPen(lightViewport() ? QPen(QColor(23, 71, 151), 1.0) : QPen(Qt::NoPen));
-  painter.setBrush(overlaySurface(colors.modeCard, 235));
-  painter.drawRoundedRect(modeRect, 5, 5);
-  painter.setPen(colors.modeText);
-  paintWorkbenchIcon(painter, modeIcon,
-                     QRectF(modeRect.left() + 8,
-                            modeRect.center().y() - modeIconSize * 0.5,
-                            modeIconSize, modeIconSize), colors.modeText);
-  painter.drawText(modeRect.adjusted(modeIconSize + 15, 0, -8, 0),
-                   Qt::AlignVCenter | Qt::AlignLeft, mode);
+                         statusRect.width() - 16), colors.muted);
 
   painter.restore();
 }
 
 void NativeViewport::drawAxisGizmo(QPainter &painter) {
-  painter.save();
-  painter.setRenderHint(QPainter::Antialiasing, true);
-  const NavigationGizmoLayout layout = navigationGizmo();
-  const QColor viewportColor = viewportColors().backdrop;
-  const bool rotateActive =
-      mNavigationHover.part == NavigationGizmoPart::Rotate ||
-      (mNavigationInteractionActive &&
-       mNavigationPress.part == NavigationGizmoPart::Rotate);
-
-  if (rotateActive) {
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(themeInk(QColor(0, 0, 0, 82), QColor(86, 111, 132, 24)));
-    painter.drawEllipse(layout.rotateBounds);
-  }
-
-  std::array<const NavigationAxisHandle *, 6> orderedHandles;
-  for (std::size_t index = 0; index < orderedHandles.size(); ++index) {
-    orderedHandles[index] = &layout.handles[index];
-  }
-  std::sort(
-      orderedHandles.begin(), orderedHandles.end(),
-      [](const NavigationAxisHandle *left, const NavigationAxisHandle *right) {
-        return left->depth < right->depth;
-      });
-
-  const auto handleHighlighted = [this](const NavigationAxisHandle &handle) {
-    return (mNavigationHover.part == NavigationGizmoPart::Rotate &&
-            mNavigationHover.axis == handle.axis) ||
-           (mNavigationInteractionActive &&
-            mNavigationPress.part == NavigationGizmoPart::Rotate &&
-            mNavigationPress.axis == handle.axis);
-  };
-  const qreal cubeHalfExtent = layout.projectionCube.width() * 0.5;
-
-  for (const NavigationAxisHandle *handle : orderedHandles) {
-    if (handle->hidden) {
-      continue;
-    }
-    const QPointF delta = handle->center - layout.center;
-    const qreal distance = std::hypot(delta.x(), delta.y());
-    if (distance < 1.0) {
-      continue;
-    }
-    const QPointF direction(delta.x() / distance, delta.y() / distance);
-    const qreal cubeExit = cubeHalfExtent / std::max(std::abs(direction.x()),
-                                                     std::abs(direction.y())) +
-                           1.0;
-    const qreal coneLength = std::max(8.0, handle->radius * 1.70);
-    const QPointF lineStart = layout.center + direction * cubeExit;
-    const QPointF lineEnd = handle->center - direction * coneLength;
-    if (QLineF(lineStart, lineEnd).length() < 1.0) {
-      continue;
-    }
-
-    QColor lineColor;
-    qreal lineWidth = layout.lineWidth;
-    if (handle->positive) {
-      const QColor axisColor = navigationAxisColor(handle->axisIndex);
-      const qreal colorAmount = std::clamp(
-          0.78 + static_cast<qreal>(handle->depth) * 0.12, 0.68, 0.92);
-      lineColor = mixColor(viewportColor, axisColor, colorAmount);
-    } else {
-      lineColor = themeInk(QColor(170, 176, 182, 178), QColor(85, 92, 102, 225));
-      lineWidth *= 0.72;
-    }
-    if (handleHighlighted(*handle)) {
-      lineColor = mixColor(lineColor,
-                           themeInk(QColor(255, 255, 255), QColor(28, 53, 76)), 0.34);
-      lineWidth *= 1.18;
-    }
-    const QPointF shadowOffset(1.0, 1.2);
-    painter.setPen(QPen(themeInk(QColor(0, 0, 0, 135), QColor(56, 78, 98, 50)),
-                        lineWidth + 1.1, Qt::SolidLine,
-                        Qt::RoundCap));
-    painter.drawLine(lineStart + shadowOffset, lineEnd + shadowOffset);
-    painter.setPen(QPen(lineColor, lineWidth, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(lineStart, lineEnd);
-  }
-
-  QFont axisFont = painter.font();
-  axisFont.setBold(true);
-  axisFont.setPixelSize(std::clamp(qRound(layout.radius * 0.24), 11, 14));
-  painter.setFont(axisFont);
-
-  for (const NavigationAxisHandle *handle : orderedHandles) {
-    if (handle->hidden) {
-      continue;
-    }
-    const QPointF delta = handle->center - layout.center;
-    const qreal distance = std::hypot(delta.x(), delta.y());
-    if (distance < 1.0) {
-      continue;
-    }
-    const QPointF direction(delta.x() / distance, delta.y() / distance);
-    const QPointF perpendicular(-direction.y(), direction.x());
-    const qreal coneLength = std::max(8.0, handle->radius * 1.70);
-    const qreal coneHalfWidth = std::max(4.0, handle->radius * 0.72);
-    const QPointF coneBase = handle->center - direction * coneLength;
-    QPolygonF cone;
-    cone << handle->center << coneBase + perpendicular * coneHalfWidth
-         << coneBase - perpendicular * coneHalfWidth;
-
-    const QColor axisColor = navigationAxisColor(handle->axisIndex);
-    const bool highlighted = handleHighlighted(*handle);
-
-    QColor fill;
-    if (handle->positive) {
-      const qreal amount = std::clamp(
-          0.82 + static_cast<qreal>(handle->depth) * 0.10, 0.72, 0.94);
-      fill = mixColor(viewportColor, axisColor, amount);
-    } else {
-      fill = themeInk(QColor(178, 184, 190, 205), QColor(109, 118, 130, 240));
-    }
-    if (highlighted) {
-      fill = mixColor(fill,
-                       themeInk(QColor(255, 255, 255), QColor(28, 53, 76)), 0.26);
-    }
-
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(themeInk(QColor(0, 0, 0, 125), QColor(56, 78, 98, 70)));
-    painter.drawPolygon(cone.translated(1.0, 1.2));
-
-    QColor brightFace = mixColor(fill, QColor(255, 255, 255),
-                                 lightViewport() ? 0.16 : 0.28);
-    QColor darkFace = mixColor(QColor(21, 24, 28), fill, 0.68);
-    const qreal lightSide =
-        QPointF::dotProduct(perpendicular, QPointF(-0.55, -0.84));
-    if (lightSide < 0.0) {
-      std::swap(brightFace, darkFace);
-    }
-    QPolygonF firstFace;
-    firstFace << handle->center << coneBase + perpendicular * coneHalfWidth
-              << coneBase;
-    QPolygonF secondFace;
-    secondFace << handle->center << coneBase
-               << coneBase - perpendicular * coneHalfWidth;
-    painter.setBrush(brightFace);
-    painter.drawPolygon(firstFace);
-    painter.setBrush(darkFace);
-    painter.drawPolygon(secondFace);
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(highlighted ? themeInk(QColor(255, 255, 255, 235),
-                                               QColor(32, 54, 74, 245))
-                                    : mixColor(darkFace, fill, 0.58),
-                        std::max(1.0, layout.lineWidth * 0.52), Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.drawPolygon(cone);
-    painter.setPen(QPen(QColor(255, 255, 255, handle->positive ? 92 : 55),
-                        std::max(0.8, layout.lineWidth * 0.32), Qt::SolidLine,
-                        Qt::RoundCap));
-    painter.drawLine(handle->center, coneBase);
-
-    if (handle->positive) {
-      const qreal labelSize = static_cast<qreal>(axisFont.pixelSize());
-      const QPointF labelCenter =
-          handle->center + direction * (labelSize * 0.62 + 2.0);
-      const QRectF textRect(labelCenter.x() - labelSize,
-                            labelCenter.y() - labelSize * 0.70, labelSize * 2.0,
-                            labelSize * 1.40);
-      painter.setPen(themeInk(QColor(0, 0, 0, 185), QColor(255, 255, 255, 200)));
-      painter.drawText(textRect.translated(1.0, 1.0), Qt::AlignCenter,
-                       navigationAxisLabel(handle->axis));
-      painter.setPen(highlighted
-                         ? themeInk(QColor(255, 255, 255), QColor(29, 50, 69))
-                         : lightViewport() ? axisColor
-                         : mixColor(axisColor, QColor(255, 255, 255), 0.30));
-      painter.drawText(textRect, Qt::AlignCenter,
-                       navigationAxisLabel(handle->axis));
-    }
-  }
-
-  const bool projectionActive =
-      mNavigationHover.part == NavigationGizmoPart::Projection ||
-      (mNavigationInteractionActive &&
-       mNavigationPress.part == NavigationGizmoPart::Projection);
-  if (projectionActive) {
-    const QRectF targetFeedback =
-        layout.projectionHitArea.adjusted(1.0, 1.0, -1.0, -1.0);
-    painter.setPen(QPen(themeInk(QColor(230, 236, 242, 150),
-                                 QColor(54, 94, 130, 170)),
-                        std::max(1.0, layout.lineWidth * 0.42), Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(themeInk(QColor(132, 166, 196, 34), QColor(58, 112, 154, 22)));
-    painter.drawEllipse(targetFeedback);
-  }
-  const std::vector<NavigationCubeFaceProjection> cubeFaces =
-      projectNavigationCube(viewMatrix(), layout.projectionCube);
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(themeInk(QColor(0, 0, 0, 125), QColor(56, 78, 98, 70)));
-  for (const NavigationCubeFaceProjection &face : cubeFaces) {
-    painter.drawPolygon(face.polygon.translated(1.2, 1.5));
-  }
-  const QColor cubeBase =
-      mOrthographic ? themeInk(QColor(112, 174, 224), QColor(39, 109, 195))
-                    : themeInk(QColor(211, 217, 224), QColor(177, 187, 198));
-  for (const NavigationCubeFaceProjection &face : cubeFaces) {
-    const qreal facing = std::clamp(face.depth, 0.0, 1.0);
-    QColor faceColor =
-        mixColor(QColor(61, 68, 76), cubeBase, 0.57 + facing * 0.38);
-    faceColor = mixColor(faceColor, navigationAxisColor(face.axisIndex),
-                         mOrthographic ? 0.055 : 0.035);
-    if (projectionActive) {
-      faceColor = mixColor(faceColor, QColor(255, 255, 255), 0.20);
-    }
-    painter.setBrush(faceColor);
-    painter.setPen(QPen(projectionActive ? themeInk(QColor(255, 255, 255, 245),
-                                                    QColor(22, 65, 132, 255))
-                                         : QColor(52, 59, 66, 235),
-                        std::max(1.0, layout.lineWidth * 0.48), Qt::SolidLine,
-                        Qt::SquareCap, Qt::MiterJoin));
-    painter.drawPolygon(face.polygon);
-  }
-  QFont projectionFont = painter.font();
-  projectionFont.setBold(false);
-  projectionFont.setPixelSize(
-      std::clamp(qRound(layout.projectionLabel.height() * 0.56), 10, 14));
-  painter.setFont(projectionFont);
-  const QColor projectionInk = projectionActive
-                     ? themeInk(QColor(255, 255, 255), QColor(29, 50, 69))
-                     : themeInk(QColor(205, 210, 216, 225), QColor(33, 38, 45, 245));
-  painter.setPen(projectionInk);
-  const QString projectionText = mOrthographic ? QStringLiteral("Iso")
-                                                : QStringLiteral("Persp");
-  const qreal projectionIconSize = layout.projectionLabel.height() * 0.68;
-  const qreal projectionGap = projectionIconSize * 0.25;
-  const qreal projectionTextWidth =
-      QFontMetricsF(projectionFont).horizontalAdvance(projectionText);
-  const qreal projectionLeft = layout.projectionLabel.center().x() -
-      (projectionIconSize + projectionGap + projectionTextWidth) * 0.5;
-  paintWorkbenchIcon(painter, WorkbenchIconId::Projection,
-                     QRectF(projectionLeft,
-                            layout.projectionLabel.center().y() - projectionIconSize * 0.5,
-                            projectionIconSize, projectionIconSize), projectionInk);
-  painter.drawText(QRectF(projectionLeft + projectionIconSize + projectionGap,
-                          layout.projectionLabel.top(), projectionTextWidth,
-                          layout.projectionLabel.height()),
-                   Qt::AlignCenter, projectionText);
-
-  const ViewportColors colors = viewportColors();
-  const auto drawButtonBackground =
-      [this, &painter, &colors](const QRectF &rect,
-                               const NavigationGizmoPart part,
-                               const bool selected = false,
-                               const bool enabled = true) {
-        const bool pressed = enabled && mNavigationInteractionActive &&
-                             mNavigationPress.part == part;
-        const bool hover = enabled && mNavigationHover.part == part;
-        const bool active = selected || pressed;
-        const qreal scale = rect.width() / 34.0;
-        painter.setPen(active ? QPen(Qt::NoPen)
-                              : QPen(colors.toolBorder, scale));
-        painter.setBrush(active ? colors.toolActive
-                                : hover ? colors.toolHover : colors.toolCard);
-        painter.drawRoundedRect(rect, 4.0 * scale, 4.0 * scale);
-        return active;
-      };
-  const auto drawNavigationButton = [&](const QRectF &rect,
-                                         const NavigationGizmoPart part,
-                                         const WorkbenchIconId icon,
-                                         const bool selected = false,
-                                         const bool enabled = true) {
-    const bool active = drawButtonBackground(rect, part, selected, enabled);
-    const qreal iconSize = rect.width() * 20.0 / 34.0;
-    paintWorkbenchIcon(painter, icon,
-                       QRectF(rect.center() - QPointF(iconSize * 0.5, iconSize * 0.5),
-                              QSizeF(iconSize, iconSize)),
-                       !enabled ? colors.disabledText
-                                : active ? QColor(255, 255, 255) : colors.toolIcon);
-  };
-  drawNavigationButton(layout.zoomButton, NavigationGizmoPart::Zoom,
-                        WorkbenchIconId::Zoom);
-  drawNavigationButton(layout.panButton, NavigationGizmoPart::Pan,
-                        WorkbenchIconId::Pan);
-  drawNavigationButton(layout.cameraButton, NavigationGizmoPart::Camera,
-                        WorkbenchIconId::Camera, mCameraViewActive,
-                        camerasAvailable());
-
-  painter.restore();
+  drawBlenderNavigationPresentation(painter, navigationGizmo(),
+      {.hover = mNavigationHover,
+       .press = mNavigationPress,
+       .interactionActive = mNavigationInteractionActive,
+       .light = lightViewport(),
+       .orthographic = mOrthographic,
+       .cameraActive = mCameraViewActive,
+       .cameraAvailable = camerasAvailable(),
+       .backdrop = viewportColors().backdrop});
 }
 
 } // namespace gsw

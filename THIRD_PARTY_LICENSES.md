@@ -72,6 +72,25 @@ Blender 全体の操作器・ウィンドウ・全操作コードを組み込む
 
 ## Native Qt 6 Preview
 
+### Blender viewport grid, axis colors and navigation
+
+The native viewport directly adapts Blender v4.5.0 at
+`8cb6b388974a817afedf1317ce26f0c75aa5f181`: its overlay-grid filtering/LOD/fade
+subset is retained in `native/third_party/blender-grid/`, and theme/axis
+navigation drawing adaptations are in `native/src/ViewportPresentation.h` and
+`native/src/BlenderNavigationPresentation.h`. Exact official paths, SHA256 and
+original Blender Authors copyright/GPL-2.0-or-later notices are retained there.
+GPLv3 is selected for the combined GSW desktop; full text is in `COPYING`.
+This does not copy Blender's branding, entire renderer, project system or
+training code. See [viewport scope](docs/BLENDER_VIEWPORT.md).
+
+中文：网格、轴配色和导航圆点实际移植上述 Blender 源码子集，保留固定
+来源、哈希、版权和 GPL 声明；背景、模型数据、训练及工程语义仍由 GSW 管理。
+
+日本語：グリッド・軸の配色・軸ナビゲーションは上記 Blender
+ソースの部分移植です。出典・ハッシュ・著作権・GPL を保持し、背景・モデル・
+学習・プロジェクトの管理は GSW に残します。
+
 Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual official hbb1/2d-gaussian-splatting `train.py`, commit `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678`: https://github.com/hbb1/2d-gaussian-splatting . Original Inria GRAPHDECO notices are retained. The complete upstream Gaussian-Splatting research/evaluation license is shipped at `native/worker/licenses/2dgs-LICENSE.md`. Changes add native state control, telemetry and observation snapshots. `native/worker/training_density_control.py` adapts the final densification/pruning orchestration from that model and the vendored Graphdeco `scene/gaussian_model.py`, under their existing research/evaluation licenses. It adds a robust geometry-aware size limit, reset-recovery grace and bounded final pruning. Upstream clone/split and optimizer surgery remain in their original modules. No commercial-use permission is implied.
 
 中文：2DGS 训练入口和原生密度控制编排基于上述官方源码，保留版权及完整研究/评估用途许可证，不以 MIT 重新授权，不授予商用许可。修改包括原生状态控制、监视、快照集成与过度裁剪保护。

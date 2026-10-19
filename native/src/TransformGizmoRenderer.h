@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TransformGizmo.h"
+#include "ViewportPresentation.h"
 
 #include <QColor>
 
@@ -11,8 +12,7 @@ namespace gsw {
 // Presentation only: geometry, hit targets and transform semantics are supplied
 // by the same layout used by the viewport's interaction code.
 struct TransformGizmoStyle final {
-  std::array<QColor, 3> axes{QColor(191, 26, 42), QColor(27, 74, 184),
-                            QColor(18, 132, 53)};
+  std::array<QColor, 3> axes = blenderAxisColors(true);
   QColor highlight{168, 108, 14};
   QColor neutral{48, 55, 64};
   QColor centerEdge{38, 43, 50};

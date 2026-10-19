@@ -1,4 +1,5 @@
 #include "AppTheme.h"
+#include "../tests/BlenderViewportVisualTests.h"
 #include "AppLanguage.h"
 #include "IconUiSmokeTest.h"
 #include "WindowUi.h"
@@ -300,6 +301,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-infinite-grid"),
       QStringLiteral("Verify the adaptive all-axis infinite reference grid."));
   parser.addOption(infiniteGridSmokeTestOption);
+  QCommandLineOption blenderViewportSmokeTestOption(
+      QStringLiteral("smoke-test-blender-viewport"),
+      QStringLiteral("Verify Blender viewport presentation without exposing a native window."));
+  parser.addOption(blenderViewportSmokeTestOption);
   QCommandLineOption orthographicNavigationSmokeTestOption(
       QStringLiteral("smoke-test-orthographic-navigation"),
       QStringLiteral("Verify navigation preserves orthographic projection."));
@@ -401,6 +406,10 @@ int main(int argc, char *argv[]) {
     return 5;
   }
   gsw::AppTheme::apply(application, scalePercent, false);
+
+  if (parser.isSet(blenderViewportSmokeTestOption)) {
+    return gsw::runBlenderViewportVisualTests(application);
+  }
 
   application.setProperty("gswInitialMediaSources",
                           parser.values(mediaSourceOption));
@@ -802,13 +811,12 @@ int main(int argc, char *argv[]) {
                       !qEnvironmentVariableIsSet(
                           "GSW_EXPECT_DEPTH_OCCLUSION") ||
                       centerAxisTintPixels <= 3;
-                  // The compact marker sits entirely behind this solid box.
-                  // Its former scene-radius Z line extended above the box;
-                  // visibility now belongs to the unoccluded zoom smoke.
+                  // Blender-style ground axes remain visible outside the box,
+                  // while the center pixel must still be occluded. A Blender
+                  // 3D cursor is not a world-origin or model transform handle.
                   const bool axisVisibilityReady =
-                      qEnvironmentVariableIsSet("GSW_EXPECT_DEPTH_OCCLUSION")
-                          ? greenAxisPixels == 0
-                          : greenAxisPixels >= 30;
+                      viewport->infiniteGridRenderingAvailable() &&
+                      greenAxisPixels >= 30;
                   const bool pagedMeshReady =
                       sourceFaceCount <= 0 ||
                       !qEnvironmentVariableIsSet(
@@ -1409,23 +1417,24 @@ int main(int argc, char *argv[]) {
             orientationFrame.save(QDir::temp().filePath(
                 QStringLiteral("gsw-unity-orientation-smoke.png")));
           }
-          // Zoom-in must keep enlarging the real shaft, including beyond the
-          // old saturation region. Distant real-world axes may become subpixel.
+          // The fixed world-origin grid axes keep a stable local footprint as
+          // the camera zooms. There is no default 3D cursor or growing tripod.
+          // Physical shaft geometry remains independently tested as geometry.
           const auto markerPixels = [](const QImage &frame) {
-            int greenPixels = 0;
-            const QRect region = QRect(frame.width() / 2 - 150, 0,
-                                        300, frame.height())
+            int redAxisPixels = 0;
+            const QRect region = QRect(frame.width() / 2 - 40,
+                                        frame.height() / 2 - 40, 81, 81)
                                      .intersected(frame.rect());
             for (int y = region.top(); y <= region.bottom(); ++y) {
               for (int x = region.left(); x <= region.right(); ++x) {
                 const QColor color = frame.pixelColor(x, y);
-                if (color.green() > 100 && color.green() - color.red() > 35 &&
-                    color.green() - color.blue() > 25) {
-                  ++greenPixels;
+                if (color.red() >= 80 && color.red() - color.green() > 30 &&
+                    color.red() - color.blue() > 30) {
+                  ++redAxisPixels;
                 }
               }
             }
-            return greenPixels;
+            return redAxisPixels;
           };
           const int nearMarkerPixels = markerPixels(orientationFrame);
           const QPointF zoomPosition(viewport->width() * 0.5,
@@ -1472,18 +1481,22 @@ int main(int argc, char *argv[]) {
           orthoFrame.save(QDir::temp().filePath(
               QStringLiteral("gsw-reference-axis-ortho.png")));
           const int orthoMarkerPixels = markerPixels(orthoFrame);
-          const bool physicalAxisScaling = nearMarkerPixels >= 60 &&
-                                      closeMarkerPixels > nearMarkerPixels * 1.5 &&
-                                      closerMarkerPixels > closeMarkerPixels * 1.5 &&
-                                      nearMarkerPixels > midMarkerPixels * 1.5 &&
-                                      farMarkerPixels < nearMarkerPixels / 10 &&
-                                      orthoMarkerPixels < nearMarkerPixels / 10;
-          qInfo() << "Reference-axis physical scaling:" << physicalAxisScaling
+          const auto sameMarkerFootprint = [nearMarkerPixels](const int pixels) {
+            return pixels >= 10 && std::abs(pixels - nearMarkerPixels) <=
+                (std::max)(4, nearMarkerPixels / 5);
+          };
+          const bool compactOriginStable = nearMarkerPixels >= 10 &&
+              sameMarkerFootprint(closeMarkerPixels) &&
+              sameMarkerFootprint(closerMarkerPixels) &&
+              sameMarkerFootprint(midMarkerPixels) &&
+              sameMarkerFootprint(farMarkerPixels) &&
+              sameMarkerFootprint(orthoMarkerPixels);
+          qInfo() << "Blender world-origin grid-axis stable local footprint:" << compactOriginStable
                   << "close" << closeMarkerPixels << "closer" << closerMarkerPixels
                   << "near" << nearMarkerPixels << "mid" << midMarkerPixels
                   << "far" << farMarkerPixels
                   << "orthographic" << orthoMarkerPixels;
-          if (!physicalAxisScaling) {
+          if (!compactOriginStable) {
             smokeTestCompleted = false;
             smokeTestFailureCode = 11;
           }

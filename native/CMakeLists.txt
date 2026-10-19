@@ -59,6 +59,14 @@ if(MSVC)
   target_compile_options(gsw_blender_gizmo_geometry PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
 endif()
 
+add_library(gsw_blender_grid STATIC
+  third_party/blender-grid/BlenderGridShaders.cpp
+  third_party/blender-grid/BlenderGridShaders.h)
+target_link_libraries(gsw_blender_grid PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(gsw_blender_grid PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
 add_library(gsw_resource_budget STATIC src/ResourceBudget.cpp src/ResourceBudget.h)
 target_include_directories(gsw_resource_budget PUBLIC src)
 target_link_libraries(gsw_resource_budget PUBLIC Qt6::Core)
@@ -82,6 +90,8 @@ if(MSVC)
 endif()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
+  tests/BlenderViewportVisualTests.cpp
+  tests/BlenderViewportVisualTests.h
   resources.qrc
   lucide_icons.qrc
   src/AppTheme.cpp
@@ -299,6 +309,7 @@ endif()
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
   gsw_blender_view_navigation
+  gsw_blender_grid
   gsw_lichtfeld_streaming
   gsw_blender_gizmo_geometry
   gsw_spz
@@ -337,6 +348,7 @@ install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
 install(DIRECTORY third_party/blender-gizmo DESTINATION licenses)
 install(DIRECTORY third_party/lichtfeld-streaming DESTINATION licenses)
 install(DIRECTORY third_party/blender-navigation DESTINATION licenses)
+install(DIRECTORY third_party/blender-grid DESTINATION licenses)
 install(FILES third_party/lucide/LICENSE third_party/lucide/README.gsw.md DESTINATION licenses/lucide)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION licenses/training-2dgs RENAME LICENSE.md)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
@@ -393,6 +405,8 @@ install(FILES
   DESTINATION source/.github/workflows)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION source/docs)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -705,6 +719,14 @@ if(BUILD_TESTING)
     NAME native_infinite_reference_grid
     COMMAND GaussianSceneWorkbench --smoke-test-infinite-grid
   )
+  foreach(GSW_VIEWPORT_LOCALE zh_CN en_US ja_JP)
+    add_test(NAME native_blender_viewport_presentation_${GSW_VIEWPORT_LOCALE}
+      COMMAND GaussianSceneWorkbench --smoke-test-blender-viewport --language ${GSW_VIEWPORT_LOCALE})
+    set_tests_properties(native_blender_viewport_presentation_${GSW_VIEWPORT_LOCALE} PROPERTIES
+      TIMEOUT 60
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1;GSW_BLENDER_VIEWPORT_EVIDENCE=${CMAKE_CURRENT_BINARY_DIR}/blender-viewport-evidence/${GSW_VIEWPORT_LOCALE}"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   add_test(
     NAME native_persistent_orthographic_navigation
     COMMAND GaussianSceneWorkbench --smoke-test-orthographic-navigation

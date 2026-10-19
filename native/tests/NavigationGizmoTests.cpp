@@ -16,6 +16,10 @@ private slots:
   void selectsNearestAxisInsideRotationCircle();
   void exposesUnityStyleProjectionControl();
   void keepsAxisHandlesClearOfProjectionCube();
+  void selectsVisibleCircularHandleRims();
+  void doesNotSnapEmptyFormerConeTails();
+  void selectsFrontmostOverlappingHandle();
+  void circularButtonCornersDoNotActivate();
   void leavesEmptyOrbitAreaFreeOfAxisSnapping();
   void mapsSixAxisViews();
   void keepsNavigationButtonsInsideViewport();
@@ -110,26 +114,79 @@ void NavigationGizmoTests::keepsAxisHandlesClearOfProjectionCube() {
     if (distance < 1.0) {
       continue;
     }
-    constexpr qreal coneLengthToHandleRadius = 1.70;
-    const qreal coneLength =
-        std::max(8.0, handle.radius * coneLengthToHandleRadius);
-    QVERIFY2(distance >= projectionHitRadius + coneLength + 4.0,
+    QVERIFY2(distance >= projectionHitRadius + handle.radius + 4.0,
              "A visible direction handle overlaps the projection hit target");
     QCOMPARE(hitTestNavigationGizmo(layout, handle.center),
              (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}));
     const QPointF direction = (handle.center - layout.center) / distance;
-    const QPointF coneBase = handle.center - direction * coneLength;
-    QVERIFY(QLineF(layout.center, coneBase).length() >=
+    const QPointF innerRim = handle.center - direction * handle.radius;
+    QVERIFY(QLineF(layout.center, innerRim).length() >=
             projectionHitRadius + 4.0);
-    const NavigationGizmoHit coneBaseHit =
-        hitTestNavigationGizmo(layout, coneBase);
-    QVERIFY2(coneBaseHit ==
+    const NavigationGizmoHit rimHit =
+        hitTestNavigationGizmo(layout, innerRim);
+    QVERIFY2(rimHit ==
                  (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}),
-             qPrintable(QStringLiteral("Expected axis %1 at cone base, got "
+             qPrintable(QStringLiteral("Expected axis %1 at circular rim, got "
                                        "part %2 axis %3")
                             .arg(static_cast<int>(handle.axis))
-                            .arg(static_cast<int>(coneBaseHit.part))
-                            .arg(static_cast<int>(coneBaseHit.axis))));
+                            .arg(static_cast<int>(rimHit.part))
+                            .arg(static_cast<int>(rimHit.axis))));
+    QVERIFY2(distance + handle.radius <= layout.radius + 0.01,
+             "The full painted circular handle must fit inside the rotation hit boundary");
+  }
+}
+
+void NavigationGizmoTests::selectsVisibleCircularHandleRims() {
+  const NavigationGizmoLayout layout =
+      navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
+  for (const auto &handle : layout.handles) {
+    if (handle.hidden) continue;
+    const QPointF direction = (handle.center - layout.center) /
+        QLineF(layout.center, handle.center).length();
+    const QPointF side(-direction.y(), direction.x());
+    for (const QPointF offset : {direction, -direction, side, -side}) {
+      const QPointF point = handle.center + offset * (handle.radius * 0.85);
+      QCOMPARE(hitTestNavigationGizmo(layout, point),
+               (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}));
+    }
+  }
+}
+
+void NavigationGizmoTests::doesNotSnapEmptyFormerConeTails() {
+  const NavigationGizmoLayout layout =
+      navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
+  for (const auto &handle : layout.handles) {
+    if (handle.hidden) continue;
+    const QPointF direction = (handle.center - layout.center) /
+        QLineF(layout.center, handle.center).length();
+    const QPointF empty = handle.center - direction * (handle.radius + 4.0);
+    QVERIFY(!layout.projectionHitArea.contains(empty));
+    QCOMPARE(hitTestNavigationGizmo(layout, empty),
+             (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::None}));
+  }
+}
+
+void NavigationGizmoTests::selectsFrontmostOverlappingHandle() {
+  NavigationGizmoLayout layout;
+  layout.center = {200, 200};
+  layout.radius = 100;
+  for (auto &handle : layout.handles) handle.hidden = true;
+  layout.handles[0] = {NavigationAxis::NegativeX, {250, 200}, 12, -0.5F, 0, false, false};
+  layout.handles[1] = {NavigationAxis::PositiveX, {251, 200}, 12, 0.5F, 0, true, false};
+  QCOMPARE(hitTestNavigationGizmo(layout, {250, 200}),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::PositiveX}));
+  std::swap(layout.handles[0].depth, layout.handles[1].depth);
+  QCOMPARE(hitTestNavigationGizmo(layout, {250, 200}),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::NegativeX}));
+}
+
+void NavigationGizmoTests::circularButtonCornersDoNotActivate() {
+  const NavigationGizmoLayout layout =
+      navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
+  for (const QRectF &button : {layout.zoomButton, layout.panButton, layout.cameraButton}) {
+    QCOMPARE(hitTestNavigationGizmo(layout, button.topLeft() + QPointF(1, 1)).part,
+             NavigationGizmoPart::None);
+    QVERIFY(hitTestNavigationGizmo(layout, button.center()).part != NavigationGizmoPart::None);
   }
 }
 

@@ -517,7 +517,6 @@ private:
   void drawTrainingPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
-  void drawDepthAwareReferenceAxes(const QMatrix4x4 &viewProjection);
   void drawDepthAwareModelBounds(const QMatrix4x4 &modelViewProjection);
   void drawDepthAwareLines(const QVector<DepthOverlayVertex> &vertices,
                            const QMatrix4x4 &viewProjection,

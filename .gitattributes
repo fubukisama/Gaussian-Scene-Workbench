@@ -1,2 +1,4 @@
 # Preserve the exact official GPL license bytes on every checkout.
 /COPYING text eol=lf
+# Retained upstream source hashes must survive Windows checkouts unchanged.
+/native/third_party/blender-grid/upstream/* text eol=lf
