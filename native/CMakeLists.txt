@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.2
+  VERSION 0.3.3
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-10-19" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-20" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -142,6 +142,16 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/QualityMeasurementDialog.cpp
   src/QualityMeasurementSmokeTest.cpp
   src/QualityMeasurementSmokeTest.h
+  src/ScaleConstraintsDialog.cpp
+  src/ScaleConstraintsDialog.h
+  src/ScaleConstraintsSmokeTest.cpp
+  src/ScaleConstraintsSmokeTest.h
+  src/TrainingBatchDialog.cpp
+  src/TrainingBatchDialog.h
+  src/TrainingBatchSmokeTest.cpp
+  src/TrainingBatchSmokeTest.h
+  src/TrainingBatchLifecycleSmokeTest.cpp
+  src/TrainingBatchLifecycleSmokeTest.h
   src/BackendLocator.cpp
   src/BackendLocator.h
   src/CameraTrajectory.cpp
@@ -427,6 +437,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINAT
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P1.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P1.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/validation/camera-scale-p1-synthetic-training.json" DESTINATION source/docs/validation)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/examples/camera-scale-p1" DESTINATION source/docs/examples)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -465,6 +479,24 @@ if(BUILD_TESTING)
     native.worker.test_mesh_generation)
   set_tests_properties(native_camera_scale_p0 PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
+  add_test(NAME native_camera_scale_p1 COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.backend.tests.test_atomic_file
+    native.backend.tests.test_scale_constraints native.backend.tests.test_model_scale_version
+    native.backend.tests.test_trajectory_dataset native.backend.tests.test_training_batch_plan
+    native.worker.test_scale_constraints native.worker.test_training_seed native.worker.test_training_batch)
+  set_tests_properties(native_camera_scale_p1 PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 180)
+  qt_add_executable(gsw_model_scale_coordinate_tests
+    tests/ModelScaleCoordinateTests.cpp src/SceneCoordinates.cpp src/SceneCoordinates.h)
+  target_include_directories(gsw_model_scale_coordinate_tests PRIVATE src)
+  target_link_libraries(gsw_model_scale_coordinate_tests PRIVATE Qt6::Core Qt6::Gui)
+  if(MSVC)
+    target_compile_options(gsw_model_scale_coordinate_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_model_scale_coordinates COMMAND gsw_model_scale_coordinate_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}")
+  set_tests_properties(native_model_scale_coordinates PROPERTIES TIMEOUT 90
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_executable(gsw_rasterizer_pinhole_oracle tests/RasterizerPinholeOracle.cpp)
   add_test(NAME rasterizer_pinhole_bounds COMMAND gsw_rasterizer_pinhole_oracle)
   set_tests_properties(rasterizer_pinhole_bounds PROPERTIES TIMEOUT 30)
@@ -609,6 +641,18 @@ if(BUILD_TESTING)
   add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
   add_test(NAME native_quality_comparison_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-comparison)
   add_test(NAME native_quality_measurement_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-measurement)
+  add_test(NAME native_scale_constraints_ui COMMAND GaussianSceneWorkbench --smoke-test-scale-constraints)
+  add_test(NAME native_training_batch_ui COMMAND GaussianSceneWorkbench --smoke-test-training-batch)
+  add_test(NAME native_training_batch_lifecycle COMMAND GaussianSceneWorkbench --smoke-test-training-batch-lifecycle)
+  set_tests_properties(native_training_batch_lifecycle PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  set_tests_properties(native_training_batch_ui PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  set_tests_properties(native_scale_constraints_ui PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_quality_measurement_ui PROPERTIES TIMEOUT 120
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE}"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
@@ -972,6 +1016,8 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+    set_tests_properties(workspace_document PROPERTIES
+      ENVIRONMENT "GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE};GSW_BACKEND_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/..")
 
   qt_add_executable(gsw_generation_history_tests
       tests/GenerationHistoryStoreTests.cpp
@@ -1023,6 +1069,18 @@ if(BUILD_TESTING)
       target_compile_options(gsw_model_export_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME model_export COMMAND gsw_model_export_tests)
+
+    qt_add_executable(gsw_scale_constraint_report_tests
+      tests/ScaleConstraintReportTests.cpp
+      src/SceneCoordinates.cpp)
+    target_include_directories(gsw_scale_constraint_report_tests PRIVATE src)
+    target_link_libraries(gsw_scale_constraint_report_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_scale_constraint_report_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME scale_constraint_coordinate_report COMMAND gsw_scale_constraint_report_tests)
+    set_tests_properties(scale_constraint_coordinate_report PROPERTIES TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_resource_budget_tests tests/ResourceBudgetTests.cpp)
     target_link_libraries(gsw_resource_budget_tests PRIVATE gsw_resource_budget Qt6::Test)

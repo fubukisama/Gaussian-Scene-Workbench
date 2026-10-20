@@ -114,6 +114,171 @@ bool validSimilarity(const QJsonObject &transform) {
   return std::abs(determinant - 1.) <= 2e-5;
 }
 
+bool validRecordedInverse(const QJsonObject &transform) {
+  const auto inverse = transform.value(QStringLiteral("inverse")).toObject();
+  if (!validSimilarity(transform) || !validSimilarity(inverse)) return false;
+  const double s = transform.value(QStringLiteral("s")).toDouble();
+  const double inverseScale = 1. / s;
+  const auto close = [](double a, double b, double absolute = 1e-10) {
+    return std::isfinite(a) && std::isfinite(b) &&
+        std::abs(a - b) <= absolute + 1e-10 * std::max(std::abs(a), std::abs(b));
+  };
+  if (!close(inverse.value(QStringLiteral("s")).toDouble(), inverseScale, 0.)) return false;
+  const auto r = transform.value(QStringLiteral("R")).toArray();
+  const auto ir = inverse.value(QStringLiteral("R")).toArray();
+  const auto t = transform.value(QStringLiteral("t")).toArray();
+  const auto it = inverse.value(QStringLiteral("t")).toArray();
+  for (int i = 0; i < 3; ++i) {
+    double expectedTranslation = 0.;
+    for (int j = 0; j < 3; ++j) {
+      const double value = r[j].toArray()[i].toDouble();
+      if (!close(ir[i].toArray()[j].toDouble(), value)) return false;
+      expectedTranslation -= value * t[j].toDouble() * inverseScale;
+    }
+    if (!close(it[i].toDouble(), expectedTranslation)) return false;
+  }
+  return true;
+}
+
+void readModelScaleRecord(const QJsonObject &root, const QString &sidecarPath,
+                         SceneCoordinateMetadata &metadata) {
+  const auto fail = [&metadata](const char *code) {
+    metadata.validationError = QCoreApplication::translate("Workbench",
+        "模型定尺度记录无效：%1。未采用该尺度，原文件保持不变。")
+            .arg(QString::fromLatin1(code));
+  };
+  static const QRegularExpression hashPattern(QStringLiteral("^[0-9a-f]{64}$"));
+  const auto hash = [](const QJsonValue &value) { return hashPattern.match(value.toString()).hasMatch(); };
+  const auto scale = root.value(QStringLiteral("scale")).toObject();
+  const auto input = root.value(QStringLiteral("input_model")).toObject();
+  const auto derivation = scale.value(QStringLiteral("derivation")).toObject();
+  const auto solution = derivation.value(QStringLiteral("solution")).toObject();
+  const auto request = derivation.value(QStringLiteral("request")).toObject();
+  const auto transform = root.value(QStringLiteral("applied_transform")).toObject();
+  const auto sourceTransform = solution.value(QStringLiteral("source_to_metric")).toObject();
+  const QString identity = input.value(QStringLiteral("data_identity")).toString();
+  const QString status = scale.value(QStringLiteral("status")).toString();
+  const auto checks = solution.value(QStringLiteral("independent_checks")).toObject();
+  const QString checkStatus = checks.value(QStringLiteral("status")).toString();
+  const QString mode = request.value(QStringLiteral("mode")).toString();
+  constexpr const char *Scope = "scale_and_reference_constraint_agreement";
+  if (root.value(QStringLiteral("coordinate_frame")) != QStringLiteral("metric") ||
+      root.value(QStringLiteral("representation")) != QStringLiteral("baked_model") ||
+      root.value(QStringLiteral("original_model_retained")) != true ||
+      root.value(QStringLiteral("model_geometry_accuracy")) != QStringLiteral("not_measured")) {
+    fail("model_scale_invalid_output_frame"); return;
+  }
+  if (!hash(input.value(QStringLiteral("sha256"))) || !hash(input.value(QStringLiteral("data_identity"))) ||
+      input.value(QStringLiteral("coordinate_frame")) != QStringLiteral("source") ||
+      derivation.value(QStringLiteral("input_data_identity")) != identity ||
+      request.value(QStringLiteral("input_data_identity")) != identity ||
+      solution.value(QStringLiteral("input_data_identity")) != identity) {
+    fail("model_scale_invalid_identity"); return;
+  }
+  if (derivation.value(QStringLiteral("schema")) != QStringLiteral("gsw.scale_derivation/1") ||
+      derivation.value(QStringLiteral("input_kind")) != QStringLiteral("model") ||
+      request.value(QStringLiteral("schema")) != QStringLiteral("gsw.scale_constraints/1") ||
+      request.value(QStringLiteral("input_frame")) != QStringLiteral("source") ||
+      (mode != QStringLiteral("scale_only") && mode != QStringLiteral("sim3")) ||
+      solution.value(QStringLiteral("canonical_request")).toObject().value(QStringLiteral("mode")) != mode ||
+      solution.value(QStringLiteral("canonical_request")).toObject().value(QStringLiteral("input_data_identity")) != identity ||
+      !request.value(QStringLiteral("constraints")).isArray() || request.value(QStringLiteral("constraints")).toArray().isEmpty() ||
+      solution.value(QStringLiteral("schema")) != QStringLiteral("gsw.scale_solution/1") ||
+      solution.value(QStringLiteral("solver")) != QStringLiteral("gsw.weighted_scale_constraints") ||
+      solution.value(QStringLiteral("solver_version")) != 1 ||
+      solution.value(QStringLiteral("request")).toObject() != request ||
+      !hash(root.value(QStringLiteral("solution_sha256"))) ||
+      solution.value(QStringLiteral("solution_sha256")) != root.value(QStringLiteral("solution_sha256")) ||
+      !hash(solution.value(QStringLiteral("request_sha256"))) ||
+      !hash(solution.value(QStringLiteral("canonical_request_sha256"))) ||
+      solution.value(QStringLiteral("scope")) != QString::fromLatin1(Scope) ||
+      solution.value(QStringLiteral("model_geometry_accuracy")) != QStringLiteral("not_measured") ||
+      solution.value(QStringLiteral("fit")).toObject().value(QStringLiteral("accepted")) != true) {
+    fail("model_scale_invalid_solution_provenance"); return;
+  }
+  if (!validRecordedInverse(transform) || !transform.value(QStringLiteral("applied")).isBool() ||
+      !transform.value(QStringLiteral("applied")).toBool() ||
+      transform.value(QStringLiteral("input_frame")) != QStringLiteral("source") ||
+      transform.value(QStringLiteral("output_frame")) != QStringLiteral("metric")) {
+    fail("model_scale_invalid_applied_transform"); return;
+  }
+  if (mode == QStringLiteral("scale_only")) {
+    const auto rotation = transform.value(QStringLiteral("R")).toArray();
+    const auto translation = transform.value(QStringLiteral("t")).toArray();
+    for (int i = 0; i < 3; ++i) {
+      if (std::abs(translation[i].toDouble()) > 1e-10) { fail("model_scale_scale_only_alignment_conflict"); return; }
+      for (int j = 0; j < 3; ++j)
+        if (std::abs(rotation[i].toArray()[j].toDouble() - (i == j ? 1. : 0.)) > 1e-10) {
+          fail("model_scale_scale_only_alignment_conflict"); return;
+        }
+    }
+  }
+  auto comparedTransform = transform; auto comparedSource = sourceTransform;
+  comparedTransform.remove(QStringLiteral("applied")); comparedSource.remove(QStringLiteral("applied"));
+  const auto metersValue = scale.value(QStringLiteral("meters_per_unit"));
+  const double meters = metersValue.toDouble(-1.);
+  if (comparedTransform != comparedSource || !metersValue.isDouble() || !std::isfinite(meters) || meters <= 0. ||
+      std::abs(meters - transform.value(QStringLiteral("s")).toDouble()) > 1e-10 * std::max(meters, transform.value(QStringLiteral("s")).toDouble()) ||
+      scale.value(QStringLiteral("canonical_unit")) != QStringLiteral("m") ||
+      scale.value(QStringLiteral("verification_origin")) != QStringLiteral("gsw_replay_verified")) {
+    fail("model_scale_transform_binding_mismatch"); return;
+  }
+  if ((status != QStringLiteral("constraint_derived") && status != QStringLiteral("independently_checked")) ||
+      (checkStatus != QStringLiteral("not_provided") && checkStatus != QStringLiteral("unverified") && checkStatus != QStringLiteral("pass")) ||
+      (status == QStringLiteral("independently_checked")) != (checkStatus == QStringLiteral("pass")) ||
+      checks.value(QStringLiteral("scope")) != QString::fromLatin1(Scope) ||
+      checks.value(QStringLiteral("model_geometry_accuracy")) != QStringLiteral("not_measured") ||
+      (checkStatus == QStringLiteral("pass") && (checks.value(QStringLiteral("disjoint")) != true ||
+          checks.value(QStringLiteral("declared_independent")) != true))) {
+    fail("model_scale_invalid_check_status"); return;
+  }
+  bool evidenceBound = false;
+  for (const auto &value : scale.value(QStringLiteral("evidence")).toArray()) {
+    const auto evidence = value.toObject();
+    if (evidence.value(QStringLiteral("kind")) == QStringLiteral("scale_constraints") &&
+        evidence.value(QStringLiteral("input_data_identity")) == identity &&
+        evidence.value(QStringLiteral("solution_sha256")) == root.value(QStringLiteral("solution_sha256")) &&
+        evidence.value(QStringLiteral("scope")) == QString::fromLatin1(Scope) &&
+        evidence.value(QStringLiteral("model_geometry_accuracy")) == QStringLiteral("not_measured")) evidenceBound = true;
+  }
+  const auto lineage = root.value(QStringLiteral("lineage")).toArray();
+  if (!evidenceBound || lineage.isEmpty() || lineage.size() > 8 ||
+      derivation.value(QStringLiteral("lineage")).toArray() != lineage ||
+      lineage.last().toObject().value(QStringLiteral("input_data_identity")) != identity ||
+      lineage.last().toObject().value(QStringLiteral("model_sha256")) != input.value(QStringLiteral("sha256")) ||
+      !hash(derivation.value(QStringLiteral("input_manifest")).toObject().value(QStringLiteral("sha256")))) {
+    fail("model_scale_invalid_lineage"); return;
+  }
+  for (const auto &value : lineage) {
+    const auto item = value.toObject();
+    const auto oldSidecar = item.value(QStringLiteral("sidecar_sha256"));
+    if (!hash(item.value(QStringLiteral("input_data_identity"))) || !hash(item.value(QStringLiteral("model_sha256"))) ||
+        (!oldSidecar.isNull() && !oldSidecar.isUndefined() && !hash(oldSidecar))) {
+      fail("model_scale_invalid_lineage"); return;
+    }
+  }
+  if (metadata.unitDeclared && metadata.unit != SceneLengthUnit::Metres) {
+    fail("model_scale_conflicting_output_units"); return;
+  }
+  // The worker replays the shared solver before publishing. This native reader
+  // checks structure, cross-record bindings and the actual PLY checksum, not a
+  // second SVD/fit or physical model accuracy. Archives are intentionally not
+  // mandatory: a complete PLY + embedded sidecar remains a portable artifact.
+  metadata.unit = SceneLengthUnit::Metres; metadata.unitDeclared = true;
+  metadata.metersPerCoordinate = 1.; // Already baked metric output, NOT input scale.meters_per_unit.
+  metadata.scaleStatus = status; metadata.sourceUnit = scale.value(QStringLiteral("source_unit")).toString();
+  metadata.dataIdentity = identity; metadata.provenance = root;
+  if (!metadata.coordinateReferenceSystem.isEmpty())
+    metadata.provenance.insert(QStringLiteral("ignored_output_crs"), metadata.coordinateReferenceSystem);
+  // A local Sim3 does not establish a CRS. Old PLY comments or an adjacent PRJ
+  // must not label this newly fitted metric reference frame as georeferenced.
+  // input_declared_crs, when supplied by the worker, remains source provenance.
+  metadata.coordinateReferenceSystem.clear();
+  metadata.provenance.insert(QStringLiteral("sidecar"), QFileInfo(sidecarPath).fileName());
+  metadata.provenance.insert(QStringLiteral("verification_level"), QStringLiteral("native_structural_and_ply_hash"));
+  metadata.provenance.insert(QStringLiteral("native_solver_replayed"), false);
+}
+
 void readCameraScaleSidecar(const QString &sourcePath,
                            SceneCoordinateMetadata &metadata) {
   const QFileInfo source(sourcePath);
@@ -134,7 +299,8 @@ void readCameraScaleSidecar(const QString &sourcePath,
   const QString schema = root.value(QStringLiteral("schema")).toString();
   const bool training = schema == QStringLiteral("gsw.training_camera_contract/1");
   const bool exported = schema == QStringLiteral("gsw.coordinate_export/1");
-  if (!training && !exported) { fail("camera_scale_unsupported_schema"); return; }
+  const bool modelScaled = schema == QStringLiteral("gsw.model_scale_export/1");
+  if (!training && !exported && !modelScaled) { fail("camera_scale_unsupported_schema"); return; }
   const QString expected = root.value(QStringLiteral("ply_sha256")).toString().toLower();
   static const QRegularExpression digestExpression(QStringLiteral("^[0-9a-f]{64}$"));
   QFile ply(sourcePath);
@@ -143,6 +309,7 @@ void readCameraScaleSidecar(const QString &sourcePath,
       !digest.addData(&ply) || QString::fromLatin1(digest.result().toHex()) != expected) {
     fail("camera_scale_ply_hash_mismatch"); return;
   }
+  if (modelScaled) { readModelScaleRecord(root, path, metadata); return; }
   const auto contract = training ? root : root.value(QStringLiteral("training_contract")).toObject();
   if (contract.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.training_camera_contract/1")) {
     fail("camera_scale_invalid_contract"); return;
@@ -627,6 +794,10 @@ bool writeSceneCoordinateReport(
     stream << "scale_status,,,," << csvEscape(coordinates.scaleStatus) << ",\n";
     stream << "source_unit,,,," << csvEscape(coordinates.sourceUnit) << ",\n";
     stream << "data_identity,,,," << csvEscape(coordinates.dataIdentity) << ",\n";
+    if (!coordinates.provenance.isEmpty()) {
+      stream << "provenance_json,,,," << csvEscape(QString::fromUtf8(
+          QJsonDocument(coordinates.provenance).toJson(QJsonDocument::Compact))) << ",\n";
+    }
     stream.flush();
   } else if (error.isEmpty()) {
     QJsonObject root;

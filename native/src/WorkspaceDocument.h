@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SceneObject.h"
+#include <QJsonArray>
 #include <QJsonObject>
 
 #include <QByteArray>
@@ -60,6 +61,11 @@ public:
   [[nodiscard]] QString cameraDatasetIdentity() const;
   [[nodiscard]] QString cameraPosePolicy() const;
   [[nodiscard]] QJsonObject cameraDatasetInfo() const;
+  // Paths are portable workspace-relative directories; availability is
+  // evaluated when read and never replaces the durable source records.
+  [[nodiscard]] QJsonArray workflowArtifacts() const;
+  bool addWorkflowArtifact(const QString &kind, const QString &path,
+                           QString *errorMessage = nullptr);
   [[nodiscard]] QString scenePath() const;
   [[nodiscard]] QVector3D sceneTranslation() const;
   [[nodiscard]] QQuaternion sceneRotation() const;
@@ -129,6 +135,7 @@ private:
   QString mProjectFilePath;
   QString mDatasetPath;
   QJsonObject mCameraDatasetInfo;
+  QJsonArray mWorkflowArtifacts;
   QString mScenePath;
   QList<SceneObject> mSceneObjects;
   QString mActiveSceneId;

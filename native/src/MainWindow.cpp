@@ -26,6 +26,8 @@
 #include "ResourceBudget.h"
 #include "TrainingDialog.h"
 #include "QualityComparisonDialog.h"
+#include "ScaleConstraintsDialog.h"
+#include "TrainingBatchDialog.h"
 #include "WrappingCheckBox.h"
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
@@ -580,6 +582,11 @@ QString workerStageLabel(const QString &stage) {
       {QStringLiteral("prepare"), QCoreApplication::translate("Workbench", "准备训练")},
       {QStringLiteral("colmap"), QCoreApplication::translate("Workbench", "COLMAP 重建")},
       {QStringLiteral("train"), QCoreApplication::translate("Workbench", "训练")},
+      {QStringLiteral("batch_run"), QCoreApplication::translate("Workbench", "训练")},
+      {QStringLiteral("batch_between_runs"), QCoreApplication::translate("Workbench", "已暂停")},
+      {QStringLiteral("batch_optimizer_checkpoint"), QCoreApplication::translate("Workbench", "已暂停")},
+      {QStringLiteral("batch_child_stopped"), QCoreApplication::translate("Workbench", "任务已结束")},
+      {QStringLiteral("batch_completed"), QCoreApplication::translate("Workbench", "任务已结束")},
       {QStringLiteral("paused"), QCoreApplication::translate("Workbench", "已暂停")},
       {QStringLiteral("done"), QCoreApplication::translate("Workbench", "完成")},
       {QStringLiteral("failed"), QCoreApplication::translate("Workbench", "失败")},
@@ -1001,6 +1008,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
     showError(QCoreApplication::translate("Workbench", "无法打开工程"), error);
     return false;
   }
+  mResumeBatchPlan.clear();
   mViewport->clearProcessingPreview();
   if (mCurrentRecovery.has_value() &&
       !pathsReferToSameLocation(mCurrentRecovery->rootPath,
@@ -1098,6 +1106,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
             if (mRecoveryStore->restoreProjectSnapshot(
                     latest, recoveredPath, &snapshotError) &&
                 mWorkspace.load(recoveredPath, &snapshotError)) {
+              mResumeBatchPlan.clear();
               mViewport->clearProcessingPreview();
               appendTaskEvent(
                   QCoreApplication::translate("Workbench", "已恢复异常退出前的自动快照：%1")
@@ -1765,6 +1774,18 @@ void MainWindow::createMenus() {
       QCoreApplication::translate("Workbench", "质量对照…")), AppLanguage::source("质量对照…"));
   qualityComparison->setObjectName(QStringLiteral("qualityComparisonAction"));
   connect(qualityComparison, &QAction::triggered, this, &MainWindow::showQualityComparison);
+  auto *scaleConstraints = AppLanguage::text(workflowMenu->addAction(
+      QCoreApplication::translate("Workbench", "相机数据集定尺度与对齐…")), AppLanguage::source("相机数据集定尺度与对齐…"));
+  scaleConstraints->setObjectName(QStringLiteral("scaleConstraintsAction"));
+  connect(scaleConstraints, &QAction::triggered, this, [this] { showScaleConstraints(false); });
+  auto *modelScale = AppLanguage::text(workflowMenu->addAction(
+      QCoreApplication::translate("Workbench", "当前模型定尺度…")), AppLanguage::source("当前模型定尺度…"));
+  modelScale->setObjectName(QStringLiteral("modelScaleConstraintsAction"));
+  connect(modelScale, &QAction::triggered, this, [this] { showScaleConstraints(true); });
+  auto *batch = AppLanguage::text(workflowMenu->addAction(
+      QCoreApplication::translate("Workbench", "批量训练…")), AppLanguage::source("批量训练…"));
+  batch->setObjectName(QStringLiteral("trainingBatchAction"));
+  connect(batch, &QAction::triggered, this, &MainWindow::showTrainingBatch);
   workflowMenu->addAction(mStopAction);
 
   QMenu *sceneMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "场景")), AppLanguage::source("场景"), "title");
@@ -2568,6 +2589,14 @@ void MainWindow::connectServices() {
               mViewport->setProcessingStage(QStringLiteral("environment"));
               mTaskTabs->setCurrentWidget(mTaskPage);
             }
+            if (mPendingTrainingBatch && mPendingTrainingBatch->taskName == taskName) {
+              mTaskTable->item(mActiveTaskRow, 1)->setData(Qt::UserRole + 37,
+                  QFileInfo(QFileInfo(mPendingTrainingBatch->planPath).absolutePath()).fileName());
+              mViewport->stopTrainingGpuPreview();
+              mViewport->beginProcessingPreview();
+              mViewport->setProcessingStage(QStringLiteral("train"));
+              mTaskTabs->setCurrentWidget(mTaskPage);
+            }
             if (mPendingTraining.has_value() &&
                 mPendingTraining->taskName == taskName) {
               mPendingTraining->launched = true;
@@ -2629,7 +2658,7 @@ void MainWindow::connectServices() {
                        QString::number(status.reconstructionInputs.value_or(0)),
                        QString::number(status.reconstructionPoints.value_or(0)), phase));
             }
-            if (mPendingTraining.has_value() || mPendingReconstruction.has_value() || mPendingMesh.has_value()) {
+            if (mPendingTraining.has_value() || mPendingReconstruction.has_value() || mPendingMesh.has_value() || mPendingTrainingBatch) {
               // Worker terminal status is not a validated/published final model yet.
               if (status.state != QStringLiteral("done") && status.state != QStringLiteral("failed") &&
                   status.state != QStringLiteral("cancelled"))
@@ -2723,9 +2752,21 @@ void MainWindow::connectServices() {
         const bool finishingTraining =
             mPendingTraining.has_value() &&
             mPendingTraining->taskName == taskName;
-        const bool paused = finishingTraining && !processCancelled && exitCode == 75 &&
+        const bool finishingBatch = mPendingTrainingBatch && mPendingTrainingBatch->taskName == taskName;
+        QJsonObject batchState;
+        if (finishingBatch) {
+          QFile state(QDir(QFileInfo(mPendingTrainingBatch->planPath).absolutePath()).filePath(QStringLiteral("state.json")));
+          if (state.open(QIODevice::ReadOnly) && state.size() <= 16 * 1024 * 1024)
+            batchState = QJsonDocument::fromJson(state.readAll()).object();
+        }
+        const bool batchPaused = finishingBatch && !processCancelled && (exitCode == 75 || exitCode == 76) &&
+            batchState.value(QStringLiteral("plan_sha256")).toString() == mPendingTrainingBatch->planSha256 &&
+            batchState.value(QStringLiteral("schema")).toString() == QStringLiteral("gsw.training_batch_state/1") &&
+            (batchState.value(QStringLiteral("status")).toString() == QStringLiteral("paused") ||
+             batchState.value(QStringLiteral("status")).toString() == QStringLiteral("interrupted"));
+        const bool paused = batchPaused || (finishingTraining && !processCancelled && exitCode == 75 &&
             mActiveWorkerState == QStringLiteral("paused") &&
-            nativeResumeIteration(mPendingTraining->outputDirectory) > 0;
+            nativeResumeIteration(mPendingTraining->outputDirectory) > 0);
         mPauseRequested = false;
         const bool finishingReconstruction =
             mPendingReconstruction.has_value() &&
@@ -2734,6 +2775,32 @@ void MainWindow::connectServices() {
         bool effectiveSucceeded = succeeded;
         bool recoveryFailed = false;
         QString completionDetail;
+
+        if (finishingBatch) {
+          const auto pending = *mPendingTrainingBatch;
+          mPendingTrainingBatch.reset();
+          effectiveSucceeded = succeeded &&
+              batchState.value(QStringLiteral("plan_sha256")).toString() == pending.planSha256 &&
+              batchState.value(QStringLiteral("schema")).toString() == QStringLiteral("gsw.training_batch_state/1") &&
+              batchState.value(QStringLiteral("status")).toString() == QStringLiteral("completed");
+          if (comparablePath(mWorkspace.rootPath()) == pending.projectRoot) {
+            mResumeBatchPlan = batchPaused ? QDir(mWorkspace.rootPath()).relativeFilePath(pending.planPath) : QString();
+            QString error;
+            if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
+          }
+          completionDetail = effectiveSucceeded
+              ? QCoreApplication::translate("Workbench", "批量训练已完成；每个任务的结果与检核记录已分别保存。")
+              : batchPaused ? QCoreApplication::translate("Workbench", "批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
+                            : QCoreApplication::translate("Workbench", "批量训练未完成；请查看批量计划中的逐任务记录。");
+          if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
+            const char *source = effectiveSucceeded ? AppLanguage::source("批量训练已完成；每个任务的结果与检核记录已分别保存。")
+                : batchPaused ? AppLanguage::source("批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
+                              : AppLanguage::source("批量训练未完成；请查看批量计划中的逐任务记录。");
+            mTaskTable->item(mActiveTaskRow, 3)->setData(Qt::UserRole + 34, QString::fromUtf8(source));
+            mTaskTable->item(mActiveTaskRow, 3)->setData(Qt::UserRole + 35, QVariantList{});
+          }
+          if (mTrainingBatchDialog) mTrainingBatchDialog->refreshHistory();
+        }
 
         if (mPendingDatasetImport.has_value() &&
             mPendingDatasetImport->taskName == taskName) {
@@ -2772,6 +2839,12 @@ void MainWindow::connectServices() {
               }
             } else if (!effectiveSucceeded) {
               appendTaskEvent(QCoreApplication::translate("Workbench", "已清理未完成的导入事务；提交前的数据已恢复。"));
+              if (!pending.cameraImportError.isEmpty()) {
+                completionDetail = CameraDatasetInfo::importErrorText(pending.cameraImportError);
+                appendTaskEvent(completionDetail);
+                if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount())
+                  mTaskTable->item(mActiveTaskRow, 3)->setData(Qt::UserRole + 36, pending.cameraImportError);
+              }
             }
           }
 
@@ -3075,13 +3148,14 @@ void MainWindow::connectServices() {
           mViewport->stopTrainingGpuPreview();
           mTrainingMonitor->finishTraining(effectiveSucceeded, cancelled, paused);
         }
-        if (finishingTraining || finishingReconstruction || finishingMesh) {
+        if (finishingTraining || finishingReconstruction || finishingMesh || finishingBatch) {
           // End the processing guard before associating the validated source.
           // setSceneObjects deliberately ignores collection mutations while
           // processing; doing this in the opposite order leaves a read-only
           // observation on screen with all model tools unavailable.
+          if (finishingBatch) mViewport->setProcessingPreviewVisible(false);
           mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
-          if (finishingTraining && (effectiveSucceeded || paused))
+          if ((finishingTraining && (effectiveSucceeded || paused)) || finishingBatch)
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
           if (finishingMesh) {
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
@@ -3934,6 +4008,7 @@ bool MainWindow::beginUntitledProject(const QString &displayName,
     }
     return false;
   }
+  mResumeBatchPlan.clear();
   mViewport->clearProcessingPreview();
   mCurrentRecovery = recovery;
   checkpointCurrentRecovery();
@@ -4170,6 +4245,7 @@ bool MainWindow::restoreRecoveryWorkspace(
     showError(QCoreApplication::translate("Workbench", "无法恢复未命名工程"), createError);
     return false;
   }
+  mResumeBatchPlan.clear();
   mViewport->clearProcessingPreview();
   QString discardError;
   if (mCurrentRecovery.has_value() &&
@@ -5101,6 +5177,7 @@ bool MainWindow::recoverInterruptedProjectImports(QString *errorMessage) {
       }
       return false;
     }
+    mResumeBatchPlan.clear();
   }
 
   if (committed && committedPaths.isEmpty()) {
@@ -5925,6 +6002,167 @@ void MainWindow::showQualityComparison() {
   mQualityComparisonDialog->show(); // Only the explicit workflow-menu action opens it.
 }
 
+void MainWindow::showScaleConstraints(const bool modelSource) {
+  if (mScaleConstraintsDialog) return; // Explicit action never raises an existing dialog.
+  if ((!modelSource && mWorkspace.cameraDatasetPath().isEmpty()) ||
+      (modelSource && (mWorkspace.scenePath().isEmpty() ||
+          QFileInfo(mWorkspace.scenePath()).suffix().compare(QStringLiteral("ply"), Qt::CaseInsensitive) != 0))) {
+    showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"),
+        modelSource ? QCoreApplication::translate("Workbench", "请先在场景中选中一个 PLY 模型。定尺度使用原始坐标，不使用视口显示偏移。")
+                    : QCoreApplication::translate("Workbench", "请先导入已知相机数据集；定尺度不会重新求解相机。"));
+    return;
+  }
+  if (!ensureProjectRecoveryReady()) return;
+  const QString root = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = findTrainingPython(root);
+  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/scale_constraints.py"));
+  if (root.isEmpty() || python.isEmpty() || !QFileInfo(helper).isFile()) {
+    showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"),
+        backendUnavailableMessage(root, helper, python));
+    return;
+  }
+  const QString projectRoot = comparablePath(mWorkspace.rootPath());
+  const QString sourceIdentity = mWorkspace.cameraDatasetIdentity();
+  const QString sourceSceneId = mWorkspace.activeSceneId();
+  const QString sourceModelPath = comparablePath(mWorkspace.scenePath());
+  const QJsonObject descriptor{{QStringLiteral("kind"), modelSource ? QStringLiteral("model") : QStringLiteral("dataset")},
+      {QStringLiteral("path"), modelSource ? mWorkspace.scenePath() : mWorkspace.cameraDatasetPath()},
+      {QStringLiteral("frame"), QStringLiteral("source")},
+      {QStringLiteral("identity"), modelSource ? QString() : sourceIdentity}};
+  mScaleConstraintsDialog = new ScaleConstraintsDialog(python, root, mWorkspace.rootPath(),
+      descriptor, pythonProcessEnvironment(python), this);
+  mScaleConstraintsDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(mScaleConstraintsDialog, &ScaleConstraintsDialog::versionCreated, this,
+      [this, projectRoot, sourceIdentity, sourceSceneId, sourceModelPath](
+          const QString &kind, const QString &path, const QJsonObject &summary) {
+    if (comparablePath(mWorkspace.rootPath()) != projectRoot) return; // Version remains in its original project.
+    QString error;
+    if (!mWorkspace.addWorkflowArtifact(QStringLiteral("scale_version"), path, &error)) {
+      showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"), error);
+      return;
+    }
+    // Even a version not adopted because the selection changed is durable.
+    // The registry stores a managed relative reference, never an instruction to
+    // mutate the scene or resume a trainer when the project is opened.
+    if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) {
+      showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"), error);
+      return;
+    }
+    if (mProcessSupervisor.isRunning()) {
+      showError(QCoreApplication::translate("Workbench", "无法关联数据集"),
+          QCoreApplication::translate("Workbench", "请先结束当前任务，再关联定尺度新版本。"));
+      return;
+    }
+    if (kind == QStringLiteral("dataset") && mWorkspace.cameraDatasetIdentity() != sourceIdentity) {
+      showError(QCoreApplication::translate("Workbench", "无法关联数据集"),
+          QCoreApplication::translate("Workbench", "当前数据集已改变；新版本已保留，请确认后再手动关联。"));
+      return;
+    }
+    if (kind == QStringLiteral("model")) {
+      if (mWorkspace.activeSceneId() != sourceSceneId || comparablePath(mWorkspace.scenePath()) != sourceModelPath) {
+        showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"),
+            QCoreApplication::translate("Workbench", "当前模型已改变；新版本已保留，请确认后再手动导入。"));
+        return;
+      }
+      // A transform-only version is durable evidence, never a pretend baked PLY.
+      const QString modelPath = summary.value(QStringLiteral("modelPath")).toString();
+      if (summary.value(QStringLiteral("representation")).toString() == QStringLiteral("baked_model") &&
+          !mWorkspace.addScenePath(modelPath, &error, !mViewport->hasUnsavedSceneEdits())) {
+        showError(QCoreApplication::translate("Workbench", "定尺度工具不可用"), error);
+        return;
+      }
+      appendTaskEvent(QCoreApplication::translate("Workbench", "已保存定尺度版本：%1；原模型与原检查点保持不变。")
+          .arg(QDir::toNativeSeparators(path)));
+    } else if (kind == QStringLiteral("dataset") && !mWorkspace.setDatasetPath(path, &error)) {
+      showError(QCoreApplication::translate("Workbench", "无法关联数据集"), error);
+      return;
+    } else if (kind == QStringLiteral("dataset")) {
+      appendTaskEvent(QCoreApplication::translate("Workbench", "已关联定尺度新版本：%1；原数据与原检查点保持不变。")
+          .arg(QDir::toNativeSeparators(path)));
+    }
+    if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
+  });
+  mScaleConstraintsDialog->show(); // Never automatic; no worker/model state is restarted.
+}
+
+void MainWindow::showTrainingBatch() {
+  if (mTrainingBatchDialog || !ensureProjectRecoveryReady()) return;
+  const QString root = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = findTrainingPython(root);
+  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/training_batch.py"));
+  if (root.isEmpty() || python.isEmpty() || !QFileInfo(helper).isFile()) {
+    showError(QCoreApplication::translate("Workbench", "批量训练工具不可用"), backendUnavailableMessage(root, helper, python));
+    return;
+  }
+  const QString projectRoot = comparablePath(mWorkspace.rootPath());
+  const QJsonObject descriptor{{QStringLiteral("id"), QStringLiteral("dataset-1")},
+      {QStringLiteral("path"), mWorkspace.cameraDatasetPath()},
+      {QStringLiteral("data_identity"), mWorkspace.cameraDatasetIdentity()},
+      {QStringLiteral("display_name"), QFileInfo(mWorkspace.datasetPath()).fileName()}};
+  mTrainingBatchDialog = new TrainingBatchDialog(python, root, mWorkspace.rootPath(),
+      descriptor, pythonProcessEnvironment(python), this);
+  mTrainingBatchDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(mTrainingBatchDialog, &TrainingBatchDialog::planningFinished, this, [this, projectRoot] {
+    if (!mTrainingBatchDialog || comparablePath(mWorkspace.rootPath()) != projectRoot ||
+        mTrainingBatchDialog->planPath().isEmpty()) return;
+    QString error;
+    if (!mWorkspace.addWorkflowArtifact(QStringLiteral("training_batch"),
+        QFileInfo(mTrainingBatchDialog->planPath()).absolutePath(), &error)) appendTaskEvent(error);
+    else if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
+  });
+  connect(mTrainingBatchDialog, &TrainingBatchDialog::runRequested, this,
+      [this, projectRoot](const QString &plan, const bool resume) {
+    if (comparablePath(mWorkspace.rootPath()) == projectRoot) startTrainingBatch(plan, resume);
+  });
+  mTrainingBatchDialog->show(); // Explicit action only; opening history never launches training.
+}
+
+void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) {
+  if (mProcessSupervisor.isRunning() || !ensureProjectRecoveryReady()) return;
+  const QString root = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = findTrainingPython(root);
+  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/training_batch.py"));
+  QString error;
+  QFile planFile(planPath);
+  QJsonObject plan;
+  if (QFileInfo(planPath).fileName() == QStringLiteral("plan.json") && planFile.open(QIODevice::ReadOnly) &&
+      planFile.size() <= 16 * 1024 * 1024) plan = QJsonDocument::fromJson(planFile.readAll()).object();
+  const QString planSha = plan.value(QStringLiteral("plan_sha256")).toString();
+  static const QRegularExpression shaExpression(QStringLiteral("^[0-9a-f]{64}$"));
+  if (plan.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.training_batch/1") ||
+      !shaExpression.match(planSha).hasMatch()) {
+    showError(QCoreApplication::translate("Workbench", "批量训练工具不可用"),
+        QCoreApplication::translate("Workbench", "Invalid project file: %1").arg(QDir::toNativeSeparators(planPath)));
+    return;
+  }
+  if (resume) {
+    QMessageBox trust(QMessageBox::Question, QCoreApplication::translate("Workbench", "继续训练"),
+        QCoreApplication::translate("Workbench", "继续批量训练？\n\n批次可能加载 Python 序列化检查点，只能继续你信任且未被他人替换的本机训练文件。校验和只能检查损坏，不能证明来源；继续前将核验计划、数据、参数与完整检查点。"),
+        QMessageBox::Yes | QMessageBox::No, this);
+    trust.setDefaultButton(QMessageBox::No);
+    if (trust.exec() != QMessageBox::Yes) return;
+  }
+  if (root.isEmpty() || python.isEmpty() || !QFileInfo(helper).isFile() ||
+      !mWorkspace.addWorkflowArtifact(QStringLiteral("training_batch"), QFileInfo(planPath).absolutePath(), &error)) {
+    showError(QCoreApplication::translate("Workbench", "批量训练工具不可用"),
+        error.isEmpty() ? backendUnavailableMessage(root, helper, python) : error);
+    return;
+  }
+  const QString name = QCoreApplication::translate("Workbench", "批量训练正在运行：%1")
+      .arg(QFileInfo(QFileInfo(planPath).absolutePath()).fileName());
+  mPendingTrainingBatch = PendingTrainingBatch{name, comparablePath(mWorkspace.rootPath()),
+      QFileInfo(planPath).absoluteFilePath(), planSha};
+  mPauseRequested = false;
+  if (!mProcessSupervisor.start(name, python,
+      {helper, QStringLiteral("--operation"), resume ? QStringLiteral("resume") : QStringLiteral("run"),
+          QStringLiteral("--plan"), planPath}, root, pythonProcessEnvironment(python), true)) {
+    mPendingTrainingBatch.reset();
+  }
+}
+
 void MainWindow::showGenerationHistory() {
   if (!mWorkspace.hasProject() || mProcessSupervisor.isRunning()) return;
   GenerationHistoryStore store(mWorkspace.rootPath());
@@ -5988,13 +6226,16 @@ void MainWindow::resumeGenerationExperiment(const QString &id) {
 
 void MainWindow::updateTrainingActions() {
   const bool running = mProcessSupervisor.isRunning();
-  mPauseTrainingAction->setEnabled(running && !mPauseRequested && mPendingTraining &&
+  const bool batchRunning = mPendingTrainingBatch.has_value();
+  mPauseTrainingAction->setEnabled(running && !mPauseRequested && (batchRunning || (mPendingTraining &&
       (mPendingTraining->backend == QStringLiteral("3dgs") ||
        mPendingTraining->backend == QStringLiteral("2dgs")) && mLastWorkerStatus &&
-      mLastWorkerStatus->stage == QStringLiteral("train") && !mProcessSupervisor.wasStopRequested());
+      mLastWorkerStatus->stage == QStringLiteral("train"))) && !mProcessSupervisor.wasStopRequested());
   const auto active = !running && mWorkspace.hasProject()
       ? loadActiveTrainingJob(mWorkspace.rootPath()) : ActiveTrainingJob{};
   bool resumable = QFileInfo::exists(active.configurationPath) && nativeResumeIteration(active.outputSceneRoot) > 0;
+  if (!running && !mResumeBatchPlan.isEmpty() &&
+      QFileInfo::exists(QDir(mWorkspace.rootPath()).filePath(mResumeBatchPlan))) resumable = true;
   if (!running && !mRecoveryBlocked && mWorkspace.hasProject() && !resumable) {
     const GenerationHistoryStore store(mWorkspace.rootPath());
     for (const auto &record : store.records()) {
@@ -6008,18 +6249,27 @@ void MainWindow::pauseTraining() {
   updateTrainingActions();
   if (!mPauseTrainingAction->isEnabled()) return;
   QString error;
-  const bool durableRequest = requestActiveTrainingPause(mWorkspace.rootPath(), &error);
+  // A batch owns its children. Never write a pause request into the unrelated
+  // historical single-run active-training record (including the 4407 checkpoint).
+  const bool durableRequest = !mPendingTrainingBatch && requestActiveTrainingPause(mWorkspace.rootPath(), &error);
   const bool stdinRequest = mProcessSupervisor.requestPause();
   if (durableRequest || stdinRequest) {
     mPauseRequested = true;
     updateTrainingActions();
-    appendTaskEvent(QCoreApplication::translate("Workbench", "正在保存完整训练状态；保存完成后暂停，请勿强制关闭。"));
+    appendTaskEvent(mPendingTrainingBatch
+        ? QCoreApplication::translate("Workbench", "正在请求批量任务在安全边界暂停；请勿强制关闭。")
+        : QCoreApplication::translate("Workbench", "正在保存完整训练状态；保存完成后暂停，请勿强制关闭。"));
     if (!durableRequest && !error.isEmpty()) appendTaskEvent(error);
   }
 }
 
 void MainWindow::resumeTraining() {
   if (mProcessSupervisor.isRunning() || !ensureProjectRecoveryReady()) return;
+  if (!mResumeBatchPlan.isEmpty()) {
+    const QString plan = QDir(mWorkspace.rootPath()).filePath(mResumeBatchPlan);
+    if (QFileInfo::exists(plan)) { startTrainingBatch(plan, true); return; }
+    mResumeBatchPlan.clear();
+  }
   const auto active = loadActiveTrainingJob(mWorkspace.rootPath());
   if (!active.isValid() || nativeResumeIteration(active.outputSceneRoot) < 0) {
     showGenerationHistory();
@@ -6531,6 +6781,9 @@ void MainWindow::updateTaskLabels() {
       name->setText(QCoreApplication::translate("Workbench", "生成网格") +
           (method.isEmpty() ? QString() : QStringLiteral(" | ") + method));
     }
+    if (auto *name = mTaskTable->item(row, 1); name && name->data(Qt::UserRole + 37).isValid())
+      name->setText(QCoreApplication::translate("Workbench", "批量训练正在运行：%1")
+          .arg(name->data(Qt::UserRole + 37).toString()));
     if (auto record = taskRecordForRow(row)) {
       if (const auto *name = mTaskTable->item(row, 1)) record->setName(name->text());
     }
@@ -6539,8 +6792,10 @@ void MainWindow::updateTaskLabels() {
       for (const auto &argument : detail->data(Qt::UserRole + 35).toList()) text = text.arg(argument.toString());
       detail->setText(text);
     }
+    if (auto *detail = mTaskTable->item(row, 3); detail && detail->data(Qt::UserRole + 36).isValid())
+      detail->setText(CameraDatasetInfo::importErrorText(detail->data(Qt::UserRole + 36).toString()));
   }
-  if (mActiveTaskRow >= 0 && mLastWorkerStatus && mActiveTaskRow < mTaskTable->rowCount()) {
+  if (mProcessSupervisor.isRunning() && mActiveTaskRow >= 0 && mLastWorkerStatus && mActiveTaskRow < mTaskTable->rowCount()) {
     const auto &status = *mLastWorkerStatus;
     QString detail = workerStageLabel(status.stage);
     if (status.previewKind == QStringLiteral("colmap_sparse") && status.gaussianCount)
@@ -6945,6 +7200,11 @@ void MainWindow::updateInspector() {
 }
 
 void MainWindow::appendLog(const QString &text) {
+  // Keep the raw technical log unchanged. A separately translated task detail
+  // supplies actionable trajectory guidance and refreshes on language changes.
+  if (mPendingDatasetImport && text.contains(QLatin1StringView("[worker] Fatal error:")) &&
+      text.contains(QRegularExpression(QStringLiteral("\\btrajectory_[a-z_]+\\b"))))
+    mPendingDatasetImport->cameraImportError = text.trimmed();
   const QString line = text.endsWith(QLatin1Char('\n')) ? text : text + QLatin1Char('\n');
   if (auto record = taskRecordForRow(mActiveTaskRow)) record->appendLog(line);
   TaskRecord::appendToLogView(mConsole, line, mFollowLogsAction->isChecked());

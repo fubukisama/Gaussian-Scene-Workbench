@@ -19,15 +19,35 @@ from native.backend.camera_dataset import write_camera_dataset
 
 def camera_dataset_summary(dataset, metadata_path=MANIFEST_NAME):
     """Presentation metadata only, not a model-quality/metric-accuracy proof."""
-    return {"version": 1, "schema": dataset["schema"], "blocked": False,
+    scale = copy.deepcopy(dataset["scale"])
+    derivation = scale.pop("derivation", None)
+    result = {"version": 1, "schema": dataset["schema"], "blocked": False,
             "dataIdentity": dataset["data_identity"], "dataVersion": dataset.get("data_version", dataset["data_identity"]),
             "adapter": dataset["source"]["adapter"], "sourceKind": dataset["source"].get("kind", "manual"),
-            "posePolicy": dataset["pose_policy"], "scale": copy.deepcopy(dataset["scale"]),
+            "posePolicy": dataset["pose_policy"], "scale": scale,
             "counts": {key: len(value) for key, value in dataset["splits"].items()},
             "splits": copy.deepcopy(dataset["splits"]), "initialization": copy.deepcopy(dataset["initialization"]),
             "transforms": copy.deepcopy(dataset["transforms"]), "metadataPath": str(metadata_path),
             "independentTest": dataset["independent_test"],
             "warnings": [item["code"] for item in dataset["warnings"]], "errors": []}
+    if derivation:
+        result["scaleDerivation"] = scale_solution_summary(derivation["solution"])
+    return result
+
+
+def scale_solution_summary(solution):
+    """Presentation-only distinction between fit/check agreement and accuracy."""
+    def compact(values):
+        result = {key: copy.deepcopy(value) for key, value in values.items()
+                  if key not in ("per_constraint", "derived_pairs", "constraint_ids")}
+        result["constraintCount"] = len(values.get("constraint_ids", []))
+        return result
+    return {"schema": "gsw.scale_derivation/1", "solutionSha256": solution["solution_sha256"],
+            "inputDataIdentity": solution["input_data_identity"], "mode": solution["request"]["mode"],
+            "method": solution["solver"], "fit": compact(solution["fit"]),
+            "independentChecks": compact(solution["independent_checks"]),
+            "scope": solution["scope"], "modelGeometryAccuracy": "not_measured",
+            "poseSemantics": "fixed_source_poses_uniform_similarity_only"}
 
 
 def admit_locked_dataset(source, expected_identity=None, run_colmap=False):

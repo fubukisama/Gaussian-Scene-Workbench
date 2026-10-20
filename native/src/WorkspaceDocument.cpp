@@ -146,6 +146,82 @@ void assignError(QString *target, const QString &message) {
   }
 }
 
+bool workflowKindSupported(const QString &kind) {
+  return kind == QStringLiteral("scale_version") ||
+         kind == QStringLiteral("training_batch");
+}
+
+bool workflowRelativePath(const QString &path, QString *relative) {
+  const QString portable = QDir::fromNativeSeparators(path);
+  const QString clean = QDir::cleanPath(portable);
+  if (portable.isEmpty() || portable.contains(QLatin1Char(':')) ||
+      QDir::isAbsolutePath(portable) || clean == QStringLiteral(".") ||
+      clean == QStringLiteral("..") || clean.startsWith(QStringLiteral("../")) ||
+      clean.contains(QChar::Null)) return false;
+  if (relative != nullptr) *relative = clean;
+  return true;
+}
+
+QString workflowArtifactStatus(const QString &rootPath, const QString &relative) {
+  QString portable;
+  if (!workflowRelativePath(relative, &portable)) return QStringLiteral("unsafe");
+  const QFileInfo root(rootPath);
+  if (root.isSymLink() || root.isJunction()) return QStringLiteral("unsafe");
+  if (!root.exists()) return QStringLiteral("missing");
+  if (!root.isDir()) return QStringLiteral("invalid");
+  const QString canonicalRoot = root.canonicalFilePath();
+  QString current = rootPath;
+  for (const QString &part : portable.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+    current = QDir(current).filePath(part);
+    const QFileInfo info(current);
+    if (info.isSymLink() || info.isJunction()) return QStringLiteral("unsafe");
+    if (!info.exists()) return QStringLiteral("missing");
+    if (!info.isDir()) return QStringLiteral("invalid");
+    if (!relativePathInside(canonicalRoot, info.canonicalFilePath()))
+      return QStringLiteral("unsafe");
+  }
+  return QStringLiteral("available");
+}
+
+void workflowError(QString *errorMessage, const QString &code,
+                   const QString &detail = {}) {
+  assignError(errorMessage, QCoreApplication::translate("Workbench", "Invalid project file: %1")
+      .arg(code + (detail.isEmpty() ? QString() : QStringLiteral(": ") + detail)));
+}
+
+bool workflowRecordsFromJson(const QJsonValue &value, QJsonArray *records,
+                             QString *errorMessage) {
+  QJsonArray normalized;
+  if (value.isUndefined()) {
+    *records = normalized;
+    return true;
+  }
+  if (!value.isArray()) {
+    workflowError(errorMessage, QStringLiteral("workflow_artifact_registry_invalid"));
+    return false;
+  }
+  QSet<QString> seen;
+  for (const QJsonValue &entry : value.toArray()) {
+    const QJsonObject record = entry.toObject();
+    QString relative;
+    const QString kind = record.value(QStringLiteral("kind")).toString();
+    if (!entry.isObject() || record.size() != 2 ||
+        !record.value(QStringLiteral("kind")).isString() ||
+        !record.value(QStringLiteral("path")).isString() || !workflowKindSupported(kind) ||
+        !workflowRelativePath(record.value(QStringLiteral("path")).toString(), &relative)) {
+      workflowError(errorMessage, QStringLiteral("workflow_artifact_registry_invalid"));
+      return false;
+    }
+    const QString key = kind + QLatin1Char('|') +
+        (pathCaseSensitivity() == Qt::CaseInsensitive ? relative.toCaseFolded() : relative);
+    if (seen.contains(key)) continue;
+    seen.insert(key);
+    normalized.append(QJsonObject{{QStringLiteral("kind"), kind}, {QStringLiteral("path"), relative}});
+  }
+  *records = normalized;
+  return true;
+}
+
 bool finiteVector(const QVector3D &value) {
   return std::isfinite(value.x()) && std::isfinite(value.y()) &&
          std::isfinite(value.z());
@@ -345,7 +421,7 @@ bool copyDirectoryTree(const QString &sourceRoot, const QString &targetRoot,
     }
 
     const QFileInfo sourceInfo = iterator.fileInfo();
-    if (sourceInfo.isSymLink()) {
+    if (sourceInfo.isSymLink() || sourceInfo.isJunction()) {
       assignError(
           errorMessage,
           QCoreApplication::translate("Workbench", "Project data contains an unsupported symbolic link: %1")
@@ -446,6 +522,44 @@ QString WorkspaceDocument::cameraDatasetPath() const { return mCameraDatasetInfo
 QString WorkspaceDocument::cameraDatasetIdentity() const { return mCameraDatasetInfo.value(QStringLiteral("dataIdentity")).toString(); }
 QString WorkspaceDocument::cameraPosePolicy() const { return mCameraDatasetInfo.value(QStringLiteral("posePolicy")).toString(QStringLiteral("solve")); }
 QJsonObject WorkspaceDocument::cameraDatasetInfo() const { return mCameraDatasetInfo; }
+QJsonArray WorkspaceDocument::workflowArtifacts() const {
+  QJsonArray result;
+  for (const QJsonValue &value : mWorkflowArtifacts) {
+    QJsonObject record = value.toObject();
+    const QString status = workflowArtifactStatus(mRootPath, record.value(QStringLiteral("path")).toString());
+    record.insert(QStringLiteral("available"), status == QStringLiteral("available"));
+    record.insert(QStringLiteral("status"), status);
+    result.append(record);
+  }
+  return result;
+}
+
+bool WorkspaceDocument::addWorkflowArtifact(const QString &kind, const QString &path,
+                                            QString *errorMessage) {
+  if (!hasProject() || !workflowKindSupported(kind)) {
+    workflowError(errorMessage, QStringLiteral("workflow_artifact_kind_invalid"), kind);
+    return false;
+  }
+  const QString candidate = QDir::isAbsolutePath(path) ? normalizedAbsolutePath(path)
+      : normalizedAbsolutePath(QDir(mRootPath).filePath(path));
+  QString relative;
+  if (!relativePathInside(mRootPath, candidate, &relative) ||
+      !workflowRelativePath(relative, &relative) ||
+      workflowArtifactStatus(mRootPath, relative) != QStringLiteral("available")) {
+    workflowError(errorMessage, QStringLiteral("workflow_artifact_path_invalid"), path);
+    return false;
+  }
+  for (const QJsonValue &value : mWorkflowArtifacts) {
+    const auto record = value.toObject();
+    if (record.value(QStringLiteral("kind")).toString() == kind &&
+        record.value(QStringLiteral("path")).toString().compare(relative, pathCaseSensitivity()) == 0)
+      return true;
+  }
+  mWorkflowArtifacts.append(QJsonObject{{QStringLiteral("kind"), kind}, {QStringLiteral("path"), relative}});
+  setModified(true);
+  emit changed();
+  return true;
+}
 QString WorkspaceDocument::scenePath() const { return mScenePath; }
 QVector3D WorkspaceDocument::sceneTranslation() const {
   return mSceneTranslation;
@@ -490,6 +604,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mCameraDatasetInfo = {};
+  mWorkflowArtifacts = {};
   mScenePath.clear();
   mSceneObjects.clear();
   mActiveSceneId.clear();
@@ -521,6 +636,7 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mCameraDatasetInfo = {};
+  mWorkflowArtifacts = {};
   mScenePath.clear();
   mSceneObjects.clear();
   mActiveSceneId.clear();
@@ -561,17 +677,24 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
     return false;
   }
 
-  mProjectFilePath = normalizedAbsolutePath(filePath);
+  const QString loadedProjectFilePath = normalizedAbsolutePath(filePath);
   const QString storedRoot = root.value(QStringLiteral("rootPath")).toString();
-  const QString projectDirectory = QFileInfo(mProjectFilePath).absolutePath();
+  const QString projectDirectory = QFileInfo(loadedProjectFilePath).absolutePath();
+  QString loadedRootPath;
   if (storedRoot.isEmpty()) {
-    mRootPath = projectDirectory;
+    loadedRootPath = projectDirectory;
   } else if (QDir::isAbsolutePath(storedRoot)) {
-    mRootPath = normalizedAbsolutePath(storedRoot);
+    loadedRootPath = normalizedAbsolutePath(storedRoot);
   } else {
-    mRootPath =
+    loadedRootPath =
         QDir::cleanPath(QDir(projectDirectory).absoluteFilePath(storedRoot));
   }
+  QJsonArray loadedWorkflowArtifacts;
+  if (!workflowRecordsFromJson(root.value(QStringLiteral("workflowArtifacts")),
+                               &loadedWorkflowArtifacts, errorMessage)) return false;
+  mProjectFilePath = loadedProjectFilePath;
+  mRootPath = loadedRootPath;
+  mWorkflowArtifacts = loadedWorkflowArtifacts;
   mProjectName = root.value(QStringLiteral("projectName"))
                      .toString(QDir(mRootPath).dirName());
   mDatasetPath =
@@ -699,6 +822,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
   root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(savedRootPath));
+  root.insert(QStringLiteral("workflowArtifacts"), mWorkflowArtifacts);
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
@@ -821,6 +945,7 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
                     ? relativePendingRoot
                     : pendingDataRoot);
   }
+  root.insert(QStringLiteral("workflowArtifacts"), mWorkflowArtifacts);
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
@@ -874,6 +999,7 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
   root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(mRootPath));
+  root.insert(QStringLiteral("workflowArtifacts"), mWorkflowArtifacts);
   if (!mPendingDataRoot.isEmpty()) {
     root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);
   }

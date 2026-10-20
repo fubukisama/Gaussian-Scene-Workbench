@@ -5,15 +5,19 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QStringList>
 
 namespace gsw {
 namespace {
-QString scaleStatus(const QString &status) {
+QString scaleStatus(const QString &status, bool internallyVerified) {
   if (status == QStringLiteral("source_declared")) return QCoreApplication::translate("Workbench", "来源声明（不是独立检核）");
-  if (status == QStringLiteral("constraint_derived")) return QCoreApplication::translate("Workbench", "约束求得（保留外部证据）");
-  if (status == QStringLiteral("independently_checked")) return QCoreApplication::translate("Workbench", "来源声称独立检核（保留外部证据）");
+  if (status == QStringLiteral("constraint_derived")) return QCoreApplication::translate("Workbench", internallyVerified
+      ? AppLanguage::source("约束求得（已重放核验；无模型精度声明）") : AppLanguage::source("约束求得（保留外部证据）"));
+  if (status == QStringLiteral("independently_checked")) return QCoreApplication::translate("Workbench", internallyVerified
+      ? AppLanguage::source("独立检核通过（仅限参考约束）") : AppLanguage::source("来源声称独立检核（保留外部证据）"));
   return QCoreApplication::translate("Workbench", "任意单位（未知绝对尺度）");
 }
 QString initializationName(const QString &kind) {
@@ -70,9 +74,10 @@ QString CameraDatasetInfo::summaryText(const QJsonObject &summary) {
       ? QCoreApplication::translate("Workbench", "位姿策略：锁定；相机内外参不参与优化，也不重跑 SfM。")
       : QCoreApplication::translate("Workbench", "位姿策略：求解；保留普通 SfM 质量检查。"));
   const auto scale = summary.value(QStringLiteral("scale")).toObject();
+  const bool internallyVerified = scale.value(QStringLiteral("verification_origin")) == QStringLiteral("gsw_replay_verified");
   const QString unit = scale.value(QStringLiteral("source_unit")).toString(QStringLiteral("unknown"));
   lines.append(QCoreApplication::translate("Workbench", "尺度状态：%1；源单位：%2")
-      .arg(scaleStatus(scale.value(QStringLiteral("status")).toString()), unit));
+      .arg(scaleStatus(scale.value(QStringLiteral("status")).toString(), internallyVerified), unit));
   if (scale.value(QStringLiteral("meters_per_unit")).isDouble())
     lines.append(QCoreApplication::translate("Workbench", "每源单位米数：%1；数值归一化不会增加尺度证据。")
         .arg(locale.toString(scale.value(QStringLiteral("meters_per_unit")).toDouble(), 'g', 15)));
@@ -81,6 +86,38 @@ QString CameraDatasetInfo::summaryText(const QJsonObject &summary) {
     const auto object = entry.toObject();
     const QString detail = object.value(QStringLiteral("description")).toString();
     if (!detail.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "尺度依据：%1").arg(detail));
+  }
+  const auto derivation = summary.value(QStringLiteral("scaleDerivation")).toObject();
+  if (!derivation.isEmpty()) {
+    const QString mode = derivation.value(QStringLiteral("mode")).toString();
+    lines.append(QCoreApplication::translate("Workbench", "定尺度方法：%1；来源数据身份：%2；解摘要：%3")
+        .arg(mode == QStringLiteral("scale_only")
+                 ? QCoreApplication::translate("Workbench", "仅定尺度（不确定方向与位置）")
+                 : mode == QStringLiteral("sim3")
+                     ? QCoreApplication::translate("Workbench", "相似变换对齐（尺度、旋转、平移）") : mode,
+             derivation.value(QStringLiteral("inputDataIdentity")).toString(),
+             derivation.value(QStringLiteral("solutionSha256")).toString()));
+    const auto fit = derivation.value(QStringLiteral("fit")).toObject();
+    const auto fitValue = [&locale, &fit](const QString &key) {
+      return fit.value(key).isDouble() ? locale.toString(fit.value(key).toDouble(), 'g', 17)
+          : QCoreApplication::translate("Workbench", "未提供");
+    };
+    lines.append(QCoreApplication::translate("Workbench", "拟合约束一致性（不是模型精度）：加权 RMSE %1 m；最大残差 %2 m。")
+        .arg(fitValue(QStringLiteral("weighted_rmse_m")), fitValue(QStringLiteral("max_residual_m"))));
+    const auto checks = derivation.value(QStringLiteral("independentChecks")).toObject();
+    const QString status = checks.value(QStringLiteral("status")).toString();
+    const QString checkText = !internallyVerified
+        ? QCoreApplication::translate("Workbench", "外部声明，尚未由本软件重放核验")
+        : status == QStringLiteral("pass")
+            ? QCoreApplication::translate("Workbench", "通过（仅限所列参考约束）")
+            : status == QStringLiteral("fail")
+                ? QCoreApplication::translate("Workbench", "失败")
+                : status == QStringLiteral("not_provided")
+                    ? QCoreApplication::translate("Workbench", "未提供独立检核")
+                    : QCoreApplication::translate("Workbench", "独立检核未验证");
+    lines.append(QCoreApplication::translate("Workbench", "独立检核：%1；范围：%2。模型几何精度未测量。")
+        .arg(checkText, derivation.value(QStringLiteral("scope")).toString()));
+    lines.append(QCoreApplication::translate("Workbench", "原始相机位姿、内参和数据划分保留；仅应用已记录的均匀相似变换，不重新求解相机。"));
   }
   lines.append(QCoreApplication::translate("Workbench", "数据划分：训练 %1；验证 %2；测试 %3（测试图不参与训练或增密）。")
       .arg(locale.toString(count(summary, QStringLiteral("train"))),
@@ -128,7 +165,7 @@ QString CameraDatasetInfo::decisionText(const QJsonObject &summary) {
       const auto object = entry.toObject();
       const QString code = entry.isString() ? entry.toString() : object.value(QStringLiteral("code")).toString();
       const QString detail = object.value(QStringLiteral("detail")).toString();
-      errors.append(detail.isEmpty() ? code : QStringLiteral("%1: %2").arg(code, detail));
+      errors.append(importErrorText(detail.isEmpty() ? code : QStringLiteral("%1: %2").arg(code, detail)));
     }
     return (summary.value(QStringLiteral("posePolicy")).toString() == QStringLiteral("solve")
         ? QCoreApplication::translate("Workbench", "相机数据准入失败：%1。已停止，不会自动更换位姿策略。")
@@ -138,5 +175,27 @@ QString CameraDatasetInfo::decisionText(const QJsonObject &summary) {
   if (summary.value(QStringLiteral("posePolicy")).toString() == QStringLiteral("solve"))
     return QCoreApplication::translate("Workbench", "将从训练划分创建独立副本并重新求解；验证／测试影像不参与 SfM。源标定保留，新 SfM 尺度为任意单位，仍须通过 SfM 质量检查。");
   return QCoreApplication::translate("Workbench", "锁定相机准入通过；仅使用训练划分，不重求相机。此结果不是模型质量或尺度精度证明。");
+}
+QString CameraDatasetInfo::importErrorText(const QString &rawError) {
+  const auto match = QRegularExpression(QStringLiteral("\\b(trajectory_[a-z_]+)\\b")).match(rawError);
+  if (!match.hasMatch()) return rawError;
+  const QString code = match.captured(1);
+  const char *guidance = AppLanguage::source("轨迹清单不符合已声明的格式或字段；请检查格式版本、必需字段与数据文件。不会重新求解相机。");
+  if (code.contains(QStringLiteral("timestamp"))) guidance = AppLanguage::source("轨迹时间戳必须使用无重复的精确十进制字符串或整数；请核对图像与位姿的时间关联。");
+  else if (code.contains(QStringLiteral("association")) || code == QStringLiteral("trajectory_unmatched_image") || code == QStringLiteral("trajectory_pose_reused"))
+    guidance = AppLanguage::source("图像与位姿不能按所选规则唯一配对；请检查一对一关联、时间容差和缺帧策略。不会插值或复用同一位姿。");
+  else if (code.contains(QStringLiteral("calibration")) || code == QStringLiteral("trajectory_image_dimensions_mismatch"))
+    guidance = AppLanguage::source("轨迹导入需要唯一、完整的针孔相机标定、已去畸变声明及匹配的图像尺寸；请核对标定 ID 与内参。");
+  else if (code.contains(QStringLiteral("path")) || code == QStringLiteral("trajectory_missing_file"))
+    guidance = AppLanguage::source("轨迹引用文件缺失或路径不安全；仅允许数据集内部的真实文件，不跟随链接或越界路径。");
+  else if (code.contains(QStringLiteral("quaternion")) || code == QStringLiteral("trajectory_invalid_pose_row") || code == QStringLiteral("trajectory_invalid_number") || code == QStringLiteral("trajectory_conflicting_pose_convention"))
+    guidance = AppLanguage::source("轨迹位姿、四元数或坐标约定无效；请核对有限数值、单位四元数及 c2w／w2c 和相机轴声明。不会自动猜测或修复位姿。");
+  else if (code == QStringLiteral("trajectory_explicit_split_required")) guidance = AppLanguage::source("每幅轨迹图像必须明确声明训练、验证或测试划分；不会将测试图自动加入训练。");
+  else if (code == QStringLiteral("trajectory_unit_declaration_required")) guidance = AppLanguage::source("必须明确声明轨迹单位 m、cm、mm 或 unknown；焦距和预览不能证明绝对尺度。");
+  else if (code.contains(QStringLiteral("sensor"))) guidance = AppLanguage::source("当前轨迹入口仅支持单传感器；请提供有效传感器标识。多相机 rig 外参尚未验收，不会静默忽略。");
+  else if (code.contains(QStringLiteral("duplicate")) || code == QStringLiteral("trajectory_invalid_view_id")) guidance = AppLanguage::source("轨迹图像路径与 view_id 必须唯一且有效；不会合并同名记录或静默丢弃图像。");
+  else if (code == QStringLiteral("trajectory_no_images") || code == QStringLiteral("trajectory_no_poses") || code == QStringLiteral("trajectory_invalid_image")) guidance = AppLanguage::source("轨迹数据缺少可读取图像或有效位姿；请检查文件与清单，不能用空预览替代输入验证。");
+  return QCoreApplication::translate("Workbench", guidance) + QLatin1Char('\n') +
+      QCoreApplication::translate("Workbench", "原始技术错误（保持不变）：%1").arg(rawError);
 }
 } // namespace gsw

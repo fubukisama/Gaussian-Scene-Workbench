@@ -140,7 +140,7 @@ def validate_camera_input(config):
         raise ValueError("cameraInput must be a nonempty object")
     if value.get("posePolicy", "locked") != "locked":
         raise ValueError("Fixed-camera import requires posePolicy=locked; no SfM fallback is available")
-    if value.get("adapter", "auto") not in ("auto", "blender_transforms", "colmap", "generic_json", "research_json"):
+    if value.get("adapter", "auto") not in ("auto", "blender_transforms", "colmap", "generic_json", "research_json", "trajectory_dataset"):
         raise ValueError("Unsupported fixed-camera input adapter")
     source = Path(str(value.get("sourcePath") or ""))
     if not source.is_absolute() or not source.exists() or not (source.is_file() or source.is_dir()):
@@ -230,6 +230,15 @@ class CameraImportService:
                     raise ValueError("Initialization path conflicts with an image path")
                 _copy_verified(_reference(source_root, relative), _output(destination, relative),
                                initialization["sha256"], self._cancel)
+                copied.add(relative)
+            # Reimporting a fitted version requires its replayable ancestry,
+            # not merely its derived status strings or a cached summary.
+            for record in camera_dataset.scale_derivation_archive_records(dataset):
+                relative = record["path"]
+                if relative in copied:
+                    raise ValueError("Scale ancestry path conflicts with an image or initialization")
+                _copy_verified(_reference(source_root, relative), _output(destination, relative),
+                               record["sha256"], self._cancel)
                 copied.add(relative)
             # Archive calibration bytes separately from the canonical manifest.
             # A generic source may itself be named camera_dataset.json.

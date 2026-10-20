@@ -40,6 +40,8 @@ class TrainingMonitorWidget;
 class TaskRecord;
 class ResourceBudgetDialog;
 class QualityComparisonDialog;
+class ScaleConstraintsDialog;
+class TrainingBatchDialog;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -77,6 +79,7 @@ private:
   friend bool runProcessingCompletionSmokeTest(MainWindow &window);
   friend bool runTaskActionsSmokeTest(MainWindow &window);
   friend bool runGenerationHistorySmokeTest(MainWindow &window);
+  friend bool runTrainingBatchLifecycleSmokeTest(MainWindow &window);
   struct PendingDatasetImport {
     QString taskName;
     QString datasetPath;
@@ -86,6 +89,7 @@ private:
     QString workerScript;
     QString workingDirectory;
     QString recoveryTask;
+    QString cameraImportError;
   };
 
   struct PendingTraining {
@@ -113,6 +117,12 @@ private:
     QString outputDirectory;
     QString previewPath;
     QString historyId;
+  };
+  struct PendingTrainingBatch {
+    QString taskName;
+    QString projectRoot;
+    QString planPath;
+    QString planSha256;
   };
 
   void createActions();
@@ -200,6 +210,9 @@ private:
   void resumeTrainingJob(const ActiveTrainingJob &active, const QString &historyId = {});
   void showGenerationHistory();
   void showQualityComparison();
+  void showScaleConstraints(bool modelSource = false);
+  void showTrainingBatch();
+  void startTrainingBatch(const QString &planPath, bool resume);
   void resumeGenerationExperiment(const QString &id);
   bool retainGenerationExperiment(const GenerationExperiment &experiment);
   void updateGenerationExperiment(const QString &projectRoot, const QString &id,
@@ -230,6 +243,8 @@ private:
   NativeViewport *mViewport = nullptr;
   QPointer<ResourceBudgetDialog> mResourceBudgetDialog;
   QPointer<QualityComparisonDialog> mQualityComparisonDialog;
+  QPointer<ScaleConstraintsDialog> mScaleConstraintsDialog;
+  QPointer<TrainingBatchDialog> mTrainingBatchDialog;
   QDockWidget *mProjectDock = nullptr;
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;
@@ -343,6 +358,8 @@ private:
   std::optional<PendingTraining> mPendingTraining;
   std::optional<PendingReconstruction> mPendingReconstruction;
   std::optional<PendingMesh> mPendingMesh;
+  std::optional<PendingTrainingBatch> mPendingTrainingBatch;
+  QString mResumeBatchPlan;
   bool mShowGeneratedMesh = false;
   QString mActiveWorkerState;
   std::optional<WorkerStatus> mLastWorkerStatus;

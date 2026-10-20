@@ -7,10 +7,18 @@ import sys
 
 
 BACKEND_FILES = (
+    "native/backend/atomic_file.py",
     "native/backend/camera_dataset.py",
     "native/backend/camera_admission.py",
     "native/backend/camera_scale_export.py",
+    "native/backend/scale_constraints.py",
+    "native/backend/model_scale_version.py",
+    "native/backend/trajectory_dataset.py",
+    "native/backend/training_batch_plan.py",
     "native/worker/camera_import.py",
+    "native/worker/scale_constraints.py",
+    "native/worker/training_seed.py",
+    "native/worker/training_batch.py",
     "native/worker/canonical_training.py",
     "native/worker/camera_rasterizer_runtime.py",
     "native/backend/__init__.py",

@@ -1,0 +1,44 @@
+{
+  "schema": "gsw.scale_constraints/1",
+  "input_data_identity": "REPLACE_WITH_INSPECTED_INPUT_IDENTITY",
+  "input_frame": "source",
+  "mode": "scale_only",
+  "fit_tolerance_m": 0.005,
+  "constraints": [
+    {
+      "id": "fit-length-01",
+      "kind": "distance",
+      "role": "fit",
+      "reference_id": "survey-length-01",
+      "source_a": [0.0, 0.0, 0.0],
+      "source_b": [4.0, 0.0, 0.0],
+      "reference_distance": 1.0,
+      "reference_unit": "m",
+      "reference_sigma": 0.001,
+      "weight": 1.0,
+      "provenance": {
+        "source": "tutorial-fit-reference-not-a-physical-measurement",
+        "measurement_id": "tutorial-fit-length-01",
+        "uncertainty_notes": "Illustrative values only; replace with the actual survey record."
+      }
+    },
+    {
+      "id": "check-length-01",
+      "kind": "distance",
+      "role": "check",
+      "reference_id": "separate-survey-length-01",
+      "source_a": [0.0, 2.0, 0.0],
+      "source_b": [0.0, 2.0, 8.0],
+      "reference_distance": 200.0,
+      "reference_unit": "cm",
+      "reference_sigma": 0.2,
+      "independent_of_fit": true,
+      "tolerance_m": 0.005,
+      "provenance": {
+        "source": "tutorial-disjoint-check-not-independent-physical-evidence",
+        "measurement_id": "tutorial-check-length-01",
+        "uncertainty_notes": "Generated tutorial reference; not a model-accuracy measurement."
+      }
+    }
+  ]
+}

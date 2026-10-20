@@ -1,0 +1,25 @@
+{
+  "schema": "gsw.scale_constraints/1",
+  "input_data_identity": "REPLACE_WITH_INSPECTED_DATASET_IDENTITY",
+  "input_frame": "source",
+  "mode": "scale_only",
+  "fit_tolerance_m": 0.005,
+  "constraints": [
+    {
+      "id": "fit-camera-baseline",
+      "kind": "baseline",
+      "role": "fit",
+      "reference_id": "measured-optical-center-baseline",
+      "view_a": "REPLACE_WITH_FIRST_CANONICAL_VIEW_ID",
+      "view_b": "REPLACE_WITH_SECOND_CANONICAL_VIEW_ID",
+      "reference_distance": 120.0,
+      "reference_unit": "mm",
+      "reference_sigma": 0.5,
+      "provenance": {
+        "source": "tutorial-baseline-reference-replace-before-use",
+        "measurement_id": "tutorial-optical-center-baseline",
+        "uncertainty_notes": "Measure optical-center separation, not camera-body dimensions."
+      }
+    }
+  ]
+}

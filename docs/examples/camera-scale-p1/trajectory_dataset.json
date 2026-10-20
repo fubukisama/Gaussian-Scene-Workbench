@@ -1,0 +1,30 @@
+{
+  "schema": "gsw.trajectory_dataset/1",
+  "trajectory": {
+    "path": "poses.csv",
+    "format": "gsw_pose_csv_v1",
+    "pose_convention": "c2w",
+    "camera_axes": "opencv",
+    "source_unit": "unknown",
+    "quaternion_norm_tolerance": 0.0001
+  },
+  "association": {
+    "mode": "exact",
+    "max_difference_s": "0",
+    "missing": "reject"
+  },
+  "calibration": {
+    "K": [[800.0, 0.0, 630.0], [0.0, 820.0, 470.0], [0.0, 0.0, 1.0]],
+    "width": 1280,
+    "height": 960,
+    "pixel_coordinates": "pixel_border",
+    "projection_model": "PINHOLE",
+    "undistorted": true,
+    "distortion": []
+  },
+  "images": [
+    {"view_id": "train-view-01", "image_path": "train/frame.png", "timestamp_s": "100.000000001", "split": "train", "sensor_id": "single-camera"},
+    {"view_id": "test-view-01", "image_path": "test/frame.png", "timestamp_s": "100.000000002", "split": "test", "sensor_id": "single-camera"}
+  ],
+  "notes": "Synthetic protocol example only. Supply actual images, calibration, units and timestamps; do not infer accuracy from this example."
+}

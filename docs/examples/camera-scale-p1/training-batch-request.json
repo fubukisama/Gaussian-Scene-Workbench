@@ -1,0 +1,30 @@
+{
+  "schema": "gsw.training_batch_plan/1",
+  "datasets": [
+    {
+      "id": "example-capture",
+      "display_name": "通用场景示例",
+      "path": "D:/GSW-Example/Project.files/datasets/scaled-version",
+      "data_identity": "REPLACE_WITH_ADMITTED_DATASET_IDENTITY"
+    }
+  ],
+  "base": {
+    "quality": "quick",
+    "performanceOptions": {
+      "enabled": true,
+      "growth_mode": "pause",
+      "engine": "stock",
+      "loss_mode": "stock"
+    }
+  },
+  "matrix": {
+    "backend": ["3dgs", "2dgs"],
+    "trainingSeed": [17, 23],
+    "repeat": [1, 2],
+    "trainOptions.iterations": [1000],
+    "trainOptions.resolution": [1]
+  },
+  "initialization_policy": "dataset_declared",
+  "evaluation_policy": "declared_splits",
+  "run_policy": {"on_failure": "stop"}
+}

@@ -1,0 +1,44 @@
+{
+  "schema": "gsw.scale_constraints/1",
+  "input_data_identity": "REPLACE_WITH_INSPECTED_INPUT_IDENTITY",
+  "input_frame": "source",
+  "mode": "sim3",
+  "fit_tolerance_m": 0.005,
+  "constraints": [
+    {
+      "id": "fit-origin", "kind": "control", "role": "fit", "reference_id": "reference-origin",
+      "source_xyz": [0.0, 0.0, 0.0], "reference_xyz": [10.0, 20.0, 30.0],
+      "reference_unit": "m", "reference_sigma": 0.002,
+      "provenance": {"source": "generated-tutorial-fit", "measurement_id": "tutorial-origin"}
+    },
+    {
+      "id": "fit-east", "kind": "control", "role": "fit", "reference_id": "reference-east",
+      "source_xyz": [1.0, 0.0, 0.0], "reference_xyz": [10.0, 22.0, 30.0],
+      "reference_unit": "m", "reference_sigma": 0.002,
+      "provenance": {"source": "generated-tutorial-fit", "measurement_id": "tutorial-east"}
+    },
+    {
+      "id": "fit-north", "kind": "control", "role": "fit", "reference_id": "reference-north",
+      "source_xyz": [0.0, 1.0, 0.0], "reference_xyz": [8.0, 20.0, 30.0],
+      "reference_unit": "m", "reference_sigma": 0.002,
+      "provenance": {"source": "generated-tutorial-fit", "measurement_id": "tutorial-north"}
+    },
+    {
+      "id": "fit-up", "kind": "control", "role": "fit", "reference_id": "reference-up",
+      "source_xyz": [0.0, 0.0, 1.0], "reference_xyz": [10.0, 20.0, 32.0],
+      "reference_unit": "m", "reference_sigma": 0.002,
+      "provenance": {"source": "generated-tutorial-fit", "measurement_id": "tutorial-up"}
+    },
+    {
+      "id": "check-spatial-point", "kind": "control", "role": "check", "reference_id": "separate-reference-point",
+      "source_xyz": [1.0, 2.0, 3.0], "reference_xyz": [6.0, 22.0, 36.0],
+      "reference_unit": "m", "reference_sigma": 0.003,
+      "independent_of_fit": true, "tolerance_m": 0.01,
+      "provenance": {
+        "source": "generated-tutorial-check-not-independent-physical-evidence",
+        "measurement_id": "tutorial-check-point",
+        "uncertainty_notes": "This example checks software mathematics only."
+      }
+    }
+  ]
+}

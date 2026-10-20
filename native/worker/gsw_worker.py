@@ -71,6 +71,12 @@ def load_configuration(path, requested_task=None):
     if missing:
         raise ValueError("Missing worker configuration fields: " + ", ".join(missing))
     config["task"] = task
+    if task == "training" and "trainingSeed" in config:
+        try:
+            from native.worker.training_seed import validate_training_seed
+        except ModuleNotFoundError:
+            from training_seed import validate_training_seed
+        config["trainingSeed"] = validate_training_seed(config["trainingSeed"])
     return config
 
 
@@ -1023,6 +1029,9 @@ def run_training(config, resume=False):
     server.TRAIN_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
     native_options = {}
+    if "trainingSeed" in config:
+        from native.worker.training_seed import validate_training_seed
+        native_options["training_seed"] = validate_training_seed(config["trainingSeed"])
     pause_callback = None
     request_path = None
     sys.path.insert(0, str(Path(config["repositoryRoot"]).resolve()))

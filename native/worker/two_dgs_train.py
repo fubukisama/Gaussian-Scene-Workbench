@@ -80,6 +80,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
+    gaussians._gsw_training_seed = getattr(dataset, "training_seed", 0)
     from native.worker.canonical_training import create_canonical_scene
     scene = create_canonical_scene(dataset, gaussians, "2dgs")
     if scene is None:
@@ -428,6 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--camera_manifest", type=str, default=None)
+    parser.add_argument("--training_seed", type=int, default=None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -435,10 +437,14 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
+    from native.worker.training_seed import apply_training_seed, seed_from_environment
+    seed_record = apply_training_seed(seed_from_environment(args.training_seed), torch_module=torch)
+    emit_gsw_event("[gsw-training-seed]", seed_record)
 
     # Start GUI server, configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     dataset = lp.extract(args)
+    dataset.training_seed = seed_record["training_seed"]
     dataset.camera_manifest = args.camera_manifest
     paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
 

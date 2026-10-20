@@ -83,7 +83,8 @@ DatasetImportPlan::create(const DatasetImportRequest &request,
     const QString policy = request.cameraInput.value(QStringLiteral("posePolicy")).toString();
     const QFileInfo source(request.cameraInput.value(QStringLiteral("sourcePath")).toString());
     const QSet<QString> adapters{QStringLiteral("auto"), QStringLiteral("blender_transforms"),
-        QStringLiteral("colmap"), QStringLiteral("generic_json"), QStringLiteral("research_json")};
+        QStringLiteral("colmap"), QStringLiteral("generic_json"), QStringLiteral("research_json"),
+        QStringLiteral("trajectory_dataset")};
     if (!adapters.contains(adapter) || policy != QStringLiteral("locked")) {
       if (errorMessage) *errorMessage = QCoreApplication::translate(
           "Workbench", "已知相机导入需要受支持的适配器和锁定位姿策略；不会回退到 SfM。");

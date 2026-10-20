@@ -39,6 +39,7 @@ private slots:
   void suggestsSceneNamesFromFoldersAndVideos();
   void usesMeaningfulParentForGenericImageFolders();
   void cameraImportKeepsExplicitLockedPolicyWithoutMediaFallback();
+  void trajectoryImportKeepsExplicitLockedPolicy();
   void cameraImportRejectsMissingSourceInsteadOfScanningPhotographs();
   void cameraImportRejectsSolvePolicyAndUnsupportedAdapter();
 };
@@ -419,6 +420,23 @@ void DatasetImportPlanTests::cameraImportRejectsMissingSourceInsteadOfScanningPh
   QString error;
   QVERIFY(!DatasetImportPlan::create(request, &error));
   QVERIFY(!error.isEmpty());
+}
+
+void DatasetImportPlanTests::trajectoryImportKeepsExplicitLockedPolicy() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString source = QDir(temporary.path()).filePath(QStringLiteral("trajectory_dataset.json"));
+  QVERIFY(writeBytes(source, QByteArrayLiteral("{\"schema\":\"gsw.trajectory_dataset/1\"}")));
+  DatasetImportRequest request;
+  request.sceneName = QStringLiteral("trajectory");
+  request.cameraInput = {{QStringLiteral("adapter"), QStringLiteral("trajectory_dataset")},
+                        {QStringLiteral("sourcePath"), source},
+                        {QStringLiteral("posePolicy"), QStringLiteral("locked")}};
+  QString error;
+  const auto plan = DatasetImportPlan::create(request, &error);
+  QVERIFY2(plan.has_value(), qPrintable(error));
+  QVERIFY(plan->hasCameraInput());
+  QCOMPARE(plan->videoCount(), 0);
 }
 
 void DatasetImportPlanTests::cameraImportRejectsSolvePolicyAndUnsupportedAdapter() {

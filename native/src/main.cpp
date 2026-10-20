@@ -22,6 +22,9 @@
 #include "WorkspaceDropSmokeTest.h"
 #include "QualityComparisonSmokeTest.h"
 #include "QualityMeasurementSmokeTest.h"
+#include "ScaleConstraintsSmokeTest.h"
+#include "TrainingBatchSmokeTest.h"
+#include "TrainingBatchLifecycleSmokeTest.h"
 #include "GenerationHistorySmokeTest.h"
 #include "BackendLocator.h"
 #include "ProcessingCompletionSmokeTest.h"
@@ -353,6 +356,15 @@ int main(int argc, char *argv[]) {
   QCommandLineOption qualityComparisonOption(QStringLiteral("smoke-test-quality-comparison"),
       QStringLiteral("Verify adjustable quality contracts using a real dialog and an owned comparison process."));
   parser.addOption(qualityComparisonOption);
+  QCommandLineOption scaleConstraintsOption(QStringLiteral("smoke-test-scale-constraints"),
+      QStringLiteral("Verify scale constraints, separate independent checks and immutable versions in a real native form."));
+  parser.addOption(scaleConstraintsOption);
+  QCommandLineOption trainingBatchOption(QStringLiteral("smoke-test-training-batch"),
+      QStringLiteral("Verify pinned batch planning, persistent history and explicit serial execution controls."));
+  parser.addOption(trainingBatchOption);
+  QCommandLineOption trainingBatchLifecycleOption(QStringLiteral("smoke-test-training-batch-lifecycle"),
+      QStringLiteral("Verify batch task lifecycle, scene preservation and checkpoint isolation with owned CPU workers."));
+  parser.addOption(trainingBatchLifecycleOption);
   QCommandLineOption qualityMeasurementOption(QStringLiteral("smoke-test-quality-measurement"),
       QStringLiteral("Verify paired image measurements and explicit report selection using an owned CPU helper."));
   parser.addOption(qualityMeasurementOption);
@@ -445,6 +457,9 @@ int main(int argc, char *argv[]) {
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
+                         parser.isSet(scaleConstraintsOption) ||
+                         parser.isSet(trainingBatchOption) ||
+                         parser.isSet(trainingBatchLifecycleOption) ||
                          parser.isSet(qualityMeasurementOption) ||
                          parser.isSet(gaussianPerformanceOption) ||
                          parser.isSet(meshRenderingOption) ||
@@ -628,6 +643,21 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runProcessingPreviewSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingBatchLifecycleOption)) {
+    QTimer::singleShot(0, &application, [&]() {
+      smokeTestCompleted = gsw::runTrainingBatchLifecycleSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(trainingBatchOption)) {
+    QTimer::singleShot(0, &application, [&]() {
+      smokeTestCompleted = gsw::runTrainingBatchSmokeTest();
+      application.exit(smokeTestCompleted ? 0 : 1);
+    });
+  } else if (parser.isSet(scaleConstraintsOption)) {
+    QTimer::singleShot(0, &application, [&] {
+      smokeTestCompleted = gsw::runScaleConstraintsSmokeTest();
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(qualityMeasurementOption)) {

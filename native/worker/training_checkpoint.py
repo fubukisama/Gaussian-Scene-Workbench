@@ -14,6 +14,8 @@ import copy
 import re
 import uuid
 
+from native.backend.atomic_file import atomic_sibling
+
 PAUSED_EXIT_CODE = 75
 CONTROL_ENV = "GSW_NATIVE_TRAINING_CONTROL"
 CHECKPOINT_NAME = re.compile(r"^state-[0-9a-f]{32}\.pth$")
@@ -22,16 +24,12 @@ CHECKPOINT_NAME = re.compile(r"^state-[0-9a-f]{32}\.pth$")
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
+    with atomic_sibling(path) as (temporary, stream):
+        json.dump(value, stream, ensure_ascii=False, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+        stream.close()
         os.replace(str(temporary), str(path))
-    finally:
-        if temporary.exists():
-            temporary.unlink()
 
 
 def file_digest(path, text_source=False):
@@ -91,6 +89,8 @@ def training_identity(dataset, opt, pipe):
         settings["native_density_source"] = file_digest(Path(__file__).with_name("training_density_control.py"), text_source=True)
         settings["native_camera_training_source"] = file_digest(Path(__file__).with_name("canonical_training.py"), text_source=True)
         settings["native_camera_dataset_source"] = file_digest(Path(__file__).parents[1] / "backend" / "camera_dataset.py", text_source=True)
+    if hasattr(dataset, "training_seed"):
+        settings["native_training_seed_source"] = file_digest(Path(__file__).with_name("training_seed.py"), text_source=True)
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -106,6 +106,7 @@ def capture_state(torch, numpy, gaussians, iteration, total, identity,
         "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
         "camera_names": camera_names, "pending_indices": list(pending_indices),
         "elapsed": elapsed, "ema_loss": ema_loss, "ema_depth": ema_depth,
+        "training_seed": getattr(gaussians, "_gsw_training_seed", 0),
     }
     if getattr(gaussians, "_gsw_camera_contract", None) is not None:
         state["camera_contract"] = copy.deepcopy(gaussians._gsw_camera_contract)
@@ -120,6 +121,8 @@ def capture_state(torch, numpy, gaussians, iteration, total, identity,
 
 
 def restore_state(torch, numpy, gaussians, opt, state, identity, camera_names, backend="3dgs"):
+    if state.get("training_seed", 0) != getattr(gaussians, "_gsw_training_seed", 0):
+        raise ValueError("Training seed changed; cannot resume this checkpoint")
     if state.get("camera_contract") != getattr(gaussians, "_gsw_camera_contract", None):
         raise ValueError("Camera/scale contract changed; cannot resume this checkpoint")
     if (state.get("version") != 1 or state.get("identity") != identity or
@@ -179,7 +182,8 @@ class TrainingCheckpoint:
             manifest = {"version": 1, "file": path.name, "iteration": state["iteration"],
                         "backend": state.get("backend", "3dgs"),
                         "total": state["total"], "identity": state["identity"],
-                        "sha256": file_digest(path), "session": self.control["session"]}
+                        "sha256": file_digest(path), "session": self.control["session"],
+                        "training_seed": state.get("training_seed", 0)}
             if "camera_contract" in state:
                 manifest["camera_contract"] = copy.deepcopy(state["camera_contract"])
             if "performance" in state:
@@ -204,11 +208,14 @@ class TrainingCheckpoint:
         if (manifest.get("identity") != identity or
                 manifest.get("backend", "3dgs") != self.control.get("backend", "3dgs")):
             raise ValueError("Training inputs/settings changed; checkpoint was not loaded")
+        if manifest.get("training_seed", 0) != self.control.get("training_seed", 0):
+            raise ValueError("Training seed changed; checkpoint was not loaded")
         # Only called by the explicit, trust-confirmed native Resume action.
         state = torch.load(str(path))
         if (state.get("backend", "3dgs") != manifest.get("backend", "3dgs") or
                 state.get("iteration") != manifest["iteration"] or
-                state.get("total") != manifest["total"]):
+                state.get("total") != manifest["total"] or
+                state.get("training_seed", 0) != manifest.get("training_seed", 0)):
             raise ValueError("Checkpoint payload and manifest disagree")
         if state.get("camera_contract") != manifest.get("camera_contract"):
             raise ValueError("Checkpoint camera/scale contract and manifest disagree")

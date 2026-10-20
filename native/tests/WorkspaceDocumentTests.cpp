@@ -20,12 +20,17 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
 #include <bit>
 #include <cmath>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 class WorkspaceDocumentTests final : public QObject {
   Q_OBJECT
@@ -49,6 +54,7 @@ private slots:
   void loadsBinaryBigEndianMesh();
   void loadsOversizedAsciiMeshIntoDiskCache();
   void preservesResidentMeshUvSeams();
+  void loadsModelScaleVersionWithElementLocalTextureAndRewrittenUnits();
   void buildsPagesAndInvalidatesDiskResidentMesh();
   void loadsConfiguredRealMeshFixture();
   void loadsConfiguredRealCoordinateFixture();
@@ -79,6 +85,10 @@ private slots:
   void savesAndLoadsPortableProject();
   void persistsCanonicalCameraIdentityAndUnitsAcrossSaveAs();
   void countsOnlyCanonicalViewsAndRejectsChangedSummaryIdentity();
+  void registersPortableWorkflowArtifactsWithoutChangingSceneOrStartingWork();
+  void persistsWorkflowArtifactsAcrossRecoveryMigrationAndSaveAs();
+  void rejectsUnsafeWorkflowArtifactsAndRetainsMissingReferences();
+  void refusesWorkflowJunctionsWithoutFollowingExternalPayloads();
   void rejectsCanonicalMeshBackendsBeforeChangingTheScene();
   void saveAsCopiesManagedDataIntoANewLinkedDirectory();
   void firstSaveKeepsExternalDatasetAsALink();
@@ -2957,6 +2967,257 @@ void WorkspaceDocumentTests::rejectsCanonicalMeshBackendsBeforeChangingTheScene(
   QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
   QVERIFY(write(sidecar, "not JSON"));
   QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
+}
+
+void WorkspaceDocumentTests::registersPortableWorkflowArtifactsWithoutChangingSceneOrStartingWork() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath(QStringLiteral("working"));
+  const QString artifact = QDir(working).filePath(QStringLiteral(".gsw/scale-versions/v1"));
+  QVERIFY(QDir().mkpath(artifact));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(working, QStringLiteral("Workflow registry"), &error), qPrintable(error));
+  const auto originalScenes = document.sceneCollectionJson();
+  QVERIFY2(document.addWorkflowArtifact(QStringLiteral("scale_version"), artifact, &error), qPrintable(error));
+  QCOMPARE(document.workflowArtifacts().size(), 1);
+  const auto record = document.workflowArtifacts().first().toObject();
+  QCOMPARE(record.value(QStringLiteral("kind")).toString(), QStringLiteral("scale_version"));
+  QCOMPARE(record.value(QStringLiteral("path")).toString(), QStringLiteral(".gsw/scale-versions/v1"));
+  QVERIFY(record.value(QStringLiteral("available")).toBool());
+  QCOMPARE(record.value(QStringLiteral("status")).toString(), QStringLiteral("available"));
+  QCOMPARE(document.sceneCollectionJson(), originalScenes);
+  QSignalSpy changed(&document, &gsw::WorkspaceDocument::changed);
+  QVERIFY2(document.addWorkflowArtifact(QStringLiteral("scale_version"), artifact, &error), qPrintable(error));
+  QCOMPARE(document.workflowArtifacts().size(), 1);
+  QCOMPARE(changed.count(), 0);
+}
+
+void WorkspaceDocumentTests::persistsWorkflowArtifactsAcrossRecoveryMigrationAndSaveAs() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  const QString working = root.filePath(QStringLiteral("working"));
+  const QString scaleRelative = QStringLiteral(".gsw/scale-versions/v1");
+  const QString batchRelative = QStringLiteral(".gsw/training-batches/b1");
+  QVERIFY(QDir().mkpath(QDir(working).filePath(scaleRelative)));
+  QVERIFY(QDir().mkpath(QDir(working).filePath(batchRelative)));
+  const QMap<QString, QByteArray> records{
+      {scaleRelative + QStringLiteral("/request.json"), "{\"reference_sigma\":0.002}"},
+      {scaleRelative + QStringLiteral("/solution.json"), "{\"s\":2.5,\"independent_checks\":\"pass\"}"},
+      {scaleRelative + QStringLiteral("/report.json"), "{\"model_geometry_accuracy\":\"not_measured\"}"},
+      {batchRelative + QStringLiteral("/plan.json"), "{\"trainingSeed\":17}"},
+      {batchRelative + QStringLiteral("/state.json"), "{\"status\":\"paused\"}"}};
+  for (auto iterator = records.cbegin(); iterator != records.cend(); ++iterator) {
+    QFile file(QDir(working).filePath(iterator.key()));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(iterator.value()), qint64(iterator.value().size()));
+  }
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.createUntitled(working, QStringLiteral("registry"), &error));
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("scale_version"), QDir(working).filePath(scaleRelative), &error));
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("training_batch"), QDir(working).filePath(batchRelative), &error));
+  const auto expected = document.workflowArtifacts();
+  const auto recovery = QJsonDocument::fromJson(document.recoveryManifestJson()).object();
+  QCOMPARE(recovery.value(QStringLiteral("workflowArtifacts")).toArray().size(), 2);
+  for (const auto &value : recovery.value(QStringLiteral("workflowArtifacts")).toArray())
+    QVERIFY(!QDir::isAbsolutePath(value.toObject().value(QStringLiteral("path")).toString()));
+  const auto saved = root.filePath(QStringLiteral("saved.gsw.json"));
+  QVERIFY2(document.saveManifest(saved, &error), qPrintable(error));
+  QVERIFY2(document.finalizeDataMigration(&error), qPrintable(error));
+  QCOMPARE(document.workflowArtifacts(), expected);
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(saved, &error), qPrintable(error));
+  QCOMPARE(reopened.workflowArtifacts(), expected);
+  const auto copied = root.filePath(QStringLiteral("copied.gsw.json"));
+  QVERIFY2(reopened.save(copied, &error), qPrintable(error));
+  gsw::WorkspaceDocument copiedDocument;
+  QVERIFY2(copiedDocument.load(copied, &error), qPrintable(error));
+  QCOMPARE(copiedDocument.workflowArtifacts(), expected);
+  for (auto iterator = records.cbegin(); iterator != records.cend(); ++iterator) {
+    QFile source(QDir(working).filePath(iterator.key()));
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256),
+             QCryptographicHash::hash(iterator.value(), QCryptographicHash::Sha256));
+    QFile output(QDir(copiedDocument.rootPath()).filePath(iterator.key()));
+    QVERIFY(output.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(output.readAll(), QCryptographicHash::Sha256),
+             QCryptographicHash::hash(iterator.value(), QCryptographicHash::Sha256));
+  }
+}
+
+void WorkspaceDocumentTests::rejectsUnsafeWorkflowArtifactsAndRetainsMissingReferences() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  const auto working = root.filePath(QStringLiteral("working"));
+  const auto outside = root.filePath(QStringLiteral("working-elsewhere"));
+  const auto artifact = QDir(working).filePath(QStringLiteral(".gsw/scale-versions/v1"));
+  QVERIFY(QDir().mkpath(artifact));
+  QVERIFY(QDir().mkpath(outside));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.createUntitled(working, QStringLiteral("registry"), &error));
+  QVERIFY(!document.addWorkflowArtifact(QStringLiteral("scale_version"), outside, &error));
+  QVERIFY(!document.addWorkflowArtifact(QStringLiteral("unknown_kind"), artifact, &error));
+  QVERIFY(!document.addWorkflowArtifact(QStringLiteral("scale_version"), working, &error));
+  QVERIFY(!document.addWorkflowArtifact(QStringLiteral("scale_version"), QDir(working).filePath(QStringLiteral("missing")), &error));
+  QVERIFY(document.workflowArtifacts().isEmpty());
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("scale_version"), artifact, &error));
+  const auto saved = root.filePath(QStringLiteral("registry.gsw.json"));
+  QVERIFY(document.saveManifest(saved, &error));
+  QVERIFY(QDir().rename(artifact, artifact + QStringLiteral("-removed")));
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(saved, &error), qPrintable(error));
+  QCOMPARE(reopened.workflowArtifacts().size(), 1);
+  QVERIFY(!reopened.workflowArtifacts().first().toObject().value(QStringLiteral("available")).toBool());
+  QCOMPARE(reopened.workflowArtifacts().first().toObject().value(QStringLiteral("status")).toString(), QStringLiteral("missing"));
+  const auto previous = reopened.workflowArtifacts();
+  QFile input(saved);
+  QVERIFY(input.open(QIODevice::ReadOnly));
+  auto malformed = QJsonDocument::fromJson(input.readAll()).object();
+  input.close();
+  malformed.insert(QStringLiteral("workflowArtifacts"), QJsonArray{QJsonObject{
+      {QStringLiteral("kind"), QStringLiteral("scale_version")}, {QStringLiteral("path"), QStringLiteral("../working-elsewhere")}}});
+  const auto badPath = root.filePath(QStringLiteral("malformed.gsw.json"));
+  QVERIFY(writeJson(badPath, QJsonDocument(malformed)));
+  QVERIFY(!reopened.load(badPath, &error));
+  QCOMPARE(reopened.workflowArtifacts(), previous);
+  QCOMPARE(reopened.projectFilePath(), saved);
+  QVERIFY(reopened.createUntitled(outside, QStringLiteral("new project"), &error));
+  QVERIFY(reopened.workflowArtifacts().isEmpty());
+}
+
+void WorkspaceDocumentTests::refusesWorkflowJunctionsWithoutFollowingExternalPayloads() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  const auto working = root.filePath(QStringLiteral("working"));
+  const auto real = QDir(working).filePath(QStringLiteral("real"));
+  const auto outside = root.filePath(QStringLiteral("outside"));
+  const auto alias = QDir(working).filePath(QStringLiteral("alias"));
+  QVERIFY(QDir().mkpath(QDir(real).filePath(QStringLiteral("v1"))));
+  QVERIFY(QDir().mkpath(QDir(outside).filePath(QStringLiteral("v1"))));
+  const auto linkDirectory = [](const QString &target, const QString &link) {
+#ifdef Q_OS_WIN
+    QString escapedTarget = target, escapedLink = link;
+    escapedTarget.replace(QLatin1Char('\''), QStringLiteral("''"));
+    escapedLink.replace(QLatin1Char('\''), QStringLiteral("''"));
+    QProcess process;
+    process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *arguments) {
+      arguments->flags |= CREATE_NO_WINDOW;
+      arguments->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+      arguments->startupInfo->wShowWindow = SW_HIDE;
+    });
+    process.start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoLogo"), QStringLiteral("-NoProfile"),
+        QStringLiteral("-NonInteractive"), QStringLiteral("-Command"),
+        QStringLiteral("$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path '%1' -Target '%2' | Out-Null")
+            .arg(escapedLink, escapedTarget)});
+    return process.waitForStarted(10000) && process.waitForFinished(30000) && process.exitCode() == 0;
+#else
+    return QFile::link(target, link);
+#endif
+  };
+  QVERIFY(linkDirectory(real, alias));
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.createUntitled(working, QStringLiteral("registry"), &error));
+  QVERIFY(!document.addWorkflowArtifact(QStringLiteral("scale_version"), QDir(alias).filePath(QStringLiteral("v1")), &error));
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("scale_version"), QDir(real).filePath(QStringLiteral("v1")), &error));
+  QVERIFY(QDir().rename(real, real + QStringLiteral("-old")));
+  QVERIFY(linkDirectory(outside, real));
+  QCOMPARE(document.workflowArtifacts().first().toObject().value(QStringLiteral("status")).toString(), QStringLiteral("unsafe"));
+  QVERIFY(!document.workflowArtifacts().first().toObject().value(QStringLiteral("available")).toBool());
+  QVERIFY(!document.save(root.filePath(QStringLiteral("blocked.gsw.json")), &error));
+  QVERIFY(QFileInfo(QDir(outside).filePath(QStringLiteral("v1"))).isDir());
+}
+
+void WorkspaceDocumentTests::loadsModelScaleVersionWithElementLocalTextureAndRewrittenUnits() {
+  QString python = qEnvironmentVariable("GSW_QUALITY_TEST_PYTHON");
+  if (python.isEmpty()) python = qEnvironmentVariable("TEST_PYTHON");
+  QVERIFY2(QFileInfo(python).isFile(), "Required model-scale CPU acceptance needs GSW_QUALITY_TEST_PYTHON or TEST_PYTHON; it is not an optional skipped case.");
+  QString repository = qEnvironmentVariable("GSW_BACKEND_ROOT");
+  if (repository.isEmpty()) {
+    QDir candidate(QDir::currentPath());
+    for (int level = 0; level < 8; ++level) {
+      if (QFileInfo(candidate.filePath(QStringLiteral("native/backend/model_scale_version.py"))).isFile()) { repository = candidate.path(); break; }
+      if (!candidate.cdUp()) break;
+    }
+  }
+  QVERIFY2(QFileInfo(QDir(repository).filePath(QStringLiteral("native/backend/model_scale_version.py"))).isFile(), "Actual shared model-scale backend must be available.");
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QDir root(directory.path());
+  QVERIFY(root.mkpath(QStringLiteral("nested")));
+  const QString texturePath = root.filePath(QStringLiteral("nested/source texture.png"));
+  QImage texture(3, 2, QImage::Format_RGB32); texture.fill(QColor(120, 60, 30));
+  QVERIFY(texture.save(texturePath, "PNG"));
+  QFile imageInput(texturePath); QVERIFY(imageInput.open(QIODevice::ReadOnly));
+  const QByteArray imageBytes = imageInput.readAll(); imageInput.close();
+  const QString source = root.filePath(QStringLiteral("source.ply"));
+  const QByteArray sourceBytes(
+      "ply\nformat ascii 1.0\ncomment keep global note\ncomment units=mm\n"
+      "element vertex 3\ncomment TextureFile \"nested/source texture.png\"\ncomment coordinate_unit=cm\ncomment crs EPSG:32654\n"
+      "property double x\nproperty double y\nproperty double z\n"
+      "element face 1\ncomment TextureFile \"nested/source texture.png\"\ncomment unit:mm\ncomment keep face note\n"
+      "property list uchar int vertex_indices\nproperty list uchar float texcoord\nend_header\n"
+      "0 0 0\n2 0 0\n0 1 0\n3 0 1 2 6 0 0 1 0 0 1\n");
+  QFile input(source); QVERIFY(input.open(QIODevice::WriteOnly)); QCOMPARE(input.write(sourceBytes), sourceBytes.size()); input.close();
+  QProcess creator;
+#ifdef Q_OS_WIN
+  creator.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+    args->flags |= CREATE_NO_WINDOW; args->startupInfo->dwFlags |= STARTF_USESHOWWINDOW; args->startupInfo->wShowWindow = SW_HIDE;
+  });
+#endif
+  const auto script = QString::fromUtf8(
+      "import json,sys;sys.path.insert(0,sys.argv[1]);from native.backend.model_scale_version import inspect_model_scale_input,create_scaled_model_version;"
+      "e=inspect_model_scale_input(sys.argv[2]);r={'schema':'gsw.scale_constraints/1','input_data_identity':e['data_identity'],'input_frame':'source','mode':'scale_only','fit_tolerance_m':1e-8,"
+      "'constraints':[{'id':'length','kind':'distance','role':'fit','reference_id':'generated-ruler','reference_unit':'m','source_a':[0,0,0],'source_b':[2,0,0],'reference_distance':6}]};"
+      "o=create_scaled_model_version(sys.argv[2],r,sys.argv[3],e['data_identity']);print(json.dumps({'modelPath':o['modelPath']}))");
+  auto environment = QProcessEnvironment::systemEnvironment();
+  environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+  environment.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
+  environment.insert(QStringLiteral("TEMP"), directory.path()); environment.insert(QStringLiteral("TMP"), directory.path());
+  creator.setProcessEnvironment(environment); creator.setWorkingDirectory(repository);
+  creator.start(python, {QStringLiteral("-B"), QStringLiteral("-c"), script, repository, source, root.filePath(QStringLiteral("new-version"))});
+  QVERIFY2(creator.waitForFinished(30000) && creator.exitCode() == 0, creator.readAllStandardError().constData());
+  const QString output = QJsonDocument::fromJson(creator.readAllStandardOutput()).object().value(QStringLiteral("modelPath")).toString();
+  QVERIFY(QFileInfo(output).isFile());
+  const auto loaded = gsw::PlyPointCloudLoader::load(output);
+  QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+  QVERIFY(loaded.hasMesh());
+  QVERIFY(loaded.meshHasTextureCoordinates);
+  QVERIFY2(loaded.meshTextureError.isEmpty(), qPrintable(loaded.meshTextureError));
+  QVERIFY(QFileInfo(loaded.meshTexturePath).isFile());
+  QVERIFY(QDir(QFileInfo(output).absolutePath()).relativeFilePath(loaded.meshTexturePath).startsWith(QStringLiteral("assets/")));
+  QFile ownedTexture(loaded.meshTexturePath); QVERIFY(ownedTexture.open(QIODevice::ReadOnly));
+  QCOMPARE(QCryptographicHash::hash(ownedTexture.readAll(), QCryptographicHash::Sha256), QCryptographicHash::hash(imageBytes, QCryptographicHash::Sha256)); ownedTexture.close();
+  QCOMPARE(loaded.meshTextureImage.size(), QSize(3, 2));
+  // The loader consumes its temporary per-corner array into render vertices.
+  // Assert the actual public geometry the viewport draws, for either residency.
+  auto vertices = loaded.meshVertices;
+  auto indices = loaded.meshIndices;
+  if (loaded.meshCache.isValid()) {
+    const auto page = gsw::MeshCache::readNode(loaded.meshCache, loaded.meshCache.rootNode);
+    QVERIFY2(page.isValid(), qPrintable(page.error));
+    vertices = page.vertices;
+    indices = page.indices;
+  }
+  QCOMPARE(indices.size(), 3);
+  const std::array<QVector2D, 3> expectedUv{{{0, 0}, {1, 0}, {0, 1}}};
+  for (int corner = 0; corner < 3; ++corner) {
+    QVERIFY(indices[corner] < static_cast<quint32>(vertices.size()));
+    const auto &vertex = vertices[indices[corner]];
+    QCOMPARE(QVector2D(vertex.textureU, vertex.textureV), expectedUv[corner]);
+    QVERIFY(vertex.textureWeight > 0.5F);
+  }
+  QCOMPARE(loaded.sourceFaceCount, qint64(1));
+  QVERIFY(loaded.coordinates.metersPerCoordinate.has_value());
+  QCOMPARE(*loaded.coordinates.metersPerCoordinate, 1.);
+  QVERIFY(loaded.coordinates.coordinateReferenceSystem.isEmpty());
+  QCOMPARE(loaded.coordinates.provenance.value(QStringLiteral("input_declared_crs")).toString(), QStringLiteral("EPSG:32654"));
+  QFile original(source); QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(), sourceBytes);
 }
 
 QTEST_GUILESS_MAIN(WorkspaceDocumentTests)

@@ -12,6 +12,8 @@ public:
   [[nodiscard]] static QString summaryText(const QJsonObject &summary);
   [[nodiscard]] static QString decisionText(const QJsonObject &summary);
   [[nodiscard]] static bool blocked(const QJsonObject &summary);
+  // Localized guidance plus unchanged original technical diagnostics.
+  [[nodiscard]] static QString importErrorText(const QString &rawError);
   // Capability admission for external mesh backends. Reads only reserved
   // training-contract markers of the explicitly selected output/checkpoint.
   [[nodiscard]] static bool meshGenerationBlocked(const QJsonObject &configuration);

@@ -303,7 +303,8 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
       {QStringLiteral("blender_transforms"), AppLanguage::source("Blender transforms 相机")},
       {QStringLiteral("colmap"), AppLanguage::source("COLMAP text / bin 相机")},
       {QStringLiteral("generic_json"), AppLanguage::source("GSW 通用相机 JSON")},
-      {QStringLiteral("research_json"), AppLanguage::source("研究 JSON 适配器")}};
+      {QStringLiteral("research_json"), AppLanguage::source("研究 JSON 适配器")},
+      {QStringLiteral("trajectory_dataset"), AppLanguage::source("轨迹与相机清单（TUM / CSV / JSON）")}};
   for (const auto &adapter : adapters) {
     mCameraAdapter->addItem(QString(), adapter.first);
     AppLanguage::bindComboItem(mCameraAdapter, mCameraAdapter->count() - 1, adapter.second);

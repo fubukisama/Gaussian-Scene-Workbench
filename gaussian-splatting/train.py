@@ -82,6 +82,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         native_runtime = NativeTrainingRuntime(json.loads(control_json), torch, emit_gsw_event, "3dgs")
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
+    gaussians._gsw_training_seed = getattr(dataset, "training_seed", 0)
     scene = Scene(dataset, gaussians, load_iteration=load_iteration)
     if native_runtime:
         native_runtime.report_images(scene.getTrainCameras())
@@ -537,6 +538,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--load_iteration", type=int, default=None)
+    parser.add_argument("--training_seed", type=int, default=None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -544,12 +546,20 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
+    _repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if _repository_root not in sys.path:
+        sys.path.insert(0, _repository_root)
+    from native.worker.training_seed import apply_training_seed, seed_from_environment
+    seed_record = apply_training_seed(seed_from_environment(args.training_seed), torch_module=torch)
+    dataset = lp.extract(args)
+    dataset.training_seed = seed_record["training_seed"]
+    emit_gsw_event("[gsw-training-seed]", seed_record)
 
     # Start GUI server, configure and run training
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    paused = training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
+    paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
     if paused:
         print("\nTraining paused; native optimizer checkpoint saved.")
         sys.exit(75)

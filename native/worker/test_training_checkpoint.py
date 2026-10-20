@@ -43,6 +43,53 @@ class PickleStore:
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_atomic_json_retries_exclusive_uuid_collision_without_overwriting_foreign_file(self):
+        target = self.root / "ready.json"
+        target.write_bytes(b"old target")
+        # Cover both the old fixed-prefix spelling and the length-bounded
+        # spelling: neither existing file belongs to the publishing operation.
+        foreign = [self.root / (".gsw-" + "a" * 32 + ".tmp"), self.root / ("a" * len(target.name))]
+        for path in foreign:
+            path.write_bytes(b"foreign file")
+        with mock.patch.object(checkpoint.uuid, "uuid4", side_effect=[SimpleNamespace(hex="a" * 32),
+                                                                    SimpleNamespace(hex="b" * 32)]):
+            checkpoint.atomic_json(target, {"retained": "new"})
+        self.assertEqual(json.loads(target.read_text()), {"retained": "new"})
+        for path in foreign:
+            self.assertEqual(path.read_bytes(), b"foreign file")
+        self.assertEqual(set(self.root.iterdir()), {target, *foreign})
+
+    def test_atomic_ready_json_succeeds_with_223_character_parent_and_no_temporary_leak(self):
+        root = self.root
+        while len(str(root)) < 223:
+            root = root / ("r" * min(40, max(1, 222 - len(str(root)))))
+        root.mkdir(parents=True)
+        target = root / "ready.json"
+        self.assertLess(len(str(target)), 260)
+        checkpoint.atomic_json(target, {"retained": "first"})
+        checkpoint.atomic_json(target, {"retained": "second"})
+        self.assertEqual(json.loads(target.read_text()), {"retained": "second"})
+        self.assertEqual(list(root.iterdir()), [target])
+
+    def test_atomic_json_does_not_extend_a_legal_target_filename_with_a_long_uuid_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            while len(str(root)) < 200:
+                root = root / ("owned-" + "a" * 24)
+            root.mkdir(parents=True)
+            target = root / "point_cloud.camera-scale.json"
+            observed = []
+            original_replace = checkpoint.os.replace
+            def record_replace(source, destination):
+                observed.append(Path(source).name)
+                return original_replace(source, destination)
+            with mock.patch.object(checkpoint.os, "replace", side_effect=record_replace):
+                checkpoint.atomic_json(target, {"scale": "retained"})
+            self.assertEqual(json.loads(target.read_text()), {"scale": "retained"})
+            self.assertTrue(observed)
+            self.assertLessEqual(len(observed[0]), 48)
+            self.assertEqual(list(root.iterdir()), [target])
+
     def test_density_policy_source_change_invalidates_resume_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             dataset = SimpleNamespace(source_path=temporary, model_path="ignored", sh_degree=3)

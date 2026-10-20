@@ -68,10 +68,18 @@ function Copy-FilteredTree {
 }
 
 $StaticFiles = @(
+  @{ Source = "native\backend\atomic_file.py"; Destination = "native\backend\atomic_file.py" },
   @{ Source = "native\backend\camera_dataset.py"; Destination = "native\backend\camera_dataset.py" },
   @{ Source = "native\backend\camera_admission.py"; Destination = "native\backend\camera_admission.py" },
   @{ Source = "native\backend\camera_scale_export.py"; Destination = "native\backend\camera_scale_export.py" },
+  @{ Source = "native\backend\scale_constraints.py"; Destination = "native\backend\scale_constraints.py" },
+  @{ Source = "native\backend\model_scale_version.py"; Destination = "native\backend\model_scale_version.py" },
+  @{ Source = "native\backend\trajectory_dataset.py"; Destination = "native\backend\trajectory_dataset.py" },
+  @{ Source = "native\backend\training_batch_plan.py"; Destination = "native\backend\training_batch_plan.py" },
   @{ Source = "native\worker\camera_import.py"; Destination = "native\worker\camera_import.py" },
+  @{ Source = "native\worker\scale_constraints.py"; Destination = "native\worker\scale_constraints.py" },
+  @{ Source = "native\worker\training_seed.py"; Destination = "native\worker\training_seed.py" },
+  @{ Source = "native\worker\training_batch.py"; Destination = "native\worker\training_batch.py" },
   @{ Source = "native\worker\canonical_training.py"; Destination = "native\worker\canonical_training.py" },
   @{ Source = "native\worker\camera_rasterizer_runtime.py"; Destination = "native\worker\camera_rasterizer_runtime.py" },
   @{ Source = "native\worker\gsw_worker.py"; Destination = "native\worker\gsw_worker.py" },
@@ -142,8 +150,16 @@ $Manifest = [ordered]@{
   purpose = "Native compute backend"
   runtime = "External Python/Conda environment required"
   components = @(
+    "native/backend/atomic_file.py",
     "native/backend/camera_dataset.py",
     "native/backend/camera_admission.py",
+    "native/backend/scale_constraints.py",
+    "native/backend/model_scale_version.py",
+    "native/backend/trajectory_dataset.py",
+    "native/backend/training_batch_plan.py",
+    "native/worker/scale_constraints.py",
+    "native/worker/training_seed.py",
+    "native/worker/training_batch.py",
     "native/backend/camera_scale_export.py",
     "native/worker/camera_import.py",
     "native/worker/canonical_training.py",

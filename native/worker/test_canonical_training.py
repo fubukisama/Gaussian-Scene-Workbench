@@ -83,6 +83,24 @@ class CanonicalPreparationTests(unittest.TestCase):
         manifest.write_text(json.dumps(data), encoding="utf-8")
         return manifest
 
+    def test_preparation_publishes_legal_long_output_without_longer_initialization_temp_path(self):
+        base = Path(os.environ.get("GSW_CAMERA_P1_TEST_ROOT", tempfile.gettempdir())) / "gsw-canonical-long-path"
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            self.fixture(source)
+            output = Path(temporary) / "prepared"
+            while len(str(output)) < 223:
+                output = output / ("p" * min(40, max(1, 222 - len(str(output)))))
+            self.assertLess(len(str(output / "training-initialization.npz")), 260)
+            result = training.prepare_training_dataset(source, output)
+            loaded = training.load_prepared_training_dataset(result["manifestPath"], source)
+            self.assertEqual(loaded["transforms"], result["contract"]["transforms"])
+            self.assertEqual(loaded["splits"], result["contract"]["splits"])
+            self.assertEqual({path.name for path in output.iterdir()}, {
+                "training-initialization.npz", "training-camera-dataset.json", "training-camera-contract.json"})
+
     def test_explicit_holdouts_are_never_folded_into_training_and_default_keeps_pixels(self):
         base = Path("D:/Codex/qa-camera-p0")
         base.mkdir(parents=True, exist_ok=True)

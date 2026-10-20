@@ -2,7 +2,7 @@
 
 The default `main` branch is the native desktop source. `native/` contains the Qt 6/C++ desktop and its supervised Python compute backend. The retired web/Electron implementation has been removed from this branch. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime. Shared workflow code lives in `native/backend/compute.py`; see [migration and compatibility](../docs/NATIVE_MIGRATION.md).
 
-Documentation updated: `2026-10-19`. Product version remains `0.3.1-native-preview`; this documentation date does not change the build manifest's release date.
+Documentation updated: `2026-10-20`. Product version is `0.3.3-native-preview`; the build manifest records the release date. See [camera/scale P1](../docs/CAMERA_SCALE_P1.md) for constraints, separate reference checks, trajectory association, controlled batches and acceptance boundaries.
 
 ## Current preview
 

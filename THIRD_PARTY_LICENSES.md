@@ -218,6 +218,16 @@ Do not assume the full repository or every bundled component is available for co
 
 ## Included License Files
 
+The three-pose format fixture under `native/backend/tests/fixtures/tum-fr1-xyz-first3/`
+is an attributed excerpt of the TUM RGB-D benchmark's `rgbd_dataset_freiburg1_xyz`
+ground-truth trajectory, distributed by the publisher under CC BY 4.0. See that
+directory's `SOURCE.md` for the official source, attribution, exact excerpt and
+hashes. It is format-test data, not a model-accuracy benchmark. The original
+data license is retained; it is not presented as newly authored GPL code.
+
+- [TUM RGB-D dataset and license](https://cvg.cit.tum.de/data/datasets/rgbd-dataset)
+- [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
 - `LICENSE`
 - `COPYING`
 - `native/LICENSE.md`

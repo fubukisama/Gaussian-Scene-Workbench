@@ -1,0 +1,108 @@
+{
+  "schema": "gsw.p1-synthetic-training-evidence/1",
+  "date": "2026-10-20",
+  "sourceHashMode": "text-lf-v1",
+  "sourceFingerprints": {
+    "gaussian-splatting/train.py": "ba726a44e3b4fa4a37887cc56a96eecc5d041842ba63d3d1a78031670b39d451",
+    "native/backend/atomic_file.py": "4621958b821c0b55bb33f4564c5f0e993c2c2af1757c4584c4218d1cc76df2a1",
+    "native/backend/camera_admission.py": "75437bcbefef692075bf797805fe4e1ba99de316ec1e31a610e4fbb2877b36b2",
+    "native/backend/camera_dataset.py": "bf33e019d84cea4b5fd412e56cdde6767b273f45d3e5f9068cd05731f1ebc3bd",
+    "native/backend/compute.py": "135f865a3712bb8e6677e61a98f47be789b464716b13097fe48e5f38659dedbc",
+    "native/backend/scale_constraints.py": "30bd7863f6569437140f54c730efe0397f5c0df8c6303c6b01524d613a608c5e",
+    "native/backend/training_batch_plan.py": "52bbc3b0c39e2e9cbffae2d0eb145e3cf8ddfd2ccb3e8b27a0f3ac3e11a3ae91",
+    "native/worker/canonical_training.py": "6c146a9d04fa60355de1a1b06ddca9fecb298a189960b041503a5653aca82c1d",
+    "native/worker/gsw_worker.py": "7f82bd0b8dff1ba587681ed80ac8e12de4a12056305e8b44784d2b384a4d64cb",
+    "native/worker/training_batch.py": "ced40ee593ab9760f7ab08f34a529235d41698031b98cbf78eb97cee02541a15",
+    "native/worker/training_checkpoint.py": "ec56a0e37d5181721d7f4be5d841e1606f8f9f6fb49dc57e3b35c849544132ac",
+    "native/worker/training_runtime.py": "7b5313ecb9329ec31ff58403ee2a93feb18287d529fc118806e3f66ebf668be3",
+    "native/worker/training_seed.py": "88b9e3fad307d869b58c024bbe584357d053a66afd01f906ccd578a2b9b19b0d",
+    "native/worker/two_dgs_train.py": "8c0c23ea9535ba422d661cfb5b41302091297b5c88dfa1e7db749f82a841e3ff"
+  },
+  "generatedImagesOnly": true,
+  "originalUserDataAccessed": false,
+  "physicalGeometryAccuracyVerified": false,
+  "constraintKinds": [
+    "distance",
+    "baseline",
+    "control"
+  ],
+  "constraintSolutionSha256": "5d5f6a85fc1cabec07b74e52f4ecbb2c1281f55141749215f10c9af60b81c585",
+  "constraintAndSeedCases": [
+    {
+      "backend": "3dgs",
+      "points": 256,
+      "sampleCount": 1000,
+      "sampledTrainViews": [
+        "v-0b0b24a8372c4b90b7119f3b",
+        "v-94477873f75a403a280b598a"
+      ],
+      "validationExcluded": true,
+      "testExcluded": true,
+      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
+      "sha256": "78a6aee3b5cf2ad5c0da97a2f0b5d297ad4dd22937a1b91df1d9e73a88cf035e",
+      "fullOptimizerPauseResume": true,
+      "changedSeedRejected": true,
+      "changedTestImageRejected": true,
+      "actualSeedChangesSampling": true,
+      "scaleDerivationPreserved": true,
+      "colmapLaunchCount": 0
+    },
+    {
+      "backend": "2dgs",
+      "points": 256,
+      "sampleCount": 1000,
+      "sampledTrainViews": [
+        "v-0b0b24a8372c4b90b7119f3b",
+        "v-94477873f75a403a280b598a"
+      ],
+      "validationExcluded": true,
+      "testExcluded": true,
+      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
+      "sha256": "b380563b44c331c76dde06da9e52bea0a351378c6c785d9e16f31fb11fde3a05",
+      "fullOptimizerPauseResume": true,
+      "changedSeedRejected": true,
+      "changedTestImageRejected": true,
+      "actualSeedChangesSampling": true,
+      "scaleDerivationPreserved": true,
+      "colmapLaunchCount": 0
+    }
+  ],
+  "batch": {
+    "applicationOpened": false,
+    "completedResultsVerifiedBeforeSkipping": true,
+    "fullAdamAndRngCheckpointInspected": true,
+    "oldWorkspaceUnchanged": true,
+    "pauseResumeAfterRealSaveAs": true,
+    "physicalGeometryAccuracyVerified": false,
+    "schema": "gsw.p1_actual_batch_acceptance/1"
+  },
+  "batchCases": [
+    {
+      "backend": "3dgs",
+      "points": 256,
+      "sampleCount": 1000,
+      "sampledTrainViews": [
+        "v-0b0b24a8372c4b90b7119f3b",
+        "v-94477873f75a403a280b598a"
+      ],
+      "validationExcluded": true,
+      "testExcluded": true,
+      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
+      "sha256": "2dd72d1c393cbc943ff7307d73df2d2cd601c68b24b0364fffa066ad8e9594c0"
+    },
+    {
+      "backend": "2dgs",
+      "points": 256,
+      "sampleCount": 1000,
+      "sampledTrainViews": [
+        "v-0b0b24a8372c4b90b7119f3b",
+        "v-94477873f75a403a280b598a"
+      ],
+      "validationExcluded": true,
+      "testExcluded": true,
+      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
+      "sha256": "38373dba087b4ba48f4c293a19f56a733cc101599db45588f54e1a69f413308b"
+    }
+  ],
+  "nativeUiAndCi": "separate delivery gates; not inferred from GPU acceptance"
+}

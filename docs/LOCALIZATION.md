@@ -192,11 +192,138 @@ dimension and mask guidance before clearly labelled original technical logs.
 
 ## Terminology
 
+### General training batches
+
+**Workflow → General Training Batch Plans…** edits dataset references, arbitrary
+supported parameter axes and an advanced base JSON configuration. Iteration count
+and resolution must be explicit; quality labels cannot silently choose them.
+Batch resolution factors are restricted to `1`, `2`, `4` and `8`; other values
+are rejected and never interpreted as target pixel widths by a legacy loader.
+Previewing expands the Cartesian product and pins verified canonical dataset
+identities, but does not start training. Creating a plan rechecks those identities
+and saves an immutable plan with its separate durable state. Start and Resume are
+separate explicit requests handled by the main window's process supervisor.
+
+Initialization follows the dataset declaration and evaluation follows declared
+splits. `trainingSeed` controls actual training randomness, not the initialization
+geometry seed or the held-out split. `repeat` identifies repeated trials and is
+not an optimizer option. GPU concurrency is one; invalid or oversized matrices
+fail rather than being sampled. Opening history, importing a request, changing
+language, refreshing state or restarting the application never starts a batch.
+Resume availability remains subject to backend validation of input identities,
+parameters, checksums and genuine full-state checkpoints. A PLY or preview is not
+optimizer-state resume. Closing or cancelling the planner stops only its own CPU
+helper and does not terminate a real training worker.
+Persisted `running` states may be crash remnants: their Resume action only asks
+for verification and explicit trust confirmation. It does not change the saved
+status or bypass worker-lock, PID, input or checkpoint checks. Declining the
+confirmation registers nothing and launches no worker.
+
+中文：“通用训练批量计划”使用可编辑的数据集表、参数轴和基础 JSON 配置。
+迭代数与分辨率必须明确，不能由质量标签暗中决定。预览只展开组合并固定核验后的
+数据身份，创建计划会再次核验并持久保存；启动和继续是分别执行的明确操作。
+初始化与评估沿用数据集声明和原划分，训练随机种子与初始化种子分开，repeat
+只表示重复试验。GPU 串行执行，超量或非法组合明确拒绝。打开、导入、切换语言、
+刷新状态及重启程序均不自动训练；继续仍须后台验证完整检查点，不能以 PLY
+或预览代替。关闭计划窗口只停止其 CPU 辅助进程，不影响真实训练任务。
+
+日本語：「汎用学習バッチ計画」は編集可能なデータセット表、パラメーター軸、
+基本 JSON 設定を使います。反復数と解像度は明示し、品質名から黙って決めません。
+プレビューは組合せの展開と検証済み ID の固定のみで、計画作成時に再検証して
+保存します。開始と再開は別の明示操作です。初期化と評価は宣言済みの内容と分割に
+従い、学習の乱数シードと初期化シードを分け、repeat は反復試行のみを表します。
+GPU は直列実行し、過大・不正な組合せは拒否します。履歴の表示、取り込み、言語
+変更、状態更新、アプリ再起動では自動学習せず、再開には完全なチェックポイントの
+バックエンド検証が必要です。PLY やプレビューは代替になりません。計画ウィンドウ
+の終了は自身の CPU 補助プロセスのみを止め、実際の学習には影響しません。
+
+### Scale constraints and independent checks
+
+**Workflow → Scale and Align…** uses separate fit constraints and independent
+checks. Known distances, camera baselines and control points retain stable IDs,
+reference units, requested weights, reference uncertainty and provenance. A
+blank uncertainty means unknown, not an error-free reference. The fit-conflict
+tolerance is explicitly entered; it is not a requested or measured model
+accuracy. Scale-only estimation does not establish position or orientation;
+full similarity alignment is a distinct mode with its own geometry checks.
+
+Fit residuals describe agreement with the constraints used to compute the
+transform. Independent checks are excluded from fitting and retain their own
+declared independence, source, measurement IDs and tolerances. Missing evidence
+remains unverified, and a failed check prevents creating a scale version. A
+passing reference-constraint check does not establish whole-model geometric
+accuracy. The machine report states `model_geometry_accuracy=not_measured`.
+The original request, solution, transform, inverse and separate check results
+are retained. Estimation and creation/use of a fresh dataset version are
+separate actions; source cameras, images and old checkpoints are unchanged.
+Language changes retain edits, active helper processes and machine results.
+
+The same dialog can explicitly target an existing PLY model. It first runs a
+hidden cancellable source inspection that hashes the model and linked resources
+without relying on a preview. The semantic source identity is distinct from the
+raw PLY checksum. Model-only sources have no camera baselines; baseline imports
+are refused rather than silently discarded. Supported transformations create a
+fresh baked model, while directional-SH rotations that cannot be baked create
+only an explicitly labelled transform manifest and unchanged model copy. Such a
+manifest is never adopted as a baked aligned PLY. Both cases retain constraints,
+transform and independent checks, and neither modifies the original model.
+
+Native reading of `gsw.model_scale_export/1` checks the actual PLY checksum,
+positive proper similarity/inverse, output frame and cross-record provenance
+bindings. Already-baked metric output has exactly `1 m` per output coordinate;
+`scale.meters_per_unit` records the input-to-metric factor and is not applied
+again to measurements. The embedded record stays portable with the PLY and does
+not require a source archive beside it. Native provenance explicitly records
+`verification_level=native_structural_and_ply_hash` and does not claim a second
+solver replay or independent physical model accuracy. Worker-side creation and
+delivery acceptance remain responsible for solver replay.
+The newly fitted local frame never inherits an output CRS from an old PLY
+header or `.prj`. Source CRS declarations remain provenance only; a local Sim3
+is not CRS registration or reprojection.
+
+中文：同一窗口可明确选择已有 PLY 模型，先在后台核验模型与关联资源的语义身份，
+不依据预览猜尺度。模型没有相机来源时禁止基线约束，不静默丢弃导入行。支持的
+变换生成新模型；不能烘焙的方向相关 SH 旋转只生成明确标注的变换清单和原模型
+副本，不能作为已烘焙的对齐模型采用。两种结果均保留约束和检核，原模型不变。
+
+日本語：同じダイアログで既存の PLY モデルも明示選択でき、先にモデルと関連
+リソースの意味的な ID をバックグラウンドで検証します。プレビューからスケールを
+推測しません。カメラ情報のないモデルでは基線拘束を禁止し、取り込み行を黙って
+捨てません。対応する変換は新モデルへ適用し、未対応の方向依存 SH 回転は明示した
+変換マニフェストと元モデルのコピーのみを生成します。これをベイク済みモデルと
+して採用せず、どちらも拘束・検査を保持して元モデルを変更しません。
+
+中文：“工作流 → 定尺度与对齐…”分别管理拟合约束和独立检核。已知距离、相机
+基线与控制点保留 ID、参考单位、权重、不确定度和来源。空白不确定度表示未知，
+不是零误差。拟合冲突容差需要明确输入，不是模型精度指标。仅定尺度不确定方向
+和位置；完整相似变换对齐使用独立模式。拟合残差只说明与拟合约束的一致程度；
+检核不参与拟合。证据不足保持未验证，检核失败禁止创建尺度新版本。检核通过
+也不代表完整模型的几何精度。估计与创建／使用新版本分开，保留原请求、变换、
+逆变换和检核结果，不修改原相机、图像或旧检查点；切换语言保留输入与进程。
+
+日本語：「ワークフロー → スケール設定と位置合わせ…」では適合用拘束と独立
+検査を分けます。既知の距離、カメラ基線、基準点の ID、参照単位、重み、不確かさ、
+出所を保持します。不確かさの空欄は不明であり、誤差ゼロではありません。適合矛盾
+の許容値を明示入力し、モデル精度とは扱いません。スケールのみでは方向・位置を
+確定せず、完全な相似変換は別モードです。適合残差は使用した拘束との整合性のみを
+表し、独立検査は適合に使いません。根拠不足は未検証、検査不合格は新規版の作成を
+禁止します。検査合格もモデル全体の幾何精度を保証しません。推定と新しい版の
+作成・採用を分け、要求、変換、逆変換、検査結果を保持します。元のカメラ、画像、
+チェックポイントは変更せず、言語変更でも入力と処理を維持します。
+
 Scene and training-output names accept arbitrary Unicode text, spaces and symbols (including characters forbidden in Windows filenames). Only blank names are rejected. `ManagedName.h` maps display names to backend-safe ASCII storage identifiers; matching Python validation must stay in sync. Legacy safe ASCII names keep their paths, except the reserved `gsw-name-` namespace. Names requiring encoding use that prefix plus the full SHA-256 of the exact UTF-8 name. Do not trim, case-fold, translate or sanitize the display name. `.gsw-name.json` retains the original name alongside the dataset and travels with project migration/backup; import publishes it in the same transaction as the data. Existing job configurations without display metadata remain supported. Actual export filenames still obey operating-system filesystem rules.
 
 | 简体中文 | English | 日本語 |
 | --- | --- | --- |
 | 工程 / 数据集 | Project / Dataset | プロジェクト / データセット |
+| 批量计划 / 参数轴 | Batch Plan / Parameter Axis | バッチ計画 / パラメーター軸 |
+| 数据身份固定 / 串行执行 | Dataset Identity Pinning / Serial Execution | データ ID の固定 / 直列実行 |
+| 距离约束 | Distance Constraint | 距離拘束 |
+| 相机基线 | Camera Baseline | カメラ基線 |
+| 控制点 | Control Point | 基準点 |
+| 拟合残差 | Fit Residual | 適合残差 |
+| 独立检核 | Independent Check | 独立検査 |
+| 正尺度相似变换（Sim3） | Positive-scale Similarity Transform (Sim3) | 正のスケールの相似変換（Sim3） |
 | 桌面 | Desktop | デスクトップ |
 | 常用文件夹 / 常用文件 | Frequent Folders / Frequent Files | よく使うフォルダー / よく使うファイル |
 | 文件窗口历史 / 清除历史 | File Dialog History / Clear History | ファイルダイアログの履歴 / 履歴を消去 |

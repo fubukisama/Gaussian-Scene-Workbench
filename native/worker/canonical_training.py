@@ -11,9 +11,10 @@ import json
 import math
 import os
 from pathlib import Path
-import uuid
 
 import numpy as np
+
+from native.backend.atomic_file import atomic_sibling
 
 
 def _json_digest(value):
@@ -191,6 +192,11 @@ def prepare_training_dataset(source, out_root=None, config=None, cancelled=None,
                                   for x in (0, 1) for y in (0, 1) for z in (0, 1)])
             transformed = transform_points(dataset["transforms"]["source_to_canonical"], corners)
             bounds = np.asarray([transformed.min(axis=0), transformed.max(axis=0)])
+        elif initialization.get("input_to_canonical") is not None:
+            corners = np.asarray([[bounds[x, 0], bounds[y, 1], bounds[z, 2]]
+                                  for x in (0, 1) for y in (0, 1) for z in (0, 1)])
+            transformed = transform_points(initialization["input_to_canonical"], corners)
+            bounds = np.asarray([transformed.min(axis=0), transformed.max(axis=0)])
     configured = dataset["transforms"]["canonical_to_training"]
     explicit_transform = configured if configured.get("mode") == "explicit" else None
     training_views = [view for view in dataset["views"] if view["split"] == "train"]
@@ -266,13 +272,14 @@ def prepare_training_dataset(source, out_root=None, config=None, cancelled=None,
             raise ValueError("camera_import_cancelled")
         initial_path = destination / "training-initialization.npz"
         _reject_reparse(initial_path)
-        temporary = destination / (".training-initialization-" + uuid.uuid4().hex + ".npz")
-        try:
-            np.savez(temporary, points=localized, colors=dataset["initial_colors"])
+        with atomic_sibling(initial_path, mode="wb") as (temporary, stream):
+            # Passing the open stream prevents NumPy appending an extra .npz
+            # suffix to the bounded exclusive temporary basename.
+            np.savez(stream, points=localized, colors=dataset["initial_colors"])
+            stream.flush()
+            os.fsync(stream.fileno())
+            stream.close()
             os.replace(str(temporary), str(initial_path))
-        finally:
-            if temporary.exists():
-                temporary.unlink()
         initial_digest = hashlib.sha256(initial_path.read_bytes()).hexdigest()
         contract = training_contract(dataset)
         contract["training_initialization_sha256"] = initial_digest

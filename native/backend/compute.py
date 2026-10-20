@@ -3795,6 +3795,8 @@ def run_logged(job, args, cwd, backend=None):
     native_control = job.get("native_control") if len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS else None
     camera_training = len(args) > 1 and str(args[1]) == "train.py" and backend in TRAINING_BACKENDS
     if camera_training:
+        from native.worker.training_seed import validate_training_seed
+        process_env["GSW_TRAINING_SEED"] = str(validate_training_seed(job.get("training_seed", 0)))
         process_env.pop("GSW_CAMERA_DATASET", None)
         process_env.pop("GSW_CAMERA_IMAGE_ROOT", None)
         process_env.pop("GSW_POSE_POLICY", None)
@@ -3806,6 +3808,8 @@ def run_logged(job, args, cwd, backend=None):
             process_env["GSW_CAMERA_IMAGE_ROOT"] = prepared["imageRoot"]
     if native_control:
         control_payload = dict(native_control)
+        if job.get("training_seed", 0):
+            control_payload["training_seed"] = job["training_seed"]
         summary = normalize_training_summary(job.get("trainingSummary"))
         if summary is not None:
             control_payload["trainingSummary"] = summary
@@ -5438,7 +5442,12 @@ def start_training(
     camera_dataset_path=None,
     camera_dataset_identity=None,
     resolution_policy=None,
+    training_seed=0,
 ):
+    from native.worker.training_seed import validate_training_seed
+    training_seed = validate_training_seed(training_seed)
+    if training_seed and not native_control:
+        raise ValueError("training_seed_requires_native_checkpoint")
     if pose_policy not in (None, "locked", "solve"):
         raise ValueError("camera_pose_policy_invalid")
     source_dataset = Path(dataset_path) if dataset_path else DATASETS_DIR / safe_name(scene)
@@ -5484,6 +5493,7 @@ def start_training(
         "camera_dataset_path": str(camera_dataset_path) if camera_dataset_path else None,
         "camera_dataset_identity": camera_dataset_identity,
         "resolution_policy": resolution_policy,
+        "training_seed": training_seed,
         "process": None,
         "colmap_options": colmap_options_from_payload(colmap_options or {}),
         "train_options": train_options if isinstance(train_options, dict) else {},

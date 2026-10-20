@@ -11,8 +11,10 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import stat
 import struct
-import uuid
+
+from native.backend.atomic_file import atomic_sibling
 
 
 SCHEMA = "gsw.camera_dataset/1"
@@ -22,6 +24,8 @@ _ROTATION = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
 _UNITS = {"m": 1., "meter": 1., "meters": 1., "cm": .01,
           "centimeter": .01, "centimeters": .01, "mm": .001,
           "millimeter": .001, "millimeters": .001}
+_SCALE_DERIVATION_LIMIT = 16 * 1024 * 1024
+_SCALE_DERIVATION_DEPTH = 8
 
 
 class CameraDatasetError(ValueError):
@@ -268,7 +272,7 @@ def _scale(value):
         _error("camera_missing_scale_evidence", status)
     value.update(status=status, source_unit=unit, meters_per_unit=meters,
                  evidence=evidence, canonical_unit="m" if meters is not None else "arbitrary")
-    if status in ("constraint_derived", "independently_checked"):
+    if status in ("constraint_derived", "independently_checked") or value.get("verification_origin") == "gsw_replay_verified":
         value["verification_origin"] = "external_claim"
     return value
 
@@ -372,7 +376,7 @@ def _view(root, value, transform, cancelled=None):
     return result
 
 
-def _finish(data, root, adapter, options=None, cancelled=None):
+def _finish(data, root, adapter, options=None, cancelled=None, _derivation_context=None):
     options = options or {}
     source = data.get("source", {})
     if (not isinstance(source, dict) or source.get("handedness", "right") not in ("right", "right-handed")
@@ -436,6 +440,10 @@ def _finish(data, root, adapter, options=None, cancelled=None):
             result["warnings"].append({"code": "camera_cross_split_duplicate_content", "sha256": digest,
                                        "view_ids": [view["view_id"] for view in group]})
     result["independent_test"] = bool(splits["test"]) and not result["warnings"]
+    if result["scale"].get("derivation") is not None:
+        _verify_scale_derivation(result, root, cancelled, _derivation_context)
+    elif result["initialization"].get("input_to_canonical") is not None:
+        _error("camera_scale_derivation_required", "initialization.input_to_canonical")
     return refresh_dataset_identity(result)
 
 
@@ -450,6 +458,148 @@ def refresh_dataset_identity(data):
     identity = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     result["data_identity"] = hashlib.sha256(identity).hexdigest()
     return result
+
+
+def _compose_similarities(first, second, source_frame="source", target_frame="canonical"):
+    """Compose first(second(p)); no image or model mutation."""
+    a, b = _sim3(first), _sim3(second)
+    r = [[sum(a["R"][i][k] * b["R"][k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    t = [a["s"] * sum(a["R"][i][k] * b["t"][k] for k in range(3)) + a["t"][i] for i in range(3)]
+    return _sim3({"s": a["s"] * b["s"], "R": r, "t": t, "mode": "explicit"}, source_frame, target_frame)
+
+
+def _scaled_dataset_from_solution(original, derivation):
+    """One deterministic derived version, always from original source poses.
+
+    The caller must replay the solver and validate the returned dataset before
+    publication. This helper alone does not admit untrusted internal evidence.
+    """
+    solution = derivation["solution"]
+    if solution["independent_checks"]["status"] == "fail":
+        _error("camera_scale_independent_checks_failed")
+    transformed = copy.deepcopy(original)
+    transformed.pop("data_identity", None)
+    value = solution["source_to_metric"]
+    transform = _sim3({"s": value["s"], "R": value["R"], "t": value["t"],
+                       "mode": "explicit", "applied": True,
+                       "evidence": [{"kind": "scale_constraints", "solution_sha256": solution["solution_sha256"]}]})
+    transformed["transforms"] = {"source_to_canonical": transform,
+                                  "canonical_to_training": _sim3(None, "canonical", "training")}
+    transformed["normalization"] = {"mode": "auto"}
+    for view in transformed["views"]:
+        view["c2w_opencv"] = _transform_pose(view["source_c2w_opencv"], transform)
+    initialization = transformed["initialization"]
+    if initialization["frame"] == "canonical":
+        correction = _compose_similarities(transform, invert_sim3(original["transforms"]["source_to_canonical"]),
+                                            "initialization_input", "canonical")
+        previous = initialization.get("input_to_canonical", _sim3(None))
+        initialization["input_to_canonical"] = _compose_similarities(correction, previous,
+                                                                       "initialization_input", "canonical")
+        initialization["input_to_canonical"]["applied"] = False
+    evidence = copy.deepcopy(original["scale"].get("evidence", []))
+    evidence.append({"kind": "scale_constraints", "solution_sha256": solution["solution_sha256"],
+                     "input_data_identity": original["data_identity"], "scope": solution["scope"],
+                     "model_geometry_accuracy": "not_measured"})
+    transformed["scale"] = {"status": "independently_checked" if solution["independent_checks"]["status"] == "pass"
+                              else "constraint_derived", "source_unit": "source_units", "meters_per_unit": transform["s"],
+                              "canonical_unit": "m", "verification_origin": "gsw_replay_verified",
+                              "evidence": evidence, "derivation": copy.deepcopy(derivation)}
+    transformed["data_version"] = "scale-" + solution["solution_sha256"]
+    return transformed
+
+
+def _scale_archive_path(root, relative):
+    """Resolve a hash-bound archive without following links/reparse points."""
+    path, normalized = _relative(root, relative)
+    if not normalized.startswith("source/scale_constraints/inputs/") or not normalized.endswith(".json"):
+        _error("camera_scale_invalid_archive_path", relative)
+    for entry in (path, *path.parents):
+        metadata = os.lstat(entry)
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+            _error("camera_scale_archive_reparse", relative)
+        if entry == root:
+            break
+    return path
+
+
+def _verify_scale_derivation(dataset, root, cancelled=None, context=None):
+    """Replay every archived input version. Hashes alone are not trust."""
+    from native.backend.scale_constraints import validate_scale_solution
+    derivation = dataset["scale"]["derivation"]
+    if not isinstance(derivation, dict) or derivation.get("schema") != "gsw.scale_derivation/1":
+        _error("camera_scale_invalid_derivation")
+    encoded = json.dumps(derivation, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    context = context or {"depth": 0, "bytes": 0, "seen": set()}
+    if context["depth"] >= _SCALE_DERIVATION_DEPTH:
+        _error("camera_scale_derivation_depth_exceeded")
+    context["bytes"] += len(encoded)
+    if context["bytes"] > _SCALE_DERIVATION_LIMIT:
+        _error("camera_scale_derivation_too_large")
+    record = derivation.get("input_manifest", {})
+    if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+        _error("camera_scale_invalid_derivation")
+    archive = _scale_archive_path(root, record["path"])
+    token = (record["path"], record.get("sha256"))
+    if token in context["seen"]:
+        _error("camera_scale_derivation_cycle")
+    context["seen"].add(token)
+    context["bytes"] += archive.stat().st_size
+    if context["bytes"] > _SCALE_DERIVATION_LIMIT:
+        _error("camera_scale_derivation_too_large")
+    if _hash(archive, cancelled) != record.get("sha256"):
+        _error("camera_scale_archive_hash_mismatch")
+    context["depth"] += 1
+    try:
+        original = validate_camera_dataset(_read_json(archive), root, cancelled=cancelled,
+                                             _derivation_context=context)
+    finally:
+        context["depth"] -= 1
+        context["seen"].remove(token)
+    if original["data_identity"] != record.get("data_identity"):
+        _error("camera_scale_archive_identity_mismatch")
+    if original["pose_policy"] != "locked" or dataset["pose_policy"] != "locked":
+        _error("camera_scale_pose_policy_mismatch")
+    try:
+        validate_scale_solution(original, derivation["request"], derivation["solution"], cancelled=cancelled)
+    except (ValueError, KeyError, TypeError) as error:
+        if getattr(error, "code", None) == "scale_constraints_cancelled":
+            _error("scale_constraints_cancelled", getattr(error, "detail", ""))
+        _error("camera_scale_derivation_replay_failed", str(error))
+    expected = _scaled_dataset_from_solution(original, derivation)
+    if derivation.get("archives") != scale_derivation_archive_records(original):
+        _error("camera_scale_invalid_lineage", "archives")
+    lineage = derivation.get("lineage")
+    previous = original["scale"].get("derivation", {}).get("lineage", [])
+    expected_lineage = copy.deepcopy(previous) + [{"data_identity": original["data_identity"],
+        "manifest_sha256": record["sha256"], "scale_status": original["scale"]["status"],
+        "source_unit": original["scale"]["source_unit"],
+        "source_to_canonical": copy.deepcopy(original["transforms"]["source_to_canonical"])}]
+    if lineage != expected_lineage or len(lineage) > _SCALE_DERIVATION_DEPTH:
+        _error("camera_scale_invalid_lineage")
+    for key in ("source", "pose_policy", "views", "splits", "initialization", "normalization", "data_version", "transforms"):
+        if dataset.get(key) != expected.get(key):
+            _error("camera_scale_derived_dataset_mismatch", key)
+    current_scale = dict(dataset["scale"], verification_origin="gsw_replay_verified")
+    if current_scale != expected["scale"]:
+        _error("camera_scale_derived_dataset_mismatch", "scale")
+    dataset["scale"]["verification_origin"] = "gsw_replay_verified"
+
+
+def scale_derivation_archive_records(dataset):
+    """Return flat, hash-bound ancestry references for an already admitted dataset."""
+    result = []
+    derivation = dataset.get("scale", {}).get("derivation")
+    if derivation:
+        result.append(copy.deepcopy(derivation["input_manifest"]))
+        # All prior archive names are content-addressed by data identity. Their
+        # byte digests stay explicit so copying cannot silently adopt new bytes.
+        result.extend(copy.deepcopy(derivation.get("archives", [])))
+    by_path = {}
+    for record in result:
+        if record["path"] in by_path and record != by_path[record["path"]]:
+            _error("camera_scale_conflicting_archive")
+        by_path[record["path"]] = record
+    return list(by_path.values())
 
 
 def _point_records(path, format_name, cancelled=None):
@@ -538,6 +688,12 @@ def _initialization(root, value, cancelled=None):
             _error("camera_invalid_initialization", name)
     value.update(kind=kind, frame=frame, priors=priors, bounds=bounds,
                  count=value.get("count"), seed=value.get("seed"))
+    if "input_to_canonical" in value:
+        transform = _sim3(value["input_to_canonical"], "initialization_input", "canonical")
+        if (frame != "canonical" or transform["input_frame"] != "initialization_input" or
+                transform["output_frame"] != "canonical" or transform["applied"]):
+            _error("camera_invalid_initialization", "input_to_canonical")
+        value["input_to_canonical"] = transform
     if kind == "random":
         if value.get("path"):
             _error("camera_invalid_initialization", "random initialization cannot consume a point cloud")
@@ -588,6 +744,8 @@ def read_initialization_points(dataset, root, cancelled=None):
         colors.append(rgb)
     if initialization["frame"] == "source":
         points = apply_sim3(dataset["transforms"]["source_to_canonical"], points)
+    elif initialization.get("input_to_canonical") is not None:
+        points = apply_sim3(initialization["input_to_canonical"], points)
     return points, colors
 
 
@@ -861,7 +1019,7 @@ def _research(path):
     return data
 
 
-def validate_camera_dataset(data, root, verify_images=True, cancelled=None):
+def validate_camera_dataset(data, root, verify_images=True, cancelled=None, _derivation_context=None):
     """Revalidate a normalized manifest without repeating its transforms.
 
     P0 deliberately requires byte/hash verification at this seam. Passing
@@ -873,7 +1031,8 @@ def validate_camera_dataset(data, root, verify_images=True, cancelled=None):
     if data.get("schema") != SCHEMA:
         _error("camera_unsupported_schema", data.get("schema"))
     result = _finish(copy.deepcopy(data), Path(root).resolve(),
-                     data.get("source", {}).get("adapter", "generic_json"), cancelled=cancelled)
+                     data.get("source", {}).get("adapter", "generic_json"), cancelled=cancelled,
+                     _derivation_context=_derivation_context)
     if data.get("data_identity") and result["data_identity"] != data["data_identity"]:
         _error("camera_data_identity_mismatch")
     return result
@@ -904,16 +1063,12 @@ def write_camera_dataset(data, path):
     """Atomically publish JSON metadata only; source image bytes are read-only."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as stream:
-            json.dump(data, stream, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
+    with atomic_sibling(path) as (temporary, stream):
+        json.dump(data, stream, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+        stream.close()
         os.replace(str(temporary), str(path))
-    finally:
-        if temporary.exists():
-            temporary.unlink()
 
 
 def _load_camera_dataset(source, adapter="auto", options=None, cancelled=None):
@@ -922,18 +1077,29 @@ def _load_camera_dataset(source, adapter="auto", options=None, cancelled=None):
     The returned dictionary is JSON-safe and contains no absolute image paths.
     Missing/unsupported input fails closed; this function never launches SfM.
     """
+    unresolved_source = Path(os.path.abspath(str(source)))
     source = Path(source).resolve()
     options = options or {}
     if not isinstance(options, dict):
         _error("camera_invalid_manifest", "options")
     if adapter == "auto":
-        if source.is_dir() and (source / MANIFEST_NAME).is_file():
-            adapter = "generic_json"
+        selected_json = _read_json(source) if source.is_file() and source.suffix.lower() == ".json" else None
+        if selected_json is not None and selected_json.get("schema") == "gsw.trajectory_dataset/1":
+            adapter = "trajectory_dataset"
+        elif source.is_dir() and (source / MANIFEST_NAME).is_file():
+            selected = _read_json(source / MANIFEST_NAME)
+            adapter = "trajectory_dataset" if selected.get("schema") == "gsw.trajectory_dataset/1" else "generic_json"
+            if adapter == "trajectory_dataset":
+                unresolved_source = unresolved_source / MANIFEST_NAME
+        elif source.is_dir() and (source / "trajectory_dataset.json").is_file():
+            selected = _read_json(source / "trajectory_dataset.json")
+            adapter = "trajectory_dataset" if selected.get("schema") == "gsw.trajectory_dataset/1" else "generic_json"
         elif (source.is_dir() and (source / "transforms_train.json").is_file()) or source.name.startswith("transforms_"):
             adapter = "blender_transforms"
         elif source.is_file() and source.suffix.lower() == ".json":
-            selected = _read_json(source)
-            adapter = "research_json" if "conventions" in selected and isinstance(selected.get("cameras"), list) else "generic_json"
+            selected = selected_json
+            adapter = ("trajectory_dataset" if selected.get("schema") == "gsw.trajectory_dataset/1" else
+                       "research_json" if "conventions" in selected and isinstance(selected.get("cameras"), list) else "generic_json")
         elif any((path / ("cameras." + extension)).is_file()
                                      for path in (source if source.is_dir() else source.parent,
                                                   source / "sparse" / "0", source / "sparse")
@@ -948,6 +1114,10 @@ def _load_camera_dataset(source, adapter="auto", options=None, cancelled=None):
         if source.is_dir():
             source = source / "cameras_metric.json"
         return _finish(_research(source), source.parent, adapter, options, cancelled)
+    if adapter == "trajectory_dataset":
+        from native.backend.trajectory_dataset import read_trajectory_dataset
+        data, root = read_trajectory_dataset(unresolved_source, cancelled)
+        return _finish(data, root, adapter, options, cancelled)
     if adapter in ("colmap", "colmap_text", "colmap_binary"):
         data, root = _colmap(source, options)
         return _finish(data, root, "colmap", options, cancelled)
@@ -978,5 +1148,5 @@ def load_camera_dataset(source, adapter="auto", options=None, cancelled=None):
         raise
     except FileNotFoundError as error:
         _error("camera_missing_file", str(error))
-    except (OSError, TypeError, KeyError, IndexError, OverflowError, ValueError, struct.error) as error:
+    except (OSError, TypeError, KeyError, IndexError, OverflowError, ValueError, RecursionError, struct.error) as error:
         _error("camera_invalid_manifest", str(error))
