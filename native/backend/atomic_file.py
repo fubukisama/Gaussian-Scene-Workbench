@@ -34,10 +34,21 @@ def _checked_directory(path):
         if (not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode)
                 or getattr(metadata, "st_file_attributes", 0) & 0x400):
             raise ValueError("atomic_unsafe_directory")
+    original_identity = path.lstat()
     resolved = path.resolve(strict=True)
-    if resolved != path:
+    for item in (resolved, *resolved.parents):
+        metadata = item.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode)
+                or getattr(metadata, "st_file_attributes", 0) & 0x400):
+            raise ValueError("atomic_unsafe_directory")
+    resolved_identity = resolved.lstat()
+    # GetFinalPathNameByHandle expands legitimate Windows 8.3 spellings. The
+    # spelling may differ without any link: bind the canonical parent only
+    # after both chains are checked and their actual filesystem IDs agree.
+    if (not os.path.samestat(original_identity, resolved_identity)
+            or not os.path.samestat(original_identity, path.lstat())):
         raise ValueError("atomic_unsafe_directory")
-    return resolved, path.lstat()
+    return resolved, resolved_identity
 
 
 def _remove_owned_directory(path, identity, parent, parent_identity):

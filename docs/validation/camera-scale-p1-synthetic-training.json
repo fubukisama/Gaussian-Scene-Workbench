@@ -4,7 +4,7 @@
   "sourceHashMode": "text-lf-v1",
   "sourceFingerprints": {
     "gaussian-splatting/train.py": "ba726a44e3b4fa4a37887cc56a96eecc5d041842ba63d3d1a78031670b39d451",
-    "native/backend/atomic_file.py": "0c608505a430017c3f97f0d9d6444e00e37c4bfdcb607acebc63d1c51ab237a6",
+    "native/backend/atomic_file.py": "64a69286ad70129e273e48be23962a58205b574afbd8aba375e9aaca0647a194",
     "native/backend/camera_admission.py": "75437bcbefef692075bf797805fe4e1ba99de316ec1e31a610e4fbb2877b36b2",
     "native/backend/camera_dataset.py": "768e3d74ec2c09b19dba0f1f943cd110a286847b5e4a25df0ebd12e9a7e5506b",
     "native/backend/compute.py": "135f865a3712bb8e6677e61a98f47be789b464716b13097fe48e5f38659dedbc",
@@ -39,7 +39,7 @@
       "validationExcluded": true,
       "testExcluded": true,
       "coordinateRoundtripMaxError": 1.7763568394002505E-15,
-      "sha256": "dd0cc16002bb55df0a66ad3ad5f8c175661da701cd0605e3731d86d5c75734fc",
+      "sha256": "46117028504bf909114603ac1830f851ff5e66502f0f120f7b3159d5d3a6ad1f",
       "fullOptimizerPauseResume": true,
       "changedSeedRejected": true,
       "changedTestImageRejected": true,
@@ -58,7 +58,7 @@
       "validationExcluded": true,
       "testExcluded": true,
       "coordinateRoundtripMaxError": 1.7763568394002505E-15,
-      "sha256": "7485ab74a99e0ba6bc2c34731c00bf756f3998689dd287f0cf6fc1800440b1f7",
+      "sha256": "db3d7a7e905497e31a2217f7950cb24e49fb961cfe1169c609ff3de10af8a7eb",
       "fullOptimizerPauseResume": true,
       "changedSeedRejected": true,
       "changedTestImageRejected": true,
@@ -88,7 +88,7 @@
       "validationExcluded": true,
       "testExcluded": true,
       "coordinateRoundtripMaxError": 1.7763568394002505E-15,
-      "sha256": "bb6dc96eba88b668f949013319ef019d5d257cabd69e7acb8eebe88968511fc5"
+      "sha256": "13186d334da48678c938afd54b68d968077741e571ab8841386563d3f8748c40"
     },
     {
       "backend": "2dgs",
@@ -101,7 +101,7 @@
       "validationExcluded": true,
       "testExcluded": true,
       "coordinateRoundtripMaxError": 1.7763568394002505E-15,
-      "sha256": "ae2786582eac6d3bc1e4acfc84ae4ddb04358a1e06e3e3ff7112e27cdb397eb5"
+      "sha256": "095adfde8fd707d157c2bdfa16621348a487e59bba25e9b1e7fd59919ba9097e"
     }
   ],
   "nativeUiAndCi": "separate delivery gates; not inferred from GPU acceptance",

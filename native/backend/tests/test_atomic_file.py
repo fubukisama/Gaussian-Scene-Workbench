@@ -1,6 +1,7 @@
 """Atomic sibling ownership, bounded names and collision behavior."""
 
 import os
+import ctypes
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -112,7 +113,7 @@ class AtomicSiblingTests(unittest.TestCase):
     def test_directory_publication_is_exclusive_bounded_and_cleans_nested_owned_content(self):
         target = self.root / "version"
         with atomic_file.atomic_sibling_directory(target) as temporary:
-            self.assertEqual(temporary.parent, target.parent)
+            self.assertEqual(temporary.parent, target.parent.resolve(strict=True))
             self.assertLessEqual(len(temporary.name), len(target.name))
             self.assertTrue(temporary.name.isascii())
             self.assertNotEqual(temporary.name.casefold(), target.name.casefold())
@@ -172,6 +173,41 @@ class AtomicSiblingTests(unittest.TestCase):
             if error.errno not in (1, 13) and getattr(error, "winerror", None) != 1314:
                 raise
         self.assertEqual(sentinel.read_bytes(), b"outside")
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 alias behavior")
+    def test_read_only_existing_short_alias_identifies_the_same_real_parent(self):
+        # Metadata only: never create test outputs in the user/system profile.
+        original = Path(os.environ["USERPROFILE"])
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(original), buffer, len(buffer))
+        self.assertGreater(size, 0)
+        self.assertLess(size, len(buffer))
+        alias = Path(buffer.value)
+        if alias == original.resolve(strict=True):
+            self.skipTest("existing profile has no different 8.3 alias; volume settings are not changed")
+        self.assertTrue(os.path.samestat(alias.lstat(), original.lstat()))
+        checked, identity = atomic_file._checked_directory(alias)
+        self.assertEqual(checked, original.resolve(strict=True))
+        self.assertTrue(os.path.samestat(identity, original.lstat()))
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 alias behavior")
+    def test_owned_short_alias_directory_publishes_in_the_canonical_d_parent(self):
+        parent = self.root / "owned directory with an alias"
+        parent.mkdir()
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(parent), buffer, len(buffer))
+        self.assertGreater(size, 0)
+        self.assertLess(size, len(buffer))
+        alias = Path(buffer.value)
+        if alias == parent.resolve(strict=True):
+            self.skipTest("D test volume does not provide a distinct 8.3 alias; configuration is unchanged")
+        target = parent / "version"
+        with atomic_file.atomic_sibling_directory(alias / target.name) as temporary:
+            self.assertEqual(temporary.parent, parent.resolve(strict=True))
+            (temporary / "data").write_bytes(b"published through an alias")
+            os.rename(str(temporary), str(target))
+        self.assertEqual((target / "data").read_bytes(), b"published through an alias")
+        self.assertEqual(set(parent.iterdir()), {target})
 
 
 if __name__ == "__main__":
