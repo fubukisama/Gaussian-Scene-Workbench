@@ -196,6 +196,30 @@ class ScaleVersionTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob(".*.preparing-scale-*")))
         self.assertEqual(before, self.source_hashes())
 
+    def test_legal_deep_final_archive_is_not_lengthened_by_version_or_report_staging(self):
+        before = self.source_hashes()
+        suffix = Path("source/scale_constraints/inputs") / (self.dataset["data_identity"] + ".json")
+        parent = self.root
+        destination = parent / "version"
+        while len(str(destination / suffix)) < 214:
+            missing = 214 - len(str(destination / suffix))
+            if missing == 1:
+                destination = destination.with_name(destination.name + "p")
+                break
+            parent = parent / ("p" * min(30, missing - 1))
+            destination = parent / "version"
+        parent.mkdir(parents=True, exist_ok=True)
+        final_archive = destination / suffix
+        old_archive = destination.with_name("." + destination.name + ".preparing-scale-" + "a" * 32) / suffix
+        self.assertLessEqual(len(str(final_archive)), 240)
+        self.assertGreater(len(str(old_archive)), 260)
+        code, result, log = self.run_worker("create-version", destination)
+        self.assertEqual(code, 0, "final={} chars, old staging={} chars\n{}".format(len(str(final_archive)), len(str(old_archive)), log))
+        self.assertTrue(final_archive.is_file())
+        self.assertEqual(load_camera_dataset(destination)["data_identity"], result["summary"]["dataIdentity"])
+        self.assertEqual(before, self.source_hashes())
+        self.assertEqual(set(parent.iterdir()), {destination})
+
     def test_external_independent_claim_cannot_impersonate_replayed_internal_check(self):
         for status in ("independently_checked", "source_declared", "arbitrary"):
             changed = copy.deepcopy(self.dataset)

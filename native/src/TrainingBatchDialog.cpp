@@ -150,7 +150,8 @@ TrainingBatchDialog::TrainingBatchDialog(const QString &python, const QString &b
       "批量分辨率比例仅支持 1、2、4、8；其他值不会被当作像素宽度执行。"));
   resolutionNotice->setWordWrap(true); resolutionNotice->setTextFormat(Qt::PlainText); inputLayout->addWidget(resolutionNotice);
   auto *form = new QFormLayout; m->failurePolicy = new QComboBox(m->inputs); m->failurePolicy->setObjectName(QStringLiteral("batchFailurePolicy"));
-  m->failurePolicy->addItem({}, QStringLiteral("stop")); m->failurePolicy->addItem({}, QStringLiteral("continue"));
+  m->failurePolicy->addItem(QString(), QVariant(QStringLiteral("stop")));
+  m->failurePolicy->addItem(QString(), QVariant(QStringLiteral("continue")));
   AppLanguage::bindComboItem(m->failurePolicy, 0, AppLanguage::source("失败时停止，保留已有成果"));
   AppLanguage::bindComboItem(m->failurePolicy, 1, AppLanguage::source("失败时继续后续独立任务"));
   form->addRow(batchText(AppLanguage::source("失败策略")), m->failurePolicy);

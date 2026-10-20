@@ -73,10 +73,10 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
     AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("当前文件坐标（保留尺度与来源记录）"));
   if (gaussian && recovery.source) {
     AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("训练输出坐标（保留高斯原属性）"));
-    mCoordinates->addItem({}, QStringLiteral("source"));
+    mCoordinates->addItem(QString(), QVariant(QStringLiteral("source")));
     AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复来源坐标与单位（另存高斯 PLY）"));
     if (recovery.metric) {
-      mCoordinates->addItem({}, QStringLiteral("metric"));
+      mCoordinates->addItem(QString(), QVariant(QStringLiteral("metric")));
       AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复为米制规范坐标（另存高斯 PLY）"));
     }
   }

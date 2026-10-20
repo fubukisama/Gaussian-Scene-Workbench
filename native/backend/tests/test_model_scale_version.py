@@ -249,6 +249,31 @@ class ModelScaleVersionTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob(".*.preparing-model-*")))
         self.assertEqual(self.model.read_bytes(), original)
 
+    def test_legal_deep_model_version_is_not_lengthened_by_staging(self):
+        before = self.model.read_bytes()
+        code, inspection, log = self.cli("inspect")
+        self.assertEqual(code, 0, log)
+        parent = self.root
+        destination = parent / "version"
+        while len(str(destination)) < 211:
+            missing = 211 - len(str(destination))
+            if missing == 1:
+                destination = destination.with_name(destination.name + "p")
+                break
+            parent = parent / ("p" * min(30, missing - 1))
+            destination = parent / "version"
+        parent.mkdir(parents=True, exist_ok=True)
+        final_descriptor = destination / "source/input_descriptor.json"
+        old_stage = destination.with_name("." + destination.name + ".preparing-model-" + "a" * 32)
+        self.assertLessEqual(len(str(final_descriptor)), 240)
+        self.assertGreater(len(str(old_stage / "source/input_descriptor.json")), 260)
+        code, result, log = self.cli("create-version", identity=inspection["inputDataIdentity"], destination=destination)
+        self.assertEqual(code, 0, "final={} chars, old staging={} chars\n{}".format(len(str(final_descriptor)), len(str(old_stage / "source/input_descriptor.json")), log))
+        self.assertTrue(final_descriptor.is_file())
+        self.assertTrue(Path(result["modelPath"]).is_file())
+        self.assertEqual(self.model.read_bytes(), before)
+        self.assertEqual(set(parent.iterdir()), {destination})
+
     def test_sidecar_changes_are_identity_changes_and_stale_model_hash_is_refused(self):
         code, inspected, log = self.cli("inspect")
         self.assertEqual(code, 0, log)

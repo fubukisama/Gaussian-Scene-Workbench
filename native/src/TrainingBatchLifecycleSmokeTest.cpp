@@ -111,10 +111,17 @@ bool runTrainingBatchLifecycleSmokeTest(MainWindow &window) {
         QStringLiteral("wrong-complete"), QStringLiteral("wrong-pause")}) {
       const bool pause = mode.endsWith(QStringLiteral("pause"));
       const bool mismatch = mode.startsWith(QStringLiteral("wrong-"));
-      const QString project = fixture.filePath(mode + (locked ? QStringLiteral("-locked") : QStringLiteral("-unlocked")));
+      const QString projectFile = fixture.filePath(mode +
+          (locked ? QStringLiteral("-locked.gsw") : QStringLiteral("-unlocked.gsw")));
+      // Use the same managed data root as a fully saved project. Saving an
+      // arbitrary working root here would schedule a Save-As migration at the
+      // next task boundary and legitimately remap every reference path.
+      const QString project = WorkspaceDocument::projectDataRootForFile(projectFile);
       QString error;
       if (!check(QDir().mkpath(project) && window.mWorkspace.create(project, &error), "create independent lifecycle project")) return false;
-      if (!check(window.mWorkspace.saveManifest(project + QStringLiteral(".gsw"), &error), "save lifecycle project before starting a process")) return false;
+      if (!check(window.mWorkspace.saveManifest(projectFile, &error) &&
+          !window.mWorkspace.hasPendingDataMigration() && window.mWorkspace.rootPath() == project,
+          "save lifecycle project with a stable managed data root before starting a process")) return false;
       const QString first = QDir(project).filePath(QStringLiteral("first.ply"));
       const QString second = QDir(project).filePath(QStringLiteral("second.ply"));
       if (!check(writeLifecycle(first, points) && writeLifecycle(second, points) && window.mWorkspace.setScenePath(first, &error) &&
@@ -165,9 +172,14 @@ bool runTrainingBatchLifecycleSmokeTest(MainWindow &window) {
           "terminal state is bound to the launched plan identity, not just an exit code and a status word");
       check(readLifecycle(historicalMarker)==markerBefore && readLifecycle(historicalConfig)==configBefore &&
           readLifecycle(historicalJob)==jobBefore && !QFileInfo::exists(pauseRequest), "batch pause never touches the historical active-training marker, job, configuration or pause path");
-      check(window.mWorkspace.sceneCollectionJson()==collection && window.mWorkspace.scenePath()==originalScene &&
-          window.mViewport->scenePath()==originalScene && window.mViewport->editToolsLocked()==locked,
-          "completion, interruption and invalid state restore reference objects, transforms and editing lock");
+      check(window.mWorkspace.sceneCollectionJson()==collection,
+          "completion, interruption and invalid state retain every reference object and transform");
+      check(window.mWorkspace.scenePath()==originalScene,
+          "completion, interruption and invalid state retain the active workspace source path");
+      check(window.mViewport->scenePath()==originalScene,
+          "completion, interruption and invalid state restore the reference viewport source path");
+      check(window.mViewport->editToolsLocked()==locked,
+          "completion, interruption and invalid state retain the editing lock");
       check(!window.mPauseTrainingAction->isEnabled(), "pause is no longer enabled after the owned batch stops");
       lastProject = project;
     }

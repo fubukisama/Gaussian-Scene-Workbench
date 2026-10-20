@@ -53,6 +53,30 @@ def _float64_ulp(value):
     return math.ldexp(1., max(-1074, math.frexp(abs(value))[1] - 53)) if value else math.ldexp(1., -1074)
 
 
+def _roundoff_magnitude(products, scale=1., offset=0.):
+    """Magnitude bound for one redundant binary64 dot/affine calculation."""
+    try:
+        magnitude = abs(scale) * math.fsum(abs(value) for value in products) + abs(offset)
+    except (OverflowError, ValueError):
+        _error("camera_numeric_range_exceeded", "redundant arithmetic bound")
+    if not math.isfinite(magnitude):
+        _error("camera_numeric_range_exceeded", "redundant arithmetic bound")
+    return magnitude
+
+
+def _redundant_binary64_equal(actual, expected, magnitude=0.):
+    # An old geometric isclose tolerance must not become authority to retain
+    # an edited coordinate at a large origin. This is an additional, narrower
+    # arithmetic replay guard; it never replaces the existing relation checks.
+    if not all(math.isfinite(value) for value in (actual, expected, magnitude)):
+        _error("camera_numeric_range_exceeded", "redundant arithmetic bound")
+    allowance = max(64. * _float64_ulp(actual), 64. * _float64_ulp(expected),
+                    (64. * math.ldexp(1., -52)) * magnitude)
+    if not math.isfinite(allowance):
+        _error("camera_numeric_range_exceeded", "redundant arithmetic bound")
+    return abs(actual - expected) <= allowance
+
+
 def _matrix(value, size, name):
     if not isinstance(value, (list, tuple)) or len(value) != size or any(
             not isinstance(row, (list, tuple)) or len(row) != size for row in value):
@@ -161,6 +185,8 @@ def _sim3(value=None, source_frame="source", target_frame="canonical"):
     inverse_r = [[r[j][i] for j in range(3)] for i in range(3)]
     inverse = {"s": 1. / s, "R": inverse_r,
                "t": [-sum(inverse_r[i][j] * t[j] for j in range(3)) / s for i in range(3)]}
+    if not math.isfinite(inverse["s"]) or not all(math.isfinite(x) for x in inverse["t"]):
+        _error("camera_invalid_similarity", "inverse numeric range")
     if "inverse" in value:
         supplied = value["inverse"]
         if not isinstance(supplied, dict) or set(("s", "R", "t")) - set(supplied):
@@ -168,13 +194,23 @@ def _sim3(value=None, source_frame="source", target_frame="canonical"):
         supplied_s = _number(supplied["s"], "inverse scale")
         supplied_r = _rotation(supplied["R"], "inverse rotation")
         supplied_t = supplied["t"]
-        if (not isinstance(supplied_t, (list, tuple)) or len(supplied_t) != 3 or
+        if (supplied_s <= 0 or not isinstance(supplied_t, (list, tuple)) or len(supplied_t) != 3 or
                 not math.isclose(supplied_s, inverse["s"], rel_tol=1e-10, abs_tol=1e-12) or
                 any(not math.isclose(supplied_r[i][j], inverse["R"][i][j], rel_tol=1e-10, abs_tol=1e-12)
                     for i in range(3) for j in range(3)) or
                 any(not math.isclose(_number(supplied_t[i], "inverse translation"), inverse["t"][i],
                                      rel_tol=1e-10, abs_tol=1e-10) for i in range(3))):
             _error("camera_conflicting_inverse")
+        supplied_t = [_number(x, "inverse translation") for x in supplied_t]
+        if (supplied_r != inverse_r or not _redundant_binary64_equal(supplied_s, inverse["s"])
+                or any(not _redundant_binary64_equal(supplied_t[i], inverse["t"][i],
+                    _roundoff_magnitude((inverse_r[i][j] * t[j] for j in range(3)), scale=1. / s))
+                       for i in range(3))):
+            _error("camera_conflicting_inverse", "binary64 replay bound")
+        # The inverse is redundant, checked evidence. Preserve the serialized
+        # binary64 values after validating their relationship: Python versions
+        # may sum the same three products with different rounding policies.
+        inverse = {"s": supplied_s, "R": supplied_r, "t": supplied_t}
     if "applied" in value and type(value["applied"]) is not bool:
         _error("camera_invalid_similarity", "applied must be boolean")
     return {"version": 1, "input_frame": value.get("input_frame", source_frame),
@@ -360,6 +396,18 @@ def _view(root, value, transform, cancelled=None):
         if any(not math.isclose(actual_pose[i][j], canonical_pose[i][j], rel_tol=1e-12, abs_tol=1e-10)
                for i in range(4) for j in range(4)):
             _error("camera_conflicting_pose", relative)
+        for i in range(4):
+            for j in range(4):
+                if i == 3:
+                    magnitude = 0.
+                elif j == 3:
+                    magnitude = _roundoff_magnitude((transform["R"][i][k] * pose[k][3] for k in range(3)),
+                                                     scale=transform["s"], offset=transform["t"][i])
+                else:
+                    magnitude = _roundoff_magnitude(transform["R"][i][k] * pose[k][j] for k in range(3))
+                if not _redundant_binary64_equal(actual_pose[i][j], canonical_pose[i][j], magnitude):
+                    _error("camera_conflicting_pose", relative)
+        canonical_pose = actual_pose
     view_id = value.get("view_id") or "v-" + hashlib.sha256(relative.encode("utf-8")).hexdigest()[:24]
     if not isinstance(view_id, str) or not view_id or len(view_id) > 256 or any(ord(char) < 32 for char in view_id):
         _error("camera_invalid_view_id", relative)
@@ -508,6 +556,35 @@ def _scaled_dataset_from_solution(original, derivation):
     return transformed
 
 
+def _check_derived_initialization_map(actual, expected, original, solution):
+    """Check only the derived A(new) o B(old inverse) o C(previous) map.
+
+    Source coordinates and the primary forward Sim3 remain exact in replay.
+    The error budget is from the full composition's operand magnitudes, not
+    the potentially near-zero result after cancellation and not model accuracy.
+    Both actual and expected maps already satisfy the positive/proper Sim3
+    contract; the actual map's own inverse was independently checked by _sim3.
+    """
+    value = solution["source_to_metric"]
+    a = _sim3({key: value[key] for key in ("s", "R", "t")})
+    b = invert_sim3(original["transforms"]["source_to_canonical"])
+    c = _sim3(original["initialization"].get("input_to_canonical"))
+    if not _redundant_binary64_equal(actual["s"], expected["s"], abs(expected["s"])):
+        _error("camera_scale_derived_dataset_mismatch", "initialization.input_to_canonical")
+    inner_translation = [_roundoff_magnitude((b["R"][k][l] * c["t"][l] for l in range(3)),
+                                             scale=b["s"], offset=b["t"][k]) for k in range(3)]
+    for i in range(3):
+        for j in range(3):
+            magnitude = _roundoff_magnitude(a["R"][i][k] * b["R"][k][l] * c["R"][l][j]
+                                           for k in range(3) for l in range(3))
+            if not _redundant_binary64_equal(actual["R"][i][j], expected["R"][i][j], magnitude):
+                _error("camera_scale_derived_dataset_mismatch", "initialization.input_to_canonical")
+        magnitude = _roundoff_magnitude((a["R"][i][k] * inner_translation[k] for k in range(3)),
+                                        scale=a["s"], offset=a["t"][i])
+        if not _redundant_binary64_equal(actual["t"][i], expected["t"][i], magnitude):
+            _error("camera_scale_derived_dataset_mismatch", "initialization.input_to_canonical")
+
+
 def _scale_archive_path(root, relative):
     """Resolve a hash-bound archive without following links/reparse points."""
     path, normalized = _relative(root, relative)
@@ -576,8 +653,30 @@ def _verify_scale_derivation(dataset, root, cancelled=None, context=None):
         "source_to_canonical": copy.deepcopy(original["transforms"]["source_to_canonical"])}]
     if lineage != expected_lineage or len(lineage) > _SCALE_DERIVATION_DEPTH:
         _error("camera_scale_invalid_lineage")
+    # _sim3 and _view already checked these redundant values against their
+    # forward transforms/source poses using the unchanged mathematical guards.
+    # Only the replay comparison may substitute their recomputed counterparts;
+    # stored evidence and the dataset returned to callers retain their exact
+    # serialized binary64 values. Source calibration and the primary forward
+    # transform, constraints, lineage and SHA remain exact. The derived init
+    # map has its own explicit composition-operand bound below.
+    checked = dict(dataset)
+    checked["transforms"] = copy.deepcopy(dataset["transforms"])
+    for name in ("source_to_canonical", "canonical_to_training"):
+        checked["transforms"][name]["inverse"] = copy.deepcopy(expected["transforms"][name]["inverse"])
+    checked["views"] = copy.deepcopy(dataset["views"])
+    for actual, wanted in zip(checked["views"], expected["views"]):
+        actual["c2w_opencv"] = copy.deepcopy(wanted["c2w_opencv"])
+    checked["initialization"] = copy.deepcopy(dataset["initialization"])
+    if ("input_to_canonical" in checked["initialization"]
+            and "input_to_canonical" in expected["initialization"]):
+        actual_map = checked["initialization"]["input_to_canonical"]
+        expected_map = expected["initialization"]["input_to_canonical"]
+        _check_derived_initialization_map(actual_map, expected_map, original, derivation["solution"])
+        for field in ("s", "R", "t", "inverse"):
+            actual_map[field] = copy.deepcopy(expected_map[field])
     for key in ("source", "pose_policy", "views", "splits", "initialization", "normalization", "data_version", "transforms"):
-        if dataset.get(key) != expected.get(key):
+        if checked.get(key) != expected.get(key):
             _error("camera_scale_derived_dataset_mismatch", key)
     current_scale = dict(dataset["scale"], verification_origin="gsw_replay_verified")
     if current_scale != expected["scale"]:
@@ -1030,6 +1129,15 @@ def validate_camera_dataset(data, root, verify_images=True, cancelled=None, _der
         _error("camera_image_verification_required")
     if data.get("schema") != SCHEMA:
         _error("camera_unsupported_schema", data.get("schema"))
+    if data.get("data_identity"):
+        try:
+            received_identity = refresh_dataset_identity(data)["data_identity"]
+        except (TypeError, ValueError, OverflowError) as error:
+            _error("camera_invalid_manifest", "semantic identity: " + str(error))
+        if received_identity != data["data_identity"]:
+            # Verify the received semantic bytes before normalization can
+            # replace any redundant field such as a sub-tolerance changed K.
+            _error("camera_data_identity_mismatch")
     result = _finish(copy.deepcopy(data), Path(root).resolve(),
                      data.get("source", {}).get("adapter", "generic_json"), cancelled=cancelled,
                      _derivation_context=_derivation_context)

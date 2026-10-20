@@ -13,14 +13,13 @@ import math
 import os
 import re
 from pathlib import Path, PurePosixPath
-import shutil
 import stat
-import uuid
 
 import numpy as np
 from plyfile import PlyData, PlyElement
 
 from native.backend.camera_scale_export import _covariance_fields, _rotate_quaternions, _similarity
+from native.backend.atomic_file import atomic_sibling_directory
 from native.backend.scale_constraints import solve_scale_constraints, validate_scale_solution
 
 
@@ -511,9 +510,7 @@ def create_scaled_model_version(model, request, output_directory, expected_ident
         _fail("model_scale_independent_checks_failed")
     rotated = not np.allclose(solution["source_to_metric"]["R"], np.eye(3), rtol=0., atol=1e-12)
     representation = "transform_manifest" if rotated and envelope["model"]["has_directional_sh"] else "baked_model"
-    temporary = destination.with_name("." + destination.name + ".preparing-model-" + uuid.uuid4().hex)
-    temporary.mkdir()
-    try:
+    with atomic_sibling_directory(destination) as temporary:
         original = temporary / "source/original.ply"
         _copy_file(source, original, envelope["model"]["sha256"], cancelled, progress)
         texture_comments, owned_assets, copied_texture_paths = {}, [], set()
@@ -587,7 +584,3 @@ def create_scaled_model_version(model, request, output_directory, expected_ident
                        scaleDerivation=scale_solution_summary(solution),
                        modelPath=str(destination / "scaled.ply") if representation == "baked_model" else "")
         return {"versionPath": str(destination), "modelPath": summary["modelPath"], "summary": summary, "solution": solution}
-    finally:
-        if temporary.exists() and temporary.parent == destination.parent:
-            _no_links(temporary)
-            shutil.rmtree(str(temporary))

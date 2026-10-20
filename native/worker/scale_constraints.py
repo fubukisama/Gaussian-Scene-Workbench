@@ -10,14 +10,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
-import uuid
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from native.backend import camera_dataset
+from native.backend.atomic_file import atomic_sibling, atomic_sibling_directory
 from native.backend.camera_admission import admit_locked_dataset, camera_dataset_summary
 from native.backend.scale_constraints import solve_scale_constraints, validate_scale_solution
 from native.worker.camera_import import _InputCancellation, _copy_verified, _output, _reference, _reparse
@@ -66,17 +65,13 @@ def _write_exclusive_json(value, path, cancelled=None):
     # Content-addressed report names already carry a 64-character digest.
     # Repeating that name in the sibling temporary path exceeds MAX_PATH in
     # otherwise ordinary Windows workspace roots.
-    temporary = path.with_name(".scale-" + uuid.uuid4().hex + ".tmp")
-    try:
-        with temporary.open("xb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
+    with atomic_sibling(path, mode="wb") as (temporary, stream):
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+        stream.close()
         _cancelled(cancelled)
         os.link(str(temporary), str(path))
-    finally:
-        if temporary.exists():
-            temporary.unlink()
 
 
 def _admitted(source, expected_identity=None):
@@ -151,9 +146,7 @@ def create_scaled_dataset_version(dataset, request, output_directory, expected_i
                   "lineage": lineage, "archives": camera_dataset.scale_derivation_archive_records(original)}
     candidate = camera_dataset._scaled_dataset_from_solution(original, derivation)
     _json_bytes(candidate)
-    temporary = destination.with_name("." + destination.name + ".preparing-scale-" + uuid.uuid4().hex)
-    temporary.mkdir()
-    try:
+    with atomic_sibling_directory(destination) as temporary:
         for relative, digest in _copy_records(root, original).items():
             _cancelled(cancelled)
             _copy_verified(_reference(root, relative), _output(temporary, relative), digest,
@@ -174,9 +167,6 @@ def create_scaled_dataset_version(dataset, request, output_directory, expected_i
         _safe_new_path(destination)
         os.rename(str(temporary), str(destination))
         return {"datasetPath": str(destination), "summary": summary, "solution": solution}
-    finally:
-        if temporary.exists() and not _reparse(temporary) and temporary.parent == destination.parent:
-            shutil.rmtree(str(temporary))
 
 
 def main(argv=None):

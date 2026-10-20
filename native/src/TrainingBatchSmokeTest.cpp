@@ -3,6 +3,7 @@
 #include "AppLanguage.h"
 #include "BackendLocator.h"
 #include <QCoreApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -41,6 +42,10 @@ bool runTrainingBatchSmokeTest() {
       {"initialization_policy", "dataset_declared"}, {"evaluation_policy", "declared_splits"},
       {"run_policy", QJsonObject{{"on_failure", "stop"}}}};
   dialog.setRequestDocument(request);
+  auto *failurePolicy = dialog.findChild<QComboBox *>(QStringLiteral("batchFailurePolicy"));
+  check(failurePolicy && failurePolicy->itemData(0).toString() == QStringLiteral("stop") &&
+      failurePolicy->itemData(1).toString() == QStringLiteral("continue") && failurePolicy->currentData().toString() == QStringLiteral("stop"),
+      "failure-policy userData contains stop/continue, not text consumed by the icon overload");
   check(dialog.requestDocument() == request, "editable dataset/matrix/base request round-trips without hard-coded experiment conditions");
   auto *start = dialog.findChild<QPushButton *>(QStringLiteral("batchStartButton"));
   auto *create = dialog.findChild<QPushButton *>(QStringLiteral("batchCreateButton"));
@@ -51,6 +56,9 @@ bool runTrainingBatchSmokeTest() {
   for (const QString &locale : AppLanguage::supported()) {
     AppLanguage::apply(locale, false);
     check(dialog.requestDocument() == request && launches == 0, "language changes retain parameters and never start a worker");
+    check(failurePolicy && failurePolicy->currentData().toString() == QStringLiteral("stop") &&
+        failurePolicy->itemData(0).toString() == QStringLiteral("stop") && failurePolicy->itemData(1).toString() == QStringLiteral("continue"),
+        "each locale switch preserves selected failure policy and both machine userData values");
   }
   AppLanguage::apply(language, false);
   dialog.previewPlan();

@@ -109,6 +109,70 @@ class AtomicSiblingTests(unittest.TestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), "published")
         self.assertEqual(temporary.read_bytes(), b"new foreign file")
 
+    def test_directory_publication_is_exclusive_bounded_and_cleans_nested_owned_content(self):
+        target = self.root / "version"
+        with atomic_file.atomic_sibling_directory(target) as temporary:
+            self.assertEqual(temporary.parent, target.parent)
+            self.assertLessEqual(len(temporary.name), len(target.name))
+            self.assertTrue(temporary.name.isascii())
+            self.assertNotEqual(temporary.name.casefold(), target.name.casefold())
+            (temporary / "nested").mkdir()
+            (temporary / "nested" / "data").write_bytes(b"owned")
+            os.rename(str(temporary), str(target))
+            temporary.mkdir()
+            (temporary / "foreign").write_bytes(b"preserve replacement")
+        self.assertEqual((target / "nested" / "data").read_bytes(), b"owned")
+        self.assertEqual((temporary / "foreign").read_bytes(), b"preserve replacement")
+        with self.assertRaisesRegex(RuntimeError, "cancel owned directory"):
+            with atomic_file.atomic_sibling_directory(self.root / "second") as cancelled:
+                (cancelled / "nested").mkdir()
+                (cancelled / "nested" / "file").write_bytes(b"not published")
+                raise RuntimeError("cancel owned directory")
+        self.assertFalse(cancelled.exists())
+
+    def test_directory_collisions_and_equal_target_are_not_owned_or_removed(self):
+        target = self.root / "a"
+        foreign = self.root / "b"
+        foreign.mkdir()
+        (foreign / "preserve").write_bytes(b"foreign")
+        with mock.patch.object(atomic_file.uuid, "uuid4", side_effect=[SimpleNamespace(hex="a" * 32),
+                SimpleNamespace(hex="b" * 32), SimpleNamespace(hex="c" * 32)]):
+            with atomic_file.atomic_sibling_directory(target) as temporary:
+                self.assertEqual(temporary.name, "c")
+        self.assertFalse(target.exists())
+        self.assertEqual((foreign / "preserve").read_bytes(), b"foreign")
+        with mock.patch.object(atomic_file.uuid, "uuid4", return_value=SimpleNamespace(hex="b" * 32)) as random:
+            with self.assertRaisesRegex(FileExistsError, "atomic_temporary_name_exhausted"):
+                with atomic_file.atomic_sibling_directory(target):
+                    self.fail("occupied directory namespace must not yield")
+            self.assertEqual(random.call_count, 128)
+        self.assertEqual((foreign / "preserve").read_bytes(), b"foreign")
+
+    def test_directory_cleanup_rejects_a_replaced_parent_and_never_follows_reparse(self):
+        parent = self.root / "parent"
+        parent.mkdir()
+        with atomic_file.atomic_sibling_directory(parent / "version") as temporary:
+            (temporary / "owned").write_bytes(b"owned")
+            moved = self.root / "moved-parent"
+            parent.rename(moved)
+            parent.mkdir()
+            foreign = parent / temporary.name
+            foreign.mkdir()
+            (foreign / "preserve").write_bytes(b"foreign parent replacement")
+        self.assertEqual((foreign / "preserve").read_bytes(), b"foreign parent replacement")
+        self.assertEqual((moved / temporary.name / "owned").read_bytes(), b"owned")
+        outside = self.root / "outside"
+        outside.mkdir()
+        sentinel = outside / "preserve"
+        sentinel.write_bytes(b"outside")
+        try:
+            with atomic_file.atomic_sibling_directory(self.root / "linked-version") as linked:
+                os.symlink(str(outside), str(linked / "link"), target_is_directory=True)
+        except OSError as error:
+            if error.errno not in (1, 13) and getattr(error, "winerror", None) != 1314:
+                raise
+        self.assertEqual(sentinel.read_bytes(), b"outside")
+
 
 if __name__ == "__main__":
     unittest.main()

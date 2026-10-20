@@ -3,6 +3,7 @@
 #include "AppLanguage.h"
 #include "BackendLocator.h"
 #include "CameraDatasetInfo.h"
+#include "ModelExportDialog.h"
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -66,12 +67,29 @@ bool runScaleConstraintsSmokeTest() {
           {"provenance", QJsonObject{{"source", "independent survey"}, {"measurement_id", "obs-1"},
               {"uncertainty_notes", "declared, not inferred"}}}, {"extra_source_record", "preserve me"}}}}};
   dialog.setConstraintDocument(request);
+  auto *distanceTable = dialog.findChild<QTableWidget *>(QStringLiteral("scaleDistanceTable"));
+  auto *role = distanceTable && distanceTable->rowCount() > 0
+      ? qobject_cast<QComboBox *>(distanceTable->cellWidget(0, 1)) : nullptr;
+  auto *independence = distanceTable && distanceTable->rowCount() > 0
+      ? qobject_cast<QComboBox *>(distanceTable->cellWidget(0, 9)) : nullptr;
+  check(mode && mode->itemData(0).toString() == QStringLiteral("scale_only") &&
+      mode->itemData(1).toString() == QStringLiteral("sim3") && mode->currentData().toString() == QStringLiteral("scale_only") &&
+      role && role->itemData(0).toString() == QStringLiteral("fit") && role->itemData(1).toString() == QStringLiteral("check") &&
+      role->currentData().toString() == QStringLiteral("fit") && independence && independence->itemData(0).isValid() &&
+      independence->itemData(0).toString().isEmpty() && independence->itemData(1).toString() == QStringLiteral("false") &&
+      independence->itemData(2).toString() == QStringLiteral("true"),
+      "combo item userData retains machine modes, fit/check roles and explicit independence values instead of using the icon overload");
   check(dialog.constraintDocument() == request, "editable request round-trips float64 and original provenance without rounding");
   const QString language = AppLanguage::current();
   for (const QString &locale : AppLanguage::supported()) {
     AppLanguage::apply(locale, false);
     check(dialog.constraintDocument() == request && dialog.solutionReport().isEmpty(),
         "changing language retains exact constraint values and does not estimate");
+    check(mode->currentData().toString() == QStringLiteral("scale_only") && role &&
+        role->currentData().toString() == QStringLiteral("fit") && independence &&
+        independence->currentData().toString().isEmpty() && mode->itemData(1).toString() == QStringLiteral("sim3") &&
+        role->itemData(1).toString() == QStringLiteral("check") && independence->itemData(2).toString() == QStringLiteral("true"),
+        "all three languages change combo captions without changing machine userData or selected policy values");
     const QString expectedTitle = locale == QStringLiteral("en_US") ? QString::fromUtf8("Scale and Align")
         : locale == QStringLiteral("ja_JP") ? QString::fromUtf8("スケール設定と位置合わせ") : QString::fromUtf8("定尺度与对齐");
     check(dialog.windowTitle() == expectedTitle && mode->currentData() == QStringLiteral("scale_only"),
@@ -180,6 +198,81 @@ bool runScaleConstraintsSmokeTest() {
   check(waitForScale([&] { return !actual.isRunning(); }) && !actual.resultDatasetPath().isEmpty() &&
       actual.resultDatasetInfo().value("posePolicy") == "locked" && actual.resultDatasetInfo().value("scale").toObject().value("status") == "constraint_derived",
       "explicit adoption publishes a fresh locked dataset version with constraint-derived status");
+  QProcess exportFixture;
+#ifdef Q_OS_WIN
+  exportFixture.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+    args->flags |= CREATE_NO_WINDOW; args->startupInfo->dwFlags |= STARTF_USESHOWWINDOW; args->startupInfo->wShowWindow = SW_HIDE;
+  });
+#endif
+  // This is the shared CPU preparation/export contract, not a claim that the
+  // disposable Gaussian vertices were trained or that a fit measures accuracy.
+  const QString exportFixtureScript = QString::fromUtf8(R"PY(import sys,json,hashlib,copy
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import numpy as np
+from plyfile import PlyData,PlyElement
+from native.worker.canonical_training import prepare_training_dataset,training_contract,transform_points
+from native.backend.camera_scale_export import export_camera_scale_ply
+prepared=prepare_training_dataset(sys.argv[2],resolution=1)
+contract=training_contract(prepared)
+assert contract['scale']['status']=='constraint_derived' and contract['scale']['meters_per_unit']==3.
+source_xyz=np.asarray([[1.,2.,3.],[2.,3.,4.]])
+canonical_xyz=transform_points(contract['transforms']['source_to_canonical'],source_xyz)
+training_xyz=transform_points(contract['transforms']['canonical_to_training'],canonical_xyz)
+paths=[]
+for backend,dimensions in [('3dgs',3),('2dgs',2)]:
+    path=Path(sys.argv[3])/(backend+'-export-training.ply')
+    names=['x','y','z','opacity','f_dc_0','f_dc_1','f_dc_2']+['scale_'+str(i) for i in range(dimensions)]+['rot_'+str(i) for i in range(4)]
+    vertices=np.zeros(2,dtype=[(name,'f8') for name in names])
+    for i,name in enumerate(('x','y','z')): vertices[name]=training_xyz[:,i]
+    for i in range(dimensions): vertices['scale_'+str(i)]=-2.
+    vertices['rot_0']=1.
+    PlyData([PlyElement.describe(vertices,'vertex')]).write(path)
+    metadata=dict(copy.deepcopy(contract),backend=backend,ply_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    path.with_suffix('.camera-scale.json').write_text(json.dumps(metadata),encoding='utf-8')
+    for mode,expected in [('source',source_xyz),('metric',canonical_xyz)]:
+        output=path.with_name(backend+'-verified-'+mode+'.ply')
+        export_camera_scale_ply(path,output,mode=mode)
+        restored=PlyData.read(output,mmap=False)['vertex'].data
+        np.testing.assert_allclose(np.column_stack([restored[name] for name in ('x','y','z')]),expected,rtol=0.,atol=1e-10)
+    paths.append(str(path))
+assert 'torch' not in sys.modules
+print(json.dumps(paths))
+)PY");
+  exportFixture.setProgram(python);
+  exportFixture.setArguments({QStringLiteral("-B"), QStringLiteral("-c"), exportFixtureScript,
+      root, actual.resultDatasetPath(), workspace.path()});
+  exportFixture.setProcessEnvironment(QProcessEnvironment::systemEnvironment()); exportFixture.setWorkingDirectory(root);
+  exportFixture.start();
+  const bool exportFixtureReady = exportFixture.waitForFinished(30000) && exportFixture.exitCode() == 0;
+  check(exportFixtureReady, "shared CPU preparation and actual source/metric export validate both Gaussian contracts without Torch or training");
+  if (!exportFixtureReady) std::fprintf(stderr, "%s\n", exportFixture.readAllStandardError().constData());
+  const auto exportPaths = QJsonDocument::fromJson(exportFixture.readAllStandardOutput()).array();
+  check(exportFixtureReady && exportPaths.size() == 2, "real helper publishes 3DGS and 2DGS scale-recovery fixtures");
+  for (const auto &entry : exportPaths) {
+    ModelExportOptions sourceOptions; sourceOptions.sourcePath = entry.toString();
+    const auto capability = cameraScaleRecoveryCapability(sourceOptions.sourcePath);
+    check(capability.source && capability.metric && capability.preserve, "actual scale sidecar enables source and metric recovery without fabricating a capability");
+    const auto plyBefore = fileHash(sourceOptions.sourcePath), sidecarBefore = fileHash(cameraScaleMetadataPath(sourceOptions.sourcePath));
+    ModelExportDialog exportDialog(sourceOptions, false, true, {});
+    auto *coordinates = exportDialog.findChild<QComboBox *>(QStringLiteral("modelExportCoordinates"));
+    for (const QString &recovery : {QStringLiteral("source"), QStringLiteral("metric")}) {
+      const int index = coordinates ? coordinates->findData(recovery) : -1;
+      check(index >= 2, "recovery choice carries its machine coordinate mode as userData");
+      if (index < 2) continue;
+      coordinates->setCurrentIndex(index);
+      for (const QString &locale : AppLanguage::supported()) {
+        AppLanguage::apply(locale, false);
+        const auto options = exportDialog.options();
+        check(coordinates->currentData().toString() == recovery && options.cameraCoordinateRecovery == recovery &&
+            !options.applyTransform && options.format == ModelExportFormat::Ply,
+            "live three-language captions preserve selected source/metric export policy through public options");
+      }
+    }
+    check(fileHash(sourceOptions.sourcePath) == plyBefore && fileHash(cameraScaleMetadataPath(sourceOptions.sourcePath)) == sidecarBefore,
+        "changing export policy or language leaves the verified source Gaussian and scale record unchanged");
+  }
+  AppLanguage::apply(language, false);
   for (auto it = originals.begin(); it != originals.end(); ++it) check(fileHash(it.key()) == it.value(), "version creation leaves original images and manifest unchanged");
   actual.setConstraintDocument(actualRequest); actual.startEstimate(); actual.cancelOperation();
   check(waitForScale([&] { return !actual.isRunning(); }) && actual.solutionReport().isEmpty(), "cancel clears evidence and stops only this dialog-owned CPU helper");

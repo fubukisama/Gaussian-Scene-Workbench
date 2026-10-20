@@ -190,7 +190,8 @@ ScaleConstraintsDialog::ScaleConstraintsDialog(const QString &python, const QStr
   auto *form = new QFormLayout;
   form->setRowWrapPolicy(QFormLayout::WrapLongRows);
   m->mode = new QComboBox(m->inputs); m->mode->setObjectName(QStringLiteral("scaleConstraintMode"));
-  m->mode->addItem({}, QStringLiteral("scale_only")); m->mode->addItem({}, QStringLiteral("sim3"));
+  m->mode->addItem(QString(), QVariant(QStringLiteral("scale_only")));
+  m->mode->addItem(QString(), QVariant(QStringLiteral("sim3")));
   AppLanguage::bindComboItem(m->mode, 0, AppLanguage::source("仅定尺度（不确定方向与位置）"));
   AppLanguage::bindComboItem(m->mode, 1, AppLanguage::source("相似变换对齐（尺度、旋转、平移）"));
   form->addRow(scaleText(AppLanguage::source("估计模式")), m->mode);
@@ -435,12 +436,15 @@ void ScaleConstraintsDialog::setConstraintDocument(const QJsonObject &document) 
       if (column == 1 || column == 3 || column == 9) {
         auto *combo = new QComboBox(table);
         if (column == 1) {
-          combo->addItem({}, QStringLiteral("fit")); combo->addItem({}, QStringLiteral("check"));
+          combo->addItem(QString(), QVariant(QStringLiteral("fit")));
+          combo->addItem(QString(), QVariant(QStringLiteral("check")));
           AppLanguage::bindComboItem(combo, 0, AppLanguage::source("参与拟合"));
           AppLanguage::bindComboItem(combo, 1, AppLanguage::source("仅作独立检核"));
         } else if (column == 3) for (const auto &unit : {QStringLiteral("m"), QStringLiteral("cm"), QStringLiteral("mm")}) combo->addItem(unit, unit);
         else {
-          combo->addItem({}, QString()); combo->addItem({}, QStringLiteral("false")); combo->addItem({}, QStringLiteral("true"));
+          combo->addItem(QString(), QVariant(QString()));
+          combo->addItem(QString(), QVariant(QStringLiteral("false")));
+          combo->addItem(QString(), QVariant(QStringLiteral("true")));
           AppLanguage::bindComboItem(combo, 0, AppLanguage::source("未声明"));
           AppLanguage::bindComboItem(combo, 1, AppLanguage::source("否")); AppLanguage::bindComboItem(combo, 2, AppLanguage::source("是"));
         }

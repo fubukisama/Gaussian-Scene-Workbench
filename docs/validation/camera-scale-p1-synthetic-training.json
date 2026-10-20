@@ -4,9 +4,9 @@
   "sourceHashMode": "text-lf-v1",
   "sourceFingerprints": {
     "gaussian-splatting/train.py": "ba726a44e3b4fa4a37887cc56a96eecc5d041842ba63d3d1a78031670b39d451",
-    "native/backend/atomic_file.py": "4621958b821c0b55bb33f4564c5f0e993c2c2af1757c4584c4218d1cc76df2a1",
+    "native/backend/atomic_file.py": "0c608505a430017c3f97f0d9d6444e00e37c4bfdcb607acebc63d1c51ab237a6",
     "native/backend/camera_admission.py": "75437bcbefef692075bf797805fe4e1ba99de316ec1e31a610e4fbb2877b36b2",
-    "native/backend/camera_dataset.py": "bf33e019d84cea4b5fd412e56cdde6767b273f45d3e5f9068cd05731f1ebc3bd",
+    "native/backend/camera_dataset.py": "768e3d74ec2c09b19dba0f1f943cd110a286847b5e4a25df0ebd12e9a7e5506b",
     "native/backend/compute.py": "135f865a3712bb8e6677e61a98f47be789b464716b13097fe48e5f38659dedbc",
     "native/backend/scale_constraints.py": "30bd7863f6569437140f54c730efe0397f5c0df8c6303c6b01524d613a608c5e",
     "native/backend/training_batch_plan.py": "52bbc3b0c39e2e9cbffae2d0eb145e3cf8ddfd2ccb3e8b27a0f3ac3e11a3ae91",
@@ -38,8 +38,8 @@
       ],
       "validationExcluded": true,
       "testExcluded": true,
-      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
-      "sha256": "78a6aee3b5cf2ad5c0da97a2f0b5d297ad4dd22937a1b91df1d9e73a88cf035e",
+      "coordinateRoundtripMaxError": 1.7763568394002505E-15,
+      "sha256": "dd0cc16002bb55df0a66ad3ad5f8c175661da701cd0605e3731d86d5c75734fc",
       "fullOptimizerPauseResume": true,
       "changedSeedRejected": true,
       "changedTestImageRejected": true,
@@ -57,8 +57,8 @@
       ],
       "validationExcluded": true,
       "testExcluded": true,
-      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
-      "sha256": "b380563b44c331c76dde06da9e52bea0a351378c6c785d9e16f31fb11fde3a05",
+      "coordinateRoundtripMaxError": 1.7763568394002505E-15,
+      "sha256": "7485ab74a99e0ba6bc2c34731c00bf756f3998689dd287f0cf6fc1800440b1f7",
       "fullOptimizerPauseResume": true,
       "changedSeedRejected": true,
       "changedTestImageRejected": true,
@@ -87,8 +87,8 @@
       ],
       "validationExcluded": true,
       "testExcluded": true,
-      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
-      "sha256": "2dd72d1c393cbc943ff7307d73df2d2cd601c68b24b0364fffa066ad8e9594c0"
+      "coordinateRoundtripMaxError": 1.7763568394002505E-15,
+      "sha256": "bb6dc96eba88b668f949013319ef019d5d257cabd69e7acb8eebe88968511fc5"
     },
     {
       "backend": "2dgs",
@@ -100,9 +100,21 @@
       ],
       "validationExcluded": true,
       "testExcluded": true,
-      "coordinateRoundtripMaxError": 1.7763568394002505e-15,
-      "sha256": "38373dba087b4ba48f4c293a19f56a733cc101599db45588f54e1a69f413308b"
+      "coordinateRoundtripMaxError": 1.7763568394002505E-15,
+      "sha256": "ae2786582eac6d3bc1e4acfc84ae4ddb04358a1e06e3e3ff7112e27cdb397eb5"
     }
   ],
-  "nativeUiAndCi": "separate delivery gates; not inferred from GPU acceptance"
+  "nativeUiAndCi": "separate delivery gates; not inferred from GPU acceptance",
+  "metadataPortability": {
+    "runtimes": [
+      "3.8.20",
+      "3.10.21",
+      "3.12.14"
+    ],
+    "sourceRecordTwoDirectionExactCases": 6,
+    "canonicalInitializerTwoGenerationsExactCases": 6,
+    "rawSemanticShaBeforeAndAfterNormalization": true,
+    "primarySourceCamerasAndForwardTransformRemainExact": true,
+    "numericalCompatibilityIsNotModelAccuracy": true
+  }
 }

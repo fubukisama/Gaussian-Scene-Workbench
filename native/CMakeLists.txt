@@ -481,6 +481,7 @@ if(BUILD_TESTING)
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
   add_test(NAME native_camera_scale_p1 COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.backend.tests.test_atomic_file
+    native.backend.tests.test_camera_identity_portability
     native.backend.tests.test_scale_constraints native.backend.tests.test_model_scale_version
     native.backend.tests.test_trajectory_dataset native.backend.tests.test_training_batch_plan
     native.worker.test_scale_constraints native.worker.test_training_seed native.worker.test_training_batch)
