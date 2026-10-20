@@ -47,7 +47,10 @@ jobs:
       (github.event_name == 'pull_request' && github.base_ref == 'main') ||
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: windows-2022
-    timeout-minutes: 30
+    # 39379171732 spent 12m33s compiling the expanded native targets and
+    # 15m51s executing all 46 public tests; bootstrap/upload exhausted 30m.
+    # Preserve every test/individual timeout and enough time to retain failures.
+    timeout-minutes: 45
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
@@ -74,6 +77,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Acceptance QA dependencies failed." }
           & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
           if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
+          & '${{ steps.qa-python.outputs.python-path }}' -B -m unittest native.backend.tests.test_initialization native.worker.test_initialization native.backend.tests.test_gs_geometry native.worker.test_gs_geometry native.worker.test_geometry_cli_utf8 native.worker.test_gs_geometry_runtime native.backend.tests.test_geometry_evaluation native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests
+          if ($LASTEXITCODE -ne 0) { throw "General reconstruction worker contracts failed before native compilation." }
           $root = Join-Path $PWD 'native/.deps'
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
             "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
@@ -190,6 +195,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native worker tests failed." }
           & $env:QA_PYTHON -B -m unittest native.backend.tests.test_atomic_file native.backend.tests.test_camera_identity_portability native.backend.tests.test_scale_constraints native.backend.tests.test_model_scale_version native.backend.tests.test_trajectory_dataset native.backend.tests.test_training_batch_plan native.worker.test_scale_constraints native.worker.test_training_seed native.worker.test_training_batch
           if ($LASTEXITCODE -ne 0) { throw "Native camera/scale P1 worker tests failed." }
+          & $env:QA_PYTHON -B -m unittest native.backend.tests.test_initialization native.worker.test_initialization native.backend.tests.test_gs_geometry native.worker.test_gs_geometry native.worker.test_geometry_cli_utf8 native.worker.test_gs_geometry_runtime native.backend.tests.test_geometry_evaluation native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests
+          if ($LASTEXITCODE -ne 0) { throw "General reconstruction worker contracts failed." }
 
       - name: Install SPZ codec dependencies
         shell: pwsh

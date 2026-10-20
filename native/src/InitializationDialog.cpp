@@ -372,7 +372,7 @@ void InitializationDialog::startOperation(const QString &operation) {
   const QString workspace = QFileInfo(m->workspace).canonicalFilePath();
   if (workspace.isEmpty()) return fail(AppLanguage::source("无法创建工程内受控初始化目录。"));
   QString managed = workspace;
-  for (const auto &part : {QStringLiteral(".gsw"), QStringLiteral("initialization")}) {
+  for (const auto &part : {QStringLiteral(".gsw"), QStringLiteral("i")}) {
     const QString next = QDir(managed).filePath(part); QFileInfo info(next);
     if (!info.exists() && !QDir(managed).mkdir(part)) return fail(AppLanguage::source("无法创建工程内受控初始化目录。"));
     info.refresh(); const QString real = info.canonicalFilePath();

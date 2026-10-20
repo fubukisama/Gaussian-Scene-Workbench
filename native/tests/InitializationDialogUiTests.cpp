@@ -106,7 +106,16 @@ int main(int argc,char **argv) {
   const QString pointHash=dialog.report().value("point_sha256").toString();QString version;QJsonObject versionSummary;int created=0;
   QObject::connect(&dialog,&gsw::InitializationDialog::versionCreated,[&](const QString &path,const QJsonObject &summary){++created;version=path;versionSummary=summary;});
   dialog.createVersion();
-  check(waitFor([&]{return !dialog.isRunning();})&&created==1&&QFileInfo(version).isDir()&&versionSummary.value("posePolicy")=="locked"&&versionSummary.value("dataIdentity").toString().size()==64,
+  const bool creationFinished=waitFor([&]{return !dialog.isRunning();});
+  if(!creationFinished||created!=1||!QFileInfo(version).isDir()){
+    const auto *diagnostic=dialog.findChild<QLabel *>(QStringLiteral("initializationSummary"));
+    const auto *ownedProcess=dialog.findChild<QProcess *>();
+    const auto bytes=QJsonDocument(QJsonObject{{"workspace",workspace.path()},{"versionSignalCount",created},{"versionPath",version},
+      {"workerArguments",QJsonArray::fromStringList(ownedProcess?ownedProcess->arguments():QStringList{})},
+      {"summary",diagnostic?diagnostic->text():QString()},{"report",dialog.report()}}).toJson(QJsonDocument::Compact);
+    std::fprintf(stderr,"Create-version diagnostic: %s\n",bytes.constData());
+  }
+  check(creationFinished&&created==1&&QFileInfo(version).isDir()&&versionSummary.value("posePolicy")=="locked"&&versionSummary.value("dataIdentity").toString().size()==64,
       "the actual create-version worker publishes a distinct locked-camera dataset exactly once");
   const auto newMetadata=QDir(version).filePath(QStringLiteral("camera_dataset.json"));QFile versionFile(newMetadata);
   const bool versionOpened=versionFile.open(QIODevice::ReadOnly);const auto versionManifest=versionOpened?QJsonDocument::fromJson(versionFile.readAll()).object():QJsonObject{};
@@ -144,6 +153,28 @@ int main(int argc,char **argv) {
   check(closeOwned(false,false),"idle close deletes the actual dialog without a visible window");
   check(closeOwned(true,false),"queued inspection close destroys the actual dialog and its owned helper");
   check(closeOwned(true,true),"running inspection close cancels and destroys only its owned helper");
+  // Keep the caller's original test root. This additional owned child makes
+  // the managed output exactly two characters deeper, exercising the real
+  // final-artifact boundary rather than shortening a failing CI path.
+  const QString boundaryWorkspace=workspace.filePath(QStringLiteral("z"));check(QDir().mkpath(boundaryWorkspace),"prepare a second workspace two characters deeper without shortening the original fixture");
+  gsw::InitializationDialog boundary(python,root,boundaryWorkspace,source,identity,initial,QProcessEnvironment::systemEnvironment());
+  boundary.startInspection();check(waitFor([&]{return !boundary.isRunning();})&&boundary.report().value("status")=="ready","two-character-deeper workspace still inspects the actual source initialization");
+  int boundaryCreated=0;QObject::connect(&boundary,&gsw::InitializationDialog::versionCreated,[&](const QString &,const QJsonObject &){++boundaryCreated;});
+  boundary.createVersion();
+  const auto boundaryArgs=boundary.findChild<QProcess *>()->arguments();
+  const int outputIndex=boundaryArgs.indexOf(QStringLiteral("--output-directory"));
+  const QString boundaryOutput=outputIndex>=0&&outputIndex+1<boundaryArgs.size()?boundaryArgs[outputIndex+1]:QString();
+  const int finalReportLength=QDir(boundaryOutput).filePath(QStringLiteral("source/initialization/reports/")+QString(64,QLatin1Char('0'))+QStringLiteral(".json")).size();
+  const bool boundaryFinished=waitFor([&]{return !boundary.isRunning();});
+  const auto *boundarySummary=boundary.findChild<QLabel *>(QStringLiteral("initializationSummary"));
+  if(finalReportLength>=260){
+    check(boundaryFinished&&boundaryCreated==0&&!boundaryOutput.isEmpty()&&!QFileInfo::exists(boundaryOutput)&&
+        boundarySummary&&boundarySummary->text().contains(QStringLiteral("initialization_unsafe_output")),
+        "a true over-MAX_PATH final artifact is explicitly refused without publishing a partial version");
+  }else{
+    check(boundaryFinished&&boundaryCreated==1&&QFileInfo(boundaryOutput).isDir()&&boundary.report().value("status")=="ready",
+        "the two-character-deeper final output still publishes when all actual artifact paths fit");
+  }
   check(digest(metadata)==sourceHash&&digest(QDir(source).filePath(QStringLiteral("image.png")))==imageHash,"inspection, language changes and cancellation leave the source metadata and image bytes unchanged");
   check(!dialog.isVisible()&&QApplication::platformName()=="offscreen","the production dialog is tested without show, GSW, OpenGL or a visible window");
   return passed?0:1;

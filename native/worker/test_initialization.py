@@ -289,7 +289,42 @@ class InitializationWorkerTests(unittest.TestCase):
         process = self.worker(report=report_path, env=env)
         stdout, stderr = process.communicate(timeout=20)
         self.assertEqual(process.returncode, 0, stdout + stderr)
-        self.assertEqual(json.loads(stdout.strip().splitlines()[-1])["reportPath"], str(report_path))
+        returned_path = Path(json.loads(stdout.strip().splitlines()[-1])["reportPath"])
+        # Windows may return the canonical long parent for an input spelling
+        # containing an existing 8.3 alias. Both must identify the same actual
+        # report, while the Unicode filename/content must survive unchanged.
+        self.assertEqual(returned_path.name, report_path.name)
+        self.assertTrue(returned_path.is_file())
+        self.assertTrue(returned_path.samefile(report_path))
+        report = json.loads(returned_path.read_text(encoding="utf-8"))
+        self.assertEqual(report["request"], self.request)
+        self.assertEqual(report["status"], "ready")
+
+    @unittest.skipUnless(os.name == "nt", "Windows real 8.3 alias behavior")
+    def test_utf8_report_through_a_real_short_parent_alias_identifies_the_same_file(self):
+        import ctypes
+        parent = self.root / "owned initialization report alias directory"
+        parent.mkdir()
+        parent = parent.resolve(strict=True)
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(parent), buffer, len(buffer))
+        self.assertGreater(size, 0)
+        self.assertLess(size, len(buffer))
+        alias = Path(buffer.value)
+        if os.path.normcase(str(alias)) == os.path.normcase(str(parent)):
+            self.skipTest("test volume has no distinct real 8.3 alias; no volume settings or system files are changed")
+        self.assertTrue(alias.samefile(parent))
+        report_path = alias / "初始化验收.json"
+        process = self.worker(report=report_path, env=dict(os.environ, PYTHONIOENCODING="cp932", PYTHONUTF8="0"))
+        stdout, stderr = process.communicate(timeout=20)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+        returned_path = Path(json.loads(stdout.strip().splitlines()[-1])["reportPath"])
+        self.assertEqual(returned_path.name, "初始化验收.json")
+        self.assertTrue(returned_path.samefile(report_path))
+        self.assertTrue(returned_path.samefile(parent / report_path.name))
+        report = json.loads(returned_path.read_text(encoding="utf-8"))
+        self.assertEqual(report["request"], self.request)
+        self.assertEqual(report["status"], "ready")
 
     def test_initializer_only_replay_rejects_rehashed_non_initializer_data_changes(self):
         from native.worker.initialization import create_initialized_dataset_version

@@ -92,6 +92,16 @@ finally:
   const auto fileHash = [](const QString &path) {
     QFile file(path); return file.open(QIODevice::ReadOnly) ? QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) : QByteArray{};
   };
+  const QStringList modeIds = {QStringLiteral("bounded"), QStringLiteral("unbounded"),
+      QStringLiteral("sugar"), QStringLiteral("gs2mesh"), QStringLiteral("gs_depth")};
+  const QStringList titles = {QStringLiteral("生成几何"), QStringLiteral("Generate Geometry"), QStringLiteral("ジオメトリを生成")};
+  const QList<QStringList> captions = {
+      {QStringLiteral("2DGS 有界 TSDF"), QStringLiteral("2DGS 无界 TSDF"), QStringLiteral("SuGaR 网格优化"),
+       QStringLiteral("GS2Mesh 深度融合"), QStringLiteral("GS 深度点云（3DGS / 2DGS）")},
+      {QStringLiteral("2DGS Bounded TSDF"), QStringLiteral("2DGS Unbounded TSDF"), QStringLiteral("SuGaR Mesh Optimization"),
+       QStringLiteral("GS2Mesh Depth Fusion"), QStringLiteral("GS Depth Point Cloud (3DGS / 2DGS)")},
+      {QStringLiteral("2DGS 有界 TSDF"), QStringLiteral("2DGS 非有界 TSDF"), QStringLiteral("SuGaR メッシュ最適化"),
+       QStringLiteral("GS2Mesh 深度融合"), QStringLiteral("GS 深度点群（3DGS / 2DGS）")}};
   for (const QString backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
     const QDir root(temporary.filePath(backend));
     const QString source = root.filePath(QStringLiteral("model"));
@@ -132,6 +142,18 @@ finally:
         !options.contains("gs2mesh_downsample"), "disabled photo-texture and legacy meshing settings are not sent into depth extraction");
     for (const auto &locale : gsw::AppLanguage::supported()) {
       check(gsw::AppLanguage::apply(locale, false), "native language switches immediately");
+      const int languageIndex = gsw::AppLanguage::supported().indexOf(locale);
+      check(mode->count() == modeIds.size(), "the exact five-mode capability matrix is present in every locale");
+      bool identifiersMatch = true, captionsMatch = true;
+      for (int item = 0; item < modeIds.size(); ++item) {
+        identifiersMatch &= mode->itemData(item).toString() == modeIds[item];
+        captionsMatch &= mode->itemText(item) == captions[languageIndex][item];
+      }
+      check(identifiersMatch, "all five stable method identifiers retain their exact ordering through live language changes");
+      check(captionsMatch && mode->currentData() == QStringLiteral("gs_depth") &&
+          mode->currentText() == captions[languageIndex][4],
+          "all five captions and the selected GS depth route match the exact Chinese English and Japanese matrix");
+      check(dialog.windowTitle() == titles[languageIndex], "the geometry title matches the exact current-language caption");
       check(dialog.configuration() == configuration &&
           dialog.windowTitle() == QCoreApplication::translate("Workbench", "生成几何"),
           "each locale refreshes the dialog without resetting any depth setting or file identity");

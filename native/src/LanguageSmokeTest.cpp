@@ -924,9 +924,42 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const auto configuration = training.configuration();
   MeshGenerationDialog meshing({}, &window);
   auto *meshMethod = meshing.findChild<QComboBox *>(QStringLiteral("meshMethodCombo"));
-  check(meshMethod && meshMethod->count() == 4, "all native mesh methods exposed");
-  check(meshing.windowTitle() == QCoreApplication::translate("Workbench", "生成网格"), "mesh dialog translation");
+  const QStringList geometryTitles = {QStringLiteral("生成几何"), QStringLiteral("Generate Geometry"),
+      QStringLiteral("ジオメトリを生成")};
+  const QStringList meshModeIds = {QStringLiteral("bounded"), QStringLiteral("unbounded"),
+      QStringLiteral("sugar"), QStringLiteral("gs2mesh"), QStringLiteral("gs_depth")};
+  const QList<QStringList> meshModeCaptions = {
+      {QStringLiteral("2DGS 有界 TSDF"), QStringLiteral("2DGS 无界 TSDF"), QStringLiteral("SuGaR 网格优化"),
+       QStringLiteral("GS2Mesh 深度融合"), QStringLiteral("GS 深度点云（3DGS / 2DGS）")},
+      {QStringLiteral("2DGS Bounded TSDF"), QStringLiteral("2DGS Unbounded TSDF"), QStringLiteral("SuGaR Mesh Optimization"),
+       QStringLiteral("GS2Mesh Depth Fusion"), QStringLiteral("GS Depth Point Cloud (3DGS / 2DGS)")},
+      {QStringLiteral("2DGS 有界 TSDF"), QStringLiteral("2DGS 非有界 TSDF"), QStringLiteral("SuGaR メッシュ最適化"),
+       QStringLiteral("GS2Mesh 深度融合"), QStringLiteral("GS 深度点群（3DGS / 2DGS）")}};
+  const auto checkGeometryModeLanguage = [&](const MeshGenerationDialog &dialog, const QComboBox *method,
+                                              const int languageIndex) {
+    check(method && method->count() == meshModeIds.size(), "all five native geometry methods exposed exactly");
+    check(dialog.windowTitle() == geometryTitles[languageIndex], "geometry dialog title has the exact locale caption");
+    if (!method) return;
+    for (int item = 0; item < meshModeIds.size(); ++item) {
+      check(method->itemData(item).toString() == meshModeIds[item], "geometry method identifiers and ordering are never translated");
+      check(method->itemText(item) == meshModeCaptions[languageIndex][item],
+            "all five geometry captions including GS depth use the exact current locale");
+    }
+  };
+  checkGeometryModeLanguage(meshing, meshMethod, index);
   if (meshMethod) meshMethod->setCurrentIndex(3);
+  // Keep the existing GS2Mesh selection/state assertions below. A separate,
+  // hidden real dialog covers the new route while it remains selected during
+  // live language changes; no helper, model, viewport or job is started.
+  MeshGenerationDialog depthGeometry({}, &window);
+  auto *depthMethod = depthGeometry.findChild<QComboBox *>(QStringLiteral("meshMethodCombo"));
+  auto *depthHint = depthGeometry.findChild<QLabel *>(QStringLiteral("meshPipelineHint"));
+  if (depthMethod) depthMethod->setCurrentIndex(depthMethod->findData(QStringLiteral("gs_depth")));
+  depthGeometry.setCameraDatasetPath(QDir(trainingImages.path()).filePath(QStringLiteral("相机_日本語.json")));
+  const auto retainedDepthConfiguration = depthGeometry.configuration();
+  check(depthMethod && depthHint && retainedDepthConfiguration.value(QStringLiteral("mode")) == QStringLiteral("gs_depth"),
+        "the selected depth route has its own real localized fixture without replacing legacy coverage");
+  checkGeometryModeLanguage(depthGeometry, depthMethod, index);
   check(configuration.backend == QStringLiteral("3dgs"), "training backend must not be translated");
   check(configuration.quality == QStringLiteral("quick"), "preset identifier must not be translated");
   check(configuration.iterations == 10000 && configuration.resolution == 2,
@@ -1239,7 +1272,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
   // existing dialogs before asserting that language changes add no actions.
   for (QDialog *dialog : {static_cast<QDialog *>(&training), static_cast<QDialog *>(&import),
        static_cast<QDialog *>(&cameraImport), static_cast<QDialog *>(&lockedSettings),
-       static_cast<QDialog *>(&meshing),
+       static_cast<QDialog *>(&meshing), static_cast<QDialog *>(&depthGeometry),
        static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
        static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog),
        static_cast<QDialog *>(&spzDialog)}) dialog->ensurePolished();
@@ -1600,9 +1633,15 @@ bool runLanguageSmokeTest(MainWindow &window) {
           exportDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型"), "export action and dialog translated live");
     check(exportDialog.options().format == ModelExportFormat::Glb && exportDialog.options().destinationPath == exportPath &&
           exportDialog.options().applyTransform, "export settings survive language changes");
-    check(meshing.windowTitle() == QCoreApplication::translate("Workbench", "生成网格") &&
-          meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
-          "mesh dialog translates live without changing backend");
+    checkGeometryModeLanguage(meshing, meshMethod, next);
+    checkGeometryModeLanguage(depthGeometry, depthMethod, next);
+    check(meshing.configuration().value(QStringLiteral("mode")).toString() == QStringLiteral("gs2mesh"),
+          "legacy GS2Mesh selection survives live geometry dialog translation");
+    check(depthGeometry.configuration() == retainedDepthConfiguration && depthMethod &&
+          depthMethod->currentText() == meshModeCaptions[next][4] && depthHint &&
+          depthHint->text() == QCoreApplication::translate("Workbench", "深度点云使用训练视点和有效掩膜，独立另存；不是高斯中心点云，也不保证真实材料边界。透明或高反射区域可能缺失。不融合、不重跑 SfM，照片纹理烘焙不可用于此路线。") + QLatin1Char('\n') +
+              QCoreApplication::translate("Workbench", "原生默认使用训练框架与原高斯模型对照。规范或源框架成果将保存但不自动叠加；请用于独立评价或同框架工程，不会猜测配准。"),
+          "selected GS depth captions and limitations translate live without changing coordinates, budgets or dataset identity");
     check(spzQuality->currentText() == QCoreApplication::translate("Workbench", "高精度（较大文件）") &&
           spzDialog.options().spzQuality == 2 && spzDialog.options().spzVersion == 3 &&
           spzDialog.options().spzMaximumShDegree == 2 && !spzDialog.options().applyTransform,
