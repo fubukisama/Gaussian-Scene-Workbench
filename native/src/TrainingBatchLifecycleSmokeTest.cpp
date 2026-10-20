@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -229,8 +230,14 @@ bool runTrainingBatchLifecycleSmokeTest(MainWindow &window) {
   check(guards==2 && loaded && guardedReference,
       "a guarded source change persists its version reference before refusing adoption");
   check(window.mWorkspace.sceneObjects().size()==beforeGuard.value(QStringLiteral("objects")).toArray().size(), "guarded transform-only record never adds a pretend baked scene model");
-  window.mScaleConstraintsDialog->close();
+  QPointer<QProcess> guardScaleProcess = window.mScaleConstraintsDialog->findChild<QProcess *>();
+  // Deliver the real close event inside the event loop being observed. A
+  // synchronous outer close posts DeferredDelete to the outer loop, which
+  // waitLifecycle's nested loops intentionally cannot dispatch.
+  QTimer::singleShot(0, window.mScaleConstraintsDialog.data(), &QWidget::close);
   check(waitLifecycle([&]{return !window.mScaleConstraintsDialog;}), "closing the owned scale dialog cleans up only its own CPU helper");
+  check(!guardScaleProcess || guardScaleProcess->state() == QProcess::NotRunning,
+      "closed scale dialog leaves no running owned inspection process");
   // Preserve the same crop/export guard used by ordinary append-import.
   // A new scaled object must not hide transient edits on its source object.
   window.mViewport->setEditToolsLocked(false);
@@ -252,8 +259,11 @@ bool runTrainingBatchLifecycleSmokeTest(MainWindow &window) {
         window.mWorkspace.activeSceneId() == editedId && window.mWorkspace.scenePath() == editedPath &&
         window.mViewport->hasUnsavedSceneEdits(),
         "adopting a scaled model retains the edited source as active so export/discard/exit guards remain reachable");
-    window.mScaleConstraintsDialog->close();
+    QPointer<QProcess> cropScaleProcess = window.mScaleConstraintsDialog->findChild<QProcess *>();
+    QTimer::singleShot(0, window.mScaleConstraintsDialog.data(), &QWidget::close);
     check(waitLifecycle([&]{return !window.mScaleConstraintsDialog;}), "close only the test-owned scale helper");
+    check(!cropScaleProcess || cropScaleProcess->state() == QProcess::NotRunning,
+        "closing after adoption leaves no running owned inspection process");
   }
   window.mViewport->undoEdit(); // Test cleanup, not an operation on a user project.
   expectedDialogs.stop();AppLanguage::apply(originalLanguage,false);

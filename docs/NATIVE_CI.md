@@ -1,5 +1,28 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
+## Local delivery and background full CI / 本地交付与后台全量检查 / ローカル配布と全 CI
+
+中文：本机原生更新采用两条验收通道。相机、尺度、独立检核、真实 3DGS／2DGS
+训练与完整续训、三语言、相关界面回归及安装内容校验通过后，可以交付本地已验证
+版本，不再等待耗时的整套 GitHub 构建与扫描。完整 CI 继续后台执行，已知失败必须
+先修复；本地通过与云端全绿分别记录，不得把运行中、历史成功或预览正常称为全套
+通过。源码有变化时重新核对受影响的证据；未经同意不打开、关闭或重启用户窗口。
+
+English: Native updates use separate local-delivery and full-CI lanes. A locally
+verified build may be delivered after camera/scale/independent-check contracts,
+actual 3DGS/2DGS training and full-state resume, localization, affected UI
+regressions and installed-content checks pass. The complete GitHub build and
+scans continue in the background. Resolve known failures first; record local
+acceptance separately from full CI success. Revalidate affected evidence after
+source changes, and never open, close or restart user windows without consent.
+
+日本語：原生版の更新はローカル配布と全 CI を分離します。カメラ・尺度・独立
+検証、実際の 3DGS／2DGS 学習と完全状態の再開、三言語、関連 UI 回帰、導入内容
+の検証後、全 GitHub ビルド・走査を待たずに検証済み版を配布できます。全 CI は
+バックグラウンドで継続し、既知の失敗は先に修正します。ローカル合格と全 CI
+成功を区別し、ソース変更時は影響する証拠を再検証します。許可なくユーザーの
+ウィンドウを開いたり、閉じたり、再起動したりしません。
+
 ## Upstream adaptation acceptance / 源码移植验收 / ソース移植の検証
 
 中文：`Upstream viewport acceptance` 并行执行三语言真实滚轮／平移／菜单操作、
