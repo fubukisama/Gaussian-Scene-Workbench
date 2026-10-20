@@ -1,12 +1,57 @@
 #requires -Version 7.2
 # GPL-3.0-or-later. Visible wizard checks are permitted only on a CI desktop.
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='Acceptance')]
 param(
-  [Parameter(Mandatory=$true)][string]$SetupPath,
-  [Parameter(Mandatory=$true)][string]$TestRoot
+  [Parameter(Mandatory=$true,ParameterSetName='Acceptance')][string]$SetupPath,
+  [Parameter(Mandatory=$true,ParameterSetName='Acceptance')][string]$TestRoot,
+  [Parameter(Mandatory=$true,ParameterSetName='PageWaitSelfTest')][switch]$SelfTestPageWait
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+function Wait-WizardPage([object]$Wizard, [scriptblock]$Predicate,
+    [scriptblock]$ReadControls = { param($handle) [GswInstallerUiNative]::Children($handle) }) {
+  # Button clicks are deliberately posted, not sent synchronously. Do not
+  # mistake a stale preceding page for a missing control on the destination.
+  # Keep the same five-second upper bound used by Get-Button; never re-click.
+  $deadline = [DateTime]::UtcNow.AddSeconds(5)
+  do {
+    $controls = @(& $ReadControls $Wizard.Handle | Where-Object { $_.ProcessId -eq $Wizard.ProcessId })
+    if (& $Predicate $controls) { return $controls }
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  throw 'Expected test-owned wizard page did not become ready.'
+}
+
+if ($SelfTestPageWait) {
+  # CPU-only delayed-page fixture: no Win32/UIAutomation calls or windows.
+  $state = @{ reads=0; handles=@() }
+  $wizard = [pscustomobject]@{Handle=123456;ProcessId=321}
+  $expected = 'D:\owned fixture\installation directory'
+  $read = {
+    param($handle)
+    $state.reads++; $state.handles += $handle
+    $edit = [pscustomobject]@{ProcessId=321;ClassName='TNewPathEdit';Text=$expected;Enabled=$true}
+    switch ($state.reads) {
+      1 { $edit.ProcessId=999; return $edit }
+      2 { return [pscustomobject]@{ProcessId=321;ClassName='TNewStaticText';Text='preceding runtime page';Enabled=$true} }
+      3 { $edit.Enabled=$false; return $edit }
+      4 { return @($edit,$edit) }
+      default { return $edit }
+    }
+  }
+  $ready = {param($controls) @($controls | Where-Object {
+    $_.ClassName -eq 'TNewPathEdit' -and $_.Enabled -and $_.Text -eq $expected
+  }).Count -eq 1}
+  $controls = @(Wait-WizardPage $wizard $ready $read)
+  if ($state.reads -ne 5 -or @($state.handles | Where-Object { $_ -ne $wizard.Handle }).Count -or
+      $controls.Count -ne 1 -or $controls[0].Text -ne $expected -or -not $controls[0].Enabled) {
+    throw 'Delayed-page regression failed: stale, foreign, disabled or duplicate controls were accepted.'
+  }
+  Write-Output 'Wizard page wait self-test passed: delayed exact-PID/HWND page, unique enabled edit, no clicks or windows.'
+  return
+}
+
 if ($env:GITHUB_ACTIONS -ne 'true') {
   throw 'Visible installer UI acceptance is remote-GitHub-Actions-only. No window was opened.'
 }
@@ -292,27 +337,42 @@ try {
     [void](Capture-Page $wizard $locale 'welcome')
     [void](Get-Button $wizard $pattern.cancel)
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.next).Handle)
+    [void](Wait-WizardPage $wizard {param($controls) @($controls | Where-Object {
+      $_.ClassName -match 'RadioButton$' -and $_.Text.Replace('&','') -match $pattern.accept
+    }).Count -eq 1})
     [void](Capture-Page $wizard $locale 'license')
     [void](Get-Button $wizard $pattern.back)
     $accept = @([GswInstallerUiNative]::Children($wizard.Handle) | Where-Object { $_.ClassName -match 'RadioButton$' -and $_.Text.Replace('&','') -match $pattern.accept })
     if ($accept.Count -ne 1) { throw 'Translated license acceptance option is missing.' }
     [GswInstallerUiNative]::Click($accept[0].Handle)
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.next).Handle)
+    $title = [string]$catalog.PSObject.Properties['安装内容与训练环境'].Value.PSObject.Properties[$locale].Value
+    $runtimeReady = {param($controls)
+      $text = ($controls | ForEach-Object Text) -join "`n"
+      $text.Contains($title) -and $text -match 'CUDA' -and $text -match 'PyTorch' -and
+        $text -match 'Python/Conda' -and $text -match 'COLMAP'
+    }
+    [void](Wait-WizardPage $wizard $runtimeReady)
     $runtime = @(Capture-Page $wizard $locale 'runtime')
     $runtimeText = ($runtime | ForEach-Object Text) -join "`n"
-    $title = [string]$catalog.PSObject.Properties['安装内容与训练环境'].Value.PSObject.Properties[$locale].Value
     if (-not $runtimeText.Contains($title) -or $runtimeText -notmatch 'CUDA' -or $runtimeText -notmatch 'PyTorch' -or
         $runtimeText -notmatch 'Python/Conda' -or $runtimeText -notmatch 'COLMAP') { throw 'Localized training-runtime explanation is missing.' }
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.next).Handle)
+    $directoryReady = {param($controls) @($controls | Where-Object {
+      $_.ClassName -eq 'TNewPathEdit' -and $_.Enabled -and $_.Text -eq $directory
+    }).Count -eq 1}
+    [void](Wait-WizardPage $wizard $directoryReady)
     $destination = @(Capture-Page $wizard $locale 'directory')
     $edit = @($destination | Where-Object { $_.ClassName -match 'Edit$' -and $_.Enabled -and $_.Text -eq $directory })
     if ($edit.Count -ne 1) { throw 'Installation directory is not visible and editable.' }
     [void](Get-Button $wizard $pattern.next)
     [void](Get-Button $wizard $pattern.back)
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.back).Handle)
+    [void](Wait-WizardPage $wizard $runtimeReady)
     $back = @(Capture-Page $wizard $locale 'runtime-back')
     if ((($back | ForEach-Object Text) -join "`n") -notmatch [regex]::Escape($title)) { throw 'Back navigation did not restore runtime explanation.' }
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.next).Handle)
+    [void](Wait-WizardPage $wizard $directoryReady)
     [GswInstallerUiNative]::Click((Get-Button $wizard $pattern.cancel).Handle)
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     $confirmed = $false
