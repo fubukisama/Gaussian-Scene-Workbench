@@ -139,7 +139,20 @@ class ScaleConstraintsTests(unittest.TestCase):
         result = solver.solve_scale_constraints(data, request(data, rows, mode="sim3", fit_tolerance_m=1e-8))
         np.testing.assert_allclose(result["source_to_metric"]["R"], [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]], atol=1e-13)
         self.assertAlmostEqual(result["source_to_metric"]["s"], 2.5, places=13)
-        np.testing.assert_allclose(result["source_to_metric"]["t"], [5000005., -2499993., 7500011.], rtol=0., atol=1e-8)
+        # SVD dispatch can change R by a few machine epsilons. At a million-unit
+        # origin t=ybar-sR*xbar amplifies that harmless component drift. Use the
+        # solver's declared 64-ULP replay budget for t, not a fixed absolute
+        # component tolerance; keep actual mapped points and round trips at
+        # the original 1e-8 metre acceptance boundary below.
+        np.testing.assert_array_max_ulp(np.asarray(result["source_to_metric"]["t"]),
+            np.asarray([5000005., -2499993., 7500011.]), maxulp=64)
+        transform = result["source_to_metric"]
+        mapped = transform["s"] * (np.asarray(source) @ np.asarray(transform["R"]).T) + transform["t"]
+        np.testing.assert_allclose(mapped, target, rtol=0., atol=1e-8)
+        inverse = transform["inverse"]
+        restored = inverse["s"] * (mapped @ np.asarray(inverse["R"]).T) + inverse["t"]
+        np.testing.assert_allclose(restored, source, rtol=0., atol=1e-8)
+        self.assertEqual(result["fit"]["fit_tolerance_m"], 1e-8)
         self.assertEqual(result["geometry_diagnostics"]["source_rank"], 3)
         self.assertLess(result["fit"]["max_residual_m"], 1e-12)
 
