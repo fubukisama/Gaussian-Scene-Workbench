@@ -24,6 +24,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDockWidget>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
@@ -289,6 +290,151 @@ bool runMeshGenerationSmokeTest(MainWindow &window) {
           window.mWorkspace.sceneObjects().size() == sceneCount, "rejection preserves edits, model identity and transform");
     }
   }
+  // These products exercise only the native completion/association boundary.
+  // No renderer or optimizer produced the fixtures and they are not evidence
+  // of GPU depth correctness, camera calibration or model accuracy.
+  window.mViewport->discardSceneEdits();
+  const QByteArray historicalBytes("{\"fixture\":\"native-boundary-only historical recovery sentinel\"}\n");
+  const QString historicalPath = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs/active-training.json"));
+  check(write(historicalPath, historicalBytes), "retain test-owned historical training sentinel");
+  const auto bytesHash = [](const QByteArray &bytes) {
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+  };
+  const QJsonArray identityR{QJsonArray{1., 0., 0.}, QJsonArray{0., 1., 0.}, QJsonArray{0., 0., 1.}};
+  const auto similarity = [&](const QString &input, const QString &output, double scale, const QJsonArray &translation) {
+    return QJsonObject{{"s", scale}, {"R", identityR}, {"t", translation},
+        {"input_frame", input}, {"output_frame", output}, {"applied", true}};
+  };
+  const QJsonObject cameraContract{{"schema", "gsw.training_camera_contract/1"}, {"pose_policy", "locked"},
+      {"input_data_identity", QString(64, QLatin1Char('f'))},
+      {"backend_identity", QJsonObject{{"fixture", "native-boundary-only; not a trained Gaussian model"}}},
+      {"scale", QJsonObject{{"status", "arbitrary"}, {"source_unit", "unknown"}, {"canonical_unit", "unknown"},
+          {"meters_per_unit", QJsonValue(QJsonValue::Null)}, {"evidence", QJsonArray{}}}},
+      {"transforms", QJsonObject{
+          {"source_to_canonical", similarity("source", "canonical", 1., QJsonArray{0., 0., 0.})},
+          {"canonical_to_training", similarity("canonical", "training", 2., QJsonArray{-20., 10., 4.})}}}};
+  const auto artifactsBeforeDepth = window.mWorkspace.workflowArtifacts().size();
+  QStringList expectedDepthHistory;
+  int expectedNewArtifacts = 0;
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    const bool corrupt = scenario == 3, crop = scenario == 4;
+    const QString frame = scenario == 1 ? QStringLiteral("canonical") : scenario == 2 ? QStringLiteral("source") : QStringLiteral("training");
+    const bool separate = frame != QStringLiteral("training");
+    const QString runId = QStringLiteral("native-depth-boundary-%1").arg(scenario);
+    const QString taskName = QStringLiteral("native-boundary-only | ") + runId;
+    const QString directory = QDir(window.mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes/") + runId);
+    const QString path = QDir(directory).filePath(QStringLiteral("depth.ply"));
+    const QString coordinatePath = QDir(directory).filePath(QStringLiteral("depth.camera-scale.json"));
+    const QString manifestPath = QDir(directory).filePath(QStringLiteral("manifest.json"));
+    check(window.mViewport->activateSceneObject(originalId), "select preserved source before depth completion");
+    check(waitUntil([&] { return window.mViewport->scenePath() == original && window.mViewport->renderedPointCount() == 3; }),
+        "source point data is ready before the owned depth job");
+    window.mViewport->setEditToolsLocked(false);
+    if (crop) {
+      window.mViewport->clearSelection(); window.mViewport->invertSelection(); window.mViewport->deleteSelection();
+      check(window.mViewport->hasUnsavedSceneEdits(), "prepare actual unsaved source crop for depth-result protection");
+    }
+    const auto previousObjects = window.mWorkspace.sceneObjects();
+    const auto previousId = window.mWorkspace.activeSceneId();
+    const auto previousTranslation = window.mWorkspace.sceneTranslation();
+    check(write(path, points), "write native-boundary-only plain depth point fixture");
+    const QJsonObject coordinate{{"schema", "gsw.coordinate_export/1"}, {"ply_sha256", bytesHash(points)},
+        {"output_frame", frame}, {"output_unit", "unknown"}, {"training_contract", cameraContract},
+        {"applied_transform", similarity("training", frame, frame == "training" ? 1. : .5,
+            frame == "training" ? QJsonArray{0., 0., 0.} : QJsonArray{10., -5., -2.})},
+        {"fixture", "native-boundary-only; not GPU geometry evidence"}};
+    const QByteArray coordinateBytes = QJsonDocument(coordinate).toJson();
+    check(write(coordinatePath, coordinateBytes), "write hash-bound coordinate export fixture with explicit frame and unknown scale");
+    const QJsonObject product{{"schema", "gsw.gs_geometry/1"}, {"fixture", "native-boundary-only"},
+        {"source", QJsonObject{{"backend", scenario % 2 ? "2dgs" : "3dgs"}, {"input_data_identity", QString(64, QLatin1Char('f'))}}},
+        {"geometry", QJsonObject{{"kind", "depth_point_cloud"}, {"path", "depth.ply"}, {"sha256", bytesHash(points)},
+            {"point_count", 3}, {"frame", frame}, {"frame_id", QString(64, QLatin1Char('f')) + QLatin1Char('/') + frame},
+            {"fusion", "none"}, {"surface_semantics", "appearance_proxy_not_material_boundary"},
+            {"coordinate_sidecar", QJsonObject{{"path", "depth.camera-scale.json"}, {"sha256", bytesHash(coordinateBytes)}}}}}};
+    check(write(manifestPath, QJsonDocument(product).toJson()), "write typed depth product manifest and asset hashes");
+    check(parsePlyCoordinateMetadata({}, path, true).validationError.isEmpty(), "coordinate sidecar passes the real native typed reader");
+    if (corrupt) check(write(path, points + "\n"), "change owned depth bytes after their manifest hash was recorded");
+    const QJsonObject result{{"version", 1}, {"task", "mesh"}, {"kind", "depth_point_cloud"}, {"state", "done"},
+        {"geometryPath", path}, {"manifestPath", manifestPath},
+        {"completedStages", QJsonArray{QStringLiteral("depth"), QStringLiteral("pointcloud")}},
+        {"fixture", "native-boundary-only"}};
+    check(write(QDir(directory).filePath(QStringLiteral("result.json")), QJsonDocument(result).toJson()), "publish owned depth completion journal");
+    GenerationExperiment experiment;
+    experiment.id = runId; experiment.pipeline = QStringLiteral("mesh"); experiment.backend = QStringLiteral("gs_depth");
+    experiment.displayName = taskName; experiment.outputRoot = directory; experiment.status = QStringLiteral("queued");
+    experiment.parameters = QJsonObject{{"fixture", "native-boundary-only"}, {"coordinateMode", frame}};
+    check(window.retainGenerationExperiment(experiment), "retain independent depth task history before the actual process starts");
+    expectedDepthHistory.append(runId);
+    window.mPendingMesh = MainWindow::PendingMesh{taskName, window.mWorkspace.rootPath(), directory, {}};
+    window.mPendingMesh->historyId = runId;
+    check(window.mProcessSupervisor.start(taskName, helper, {QStringLiteral("mesh-worker"), path, QStringLiteral("done")}, {}, {}, true),
+        "start only the existing test-owned native process fixture");
+    check(waitUntil([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingMesh; }), "actual depth completion callback finishes");
+    const int expectedAdded = !corrupt && !separate ? 1 : 0;
+    check(window.mWorkspace.sceneObjects().size() == previousObjects.size() + expectedAdded,
+        "only a valid training-frame depth result enters the existing scene");
+    if (!corrupt) ++expectedNewArtifacts;
+    check(window.mWorkspace.workflowArtifacts().size() == artifactsBeforeDepth + expectedNewArtifacts,
+        "valid depth products are durably registered while a hash-corrupt product is refused");
+    bool originalsKept = true;
+    for (const auto &oldObject : previousObjects) {
+      bool found = false;
+      for (const auto &current : window.mWorkspace.sceneObjects()) if (oldObject.id == current.id) {
+        found = oldObject.path == current.path && oldObject.translation == current.translation &&
+            oldObject.rotation == current.rotation && oldObject.scale == current.scale;
+      }
+      originalsKept &= found;
+    }
+    check(originalsKept, "all earlier model identities and independent transforms survive each depth outcome");
+    if (separate || corrupt || crop) {
+      check(window.mWorkspace.activeSceneId() == previousId && window.mWorkspace.sceneTranslation() == previousTranslation &&
+          window.mViewport->scenePath() == original, "separate-frame, invalid or crop-protected completion cannot replace the selected source");
+    } else {
+      check(window.mWorkspace.scenePath() == path && waitUntil([&] {
+        (void)window.mViewport->grabFramebuffer();
+        return window.mViewport->scenePath() == path && window.mViewport->renderedPointCount() == 3 &&
+            window.mViewport->renderMode() == NativeViewport::RenderMode::Points;
+      }), "valid training-frame depth points appear in points mode without replacing previous objects");
+    }
+    if (crop) check(window.mViewport->hasUnsavedSceneEdits(), "adding inactive depth geometry preserves the actual unsaved crop edits");
+    const int taskRow = window.mTaskTable->rowCount() - 1;
+    check(taskRow >= 0 && window.mTaskTable->item(taskRow, 0)->data(Qt::UserRole + 31).toString() ==
+        (corrupt ? QStringLiteral("failed") : QStringLiteral("done")), "hash rejection is a failed task, never a successful geometry result");
+    const auto archived = GenerationHistoryStore(window.mWorkspace.rootPath()).record(runId, &error);
+    check(archived.isValid() && archived.status == (corrupt ? QStringLiteral("failed") : QStringLiteral("completed")) &&
+        (corrupt ? archived.resultPath.isEmpty() : archived.resultPath == path) &&
+        (!separate || archived.resultSceneId.isEmpty()), "per-task history distinguishes retained files from an associated scene object");
+    const auto stableCollection = window.mWorkspace.sceneCollectionJson();
+    const auto stableArtifacts = window.mWorkspace.workflowArtifacts();
+    const auto stableTarget = window.mViewport->viewTarget();
+    const auto stableDistance = window.mViewport->viewDistance();
+    for (const auto &language : AppLanguage::supported()) {
+      check(AppLanguage::apply(language, false), "depth task language applies immediately");
+      if (!corrupt) {
+        const QString expected = separate
+            ? QCoreApplication::translate("Workbench", "深度几何已保存（%1）；未与训练坐标模型叠加").arg(frame)
+            : crop ? QCoreApplication::translate("Workbench", "深度几何已保留；未替换当前裁剪编辑")
+                   : QCoreApplication::translate("Workbench", "深度点云已载入 · %1 个点（外观代理）").arg(3);
+        check(window.mTaskTable->item(taskRow, 3)->text() == expected, "depth completion details translate without relabeling a separate frame as an overlay");
+      }
+      check(window.mWorkspace.sceneCollectionJson() == stableCollection && window.mWorkspace.workflowArtifacts() == stableArtifacts &&
+          window.mViewport->viewTarget() == stableTarget && window.mViewport->viewDistance() == stableDistance &&
+          (!crop || window.mViewport->hasUnsavedSceneEdits()), "language changes preserve depth files, scene transforms, camera and crop state");
+    }
+    QFile historical(historicalPath);
+    check(historical.open(QIODevice::ReadOnly) && historical.readAll() == historicalBytes,
+        "depth completion does not touch unrelated historical training recovery bytes");
+    window.mViewport->discardSceneEdits();
+  }
+  check(window.mWorkspace.saveManifest({}, &error), "save depth workflow artifacts and independent scene objects");
+  WorkspaceDocument depthReopened;
+  check(depthReopened.load(window.mWorkspace.projectFilePath(), &error) &&
+      depthReopened.workflowArtifacts() == window.mWorkspace.workflowArtifacts() &&
+      depthReopened.sceneCollectionJson() == window.mWorkspace.sceneCollectionJson(),
+      "saved project reopens with all depth artifact records and original/transformed model objects");
+  const GenerationHistoryStore reopenedDepthHistory(depthReopened.rootPath());
+  for (const auto &id : expectedDepthHistory) check(reopenedDepthHistory.record(id, &error).isValid(),
+      "every depth experiment history record remains available after project reopen");
   qInfo() << "Mesh generation desktop smoke:" << (passed ? "PASS" : "FAIL");
   return passed;
 }

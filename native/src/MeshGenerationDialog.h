@@ -6,6 +6,7 @@
 class QLineEdit;
 class QComboBox;
 class QSpinBox;
+class QDoubleSpinBox;
 class QCheckBox;
 class QLabel;
 
@@ -15,6 +16,7 @@ class MeshGenerationDialog final : public QDialog {
 public:
   explicit MeshGenerationDialog(const QString &modelDirectory, QWidget *parent = nullptr);
   [[nodiscard]] QJsonObject configuration() const;
+  void setCameraDatasetPath(const QString &path);
 protected:
   void accept() override;
 private:
@@ -28,6 +30,12 @@ private:
   QSpinBox *mDownsample;
   QCheckBox *mTexture;
   QSpinBox *mTextureResolution;
+  QLineEdit *mDataset;
+  QComboBox *mCoordinateMode;
+  QDoubleSpinBox *mAlpha;
+  QSpinBox *mPixelStride;
+  QSpinBox *mMaxPoints;
+  QSpinBox *mMemoryBudget;
   QLabel *mSourceSummary;
   QLabel *mHint;
   QString mBackend;

@@ -175,55 +175,22 @@ def prepare_training_dataset(source, out_root=None, config=None, cancelled=None,
                     "initializationPath": str(existing.parent / payload["initialization_file"])}
     dataset = copy.deepcopy(dataset)
     input_identity = dataset["data_identity"]
-    initialization = dataset["initialization"]
-    points = colors = None
-    if initialization["kind"] != "random":
-        points, colors = camera_dataset.read_initialization_points(dataset, root)
-        points, colors = np.asarray(points, dtype=np.float64), np.asarray(colors, dtype=np.float64)
-        if not len(points):
-            raise ValueError("declared initialization point cloud is empty")
-    bounds = initialization.get("bounds")
-    if bounds is not None:
-        bounds = np.asarray(bounds, dtype=np.float64)
-        if bounds.shape != (2, 3) or not np.isfinite(bounds).all() or np.any(bounds[1] <= bounds[0]):
-            raise ValueError("initialization bounds must contain finite increasing minima and maxima")
-        if initialization.get("frame", "source") == "source":
-            corners = np.asarray([[bounds[x, 0], bounds[y, 1], bounds[z, 2]]
-                                  for x in (0, 1) for y in (0, 1) for z in (0, 1)])
-            transformed = transform_points(dataset["transforms"]["source_to_canonical"], corners)
-            bounds = np.asarray([transformed.min(axis=0), transformed.max(axis=0)])
-        elif initialization.get("input_to_canonical") is not None:
-            corners = np.asarray([[bounds[x, 0], bounds[y, 1], bounds[z, 2]]
-                                  for x in (0, 1) for y in (0, 1) for z in (0, 1)])
-            transformed = transform_points(initialization["input_to_canonical"], corners)
-            bounds = np.asarray([transformed.min(axis=0), transformed.max(axis=0)])
+    from native.backend.initialization import resolve_initialization_points
+    points, colors, resolved = resolve_initialization_points(dataset, root, cancelled)
+    initialization = copy.deepcopy(resolved["initialization"])
+    dataset["initialization"] = initialization
+    corners = np.asarray(resolved["bounds_corners"], dtype=np.float64)
     configured = dataset["transforms"]["canonical_to_training"]
     explicit_transform = configured if configured.get("mode") == "explicit" else None
     training_views = [view for view in dataset["views"] if view["split"] == "train"]
-    normalization = training_normalization(training_views, points=points, bounds=bounds,
+    normalization = training_normalization(training_views, points=np.concatenate((points, corners)),
                                             explicit=explicit_transform)
     # A normalized manifest stores canonical camera coordinates, never modified
     # training poses. Re-loading therefore cannot multiply this chain twice.
     normalization["applied"] = True
     dataset["transforms"]["canonical_to_training"] = normalization
-    if points is None:
-        seed = initialization.get("seed")
-        count = initialization.get("count")
-        seed, count = 0 if seed is None else seed, 10000 if count is None else count
-        if type(seed) is not int or not 0 <= seed <= 2**32 - 1 or type(count) is not int or not 4 <= count <= 10_000_000:
-            raise ValueError("random initialization requires an integral seed and 4..10000000 points")
-        if bounds is None:
-            centers = np.asarray([[view["c2w_opencv"][i][3] for i in range(3)]
-                                  for view in training_views], dtype=np.float64)
-            middle = (centers.min(axis=0) + centers.max(axis=0)) * .5
-            radius = float(np.linalg.norm(centers - middle, axis=1).max())
-            if radius <= 0:
-                raise ValueError("random initialization needs camera coverage or explicit bounds")
-            bounds = np.asarray([middle - radius * .5, middle + radius * .5])
-            initialization["coverage_assumption"] = "scene_near_camera_coverage_center_not_depth_evidence"
-        points = np.random.RandomState(seed).uniform(bounds[0], bounds[1], size=(count, 3))
-        colors = np.full((count, 3), .5, dtype=np.float64)
-        initialization.update(seed=seed, count=count, actual_canonical_bounds=bounds.tolist())
+    initialization.update(point_sha256=resolved["point_sha256"],
+        actual_canonical_bounds=[corners.min(axis=0).tolist(), corners.max(axis=0).tolist()])
     localized = transform_points(normalization, points)
     rotation = np.asarray(normalization["R"], dtype=np.float64)
     for view in dataset["views"]:
@@ -233,29 +200,15 @@ def prepare_training_dataset(source, out_root=None, config=None, cancelled=None,
         view["training_c2w_opencv"] = pose.tolist()
         view["training_size"] = _training_size(view["width"], view["height"], resolution)
         view["training_K"] = resized_intrinsics(view["K"], (view["width"], view["height"]), view["training_size"])
-    coverage = []
+    from native.backend.initialization import check_initialization_visibility
+    coverage = check_initialization_visibility(dataset, points, normalization, resolution, cancelled)["per_view"]
     maximum_depth = .2
-    for view in dataset["views"]:
-        pose = np.asarray(view["training_c2w_opencv"], dtype=np.float64)
-        local = (localized - pose[:3, 3]) @ pose[:3, :3]
-        if view["split"] != "train":
-            continue
-        maximum_depth = max(maximum_depth, float(local[:, 2].max()))
-        positive = local[:, 2] > .2
-        if not positive.any():
-            raise camera_dataset.CameraDatasetError("camera_no_forward_initialization", view["view_id"])
-        k = np.asarray(view["training_K"], dtype=np.float64)
-        image_xy = local[positive, :2] / local[positive, 2:3]
-        image_xy *= [k[0, 0], k[1, 1]]
-        image_xy += [k[0, 2], k[1, 2]]
-        size = view["training_size"]
-        visible = (image_xy[:, 0] >= 0) & (image_xy[:, 0] < size[0]) & (image_xy[:, 1] >= 0) & (image_xy[:, 1] < size[1])
-        if not visible.any():
-            raise camera_dataset.CameraDatasetError("camera_no_visible_initialization", view["view_id"])
-        coverage.append({"view_id": view["view_id"], "initial_points": len(local),
-                         "forward_past_backend_near": int(positive.sum()), "inside_image": int(visible.sum()),
-                         "minimum_initial_view_z": float(local[:, 2].min()),
-                         "maximum_initial_view_z": float(local[:, 2].max())})
+    for row in coverage:
+        maximum_depth = max(maximum_depth, row["maximum_view_z"])
+        if row["forward_past_backend_near"] == 0:
+            raise camera_dataset.CameraDatasetError("camera_no_forward_initialization", row["view_id"])
+        if row["inside_image"] == 0:
+            raise camera_dataset.CameraDatasetError("camera_no_visible_initialization", row["view_id"])
     dataset["clipping"] = {"backend_near": .2, "znear": .2, "zfar": maximum_depth * 2.,
                            "frame": "training", "mode": "stock_fixed_positive_depth_clip",
                            "limitation": "geometry_with_view_z_at_or_below_backend_near_is_culled",

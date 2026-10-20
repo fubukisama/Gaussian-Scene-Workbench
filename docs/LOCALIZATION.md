@@ -1,5 +1,48 @@
 # Native desktop localization
 
+## Known-camera initialization terminology
+
+| English | 简体中文 | 日本語 |
+| --- | --- | --- |
+| Initialization recipe | 初始化配方 | 初期化の生成条件 |
+| Declared coarse bounds | 声明的粗范围 | 宣言した概略範囲 |
+| Optical-axis convergence | 光轴会聚 | 光軸の収束 |
+| Camera Z depth | 相机 Z 深度 | カメラの Z 深度 |
+| Geometric visibility check | 几何可见性检查 | 幾何学的な可視性の確認 |
+| Frozen initialization points | 冻结初始化点集 | 固定した初期点群 |
+
+The raw import editor records a declaration only. Its source/canonical frame,
+seed, count, priors and provenance survive native request round trips. The
+post-import initialization dialog uses the admitted dataset identity and the
+actual shared CPU helper for points, transformed declared box corners, full-K
+camera frusta and per-training-view visibility. Display frustum length is a
+notation, not measured object depth. Validation/test cameras are labeled, but
+their image pixels do not generate initialization or suggestions.
+
+Suggestions require explicit adoption and another check. An optical-axis
+intersection cannot establish object extent; a user-specified camera-Z interval
+creates a frustum AABB, not a measured object boundary. Source/canonical frame
+changes never just relabel existing coordinates. Editing invalidates old
+reports; changing a saved recipe invalidates its old frozen point artifact.
+Creating a version preserves the original dataset and locked cameras. Frozen
+random points remain random initialization, not an external geometry prior.
+Visibility checks are not training, surface coverage or model accuracy proof.
+
+中文：原始导入页仅记录声明；导入后才对真实点集、完整内参相机、变换后的声明
+范围与训练视图可见性进行检查。建议必须明确采用并重新检查，不把光轴或相机
+轨迹当作对象深度或边界；不读取验证、测试图像。源／规范框架不能仅换标签，
+修改立即使旧报告失效；修改已保存配方时重新生成点集并显示警告。创建独立
+版本保留原数据与已知相机。冻结随机点不构成外部几何先验，可见性不是模型精度。
+
+日本語：インポート画面は宣言の記録のみを行い、インポート後に実際の点群、
+完全な内部行列を持つカメラ、変換した宣言範囲と学習視点での可視性を確認
+します。提案は明示的に採用して再確認し、光軸や軌跡を物体の深度・境界と
+見なしません。検証・テスト画像の画素は読み込みません。元／正規座標系の
+ラベルだけの変更を拒否し、編集時は古い報告を無効にします。保存済みの
+生成条件を変更すると点群を再生成し警告します。新しい版は元データと既知
+カメラを保持します。固定したランダム点群は外部形状の事前情報ではなく、
+可視性の確認はモデル精度の証明ではありません。
+
 ## Separate Windows setup wizard
 
 Setup offers `zh_CN`, `en_US` and `ja_JP` before opening its pages. Its custom

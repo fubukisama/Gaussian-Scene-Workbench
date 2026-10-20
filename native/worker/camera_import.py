@@ -240,6 +240,16 @@ class CameraImportService:
                 _copy_verified(_reference(source_root, relative), _output(destination, relative),
                                record["sha256"], self._cancel)
                 copied.add(relative)
+            from native.backend.initialization import initialization_reference_records
+            for record in initialization_reference_records(dataset, source_root, self._cancel):
+                relative = record["path"]
+                if relative in copied:
+                    if camera_dataset._hash(_output(destination, relative), self._cancel) != record["sha256"]:
+                        raise ValueError("Conflicting initialization reference")
+                    continue
+                _copy_verified(_reference(source_root, relative), _output(destination, relative),
+                               record["sha256"], self._cancel)
+                copied.add(relative)
             # Archive calibration bytes separately from the canonical manifest.
             # A generic source may itself be named camera_dataset.json.
             source_files = copy.deepcopy(dataset["source"].get("files", []))

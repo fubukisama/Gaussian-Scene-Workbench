@@ -42,6 +42,7 @@ class ResourceBudgetDialog;
 class QualityComparisonDialog;
 class ScaleConstraintsDialog;
 class TrainingBatchDialog;
+class InitializationDialog;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -211,6 +212,9 @@ private:
   void showGenerationHistory();
   void showQualityComparison();
   void showScaleConstraints(bool modelSource = false);
+  void showInitialization();
+  bool adoptInitializationVersion(const QString &path, const QJsonObject &summary,
+                                  const QString &inputIdentity, const QString &projectRoot);
   void showTrainingBatch();
   void startTrainingBatch(const QString &planPath, bool resume);
   void resumeGenerationExperiment(const QString &id);
@@ -245,6 +249,7 @@ private:
   QPointer<QualityComparisonDialog> mQualityComparisonDialog;
   QPointer<ScaleConstraintsDialog> mScaleConstraintsDialog;
   QPointer<TrainingBatchDialog> mTrainingBatchDialog;
+  QPointer<InitializationDialog> mInitializationDialog;
   QDockWidget *mProjectDock = nullptr;
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;

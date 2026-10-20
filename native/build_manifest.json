@@ -1,7 +1,7 @@
 {
   "product": "Gaussian Scene Workbench",
   "appUserModelId": "Fubukisama.GaussianSceneWorkbench.Native",
-  "version": "0.3.3-native-preview",
+  "version": "0.3.4-native-preview",
   "releaseDate": "2026-10-20",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",
@@ -10,6 +10,10 @@
   "editing": "GPU-refined point/mesh/Gaussian object picking with empty-AABB rejection and compact idle corner bounds, Blender-style Move/Rotate/Scale/Transform gizmos, explicit global/local Move/Rotate orientation plus shear-safe locked-local Scale/Transform feedback, spacious screen-layered combined handles, guarded ring/trackball hit zones, direct axis/plane/view handles, modal G/R/RR/S transforms, snapping, numeric entry, exact cancel, transform undo/redo, recovery-safe TRS persistence, and full-source rectangle/lasso/brush trimming",
   "computeBackendIncluded": true,
   "cameraDataset": "Versioned known-camera input with explicit locked/solve policy, full pinhole intrinsics, disjoint training/validation/test splits, reversible source/canonical/training coordinates and hash-bound scale provenance for native measurement and Gaussian-aware export; no independent geometry accuracy claim",
+  "initialization": "Explicit source/frame/coarse bounds/count/seed/prior controls, explainable opt-in camera-axis/depth-interval suggestions, actual point/camera/volume preview, executed-kernel-aware visibility checks and hash-bound immutable initializer versions shared by 3DGS and 2DGS",
+  "geometryExtraction": "Train-view-only rendered camera-Z moments, alpha validity masks and unfused float64 depth point clouds for native canonical-camera 3DGS and 2DGS with distinct recorded depth definitions, complete frame/scale/backend provenance and original-result protection; appearance proxy, not certified material surface",
+  "geometryEvaluation": "Independent known-frame geometry CLI with dimension bias, bidirectional point/surface distances, explicit sampling/ROI/quantiles and missing coverage; optional rigid/similarity diagnostics retain original-scale results and never feed reference geometry into training",
+  "comparison": "Arbitrary named export/replay recipes pin actual initializer point identity, data/cameras/splits/resolution/seeds/training/extraction and repository source; export alone does not execute jobs or certify external runtimes",
   "featureGate": "NATIVE_PARITY.md",
   "legacyWebRuntimeIncluded": false
 }

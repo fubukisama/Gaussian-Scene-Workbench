@@ -19,7 +19,7 @@ _SOURCE_FILES = ("native/backend/atomic_file.py", "native/backend/training_batch
     "native/worker/training_runtime.py", "native/worker/training_checkpoint.py",
     "native/worker/two_dgs_train.py", "gaussian-splatting/train.py",
     "native/worker/training_seed.py", "native/worker/training_batch.py",
-    "native/backend/camera_admission.py", "native/backend/scale_constraints.py")
+    "native/backend/camera_admission.py", "native/backend/scale_constraints.py", "native/backend/initialization.py")
 
 
 class TrainingBatchError(ValueError):

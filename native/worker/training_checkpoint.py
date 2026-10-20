@@ -89,6 +89,7 @@ def training_identity(dataset, opt, pipe):
         settings["native_density_source"] = file_digest(Path(__file__).with_name("training_density_control.py"), text_source=True)
         settings["native_camera_training_source"] = file_digest(Path(__file__).with_name("canonical_training.py"), text_source=True)
         settings["native_camera_dataset_source"] = file_digest(Path(__file__).parents[1] / "backend" / "camera_dataset.py", text_source=True)
+        settings["native_initialization_source"] = file_digest(Path(__file__).parents[1] / "backend" / "initialization.py", text_source=True)
     if hasattr(dataset, "training_seed"):
         settings["native_training_seed_source"] = file_digest(Path(__file__).with_name("training_seed.py"), text_source=True)
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()

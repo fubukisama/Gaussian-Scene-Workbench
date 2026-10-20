@@ -115,7 +115,7 @@ def run_child(args, trainer_args):
                 scheduled = True
                 emit('pause_requested', iteration=iteration)
         elif filename.endswith('/scene/gaussian_model.py') and name in (
-                'add_densification_stats', 'densify_and_clone', 'densify_and_split'):
+                'add_densification_stats', 'densify_and_clone', 'densify_and_split', 'prune_points'):
             model = local['self']
             if event == 'call':
                 before = {'beforePoints': int(model.get_xyz.shape[0]), **latest}
@@ -123,6 +123,10 @@ def run_child(args, trainer_args):
                     before.update(denomBefore=float(model.denom.sum().item()),
                         gradientBefore=float(model.xyz_gradient_accum.sum().item()),
                         visible=int(local['update_filter'].sum().item()))
+                elif name == 'prune_points':
+                    before.update(requestedRemoval=int(local['mask'].sum().item()),
+                        caller=frame.f_back.f_code.co_name,
+                        callerFile=frame.f_back.f_code.co_filename.replace('\\', '/'))
                 calls[id(frame)] = before
             else:
                 before = calls.pop(id(frame))
@@ -216,15 +220,29 @@ def verify_audits(work, prepared, mode):
     events = [row for row in records if row['event'] == 'density_event']
     assert [row['iteration'] for row in events] == list(GROWTH_ITERATIONS)
     for row in events:
-        assert row['after']['points'] == 2 * row['before']['points']
+        if mode == 'prune':
+            if row['iteration'] == GROWTH_ITERATIONS[0]:
+                assert row['after']['points'] == 2 * row['before']['points']
+            else:
+                assert row['before']['points'] < row['after']['points'] < 2 * row['before']['points']
+        else:
+            assert row['after']['points'] == 2 * row['before']['points']
         assert row['after']['points'] <= MAX_POINTS
         assert row['before']['gradientAccumulatorSum'] > 0 and row['before']['denomSum'] > 0
         assert row['after']['gradientAccumulatorSum'] == 0 and row['after']['denomSum'] == 0
-    selected = [row for row in records if row['event'] == 'densify_and_' + mode]
+    growth_mode = 'clone' if mode == 'prune' else mode
+    selected = [row for row in records if row['event'] == 'densify_and_' + growth_mode]
     assert len(selected) == len(GROWTH_ITERATIONS)
     assert all(row['afterPoints'] == 2 * row['beforePoints'] for row in selected)
-    other = 'split' if mode == 'clone' else 'clone'
+    other = 'split' if growth_mode == 'clone' else 'clone'
     assert all(row['afterPoints'] == row['beforePoints'] for row in records if row['event'] == 'densify_and_' + other)
+    pruning = [row for row in records if row['event'] == 'prune_points']
+    for row in pruning:
+        assert row['beforePoints'] - row['afterPoints'] == row['requestedRemoval']
+    policy_pruning = [row for row in pruning if row['callerFile'].endswith('/training_density_control.py')]
+    assert len(policy_pruning) == len(GROWTH_ITERATIONS)
+    if mode == 'prune':
+        assert all(row['requestedRemoval'] > 0 for row in policy_pruning if row['iteration'] > 2)
     saved = [row for row in records if row['event'] == 'checkpoint_saved']
     restored = [row for row in records if row['event'] == 'restore_verified']
     assert [row['iteration'] for row in saved] == list(PAUSE_ITERATIONS)
@@ -236,9 +254,15 @@ def verify_audits(work, prepared, mode):
             assert before[key] == after[key]
         assert after['optimizerStatisticsRngExact']
     final = verify_output(work / 'model', prepared, TOTAL)
-    assert final['points'] == MAX_POINTS
+    assert final['points'] == events[-1]['after']['points']
+    if mode != 'prune':
+        assert final['points'] == MAX_POINTS
     return {'densityEvents': events, 'statisticsCalls': len(stats), 'splitIsolationVerified': True,
             'fullStateResumeVerifiedIterations': list(PAUSE_ITERATIONS), 'maxPoints': MAX_POINTS,
+            'actualPruneCalls': pruning,
+            'policyPrunedPoints': sum(row['requestedRemoval'] for row in policy_pruning),
+            'splitParentRemovalPoints': sum(row['requestedRemoval'] for row in pruning
+                if row['caller'] == 'densify_and_split'),
             'mode': mode, **final}
 
 
@@ -246,7 +270,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output')
     parser.add_argument('--backend', choices=('3dgs', '2dgs', 'both'), default='both')
-    parser.add_argument('--mode', choices=('clone', 'split', 'both'), default='both')
+    parser.add_argument('--mode', choices=('clone', 'split', 'prune', 'both', 'all'), default='both')
     parser.add_argument('--plan-only', action='store_true')
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--entry', help=argparse.SUPPRESS)
@@ -274,7 +298,8 @@ def main():
     data = camera_dataset.validate_camera_dataset(data, data_root)
     camera_dataset.write_camera_dataset(data, data_root / 'camera_dataset.json')
     backends = ('3dgs', '2dgs') if args.backend == 'both' else (args.backend,)
-    modes = ('clone', 'split') if args.mode == 'both' else (args.mode,)
+    modes = ('clone', 'split', 'prune') if args.mode == 'all' else (
+        ('clone', 'split') if args.mode == 'both' else (args.mode,))
     evidence = {'schema': 'gsw.acceptance_density_resume/1', 'gpuExecuted': False, 'cases': [],
                 'scope': 'bounded_real_density_and_optimizer_resume_not_reconstruction_quality',
                 'productionSourceChanged': False, 'observation': 'sys.setprofile_no_function_replacement',
@@ -297,7 +322,10 @@ def main():
             train = ['-s', str(data_root), '-m', str(output), '-r', '1', '--data_device', 'cpu',
                 '--iterations', str(TOTAL), '--densify_from_iter', '1', '--densification_interval', '2',
                 '--densify_until_iter', '7', '--densify_grad_threshold', '0',
-                '--percent_dense', '100' if mode == 'clone' else '0', '--opacity_reset_interval', '1000',
+                '--percent_dense', '0' if mode == 'split' else '100',
+                # Reset after Adam has at least one actual optimizer update.
+                # The upstream reset API cannot replace an uninitialized state.
+                '--opacity_reset_interval', '2' if mode == 'prune' else '1000',
                 '--test_iterations', str(TOTAL), '--save_iterations', str(TOTAL)]
             if backend == '3dgs':
                 train.extend(['--disable_viewer', '--optimizer_type', 'default'])

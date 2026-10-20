@@ -4,6 +4,7 @@
 #include "ManagedName.h"
 #include "WrappingCheckBox.h"
 #include "CameraDatasetInfo.h"
+#include "InitializationDialog.h"
 
 #include "ColmapSupport.h"
 
@@ -67,6 +68,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->setVerticalSpacing(9);
 
   auto *datasetValue = new QLabel(QDir::toNativeSeparators(datasetPath), this);
+  mDatasetValue = datasetValue;
   datasetValue->setObjectName(QStringLiteral("mutedLabel"));
   datasetValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
   datasetValue->setWordWrap(true);
@@ -277,6 +279,11 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   form->addRow(QCoreApplication::translate("Workbench", "相机与重建来源"), mReconstructionSummaryLabel);
   AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mReconstructionSummaryLabel)),
                     AppLanguage::source("相机与重建来源"));
+  mInitializationButton = AppLanguage::text(new QPushButton(this), AppLanguage::source("初始化设置与检查…"));
+  mInitializationButton->setObjectName(QStringLiteral("trainingInitializationButton"));
+  mInitializationButton->setEnabled(false);
+  form->addRow(mInitializationButton);
+  connect(mInitializationButton, &QPushButton::clicked, this, &TrainingDialog::openInitialization);
   mReconstructionDecisionLabel = new QLabel(this);
   mReconstructionDecisionLabel->setObjectName(QStringLiteral("trainingReconstructionDecisionLabel"));
   mReconstructionDecisionLabel->setTextFormat(Qt::PlainText);
@@ -516,6 +523,38 @@ void TrainingDialog::setCameraDatasetReference(const QString &metadataPath,
 QJsonObject TrainingDialog::cameraDatasetSummary() const {
   return mReconstructionSummary.report.value(QStringLiteral("cameraDataset")).toObject();
 }
+void TrainingDialog::setInitializationWorkspace(const QString &workspaceRoot) {
+  mInitializationWorkspace = workspaceRoot;
+  refreshReconstructionSummary();
+}
+void TrainingDialog::useInitializationDataset(const QString &metadataPath, const QString &dataIdentity) {
+  const QFileInfo selected(metadataPath);
+  mDatasetPath = selected.isDir() ? selected.absoluteFilePath() : selected.absolutePath();
+  if (mDatasetValue) mDatasetValue->setText(QDir::toNativeSeparators(mDatasetPath));
+  setCameraDatasetReference(selected.isDir() ? QDir(mDatasetPath).filePath(QStringLiteral("camera_dataset.json"))
+                                           : selected.absoluteFilePath(), dataIdentity, QStringLiteral("locked"));
+  scanInputSummary();
+  scanReconstructionSummary();
+}
+void TrainingDialog::openInitialization() {
+  if (!mReconstructionProbeConfigured || !reconstructionPreflightReady() ||
+      mInitializationWorkspace.isEmpty() || mCameraDatasetPath.isEmpty() ||
+      mCameraDatasetIdentity.isEmpty() || CameraDatasetInfo::blocked(cameraDatasetSummary())) return;
+  const QString inputIdentity = mCameraDatasetIdentity;
+  InitializationDialog initialization(mProbePython, mProbeBackendRoot, mInitializationWorkspace,
+      mCameraDatasetPath, inputIdentity, cameraDatasetSummary().value(QStringLiteral("initialization")).toObject(),
+      mProbeEnvironment, this);
+  initialization.setModal(true);
+  auto request = initialization.requestDocument();
+  request.insert(QStringLiteral("backend"), mBackend->currentData().toString());
+  request.insert(QStringLiteral("resolution"), mResolution->currentData().toInt());
+  initialization.setRequestDocument(request);
+  connect(&initialization, &InitializationDialog::versionCreated, this,
+      [this, inputIdentity](const QString &path, const QJsonObject &summary) {
+        emit initializationVersionCreated(path, summary, inputIdentity);
+      });
+  initialization.exec(); // Explicit user action; never opened by a probe or language change.
+}
 
 void TrainingDialog::refreshCameraPolicy() {
   if (!mRunColmap || !mResolutionPolicy) return;
@@ -716,6 +755,9 @@ void TrainingDialog::scanReconstructionSummary() {
 
 void TrainingDialog::refreshReconstructionSummary() {
   if (!mReconstructionSummaryLabel || !mReconstructionDecisionLabel) return;
+  if (mInitializationButton) mInitializationButton->setEnabled(mReconstructionProbeConfigured &&
+      reconstructionPreflightReady() && !mInitializationWorkspace.isEmpty() && !mCameraDatasetPath.isEmpty() &&
+      !mCameraDatasetIdentity.isEmpty() && !CameraDatasetInfo::blocked(cameraDatasetSummary()));
   if (mStartButton && mReconstructionProbeConfigured)
     mStartButton->setEnabled(reconstructionPreflightReady() &&
                             !mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool());

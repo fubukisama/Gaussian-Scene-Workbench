@@ -150,7 +150,114 @@ def _validate_configuration(path):
     return values
 
 
+def run_depth_geometry(config, server, emit):
+    """Map the native typed job to a separate correct-backend depth worker.
+
+    Unlike legacy mesh modes this consumes the locked full-K contract directly.
+    The result is an un-fused pointcloud, not a triangle mesh or optimizer state.
+    """
+    import subprocess
+    from native.backend.gs_geometry import GsGeometryError, _no_links, _read_json, file_sha256, inspect_geometry_source
+    from native.worker.gs_geometry import _config, _write_json
+    from native.worker.training_batch import _Commands, _run_child
+    source, output_root = Path(config["modelDirectory"]), Path(config["outputRoot"])
+    name = config["runName"]
+    if (not source.is_absolute() or not output_root.is_absolute() or not isinstance(name, str) or not name
+            or Path(name).name != name or name in (".", "..") or any(c in name for c in (":", "\\", "/"))):
+        raise GsGeometryError("geometry_invalid_path")
+    if config.get("bakeTexture"):
+        raise GsGeometryError("geometry_texture_not_available_for_depth_pointcloud")
+    dataset = config.get("cameraDatasetPath") or config.get("datasetPath")
+    if not dataset:
+        raise GsGeometryError("geometry_explicit_camera_dataset_required")
+    _no_links(output_root)
+    source = source.resolve()
+    output_root = output_root.resolve()
+    dataset_root = Path(dataset).resolve()
+    dataset_root = dataset_root if dataset_root.is_dir() else dataset_root.parent
+    if source == output_root or source in output_root.parents or dataset_root == output_root or dataset_root in output_root.parents:
+        raise GsGeometryError("geometry_output_overlaps_source")
+    # Admission before environment setup, renderer import or subprocess start.
+    admitted = inspect_geometry_source(source, config["iteration"], Path(dataset))
+    options = dict(config.get("meshOptions") or {})
+    options.pop("mode", None)
+    request = _config(dict(options, schema="gsw.gs_geometry_request/1", model_directory=str(source), dataset_path=str(dataset),
+        iteration=config["iteration"], output_directory=str(output_root / name / "geometry")))
+    # Resolve a missing runtime before recording a running job. A setup failure
+    # must not strand a result.json permanently marked running.
+    backend = admitted["backend"]
+    environment = server.training_env(backend)
+    environment["GSW_POSE_POLICY"] = "locked"
+    environment["GSW_CAMERA_DATASET"] = admitted["prepared_manifest_path"]
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONNOUSERSITE"] = "1"
+    if backend == "2dgs":
+        environment["GSW_TWO_DGS_SOURCE"] = str(server.TWO_DGS_DIR)
+    executable = Path(server.training_python(backend))
+    if not executable.is_file():
+        raise GsGeometryError("geometry_renderer_python_missing")
+    output_root.mkdir(parents=True, exist_ok=True)
+    run_directory = output_root / name
+    run_directory.mkdir()  # fresh typed job; no previous output overwritten
+    configuration = run_directory / "request.json"
+    receipt = run_directory / "receipt.json"
+    record_path = run_directory / "result.json"
+    _write_json(configuration, request)
+    record = {"version": 1, "task": "mesh", "mode": "gs_depth", "state": "running", "stage": "geometry_depth",
+        "source": str(source), "iteration": config["iteration"], "completedStages": [], "kind": "depth_point_cloud"}
+    atomic_json(record_path, record)
+    emit("running", "geometry_depth", 0)
+    command = [str(executable), "-B", str(Path(__file__).with_name("gs_geometry.py")),
+               "--config", str(configuration), "--report", str(receipt)]
+    def on_line(channel, line):
+        # Child progress is owned by this typed job, never another training.
+        if channel == "stdout" and line.startswith("[worker-event] "):
+            try:
+                event = json.loads(line[len("[worker-event] "):])
+                total = event.get("total_views", 0)
+                fraction = 100. * event.get("completed_views", 0) / total if total else 0.
+                emit("running", "geometry_depth", fraction)
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+        else:
+            print("[geometry-child] " + line.rstrip(), flush=True)
+        return False
+    def process_factory(*args, **kwargs):
+        return subprocess.Popen(*args, env=environment, **kwargs)
+    try:
+        code, requested = _run_child(command, configuration, _Commands(), process_factory, on_line)
+        result = _read_json(receipt)
+        manifest_path = run_directory / "geometry/manifest.json"
+        if result.get("manifestPath") != str(manifest_path) or result.get("schema") != "gsw.gs_geometry_report/1":
+            raise GsGeometryError("geometry_receipt_mismatch")
+        manifest = _read_json(manifest_path)
+        record.update(manifestPath=str(manifest_path), geometryReportPath=str(receipt))
+        if code or not result.get("success") or manifest.get("status") != "completed":
+            error = result.get("error", {})
+            raise GsGeometryError(error.get("code", "geometry_extraction_failed"), error.get("detail", ""))
+        geometry = manifest.get("geometry", {})
+        cloud = run_directory / "geometry/point_cloud.ply"
+        if (manifest.get("schema") != "gsw.gs_geometry/1" or geometry.get("path") != "point_cloud.ply"
+                or geometry.get("kind") != "depth_point_cloud" or geometry.get("fusion") != "none"
+                or geometry.get("sha256") != file_sha256(cloud) or result.get("geometryPath") != str(cloud)):
+            raise GsGeometryError("geometry_product_mismatch")
+        record.update(state="done", stage="done", geometryPath=str(cloud), geometry=geometry,
+            completedStages=["depth", "pointcloud"], geometrySummary=result.get("summary", {}))
+        atomic_json(record_path, record)
+        emit("done", "done", 100, {"previewPath": str(cloud), "previewKind": "points", "previewIteration": 1})
+        return 0
+    except Exception as error:
+        code = getattr(error, "code", "geometry_extraction_failed")
+        state = "cancelled" if code == "geometry_cancelled" else "failed"
+        record.update(state=state, stage=state, error=str(error), errorCode=code)
+        atomic_json(record_path, record)
+        emit(state, state, None, {"generation_issue": code})
+        return 130 if state == "cancelled" else 1
+
+
 def run(config, server, emit):
+    if config.get("mode") == "gs_depth":
+        return run_depth_geometry(config, server, emit)
     source = Path(config["modelDirectory"]).resolve()
     output_root = Path(config["outputRoot"]).resolve()
     run_name = config["runName"]

@@ -91,7 +91,7 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw "Acceptance configure failed." }
-          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests gsw_training_telemetry_tests gsw_process_output_fixture
+          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests gsw_training_telemetry_tests gsw_process_output_fixture gsw_native_tests gsw_geometry_product_tests gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests gsw_mesh_geometry_dialog_ui_tests
           if ($LASTEXITCODE -ne 0) { throw "Acceptance build failed." }
       - name: Prepare real Windows display and OpenGL
         shell: pwsh
@@ -109,7 +109,7 @@ jobs:
         run: |
           ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
             --output-log native/acceptance.log `
-            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_scale_constraints_ui|native_training_batch_ui|native_training_batch_lifecycle|native_camera_scale_p1|native_training_performance_policy|native_training_preflight|native_processing_completion|native_language_(zh_CN|en_US|ja_JP)|native_resource_budget_hud|native_texture_text_masks|native_texture_text_(zh_CN|en_US|ja_JP)_(light|dark)|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP))$'
+            -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_scale_constraints_ui|native_training_batch_ui|native_training_batch_lifecycle|native_camera_scale_p1|native_training_performance_policy|native_training_preflight|native_processing_completion|native_language_(zh_CN|en_US|ja_JP)|native_resource_budget_hud|native_texture_text_masks|native_texture_text_(zh_CN|en_US|ja_JP)_(light|dark)|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP)|native_geometry_product|native_initialization_editor_ui|native_initialization_dialog_ui|native_mesh_geometry_dialog_ui|native_general_reconstruction_contracts|native_general_version_adoption|native_mesh_generation)$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
       - name: Upload acceptance evidence
         if: always()

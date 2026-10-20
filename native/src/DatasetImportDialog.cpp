@@ -5,6 +5,7 @@
 #include "MultiItemList.h"
 #include "WrappingCheckBox.h"
 #include "WorkbenchIcons.h"
+#include "InitializationEditor.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -65,19 +66,6 @@ WorkbenchIconId sourceIcon(const QFileInfo &info) {
   if (type.startsWith(QStringLiteral("image/"))) return WorkbenchIconId::Image;
   if (type.startsWith(QStringLiteral("video/"))) return WorkbenchIconId::Video;
   return WorkbenchIconId::File;
-}
-
-std::optional<QJsonArray> numericVector(const QString &text) {
-  const QStringList parts = text.trimmed().split(QRegularExpression(QStringLiteral("[\\s,;]+")), Qt::SkipEmptyParts);
-  if (parts.size() != 3) return std::nullopt;
-  QJsonArray result;
-  for (const QString &part : parts) {
-    bool valid = false;
-    const double value = part.toDouble(&valid);
-    if (!valid || !std::isfinite(value)) return std::nullopt;
-    result.append(value);
-  }
-  return result;
 }
 
 // Keep complete action captions without making narrow import windows wider.
@@ -349,37 +337,10 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mNormalization->addItem(QString(), QStringLiteral("none"));
   AppLanguage::bindComboItem(mNormalization, 1, AppLanguage::source("不做数值归一化"));
   cameraRow(AppLanguage::source("训练坐标归一化"), mNormalization);
-  mInitialization = new QComboBox(mCameraPanel);
-  mInitialization->setObjectName(QStringLiteral("datasetImportInitialization"));
-  const QList<QPair<QString, const char *>> initializations{
-      {QStringLiteral("preserve"), AppLanguage::source("保留来源初始化；未声明则随机初始化")},
-      {QStringLiteral("random"), AppLanguage::source("随机初始化（无几何先验）")},
-      {QStringLiteral("external_point_cloud"), AppLanguage::source("外部点云初始化（含几何先验）")},
-      {QStringLiteral("sfm_sparse"), AppLanguage::source("SfM 稀疏点初始化")}};
-  for (const auto &initialization : initializations) {
-    mInitialization->addItem(QString(), initialization.first);
-    AppLanguage::bindComboItem(mInitialization, mInitialization->count() - 1, initialization.second);
-  }
-  cameraRow(AppLanguage::source("初始化来源"), mInitialization);
-  mInitializationPath = new QLineEdit(mCameraPanel);
-  mInitializationPath->setObjectName(QStringLiteral("datasetImportInitializationPath"));
-  AppLanguage::bind(mInitializationPath, "placeholderText", AppLanguage::source("初始化点云路径；不要使用评价网格、深度或法向"));
-  cameraRow(AppLanguage::source("初始化点云"), mInitializationPath);
-  auto *boundsRow = new QWidget(mCameraPanel);
-  boundsRow->setProperty("gswLayoutContainer", true);
-  auto *boundsLayout = new QHBoxLayout(boundsRow);
-  boundsLayout->setContentsMargins(0, 0, 0, 0);
-  mBoundsMinimum = new QLineEdit(boundsRow);
-  mBoundsMaximum = new QLineEdit(boundsRow);
-  mBoundsMinimum->setObjectName(QStringLiteral("datasetImportBoundsMinimum"));
-  mBoundsMaximum->setObjectName(QStringLiteral("datasetImportBoundsMaximum"));
-  AppLanguage::bind(mBoundsMinimum, "placeholderText", AppLanguage::source("最小值 x y z"));
-  AppLanguage::bind(mBoundsMaximum, "placeholderText", AppLanguage::source("最大值 x y z"));
-  boundsLayout->addWidget(mBoundsMinimum);
-  boundsLayout->addWidget(mBoundsMaximum);
-  cameraRow(AppLanguage::source("随机范围（源单位，可选）"), boundsRow);
+  mInitializationEditor = new InitializationEditor(true, mCameraPanel);
+  cameraForm->addRow(mInitializationEditor);
   auto *initializationHint = AppLanguage::text(new QLabel(mCameraPanel), AppLanguage::source(
-      "仅有相机轨迹不保证物体深度。自动随机范围会记录覆盖假设；已知粗范围时请显式填写，不会读取评价几何。"));
+      "导入前仅编辑初始化声明，尚未检核范围与相机关系；导入后请打开初始化设置与检查，不会根据预览宣称训练可用。"));
   initializationHint->setWordWrap(true);
   cameraForm->addRow(initializationHint);
   form->addRow(mCameraPanel);
@@ -464,9 +425,13 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   connect(mSceneName, &QLineEdit::textChanged, this,
           &DatasetImportDialog::refreshSummary);
   connect(mInputMode, &QComboBox::currentIndexChanged, this, &DatasetImportDialog::refreshInputMode);
-  connect(mCameraSource, &QLineEdit::textChanged, this, &DatasetImportDialog::refreshSummary);
+  connect(mCameraSource, &QLineEdit::textChanged, this, [this] {
+    const QFileInfo source(mCameraSource->text());
+    mInitializationEditor->setDatasetDirectory(source.isDir() ? source.absoluteFilePath() : source.absolutePath());
+    refreshSummary();
+  });
   connect(mCameraUnit, &QComboBox::currentIndexChanged, this, &DatasetImportDialog::refreshInputMode);
-  connect(mInitialization, &QComboBox::currentIndexChanged, this, &DatasetImportDialog::refreshInputMode);
+  connect(mInitializationEditor, &InitializationEditor::initializationChanged, this, &DatasetImportDialog::refreshSummary);
   connect(mOverwrite, &QCheckBox::toggled, this,
           &DatasetImportDialog::refreshSummary);
   connect(buttons, &QDialogButtonBox::accepted, this,
@@ -552,21 +517,9 @@ DatasetImportRequest DatasetImportDialog::request() const {
                             {QStringLiteral("description"), mScaleEvidence->text().trimmed()}}}}};
       result.cameraInput.insert(QStringLiteral("scale"), scale);
     } else result.cameraInput.remove(QStringLiteral("scale"));
-    const QString initializationKind = mInitialization->currentData().toString();
+    const auto initialization = mInitializationEditor->initialization();
+    const QString initializationKind = initialization.value(QStringLiteral("kind")).toString();
     if (initializationKind != QStringLiteral("preserve")) {
-      QJsonObject initialization{{QStringLiteral("kind"), initializationKind},
-                                 {QStringLiteral("frame"), QStringLiteral("source")}};
-      const auto suppliedInitialization = mCameraInputTemplate.value(QStringLiteral("initialization")).toObject();
-      for (const auto &key : {QStringLiteral("seed"), QStringLiteral("count")})
-        if (suppliedInitialization.contains(key)) initialization.insert(key, suppliedInitialization.value(key));
-      if (initializationKind != QStringLiteral("random"))
-        initialization.insert(QStringLiteral("path"), QDir::fromNativeSeparators(mInitializationPath->text().trimmed()));
-      const auto minimum = numericVector(mBoundsMinimum->text());
-      const auto maximum = numericVector(mBoundsMaximum->text());
-      if (initializationKind == QStringLiteral("random") && minimum && maximum)
-        initialization.insert(QStringLiteral("bounds"), QJsonArray{*minimum, *maximum});
-      else initialization.remove(QStringLiteral("bounds"));
-      if (initializationKind == QStringLiteral("random")) initialization.remove(QStringLiteral("path"));
       result.cameraInput.insert(QStringLiteral("initialization"), initialization);
     } else result.cameraInput.remove(QStringLiteral("initialization"));
     return result;
@@ -594,20 +547,8 @@ void DatasetImportDialog::setCameraInput(const QJsonObject &input) {
   const int normalizationIndex = mNormalization->findData(input.value(QStringLiteral("normalization")).toObject()
       .value(QStringLiteral("mode")).toString(QStringLiteral("auto")));
   if (normalizationIndex >= 0) mNormalization->setCurrentIndex(normalizationIndex);
-  const auto initialization = input.value(QStringLiteral("initialization")).toObject();
-  const int initializationIndex = mInitialization->findData(initialization.value(QStringLiteral("kind")).toString(QStringLiteral("preserve")));
-  if (initializationIndex >= 0) mInitialization->setCurrentIndex(initializationIndex);
-  mInitializationPath->setText(QDir::toNativeSeparators(initialization.value(QStringLiteral("path")).toString()));
-  const auto bounds = initialization.value(QStringLiteral("bounds")).toArray();
-  const auto vectorText = [](const QJsonArray &vector) {
-    QStringList values;
-    for (const auto &value : vector) values.append(QString::number(value.toDouble(), 'g', 17));
-    return values.join(QLatin1Char(' '));
-  };
-  if (bounds.size() == 2) {
-    mBoundsMinimum->setText(vectorText(bounds.at(0).toArray()));
-    mBoundsMaximum->setText(vectorText(bounds.at(1).toArray()));
-  }
+  mInitializationEditor->setInitialization(input.contains(QStringLiteral("initialization"))
+      ? input.value(QStringLiteral("initialization")).toObject() : QJsonObject{{QStringLiteral("kind"),QStringLiteral("preserve")}});
   refreshInputMode();
 }
 
@@ -631,10 +572,6 @@ void DatasetImportDialog::refreshInputMode() {
   mFramesPerSecond->setEnabled(!camera);
   const QString unit = mCameraUnit->currentData().toString();
   mScaleEvidence->setEnabled(unit != QStringLiteral("preserve") && unit != QStringLiteral("unknown"));
-  const QString initialization = mInitialization->currentData().toString();
-  mInitializationPath->setEnabled(initialization == QStringLiteral("external_point_cloud") || initialization == QStringLiteral("sfm_sparse"));
-  mBoundsMinimum->setEnabled(initialization == QStringLiteral("random"));
-  mBoundsMaximum->setEnabled(initialization == QStringLiteral("random"));
   refreshSummary();
 }
 
@@ -664,17 +601,10 @@ void DatasetImportDialog::accept() {
       mScaleEvidence->setFocus();
       return;
     }
-    if (mInitialization->currentData().toString() == QStringLiteral("random") &&
-        (!mBoundsMinimum->text().trimmed().isEmpty() || !mBoundsMaximum->text().trimmed().isEmpty())) {
-      const auto minimum = numericVector(mBoundsMinimum->text());
-      const auto maximum = numericVector(mBoundsMaximum->text());
-      bool valid = minimum && maximum;
-      for (int index = 0; valid && index < 3; ++index) valid = minimum->at(index).toDouble() < maximum->at(index).toDouble();
-      if (!valid) {
-        QMessageBox::critical(this, QCoreApplication::translate("Workbench", "初始化范围无效"),
-                              QCoreApplication::translate("Workbench", "请分别输入三个有限数值，并确保每个最小值都小于最大值；范围采用源坐标单位。"));
-        return;
-      }
+    const QString initializationError = mInitializationEditor->validationError();
+    if (!initializationError.isEmpty()) {
+      QMessageBox::critical(this, QCoreApplication::translate("Workbench", "初始化范围无效"), initializationError);
+      return;
     }
   }
 

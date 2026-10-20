@@ -18,6 +18,8 @@
 #include "MediaProjectBootstrap.h"
 #include "ModelExportDialog.h"
 #include "MeshGenerationDialog.h"
+#include "GeometryProductInfo.h"
+#include "SceneCoordinates.h"
 #include "SpzIO.h"
 #include <QTemporaryDir>
 #include <memory>
@@ -27,6 +29,7 @@
 #include "TrainingDialog.h"
 #include "QualityComparisonDialog.h"
 #include "ScaleConstraintsDialog.h"
+#include "InitializationDialog.h"
 #include "TrainingBatchDialog.h"
 #include "WrappingCheckBox.h"
 #include "TrainingEnvironmentProbe.h"
@@ -1778,6 +1781,10 @@ void MainWindow::createMenus() {
       QCoreApplication::translate("Workbench", "相机数据集定尺度与对齐…")), AppLanguage::source("相机数据集定尺度与对齐…"));
   scaleConstraints->setObjectName(QStringLiteral("scaleConstraintsAction"));
   connect(scaleConstraints, &QAction::triggered, this, [this] { showScaleConstraints(false); });
+  auto *initialization = AppLanguage::text(workflowMenu->addAction(
+      QCoreApplication::translate("Workbench", "相机数据集初始化与检查…")), AppLanguage::source("相机数据集初始化与检查…"));
+  initialization->setObjectName(QStringLiteral("initializationAction"));
+  connect(initialization, &QAction::triggered, this, &MainWindow::showInitialization);
   auto *modelScale = AppLanguage::text(workflowMenu->addAction(
       QCoreApplication::translate("Workbench", "当前模型定尺度…")), AppLanguage::source("当前模型定尺度…"));
   modelScale->setObjectName(QStringLiteral("modelScaleConstraintsAction"));
@@ -3077,7 +3084,8 @@ void MainWindow::connectServices() {
           QJsonObject result;
           if (resultFile.open(QIODevice::ReadOnly)) result = QJsonDocument::fromJson(resultFile.readAll()).object();
           const auto stages = result.value(QStringLiteral("completedStages")).toArray();
-          QString path = result.value(QStringLiteral("meshPath")).toString();
+          const bool depthProduct = result.value(QStringLiteral("kind")) == QStringLiteral("depth_point_cloud");
+          QString path = result.value(depthProduct ? QStringLiteral("geometryPath") : QStringLiteral("meshPath")).toString();
           QString error;
           auto metadata = WorkspaceDocument::inspectPly(path, &error);
           bool textured = false;
@@ -3097,29 +3105,50 @@ void MainWindow::connectServices() {
               textured = true;
             }
           }
-          const bool valid = pathIsWithinDirectory(path, pending.outputDirectory) &&
-              metadata.valid && metadata.looksLikeMesh() &&
-              stages.contains(QStringLiteral("mesh"));
+          const auto depthInfo = depthProduct ? GeometryProductInfo::inspect(
+              result.value(QStringLiteral("manifestPath")).toString(), path, pending.outputDirectory) : GeometryProductInfo{};
+          const QString geometryFrame = depthInfo.manifest.value(QStringLiteral("geometry")).toObject().value(QStringLiteral("frame")).toString();
+          const bool separateFrame = depthProduct && geometryFrame != QStringLiteral("training");
+          QString depthResultSceneId;
+          const bool valid = pathIsWithinDirectory(path, pending.outputDirectory) && metadata.valid &&
+              (depthProduct ? depthInfo.valid && metadata.vertexCount == depthInfo.pointCount &&
+                  !metadata.looksLikeGaussianSplat() && !metadata.looksLikeMesh() &&
+                  stages.contains(QStringLiteral("depth")) && stages.contains(QStringLiteral("pointcloud")) &&
+                  parsePlyCoordinateMetadata({}, path, true).validationError.isEmpty()
+                : metadata.looksLikeMesh() && stages.contains(QStringLiteral("mesh")));
           const bool materialExpected = stages.contains(QStringLiteral("texture_preview"));
           effectiveSucceeded = succeeded && result.value(QStringLiteral("state")).toString() == QStringLiteral("done") &&
               valid && (!materialExpected || textured);
           if (valid && pathsReferToSameLocation(mWorkspace.rootPath(), pending.projectRoot)) {
-            mShowGeneratedMesh = true;
-            if (mWorkspace.addScenePath(path, &error)) {
-              if (mViewport->scenePath() == path && mViewport->meshRenderingAvailable()) {
+            const bool activate = !depthProduct || !mViewport->hasUnsavedSceneEdits();
+            mShowGeneratedMesh = !depthProduct;
+            const bool registered = !depthProduct || mWorkspace.addWorkflowArtifact(QStringLiteral("geometry_product"),
+                QFileInfo(result.value(QStringLiteral("manifestPath")).toString()).absolutePath(), &error);
+            if (registered && (separateFrame || mWorkspace.addScenePath(path, &error, activate))) {
+              if (depthProduct && !separateFrame) for (const auto &object : mWorkspace.sceneObjects())
+                if (pathsReferToSameLocation(object.path, path)) depthResultSceneId = object.id;
+              if (depthProduct && !separateFrame && activate) mViewport->setRenderMode(NativeViewport::RenderMode::Points);
+              else if (!depthProduct && mViewport->scenePath() == path && mViewport->meshRenderingAvailable()) {
                 mShowGeneratedMesh = false;
                 mViewport->setRenderMode(NativeViewport::RenderMode::Mesh);
               }
-              const char *detailSource = !effectiveSucceeded
+              const char *detailSource = depthProduct
+                  ? (separateFrame ? AppLanguage::source("深度几何已保存（%1）；未与训练坐标模型叠加")
+                     : activate ? AppLanguage::source("深度点云已载入 · %1 个点（外观代理）")
+                              : AppLanguage::source("深度几何已保留；未替换当前裁剪编辑"))
+                  : !effectiveSucceeded
                   ? AppLanguage::source("保留已完成网格；后续阶段未完成")
                   : textured ? AppLanguage::source("贴图网格已载入 · %1 个面")
                              : AppLanguage::source("网格已载入 · %1 个面");
               completionDetail = QCoreApplication::translate("Workbench", detailSource);
-              if (effectiveSucceeded) completionDetail = completionDetail.arg(metadata.faceCount);
+              const qint64 count = depthProduct ? metadata.vertexCount : metadata.faceCount;
+              QVariantList detailArguments;
+              if (separateFrame) { completionDetail = completionDetail.arg(geometryFrame); detailArguments = {geometryFrame}; }
+              else if (effectiveSucceeded && (!depthProduct || activate)) { completionDetail = completionDetail.arg(count); detailArguments = {count}; }
               if (mActiveTaskRow >= 0) {
                 auto *detail = mTaskTable->item(mActiveTaskRow, 3);
                 detail->setData(Qt::UserRole + 34, QString::fromUtf8(detailSource));
-                detail->setData(Qt::UserRole + 35, effectiveSucceeded ? QVariantList{metadata.faceCount} : QVariantList{});
+                detail->setData(Qt::UserRole + 35, detailArguments);
               }
               if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
             } else {
@@ -3140,7 +3169,7 @@ void MainWindow::connectServices() {
               : processCancelled ? QStringLiteral("cancelled") : QStringLiteral("failed"),
               valid ? path : QString(),
               valid && comparablePath(mWorkspace.rootPath()) == pending.projectRoot
-                  ? mWorkspace.activeSceneId() : QString());
+                  ? (depthProduct ? depthResultSceneId : mWorkspace.activeSceneId()) : QString());
         }
         const bool cancelled =
             processCancelled && !effectiveSucceeded && !recoveryFailed;
@@ -6086,6 +6115,77 @@ void MainWindow::showScaleConstraints(const bool modelSource) {
   mScaleConstraintsDialog->show(); // Never automatic; no worker/model state is restarted.
 }
 
+bool MainWindow::adoptInitializationVersion(const QString &path, const QJsonObject &summary,
+                                           const QString &inputIdentity, const QString &projectRoot) {
+  if (comparablePath(mWorkspace.rootPath()) != projectRoot) return false;
+  QString error;
+  // Registration precedes every adoption guard, so completed versions survive
+  // a busy task, changed selection, transient crop or a later project reopen.
+  if (!mWorkspace.addWorkflowArtifact(QStringLiteral("initialization_version"), path, &error) ||
+      (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error))) {
+    showError(QCoreApplication::translate("Workbench", "初始化工具不可用"), error);
+    return false;
+  }
+  if (mProcessSupervisor.isRunning() || mViewport->hasUnsavedSceneEdits()) {
+    showError(QCoreApplication::translate("Workbench", "无法关联数据集"),
+        QCoreApplication::translate("Workbench", "当前仍有任务或未保存的裁剪编辑；初始化新版本已保留，请稍后手动关联。"));
+    return false;
+  }
+  if (mWorkspace.cameraDatasetIdentity() != inputIdentity) {
+    showError(QCoreApplication::translate("Workbench", "无法关联数据集"),
+        QCoreApplication::translate("Workbench", "当前数据集已改变；新版本已保留，请确认后再手动关联。"));
+    return false;
+  }
+  const QString previousDataset = mWorkspace.datasetPath();
+  if (!mWorkspace.setVerifiedCameraDatasetPath(path, summary, &error)) {
+    showError(QCoreApplication::translate("Workbench", "无法关联数据集"), error);
+    return false;
+  }
+  if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) {
+    // The old manifest already retains the new artifact before adoption. If
+    // the reference update cannot be saved, keep the visible training dialog
+    // and workspace on the same previous dataset instead of half-adopting it.
+    QString restoreError;
+    if (!previousDataset.isEmpty() && !mWorkspace.setDatasetPath(previousDataset, &restoreError))
+      appendTaskEvent(restoreError);
+    appendTaskEvent(error);
+    return false;
+  }
+  appendTaskEvent(QCoreApplication::translate("Workbench", "已关联初始化新版本：%1；原数据、模型与检查点保持不变。")
+      .arg(QDir::toNativeSeparators(path)));
+  return true;
+}
+
+void MainWindow::showInitialization() {
+  if (mInitializationDialog) return; // Never raise an existing user window.
+  if (mWorkspace.cameraDatasetPath().isEmpty()) {
+    showError(QCoreApplication::translate("Workbench", "初始化工具不可用"),
+        QCoreApplication::translate("Workbench", "请先导入已知相机数据集；初始化不会重新求解相机。"));
+    return;
+  }
+  if (!ensureProjectRecoveryReady()) return;
+  const QString root = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = findTrainingPython(root);
+  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/initialization.py"));
+  if (root.isEmpty() || python.isEmpty() || !QFileInfo(helper).isFile()) {
+    showError(QCoreApplication::translate("Workbench", "初始化工具不可用"), backendUnavailableMessage(root, helper, python));
+    return;
+  }
+  const QString projectRoot = comparablePath(mWorkspace.rootPath());
+  const QString sourceIdentity = mWorkspace.cameraDatasetIdentity();
+  mInitializationDialog = new InitializationDialog(python, root, mWorkspace.rootPath(),
+      mWorkspace.cameraDatasetPath(), sourceIdentity,
+      mWorkspace.cameraDatasetInfo().value(QStringLiteral("initialization")).toObject(),
+      pythonProcessEnvironment(python), this);
+  mInitializationDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(mInitializationDialog, &InitializationDialog::versionCreated, this,
+      [this, projectRoot, sourceIdentity](const QString &path, const QJsonObject &summary) {
+    adoptInitializationVersion(path, summary, sourceIdentity, projectRoot);
+  });
+  mInitializationDialog->show(); // Explicit action only; no trainer starts here.
+}
+
 void MainWindow::showTrainingBatch() {
   if (mTrainingBatchDialog || !ensureProjectRecoveryReady()) return;
   const QString root = BackendLocator::findRepositoryRoot(
@@ -6465,6 +6565,7 @@ void MainWindow::startMeshGeneration() {
     }
   }
   MeshGenerationDialog dialog(source, this);
+  dialog.setCameraDatasetPath(mWorkspace.cameraDatasetPath());
   if (dialog.exec() != QDialog::Accepted) return;
   QJsonObject config = dialog.configuration();
   if (CameraDatasetInfo::meshGenerationBlocked(config)) {
@@ -6472,7 +6573,8 @@ void MainWindow::startMeshGeneration() {
         QCoreApplication::translate("Workbench", "所选已知相机训练产物尚未通过此网格后端的完整内参与尺度验收。已停止，原模型和编辑保持不变，不会重新求解相机。请使用受支持的原有流程。"));
     return;
   }
-  if (!confirmDiscardSceneEdits()) return;
+  const bool depthProduct = config.value(QStringLiteral("mode")) == QStringLiteral("gs_depth");
+  if (!depthProduct && !confirmDiscardSceneEdits()) return;
   const QString run = QStringLiteral("mesh-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   const QString outputRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output/meshes"));
   config.insert(QStringLiteral("task"), QStringLiteral("mesh"));
@@ -6487,7 +6589,7 @@ void MainWindow::startMeshGeneration() {
     showError(QCoreApplication::translate("Workbench", "无法保存生成任务"), file.errorString());
     return;
   }
-  const QString name = QCoreApplication::translate("Workbench", "生成网格") + QStringLiteral(" | ") +
+  const QString name = QCoreApplication::translate("Workbench", depthProduct ? "提取深度几何" : "生成网格") + QStringLiteral(" | ") +
       config.value(QStringLiteral("mode")).toString();
   GenerationExperiment experiment;
   experiment.id = run;
@@ -6550,6 +6652,14 @@ void MainWindow::startTraining() {
   if (!mWorkspace.cameraDatasetInfo().isEmpty()) dialog.setCameraDatasetReference(
       mWorkspace.cameraDatasetPath(), mWorkspace.cameraDatasetIdentity(), mWorkspace.cameraPosePolicy());
   dialog.setReconstructionProbe(python, root, pythonProcessEnvironment(python));
+  dialog.setInitializationWorkspace(mWorkspace.rootPath());
+  const QString initializationProjectRoot = comparablePath(mWorkspace.rootPath());
+  connect(&dialog, &TrainingDialog::initializationVersionCreated, this,
+      [this, &dialog, initializationProjectRoot](const QString &path, const QJsonObject &summary,
+                                               const QString &inputIdentity) {
+    if (adoptInitializationVersion(path, summary, inputIdentity, initializationProjectRoot))
+      dialog.useInitializationDataset(path, summary.value(QStringLiteral("dataIdentity")).toString());
+  });
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }

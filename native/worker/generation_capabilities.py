@@ -65,3 +65,16 @@ for _name, _pipeline in PIPELINES.items():
 
 def supports_checkpoint(backend):
     return bool(PIPELINES.get(backend, {}).get("checkpoint", False))
+
+
+# Deliberately separate from the legacy external mesh gates. Implementation is
+# not release acceptance: root promotes this only after both real backends and
+# native lifecycle/locale tests, never merely because a preview looks correct.
+GS_DEPTH_CAPABILITY = {
+    "mode": "gs_depth", "backends": ["3dgs", "2dgs"], "native_entry": True,
+    "canonical_camera_input": True, "checkpoint": False, "product": "depth_point_cloud",
+    "fusion": "none", "surface_semantics": "appearance_proxy_not_material_boundary",
+    "release_accepted": False,
+    "acceptance": "Real per-backend camera-Z/mask/full-K/scale/split extraction, independent geometry evaluation and native cancellation/reopen/locale acceptance remain required.",
+    "limitation": "Opacity-rendered depth proxy, not material boundary or physical accuracy guarantee; no TSDF, mesh, texture or optimizer-state resume.",
+}

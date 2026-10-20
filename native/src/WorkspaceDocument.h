@@ -100,6 +100,10 @@ public:
   bool finalizeDataMigration(QString *errorMessage = nullptr);
   [[nodiscard]] QByteArray recoveryManifestJson() const;
   bool setDatasetPath(const QString &path, QString *errorMessage = nullptr);
+  // Adopt only a freshly created known-camera version whose worker-bound
+  // manifest, cached summary and current initializer bytes still agree.
+  bool setVerifiedCameraDatasetPath(const QString &path, const QJsonObject &expectedSummary,
+                                   QString *errorMessage = nullptr);
   bool setScenePath(const QString &path, QString *errorMessage = nullptr);
   bool setSceneTranslation(const QVector3D &translation,
                            QString *errorMessage = nullptr);

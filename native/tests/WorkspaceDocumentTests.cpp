@@ -85,6 +85,7 @@ private slots:
   void savesAndLoadsPortableProject();
   void persistsCanonicalCameraIdentityAndUnitsAcrossSaveAs();
   void countsOnlyCanonicalViewsAndRejectsChangedSummaryIdentity();
+  void refusesChangedInitializerVersionBeforeDatasetAssociation();
   void registersPortableWorkflowArtifactsWithoutChangingSceneOrStartingWork();
   void persistsWorkflowArtifactsAcrossRecoveryMigrationAndSaveAs();
   void rejectsUnsafeWorkflowArtifactsAndRetainsMissingReferences();
@@ -2969,6 +2970,52 @@ void WorkspaceDocumentTests::rejectsCanonicalMeshBackendsBeforeChangingTheScene(
   QVERIFY(gsw::CameraDatasetInfo::meshGenerationBlocked(selected));
 }
 
+void WorkspaceDocumentTests::refusesChangedInitializerVersionBeforeDatasetAssociation() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QDir root(temporary.path());
+  const QString project = root.filePath(QStringLiteral("workspace"));
+  const QString oldDataset = QDir(project).filePath(QStringLiteral("old-dataset"));
+  const QString version = QDir(project).filePath(QStringLiteral(".gsw/initialization/new-version"));
+  const QString artifactRelative = QStringLiteral("source/initialization/points/fixture.npz");
+  QVERIFY(QDir().mkpath(oldDataset));
+  QVERIFY(QDir().mkpath(QFileInfo(QDir(version).filePath(artifactRelative)).absolutePath()));
+  const auto write = [](const QString &path, const QByteArray &bytes) {
+    QFile file(path); return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+  };
+  const auto hash = [](const QByteArray &bytes) { return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()); };
+  const QByteArray artifact("test-owned-opaque-bytes-native-binding-only-not-NPZ-training-proof");
+  const QString identity(64, QLatin1Char('b'));
+  const QJsonObject summary{{"version", 1}, {"schema", "gsw.camera_dataset/1"}, {"posePolicy", "locked"},
+      {"dataIdentity", identity}, {"metadataPath", "camera_dataset.json"}, {"blocked", false}, {"errors", QJsonArray{}}};
+  const QJsonObject manifest{{"schema", "gsw.camera_dataset/1"}, {"pose_policy", "locked"}, {"data_identity", identity},
+      {"initialization", QJsonObject{{"kind", "random"}, {"materialization", QJsonObject{
+          {"path", artifactRelative}, {"sha256", hash(artifact)}}}}}};
+  const QByteArray infoBytes = QJsonDocument(summary).toJson(), manifestBytes = QJsonDocument(manifest).toJson();
+  QVERIFY(write(QDir(version).filePath(artifactRelative), artifact));
+  QVERIFY(write(QDir(version).filePath(QStringLiteral("camera_dataset_info.json")), infoBytes));
+  QVERIFY(write(QDir(version).filePath(QStringLiteral("camera_dataset.json")), manifestBytes));
+  QJsonObject expected = summary;
+  expected["manifestSha256"] = hash(manifestBytes); expected["infoSha256"] = hash(infoBytes);
+  gsw::WorkspaceDocument document; QString error;
+  QVERIFY(document.create(project, &error));
+  QVERIFY(document.setDatasetPath(oldDataset, &error));
+  const auto scene = document.sceneCollectionJson();
+  for (const QString &target : {QStringLiteral("camera_dataset_info.json"), QStringLiteral("camera_dataset.json"), artifactRelative}) {
+    const QString path = QDir(version).filePath(target);
+    const QByteArray original = target == artifactRelative ? artifact : target == QStringLiteral("camera_dataset.json") ? manifestBytes : infoBytes;
+    QVERIFY(write(path, original + "\n"));
+    QVERIFY(!document.setVerifiedCameraDatasetPath(version, expected, &error));
+    QCOMPARE(document.datasetPath(), oldDataset);
+    QCOMPARE(document.sceneCollectionJson(), scene);
+    QVERIFY(write(path, original));
+  }
+  QVERIFY2(document.setVerifiedCameraDatasetPath(version, expected, &error), qPrintable(error));
+  QCOMPARE(document.datasetPath(), version);
+  QCOMPARE(document.cameraDatasetIdentity(), identity);
+  QCOMPARE(document.sceneCollectionJson(), scene);
+}
+
 void WorkspaceDocumentTests::registersPortableWorkflowArtifactsWithoutChangingSceneOrStartingWork() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -3000,14 +3047,20 @@ void WorkspaceDocumentTests::persistsWorkflowArtifactsAcrossRecoveryMigrationAnd
   const QString working = root.filePath(QStringLiteral("working"));
   const QString scaleRelative = QStringLiteral(".gsw/scale-versions/v1");
   const QString batchRelative = QStringLiteral(".gsw/training-batches/b1");
+  const QString initializerRelative = QStringLiteral(".gsw/initialization/v1");
+  const QString geometryRelative = QStringLiteral("output/geometry/g1");
   QVERIFY(QDir().mkpath(QDir(working).filePath(scaleRelative)));
   QVERIFY(QDir().mkpath(QDir(working).filePath(batchRelative)));
+  QVERIFY(QDir().mkpath(QDir(working).filePath(initializerRelative)));
+  QVERIFY(QDir().mkpath(QDir(working).filePath(geometryRelative)));
   const QMap<QString, QByteArray> records{
       {scaleRelative + QStringLiteral("/request.json"), "{\"reference_sigma\":0.002}"},
       {scaleRelative + QStringLiteral("/solution.json"), "{\"s\":2.5,\"independent_checks\":\"pass\"}"},
       {scaleRelative + QStringLiteral("/report.json"), "{\"model_geometry_accuracy\":\"not_measured\"}"},
       {batchRelative + QStringLiteral("/plan.json"), "{\"trainingSeed\":17}"},
-      {batchRelative + QStringLiteral("/state.json"), "{\"status\":\"paused\"}"}};
+      {batchRelative + QStringLiteral("/state.json"), "{\"status\":\"paused\"}"},
+      {initializerRelative + QStringLiteral("/request.json"), "{\"kind\":\"random\",\"seed\":4294967295}"},
+      {geometryRelative + QStringLiteral("/manifest.json"), "{\"surface_semantics\":\"appearance_proxy_not_material_boundary\"}"}};
   for (auto iterator = records.cbegin(); iterator != records.cend(); ++iterator) {
     QFile file(QDir(working).filePath(iterator.key()));
     QVERIFY(file.open(QIODevice::WriteOnly));
@@ -3018,9 +3071,11 @@ void WorkspaceDocumentTests::persistsWorkflowArtifactsAcrossRecoveryMigrationAnd
   QVERIFY(document.createUntitled(working, QStringLiteral("registry"), &error));
   QVERIFY(document.addWorkflowArtifact(QStringLiteral("scale_version"), QDir(working).filePath(scaleRelative), &error));
   QVERIFY(document.addWorkflowArtifact(QStringLiteral("training_batch"), QDir(working).filePath(batchRelative), &error));
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("initialization_version"), QDir(working).filePath(initializerRelative), &error));
+  QVERIFY(document.addWorkflowArtifact(QStringLiteral("geometry_product"), QDir(working).filePath(geometryRelative), &error));
   const auto expected = document.workflowArtifacts();
   const auto recovery = QJsonDocument::fromJson(document.recoveryManifestJson()).object();
-  QCOMPARE(recovery.value(QStringLiteral("workflowArtifacts")).toArray().size(), 2);
+  QCOMPARE(recovery.value(QStringLiteral("workflowArtifacts")).toArray().size(), 4);
   for (const auto &value : recovery.value(QStringLiteral("workflowArtifacts")).toArray())
     QVERIFY(!QDir::isAbsolutePath(value.toObject().value(QStringLiteral("path")).toString()));
   const auto saved = root.filePath(QStringLiteral("saved.gsw.json"));

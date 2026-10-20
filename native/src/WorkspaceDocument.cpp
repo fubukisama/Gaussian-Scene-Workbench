@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include "WorkspaceDocument.h"
 
 #include <QDateTime>
@@ -10,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QRegularExpression>
 #include <QSet>
 #include <QUuid>
 
@@ -148,6 +150,8 @@ void assignError(QString *target, const QString &message) {
 
 bool workflowKindSupported(const QString &kind) {
   return kind == QStringLiteral("scale_version") ||
+         kind == QStringLiteral("initialization_version") ||
+         kind == QStringLiteral("geometry_product") ||
          kind == QStringLiteral("training_batch");
 }
 
@@ -1110,6 +1114,68 @@ bool WorkspaceDocument::setDatasetPath(const QString &path,
   setModified(true);
   emit changed();
   return true;
+}
+
+bool WorkspaceDocument::setVerifiedCameraDatasetPath(const QString &path,
+    const QJsonObject &expectedSummary, QString *errorMessage) {
+  const auto fail = [&] {
+    workflowError(errorMessage, QStringLiteral("initialization_version_changed_before_adoption"));
+    return false;
+  };
+  QString relative;
+  const QString directory = normalizedAbsolutePath(path);
+  if (!hasProject() || !relativePathInside(mRootPath, directory, &relative) ||
+      workflowArtifactStatus(mRootPath, relative) != QStringLiteral("available")) return fail();
+  static const QRegularExpression sha(QStringLiteral("^[0-9a-f]{64}$"));
+  const QString identity = expectedSummary.value(QStringLiteral("dataIdentity")).toString();
+  if (!sha.match(identity).hasMatch()) return fail();
+  const QDir version(directory);
+  const auto readBound = [&](const QString &name, const QString &expected) {
+    const QString selected = version.filePath(name); const QFileInfo info(selected);
+    if (!info.isFile() || info.isSymLink() || info.isJunction() || info.size() > 16 * 1024 * 1024 ||
+        !sha.match(expected).hasMatch()) return QJsonObject{};
+    QFile file(selected);
+    if (!file.open(QIODevice::ReadOnly)) return QJsonObject{};
+    const QByteArray bytes = file.readAll();
+    if (QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) != expected)
+      return QJsonObject{};
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(bytes, &error);
+    return error.error == QJsonParseError::NoError && document.isObject() ? document.object() : QJsonObject{};
+  };
+  const auto manifest = readBound(QStringLiteral("camera_dataset.json"), expectedSummary.value(QStringLiteral("manifestSha256")).toString());
+  auto info = readBound(QStringLiteral("camera_dataset_info.json"), expectedSummary.value(QStringLiteral("infoSha256")).toString());
+  if (manifest.value(QStringLiteral("schema")) != QStringLiteral("gsw.camera_dataset/1") ||
+      manifest.value(QStringLiteral("pose_policy")) != QStringLiteral("locked") ||
+      manifest.value(QStringLiteral("data_identity")) != identity ||
+      info.value(QStringLiteral("version")).toInt() != 1 ||
+      info.value(QStringLiteral("schema")) != QStringLiteral("gsw.camera_dataset/1") ||
+      info.value(QStringLiteral("posePolicy")) != QStringLiteral("locked") ||
+      info.value(QStringLiteral("dataIdentity")) != identity ||
+      !info.value(QStringLiteral("blocked")).isBool() || info.value(QStringLiteral("blocked")).toBool() ||
+      !info.value(QStringLiteral("errors")).isArray() || !info.value(QStringLiteral("errors")).toArray().isEmpty()) return fail();
+  const QString metadata = info.value(QStringLiteral("metadataPath")).toString();
+  if (metadata.isEmpty() || QFileInfo(QDir::isAbsolutePath(metadata) ? metadata : version.filePath(metadata)).canonicalFilePath() !=
+      QFileInfo(version.filePath(QStringLiteral("camera_dataset.json"))).canonicalFilePath()) return fail();
+  const auto material = manifest.value(QStringLiteral("initialization")).toObject().value(QStringLiteral("materialization")).toObject();
+  const QString artifactRelative = material.value(QStringLiteral("path")).toString();
+  QString artifactClean;
+  if (!artifactRelative.startsWith(QStringLiteral("source/initialization/points/")) ||
+      !artifactRelative.endsWith(QStringLiteral(".npz")) || !workflowRelativePath(artifactRelative, &artifactClean) ||
+      artifactClean != artifactRelative) return fail();
+  const QString artifact = version.filePath(artifactRelative); const QFileInfo artifactInfo(artifact);
+  if (!artifactInfo.isFile() || artifactInfo.isSymLink() || artifactInfo.isJunction() ||
+      workflowArtifactStatus(mRootPath, QDir(mRootPath).relativeFilePath(artifactInfo.absolutePath())) != QStringLiteral("available")) return fail();
+  QFile artifactFile(artifact); QCryptographicHash digest(QCryptographicHash::Sha256);
+  if (!artifactFile.open(QIODevice::ReadOnly) || !digest.addData(&artifactFile) ||
+      !sha.match(material.value(QStringLiteral("sha256")).toString()).hasMatch() ||
+      QString::fromLatin1(digest.result().toHex()) != material.value(QStringLiteral("sha256")).toString()) return fail();
+  // Commit the checked cached bytes, not a second unbound summary read. The
+  // worker/next training preflight separately validates all image and lineage
+  // bytes; these native hashes do not claim an independent accuracy audit.
+  info.insert(QStringLiteral("metadataPath"), version.filePath(QStringLiteral("camera_dataset.json")));
+  mDatasetPath = directory; mCameraDatasetInfo = info; mImageCount = countDatasetImages(directory);
+  setModified(true); emit changed(); return true;
 }
 
 QList<SceneObject> WorkspaceDocument::sceneObjects() const {

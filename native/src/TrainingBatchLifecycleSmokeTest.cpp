@@ -1,6 +1,7 @@
 #include "TrainingBatchLifecycleSmokeTest.h"
 #include "MainWindow.h"
 #include "ScaleConstraintsDialog.h"
+#include "InitializationDialog.h"
 #include "AppLanguage.h"
 #include <QAction>
 #include <QApplication>
@@ -266,6 +267,173 @@ bool runTrainingBatchLifecycleSmokeTest(MainWindow &window) {
         "closing after adoption leaves no running owned inspection process");
   }
   window.mViewport->undoEdit(); // Test cleanup, not an operation on a user project.
+  check(!window.mViewport->hasUnsavedSceneEdits(), "the earlier owned crop is undone before initializer lifecycle checks");
+
+  // These deliberately opaque NPZ-named bytes exercise ONLY MainWindow's
+  // native callback/hash/adoption boundary. They are not valid training input,
+  // Python initialization replay evidence, a solver result or a checkpoint.
+  // The Python worker and actual GPU training have their separate acceptance.
+  const auto boundaryHash = [](const QByteArray &bytes) {
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+  };
+  const auto versionPath = [&](const QString &name) {
+    return QDir(lastProject).filePath(QStringLiteral(".gsw/initialization/") + name);
+  };
+  const auto writeBoundaryVersion = [&](const QString &name, const QChar identityCharacter, QJsonObject *expected) {
+    const QString directory = versionPath(name), identity(64, identityCharacter);
+    const QString artifactRelative = QStringLiteral("source/initialization/points/native-boundary.npz");
+    const QByteArray artifact = QByteArray("owned-opaque-native-callback-binding-only-not-training-proof:") + name.toUtf8();
+    const QJsonObject declaration{{"kind", "random"}, {"frame", "canonical"}, {"count", 4}, {"seed", 7},
+        {"bounds", QJsonArray{QJsonArray{-1., -1., 1.}, QJsonArray{1., 1., 3.}}}, {"priors", QJsonArray{}},
+        {"materialization", QJsonObject{{"schema", "gsw.initialization_materialization/1"},
+            {"path", artifactRelative}, {"sha256", boundaryHash(artifact)}}}};
+    const QJsonObject info{{"version", 1}, {"schema", "gsw.camera_dataset/1"}, {"posePolicy", "locked"},
+        {"dataIdentity", identity}, {"metadataPath", "camera_dataset.json"}, {"blocked", false},
+        {"errors", QJsonArray{}}, {"initialization", declaration},
+        {"test_scope", "native_controller_callback_boundary_only_not_backend_admission"}};
+    const QJsonObject manifest{{"schema", "gsw.camera_dataset/1"}, {"pose_policy", "locked"},
+        {"data_identity", identity}, {"initialization", declaration},
+        {"test_scope", "opaque_native_binding_fixture_not_training_camera_data"}};
+    const QByteArray infoBytes = QJsonDocument(info).toJson(), manifestBytes = QJsonDocument(manifest).toJson();
+    *expected = info;
+    expected->insert(QStringLiteral("manifestSha256"), boundaryHash(manifestBytes));
+    expected->insert(QStringLiteral("infoSha256"), boundaryHash(infoBytes));
+    return writeLifecycle(QDir(directory).filePath(artifactRelative), artifact) &&
+        writeLifecycle(QDir(directory).filePath(QStringLiteral("camera_dataset_info.json")), infoBytes) &&
+        writeLifecycle(QDir(directory).filePath(QStringLiteral("camera_dataset.json")), manifestBytes);
+  };
+  const auto hasInitializationRecord = [&](const WorkspaceDocument &document, const QString &path) {
+    const QString relative = QDir(document.rootPath()).relativeFilePath(path);
+    for (const auto &entry : document.workflowArtifacts()) {
+      const auto record = entry.toObject();
+      if (record.value(QStringLiteral("kind")) == QStringLiteral("initialization_version") &&
+          record.value(QStringLiteral("path")) == relative && record.value(QStringLiteral("available")).toBool()) return true;
+    }
+    return false;
+  };
+  QJsonObject sourceSummary, otherSummary, busySummary, changedSummary, cropSummary, adoptedSummary;
+  if (!check(writeBoundaryVersion(QStringLiteral("owned-callback-source"), QLatin1Char('c'), &sourceSummary) &&
+      writeBoundaryVersion(QStringLiteral("owned-callback-other-source"), QLatin1Char('d'), &otherSummary) &&
+      writeBoundaryVersion(QStringLiteral("owned-callback-busy-result"), QLatin1Char('e'), &busySummary) &&
+      writeBoundaryVersion(QStringLiteral("owned-callback-changed-result"), QLatin1Char('f'), &changedSummary) &&
+      writeBoundaryVersion(QStringLiteral("owned-callback-crop-result"), QLatin1Char('1'), &cropSummary) &&
+      writeBoundaryVersion(QStringLiteral("owned-callback-adopted-result"), QLatin1Char('2'), &adoptedSummary),
+      "write only owned native-boundary initializer versions with real byte hashes")) return false;
+  const QString initializationSource = versionPath(QStringLiteral("owned-callback-source"));
+  QString initializationError;
+  const auto setInitializationSource = [&] {
+    return window.mWorkspace.setDatasetPath(initializationSource, &initializationError) &&
+        window.mWorkspace.saveManifest({}, &initializationError) &&
+        window.mWorkspace.cameraDatasetIdentity() == sourceSummary.value(QStringLiteral("dataIdentity")).toString();
+  };
+  if (!check(setInitializationSource(), "select and persist the cached known-camera source for the real initializer action")) return false;
+  auto *initializationAction = window.findChild<QAction *>(QStringLiteral("initializationAction"));
+  if (!check(initializationAction && initializationAction->isEnabled(), "the actual workflow initialization QAction is available")) return false;
+  const auto initializationScenes = window.mWorkspace.sceneCollectionJson();
+  const QString initializationScenePath = window.mWorkspace.scenePath();
+  const bool initializationLocked = window.mViewport->editToolsLocked();
+  const QString initializationMarker = QDir(lastProject).filePath(QStringLiteral(".gsw/jobs/active-training.json"));
+  const QString initializationConfig = QDir(lastProject).filePath(QStringLiteral(".gsw/jobs/historical-owned.json"));
+  const QString initializationJob = QDir(lastProject).filePath(QStringLiteral(".gsw/jobs/training/0123456789abcdef0123456789abcdef.json"));
+  const QString initializationPause = QDir(lastProject).filePath(QStringLiteral(".gsw/jobs/training/pause-abcdef0123456789abcdef0123456789.json"));
+  const auto initializationMarkerBytes = readLifecycle(initializationMarker);
+  const auto initializationConfigBytes = readLifecycle(initializationConfig);
+  const auto initializationJobBytes = readLifecycle(initializationJob);
+  if (!check(!initializationMarkerBytes.isEmpty() && !initializationConfigBytes.isEmpty() && !initializationJobBytes.isEmpty(),
+      "historical active-training sentinel is present before initializer callbacks")) return false;
+  const auto initializationStatePreserved = [&] {
+    return window.mWorkspace.sceneCollectionJson() == initializationScenes &&
+        window.mWorkspace.scenePath() == initializationScenePath &&
+        window.mViewport->scenePath() == initializationScenePath &&
+        window.mViewport->editToolsLocked() == initializationLocked &&
+        readLifecycle(initializationMarker) == initializationMarkerBytes &&
+        readLifecycle(initializationConfig) == initializationConfigBytes &&
+        readLifecycle(initializationJob) == initializationJobBytes && !QFileInfo::exists(initializationPause);
+  };
+  const auto openInitializationAction = [&] {
+    initializationAction->trigger();
+    return check(bool(window.mInitializationDialog) && !window.mInitializationDialog->isRunning() &&
+        window.mInitializationDialog->requestDocument().value(QStringLiteral("input_data_identity")) ==
+            window.mWorkspace.cameraDatasetIdentity(),
+        "the real QAction opens InitializationDialog with the current source identity and starts no helper");
+  };
+  const auto closeInitializationAction = [&] {
+    if (!window.mInitializationDialog) return false;
+    QPointer<QProcess> process = window.mInitializationDialog->findChild<QProcess *>();
+    QTimer::singleShot(0, window.mInitializationDialog.data(), &QWidget::close);
+    return check(waitLifecycle([&] { return !window.mInitializationDialog; }) &&
+        (!process || process->state() == QProcess::NotRunning),
+        "closing the actual initializer dialog leaves no running owned helper");
+  };
+  const auto persistedInitialization = [&](const QString &path, const QString &expectedIdentity) {
+    WorkspaceDocument document; QString error;
+    return document.load(window.mWorkspace.projectFilePath(), &error) &&
+        document.cameraDatasetIdentity() == expectedIdentity && hasInitializationRecord(document, path) &&
+        document.sceneCollectionJson() == initializationScenes;
+  };
+
+  // A real owned supervisor process supplies the busy condition. Sending the
+  // dialog's public result signal must durably register before refusing adopt.
+  if (!openInitializationAction()) return false;
+  const QString initializationPlan = QDir(lastProject).filePath(QStringLiteral(".gsw/training-batches/owned-lifecycle/plan.json"));
+  const QString initializationBatchState = QDir(QFileInfo(initializationPlan).absolutePath()).filePath(QStringLiteral("state.json"));
+  const QString initializationPlanSha(64, QLatin1Char('a'));
+  window.mPendingTrainingBatch = MainWindow::PendingTrainingBatch{QStringLiteral("owned-initializer-busy"), lastProject,
+      initializationPlan, initializationPlanSha};
+  const int initializationBusyGuards = guards;
+  if (!check(window.mProcessSupervisor.start(QStringLiteral("owned-initializer-busy"), python,
+      {QStringLiteral("-B"), worker, initializationBatchState, initializationPlanSha, QStringLiteral("pause")},
+      lastProject, QProcessEnvironment::systemEnvironment(), true) &&
+      waitLifecycle([&] { return window.mProcessSupervisor.isRunning() && window.mPauseTrainingAction->isEnabled(); }),
+      "start only the owned CPU process for the initializer busy-adoption guard")) return false;
+  const QString initializationBusyVersion = versionPath(QStringLiteral("owned-callback-busy-result"));
+  window.mInitializationDialog->versionCreated(initializationBusyVersion, busySummary);
+  check(guards == initializationBusyGuards + 1 && window.mWorkspace.datasetPath() == initializationSource &&
+      persistedInitialization(initializationBusyVersion, sourceSummary.value(QStringLiteral("dataIdentity")).toString()) &&
+      initializationStatePreserved(), "busy initializer completion is registered and saved without replacing dataset, objects, TRS or historical training state");
+  window.mPauseTrainingAction->trigger();
+  if (!check(waitLifecycle([&] { return !window.mProcessSupervisor.isRunning() && !window.mPendingTrainingBatch; }),
+      "the owned initializer busy worker exits through the real pause action")) return false;
+  if (!closeInitializationAction()) return false;
+
+  if (!check(setInitializationSource(), "reset only the owned source before testing a changed dataset")) return false;
+  if (!openInitializationAction()) return false;
+  const QString otherSource = versionPath(QStringLiteral("owned-callback-other-source"));
+  if (!check(window.mWorkspace.setDatasetPath(otherSource, &initializationError), "change the current cached dataset after the actual dialog captured its source")) return false;
+  const int initializationChangedGuards = guards;
+  const QString initializationChangedVersion = versionPath(QStringLiteral("owned-callback-changed-result"));
+  window.mInitializationDialog->versionCreated(initializationChangedVersion, changedSummary);
+  check(guards == initializationChangedGuards + 1 && window.mWorkspace.datasetPath() == otherSource &&
+      persistedInitialization(initializationChangedVersion, otherSummary.value(QStringLiteral("dataIdentity")).toString()) &&
+      initializationStatePreserved(), "changed-source initializer completion is persisted before adoption is refused and the selected dataset remains selected");
+  if (!closeInitializationAction()) return false;
+
+  if (!check(setInitializationSource(), "reset the owned source before the transient-crop callback")) return false;
+  window.mViewport->setEditToolsLocked(false);
+  window.mViewport->clearSelection(); window.mViewport->invertSelection(); window.mViewport->deleteSelection();
+  if (!check(window.mViewport->hasUnsavedSceneEdits(), "create only an owned transient crop before initializer completion")) return false;
+  if (!openInitializationAction()) return false;
+  const int initializationCropGuards = guards;
+  const QString initializationCropVersion = versionPath(QStringLiteral("owned-callback-crop-result"));
+  window.mInitializationDialog->versionCreated(initializationCropVersion, cropSummary);
+  check(guards == initializationCropGuards + 1 && window.mWorkspace.datasetPath() == initializationSource &&
+      window.mViewport->hasUnsavedSceneEdits() &&
+      persistedInitialization(initializationCropVersion, sourceSummary.value(QStringLiteral("dataIdentity")).toString()) &&
+      initializationStatePreserved(), "unsaved crop blocks initializer adoption but keeps the version durable, source crop reachable and all scene/training records unchanged");
+  if (!closeInitializationAction()) return false;
+  window.mViewport->undoEdit();
+  if (!check(!window.mViewport->hasUnsavedSceneEdits(), "undo only the owned crop before successful initializer adoption")) return false;
+
+  if (!check(setInitializationSource(), "reset the owned source before the normal hash-bound adoption")) return false;
+  if (!openInitializationAction()) return false;
+  const int initializationAdoptGuards = guards;
+  const QString initializationAdoptVersion = versionPath(QStringLiteral("owned-callback-adopted-result"));
+  window.mInitializationDialog->versionCreated(initializationAdoptVersion, adoptedSummary);
+  check(guards == initializationAdoptGuards && window.mWorkspace.datasetPath() == initializationAdoptVersion &&
+      window.mWorkspace.cameraDatasetIdentity() == adoptedSummary.value(QStringLiteral("dataIdentity")).toString() &&
+      persistedInitialization(initializationAdoptVersion, adoptedSummary.value(QStringLiteral("dataIdentity")).toString()) &&
+      initializationStatePreserved(), "normal callback adopts matching cached manifest/info/opaque artifact hashes; save/reopen retains the new identity and registry without changing objects, TRS or historical training state");
+  if (!closeInitializationAction()) return false;
   expectedDialogs.stop();AppLanguage::apply(originalLanguage,false);
   std::fprintf(stderr,"Training batch lifecycle smoke: %s\n",passed?"PASS":"FAIL");
   return passed;

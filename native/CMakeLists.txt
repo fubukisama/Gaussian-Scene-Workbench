@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.3
+  VERSION 0.3.4
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -144,6 +144,14 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/QualityMeasurementSmokeTest.h
   src/ScaleConstraintsDialog.cpp
   src/ScaleConstraintsDialog.h
+  src/InitializationEditor.cpp
+  src/InitializationEditor.h
+  src/InitializationPreview.cpp
+  src/InitializationPreview.h
+  src/InitializationDialog.cpp
+  src/InitializationDialog.h
+  src/GeometryProductInfo.cpp
+  src/GeometryProductInfo.h
   src/ScaleConstraintsSmokeTest.cpp
   src/ScaleConstraintsSmokeTest.h
   src/TrainingBatchDialog.cpp
@@ -398,6 +406,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_gpu.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_scale_worker.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_camera_density_resume.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_general_reconstruction.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_gs_geometry_depth.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_pinhole_rasterizer_gpu.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
@@ -439,6 +449,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATI
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P1.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P1.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/GENERAL_RECONSTRUCTION.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/GENERAL_RECONSTRUCTION.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/validation/camera-scale-p1-synthetic-training.json" DESTINATION source/docs/validation)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/examples/camera-scale-p1" DESTINATION source/docs/examples)
 
@@ -487,6 +499,73 @@ if(BUILD_TESTING)
     native.worker.test_scale_constraints native.worker.test_training_seed native.worker.test_training_batch)
   set_tests_properties(native_camera_scale_p1 PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 180)
+  add_test(NAME native_general_reconstruction_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.backend.tests.test_initialization native.worker.test_initialization
+    native.backend.tests.test_gs_geometry native.worker.test_gs_geometry
+    native.worker.test_geometry_cli_utf8
+    native.worker.test_gs_geometry_runtime
+    native.backend.tests.test_geometry_evaluation
+    native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests)
+  set_tests_properties(native_general_reconstruction_contracts PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 180)
+  qt_add_executable(gsw_geometry_product_tests tests/GeometryProductInfoTests.cpp
+    src/GeometryProductInfo.cpp src/GeometryProductInfo.h src/SceneCoordinates.cpp src/SceneCoordinates.h)
+  target_include_directories(gsw_geometry_product_tests PRIVATE src)
+  target_link_libraries(gsw_geometry_product_tests PRIVATE Qt6::Core Qt6::Gui)
+  if(MSVC)
+    target_compile_options(gsw_geometry_product_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_geometry_product COMMAND gsw_geometry_product_tests)
+  set_tests_properties(native_geometry_product PROPERTIES TIMEOUT 30
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  qt_add_executable(gsw_initialization_editor_ui_tests
+    tests/InitializationEditorUiTests.cpp src/InitializationEditor.cpp src/InitializationEditor.h
+    src/InitializationPreview.cpp src/InitializationPreview.h src/DatasetImportDialog.cpp src/DatasetImportDialog.h
+    src/DatasetImportPlan.cpp src/DatasetImportPlan.h src/MultiItemList.cpp src/MultiItemList.h
+    src/AppTheme.cpp src/AppTheme.h src/WorkbenchIcons.cpp src/WorkbenchIcons.h
+    src/AppLanguage.cpp src/AppLanguage.h lucide_icons.qrc)
+  target_link_libraries(gsw_initialization_editor_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::Svg)
+  qt_add_executable(gsw_initialization_dialog_ui_tests
+    tests/InitializationDialogUiTests.cpp src/InitializationEditor.cpp src/InitializationEditor.h
+    src/InitializationPreview.cpp src/InitializationPreview.h src/InitializationDialog.cpp src/InitializationDialog.h
+    src/AppLanguage.cpp src/AppLanguage.h)
+  target_link_libraries(gsw_initialization_dialog_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data")
+  foreach(target gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests)
+    target_include_directories(${target} PRIVATE src)
+    qt_add_resources(${target} "${target}_languages" PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    foreach(language zh_CN ja)
+      qt_add_resources(${target} "${target}_qtbase_${language}" PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+    endforeach()
+    if(MSVC)
+      target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+  endforeach()
+  add_test(NAME native_initialization_editor_ui COMMAND gsw_initialization_editor_ui_tests)
+  add_test(NAME native_initialization_dialog_ui COMMAND gsw_initialization_dialog_ui_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}")
+  set_tests_properties(native_initialization_editor_ui native_initialization_dialog_ui PROPERTIES TIMEOUT 180
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  qt_add_executable(gsw_mesh_geometry_dialog_ui_tests tests/MeshGeometryDialogUiTests.cpp
+    src/MeshGenerationDialog.cpp src/MeshGenerationDialog.h src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h
+    src/WorkspaceDocument.cpp src/WorkspaceDocument.h src/AppLanguage.cpp src/AppLanguage.h)
+  target_include_directories(gsw_mesh_geometry_dialog_ui_tests PRIVATE src)
+  target_link_libraries(gsw_mesh_geometry_dialog_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+  qt_add_resources(gsw_mesh_geometry_dialog_ui_tests "mesh_geometry_dialog_languages"
+    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  foreach(language zh_CN ja)
+    qt_add_resources(gsw_mesh_geometry_dialog_ui_tests "mesh_geometry_dialog_qtbase_${language}"
+      PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+  endforeach()
+  if(MSVC)
+    target_compile_options(gsw_mesh_geometry_dialog_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_mesh_geometry_dialog_ui COMMAND gsw_mesh_geometry_dialog_ui_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}")
+  set_tests_properties(native_mesh_geometry_dialog_ui PROPERTIES TIMEOUT 90
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   qt_add_executable(gsw_model_scale_coordinate_tests
     tests/ModelScaleCoordinateTests.cpp src/SceneCoordinates.cpp src/SceneCoordinates.h)
   target_include_directories(gsw_model_scale_coordinate_tests PRIVATE src)
@@ -1017,6 +1096,12 @@ if(BUILD_TESTING)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME workspace_document COMMAND gsw_native_tests)
+    add_test(NAME native_general_version_adoption COMMAND gsw_native_tests
+      refusesChangedInitializerVersionBeforeDatasetAssociation
+      persistsWorkflowArtifactsAcrossRecoveryMigrationAndSaveAs
+      registersPortableWorkflowArtifactsWithoutChangingSceneOrStartingWork)
+    set_tests_properties(native_general_version_adoption PROPERTIES TIMEOUT 60
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     set_tests_properties(workspace_document PROPERTIES
       ENVIRONMENT "GSW_QUALITY_TEST_PYTHON=${Python3_EXECUTABLE};GSW_BACKEND_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/..")
 

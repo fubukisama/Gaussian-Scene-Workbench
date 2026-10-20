@@ -47,6 +47,10 @@ bool CameraDatasetInfo::blocked(const QJsonObject &summary) {
 }
 
 bool CameraDatasetInfo::meshGenerationBlocked(const QJsonObject &configuration) {
+  // Only this new depth/mask adapter consumes the complete canonical contract.
+  // It still performs actual model/dataset/hash/camera checks in its worker;
+  // no legacy external scene reader is made compatible by this exception.
+  if (configuration.value(QStringLiteral("mode")) == QStringLiteral("gs_depth")) return false;
   const QString directory = configuration.value(QStringLiteral("modelDirectory")).toString();
   if (directory.trimmed().isEmpty()) return false;
   const QDir output(directory);
@@ -132,8 +136,27 @@ QString CameraDatasetInfo::summaryText(const QJsonObject &summary) {
     lines.append(QCoreApplication::translate("Workbench", "未提供测试集；不能显示独立测试指标。"));
   const auto initialization = summary.value(QStringLiteral("initialization")).toObject();
   lines.append(QCoreApplication::translate("Workbench", "初始化：%1").arg(initializationName(initialization.value(QStringLiteral("kind")).toString())));
-  const QString assumption = initialization.value(QStringLiteral("assumption")).toString();
+  const auto declaredNumber = [&locale, &initialization](const QString &key) {
+    return initialization.value(key).isDouble() ? locale.toString(initialization.value(key).toInteger())
+        : QCoreApplication::translate("Workbench", "未声明（检查时显示实际值）");
+  };
+  const QString frame = initialization.value(QStringLiteral("frame")).toString();
+  lines.append(QCoreApplication::translate("Workbench", "初始化声明：点数 %1；种子 %2；输入框架 %3。")
+      .arg(declaredNumber(QStringLiteral("count")), declaredNumber(QStringLiteral("seed")),
+           frame == QStringLiteral("canonical") ? QCoreApplication::translate("Workbench", "规范坐标（已记录的尺度）")
+                                               : QCoreApplication::translate("Workbench", "源坐标（沿用源单位）")));
+  const auto bounds = initialization.value(QStringLiteral("bounds")).toArray();
+  if (bounds.size() == 2) lines.append(QCoreApplication::translate("Workbench", "声明粗范围：[%1] → [%2]；不是已测对象边界。")
+      .arg(vectorText(bounds.at(0).toArray()), vectorText(bounds.at(1).toArray())));
+  else lines.append(QCoreApplication::translate("Workbench", "尚未声明粗范围；相机轨迹不确定物体深度，需单独检查初始化。"));
+  QString assumption = initialization.value(QStringLiteral("coverage_assumption")).toString(
+      initialization.value(QStringLiteral("assumption")).toString());
+  if (assumption == QStringLiteral("scene_near_camera_coverage_center_not_depth_evidence"))
+    assumption = QCoreApplication::translate("Workbench", "历史随机范围假设对象接近相机覆盖中心；这不是对象深度证据。");
   if (!assumption.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "初始化假设：%1").arg(assumption));
+  const auto materialization = initialization.value(QStringLiteral("materialization")).toObject();
+  const QString pointIdentity = materialization.value(QStringLiteral("point_sha256")).toString();
+  if (!pointIdentity.isEmpty()) lines.append(QCoreApplication::translate("Workbench", "已冻结初始化点集身份：%1").arg(pointIdentity));
   const auto transforms = summary.value(QStringLiteral("transforms")).toObject();
   for (const auto &item : {QPair<QString, const char *>{QStringLiteral("source_to_canonical"), AppLanguage::source("源坐标 → 规范坐标")},
                            QPair<QString, const char *>{QStringLiteral("canonical_to_training"), AppLanguage::source("规范坐标 → 训练坐标")}}) {

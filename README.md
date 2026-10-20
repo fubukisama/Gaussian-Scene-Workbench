@@ -8,7 +8,7 @@
 
 ## Native Desktop Preview
 
-- Version: `0.3.3-native-preview`
+- Version: `0.3.4-native-preview`
 - Documentation updated: `2026-10-20`; camera/scale P0 and P1 implementation and acceptance status are documented below.
 - Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
@@ -16,6 +16,8 @@
 The default `main` branch contains the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
 
 ### Current capabilities
+
+- **General reconstruction:** editable, explainable initialization bounds and frozen point identities; native known-camera 3DGS/2DGS rendered camera-Z/mask point clouds; independent bidirectional geometry/coverage/dimension evaluation; reusable named comparison recipes. Products retain full camera/frame/scale/split/backend provenance and remain separate from original Gaussians/checkpoints. This is an unfused appearance proxy, not a certified material boundary; short-run acceptance is not accuracy certification. See [interfaces and precise support limits](docs/GENERAL_RECONSTRUCTION.md).
 
 - **Scale constraints and controlled batches (P1):** known distances, camera baselines and control points solve scale-only or proper Sim3 alignment. Fit constraints and independent reference checks remain separate and versioned; neither is a whole-model accuracy measurement. Explicit single-camera TUM/CSV/JSON association and pinned serial 3DGS/2DGS parameter/seed batches preserve declared cameras, initialization and held-out images. See the [P1 guide, examples and capability limits](docs/CAMERA_SCALE_P1.md). Checkpoint compatibility is source-version-specific; old checkpoints are preserved, not silently migrated or converted to PLY warm starts.
 
@@ -51,7 +53,7 @@ From this branch's checkout, with the dependencies in [native/README.md](native/
 powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration Release -Package
 ```
 
-The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.3-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
+The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.4-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
 
 Translation and native regression commands:
 
@@ -90,9 +92,11 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 ## 简体中文
 
+本轮补齐可解释的初始化范围与冻结点集、3DGS／2DGS 真实相机 Z 深度和掩膜点云、独立双向几何／缺面／尺寸评价，以及任意命名的可复用比较配置。相机、划分、尺度、变换、模型及后端来源均可追溯，原高斯和检查点保留；深度点云是未融合的外观代理，不是物理材料边界或精度认证。见[通用重建接口与支持范围](docs/GENERAL_RECONSTRUCTION.md)。
+
 P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存拟合与独立参考检核；两者均不等于模型几何精度。单相机 TUM／CSV／JSON 轨迹关联与固定身份的串行 3DGS／2DGS 参数、种子批次保留相机、初始化和测试划分。见 [P1 指南、示例与能力边界](docs/CAMERA_SCALE_P1.md)。旧版检查点保留原样；跨源码版本不自动迁移，更不以 PLY 热启动冒充完整续训。
 
-**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.3-native-preview`。本页文档更新日期为 **2026-10-20**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.4-native-preview`。本页文档更新日期为 **2026-10-20**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
 本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
 
@@ -120,7 +124,7 @@ P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存
 
 有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。旧 HTML/Electron Releases 已下架；Setup 不自动启动程序或训练，未签名预览版可能需要获准的签名/运行策略，软件不绕过安全策略。
 
-源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.3-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
+源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.4-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
 
 ### 能力边界与许可
 
@@ -130,9 +134,11 @@ P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存
 
 ## 日本語
 
+説明可能な初期化範囲と固定点群、3DGS／2DGS の実 camera-Z 深度・マスク点群、独立した双方向形状・欠損・寸法評価、任意名称の比較レシピを追加しました。カメラ、分割、尺度、変換と実行元を記録し、元のガウシアンとチェックポイントは保持します。融合しない外観プロキシであり、物理的な材質境界や精度の認証ではありません。[通用再構築のインターフェースと対応範囲](docs/GENERAL_RECONSTRUCTION.md)を参照してください。
+
 P1 では既知距離、カメラ基線、制御点によるスケール推定／Sim3 整合を追加しました。フィット残差と独立した参照検証を分離して保存し、モデル全体の形状精度とはみなしません。単眼 TUM／CSV／JSON の時刻関連付け、データを固定した逐次 3DGS／2DGS パラメーター・シード実験は、カメラ・初期化・評価用画像の分割を維持します。[P1 ガイドと対応範囲](docs/CAMERA_SCALE_P1.md)を参照してください。旧チェックポイントは保持し、異なるソース版への自動移行や PLY による完全再開の代用は行いません。
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.3-native-preview`、本ページの文書更新日は **2026-10-20** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.4-native-preview`、本ページの文書更新日は **2026-10-20** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
 この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
 
@@ -160,7 +166,7 @@ P1 では既知距離、カメラ基線、制御点によるスケール推定�
 
 別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。上記のネイティブパッケージと実行環境の手順を使用し、過去の配布物を現在の導入先とは扱いません。
 
-ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.3-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
+ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.4-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
 
 ### 制限とライセンス
 

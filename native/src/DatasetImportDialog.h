@@ -18,6 +18,7 @@ class QListWidget;
 class QPushButton;
 
 namespace gsw {
+class InitializationEditor;
 
 class DatasetImportDialog final : public QDialog {
   Q_OBJECT
@@ -68,10 +69,7 @@ private:
   QComboBox *mCameraUnit = nullptr;
   QLineEdit *mScaleEvidence = nullptr;
   QComboBox *mNormalization = nullptr;
-  QComboBox *mInitialization = nullptr;
-  QLineEdit *mInitializationPath = nullptr;
-  QLineEdit *mBoundsMinimum = nullptr;
-  QLineEdit *mBoundsMaximum = nullptr;
+  InitializationEditor *mInitializationEditor = nullptr;
   QWidget *mCameraPanel = nullptr;
   QWidget *mMediaActions = nullptr;
   QLabel *mSourceTitle = nullptr;

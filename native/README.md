@@ -2,9 +2,11 @@
 
 The default `main` branch is the native desktop source. `native/` contains the Qt 6/C++ desktop and its supervised Python compute backend. The retired web/Electron implementation has been removed from this branch. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime. Shared workflow code lives in `native/backend/compute.py`; see [migration and compatibility](../docs/NATIVE_MIGRATION.md).
 
-Documentation updated: `2026-10-20`. Product version is `0.3.3-native-preview`; the build manifest records the release date. See [camera/scale P1](../docs/CAMERA_SCALE_P1.md) for constraints, separate reference checks, trajectory association, controlled batches and acceptance boundaries.
+Documentation updated: `2026-10-20`. Product version is `0.3.4-native-preview`; the build manifest records the release date. See [general reconstruction](../docs/GENERAL_RECONSTRUCTION.md) for reproducible initialization, real 3DGS/2DGS rendered-depth point clouds, independent geometry evaluation and named comparison recipes; [camera/scale P1](../docs/CAMERA_SCALE_P1.md) covers constraints, independent checks and trajectory association.
 
 ## Current preview
+
+The new geometry route uses only training views and preserves original Gaussian models/checkpoints. Camera-Z/masks/scale/frame/backend identities are saved with a separate, unfused point cloud. It is an appearance proxy, not a certified material surface. Native display defaults to the training frame; canonical/source products are saved without guessing viewport alignment. Short actual training/resume tests do not establish reconstruction accuracy.
 
 Windows has a real setup wizard definition, not only a portable ZIP. See
 [Windows Installer](../docs/WINDOWS_INSTALLER.md) for build and acceptance.

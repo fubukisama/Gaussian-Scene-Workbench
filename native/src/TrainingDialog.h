@@ -56,6 +56,11 @@ public:
                                 const QString &dataIdentity = {},
                                 const QString &posePolicy = QStringLiteral("locked"));
   [[nodiscard]] QJsonObject cameraDatasetSummary() const;
+  void setInitializationWorkspace(const QString &workspaceRoot);
+  void useInitializationDataset(const QString &metadataPath, const QString &dataIdentity);
+signals:
+  void initializationVersionCreated(const QString &datasetPath, const QJsonObject &summary,
+                                    const QString &inputIdentity);
 
 protected:
   void accept() override;
@@ -70,6 +75,7 @@ private:
   void refreshReconstructionSummary();
   void refreshCameraPolicy();
   void refreshResolutionPolicy();
+  void openInitialization();
 
   QString mDatasetPath;
   QComboBox *mBackend = nullptr;
@@ -110,6 +116,9 @@ private:
   QString mCameraDatasetPath;
   QString mCameraDatasetIdentity;
   QString mExpectedCameraDatasetIdentity;
+  QString mInitializationWorkspace;
+  QPushButton *mInitializationButton = nullptr;
+  QLabel *mDatasetValue = nullptr;
 };
 
 } // namespace gsw

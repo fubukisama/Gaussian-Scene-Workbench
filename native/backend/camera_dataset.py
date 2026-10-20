@@ -488,8 +488,13 @@ def _finish(data, root, adapter, options=None, cancelled=None, _derivation_conte
             result["warnings"].append({"code": "camera_cross_split_duplicate_content", "sha256": digest,
                                        "view_ids": [view["view_id"] for view in group]})
     result["independent_test"] = bool(splits["test"]) and not result["warnings"]
-    if result["scale"].get("derivation") is not None:
+    if result.get("initialization_derivation") is not None:
+        from native.backend.initialization import verify_initialization_derivation
+        verify_initialization_derivation(result, root, cancelled, _derivation_context)
+    elif result["scale"].get("derivation") is not None:
         _verify_scale_derivation(result, root, cancelled, _derivation_context)
+    elif result["initialization"].get("materialization") is not None:
+        _error("camera_initialization_derivation_required")
     elif result["initialization"].get("input_to_canonical") is not None:
         _error("camera_scale_derivation_required", "initialization.input_to_canonical")
     return refresh_dataset_identity(result)
@@ -527,6 +532,7 @@ def _scaled_dataset_from_solution(original, derivation):
         _error("camera_scale_independent_checks_failed")
     transformed = copy.deepcopy(original)
     transformed.pop("data_identity", None)
+    transformed.pop("initialization_derivation", None)
     value = solution["source_to_metric"]
     transform = _sim3({"s": value["s"], "R": value["R"], "t": value["t"],
                        "mode": "explicit", "applied": True,
@@ -537,7 +543,7 @@ def _scaled_dataset_from_solution(original, derivation):
     for view in transformed["views"]:
         view["c2w_opencv"] = _transform_pose(view["source_c2w_opencv"], transform)
     initialization = transformed["initialization"]
-    if initialization["frame"] == "canonical":
+    if initialization["frame"] == "canonical" or initialization.get("materialization") is not None:
         correction = _compose_similarities(transform, invert_sim3(original["transforms"]["source_to_canonical"]),
                                             "initialization_input", "canonical")
         previous = initialization.get("input_to_canonical", _sim3(None))
@@ -585,10 +591,10 @@ def _check_derived_initialization_map(actual, expected, original, solution):
             _error("camera_scale_derived_dataset_mismatch", "initialization.input_to_canonical")
 
 
-def _scale_archive_path(root, relative):
+def _scale_archive_path(root, relative, prefix="source/scale_constraints/inputs/"):
     """Resolve a hash-bound archive without following links/reparse points."""
     path, normalized = _relative(root, relative)
-    if not normalized.startswith("source/scale_constraints/inputs/") or not normalized.endswith(".json"):
+    if not normalized.startswith(prefix) or not normalized.endswith(".json"):
         _error("camera_scale_invalid_archive_path", relative)
     for entry in (path, *path.parents):
         metadata = os.lstat(entry)
@@ -687,12 +693,13 @@ def _verify_scale_derivation(dataset, root, cancelled=None, context=None):
 def scale_derivation_archive_records(dataset):
     """Return flat, hash-bound ancestry references for an already admitted dataset."""
     result = []
-    derivation = dataset.get("scale", {}).get("derivation")
-    if derivation:
-        result.append(copy.deepcopy(derivation["input_manifest"]))
-        # All prior archive names are content-addressed by data identity. Their
-        # byte digests stay explicit so copying cannot silently adopt new bytes.
-        result.extend(copy.deepcopy(derivation.get("archives", [])))
+    derivations = (dataset.get("scale", {}).get("derivation"), dataset.get("initialization_derivation"))
+    for derivation in derivations:
+        if derivation:
+            result.append(copy.deepcopy(derivation["input_manifest"]))
+            # All prior archive names are content-addressed by data identity. Their
+            # byte digests stay explicit so copying cannot silently adopt new bytes.
+            result.extend(copy.deepcopy(derivation.get("archives", [])))
     by_path = {}
     for record in result:
         if record["path"] in by_path and record != by_path[record["path"]]:
@@ -789,10 +796,16 @@ def _initialization(root, value, cancelled=None):
                  count=value.get("count"), seed=value.get("seed"))
     if "input_to_canonical" in value:
         transform = _sim3(value["input_to_canonical"], "initialization_input", "canonical")
-        if (frame != "canonical" or transform["input_frame"] != "initialization_input" or
+        if ((frame != "canonical" and value.get("materialization") is None) or transform["input_frame"] != "initialization_input" or
                 transform["output_frame"] != "canonical" or transform["applied"]):
             _error("camera_invalid_initialization", "input_to_canonical")
         value["input_to_canonical"] = transform
+    if value.get("materialization") is not None:
+        from native.backend.initialization import read_materialized_initialization
+        points, _ = read_materialized_initialization(value, root, cancelled)
+        if value.get("count") is not None and value["count"] != len(points):
+            _error("camera_initialization_count_mismatch")
+        return value
     if kind == "random":
         if value.get("path"):
             _error("camera_invalid_initialization", "random initialization cannot consume a point cloud")
@@ -831,6 +844,10 @@ def read_initialization_points(dataset, root, cancelled=None):
     apply canonical_to_training exactly once. No evaluation geometry is read.
     """
     initialization = dataset["initialization"]
+    if initialization.get("materialization") is not None:
+        from native.backend.initialization import resolve_initialization_points
+        points, colors, _ = resolve_initialization_points(dataset, root, cancelled)
+        return points.tolist(), colors.tolist()
     if initialization["kind"] == "random":
         return None
     path, _ = _relative(Path(root).resolve(), initialization["path"])

@@ -98,6 +98,11 @@ def _copy_records(root, dataset):
         if record["path"] in records and records[record["path"]] != record["sha256"]:
             raise camera_dataset.CameraDatasetError("camera_scale_conflicting_archive")
         records[record["path"]] = record["sha256"]
+    from native.backend.initialization import initialization_reference_records
+    for record in initialization_reference_records(dataset, root):
+        if record["path"] in records and records[record["path"]] != record["sha256"]:
+            raise camera_dataset.CameraDatasetError("camera_scale_conflicting_archive")
+        records[record["path"]] = record["sha256"]
     metadata = root / "source"
     if metadata.exists():
         if _reparse(metadata):
