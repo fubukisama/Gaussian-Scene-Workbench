@@ -278,6 +278,58 @@ bool runPointStreamingSmokeTest(NativeViewport &viewport) {
                cleared.reservedGpuBytes == 0 && cleared.managedGpuBytes == 0 &&
                viewport.residentPointCount() == 0;
       }, 10000), "clearing the fixture releases point buffers and loading leases")) return false;
+
+  // Exercise only public lifecycle operations while page jobs still own their
+  // buffers. A cache/scene replacement must not apply stale results, release a
+  // worker lane early, strand reservations, or prevent a later explicit retry.
+  loaded = false;
+  failed = false;
+  qputenv("GSW_FORCE_POINT_PAGING", "1");
+  viewport.setScene(path, 0);
+  if (!check(waitUntil([&]() { return loaded || failed; }) && loaded && !failed,
+             "the same unchanged source can be explicitly reopened for lifecycle acceptance")) return false;
+  restoreFlag();
+  if (!check(waitUntil([&]() {
+        viewport.grabFramebuffer();
+        return viewport.residentPointCount() > 0 && !viewport.pointPagingSettled();
+      }), "public viewport exposes a partially resident stream before clearing")) return false;
+  viewport.setScene({}, 0);
+  if (!check(waitUntil([&]() {
+        viewport.grabFramebuffer();
+        const auto cleared = viewport.resourceBudgetStatus();
+        return cleared.loadingMeshCount == 0 && cleared.reservedRamBytes == 0 &&
+               cleared.reservedGpuBytes == 0 && cleared.managedGpuBytes == 0 &&
+               viewport.residentPointCount() == 0;
+      }, 10000), "clearing in-flight point pages drains their actual leases without stale residency")) return false;
+
+  loaded = false;
+  failed = false;
+  qputenv("GSW_FORCE_POINT_PAGING", "1");
+  viewport.setScene(path, 0);
+  if (!check(waitUntil([&]() { return loaded || failed; }) && loaded && !failed,
+             "explicit retry imports the same source after an in-flight clear")) return false;
+  restoreFlag();
+  viewport.setRenderMode(NativeViewport::RenderMode::Points);
+  viewport.setAxisView(NavigationAxis::PositiveZ);
+  if (!check(viewport.focusModel(), "retry uses the same public camera framing")) return false;
+  if (!check(waitUntil([&]() {
+        const auto retried = viewport.resourceBudgetStatus();
+        return viewport.pointPagingSettled() && viewport.residentPointCount() >= kSourcePoints &&
+               retried.loadingMeshCount == 0 && retried.reservedRamBytes == 0 &&
+               retried.reservedGpuBytes == 0;
+      }), "retry settles under the unchanged thirty-second gate after cancelling page work")) return false;
+  const auto retriedFrame = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+  if (!check(coloredPointPixels(retriedFrame) >= 64 && sourceHash(path) == originalHash &&
+             viewport.scenePath() == path && !viewport.hasUnsavedSceneEdits(),
+             "retry renders actual colored pages and preserves source bytes and edits")) return false;
+  viewport.setScene({}, 0);
+  if (!check(waitUntil([&]() {
+        viewport.grabFramebuffer();
+        const auto cleared = viewport.resourceBudgetStatus();
+        return cleared.loadingMeshCount == 0 && cleared.reservedRamBytes == 0 &&
+               cleared.reservedGpuBytes == 0 && cleared.managedGpuBytes == 0 &&
+               viewport.residentPointCount() == 0;
+      }, 10000), "retry cleanup releases all point storage and loading leases")) return false;
   qInfo() << "POINT_STREAMING PASS:" << "source points/leaves" << kSourcePoints << leafCount
           << "source bytes" << QFileInfo(path).size()
           << "first-visible/ready milliseconds" << firstVisibleMs << readyMs

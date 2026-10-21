@@ -617,6 +617,30 @@ if(BUILD_TESTING)
   set_tests_properties(native_runtime_decoupling_ui PROPERTIES TIMEOUT 120
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  # Exercise the same public batch smoke without a MainWindow or training
+  # process, so admission/observation regressions fail quickly in every locale.
+  qt_add_executable(gsw_training_batch_ui_tests tests/TrainingBatchUiTests.cpp
+    src/TrainingBatchSmokeTest.cpp src/TrainingBatchSmokeTest.h
+    src/TrainingBatchDialog.cpp src/TrainingBatchDialog.h
+    src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h)
+  target_include_directories(gsw_training_batch_ui_tests PRIVATE src)
+  target_link_libraries(gsw_training_batch_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+  qt_add_resources(gsw_training_batch_ui_tests "training_batch_languages"
+    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  foreach(language zh_CN ja)
+    qt_add_resources(gsw_training_batch_ui_tests "training_batch_qtbase_${language}"
+      PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+  endforeach()
+  if(MSVC)
+    target_compile_options(gsw_training_batch_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  foreach(locale zh_CN en_US ja_JP)
+    add_test(NAME native_training_batch_contract_${locale} COMMAND gsw_training_batch_ui_tests
+      "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}" "${locale}")
+    set_tests_properties(native_training_batch_contract_${locale} PROPERTIES TIMEOUT 120
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   qt_add_executable(gsw_model_scale_coordinate_tests
     tests/ModelScaleCoordinateTests.cpp src/SceneCoordinates.cpp src/SceneCoordinates.h)
   target_include_directories(gsw_model_scale_coordinate_tests PRIVATE src)

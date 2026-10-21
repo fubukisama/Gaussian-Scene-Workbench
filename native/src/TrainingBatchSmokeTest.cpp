@@ -84,17 +84,46 @@ bool runTrainingBatchSmokeTest() {
   check(batchWait([&]{return !actual.isRunning();})&&!actual.planPath().isEmpty()&&actualStarts==0,"creating a durable plan does not emit a training launch");
   const QString plan=actual.planPath();
   TrainingBatchDialog reopened(python,root,workspace.path(),{},QProcessEnvironment::systemEnvironment());
-  int reopenedStarts=0;QObject::connect(&reopened,&TrainingBatchDialog::runRequested,&reopened,[&](const QString&,bool){++reopenedStarts;});
+  int reopenedStarts=0;QString reopenedPlan;bool reopenedResume=false;
+  QObject::connect(&reopened,&TrainingBatchDialog::runRequested,&reopened,[&](const QString&path,bool resume){++reopenedStarts;reopenedPlan=path;reopenedResume=resume;});
   check(reopened.loadPlan(plan)&&reopenedStarts==0&&reopened.previewReport().value("runs").toArray().size()==4,"opening a saved plan and state never resumes or starts training");
   actual.startBatch();check(actualStarts==1&&!lastResume,"only explicit Start emits a serial-worker launch request");
   const QString savedStatePath=QDir(QFileInfo(plan).absolutePath()).filePath(QStringLiteral("state.json"));
   QFile savedStateFile(savedStatePath);QByteArray savedStateBytes;
   if(savedStateFile.open(QIODevice::ReadOnly)){savedStateBytes=savedStateFile.readAll();savedStateFile.close();}
+  const auto unchangedState=[&](const QByteArray&expected){QFile file(savedStatePath);return file.open(QIODevice::ReadOnly)&&file.readAll()==expected;};
   auto interruptedRunning=QJsonDocument::fromJson(savedStateBytes).object();interruptedRunning["status"]="running";
+  const QByteArray runningBytes=QJsonDocument(interruptedRunning).toJson();
+  auto*resumeButton=reopened.findChild<QPushButton*>(QStringLiteral("batchResumeButton"));
+  auto*observeButton=reopened.findChild<QPushButton*>(QStringLiteral("batchObserveButton"));
+  int observations=0;QString observedPlan;
+  QObject::connect(&reopened,&TrainingBatchDialog::observeRequested,&reopened,[&](const QString&path){++observations;observedPlan=path;});
   check(writeBatchJson(savedStatePath,interruptedRunning)&&reopened.loadPlan(plan)&&reopenedStarts==0&&
-      reopened.findChild<QPushButton*>(QStringLiteral("batchResumeButton"))->isEnabled(),
-      "a persisted running state can request verification after a crash but never starts merely on load");
-  reopened.resumeBatch();check(reopenedStarts==1,"only an explicit resume action emits the request for a persisted running state");
+      unchangedState(runningBytes)&&resumeButton&&!resumeButton->isEnabled()&&observeButton&&observeButton->isEnabled(),
+      "legacy running metadata remains byte-preserving and observation-only, without inventing a stopped owner or checkpoint");
+  reopened.resumeBatch();check(reopenedStarts==0&&unchangedState(runningBytes),
+      "an explicit invalid resume cannot emit a launch request for unverified legacy running metadata");
+  if(observeButton)observeButton->click();
+  check(observations==1&&observedPlan==plan&&reopenedStarts==0&&unchangedState(runningBytes),
+      "only explicit Observe emits the same plan observation, without starting or rewriting the legacy queue");
+  // These are pending, between-run queue metadata cases. They exercise only
+  // public UI admission/signals; no optimizer checkpoint or actual resume is
+  // fabricated or claimed by this CPU planning smoke.
+  for(const QString&status:{QStringLiteral("paused"),QStringLiteral("interrupted")}){
+    auto betweenRuns=QJsonDocument::fromJson(savedStateBytes).object();betweenRuns["status"]=status;
+    const QByteArray expected=QJsonDocument(betweenRuns).toJson();const int before=reopenedStarts;
+    check(writeBatchJson(savedStatePath,betweenRuns)&&reopened.loadPlan(plan)&&reopenedStarts==before&&
+        unchangedState(expected)&&resumeButton&&resumeButton->isEnabled(),
+        status==QStringLiteral("paused")?"opening a paused between-run queue preserves bytes and never launches training":
+        "opening an interrupted between-run queue preserves bytes and never launches training");
+    if(resumeButton)resumeButton->click();
+    check(reopenedStarts==before+1&&reopenedPlan==plan&&reopenedResume&&unchangedState(expected),
+        status==QStringLiteral("paused")?"only explicit Resume emits exactly one same-plan resume request for a paused queue":
+        "only explicit Resume emits exactly one same-plan resume request for an interrupted queue");
+    reopened.refreshHistory();
+    check(reopenedStarts==before+1&&unchangedState(expected),
+        "refreshing resumable queue metadata neither repeats its request nor rewrites state");
+  }
   QFile restoredState(savedStatePath);check(restoredState.open(QIODevice::WriteOnly|QIODevice::Truncate)&&
       restoredState.write(savedStateBytes)==savedStateBytes.size(),"restore only the owned state fixture after the resume-request test");restoredState.close();
   actual.refreshHistory();check(actualStarts==1,"refreshing persisted state has no automatic launch behavior");

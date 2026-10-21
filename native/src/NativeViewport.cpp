@@ -801,6 +801,7 @@ void NativeViewport::rebalanceResourceResidency() {
         state->resourcePointPageReservations.clear();
         state->mMeshCacheReadsInFlight.clear();
         state->mPointCacheReadsInFlight.clear();
+        ++state->mPointCacheReadEpoch;
         discardResidentMeshStorage();
         refreshResourceBudgets();
         // If external pressure changed during replacement, the loader can
@@ -1821,6 +1822,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mScene->mPointCache = {};
   mScene->mDesiredPointCacheNodes.clear();
   mScene->mPointCacheReadsInFlight.clear();
+  ++mScene->mPointCacheReadEpoch;
   mScene->mPointCacheFailedNodes.clear();
   mScene->mPendingPointCachePages.clear();
   mScene->mPendingPointCachePages.squeeze();
@@ -2551,7 +2553,8 @@ bool NativeViewport::meshRenderingAvailable() const {
 bool NativeViewport::pointPagingSettled() const {
   if (mScene->resourceLoading ||
       mScene->mPointUploadPending || mScene->mFullResolutionPointClearPending ||
-      !mScene->mPointCacheReadsInFlight.isEmpty() || !mScene->mPendingPointCachePages.isEmpty())
+      mScene->pointReadsActive() || !mScene->mPointCacheReadsInFlight.isEmpty() ||
+      !mScene->mPendingPointCachePages.isEmpty())
     return false;
   if (!mScene->mPointCache.isValid()) return true;
   return std::all_of(mScene->mDesiredPointCacheNodes.cbegin(), mScene->mDesiredPointCacheNodes.cend(),
@@ -3741,6 +3744,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             }
             mScene->mDesiredPointCacheNodes.clear();
             mScene->mPointCacheReadsInFlight.clear();
+            ++mScene->mPointCacheReadEpoch;
             mScene->mPointCacheFailedNodes.clear();
             mScene->mPendingPointCachePages.clear();
             mScene->resourcePointPageReservations.clear();
@@ -3999,7 +4003,8 @@ void NativeViewport::updateFrameRefreshPolicy() {
   mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
   const auto needsRefresh = [](const auto &scene) {
     return scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
-        !scene->mPendingPointCachePages.isEmpty() || !scene->mPointCacheReadsInFlight.isEmpty() ||
+        !scene->mPendingPointCachePages.isEmpty() || scene->pointReadsActive() ||
+        !scene->mPointCacheReadsInFlight.isEmpty() ||
         !scene->mFullResolutionPointGpuChunks.isEmpty() || scene->mRenderedMeshIndexCount > 0 ||
         scene->mMeshTextureUploadPending || !scene->mPendingMeshCachePages.isEmpty() ||
         !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty();
@@ -4334,27 +4339,55 @@ void NativeViewport::requestMissingPointCachePages() {
     }
     return a.pointCount < b.pointCount;
   });
-  constexpr qsizetype kMaximumReadsInFlight = 2;
-  // Stage at most two eight-page upload batches. Completed reads replenish
-  // this bounded window without waiting for another viewport paint.
+  // Keep two physical read jobs, not two single-page GUI handoffs. Slow
+  // software-rendered frames must not starve the existing eight-page drain.
+  // Each job is immutable after admission and retains every per-page lease.
+  // Old-generation jobs keep their lanes until actual completion, even when
+  // cache queues are cleared, so reloads cannot increase I/O concurrency.
   constexpr qsizetype kMaximumQueuedPages = 16;
-  for (const int nodeId : std::as_const(ordered)) {
-    if (mScene->mPointCacheReadsInFlight.size() >= kMaximumReadsInFlight ||
-        mScene->mPendingPointCachePages.size() +
-            mScene->mPointCacheReadsInFlight.size() >= kMaximumQueuedPages) {
-      break;
+  qsizetype stagedPages = mScene->mPendingPointCachePages.size();
+  for (const auto &activeLane : mScene->mPointCacheReadLanes) {
+    if (const auto activeBatch = activeLane.lock())
+      stagedPages += activeBatch->nodeIds.size();
+  }
+  qsizetype nextNode = 0;
+  for (auto &lane : mScene->mPointCacheReadLanes) {
+    if (!lane.expired()) continue;
+    auto work = std::make_shared<PointCacheReadBatch>();
+    work->generation = mScene->mSceneGeneration;
+    work->cacheEpoch = mScene->mPointCacheReadEpoch;
+    lichtfeld::UploadDrainBudget readBatch(8ULL * 1024 * 1024, 8, 0);
+    while (nextNode < ordered.size() && stagedPages < kMaximumQueuedPages) {
+      const int nodeId = ordered.at(nextNode++);
+      const qint64 count = mScene->mPointCache.nodes.at(nodeId).pointCount;
+      if (count <= 0 || count > std::numeric_limits<qint64>::max() /
+                                   (3 * qint64(sizeof(PointPreviewVertex)))) {
+        mScene->mPointCacheFailedNodes.insert(nodeId);
+        mScene->mPointCacheError = QCoreApplication::translate(
+            "Workbench", "Invalid point-cache node request.");
+        continue;
+      }
+      const qint64 pageBytes = count * qint64(sizeof(PointPreviewVertex));
+      if (pageBytes > sharedPageGpuBudget()) continue;
+      if (!readBatch.permits(static_cast<std::uint64_t>(pageBytes), 0)) {
+        --nextNode;
+        break;
+      }
+      auto reservation = mResources->createReservation();
+      if (!reservation->tryResize(pageBytes * 3, 0)) continue;
+      work->nodeIds.append(nodeId);
+      work->reservations.insert(nodeId, std::move(reservation));
+      mScene->mPointCacheReadsInFlight.insert(nodeId, work);
+      ++stagedPages;
+      readBatch.recordPage(static_cast<std::uint64_t>(pageBytes));
     }
-    const qint64 pageBytes = mScene->mPointCache.nodes.at(nodeId).pointCount *
-                             qint64(sizeof(PointPreviewVertex));
-    if (pageBytes > sharedPageGpuBudget()) continue;
-    auto reservation = mResources->createReservation();
-    if (!reservation->tryResize(pageBytes * 3, 0)) continue;
-    mScene->mPointCacheReadsInFlight.insert(nodeId);
-    const int generation = mScene->mSceneGeneration;
+    if (work->nodeIds.isEmpty()) continue;
+    const std::shared_ptr<const PointCacheReadBatch> batch = std::move(work);
+    lane = batch;
     const PointCloudCacheIndex cache = mScene->mPointCache;
-    auto *watcher = new QFutureWatcher<PointCloudCachePage>(this);
-    connect(watcher, &QFutureWatcher<PointCloudCachePage>::finished, this,
-            [this, watcher, generation, nodeId, reservation,
+    auto *watcher = new QFutureWatcher<QVector<PointCloudCachePage>>(this);
+    connect(watcher, &QFutureWatcher<QVector<PointCloudCachePage>>::finished, this,
+            [this, watcher, batch,
              weakScene = std::weak_ptr<SceneState>(mScene)]() {
             const auto targetScene = weakScene.lock();
             if (!targetScene) { watcher->deleteLater(); return; }
@@ -4363,25 +4396,43 @@ void NativeViewport::requestMissingPointCachePages() {
             QScopedValueRollback<bool> backgroundScope(mRenderingInactiveScene, !foreground);
             QSignalBlocker sceneSignals(this);
             if (foreground) sceneSignals.unblock();
-              PointCloudCachePage page = watcher->result();
+              auto pages = watcher->result();
               watcher->deleteLater();
-              if (generation != mScene->mSceneGeneration) {
+              for (auto &activeLane : mScene->mPointCacheReadLanes) {
+                if (activeLane.lock() == batch) activeLane.reset();
+              }
+              for (const int nodeId : batch->nodeIds) {
+                if (mScene->mPointCacheReadsInFlight.value(nodeId).lock() == batch)
+                  mScene->mPointCacheReadsInFlight.remove(nodeId);
+              }
+              if (batch->generation != mScene->mSceneGeneration ||
+                  batch->cacheEpoch != mScene->mPointCacheReadEpoch) {
+                updateFrameRefreshPolicy();
+                update();
                 return;
               }
-              mScene->mPointCacheReadsInFlight.remove(nodeId);
-              if (page.isValid()) {
-                mScene->resourcePointPageReservations.insert(nodeId, reservation);
-                mScene->mPendingPointCachePages.append(std::move(page));
-              } else {
-                mScene->mPointCacheFailedNodes.insert(nodeId);
-                mScene->mPointCacheError = page.error;
+              for (auto &page : pages) {
+                if (page.isValid()) {
+                  mScene->resourcePointPageReservations.insert(
+                      page.nodeId, batch->reservations.value(page.nodeId));
+                  mScene->mPendingPointCachePages.append(std::move(page));
+                } else {
+                  mScene->mPointCacheFailedNodes.insert(page.nodeId);
+                  mScene->mPointCacheError = page.error;
+                }
               }
               requestMissingPointCachePages();
               updateFrameRefreshPolicy();
               update();
             });
     watcher->setFuture(QtConcurrent::run(
-        [cache, nodeId, reservation]() { return PointCloudCache::readNode(cache, nodeId); }));
+        [cache, batch]() {
+          QVector<PointCloudCachePage> pages;
+          pages.reserve(batch->nodeIds.size());
+          for (const int nodeId : batch->nodeIds)
+            pages.append(PointCloudCache::readNode(cache, nodeId));
+          return pages;
+        }));
   }
 }
 
@@ -5189,7 +5240,7 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   }
   mInteractionLodActive = hierarchicalLod;
   mScene->mProgressiveUploadActive =
-      desiredMissing || !mScene->mPointCacheReadsInFlight.isEmpty() ||
+      desiredMissing || mScene->pointReadsActive() || !mScene->mPointCacheReadsInFlight.isEmpty() ||
       !mScene->mPendingPointCachePages.isEmpty();
   glBindVertexArray(0);
   mPointProgram->release();

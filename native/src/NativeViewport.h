@@ -340,6 +340,13 @@ private:
     QVector3D boundsMaximum;
   };
 
+  struct PointCacheReadBatch final {
+    int generation = 0;
+    quint64 cacheEpoch = 0;
+    QVector<int> nodeIds;
+    QHash<int, std::shared_ptr<ResourceReservation>> reservations;
+  };
+
   struct SceneState final {
     QString id;
     QVector3D sourceTranslation;
@@ -397,7 +404,15 @@ private:
     QVector<PointCloudVertex> mPendingVertices;
     PointCloudCacheIndex mPointCache;
     QSet<int> mDesiredPointCacheNodes;
-    QSet<int> mPointCacheReadsInFlight;
+    QHash<int, std::weak_ptr<const PointCacheReadBatch>> mPointCacheReadsInFlight;
+    std::array<std::weak_ptr<const PointCacheReadBatch>, 2> mPointCacheReadLanes;
+    quint64 mPointCacheReadEpoch = 0;
+    [[nodiscard]] bool pointReadsActive() const {
+      for (const auto &lane : mPointCacheReadLanes) {
+        if (!lane.expired()) return true;
+      }
+      return false;
+    }
     QSet<int> mPointCacheFailedNodes;
     QVector<PointCloudCachePage> mPendingPointCachePages;
     QVector<FullResolutionGpuChunk> mFullResolutionPointGpuChunks;
