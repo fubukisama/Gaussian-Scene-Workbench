@@ -999,15 +999,84 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
   check(!calibratedFrameV3.isNull(),"the calibrated coordinate case renders a real nonempty framebuffer");
   const auto rasterPointsV3=projectionPointsV3();
   const double rasterScaleV3=calibratedFrameV3.width()/double(std::max(1,viewport.width()));
+  const auto matrixEvidenceV3=[](const QMatrix4x4 &matrix) {
+    QJsonArray rows;
+    for(int row=0;row<4;++row) {
+      QJsonArray values;for(int column=0;column<4;++column)values.append(matrix(row,column));
+      rows.append(values);
+    }
+    return rows;
+  };
+  QJsonObject rasterEvidenceV3{
+      {"language",AppLanguage::current()},{"active_scene_id",viewport.activeSceneId()},
+      {"viewport_rect",QJsonArray{viewport.rect().x(),viewport.rect().y(),viewport.width(),viewport.height()}},
+      {"frame_size",QJsonArray{calibratedFrameV3.width(),calibratedFrameV3.height()}},
+      {"viewport_device_pixel_ratio",viewport.devicePixelRatioF()},
+      {"frame_device_pixel_ratio",calibratedFrameV3.devicePixelRatio()},
+      {"raster_scale",rasterScaleV3},{"requested_samples",viewport.format().samples()},
+      {"projection",matrixEvidenceV3(viewport.projectionMatrix())},
+      {"view",matrixEvidenceV3(viewport.viewMatrix())},
+      {"active_model",matrixEvidenceV3(viewport.modelMatrix())},
+      {"scene_layer_count",double(viewport.sceneObjectCount())},
+      {"active_rendered_point_count",double(viewport.renderedPointCount())}};
+  QJsonArray layerEvidenceV3;
+  for(const auto &state:viewport.displayedSceneStates()) {
+    const auto layerModel=viewport.sceneDisplayTransform(*state,*viewport.mScene)*
+        ModelTransform{state->mModelTranslation,state->mModelRotation,state->mModelScale}.matrix(state->mSceneCenter);
+    const auto layerProjection=viewport.projectionMatrix()*viewport.viewMatrix()*layerModel;
+    QJsonArray vertices;
+    for(const auto &vertex:state->mPreviewVertices) {
+      const auto clip=layerProjection*QVector4D(vertex.x,vertex.y,vertex.z,1.F);
+      QJsonObject record{{"local_position",QJsonArray{vertex.x,vertex.y,vertex.z}},
+          {"color",QJsonArray{vertex.red,vertex.green,vertex.blue}},
+          {"clip",QJsonArray{clip.x(),clip.y(),clip.z(),clip.w()}}};
+      if(clip.w()!=0.F)record.insert(QStringLiteral("logical_pixel"),QJsonArray{
+          (clip.x()/clip.w()+1.)*.5*viewport.width(),(1.-clip.y()/clip.w())*.5*viewport.height()});
+      vertices.append(record);
+    }
+    layerEvidenceV3.append(QJsonObject{{"scene_id",state->id},{"active",state==viewport.mScene},
+        {"rendered_point_count",double(state->mRenderedPointCount)},
+        {"preview_vertex_count",double(state->mPreviewVertices.size())},
+        {"model",matrixEvidenceV3(layerModel)},{"vertices",vertices}});
+  }
+  rasterEvidenceV3.insert(QStringLiteral("layers"),layerEvidenceV3);
+  QJsonArray pointEvidenceV3;
+  int rasterPointIndexV3=0;
   for(const auto &point:rasterPointsV3) {
     bool marker=false;const QPoint center(qRound(rasterScaleV3*point.x()),qRound(rasterScaleV3*point.y()));
+    int maximumMagentaContrast=-256,maximumCyanContrast=-256,bestContrast=-256;
+    QColor bestColor;QPoint bestPixel;
     for(int y=std::max(0,center.y()-6);y<std::min(calibratedFrameV3.height(),center.y()+7);++y)
       for(int x=std::max(0,center.x()-6);x<std::min(calibratedFrameV3.width(),center.x()+7);++x) {
         const auto color=calibratedFrameV3.pixelColor(x,y);
         marker|=color.blue()>100&&((color.red()-color.green()>45&&color.blue()-color.green()>45)||
             (color.green()-color.red()>45&&color.blue()-color.red()>45));
+        const int magenta=std::min(color.red()-color.green(),color.blue()-color.green());
+        const int cyan=std::min(color.green()-color.red(),color.blue()-color.red());
+        maximumMagentaContrast=std::max(maximumMagentaContrast,magenta);
+        maximumCyanContrast=std::max(maximumCyanContrast,cyan);
+        if(std::max(magenta,cyan)>bestContrast) {
+          bestContrast=std::max(magenta,cyan);bestColor=color;bestPixel=QPoint(x,y);
+        }
       }
+    const QJsonObject sample{{"index",rasterPointIndexV3++},{"logical_pixel",QJsonArray{point.x(),point.y()}},
+        {"raster_center",QJsonArray{center.x(),center.y()}},
+        {"sample_rect",QJsonArray{std::max(0,center.x()-6),std::max(0,center.y()-6),
+            std::min(calibratedFrameV3.width(),center.x()+7),std::min(calibratedFrameV3.height(),center.y()+7)}},
+        {"marker",marker},{"maximum_magenta_contrast",maximumMagentaContrast},
+        {"maximum_cyan_contrast",maximumCyanContrast},
+        {"best_pixel",QJsonArray{bestPixel.x(),bestPixel.y()}},
+        {"best_rgba",QJsonArray{bestColor.red(),bestColor.green(),bestColor.blue(),bestColor.alpha()}}};
+    pointEvidenceV3.append(sample);
+    qInfo().noquote()<<"COORDINATE_SCENE v3 raster sample:"<<QJsonDocument(sample).toJson(QJsonDocument::Compact);
     check(marker,"actual point-renderer framebuffer contains a colored model sample at the calibrated projected location");
+  }
+  rasterEvidenceV3.insert(QStringLiteral("samples"),pointEvidenceV3);
+  qInfo().noquote()<<"COORDINATE_SCENE v3 raster frame:"<<QJsonDocument(rasterEvidenceV3).toJson(QJsonDocument::Compact);
+  if(!evidence.isEmpty()) {
+    check(calibratedFrameV3.save(QDir(evidence).filePath(AppLanguage::current()+"-v3-calibrated.png"))&&
+        writeV3(QDir(evidence).filePath(AppLanguage::current()+"-v3-calibrated.json"),QJsonDocument(rasterEvidenceV3).toJson()),
+        "exact calibrated framebuffer and per-point raster evidence are saved without changing the image");
   }
   viewport.setModelTransform({400,-200,100},QQuaternion::fromAxisAndAngle(0,0,1,15),{1.05F,1.05F,1.05F});
   viewport.setEditToolsLocked(false);viewport.setSceneSelection({layersV3[1].id},layersV3[1].id);viewport.selectModel();

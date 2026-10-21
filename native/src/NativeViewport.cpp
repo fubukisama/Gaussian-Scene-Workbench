@@ -466,9 +466,9 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
         state->mSceneLoadMessage = QCoreApplication::translate(
             "Workbench", "Insufficient memory for the mesh preview and texture.");
     }
-    emit sceneCoordinatesChanged();
-    emit cameraTrajectoryChanged(cameraCount(),mScene->mCameraTrajectory.invalidCameraCount(),
-        mScene->mCameraGeometry.decimated,mScene->mCameraTrajectory.sourcePath(),mScene->mCameraTrajectory.error());
+    // Presentation changes must not masquerade as a coordinate/data update:
+    // owners use those signals to apply workspace TRS and rebuild the tree.
+    // Presentation owners read the translated error via cameraTrajectoryError().
     update();
   });
   resetModelTransformHistory();

@@ -1254,6 +1254,35 @@ if(BUILD_TESTING)
     set_tests_properties(native_camera_trajectory_contract native_scene_display_mapping PROPERTIES TIMEOUT 90
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
+    # Exercise real viewport presentation without showing a window or creating
+    # a GL context. Locale changes must never announce geometry/data mutations.
+    qt_add_executable(gsw_native_viewport_locale_tests tests/NativeViewportLocaleTests.cpp lucide_icons.qrc)
+    foreach(source AppLanguage AppTheme WorkbenchIcons NativeViewport CameraTrajectory SceneCoordinates
+        ReferenceAxisGeometry FrameRateCounter GaussianDepthSorter GaussianGpuBuffer
+        ModelInteraction NavigationGizmo PlyPointCloudLoader PointCloudCache MeshCache
+        SceneEditModel ScreenSpaceSelection TrainingGpuPreviewProtocol TrainingGpuPreviewBuffer
+        TransformGizmo TransformGizmoRenderer ViewportCamera SystemResourceProbe ModelExport SpzIO)
+      target_sources(gsw_native_viewport_locale_tests PRIVATE src/${source}.cpp src/${source}.h)
+    endforeach()
+    target_include_directories(gsw_native_viewport_locale_tests PRIVATE src)
+    target_link_libraries(gsw_native_viewport_locale_tests PRIVATE
+      gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
+      gsw_blender_gizmo_geometry gsw_spz gsw_resource_budget
+      Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Test)
+    qt_add_resources(gsw_native_viewport_locale_tests viewport_locale_languages PREFIX "/i18n"
+      BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    foreach(language zh_CN ja)
+      qt_add_resources(gsw_native_viewport_locale_tests "viewport_locale_qt_${language}"
+        PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+    endforeach()
+    if(MSVC)
+      target_compile_options(gsw_native_viewport_locale_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME native_viewport_locale_contract COMMAND gsw_native_viewport_locale_tests -o -,txt)
+    set_tests_properties(native_viewport_locale_contract PROPERTIES TIMEOUT 60
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PYTHONUTF8=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
     target_include_directories(gsw_scale_constraint_report_tests PRIVATE src)
     target_link_libraries(gsw_scale_constraint_report_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)

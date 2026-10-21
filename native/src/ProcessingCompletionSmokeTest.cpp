@@ -1,6 +1,7 @@
 #include "ProcessingCompletionSmokeTest.h"
 #include "AppLanguage.h"
 #include "MainWindow.h"
+#include "CameraTrajectory.h"
 #include "SceneCoordinates.h"
 #include "BackendLocator.h"
 #include "ExistingTrainingDialog.h"
@@ -82,6 +83,24 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
   const QByteArray points("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n1 0 0\n0 1 0\n0 0 1\n");
   const QByteArray mesh("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n0 0 1\n3 0 1 2\n3 0 2 3\n");
   QByteArray gaussian("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nproperty float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\nproperty float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n0 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n1 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 1 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 0 1 0 0 0 1 -3 -3 -3 1 0 0 0\n");
+  const QByteArray sourceCameraBytes("[{\"img_name\":\"fixture\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]],\"width\":1920,\"height\":1080,\"fx\":1300,\"fy\":1300}]");
+  const QString fixtureViewId = QStringLiteral("completion-fixture-view");
+  const QJsonArray fixtureK{QJsonArray{1300, 7, 901}, QJsonArray{0, 1310, 503}, QJsonArray{0, 0, 1}};
+  const QJsonArray fixtureCanonicalPose{QJsonArray{1, 0, 0, .25}, QJsonArray{0, 1, 0, -.125},
+      QJsonArray{0, 0, 1, 1.5}, QJsonArray{0, 0, 0, 1}};
+  // Independently worked normalization: 20 * (.25, -.125, 1.5) + (0, 0, -.5).
+  const QJsonArray expectedTrainingPose{QJsonArray{1, 0, 0, 5}, QJsonArray{0, 1, 0, -2.5},
+      QJsonArray{0, 0, 1, 29.5}, QJsonArray{0, 0, 0, 1}};
+  const auto matchesFixtureCamera = [&](const CameraTrajectory &trajectory) {
+    if (!trajectory.metadataVerified() || !trajectory.error().isEmpty() || trajectory.cameras().size() != 1)
+      return false;
+    const auto &camera = trajectory.cameras().constFirst();
+    return trajectory.coordinateFrame() == QStringLiteral("training") &&
+        trajectory.coordinateUnit() == QStringLiteral("training") &&
+        camera.viewId == fixtureViewId && camera.split == QStringLiteral("train") &&
+        camera.width == 1920 && camera.height == 1080 && camera.intrinsics == fixtureK &&
+        camera.cameraToWorld == expectedTrainingPose;
+  };
   for (const QString kind : {QStringLiteral("3dgs"), QStringLiteral("2dgs"),
       QStringLiteral("bounded_tsdf"), QStringLiteral("unbounded_tsdf"),
       QStringLiteral("sugar"), QStringLiteral("gs2mesh")}) {
@@ -130,8 +149,7 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (!check(write(final, bytes) && write(preview, bytes), "write independent preview/final fixtures")) return false;
       QByteArray trainingScaleBytes;
       if (training) {
-        check(write(QDir(output).filePath("cameras.json"),
-            "[{\"img_name\":\"fixture\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]],\"width\":1920,\"height\":1080,\"fx\":1300,\"fy\":1300}]"), "write source camera fixture");
+        check(write(QDir(output).filePath("cameras.json"), sourceCameraBytes), "write source camera fixture");
         check(write(QDir(output).filePath("reconstruction_quality.json"),
             "{\"registeredImages\":9,\"inputImages\":9}"), "write quality report fixture");
         QJsonObject cameraContract{
@@ -139,6 +157,13 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
             {QStringLiteral("backend"), kind},
             {QStringLiteral("input_data_identity"), QString(64, QLatin1Char('a'))},
             {QStringLiteral("pose_policy"), QStringLiteral("locked")},
+            {QStringLiteral("views"), QJsonArray{QJsonObject{
+                {QStringLiteral("view_id"), fixtureViewId}, {QStringLiteral("split"), QStringLiteral("train")},
+                {QStringLiteral("image_path"), QStringLiteral("images/fixture.png")},
+                {QStringLiteral("projection_model"), QStringLiteral("PINHOLE")},
+                {QStringLiteral("pixel_coordinates"), QStringLiteral("pixel_border")},
+                {QStringLiteral("width"), 1920}, {QStringLiteral("height"), 1080},
+                {QStringLiteral("K"), fixtureK}, {QStringLiteral("c2w_opencv"), fixtureCanonicalPose}}}},
             {QStringLiteral("scale"), QJsonObject{
                 {QStringLiteral("status"), QStringLiteral("source_declared")},
                 {QStringLiteral("source_unit"), QStringLiteral("cm")},
@@ -166,6 +191,8 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
                    admittedCoordinates.metersPerCoordinate.has_value() &&
                    std::abs(*admittedCoordinates.metersPerCoordinate - .05) < 1e-12,
                    "final fixture passes the actual scale and data-identity reader before publication")) return false;
+        if (!check(matchesFixtureCamera(CameraTrajectory::loadForScene(final)),
+                   "final fixture passes verified complete intrinsics and normalized camera pose before publication")) return false;
       }
       const QString task = kind + "-completion";
       GenerationExperiment experiment;
@@ -224,6 +251,11 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       if (training) {
         check(wait([&] { return window.mViewport->cameraCount() == 1; }), "protected training result retains source cameras");
         const auto directory = QFileInfo(window.mViewport->scenePath()).absoluteDir();
+        check(matchesFixtureCamera(CameraTrajectory::loadForScene(window.mWorkspace.scenePath())),
+              "protected training result retains verified camera identity, complete intrinsics and the once-normalized pose");
+        QFile protectedSourceCameras(directory.filePath(QStringLiteral("cameras.json")));
+        check(protectedSourceCameras.open(QIODevice::ReadOnly) && protectedSourceCameras.readAll() == sourceCameraBytes,
+              "protected raw training result preserves the exact legacy source cameras without using them in the bound frame");
         check(QFileInfo::exists(directory.filePath("reconstruction_quality.json")), "protected result retains quality report");
         const QFileInfo protectedInfo(window.mWorkspace.scenePath());
         QFile protectedScale(directory.filePath(protectedInfo.completeBaseName() + QStringLiteral(".camera-scale.json")));
@@ -264,6 +296,15 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
       check(languageLoads == 0, "language switch does not reload final model");
       QFile source(final);
       check(source.open(QIODevice::ReadOnly) && source.readAll() == bytes, "generated source file is unchanged by trimming");
+      if (training) {
+        QFile sourceCameras(QDir(output).filePath(QStringLiteral("cameras.json")));
+        check(sourceCameras.open(QIODevice::ReadOnly) && sourceCameras.readAll() == sourceCameraBytes,
+              "generated source camera file is unchanged by publication and trimming");
+        const QFileInfo finalInfo(final);
+        QFile sourceScale(finalInfo.dir().filePath(finalInfo.completeBaseName() + QStringLiteral(".camera-scale.json")));
+        check(sourceScale.open(QIODevice::ReadOnly) && sourceScale.readAll() == trainingScaleBytes,
+              "generated source scale contract is unchanged by publication and trimming");
+      }
       qInfo() << "Processing completion:" << kind << "locked" << locked << (passed ? "PASS" : "FAIL");
     }
   }

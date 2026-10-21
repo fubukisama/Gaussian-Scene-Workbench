@@ -178,6 +178,9 @@ public:
   }
   [[nodiscard]] bool camerasAvailable() const;
   [[nodiscard]] qsizetype cameraCount() const;
+  [[nodiscard]] QString cameraTrajectoryError() const {
+    return mScene->mCameraTrajectory.error();
+  }
   [[nodiscard]] bool setSourceCameraView(qsizetype index);
   [[nodiscard]] float perspectiveFovDegrees() const { return mPerspectiveFovDegrees; }
   [[nodiscard]] RenderMode renderMode() const { return mScene->mRenderMode; }

@@ -7117,6 +7117,9 @@ void MainWindow::updateTaskLabels() {
 void MainWindow::retranslateUi() {
   // Presentation only. Do not call updateWorkspaceUi(): it can replace a live
   // training scene and reset transforms. Preserve all tree interaction state.
+  // Refresh the translated diagnostic without re-emitting camera/coordinate
+  // data changes, which reapply saved transforms and rebuild interaction state.
+  mCameraTrajectoryError = mViewport->cameraTrajectoryError();
   const QSignalBlocker treeSignals(mProjectTree);
   const int scroll = mProjectTree->verticalScrollBar()->value();
   const int horizontalScroll = mProjectTree->horizontalScrollBar()->value();

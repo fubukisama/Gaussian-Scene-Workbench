@@ -211,6 +211,13 @@ promise that every queued batch child will survive. Child configuration uses
 the same independent runtime contract; detaching the coordinator itself remains
 a separate acceptance boundary, not an implicitly enabled capability.
 
+Language changes are presentation-only: translated camera diagnostics refresh
+without emitting coordinate or camera-collection mutation signals, reapplying
+saved workspace transforms, or losing tree/selection state. Actual model loads
+and explicit metadata refresh still publish their normal data notifications.
+This has a non-displayed real-viewport regression as well as the separate full
+three-language window matrix; the former does not replace the latter.
+
 ## Backend support and retained gates
 
 | Pipeline | Shared runtime controls | Necessary limits |
