@@ -37,6 +37,44 @@
 
 namespace gsw {
 namespace {
+constexpr bool calibratedModelMarkerRgb(int red, int green, int blue) {
+  // Absolute brightness depends on the neutral backdrop under MSAA coverage.
+  // Identify fixture hues by both contrasts, not an absolute bright-blue floor.
+  return (red - green > 45 && blue - green > 45) ||
+         (green - red > 45 && blue - red > 45);
+}
+
+// Literal expectations cover valid light/dark hues, neutral colors, reference
+// axes and strict contrast boundaries; no expected pixel is computed by
+// renderer code. The first literal is the retained remote dark-coverage sample.
+static_assert(calibratedModelMarkerRgb(73, 10, 74), "dark magenta coverage is visible");
+static_assert(calibratedModelMarkerRgb(9, 74, 74), "dark cyan coverage is visible");
+static_assert(calibratedModelMarkerRgb(255, 191, 255) &&
+              calibratedModelMarkerRgb(191, 255, 255), "light thin coverage is visible");
+static_assert(calibratedModelMarkerRgb(255, 0, 255) &&
+              calibratedModelMarkerRgb(0, 255, 255), "full marker colors are visible");
+static_assert(!calibratedModelMarkerRgb(0, 0, 0) &&
+              !calibratedModelMarkerRgb(74, 74, 74) &&
+              !calibratedModelMarkerRgb(255, 255, 255) &&
+              !calibratedModelMarkerRgb(12, 13, 14), "gray grid and neutral backdrops are not markers");
+static_assert(!calibratedModelMarkerRgb(255, 0, 0) &&
+              !calibratedModelMarkerRgb(0, 255, 0) &&
+              !calibratedModelMarkerRgb(0, 0, 255), "pure reference axes are not markers");
+static_assert(!calibratedModelMarkerRgb(73, 10, 11) &&
+              !calibratedModelMarkerRgb(9, 74, 11) &&
+              !calibratedModelMarkerRgb(9, 10, 74) &&
+              !calibratedModelMarkerRgb(74, 74, 137), "thin axes and blue-only mixtures are not markers");
+static_assert(!calibratedModelMarkerRgb(54, 10, 54) &&
+              !calibratedModelMarkerRgb(10, 54, 54) &&
+              !calibratedModelMarkerRgb(55, 10, 55) &&
+              !calibratedModelMarkerRgb(10, 55, 55), "contrast at or below 45 is rejected");
+static_assert(!calibratedModelMarkerRgb(56, 10, 55) &&
+              !calibratedModelMarkerRgb(55, 10, 56) &&
+              !calibratedModelMarkerRgb(10, 56, 55) &&
+              !calibratedModelMarkerRgb(10, 55, 56), "both channel contrasts must exceed 45");
+static_assert(calibratedModelMarkerRgb(56, 10, 56) &&
+              calibratedModelMarkerRgb(10, 56, 56), "contrast 46 is accepted without an absolute brightness requirement");
+
 void processFor(int milliseconds) {
   QEventLoop loop;
   QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
@@ -1049,8 +1087,7 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
     for(int y=std::max(0,center.y()-6);y<std::min(calibratedFrameV3.height(),center.y()+7);++y)
       for(int x=std::max(0,center.x()-6);x<std::min(calibratedFrameV3.width(),center.x()+7);++x) {
         const auto color=calibratedFrameV3.pixelColor(x,y);
-        marker|=color.blue()>100&&((color.red()-color.green()>45&&color.blue()-color.green()>45)||
-            (color.green()-color.red()>45&&color.blue()-color.red()>45));
+        marker|=calibratedModelMarkerRgb(color.red(),color.green(),color.blue());
         const int magenta=std::min(color.red()-color.green(),color.blue()-color.green());
         const int cyan=std::min(color.green()-color.red(),color.blue()-color.red());
         maximumMagentaContrast=std::max(maximumMagentaContrast,magenta);
