@@ -272,6 +272,8 @@ def main():
     parser.add_argument('--backend', choices=('3dgs', '2dgs', 'both'), default='both')
     parser.add_argument('--mode', choices=('clone', 'split', 'prune', 'both', 'all'), default='both')
     parser.add_argument('--plan-only', action='store_true')
+    parser.add_argument('--runtime-options', help='Explicit v2 runtimeOptions JSON for this owned audit')
+    parser.add_argument('--resume-runtime-options', help='Explicit v2 override used only after the first complete checkpoint')
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--entry', help=argparse.SUPPRESS)
     parser.add_argument('--audit', help=argparse.SUPPRESS)
@@ -306,6 +308,18 @@ def main():
                 'iterations': TOTAL, 'initialPoints': INITIAL_POINTS, 'maxPoints': MAX_POINTS,
                 'expectedGrowthIterations': list(GROWTH_ITERATIONS),
                 'expectedPauseIterations': list(PAUSE_ITERATIONS)}
+    runtime = resume_runtime = None
+    if args.runtime_options or args.resume_runtime_options:
+        from native.worker.training_configuration import normalize_runtime_options
+        if not args.runtime_options:
+            raise ValueError('--resume-runtime-options requires --runtime-options')
+        runtime = normalize_runtime_options(json.loads(Path(args.runtime_options).read_text(encoding='utf-8')))['requested']
+        if args.resume_runtime_options:
+            resume_runtime = normalize_runtime_options(
+                json.loads(Path(args.resume_runtime_options).read_text(encoding='utf-8')),
+                resume=True, checkpoint_runtime=runtime)['requested']
+        evidence['runtimeOptions'] = runtime
+        evidence['resumeRuntimeOptions'] = resume_runtime
     for backend in backends:
         for mode in modes:
             work = destination / backend / mode
@@ -338,7 +352,11 @@ def main():
             for index, (phase, pause_at, expected) in enumerate((('pause3', 3, 75), ('pause5', 5, 75), ('finish', 0, 0))):
                 request = work / (phase + '-request.json')
                 control = dict(output=str(output), request=str(request), session=uuid.uuid4().hex,
-                    backend=backend, resume=index > 0, performance={'enabled': False})
+                    backend=backend, resume=index > 0)
+                if runtime is None:
+                    control['performance'] = {'enabled': False}
+                else:
+                    control['runtimeOptions'] = resume_runtime if index > 0 and resume_runtime is not None else runtime
                 env['GSW_NATIVE_TRAINING_CONTROL'] = json.dumps(control)
                 command = [compute.training_python(backend), '-B', Path(__file__).resolve(), '--child',
                     '--entry', entry, '--audit', work / (phase + '.jsonl'), '--pause-after', str(pause_at), '--', *train]

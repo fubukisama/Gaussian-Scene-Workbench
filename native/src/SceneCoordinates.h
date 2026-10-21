@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QMatrix4x4>
 #include <QString>
 #include <QStringList>
 #include <QVector3D>
+#include <array>
 #include <optional>
 
 namespace gsw {
@@ -52,6 +54,7 @@ struct SceneCoordinateInfo final {
   QString sourceUnit;
   QString dataIdentity;
   QJsonObject provenance;
+  QString validationError;
 
   [[nodiscard]] SceneCoordinate3D globalCenter() const;
   [[nodiscard]] SceneCoordinate3D globalSize() const;
@@ -89,6 +92,22 @@ private:
 // A missing result means arbitrary/unknown units, never an implicit metre.
 [[nodiscard]] std::optional<double> sceneMetresPerCoordinate(
     const SceneCoordinateInfo &coordinates);
+// Maps already rebased display coordinates, not PLY coordinates. Full R/t/s
+// alignment requires matching verified canonical lineage; otherwise only
+// declared physical length units are converted, with no guessed registration.
+struct SceneDisplayMapping final {
+  QMatrix4x4 localToReference;
+  double lengthScale = 1.0;
+  bool verifiedAlignment = false;
+  QString reason;
+  [[nodiscard]] SceneCoordinate3D mapCoordinate(const SceneCoordinate3D &value) const;
+private:
+  std::array<double,9> mLinear{1.,0.,0.,0.,1.,0.,0.,0.,1.};
+  SceneCoordinate3D mTranslation;
+  friend SceneDisplayMapping sceneDisplayMapping(const SceneCoordinateInfo &,const SceneCoordinateInfo &);
+};
+[[nodiscard]] SceneDisplayMapping sceneDisplayMapping(
+    const SceneCoordinateInfo &from, const SceneCoordinateInfo &reference);
 [[nodiscard]] QString sceneLengthUnitDescription(
     const SceneCoordinateInfo &coordinates);
 [[nodiscard]] QString formatSceneCoordinate(double value,

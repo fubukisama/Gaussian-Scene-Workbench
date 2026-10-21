@@ -11,12 +11,11 @@ from native.backend import camera_dataset
 _COMMON = {"iterations", "resolution", "densify_grad_threshold", "densification_interval", "densify_until_iter"}
 _TWO_D = {"depth_ratio"}
 _THREE_D = {"optimizer_type", "antialiasing", "exposure_compensation"}
-_PERFORMANCE = {"version", "enabled", "usage_fraction", "minimum_spare_mib", "gpu_slots",
-    "pinned_mib", "gpu_mib", "profile_interval", "engine", "growth_mode", "loss_mode",
-    "camera_prefetch", "capacity_storage", "surfel_auxiliary"}
 _SOURCE_FILES = ("native/backend/atomic_file.py", "native/backend/training_batch_plan.py", "native/backend/camera_dataset.py",
     "native/worker/canonical_training.py", "native/backend/compute.py", "native/worker/gsw_worker.py",
     "native/worker/training_runtime.py", "native/worker/training_checkpoint.py",
+    "native/worker/training_configuration.py", "native/worker/training_resource_policy.py",
+    "native/worker/training_failure.py",
     "native/worker/two_dgs_train.py", "gaussian-splatting/train.py",
     "native/worker/training_seed.py", "native/worker/training_batch.py",
     "native/backend/camera_admission.py", "native/backend/scale_constraints.py", "native/backend/initialization.py")
@@ -108,18 +107,28 @@ def expand_training_batch(request, repository_root=None, cancelled=None):
     supported = {"backend", "quality", "trainingSeed", "repeat", "trainOptions.iterations", "trainOptions.resolution"}
     supported.update("trainOptions." + key for key in _COMMON | _TWO_D | _THREE_D)
     if (not isinstance(matrix, dict) or not matrix or not isinstance(base, dict) or
-            set(matrix) - supported or set(base) - {"backend", "quality", "trainingSeed", "trainOptions", "performanceOptions"}):
+            set(matrix) - supported or set(base) - {"backend", "quality", "trainingSeed", "trainOptions", "performanceOptions", "runtimeOptions"}):
         raise TrainingBatchError("batch_unsupported_parameter")
     if not isinstance(base.get("trainOptions", {}), dict):
         raise TrainingBatchError("batch_unsupported_parameter", "trainOptions")
     performance = base.get("performanceOptions", {})
-    if not isinstance(performance, dict) or set(performance) - _PERFORMANCE:
+    if not isinstance(performance, dict):
         raise TrainingBatchError("batch_invalid_performance_policy")
     try:
-        from native.worker.training_runtime import performance_configuration
-        performance = performance_configuration({"performance": performance})
+        from native.worker.training_configuration import normalize_runtime_options, legacy_performance_options
+        runtime_report = normalize_runtime_options(
+            runtime_options=base.get("runtimeOptions"),
+            legacy_performance=base.get("performanceOptions"))
+        if "runtimeOptions" in base:
+            runtime_policy = runtime_report["requested"]
+        else:
+            # Preserve the old version-one wire/semantic identity for saved
+            # legacy requests. The common normalizer still validates/migrates
+            # these when executed; OFF must retain its old effective features.
+            performance = legacy_performance_options(performance)
     except (TypeError, ValueError) as error:
-        raise TrainingBatchError("batch_invalid_performance_policy", str(error))
+        code = "batch_invalid_runtime_policy" if "runtimeOptions" in base else "batch_invalid_performance_policy"
+        raise TrainingBatchError(code, str(error))
     for key, values in matrix.items():
         if not isinstance(values, list) or not values:
             raise TrainingBatchError("batch_invalid_axis", key)
@@ -205,9 +214,10 @@ def expand_training_batch(request, repository_root=None, cancelled=None):
             _validate_options(backend, options)
             semantic = {"dataset_id": reference["id"], "data_identity": reference["data_identity"],
                 "backend": backend, "quality": quality, "trainingSeed": seed, "repeat": repeat, "trainOptions": options,
-                "performanceOptions": performance,
                 "initialization_policy": request["initialization_policy"],
                 "evaluation_policy": request["evaluation_policy"]}
+            policy_key = "runtimeOptions" if "runtimeOptions" in base else "performanceOptions"
+            semantic[policy_key] = runtime_policy if policy_key == "runtimeOptions" else performance
             run_id = "run-" + _digest(semantic)[:24]
             config = {"task": "training", "repositoryRoot": root,
                 "datasetPath": reference["path"], "cameraDatasetPath": reference["manifest_path"],
@@ -215,7 +225,7 @@ def expand_training_batch(request, repository_root=None, cancelled=None):
                 "resolutionPolicy": "preserve" if options["resolution"] == 1 else "manual",
                 "runColmap": False, "overwrite": False, "nativeCheckpoint": True,
                 "backend": backend, "quality": quality, "trainingSeed": seed, "trainOptions": options}
-            config["performanceOptions"] = copy.deepcopy(performance)
+            config[policy_key] = copy.deepcopy(semantic[policy_key])
             runs.append({"id": run_id, "dataset_id": reference["id"], "parameters": semantic,
                 "configuration": config, "initialization": reference["initialization"],
                 "splits": reference["splits"]})
@@ -223,9 +233,14 @@ def expand_training_batch(request, repository_root=None, cancelled=None):
         "datasets": [{key: record[key] for key in ("id", "data_identity", "manifest_sha256")}
                      for record in references], "runs": [run["parameters"] for run in runs],
         "source_hash_mode": "text-lf-v1", "source_fingerprints": fingerprints}
-    return {"schema": "gsw.training_batch/1", "plan_sha256": _digest(identity), "request": request,
+    result = {"schema": "gsw.training_batch/1", "plan_sha256": _digest(identity), "request": request,
         "datasets": references, "runs": runs,
         "initialization_policy": request["initialization_policy"],
         "evaluation_policy": request["evaluation_policy"],
         "run_policy": copy.deepcopy(policy), "source_hash_mode": "text-lf-v1", "source_fingerprints": fingerprints,
         "summary": {"runCount": len(runs), "datasetCount": len(references)}}
+    # Reporting is not part of the legacy run semantic ID. Persist the actual
+    # migration/dependency explanation separately from its version-one wire.
+    result["runtime_configuration"] = runtime_report
+    result["runtime_configuration_scope"] = "dependency_resolution_only_runtime_not_executed"
+    return result

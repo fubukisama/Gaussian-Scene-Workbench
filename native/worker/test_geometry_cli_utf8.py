@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 from native.backend.tests import test_geometry_evaluation as evaluation_fixtures
@@ -27,9 +28,22 @@ class GeometryCliUtf8Tests(unittest.TestCase):
         command = [sys.executable, "-B", str(self.repository / "native/worker" / script)] + list(arguments)
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        captured = {}
+        def drain(name, stream):
+            captured[name] = stream.read()
+        readers = [threading.Thread(target=drain, args=(name, stream), daemon=True)
+                   for name, stream in (("stdout", child.stdout), ("stderr", child.stderr))]
+        for reader in readers:
+            reader.start()
         try:
+            # Like the native QProcess owner, consume both output channels while
+            # leaving control input open. Waiting before reads deadlocks on a
+            # legitimate report larger than the OS pipe's buffer.
             code = child.wait(timeout=20)
-            stdout, stderr = child.stdout.read(), child.stderr.read()
+            for reader in readers:
+                reader.join(timeout=5)
+                self.assertFalse(reader.is_alive(), "Worker did not close an output pipe after exit")
+            stdout, stderr = captured["stdout"], captured["stderr"]
             self.assertEqual(code, expected_code, stderr.decode("utf-8", "replace"))
             self.assertFalse(child.stdin.closed, "Parent control pipe stays open until the worker has exited")
             return json.loads(stdout.decode("utf-8"))
@@ -37,6 +51,9 @@ class GeometryCliUtf8Tests(unittest.TestCase):
             if child.poll() is None:
                 child.kill()
                 child.wait(timeout=5)
+            child.stdin.close()
+            for reader in readers:
+                reader.join(timeout=5)
             for stream in (child.stdin, child.stdout, child.stderr):
                 stream.close()
 
@@ -49,6 +66,20 @@ class GeometryCliUtf8Tests(unittest.TestCase):
         result = self.run_cli("reconstruction_comparison.py", ["--operation", "verify", "--profile", saved["profilePath"]], 0)
         self.assertTrue(result["success"])
         self.assertEqual([row["label"] for row in result["conditions"]], [row["label"] for row in fixture.request["conditions"]])
+
+    def test_comparison_report_larger_than_pipe_buffer_completes_with_input_open(self):
+        from native.backend.reconstruction_comparison import export_comparison
+        fixture = comparison_fixtures.ReconstructionComparisonTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        label = "尺度比較🙂" * 10000
+        for index, condition in enumerate(fixture.request["conditions"]):
+            condition["label"] = label + str(index)
+        saved = export_comparison(fixture.request, fixture.root / "large-profile")
+        result = self.run_cli("reconstruction_comparison.py", ["--operation", "verify", "--profile", saved["profilePath"]], 0)
+        self.assertGreater(len(json.dumps(result, ensure_ascii=False).encode("utf-8")), 128 * 1024)
+        self.assertTrue(result["success"])
+        self.assertEqual([row["label"] for row in result["conditions"]], [label + "0", label + "1"])
 
     def test_geometry_evaluation_unicode_output_path_emits_utf8_without_locale_dependency(self):
         candidate = self.root / "candidate.ply"

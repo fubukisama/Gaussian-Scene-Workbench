@@ -187,11 +187,14 @@ class TrainingCheckpoint:
                         "training_seed": state.get("training_seed", 0)}
             if "camera_contract" in state:
                 manifest["camera_contract"] = copy.deepcopy(state["camera_contract"])
-            if "performance" in state:
-                manifest["performance"] = state["performance"]
-                manifest["renderer_engine"] = state.get("renderer_engine", "stock")
-            if state.get("pause_reason") == "vram_pressure":
-                manifest["pause_reason"] = "vram_pressure"
+            for key in ("performance", "renderer_engine"):
+                if key in state:
+                    manifest[key] = copy.deepcopy(state[key])
+            for key in ("runtime_options", "runtime_configuration", "runtime_policy_history"):
+                if key in state:
+                    manifest[key] = copy.deepcopy(state[key])
+            if state.get("pause_reason") in ("vram_pressure", "resource_probe_unavailable", "resource_estimate_unavailable"):
+                manifest["pause_reason"] = state["pause_reason"]
             atomic_json(self.root / "ready.json", manifest)
         finally:
             if temporary.exists():
@@ -220,7 +223,10 @@ class TrainingCheckpoint:
             raise ValueError("Checkpoint payload and manifest disagree")
         if state.get("camera_contract") != manifest.get("camera_contract"):
             raise ValueError("Checkpoint camera/scale contract and manifest disagree")
-        if "performance" in manifest and (manifest["performance"] != state.get("performance") or
-                manifest.get("renderer_engine", "stock") != state.get("renderer_engine", "stock")):
-            raise ValueError("Checkpoint performance policy and manifest disagree")
+        for key in ("performance", "renderer_engine"):
+            if (key in manifest) != (key in state) or manifest.get(key) != state.get(key):
+                raise ValueError("Checkpoint performance/renderer metadata and manifest disagree: " + key)
+        for key in ("runtime_options", "runtime_configuration", "runtime_policy_history"):
+            if (key in manifest) != (key in state) or manifest.get(key) != state.get(key):
+                raise ValueError("Checkpoint runtime metadata and manifest disagree: " + key)
         return state

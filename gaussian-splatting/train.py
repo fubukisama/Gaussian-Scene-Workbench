@@ -419,7 +419,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 native_state["density_control"] = density_control.capture()
                 native_runtime.capture(native_state)
                 if native_runtime.pause_for_resources():
-                    native_state['pause_reason'] = 'vram_pressure'
+                    native_state['pause_reason'] = native_runtime.resource_pause_reason()
                 native_checkpoint.save(torch, native_state)
                 emit_gsw_event("[gsw-training-preview]", {
                     "iteration": iteration,
@@ -550,16 +550,18 @@ if __name__ == "__main__":
     if _repository_root not in sys.path:
         sys.path.insert(0, _repository_root)
     from native.worker.training_seed import apply_training_seed, seed_from_environment
+    from native.worker.training_failure import report_training_failure
     seed_record = apply_training_seed(seed_from_environment(args.training_seed), torch_module=torch)
     dataset = lp.extract(args)
     dataset.training_seed = seed_record["training_seed"]
     emit_gsw_event("[gsw-training-seed]", seed_record)
 
     # Start GUI server, configure and run training
-    if not args.disable_viewer:
-        network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
+    with report_training_failure("3dgs", torch, emit_gsw_event):
+        if not args.disable_viewer:
+            network_gui.init(args.ip, args.port)
+        torch.autograd.set_detect_anomaly(args.detect_anomaly)
+        paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.load_iteration, args.enable_gpu_preview, args.gpu_preview_fps)
     if paused:
         print("\nTraining paused; native optimizer checkpoint saved.")
         sys.exit(75)

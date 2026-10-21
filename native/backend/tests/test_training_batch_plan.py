@@ -120,7 +120,52 @@ class TrainingBatchPlanTests(unittest.TestCase):
         after = training_batch_plan.expand_training_batch(request)
         self.assertNotEqual(before["runs"][0]["id"], after["runs"][0]["id"])
         self.assertFalse(after["runs"][0]["configuration"]["performanceOptions"]["enabled"])
+        self.assertNotIn("runtimeOptions", after["runs"][0]["configuration"])
+        effective = after["runtime_configuration"]["effective"]
+        self.assertFalse(effective["resourceGuard"]["enabled"])
+        self.assertFalse(effective["execution"]["image_staging"])
+        self.assertFalse(effective["execution"]["capacity_storage"])
+        self.assertEqual(effective["execution"]["loss_mode"], "stock")
+        self.assertEqual(after["runtime_configuration"]["migration"]["source"], "performanceOptions")
         self.assertEqual(after["run_policy"], {"on_failure": "stop"})
+
+    def test_independent_guard_off_runtime_keeps_execution_and_training_inputs_for_both_backends(self):
+        request = copy.deepcopy(self.request)
+        policy = {"version": 2,
+            "resourceGuard": {"enabled": False, "mode": "pause", "usage_fraction": .9,
+                "minimum_spare_mib": 512, "max_consecutive_denials": 3},
+            "execution": {"image_staging": True, "camera_prefetch": True,
+                "capacity_storage": True, "surfel_auxiliary": True, "loss_mode": "auto",
+                "engine": "stock", "gpu_slots": 2, "pinned_mib": 256, "gpu_mib": 512},
+            "monitoring": {"profile_interval": 30}}
+        request["base"]["runtimeOptions"] = policy
+        before = copy.deepcopy(request)
+        result = training_batch_plan.expand_training_batch(request)
+        self.assertEqual(result["summary"]["runCount"], 4)
+        for run in result["runs"]:
+            config = run["configuration"]
+            self.assertEqual(config["runtimeOptions"], policy)
+            self.assertNotIn("performanceOptions", config)
+            self.assertEqual(config["trainOptions"], {"iterations": 1000, "resolution": 1})
+            self.assertEqual(config["posePolicy"], "locked")
+            self.assertEqual(config["cameraDatasetIdentity"], self.data["data_identity"])
+            self.assertEqual(run["initialization"], self.data["initialization"])
+            self.assertEqual(run["splits"], self.data["splits"])
+        self.assertEqual(request, before)
+
+    def test_runtime_plan_records_requested_dependency_effective_value_without_rewriting_child(self):
+        request = copy.deepcopy(self.request)
+        request["base"]["runtimeOptions"] = {"version": 2,
+            "execution": {"image_staging": False, "camera_prefetch": True}}
+        report = training_batch_plan.expand_training_batch(request)
+        runtime = report["runtime_configuration"]
+        self.assertTrue(runtime["requested"]["execution"]["camera_prefetch"])
+        self.assertFalse(runtime["effective"]["execution"]["camera_prefetch"])
+        self.assertEqual(runtime["reasons"], [
+            {"feature": "execution.camera_prefetch", "code": "requires_image_staging"}])
+        self.assertEqual(runtime["migration"]["source"], "runtimeOptions")
+        for run in report["runs"]:
+            self.assertTrue(run["configuration"]["runtimeOptions"]["execution"]["camera_prefetch"])
 
     def test_relocation_preserves_plan_identity_but_changed_test_pixels_are_refused(self):
         before = training_batch_plan.expand_training_batch(self.request)

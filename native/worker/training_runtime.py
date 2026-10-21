@@ -127,51 +127,71 @@ def execution_quality_profile(backend, dataset, optimization, pipeline, performa
 
 
 class GrowthQuality:
-    def __init__(self, mode='pause', state=None):
-        if mode not in ('pause', 'defer'):
+    def __init__(self, mode='pause', state=None, max_consecutive_denials=3):
+        if (mode not in ('pause', 'defer') or type(max_consecutive_denials) is not int
+                or not 1 <= max_consecutive_denials <= 1000000):
             raise ValueError('Invalid growth quality mode')
         self.mode = mode
+        self.max_consecutive_denials = max_consecutive_denials
         self._observed_this_session = False
         self._state = {'admitted_events': 0, 'deferred_events': 0,
-                       'last_growth_deferred': False, 'consecutive_deferred': 0}
+                       'last_growth_deferred': False, 'consecutive_deferred': 0,
+                       'last_reason': 'unobserved'}
         if isinstance(state, dict):
             for key in ('admitted_events', 'deferred_events', 'consecutive_deferred'):
                 if type(state.get(key)) is int and state[key] >= 0:
                     self._state[key] = state[key]
             if type(state.get('last_growth_deferred')) is bool:
                 self._state['last_growth_deferred'] = state['last_growth_deferred']
+            if state.get('last_reason') in ('admitted', 'vram_pressure', 'probe_unavailable',
+                                            'invalid_observation', 'estimate_unavailable'):
+                self._state['last_reason'] = state['last_reason']
 
-    def observe(self, allowed):
+    def observe(self, allowed, reason=None):
         self._observed_this_session = True
         self._state['admitted_events' if allowed else 'deferred_events'] += 1
         self._state['last_growth_deferred'] = not allowed
         self._state['consecutive_deferred'] = 0 if allowed else self._state['consecutive_deferred'] + 1
+        self._state['last_reason'] = 'admitted' if allowed else (reason or 'vram_pressure')
 
     def should_pause(self):
         return (self.mode == 'pause' and self._observed_this_session
-                and self._state['consecutive_deferred'] >= 3)
+                and self._state['consecutive_deferred'] >= self.max_consecutive_denials)
 
     def snapshot(self):
         return dict(self._state)
 
 
 def observed_memory(torch):
-    from native.worker.training_resource_policy import MemoryObservation
+    from native.worker.training_resource_policy import MemoryObservation, is_cuda_out_of_memory
     free, total = torch.cuda.mem_get_info()
     reusable = 0
+    metadata = {'allocator_status': 'unavailable'}
+    if type(free) is not int or type(total) is not int or not 0 <= free <= total or total <= 0:
+        return MemoryObservation(free, total, allocator_status='invalid')
     try:
         stats = torch.cuda.memory_stats()
         values = [stats[key] for key in ('reserved_bytes.all.current',
                   'active_bytes.all.current', 'inactive_split_bytes.all.current')]
-        if all(type(value) is int and value >= 0 for value in values):
+        if (all(type(value) is int and value >= 0 for value in values)
+                and values[1] <= values[0] and values[2] <= values[0] - values[1]):
             reserved, active, fragments = values
             # Active includes pending stream use. Inactive split fragments are
             # deliberately excluded. The admission policy credits only HALF
             # of this fully inactive storage, never all reserved CUDA memory.
             reusable = min(max(0, reserved - active - fragments), total - free)
-    except (KeyError, RuntimeError, AttributeError):
-        pass
-    return MemoryObservation(int(free), int(total), int(reusable))
+            allocated = stats.get('allocated_bytes.all.current')
+            if type(allocated) is not int or not 0 <= allocated <= reserved:
+                allocated = None
+            metadata = {'allocated_bytes': allocated, 'reserved_bytes': reserved,
+                        'active_bytes': active, 'inactive_split_bytes': fragments,
+                        'allocator_status': 'known' if allocated is not None else 'partial'}
+        else:
+            metadata = {'allocator_status': 'invalid'}
+    except (KeyError, RuntimeError, AttributeError) as error:
+        if is_cuda_out_of_memory(error):
+            raise
+    return MemoryObservation(free, total, int(reusable), **metadata)
 
 
 def validate_resume_renderer(recorded, effective):
@@ -179,41 +199,42 @@ def validate_resume_renderer(recorded, effective):
         raise ValueError('resume_renderer_environment_changed')
 
 
+def runtime_configuration(control, checkpoint_runtime=None, checkpoint_performance=None):
+    from native.worker.training_configuration import normalize_runtime_options, runtime_options_from_flat
+    supplied = control.get('runtimeOptions')
+    legacy = control.get('performance')
+    resume = bool(control.get('resume'))
+    if checkpoint_runtime is None and checkpoint_performance is not None:
+        if isinstance(checkpoint_performance, dict) and checkpoint_performance.get('version') == 2:
+            checkpoint_runtime = runtime_options_from_flat(checkpoint_performance)
+        else:
+            checkpoint_runtime = normalize_runtime_options(
+                legacy_performance=checkpoint_performance, resume=resume)['requested']
+    if isinstance(legacy, dict) and legacy.get('version') == 2:
+        adapted = runtime_options_from_flat(legacy)
+        if supplied is None:
+            supplied, legacy = adapted, None
+        elif normalize_runtime_options(supplied, resume=resume,
+                                     checkpoint_runtime=checkpoint_runtime)['requested'] != adapted:
+            raise ValueError('runtime_configuration_conflict: native control')
+        else:
+            legacy = None
+    report = normalize_runtime_options(supplied, legacy, resume=resume,
+                                       checkpoint_runtime=checkpoint_runtime)
+    if control.get('backend') == '3dgs' and report['effective']['execution']['surfel_auxiliary']:
+        report['effective']['execution']['surfel_auxiliary'] = False
+        report['reasons'].append({'feature': 'execution.surfel_auxiliary', 'code': 'not_applicable_to_3dgs'})
+    return report
+
+
 def performance_configuration(control, checkpoint_performance=None):
-    supplied = control.get('performance', checkpoint_performance)
-    defaults = {'version': 1, 'enabled': not bool(control.get('resume')),
-                'usage_fraction': .9, 'minimum_spare_mib': 512,
-                'gpu_slots': 2, 'pinned_mib': 256, 'gpu_mib': 512,
-                'profile_interval': 30, 'engine': 'stock', 'growth_mode': 'pause', 'loss_mode': 'auto',
-                'camera_prefetch': True, 'capacity_storage': True, 'surfel_auxiliary': True}
-    if supplied is not None:
-        if not isinstance(supplied, dict):
-            raise ValueError('Invalid native performance policy')
-        defaults.update({key: supplied[key] for key in defaults if key in supplied})
-    if (type(defaults['version']) is not int or defaults['version'] != 1 or
-            type(defaults['enabled']) is not bool or defaults['engine'] not in ('stock', 'fastergs') or
-            defaults['growth_mode'] not in ('pause', 'defer')):
-        raise ValueError('Invalid native performance policy')
-    if defaults['loss_mode'] not in ('auto', 'stock'):
-        raise ValueError('Invalid photometric runtime policy')
-    for key in ('camera_prefetch', 'capacity_storage', 'surfel_auxiliary'):
-        if type(defaults[key]) is not bool:
-            raise ValueError('Invalid exact runtime feature: ' + key)
-    fraction = defaults['usage_fraction']
-    if (isinstance(fraction, bool) or not isinstance(fraction, (int, float))
-            or not math.isfinite(fraction) or not .5 <= fraction <= .95):
-        raise ValueError('Invalid native memory fraction')
-    limits = {'minimum_spare_mib': (256, 8192), 'gpu_slots': (1, 2),
-              'pinned_mib': (16, 1024), 'gpu_mib': (16, 2048), 'profile_interval': (1, 1000)}
-    for key, (low, high) in limits.items():
-        if type(defaults[key]) is not int or not low <= defaults[key] <= high:
-            raise ValueError('Invalid native performance limit: ' + key)
-    return defaults
+    from native.worker.training_configuration import flat_runtime_options
+    return flat_runtime_options(runtime_configuration(control, checkpoint_performance=checkpoint_performance))
 
 
 def configure_image_environment(configuration, environment=None):
     environment = os.environ if environment is None else environment
-    if configuration['enabled']:
+    if configuration['image_staging']:
         environment['GSW_TRAINING_IMAGE_PIPELINE'] = 'bounded'
         for suffix, key in (('GPU_SLOTS', 'gpu_slots'), ('PINNED_MIB', 'pinned_mib'), ('GPU_MIB', 'gpu_mib')):
             environment['GSW_TRAINING_IMAGE_' + suffix] = str(configuration[key])
@@ -221,15 +242,38 @@ def configure_image_environment(configuration, environment=None):
         environment.pop('GSW_TRAINING_IMAGE_PIPELINE', None)
 
 
-def configure_native_images(control):
+def configure_native_images(control, return_report=False):
     checkpoint_policy = None
+    checkpoint_runtime = None
     if control.get('resume'):
         from native.worker.training_checkpoint import read_manifest
         manifest, _ = read_manifest(control['output'], verify=False)
         checkpoint_policy = manifest.get('performance')
-    configuration = performance_configuration(control, checkpoint_policy)
+        checkpoint_runtime = manifest.get('runtime_options')
+    from native.worker.training_configuration import flat_runtime_options
+    report = runtime_configuration(control, checkpoint_runtime, checkpoint_policy)
+    configuration = flat_runtime_options(report)
     configure_image_environment(configuration)
-    return configuration
+    return report if return_report else configuration
+
+
+def _entry_report(control, current):
+    entry = control.get('runtimeConfigurationReport')
+    if entry is None:
+        return None
+    if (type(entry) is not dict or set(entry) != {'requested', 'effective', 'reasons', 'migration'}
+            or any(entry[key] != current[key] for key in ('requested', 'effective', 'reasons'))):
+        raise ValueError('runtime_entry_configuration_report_invalid')
+    migration = entry['migration']
+    if (type(migration) is not dict or set(migration) != {'source', 'from_version', 'to_version', 'notes'}
+            or migration['source'] not in ('runtimeOptions', 'performanceOptions', 'checkpoint_runtime',
+                                            'legacy_resume_without_policy', 'defaults')
+            or migration['from_version'] is not None and type(migration['from_version']) is not int
+            or migration['from_version'] not in (None, 1, 2) or migration['to_version'] != 2
+            or type(migration['notes']) is not list
+            or any(type(note) is not str or not 0 < len(note) <= 4096 for note in migration['notes'])):
+        raise ValueError('runtime_entry_configuration_report_invalid')
+    return json.loads(json.dumps(entry, allow_nan=False))
 
 
 class NativeTrainingRuntime:
@@ -238,7 +282,12 @@ class NativeTrainingRuntime:
         from native.worker.training_resource_policy import GrowthAdmission
         from native.worker.training_image_pipeline import TrainingImagePipeline, ImagePipelineConfig
         from native.worker.training_loss import PhotometricLoss
-        self.configuration = configure_native_images(control)
+        from native.worker.training_configuration import flat_runtime_options
+        self.runtime_configuration = configure_native_images(dict(control, backend=backend), return_report=True)
+        entry = _entry_report(control, self.runtime_configuration)
+        if entry is not None:
+            self.runtime_configuration['entry_migration'] = entry
+        self.configuration = flat_runtime_options(self.runtime_configuration)
         self.output = control.get('output')
         self.quality_profile = None
         self.image_summary = {}
@@ -249,16 +298,20 @@ class NativeTrainingRuntime:
         self.lookahead_opportunities = 0
         self.backend, self.torch, self.emit = backend, torch, emit
         self.engine = 'stock'
-        self.growth_quality = GrowthQuality(self.configuration['growth_mode'])
+        self.growth_quality = GrowthQuality(self.configuration['growth_mode'],
+            max_consecutive_denials=self.configuration['max_consecutive_denials'])
+        self.last_growth_decision = None
+        self.runtime_policy_history = []
         self.profiler = IterationProfiler(backend, self.configuration['profile_interval'],
             torch_module=torch, emit=emit, metadata=lambda: {
                 'renderer_engine': self.engine,
                 'loss_engine': self.loss.status()['effective'] if self.loss else 'stock'})
         self.admission = (GrowthAdmission(lambda: observed_memory(torch),
-            self.configuration['usage_fraction'], self.configuration['minimum_spare_mib'] * 1024 ** 2)
-            if self.configuration['enabled'] else None)
+            self.configuration['usage_fraction'], self.configuration['minimum_spare_mib'] * 1024 ** 2,
+            cache_reclaimer=getattr(torch.cuda, 'empty_cache', None))
+            if self.configuration['resource_guard_enabled'] else None)
         self.images = (TrainingImagePipeline(torch, config=ImagePipelineConfig.from_environment())
-                       if self.configuration['enabled'] else None)
+                       if self.configuration['image_staging'] else None)
         module_path = os.environ.get('GSW_TRAINING_LOSS_MODULE_PATH')
         if module_path and module_path not in sys.path:
             sys.path.append(module_path)  # Never shadow the configured Torch runtime.
@@ -267,10 +320,11 @@ class NativeTrainingRuntime:
         self._loss_history_state = _FRESH_LOSS_HISTORY
         self._loss_class = PhotometricLoss
         emit('[gsw-training-runtime]', dict(self.configuration, backend=backend))
+        emit('[gsw-training-runtime-configuration]', dict(self.runtime_configuration, backend=backend))
 
     def photometric_loss(self, l1, ssim):
         self.loss = self._loss_class(self.torch, l1, ssim,
-            mode='fused_l1_ssim' if self.configuration['enabled'] and self.configuration['loss_mode'] == 'auto' else 'stock')
+            mode='fused_l1_ssim' if self.configuration['loss_mode'] == 'auto' else 'stock')
         self.emit('[gsw-training-loss-engine]', self.loss.status())
         self.loss_execution = LossExecutionRecord(self.loss.mode, self._loss_history_state)
         return self.loss
@@ -297,7 +351,7 @@ class NativeTrainingRuntime:
         self.emit('[gsw-training-image-cache]', {
             'version': 1, 'backend': self.backend, 'cameras': len(cameras),
             'host_cache_bytes': total_host_bytes(cameras),
-            'bounded': self.configuration['enabled']})
+            'bounded': self.configuration['image_staging']})
 
     def report_profile(self, dataset, optimization, pipeline):
         self.quality_profile = execution_quality_profile(self.backend, vars(dataset),
@@ -322,13 +376,21 @@ class NativeTrainingRuntime:
         loss = self.loss_execution.snapshot() if self.loss_execution else {'last_effective': 'unobserved'}
         execution['loss'] = loss['last_effective']
         execution['loss_history'] = loss
+        execution['runtime_configuration'] = json.loads(json.dumps(self.runtime_configuration))
+        execution['runtime_policy_history'] = json.loads(json.dumps(self.runtime_policy_history))
+        requested = self.runtime_configuration['requested']['execution']
         execution['features'] = {
             'capacity_storage': dict(self.storage_status,
-                requested=bool(self.configuration['enabled'] and self.configuration['capacity_storage'])),
+                requested=requested['capacity_storage']),
             'surfel_auxiliary': dict(self.surfel_status,
-                requested=bool(self.configuration['enabled'] and self.configuration['surfel_auxiliary'])),
-            'camera_prefetch': {'requested': bool(self.configuration['enabled'] and self.configuration['camera_prefetch']),
-                                'opportunities': self.lookahead_opportunities}}
+                requested=requested['surfel_auxiliary']),
+            'camera_prefetch': {'requested': requested['camera_prefetch'],
+                                'effective': self.configuration['camera_prefetch'],
+                                'reason': '' if self.configuration['camera_prefetch'] or not requested['camera_prefetch'] else 'requires_image_staging',
+                                'opportunities': self.lookahead_opportunities},
+            'image_staging': {'requested': requested['image_staging'],
+                              'effective': self.images is not None},
+            'photometric_loss': self.loss.status() if self.loss else {'effective': 'unobserved'}}
         if self.images:
             execution['image_staging'] = self.images.stats()
 
@@ -342,7 +404,7 @@ class NativeTrainingRuntime:
             self.surfel_status['omitted_calls'] += 1
 
     def bind_model(self, model):
-        if self.configuration['enabled'] and self.configuration['capacity_storage']:
+        if self.configuration['capacity_storage']:
             from native.worker.training_capacity_storage import install_capacity_storage
             self.storage = install_capacity_storage(self.torch, model, self.backend,
                 memory_probe=lambda: observed_memory(self.torch))
@@ -371,17 +433,32 @@ class NativeTrainingRuntime:
 
     def admit(self, model, threshold, extent, iteration):
         from native.worker.training_resource_policy import admit_densification
+        def observed(kind, value):
+            if kind == '[gsw-training-growth]':
+                self.last_growth_decision = dict(value)
+            self.emit(kind, value)
         allowed = admit_densification(self.torch, model, self.backend, threshold, extent,
-                                      self.admission, self.emit, iteration)
+                                      self.admission, observed, iteration)
         if self.admission is not None:
-            self.growth_quality.observe(allowed)
+            self.growth_quality.observe(allowed, (self.last_growth_decision or {}).get('reason'))
         return allowed
 
     def pause_for_resources(self):
         return self.admission is not None and self.growth_quality.should_pause()
 
+    def resource_pause_reason(self):
+        reason = self.growth_quality.snapshot().get('last_reason')
+        if reason in ('probe_unavailable', 'invalid_observation'):
+            return 'resource_probe_unavailable'
+        if reason == 'estimate_unavailable':
+            return 'resource_estimate_unavailable'
+        return 'vram_pressure'
+
     def capture(self, state):
         state['performance'] = dict(self.configuration)
+        state['runtime_options'] = json.loads(json.dumps(self.runtime_configuration['requested']))
+        state['runtime_configuration'] = json.loads(json.dumps(self.runtime_configuration))
+        state['runtime_policy_history'] = json.loads(json.dumps(self.runtime_policy_history))
         state['renderer_engine'] = self.engine
         state['growth_quality'] = self.growth_quality.snapshot()
         if self.quality_profile:
@@ -390,7 +467,34 @@ class NativeTrainingRuntime:
             state['quality_profile'] = json.loads(json.dumps(self.quality_profile, allow_nan=False))
 
     def restore_quality(self, state):
-        self.growth_quality = GrowthQuality(self.configuration['growth_mode'], state.get('growth_quality'))
+        from native.worker.training_configuration import normalize_runtime_options
+        history = state.get('runtime_policy_history', [])
+        if type(history) is not list:
+            raise ValueError('runtime_policy_history_invalid')
+        restored_history = []
+        for entry in history:
+            if (type(entry) is not dict or set(entry) != {'iteration', 'before', 'after', 'reason'}
+                    or type(entry['iteration']) is not int or not 0 <= entry['iteration'] <= 2 ** 53 - 1
+                    or type(entry['reason']) is not str or not 0 < len(entry['reason']) <= 4096):
+                raise ValueError('runtime_policy_history_invalid')
+            for key in ('before', 'after'):
+                normalize_runtime_options(entry[key])
+            restored_history.append(json.loads(json.dumps(entry, allow_nan=False)))
+        before = runtime_configuration({'resume': True},
+            checkpoint_runtime=state.get('runtime_options'),
+            checkpoint_performance=state.get('performance'))['requested']
+        after = self.runtime_configuration['requested']
+        if before != after:
+            iteration = state.get('iteration')
+            if type(iteration) is not int or not 0 <= iteration <= 2 ** 53 - 1:
+                raise ValueError('runtime_policy_history_iteration_invalid')
+            change = {'iteration': iteration, 'before': before, 'after': after,
+                      'reason': 'explicit_resume_runtime_override'}
+            restored_history.append(json.loads(json.dumps(change, allow_nan=False)))
+            self.emit('[gsw-training-runtime-policy-change]', change)
+        self.runtime_policy_history = restored_history
+        self.growth_quality = GrowthQuality(self.configuration['growth_mode'], state.get('growth_quality'),
+            max_consecutive_denials=self.configuration['max_consecutive_denials'])
         profile = state.get('quality_profile')
         if profile is None and 'quality_profile' not in state:
             self._loss_history_state = None  # Legacy: prior execution is unknown.

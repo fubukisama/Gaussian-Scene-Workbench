@@ -27,6 +27,20 @@ def write_colmap_points(path, points):
 
 
 class TrainingTelemetryTests(unittest.TestCase):
+    def test_runtime_configuration_observation_is_retained_without_changing_train_options(self):
+        from native.worker.training_configuration import normalize_runtime_options
+        report = normalize_runtime_options({'version': 2, 'resourceGuard': {'enabled': False}})
+        event = dict(report, backend='2dgs')
+        job = dict(id='runtime', scene='scene', output_scene='out', backend='2dgs',
+                   status='running', stage='train', created_at=1, updated_at=1, log=[],
+                   options={'iterations': 819, 'resolution': 4})
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(compute, 'TRAIN_JOBS_DIR', Path(temporary)):
+            compute.add_job_log(job, '[gsw-training-runtime-configuration] ' + json.dumps(event))
+            persisted = json.loads((Path(temporary) / 'runtime.json').read_text(encoding='utf-8'))
+        self.assertEqual(persisted.get('runtimeConfiguration'), event)
+        self.assertEqual(compute.job_snapshot(job).get('runtimeConfiguration'), event)
+        self.assertEqual(persisted['options'], {'iterations': 819, 'resolution': 4})
+
     def test_loaded_training_input_event_persists_and_preserves_effective_options(self):
         from native.worker.training_summary import configured_training_summary, loaded_training_summary
         for backend in ("3dgs", "2dgs"):

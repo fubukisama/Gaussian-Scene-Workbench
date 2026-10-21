@@ -2,6 +2,9 @@
 #include "AppLanguage.h"
 #include "MainWindow.h"
 #include "SceneCoordinates.h"
+#include "BackendLocator.h"
+#include "ExistingTrainingDialog.h"
+#include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QDebug>
@@ -16,11 +19,20 @@
 #include <QJsonObject>
 #include <QImage>
 #include <QMessageBox>
+#include <QPointer>
+#include <QProcess>
+#include <QScopeGuard>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
+#include <QUuid>
 #include <cstdio>
 #include <functional>
+#include <memory>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 namespace gsw {
 bool runProcessingCompletionSmokeTest(MainWindow &window) {
@@ -440,6 +452,249 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
     QFile original(realModel);
     check(original.open(QIODevice::ReadOnly) && original.readAll() == realBytes, "original real-result fixture remains unchanged");
   }
+#ifdef Q_OS_WIN
+  // This block runs only under the existing real-window remote smoke mode.
+  // Its detached child is a bounded CPU lease fixture, never a GS trainer.
+  // No fake optimizer checkpoint is needed to verify ownership and migration.
+  dialogs.stop();
+  const QString repository = BackendLocator::findRepositoryRoot(
+      QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python = qEnvironmentVariable("GSW_RUNTIME_UI_TEST_PYTHON",
+      qEnvironmentVariable("GSW_PREFLIGHT_TEST_PYTHON", QStandardPaths::findExecutable("python")));
+  const QString cpuFixture = QDir(repository).filePath(QStringLiteral("native/tests/helpers/OwnedTrainingConnectionFixture.py"));
+  if (!check(!repository.isEmpty() && QFileInfo(python).isFile() && QFileInfo(cpuFixture).isFile(),
+      "resolve real CPU lifecycle fixture without a GPU runtime or hard-coded machine path")) return false;
+  const bool previousPrefixPresent = qEnvironmentVariableIsSet("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  const QByteArray previousPrefix = qgetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX", QFileInfo(python).absolutePath().toUtf8());
+  const auto restorePrefix = qScopeGuard([&] {
+    if (previousPrefixPresent) qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX", previousPrefix);
+    else qunsetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  });
+  const auto readBytes = [](const QString &path) {
+    QFile file(path); return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
+  };
+  const auto readObject = [&](const QString &path) { return QJsonDocument::fromJson(readBytes(path)).object(); };
+  for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+    const QString lifecycle = root.filePath(QStringLiteral("persistent-") + backend);
+    const QString recoveryBase = QDir(lifecycle).filePath(QStringLiteral("recovery"));
+    const QString phase = QDir(lifecycle).filePath(QStringLiteral("phase"));
+    if (!check(QDir().mkpath(recoveryBase), "create isolated persistent lifecycle recovery catalog")) return false;
+    auto owner = std::make_unique<MainWindow>();
+    std::unique_ptr<MainWindow> reopened;
+    HANDLE child = nullptr;
+    const auto cleanupOwned = qScopeGuard([&] {
+      write(phase + QStringLiteral("-abort"), "abort");
+      write(phase + QStringLiteral("-exit"), "exit");
+      if (child) {
+        if (WaitForSingleObject(child, 5000) != WAIT_OBJECT_0) {
+          check(false, "owned CPU fixture failed its bounded graceful cleanup; no unrelated PID is targeted");
+          TerminateProcess(child, 197);
+          WaitForSingleObject(child, 2000);
+        }
+        CloseHandle(child);
+      }
+      reopened.reset();
+      owner.reset();
+    });
+    QString error;
+    if (!check(owner->discardCurrentRecovery(&error), "remove only the new smoke window's unused initial recovery")) return false;
+    owner->mRecoveryStore = std::make_unique<RecoveryStore>(recoveryBase);
+    if (!check(owner->beginUntitledProject(QStringLiteral("owned-persistent-") + backend, &error),
+        "create owned untitled project for persistent training")) return false;
+    const QString oldRoot = owner->mWorkspace.rootPath();
+    const QString dataset = QDir(oldRoot).filePath(QStringLiteral("datasets/owned"));
+    const QString photo = QDir(dataset).filePath(QStringLiteral("images/owned.png"));
+    QImage fixturePhoto(3, 2, QImage::Format_RGB32); fixturePhoto.fill(Qt::white);
+    const QString reference = QDir(oldRoot).filePath(QStringLiteral("reference.ply"));
+    if (!check(QDir().mkpath(QFileInfo(photo).absolutePath()) && fixturePhoto.save(photo) &&
+        owner->mWorkspace.setDatasetPath(dataset, &error) && write(reference, points) &&
+        owner->mWorkspace.setScenePath(reference, &error) &&
+        owner->mWorkspace.setSceneTranslation(QVector3D(1, 2, 3), &error),
+        "retain independent photo, reference object and transform for close/reopen acceptance")) return false;
+    const QString referenceId = owner->mWorkspace.activeSceneId();
+    const QString output = QDir(oldRoot).filePath(QStringLiteral("output/owned"));
+    const QString jobs = QDir(oldRoot).filePath(QStringLiteral(".gsw/jobs"));
+    const QString store = QDir(jobs).filePath(QStringLiteral("training"));
+    const QString configPath = QDir(jobs).filePath(QStringLiteral("owned-configuration.json"));
+    const QString jobId = QUuid::createUuid().toString(QUuid::Id128);
+    const QString jobPath = QDir(store).filePath(jobId + QStringLiteral(".json"));
+    const QString manifestPath = QDir(lifecycle).filePath(QStringLiteral("saved.gsw.json"));
+    const QJsonObject configuration{{"projectRoot", oldRoot}, {"backend", backend}, {"nativeCheckpoint", true},
+        {"datasetPath", dataset}, {"outputRoot", QDir(oldRoot).filePath(QStringLiteral("output"))},
+        {"outputScene", "owned"}, {"outputDisplayName", "owned-cpu-lifecycle"}, {"jobStore", store},
+        {"trainOptions", QJsonObject{{"iterations", 10}}}};
+    GenerationExperiment experiment;
+    experiment.id = QStringLiteral("owned-persistent-") + backend;
+    experiment.pipeline = QStringLiteral("training"); experiment.backend = backend;
+    experiment.displayName = QStringLiteral("owned-cpu-lifecycle"); experiment.configurationPath = configPath;
+    experiment.outputRoot = output; experiment.datasetPath = dataset; experiment.status = QStringLiteral("queued");
+    experiment.resultSceneId = experiment.id; experiment.parameters = configuration;
+    if (!check(write(configPath, QJsonDocument(configuration).toJson()) && QDir().mkpath(store) &&
+        GenerationHistoryStore(oldRoot).upsert(experiment, &error) &&
+        saveActiveTrainingJob(oldRoot, {configPath, output, false, experiment.id}, &error) &&
+        owner->mWorkspace.saveManifest(manifestPath, &error) && owner->mWorkspace.hasPendingDataMigration(),
+        "save a pending-migration project without moving its owned training inputs")) return false;
+    const QByteArray originalConfig = readBytes(configPath), originalPhoto = readBytes(photo);
+    const QString archivePath = QDir(oldRoot).filePath(QStringLiteral(".gsw/experiments/") + experiment.id + QStringLiteral(".json"));
+    QByteArray originalArchive;
+    // Inspect recovery through its public semantic identity, not a guessed
+    // marker filename or a fabricated full-state checkpoint.
+    const ActiveTrainingJob originalActive = loadActiveTrainingJob(oldRoot);
+    const QString task = QStringLiteral("owned-persistent-") + backend;
+    owner->mPendingTraining = MainWindow::PendingTraining{task, oldRoot, dataset, output, backend, 10, experiment.id};
+    owner->mPendingTraining->historyId = experiment.id;
+    QProcessEnvironment cpuEnvironment = QProcessEnvironment::systemEnvironment();
+    cpuEnvironment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    cpuEnvironment.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
+    if (!check(owner->mProcessSupervisor.startPersistentTraining(task, python,
+        {QStringLiteral("-B"), cpuFixture, QStringLiteral("--mode"), QStringLiteral("mainwindow"),
+         QStringLiteral("--store"), store, QStringLiteral("--job-id"), jobId,
+         QStringLiteral("--backend"), backend, QStringLiteral("--output"), output,
+         QStringLiteral("--configuration"), configPath, QStringLiteral("--phase-prefix"), phase},
+        repository, cpuEnvironment, QDir(jobs).filePath(QStringLiteral("owned-cpu.log")), store) &&
+        wait([&] { return QFileInfo::exists(phase + QStringLiteral("-ready.json")); }),
+        "launch an actual bounded detached CPU owner before job registration")) return false;
+    originalArchive = readBytes(archivePath); // taskStarted legitimately marks the archive running.
+    const QJsonObject identity = readObject(phase + QStringLiteral("-ready.json")).value(QStringLiteral("workerIdentity")).toObject();
+    child = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, FALSE,
+        static_cast<DWORD>(identity.value(QStringLiteral("pid")).toInteger()));
+    FILETIME creation{}, exited{}, kernel{}, user{};
+    const bool validIdentity = child && GetProcessTimes(child, &creation, &exited, &kernel, &user) &&
+        identity.value(QStringLiteral("startToken")).toString() == QStringLiteral("win-filetime:") +
+            QString::number((quint64(creation.dwHighDateTime) << 32) | creation.dwLowDateTime);
+    if (!validIdentity && child) { CloseHandle(child); child = nullptr; }
+    if (!check(validIdentity && WaitForSingleObject(child, 0) == WAIT_TIMEOUT,
+        "retain a query/synchronize handle for this fixture's verified OS creation identity")) return false;
+    check(!QFileInfo::exists(jobPath) && ProcessSupervisor::hasUnfinishedTraining(store),
+        "persistent ownership protects the workspace before any job JSON or lease exists");
+    check(owner->saveProject(false) && owner->mWorkspace.rootPath() == oldRoot &&
+        owner->mWorkspace.hasPendingDataMigration(), "save during startup records state without migrating live inputs");
+    enum class ExpectedDialog { Exit, Reopen, History, None };
+    ExpectedDialog expected = ExpectedDialog::Exit;
+    bool exitSeen = false, pendingWarningSeen = false, observationSeen = false;
+    QTimer lifecycleDialogs;
+    QObject::connect(&lifecycleDialogs, &QTimer::timeout, &window, [&] {
+      auto *modal = QApplication::activeModalWidget();
+      if (!modal) return;
+      if (expected == ExpectedDialog::History) {
+        if (auto *observer = qobject_cast<ExistingTrainingDialog *>(modal)) {
+          observationSeen = true; observer->close(); return;
+        }
+      }
+      if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+        if (expected == ExpectedDialog::Exit && box->parentWidget() == owner.get()) {
+          if (box->objectName() == QStringLiteral("exitConfirmationDialog")) {
+            exitSeen = true;
+            for (auto *button : box->buttons()) if (box->buttonRole(button) == QMessageBox::AcceptRole) { button->click(); return; }
+          } else if (box->button(QMessageBox::Save)) { box->button(QMessageBox::Save)->click(); return; }
+        }
+        if (expected == ExpectedDialog::Reopen && box->windowTitle() ==
+            QCoreApplication::translate("Workbench", "工程数据迁移待恢复")) {
+          pendingWarningSeen = true; box->accept(); return;
+        }
+        check(false, "persistent lifecycle never silently accepts an unrelated modal error"); box->reject();
+      }
+    });
+    lifecycleDialogs.start(10);
+    owner->show();
+    QPointer<MainWindow> destroyedOwner(owner.get());
+    if (!check(owner->close() && exitSeen && !owner->isVisible(),
+        "real MainWindow close accepts explicit exit without sending worker stop")) return false;
+    const auto retainedRecovery = owner->mCurrentRecovery;
+    owner.reset();
+    check(destroyedOwner.isNull() && WaitForSingleObject(child, 0) == WAIT_TIMEOUT &&
+        ProcessSupervisor::hasUnfinishedTraining(store) && QFileInfo(oldRoot).isDir(),
+        "actual MainWindow destruction preserves the still-live CPU owner and recovery workspace");
+    reopened = std::make_unique<MainWindow>();
+    if (!check(reopened->discardCurrentRecovery(&error), "discard only the reopen window's unused fresh workspace")) return false;
+    reopened->mRecoveryStore = std::make_unique<RecoveryStore>(recoveryBase);
+    reopened->mCurrentRecovery = retainedRecovery;
+    expected = ExpectedDialog::Reopen;
+    check(reopened->openProjectFile(manifestPath) && pendingWarningSeen &&
+        reopened->mWorkspace.rootPath() == oldRoot && reopened->mWorkspace.hasPendingDataMigration(),
+        "reopening a live pending Save As preserves old inputs and refuses automatic migration");
+    check(reopened->recoverInterruptedTraining(&error) &&
+        loadActiveTrainingJob(oldRoot).configurationPath == originalActive.configurationPath &&
+        loadActiveTrainingJob(oldRoot).outputSceneRoot == originalActive.outputSceneRoot &&
+        readBytes(configPath) == originalConfig && readBytes(photo) == originalPhoto &&
+        readBytes(archivePath) == originalArchive && reopened->mWorkspace.activeSceneId() == referenceId &&
+        reopened->mWorkspace.sceneTranslation() == QVector3D(1, 2, 3),
+        "reopen does not label live training interrupted, clear recovery or alter model/input identity");
+    expected = ExpectedDialog::History;
+    reopened->showGenerationHistory();
+    check(observationSeen && readBytes(archivePath) == originalArchive,
+        "history routes live ownership to observation without rewriting in-flight experiments");
+    expected = ExpectedDialog::None;
+    check(write(phase + QStringLiteral("-register"), "register") &&
+        wait([&] { return QFileInfo::exists(phase + QStringLiteral("-registered.json")); }),
+        "release registration only after real UI destruction and project reopen");
+    QProcess stop;
+    stop.setWorkingDirectory(repository); stop.setProcessEnvironment(cpuEnvironment);
+    stop.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *arguments) { arguments->flags |= CREATE_NO_WINDOW; });
+    stop.start(python, {QStringLiteral("-B"), QStringLiteral("-m"), QStringLiteral("native.worker.training_job_connection"),
+        QStringLiteral("--job-store"), store, QStringLiteral("--job-id"), jobId,
+        QStringLiteral("--command"), QStringLiteral("stop")});
+    if (!check(stop.waitForStarted(3000) && stop.waitForFinished(3000) && stop.exitCode() == 0 &&
+        wait([&] { return readObject(phase + QStringLiteral("-ack.json")).value(QStringLiteral("command")).toString() == QStringLiteral("stop"); }),
+        "explicit session-bound stop is actually acknowledged by the owned CPU worker")) return false;
+    check(WaitForSingleObject(child, 0) == WAIT_TIMEOUT && ProcessSupervisor::hasUnfinishedTraining(store) &&
+        !reopened->finalizePendingProjectSave(&error) && reopened->mWorkspace.rootPath() == oldRoot,
+        "terminal job metadata cannot permit migration while its owner process is still alive");
+    check(write(phase + QStringLiteral("-exit"), "exit") && wait([&] { return WaitForSingleObject(child, 0) == WAIT_OBJECT_0; }),
+        "actual owned process exit is verified rather than inferred from a command receipt or job label");
+    DWORD exitCode = 1;
+    check(GetExitCodeProcess(child, &exitCode) && exitCode == 0 && !ProcessSupervisor::hasUnfinishedTraining(store),
+        "only proved owner exit releases conservative migration protection");
+    check(reopened->finalizePendingProjectSave(&error) && !reopened->mWorkspace.hasPendingDataMigration() &&
+        reopened->mWorkspace.rootPath() != oldRoot && !QFileInfo::exists(oldRoot),
+        "pending project migration and recovery completion succeed after actual owner exit");
+    const QString migratedRoot = reopened->mWorkspace.rootPath();
+    check(readBytes(QDir(migratedRoot).filePath(QStringLiteral(".gsw/jobs/owned-configuration.json"))) == originalConfig &&
+        readBytes(QDir(migratedRoot).filePath(QStringLiteral("datasets/owned/images/owned.png"))) == originalPhoto &&
+        reopened->mWorkspace.activeSceneId() == referenceId && reopened->mWorkspace.sceneTranslation() == QVector3D(1, 2, 3),
+        "finished migration preserves input bytes, model identity and transform for both native backends");
+    lifecycleDialogs.stop();
+  }
+  dialogs.start(20);
+  for(const auto &backend:{QStringLiteral("3dgs"),QStringLiteral("2dgs")}) {
+    const QString name=QStringLiteral("nonzero-delivery-")+backend;
+    const QString project=root.filePath(name+QStringLiteral(".files"));
+    const QString output=QDir(project).filePath(QStringLiteral("output/owned"));
+    const QString final=QDir(output).filePath(QStringLiteral("point_cloud/iteration_2/point_cloud.ply"));
+    const QString configurationPath=QDir(project).filePath(QStringLiteral(".gsw/jobs/owned.json"));
+    QString error;QByteArray bytes=gaussian;
+    if(backend==QStringLiteral("2dgs")){bytes.replace("property float scale_2\n","");bytes.replace("-3 -3 -3","-3 -3");}
+    if(!check(QDir().mkpath(project)&&window.mWorkspace.create(project,&error)&&
+        window.mWorkspace.saveManifest(root.filePath(name+QStringLiteral(".gsw.json")),&error)&&write(final,bytes),
+        "prepare independent format-valid output for nonzero export-exit semantics, not an optimizer checkpoint"))return false;
+    GenerationExperiment experiment;experiment.id=name;experiment.pipeline=QStringLiteral("training");
+    experiment.backend=backend;experiment.displayName=name;experiment.configurationPath=configurationPath;
+    experiment.outputRoot=output;experiment.resultSceneId=name;experiment.status=QStringLiteral("queued");
+    experiment.parameters={{"projectRoot",project},{"backend",backend},{"outputRoot",QDir(project).filePath(QStringLiteral("output"))},
+        {"outputScene","owned"},{"trainOptions",QJsonObject{{"iterations",2}}}};
+    if(!check(write(configurationPath,QJsonDocument(experiment.parameters).toJson())&&
+        GenerationHistoryStore(project).upsert(experiment,&error)&&saveActiveTrainingJob(project,{configurationPath,output,false,name},&error),
+        "record the owned optimizer/export state fixture without manufacturing serialized resume data"))return false;
+    window.mPendingTraining=MainWindow::PendingTraining{name,project,{},output,backend,2,name};
+    window.mPendingTraining->historyId=name;
+    // Machine-facing CPU fixture code, not a translatable UI sentence.
+    const QString script=QString::fromLatin1("import json,sys;print('[worker-event] '+json.dumps({'version':1,'type':'status','state':'done','stage':'done','iteration':2,'totalIterations':2,'trainingDelivery':{'training_status':'done','export_status':'failed','reason':'owned_runtime_error','internal_model_path':sys.argv[1],'iteration':2}}),flush=True);sys.exit(1)");
+    if(!check(window.mProcessSupervisor.start(name,python,{QStringLiteral("-B"),QStringLiteral("-c"),script,final},repository,{},false)&&
+        wait([&]{return !window.mProcessSupervisor.isRunning()&&!window.mPendingTraining;}),
+        "a real owned CPU process emits optimizer-done/export-failed and actually exits nonzero"))return false;
+    const auto record=GenerationHistoryStore(project).record(name);
+    const auto outcome=record.parameters.value(QStringLiteral("resultDeliveryOutcome")).toObject();
+    check(record.status==QStringLiteral("completed")&&outcome.value(QStringLiteral("training_status"))==QStringLiteral("done")&&
+        outcome.value(QStringLiteral("export_status"))==QStringLiteral("failed")&&
+        outcome.value(QStringLiteral("reason"))==QStringLiteral("owned_runtime_error"),
+        "nonzero export exit retains completed optimization and the independent failed-delivery history");
+    check(!record.resultPath.isEmpty()&&readBytes(final)==bytes&&QFileInfo::exists(record.resultPath)&&
+        !QFileInfo::exists(QDir(output).filePath(QStringLiteral(".gsw-resume/ready.json"))),
+        "the original model and retained result survive without advertising a fabricated optimizer resume");
+  }
+  dialogs.stop();
+#endif
   window.mViewport->setEditToolsLocked(false);
   qInfo() << "Processing completion desktop smoke:" << (passed ? "PASS" : "FAIL");
   return passed;

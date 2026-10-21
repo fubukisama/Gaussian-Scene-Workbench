@@ -4,6 +4,10 @@
 
 namespace gsw {
 
+// Complete checkpoints retain runtime-policy history. Bound metadata reads
+// consistently without truncating or rewriting that provenance.
+inline constexpr qint64 NativeResumeManifestMaximumBytes = 16 * 1024 * 1024;
+
 struct TrainingOutputScene {
   QString path;
   int iteration = -1;

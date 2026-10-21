@@ -1049,6 +1049,49 @@ class TrainingBackendTests(unittest.TestCase):
                 self.assertEqual(observed[0]["iterations"], 12345)
                 self.assertEqual(job["train_options"], {"iterations": 12345})
 
+    def test_two_dgs_vram_warning_reports_selected_guard_and_density_schedule(self):
+        from native.worker.training_configuration import normalize_runtime_options
+
+        for enabled, mode in ((False, "pause"), (True, "pause"), (True, "defer")):
+            with self.subTest(enabled=enabled, mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                dataset = root / "dataset"
+                (dataset / "images").mkdir(parents=True)
+                (dataset / "images/frame.jpg").write_bytes(b"owned CPU fixture")
+                (dataset / "transforms_train.json").write_text("{}", encoding="utf-8")
+                runtime = normalize_runtime_options({"version": 2, "resourceGuard": {
+                    "enabled": enabled, "mode": mode, "max_consecutive_denials": 7}})["requested"]
+                options = {"iterations": 1043, "resolution": 1, "densify_until_iter": 31,
+                           "densification_interval": 13, "densify_grad_threshold": 0.00037}
+                job = {"id": "warning", "scene": "capture", "output_scene": "result", "backend": "2dgs",
+                       "status": "queued", "stage": "queued", "error": None, "cancel_requested": False,
+                       "dataset_path": str(dataset), "train_options": options, "log": [],
+                       "native_control": {"runtimeOptions": runtime}}
+                commands = []
+                with mock.patch.object(compute, "OUTPUT_DIR", root / "output"), \
+                     mock.patch.object(compute, "TRAIN_JOBS_DIR", root / "jobs"), \
+                     mock.patch.object(compute, "ensure_training_environment", return_value={"python": "python", "colmap": "colmap", "two_dgs_dir": "2dgs"}), \
+                     mock.patch.object(compute, "run_logged", side_effect=lambda *args: commands.append(args[1])), \
+                     mock.patch.object(compute, "training_point_cloud", return_value={"iteration": 1043, "path": "owned.ply", "vertex_count": 4}):
+                    compute.run_training_job(job, False, "original_quality", False)
+                self.assertEqual(job["status"], "done", job.get("error"))
+                warning = next(line for line in job["log"] if "WARNING: 2DGS full/half-resolution" in line)
+                self.assertIn("resource_guard=" + ("ON" if enabled else "OFF"), warning)
+                self.assertIn("mode=" + mode, warning)
+                self.assertIn("densify_until=31, densify_interval=13, densify_grad=0.00037", warning)
+                self.assertNotIn("4GB", warning)
+                self.assertNotIn("guard caps", warning)
+                self.assertNotIn("7000/15000", warning)
+                self.assertIn("CUDA out-of-memory remains possible", warning)
+                if enabled and mode == "pause":
+                    self.assertIn("pause after 7 consecutive denials", warning)
+                elif enabled:
+                    self.assertIn("defer growth without automatic resource pause", warning)
+                else:
+                    self.assertIn("software memory thresholds will not defer growth or pause", warning)
+                self.assertEqual(job["effective_train_options"], compute.training_options_from_payload("2dgs", "original_quality", options))
+                self.assertTrue(any("--iterations" in command and "1043" in command for command in commands))
+
 
     def test_training_job_persistence_round_trips_without_process_handle(self):
         with tempfile.TemporaryDirectory() as tmp:

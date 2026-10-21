@@ -19,6 +19,7 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QDateTime>
 #include <QEnterEvent>
 #include <QEvent>
 #include <QFileInfo>
@@ -465,6 +466,9 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
         state->mSceneLoadMessage = QCoreApplication::translate(
             "Workbench", "Insufficient memory for the mesh preview and texture.");
     }
+    emit sceneCoordinatesChanged();
+    emit cameraTrajectoryChanged(cameraCount(),mScene->mCameraTrajectory.invalidCameraCount(),
+        mScene->mCameraGeometry.decimated,mScene->mCameraTrajectory.sourcePath(),mScene->mCameraTrajectory.error());
     update();
   });
   resetModelTransformHistory();
@@ -847,6 +851,8 @@ SceneCoordinateInfo NativeViewport::sceneReferenceCoordinates() const {
 double NativeViewport::sourceToReferenceUnitScale(const SceneState &state) const {
   const auto &source = state.mSceneCoordinates;
   const auto reference = sceneReferenceCoordinates();
+  const auto mapping=sceneDisplayMapping(source,reference);
+  if(mapping.verifiedAlignment)return mapping.lengthScale*source.displayScale/reference.displayScale;
   const auto sourceRatio = sceneMetresPerCoordinate(source);
   const auto referenceRatio = sceneMetresPerCoordinate(reference);
   if (!sourceRatio || !referenceRatio)
@@ -865,16 +871,20 @@ QString NativeViewport::sceneCoordinateSummary() const {
       ? QCoreApplication::translate("Workbench", "坐标信息加载中")
       : QCoreApplication::translate("Workbench", "坐标关系未确认");
   bool unknown = !reference.unitDeclared || reference.coordinateReferenceSystem.isEmpty();
+  bool verified = !displayedSceneStates().isEmpty();
   for (const auto &state : displayedSceneStates()) {
     const auto &source = state->mSceneCoordinates;
     if (!source.valid) return state->resourceLoading
         ? QCoreApplication::translate("Workbench", "坐标信息加载中")
         : QCoreApplication::translate("Workbench", "坐标关系未确认");
-    if (!source.coordinateReferenceSystem.isEmpty() && !reference.coordinateReferenceSystem.isEmpty() &&
+    const bool sameCanonical=sceneDisplayMapping(source, reference).verifiedAlignment;
+    verified &= sameCanonical;
+    if (!sameCanonical && !source.coordinateReferenceSystem.isEmpty() && !reference.coordinateReferenceSystem.isEmpty() &&
         source.coordinateReferenceSystem != reference.coordinateReferenceSystem)
       return QCoreApplication::translate("Workbench", "CRS 不同 · 需要配准或重投影");
     unknown |= !source.unitDeclared || source.coordinateReferenceSystem.isEmpty();
   }
+  if(verified)return QCoreApplication::translate("Workbench", "同源坐标链已验证 · 框架与单位已统一（不代表精度验证）");
   return unknown ? QCoreApplication::translate("Workbench", "坐标关系未确认") :
       QCoreApplication::translate("Workbench", "相同 CRS · 单位已统一（不代表精度验证）");
 }
@@ -891,16 +901,24 @@ QString NativeViewport::sceneCoordinateDetail() const {
   bool unknown = !reference.mSceneCoordinates.unitDeclared ||
       reference.mSceneCoordinates.coordinateReferenceSystem.isEmpty();
   bool conflict = false;
+  bool verified = true;
   for (const auto &state : displayedSceneStates()) {
     const auto &source = state->mSceneCoordinates;
+    verified &= sceneDisplayMapping(source, reference.mSceneCoordinates).verifiedAlignment;
     unknown |= !source.unitDeclared || source.coordinateReferenceSystem.isEmpty();
     conflict |= !source.coordinateReferenceSystem.isEmpty() &&
         !reference.mSceneCoordinates.coordinateReferenceSystem.isEmpty() &&
         source.coordinateReferenceSystem != reference.mSceneCoordinates.coordinateReferenceSystem;
   }
-  if (unknown) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+  if(!verified) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "存在不同来源或未验证坐标链；仅换算长度单位，不自动配准原点或旋转。");
+  if(!mScene->mSceneCoordinates.validationError.isEmpty())result += QLatin1Char('\n') + mScene->mSceneCoordinates.validationError;
+  if (verified) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "同源坐标链已验证 · 框架与单位已统一（不代表精度验证）");
+  result += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "当前文件框架：%1；参考文件框架：%2。")
+      .arg(mScene->mSceneCoordinates.provenance.value(QStringLiteral("coordinate_frame")).toString(QStringLiteral("-")),
+          reference.mSceneCoordinates.provenance.value(QStringLiteral("coordinate_frame")).toString(QStringLiteral("-")));
+  if (unknown && !verified) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
       "未声明单位或 CRS，不能确认模型已配准；保留未知单位的原始数值，不猜测比例或自动对齐。");
-  if (conflict) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+  if (conflict && !verified) result += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
       "CRS 不一致；这里只统一可识别的长度单位，不执行坐标投影转换。请先在配准或测绘工具中建立明确变换。");
   return result;
 }
@@ -932,17 +950,35 @@ bool NativeViewport::collectionReferenceBounds(QVector3D &minimum,
 
 QMatrix4x4 NativeViewport::sceneDisplayTransform(const SceneState &from,
                                                 const SceneState &to) const {
-  QMatrix4x4 mapping;
-  if (!from.mSceneCoordinates.valid || !to.mSceneCoordinates.valid) return mapping;
-  // displayShift is added to global XYZ, not the global position of local
-  // zero. Convert that zero through the public inverse to preserve the sign.
-  const double unitRatio = sourceToReferenceUnitScale(from) / sourceToReferenceUnitScale(to);
-  auto globalZero = from.mSceneCoordinates.globalFromLocal(QVector3D());
-  globalZero = {globalZero.x * unitRatio, globalZero.y * unitRatio, globalZero.z * unitRatio};
-  mapping.translate(to.mSceneCoordinates.localFromGlobal(globalZero));
-  mapping.scale(static_cast<float>(unitRatio * to.mSceneCoordinates.displayScale /
-                                    from.mSceneCoordinates.displayScale));
-  return mapping;
+  return sceneDisplayMapping(from.mSceneCoordinates,to.mSceneCoordinates).localToReference;
+}
+
+void NativeViewport::mapViewToScene(const QMatrix4x4 &mapping) {
+  const float lengthScale=mapping.mapVector(QVector3D(1,0,0)).length();
+  const auto mappedAngles=[&](const OrbitAngles &angles) {
+    const OrbitFrame frame=orbitFrame(angles);
+    const auto offset=mapping.mapVector(frame.cameraOffsetDirection).normalized();
+    const auto up=mapping.mapVector(frame.upDirection).normalized();
+    if((offset-frame.cameraOffsetDirection).lengthSquared()<1e-12F &&
+        (up-frame.upDirection).lengthSquared()<1e-12F)return angles;
+    OrbitAngles result;
+    result.pitchDegrees=std::asin(std::clamp(offset.z(),-1.F,1.F))*180.F/kPi;
+    result.yawDegrees=std::atan2(offset.x(),offset.y())*180.F/kPi;
+    const auto baseUp=orbitFrame({result.yawDegrees,result.pitchDegrees,0.F}).upDirection;
+    result.rollDegrees=std::atan2(QVector3D::dotProduct(offset,QVector3D::crossProduct(baseUp,up)),
+        QVector3D::dotProduct(baseUp,up))*180.F/kPi;
+    return result;
+  };
+  const auto angles=mappedAngles(viewOrbitAngles());
+  mTarget=mapping.map(mTarget);
+  mDistance*=lengthScale;mYawDegrees=angles.yawDegrees;mPitchDegrees=angles.pitchDegrees;mRollDegrees=angles.rollDegrees;
+  if(mCameraViewActive&&mSourceCameraClipping)for(auto &length:*mSourceCameraClipping)length*=lengthScale;
+  if(mStoredCameraView) {
+    auto &stored=*mStoredCameraView;
+    const auto savedAngles=mappedAngles({stored.yawDegrees,stored.pitchDegrees,stored.rollDegrees});
+    stored.target=mapping.map(stored.target);stored.distance*=lengthScale;
+    stored.yawDegrees=savedAngles.yawDegrees;stored.pitchDegrees=savedAngles.pitchDegrees;stored.rollDegrees=savedAngles.rollDegrees;
+  }
 }
 
 void NativeViewport::publishActiveSceneState() {
@@ -1077,16 +1113,25 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     if (!retained.isEmpty()) mProcessingPreviewPresent = false;
     if (oldActive != mScene && !changedSource && !retained.isEmpty()) {
       const QMatrix4x4 mapping = sceneDisplayTransform(*oldActive, *mScene);
-      mTarget = mapping.map(oldTarget);
-      mDistance = oldDistance * mapping.mapVector(QVector3D(1, 0, 0)).length();
+      const bool sameCanonical=sceneDisplayMapping(oldActive->mSceneCoordinates,mScene->mSceneCoordinates).verifiedAlignment;
+      if(mCameraViewActive&&!sameCanonical) {
+        // Explicitly restore the ordinary view, rather than retaining only
+        // camera FOV while silently dropping its principal point and skew.
+        toggleCameraView();mSourceCameraIntrinsics.reset();mSourceCameraClipping.reset();
+      } else { mTarget=oldTarget;mDistance=oldDistance; }
+      mapViewToScene(mapping);
     }
   }
   if (oldActive != mScene || changedSource || wasProcessingPreview != mProcessingPreviewPresent) {
     mSelectionGestureActive = false;
     mSelectionPath.clear();
     mPressedButtons = Qt::NoButton;
-    mCameraViewActive = false;
-    mStoredCameraView.reset();
+    const bool keepCalibration=mCameraViewActive&&!changedSource&&oldActive&&
+        (oldActive==mScene||sceneDisplayMapping(oldActive->mSceneCoordinates,mScene->mSceneCoordinates).verifiedAlignment);
+    if(!keepCalibration){
+      if(mCameraViewActive&&mStoredCameraView)toggleCameraView();
+      mCameraViewActive=false;mStoredCameraView.reset();mSourceCameraIntrinsics.reset();mSourceCameraClipping.reset();
+    }
     mModelSelected = !objects.isEmpty();
     mSelectedSceneIds.clear();
     if (mModelSelected) mSelectedSceneIds.insert(mScene->id);
@@ -1163,12 +1208,15 @@ bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &ac
   const auto next = *found;
   const bool activeChanged = next != mScene;
   const QMatrix4x4 mapping = sceneDisplayTransform(*mScene, *next);
-  mTarget = mapping.map(mTarget);
-  mDistance *= mapping.mapVector(QVector3D(1, 0, 0)).length();
+  const bool keepCalibration=mCameraViewActive&&(next==mScene||
+      sceneDisplayMapping(mScene->mSceneCoordinates,next->mSceneCoordinates).verifiedAlignment);
+  if(mCameraViewActive&&!keepCalibration) {
+    toggleCameraView();mSourceCameraIntrinsics.reset();mSourceCameraClipping.reset();
+  }
+  mapViewToScene(mapping);
   mScene = next;
   if (mProcessingScene) mProcessingReferenceScene = next;
-  mCameraViewActive = false;
-  mStoredCameraView.reset();
+  if(!keepCalibration){mCameraViewActive=false;mStoredCameraView.reset();}
   mTransformGizmoHover = {};
   mSelectedSceneIds = selected;
   mModelSelected = !selected.isEmpty();
@@ -2434,18 +2482,17 @@ void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
 
 double NativeViewport::referencePlaneElevation() const {
   if (mReferencePlaneMode != ReferencePlaneMode::ModelBase) return 0.0;
-  double minimum = std::numeric_limits<double>::infinity();
-  for (const auto &state : displayedSceneStates()) {
-    const auto &coordinates = state->mSceneCoordinates;
-    if (!coordinates.valid) continue;
-    // The reference plane belongs to the original source frame, not the
-    // editable model transform. Moving a model must create height above the
-    // plane instead of moving the plane by the same amount. Use source doubles
-    // directly so reports also retain decimal precision after save/reopen.
-    minimum = std::min(minimum, coordinates.globalMinimum.z *
-                                  sourceToReferenceUnitScale(*state));
+  double minimum=std::numeric_limits<double>::infinity();
+  const auto reference=sceneReferenceCoordinates();
+  for(const auto &state:displayedSceneStates()) {
+    const auto &coordinates=state->mSceneCoordinates;if(!coordinates.valid)continue;
+    const auto mapping=sceneDisplayMapping(coordinates,reference);
+    for(int corner=0;corner<8;++corner)minimum=std::min(minimum,mapping.mapCoordinate({
+        corner&1?coordinates.globalMaximum.x:coordinates.globalMinimum.x,
+        corner&2?coordinates.globalMaximum.y:coordinates.globalMinimum.y,
+        corner&4?coordinates.globalMaximum.z:coordinates.globalMinimum.z}).z);
   }
-  return std::isfinite(minimum) ? minimum : 0.0;
+  return std::isfinite(minimum)?minimum:0.;
 }
 
 QString NativeViewport::referencePlaneDescription() const {
@@ -3481,22 +3528,59 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
 }
 
 void NativeViewport::rebuildCameraGeometry() {
-  mScene->mCameraGeometry = mScene->mCameraTrajectory.geometry(mScene->mSceneRadius);
-  if (!mScene->mSceneCoordinates.valid ||
-      (!mScene->mSceneCoordinates.automaticDisplayShift &&
-       mScene->mSceneCoordinates.displayScale == 1.0)) {
-    return;
-  }
-  const auto transformSegments = [this](QList<CameraLineSegment> &segments) {
-    for (CameraLineSegment &segment : segments) {
-      segment.start = mScene->mSceneCoordinates.localFromGlobal(
-          {segment.start.x(), segment.start.y(), segment.start.z()});
-      segment.end = mScene->mSceneCoordinates.localFromGlobal(
-          {segment.end.x(), segment.end.y(), segment.end.z()});
+  mScene->mCameraGeometry = mScene->mCameraTrajectory.geometry(mScene->mSceneRadius,mScene->mSceneCoordinates);
+}
+
+void NativeViewport::refreshActiveSceneMetadata() {
+  const auto scene=mScene;
+  const QString path=scene->mScenePath;
+  if(path.isEmpty())return;
+  const int generation=++scene->mMetadataGeneration;
+  const int sourceGeneration=scene->mSceneGeneration;
+  ++scene->mCameraTrajectoryGeneration; // stale asynchronous camera reads cannot win this refresh.
+  using Result=std::pair<SceneCoordinateMetadata,CameraTrajectory>;
+  auto *watcher=new QFutureWatcher<Result>(this);
+  connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,path,generation,sourceGeneration,weak=std::weak_ptr<SceneState>(scene)] {
+    const auto target=weak.lock();auto result=watcher->result();watcher->deleteLater();
+    if(!target || target->mMetadataGeneration!=generation || target->mSceneGeneration!=sourceGeneration || target->mScenePath!=path)return;
+    const bool foreground=target==mScene;
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene,target);
+    auto &coordinates=target->mSceneCoordinates;
+    coordinates.unit=result.first.unit;coordinates.unitDeclared=result.first.unitDeclared;
+    coordinates.coordinateReferenceSystem=result.first.coordinateReferenceSystem;
+    coordinates.metersPerCoordinate=result.first.metersPerCoordinate;coordinates.scaleStatus=result.first.scaleStatus;
+    coordinates.sourceUnit=result.first.sourceUnit;coordinates.dataIdentity=result.first.dataIdentity;
+    coordinates.provenance=result.first.provenance;coordinates.validationError=result.first.validationError;
+    target->mCameraTrajectory=std::move(result.second);rebuildCameraGeometry();
+    // Bounds/rebasing, per-object TRS, edits, selection and the worker are
+    // deliberately untouched. Both model and cameras share this same layer.
+    if(foreground)publishActiveSceneState();
+    update();
+  });
+  watcher->setFuture(QtConcurrent::run([path,usesDouble=scene->mSceneCoordinates.sourceUsesFloat64,
+      sourceSize=scene->metadataSourceSize,sourceModified=scene->metadataSourceModified,
+      sourceHash=scene->mSceneCoordinates.provenance.value(QStringLiteral("ply_sha256")).toString()] {
+    const QFileInfo current(path);
+    if((sourceSize>=0&&sourceSize!=current.size()) ||
+        (sourceModified>=0&&sourceModified!=current.lastModified().toMSecsSinceEpoch())) {
+      SceneCoordinateMetadata rejected;rejected.validationError=QStringLiteral("camera_scale_model_changed_reload_required");
+      return Result{rejected,{}};
     }
-  };
-  transformSegments(mScene->mCameraGeometry.frustums);
-  transformSegments(mScene->mCameraGeometry.path);
+    QStringList header;QFile file(path);
+    if(file.open(QIODevice::ReadOnly))while(!file.atEnd()&&file.pos()<1024*1024) {
+      const auto line=file.readLine(65537).trimmed();
+      if(line=="end_header")break;
+      if(line.startsWith("comment "))header.append(QString::fromUtf8(line.mid(8)));
+      else if(line.startsWith("obj_info "))header.append(QString::fromUtf8(line.mid(9)));
+    }
+    auto metadata=parsePlyCoordinateMetadata(header,path,usesDouble);
+    if(!sourceHash.isEmpty() && !metadata.provenance.isEmpty() &&
+        metadata.provenance.value(QStringLiteral("ply_sha256")).toString()!=sourceHash) {
+      metadata={};metadata.validationError=QStringLiteral("camera_scale_model_changed_reload_required");
+      return Result{metadata,{}};
+    }
+    return Result{metadata,CameraTrajectory::loadForScene(path)};
+  }));
 }
 
 QMatrix4x4 NativeViewport::trainingPreviewCoordinateTransform() const {
@@ -3600,6 +3684,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->resourceForcePagedRetry = false;
             mScene->resourceLoadReservation = reservation;
             mScene->mScenePath = scenePath;
+            mScene->metadataSourceSize=QFileInfo(scenePath).size();
+            mScene->metadataSourceModified=QFileInfo(scenePath).lastModified().toMSecsSinceEpoch();
             if (continuous) {
               if (targetScene == mProcessingScene) {
                 mScene->sourceTranslation = {};
@@ -3730,6 +3816,9 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             emit sceneLoaded(data.sourceVertexCount, mScene->mPreviewPointCount,
                              data.sourceFaceCount, mScene->mPreviewTriangleCount);
             emit sceneCoordinatesChanged();
+            if(!mScene->mSceneCoordinates.provenance.isEmpty() &&
+                !mScene->mSceneCoordinates.provenance.value(QStringLiteral("native_hash_verified")).toBool())
+              refreshActiveSceneMetadata();
             updateManagedResourceUsage();
             emit resourceBudgetStatusChanged();
           });
@@ -4054,7 +4143,13 @@ void NativeViewport::applyGroupTransform(const QVector3D &translation,
     const QVector3D newCenter = mGroupPivot + translation +
         rotation.rotatedVector((oldCenter - mGroupPivot) * commonFactor);
     state.mModelTranslation = mapping.inverted().map(newCenter) - state.mSceneCenter;
-    state.mModelRotation = normalizedModelRotation(rotation * before.rotation);
+    QMatrix3x3 basis;
+    for(int column=0;column<3;++column) {
+      const auto axis=mapping.mapVector(column==0?QVector3D(1,0,0):column==1?QVector3D(0,1,0):QVector3D(0,0,1)).normalized();
+      for(int row=0;row<3;++row)basis(row,column)=axis[row];
+    }
+    const auto frameRotation=QQuaternion::fromRotationMatrix(basis).normalized();
+    state.mModelRotation = normalizedModelRotation(frameRotation.conjugated()*rotation*frameRotation*before.rotation);
     state.mModelScale = normalizedModelScale(before.scale * commonFactor);
     state.sortDirectionValid = false;
   }
@@ -5309,9 +5404,14 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   glLineWidth(1.0F);
   mGridProgram->bind();
   const ReferenceGridScale scale = sceneGridScale();
-  const ReferenceGridPlane plane =
-      referenceGridPlane({mYawDegrees, mPitchDegrees}, mOrthographic);
-  const ReferenceGridFrame grid = referenceGridFrame(plane);
+  const auto referenceMapping=sceneDisplayTransform(coordinateReferenceScene(),*mScene);
+  const auto referenceOffset=referenceMapping.inverted().mapVector(orbitFrame(viewOrbitAngles()).cameraOffsetDirection).normalized();
+  const ReferenceGridPlane plane = referenceGridPlane({std::atan2(referenceOffset.x(),referenceOffset.y())*180.F/kPi,
+      std::asin(std::clamp(referenceOffset.z(),-1.F,1.F))*180.F/kPi},mOrthographic);
+  auto grid = referenceGridFrame(plane);
+  grid.axisU=referenceMapping.mapVector(grid.axisU).normalized();
+  grid.axisV=referenceMapping.mapVector(grid.axisV).normalized();
+  grid.normal=referenceMapping.mapVector(grid.normal).normalized();
   const QVector3D gridPlaneOrigin = gridOrigin(plane);
   const QVector3D relativeCamera = cameraPosition() - gridPlaneOrigin;
   Q_UNUSED(viewProjection);
@@ -5954,7 +6054,25 @@ void NativeViewport::toggleCameraView() {
 bool NativeViewport::setSourceCameraView(const qsizetype index) {
   if (!camerasAvailable() || index < 0 || index >= cameraCount()) return false;
   const CameraPose &camera = mScene->mCameraTrajectory.cameras().at(index);
-  const auto mapping = modelMatrix() * trainingPreviewCoordinateTransform();
+  mSourceCameraIntrinsics.reset();
+  mSourceCameraClipping.reset();
+  const auto clipping=mScene->mCameraTrajectory.clipping();
+  const double sourceNear=std::max(clipping.value(QStringLiteral("znear")).toDouble(),
+      clipping.value(QStringLiteral("backend_near")).toDouble());
+  const double sourceFar=clipping.value(QStringLiteral("zfar")).toDouble();
+  if(std::isfinite(sourceNear)&&std::isfinite(sourceFar)&&sourceNear>0.&&sourceFar>sourceNear) {
+    const double localScale=mScene->mSceneCoordinates.displayScale*modelMatrix().mapVector(camera.forward).length();
+    mSourceCameraClipping=std::array<double,2>{sourceNear*localScale,sourceFar*localScale};
+  }
+  if(camera.intrinsics.size()==3 && camera.width>0 && camera.height>0) {
+    const auto row0=camera.intrinsics[0].toArray(),row1=camera.intrinsics[1].toArray();
+    if(row0.size()==3 && row1.size()==3) {
+      const double offset=camera.pixelCoordinates==QStringLiteral("opencv_integer")?.5:0.;
+      mSourceCameraIntrinsics=std::array<double,7>{row0[0].toDouble(),row1[1].toDouble(),
+          row0[2].toDouble()+offset,row1[2].toDouble()+offset,row0[1].toDouble(),double(camera.width),double(camera.height)};
+    }
+  }
+  const auto mapping = modelMatrix();
   const QVector3D forward = mapping.mapVector(camera.forward).normalized();
   QVector3D up = mapping.mapVector(-camera.imageDown);
   up = (up - forward * QVector3D::dotProduct(up, forward)).normalized();
@@ -5975,7 +6093,7 @@ bool NativeViewport::setSourceCameraView(const qsizetype index) {
   const QVector3D baseUp = orbitFrame(viewOrbitAngles()).upDirection;
   mRollDegrees = std::atan2(QVector3D::dotProduct(cameraOffset,
       QVector3D::crossProduct(baseUp, up)), QVector3D::dotProduct(baseUp, up)) * 180.0F / kPi;
-  mTarget = mapping.map(camera.position) + forward * mDistance;
+  mTarget = mapping.map(mScene->mSceneCoordinates.localFromGlobal(camera.globalPosition)) + forward * mDistance;
   mPerspectiveFovDegrees = camera.verticalFovDegrees;
   mFocalAspectCorrection = camera.focalAspectCorrection;
   mOrthographic = false;
@@ -6202,7 +6320,7 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   const float referenceLocalUnit = reference.valid && mScene->mSceneCoordinates.valid
       ? static_cast<float>(mScene->mSceneCoordinates.displayScale /
           (sourceToSceneUnitScale() * reference.displayScale)) : 1.0F;
-  const float nearPlane = std::max(0.001F * referenceLocalUnit, mDistance / 10000.0F);
+  float nearPlane = std::max(0.001F * referenceLocalUnit, mDistance / 10000.0F);
   const float modelDistance =
       (transformedSceneCenter() - cameraPosition()).length();
   const float transformedRadius =
@@ -6219,6 +6337,12 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
     farPlane = std::max(farPlane, (mapping.map(state->mSceneCenter + state->mModelTranslation) -
                                   cameraPosition()).length() + radius * 12);
   }
+  if(mCameraViewActive&&mSourceCameraClipping) {
+    const double near=(*mSourceCameraClipping)[0],far=(*mSourceCameraClipping)[1];
+    if(std::isfinite(near)&&std::isfinite(far)&&near>0.&&far>near&&far<std::numeric_limits<float>::max()) {
+      nearPlane=static_cast<float>(near);farPlane=static_cast<float>(far);
+    }
+  }
   if (mOrthographic) {
     const float halfHeight =
         std::max(0.05F * referenceLocalUnit, mDistance * std::tan(radians(mPerspectiveFovDegrees * 0.5F)));
@@ -6227,6 +6351,14 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
   } else {
     projection.perspective(mPerspectiveFovDegrees, aspect, nearPlane, farPlane);
     projection(0, 0) *= mFocalAspectCorrection;
+    if(mCameraViewActive && mSourceCameraIntrinsics) {
+      const auto &k=*mSourceCameraIntrinsics;
+      projection(0,0)=static_cast<float>(2.*k[0]/(k[6]*aspect));
+      projection(0,1)=static_cast<float>(-2.*k[4]/(k[6]*aspect));
+      projection(0,2)=static_cast<float>((k[5]-2.*k[2])/(k[6]*aspect));
+      projection(1,1)=static_cast<float>(2.*k[1]/k[6]);
+      projection(1,2)=static_cast<float>(2.*k[3]/k[6]-1.);
+    }
   }
   return projection;
 }

@@ -65,6 +65,24 @@ class ReconstructionComparisonTests(unittest.TestCase):
             export_comparison(self.request, self.root / "cancelled", cancelled=lambda: True)
         self.assertFalse((self.root / "cancelled").exists())
 
+    def test_runtime_policies_reopen_with_legacy_off_migration_and_independent_new_guard(self):
+        self.request['conditions'][0]['training']['performanceOptions'] = {
+            'enabled': False, 'capacity_storage': True, 'loss_mode': 'auto'}
+        self.request['conditions'][1]['training']['runtimeOptions'] = {'version': 2,
+            'resourceGuard': {'enabled': False},
+            'execution': {'image_staging': True, 'camera_prefetch': True}}
+        result = export_comparison(self.request, self.root / 'runtime-comparison')
+        verified = verify_comparison(result['profilePath'])
+        old, new = verified['conditions']
+        self.assertEqual(old['runtime_configuration']['migration']['source'], 'performanceOptions')
+        self.assertFalse(old['runtime_configuration']['effective']['execution']['capacity_storage'])
+        self.assertEqual(old['runtime_configuration']['effective']['execution']['loss_mode'], 'stock')
+        self.assertFalse(new['runtime_configuration']['requested']['resourceGuard']['enabled'])
+        self.assertTrue(new['runtime_configuration']['requested']['execution']['image_staging'])
+        self.assertTrue(new['runtime_configuration']['requested']['execution']['camera_prefetch'])
+        self.assertEqual(old['initialization']['point_sha256'], new['initialization']['point_sha256'])
+        self.assertFalse(any(self.root.glob('**/point_cloud.ply')))
+
     def test_public_cli_exports_without_training_and_completes_with_control_pipe_open(self):
         request = self.root / "comparison-request.json"
         request.write_text(json.dumps(self.request), encoding="utf-8")

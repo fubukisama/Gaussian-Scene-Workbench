@@ -22,6 +22,11 @@ class MemoryObservation:
     free_bytes: int
     total_bytes: int
     reusable_cache_bytes: int = 0
+    allocated_bytes: object = None
+    reserved_bytes: object = None
+    active_bytes: object = None
+    inactive_split_bytes: object = None
+    allocator_status: str = 'unreported'
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,14 @@ class GrowthDecision:
     available_bytes: int = 0
     observation_valid: bool = False
     cache_credit_bytes: int = 0
+    cache_reclaim_attempted: bool = False
+    device_free_before_reclaim_bytes: int = 0
+    cache_reclaim_status: str = 'not_attempted'
+    torch_allocated_bytes: object = None
+    torch_reserved_bytes: object = None
+    torch_active_bytes: object = None
+    torch_inactive_split_bytes: object = None
+    allocator_observation_status: str = 'unreported'
 
 
 _GROUP_NAMES = ("xyz", "f_dc", "f_rest", "opacity", "scaling", "rotation")
@@ -47,9 +60,9 @@ GROWTH_INTEGER_FIELDS = (
     "point_count", "transient_point_count", "final_point_count", "parameter_bytes",
     "optimizer_state_bytes", "additional_peak_bytes", "free_bytes", "total_bytes",
     "spare_bytes", "available_bytes", "cache_credit_bytes", "clone_count", "split_count")
-GROWTH_BOOLEAN_FIELDS = ("allowed", "observation_valid", "candidate_counts_known")
+GROWTH_BOOLEAN_FIELDS = ("allowed", "observation_valid", "candidate_counts_known", "guard_enabled", "cache_reclaim_attempted")
 GROWTH_REASONS = ("admitted", "vram_pressure", "probe_unavailable",
-                  "invalid_observation", "estimate_unavailable")
+                  "invalid_observation", "estimate_unavailable", "guard_disabled")
 
 
 def normalize_growth(payload):
@@ -62,10 +75,11 @@ def normalize_growth(payload):
             payload["version"] != 1 or payload.get("backend") not in ("3dgs", "2dgs") or
             type(payload.get("iteration")) is not int or
             not 0 <= payload["iteration"] <= 2 ** 53 - 1 or
-            payload.get("state") not in ("admitted", "deferred") or
+            payload.get("state") not in ("admitted", "deferred", "bypassed") or
             payload.get("reason") not in GROWTH_REASONS):
         return None
-    if ((payload["state"] == "admitted") != (payload["reason"] == "admitted")):
+    if ((payload["state"] == "admitted") != (payload["reason"] == "admitted") or
+            (payload['state'] == 'bypassed') != (payload['reason'] == 'guard_disabled')):
         return None
     result = {key: payload[key] for key in ("version", "backend", "iteration", "state", "reason")}
     for key in GROWTH_INTEGER_FIELDS:
@@ -78,15 +92,47 @@ def normalize_growth(payload):
             if type(payload[key]) is not bool:
                 return None
             result[key] = payload[key]
-    if ("allowed" in result and result["allowed"] != (result["state"] == "admitted")):
+    if 'device_free_before_reclaim_bytes' in payload:
+        value = payload['device_free_before_reclaim_bytes']
+        if type(value) is not int or not 0 <= value <= 2 ** 53 - 1:
+            return None
+        result['device_free_before_reclaim_bytes'] = value
+    if 'cache_reclaim_status' in payload:
+        if payload['cache_reclaim_status'] not in ('not_attempted', 'reclaimed_remeasured'):
+            return None
+        result['cache_reclaim_status'] = payload['cache_reclaim_status']
+    for key in ('torch_allocated_bytes', 'torch_reserved_bytes', 'torch_active_bytes',
+                'torch_inactive_split_bytes'):
+        if key in payload:
+            value = payload[key]
+            if value is not None and (type(value) is not int or not 0 <= value <= 2 ** 53 - 1):
+                return None
+            result[key] = value
+    if 'allocator_observation_status' in payload:
+        if payload['allocator_observation_status'] not in ('unreported', 'known', 'partial', 'invalid', 'unavailable'):
+            return None
+        result['allocator_observation_status'] = payload['allocator_observation_status']
+    if ("allowed" in result and result["allowed"] != (result["state"] in ("admitted", "bypassed"))):
         return None
     if result["state"] == "admitted" and result.get("observation_valid") is False:
+        return None
+    if result['state'] == 'bypassed' and (result.get('guard_enabled') is not False or
+            result.get('observation_valid') is not False or any(result[key] for key in GROWTH_INTEGER_FIELDS)):
         return None
     if result.get("observation_valid") and (
             result["total_bytes"] <= 0 or result["free_bytes"] > result["total_bytes"] or
             result["cache_credit_bytes"] > result["total_bytes"] - result["free_bytes"]):
         return None
     return result
+
+
+def is_cuda_out_of_memory(error):
+    """Recognize the external Torch error without importing or starting CUDA."""
+    return (any(kind.__name__ == 'OutOfMemoryError' and kind.__module__.startswith('torch')
+                for kind in type(error).__mro__) or
+            isinstance(error, RuntimeError) and str(error).lstrip().startswith((
+                'CUDA out of memory', 'CUDA error: out of memory',
+                'CUDA runtime error (2) : out of memory')))
 
 
 def _tensor_metadata(tensor):
@@ -214,27 +260,50 @@ class GrowthAdmission:
     CACHE_CREDIT_FRACTION = .5
 
     def __init__(self, memory_probe, usage_fraction=.90,
-                 minimum_spare_bytes=512 * 1024 ** 2):
+                 minimum_spare_bytes=512 * 1024 ** 2, cache_reclaimer=None):
         if (not callable(memory_probe) or isinstance(usage_fraction, bool) or
                 not isinstance(usage_fraction, numbers.Real) or
                 not math.isfinite(usage_fraction) or not 0 < usage_fraction <= 1 or
                 isinstance(minimum_spare_bytes, bool) or
                 not isinstance(minimum_spare_bytes, numbers.Integral) or
-                not 0 < minimum_spare_bytes <= 2 ** 63 - 1):
+                not 0 <= minimum_spare_bytes <= 2 ** 63 - 1 or
+                cache_reclaimer is not None and not callable(cache_reclaimer)):
             raise ValueError("Invalid growth-admission configuration")
         self.memory_probe = memory_probe
         self.usage_fraction = float(usage_fraction)
         self.minimum_spare_bytes = int(minimum_spare_bytes)
+        self.cache_reclaimer = cache_reclaimer
 
     def evaluate(self, model, backend, clone_count=None, split_count=None):
+        decision = self._evaluate_once(model, backend, clone_count, split_count)
+        if (decision.reason == 'vram_pressure' and decision.observation_valid
+                and decision.cache_credit_bytes > 0 and self.cache_reclaimer is not None):
+            # Only release independently classified inactive cache, never live
+            # model/Adam tensors. A subsequent measurement, not the credit,
+            # must satisfy the actual-free reserve. Real CUDA failures escape.
+            self.cache_reclaimer()
+            measured = self._evaluate_once(model, backend, clone_count, split_count)
+            return replace(measured, cache_reclaim_attempted=True,
+                           device_free_before_reclaim_bytes=decision.free_bytes,
+                           cache_reclaim_status='reclaimed_remeasured')
+        return decision
+
+    def _evaluate_once(self, model, backend, clone_count, split_count):
         try:
             observation = self.memory_probe()
-        except Exception:
+        except Exception as error:
+            if is_cuda_out_of_memory(error):
+                raise
             return GrowthDecision(False, "probe_unavailable")
+        metadata = {}
         if isinstance(observation, MemoryObservation):
             free, total, reusable = (observation.free_bytes,
                                      observation.total_bytes,
                                      observation.reusable_cache_bytes)
+            metadata = {target: getattr(observation, source) for source, target in (
+                ('allocated_bytes', 'torch_allocated_bytes'), ('reserved_bytes', 'torch_reserved_bytes'),
+                ('active_bytes', 'torch_active_bytes'), ('inactive_split_bytes', 'torch_inactive_split_bytes'))}
+            metadata['allocator_observation_status'] = observation.allocator_status
         elif isinstance(observation, (tuple, list)) and len(observation) == 2:
             free, total = observation
             reusable = 0
@@ -252,12 +321,14 @@ class GrowthAdmission:
         available = max(0, free + cache_credit - spare)
         try:
             estimate = _estimate(model, backend, clone_count, split_count)
-        except Exception:
+        except Exception as error:
+            if is_cuda_out_of_memory(error):
+                raise
             return GrowthDecision(False, "estimate_unavailable",
                                   free_bytes=free, total_bytes=total,
                                   spare_bytes=spare, available_bytes=available,
                                   observation_valid=True,
-                                  cache_credit_bytes=cache_credit)
+                                  cache_credit_bytes=cache_credit, **metadata)
         allowed = (free >= self.minimum_spare_bytes and
                    estimate["additional_peak_bytes"] <= available)
         return GrowthDecision(allowed,
@@ -266,7 +337,7 @@ class GrowthAdmission:
                               spare_bytes=spare, available_bytes=available,
                               observation_valid=True,
                               cache_credit_bytes=cache_credit,
-                              **estimate)
+                               **dict(estimate, **metadata))
 
 
 def admit_densification(torch, model, backend, threshold, extent, policy,
@@ -277,14 +348,24 @@ def admit_densification(torch, model, backend, threshold, extent, policy,
     The preflight uses metadata only, before candidate Tensor operations.
     """
     if policy is None:
+        if emit is not None:
+            event = asdict(GrowthDecision(True, 'guard_disabled'))
+            event.update(version=GrowthAdmission.VERSION, backend=backend, iteration=iteration,
+                         state='bypassed', clone_count=0, split_count=0,
+                         candidate_counts_known=False, guard_enabled=False)
+            try:
+                emit('[gsw-training-growth]', event)
+            except Exception:
+                pass
         return True
     decision = policy.evaluate(model, backend, clone_count=0, split_count=0)
+    first_decision = decision
     clone_count = split_count = 0
     candidates_known = False
     if decision.allowed:
         try:
             if (isinstance(threshold, bool) or not isinstance(threshold, numbers.Real) or
-                    not math.isfinite(threshold) or threshold <= 0 or
+                    not math.isfinite(threshold) or threshold < 0 or
                     isinstance(extent, bool) or not isinstance(extent, numbers.Real) or
                     not math.isfinite(extent) or extent <= 0 or
                     not math.isfinite(model.percent_dense) or model.percent_dense < 0):
@@ -309,7 +390,13 @@ def admit_densification(torch, model, backend, threshold, extent, policy,
             candidates_known = True
             decision = policy.evaluate(model, backend, clone_count=clone_count,
                                        split_count=split_count)
-        except Exception:
+            if first_decision.cache_reclaim_attempted and not decision.cache_reclaim_attempted:
+                decision = replace(decision, cache_reclaim_attempted=True,
+                                   device_free_before_reclaim_bytes=first_decision.device_free_before_reclaim_bytes,
+                                   cache_reclaim_status=first_decision.cache_reclaim_status)
+        except Exception as error:
+            if is_cuda_out_of_memory(error):
+                raise
             decision = replace(decision, allowed=False, reason="estimate_unavailable")
     if emit is not None:
         event = asdict(decision)
@@ -317,7 +404,7 @@ def admit_densification(torch, model, backend, threshold, extent, policy,
                      iteration=iteration,
                      state="admitted" if decision.allowed else "deferred",
                      clone_count=clone_count, split_count=split_count,
-                     candidate_counts_known=candidates_known)
+                     candidate_counts_known=candidates_known, guard_enabled=True)
         try:
             emit("[gsw-training-growth]", event)
         except Exception:

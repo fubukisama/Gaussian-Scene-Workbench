@@ -7,6 +7,12 @@
 #include <QJsonParseError>
 #include <QProcessEnvironment>
 #include <QTimer>
+#include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
+#include <QRegularExpression>
+#include <QUuid>
+#include <QSaveFile>
 
 #include <cmath>
 #include <limits>
@@ -109,6 +115,94 @@ bool observerHeader(const QJsonObject &payload) {
          nonnegativeInteger(payload.value(QStringLiteral("iteration")));
 }
 
+bool runtimeOptionsObserved(const QJsonObject &options) {
+  if(options.value(QStringLiteral("version")).toDouble(-1)!=2.0) return false;
+  const auto guard=options.value(QStringLiteral("resourceGuard")).toObject();
+  const auto execution=options.value(QStringLiteral("execution")).toObject();
+  const auto monitoring=options.value(QStringLiteral("monitoring")).toObject();
+  const auto boundedInteger=[](const QJsonValue &value,double minimum,double maximum) {
+    return nonnegativeInteger(value) && value.toDouble()>=minimum && value.toDouble()<=maximum;
+  };
+  if(!guard.value(QStringLiteral("enabled")).isBool() ||
+      !QStringList{QStringLiteral("pause"),QStringLiteral("defer")}.contains(guard.value(QStringLiteral("mode")).toString()) ||
+      !nonnegativeReal(guard.value(QStringLiteral("usage_fraction"))) ||
+      guard.value(QStringLiteral("usage_fraction")).toDouble()<.5 ||
+      guard.value(QStringLiteral("usage_fraction")).toDouble()>1.0 ||
+      !boundedInteger(guard.value(QStringLiteral("minimum_spare_mib")),0,1048576) ||
+      !boundedInteger(guard.value(QStringLiteral("max_consecutive_denials")),1,1000000)) return false;
+  for(const auto &key:QStringList{QStringLiteral("image_staging"),QStringLiteral("camera_prefetch"),
+      QStringLiteral("capacity_storage"),QStringLiteral("surfel_auxiliary")})
+    if(!execution.value(key).isBool()) return false;
+  return QStringList{QStringLiteral("auto"),QStringLiteral("stock")}.contains(execution.value(QStringLiteral("loss_mode")).toString()) &&
+      QStringList{QStringLiteral("stock"),QStringLiteral("fastergs")}.contains(execution.value(QStringLiteral("engine")).toString()) &&
+      boundedInteger(execution.value(QStringLiteral("gpu_slots")),1,2) &&
+      boundedInteger(execution.value(QStringLiteral("pinned_mib")),16,1024) &&
+      boundedInteger(execution.value(QStringLiteral("gpu_mib")),16,2048) &&
+      boundedInteger(monitoring.value(QStringLiteral("profile_interval")),1,1000000);
+}
+
+bool persistentSafePath(const QString &path) {
+  if (!QDir::isAbsolutePath(path) || QDir::fromNativeSeparators(path).split('/').contains("..")) return false;
+  QFileInfo current(path);
+  for (;;) {
+    if (current.isSymbolicLink()) return false;
+#ifdef Q_OS_WIN
+    const DWORD attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(current.absoluteFilePath().utf16()));
+    if (attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+#endif
+    const QString parent=current.absolutePath();
+    if (parent==current.absoluteFilePath()) break;
+    current.setFile(parent);
+  }
+  return true;
+}
+
+QJsonObject readPersistentObject(const QString &path,const qint64 maximum) {
+  if (!persistentSafePath(path)) return {};
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly) || file.size()>maximum) return {};
+  QJsonParseError error;
+  const auto value=QJsonDocument::fromJson(file.readAll(),&error);
+  return error.error==QJsonParseError::NoError && value.isObject()?value.object():QJsonObject{};
+}
+
+#ifdef Q_OS_WIN
+QString persistentStartToken(const HANDLE process) {
+  FILETIME creation{},exit{},kernel{},user{};
+  if (!GetProcessTimes(process,&creation,&exit,&kernel,&user)) return {};
+  const quint64 token=(quint64(creation.dwHighDateTime)<<32)|creation.dwLowDateTime;
+  return QStringLiteral("win-filetime:")+QString::number(token);
+}
+#endif
+
+bool persistentIdentityMayWrite(const QJsonObject &identity) {
+#ifdef Q_OS_WIN
+  const double pid = identity.value(QStringLiteral("pid")).toDouble(-1);
+  const QString expected = identity.value(QStringLiteral("startToken")).toString();
+  static const QRegularExpression tokenPattern(QStringLiteral("^win-filetime:[1-9][0-9]*$"));
+  bool tokenParsed=false;
+  const quint64 tokenValue=expected.mid(13).toULongLong(&tokenParsed);
+  if (!std::isfinite(pid) || pid < 1 || pid > 4294967295.0 || std::floor(pid) != pid ||
+      identity.size()!=2 || !tokenPattern.match(expected).hasMatch() || !tokenParsed || tokenValue==0) return true;
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+  if (!process) return GetLastError() != ERROR_INVALID_PARAMETER;
+  DWORD exitCode = 0;
+  const bool readable = GetExitCodeProcess(process, &exitCode);
+  const QString token = persistentStartToken(process);
+  CloseHandle(process);
+  return !readable || token.isEmpty() || (exitCode == STILL_ACTIVE && token == expected);
+#else
+  Q_UNUSED(identity);
+  return true;
+#endif
+}
+
+bool writePersistentObject(const QString &path, const QJsonObject &object) {
+  QSaveFile file(path); file.setDirectWriteFallback(false);
+  const auto data = QJsonDocument(object).toJson(QJsonDocument::Compact);
+  return file.open(QIODevice::WriteOnly) && file.write(data) == data.size() && file.commit();
+}
+
 bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
   const QByteArray jsonPayload = jsonObjectPrefix(payload);
   if (jsonPayload.isEmpty()) {
@@ -204,12 +298,19 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
     const QStringList allowed = key == QStringLiteral("reconstructionQuality")
         ? QStringList{QStringLiteral("accepted"), QStringLiteral("partial"), QStringLiteral("repairing"), QStringLiteral("rejected")}
         : QStringList{QStringLiteral("reconstruction_quality"), QStringLiteral("source_frames_missing"),
-                      QStringLiteral("training_renderer_resume")};
+                      QStringLiteral("training_renderer_resume"),QStringLiteral("training_cuda_oom"),
+                      QStringLiteral("training_cuda_oom_reported"),QStringLiteral("training_exception"),
+                      QStringLiteral("training_resource_pause")};
     if (!value.isString() || !allowed.contains(value.toString())) return false;
     if (key == QStringLiteral("reconstructionQuality")) parsedStatus.reconstructionQuality = value.toString();
     else parsedStatus.generationIssue = value.toString();
   }
 
+  const auto delivery=object.value(QStringLiteral("trainingDelivery")).toObject();
+  if (delivery.value(QStringLiteral("training_status"))==QStringLiteral("done") &&
+      QStringList{QStringLiteral("running"),QStringLiteral("ready"),QStringLiteral("blocked"),
+        QStringLiteral("failed"),QStringLiteral("cancelled")}.contains(delivery.value(QStringLiteral("export_status")).toString()))
+    parsedStatus.trainingDelivery=delivery;
   // Summary metadata is optional for old workers. Reject malformed metadata
   // independently: a bad caption must never discard valid progress samples.
   const QJsonObject summary = object.value(QStringLiteral("trainingSummary")).toObject();
@@ -283,6 +384,17 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
       object.value(QStringLiteral("trainingPerformance")).toObject());
   parsedStatus.trainingGrowth = normalizeTrainingGrowth(
       object.value(QStringLiteral("trainingGrowth")).toObject());
+  const auto runtime=object.value(QStringLiteral("runtimeConfiguration")).toObject();
+  if(runtimeOptionsObserved(runtime.value(QStringLiteral("requested")).toObject()) &&
+      runtimeOptionsObserved(runtime.value(QStringLiteral("effective")).toObject()) &&
+      runtime.value(QStringLiteral("reasons")).isArray() && runtime.value(QStringLiteral("migration")).isObject() &&
+      QJsonDocument(runtime).toJson(QJsonDocument::Compact).size()<=1024*1024)
+    parsedStatus.runtimeConfiguration=runtime;
+  const QString failure=object.value(QStringLiteral("failureReason")).toString();
+  if(QStringList{QStringLiteral("cuda_oom"),QStringLiteral("cuda_oom_reported"),QStringLiteral("training_exception"),
+      QStringLiteral("manual_pause"),QStringLiteral("resource_probe_unavailable"),
+      QStringLiteral("resource_estimate_unavailable"),QStringLiteral("vram_pressure")}.contains(failure))
+    parsedStatus.failureReason=failure;
 
   *status = std::move(parsedStatus);
   return true;
@@ -338,11 +450,13 @@ QJsonObject normalizeTrainingGrowth(const QJsonObject &payload) {
   const QString state = payload.value(QStringLiteral("state")).toString();
   const QString reason = payload.value(QStringLiteral("reason")).toString();
   const bool admitted = state == QStringLiteral("admitted");
-  if ((!admitted && state != QStringLiteral("deferred")) ||
+  const bool bypassed=state==QStringLiteral("bypassed");
+  if ((!admitted && !bypassed && state != QStringLiteral("deferred")) ||
       !QStringList{QStringLiteral("admitted"), QStringLiteral("vram_pressure"),
           QStringLiteral("probe_unavailable"), QStringLiteral("invalid_observation"),
-          QStringLiteral("estimate_unavailable")}.contains(reason) ||
-      admitted != (reason == QStringLiteral("admitted"))) return {};
+          QStringLiteral("estimate_unavailable"),QStringLiteral("guard_disabled")}.contains(reason) ||
+      admitted != (reason == QStringLiteral("admitted")) ||
+      bypassed != (reason==QStringLiteral("guard_disabled"))) return {};
   QJsonObject result;
   for (const QString &key : {QStringLiteral("version"), QStringLiteral("backend"),
       QStringLiteral("iteration"), QStringLiteral("state"), QStringLiteral("reason")})
@@ -354,17 +468,40 @@ QJsonObject normalizeTrainingGrowth(const QJsonObject &payload) {
       QStringLiteral("available_bytes"), QStringLiteral("cache_credit_bytes"),
       QStringLiteral("clone_count"), QStringLiteral("split_count")}) {
     if (!nonnegativeInteger(payload.value(key))) return {};
+    if(bypassed && payload.value(key).toDouble()!=0.0) return {};
     result.insert(key, payload.value(key));
   }
   for (const QString &key : {QStringLiteral("allowed"), QStringLiteral("observation_valid"),
-                            QStringLiteral("candidate_counts_known")}) {
+                            QStringLiteral("candidate_counts_known"),QStringLiteral("guard_enabled"),
+                            QStringLiteral("cache_reclaim_attempted")}) {
     const auto value = payload.value(key);
     if (value.isUndefined()) continue;
     if (!value.isBool()) return {};
     result.insert(key, value);
   }
   if (result.contains(QStringLiteral("allowed")) &&
-      result.value(QStringLiteral("allowed")).toBool() != admitted) return {};
+      result.value(QStringLiteral("allowed")).toBool() != (admitted || bypassed)) return {};
+  if(bypassed && (!result.value(QStringLiteral("guard_enabled")).isBool() ||
+      result.value(QStringLiteral("guard_enabled")).toBool() ||
+      !result.value(QStringLiteral("observation_valid")).isBool() ||
+      result.value(QStringLiteral("observation_valid")).toBool())) return {};
+  for(const auto &key:QStringList{QStringLiteral("device_free_before_reclaim_bytes"),
+      QStringLiteral("torch_allocated_bytes"),QStringLiteral("torch_reserved_bytes"),
+      QStringLiteral("torch_active_bytes"),QStringLiteral("torch_inactive_split_bytes")}) {
+    const auto value=payload.value(key);
+    if(value.isUndefined()) continue;
+    if(!value.isNull() && !nonnegativeInteger(value)) return {};
+    result.insert(key,value);
+  }
+  for(const auto &key:QStringList{QStringLiteral("cache_reclaim_status"),QStringLiteral("allocator_observation_status")}) {
+    const auto value=payload.value(key);
+    if(value.isUndefined()) continue;
+    const QStringList allowed=key==QStringLiteral("cache_reclaim_status")
+        ?QStringList{QStringLiteral("not_attempted"),QStringLiteral("reclaimed_remeasured")}
+        :QStringList{QStringLiteral("unreported"),QStringLiteral("known"),QStringLiteral("partial"),QStringLiteral("invalid"),QStringLiteral("unavailable")};
+    if(!value.isString() || !allowed.contains(value.toString())) return {};
+    result.insert(key,value);
+  }
   if (admitted && result.value(QStringLiteral("observation_valid")).isBool() &&
       !result.value(QStringLiteral("observation_valid")).toBool()) return {};
   if (result.value(QStringLiteral("observation_valid")).toBool()) {
@@ -382,9 +519,47 @@ std::optional<WorkerStatus> ProcessSupervisor::decodeStatusEvent(const QByteArra
   return status;
 }
 
+bool ProcessSupervisor::hasUnfinishedTraining(const QString &jobStore) {
+  const QDir store(jobStore);
+  if (!store.exists()) return false;
+  if (!persistentSafePath(store.absolutePath())) return true;
+  const QString owners = store.filePath(QStringLiteral(".p"));
+  if (!persistentSafePath(owners)) return true;
+  const auto launches = QDir(owners).entryInfoList({QStringLiteral("*.json")},QDir::Files);
+  if (launches.size() > 4096) return true;
+  for (const auto &file : launches) {
+    const auto owner = readPersistentObject(file.absoluteFilePath(),65536);
+    if (owner.value(QStringLiteral("version")).toInt() != 1) return true;
+    if (!owner.value(QStringLiteral("closed")).toBool(false) &&
+        persistentIdentityMayWrite(owner.value(QStringLiteral("workerIdentity")).toObject())) return true;
+  }
+  const auto files = store.entryInfoList({QStringLiteral("*.json")}, QDir::Files | QDir::NoDotAndDotDot);
+  if (files.size() > 4096) return true;
+  const QRegularExpression id(QStringLiteral("^[0-9a-f]{32}\\.json$"));
+  for (const auto &file : files) {
+    if (!id.match(file.fileName()).hasMatch()) continue;
+    const auto job = readPersistentObject(file.absoluteFilePath(), 16 * 1024 * 1024);
+    if (job.isEmpty()) return true;
+    const QString state = job.value(QStringLiteral("status")).toString();
+    if (!QStringList{QStringLiteral("queued"),QStringLiteral("running"),QStringLiteral("cancelling")}.contains(state)) continue;
+    const auto control = job.value(QStringLiteral("native_control")).toObject();
+    const QString session = control.value(QStringLiteral("session")).toString();
+    if (!QRegularExpression(QStringLiteral("^[0-9a-f]{32}$")).match(session).hasMatch()) return true;
+    const auto lease = readPersistentObject(store.filePath(QStringLiteral(".c/") + session + QStringLiteral(".json")), 65536);
+    if (lease.value(QStringLiteral("jobId")) != job.value(QStringLiteral("id")) ||
+        lease.value(QStringLiteral("session")) != session ||
+        lease.value(QStringLiteral("output")) != control.value(QStringLiteral("output"))) return true;
+    if (lease.value(QStringLiteral("closed")).toBool(false)) continue;
+    if (persistentIdentityMayWrite(lease.value(QStringLiteral("workerIdentity")).toObject())) return true;
+  }
+  return false;
+}
+
 ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
   qRegisterMetaType<TrainingGpuPreviewDescriptor>();
   mProcess.setProcessChannelMode(QProcess::MergedChannels);
+  mPersistentPoll.setInterval(100);
+  connect(&mPersistentPoll,&QTimer::timeout,this,&ProcessSupervisor::pollPersistentTraining);
 
   connect(&mProcess, &QProcess::readyReadStandardOutput, this, &ProcessSupervisor::drainOutput);
   connect(&mProcess, &QProcess::started, this, [this]() {
@@ -425,7 +600,8 @@ ProcessSupervisor::~ProcessSupervisor() {
   shutdown();
 }
 
-bool ProcessSupervisor::isRunning() const { return mProcess.state() != QProcess::NotRunning; }
+bool ProcessSupervisor::isRunning() const { return mPersistentTraining || mProcess.state() != QProcess::NotRunning; }
+bool ProcessSupervisor::isPersistentTraining() const { return mPersistentTraining; }
 QString ProcessSupervisor::activeTask() const { return mActiveTask; }
 bool ProcessSupervisor::wasStopRequested() const { return mStopRequested; }
 
@@ -454,13 +630,238 @@ bool ProcessSupervisor::start(const QString &taskName, const QString &program,
   return true;
 }
 
+bool ProcessSupervisor::startPersistentTraining(const QString &taskName,const QString &program,
+    const QStringList &arguments,const QString &workingDirectory,
+    const QProcessEnvironment &environment,const QString &logPath,const QString &jobStore) {
+  if(mShutdownStarted || isRunning() || program.isEmpty()) return false;
+  if(!persistentSafePath(logPath) || !persistentSafePath(jobStore) ||
+      !QFileInfo(logPath).dir().exists()) {
+    emit outputReady(QCoreApplication::translate("Workbench","Persistent training could not be started: %1\n")
+        .arg(QStringLiteral("persistent_training_path_invalid")));
+    return false;
+  }
+#ifndef Q_OS_WIN
+  Q_UNUSED(arguments); Q_UNUSED(workingDirectory); Q_UNUSED(environment);
+  emit outputReady(QCoreApplication::translate("Workbench","Persistent training could not be started: %1\n")
+      .arg(QStringLiteral("persistent_training_windows_only")));
+  return false;
+#else
+  QFile reserve(logPath);
+  if(!reserve.open(QIODevice::WriteOnly|QIODevice::NewOnly)) {
+    emit outputReady(QCoreApplication::translate("Workbench","Persistent training could not be started: %1\n")
+        .arg(reserve.errorString()));
+    return false;
+  }
+  reserve.close();
+  // Publish the launch ownership before the detached process can write. The
+  // initial unknown identity deliberately blocks relocation if the UI crashes
+  // during CreateProcess; it is never inferred to be a completed training job.
+  const QString ownerRoot=QDir(jobStore).filePath(QStringLiteral(".p"));
+  if(!persistentSafePath(ownerRoot) || !QDir().mkpath(ownerRoot)) return false;
+  const QString ownerPath=QDir(ownerRoot).filePath(QUuid::createUuid().toString(QUuid::Id128)+QStringLiteral(".json"));
+  QJsonObject owner{{QStringLiteral("version"),1},{QStringLiteral("closed"),false},
+      {QStringLiteral("workerIdentity"),QJsonObject{}}};
+  if(!writePersistentObject(ownerPath,owner)) return false;
+  mActiveTask=taskName; mOutputBuffer.clear(); mStopRequested=false;
+  mPersistentFinalState.clear(); mPersistentJobStore=QDir::cleanPath(jobStore);
+  QProcess launcher;
+  launcher.setProgram(program); launcher.setArguments(arguments);
+  launcher.setWorkingDirectory(workingDirectory);
+  launcher.setProcessEnvironment(environment.isEmpty()?QProcessEnvironment::systemEnvironment():environment);
+  launcher.setProcessChannelMode(QProcess::MergedChannels);
+  launcher.setStandardOutputFile(logPath,QIODevice::Append);
+  launcher.setStandardInputFile(QProcess::nullDevice());
+  launcher.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *value) {
+    value->flags |= CREATE_NO_WINDOW;
+    value->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+    value->startupInfo->wShowWindow=SW_HIDE;
+  });
+  emit taskLaunchRequested(taskName,workingDirectory);
+  qint64 pid=0;
+  if(!launcher.startDetached(&pid)) {
+    owner.insert(QStringLiteral("closed"),true);
+    writePersistentObject(ownerPath,owner);
+    const QString error=launcher.errorString();
+    mActiveTask.clear();
+    emit outputReady(QCoreApplication::translate("Workbench","Persistent training could not be started: %1\n").arg(error));
+    QTimer::singleShot(0,this,[this,taskName] { emit taskFinished(taskName,-1,false); emit runningChanged(false); });
+    return true;
+  }
+  mPersistentProcessId=pid;
+  const HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,static_cast<DWORD>(pid));
+  mPersistentQueryHandle=reinterpret_cast<quintptr>(handle);
+  mPersistentStartToken=handle?persistentStartToken(handle):QString{};
+  owner.insert(QStringLiteral("workerIdentity"),QJsonObject{
+      {QStringLiteral("pid"),pid},{QStringLiteral("startToken"),mPersistentStartToken}});
+  writePersistentObject(ownerPath,owner);
+  mPersistentLog.setFileName(logPath);
+  mPersistentLog.open(QIODevice::ReadOnly);
+  mPersistentTraining=true;
+  emit taskStarted(taskName); emit runningChanged(true);
+  mPersistentPoll.start();
+  return true;
+#endif
+}
+
+std::optional<QJsonObject> ProcessSupervisor::persistentConnection() const {
+#ifndef Q_OS_WIN
+  return std::nullopt;
+#else
+  if(!mPersistentTraining || !mPersistentQueryHandle || mPersistentStartToken.isEmpty() ||
+      !persistentSafePath(mPersistentJobStore)) return std::nullopt;
+  DWORD exitCode=0;
+  const auto handle=reinterpret_cast<HANDLE>(mPersistentQueryHandle);
+  if(!GetExitCodeProcess(handle,&exitCode) || exitCode!=STILL_ACTIVE ||
+      persistentStartToken(handle)!=mPersistentStartToken) return std::nullopt;
+  const QString connectionRoot=QDir(mPersistentJobStore).filePath(QStringLiteral(".c"));
+  if(!persistentSafePath(connectionRoot)) return std::nullopt;
+  const auto files=QDir(connectionRoot).entryInfoList({QStringLiteral("*.json")},QDir::Files,QDir::Name);
+  if(files.size()>4096) return std::nullopt;
+  const QRegularExpression idPattern(QStringLiteral("^[0-9a-f]{32}$"));
+  for(const auto &file:files) {
+    if(!idPattern.match(file.completeBaseName()).hasMatch()) continue;
+    const auto lease=readPersistentObject(file.absoluteFilePath(),64*1024);
+    const auto identity=lease.value(QStringLiteral("workerIdentity")).toObject();
+    if(identity.size()!=2 || identity.value(QStringLiteral("pid")).toInteger(-1)!=mPersistentProcessId ||
+        identity.value(QStringLiteral("startToken")).toString()!=mPersistentStartToken) continue;
+    const QString id=lease.value(QStringLiteral("jobId")).toString();
+    const QString session=lease.value(QStringLiteral("session")).toString();
+    const QString backend=lease.value(QStringLiteral("backend")).toString();
+    const auto heartbeat=lease.value(QStringLiteral("heartbeat"));
+    const double age=QDateTime::currentMSecsSinceEpoch()/1000.0-heartbeat.toDouble();
+    if(lease.value(QStringLiteral("version")).toDouble()!=1.0 || !idPattern.match(id).hasMatch() ||
+        !idPattern.match(session).hasMatch() || session!=file.completeBaseName() ||
+        (backend!=QStringLiteral("3dgs") && backend!=QStringLiteral("2dgs")) ||
+        !lease.value(QStringLiteral("closed")).isBool() || lease.value(QStringLiteral("closed")).toBool() ||
+        !heartbeat.isDouble() || !std::isfinite(age) || age< -2.0 || age>15.0) continue;
+    const auto job=readPersistentObject(QDir(mPersistentJobStore).filePath(id+QStringLiteral(".json")),16*1024*1024);
+    const auto control=job.value(QStringLiteral("native_control")).toObject();
+    const auto output=control.value(QStringLiteral("output"));
+    if(job.value(QStringLiteral("id")).toString()!=id || job.value(QStringLiteral("backend")).toString()!=backend ||
+        control.value(QStringLiteral("session")).toString()!=session ||
+        control.value(QStringLiteral("backend")).toString()!=backend ||
+        !output.isString() || output.toString().isEmpty() || !persistentSafePath(output.toString()) ||
+        control.value(QStringLiteral("output"))!=lease.value(QStringLiteral("output")) ||
+        !QStringList{QStringLiteral("queued"),QStringLiteral("running"),QStringLiteral("cancelling")}
+             .contains(job.value(QStringLiteral("status")).toString())) continue;
+    return QJsonObject{{QStringLiteral("jobId"),id},{QStringLiteral("session"),session},
+        {QStringLiteral("workerIdentity"),identity},{QStringLiteral("connectionRoot"),connectionRoot}};
+  }
+  return std::nullopt;
+#endif
+}
+
+bool ProcessSupervisor::requestPersistentCommand(const QString &command) {
+  if(mShutdownStarted || !mPersistentTraining || mStopRequested) return false;
+  const auto connection=persistentConnection();
+  QString error=QStringLiteral("job_connection_control_unavailable");
+#ifdef Q_OS_WIN
+  if(connection) {
+    const QString root=connection->value(QStringLiteral("connectionRoot")).toString();
+    const QString session=connection->value(QStringLiteral("session")).toString();
+    const QString target=QDir(root).filePath(session+QStringLiteral("-cmd.json"));
+    const QString temporary=QDir(root).filePath(QUuid::createUuid().toString(QUuid::Id128));
+    const QByteArray bytes=QJsonDocument(QJsonObject{{QStringLiteral("version"),1},
+        {QStringLiteral("jobId"),connection->value(QStringLiteral("jobId"))},
+        {QStringLiteral("session"),session},
+        {QStringLiteral("workerIdentity"),connection->value(QStringLiteral("workerIdentity"))},
+        {QStringLiteral("command"),command},
+        {QStringLiteral("nonce"),QUuid::createUuid().toString(QUuid::Id128)},
+        {QStringLiteral("requestedAt"),QDateTime::currentMSecsSinceEpoch()/1000.0}}).toJson(QJsonDocument::Compact);
+    if(persistentSafePath(target) && persistentSafePath(temporary) && bytes.size()<=4096) {
+      const HANDLE file=CreateFileW(reinterpret_cast<LPCWSTR>(temporary.utf16()),GENERIC_WRITE,0,nullptr,CREATE_NEW,
+          FILE_ATTRIBUTE_NORMAL,nullptr);
+      if(file!=INVALID_HANDLE_VALUE) {
+        DWORD written=0;
+        const bool durable=WriteFile(file,bytes.constData(),static_cast<DWORD>(bytes.size()),&written,nullptr) &&
+            written==static_cast<DWORD>(bytes.size()) && FlushFileBuffers(file);
+        CloseHandle(file);
+        const bool published=durable && CreateHardLinkW(reinterpret_cast<LPCWSTR>(target.utf16()),
+            reinterpret_cast<LPCWSTR>(temporary.utf16()),nullptr);
+        if(!published) error=QStringLiteral("job_connection_command_pending_or_unavailable");
+        QFile::remove(temporary);
+        if(published) {
+          emit outputReady(command==QStringLiteral("pause")
+              ?QCoreApplication::translate("Workbench","Training pause requested; waiting for the worker to acknowledge it.\n")
+              :QCoreApplication::translate("Workbench","Training stop requested; waiting for the worker to acknowledge it.\n"));
+          return true;
+        }
+      }
+    }
+  }
+#else
+  Q_UNUSED(command); Q_UNUSED(connection);
+#endif
+  emit outputReady(QCoreApplication::translate("Workbench","Persistent training command was not sent: %1\n").arg(error));
+  return false;
+}
+
+void ProcessSupervisor::pollPersistentTraining() {
+  if(!mPersistentTraining) return;
+  if(!mPersistentLog.isOpen()) mPersistentLog.open(QIODevice::ReadOnly);
+  if(mPersistentLog.isOpen()) {
+    const auto bytes=mPersistentLog.read(1024*1024);
+    if(!bytes.isEmpty()) {
+      mOutputBuffer.append(bytes); processBufferedOutput(false);
+      // The complete output remains on disk. Bound a malformed unterminated
+      // display line without changing worker or training state.
+      if(mOutputBuffer.size()>2*1024*1024) processBufferedOutput(true);
+    }
+  }
+  int exitCode=-1;
+#ifdef Q_OS_WIN
+  if(!mPersistentQueryHandle) {
+    const auto handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,
+        static_cast<DWORD>(mPersistentProcessId));
+    if(handle) {
+      const auto token=persistentStartToken(handle);
+      if(token.isEmpty() || (!mPersistentStartToken.isEmpty() && token!=mPersistentStartToken)) {
+        CloseHandle(handle);
+        return; // Unverified identity is not a completed job.
+      }
+      mPersistentStartToken=token;
+      mPersistentQueryHandle=reinterpret_cast<quintptr>(handle);
+    } else if(GetLastError()!=ERROR_INVALID_PARAMETER) return;
+  }
+  if(mPersistentQueryHandle) {
+    DWORD code=0;
+    if(!GetExitCodeProcess(reinterpret_cast<HANDLE>(mPersistentQueryHandle),&code)) return;
+    if(code==STILL_ACTIVE) return;
+    exitCode=static_cast<int>(code);
+  }
+#endif
+  if(mPersistentLog.isOpen() && !mPersistentLog.atEnd()) return;
+  processBufferedOutput(true);
+  const QString task=mActiveTask;
+  const bool succeeded=exitCode==0 && mPersistentFinalState!=QStringLiteral("failed") &&
+      mPersistentFinalState!=QStringLiteral("cancelled");
+  if(mPersistentFinalState.isEmpty() && exitCode!=0)
+    emit outputReady(QCoreApplication::translate("Workbench","Training worker ended; its final status is unavailable.\n"));
+  detachPersistentTraining();
+  emit taskFinished(task,exitCode,succeeded); emit runningChanged(false);
+}
+
+void ProcessSupervisor::detachPersistentTraining() {
+  mPersistentPoll.stop();
+#ifdef Q_OS_WIN
+  if(mPersistentQueryHandle) CloseHandle(reinterpret_cast<HANDLE>(mPersistentQueryHandle));
+#endif
+  mPersistentQueryHandle=0; mPersistentTraining=false; mPersistentProcessId=0;
+  mPersistentStartToken.clear(); mPersistentLog.close(); mActiveTask.clear(); mOutputBuffer.clear();
+}
+
 bool ProcessSupervisor::requestPause() {
+  if (mPersistentTraining) return requestPersistentCommand(QStringLiteral("pause"));
   return isRunning() && mAcceptsCancelCommand && !mStopRequested &&
          mProcess.write("pause\n") == 6;
 }
 
 void ProcessSupervisor::stop() {
   if (mShutdownStarted || !isRunning()) {
+    return;
+  }
+  if (mPersistentTraining) {
+    if (requestPersistentCommand(QStringLiteral("stop"))) mStopRequested=true;
     return;
   }
 
@@ -518,6 +919,10 @@ void ProcessSupervisor::shutdown() {
     return;
   }
   mShutdownStarted = true;
+  if (mPersistentTraining) {
+    detachPersistentTraining();
+    return;
+  }
   mStopRequested = mStopRequested || isRunning();
 
   if (!isRunning()) {
@@ -652,6 +1057,9 @@ void ProcessSupervisor::handleOutputLine(const QByteArray &line) {
   if (content.startsWith(kWorkerEventPrefix)) {
     const QByteArray payload = content.mid(kWorkerEventPrefix.size());
     if (const auto status = decodeStatusEvent(payload)) {
+      if(mPersistentTraining && QStringList{QStringLiteral("done"),QStringLiteral("failed"),
+          QStringLiteral("paused"),QStringLiteral("cancelled")}.contains(status->state))
+        mPersistentFinalState=status->state;
       emit workerStatusReady(*status);
       return;
     }

@@ -54,6 +54,7 @@ struct ReferenceGridScale;
 class NativeViewport final : public QOpenGLWidget,
                              protected QOpenGLExtraFunctions {
   Q_OBJECT
+  friend bool runCoordinateSceneSmokeTest(NativeViewport &viewport);
 
 public:
   enum class InteractionMode {
@@ -225,6 +226,7 @@ public:
   [[nodiscard]] double sourceToSceneUnitScale() const;
   [[nodiscard]] QString sceneCoordinateSummary() const;
   [[nodiscard]] QString sceneCoordinateDetail() const;
+  void refreshActiveSceneMetadata();
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
   [[nodiscard]] TrainingGpuPreviewCapability
   trainingGpuPreviewCapability() const {
@@ -377,6 +379,9 @@ private:
     qint64 queuedPreviewCount = 0;
     qint64 requestedPreviewCount = 0;
     int mCameraTrajectoryGeneration = 0;
+    int mMetadataGeneration = 0;
+    qint64 metadataSourceSize = -1;
+    qint64 metadataSourceModified = -1;
     RenderMode mRenderMode = RenderMode::Points;
     SceneCoordinateInfo mSceneCoordinates;
     QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
@@ -613,6 +618,7 @@ private:
   void drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection);
   [[nodiscard]] QMatrix4x4 sceneDisplayTransform(const SceneState &from,
                                                const SceneState &to) const;
+  void mapViewToScene(const QMatrix4x4 &mapping);
   [[nodiscard]] const SceneState &coordinateReferenceScene() const;
   [[nodiscard]] double sourceToReferenceUnitScale(const SceneState &state) const;
   [[nodiscard]] ReferenceGridScale sceneGridScale() const;
@@ -703,6 +709,8 @@ private:
   float mDistance = 12.0F;
   float mPerspectiveFovDegrees = 46.0F;
   float mFocalAspectCorrection = 1.0F;
+  std::optional<std::array<double,7>> mSourceCameraIntrinsics;
+  std::optional<std::array<double,2>> mSourceCameraClipping;
   NavigationGizmoHit mNavigationHover;
   NavigationGizmoHit mNavigationPress;
   QPoint mNavigationPressPosition;

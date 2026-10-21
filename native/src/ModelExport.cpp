@@ -1,9 +1,11 @@
 #include "ModelExport.h"
 #include "PlyPointCloudLoader.h"
+#include "CameraTrajectory.h"
 #include "SpzIO.h"
 
 #include <QBuffer>
 #include <QCache>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDateTime>
 #include <QFileInfo>
@@ -49,14 +51,29 @@ CameraScaleRecoveryCapability cameraScaleRecoveryCapability(const QString &sourc
   const auto object = document.object();
   if (!document.isObject() || object.value(QStringLiteral("ply_sha256")).toString().size() != 64) return capability;
   const QString schema = object.value(QStringLiteral("schema")).toString();
-  if (schema == QStringLiteral("gsw.coordinate_export/1")) {
-    const QString frame = object.value(QStringLiteral("output_frame")).toString();
-    capability.preserve = (frame == QStringLiteral("source") || frame == QStringLiteral("canonical")) &&
-        object.value(QStringLiteral("output_unit")).isString();
+  const bool restored = schema == QStringLiteral("gsw.coordinate_export/1");
+  if (!restored && schema != QStringLiteral("gsw.training_camera_contract/1")) return capability;
+  const auto verified = parsePlyCoordinateMetadata({},source,false);
+  if (!verified.validationError.isEmpty() || verified.provenance.isEmpty()) {
+    capability.validationError = verified.validationError;
     return capability;
   }
-  if (schema != QStringLiteral("gsw.training_camera_contract/1")) return capability;
-  const auto transforms = object.value(QStringLiteral("transforms")).toObject();
+  if(restored && (object.contains(QStringLiteral("camera_reference")) ||
+      object.value(QStringLiteral("export_version")).toInt()>=2)) {
+    const auto cameras=CameraTrajectory::loadForScene(source);
+    if(!cameras.metadataVerified() || !cameras.error().isEmpty()) {
+      capability.validationError=QStringLiteral("camera_scale_export_camera_binding_invalid");
+      return capability;
+    }
+  }
+  QJsonObject contract = object;
+  for (int depth=0; contract.value(QStringLiteral("schema")).toString()==QStringLiteral("gsw.coordinate_export/1") && depth<8; ++depth)
+    contract=contract.value(QStringLiteral("training_contract")).toObject();
+  if (contract.value(QStringLiteral("schema")).toString()!=QStringLiteral("gsw.training_camera_contract/1")) return capability;
+  capability.currentFrame = restored ? object.value(QStringLiteral("output_frame")).toString() : QStringLiteral("training");
+  capability.currentUnit = restored ? object.value(QStringLiteral("output_unit")).toString() : QStringLiteral("training");
+  capability.scaleStatus = verified.scaleStatus;
+  const auto transforms = contract.value(QStringLiteral("transforms")).toObject();
   for (const QString &name : {QStringLiteral("source_to_canonical"), QStringLiteral("canonical_to_training")}) {
     const auto transform = transforms.value(name).toObject();
     const double scale = transform.value(QStringLiteral("s")).toDouble(-1);
@@ -84,12 +101,70 @@ CameraScaleRecoveryCapability cameraScaleRecoveryCapability(const QString &sourc
   }
   capability.source = true;
   capability.preserve = true;
-  const auto scale = object.value(QStringLiteral("scale")).toObject();
+  const auto scale = contract.value(QStringLiteral("scale")).toObject();
+  capability.sourceUnit = scale.value(QStringLiteral("source_unit")).toString(QStringLiteral("unknown"));
   const double meters = scale.value(QStringLiteral("meters_per_unit")).toDouble(-1);
   capability.metric = scale.value(QStringLiteral("canonical_unit")).toString() == QStringLiteral("m") &&
       scale.value(QStringLiteral("status")).toString() != QStringLiteral("arbitrary") &&
       std::isfinite(meters) && meters > 0 && !scale.value(QStringLiteral("evidence")).toArray().isEmpty();
   return capability;
+}
+
+QString verifiedTrainingDeliveryPath(const QString &outputDirectory, const int expectedIteration) {
+  const QDir root(QFileInfo(outputDirectory).absoluteFilePath());
+  QFile receipt(root.filePath(QStringLiteral("model-delivery.json")));
+  if (!receipt.open(QIODevice::ReadOnly) || receipt.size()>16*1024*1024) return {};
+  const auto record=QJsonDocument::fromJson(receipt.readAll()).object();
+  if (record.value(QStringLiteral("schema"))!=QStringLiteral("gsw.model_delivery/1") ||
+      record.value(QStringLiteral("training_status"))!=QStringLiteral("done") ||
+      record.value(QStringLiteral("export_status"))!=QStringLiteral("ready") ||
+      (expectedIteration>=0 && record.value(QStringLiteral("iteration")).toInt(-1)!=expectedIteration)) return {};
+  const auto child=[&root](const QString &value)->QString {
+    if(value.isEmpty() || QDir::fromNativeSeparators(value).split('/').contains(QStringLiteral(".."))) return {};
+    const QString path=QDir::cleanPath(QDir::isAbsolutePath(value)?value:root.filePath(value));
+    const QString relative=root.relativeFilePath(path);
+    if(relative==QStringLiteral("..") || relative.startsWith(QStringLiteral("../")) || QDir::isAbsolutePath(relative)) return {};
+    QFileInfo current(path);
+    while(current.absoluteFilePath()!=root.absolutePath()) {
+      if(current.isSymbolicLink()) return {};
+#ifdef Q_OS_WIN
+      const DWORD attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(current.absoluteFilePath().utf16()));
+      if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT)) return {};
+#endif
+      const QString parent=current.absolutePath();
+      if(parent==current.absoluteFilePath()) return {};
+      current.setFile(parent);
+    }
+    return path;
+  };
+  const QString model=child(record.value(QStringLiteral("model_relative_path")).toString(
+      record.value(QStringLiteral("model_path")).toString()));
+  if(model.isEmpty() || !QFileInfo(model).isFile()) return {};
+  const auto metadata=parsePlyCoordinateMetadata({},model,true);
+  if(!metadata.validationError.isEmpty() || metadata.provenance.isEmpty() ||
+      !metadata.metersPerCoordinate || *metadata.metersPerCoordinate!=1.) return {};
+  const auto cameras=CameraTrajectory::loadForScene(model);
+  if(!cameras.metadataVerified() || !cameras.error().isEmpty()) return {};
+  QFile sidecar(cameraScaleMetadataPath(model));
+  if(!sidecar.open(QIODevice::ReadOnly) || sidecar.size()>64*1024*1024) return {};
+  const auto exported=QJsonDocument::fromJson(sidecar.readAll()).object();
+  if(exported.value(QStringLiteral("output_frame"))!=QStringLiteral("canonical") ||
+      exported.value(QStringLiteral("output_unit"))!=QStringLiteral("m")) return {};
+  const auto digest=[](const QString &path) {
+    QFile file(path); QCryptographicHash hash(QCryptographicHash::Sha256);
+    return file.open(QIODevice::ReadOnly) && hash.addData(&file)?QString::fromLatin1(hash.result().toHex()):QString();
+  };
+  const QString internal=child(record.value(QStringLiteral("internal_model_relative_path")).toString(
+      record.value(QStringLiteral("internal_model_path")).toString()));
+  const QString inputHash=exported.value(QStringLiteral("input_sha256")).toString();
+  if(internal.isEmpty() || inputHash.size()!=64 || digest(internal)!=inputHash) return {};
+  const auto camera=exported.value(QStringLiteral("camera_reference")).toObject();
+  const QString cameraName=camera.value(QStringLiteral("path")).toString();
+  if(cameraName.isEmpty() || QFileInfo(cameraName).fileName()!=cameraName) return {};
+  const QString cameraPath=child(QFileInfo(model).dir().filePath(cameraName));
+  if(cameraPath.isEmpty() || camera.value(QStringLiteral("sha256")).toString().size()!=64 ||
+      digest(cameraPath)!=camera.value(QStringLiteral("sha256")).toString()) return {};
+  return model;
 }
 
 SceneCoordinate3D exportPosition(const SceneCoordinate3D &p, const ModelExportOptions &o) {
@@ -214,6 +289,7 @@ ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
       QStringLiteral("--input"), o.sourcePath, QStringLiteral("--output"), o.destinationPath,
       QStringLiteral("--coordinates"), o.cameraCoordinateRecovery,
       QStringLiteral("--cancel-file"), cancelPath, QStringLiteral("--progress-json")};
+  if (!o.cameraOutputUnit.isEmpty()) arguments << QStringLiteral("--unit") << o.cameraOutputUnit;
   if (!o.deletedVertices.isEmpty())
     arguments << QStringLiteral("--deleted-vertex-count") << QString::number(o.deletedVertices.size());
   if (o.deletedVertices.count(true)) {

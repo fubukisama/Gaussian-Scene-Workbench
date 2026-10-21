@@ -47,6 +47,9 @@ private:
   int mDensityGuardDeferred = 0;
   WorkerStatus mReconstructionStatus;
   QJsonObject mTrainingSummary;
+  QJsonObject mRuntimeConfiguration;
+  QString mFailureReason;
+  QJsonObject mTrainingDelivery;
 
   TrainingTelemetry mTelemetry;
   QScrollArea *mScrollArea = nullptr;
@@ -71,6 +74,9 @@ private:
   QLabel *mPerformanceDetails = nullptr;
   QLabel *mQualityEvidence = nullptr;
   QLabel *mGrowthWarning = nullptr;
+  QLabel *mResourceGuardState = nullptr;
+  QLabel *mFailureReasonLabel = nullptr;
+  QLabel *mDeliveryState = nullptr;
   QProgressBar *mProgress = nullptr;
 };
 

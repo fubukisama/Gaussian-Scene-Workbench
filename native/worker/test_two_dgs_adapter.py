@@ -23,6 +23,7 @@ from native.worker.training_preview_policy import TrainingPreviewPolicy, close_p
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
 from native.worker.training_runtime import NativeTrainingRuntime
+from native.worker.surfel_regularization import surfel_regularization
 
 
 class TwoDgsAdapterTests(unittest.TestCase):
@@ -153,6 +154,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                       close_preview_safely=close_preview_safely,
                       NativeDensityControl=NativeDensityControl,
                       NativeTrainingRuntime=NativeTrainingRuntime,
+                      surfel_regularization=surfel_regularization,
                       emit_loaded_training_summary=emit_loaded_training_summary,
                       l1_loss=lambda a, b: (a - b).abs().mean(), ssim=lambda a, b: 1 - ((a - b)**2).mean(),
                       psnr=lambda a, b: -10 * torch.log10(((a-b)**2).mean()),
@@ -175,7 +177,7 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 return original_to(value, *args, **kwargs)
             event = SimpleNamespace(record=lambda: None, elapsed_time=lambda other: 1.)
 
-            def run(name, pause=False, resume=False, free_vram=8 * 1024**3):
+            def run(name, pause=False, resume=False, free_vram=8 * 1024**3, runtime_options=None):
                 random.seed(999 if resume else 42)
                 np.random.seed(999 if resume else 42)
                 torch.manual_seed(999 if resume else 42)
@@ -183,6 +185,9 @@ class TwoDgsAdapterTests(unittest.TestCase):
                 request = root / (name + "-pause.json")
                 control = dict(output=str(output), request=str(request), session="test", backend="2dgs", resume=resume,
                                performance={"version": 1, "enabled": False})
+                if runtime_options is not None:
+                    control.pop("performance")
+                    control["runtimeOptions"] = runtime_options
                 if pause: cp.atomic_json(request, {"session": "test"})
                 elif request.exists(): request.unlink()
                 data = SimpleNamespace(source_path=str(dataset), model_path=str(output), white_background=False, sh_degree=3)
@@ -244,6 +249,14 @@ class TwoDgsAdapterTests(unittest.TestCase):
                                  for prefix, value in constrained))
             self.assertTrue(any(prefix == "[gsw-training-metrics]" and value["iteration"] == 12
                                 for prefix, value in constrained))
+            auxiliary = run("independent-auxiliary", runtime_options={"version": 2,
+                "resourceGuard": {"enabled": False},
+                "execution": {"image_staging": False, "camera_prefetch": False,
+                    "capacity_storage": False, "surfel_auxiliary": True,
+                    "loss_mode": "stock", "engine": "stock"}})
+            self.assertTrue(torch.equal(reference._xyz, auxiliary._xyz))
+            self.assertTrue(torch.equal(reference._scaling, auxiliary._scaling))
+            self.assertTrue(torch.equal(reference.accumulator, auxiliary.accumulator))
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ from native.worker.training_preview_policy import TrainingPreviewPolicy, close_p
 from native.worker.training_density_control import NativeDensityControl
 from native.worker.training_summary import emit_loaded_training_summary
 from native.worker.training_runtime import NativeTrainingRuntime
+from native.worker.training_failure import report_training_failure
 from native.worker.surfel_regularization import surfel_regularization
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -132,7 +133,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         ema_normal_for_log = state["ema_normal"]
         del state
     render_training = native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
-    if native_runtime.configuration['enabled'] and native_runtime.configuration['surfel_auxiliary']:
+    if native_runtime.configuration['surfel_auxiliary']:
         from native.worker.surfel_render_adapter import SurfelRenderAdapter
         render_training = SurfelRenderAdapter(render_training)
         native_runtime.register_surfel_adapter(render_training.capability)
@@ -174,7 +175,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         native_runtime.profiler.mark('transfer')
         ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices)
         native_runtime.profiler.mark('render')
-        if native_runtime.configuration['enabled'] and native_runtime.configuration['surfel_auxiliary']:
+        if native_runtime.configuration['surfel_auxiliary']:
             render_pkg = render_training(viewpoint_cam, gaussians, pipe, background,
                 surface_normal_required=bool(opt.lambda_normal and iteration > 7000))
             native_runtime.register_surfel_adapter(render_training.capability)
@@ -192,7 +193,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
         lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
 
-        if native_runtime.configuration['enabled']:
+        if native_runtime.configuration['surfel_auxiliary']:
             normal_loss, dist_loss = surfel_regularization(torch, render_pkg, lambda_normal, lambda_dist)
         else:
             rend_dist = render_pkg["rend_dist"]
@@ -298,7 +299,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 state["density_control"] = density_control.capture()
                 native_runtime.capture(state)
                 if native_runtime.pause_for_resources():
-                    state['pause_reason'] = 'vram_pressure'
+                    state['pause_reason'] = native_runtime.resource_pause_reason()
                 native_checkpoint.save(torch, state)
                 emit_checkpoint_preview(scene, iteration)
                 paused = True
@@ -446,7 +447,8 @@ if __name__ == "__main__":
     dataset = lp.extract(args)
     dataset.training_seed = seed_record["training_seed"]
     dataset.camera_manifest = args.camera_manifest
-    paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
+    with report_training_failure("2dgs", torch, emit_gsw_event):
+        paused = training(dataset, op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
 
     # All done
     print("\nTraining paused." if paused else "\nTraining complete.")

@@ -151,11 +151,69 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::onChanged(this, updateResolutionHint);
   updateResolutionHint();
 
-  mPerformanceOptimization = AppLanguage::text(new WrappingCheckBox(this),
-      AppLanguage::source("自动性能优化（图像流水线与显存增密保护）"));
-  mPerformanceOptimization->setObjectName(QStringLiteral("trainingPerformanceOptimization"));
-  mPerformanceOptimization->setChecked(true);
-  form->addRow(QString(), mPerformanceOptimization);
+  mResourceGuard = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("启用显存增密保护（独立于性能优化）"));
+  mResourceGuard->setObjectName(QStringLiteral("trainingResourceGuard"));
+  mResourceGuard->setChecked(true);
+  AppLanguage::bind(mResourceGuard, "toolTip", AppLanguage::source(
+      "关闭后不按软件显存阈值拒绝、暂缓增密或自动暂停；不会改变执行优化、照片分辨率、增密参数或手动暂停与完整状态保存。真实 CUDA 内存不足仍会报错。"));
+  form->addRow(QString(), mResourceGuard);
+  const auto addRuntimeInteger = [this, form](const char *source, const char *name,
+      const int minimum, const int maximum, const int value, const QString &suffix = {}) {
+    auto *spin = new QSpinBox(this);
+    spin->setObjectName(QString::fromLatin1(name));
+    spin->setRange(minimum, maximum);
+    spin->setValue(value);
+    spin->setSuffix(suffix);
+    form->addRow(QCoreApplication::translate("Workbench", source), spin);
+    AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(spin)), source);
+    return spin;
+  };
+  mTrainingMemoryPercent = addRuntimeInteger(AppLanguage::source("训练显存目标"),
+      "trainingMemoryPercent", 50, 100, 90, QStringLiteral("%"));
+  mMinimumSpareMiB = addRuntimeInteger(AppLanguage::source("最低空闲显存"),
+      "trainingMinimumSpareMiB", 0, 1048576, 512, QStringLiteral(" MiB"));
+  mMaxConsecutiveDenials = addRuntimeInteger(AppLanguage::source("连续拒绝次数"),
+      "trainingMaxConsecutiveDenials", 1, 1000000, 3);
+  mGrowthMode = new QComboBox(this);
+  mGrowthMode->setObjectName(QStringLiteral("trainingGrowthModeCombo"));
+  mGrowthMode->addItem(QString(), QStringLiteral("pause"));
+  AppLanguage::bindComboItem(mGrowthMode, 0, AppLanguage::source("质量优先：保存完整状态并安全暂停"));
+  mGrowthMode->addItem(QString(), QStringLiteral("defer"));
+  AppLanguage::bindComboItem(mGrowthMode, 1, AppLanguage::source("继续训练：暂缓增密并提示质量风险"));
+  form->addRow(QCoreApplication::translate("Workbench", "显存持续不足时"), mGrowthMode);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mGrowthMode)), AppLanguage::source("显存持续不足时"));
+  auto *growthHint = new QLabel(this);
+  growthHint->setObjectName(QStringLiteral("trainingResourceGuardHint"));
+  growthHint->setWordWrap(true);
+  form->addRow(growthHint);
+  const auto updateGuardControls = [this, growthHint]() {
+    for (auto *control : {mTrainingMemoryPercent, mMinimumSpareMiB, mMaxConsecutiveDenials})
+      control->setEnabled(mResourceGuard->isChecked());
+    mGrowthMode->setEnabled(mResourceGuard->isChecked());
+    growthHint->setText(mResourceGuard->isChecked()
+        ? QCoreApplication::translate("Workbench", "保护开启：连续 %1 次拒绝后按所选方式处理；质量优先会在安全边界保存完整状态并暂停。100% 目标或零余量不保证不会发生 CUDA 内存不足。")
+              .arg(mMaxConsecutiveDenials->value())
+        : QCoreApplication::translate("Workbench", "保护关闭：不执行软件显存阈值判定，不自动暂缓增密或暂停；执行优化与手动暂停、停止、完整状态保存保持独立。"));
+  };
+  connect(mResourceGuard, &QCheckBox::toggled, this, updateGuardControls);
+  connect(mMaxConsecutiveDenials, &QSpinBox::valueChanged, this, updateGuardControls);
+  AppLanguage::onChanged(this, updateGuardControls);
+  updateGuardControls();
+
+  auto *recommended = AppLanguage::text(new QPushButton(this),
+      AppLanguage::source("应用推荐执行设置"));
+  recommended->setObjectName(QStringLiteral("trainingApplyRecommendedExecution"));
+  AppLanguage::bind(recommended, "toolTip", AppLanguage::source(
+      "仅开启图像暂存、预取、FP32 容量复用、按需曲面辅助计算并选择自动损失与标准渲染器；不会改变显存保护、相机、分辨率、增密或训练迭代。"));
+  form->addRow(QString(), recommended);
+  mImageStaging = AppLanguage::text(new WrappingCheckBox(this),
+      AppLanguage::source("有界图像暂存与传输"));
+  mImageStaging->setObjectName(QStringLiteral("trainingImageStaging"));
+  mImageStaging->setChecked(true);
+  AppLanguage::bind(mImageStaging, "toolTip", AppLanguage::source(
+      "仅改变原始像素的主存存储与有界 GPU 传输，不降低照片分辨率。图像预取需要此路径；关闭时仍保留预取请求并明确报告无效原因。"));
+  form->addRow(QString(), mImageStaging);
   mCameraPrefetch = AppLanguage::text(new WrappingCheckBox(this),
       AppLanguage::source("跨步图像预取"));
   mCameraPrefetch->setObjectName(QStringLiteral("trainingCameraPrefetch"));
@@ -178,44 +236,39 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
       "仅在法线项权重为零时跳过未使用的 Python 曲面法线计算；保留所有活跃约束，不代表关闭 CUDA 辅助缓冲。"));
   form->addRow(QString(), mSurfelAuxiliary);
   auto *independentPerformanceHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
-      "这三个开关不改变照片分辨率或增密算法；速度与质量取舍仍由质量预设及显式训练参数控制。"));
+      "执行选项逐项生效，不由显存保护开关控制；不会自动修改相机、照片分辨率或增密算法。渲染器与损失的实际引擎及回退原因由任务报告记录。"));
   independentPerformanceHint->setObjectName(QStringLiteral("trainingIndependentPerformanceHint"));
   independentPerformanceHint->setWordWrap(true);
   form->addRow(independentPerformanceHint);
-  const auto updateIndependentPerformanceControls = [this]() {
-    const bool enabled = mPerformanceOptimization->isChecked();
-    mCameraPrefetch->setEnabled(enabled);
-    mCapacityStorage->setEnabled(enabled);
-    mSurfelAuxiliary->setEnabled(enabled && mBackend->currentData().toString() == QStringLiteral("2dgs"));
+  auto *prefetchHint = new QLabel(this);
+  prefetchHint->setObjectName(QStringLiteral("trainingPrefetchDependencyHint"));
+  prefetchHint->setWordWrap(true);
+  form->addRow(prefetchHint);
+  const auto updateIndependentPerformanceControls = [this, prefetchHint]() {
+    mSurfelAuxiliary->setEnabled(mBackend->currentData().toString() == QStringLiteral("2dgs"));
+    prefetchHint->setText(mCameraPrefetch->isChecked() && !mImageStaging->isChecked()
+        ? QCoreApplication::translate("Workbench", "图像预取：请求开启，但图像暂存已关闭，因此有效状态为关闭；请求值保留，不会自动改写。")
+        : QCoreApplication::translate("Workbench", "图像预取依赖有界图像暂存；3DGS 不使用曲面辅助计算。其他执行设置与显存保护独立。"));
   };
-  connect(mPerformanceOptimization, &QCheckBox::toggled, this, updateIndependentPerformanceControls);
+  connect(mImageStaging, &QCheckBox::toggled, this, updateIndependentPerformanceControls);
+  connect(mCameraPrefetch, &QCheckBox::toggled, this, updateIndependentPerformanceControls);
   connect(mBackend, &QComboBox::currentIndexChanged, this, updateIndependentPerformanceControls);
+  AppLanguage::onChanged(this, updateIndependentPerformanceControls);
   updateIndependentPerformanceControls();
-  mTrainingMemoryPercent = new QSpinBox(this);
-  mTrainingMemoryPercent->setObjectName(QStringLiteral("trainingMemoryPercent"));
-  mTrainingMemoryPercent->setRange(50, 95);
-  mTrainingMemoryPercent->setSuffix(QStringLiteral("%"));
-  mTrainingMemoryPercent->setValue(90);
-  form->addRow(QCoreApplication::translate("Workbench", "训练显存目标"), mTrainingMemoryPercent);
-  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mTrainingMemoryPercent)),
-                    AppLanguage::source("训练显存目标"));
-  auto *performanceHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
-      "默认目标 90%，至少保留 512 MiB；按实际空闲显存与增密临时峰值判断。资源不足仅暂缓新增高斯，不删除已有高斯、不降低照片分辨率。"));
-  performanceHint->setObjectName(QStringLiteral("trainingPerformanceHint"));
-  performanceHint->setWordWrap(true);
-  form->addRow(performanceHint);
-  mGrowthMode = new QComboBox(this);
-  mGrowthMode->setObjectName(QStringLiteral("trainingGrowthModeCombo"));
-  mGrowthMode->addItem(QString(), QStringLiteral("pause"));
-  AppLanguage::bindComboItem(mGrowthMode, 0, AppLanguage::source("质量优先：保存完整状态并安全暂停"));
-  mGrowthMode->addItem(QString(), QStringLiteral("defer"));
-  AppLanguage::bindComboItem(mGrowthMode, 1, AppLanguage::source("继续训练：暂缓增密并提示质量风险"));
-  form->addRow(QCoreApplication::translate("Workbench", "显存持续不足时"), mGrowthMode);
-  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mGrowthMode)), AppLanguage::source("显存持续不足时"));
-  auto *growthHint = AppLanguage::text(new QLabel(this), AppLanguage::source(
-      "质量优先模式在连续 3 次增密被资源保护拒绝后，于优化器更新完成后保存完整检查点并暂停；不会降采样或删除已有高斯。释放资源后可继续原进度。"));
-  growthHint->setWordWrap(true);
-  form->addRow(growthHint);
+  mImageGpuSlots = addRuntimeInteger(AppLanguage::source("图像 GPU 槽位"),
+      "trainingImageGpuSlots", 1, 2, 2);
+  mImagePinnedMiB = addRuntimeInteger(AppLanguage::source("锁页图像预算"),
+      "trainingImagePinnedMiB", 16, 1024, 256, QStringLiteral(" MiB"));
+  mImageGpuMiB = addRuntimeInteger(AppLanguage::source("GPU 图像预算"),
+      "trainingImageGpuMiB", 16, 2048, 512, QStringLiteral(" MiB"));
+  mLossMode = new QComboBox(this);
+  mLossMode->setObjectName(QStringLiteral("trainingLossModeCombo"));
+  mLossMode->addItem(QString(), QStringLiteral("auto"));
+  AppLanguage::bindComboItem(mLossMode, 0, AppLanguage::source("自动（兼容时使用融合损失）"));
+  mLossMode->addItem(QString(), QStringLiteral("stock"));
+  AppLanguage::bindComboItem(mLossMode, 1, AppLanguage::source("标准 L1 / SSIM"));
+  form->addRow(QCoreApplication::translate("Workbench", "损失执行方式"), mLossMode);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mLossMode)), AppLanguage::source("损失执行方式"));
   mTrainingEngine = new QComboBox(this);
   mTrainingEngine->setObjectName(QStringLiteral("trainingEngineCombo"));
   mTrainingEngine->addItem(QString(), QStringLiteral("stock"));
@@ -229,8 +282,16 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
       "Fast-GS 需独立验证过的运行库；目前仅支持不增密的 3DGS 标准 Adam。2DGS、稀疏 Adam、深度约束或旧检查点自动保留标准后端，不关闭这些功能来凑兼容。"));
   engineHint->setWordWrap(true);
   form->addRow(engineHint);
-  connect(mPerformanceOptimization, &QCheckBox::toggled, mTrainingMemoryPercent, &QWidget::setEnabled);
-  connect(mPerformanceOptimization, &QCheckBox::toggled, mGrowthMode, &QWidget::setEnabled);
+  mProfileInterval = addRuntimeInteger(AppLanguage::source("性能采样间隔（迭代）"),
+      "trainingProfileInterval", 1, 1000000, 30);
+  connect(recommended, &QPushButton::clicked, this, [this] {
+    mImageStaging->setChecked(true);
+    mCameraPrefetch->setChecked(true);
+    mCapacityStorage->setChecked(true);
+    mSurfelAuxiliary->setChecked(true);
+    mLossMode->setCurrentIndex(mLossMode->findData(QStringLiteral("auto")));
+    mTrainingEngine->setCurrentIndex(mTrainingEngine->findData(QStringLiteral("stock")));
+  });
 
   mOutputScene = new QLineEdit(projectName + QDateTime::currentDateTime().toString(QStringLiteral("-yyyyMMdd-HHmmss")), this);
   mOutputScene->setObjectName(QStringLiteral("trainingOutputNameEdit"));
@@ -420,13 +481,40 @@ TrainingConfiguration TrainingDialog::configuration() const {
   result.cameraDatasetIdentity = mCameraDatasetIdentity;
   result.resolutionPolicy = mResolutionPolicy->currentData().toString();
   result.overwrite = mOverwrite->isChecked();
-  result.performanceOptimization = mPerformanceOptimization->isChecked();
+  result.resourceGuardEnabled = mResourceGuard->isChecked();
+  result.imageStaging = mImageStaging->isChecked();
   result.cameraPrefetch = mCameraPrefetch->isChecked();
   result.capacityStorage = mCapacityStorage->isChecked();
   result.surfelAuxiliary = mSurfelAuxiliary->isChecked();
   result.trainingMemoryPercent = mTrainingMemoryPercent->value();
+  result.minimumSpareMiB = mMinimumSpareMiB->value();
+  result.maxConsecutiveDenials = mMaxConsecutiveDenials->value();
+  result.imageGpuSlots = mImageGpuSlots->value();
+  result.imagePinnedMiB = mImagePinnedMiB->value();
+  result.imageGpuMiB = mImageGpuMiB->value();
+  result.profileInterval = mProfileInterval->value();
+  result.lossMode = mLossMode->currentData().toString();
   result.trainingEngine = mTrainingEngine->currentData().toString();
   result.growthMode = mGrowthMode->currentData().toString();
+  result.runtimeOptions = QJsonObject{
+      {QStringLiteral("version"), 2},
+      {QStringLiteral("resourceGuard"), QJsonObject{
+          {QStringLiteral("enabled"), result.resourceGuardEnabled},
+          {QStringLiteral("mode"), result.growthMode},
+          {QStringLiteral("usage_fraction"), result.trainingMemoryPercent / 100.0},
+          {QStringLiteral("minimum_spare_mib"), result.minimumSpareMiB},
+          {QStringLiteral("max_consecutive_denials"), result.maxConsecutiveDenials}}},
+      {QStringLiteral("execution"), QJsonObject{
+          {QStringLiteral("image_staging"), result.imageStaging},
+          {QStringLiteral("camera_prefetch"), result.cameraPrefetch},
+          {QStringLiteral("capacity_storage"), result.capacityStorage},
+          {QStringLiteral("surfel_auxiliary"), result.surfelAuxiliary},
+          {QStringLiteral("loss_mode"), result.lossMode},
+          {QStringLiteral("engine"), result.trainingEngine},
+          {QStringLiteral("gpu_slots"), result.imageGpuSlots},
+          {QStringLiteral("pinned_mib"), result.imagePinnedMiB},
+          {QStringLiteral("gpu_mib"), result.imageGpuMiB}}},
+      {QStringLiteral("monitoring"), QJsonObject{{QStringLiteral("profile_interval"), result.profileInterval}}}};
   return result;
 }
 

@@ -35,6 +35,59 @@ def model_fixture(backend="3dgs", count=10, dtype=np.float32,
 
 
 class GrowthAdmissionTests(unittest.TestCase):
+    def test_cuda_oom_is_not_relabelled_as_probe_or_estimate_failure(self):
+        external_oom = type('OutOfMemoryError', (RuntimeError,), {'__module__': 'torch.cuda'})
+        for error in (external_oom('controlled external CUDA OOM; no allocation'),
+                      RuntimeError('CUDA out of memory. Controlled external error.'),
+                      RuntimeError('CUDA error: out of memory'),
+                      RuntimeError('CUDA runtime error (2) : out of memory')):
+            def failing_probe(error=error):
+                raise error
+            with self.subTest(kind=type(error).__name__), self.assertRaises(type(error)):
+                GrowthAdmission(failing_probe).evaluate(model_fixture(), '3dgs')
+        def ordinary_probe():
+            raise RuntimeError('device probe unavailable')
+        self.assertEqual(GrowthAdmission(ordinary_probe).evaluate(model_fixture(), '3dgs').reason,
+                         'probe_unavailable')
+        for error in (MemoryError('out of memory'), RuntimeError('host out of memory')):
+            def host_probe(error=error):
+                raise error
+            self.assertEqual(GrowthAdmission(host_probe).evaluate(model_fixture(), '3dgs').reason,
+                             'probe_unavailable')
+        self.assertEqual(GrowthAdmission(lambda: (GIB, GIB)).evaluate(object(), '3dgs').reason,
+                         'estimate_unavailable')
+
+    def test_cache_reclaim_does_not_hide_cuda_or_ordinary_errors(self):
+        from native.worker.training_resource_policy import MemoryObservation
+        for error in (RuntimeError('CUDA out of memory. Controlled error.'),
+                      RuntimeError('controlled cache operation failed')):
+            def reclaim(error=error):
+                raise error
+            policy = GrowthAdmission(lambda: MemoryObservation(128 * MIB, GIB, 800 * MIB),
+                                     cache_reclaimer=reclaim)
+            with self.subTest(message=str(error)), self.assertRaisesRegex(RuntimeError, str(error)):
+                policy.evaluate(model_fixture('2dgs'), '2dgs', clone_count=2, split_count=3)
+
+    def test_reusable_cache_is_reclaimed_and_device_free_remeasured_before_admission(self):
+        from native.worker.training_resource_policy import MemoryObservation
+        available = [MemoryObservation(128 * MIB, GIB, 800 * MIB)]
+        def reclaim():
+            available[0] = MemoryObservation(800 * MIB, GIB, 0)
+        policy = GrowthAdmission(lambda: available[0], cache_reclaimer=reclaim)
+        decision = policy.evaluate(model_fixture(), '3dgs', clone_count=2, split_count=3)
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.cache_reclaim_attempted)
+        self.assertEqual(decision.device_free_before_reclaim_bytes, 128 * MIB)
+        self.assertEqual(decision.free_bytes, 800 * MIB)
+        self.assertEqual(decision.cache_credit_bytes, 0)
+
+    def test_explicit_full_budget_and_zero_spare_remain_a_policy_not_an_oom_guarantee(self):
+        decision = GrowthAdmission(lambda: (GIB, GIB), usage_fraction=1.,
+                                   minimum_spare_bytes=0).evaluate(
+                                       model_fixture(), '3dgs', clone_count=2, split_count=3)
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.spare_bytes, 0)
+
     def test_growth_event_schema_rejects_nonfinite_boolean_or_unknown_values(self):
         from native.worker.training_resource_policy import normalize_growth
         valid = {"version": 1, "backend": "3dgs", "iteration": 800,
@@ -83,12 +136,17 @@ class GrowthAdmissionTests(unittest.TestCase):
         events = []
         self.assertTrue(admit_densification(None, None, "3dgs", .0002, 1.,
                                            None, lambda *event: events.append(event), 800))
-        self.assertEqual(events, [])
+        self.assertEqual(len(events), 1)
+        from native.worker.training_resource_policy import normalize_growth
+        bypass = normalize_growth(events[0][1])
+        self.assertEqual(bypass['state'], 'bypassed')
+        self.assertEqual(bypass['reason'], 'guard_disabled')
+        self.assertFalse(bypass['observation_valid'])
 
     def test_invalid_policy_configuration_is_rejected_at_construction(self):
         for options in ({"usage_fraction": float("nan")},
                         {"usage_fraction": 0}, {"usage_fraction": 1.01},
-                        {"usage_fraction": True}, {"minimum_spare_bytes": 0},
+                        {"usage_fraction": True},
                         {"minimum_spare_bytes": -1}, {"minimum_spare_bytes": True}):
             with self.subTest(options=options):
                 with self.assertRaises(ValueError):
@@ -286,6 +344,19 @@ if "--torch-cpu" in sys.argv:
                     self.assertTrue(event["candidate_counts_known"])
                     self.assertEqual(self.snapshot(model), state)
                     self.assertTrue(torch.equal(torch.get_rng_state(), rng))
+
+        def test_zero_backend_threshold_is_a_valid_resource_candidate_query(self):
+            from native.worker.training_resource_policy import admit_densification
+            for backend in ('3dgs', '2dgs'):
+                model = self.model(backend)
+                before = self.snapshot(model)
+                events = []
+                allowed = admit_densification(torch, model, backend, 0., 100.,
+                    GrowthAdmission(lambda: (11 * GIB, 12 * GIB)),
+                    lambda *event: events.append(event), 2)
+                self.assertTrue(allowed)
+                self.assertEqual((events[-1][1]['clone_count'], events[-1][1]['split_count']), (2, 2))
+                self.assertEqual(self.snapshot(model), before)
 
         def test_actual_tensor_pressure_defers_without_changes(self):
             from native.worker.training_resource_policy import admit_densification

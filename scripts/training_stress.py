@@ -16,6 +16,52 @@ import time
 import uuid
 
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+def runtime_plan(arguments):
+    """Describe explicit stress presets; guard and execution never gate each other."""
+    from native.worker.training_configuration import normalize_runtime_options
+    optimized = (arguments.optimizations == 'on' if arguments.optimizations is not None
+                 else arguments.case != 'legacy')
+    guard = (arguments.guard == 'on' if arguments.guard is not None
+             else arguments.case != 'legacy')
+    execution = {key: optimized for key in (
+        'image_staging', 'camera_prefetch', 'capacity_storage', 'surfel_auxiliary')}
+    execution.update(loss_mode='auto' if optimized else 'stock', engine='stock',
+                     gpu_slots=2, pinned_mib=256, gpu_mib=512)
+    preset_changes = []
+    if arguments.baseline_runtime:
+        # Preserve the previous harness flag's exact feature subset. It never
+        # changes the guard, image staging, renderer or loss selection.
+        for key in ('camera_prefetch', 'capacity_storage', 'surfel_auxiliary'):
+            execution[key] = False
+        preset_changes.append('baseline_runtime_disables_prefetch_capacity_surfel_auxiliary')
+    for key in ('image_staging', 'camera_prefetch', 'capacity_storage', 'surfel_auxiliary'):
+        choice = getattr(arguments, key)
+        if choice is not None:
+            execution[key] = choice == 'on'
+    if arguments.loss_mode is not None:
+        execution['loss_mode'] = arguments.loss_mode
+    if arguments.renderer is not None:
+        execution['engine'] = arguments.renderer
+    policy = {'version': 2,
+        'resourceGuard': {'enabled': guard, 'mode': arguments.guard_mode,
+            'usage_fraction': (arguments.guard_usage_fraction if arguments.guard_usage_fraction is not None
+                               else .5 if arguments.case == 'pressure' else .9),
+            'minimum_spare_mib': (arguments.guard_minimum_spare_mib if arguments.guard_minimum_spare_mib is not None
+                                  else 8192 if arguments.case == 'pressure' else 512),
+            'max_consecutive_denials': arguments.guard_denials},
+        'execution': execution, 'monitoring': {'profile_interval': 1}}
+    return {'runtime': normalize_runtime_options(runtime_options=policy),
+            'preset_changes': preset_changes,
+            'legacy_case_mapping': ('legacy_effective_guard_and_execution_off'
+                                    if arguments.case == 'legacy' else 'independent_runtime_v2'),
+            'training_started': False}
+
+
 def digest(path):
     value = hashlib.sha256()
     with path.open('rb') as stream:
@@ -75,9 +121,27 @@ def main():
     parser.add_argument('--memory-observer', action='store_true')
     parser.add_argument('--baseline-runtime', action='store_true',
                         help='Keep the previous bounded runtime but disable the new exact-storage/prefetch/auxiliary features.')
+    parser.add_argument('--runtime-plan', action='store_true',
+                        help='Print requested/dependency-resolved runtime options; load no data and start no training.')
+    parser.add_argument('--guard', choices=('on', 'off'),
+                        help='Override only the software resource guard; actual CUDA errors remain errors.')
+    parser.add_argument('--optimizations', choices=('on', 'off'),
+                        help='Explicit preset for staging/prefetch/capacity/surfel/loss, independent of the guard.')
+    parser.add_argument('--guard-mode', choices=('pause', 'defer'), default='pause')
+    parser.add_argument('--guard-usage-fraction', type=float)
+    parser.add_argument('--guard-minimum-spare-mib', type=int)
+    parser.add_argument('--guard-denials', type=int, default=3)
+    for feature in ('image-staging', 'camera-prefetch', 'capacity-storage', 'surfel-auxiliary'):
+        parser.add_argument('--' + feature, choices=('on', 'off'))
+    parser.add_argument('--loss-mode', choices=('auto', 'stock'))
+    parser.add_argument('--renderer', choices=('stock', 'fastergs'))
     args = parser.parse_args()
     if args.child is not None:
         child(args.child)
+        return 0
+    planned_runtime = runtime_plan(args)
+    if args.runtime_plan:
+        print(json.dumps(planned_runtime, ensure_ascii=False, allow_nan=False))
         return 0
     if any(value is None for value in (args.dataset, args.output, args.python)):
         parser.error('--dataset, --output and --python are required')
@@ -115,13 +179,9 @@ def main():
         warm_iteration = 1
     session = uuid.uuid4().hex
     request = root / 'pause-request.json'
-    performance = {'enabled': args.case != 'legacy', 'profile_interval': 1,
-                   'usage_fraction': .5 if args.case == 'pressure' else .9,
-                   'minimum_spare_mib': 8192 if args.case == 'pressure' else 512}
-    if args.baseline_runtime:
-        performance.update(camera_prefetch=False, capacity_storage=False, surfel_auxiliary=False)
     control = {'backend': args.backend, 'output': str(output), 'request': str(request),
-               'session': session, 'resume': False, 'performance': performance}
+               'session': session, 'resume': False,
+               'runtimeOptions': planned_runtime['runtime']['requested']}
     env = os.environ.copy()
     env.update(PYTHONUTF8='1', MPLBACKEND='Agg', GSW_NATIVE_TRAINING_CONTROL=json.dumps(control))
     loss_path = env.get('GSW_TRAINING_LOSS_MODULE_PATH_' + args.backend.upper())
@@ -193,12 +253,14 @@ def main():
                 except ValueError:
                     pass
     unchanged = all(path.is_file() and digest(path) == before[str(path)] for path in files)
-    report = {'version': 1, 'backend': args.backend, 'case': args.case,
+    report = {'version': 2, 'backend': args.backend, 'case': args.case,
               'baseline_runtime': args.baseline_runtime,
+              'runtime_plan': planned_runtime,
               'source_unchanged': unchanged, 'source_hashes': before,
               'photos': len(list((dataset / 'images').glob('*'))),
               'warm_start_only': bool(warm_iteration), 'optimizer_resume': False,
               'allocator_fraction_cap': .75, 'returncode': process.returncode,
+              'training_started': True,
               'timeout_pause_requested': interrupted, 'duration_seconds': time.monotonic() - started,
               'events': events}
     (root / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

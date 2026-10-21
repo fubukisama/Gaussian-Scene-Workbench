@@ -133,6 +133,8 @@ def _build(request, repository_root=None, cancelled=None):
         condition_records.append({"id": condition["id"], "label": condition["label"],
             "dataset_id": source["id"], "data_identity": reference["data_identity"],
             "training_configuration": batch["runs"][0]["configuration"],
+            "runtime_configuration": copy.deepcopy(batch["runtime_configuration"]),
+            "runtime_configuration_scope": batch["runtime_configuration_scope"],
             "initialization": copy.deepcopy(cached_datasets[source["id"]]),
             "splits": copy.deepcopy(reference["splits"]),
             "extraction": _extraction(condition["extraction"]),

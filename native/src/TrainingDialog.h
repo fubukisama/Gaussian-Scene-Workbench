@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QJsonObject>
 #include <QString>
 #include "TrainingInputSummary.h"
 #include "TrainingReconstructionSummary.h"
@@ -24,17 +25,26 @@ struct TrainingConfiguration {
   int resolution = 2;
   bool runColmap = true;
   bool overwrite = false;
-  bool performanceOptimization = true;
+  bool resourceGuardEnabled = true;
+  bool imageStaging = true;
   bool cameraPrefetch = true;
   bool capacityStorage = true;
   bool surfelAuxiliary = true;
   int trainingMemoryPercent = 90;
+  int minimumSpareMiB = 512;
+  int maxConsecutiveDenials = 3;
+  int imageGpuSlots = 2;
+  int imagePinnedMiB = 256;
+  int imageGpuMiB = 512;
+  int profileInterval = 30;
+  QString lossMode = QStringLiteral("auto");
   QString trainingEngine = QStringLiteral("stock");
   QString growthMode = QStringLiteral("pause");
   QString posePolicy = QStringLiteral("solve");
   QString cameraDatasetPath;
   QString cameraDatasetIdentity;
   QString resolutionPolicy = QStringLiteral("manual");
+  QJsonObject runtimeOptions;
 };
 
 class TrainingDialog final : public QDialog {
@@ -88,11 +98,19 @@ private:
   QLineEdit *mOutputScene = nullptr;
   QCheckBox *mRunColmap = nullptr;
   QCheckBox *mOverwrite = nullptr;
-  QCheckBox *mPerformanceOptimization = nullptr;
+  QCheckBox *mResourceGuard = nullptr;
+  QCheckBox *mImageStaging = nullptr;
   QCheckBox *mCameraPrefetch = nullptr;
   QCheckBox *mCapacityStorage = nullptr;
   QCheckBox *mSurfelAuxiliary = nullptr;
   QSpinBox *mTrainingMemoryPercent = nullptr;
+  QSpinBox *mMinimumSpareMiB = nullptr;
+  QSpinBox *mMaxConsecutiveDenials = nullptr;
+  QSpinBox *mImageGpuSlots = nullptr;
+  QSpinBox *mImagePinnedMiB = nullptr;
+  QSpinBox *mImageGpuMiB = nullptr;
+  QSpinBox *mProfileInterval = nullptr;
+  QComboBox *mLossMode = nullptr;
   QComboBox *mTrainingEngine = nullptr;
   QComboBox *mGrowthMode = nullptr;
   QLabel *mInputSummaryLabel = nullptr;

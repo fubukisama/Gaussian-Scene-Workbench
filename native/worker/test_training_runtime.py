@@ -5,6 +5,120 @@ from types import SimpleNamespace
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_guard_and_optimization_matrix_is_independent_for_both_backends(self):
+        from native.worker.training_runtime import runtime_configuration
+        for backend in ('3dgs', '2dgs'):
+            for guard in (True, False):
+                for optimize in (True, False):
+                    wire = {'version': 2, 'resourceGuard': {'enabled': guard},
+                            'execution': {'image_staging': optimize, 'camera_prefetch': optimize,
+                                          'capacity_storage': optimize, 'surfel_auxiliary': optimize,
+                                          'loss_mode': 'auto' if optimize else 'stock'}}
+                    with self.subTest(backend=backend, guard=guard, optimize=optimize):
+                        report = runtime_configuration({'backend': backend, 'runtimeOptions': wire})
+                        self.assertEqual(report['requested']['resourceGuard']['enabled'], guard)
+                        self.assertEqual(report['effective']['execution']['image_staging'], optimize)
+                        self.assertEqual(report['effective']['execution']['capacity_storage'], optimize)
+                        self.assertEqual(report['requested']['execution']['surfel_auxiliary'], optimize)
+                        self.assertEqual(report['effective']['execution']['surfel_auxiliary'], optimize and backend == '2dgs')
+                        self.assertEqual(report['effective']['execution']['loss_mode'], 'auto' if optimize else 'stock')
+                        self.assertEqual(report['effective']['execution']['engine'], 'stock')
+
+    def test_entry_migration_is_retained_without_becoming_an_execution_override(self):
+        from native.worker.training_runtime import NativeTrainingRuntime
+        from native.worker.training_configuration import normalize_runtime_options
+        entry = normalize_runtime_options(legacy_performance={'enabled': False})
+        runtime = NativeTrainingRuntime({'runtimeOptions': entry['requested'],
+            'runtimeConfigurationReport': entry},
+            SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
+            lambda *args: None, '2dgs')
+        state = {}
+        runtime.capture(state)
+        self.assertEqual(state['runtime_configuration']['entry_migration'], entry)
+        self.assertFalse(state['runtime_options']['execution']['image_staging'])
+        changed = dict(entry, effective=normalize_runtime_options()['effective'])
+        with self.assertRaisesRegex(ValueError, 'entry_configuration_report'):
+            NativeTrainingRuntime({'runtimeOptions': entry['requested'],
+                'runtimeConfigurationReport': changed},
+                SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
+                lambda *args: None, '2dgs')
+
+    def test_full_state_runtime_override_records_before_after_and_iteration(self):
+        from native.worker.training_runtime import NativeTrainingRuntime
+        from native.worker.training_configuration import normalize_runtime_options
+        before = normalize_runtime_options({'version': 2, 'execution': {'image_staging': False}})['requested']
+        after = normalize_runtime_options({'version': 2, 'resourceGuard': {'enabled': False}},
+                                           checkpoint_runtime=before, resume=True)['requested']
+        events = []
+        runtime = NativeTrainingRuntime({'runtimeOptions': after},
+            SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
+            lambda kind, value: events.append((kind, value)), '3dgs')
+        runtime.restore_quality({'iteration': 6240, 'runtime_options': before,
+                                 'growth_quality': {'consecutive_deferred': 2}})
+        state = {}
+        runtime.capture(state)
+        self.assertEqual(state['runtime_policy_history'], [{
+            'iteration': 6240, 'before': before, 'after': after,
+            'reason': 'explicit_resume_runtime_override'}])
+        self.assertEqual(state['runtime_options']['execution'], before['execution'])
+        resumed = NativeTrainingRuntime({'runtimeOptions': after},
+            SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
+            lambda *args: None, '3dgs')
+        state['iteration'] = 6300
+        resumed.restore_quality(state)
+        second = {}
+        resumed.capture(second)
+        self.assertEqual(second['runtime_policy_history'], state['runtime_policy_history'])
+
+    def test_disabled_guard_bypasses_unavailable_probe_without_disabling_staging(self):
+        from native.worker.training_runtime import NativeTrainingRuntime
+        def forbidden_probe():
+            raise AssertionError('disabled guard must not query device memory')
+        external_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: False, mem_get_info=forbidden_probe),
+            device=lambda value: SimpleNamespace(type=value))
+        for backend in ('3dgs', '2dgs'):
+            events = []
+            runtime = NativeTrainingRuntime({'runtimeOptions': {
+                'version': 2, 'resourceGuard': {'enabled': False}}},
+                external_torch, lambda kind, value: events.append((kind, value)), backend)
+            runtime.report_images([])
+            self.assertTrue(next(value for kind, value in events
+                                 if kind == '[gsw-training-image-cache]')['bounded'])
+            self.assertTrue(runtime.admit(object(), .1, 1., 5))
+            self.assertFalse(runtime.pause_for_resources())
+            growth = next(value for kind, value in events if kind == '[gsw-training-growth]')
+            self.assertEqual(growth['state'], 'bypassed')
+            self.assertEqual(growth['reason'], 'guard_disabled')
+            self.assertFalse(growth['observation_valid'])
+            state = {}
+            runtime.capture(state)
+            self.assertTrue(state['runtime_options']['execution']['image_staging'])
+            self.assertFalse(state['runtime_options']['resourceGuard']['enabled'])
+
+    def test_resource_pause_threshold_is_configurable_and_retains_failure_reason(self):
+        quality = GrowthQuality('pause', max_consecutive_denials=2)
+        quality.observe(False, 'probe_unavailable')
+        self.assertFalse(quality.should_pause())
+        quality.observe(False, 'probe_unavailable')
+        self.assertTrue(quality.should_pause())
+        self.assertEqual(quality.snapshot()['last_reason'], 'probe_unavailable')
+        deferred = GrowthQuality('defer', max_consecutive_denials=1)
+        deferred.observe(False, 'estimate_unavailable')
+        self.assertFalse(deferred.should_pause())
+
+    def test_guard_off_keeps_requested_staging_and_other_execution_features(self):
+        value = performance_configuration({'runtimeOptions': {
+            'version': 2, 'resourceGuard': {'enabled': False}}})
+        self.assertFalse(value['resource_guard_enabled'])
+        self.assertTrue(value['image_staging'])
+        self.assertEqual(value['loss_mode'], 'auto')
+        self.assertTrue(value['camera_prefetch'])
+        self.assertTrue(value['capacity_storage'])
+        environment = {}
+        configure_image_environment(value, environment)
+        self.assertEqual(environment['GSW_TRAINING_IMAGE_PIPELINE'], 'bounded')
+
     def test_loss_execution_record_starts_unobserved_and_retains_fallback_changes(self):
         from native.worker.training_runtime import LossExecutionRecord
         record = LossExecutionRecord('fused_l1_ssim')
@@ -154,6 +268,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(observation.reusable_cache_bytes, 2000)
         cuda.memory_stats = lambda: {'reserved_bytes.all.current': 4000}
         self.assertEqual(observed_memory(SimpleNamespace(cuda=cuda)).reusable_cache_bytes, 0)
+
+    def test_memory_observation_keeps_device_and_allocator_quantities_distinct(self):
+        cuda = SimpleNamespace(mem_get_info=lambda: (1000, 10000), memory_stats=lambda: {
+            'allocated_bytes.all.current': 900, 'reserved_bytes.all.current': 4000,
+            'active_bytes.all.current': 1000, 'inactive_split_bytes.all.current': 1000})
+        result = observed_memory(SimpleNamespace(cuda=cuda))
+        self.assertEqual(result.free_bytes, 1000)
+        self.assertEqual(result.allocated_bytes, 900)
+        self.assertEqual(result.reserved_bytes, 4000)
+        self.assertEqual(result.active_bytes, 1000)
+        self.assertEqual(result.inactive_split_bytes, 1000)
+        self.assertEqual(result.reusable_cache_bytes, 2000)
+        self.assertEqual(result.allocator_status, 'known')
+
 
     def test_quality_priority_pauses_after_sustained_pressure_and_restores_counter(self):
         quality = GrowthQuality('pause')

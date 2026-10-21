@@ -180,8 +180,10 @@ int nativeResumeIteration(const QString &outputSceneRoot) {
   if (outputSceneRoot.isEmpty()) return -1;
   const QDir root(QDir(outputSceneRoot).filePath(QStringLiteral(".gsw-resume")));
   QFile manifest(root.filePath(QStringLiteral("ready.json")));
-  if (!manifest.open(QIODevice::ReadOnly) || manifest.size() > 16384) return -1;
-  const QJsonObject data = QJsonDocument::fromJson(manifest.readAll()).object();
+  if (!manifest.open(QIODevice::ReadOnly) || manifest.size() > NativeResumeManifestMaximumBytes) return -1;
+  const auto bytes = manifest.read(NativeResumeManifestMaximumBytes + 1);
+  if (bytes.size() > NativeResumeManifestMaximumBytes || !manifest.atEnd()) return -1;
+  const QJsonObject data = QJsonDocument::fromJson(bytes).object();
   const QString name = data.value(QStringLiteral("file")).toString();
   static const QRegularExpression pattern(QStringLiteral("^state-[0-9a-f]{32}\\.pth$"));
   const int iteration = data.value(QStringLiteral("iteration")).toInt(-1);

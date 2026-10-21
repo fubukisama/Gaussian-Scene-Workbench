@@ -21,6 +21,9 @@ private:
   QStringList mProtectedPaths;
   QComboBox *mFormat;
   QComboBox *mCoordinates;
+  QComboBox *mOutputUnit;
+  CameraScaleRecoveryCapability mRecovery;
+  QLabel *mCoordinateInfo;
   QWidget *mSpzOptions;
   QComboBox *mSpzVersion;
   QComboBox *mSpzQuality;

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -55,6 +56,77 @@ GenerationExperiment pausedFixture(const QString &root, const QString &backend) 
 class GenerationHistoryStoreTests final : public QObject {
   Q_OBJECT
 private slots:
+  void completeResumeMetadataRetainsLongRuntimePolicyHistory_data() {
+    QTest::addColumn<QString>("backend");
+    QTest::newRow("3dgs") << QStringLiteral("3dgs");
+    QTest::newRow("2dgs") << QStringLiteral("2dgs");
+  }
+
+  void completeResumeMetadataRetainsLongRuntimePolicyHistory() {
+    QFETCH(QString,backend);
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto record=pausedFixture(temporary.path(),backend);
+    GenerationHistoryStore history(temporary.path());
+    QVERIFY(history.upsert(record));
+    const QString manifestPath=QDir(record.outputRoot).filePath(QStringLiteral(".gsw-resume/ready.json"));
+    QFile manifest(manifestPath);QVERIFY(manifest.open(QIODevice::ReadOnly));
+    auto metadata=QJsonDocument::fromJson(manifest.readAll()).object();manifest.close();
+    const QJsonObject policy{{"version",2},{"resourceGuard",QJsonObject{{"enabled",true},{"mode","pause"},{"usage_fraction",0.9},{"minimum_spare_mib",512},{"max_consecutive_denials",3}}},
+        {"execution",QJsonObject{{"image_staging",true},{"camera_prefetch",true},{"capacity_storage",true},{"surfel_auxiliary",true},{"loss_mode","auto"},{"engine","stock"},{"gpu_slots",2},{"pinned_mib",256},{"gpu_mib",512}}},
+        {"monitoring",QJsonObject{{"profile_interval",30}}}};
+    QJsonArray changes;
+    for(int index=0;index<24;++index)changes.append(QJsonObject{{"iteration",100+index},{"before",policy},{"after",policy},{"reason","explicit_resume_runtime_override"}});
+    metadata.insert(QStringLiteral("runtime_policy_history"),changes);
+    const auto bytes=QJsonDocument(metadata).toJson();QVERIFY(bytes.size()>16384);QVERIFY(bytes.size()<1024*1024);
+    QVERIFY(writeJson(manifestPath,metadata));
+    QCOMPARE(nativeResumeIteration(record.outputRoot),4407);
+    const auto availability=GenerationHistoryStore(temporary.path()).resumeAvailability(record.id);
+    QVERIFY2(availability.available,qPrintable(availability.reason));QCOMPARE(availability.iteration,4407);
+    QVERIFY(manifest.open(QIODevice::ReadOnly));QCOMPARE(manifest.readAll(),bytes);
+  }
+
+  void completeResumeMetadataBudgetIsBoundedWithoutDiscardingHistory_data() {
+    QTest::addColumn<QString>("backend");
+    QTest::newRow("3dgs") << QStringLiteral("3dgs");
+    QTest::newRow("2dgs") << QStringLiteral("2dgs");
+  }
+
+  void completeResumeMetadataBudgetIsBoundedWithoutDiscardingHistory() {
+    QFETCH(QString, backend);
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto record = pausedFixture(temporary.path(), backend);
+    GenerationHistoryStore history(temporary.path());
+    QVERIFY(history.upsert(record));
+    const QString manifestPath = QDir(record.outputRoot).filePath(QStringLiteral(".gsw-resume/ready.json"));
+    QFile manifest(manifestPath);
+    QVERIFY(manifest.open(QIODevice::ReadOnly));
+    auto metadata = QJsonDocument::fromJson(manifest.readAll()).object();
+    manifest.close();
+    metadata.insert(QStringLiteral("runtime_policy_history"), QJsonArray{QJsonObject{{"reason", "explicit_resume_runtime_override"}}});
+    auto bytes = QJsonDocument(metadata).toJson(QJsonDocument::Compact);
+    bytes += QByteArray(NativeResumeManifestMaximumBytes - bytes.size(), ' ');
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    QCOMPARE(manifest.write(bytes), bytes.size());
+    manifest.close();
+    QCOMPARE(nativeResumeIteration(record.outputRoot), 4407);
+    QVERIFY(history.resumeAvailability(record.id).available);
+
+    // A valid JSON document one byte above the admission budget is refused,
+    // not repaired by removing provenance. Both public readers agree.
+    bytes += ' ';
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    QCOMPARE(manifest.write(bytes), bytes.size());
+    manifest.close();
+    QCOMPARE(nativeResumeIteration(record.outputRoot), -1);
+    QVERIFY(!history.resumeAvailability(record.id).available);
+    QVERIFY(manifest.open(QIODevice::ReadOnly));
+    QCOMPARE(manifest.readAll(), bytes);
+    QCOMPARE(history.records().size(), 1);
+    QVERIFY(QFileInfo::exists(QDir(record.outputRoot).filePath(QStringLiteral(".gsw-resume/") + metadata.value(QStringLiteral("file")).toString())));
+  }
+
   void experimentsRetainTheirIndependentParametersAfterReopening() {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());

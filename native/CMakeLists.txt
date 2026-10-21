@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.4
+  VERSION 0.3.5
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-10-20" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-21" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -259,6 +259,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ScreenSpaceSelection.h
   src/TrainingDialog.cpp
   src/TrainingDialog.h
+  src/RuntimeGuardDialog.cpp
+  src/RuntimeGuardDialog.h
+  src/ExistingTrainingDialog.cpp
+  src/ExistingTrainingDialog.h
   src/TrainingInputSummary.cpp
   src/TrainingInputSummary.h
   src/TrainingEnvironmentProbe.cpp
@@ -417,6 +421,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/RUNTIME_DECOUPLING.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/RUNTIME_DECOUPLING.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION .)
@@ -566,6 +572,41 @@ if(BUILD_TESTING)
   set_tests_properties(native_mesh_geometry_dialog_ui PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  # Keep runtime-policy/lifecycle acceptance independent of MainWindow and the
+  # local user session. The observer controls only the generated CPU fixture.
+  qt_add_executable(gsw_runtime_decoupling_ui_tests tests/RuntimeDecouplingUiTests.cpp
+    src/TrainingDialog.cpp src/TrainingDialog.h src/RuntimeGuardDialog.cpp src/RuntimeGuardDialog.h
+    src/ExistingTrainingDialog.cpp src/ExistingTrainingDialog.h
+    src/TrainingInputSummary.cpp src/TrainingInputSummary.h
+    src/TrainingReconstructionSummary.cpp src/TrainingReconstructionSummary.h
+    src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h src/ColmapSupport.cpp src/ColmapSupport.h
+    src/InitializationDialog.cpp src/InitializationDialog.h
+    src/InitializationEditor.cpp src/InitializationEditor.h
+    src/InitializationPreview.cpp src/InitializationPreview.h
+    src/TrainingMonitorWidget.cpp src/TrainingMonitorWidget.h
+    src/TrainingTelemetry.cpp src/TrainingTelemetry.h
+    src/ProcessSupervisor.cpp src/ProcessSupervisor.h
+    src/TrainingOutputLocator.cpp src/TrainingOutputLocator.h
+    src/TrainingGpuPreviewProtocol.cpp src/TrainingGpuPreviewProtocol.h
+    src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
+  target_include_directories(gsw_runtime_decoupling_ui_tests PRIVATE src)
+  target_link_libraries(gsw_runtime_decoupling_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
+  qt_add_resources(gsw_runtime_decoupling_ui_tests "runtime_decoupling_languages"
+    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  foreach(language zh_CN ja)
+    qt_add_resources(gsw_runtime_decoupling_ui_tests "runtime_decoupling_qtbase_${language}"
+      PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+  endforeach()
+  if(MSVC)
+    target_compile_options(gsw_runtime_decoupling_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data")
+  add_test(NAME native_runtime_decoupling_ui COMMAND gsw_runtime_decoupling_ui_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/helpers/OwnedTrainingConnectionFixture.py")
+  set_tests_properties(native_runtime_decoupling_ui PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   qt_add_executable(gsw_model_scale_coordinate_tests
     tests/ModelScaleCoordinateTests.cpp src/SceneCoordinates.cpp src/SceneCoordinates.h)
   target_include_directories(gsw_model_scale_coordinate_tests PRIVATE src)
@@ -589,6 +630,15 @@ if(BUILD_TESTING)
     native.worker.test_training_stress)
   set_tests_properties(native_training_performance_policy PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 60)
+  add_test(NAME native_runtime_decoupling_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.worker.test_training_configuration native.worker.test_runtime_checkpoint_binding
+    native.worker.test_runtime_worker_configuration native.worker.test_training_failure
+    native.worker.test_runtime_delivery
+    native.worker.test_training_job_connection native.worker.test_two_dgs_adapter
+    native.backend.tests.test_training_backends.TrainingBackendTests.test_two_dgs_vram_warning_reports_selected_guard_and_density_schedule)
+  set_tests_properties(native_runtime_decoupling_contracts PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120
+    ENVIRONMENT "PYTHONUTF8=1;PYTHONIOENCODING=utf-8")
   foreach(icon_locale zh_CN en_US ja_JP)
     add_test(NAME native_icon_ui_${icon_locale}
       COMMAND GaussianSceneWorkbench --smoke-test-icon-ui --language ${icon_locale})
@@ -1035,6 +1085,11 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  # Completion now also covers two bounded persistent-owner close/reopen/
+  # migration fixtures (30s deadlines each) in addition to the original cases.
+  set_tests_properties(native_processing_completion PROPERTIES TIMEOUT 180)
+  set_property(TEST native_processing_completion APPEND PROPERTY ENVIRONMENT
+    "GSW_RUNTIME_UI_TEST_PYTHON=${Python3_EXECUTABLE}")
   set_tests_properties(native_paged_mesh_scene PROPERTIES
     ENVIRONMENT
       "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_MESH_RESIDENT_VERTEX_LIMIT=4;GSW_MESH_RESIDENT_FACE_LIMIT=4;GSW_EXPECT_DEPTH_OCCLUSION=1"
@@ -1142,6 +1197,7 @@ if(BUILD_TESTING)
     qt_add_executable(gsw_model_export_tests
       tests/ModelExportTests.cpp
       src/ModelExport.cpp
+      src/CameraTrajectory.cpp
       src/SpzIO.cpp
       src/ModelInteraction.cpp
       src/PlyPointCloudLoader.cpp
@@ -1156,9 +1212,48 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME model_export COMMAND gsw_model_export_tests)
 
+    qt_add_executable(gsw_coordinate_delivery_ui_tests
+      tests/CoordinateDeliveryUiTests.cpp src/ModelExportDialog.cpp src/ModelExportDialog.h
+      src/AppLanguage.cpp src/AppLanguage.h src/ModelExport.cpp src/CameraTrajectory.cpp src/SpzIO.cpp
+      src/ModelInteraction.cpp src/PlyPointCloudLoader.cpp src/PointCloudCache.cpp
+      src/MeshCache.cpp src/SceneCoordinates.cpp)
+    target_include_directories(gsw_coordinate_delivery_ui_tests PRIVATE src)
+    target_link_libraries(gsw_coordinate_delivery_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test gsw_spz gsw_resource_budget)
+    if(MSVC)
+      target_compile_options(gsw_coordinate_delivery_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    qt_add_resources(gsw_coordinate_delivery_ui_tests coordinate_delivery_languages PREFIX "/i18n"
+      BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    foreach(language zh_CN ja)
+      qt_add_resources(gsw_coordinate_delivery_ui_tests "coordinate_delivery_qt_${language}"
+        PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+    endforeach()
+    add_test(NAME native_coordinate_delivery_ui COMMAND gsw_coordinate_delivery_ui_tests)
+    set_tests_properties(native_coordinate_delivery_ui PROPERTIES TIMEOUT 60
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PYTHONUTF8=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
     qt_add_executable(gsw_scale_constraint_report_tests
       tests/ScaleConstraintReportTests.cpp
       src/SceneCoordinates.cpp)
+
+    qt_add_executable(gsw_camera_trajectory_tests
+      tests/CameraTrajectoryTests.cpp src/CameraTrajectory.cpp src/CameraTrajectory.h src/SceneCoordinates.cpp)
+    target_include_directories(gsw_camera_trajectory_tests PRIVATE src)
+    target_link_libraries(gsw_camera_trajectory_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    qt_add_executable(gsw_scene_display_mapping_tests tests/SceneDisplayMappingTests.cpp src/SceneCoordinates.cpp)
+    target_include_directories(gsw_scene_display_mapping_tests PRIVATE src)
+    target_link_libraries(gsw_scene_display_mapping_tests PRIVATE Qt6::Core Qt6::Gui)
+    foreach(target gsw_camera_trajectory_tests gsw_scene_display_mapping_tests)
+      if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+      endif()
+    endforeach()
+    add_test(NAME native_camera_trajectory_contract COMMAND gsw_camera_trajectory_tests)
+    add_test(NAME native_scene_display_mapping COMMAND gsw_scene_display_mapping_tests)
+    set_tests_properties(native_camera_trajectory_contract native_scene_display_mapping PROPERTIES TIMEOUT 90
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
     target_include_directories(gsw_scale_constraint_report_tests PRIVATE src)
     target_link_libraries(gsw_scale_constraint_report_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
     if(MSVC)

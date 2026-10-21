@@ -5,6 +5,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QDateTime>
+#include <QJsonDocument>
+#include <QSaveFile>
+#include <QTimer>
 #include <QMetaMethod>
 #include <QProcess>
 #include <QScopeGuard>
@@ -17,10 +21,71 @@
 #endif
 
 #include <memory>
+#include <cstdio>
 
 using namespace gsw;
 
 namespace {
+bool writeJsonFixture(const QString &path, const QJsonObject &value) {
+  QSaveFile file(path);
+  return file.open(QIODevice::WriteOnly) &&
+      file.write(QJsonDocument(value).toJson(QJsonDocument::Compact)) > 0 && file.commit();
+}
+
+int persistentFixture(QCoreApplication &application) {
+#ifndef Q_OS_WIN
+  return 2;
+#else
+  const auto args = application.arguments();
+  if (args.size() != 5) return 3;
+  const QString store = args.at(2), ready = args.at(3), release = args.at(4);
+  const QString id(32, QLatin1Char('a')), session(32, QLatin1Char('b'));
+  const QString output = QDir(store).filePath(QStringLiteral("owned-output"));
+  if (!QDir().mkpath(QDir(store).filePath(QStringLiteral(".c")))) return 4;
+  FILETIME creation{}, exit{}, kernel{}, user{};
+  if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) return 5;
+  const quint64 token = (quint64(creation.dwHighDateTime) << 32) | creation.dwLowDateTime;
+  const QJsonObject identity{{"pid", QCoreApplication::applicationPid()},
+      {"startToken", QStringLiteral("win-filetime:") + QString::number(token)}};
+  const QJsonObject control{{"session", session}, {"backend", "3dgs"}, {"output", output}};
+  const QJsonObject job{{"id", id}, {"backend", "3dgs"}, {"status", "running"},
+      {"stage", "train"}, {"native_control", control}};
+  if (!writeJsonFixture(QDir(store).filePath(id + QStringLiteral(".json")), job)) return 6;
+  const QString leasePath = QDir(store).filePath(QStringLiteral(".c/") + session + QStringLiteral(".json"));
+  const auto heartbeat = [&] {
+    return writeJsonFixture(leasePath, {{"version", 1}, {"jobId", id},
+        {"session", session}, {"backend", "3dgs"}, {"output", output},
+        {"workerIdentity", identity}, {"closed", false},
+        {"heartbeat", QDateTime::currentMSecsSinceEpoch() / 1000.0}});
+  };
+  if (!heartbeat()) return 7;
+  QFile readyFile(ready);
+  if (!readyFile.open(QIODevice::WriteOnly) || readyFile.write(QByteArray::number(QCoreApplication::applicationPid())) <= 0) return 8;
+  readyFile.close();
+  std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"running\",\"stage\":\"train\",\"iteration\":3}");
+  std::fflush(stdout);
+  QTimer timer;
+  QObject::connect(&timer, &QTimer::timeout, &application, [&] {
+    if (QFileInfo::exists(release)) { application.exit(0); return; }
+    heartbeat();
+    QFile command(QDir(store).filePath(QStringLiteral(".c/") + session + QStringLiteral("-cmd.json")));
+    if (!command.open(QIODevice::ReadOnly)) return;
+    const auto request = QJsonDocument::fromJson(command.readAll()).object();
+    command.close(); command.remove();
+    if (request.value("session") != session || request.value("jobId") != id ||
+        request.value("workerIdentity").toObject() != identity) { application.exit(9); return; }
+    const bool paused = request.value("command").toString() == QStringLiteral("pause");
+    const QByteArray event = QJsonDocument(QJsonObject{{"version", 1}, {"type", "status"},
+        {"state", paused ? "paused" : "cancelled"}, {"stage", paused ? "paused" : "cancelled"}}).toJson(QJsonDocument::Compact);
+    std::printf("[worker-event] %s\n", event.constData()); std::fflush(stdout);
+    application.exit(paused ? 75 : 130);
+  });
+  timer.start(25);
+  QTimer::singleShot(15000, &application, [&] { application.exit(10); });
+  return application.exec();
+#endif
+}
+
 QString processOutputFixturePath() {
 #ifdef Q_OS_WIN
   const QString helperName = QStringLiteral("gsw_process_output_fixture.exe");
@@ -64,10 +129,205 @@ private slots:
   void gracefulStopCleansChildAfterParentExitsFirst();
   void shutdownTerminatesTheEntireProcessTreeSynchronously();
   void destructionAfterStopDoesNotLeaveChildProcess();
+  void persistentObserverDestructionLeavesWorkerAlive();
+  void persistentExplicitControlsAreSessionBound_data();
+  void persistentExplicitControlsAreSessionBound();
+  void persistentUnavailableControlsDoNotPretendToStop();
+  void decodesIndependentRuntimeAndTypedFailureWithoutDiscardingProgress();
+  void growthBypassIsExplicitlyUnmeasured();
+  void migrationProtectsUnverifiedActiveRecords();
+  void migrationProtectsMalformedPersistentCreationTokens();
 };
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
+}
+
+void ProcessSupervisorTests::migrationProtectsUnverifiedActiveRecords() {
+  QTemporaryDir temporary; QVERIFY(temporary.isValid());
+  const QString store = QDir(temporary.path()).filePath("jobs");
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(store));
+  QVERIFY(QDir().mkpath(store));
+  const QString record = QDir(store).filePath(QString(32, QLatin1Char('a')) + ".json");
+  QVERIFY(writeJsonFixture(record, {{"id",QString(32,QLatin1Char('a'))},
+      {"backend","3dgs"},{"status","running"}}));
+  const QByteArray before = [&] { QFile file(record); file.open(QIODevice::ReadOnly); return file.readAll(); }();
+  QVERIFY(ProcessSupervisor::hasUnfinishedTraining(store));
+  QFile unchanged(record); QVERIFY(unchanged.open(QIODevice::ReadOnly));
+  QCOMPARE(unchanged.readAll(), before); unchanged.close();
+  QVERIFY(writeJsonFixture(record, {{"id",QString(32,QLatin1Char('a'))},
+      {"backend","3dgs"},{"status","paused"}}));
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(store));
+}
+
+void ProcessSupervisorTests::migrationProtectsMalformedPersistentCreationTokens() {
+#ifndef Q_OS_WIN
+  QSKIP("Persistent process identity currently targets native Windows.");
+#else
+  QTemporaryDir temporary;QVERIFY(temporary.isValid());
+  const QString store=QDir(temporary.path()).filePath(QStringLiteral("jobs"));
+  QVERIFY(QDir().mkpath(QDir(store).filePath(QStringLiteral(".p"))));
+  const QString path=QDir(store).filePath(QStringLiteral(".p/owned-launch.json"));
+  for(const auto &token:QStringList{QStringLiteral("unknown"),QStringLiteral("linux:other-platform:10"),
+      QStringLiteral("win-filetime:-1"),QStringLiteral("win-filetime:0"),QStringLiteral("win-filetime:01"),
+      QStringLiteral("win-filetime:1.5"),QStringLiteral("win-filetime:18446744073709551616")}) {
+    const QJsonObject record{{"version",1},{"closed",false},{"workerIdentity",QJsonObject{
+        {"pid",QCoreApplication::applicationPid()},{"startToken",token}}}};
+    QVERIFY(writeJsonFixture(path,record));
+    const QByteArray before=[&] {QFile file(path);file.open(QIODevice::ReadOnly);return file.readAll();}();
+    QVERIFY2(ProcessSupervisor::hasUnfinishedTraining(store),qPrintable(token));
+    QFile after(path);QVERIFY(after.open(QIODevice::ReadOnly));QCOMPARE(after.readAll(),before);
+  }
+  FILETIME creation{},exit{},kernel{},user{};
+  QVERIFY(GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernel,&user));
+  const quint64 token=(quint64(creation.dwHighDateTime)<<32)|creation.dwLowDateTime;
+  QJsonObject identity{{"pid",QCoreApplication::applicationPid()},{"startToken",QStringLiteral("win-filetime:")+QString::number(token)}};
+  QVERIFY(writeJsonFixture(path,{{"version",1},{"closed",false},{"workerIdentity",identity}}));
+  QVERIFY(ProcessSupervisor::hasUnfinishedTraining(store));
+  identity.insert(QStringLiteral("startToken"),QStringLiteral("win-filetime:")+QString::number(token+1));
+  QVERIFY(writeJsonFixture(path,{{"version",1},{"closed",false},{"workerIdentity",identity}}));
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(store));
+  identity.insert(QStringLiteral("unknown"),true);
+  QVERIFY(writeJsonFixture(path,{{"version",1},{"closed",false},{"workerIdentity",identity}}));
+  QVERIFY(ProcessSupervisor::hasUnfinishedTraining(store));
+  QVERIFY(writeJsonFixture(path,{{"version",1},{"closed",true},{"workerIdentity",QJsonObject{}}}));
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(store));
+#endif
+}
+
+void ProcessSupervisorTests::persistentUnavailableControlsDoNotPretendToStop() {
+#ifndef Q_OS_WIN
+  QSKIP("Persistent process identity currently targets native Windows.");
+#else
+  QTemporaryDir temporary; QVERIFY(temporary.isValid());
+  const QString release=QDir(temporary.path()).filePath("release");
+  const auto cleanup=qScopeGuard([&] { QFile file(release); if(file.open(QIODevice::WriteOnly)) file.write("release"); });
+  ProcessSupervisor supervisor;
+  QSignalSpy statuses(&supervisor,&ProcessSupervisor::workerStatusReady);
+  QSignalSpy finished(&supervisor,&ProcessSupervisor::taskFinished);
+  QVERIFY(supervisor.startPersistentTraining("unregistered",processOutputFixturePath(),
+      {"completion-worker",QDir(temporary.path()).filePath("result.ply"),release,"training_checkpoint"},
+      temporary.path(),{},QDir(temporary.path()).filePath("worker.log"),
+      QDir(temporary.path()).filePath("jobs")));
+  // The detached worker has not registered a job/observer lease yet.
+  QVERIFY(ProcessSupervisor::hasUnfinishedTraining(QDir(temporary.path()).filePath("jobs")));
+  QTRY_VERIFY_WITH_TIMEOUT(!statuses.isEmpty(),5000);
+  QVERIFY(!supervisor.requestPause());
+  supervisor.stop();
+  QVERIFY(!supervisor.wasStopRequested());
+  QVERIFY(supervisor.isRunning());
+  QFile file(release); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("release"); file.close();
+  QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(QDir(temporary.path()).filePath("jobs")));
+#endif
+}
+
+void ProcessSupervisorTests::decodesIndependentRuntimeAndTypedFailureWithoutDiscardingProgress() {
+  const QJsonObject guard{{"enabled",false},{"mode","pause"},{"usage_fraction",.9},
+      {"minimum_spare_mib",512},{"max_consecutive_denials",3}};
+  const QJsonObject execution{{"image_staging",true},{"camera_prefetch",true},
+      {"capacity_storage",true},{"surfel_auxiliary",true},{"loss_mode","auto"},
+      {"engine","stock"},{"gpu_slots",2},{"pinned_mib",256},{"gpu_mib",512}};
+  const QJsonObject options{{"version",2},{"resourceGuard",guard},{"execution",execution},
+      {"monitoring",QJsonObject{{"profile_interval",30}}}};
+  const QJsonObject runtime{{"requested",options},{"effective",options},
+      {"reasons",QJsonArray{}},{"migration",QJsonObject{{"source","runtimeOptions"},{"from_version",2},{"to_version",2},{"notes",QJsonArray{}}}}};
+  for(const auto &reason:QStringList{"cuda_oom","cuda_oom_reported","training_exception",
+      "resource_probe_unavailable","resource_estimate_unavailable","vram_pressure","manual_pause"}) {
+    const auto decoded=ProcessSupervisor::decodeStatusEvent(QJsonDocument(QJsonObject{
+        {"version",1},{"type","status"},{"state","running"},{"stage","train"},{"iteration",4},
+        {"runtimeConfiguration",runtime},{"failureReason",reason}}).toJson(QJsonDocument::Compact));
+    QVERIFY(decoded.has_value()); QCOMPARE(decoded->iteration.value(),4);
+    QCOMPARE(decoded->runtimeConfiguration,runtime); QCOMPARE(decoded->failureReason,reason);
+  }
+}
+
+void ProcessSupervisorTests::growthBypassIsExplicitlyUnmeasured() {
+  QJsonObject payload{{"version",1},{"backend","3dgs"},{"iteration",4},
+      {"state","bypassed"},{"reason","guard_disabled"},{"allowed",true},
+      {"guard_enabled",false},{"observation_valid",false},{"candidate_counts_known",false}};
+  for(const auto &key:QStringList{"point_count","transient_point_count","final_point_count", "parameter_bytes",
+      "optimizer_state_bytes","additional_peak_bytes","free_bytes","total_bytes","spare_bytes",
+      "available_bytes","cache_credit_bytes","clone_count","split_count"}) payload.insert(key,0);
+  const auto bypass=normalizeTrainingGrowth(payload);
+  QVERIFY(!bypass.isEmpty()); QCOMPARE(bypass.value("state").toString(),QStringLiteral("bypassed"));
+  payload.insert("free_bytes",100); QVERIFY(normalizeTrainingGrowth(payload).isEmpty());
+}
+
+void ProcessSupervisorTests::persistentObserverDestructionLeavesWorkerAlive() {
+#ifndef Q_OS_WIN
+  QSKIP("Persistent process identity currently targets native Windows.");
+#else
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString store=QDir(temporary.path()).filePath("jobs");
+  const QString ready=QDir(temporary.path()).filePath("ready");
+  const QString release=QDir(temporary.path()).filePath("release");
+  const auto cleanup=qScopeGuard([&] { QFile file(release); if(file.open(QIODevice::WriteOnly)) file.write("release"); });
+  auto supervisor=std::make_unique<ProcessSupervisor>();
+  QVERIFY(supervisor->startPersistentTraining("persistent", QCoreApplication::applicationFilePath(),
+      {"--persistent-fixture",store,ready,release},temporary.path(),{},
+      QDir(temporary.path()).filePath("worker.log"),store));
+  QVERIFY(supervisor->isPersistentTraining());
+  QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(ready),5000);
+  QFile file(ready); QVERIFY(file.open(QIODevice::ReadOnly));
+  const auto pid=file.readAll().toLongLong(); file.close();
+  QVERIFY(processIsRunning(pid));
+  QVERIFY(ProcessSupervisor::hasUnfinishedTraining(store));
+  supervisor.reset();
+  QTest::qWait(150);
+  QVERIFY(processIsRunning(pid));
+  QFile releaseFile(release); QVERIFY(releaseFile.open(QIODevice::WriteOnly));
+  releaseFile.write("release"); releaseFile.close();
+  QTRY_VERIFY_WITH_TIMEOUT(!processIsRunning(pid),5000);
+  QVERIFY(!ProcessSupervisor::hasUnfinishedTraining(store));
+#endif
+}
+
+void ProcessSupervisorTests::persistentExplicitControlsAreSessionBound_data() {
+  QTest::addColumn<bool>("pause");
+  QTest::newRow("pause") << true;
+  QTest::newRow("stop") << false;
+}
+
+void ProcessSupervisorTests::persistentExplicitControlsAreSessionBound() {
+#ifndef Q_OS_WIN
+  QSKIP("Persistent process identity currently targets native Windows.");
+#else
+  QFETCH(bool,pause);
+  QTemporaryDir temporary; QVERIFY(temporary.isValid());
+  const QString store=QDir(temporary.path()).filePath("jobs");
+  const QString ready=QDir(temporary.path()).filePath("ready");
+  const QString release=QDir(temporary.path()).filePath("release");
+  const auto cleanup=qScopeGuard([&] { QFile file(release); if(file.open(QIODevice::WriteOnly)) file.write("release"); });
+  ProcessSupervisor supervisor;
+  QSignalSpy finished(&supervisor,&ProcessSupervisor::taskFinished);
+  QSignalSpy statuses(&supervisor,&ProcessSupervisor::workerStatusReady);
+  QVERIFY(supervisor.startPersistentTraining("persistent",QCoreApplication::applicationFilePath(),
+      {"--persistent-fixture",store,ready,release},temporary.path(),{},
+      QDir(temporary.path()).filePath("worker.log"),store));
+  QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(ready),5000);
+  QTRY_VERIFY_WITH_TIMEOUT(!statuses.isEmpty(),5000);
+  const QString jobPath=QDir(store).filePath(QString(32,QLatin1Char('a'))+QStringLiteral(".json"));
+  QFile jobFile(jobPath); QVERIFY(jobFile.open(QIODevice::ReadOnly));
+  const QJsonObject originalJob=QJsonDocument::fromJson(jobFile.readAll()).object(); jobFile.close();
+  auto invalidJob=originalJob;
+  auto invalidControl=invalidJob.value("native_control").toObject();
+  invalidControl.insert("session",QString(32,QLatin1Char('c')));
+  invalidJob.insert("native_control",invalidControl);
+  QVERIFY(writeJsonFixture(jobPath,invalidJob));
+  QVERIFY(!supervisor.requestPause());
+  QVERIFY(!supervisor.wasStopRequested());
+  QVERIFY(supervisor.isRunning());
+  QVERIFY(writeJsonFixture(jobPath,originalJob));
+  if(pause) QVERIFY(supervisor.requestPause()); else supervisor.stop();
+  QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+  QCOMPARE(finished.first().at(1).toInt(),pause?75:130);
+  QCOMPARE(supervisor.wasStopRequested(),!pause);
+  QCOMPARE(qvariant_cast<WorkerStatus>(statuses.last().at(0)).state,
+           pause?QStringLiteral("paused"):QStringLiteral("cancelled"));
+  QVERIFY(!supervisor.isRunning());
+#endif
 }
 
 void ProcessSupervisorTests::lifetimeFixtureWaitsForOwnedStdinRelease_data() {
@@ -508,6 +768,12 @@ void ProcessSupervisorTests::destructionAfterStopDoesNotLeaveChildProcess() {
 #endif
 }
 
-QTEST_GUILESS_MAIN(ProcessSupervisorTests)
+int main(int argc,char **argv) {
+  QCoreApplication application(argc,argv);
+  if(application.arguments().value(1)==QStringLiteral("--persistent-fixture"))
+    return persistentFixture(application);
+  ProcessSupervisorTests tests;
+  return QTest::qExec(&tests,argc,argv);
+}
 
 #include "ProcessSupervisorTests.moc"

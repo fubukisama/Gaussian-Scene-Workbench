@@ -4,12 +4,14 @@
 
 #include <QByteArray>
 #include <QJsonObject>
+#include <QFile>
 #include <QMetaType>
 #include <QObject>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 
 #include <optional>
 
@@ -39,6 +41,9 @@ struct WorkerStatus final {
   QJsonObject trainingSummary;
   QJsonObject trainingPerformance;
   QJsonObject trainingGrowth;
+  QJsonObject runtimeConfiguration;
+  QJsonObject trainingDelivery;
+  QString failureReason;
 };
 
 [[nodiscard]] QJsonObject normalizeTrainingPerformance(const QJsonObject &payload);
@@ -56,10 +61,21 @@ public:
   [[nodiscard]] bool wasStopRequested() const;
   // Pure observer decoding; callers and regression tests use the same seam.
   [[nodiscard]] static std::optional<WorkerStatus> decodeStatusEvent(const QByteArray &payload);
+  // Read-only conservative writer gate for project migration/recovery cleanup.
+  // Unverified active legacy records block destructive relocation too.
+  [[nodiscard]] static bool hasUnfinishedTraining(const QString &jobStore);
   bool start(const QString &taskName, const QString &program, const QStringList &arguments,
              const QString &workingDirectory = {},
              const QProcessEnvironment &environment = {},
              bool acceptsCancelCommand = false);
+  // Native Windows training only: detached worker, fresh durable stdout log,
+  // query-only process identity and session-bound controls. Shutdown detaches
+  // this observer; ordinary start() keeps its owned process-tree lifecycle.
+  bool startPersistentTraining(const QString &taskName, const QString &program,
+      const QStringList &arguments, const QString &workingDirectory,
+      const QProcessEnvironment &environment, const QString &logPath,
+      const QString &jobStore);
+  [[nodiscard]] bool isPersistentTraining() const;
   void stop();
   bool requestPause();
   void shutdown();
@@ -82,6 +98,10 @@ private:
   void drainOutput();
   void processBufferedOutput(bool flushTail);
   void handleOutputLine(const QByteArray &line);
+  void pollPersistentTraining();
+  void detachPersistentTraining();
+  bool requestPersistentCommand(const QString &command);
+  [[nodiscard]] std::optional<QJsonObject> persistentConnection() const;
 
   QProcess mProcess;
   QByteArray mOutputBuffer;
@@ -90,6 +110,14 @@ private:
   bool mStopRequested = false;
   bool mShutdownStarted = false;
   quintptr mProcessJobHandle = 0;
+  bool mPersistentTraining = false;
+  quintptr mPersistentQueryHandle = 0;
+  qint64 mPersistentProcessId = 0;
+  QString mPersistentStartToken;
+  QString mPersistentJobStore;
+  QFile mPersistentLog;
+  QTimer mPersistentPoll;
+  QString mPersistentFinalState;
 };
 
 } // namespace gsw

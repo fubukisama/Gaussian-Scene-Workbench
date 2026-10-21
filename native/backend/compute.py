@@ -3233,6 +3233,7 @@ def persist_train_job(job):
 
 def job_snapshot(job):
     return {
+        "trainingDelivery": job.get("trainingDelivery"),
         "id": job["id"],
         "kind": "training",
         "scene": job["scene"],
@@ -3258,6 +3259,10 @@ def job_snapshot(job):
         "trainingSummary": normalize_training_summary(job.get("trainingSummary")),
         "trainingPerformance": normalize_performance(job.get("trainingPerformance")),
         "trainingGrowth": normalize_growth(job.get("trainingGrowth")),
+        "runtimeConfiguration": job.get("runtimeConfiguration"),
+        "runtimePolicyHistory": job.get("runtimePolicyHistory", []),
+        "trainingFailure": job.get("trainingFailure"),
+        "pause_reason": job.get("pause_reason"),
         "progressPercent": job.get("progressPercent"),
         "loss": job.get("loss"),
         "psnr": job.get("psnr"),
@@ -3381,6 +3386,40 @@ def add_job_log(job, message):
             performance_payload = normalize_performance(training_event_payload(line, TRAINING_PERFORMANCE_PREFIX))
             growth_payload = normalize_growth(training_event_payload(line, TRAINING_GROWTH_PREFIX))
             acceleration_payload = training_event_payload(line, "[gsw-training-acceleration]")
+            runtime_payload = training_event_payload(line, "[gsw-training-runtime-configuration]")
+            if runtime_payload is not None:
+                try:
+                    from native.worker.training_configuration import normalize_runtime_options
+                    if runtime_payload.get("backend") != job.get("backend", "3dgs"):
+                        raise ValueError("Runtime backend mismatch")
+                    for key in ("requested", "effective"):
+                        normalized = normalize_runtime_options(runtime_payload[key])["requested"]
+                        if normalized != runtime_payload[key]:
+                            raise ValueError("Runtime configuration is incomplete")
+                    encoded = json.dumps(runtime_payload, ensure_ascii=False, allow_nan=False)
+                    if len(encoded.encode("utf-8")) > 1024 * 1024:
+                        raise ValueError("Runtime report is too large")
+                    job["runtimeConfiguration"] = json.loads(encoded)
+                except (KeyError, TypeError, ValueError):
+                    pass  # Malformed observation cannot rewrite execution settings.
+            runtime_change = training_event_payload(line, "[gsw-training-runtime-policy-change]")
+            if (runtime_change is not None and type(runtime_change.get("iteration")) is int
+                    and runtime_change["iteration"] >= 0 and isinstance(runtime_change.get("reason"), str)):
+                try:
+                    encoded = json.dumps(runtime_change, allow_nan=False)
+                    if len(encoded.encode("utf-8")) <= 64 * 1024:
+                        history = job.setdefault("runtimePolicyHistory", [])
+                        history.append(json.loads(encoded))
+                        del history[:-256]
+                except (TypeError, ValueError):
+                    pass
+            failure = training_event_payload(line, "[gsw-training-error]")
+            if (failure is not None and failure.get("version") == 1
+                    and failure.get("backend") == job.get("backend", "3dgs")
+                    and failure.get("kind") in ("cuda_oom", "cuda_oom_reported", "training_exception")):
+                job["trainingFailure"] = failure
+                job["generation_issue"] = ("training_exception" if failure["kind"] == "training_exception"
+                                           else "training_" + failure["kind"])
             if acceleration_payload is not None and acceleration_payload.get("resumeBlocked") is True:
                 job["generation_issue"] = "training_renderer_resume"
             if growth_payload is not None and growth_payload["iteration"] >= int(
@@ -5242,11 +5281,40 @@ def run_training_job(job, run_convert, quality, overwrite):
                 f"densify_grad={options['densify_grad_threshold']:.12g}",
             )
             if options["resolution"] <= 2:
+                control = job.get("native_control") or {}
+                configured_guard = None
+                if control.get("runtimeOptions") is not None or control.get("performance") is not None:
+                    from native.worker.training_configuration import normalize_runtime_options
+                    configured_guard = normalize_runtime_options(
+                        control.get("runtimeOptions"), control.get("performance"),
+                        resume=bool(control.get("resume")),
+                        checkpoint_runtime=(job.get("runtimeConfiguration") or {}).get("requested"),
+                    )["effective"]["resourceGuard"]
+                if configured_guard is None:
+                    guard_notice = "resource_guard=UNVERIFIED; actual guard policy must be reported by the trainer"
+                else:
+                    guard_notice = (
+                        f"resource_guard={'ON' if configured_guard['enabled'] else 'OFF'}, "
+                        f"mode={configured_guard['mode']}; "
+                    )
+                    if not configured_guard["enabled"]:
+                        guard_notice += "software memory thresholds will not defer growth or pause"
+                    elif configured_guard["mode"] == "pause":
+                        guard_notice += (
+                            "memory admission may defer growth and save complete state to "
+                            f"pause after {configured_guard['max_consecutive_denials']} consecutive denials"
+                        )
+                    else:
+                        guard_notice += "memory admission may defer growth without automatic resource pause"
                 add_job_log(
                     job,
-                    "WARNING: 2DGS full/half-resolution training is VRAM-heavy. On 4GB GPUs, "
-                    "the guard caps densification and saves 7000/15000/final checkpoints "
-                    "so long jobs remain recoverable.",
+                    "WARNING: 2DGS full/half-resolution training may require substantial VRAM. "
+                    f"Configured {guard_notice}. "
+                    f"densify_until={options['densify_until_iter']}, "
+                    f"densify_interval={options['densification_interval']}, "
+                    f"densify_grad={options['densify_grad_threshold']:.12g}; "
+                    f"scheduled checkpoint iterations={training_milestone_iterations(options['iterations'])}. "
+                    "CUDA out-of-memory remains possible; no device-specific point cap or recoverability is guaranteed.",
                 )
         start_checkpoint = job.get("resume_checkpoint")
         if start_checkpoint:
@@ -5268,8 +5336,12 @@ def run_training_job(job, run_convert, quality, overwrite):
             )
         write_training_metadata(output, backend, quality, options, job.get("trainingSummary"))
         performance_record = {
-            "version": 1, "backend": backend,
+            "version": 2, "backend": backend,
             "policy": (job.get("native_control") or {}).get("performance"),
+            "runtimeConfiguration": job.get("runtimeConfiguration"),
+            "requestedRuntimeOptions": (job.get("native_control") or {}).get("runtimeOptions"),
+            "entryMigration": (job.get("native_control") or {}).get("runtimeConfigurationReport"),
+            "runtimePolicyHistory": job.get("runtimePolicyHistory", []),
             "lastSample": normalize_performance(job.get("trainingPerformance")),
             "lastGrowth": normalize_growth(job.get("trainingGrowth")),
             "qualityMayBeConstrained": (job.get("trainingGrowth") or {}).get("state") == "deferred",
@@ -5305,6 +5377,11 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["total_iterations"] = manifest["total"]
             job["progressPercent"] = round(manifest["iteration"] * 100 / manifest["total"])
             job["updated_at"] = time.time()
+            job["pause_reason"] = manifest.get("pause_reason", "manual_pause")
+            if job["pause_reason"] != "manual_pause":
+                job["generation_issue"] = "training_resource_pause"
+            job["runtimeConfiguration"] = manifest.get("runtime_configuration", job.get("runtimeConfiguration"))
+            job["runtimePolicyHistory"] = manifest.get("runtime_policy_history", job.get("runtimePolicyHistory", []))
             persist_train_job(job)
         add_job_log(job, str(paused))
     except Exception as exc:

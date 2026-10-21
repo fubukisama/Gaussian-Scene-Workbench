@@ -77,6 +77,15 @@ def load_configuration(path, requested_task=None):
         except ModuleNotFoundError:
             from training_seed import validate_training_seed
         config["trainingSeed"] = validate_training_seed(config["trainingSeed"])
+    if task == "training" and ("runtimeOptions" in config or "performanceOptions" in config):
+        try:
+            from native.worker.training_configuration import normalize_runtime_options
+        except ModuleNotFoundError:
+            from training_configuration import normalize_runtime_options
+        # Validate here but do not fill a partial resume request with fresh
+        # defaults: the verified checkpoint supplies its execution defaults.
+        normalize_runtime_options(config.get("runtimeOptions"), config.get("performanceOptions"))
+    config["_configurationPath"] = str(Path(path).absolute())
     return config
 
 
@@ -135,6 +144,24 @@ def status_telemetry(snapshot):
                if snapshot.get("kind") in (None, "training") else None)
     if summary is not None:
         telemetry["trainingSummary"] = summary
+    runtime = snapshot.get("runtimeConfiguration")
+    if isinstance(runtime, dict) and snapshot.get("kind") in (None, "training"):
+        try:
+            encoded = json.dumps(runtime, allow_nan=False)
+            if len(encoded.encode("utf-8")) <= 1024 * 1024:
+                telemetry["runtimeConfiguration"] = json.loads(encoded)
+        except (TypeError, ValueError):
+            pass
+    failure = snapshot.get("trainingFailure")
+    failure_reason = ((failure.get("kind") if isinstance(failure, dict) else None)
+                      or snapshot.get("pause_reason") or snapshot.get("failureReason"))
+    if failure_reason in ("cuda_oom", "cuda_oom_reported", "training_exception", "manual_pause",
+                          "resource_probe_unavailable", "resource_estimate_unavailable", "vram_pressure"):
+        telemetry["failureReason"] = failure_reason
+    delivery = snapshot.get('trainingDelivery')
+    if type(delivery) is dict and delivery.get('training_status') == 'done' and delivery.get('export_status') in ('running','ready','blocked','failed','cancelled'):
+        telemetry['trainingDelivery'] = {key:delivery[key] for key in
+            ('training_status','export_status','reason','model_path','internal_model_path','iteration') if key in delivery}
     integer_fields = {
         "iteration": ("iteration",),
         "totalIterations": ("total_iterations", "totalIterations"),
@@ -183,7 +210,8 @@ def status_telemetry(snapshot):
     if phase in ("accepted", "partial", "repairing", "rejected"):
         telemetry["reconstructionQuality"] = phase
     issue = snapshot.get("generation_issue") or snapshot.get("generationIssue")
-    if issue in ("reconstruction_quality", "source_frames_missing", "training_renderer_resume"):
+    if issue in ("reconstruction_quality", "source_frames_missing", "training_renderer_resume",
+                 "training_cuda_oom", "training_cuda_oom_reported", "training_exception", "training_resource_pause"):
         telemetry["generationIssue"] = issue
     return telemetry
 
@@ -219,7 +247,7 @@ def job_progress_percent(job):
     return None
 
 
-def stream_job(lock, jobs, job_id):
+def stream_job(lock, jobs, job_id, observer=None, defer_success=False):
     next_log_index = 0
     state = "queued"
     error = None
@@ -234,11 +262,18 @@ def stream_job(lock, jobs, job_id):
             error = job.get("error")
             progress_percent = job_progress_percent(job)
             telemetry = status_telemetry(job)
+            observation = dict(job) if observer else None
+        if observer is not None:
+            observer(observation)
         for line in lines:
             print(line)
         current_stage = (state, stage, progress_percent, tuple(sorted(telemetry.items())))
         if current_stage != previous_stage:
-            emit_status(state, stage, progress_percent, telemetry)
+            if state == 'done' and defer_success:
+                emit_status('running','coordinate_export',0,dict(telemetry,
+                    trainingDelivery={'training_status':'done','export_status':'running'}))
+            else:
+                emit_status(state, stage, progress_percent, telemetry)
             previous_stage = current_stage
         if state not in FINAL_STATES:
             time.sleep(0.5)
@@ -510,13 +545,13 @@ def write_import_journal(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     if _is_reparse_point(path):
         raise RuntimeError("Import journal must not be a link or reparse point: {}".format(path))
-    temporary = path.with_name("{}.tmp-{}".format(path.name, uuid.uuid4().hex))
-    try:
-        with open(temporary, "x", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
+    from native.backend.atomic_file import atomic_sibling
+    with atomic_sibling(path, mode='w', encoding='utf-8') as (temporary, stream):
+        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+        stream.close()
         # Antivirus/indexing can briefly deny Windows atomic replacement even
         # after our fsynced stream is closed. Retry only this publication step;
         # never rerun the import or remove the existing journal as a fallback.
@@ -530,9 +565,6 @@ def write_import_journal(path, payload):
                 if getattr(error, "winerror", None) not in (5, 32) or attempt == 4:
                     raise
                 time.sleep(.05)
-    finally:
-        if _path_exists_no_follow(temporary):
-            temporary.unlink()
 
 
 def _read_import_journal(path):
@@ -1021,7 +1053,74 @@ def run_import_project_recovery(config):
     return 0
 
 
+def publish_training_delivery(output_directory, iteration=None, cancelled=None, progress=None):
+    """Deliver coordinates separately from optimizer success; safe to retry."""
+    from native.backend.camera_scale_export import deliver_training_result
+    from native.worker.training_checkpoint import atomic_json
+    output = _lexical_absolute(output_directory)
+    candidates = []
+    point_root = output / 'point_cloud'
+    if iteration is not None and (type(iteration) is not int or iteration < 1):
+        raise ValueError('training_delivery_iteration_invalid')
+    if point_root.is_dir() and not _is_reparse_point(point_root):
+        for directory in point_root.iterdir():
+            match = re.fullmatch(r'iteration_(\d+)', directory.name)
+            if (match and directory.is_dir() and not _is_reparse_point(directory) and
+                    (iteration is None or int(match.group(1)) == iteration)):
+                model = directory / 'point_cloud.ply'
+                if model.is_file() and not _is_reparse_point(model):
+                    candidates.append((int(match.group(1)), model))
+    if not candidates:
+        return {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
+                'reason':'training_delivery_model_missing','model_path':None}
+    actual_iteration, model = max(candidates)
+    _ensure_within_root(model, output)
+    destination = output / '.gsw-deliveries' / ('i' + str(actual_iteration))
+    _ensure_within_root(destination, output)
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        result = deliver_training_result(model, destination, cancelled=cancelled, progress=progress)
+    except Exception as exc:
+        # Optimization already completed. An export/plugin allocation or other
+        # ordinary exception is an independent failed delivery, not failed
+        # training. Preserve KeyboardInterrupt/SystemExit and the raw state.
+        result = {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
+                  'reason':getattr(exc,'code','training_delivery_failed'),'detail':str(exc),
+                  'model_path':str(model)}
+    result.update(iteration=actual_iteration, internal_model_path=str(model))
+    result['internal_model_relative_path'] = str(model.relative_to(output)).replace('\\','/')
+    for key in ('model_path','sidecar_path','camera_path'):
+        if result.get(key):
+            result[key.replace('_path','_relative_path')] = str(Path(result[key]).relative_to(output)).replace('\\','/')
+    receipt = output / 'model-delivery.json'
+    _ensure_within_root(receipt, output)
+    atomic_json(receipt, result)
+    return result
+
+
 def run_training(config, resume=False):
+    # Direct script/installed-worker execution must resolve its own packaged
+    # native modules before claiming an output, independent of caller cwd or
+    # a GUI-injected PYTHONPATH. Compute is still not loaded before the gate.
+    own_root = str(Path(__file__).resolve().parents[2])
+    if own_root not in sys.path:
+        sys.path.insert(0,own_root)
+    # Claim output before compute can enqueue/start an optimizer thread, not
+    # only when a later GUI observer lease is registered. Closing an observer
+    # does not release this worker-owned gate.
+    if config.get('nativeCheckpoint') and config.get('backend', '3dgs') in ('3dgs', '2dgs'):
+        from native.worker.training_job_connection import OutputSessionGate, ensure_output_not_active
+        root = _lexical_absolute(Path(config['outputRoot']))
+        output = _lexical_absolute(root / config['outputScene'])
+        _ensure_within_root(output, root, direct_child=True)
+        session = uuid.uuid4().hex
+        with OutputSessionGate(output, session) as gate:
+            ensure_output_not_active(config['jobStore'], output)
+            return _run_training_owned(config, resume, gate, session)
+    return _run_training_owned(config, resume)
+
+
+def _run_training_owned(config, resume=False, output_gate=None, session=None):
     display_name = validated_display_name(config, "outputDisplayName", "outputScene")
     server = import_backend(config["repositoryRoot"])
     server.OUTPUT_DIR = Path(config["outputRoot"]).resolve()
@@ -1040,23 +1139,33 @@ def run_training(config, resume=False):
         from native.worker.training_checkpoint import atomic_json, read_manifest
         output = _lexical_absolute(server.OUTPUT_DIR / config["outputScene"])
         _ensure_within_root(output, server.OUTPUT_DIR, direct_child=True)
-        session = uuid.uuid4().hex
+        session = session or uuid.uuid4().hex
         request_path = server.TRAIN_JOBS_DIR / ("pause-" + session + ".json")
         native_options["native_control"] = {
             "output": str(output), "request": str(request_path), "session": session, "resume": resume,
             "backend": config["backend"]}
-        if "performanceOptions" in config:
-            from native.worker.training_runtime import performance_configuration
-            native_options["native_control"]["performance"] = performance_configuration(
-                {"performance": config["performanceOptions"], "resume": resume})
         pause_callback = lambda: atomic_json(request_path, {"session": session})
+        manifest = None
         if resume:
             manifest, _ = read_manifest(output)
             if manifest.get("backend", "3dgs") != config["backend"]:
                 raise ValueError("Checkpoint backend does not match the selected training method")
             native_options["resume_checkpoint_iteration"] = manifest["iteration"]
+        from native.worker.training_runtime import runtime_configuration
+        runtime_request = {"resume": resume, "backend": config["backend"]}
+        if "runtimeOptions" in config:
+            runtime_request["runtimeOptions"] = config["runtimeOptions"]
+        if "performanceOptions" in config:
+            runtime_request["performance"] = config["performanceOptions"]
+        runtime_report = runtime_configuration(
+            runtime_request, checkpoint_runtime=(manifest or {}).get("runtime_options"),
+            checkpoint_performance=(manifest or {}).get("performance"))
+        native_options["native_control"]["runtimeOptions"] = runtime_report["requested"]
+        native_options["native_control"]["runtimeConfigurationReport"] = runtime_report
     elif resume:
         raise ValueError("This task has no native training checkpoint support")
+    elif "runtimeOptions" in config or "performanceOptions" in config:
+        raise ValueError("runtime_options_require_native_checkpoint_backend")
 
     # Keep policy explicit across queueing, retry and complete-state resume.
     # A nearby calibration file must never silently select a different policy.
@@ -1098,7 +1207,76 @@ def run_training(config, resume=False):
     )
     cancel_thread.start()
 
-    state, error = stream_job(server.TRAIN_LOCK, server.TRAIN_JOBS, job_id)
+    connection = None
+    if native_options.get("native_control"):
+        try:
+            from native.worker.training_job_connection import WorkerConnection
+            connection = WorkerConnection(server.TRAIN_JOBS_DIR, job_id,
+                native_options["native_control"], config.get("_configurationPath"),
+                output_gate=output_gate)
+        except (OSError, ValueError) as exc:
+            print("[worker] Existing-job connection unavailable: {}".format(exc), flush=True)
+
+    def observe_connection(snapshot):
+        if connection is None:
+            return
+        try:
+            connection.heartbeat()
+            command = connection.take_command()
+            if command == "pause" and pause_callback:
+                pause_callback()
+            elif command == "stop":
+                server.cancel_training(job_id)
+        except (OSError, ValueError) as exc:
+            # Losing a monitor or its filesystem must not cancel optimization.
+            print("[worker] Existing-job connection warning: {}".format(exc), flush=True)
+
+    state, error = stream_job(server.TRAIN_LOCK, server.TRAIN_JOBS, job_id,
+                              observe_connection if connection is not None else None,
+                              defer_success=bool(native_options.get('native_control')))
+    if state == 'done' and native_options.get('native_control'):
+        delivery_stopped = [False]
+        def delivery_cancelled():
+            with server.TRAIN_LOCK:
+                if server.TRAIN_JOBS[job_id].get('cancel_requested'):
+                    delivery_stopped[0] = True
+            if connection is not None:
+                try:
+                    connection.heartbeat()
+                    if connection.take_command() == 'stop':
+                        delivery_stopped[0] = True
+                except (OSError, ValueError) as exc:
+                    print('[worker] Delivery observer warning: {}'.format(exc),flush=True)
+            return delivery_stopped[0]
+        with server.TRAIN_LOCK:
+            record = server.TRAIN_JOBS[job_id]
+            record.update(status='running',stage='coordinate_export',training_status='done',
+                trainingDelivery={'training_status':'done','export_status':'running'})
+            server.persist_train_job(record)
+        emit_status('running','coordinate_export',0,snapshot=record)
+        try:
+            delivery = publish_training_delivery(native_options['native_control']['output'],
+                cancelled=delivery_cancelled,
+                progress=lambda value: emit_status('running','coordinate_export',value,
+                    snapshot={'trainingDelivery':{'training_status':'done','export_status':'running'}}))
+        except Exception as exc:
+            delivery = {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
+                        'reason':getattr(exc,'code','training_delivery_failed'),'detail':str(exc)}
+        with server.TRAIN_LOCK:
+            record = server.TRAIN_JOBS[job_id]
+            summary={key:value for key,value in delivery.items() if key not in ('report',)}
+            manifest=Path(native_options['native_control']['output'])/'model-delivery.json'
+            if manifest.is_file():
+                summary.update(manifest_path=str(manifest),manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
+            record.update(status='done',stage='done',trainingDelivery=summary,training_status='done')
+            server.persist_train_job(record)
+        print('[gsw-model-delivery] '+json.dumps(summary,ensure_ascii=True,allow_nan=False),flush=True)
+        emit_status('done','done',100,snapshot=record)
+    if connection is not None:
+        try:
+            connection.close(state)
+        except OSError as exc:
+            print("[worker] Existing-job final connection warning: {}".format(exc), flush=True)
     if request_path and request_path.exists():
         request_path.unlink()
 

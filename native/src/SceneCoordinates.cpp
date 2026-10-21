@@ -13,7 +13,9 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 
 namespace gsw {
 namespace {
@@ -137,6 +139,66 @@ bool validRecordedInverse(const QJsonObject &transform) {
     }
     if (!close(it[i].toDouble(), expectedTranslation)) return false;
   }
+  return true;
+}
+
+struct DisplaySimilarity {
+  double s = 1.;
+  double r[3][3]{{1.,0.,0.},{0.,1.,0.},{0.,0.,1.}};
+  double t[3]{0.,0.,0.};
+};
+
+DisplaySimilarity displaySimilarity(const QJsonObject &object) {
+  DisplaySimilarity result; result.s=object.value(QStringLiteral("s")).toDouble();
+  for(int i=0;i<3;++i) {
+    result.t[i]=object.value(QStringLiteral("t")).toArray()[i].toDouble();
+    for(int j=0;j<3;++j)result.r[i][j]=object.value(QStringLiteral("R")).toArray()[i].toArray()[j].toDouble();
+  }
+  return result;
+}
+
+bool displayFrameContext(const SceneCoordinateInfo &info, DisplaySimilarity &transform,
+                         QJsonObject &lineage) {
+  const auto &provenance=info.provenance;
+  if(provenance.value(QStringLiteral("native_hash_verified"))!=true)return false;
+  const auto root=provenance.value(QStringLiteral("training_contract")).toObject();
+  const auto transforms=root.value(QStringLiteral("transforms")).toObject();
+  const auto source=transforms.value(QStringLiteral("source_to_canonical")).toObject();
+  const auto normalization=transforms.value(QStringLiteral("canonical_to_training")).toObject();
+  if(root.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_camera_contract/1") ||
+      !validSimilarity(source) || source.value(QStringLiteral("applied"))!=true ||
+      !validSimilarity(normalization) || normalization.value(QStringLiteral("applied"))!=true ||
+      root.value(QStringLiteral("input_data_identity")).toString()!=info.dataIdentity)return false;
+  const auto scale=root.value(QStringLiteral("scale")).toObject();
+  const bool known=scale.value(QStringLiteral("status"))!=QStringLiteral("arbitrary");
+  const auto frame=provenance.value(QStringLiteral("coordinate_frame")).toString();
+  const auto unit=provenance.value(QStringLiteral("coordinate_unit")).toString();
+  QString nativeUnit; double nativeMeters=0.;
+  if(frame==QStringLiteral("training")) {
+    const auto forward=displaySimilarity(normalization);
+    transform.s=1./forward.s;
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j) {
+      transform.r[i][j]=forward.r[j][i];
+      transform.t[i]-=forward.r[j][i]*forward.t[j]/forward.s;
+    }
+    nativeUnit=QStringLiteral("training"); nativeMeters=1./forward.s;
+  } else if(frame==QStringLiteral("source")) {
+    transform=displaySimilarity(source);nativeUnit=scale.value(QStringLiteral("source_unit")).toString(QStringLiteral("unknown"));
+    nativeMeters=scale.value(QStringLiteral("meters_per_unit")).toDouble();
+  } else if(frame==QStringLiteral("canonical")) {
+    nativeUnit=known?QStringLiteral("m"):QStringLiteral("unknown");nativeMeters=1.;
+  } else return false;
+  if(unit!=nativeUnit && !(unit==QStringLiteral("arbitrary")&&!known&&frame==QStringLiteral("canonical"))) {
+    const auto parsed=unitFromKey(unit);
+    if(!known || parsed==SceneLengthUnit::Unknown || !std::isfinite(nativeMeters)||nativeMeters<=0.)return false;
+    transform.s*=metresPerUnit(parsed)/nativeMeters;
+  }
+  // Numerical training normalization is intentionally not part of canonical
+  // identity: two runs may normalize the same canonical data differently.
+  lineage={{QStringLiteral("identity"),info.dataIdentity.toLower()},
+      {QStringLiteral("source_to_canonical"),QJsonObject{{QStringLiteral("s"),source.value(QStringLiteral("s"))},
+          {QStringLiteral("R"),source.value(QStringLiteral("R"))},{QStringLiteral("t"),source.value(QStringLiteral("t"))}}},
+      {QStringLiteral("canonical_unit"),scale.value(QStringLiteral("canonical_unit"))}};
   return true;
 }
 
@@ -310,7 +372,9 @@ void readCameraScaleSidecar(const QString &sourcePath,
     fail("camera_scale_ply_hash_mismatch"); return;
   }
   if (modelScaled) { readModelScaleRecord(root, path, metadata); return; }
-  const auto contract = training ? root : root.value(QStringLiteral("training_contract")).toObject();
+  auto contract = root;
+  for(int depth=0;contract.value(QStringLiteral("schema"))==QStringLiteral("gsw.coordinate_export/1")&&depth<8;++depth)
+    contract=contract.value(QStringLiteral("training_contract")).toObject();
   if (contract.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.training_camera_contract/1")) {
     fail("camera_scale_invalid_contract"); return;
   }
@@ -326,14 +390,21 @@ void readCameraScaleSidecar(const QString &sourcePath,
   if (!digestExpression.match(metadata.dataIdentity.toLower()).hasMatch()) {
     fail("camera_scale_invalid_identity"); return;
   }
+  if(exported && root.contains(QStringLiteral("input_data_identity")) &&
+      root.value(QStringLiteral("input_data_identity")).toString()!=metadata.dataIdentity) {
+    fail("camera_scale_invalid_identity");return;
+  }
   const auto transforms = contract.value(QStringLiteral("transforms")).toObject();
   const auto normalization = transforms.value(QStringLiteral("canonical_to_training")).toObject();
   if (!validSimilarity(normalization) || !normalization.value(QStringLiteral("applied")).isBool() ||
-      !normalization.value(QStringLiteral("applied")).toBool()) {
+      !normalization.value(QStringLiteral("applied")).toBool() ||
+      (normalization.contains(QStringLiteral("inverse"))&&!validRecordedInverse(normalization))) {
     fail("camera_scale_invalid_normalization"); return;
   }
   if (transforms.contains(QStringLiteral("source_to_canonical")) &&
-      !validSimilarity(transforms.value(QStringLiteral("source_to_canonical")).toObject())) {
+      (!validSimilarity(transforms.value(QStringLiteral("source_to_canonical")).toObject()) ||
+       (transforms.value(QStringLiteral("source_to_canonical")).toObject().contains(QStringLiteral("inverse"))&&
+        !validRecordedInverse(transforms.value(QStringLiteral("source_to_canonical")).toObject())))) {
     fail("camera_scale_invalid_source_transform"); return;
   }
   QString frame = training ? QStringLiteral("training") : root.value(QStringLiteral("output_frame")).toString();
@@ -351,6 +422,11 @@ void readCameraScaleSidecar(const QString &sourcePath,
     if (declaredUnit != SceneLengthUnit::Unknown &&
         std::abs(sourceRatio - metresPerUnit(declaredUnit)) > 1e-12 * std::max(1., sourceRatio)) {
       fail("camera_scale_conflicting_units"); return;
+    }
+    if(transforms.contains(QStringLiteral("source_to_canonical")) &&
+        std::abs(transforms.value(QStringLiteral("source_to_canonical")).toObject().value(QStringLiteral("s")).toDouble()-sourceRatio)>
+          1e-12*std::max(1.,sourceRatio)) {
+      fail("camera_scale_conflicting_source_scale");return;
     }
     if (frame == QStringLiteral("source")) ratio = sourceRatio;
     else if (frame == QStringLiteral("canonical")) ratio = 1.;
@@ -370,9 +446,19 @@ void readCameraScaleSidecar(const QString &sourcePath,
   }
   if (exported) {
     const QString outputUnit = root.value(QStringLiteral("output_unit")).toString();
-    if ((ratio && frame == QStringLiteral("canonical") && outputUnit != QStringLiteral("m")) ||
+    const bool v2=root.value(QStringLiteral("export_version")).toInt(1)>=2;
+    if(v2 && (root.value(QStringLiteral("current_frame"))!=frame || root.value(QStringLiteral("current_unit"))!=outputUnit ||
+        root.value(QStringLiteral("transform_applied"))!=true ||
+        root.value(QStringLiteral("applied_transform")).toObject().value(QStringLiteral("applied"))!=true ||
+        !validSimilarity(root.value(QStringLiteral("applied_transform")).toObject()))) {
+      fail("camera_scale_invalid_applied_transform");return;
+    }
+    const auto outputMetric=unitFromKey(outputUnit);
+    if(v2 && ratio && outputMetric!=SceneLengthUnit::Unknown) ratio=metresPerUnit(outputMetric);
+    else if ((ratio && frame == QStringLiteral("canonical") && outputUnit != QStringLiteral("m")) ||
         (ratio && frame == QStringLiteral("source") && outputUnit != metadata.sourceUnit) ||
-        (!ratio && unitFromKey(outputUnit) != SceneLengthUnit::Unknown)) {
+        (ratio && frame==QStringLiteral("training") && outputUnit!=QStringLiteral("training")) ||
+        (!ratio && outputMetric != SceneLengthUnit::Unknown)) {
       fail("camera_scale_conflicting_units"); return;
     }
   }
@@ -391,6 +477,9 @@ void readCameraScaleSidecar(const QString &sourcePath,
       {QStringLiteral("sidecar"), QFileInfo(path).fileName()}, {QStringLiteral("ply_sha256"), expected},
       {QStringLiteral("coordinate_frame"), frame}, {QStringLiteral("scale"), scale},
       {QStringLiteral("transforms"), transforms}, {QStringLiteral("input_data_identity"), metadata.dataIdentity}};
+  metadata.provenance.insert(QStringLiteral("training_contract"),contract);
+  metadata.provenance.insert(QStringLiteral("native_hash_verified"),true);
+  metadata.provenance.insert(QStringLiteral("coordinate_unit"),training?QStringLiteral("training"):root.value(QStringLiteral("output_unit")));
   if (exported) {
     metadata.provenance.insert(QStringLiteral("applied_transform"), root.value(QStringLiteral("applied_transform")));
     metadata.provenance.insert(QStringLiteral("input_sha256"), root.value(QStringLiteral("input_sha256")));
@@ -473,6 +562,7 @@ SceneCoordinateTracker::SceneCoordinateTracker(
   mInfo.sourceUnit = metadata.sourceUnit;
   mInfo.dataIdentity = metadata.dataIdentity;
   mInfo.provenance = metadata.provenance;
+  mInfo.validationError = metadata.validationError;
 }
 
 bool SceneCoordinateTracker::observeAndMap(const double x, const double y,
@@ -582,6 +672,61 @@ QString sceneLengthUnitSymbol(const SceneLengthUnit unit) {
   return QStringLiteral("u");
 }
 
+SceneDisplayMapping sceneDisplayMapping(const SceneCoordinateInfo &from,
+                                        const SceneCoordinateInfo &reference) {
+  SceneDisplayMapping result;
+  result.reason=QStringLiteral("coordinate_metadata_missing");
+  if (!from.valid || !reference.valid) return result;
+  const auto a = sceneMetresPerCoordinate(from), b = sceneMetresPerCoordinate(reference);
+  const double ratio = a && b ? *a / *b : 1.0;
+  DisplaySimilarity source,target,relative;relative.s=ratio;
+  QJsonObject sourceLineage,targetLineage;
+  const bool sourceVerified=displayFrameContext(from,source,sourceLineage);
+  const bool targetVerified=displayFrameContext(reference,target,targetLineage);
+  if(sourceVerified && targetVerified) {
+    if(from.dataIdentity.toLower()!=reference.dataIdentity.toLower())result.reason=QStringLiteral("data_identity_mismatch");
+    else if(sourceLineage!=targetLineage)result.reason=QStringLiteral("canonical_lineage_mismatch");
+    else {
+      relative.s=source.s/target.s;
+      for(int i=0;i<3;++i) {
+        relative.t[i]=0.;
+        for(int j=0;j<3;++j) {
+          relative.r[i][j]=0.;
+          for(int k=0;k<3;++k)relative.r[i][j]+=target.r[k][i]*source.r[k][j];
+          relative.t[i]+=target.r[j][i]*(source.t[j]-target.t[j])/target.s;
+        }
+      }
+      result.verifiedAlignment=true;result.reason=QStringLiteral("verified_common_canonical");
+    }
+  }
+  const double sourceShift[3]{from.displayShift.x,from.displayShift.y,from.displayShift.z};
+  const double targetShift[3]{reference.displayShift.x,reference.displayShift.y,reference.displayShift.z};
+  result.lengthScale=relative.s*reference.displayScale/from.displayScale;
+  // Cancel physical origins/normalization translations in double. Only the
+  // small local-to-local result is narrowed for the GPU's float matrices.
+  for(int i=0;i<3;++i) {
+    double offset=relative.t[i]+targetShift[i];
+    for(int j=0;j<3;++j) {
+      const double value=result.lengthScale*relative.r[i][j];
+      result.mLinear[3*i+j]=relative.s*relative.r[i][j];
+      offset-=relative.s*relative.r[i][j]*sourceShift[j];
+      if(!std::isfinite(value)||std::abs(value)>std::numeric_limits<float>::max())return {};
+      result.localToReference(i,j)=static_cast<float>(value);
+    }
+    offset*=reference.displayScale;
+    if(!std::isfinite(offset)||std::abs(offset)>std::numeric_limits<float>::max())return {};
+    result.localToReference(i,3)=static_cast<float>(offset);
+  }
+  result.mTranslation={relative.t[0],relative.t[1],relative.t[2]};
+  return result;
+}
+
+SceneCoordinate3D SceneDisplayMapping::mapCoordinate(const SceneCoordinate3D &value) const {
+  const double p[3]{value.x,value.y,value.z};double q[3]{mTranslation.x,mTranslation.y,mTranslation.z};
+  for(int i=0;i<3;++i)for(int j=0;j<3;++j)q[i]+=mLinear[3*i+j]*p[j];
+  return {q[0],q[1],q[2]};
+}
+
 QString sceneLengthUnitDescription(const SceneCoordinateInfo &coordinates) {
   if (coordinates.metersPerCoordinate && sceneMetresPerCoordinate(coordinates)) {
     QString status = QCoreApplication::translate("Workbench", "来源声明（不是独立检核）");
@@ -684,6 +829,7 @@ QJsonObject sceneCoordinateInfoToJson(
   object.insert(QStringLiteral("sourceUnit"), coordinates.sourceUnit);
   object.insert(QStringLiteral("dataIdentity"), coordinates.dataIdentity);
   object.insert(QStringLiteral("provenance"), coordinates.provenance);
+  object.insert(QStringLiteral("validationError"), coordinates.validationError);
   return object;
 }
 
@@ -719,6 +865,10 @@ bool sceneCoordinateInfoFromJson(const QJsonObject &object,
   parsed.sourceUnit = object.value(QStringLiteral("sourceUnit")).toString();
   parsed.dataIdentity = object.value(QStringLiteral("dataIdentity")).toString();
   parsed.provenance = object.value(QStringLiteral("provenance")).toObject();
+  // Cached metadata is not a current checksum observation. The viewport
+  // revalidates the PLY/sidecar before using a cached full-frame mapping.
+  parsed.provenance.remove(QStringLiteral("native_hash_verified"));
+  parsed.validationError = object.value(QStringLiteral("validationError")).toString();
   if (parsed.metersPerCoordinate && (!parsed.unitDeclared || parsed.scaleStatus == QStringLiteral("arbitrary"))) return false;
   if (parsed.metersPerCoordinate && parsed.unit != SceneLengthUnit::Unknown &&
       std::abs(*parsed.metersPerCoordinate - metresPerUnit(parsed.unit)) >

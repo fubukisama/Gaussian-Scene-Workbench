@@ -94,8 +94,10 @@ QJsonObject mapConfigurationPaths(QJsonObject parameters, const QString &project
 QJsonObject readObject(const QString &path, qint64 limit = kMetadataLimit) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly) || file.size() > limit) return {};
+  const auto bytes = file.read(limit + 1);
+  if (bytes.size() > limit || !file.atEnd()) return {};
   QJsonParseError error;
-  const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+  const auto document = QJsonDocument::fromJson(bytes, &error);
   return error.error == QJsonParseError::NoError && document.isObject()
       ? document.object() : QJsonObject{};
 }
@@ -364,7 +366,7 @@ GenerationResumeAvailability GenerationHistoryStore::resumeAvailability(const QS
   }
   const QString checkpointRoot = QDir(value.outputRoot).filePath(QStringLiteral(".gsw-resume"));
   const QString manifestPath = QDir(checkpointRoot).filePath(QStringLiteral("ready.json"));
-  const auto metadata = readObject(manifestPath, 16 * 1024);
+  const auto metadata = readObject(manifestPath, NativeResumeManifestMaximumBytes);
   static const QRegularExpression filename(QStringLiteral("^state-[0-9a-f]{32}\\.pth$"));
   static const QRegularExpression digest(QStringLiteral("^[0-9a-f]{64}$"));
   const QString name = metadata.value(QStringLiteral("file")).toString();

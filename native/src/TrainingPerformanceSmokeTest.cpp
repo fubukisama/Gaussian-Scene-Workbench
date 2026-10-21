@@ -14,6 +14,7 @@
 #include <QLocale>
 #include <QMainWindow>
 #include <QProgressBar>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -157,7 +158,8 @@ bool runTrainingPerformanceSmokeTest() {
     if (!check(fixture.isValid(), "a disposable training-dialog location is available")) return false;
     TrainingDialog dialog(fixture.path(), QStringLiteral("configuration-fixture"),
                           fixture.path(), true, true, &ownedWindow);
-    auto *optimization = dialog.findChild<QCheckBox *>(QStringLiteral("trainingPerformanceOptimization"));
+    auto *guard = dialog.findChild<QCheckBox *>(QStringLiteral("trainingResourceGuard"));
+    auto *staging = dialog.findChild<QCheckBox *>(QStringLiteral("trainingImageStaging"));
     auto *prefetch = dialog.findChild<QCheckBox *>(QStringLiteral("trainingCameraPrefetch"));
     auto *capacity = dialog.findChild<QCheckBox *>(QStringLiteral("trainingCapacityStorage"));
     auto *auxiliary = dialog.findChild<QCheckBox *>(QStringLiteral("trainingSurfelAuxiliary"));
@@ -165,17 +167,80 @@ bool runTrainingPerformanceSmokeTest() {
     auto *preset = dialog.findChild<QComboBox *>(QStringLiteral("trainingQualityCombo"));
     auto *iterations = dialog.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
     auto *resolution = dialog.findChild<QComboBox *>(QStringLiteral("trainingResolutionCombo"));
-    if (!check(optimization && prefetch && capacity && auxiliary && backend && preset && iterations && resolution,
-        "three independent performance controls are present on the public training form")) return false;
+    auto *memory = dialog.findChild<QSpinBox *>(QStringLiteral("trainingMemoryPercent"));
+    auto *spare = dialog.findChild<QSpinBox *>(QStringLiteral("trainingMinimumSpareMiB"));
+    auto *denials = dialog.findChild<QSpinBox *>(QStringLiteral("trainingMaxConsecutiveDenials"));
+    auto *lossMode = dialog.findChild<QComboBox *>(QStringLiteral("trainingLossModeCombo"));
+    auto *engine = dialog.findChild<QComboBox *>(QStringLiteral("trainingEngineCombo"));
+    auto *growth = dialog.findChild<QComboBox *>(QStringLiteral("trainingGrowthModeCombo"));
+    auto *profileInterval = dialog.findChild<QSpinBox *>(QStringLiteral("trainingProfileInterval"));
+    auto *recommend = dialog.findChild<QPushButton *>(QStringLiteral("trainingApplyRecommendedExecution"));
+    auto *dependency = dialog.findChild<QLabel *>(QStringLiteral("trainingPrefetchDependencyHint"));
+    if (!check(guard && staging && prefetch && capacity && auxiliary && backend && preset && iterations && resolution &&
+        memory && spare && denials && lossMode && engine && growth && profileInterval && recommend && dependency,
+        "independent resource guard, execution settings and observation interval exist on the public form")) return false;
     const TrainingConfiguration defaults = dialog.configuration();
-    check(defaults.cameraPrefetch && defaults.capacityStorage && defaults.surfelAuxiliary &&
+    check(defaults.resourceGuardEnabled && defaults.imageStaging && defaults.cameraPrefetch && defaults.capacityStorage && defaults.surfelAuxiliary &&
         prefetch->isEnabled() && capacity->isEnabled() && !auxiliary->isEnabled(),
-        "new controls default on, with only the surfel option disabled for 3DGS");
-    optimization->setChecked(false);
-    check(!prefetch->isEnabled() && !capacity->isEnabled() && !auxiliary->isEnabled() &&
-        prefetch->isChecked() && capacity->isChecked() && auxiliary->isChecked(),
-        "disabling overall optimization disables options without erasing their values");
-    optimization->setChecked(true);
+        "guard and exact-pixel optimizations default on; only the backend-specific surfel control is unavailable for 3DGS");
+    check(defaults.runtimeOptions.value(QStringLiteral("version")).toInt() == 2 &&
+        defaults.runtimeOptions.value(QStringLiteral("resourceGuard")).toObject() == QJsonObject{
+            {"enabled",true},{"mode","pause"},{"usage_fraction",0.9},{"minimum_spare_mib",512},{"max_consecutive_denials",3}} &&
+        defaults.runtimeOptions.value(QStringLiteral("monitoring")).toObject() == QJsonObject{{"profile_interval",30}},
+        "public configuration emits the versioned guard and monitoring contract with explicit defaults");
+    guard->setChecked(false);
+    const auto unguarded = dialog.configuration();
+    check(prefetch->isEnabled() && capacity->isEnabled() && staging->isEnabled() && !auxiliary->isEnabled() &&
+        prefetch->isChecked() && capacity->isChecked() && auxiliary->isChecked() &&
+        unguarded.runtimeOptions.value(QStringLiteral("execution")) == defaults.runtimeOptions.value(QStringLiteral("execution")) &&
+        unguarded.runtimeOptions.value(QStringLiteral("monitoring")) == defaults.runtimeOptions.value(QStringLiteral("monitoring")) &&
+        unguarded.iterations == defaults.iterations && unguarded.resolution == defaults.resolution &&
+        !unguarded.resourceGuardEnabled && !memory->isEnabled() && !growth->isEnabled(),
+        "guard OFF changes no execution request, monitoring interval, resolution or iterations and does not disable execution controls");
+    staging->setChecked(false);
+    check(prefetch->isEnabled() && prefetch->isChecked() && !dialog.configuration().imageStaging &&
+        dialog.configuration().runtimeOptions.value(QStringLiteral("execution")).toObject().value(QStringLiteral("camera_prefetch")).toBool() &&
+        !dependency->text().isEmpty(),
+        "staging OFF preserves an editable prefetch ON request and explains its ineffective dependency");
+    for (const QString &backendId : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+      backend->setCurrentIndex(backend->findData(backendId));
+      for (const bool optimized : {false,true}) {
+        staging->setChecked(optimized);
+        prefetch->setChecked(optimized);
+        capacity->setChecked(optimized);
+        auxiliary->setChecked(optimized);
+        lossMode->setCurrentIndex(lossMode->findData(optimized ? QStringLiteral("auto") : QStringLiteral("stock")));
+        const auto execution = dialog.configuration().runtimeOptions.value(QStringLiteral("execution"));
+        for (const bool protectedMode : {false,true}) {
+          guard->setChecked(protectedMode);
+          const auto value = dialog.configuration();
+          check(value.resourceGuardEnabled == protectedMode && value.imageStaging == optimized &&
+              value.runtimeOptions.value(QStringLiteral("execution")) == execution &&
+              value.iterations == defaults.iterations && value.resolution == defaults.resolution,
+              "both backends retain each execution request in all four guard/optimization combinations");
+        }
+      }
+    }
+    guard->setChecked(false);
+    memory->setValue(100);
+    spare->setValue(0);
+    denials->setValue(7);
+    growth->setCurrentIndex(growth->findData(QStringLiteral("defer")));
+    const auto guardBeforePreset = dialog.configuration().runtimeOptions.value(QStringLiteral("resourceGuard"));
+    staging->setChecked(false);
+    prefetch->setChecked(false);
+    capacity->setChecked(false);
+    auxiliary->setChecked(false);
+    lossMode->setCurrentIndex(lossMode->findData(QStringLiteral("stock")));
+    engine->setCurrentIndex(engine->findData(QStringLiteral("fastergs")));
+    recommend->click();
+    check(dialog.configuration().runtimeOptions.value(QStringLiteral("resourceGuard")) == guardBeforePreset &&
+        staging->isChecked() && prefetch->isChecked() && capacity->isChecked() && auxiliary->isChecked() &&
+        dialog.configuration().lossMode == QStringLiteral("auto") && dialog.configuration().trainingEngine == QStringLiteral("stock") &&
+        dialog.configuration().iterations == defaults.iterations && dialog.configuration().resolution == defaults.resolution &&
+        !recommend->toolTip().isEmpty(),
+        "explicit recommended execution preset changes only its advertised children and never the guard or training data policy");
+    guard->setChecked(true);
     prefetch->setChecked(false);
     capacity->setChecked(true);
     backend->setCurrentIndex(backend->findData(QStringLiteral("2dgs")));
@@ -200,10 +265,14 @@ bool runTrainingPerformanceSmokeTest() {
       const TrainingConfiguration config = dialog.configuration();
       check(config.iterations == 17000 && config.resolution == 4 && config.quality == chosenPreset &&
           config.backend == QStringLiteral("2dgs") && !config.cameraPrefetch &&
-          config.capacityStorage && !config.surfelAuxiliary,
+          config.capacityStorage && !config.surfelAuxiliary && config.resourceGuardEnabled &&
+          config.trainingMemoryPercent == 100 && config.minimumSpareMiB == 0 && config.maxConsecutiveDenials == 7 &&
+          config.growthMode == QStringLiteral("defer"),
           "live language switching preserves edited options, backend and preset");
       check(!prefetch->text().isEmpty() && !capacity->text().isEmpty() && !auxiliary->text().isEmpty() &&
-          !prefetch->toolTip().isEmpty() && !capacity->toolTip().isEmpty() && !auxiliary->toolTip().isEmpty(),
+          !prefetch->toolTip().isEmpty() && !capacity->toolTip().isEmpty() && !auxiliary->toolTip().isEmpty() &&
+          !guard->text().isEmpty() && !guard->toolTip().isEmpty() && !lossMode->currentText().isEmpty() &&
+          !recommend->text().isEmpty() && !dependency->text().isEmpty(),
           "all independent controls expose localized descriptions");
     }
     backend->setCurrentIndex(backend->findData(QStringLiteral("3dgs")));

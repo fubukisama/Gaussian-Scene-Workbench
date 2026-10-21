@@ -210,6 +210,7 @@ private:
   void resumeTraining();
   void resumeTrainingJob(const ActiveTrainingJob &active, const QString &historyId = {});
   void showGenerationHistory();
+  void showExistingTraining();
   void showQualityComparison();
   void showScaleConstraints(bool modelSource = false);
   void showInitialization();
@@ -221,7 +222,7 @@ private:
   bool retainGenerationExperiment(const GenerationExperiment &experiment);
   void updateGenerationExperiment(const QString &projectRoot, const QString &id,
                                   const QString &status, const QString &resultPath = {},
-                                  const QString &resultSceneId = {});
+                                  const QString &resultSceneId = {}, const QJsonObject &outcome = {});
   void updateTrainingActions();
   void updateWorkspaceUi();
   void retranslateUi();
@@ -321,6 +322,7 @@ private:
   QAction *mPauseTrainingAction = nullptr;
   QAction *mResumeTrainingAction = nullptr;
   QAction *mGenerationHistoryAction = nullptr;
+  QAction *mExistingTrainingAction = nullptr;
   bool mPauseRequested = false;
   QAction *mStopAction = nullptr;
   QAction *mGaussianRenderAction = nullptr;
@@ -348,6 +350,7 @@ private:
   QAction *mExportCropAction = nullptr;
   QAction *mExportModelAction = nullptr;
   QAction *mExportCoordinateReportAction = nullptr;
+  QAction *mReloadModelMetadataAction = nullptr;
   QAction *mModelBasePlaneAction = nullptr;
   QAction *mWorldZeroPlaneAction = nullptr;
   QAction *mAutoScaleAction = nullptr;

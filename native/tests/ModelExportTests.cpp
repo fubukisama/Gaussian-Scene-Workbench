@@ -850,7 +850,12 @@ void ModelExportTests::trainingCoordinateScaleReachesMeasurementAndJsonReport() 
   SceneCoordinateInfo restored;
   QVERIFY(sceneCoordinateInfoFromJson(sceneCoordinateInfoToJson(loaded.coordinates), restored));
   QCOMPARE(formatSceneLength(2., restored), QString("25 cm"));
-  QCOMPARE(restored.provenance, loaded.coordinates.provenance);
+  auto persistedProvenance=loaded.coordinates.provenance;
+  QVERIFY(persistedProvenance.take(QStringLiteral("native_hash_verified")).toBool());
+  // Serialized coordinates retain provenance, not an authority to skip a new
+  // model/sidecar hash verification on project/cache reload.
+  QCOMPARE(restored.provenance,persistedProvenance);
+  QVERIFY(!restored.provenance.contains(QStringLiteral("native_hash_verified")));
   const QString report = dir.filePath("coordinate-report.json");
   QString error;
   QVERIFY2(writeSceneCoordinateReport(report, source, restored, 0., "source", &error), qPrintable(error));
@@ -985,6 +990,29 @@ void ModelExportTests::recordedCameraCoordinatesUseRealNativeExportProcess() {
     QCOMPARE(*loaded.coordinates.metersPerCoordinate, metric ? 1. : .01);
     QCOMPARE(loaded.coordinates.scaleStatus, QString("source_declared"));
     QCOMPARE(read(source), original);
+    if (metric) {
+      const QJsonObject delivery{{"schema","gsw.model_delivery/1"},{"training_status","done"},
+        {"export_status","ready"},{"iteration",8},{"model_path",options.destinationPath},
+        {"internal_model_path",source},{"report",result.coordinateRecovery}};
+      QVERIFY(save(dir.filePath("model-delivery.json"),QJsonDocument(delivery).toJson()));
+      QCOMPARE(verifiedTrainingDeliveryPath(dir.path(),8),options.destinationPath);
+      QVERIFY(verifiedTrainingDeliveryPath(dir.path(),9).isEmpty());
+      const auto reference=QJsonDocument::fromJson(read(cameraScaleMetadataPath(options.destinationPath)))
+          .object().value("camera_reference").toObject();
+      const QString camera=dir.filePath(reference.value("path").toString());
+      const auto cameras=read(camera); QVERIFY(!cameras.isEmpty());
+      QVERIFY(save(camera,cameras+"tampered"));
+      QVERIFY(verifiedTrainingDeliveryPath(dir.path(),8).isEmpty());
+      QVERIFY(save(camera,cameras));
+      const QString sidecarPath=cameraScaleMetadataPath(options.destinationPath);
+      const auto originalSidecar=read(sidecarPath);
+      auto malformed=QJsonDocument::fromJson(originalSidecar).object();
+      malformed["bundle_sha256"]=QString(64,'f');
+      QVERIFY(save(sidecarPath,QJsonDocument(malformed).toJson()));
+      QVERIFY(verifiedTrainingDeliveryPath(dir.path(),8).isEmpty());
+      QVERIFY(!cameraScaleRecoveryCapability(options.destinationPath).metric);
+      QVERIFY(save(sidecarPath,originalSidecar));
+    }
   }
 }
 

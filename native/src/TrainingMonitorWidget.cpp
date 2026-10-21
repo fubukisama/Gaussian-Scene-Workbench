@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include "TrainingMonitorWidget.h"
 #include <QJsonArray>
+#include <QJsonDocument>
 
 #include <QFontMetrics>
 #include <QEvent>
@@ -48,6 +49,7 @@ QString formattedDuration(const double seconds) {
 }
 
 QString stageLabel(const QString &stage) {
+  if(stage==QStringLiteral("coordinate_export"))return QCoreApplication::translate("Workbench", "恢复坐标与生成交付物");
   if (stage == QStringLiteral("paused")) return QCoreApplication::translate("Workbench", "已暂停");
   if (stage == QStringLiteral("queued")) {
     return QCoreApplication::translate("Workbench", "排队中");
@@ -120,6 +122,16 @@ QString growthReasonLabel(const QString &reason) {
   if (reason == QStringLiteral("probe_unavailable")) return QCoreApplication::translate("Workbench", "显存观测不可用");
   if (reason == QStringLiteral("invalid_observation")) return QCoreApplication::translate("Workbench", "显存观测无效");
   return QCoreApplication::translate("Workbench", "增密开销无法估算");
+}
+
+QString failureReasonLabel(const QString &reason) {
+  if (reason == QStringLiteral("resource_probe_unavailable")) return QCoreApplication::translate("Workbench", "显存探测失败");
+  if (reason == QStringLiteral("resource_estimate_unavailable")) return QCoreApplication::translate("Workbench", "增密峰值估计失败");
+  if (reason == QStringLiteral("cuda_oom") || reason == QStringLiteral("cuda_oom_reported")) return QCoreApplication::translate("Workbench", "CUDA 显存不足");
+  if (reason == QStringLiteral("training_exception")) return QCoreApplication::translate("Workbench", "训练发生异常");
+  if (reason == QStringLiteral("manual_pause")) return QCoreApplication::translate("Workbench", "手动暂停");
+  if (reason == QStringLiteral("vram_pressure")) return QCoreApplication::translate("Workbench", "显存压力");
+  return {};
 }
 
 } // namespace
@@ -363,6 +375,31 @@ TrainingMonitorWidget::TrainingMonitorWidget(QWidget *parent) : QWidget(parent) 
   mPerformanceDetails->hide();
   layout->addWidget(mPerformanceDetails);
 
+  mResourceGuardState = new QLabel(content);
+  mResourceGuardState->setObjectName(QStringLiteral("trainingResourceGuardState"));
+  mResourceGuardState->setWordWrap(true);
+  mResourceGuardState->setTextFormat(Qt::PlainText);
+  mResourceGuardState->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mResourceGuardState->setMinimumWidth(0);
+  mResourceGuardState->hide();
+  layout->addWidget(mResourceGuardState);
+
+  mFailureReasonLabel = new QLabel(content);
+  mFailureReasonLabel->setObjectName(QStringLiteral("trainingFailureReason"));
+  mFailureReasonLabel->setWordWrap(true);
+  mFailureReasonLabel->setTextFormat(Qt::PlainText);
+  mFailureReasonLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mFailureReasonLabel->setMinimumWidth(0);
+  mFailureReasonLabel->hide();
+  layout->addWidget(mFailureReasonLabel);
+
+  mDeliveryState=new QLabel(content);
+  mDeliveryState->setObjectName(QStringLiteral("trainingDeliveryState"));
+  mDeliveryState->setWordWrap(true);mDeliveryState->setTextFormat(Qt::PlainText);
+  mDeliveryState->setTextInteractionFlags(Qt::TextSelectableByMouse);mDeliveryState->setMinimumWidth(0);
+  AppLanguage::bind(mDeliveryState,"accessibleName",AppLanguage::source("模型交付（训练成功与坐标导出分别记录）"));
+  mDeliveryState->hide();layout->addWidget(mDeliveryState);
+
   mGrowthWarning = new QLabel(content);
   mGrowthWarning->setObjectName(QStringLiteral("trainingGrowthWarning"));
   mGrowthWarning->setWordWrap(true);
@@ -467,6 +504,9 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
   mDensityGuardDeferred = 0;
   mReconstructionStatus = {};
   mTrainingSummary = {};
+  mRuntimeConfiguration = {};
+  mFailureReason.clear();
+  mTrainingDelivery={};
   mTaskTitle = QStringLiteral("%1 · %2").arg(backend.toUpper(), taskName);
   mTitle->setText(mTaskTitle);
   mState->setText(QCoreApplication::translate("Workbench", "启动中"));
@@ -477,6 +517,11 @@ void TrainingMonitorWidget::beginTraining(const QString &taskName,
 
 void TrainingMonitorWidget::updateStatus(const WorkerStatus &status) {
   mTelemetry.ingest(status);
+  // Status events are partial: a later progress/final event must not erase
+  // runtime provenance or the last classified pause/failure reason.
+  if (!status.runtimeConfiguration.isEmpty()) mRuntimeConfiguration = status.runtimeConfiguration;
+  if (!status.failureReason.isEmpty()) mFailureReason = status.failureReason;
+  if(!status.trainingDelivery.isEmpty())mTrainingDelivery=status.trainingDelivery;
   if (!status.trainingSummary.isEmpty() &&
       (mTrainingSummary.value(QStringLiteral("phase")).toString() != QStringLiteral("loaded") ||
        status.trainingSummary.value(QStringLiteral("phase")).toString() == QStringLiteral("loaded")))
@@ -680,6 +725,40 @@ void TrainingMonitorWidget::refreshMetrics() {
   }
   mPerformanceDetails->setVisible(!profileLines.isEmpty());
   mPerformanceDetails->setText(profileLines.join(QLatin1Char('\n')));
+  const auto guard = mRuntimeConfiguration.value(QStringLiteral("effective")).toObject()
+      .value(QStringLiteral("resourceGuard")).toObject();
+  mResourceGuardState->setVisible(guard.value(QStringLiteral("enabled")).isBool());
+  if (guard.value(QStringLiteral("enabled")).isBool()) {
+    const auto mode = guard.value(QStringLiteral("mode")).toString() == QStringLiteral("pause")
+        ? QCoreApplication::translate("Workbench", "质量优先：保存完整状态并安全暂停")
+        : QCoreApplication::translate("Workbench", "继续训练：暂缓增密并提示质量风险");
+    mResourceGuardState->setText(guard.value(QStringLiteral("enabled")).toBool()
+        ? QCoreApplication::translate("Workbench", "显存保护已启用：%1 · 目标 %2% · 最低余量 %3 MiB · 连续拒绝 %4 次。")
+            .arg(mode, locale.toString(guard.value(QStringLiteral("usage_fraction")).toDouble() * 100.0, 'g', 8),
+                 locale.toString(guard.value(QStringLiteral("minimum_spare_mib")).toInteger()),
+                 locale.toString(guard.value(QStringLiteral("max_consecutive_denials")).toInteger()))
+        : QCoreApplication::translate("Workbench", "显存保护已关闭；不会按软件资源阈值暂缓增密。实际 CUDA 内存不足仍会报错。"));
+    // Machine-facing policy identifiers and values remain exact and untranslated.
+    mResourceGuardState->setToolTip(QString::fromUtf8(QJsonDocument(mRuntimeConfiguration).toJson(QJsonDocument::Indented)));
+  }
+  mFailureReasonLabel->setText(failureReasonLabel(mFailureReason));
+  mFailureReasonLabel->setVisible(!mFailureReasonLabel->text().isEmpty());
+  mFailureReasonLabel->setToolTip(mFailureReason);
+  const bool trained=mTrainingDelivery.value(QStringLiteral("training_status"))==QStringLiteral("done");
+  mDeliveryState->setVisible(trained);
+  if(trained) {
+    const auto state=mTrainingDelivery.value(QStringLiteral("export_status")).toString();
+    const QString delivery=state==QStringLiteral("ready")?QCoreApplication::translate("Workbench","已完成"):
+        state==QStringLiteral("running")?QCoreApplication::translate("Workbench","运行中"):
+        state==QStringLiteral("cancelled")?QCoreApplication::translate("Workbench","已取消"):
+        state==QStringLiteral("blocked")?QCoreApplication::translate("Workbench","交付受限"):
+        QCoreApplication::translate("Workbench","失败");
+    mDeliveryState->setText(QCoreApplication::translate("Workbench","训练：已完成；坐标交付：%1。").arg(delivery));
+    mDeliveryState->setToolTip(QString::fromUtf8(QJsonDocument(mTrainingDelivery).toJson(QJsonDocument::Indented)));
+    // A failed/cancelled publication is not a failed/cancelled optimizer run.
+    mState->setText(QCoreApplication::translate("Workbench","训练已完成"));
+    mProgress->setValue(100);
+  }
   const QJsonObject &growth = mTelemetry.growth();
   const bool deferred = growth.value(QStringLiteral("state")).toString() == QStringLiteral("deferred");
   mGrowthWarning->setVisible(deferred);

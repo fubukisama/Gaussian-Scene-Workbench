@@ -29,6 +29,7 @@ struct ModelExportOptions {
   int spzQuality = 1; // 0 compact (4/3), 1 balanced (5/4), 2 high (8/8).
   // Explicit recorded-camera recovery, separate from arbitrary scene TRS.
   QString cameraCoordinateRecovery; // empty, source, metric, training, preserve
+  QString cameraOutputUnit; // empty uses recorded/default unit; m/cm/mm explicit.
   QString recoveryPythonPath;
   QString recoveryRepositoryRoot;
   // Called on the export thread. A true return requests cancellation.
@@ -46,9 +47,15 @@ struct CameraScaleRecoveryCapability {
   bool preserve = false;
   bool source = false;
   bool metric = false;
+  QString currentFrame;
+  QString currentUnit;
+  QString sourceUnit;
+  QString scaleStatus;
+  QString validationError;
 };
 [[nodiscard]] QString cameraScaleMetadataPath(const QString &source);
 [[nodiscard]] CameraScaleRecoveryCapability cameraScaleRecoveryCapability(const QString &source);
+[[nodiscard]] QString verifiedTrainingDeliveryPath(const QString &outputDirectory, int expectedIteration = -1);
 
 [[nodiscard]] SceneCoordinate3D exportPosition(const SceneCoordinate3D &position,
                                               const ModelExportOptions &options);

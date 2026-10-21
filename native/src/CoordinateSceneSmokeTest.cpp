@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
@@ -14,13 +15,20 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
+#include <QFutureWatcher>
 #include <QImage>
 #include <QKeyEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QPointer>
+#include <QSignalBlocker>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QThread>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -872,6 +880,196 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
         (viewport.modelExportOptions().transform.translation - QVector3D(0, 0, 1)).length() < 1.0e-4F &&
         std::abs(viewport.referencePlaneElevation() - preciseElevation) < 1.0e-10,
         "save/reopen retains edited model height and the original fixed reference plane");
+  // v3 display-only fixtures: two asymmetric point models, no optimizer state,
+  // no reference measurement and no claim of GS/mesh export capability.
+  const auto waitV3 = [](const std::function<bool()> &predicate) {
+    QElapsedTimer deadline;deadline.start();
+    while(!predicate()&&deadline.elapsed()<5000)processFor(10);
+    return predicate();
+  };
+  const auto writeV3 = [](const QString &path,const QByteArray &bytes) {
+    QFile file(path);return file.open(QIODevice::WriteOnly|QIODevice::Truncate)&&file.write(bytes)==bytes.size();
+  };
+  const QJsonArray identityV3{QJsonArray{1.,0.,0.},QJsonArray{0.,1.,0.},QJsonArray{0.,0.,1.}};
+  const QJsonArray identityPoseV3{QJsonArray{1.,0.,0.,0.},QJsonArray{0.,1.,0.,0.},QJsonArray{0.,0.,1.,0.},QJsonArray{0.,0.,0.,1.}};
+  const QJsonArray calibrationV3{QJsonArray{520.,23.,271.25},QJsonArray{0.,470.,219.75},QJsonArray{0.,0.,1.}};
+  const QList<SceneCoordinate3D> canonicalV3{{0.,0.,2.},{.8,.1,2.},{-.3,.7,2.3},{.2,-.4,2.8},{.7,.6,3.4}};
+  QJsonArray canonicalPointsV3;for(const auto &point:canonicalV3)canonicalPointsV3.append(QJsonArray{point.x,point.y,point.z});
+  const QString canonicalIdentityV3=QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(QJsonObject{
+      {"points",canonicalPointsV3},{"K",calibrationV3},{"pose",identityPoseV3},{"unit","m"}}).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256).toHex());
+  QList<SceneObject> layersV3;QStringList sidecarsV3;QList<QJsonObject> recordsV3;
+  for(int model=0;model<2;++model) {
+    const QString path=temporary.filePath(QStringLiteral("v3-frame-%1.ply").arg(model));
+    const auto similarity=[&](double scale,const QJsonArray &rotation,const QJsonArray &translation) {
+      return QJsonObject{{"s",scale},{"R",rotation},{"t",translation},{"applied",true}};
+    };
+    const auto normalization=model==0?similarity(2.,{QJsonArray{0.,-1.,0.},QJsonArray{1.,0.,0.},QJsonArray{0.,0.,1.}},{10.,-6.,3.}):
+        similarity(4.,{QJsonArray{-1.,0.,0.},QJsonArray{0.,-1.,0.},QJsonArray{0.,0.,1.}},{-20.,8.,4.});
+    const QJsonObject camera{{"view_id","owned-view"},{"image_path","pose-only-no-image.png"},{"split","train"},
+        {"projection_model","PINHOLE"},{"pixel_coordinates","opencv_integer"},{"width",640},{"height",480},
+        {"K",calibrationV3},{"c2w_opencv",identityPoseV3}};
+    const double normalScale=model==0?2.:4.;
+    QJsonObject contract{{"schema","gsw.training_camera_contract/1"},{"input_data_identity",canonicalIdentityV3},
+        {"scale",QJsonObject{{"status","source_declared"},{"source_unit","m"},{"canonical_unit","m"},{"meters_per_unit",1.},
+            {"evidence",QJsonArray{QJsonObject{{"kind","source_declaration"},{"source","generated-display-fixture"},{"unit","m"}}}}}},
+        {"transforms",QJsonObject{{"source_to_canonical",similarity(1.,identityV3,{0.,0.,0.})},{"canonical_to_training",normalization}}},
+        {"views",QJsonArray{camera}},{"clipping",QJsonObject{{"frame","training"},{"znear",.05*normalScale},
+            {"backend_near",.1*normalScale},{"zfar",20.*normalScale}}}};
+    QByteArray bytes="ply\nformat ascii 1.0\nelement vertex 5\nproperty double x\nproperty double y\nproperty double z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n";
+    for(const auto &p:canonicalV3) {
+      const SceneCoordinate3D value=model==0?SceneCoordinate3D{10.-2.*p.y,-6.+2.*p.x,3.+2.*p.z}:SceneCoordinate3D{1000.*p.x,1000.*p.y,1000.*p.z};
+      bytes+=QStringLiteral("%1 %2 %3 %4\n").arg(value.x,0,'g',17).arg(value.y,0,'g',17).arg(value.z,0,'g',17)
+          .arg(model==0?QStringLiteral("255 0 255"):QStringLiteral("0 255 255")).toUtf8();
+    }
+    QJsonObject record=contract;
+    if(model==1) {
+      auto applied=similarity(250.,{QJsonArray{-1.,0.,0.},QJsonArray{0.,-1.,0.},QJsonArray{0.,0.,1.}},{-5000.,2000.,-1000.});
+      applied.insert(QStringLiteral("input_frame"),QStringLiteral("training"));applied.insert(QStringLiteral("output_frame"),QStringLiteral("canonical"));
+      record={{"schema","gsw.coordinate_export/1"},{"export_version",2},{"output_frame","canonical"},{"output_unit","mm"},
+          {"current_frame","canonical"},{"current_unit","mm"},{"transform_applied",true},{"applied_transform",applied},
+          {"input_data_identity",contract.value("input_data_identity")},{"training_contract",contract}};
+    }
+    record.insert(QStringLiteral("ply_sha256"),QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex()));
+    const QString sidecar=temporary.filePath(QStringLiteral("v3-frame-%1.camera-scale.json").arg(model));
+    if(!check(writeV3(path,bytes)&&writeV3(sidecar,QJsonDocument(record).toJson()),"write hash-bound asymmetric same-canonical display fixtures"))return false;
+    layersV3.append({QStringLiteral("v3-frame-%1").arg(model),path,{},{},{1,1,1},5});
+    sidecarsV3.append(sidecar);recordsV3.append(record);
+  }
+  viewport.setSceneObjects({},{});viewport.setSceneObjects(layersV3,layersV3[0].id);
+  for(const auto &layer:layersV3) {
+    if(!check(viewport.activateSceneObject(layer.id)&&waitV3([&]{return viewport.renderedPointCount()==5&&viewport.cameraCount()==1&&
+        viewport.sceneCoordinates().provenance.value(QStringLiteral("native_hash_verified")).toBool();}),
+        "both real point models and bound cameras load within a five-second case deadline"))return false;
+    viewport.setRenderMode(NativeViewport::RenderMode::Points);
+  }
+  viewport.activateSceneObject(layersV3[0].id);viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::WorldZero);
+  viewport.setShowCameras(false);viewport.setEditToolsLocked(true);viewport.selectAllModels();
+  check(viewport.focusModel(),"frame both asymmetric coordinate fixtures through the real selection operation");viewport.clearSelection();processFor(50);
+  const auto projectionPointsV3=[&]() {
+    QList<QPointF> pixels;const auto matrix=viewport.projectionMatrix()*viewport.viewMatrix()*viewport.modelMatrix();
+    for(const auto &point:canonicalV3) {
+      const bool training=viewport.activeSceneId()==layersV3[0].id;
+      const auto raw=training?SceneCoordinate3D{10.-2.*point.y,-6.+2.*point.x,3.+2.*point.z}:
+          SceneCoordinate3D{1000.*point.x,1000.*point.y,1000.*point.z};
+      const auto clip=matrix*QVector4D(viewport.sceneCoordinates().localFromGlobal(raw),1.);
+      pixels.append(QPointF((clip.x()/clip.w()+1.)*.5*viewport.width(),(1.-clip.y()/clip.w())*.5*viewport.height()));
+    }
+    return pixels;
+  };
+  const auto maxPixelDifferenceV3=[](const QList<QPointF> &a,const QList<QPointF> &b) {
+    double maximum=0.;if(a.size()!=b.size())return 1e9;
+    for(int i=0;i<a.size();++i)maximum=std::max(maximum,QLineF(a[i],b[i]).length());return maximum;
+  };
+  const auto referenceV3=sceneCoordinateInfoToJson(viewport.sceneReferenceCoordinates());
+  const auto navigationPixelsV3=projectionPointsV3();
+  viewport.activateSceneObject(layersV3[1].id);
+  check(maxPixelDifferenceV3(navigationPixelsV3,projectionPointsV3())<.02&&
+      sceneCoordinateInfoToJson(viewport.sceneReferenceCoordinates())==referenceV3,
+      "selection changes preserve actual rendered projection and the collection reference across R/t and millimetres");
+  QList<QPointF> calibratedPixelsV3;
+  for(int model=0;model<2;++model) {
+    viewport.activateSceneObject(layersV3[model].id);
+    if(!check(viewport.setSourceCameraView(0),"pose-only model metadata opens the real calibrated source-camera view"))return false;
+    const auto points=projectionPointsV3();
+    for(int i=0;i<canonicalV3.size();++i) {
+      const auto &p=canonicalV3[i];const double u=(520.*p.x+23.*p.y)/p.z+271.25+.5,v=470.*p.y/p.z+219.75+.5;
+      const QPointF expected(viewport.width()*.5+(u-320.)*viewport.height()/480.,v*viewport.height()/480.);
+      check(QLineF(points[i],expected).length()<.03,"actual viewport projection matches independent full-K principal-point/skew/pixel-center equations");
+    }
+    const auto &pose=viewport.mScene->mCameraTrajectory.cameras().first();
+    check((viewport.cameraPosition()-viewport.modelMatrix().map(viewport.sceneCoordinates().localFromGlobal(pose.globalPosition))).length()<.01F,
+        "calibrated camera position uses the same model-frame transform exactly once without reading an image");
+    const auto projection=viewport.projectionMatrix();
+    const double near=projection(2,3)/(projection(2,2)-1.);
+    const double far=projection(2,3)/(projection(2,2)+1.);
+    const auto metres=sceneMetresPerCoordinate(viewport.sceneCoordinates());
+    check(metres&&std::abs(near**metres-.1)<1e-5&&std::abs(far**metres-20.)<.002,
+        "source-camera near/backend-near/far clipping retain the same physical lengths in training and mm frames");
+    const auto rawA=viewport.sceneCoordinates().localFromGlobal(model==0?SceneCoordinate3D{10.,-6.,7.}:SceneCoordinate3D{0.,0.,2000.});
+    const auto rawB=viewport.sceneCoordinates().localFromGlobal(model==0?SceneCoordinate3D{8.8,-4.6,9.8}:SceneCoordinate3D{700.,600.,3400.});
+    check(metres&&std::abs((rawB-rawA).length()**metres-std::sqrt(2.81))<1e-5,
+        "asymmetric models retain equal physical dimensions rather than shrinking metric output visually");
+    if(model==0) {
+      calibratedPixelsV3=points;viewport.activateSceneObject(layersV3[1].id);
+      check(viewport.mCameraViewActive&&maxPixelDifferenceV3(calibratedPixelsV3,projectionPointsV3())<.03,
+          "switching a verified same-source layer inside full-K camera view preserves principal point, skew, pose and projection");
+    } else check(maxPixelDifferenceV3(calibratedPixelsV3,points)<.03,"independently opening both bound camera records yields the same image projection");
+  }
+  const auto calibratedFrameV3=viewport.grabFramebuffer();
+  check(!calibratedFrameV3.isNull(),"the calibrated coordinate case renders a real nonempty framebuffer");
+  const auto rasterPointsV3=projectionPointsV3();
+  const double rasterScaleV3=calibratedFrameV3.width()/double(std::max(1,viewport.width()));
+  for(const auto &point:rasterPointsV3) {
+    bool marker=false;const QPoint center(qRound(rasterScaleV3*point.x()),qRound(rasterScaleV3*point.y()));
+    for(int y=std::max(0,center.y()-6);y<std::min(calibratedFrameV3.height(),center.y()+7);++y)
+      for(int x=std::max(0,center.x()-6);x<std::min(calibratedFrameV3.width(),center.x()+7);++x) {
+        const auto color=calibratedFrameV3.pixelColor(x,y);
+        marker|=color.blue()>100&&((color.red()-color.green()>45&&color.blue()-color.green()>45)||
+            (color.green()-color.red()>45&&color.blue()-color.red()>45));
+      }
+    check(marker,"actual point-renderer framebuffer contains a colored model sample at the calibrated projected location");
+  }
+  viewport.setModelTransform({400,-200,100},QQuaternion::fromAxisAndAngle(0,0,1,15),{1.05F,1.05F,1.05F});
+  viewport.setEditToolsLocked(false);viewport.setSceneSelection({layersV3[1].id},layersV3[1].id);viewport.selectModel();
+  viewport.clearSelection();viewport.invertSelection();viewport.deleteSelection();
+  viewport.setSceneSelection({layersV3[1].id},layersV3[1].id);viewport.selectModel();
+  check(viewport.hasUnsavedSceneEdits()&&viewport.mScene->mEditModel.deletedCount()==canonicalV3.size()&&
+      viewport.selectedSceneIds()==QStringList{layersV3[1].id},"prepare real nonempty crop history and model selection before metadata reload");
+  const auto beforeTranslationV3=viewport.modelTranslation(),beforeScaleV3=viewport.modelScale();
+  const auto beforeRotationV3=viewport.modelRotation();const auto beforeSelectionV3=viewport.selectedSceneIds();
+  const auto beforeDeletedV3=viewport.mScene->mEditModel.deletedBits();
+  const auto beforeCameraV3=viewport.mScene->mCameraTrajectory.cameras().first().cameraToWorld;
+  int geometryReloadsV3=0;QObject refreshObserver;
+  QObject::connect(&viewport,&NativeViewport::sceneLoadStarted,&refreshObserver,[&](const QString &){++geometryReloadsV3;});
+  auto revised=recordsV3[1];auto revisedRoot=revised.value(QStringLiteral("training_contract")).toObject();
+  revisedRoot.insert(QStringLiteral("warnings"),QJsonArray{QStringLiteral("owned-metadata-refresh")});revised.insert(QStringLiteral("training_contract"),revisedRoot);
+  if(!check(writeV3(sidecarsV3[1],QJsonDocument(revised).toJson()),"update only the owned sidecar metadata without modifying model or camera inputs"))return false;
+  viewport.refreshActiveSceneMetadata();
+  check(waitV3([&]{return viewport.sceneCoordinates().provenance.value(QStringLiteral("training_contract")).toObject().value(QStringLiteral("warnings")).toArray().contains(QStringLiteral("owned-metadata-refresh"));})&&
+      geometryReloadsV3==0&&viewport.modelTranslation()==beforeTranslationV3&&viewport.modelRotation()==beforeRotationV3&&
+      viewport.modelScale()==beforeScaleV3&&viewport.selectedSceneIds()==beforeSelectionV3&&viewport.hasUnsavedSceneEdits()&&
+      viewport.mScene->mEditModel.deletedBits()==beforeDeletedV3&&viewport.mScene->mCameraTrajectory.cameras().first().cameraToWorld==beforeCameraV3,
+      "metadata reload preserves TRS, actual crop/deleted selection, model selection and recorded cameras without geometry reload or camera solving");
+  // Deterministically deliver an actual old metadata future after a real
+  // same-path replacement has loaded. Only the Qt notification is held; the
+  // model/sidecar readers and public replacement operations are not mocked.
+  const auto oldWatchersV3=viewport.findChildren<QFutureWatcherBase*>();
+  viewport.refreshActiveSceneMetadata();
+  QPointer<QFutureWatcherBase> heldWatcherV3;
+  for(auto *watcher:viewport.findChildren<QFutureWatcherBase*>())if(!oldWatchersV3.contains(watcher))heldWatcherV3=watcher;
+  if(!check(!heldWatcherV3.isNull(),"observe the newly created metadata notification for a controlled late-result race"))return false;
+  QSignalBlocker holdFinishedV3(heldWatcherV3);
+  QElapsedTimer metadataDeadlineV3;metadataDeadlineV3.start();
+  while(!heldWatcherV3->isFinished()&&metadataDeadlineV3.elapsed()<5000)QThread::msleep(1);
+  if(!check(heldWatcherV3->isFinished(),"the original metadata and camera readers actually finish inside the bounded race fixture"))return false;
+  processFor(10); // consume its finished event while notification delivery is held.
+  auto replacementBytesV3=fileContents(layersV3[1].path);
+  replacementBytesV3.replace("element vertex 5\n","element vertex 6\n");
+  replacementBytesV3+="100 200 2600 0 255 255\n";
+  auto replacementRecordV3=revised;auto replacementRootV3=revisedRoot;
+  auto replacementViewsV3=replacementRootV3.value(QStringLiteral("views")).toArray();
+  auto replacementViewV3=replacementViewsV3[0].toObject();auto replacementPoseV3=identityPoseV3;
+  replacementPoseV3[0]=QJsonArray{1.,0.,0.,.4};replacementViewV3.insert(QStringLiteral("c2w_opencv"),replacementPoseV3);
+  replacementViewsV3[0]=replacementViewV3;replacementRootV3.insert(QStringLiteral("views"),replacementViewsV3);
+  const QString replacementIdV3=QString::fromLatin1(QCryptographicHash::hash(replacementBytesV3+
+      QJsonDocument(replacementViewsV3).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256).toHex());
+  replacementRootV3.insert(QStringLiteral("input_data_identity"),replacementIdV3);
+  replacementRecordV3.insert(QStringLiteral("input_data_identity"),replacementIdV3);
+  replacementRecordV3.insert(QStringLiteral("training_contract"),replacementRootV3);
+  replacementRecordV3.insert(QStringLiteral("ply_sha256"),QString::fromLatin1(QCryptographicHash::hash(replacementBytesV3,QCryptographicHash::Sha256).toHex()));
+  if(!check(writeV3(layersV3[1].path,replacementBytesV3)&&writeV3(sidecarsV3[1],QJsonDocument(replacementRecordV3).toJson()),
+      "publish a genuinely changed same-path model and matching new camera/coordinate record"))return false;
+  viewport.setScene(QString(),0);viewport.setScene(layersV3[1].path,6);
+  if(!check(waitV3([&]{return viewport.renderedPointCount()==6&&viewport.sceneCoordinates().dataIdentity==replacementIdV3&&
+      viewport.cameraCount()==1&&std::abs(viewport.mScene->mCameraTrajectory.cameras().first().globalPosition.x-400.)<1e-8;}),
+      "the replacement model and its new identity/camera pose actually load before old notification delivery"))return false;
+  holdFinishedV3.unblock();
+  holdFinishedV3.dismiss(); // the production callback schedules its watcher for deletion.
+  check(QMetaObject::invokeMethod(heldWatcherV3,"finished",Qt::DirectConnection),"release the real completed old metadata notification after replacement");
+  processFor(20);
+  check(viewport.renderedPointCount()==6&&viewport.sceneCoordinates().dataIdentity==replacementIdV3&&viewport.cameraCount()==1&&
+      std::abs(viewport.mScene->mCameraTrajectory.cameras().first().globalPosition.x-400.)<1e-8,
+      "a late metadata result cannot overwrite the replacement model's actual coordinate identity or camera pose");
   viewport.setSceneObjects({}, {});
   if (passed) qInfo() << "COORDINATE_SCENE PASS: same-frame and mixed-unit geometry retain physical size, shared grid and coordinate relationship";
   return passed;
