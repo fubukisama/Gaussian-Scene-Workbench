@@ -27,8 +27,10 @@ struct ModelExportOptions {
   int spzVersion = 4;
   int spzMaximumShDegree = -1; // -1 retains the source degree.
   int spzQuality = 1; // 0 compact (4/3), 1 balanced (5/4), 2 high (8/8).
-  // Explicit recorded-camera recovery, separate from arbitrary scene TRS.
-  QString cameraCoordinateRecovery; // empty, source, metric, training, preserve
+  // Explicit recorded-frame recovery; an optional proper Sim3 scene edit is
+  // baked before passive frame recovery. sceneUnitScale does not enter it.
+  QString cameraCoordinateRecovery; // empty, source, canonical, metric, training, preserve
+  QString recordedRepresentation = QStringLiteral("auto"); // auto, gaussian, point_cloud, mesh
   QString cameraOutputUnit; // empty uses recorded/default unit; m/cm/mm explicit.
   QString recoveryPythonPath;
   QString recoveryRepositoryRoot;

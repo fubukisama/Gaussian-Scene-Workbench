@@ -204,12 +204,11 @@ The native GUI's reconnect, detach, pause/stop and explicit resume lifecycle is
 a separate real-window acceptance gate; do not infer it from the JSON interface
 or claim persistent main-window-exit behavior before that gate passes.
 
-The detached launch/observer lifecycle applies to individual native 3DGS/2DGS
-training and full-state continuation. The batch coordinator still uses its
-explicit owned group lifecycle: closing/cancelling that coordinator is not a
-promise that every queued batch child will survive. Child configuration uses
-the same independent runtime contract; detaching the coordinator itself remains
-a separate acceptance boundary, not an implicitly enabled capability.
+The detached launch/observer lifecycle covers individual native 3DGS/2DGS
+training and explicitly persistent batch coordinators. Batch observation and
+control use a separate plan/session/OS identity contract; ordinary owned tasks
+retain their cleanup behavior. Closing observation is not cancellation. See
+[persistent queue states, cancellation and acceptance boundaries](RECORDED_PLY_AND_BATCH.md).
 
 Language changes are presentation-only: translated camera diagnostics refresh
 without emitting coordinate or camera-collection mutation signals, reapplying
@@ -304,9 +303,12 @@ adds `export_version=2`, actual `current_frame/current_unit`, output frame/unit,
 `gsw.training_camera_contract/1`, not another export wrapper. Historical nested
 wrappers are bounded/unwrapped with identity/hash checks. Crop operations retain
 point order, attributes, the new model hash and their input/metadata ancestry;
-stale edited files cannot silently borrow the old hash-bound metadata. Baking a
-separate scene TRS is not part of this Gaussian-coordinate interface and remains
-an explicit unsupported native combination, rather than a guessed transform.
+stale edited files cannot silently borrow the old hash-bound metadata. The
+generalized recorded-PLY interface adds version3 for ordinary point/mesh data,
+bound assets and explicit proper uniform scene TRS. It retains version1/2
+compatibility and the strict Gaussian entry rather than reinterpreting malformed
+Gaussians as points. [Active-edit and repeat-export semantics](RECORDED_PLY_AND_BATCH.md)
+keep the immutable training contract separate from subsequent user edits.
 The root dataset identity is the canonical 64-character lowercase SHA-256 value,
 matching native model/camera readers; opaque test labels are not valid identities.
 

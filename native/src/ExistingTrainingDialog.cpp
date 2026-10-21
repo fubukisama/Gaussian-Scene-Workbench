@@ -44,12 +44,13 @@ QString liveLabel(const QString &state){
 }
 QString stateLabel(const QString &state){
   if(state==QStringLiteral("running"))return text(AppLanguage::source("运行中"));
-  if(state==QStringLiteral("queued"))return text(AppLanguage::source("等待中"));
+  if(state==QStringLiteral("queued")||state==QStringLiteral("ready"))return text(AppLanguage::source("等待中"));
   if(state==QStringLiteral("paused"))return text(AppLanguage::source("已暂停"));
-  if(state==QStringLiteral("done"))return text(AppLanguage::source("已完成"));
+  if(state==QStringLiteral("done")||state==QStringLiteral("completed"))return text(AppLanguage::source("已完成"));
+  if(state==QStringLiteral("interrupted"))return text(AppLanguage::source("已中断；未自动恢复"));
   if(state==QStringLiteral("failed"))return text(AppLanguage::source("失败"));
   if(state==QStringLiteral("cancelled"))return text(AppLanguage::source("已取消"));
-  if(state==QStringLiteral("cancelling"))return text(AppLanguage::source("正在停止"));
+  if(state==QStringLiteral("cancelling")||state==QStringLiteral("cancelling_checkpoint")||state==QStringLiteral("pausing"))return text(AppLanguage::source("正在停止"));
   return state.isEmpty()?text(AppLanguage::source("未验证")):state;
 }
 bool terminal(const QString &state){return QStringList{QStringLiteral("paused"),QStringLiteral("done"),QStringLiteral("failed"),QStringLiteral("cancelled")}.contains(state);}
@@ -63,7 +64,8 @@ public:
   QJsonArray jobs;
   QJsonObject report;
   const char *message=nullptr;
-  bool connected=false,failedObservation=false;
+  bool connected=false,failedObservation=false,batch=false;
+  QString batchPlan;
   QLineEdit *store=nullptr;
   QComboBox *job=nullptr;
   QLabel *state=nullptr,*runtimeState=nullptr;
@@ -129,7 +131,9 @@ ExistingTrainingDialog::ExistingTrainingDialog(const QString &python,const QStri
   connect(m->detach,&QPushButton::clicked,this,&ExistingTrainingDialog::disconnectJob);
   connect(m->pause,&QPushButton::clicked,this,&ExistingTrainingDialog::pauseJob);
   connect(m->stop,&QPushButton::clicked,this,&ExistingTrainingDialog::stopJob);
-  connect(m->resume,&QPushButton::clicked,this,[this]{if(m->resume->isEnabled())emit resumeRequested(m->report.value("configurationPath").toString(),m->report.value("outputDirectory").toString());});
+  connect(m->resume,&QPushButton::clicked,this,[this]{if(m->resume->isEnabled()){
+    if(m->batch)emit resumeBatchRequested(m->batchPlan);
+    else emit resumeRequested(m->report.value("configurationPath").toString(),m->report.value("outputDirectory").toString());}});
   connect(m->result,&QPushButton::clicked,this,[this]{if(m->result->isEnabled())emit resultRequested(m->report.value("outputDirectory").toString());});
   AppLanguage::onChanged(this,[this]{refreshPresentation();});
   refreshPresentation();
@@ -138,6 +142,11 @@ ExistingTrainingDialog::~ExistingTrainingDialog(){m->poll->stop();cancelOwnedHel
 QJsonObject ExistingTrainingDialog::currentReport()const{return m->report;}
 bool ExistingTrainingDialog::isConnected()const{return m->connected;}
 bool ExistingTrainingDialog::isBusy()const{return m->helper!=nullptr;}
+bool ExistingTrainingDialog::connectBatch(const QString &planPath){
+  if(m->helper||!QDir::isAbsolutePath(planPath)||QFileInfo(planPath).fileName()!=QStringLiteral("plan.json")||!QFileInfo(planPath).isFile())return false;
+  disconnectJob();m->batch=true;m->batchPlan=QFileInfo(planPath).absoluteFilePath();m->store->setText(m->batchPlan);
+  m->connected=true;m->failedObservation=false;m->message=nullptr;startHelper(QStringLiteral("inspect"));m->poll->start();return true;
+}
 void ExistingTrainingDialog::refreshJobs(){if(m->helper)return;startHelper(m->connected?QStringLiteral("inspect"):QStringLiteral("list"));}
 void ExistingTrainingDialog::connectSelectedJob(){
   if(m->helper||m->connected||!jobId(m->job->currentData().toString()))return;
@@ -145,7 +154,7 @@ void ExistingTrainingDialog::connectSelectedJob(){
   startHelper(QStringLiteral("inspect"));m->poll->start();
 }
 void ExistingTrainingDialog::disconnectJob(){
-  m->connected=false;m->poll->stop();cancelOwnedHelper();m->attachedStore.clear();m->attachedId.clear();m->monitorJob.clear();m->report={};m->failedObservation=false;
+  m->connected=false;m->poll->stop();cancelOwnedHelper();m->attachedStore.clear();m->attachedId.clear();m->monitorJob.clear();m->report={};m->failedObservation=false;m->batch=false;m->batchPlan.clear();
   m->message=AppLanguage::source("观察已断开；已有训练和原始数据保持不变。");m->errorDetail.clear();refreshPresentation();
 }
 void ExistingTrainingDialog::cancelOwnedHelper(){
@@ -154,10 +163,11 @@ void ExistingTrainingDialog::cancelOwnedHelper(){
 }
 void ExistingTrainingDialog::startHelper(const QString &operation){
   if(m->helper)return;
-  if(!QFileInfo(m->python).isFile()||!QFileInfo(QDir(m->backend).filePath(QStringLiteral("native/worker/training_job_connection.py"))).isFile()){
+  const QString module=m->batch?QStringLiteral("native.worker.training_batch_connection"):QStringLiteral("native.worker.training_job_connection");
+  if(!QFileInfo(m->python).isFile()||!QFileInfo(QDir(m->backend).filePath(m->batch?QStringLiteral("native/worker/training_batch_connection.py"):QStringLiteral("native/worker/training_job_connection.py"))).isFile()){
     m->message=AppLanguage::source("现有作业检查后端不可用；未启动训练。");m->failedObservation=true;refreshPresentation();return;}
   const QString store=m->connected?m->attachedStore:storePath(m->store->text());
-  if(m->store->text().trimmed().isEmpty()||!QFileInfo(store).isDir()){
+  if(m->store->text().trimmed().isEmpty()||(!m->batch&&!QFileInfo(store).isDir())||(m->batch&&!QFileInfo(m->batchPlan).isFile())){
     m->message=AppLanguage::source("请选择存在的工程或训练作业目录。");m->failedObservation=true;refreshPresentation();return;}
   m->operation=operation;m->output.clear();m->errors.clear();m->message=nullptr;m->errorDetail.clear();
   auto *helper=new QProcess(this);m->helper=helper;
@@ -169,8 +179,12 @@ void ExistingTrainingDialog::startHelper(const QString &operation){
   connect(helper,&QProcess::readyReadStandardError,this,[this]{readHelperOutput(true);});
   connect(helper,&QProcess::finished,this,[this](const int code,const QProcess::ExitStatus status){finishHelper(code,status==QProcess::NormalExit);});
   connect(helper,&QProcess::errorOccurred,this,[this](const QProcess::ProcessError error){if(error==QProcess::FailedToStart&&m->helper){m->errorDetail=m->helper->errorString();finishHelper(-1,false);}});
-  QStringList arguments{QStringLiteral("-B"),QStringLiteral("-m"),QStringLiteral("native.worker.training_job_connection"),QStringLiteral("--job-store"),store};
-  if(operation!=QStringLiteral("list")){arguments<<QStringLiteral("--job-id")<<m->attachedId;if(operation!=QStringLiteral("inspect"))arguments<<QStringLiteral("--command")<<operation;}
+  QStringList arguments{QStringLiteral("-B"),QStringLiteral("-m"),module};
+  if(m->batch){arguments<<QStringLiteral("--operation")<<(operation==QStringLiteral("inspect")?operation:QStringLiteral("command"))
+      <<QStringLiteral("--plan")<<m->batchPlan;
+    if(operation!=QStringLiteral("inspect"))arguments<<QStringLiteral("--command")<<operation<<QStringLiteral("--session")<<m->report.value("session").toString();
+  }else{arguments<<QStringLiteral("--job-store")<<store;
+    if(operation!=QStringLiteral("list")){arguments<<QStringLiteral("--job-id")<<m->attachedId;if(operation!=QStringLiteral("inspect"))arguments<<QStringLiteral("--command")<<operation;}}
   m->timeout->start();refreshEnabled();helper->start(m->python,arguments,QIODevice::ReadOnly);
 }
 void ExistingTrainingDialog::readHelperOutput(const bool errors){
@@ -186,6 +200,19 @@ void ExistingTrainingDialog::finishHelper(const int exitCode,const bool normalEx
   if(!normalExit||exitCode!=0||error.error!=QJsonParseError::NoError||!doc.isObject()||report.value("version").toInt()!=1||report.contains("error")){
     m->message=AppLanguage::source("现有作业检查失败：%1。仅保留旧记录，不据此控制训练。");m->failedObservation=true;
     m->errorDetail=report.value("error").toString(QString::fromUtf8(m->errors).left(8192));if(m->errorDetail.isEmpty())m->errorDetail=text(AppLanguage::source("无有效辅助报告"));refreshPresentation();return;}
+  if(m->batch){
+    bool valid=report.value("schema")==QStringLiteral("gsw.training_batch_connection/1");
+    if(m->operation==QStringLiteral("inspect"))valid=valid&&report.value("kind")==QStringLiteral("training_batch")&&
+      QDir::cleanPath(QDir::fromNativeSeparators(report.value("planPath").toString()))==m->batchPlan&&
+      report.value("state").isObject()&&report.value("controlAvailable").isBool()&&
+      QStringList{QStringLiteral("live"),QStringLiteral("unknown"),QStringLiteral("ended")}.contains(report.value("liveness").toString());
+    else for(const auto &key:QStringList{QStringLiteral("session"),QStringLiteral("batchId"),QStringLiteral("planSha256"),QStringLiteral("planFileSha256")})
+      valid=valid&&!report.value(key).toString().isEmpty()&&report.value(key)==m->report.value(key);
+    if(!valid){m->message=AppLanguage::source("现有作业身份或状态报告无效；未发送控制命令。");m->failedObservation=true;refreshPresentation();return;}
+    if(m->operation==QStringLiteral("inspect"))m->report=report;
+    else{m->message=AppLanguage::source("控制请求已发送；等待现有训练确认，不代表已经暂停或停止。");QTimer::singleShot(0,this,[this]{if(m->connected&&!m->helper)startHelper(QStringLiteral("inspect"));});}
+    m->failedObservation=false;refreshPresentation();emit reportUpdated(report);return;
+  }
   if(m->operation==QStringLiteral("list")){
     if(!report.value("jobs").isArray()||report.value("jobs").toArray().size()>4096){m->message=AppLanguage::source("现有作业清单无效；未连接或启动训练。");m->failedObservation=true;refreshPresentation();return;}
     const auto jobs=report.value("jobs").toArray();for(const auto &entry:jobs){if(!entry.isObject()||!jobId(entry.toObject().value("jobId").toString())){m->message=AppLanguage::source("现有作业清单无效；未连接或启动训练。");m->failedObservation=true;refreshPresentation();return;}}
@@ -213,9 +240,10 @@ void ExistingTrainingDialog::requestCommand(const QString &command){if(m->failed
 void ExistingTrainingDialog::pauseJob(){requestCommand(QStringLiteral("pause"));}
 void ExistingTrainingDialog::stopJob(){
   if(!m->stop->isEnabled())return;
-  QMessageBox confirmation(QMessageBox::Question,text(AppLanguage::source("停止现有训练？")),
-      text(AppLanguage::source("将向已核实的训练会话发送停止请求。不会删除数据或覆盖已有完整检查点；停止不等于保存新的完整进度。是否继续？")),QMessageBox::Yes|QMessageBox::No,this);
-  confirmation.setDefaultButton(QMessageBox::No);if(confirmation.exec()==QMessageBox::Yes)requestCommand(QStringLiteral("stop"));
+  QMessageBox confirmation(QMessageBox::Question,text(m->batch?AppLanguage::source("取消已保存检查点的批量队列？"):AppLanguage::source("停止现有训练？")),
+      text(m->batch?AppLanguage::source("将安全暂停活动训练并保留完整检查点与待执行队列。协调器结果标记为已取消，底层训练状态仍为已暂停；继续须显式新建会话。"):
+        AppLanguage::source("将向已核实的训练会话发送停止请求。不会删除数据或覆盖已有完整检查点；停止不等于保存新的完整进度。是否继续？")),QMessageBox::Yes|QMessageBox::No,this);
+  confirmation.setDefaultButton(QMessageBox::No);if(confirmation.exec()==QMessageBox::Yes)requestCommand(m->batch?QStringLiteral("cancel"):QStringLiteral("stop"));
 }
 void ExistingTrainingDialog::refreshEnabled(){
   const bool busy=m->helper!=nullptr;
@@ -223,6 +251,9 @@ void ExistingTrainingDialog::refreshEnabled(){
   m->refresh->setEnabled(!busy);m->connect->setEnabled(!busy&&!m->connected&&jobId(m->job->currentData().toString()));m->detach->setEnabled(m->connected||busy);
   const bool live=m->connected&&!busy&&!m->failedObservation&&m->report.value("liveness").toString()==QStringLiteral("live")&&m->report.value("controlAvailable").toBool();
   m->pause->setEnabled(live&&m->report.value("stage").toString()!=QStringLiteral("coordinate_export"));m->stop->setEnabled(live);
+  if(m->batch){m->job->setEnabled(false);m->connect->setEnabled(false);
+    m->resume->setEnabled(m->connected&&!busy&&!m->failedObservation&&m->report.value("resumeAvailable").toBool());
+    m->result->setEnabled(false);return;}
   const QString state=m->report.value("recordedState").toString();const QString liveness=m->report.value("liveness").toString();
   const bool ended=liveness==QStringLiteral("ended")||(liveness==QStringLiteral("unverified")&&terminal(state)&&m->report.value("workerIdentity").isUndefined());
   m->resume->setEnabled(m->connected&&!busy&&!m->failedObservation&&ended&&m->report.value("checkpointState").toString()==QStringLiteral("available_unverified")&&
@@ -230,6 +261,13 @@ void ExistingTrainingDialog::refreshEnabled(){
   m->result->setEnabled(m->connected&&!busy&&!m->report.value("outputDirectory").toString().isEmpty());
 }
 void ExistingTrainingDialog::refreshPresentation(){
+  if(m->batch){
+    m->monitor->hide();m->runtimeState->clear();
+    m->state->setText(m->message?text(m->message).arg(m->errorDetail):text(AppLanguage::source("批量队列：%1；协调器：%2；存活状态：%3；待执行：%4"))
+      .arg(stateLabel(m->report.value("queueState").toString()),stateLabel(m->report.value("coordinatorOutcome").toString()),
+        liveLabel(m->report.value("liveness").toString()),QString::number(m->report.value("pendingRunIds").toArray().size())));
+    m->details->setPlainText(json(m->report));refreshEnabled();return;
+  }
   const QSignalBlocker blocker(m->job);
   for(int i=0;i<m->jobs.size()&&i<m->job->count();++i){const auto row=m->jobs[i].toObject();const QString name=row.value("outputName").toString(row.value("jobId").toString());
     const QString caption=QStringLiteral("%1 | %2 | %3 | %4").arg(name,row.value("jobId").toString(),stateLabel(row.value("recordedState").toString()),liveLabel(row.value("liveness").toString()));m->job->setItemText(i,caption);m->job->setItemData(i,caption,Qt::ToolTipRole);}

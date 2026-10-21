@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.5
+  VERSION 0.3.6
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -505,6 +505,16 @@ if(BUILD_TESTING)
     native.worker.test_scale_constraints native.worker.test_training_seed native.worker.test_training_batch)
   set_tests_properties(native_camera_scale_p1 PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 180)
+  add_test(NAME native_recorded_ply_export_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.backend.tests.test_recorded_ply_export)
+  set_tests_properties(native_recorded_ply_export_contracts PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120
+    ENVIRONMENT "PYTHONUTF8=1;PYTHONIOENCODING=utf-8")
+  add_test(NAME native_persistent_batch_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.worker.test_training_batch_connection)
+  set_tests_properties(native_persistent_batch_contracts PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 180
+    ENVIRONMENT "PYTHONUTF8=1;PYTHONIOENCODING=utf-8")
   add_test(NAME native_general_reconstruction_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.backend.tests.test_initialization native.worker.test_initialization
     native.backend.tests.test_gs_geometry native.worker.test_gs_geometry

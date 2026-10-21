@@ -355,7 +355,8 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
   const bool training=schema==QStringLiteral("gsw.training_camera_contract/1");
   const auto contract=training?root:root.value(QStringLiteral("training_contract")).toObject();
   if(!training && root.contains(QStringLiteral("export_version")) &&
-      root.value(QStringLiteral("export_version"))!=QJsonValue(1) && root.value(QStringLiteral("export_version"))!=QJsonValue(2)) {
+      root.value(QStringLiteral("export_version"))!=QJsonValue(1) && root.value(QStringLiteral("export_version"))!=QJsonValue(2) &&
+      root.value(QStringLiteral("export_version"))!=QJsonValue(3)) {
     result.error=QStringLiteral("camera_metadata_version_unsupported");return result;
   }
   const QString contractIdentity=contract.value(QStringLiteral("input_data_identity")).toString();
@@ -368,6 +369,11 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
       !readSimilarity(transforms.value(QStringLiteral("canonical_to_training")).toObject(),&normalization) ||
       transforms.value(QStringLiteral("canonical_to_training")).toObject().value(QStringLiteral("applied"))!=QJsonValue(true)) {
     result.error=QStringLiteral("camera_metadata_contract_invalid");return result;
+  }
+  std::optional<RecordedFrameTransforms> editedFrames;
+  if(root.value(QStringLiteral("export_version"))==3) {
+    editedFrames=recordedExportFrameTransforms(root,&result.error);
+    if(!editedFrames||!validateRecordedExportFiles(root,scenePath,&result.error))return result;
   }
   const auto reference = root.value(QStringLiteral("camera_reference")).toObject();
   if (!root.contains(QStringLiteral("camera_reference"))) { readLegacyBoundViews(root,result);return result; }
@@ -397,7 +403,7 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
       root.value(QStringLiteral("transform_applied")) != QJsonValue(true) || bundle.value(QStringLiteral("transform_applied")) != QJsonValue(true)) {
     result.error = QStringLiteral("camera_bundle_frame_or_identity_mismatch"); return result;
   }
-  if (root.value(QStringLiteral("bundle_sha256")).toString() != bundleBinding(modelHash,cameraHash,identity,result.frame,result.unit)) {
+  if (!editedFrames && root.value(QStringLiteral("bundle_sha256")).toString() != bundleBinding(modelHash,cameraHash,identity,result.frame,result.unit)) {
     result.error = QStringLiteral("camera_bundle_binding_mismatch"); return result;
   }
   if (!bundle.value(QStringLiteral("views")).isArray()) { result.error = QStringLiteral("camera_metadata_views_invalid"); return result; }
@@ -411,6 +417,43 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
       ++result.invalid; result.cameras.clear(); result.error = QStringLiteral("camera_metadata_view_invalid"); return result;
     }
     identifiers.insert(camera.viewId); result.cameras.append(camera);
+  }
+  if(editedFrames) {
+    // Compare the published cameras with the immutable root transformed by W
+    // exactly once, not with a second independently trusted camera payload.
+    Similarity trainingToCurrent;
+    if(!readSimilarity(editedFrames->trainingToCurrent,&trainingToCurrent)||!contract.value(QStringLiteral("views")).isArray()) {
+      result.cameras.clear();result.error=QStringLiteral("camera_metadata_scene_chain_invalid");return result;
+    }
+    QJsonObject expectedClip;
+    if(!readClipping(contract.value(QStringLiteral("clipping")),trainingToCurrent.scale,QStringLiteral("training"),&expectedClip)) {
+      result.cameras.clear();result.error=QStringLiteral("camera_metadata_clipping_invalid");return result;
+    }
+    const auto close=[](double a,double b,double absolute=2e-7) { return std::isfinite(a)&&std::isfinite(b)&&std::abs(a-b)<=absolute+1e-12*std::abs(b); };
+    bool consistent=expectedClip.size()==result.clipping.size();
+    for(auto it=expectedClip.begin();consistent&&it!=expectedClip.end();++it)consistent=result.clipping.contains(it.key())&&close(result.clipping.value(it.key()).toDouble(),it.value().toDouble(),1e-12);
+    const auto originalViews=contract.value(QStringLiteral("views")).toArray();
+    consistent=consistent&&originalViews.size()==result.cameras.size();
+    QSet<QString> originalIds;
+    for(qsizetype index=0;consistent&&index<originalViews.size();++index) {
+      auto original=originalViews[index].toObject();
+      auto pose=original.value(QStringLiteral("training_c2w_opencv")).toArray();
+      if(pose.isEmpty())pose=transformedPose(original.value(QStringLiteral("c2w_opencv")).toArray(),normalization);
+      original.insert(QStringLiteral("c2w_opencv"),transformedPose(pose,trainingToCurrent));
+      if(original.contains(QStringLiteral("training_K")))original.insert(QStringLiteral("K"),original.value(QStringLiteral("training_K")));
+      if(original.contains(QStringLiteral("training_size"))) {
+        const auto size=original.value(QStringLiteral("training_size")).toArray();
+        if(size.size()!=2) {consistent=false;break;}
+        original.insert(QStringLiteral("width"),size[0]);original.insert(QStringLiteral("height"),size[1]);
+      }
+      CameraPose expected;
+      if(!parseBoundCamera(original,result.frame,result.unit,&expected)||originalIds.contains(expected.viewId)) {consistent=false;break;}
+      originalIds.insert(expected.viewId);const auto &actual=result.cameras[index];
+      consistent=expected.viewId==actual.viewId&&expected.split==actual.split&&expected.imageName==actual.imageName&&
+          expected.pixelCoordinates==actual.pixelCoordinates&&expected.width==actual.width&&expected.height==actual.height&&expected.intrinsics==actual.intrinsics;
+      for(int i=0;consistent&&i<4;++i)for(int j=0;consistent&&j<4;++j)consistent=close(actual.cameraToWorld[i].toArray()[j].toDouble(),expected.cameraToWorld[i].toArray()[j].toDouble(),j==3?2e-7:1e-11);
+    }
+    if(!consistent) {result.cameras.clear();result.error=QStringLiteral("camera_metadata_scene_camera_mismatch");return result;}
   }
   result.source = cameraPath;
   return result;

@@ -64,6 +64,7 @@ public:
   // Read-only conservative writer gate for project migration/recovery cleanup.
   // Unverified active legacy records block destructive relocation too.
   [[nodiscard]] static bool hasUnfinishedTraining(const QString &jobStore);
+  [[nodiscard]] static bool hasUnfinishedBatches(const QString &workspaceRoot);
   bool start(const QString &taskName, const QString &program, const QStringList &arguments,
              const QString &workingDirectory = {},
              const QProcessEnvironment &environment = {},
@@ -76,6 +77,14 @@ public:
       const QProcessEnvironment &environment, const QString &logPath,
       const QString &jobStore);
   [[nodiscard]] bool isPersistentTraining() const;
+  bool startPersistentBatch(const QString &taskName, const QString &program,
+      const QStringList &arguments, const QString &workingDirectory,
+      const QProcessEnvironment &environment, const QString &logPath,
+      const QString &planPath);
+  bool attachPersistentBatch(const QString &taskName, const QString &planPath,
+      const QString &logPath);
+  [[nodiscard]] bool isPersistentBatch() const;
+  [[nodiscard]] bool isPersistentTask() const;
   void stop();
   bool requestPause();
   void shutdown();
@@ -102,6 +111,11 @@ private:
   void detachPersistentTraining();
   bool requestPersistentCommand(const QString &command);
   [[nodiscard]] std::optional<QJsonObject> persistentConnection() const;
+  [[nodiscard]] std::optional<QJsonObject> batchConnection() const;
+  bool launchPersistent(const QString &taskName, const QString &program,
+      const QStringList &arguments, const QString &workingDirectory,
+      const QProcessEnvironment &environment, const QString &logPath,
+      const QString &jobStore, bool batch);
 
   QProcess mProcess;
   QByteArray mOutputBuffer;
@@ -111,6 +125,8 @@ private:
   bool mShutdownStarted = false;
   quintptr mProcessJobHandle = 0;
   bool mPersistentTraining = false;
+  bool mPersistentBatch = false;
+  QString mPersistentPlanPath;
   quintptr mPersistentQueryHandle = 0;
   qint64 mPersistentProcessId = 0;
   QString mPersistentStartToken;

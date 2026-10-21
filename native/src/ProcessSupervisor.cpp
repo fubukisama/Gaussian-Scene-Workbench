@@ -13,6 +13,8 @@
 #include <QRegularExpression>
 #include <QUuid>
 #include <QSaveFile>
+#include <QCryptographicHash>
+#include <QSysInfo>
 
 #include <cmath>
 #include <limits>
@@ -143,6 +145,9 @@ bool runtimeOptionsObserved(const QJsonObject &options) {
 
 bool persistentSafePath(const QString &path) {
   if (!QDir::isAbsolutePath(path) || QDir::fromNativeSeparators(path).split('/').contains("..")) return false;
+#ifdef Q_OS_WIN
+  if(path.size()>=260&&!path.startsWith(QStringLiteral("\\\\?\\")))return false;
+#endif
   QFileInfo current(path);
   for (;;) {
     if (current.isSymbolicLink()) return false;
@@ -201,6 +206,24 @@ bool writePersistentObject(const QString &path, const QJsonObject &object) {
   QSaveFile file(path); file.setDirectWriteFallback(false);
   const auto data = QJsonDocument(object).toJson(QJsonDocument::Compact);
   return file.open(QIODevice::WriteOnly) && file.write(data) == data.size() && file.commit();
+}
+
+std::optional<QJsonObject> batchBinding(const QString &planPath) {
+  static const QRegularExpression id(QStringLiteral("^[0-9a-f]{32}$")),sha(QStringLiteral("^[0-9a-f]{64}$"));
+  const QFileInfo file(planPath);const QDir root=file.dir();
+  if(!persistentSafePath(planPath)||file.fileName()!=QStringLiteral("plan.json")||
+      !id.match(root.dirName()).hasMatch()||QFileInfo(root.absolutePath()).dir().dirName()!=QStringLiteral("training-batches")||
+      QFileInfo(QFileInfo(root.absolutePath()).absolutePath()).dir().dirName()!=QStringLiteral(".gsw")) return std::nullopt;
+  const auto plan=readPersistentObject(planPath,16*1024*1024);
+  const auto state=readPersistentObject(root.filePath(QStringLiteral("state.json")),16*1024*1024);
+  QFile input(planPath);if(!input.open(QIODevice::ReadOnly)||input.size()>16*1024*1024)return std::nullopt;
+  const auto hash=QString::fromLatin1(QCryptographicHash::hash(input.readAll(),QCryptographicHash::Sha256).toHex());
+  const auto semantic=plan.value(QStringLiteral("plan_sha256")).toString();
+  if(plan.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch/1")||!sha.match(semantic).hasMatch()||
+      state.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch_state/1")||
+      state.value(QStringLiteral("plan_sha256"))!=semantic||state.value(QStringLiteral("plan_file_sha256"))!=hash)return std::nullopt;
+  return QJsonObject{{QStringLiteral("batchId"),root.dirName()},{QStringLiteral("planSha256"),semantic},
+      {QStringLiteral("planFileSha256"),hash},{QStringLiteral("state"),state}};
 }
 
 bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
@@ -555,6 +578,53 @@ bool ProcessSupervisor::hasUnfinishedTraining(const QString &jobStore) {
   return false;
 }
 
+bool ProcessSupervisor::hasUnfinishedBatches(const QString &workspaceRoot) {
+  const QString batches=QDir(workspaceRoot).filePath(QStringLiteral(".gsw/training-batches"));
+  if(!persistentSafePath(batches))return true;
+  const auto directories=QDir(batches).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
+  if(directories.size()>10000)return true;
+  for(const auto &directory:directories) {
+    if(!persistentSafePath(directory.absoluteFilePath()))return true;
+    const QDir root(directory.absoluteFilePath());
+    const auto owners=QDir(root.filePath(QStringLiteral(".p"))).entryInfoList({QStringLiteral("*.json")},QDir::Files,QDir::Name);
+    if(owners.size()>4096)return true;
+    for(const auto &file:owners){const auto owner=readPersistentObject(file.absoluteFilePath(),65536);
+      if(owner.value(QStringLiteral("version")).toInt()!=1||!owner.value(QStringLiteral("closed")).isBool()||
+          (!owner.value(QStringLiteral("closed")).toBool()&&
+          persistentIdentityMayWrite(owner.value(QStringLiteral("workerIdentity")).toObject())))return true;}
+    const QString leasePath=root.filePath(QStringLiteral(".coordinator.json"));
+    if(QFileInfo::exists(leasePath)) {
+      const auto binding=batchBinding(root.filePath(QStringLiteral("plan.json")));
+      const auto lease=readPersistentObject(leasePath,256*1024);
+      const auto child=lease.value(QStringLiteral("activeChild"));
+      if(!child.isUndefined()&&!child.isNull()&&(!child.isObject()||
+          persistentIdentityMayWrite(child.toObject().value(QStringLiteral("identity")).toObject())))return true;
+      if(!binding||lease.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch_connection/1")||
+          lease.value(QStringLiteral("planSha256"))!=binding->value(QStringLiteral("planSha256"))||
+          lease.value(QStringLiteral("planFileSha256"))!=binding->value(QStringLiteral("planFileSha256"))||
+          lease.value(QStringLiteral("host"))!=QSysInfo::machineHostName()||
+          persistentIdentityMayWrite(lease.value(QStringLiteral("coordinatorIdentity")).toObject()))return true;
+    } else {
+      const auto state=readPersistentObject(root.filePath(QStringLiteral("state.json")),16*1024*1024);
+      if(state.isEmpty()||QStringList{QStringLiteral("running"),QStringLiteral("cancelling")}.contains(state.value(QStringLiteral("status")).toString()))return true;
+    }
+    const QString oldLock=root.filePath(QStringLiteral(".run-lock.json"));
+    if(QFileInfo::exists(oldLock)) {
+      const auto legacy=readPersistentObject(oldLock,65536);
+      const auto pid=legacy.value(QStringLiteral("pid")).toInteger(-1);
+      if(legacy.value(QStringLiteral("host"))!=QSysInfo::machineHostName()||pid<1||pid>4294967295LL)return true;
+#ifdef Q_OS_WIN
+      const HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,static_cast<DWORD>(pid));
+      if(!process){if(GetLastError()!=ERROR_INVALID_PARAMETER)return true;}
+      else{DWORD code=0;const bool ended=GetExitCodeProcess(process,&code)&&code!=STILL_ACTIVE;CloseHandle(process);if(!ended)return true;}
+#else
+      return true;
+#endif
+    }
+  }
+  return false;
+}
+
 ProcessSupervisor::ProcessSupervisor(QObject *parent) : QObject(parent) {
   qRegisterMetaType<TrainingGpuPreviewDescriptor>();
   mProcess.setProcessChannelMode(QProcess::MergedChannels);
@@ -601,7 +671,9 @@ ProcessSupervisor::~ProcessSupervisor() {
 }
 
 bool ProcessSupervisor::isRunning() const { return mPersistentTraining || mProcess.state() != QProcess::NotRunning; }
-bool ProcessSupervisor::isPersistentTraining() const { return mPersistentTraining; }
+bool ProcessSupervisor::isPersistentTraining() const { return mPersistentTraining && !mPersistentBatch; }
+bool ProcessSupervisor::isPersistentBatch() const { return mPersistentTraining && mPersistentBatch; }
+bool ProcessSupervisor::isPersistentTask() const { return mPersistentTraining; }
 QString ProcessSupervisor::activeTask() const { return mActiveTask; }
 bool ProcessSupervisor::wasStopRequested() const { return mStopRequested; }
 
@@ -633,6 +705,22 @@ bool ProcessSupervisor::start(const QString &taskName, const QString &program,
 bool ProcessSupervisor::startPersistentTraining(const QString &taskName,const QString &program,
     const QStringList &arguments,const QString &workingDirectory,
     const QProcessEnvironment &environment,const QString &logPath,const QString &jobStore) {
+  return launchPersistent(taskName,program,arguments,workingDirectory,environment,logPath,jobStore,false);
+}
+
+bool ProcessSupervisor::startPersistentBatch(const QString &taskName,const QString &program,
+    const QStringList &arguments,const QString &workingDirectory,
+    const QProcessEnvironment &environment,const QString &logPath,const QString &planPath) {
+  if(!batchBinding(planPath)||QFileInfo(logPath).absolutePath()!=QFileInfo(planPath).absolutePath()) return false;
+  const bool accepted=launchPersistent(taskName,program,arguments,workingDirectory,environment,logPath,
+      QFileInfo(planPath).absolutePath(),true);
+  if(accepted && mPersistentTraining) mPersistentPlanPath=QFileInfo(planPath).absoluteFilePath();
+  return accepted;
+}
+
+bool ProcessSupervisor::launchPersistent(const QString &taskName,const QString &program,
+    const QStringList &arguments,const QString &workingDirectory,
+    const QProcessEnvironment &environment,const QString &logPath,const QString &jobStore,const bool batch) {
   if(mShutdownStarted || isRunning() || program.isEmpty()) return false;
   if(!persistentSafePath(logPath) || !persistentSafePath(jobStore) ||
       !QFileInfo(logPath).dir().exists()) {
@@ -662,7 +750,7 @@ bool ProcessSupervisor::startPersistentTraining(const QString &taskName,const QS
   QJsonObject owner{{QStringLiteral("version"),1},{QStringLiteral("closed"),false},
       {QStringLiteral("workerIdentity"),QJsonObject{}}};
   if(!writePersistentObject(ownerPath,owner)) return false;
-  mActiveTask=taskName; mOutputBuffer.clear(); mStopRequested=false;
+  mActiveTask=taskName; mOutputBuffer.clear(); mStopRequested=false;mPersistentBatch=batch;
   mPersistentFinalState.clear(); mPersistentJobStore=QDir::cleanPath(jobStore);
   QProcess launcher;
   launcher.setProgram(program); launcher.setArguments(arguments);
@@ -700,6 +788,55 @@ bool ProcessSupervisor::startPersistentTraining(const QString &taskName,const QS
   emit taskStarted(taskName); emit runningChanged(true);
   mPersistentPoll.start();
   return true;
+#endif
+}
+
+bool ProcessSupervisor::attachPersistentBatch(const QString &taskName,const QString &planPath,const QString &logPath) {
+#ifndef Q_OS_WIN
+  Q_UNUSED(taskName);Q_UNUSED(planPath);Q_UNUSED(logPath);return false;
+#else
+  if(mShutdownStarted||isRunning()||!batchBinding(planPath)||!persistentSafePath(logPath)||!QFileInfo(logPath).isFile()||
+      QFileInfo(logPath).absolutePath()!=QFileInfo(planPath).absolutePath())return false;
+  const auto lease=readPersistentObject(QFileInfo(planPath).dir().filePath(QStringLiteral(".coordinator.json")),256*1024);
+  const auto identity=lease.value(QStringLiteral("coordinatorIdentity")).toObject();
+  const auto pid=identity.value(QStringLiteral("pid")).toInteger(-1);
+  if(pid<1||pid>4294967295LL)return false;
+  const HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,static_cast<DWORD>(pid));
+  if(!handle)return false;
+  mPersistentQueryHandle=reinterpret_cast<quintptr>(handle);mPersistentProcessId=pid;
+  mPersistentStartToken=persistentStartToken(handle);mPersistentTraining=true;mPersistentBatch=true;
+  mPersistentPlanPath=QFileInfo(planPath).absoluteFilePath();mPersistentJobStore=QFileInfo(planPath).absolutePath();
+  if(!batchConnection()){detachPersistentTraining();return false;}
+  mActiveTask=taskName;mStopRequested=false;mPersistentFinalState.clear();
+  mPersistentLog.setFileName(logPath);mPersistentLog.open(QIODevice::ReadOnly);
+  emit taskStarted(taskName);emit runningChanged(true);mPersistentPoll.start();return true;
+#endif
+}
+
+std::optional<QJsonObject> ProcessSupervisor::batchConnection() const {
+#ifndef Q_OS_WIN
+  return std::nullopt;
+#else
+  if(!isPersistentBatch()||!mPersistentQueryHandle||mPersistentStartToken.isEmpty())return std::nullopt;
+  const auto binding=batchBinding(mPersistentPlanPath);if(!binding)return std::nullopt;
+  const auto lease=readPersistentObject(QFileInfo(mPersistentPlanPath).dir().filePath(QStringLiteral(".coordinator.json")),256*1024);
+  const auto identity=lease.value(QStringLiteral("coordinatorIdentity")).toObject();
+  const auto session=lease.value(QStringLiteral("session")).toString();
+  static const QRegularExpression id(QStringLiteral("^[0-9a-f]{32}$"));
+  const double age=QDateTime::currentMSecsSinceEpoch()/1000.0-lease.value(QStringLiteral("heartbeat")).toDouble();
+  DWORD exit=0;const HANDLE handle=reinterpret_cast<HANDLE>(mPersistentQueryHandle);
+  if(!GetExitCodeProcess(handle,&exit)||exit!=STILL_ACTIVE||persistentStartToken(handle)!=mPersistentStartToken||
+      identity.size()!=2||identity.value(QStringLiteral("pid")).toInteger(-1)!=mPersistentProcessId||
+      identity.value(QStringLiteral("startToken")).toString()!=mPersistentStartToken||
+      lease.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch_connection/1")||
+      lease.value(QStringLiteral("version")).toInt()!=1||lease.value(QStringLiteral("host"))!=QSysInfo::machineHostName()||
+      !lease.value(QStringLiteral("closed")).isBool()||lease.value(QStringLiteral("closed")).toBool()||
+      !id.match(session).hasMatch()||!std::isfinite(age)||age< -2||age>15||
+      QDir::cleanPath(QDir::fromNativeSeparators(lease.value(QStringLiteral("planPath")).toString()))!=mPersistentPlanPath||
+      lease.value(QStringLiteral("planSha256"))!=binding->value(QStringLiteral("planSha256"))||
+      lease.value(QStringLiteral("planFileSha256"))!=binding->value(QStringLiteral("planFileSha256"))||
+      lease.value(QStringLiteral("batchId"))!=binding->value(QStringLiteral("batchId")))return std::nullopt;
+  return lease;
 #endif
 }
 
@@ -753,21 +890,28 @@ std::optional<QJsonObject> ProcessSupervisor::persistentConnection() const {
 
 bool ProcessSupervisor::requestPersistentCommand(const QString &command) {
   if(mShutdownStarted || !mPersistentTraining || mStopRequested) return false;
-  const auto connection=persistentConnection();
+  const auto connection=mPersistentBatch?batchConnection():persistentConnection();
   QString error=QStringLiteral("job_connection_control_unavailable");
 #ifdef Q_OS_WIN
   if(connection) {
-    const QString root=connection->value(QStringLiteral("connectionRoot")).toString();
+    const QString root=mPersistentBatch?QFileInfo(mPersistentPlanPath).dir().filePath(QStringLiteral(".coordinators")):
+        connection->value(QStringLiteral("connectionRoot")).toString();
     const QString session=connection->value(QStringLiteral("session")).toString();
     const QString target=QDir(root).filePath(session+QStringLiteral("-cmd.json"));
     const QString temporary=QDir(root).filePath(QUuid::createUuid().toString(QUuid::Id128));
-    const QByteArray bytes=QJsonDocument(QJsonObject{{QStringLiteral("version"),1},
+    QJsonObject request{{QStringLiteral("version"),1},
         {QStringLiteral("jobId"),connection->value(QStringLiteral("jobId"))},
         {QStringLiteral("session"),session},
         {QStringLiteral("workerIdentity"),connection->value(QStringLiteral("workerIdentity"))},
         {QStringLiteral("command"),command},
         {QStringLiteral("nonce"),QUuid::createUuid().toString(QUuid::Id128)},
-        {QStringLiteral("requestedAt"),QDateTime::currentMSecsSinceEpoch()/1000.0}}).toJson(QJsonDocument::Compact);
+        {QStringLiteral("requestedAt"),QDateTime::currentMSecsSinceEpoch()/1000.0}};
+    if(mPersistentBatch) {
+      request.remove(QStringLiteral("jobId"));request.remove(QStringLiteral("workerIdentity"));
+      for(const auto &key:QStringList{QStringLiteral("schema"),QStringLiteral("batchId"),QStringLiteral("planSha256"),
+          QStringLiteral("planFileSha256"),QStringLiteral("coordinatorIdentity")})request.insert(key,connection->value(key));
+    }
+    const QByteArray bytes=QJsonDocument(request).toJson(QJsonDocument::Compact);
     if(persistentSafePath(target) && persistentSafePath(temporary) && bytes.size()<=4096) {
       const HANDLE file=CreateFileW(reinterpret_cast<LPCWSTR>(temporary.utf16()),GENERIC_WRITE,0,nullptr,CREATE_NEW,
           FILE_ATTRIBUTE_NORMAL,nullptr);
@@ -781,7 +925,9 @@ bool ProcessSupervisor::requestPersistentCommand(const QString &command) {
         if(!published) error=QStringLiteral("job_connection_command_pending_or_unavailable");
         QFile::remove(temporary);
         if(published) {
-          emit outputReady(command==QStringLiteral("pause")
+          emit outputReady(mPersistentBatch && command==QStringLiteral("cancel")?
+              QCoreApplication::translate("Workbench","批量取消已请求；将先保存活动任务的完整检查点，保留待执行队列。"):
+              command==QStringLiteral("pause")
               ?QCoreApplication::translate("Workbench","Training pause requested; waiting for the worker to acknowledge it.\n")
               :QCoreApplication::translate("Workbench","Training stop requested; waiting for the worker to acknowledge it.\n"));
           return true;
@@ -792,7 +938,8 @@ bool ProcessSupervisor::requestPersistentCommand(const QString &command) {
 #else
   Q_UNUSED(command); Q_UNUSED(connection);
 #endif
-  emit outputReady(QCoreApplication::translate("Workbench","Persistent training command was not sent: %1\n").arg(error));
+  emit outputReady(QCoreApplication::translate("Workbench",mPersistentBatch?
+      "Persistent batch command was not sent: %1\n":"Persistent training command was not sent: %1\n").arg(error));
   return false;
 }
 
@@ -846,7 +993,7 @@ void ProcessSupervisor::detachPersistentTraining() {
 #ifdef Q_OS_WIN
   if(mPersistentQueryHandle) CloseHandle(reinterpret_cast<HANDLE>(mPersistentQueryHandle));
 #endif
-  mPersistentQueryHandle=0; mPersistentTraining=false; mPersistentProcessId=0;
+  mPersistentQueryHandle=0; mPersistentTraining=false; mPersistentBatch=false;mPersistentPlanPath.clear();mPersistentProcessId=0;
   mPersistentStartToken.clear(); mPersistentLog.close(); mActiveTask.clear(); mOutputBuffer.clear();
 }
 
@@ -861,7 +1008,7 @@ void ProcessSupervisor::stop() {
     return;
   }
   if (mPersistentTraining) {
-    if (requestPersistentCommand(QStringLiteral("stop"))) mStopRequested=true;
+    if (requestPersistentCommand(mPersistentBatch?QStringLiteral("cancel"):QStringLiteral("stop"))) mStopRequested=true;
     return;
   }
 

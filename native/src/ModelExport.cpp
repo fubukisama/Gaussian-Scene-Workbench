@@ -258,6 +258,51 @@ bool sameFile(const QString &a, const QString &b) {
   return canonical(a).compare(canonical(b), Qt::CaseInsensitive) == 0;
 }
 
+std::optional<QJsonObject> recordedSceneEdit(const ModelExportOptions &options,const CameraScaleRecoveryCapability &capability) {
+  const double axes[3]{options.transform.scale.x(),options.transform.scale.y(),options.transform.scale.z()};
+  const double scale=std::abs(axes[0]);
+  const int negativeAxes=int(axes[0]<0.)+int(axes[1]<0.)+int(axes[2]<0.);
+  if(!options.pivot.isFinite()||!std::isfinite(scale)||scale<=0.||std::abs(axes[1])!=scale||std::abs(axes[2])!=scale||negativeAxes%2)return std::nullopt;
+  const double translation[3]{options.transform.translation.x(),options.transform.translation.y(),options.transform.translation.z()};
+  const double pivot[3]{options.pivot.x,options.pivot.y,options.pivot.z};
+  double w=options.transform.rotation.scalar(),x=options.transform.rotation.x(),y=options.transform.rotation.y(),z=options.transform.rotation.z();
+  const double norm=std::hypot(std::hypot(w,x),std::hypot(y,z));
+  if(!std::isfinite(norm)||norm<=0.)return std::nullopt;
+  w/=norm;x/=norm;y/=norm;z/=norm;
+  double rotation[3][3]{{1.-2.*(y*y+z*z),2.*(x*y-w*z),2.*(x*z+w*y)},
+      {2.*(x*y+w*z),1.-2.*(x*x+z*z),2.*(y*z-w*x)},
+      {2.*(x*z-w*y),2.*(y*z+w*x),1.-2.*(x*x+y*y)}};
+  QJsonArray rows,offset;
+  for(int i=0;i<3;++i) {
+    QJsonArray row;double t=pivot[i]+translation[i];
+    for(int j=0;j<3;++j) {rotation[i][j]*=axes[j]<0.?-1.:1.;row.append(rotation[i][j]);t-=scale*rotation[i][j]*pivot[j];}
+    if(!std::isfinite(t))return std::nullopt;
+    rows.append(row);offset.append(t);
+  }
+  return QJsonObject{{QStringLiteral("schema"),QStringLiteral("gsw.scene_transform/1")},
+      {QStringLiteral("frame"),capability.currentFrame},{QStringLiteral("unit"),capability.currentUnit},
+      {QStringLiteral("transform"),QJsonObject{{QStringLiteral("s"),scale},{QStringLiteral("R"),rows},{QStringLiteral("t"),offset}}}};
+}
+
+QString recordedExportErrorCaption(const QString &code) {
+  if(code==QStringLiteral("camera_scale_export_invalid_geometry_provenance"))return QCoreApplication::translate("Workbench", "几何来源声明无效或与原提取坐标链不一致；原始文件保持不变。");
+  if(code==QStringLiteral("camera_scale_export_asset_hash_mismatch"))return QCoreApplication::translate("Workbench", "贴图资源的字节、大小或哈希与记录不一致。");
+  if(code==QStringLiteral("camera_scale_export_asset_missing"))return QCoreApplication::translate("Workbench", "引用的贴图资源不存在。");
+  if(code==QStringLiteral("camera_scale_export_asset_reference_mismatch"))return QCoreApplication::translate("Workbench", "PLY 贴图引用的路径或顺序与资源清单不一致。");
+  if(code==QStringLiteral("camera_scale_export_invalid_asset_header"))return QCoreApplication::translate("Workbench", "PLY 资源头无效或超过允许大小。");
+  if(code==QStringLiteral("camera_scale_export_invalid_assets_manifest"))return QCoreApplication::translate("Workbench", "资源清单或其哈希无效。");
+  if(code==QStringLiteral("camera_scale_export_invalid_material_index"))return QCoreApplication::translate("Workbench", "网格材质索引超出贴图引用范围。");
+  if(code==QStringLiteral("camera_scale_export_invalid_mesh_indices"))return QCoreApplication::translate("Workbench", "网格面索引必须是范围内的整数多边形。");
+  if(code==QStringLiteral("camera_scale_export_invalid_representation"))return QCoreApplication::translate("Workbench", "记录坐标导出的模型类型无效。");
+  if(code==QStringLiteral("camera_scale_export_invalid_scene_history"))return QCoreApplication::translate("Workbench", "场景编辑历史与实际坐标变换链不一致。");
+  if(code==QStringLiteral("camera_scale_export_invalid_scene_transform"))return QCoreApplication::translate("Workbench", "场景变换必须匹配当前框架与单位，并为正等比相似变换。");
+  if(code==QStringLiteral("camera_scale_export_invalid_vertex_positions"))return QCoreApplication::translate("Workbench", "PLY 缺少有效的数值 XYZ 坐标。");
+  if(code==QStringLiteral("camera_scale_export_unsafe_asset_reference"))return QCoreApplication::translate("Workbench", "贴图引用必须为安全相对路径；拒绝绝对路径、遍历、链接和 URI。");
+  if(code==QStringLiteral("camera_scale_export_unsupported_index_relation"))return QCoreApplication::translate("Workbench", "裁剪涉及未支持的索引关联；无法安全重映射。");
+  if(code==QStringLiteral("camera_scale_export_unsupported_material_reference"))return QCoreApplication::translate("Workbench", "该外部材质引用方式尚未适配；未丢弃原始材质。");
+  return {};
+}
+
 ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
   ModelExportResult result;
   if (o.progress && o.progress(0)) {
@@ -268,15 +313,19 @@ ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
     result.error = QCoreApplication::translate("Workbench", message);
     return result;
   };
-  if (o.format != ModelExportFormat::Ply || o.applyTransform ||
+  if (o.format != ModelExportFormat::Ply ||
       (o.cameraCoordinateRecovery != QStringLiteral("source") && o.cameraCoordinateRecovery != QStringLiteral("metric") &&
-       o.cameraCoordinateRecovery != QStringLiteral("training") && o.cameraCoordinateRecovery != QStringLiteral("preserve")))
-    return fail("相机坐标恢复仅支持独立的高斯 PLY 导出，不能同时烘焙场景变换。");
+       o.cameraCoordinateRecovery != QStringLiteral("canonical") && o.cameraCoordinateRecovery != QStringLiteral("training") && o.cameraCoordinateRecovery != QStringLiteral("preserve")))
+    return fail("共享相机坐标恢复目前仅支持另存 PLY；其他格式保持原有导出限制。");
   const auto capability = cameraScaleRecoveryCapability(o.sourcePath);
   const bool preserve = o.cameraCoordinateRecovery == QStringLiteral("training") || o.cameraCoordinateRecovery == QStringLiteral("preserve");
   if ((preserve && !capability.preserve) || (!preserve && !capability.source) ||
       (o.cameraCoordinateRecovery == QStringLiteral("metric") && !capability.metric))
     return fail("缺少有效的相机尺度记录，或绝对尺度未知；不能恢复为米制。");
+  const auto edit=o.applyTransform?recordedSceneEdit(o,capability):std::optional<QJsonObject>{};
+  if(o.applyTransform&&!edit)return fail("相机坐标导出的场景变换必须为非零等比缩放和正旋转；不支持非等比缩放或镜像。");
+  if(!QStringList{QStringLiteral("auto"),QStringLiteral("gaussian"),QStringLiteral("point_cloud"),QStringLiteral("mesh")}.contains(o.recordedRepresentation))
+    return fail("记录坐标导出的模型类型无效。");
   if (!QFileInfo::exists(o.recoveryPythonPath) ||
       !QFileInfo::exists(QDir(o.recoveryRepositoryRoot).filePath(QStringLiteral("native/backend/camera_scale_export.py"))))
     return fail("坐标恢复需要有效的原生后端与 Python 运行环境。");
@@ -288,8 +337,15 @@ ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
   QStringList arguments{QStringLiteral("-B"), QStringLiteral("-m"), QStringLiteral("native.backend.camera_scale_export"),
       QStringLiteral("--input"), o.sourcePath, QStringLiteral("--output"), o.destinationPath,
       QStringLiteral("--coordinates"), o.cameraCoordinateRecovery,
+      QStringLiteral("--representation"),o.recordedRepresentation,
       QStringLiteral("--cancel-file"), cancelPath, QStringLiteral("--progress-json")};
   if (!o.cameraOutputUnit.isEmpty()) arguments << QStringLiteral("--unit") << o.cameraOutputUnit;
+  if(edit) {
+    const QString path=control.filePath(QStringLiteral("scene-transform.json"));QSaveFile file(path);
+    const QByteArray bytes=QJsonDocument(*edit).toJson(QJsonDocument::Compact);
+    if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())return fail("无法写入场景变换的坐标导出记录。");
+    arguments<<QStringLiteral("--scene-transform")<<path;
+  }
   if (!o.deletedVertices.isEmpty())
     arguments << QStringLiteral("--deleted-vertex-count") << QString::number(o.deletedVertices.size());
   if (o.deletedVertices.count(true)) {
@@ -364,11 +420,15 @@ ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
     const QString code = response.value(QStringLiteral("code")).toString();
     if (code == QStringLiteral("camera_scale_export_rotation_SH_unsupported"))
       return fail("该坐标链包含旋转和方向相关球谐；尚未支持正确烘焙，请保留训练坐标与变换记录。");
+    const QString raw=response.isEmpty()?QString::fromUtf8(errorText):response.value(QStringLiteral("detail")).toString(code);
+    const QString caption=recordedExportErrorCaption(code);
     result.error = QCoreApplication::translate("Workbench", "坐标恢复失败：%1")
-        .arg(response.isEmpty() ? QString::fromUtf8(errorText) : response.value(QStringLiteral("detail")).toString(code));
+        .arg(caption.isEmpty()?raw:caption+QLatin1Char('\n')+raw);
     return result;
   }
   result.coordinateRecovery = response;
+  const auto published=cameraScaleRecoveryCapability(o.destinationPath);
+  if(!published.preserve||!published.validationError.isEmpty())return fail("导出文件组的模型、相机、变换或资源校验失败；原始模型保持不变。");
   result.success = true;
   return result;
 }

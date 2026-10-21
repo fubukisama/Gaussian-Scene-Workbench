@@ -17,6 +17,7 @@ public:
   [[nodiscard]] QJsonObject currentReport() const;
   [[nodiscard]] bool isConnected() const;
   [[nodiscard]] bool isBusy() const;
+  bool connectBatch(const QString &planPath);
 public slots:
   void refreshJobs();
   void connectSelectedJob();
@@ -26,6 +27,7 @@ public slots:
 signals:
   void resumeRequested(const QString &configurationPath,const QString &outputDirectory);
   void resultRequested(const QString &outputDirectory);
+  void resumeBatchRequested(const QString &planPath);
   void reportUpdated(const QJsonObject &report);
 protected:
   void reject() override;

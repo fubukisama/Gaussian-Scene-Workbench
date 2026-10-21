@@ -38,6 +38,22 @@ struct SceneCoordinateMetadata final {
   QString validationError;
 };
 
+// Math-only validation of a v3 recorded export. File, camera and texture hashes
+// are checked separately; a valid transform chain is not a file verification.
+struct RecordedFrameTransforms final {
+  QJsonObject currentToCanonical;
+  QJsonObject trainingToCurrent;
+  QJsonObject canonicalSceneTransform;
+  QJsonObject inputCanonicalSceneTransform;
+  QJsonObject trainingContract;
+  double sceneScaleMultiplier = 1.;
+  bool physicalScaleModified = false;
+};
+[[nodiscard]] std::optional<RecordedFrameTransforms> recordedExportFrameTransforms(
+    const QJsonObject &record, QString *error = nullptr);
+[[nodiscard]] bool validateRecordedExportFiles(const QJsonObject &record,
+    const QString &modelPath, QString *error = nullptr);
+
 struct SceneCoordinateInfo final {
   bool valid = false;
   SceneCoordinate3D globalMinimum;

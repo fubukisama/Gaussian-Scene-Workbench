@@ -1,7 +1,7 @@
 {
   "product": "Gaussian Scene Workbench",
   "appUserModelId": "Fubukisama.GaussianSceneWorkbench.Native",
-  "version": "0.3.5-native-preview",
+  "version": "0.3.6-native-preview",
   "releaseDate": "2026-10-21",
   "channel": "native-preview",
   "runtime": "Qt 6.8 / C++20",

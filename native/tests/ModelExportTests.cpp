@@ -83,8 +83,110 @@ private slots:
   void cameraScaleMetadataRefreshesAnExistingGeometryCache();
   void unknownScaleCannotBeExportedAsImplicitMetreGlb();
   void recordedCameraCoordinatesUseRealNativeExportProcess();
+  void recordedPointSceneEditUsesPivotOnceAndRetainsFrameHistory();
+  void recordedKindsUseSharedNativeExportProcess();
   void realGpuTrainingModelMeasurementAndCoordinateExports();
 };
+
+void ModelExportTests::recordedKindsUseSharedNativeExportProcess() {
+  const QString python=qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_PYTHON"),root=qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_ROOT");
+  if(python.isEmpty()||root.isEmpty())QSKIP("Real native export helper runtime not selected");
+  QTemporaryDir directory;QVERIFY(directory.isValid());
+  QImage image(3,2,QImage::Format_RGB32);image.fill(QColor(10,90,180));QVERIFY(image.save(directory.filePath("texture.png")));
+  const auto originalTexture=read(directory.filePath("texture.png"));
+  const QJsonArray identity{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}};
+  const auto sim=[&](double s,QJsonArray t){return QJsonObject{{"s",s},{"R",identity},{"t",t},{"applied",true}};};
+  const QJsonObject camera{{"view_id","stable-train"},{"split","train"},{"width",640},{"height",480},
+      {"K",QJsonArray{QJsonArray{700,12,301},QJsonArray{0,710,222},QJsonArray{0,0,1}}},
+      {"c2w_opencv",QJsonArray{QJsonArray{1,0,0,3},QJsonArray{0,1,0,4},QJsonArray{0,0,1,5},QJsonArray{0,0,0,1}}}};
+  for(const QString &kind:QStringList{"point_cloud","mesh","3dgs","2dgs"}) {
+    const QString source=directory.filePath(kind+".ply");
+    QByteArray bytes=kind=="point_cloud"?pointPly():kind=="mesh"?meshPly():gaussianPly(1);
+    bytes.replace("comment units cm\n","");
+    if(kind=="2dgs") {
+      bytes.replace("property double scale_2\n","");
+      bytes.replace("0.75 -2 -3 -4 ","0.75 -2 -3 ");
+    }
+    QVERIFY(save(source,bytes));
+    const QJsonObject record{{"schema","gsw.training_camera_contract/1"},{"input_data_identity",QString(64,'b')},
+        {"ply_sha256",QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())},
+        {"scale",QJsonObject{{"status","source_declared"},{"source_unit","m"},{"canonical_unit","m"},{"meters_per_unit",1.},
+            {"evidence",QJsonArray{QJsonObject{{"kind","user_declaration"}}}}}},
+        {"transforms",QJsonObject{{"source_to_canonical",sim(1.,{0,0,0})},{"canonical_to_training",sim(2.,{1,2,3})}}},
+        {"views",QJsonArray{camera}},{"clipping",QJsonObject{{"frame","training"},{"znear",.2},{"zfar",100.},{"backend_near",.4}}}};
+    QVERIFY(save(cameraScaleMetadataPath(source),QJsonDocument(record).toJson()));
+    const auto before=PlyPointCloudLoader::load(source);QVERIFY2(before.isValid(),qPrintable(before.error));
+    ModelExportOptions options;options.sourcePath=source;options.destinationPath=directory.filePath(kind+"-edited.ply");
+    options.cameraCoordinateRecovery="metric";options.recordedRepresentation=(kind=="3dgs"||kind=="2dgs")?QString("gaussian"):kind;
+    options.recoveryPythonPath=python;options.recoveryRepositoryRoot=root;options.applyTransform=true;
+    options.transform.scale={2,2,2};options.transform.rotation=QQuaternion::fromAxisAndAngle({0,0,1},90);options.transform.translation={10,20,30};
+    const auto result=exportModelFile(options);QVERIFY2(result.success,qPrintable(kind+": "+result.error));
+    const auto after=PlyPointCloudLoader::load(options.destinationPath);QVERIFY2(after.isValid(),qPrintable(after.error));
+    QVERIFY(std::abs(after.coordinates.globalMinimum.x-(4.5-before.coordinates.globalMaximum.y))<1e-6);
+    QVERIFY(std::abs(after.coordinates.globalMaximum.y-(9.+before.coordinates.globalMaximum.x))<1e-6);
+    QVERIFY(std::abs(after.coordinates.globalMinimum.z-(13.5+before.coordinates.globalMinimum.z))<1e-6);
+    QCOMPARE(after.sourceVertexCount,before.sourceVertexCount);QCOMPARE(after.sourceFaceCount,before.sourceFaceCount);
+    QCOMPARE(after.hasGaussianAttributes,before.hasGaussianAttributes);QCOMPARE(after.hasSurfelAttributes,before.hasSurfelAttributes);
+    QVERIFY(cameraScaleRecoveryCapability(options.destinationPath).preserve);
+    const auto metadata=QJsonDocument::fromJson(read(cameraScaleMetadataPath(options.destinationPath))).object();
+    QCOMPARE(metadata["export_version"].toInt(),3);QCOMPARE(metadata["scene_scale_multiplier"].toDouble(),2.);
+    if(kind=="mesh") {
+      const auto assets=metadata["assets"].toArray();QCOMPARE(assets.size(),1);
+      QCOMPARE(read(directory.filePath(assets[0].toObject()["path"].toString())),originalTexture);QVERIFY(!after.meshTextureImage.isNull());
+    }
+    QCOMPARE(read(source),bytes);QCOMPARE(read(directory.filePath("texture.png")),originalTexture);
+  }
+}
+
+void ModelExportTests::recordedPointSceneEditUsesPivotOnceAndRetainsFrameHistory() {
+  const QString python=qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_PYTHON"),root=qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_ROOT");
+  if(python.isEmpty()||root.isEmpty())QSKIP("Real native export helper runtime not selected");
+  QTemporaryDir directory;QVERIFY(directory.isValid());
+  const QString source=directory.filePath("points.ply");
+  const QByteArray original="ply\nformat ascii 1.0\nelement vertex 2\nproperty double x\nproperty double y\nproperty double z\nproperty uchar red\nend_header\n3 6 9 23\n5 8 11 42\n";
+  QVERIFY(save(source,original));
+  const QJsonArray identity{QJsonArray{1,0,0},QJsonArray{0,1,0},QJsonArray{0,0,1}};
+  const auto sim=[&](double s,QJsonArray t){return QJsonObject{{"s",s},{"R",identity},{"t",t},{"applied",true}};};
+  const auto pose=[](double x,double y,double z){return QJsonArray{QJsonArray{1,0,0,x},QJsonArray{0,1,0,y},QJsonArray{0,0,1,z},QJsonArray{0,0,0,1}};};
+  const QJsonObject camera{{"view_id","pose-without-image"},{"split","train"},{"width",640},{"height",480},
+      {"K",QJsonArray{QJsonArray{700,12,301},QJsonArray{0,710,222},QJsonArray{0,0,1}}},{"c2w_opencv",pose(3,4,5)}};
+  QJsonObject record{{"schema","gsw.training_camera_contract/1"},{"ply_sha256",QString::fromLatin1(QCryptographicHash::hash(original,QCryptographicHash::Sha256).toHex())},
+      {"input_data_identity",QString(64,'a')},{"scale",QJsonObject{{"status","source_declared"},{"source_unit","m"},{"canonical_unit","m"},{"meters_per_unit",1.},
+        {"evidence",QJsonArray{QJsonObject{{"kind","user_declaration"}}}}}},{"views",QJsonArray{camera}},
+      {"transforms",QJsonObject{{"source_to_canonical",sim(1.,{0,0,0})},{"canonical_to_training",sim(2.,{1,2,3})}}}};
+  QVERIFY(save(cameraScaleMetadataPath(source),QJsonDocument(record).toJson()));
+  ModelExportOptions options;options.sourcePath=source;options.destinationPath=directory.filePath("edited.ply");
+  options.cameraCoordinateRecovery="canonical";options.recoveryPythonPath=python;options.recoveryRepositoryRoot=root;
+  options.applyTransform=true;options.pivot={1e12+.25,-2e12+.5,3e12+.75};
+  options.transform.scale={-2,-2,2};options.transform.translation={4,5,6};
+  // The even negative signs form a proper half-turn. A large pivot makes an
+  // accidental float matrix path observable in the actual exported bytes.
+  options.sceneUnitScale=.001; // Legacy scene-unit conversion must not enter D.
+  const auto result=exportModelFile(options);QVERIFY2(result.success,qPrintable(result.error));
+  const auto metadata=QJsonDocument::fromJson(read(cameraScaleMetadataPath(options.destinationPath))).object();
+  QCOMPARE(metadata["export_version"].toInt(),3);QCOMPARE(metadata["representation"].toString(),QString("point_cloud"));
+  const auto edit=metadata["scene_transform"].toObject()["transform"].toObject();
+  QCOMPARE(edit["s"].toDouble(),2.);
+  QCOMPARE(edit["R"].toArray(),QJsonArray({QJsonArray{-1,0,0},QJsonArray{0,-1,0},QJsonArray{0,0,1}}));
+  const auto t=edit["t"].toArray();
+  QCOMPARE(t[0].toDouble(),3.*options.pivot.x+4.);QCOMPARE(t[1].toDouble(),3.*options.pivot.y+5.);QCOMPARE(t[2].toDouble(),-options.pivot.z+6.);
+  const auto loaded=PlyPointCloudLoader::load(options.destinationPath);QVERIFY2(loaded.isValid(),qPrintable(loaded.error));
+  QCOMPARE(loaded.coordinates.globalMinimum.x,(-10.+t[0].toDouble()-1.)/2.);
+  QCOMPARE(loaded.coordinates.globalMaximum.z,(22.+t[2].toDouble()-3.)/2.);
+  QCOMPARE(metadata["physical_scale_modified"].toBool(),true);QCOMPARE(metadata["scene_edit_independent_validation"].toBool(),false);
+  QVERIFY(!cameraScaleRecoveryCapability(options.destinationPath).validationError.size());
+  auto repeated=options;repeated.sourcePath=options.destinationPath;repeated.destinationPath=directory.filePath("repeated.ply");repeated.applyTransform=false;repeated.cameraCoordinateRecovery="preserve";
+  const auto repeatedResult=exportModelFile(repeated);QVERIFY2(repeatedResult.success,qPrintable(repeatedResult.error));
+  const auto repeatedMetadata=QJsonDocument::fromJson(read(cameraScaleMetadataPath(repeated.destinationPath))).object();
+  QCOMPARE(repeatedMetadata["canonical_scene_transform"],metadata["canonical_scene_transform"]);
+  const auto repeatedLoaded=PlyPointCloudLoader::load(repeated.destinationPath);QVERIFY2(repeatedLoaded.isValid(),qPrintable(repeatedLoaded.error));
+  QCOMPARE(repeatedLoaded.coordinates.globalMinimum.x,loaded.coordinates.globalMinimum.x);QCOMPARE(repeatedLoaded.coordinates.globalMaximum.z,loaded.coordinates.globalMaximum.z);
+  QCOMPARE(read(source),original);
+  for(const QVector3D invalid:{QVector3D(1,2,1),QVector3D(-1,1,1),QVector3D(0,0,0)}) {
+    auto rejected=options;rejected.destinationPath=directory.filePath("invalid.ply");rejected.transform.scale=invalid;
+    const auto failed=exportModelFile(rejected);QVERIFY(!failed.success);QVERIFY(!QFileInfo::exists(rejected.destinationPath));QVERIFY(!QFileInfo::exists(cameraScaleMetadataPath(rejected.destinationPath)));
+  }
+}
 
 void ModelExportTests::preservesPlyAndCroppedGaussianAttributes() {
   QTemporaryDir dir;

@@ -13,7 +13,7 @@ import sys
 import uuid
 
 import numpy as np
-from plyfile import PlyData, PlyElement
+from plyfile import PlyData, PlyElement, PlyListProperty
 
 from native.backend import camera_dataset
 
@@ -185,6 +185,47 @@ def _identity(frame=None):
 
 
 _METERS = {"m": 1., "cm": .01, "mm": .001}
+_GEOMETRY_DECLARATIONS = ("geometry_kind", "depth_definition", "fusion", "surface_semantics", "model_geometry_accuracy")
+
+
+def _validated_geometry_provenance(value, root):
+    keys = {"schema", "source_model_sha256", "source_metadata_sha256", "source_frame", "source_unit",
+            "source_applied_transform", "depth_definition_scope"} | set(_GEOMETRY_DECLARATIONS)
+    if (type(value) is not dict or set(value) != keys or value.get("schema") != "gsw.geometry_source_provenance/1" or
+            value.get("depth_definition_scope") != "extraction_camera_depth_not_current_file_axes_or_units" or
+            any(not isinstance(value.get(name), str) or not value[name] or len(value[name]) > 4096 or "\x00" in value[name]
+                for name in _GEOMETRY_DECLARATIONS) or
+            any(not isinstance(value.get(name), str) or not re.fullmatch(r"[0-9a-f]{64}", value[name])
+                for name in ("source_model_sha256", "source_metadata_sha256"))):
+        _fail("camera_scale_export_invalid_geometry_provenance")
+    try:
+        source_frame, source_unit = value["source_frame"], value["source_unit"]
+        original_to_canonical = _frame_to_canonical(root, source_frame, source_unit)
+        original = value["source_applied_transform"]
+        if (type(original) is not dict or original.get("applied") is not True or
+                original.get("input_frame") != "training" or original.get("output_frame") != source_frame):
+            _fail("camera_scale_export_invalid_geometry_provenance")
+        expected = _compose(camera_dataset.invert_sim3(original_to_canonical),
+                            _native_frame(root, "training")[0])
+        if not _similarities_close(_similarity(original), expected):
+            _fail("camera_scale_export_invalid_geometry_provenance")
+    except (ValueError, KeyError, TypeError, OverflowError) as error:
+        _fail("camera_scale_export_invalid_geometry_provenance", error)
+    return copy.deepcopy(value)
+
+
+def _geometry_provenance(record, root, source_hash, metadata_hash, frame, unit):
+    if "source_geometry_provenance" in record:
+        return _validated_geometry_provenance(record["source_geometry_provenance"], root)
+    if (record.get("schema") == "gsw.coordinate_export/1" and record.get("export_version", 1) == 1 and
+            all(name in record for name in _GEOMETRY_DECLARATIONS)):
+        value = {"schema": "gsw.geometry_source_provenance/1", "source_model_sha256": source_hash,
+            "source_metadata_sha256": metadata_hash, "source_frame": frame, "source_unit": unit,
+            "source_applied_transform": copy.deepcopy(record.get("applied_transform")),
+            "depth_definition_scope": "extraction_camera_depth_not_current_file_axes_or_units"}
+        value.update({name: copy.deepcopy(record[name]) for name in _GEOMETRY_DECLARATIONS})
+        return _validated_geometry_provenance(value, root)
+    return None
 
 
 def _root_contract(record):
@@ -197,7 +238,7 @@ def _root_contract(record):
             break
         if root.get("schema") != "gsw.coordinate_export/1":
             _fail("camera_scale_export_invalid_metadata")
-        if type(root.get("export_version", 1)) is not int or root.get("export_version", 1) not in (1, 2):
+        if type(root.get("export_version", 1)) is not int or root.get("export_version", 1) not in (1, 2, 3):
             _fail("camera_scale_export_unsupported_version")
         nested = root.get("training_contract")
         if type(nested) is not dict:
@@ -276,12 +317,70 @@ def _context(record):
                 _fail("camera_scale_export_conflicting_applied_frame")
             before = _frame_to_canonical(root, record.get("input_frame"), record.get("input_unit"))
             after = _frame_to_canonical(root, frame, unit)
-            expected = _compose(camera_dataset.invert_sim3(after), before)
+            if record.get("export_version", 1) >= 3:
+                old_scene = _validated_scene_state(record.get("input_canonical_scene_transform"))
+                new_scene = _validated_scene_state(record.get("canonical_scene_transform"))
+                if "scene_transform" in record:
+                    edit = _scene_request(record["scene_transform"], record.get("input_frame"), record.get("input_unit"))["transform"]
+                    expected_scene = _compose(before, _compose(edit,
+                        _compose(camera_dataset.invert_sim3(before), old_scene)))
+                else:
+                    expected_scene = old_scene
+                if not _similarities_close(new_scene, expected_scene):
+                    _fail("camera_scale_export_invalid_scene_history")
+                expected = _compose(camera_dataset.invert_sim3(after), _compose(new_scene,
+                    _compose(camera_dataset.invert_sim3(old_scene), before)))
+                if (type(record.get("scene_scale_multiplier")) not in (int, float) or
+                        not math.isclose(record["scene_scale_multiplier"], new_scene["s"], rel_tol=1e-12) or
+                        record.get("physical_scale_modified") is not (abs(new_scene["s"] - 1.) > 1e-12) or
+                        record.get("scale_evidence_scope") != "immutable_training_contract" or
+                        record.get("scene_edit_independent_validation") is not False or
+                        record.get("full_optimizer_state_transformed") is not False):
+                    _fail("camera_scale_export_invalid_scene_history")
+            else:
+                expected = _compose(camera_dataset.invert_sim3(after), before)
             if (not math.isclose(applied["s"], expected["s"], rel_tol=1e-12) or
                     not np.allclose(applied["R"], expected["R"], atol=1e-11, rtol=0) or
                     not np.allclose(applied["t"], expected["t"], atol=2e-7, rtol=1e-12)):
                 _fail("camera_scale_export_applied_chain_mismatch")
     return root, frame, unit, _frame_to_canonical(root, frame, unit)
+
+
+def _validated_scene_state(value):
+    if (type(value) is not dict or value.get("input_frame") != "canonical" or
+            value.get("output_frame") != "canonical" or value.get("applied") is not True):
+        _fail("camera_scale_export_invalid_scene_history")
+    _similarity(value)
+    # A no-edit reexport retains the recorded active edit exactly. Validating
+    # through an inverse must not rewrite a previously applied ledger value.
+    return {"s": value["s"], "R": copy.deepcopy(value["R"]), "t": copy.deepcopy(value["t"]),
+            "input_frame": "canonical", "output_frame": "canonical", "applied": True}
+
+
+def _similarities_close(first, second):
+    return (math.isclose(first["s"], second["s"], rel_tol=1e-12) and
+            np.allclose(first["R"], second["R"], atol=1e-11, rtol=0) and
+            np.allclose(first["t"], second["t"], atol=2e-7, rtol=1e-12))
+
+
+def _scene_request(value, frame, unit):
+    if (type(value) is not dict or set(value) != {"schema", "frame", "unit", "transform"} or
+            value.get("schema") != "gsw.scene_transform/1" or value.get("frame") != frame or
+            value.get("unit") != unit or type(value.get("transform")) is not dict or
+            set(value["transform"]) != {"s", "R", "t"}):
+        _fail("camera_scale_export_invalid_scene_transform")
+    try:
+        transform = _similarity(value["transform"])
+    except (ValueError, TypeError, KeyError) as error:
+        _fail("camera_scale_export_invalid_scene_transform", error)
+    return {"schema": "gsw.scene_transform/1", "frame": frame, "unit": unit,
+            "transform": {key: transform[key] for key in ("s", "R", "t")}}
+
+
+def _current_scene_state(record):
+    if record.get("schema") == "gsw.coordinate_export/1" and record.get("export_version", 1) >= 3:
+        return _validated_scene_state(record.get("canonical_scene_transform"))
+    return dict(_identity("canonical"), applied=True)
 
 
 def _no_links(path):
@@ -306,9 +405,115 @@ def _json_read(path):
                          parse_constant=lambda value: _fail("camera_scale_export_nonfinite_metadata", value))
 
 
-def _bundle_hash(model_hash, camera_hash, identity, frame, unit):
+def _assets_hash(assets):
+    return hashlib.sha256(json.dumps(assets, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _relative_asset(root, relative):
+    if (not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative or
+            "\x00" in relative or Path(relative).is_absolute() or ".." in Path(relative).parts):
+        _fail("camera_scale_export_unsafe_asset_reference")
+    if any(part.endswith((".", " ")) or re.fullmatch(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part, re.IGNORECASE)
+           for part in Path(relative).parts):
+        _fail("camera_scale_export_unsafe_asset_reference")
+    path = root / relative
+    _no_links(path)
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        _fail("camera_scale_export_unsafe_asset_reference")
+    return path
+
+
+def _validate_assets(source, record):
+    assets = record.get("assets")
+    if type(assets) is not list or record.get("assets_sha256") != _assets_hash(assets):
+        _fail("camera_scale_export_invalid_assets_manifest")
+    for asset in assets:
+        if (type(asset) is not dict or set(asset) != {"kind", "path", "sha256", "bytes", "source_reference"} or
+                asset.get("kind") != "texture_file" or type(asset.get("bytes")) is not int or asset["bytes"] < 0 or
+                not isinstance(asset.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])):
+            _fail("camera_scale_export_invalid_assets_manifest")
+        _relative_asset(source.parent, asset["source_reference"])
+        path = _relative_asset(source.parent, asset["path"])
+        if not path.is_file() or path.stat().st_size != asset["bytes"] or _hash(path) != asset["sha256"]:
+            _fail("camera_scale_export_asset_hash_mismatch")
+    comments = []
+    header_bytes = 0
+    with source.open("rb") as stream:
+        while True:
+            line = stream.readline(1024 * 1024)
+            header_bytes += len(line)
+            if not line or header_bytes > 16 * 1024 * 1024:
+                _fail("camera_scale_export_invalid_asset_header")
+            try:
+                line = line.decode("ascii").rstrip("\r\n")
+            except UnicodeError:
+                _fail("camera_scale_export_invalid_asset_header")
+            if line == "end_header":
+                break
+            if line.startswith("comment "):
+                comments.append(line[8:])
+    references = _texture_references(comments)
+    if references != [asset["path"] for asset in assets]:
+        _fail("camera_scale_export_asset_reference_mismatch")
+    return assets
+
+
+def _texture_references(comments):
+    references = []
+    for comment in comments:
+        match = re.fullmatch(r"TextureFile\s+(.+)", comment, re.IGNORECASE)
+        if match:
+            references.append(match[1])
+        elif re.match(r"(?:TextureFile|Texture|MaterialFile|MaterialLibrary|mtllib|map_Kd)\b", comment, re.IGNORECASE):
+            _fail("camera_scale_export_unsupported_material_reference", comment)
+    return references
+
+
+def _texture_inputs(source, ply, contract):
+    references = _texture_references(ply.comments)
+    for element in ply.elements:
+        # PLY permits comments anywhere in the header. plyfile retains their
+        # sequence within each element rather than all at document level.
+        references.extend(_texture_references(element.comments))
+    prior = {asset["path"]: asset for asset in contract.get("assets", [])}
+    inputs = []
+    for reference in references:
+        path = _relative_asset(source.parent, reference)
+        if not path.is_file():
+            _fail("camera_scale_export_asset_missing", reference)
+        inputs.append({"path": path, "sha256": _hash(path), "bytes": path.stat().st_size,
+            "source_reference": prior.get(reference, {}).get("source_reference", reference)})
+    if inputs and "face" in ply and "texture_index" in ply["face"].data.dtype.names:
+        indices = ply["face"]["texture_index"]
+        if indices.dtype.kind not in "iu" or np.any(indices < 0) or np.any(indices >= len(inputs)):
+            _fail("camera_scale_export_invalid_material_index")
+    return inputs
+
+
+def _asset_directory(output):
+    stem = output.stem
+    reserved = re.fullmatch(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", stem, re.IGNORECASE)
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", stem) or stem in (".", "..") or stem.endswith(".") or reserved:
+        stem = "model-" + hashlib.sha256(stem.encode("utf-8")).hexdigest()[:16]
+    return output.parent / (stem + ".assets")
+
+
+def _source_assets_unchanged(inputs):
+    for asset in inputs:
+        _no_links(asset["path"])
+        if (not asset["path"].is_file() or asset["path"].stat().st_size != asset["bytes"] or
+                _hash(asset["path"]) != asset["sha256"]):
+            _fail("camera_scale_export_source_changed")
+
+
+def _bundle_hash(model_hash, camera_hash, identity, frame, unit, assets_hash=None):
     payload = {"model_sha256": model_hash, "camera_sha256": camera_hash,
                "input_data_identity": identity, "coordinate_frame": frame, "coordinate_unit": unit}
+    if assets_hash is not None:
+        payload["assets_sha256"] = assets_hash
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=True,
                                     separators=(",", ":")).encode("utf-8")).hexdigest()
 
@@ -335,8 +540,32 @@ def _validate_camera_reference(source, record, model_hash):
                 "coordinate_unit": unit, "transform_applied": True}
     if type(cameras) is not dict or any(cameras.get(key) != value for key, value in expected.items()):
         _fail("camera_scale_export_camera_binding_mismatch")
-    if record.get("bundle_sha256") != _bundle_hash(model_hash, reference["sha256"], root["input_data_identity"], frame, unit):
+    assets_hash = record.get("assets_sha256") if record.get("export_version", 1) >= 3 else None
+    if record.get("bundle_sha256") != _bundle_hash(model_hash, reference["sha256"], root["input_data_identity"], frame, unit, assets_hash):
         _fail("camera_scale_export_bundle_hash_mismatch")
+    if record.get("export_version", 1) >= 3:
+        expected_cameras = _camera_bundle(root, model_hash, frame, unit, _current_scene_state(record))
+        if (cameras.get("camera_count") != expected_cameras["camera_count"] or
+                type(cameras.get("views")) is not list or len(cameras["views"]) != len(expected_cameras["views"]) or
+                type(cameras.get("clipping")) is not dict or set(cameras["clipping"]) != set(expected_cameras["clipping"])):
+            _fail("camera_scale_export_camera_binding_mismatch")
+        for actual, wanted in zip(cameras["views"], expected_cameras["views"]):
+            if type(actual) is not dict or any(actual.get(key) != wanted[key] for key in (
+                    "view_id", "split", "image_path", "width", "height", "projection_model", "pixel_coordinates")):
+                _fail("camera_scale_export_camera_binding_mismatch")
+            try:
+                k, pose = np.asarray(actual.get("K")), np.asarray(actual.get("c2w_opencv"))
+                if (k.shape != (3, 3) or pose.shape != (4, 4) or
+                        not np.isfinite(k).all() or not np.isfinite(pose).all() or
+                        not np.allclose(k, wanted["K"], atol=1e-10, rtol=1e-12) or
+                        not np.allclose(pose, wanted["c2w_opencv"], atol=2e-7, rtol=1e-12)):
+                    _fail("camera_scale_export_camera_binding_mismatch")
+            except (ValueError, TypeError):
+                _fail("camera_scale_export_camera_binding_mismatch")
+        if any(type(cameras["clipping"][key]) not in (int, float) or
+               not math.isclose(cameras["clipping"][key], value, rel_tol=1e-12, abs_tol=2e-7)
+               for key, value in expected_cameras["clipping"].items()):
+            _fail("camera_scale_export_camera_binding_mismatch")
     return path
 
 
@@ -352,7 +581,11 @@ def _read_context(source, metadata):
     digest = _hash(source)
     if record.get("ply_sha256") != digest or record.get("output_sha256", digest) != digest:
         _fail("camera_scale_export_model_hash_mismatch")
-    _context(record)
+    root, frame, unit, _ = _context(record)
+    if "source_geometry_provenance" in record:
+        _validated_geometry_provenance(record["source_geometry_provenance"], root)
+    if record.get("export_version", 1) >= 3:
+        _validate_assets(source, record)
     camera_path = _validate_camera_reference(source, record, digest)
     return record, digest, _hash(metadata), camera_path
 
@@ -373,9 +606,10 @@ def inspect_coordinate_metadata(input_ply, sidecar=None):
             "camera_path": str(camera_path) if camera_path else None}
 
 
-def _camera_bundle(root, model_hash, frame, unit):
+def _camera_bundle(root, model_hash, frame, unit, canonical_scene_transform=None):
     native_to_canonical, _, _ = _native_frame(root, "training")
-    transform = _compose(camera_dataset.invert_sim3(_frame_to_canonical(root, frame, unit)), native_to_canonical)
+    transform = _compose(camera_dataset.invert_sim3(_frame_to_canonical(root, frame, unit)),
+        _compose(canonical_scene_transform or _identity("canonical"), native_to_canonical))
     rotation, translation = np.asarray(transform["R"]), np.asarray(transform["t"])
     views, seen = [], set()
     for view in root.get("views", []):
@@ -440,8 +674,76 @@ def _output_transform(record, mode, output_unit=None):
 
 
 def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, cancelled=None,
-                            deleted_indices=None, progress=None, deleted_vertex_count=None, output_unit=None):
-    """Write a new Gaussian PLY and traceable sidecar, retaining the input.
+                            deleted_indices=None, progress=None, deleted_vertex_count=None, output_unit=None,
+                            scene_transform=None):
+    """Compatible strict-Gaussian entry; never relabel ordinary geometry as GS."""
+    return _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, deleted_indices,
+        progress, deleted_vertex_count, output_unit, "gaussian", scene_transform)
+
+
+def export_recorded_ply(input_ply, output_ply, mode="source", sidecar=None, cancelled=None,
+                        deleted_indices=None, progress=None, deleted_vertex_count=None, output_unit=None,
+                        representation="auto", scene_transform=None):
+    """Export typed PLY geometry with the recorded camera/frame contract."""
+    return _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, deleted_indices,
+        progress, deleted_vertex_count, output_unit, representation, scene_transform)
+
+
+def _describe_like(data, element, comments=None):
+    # Object dtype alone does not retain a PLY list's value/length types.
+    lists = [prop for prop in element.properties if isinstance(prop, PlyListProperty)]
+    return PlyElement.describe(data, element.name,
+        len_types={prop.name: prop.len_dtype for prop in lists},
+        val_types={prop.name: prop.val_dtype for prop in lists}, comments=element.comments if comments is None else comments)
+
+
+def _mesh_faces(element, vertex_count, rotation, retained):
+    names = element.data.dtype.names
+    indices = [name for name in ("vertex_indices", "vertex_index") if name in names]
+    if len(indices) != 1:
+        _fail("camera_scale_export_invalid_mesh_indices")
+    property_map = {prop.name: prop for prop in element.properties}
+    prop = property_map[indices[0]]
+    if not isinstance(prop, PlyListProperty) or np.dtype(prop.val_dtype).kind not in "iu":
+        _fail("camera_scale_export_invalid_mesh_indices")
+    faces = element.data.copy()
+    for polygon in faces[indices[0]]:
+        if len(polygon) < 3 or np.any(polygon < 0) or np.any(polygon >= vertex_count):
+            _fail("camera_scale_export_invalid_mesh_indices")
+    if not retained.all():
+        keep = np.array([bool(retained[polygon].all()) for polygon in faces[indices[0]]], dtype=bool)
+        faces = faces[keep].copy()
+        remap = np.full(vertex_count, -1, dtype=np.int64)
+        remap[retained] = np.arange(int(retained.sum()))
+        for row, polygon in enumerate(faces[indices[0]]):
+            faces[indices[0]][row] = remap[polygon].astype(np.dtype(prop.val_dtype), copy=False)
+    for fields in (("nx", "ny", "nz"), ("tangent_x", "tangent_y", "tangent_z"),
+                   ("bitangent_x", "bitangent_y", "bitangent_z")):
+        if any(name in names for name in fields):
+            if not all(name in names and faces.dtype[name].kind == "f" for name in fields):
+                _fail("camera_scale_export_incomplete_direction_fields")
+            directions = np.column_stack([faces[name] for name in fields]).astype(np.float64)
+            if not np.isfinite(directions).all():
+                _fail("camera_scale_export_nonfinite_direction")
+            directions = directions @ rotation.T
+            for axis, name in enumerate(fields):
+                faces[name] = directions[:, axis]
+    return _describe_like(faces, element)
+
+
+def _check_crop_relations(ply):
+    for element in ply.elements:
+        for prop in element.properties:
+            if element.name == "face" and prop.name in ("vertex_indices", "vertex_index", "texture_index", "material_index"):
+                continue
+            if (re.search(r"(?:^|_)(?:index|indices)(?:_|$)", prop.name, re.IGNORECASE) or
+                    re.search(r"(?:vertex|vertices|face|faces|edge|edges|point|points)(?:_|[0-9]|$)", prop.name, re.IGNORECASE)):
+                _fail("camera_scale_export_unsupported_index_relation", element.name + "." + prop.name)
+
+
+def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, deleted_indices,
+                         progress, deleted_vertex_count, output_unit, representation, scene_transform):
+    """Write a new typed PLY and traceable sidecar, retaining the input.
 
     XYZ is promoted to float64 so restoration of large source origins does not
     lose centimetre-scale geometry to a float32 PLY field. Other attributes and
@@ -461,32 +763,59 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
     _check_cancel(cancelled)
     contract, source_hash, metadata_hash, input_cameras = _read_context(source, metadata)
     input_camera_hash = _hash(input_cameras) if input_cameras else None
-    root_contract, current_frame, current_unit, _ = _context(contract)
+    root_contract, current_frame, current_unit, current_to_canonical = _context(contract)
+    geometry_provenance = _geometry_provenance(contract, root_contract, source_hash, metadata_hash, current_frame, current_unit)
+    old_scene = _current_scene_state(contract)
+    scene_request = _scene_request(scene_transform, current_frame, current_unit) if scene_transform is not None else None
+    new_scene = old_scene
     transform, unit, frame = _output_transform(contract, mode, output_unit)
+    if scene_request is not None:
+        edit = scene_request["transform"]
+        new_scene = dict(_compose(current_to_canonical, _compose(edit,
+            _compose(camera_dataset.invert_sim3(current_to_canonical), old_scene))),
+            input_frame="canonical", output_frame="canonical", applied=True)
+        transform = dict(_compose(transform, edit), input_frame=current_frame, output_frame=frame, applied=True)
     s, rotation, translation = transform["s"], np.asarray(transform["R"]), np.asarray(transform["t"])
     rotated = not np.allclose(rotation, np.eye(3), rtol=0., atol=1e-12)
     ply = PlyData.read(source, mmap=False)
+    source_assets = _texture_inputs(source, ply, contract)
+    asset_directory = _asset_directory(output) if source_assets else None
+    if asset_directory is not None and asset_directory.exists():
+        _fail("camera_scale_export_requires_new_output")
     if "vertex" not in ply or not len(ply["vertex"].data):
         _fail("camera_scale_export_empty_gaussian")
-    if "face" in ply and len(ply["face"].data):
+    if representation not in ("auto", "gaussian", "point_cloud", "mesh"):
+        _fail("camera_scale_export_invalid_representation")
+    has_faces = "face" in ply and len(ply["face"].data) > 0
+    if has_faces and representation in ("gaussian", "point_cloud"):
         _fail("camera_scale_export_mesh_not_supported")
     original = ply["vertex"].data
     if deleted_vertex_count is not None and (type(deleted_vertex_count) is not int or deleted_vertex_count != len(original)):
         _fail("camera_scale_export_edit_state_mismatch")
     names = original.dtype.names
+    if not all(name in names and original.dtype.fields[name][0].kind in "fiu" for name in ("x", "y", "z")):
+        _fail("camera_scale_export_invalid_vertex_positions")
+    if representation == "auto":
+        gaussian_markers = any(re.fullmatch(r"(?:scale|rot|f_dc|f_rest)_\d+", name) for name in names)
+        if gaussian_markers and has_faces:
+            _fail("camera_scale_export_mesh_not_supported")
+        representation = "gaussian" if gaussian_markers else "mesh" if has_faces else "point_cloud"
+    if representation == "mesh" and not has_faces:
+        _fail("camera_scale_export_invalid_mesh_indices")
+    gaussian = representation == "gaussian"
     scale_fields = sorted((name for name in names if name.startswith("scale_") and name[6:].isdigit()),
-                          key=lambda name: int(name[6:]))
-    if scale_fields not in (["scale_0", "scale_1"], ["scale_0", "scale_1", "scale_2"]) or not all(name in names for name in ("x", "y", "z", "opacity")):
+                          key=lambda name: int(name[6:])) if gaussian else []
+    if gaussian and (scale_fields not in (["scale_0", "scale_1"], ["scale_0", "scale_1", "scale_2"]) or not all(name in names for name in ("x", "y", "z", "opacity"))):
         _fail("camera_scale_export_requires_supported_gaussian_ply")
-    if root_contract.get("backend") in ("3dgs", "2dgs") and len(scale_fields) != (2 if root_contract["backend"] == "2dgs" else 3):
+    if gaussian and root_contract.get("backend") in ("3dgs", "2dgs") and len(scale_fields) != (2 if root_contract["backend"] == "2dgs" else 3):
         _fail("camera_scale_export_backend_dimensions_mismatch")
     if any(original.dtype.fields[name][0].kind != "f" for name in scale_fields):
         _fail("camera_scale_export_requires_float_log_scales")
-    sh_matrix, sh_fields, sh_report = _sh_rotation(names, rotation) if rotated else (None, [], {"degree": None, "method": "unchanged"})
-    rotations = ["rot_{}".format(index) for index in range(4)]
+    sh_matrix, sh_fields, sh_report = _sh_rotation(names, rotation) if gaussian and rotated else (None, [], {"degree": None, "method": "unchanged" if gaussian else "not_gaussian"})
+    rotations = ["rot_{}".format(index) for index in range(4)] if gaussian else []
     if not all(name in names and original.dtype.fields[name][0].kind == "f" for name in rotations):
         _fail("camera_scale_export_missing_gaussian_rotation")
-    if not all(name in names and original.dtype.fields[name][0].kind == "f" for name in ("f_dc_0", "f_dc_1", "f_dc_2")):
+    if gaussian and not all(name in names and original.dtype.fields[name][0].kind == "f" for name in ("f_dc_0", "f_dc_1", "f_dc_2")):
         _fail("camera_scale_export_missing_gaussian_color")
     direction_fields = []
     for fields in (("nx", "ny", "nz"), ("tangent_x", "tangent_y", "tangent_z"),
@@ -509,6 +838,9 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
         retained[indices.astype(np.int64)] = False
     if not retained.any():
         _fail("camera_scale_export_empty_gaussian")
+    if not retained.all():
+        _check_crop_relations(ply)
+    mesh_element = _mesh_faces(ply["face"], len(original), rotation, retained) if representation == "mesh" else None
     vertices = np.empty(int(retained.sum()), dtype=dtype)
     for name in names:
         vertices[name] = original[name][retained]
@@ -521,9 +853,10 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
         xyz = np.stack([block[name] for name in ("x", "y", "z")], axis=1)
         if not np.isfinite(xyz).all() or any(not np.isfinite(block[name]).all() for name in scale_fields):
             _fail("camera_scale_export_nonfinite_gaussian")
-        quaternions = np.stack([block[name] for name in rotations], axis=1).astype(np.float64)
-        if not np.isfinite(quaternions).all() or np.any(np.linalg.norm(quaternions, axis=1) <= 1e-20):
-            _fail("camera_scale_export_invalid_quaternion")
+        if gaussian:
+            quaternions = np.stack([block[name] for name in rotations], axis=1).astype(np.float64)
+            if not np.isfinite(quaternions).all() or np.any(np.linalg.norm(quaternions, axis=1) <= 1e-20):
+                _fail("camera_scale_export_invalid_quaternion")
         if s != 1. or rotated or bool(np.any(translation != 0.)):
             xyz = s * (xyz @ rotation.T) + translation
         if not np.isfinite(xyz).all():
@@ -534,9 +867,10 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
             for name in scale_fields:
                 block[name] += math.log(s)
         if rotated:
-            q = _rotate_quaternions(np.stack([block[name] for name in rotations], axis=1), rotation)
-            for index, name in enumerate(rotations):
-                block[name] = q[:, index]
+            if gaussian:
+                q = _rotate_quaternions(np.stack([block[name] for name in rotations], axis=1), rotation)
+                for index, name in enumerate(rotations):
+                    block[name] = q[:, index]
             for fields in direction_fields:
                 normal = np.stack([block[name] for name in fields], axis=1).astype(np.float64)
                 if not np.isfinite(normal).all():
@@ -564,51 +898,103 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
                 _fail("camera_scale_export_invalid_covariance")
             for name, index in zip(covariance, ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2))):
                 block[name] = changed[:, index[0], index[1]]
-        checked = list(scale_fields) + rotations + (covariance or []) + [name for name in names if name.startswith(("f_dc_", "f_rest_"))] + ["opacity"]
+        checked = list(scale_fields) + rotations + (covariance or [])
+        if gaussian:
+            checked += [name for name in names if name.startswith(("f_dc_", "f_rest_"))] + ["opacity"]
         if any(not np.isfinite(block[name]).all() for name in checked):
             _fail("camera_scale_export_output_attribute_overflow")
     temporary = output.with_name("." + output.name + "." + uuid.uuid4().hex + ".tmp")
     temporary_metadata = output_metadata.with_name("." + output_metadata.name + "." + uuid.uuid4().hex + ".tmp")
     temporary_cameras = output_cameras.with_name("." + output_cameras.name + "." + uuid.uuid4().hex + ".tmp")
     published = []
+    temporary_assets, assets = [], []
+    owned_asset_directory = False
     try:
+        for index, asset in enumerate(source_assets):
+            _check_cancel(cancelled)
+            suffix = asset["path"].suffix.lower()
+            suffix = suffix if re.fullmatch(r"\.[a-z0-9]{1,16}", suffix) else ".bin"
+            final = asset_directory / ("texture-{:04d}".format(index) + suffix)
+            temporary_asset = output.parent / (".gsw-asset-" + uuid.uuid4().hex + ".tmp")
+            temporary_assets.append((temporary_asset, final))
+            with asset["path"].open("rb") as incoming, temporary_asset.open("xb") as outgoing:
+                while True:
+                    _check_cancel(cancelled)
+                    block = incoming.read(1024 * 1024)
+                    if not block:
+                        break
+                    outgoing.write(block)
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+            if _hash(temporary_asset) != asset["sha256"]:
+                _fail("camera_scale_export_source_changed")
+            assets.append({"kind": "texture_file", "path": final.relative_to(output.parent).as_posix(),
+                "sha256": asset["sha256"], "bytes": asset["bytes"], "source_reference": asset["source_reference"]})
         comments = [value for value in ply.comments if not value.lower().startswith(("units ", "unit ", "coordinate_unit "))]
+        texture_index = 0
+        def rewrite_texture_comments(values):
+            nonlocal texture_index
+            changed = list(values)
+            for index, comment in enumerate(changed):
+                if re.fullmatch(r"TextureFile\s+(.+)", comment, re.IGNORECASE):
+                    changed[index] = "TextureFile " + assets[texture_index]["path"]
+                    texture_index += 1
+            return changed
+        comments = rewrite_texture_comments(comments)
         if unit in ("m", "cm", "mm"):
             comments.append("units " + unit)
         scale_status = root_contract["scale"]["status"]
         evidence = root_contract["scale"].get("evidence", [])
         comments += ["gsw_coordinate_frame " + frame, "gsw_scale_status " + scale_status]
-        elements = [PlyElement.describe(vertices, "vertex") if element.name == "vertex" else element for element in ply.elements]
+        elements = []
+        for element in ply.elements:
+            element_comments = rewrite_texture_comments(element.comments)
+            data = vertices if element.name == "vertex" else mesh_element.data if element.name == "face" and mesh_element is not None else element.data
+            elements.append(_describe_like(data, element, element_comments))
         PlyData(elements, text=False, byte_order="<", comments=comments, obj_info=ply.obj_info).write(temporary)
         _check_cancel(cancelled)
         if progress:
             progress(95)
         if _hash(source) != source_hash or _hash(metadata) != metadata_hash:
             _fail("camera_scale_export_source_changed")
-        report = {"schema": "gsw.coordinate_export/1", "export_version": 2, "success": True, "coordinate_mode": mode,
+        version = 3 if not gaussian or scene_request is not None or assets or contract.get("export_version", 1) >= 3 else 2
+        report = {"schema": "gsw.coordinate_export/1", "export_version": version, "success": True, "coordinate_mode": mode,
                   "input_frame": transform.get("input_frame", "training"), "output_frame": frame, "output_unit": unit,
                   "input_unit": current_unit, "current_frame": frame, "current_unit": unit, "transform_applied": True,
                   "scale_status": scale_status, "scale_evidence": copy.deepcopy(evidence),
                   "applied_transform": transform, "input_sha256": source_hash, "input_metadata_sha256": metadata_hash,
                   "output_sha256": _hash(temporary), "vertex_count": count, "deleted_vertices": int((~retained).sum()),
-                  "gaussian_dimensions": len(scale_fields), "appearance_rotation": "real_sh_basis_rotation" if sh_matrix is not None else "DC_only" if rotated else "unchanged",
+                  "gaussian_dimensions": len(scale_fields) if gaussian else None, "appearance_rotation": "not_applicable" if not gaussian else "real_sh_basis_rotation" if sh_matrix is not None else "DC_only" if rotated else "unchanged",
                   "sh_rotation": sh_report,
-                  "representation": "2dgs_surfel_gaussian" if len(scale_fields) == 2 else "3dgs_gaussian",
+                  "representation": ("2dgs_surfel_gaussian" if len(scale_fields) == 2 else "3dgs_gaussian") if gaussian else representation,
                   "position_storage": "float64", "surface_accuracy_certified": False,
                   "covariance_fields": covariance or [],
                   "original_training_model_retained": True, "input_model_retained": True,
                   "input_data_identity": root_contract["input_data_identity"],
                   "scale": copy.deepcopy(root_contract["scale"]), "transforms": copy.deepcopy(root_contract["transforms"]),
                   "training_contract": copy.deepcopy(root_contract)}
+        if mesh_element is not None:
+            report["face_count"] = len(mesh_element.data)
+            report["deleted_faces"] = len(ply["face"].data) - len(mesh_element.data)
         report["ply_sha256"] = report["output_sha256"]
-        cameras = _camera_bundle(root_contract, report["output_sha256"], frame, unit)
+        if version >= 3:
+            report.update(input_canonical_scene_transform=old_scene, canonical_scene_transform=new_scene,
+                scene_scale_multiplier=new_scene["s"], physical_scale_modified=abs(new_scene["s"] - 1.) > 1e-12,
+                scale_evidence_scope="immutable_training_contract", scene_edit_independent_validation=False,
+                full_optimizer_state_transformed=False, assets=assets, assets_sha256=_assets_hash(assets))
+            if scene_request is not None:
+                report["scene_transform"] = scene_request
+            if geometry_provenance is not None:
+                report["source_geometry_provenance"] = geometry_provenance
+        cameras = _camera_bundle(root_contract, report["output_sha256"], frame, unit, new_scene)
         with temporary_cameras.open("x", encoding="utf-8") as stream:
             json.dump(cameras, stream, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2)
             stream.flush()
             os.fsync(stream.fileno())
         camera_hash = _hash(temporary_cameras)
         report["camera_reference"] = {"path": output_cameras.name, "sha256": camera_hash, "schema": "gsw.model_cameras/1"}
-        report["bundle_sha256"] = _bundle_hash(report["output_sha256"], camera_hash, root_contract["input_data_identity"], frame, unit)
+        report["bundle_sha256"] = _bundle_hash(report["output_sha256"], camera_hash, root_contract["input_data_identity"], frame, unit,
+            report.get("assets_sha256") if version >= 3 else None)
         report["camera_count"] = len(cameras["views"])
         sidecar_record = report
         operations = copy.deepcopy(contract.get("export_operations", []))
@@ -620,6 +1006,12 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
                            "coordinate_frame": frame, "coordinate_unit": unit, "retained_vertices": count,
                            "deleted_vertices": int((~retained).sum()), "transform_applied": True,
                            "coordinate_values_changed": transform["s"] != 1. or rotated or bool(np.any(translation))})
+        if version >= 3:
+            operations[-1].update(input_canonical_scene_transform=old_scene, canonical_scene_transform=new_scene)
+            if scene_request is not None:
+                operations[-1]["scene_transform"] = scene_request
+        if mesh_element is not None:
+            operations[-1].update(retained_faces=report["face_count"], deleted_faces=report["deleted_faces"])
         sidecar_record["export_operations"] = operations
         with temporary_metadata.open("w", encoding="utf-8") as stream:
             json.dump(sidecar_record, stream, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2)
@@ -628,8 +1020,15 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
         _check_cancel(cancelled)
         if _hash(source) != source_hash or _hash(metadata) != metadata_hash or input_cameras and _hash(input_cameras) != input_camera_hash:
             _fail("camera_scale_export_source_changed")
+        _source_assets_unchanged(source_assets)
         # Atomic exclusive publication: no existing output can be overwritten,
         # including a file created by another writer after the initial check.
+        if asset_directory is not None:
+            asset_directory.mkdir()
+            owned_asset_directory = True
+            for temporary_asset, final in temporary_assets:
+                os.link(temporary_asset, final)
+                published.append((final, temporary_asset))
         os.link(temporary, output)
         published.append((output, temporary))
         os.link(temporary_cameras, output_cameras)
@@ -643,9 +1042,15 @@ def export_camera_scale_ply(input_ply, output_ply, mode="source", sidecar=None, 
         for path, owned_temporary in reversed(published):
             if path.exists() and owned_temporary.exists() and os.path.samefile(path, owned_temporary):
                 path.unlink()
+        if owned_asset_directory:
+            try:
+                asset_directory.rmdir()
+            except OSError:
+                # A competing writer's file must not be recursively erased.
+                pass
         raise
     finally:
-        for path in (temporary, temporary_metadata, temporary_cameras):
+        for path in (temporary, temporary_metadata, temporary_cameras) + tuple(item[0] for item in temporary_assets):
             if path.exists():
                 path.unlink()
 
@@ -704,6 +1109,8 @@ def main(argv=None):
     parser.add_argument("--coordinates", choices=("source", "canonical", "metric", "training", "preserve"), required=True)
     parser.add_argument("--unit", choices=("m", "cm", "mm"))
     parser.add_argument("--metadata")
+    parser.add_argument("--representation", choices=("auto", "gaussian", "point_cloud", "mesh"), default="gaussian")
+    parser.add_argument("--scene-transform")
     parser.add_argument("--deleted-indices")
     parser.add_argument("--deleted-vertex-count", type=int)
     parser.add_argument("--cancel-file")
@@ -714,9 +1121,11 @@ def main(argv=None):
         if args.deleted_indices:
             with Path(args.deleted_indices).open(encoding="utf-8") as stream:
                 deleted = json.load(stream)
-        report = export_camera_scale_ply(args.input, args.output, args.coordinates, args.metadata,
+        scene = _json_read(Path(args.scene_transform)) if args.scene_transform else None
+        report = export_recorded_ply(args.input, args.output, args.coordinates, args.metadata,
             cancelled=(lambda: Path(args.cancel_file).is_file()) if args.cancel_file else None,
             deleted_indices=deleted, deleted_vertex_count=args.deleted_vertex_count, output_unit=args.unit,
+            representation=args.representation, scene_transform=scene,
             progress=(lambda value: print("[gsw-coordinate-export-progress] " +
                 json.dumps({"progress": value}, separators=(",", ":")), flush=True)) if args.progress_json else None)
         print(json.dumps(report, ensure_ascii=False, allow_nan=False, separators=(",", ":")))

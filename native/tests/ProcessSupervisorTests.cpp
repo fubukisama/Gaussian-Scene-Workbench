@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDateTime>
+#include <QCryptographicHash>
+#include <QSysInfo>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QTimer>
@@ -86,6 +88,54 @@ int persistentFixture(QCoreApplication &application) {
 #endif
 }
 
+int persistentBatchFixture(QCoreApplication &application) {
+#ifndef Q_OS_WIN
+  return 2;
+#else
+  const auto args=application.arguments();
+  if(args.size()!=5) return 3;
+  const QString plan=args.at(2),ready=args.at(3),release=args.at(4);
+  QFile planFile(plan);
+  if(!planFile.open(QIODevice::ReadOnly)) return 4;
+  const auto bytes=planFile.readAll();
+  const auto document=QJsonDocument::fromJson(bytes).object();
+  const QString root=QFileInfo(plan).absolutePath(),session(32,QLatin1Char('d'));
+  const auto fileHash=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
+  FILETIME creation{},exit{},kernel{},user{};
+  if(!GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernel,&user)) return 5;
+  const auto token=(quint64(creation.dwHighDateTime)<<32)|creation.dwLowDateTime;
+  const QJsonObject identity{{"pid",QCoreApplication::applicationPid()},
+    {"startToken",QStringLiteral("win-filetime:")+QString::number(token)}};
+  const QString inbox=QDir(root).filePath(QStringLiteral(".coordinators/")+session+QStringLiteral("-cmd.json"));
+  if(!QDir().mkpath(QFileInfo(inbox).absolutePath())) return 6;
+  QJsonObject lease{{"schema","gsw.training_batch_connection/1"},{"version",1},
+    {"batchId",QFileInfo(root).fileName()},{"planPath",QDir::toNativeSeparators(plan)},
+    {"planSha256",document.value("plan_sha256")},{"planFileSha256",fileHash},
+    {"session",session},{"host",QSysInfo::machineHostName()},
+    {"coordinatorIdentity",identity},{"closed",false},{"outcome","running"}};
+  const auto heartbeat=[&]{lease.insert("heartbeat",QDateTime::currentMSecsSinceEpoch()/1000.0);
+    return writeJsonFixture(QDir(root).filePath(QStringLiteral(".coordinator.json")),lease);};
+  if(!heartbeat()) return 7;
+  QFile readyFile(ready);if(!readyFile.open(QIODevice::WriteOnly)) return 8;
+  readyFile.write(QByteArray::number(QCoreApplication::applicationPid()));readyFile.close();
+  std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"running\",\"stage\":\"batch_run\",\"progressPercent\":25}");std::fflush(stdout);
+  QTimer timer;
+  QObject::connect(&timer,&QTimer::timeout,&application,[&]{
+    if(QFileInfo::exists(release)){application.exit(0);return;}heartbeat();
+    QFile file(inbox);if(!file.open(QIODevice::ReadOnly))return;
+    const auto command=QJsonDocument::fromJson(file.readAll()).object();file.close();file.remove();
+    if(command.value("schema")!="gsw.training_batch_connection/1"||command.value("session")!=session||
+      command.value("coordinatorIdentity").toObject()!=identity||command.value("planSha256")!=lease.value("planSha256")||
+      command.value("planFileSha256")!=fileHash){application.exit(9);return;}
+    const bool pause=command.value("command")=="pause";
+    if(!pause&&command.value("command")!="cancel"){application.exit(9);return;}
+    lease.insert("closed",true);lease.insert("outcome",pause?"paused":"cancelled");heartbeat();
+    std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"paused\",\"stage\":\"batch_paused\"}");std::fflush(stdout);
+    application.exit(pause?75:130);
+  });timer.start(25);QTimer::singleShot(15000,&application,[&]{application.exit(10);});return application.exec();
+#endif
+}
+
 QString processOutputFixturePath() {
 #ifdef Q_OS_WIN
   const QString helperName = QStringLiteral("gsw_process_output_fixture.exe");
@@ -137,7 +187,97 @@ private slots:
   void growthBypassIsExplicitlyUnmeasured();
   void migrationProtectsUnverifiedActiveRecords();
   void migrationProtectsMalformedPersistentCreationTokens();
+  void persistentBatchObserverDetachesAndReattaches_data();
+  void persistentBatchObserverDetachesAndReattaches();
+  void batchMigrationRejectsDamagedLaunchMarker();
+  void batchMigrationProtectsOrphanedChildUntilItsCreationIdentityEnds();
 };
+
+void ProcessSupervisorTests::batchMigrationProtectsOrphanedChildUntilItsCreationIdentityEnds(){
+#ifndef Q_OS_WIN
+  QSKIP("Native Windows creation-identity writer gate");
+#else
+  const auto identity=[](qint64 pid){
+    const HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,static_cast<DWORD>(pid));
+    if(!handle)return QJsonObject{};FILETIME creation{},exit{},kernel{},user{};
+    const bool read=GetProcessTimes(handle,&creation,&exit,&kernel,&user);CloseHandle(handle);
+    return read?QJsonObject{{"pid",pid},{"startToken",QStringLiteral("win-filetime:")+
+      QString::number((quint64(creation.dwHighDateTime)<<32)|creation.dwLowDateTime)}}:QJsonObject{};
+  };
+  QProcess owner,child;owner.start(processOutputFixturePath(),{"pause-worker"});QVERIFY(owner.waitForStarted());
+  const auto ownerIdentity=identity(owner.processId());QVERIFY(!ownerIdentity.isEmpty());
+  owner.write("pause\n");QVERIFY(owner.waitForFinished());
+  child.start(processOutputFixturePath(),{"pause-worker"});QVERIFY(child.waitForStarted());
+  const auto childIdentity=identity(child.processId());QVERIFY(!childIdentity.isEmpty());
+  const auto cleanup=qScopeGuard([&]{if(child.state()!=QProcess::NotRunning){child.write("pause\n");child.waitForFinished(5000);}});
+  QTemporaryDir temporary;QVERIFY(temporary.isValid());
+  const auto root=QDir(temporary.path()).filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('a')));
+  QVERIFY(QDir().mkpath(root));const QString plan=QDir(root).filePath("plan.json");
+  QVERIFY(writeJsonFixture(plan,{{"schema","gsw.training_batch/1"},{"plan_sha256",QString(64,QLatin1Char('b'))}}));
+  QFile input(plan);QVERIFY(input.open(QIODevice::ReadOnly));
+  const auto hash=QString::fromLatin1(QCryptographicHash::hash(input.readAll(),QCryptographicHash::Sha256).toHex());input.close();
+  QVERIFY(writeJsonFixture(QDir(root).filePath("state.json"),{{"schema","gsw.training_batch_state/1"},
+    {"plan_sha256",QString(64,QLatin1Char('b'))},{"plan_file_sha256",hash},{"status","running"}}));
+  const QString leasePath=QDir(root).filePath(".coordinator.json");
+  QJsonObject lease{{"schema","gsw.training_batch_connection/1"},{"planSha256",QString(64,QLatin1Char('b'))},
+    {"planFileSha256",hash},{"host",QSysInfo::machineHostName()},{"closed",true},{"coordinatorIdentity",ownerIdentity},
+    {"activeChild",QJsonObject{{"identity",childIdentity}}}};
+  QVERIFY(writeJsonFixture(leasePath,lease));
+  QVERIFY(ProcessSupervisor::hasUnfinishedBatches(temporary.path()));QVERIFY(processIsRunning(child.processId()));
+  lease.insert("activeChild",QJsonObject{{"identity",QJsonObject{}}});QVERIFY(writeJsonFixture(leasePath,lease));
+  QVERIFY(ProcessSupervisor::hasUnfinishedBatches(temporary.path()));QVERIFY(processIsRunning(child.processId()));
+  child.write("pause\n");QVERIFY(child.waitForFinished());
+  lease.insert("activeChild",QJsonObject{{"identity",childIdentity}});QVERIFY(writeJsonFixture(leasePath,lease));
+  QVERIFY(!ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
+#endif
+}
+
+void ProcessSupervisorTests::batchMigrationRejectsDamagedLaunchMarker(){
+  QTemporaryDir temporary;QVERIFY(temporary.isValid());
+  const auto root=QDir(temporary.path()).filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('a')));
+  QVERIFY(QDir().mkpath(QDir(root).filePath(QStringLiteral(".p"))));
+  QVERIFY(writeJsonFixture(QDir(root).filePath(QStringLiteral("state.json")),{{"status","ready"}}));
+  const QString marker=QDir(root).filePath(QStringLiteral(".p/owned.json"));
+  QVERIFY(writeJsonFixture(marker,{{"closed",true}}));
+  QFile input(marker);QVERIFY(input.open(QIODevice::ReadOnly));const auto original=input.readAll();input.close();
+  QVERIFY(ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
+  QVERIFY(input.open(QIODevice::ReadOnly));QCOMPARE(input.readAll(),original);
+}
+
+void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches_data(){
+  QTest::addColumn<bool>("cancel");QTest::newRow("pause")<<false;QTest::newRow("cancel-checkpoint")<<true;
+}
+void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
+#ifndef Q_OS_WIN
+  QSKIP("Persistent Windows coordinator process identity boundary");
+#else
+  QFETCH(bool,cancel);QTemporaryDir temporary;QVERIFY(temporary.isValid());
+  const QString root=QDir(temporary.path()).filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('a')));
+  QVERIFY(QDir().mkpath(root));const QString plan=QDir(root).filePath("plan.json"),log=QDir(root).filePath("stdout.log");
+  QVERIFY(writeJsonFixture(plan,{{"schema","gsw.training_batch/1"},{"plan_sha256",QString(64,QLatin1Char('b'))}}));
+  QFile planFile(plan);QVERIFY(planFile.open(QIODevice::ReadOnly));
+  const auto fileHash=QString::fromLatin1(QCryptographicHash::hash(planFile.readAll(),QCryptographicHash::Sha256).toHex());planFile.close();
+  QVERIFY(writeJsonFixture(QDir(root).filePath("state.json"),{{"schema","gsw.training_batch_state/1"},
+    {"plan_sha256",QString(64,QLatin1Char('b'))},{"plan_file_sha256",fileHash},{"status","running"}}));
+  const QString ready=QDir(root).filePath("ready"),release=QDir(root).filePath("release");
+  auto supervisor=std::make_unique<ProcessSupervisor>();
+  QVERIFY(supervisor->startPersistentBatch("batch",QCoreApplication::applicationFilePath(),
+    {"--persistent-batch-fixture",plan,ready,release},temporary.path(),{},log,plan));
+  QVERIFY(supervisor->isPersistentTask());QVERIFY(supervisor->isPersistentBatch());QVERIFY(!supervisor->isPersistentTraining());
+  QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(ready),5000);
+  QFile readyFile(ready);QVERIFY(readyFile.open(QIODevice::ReadOnly));const auto pid=readyFile.readAll().toLongLong();readyFile.close();
+  const auto releaseOwned=qScopeGuard([&]{QFile file(release);if(file.open(QIODevice::WriteOnly))file.write("release");});
+  supervisor->shutdown();supervisor.reset();QVERIFY(processIsRunning(pid));
+  QVERIFY(ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
+  ProcessSupervisor observer;QSignalSpy finished(&observer,&ProcessSupervisor::taskFinished);
+  QVERIFY(observer.attachPersistentBatch("batch-observe",plan,log));
+  if(cancel){observer.stop();QVERIFY(observer.wasStopRequested());}
+  else QVERIFY(observer.requestPause());
+  QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+  QCOMPARE(finished.first().at(1).toInt(),cancel?130:75);QVERIFY(!processIsRunning(pid));
+  QVERIFY(!ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
+#endif
+}
 
 void ProcessSupervisorTests::initTestCase() {
   qRegisterMetaType<WorkerStatus>();
@@ -772,6 +912,8 @@ int main(int argc,char **argv) {
   QCoreApplication application(argc,argv);
   if(application.arguments().value(1)==QStringLiteral("--persistent-fixture"))
     return persistentFixture(application);
+  if(application.arguments().value(1)==QStringLiteral("--persistent-batch-fixture"))
+    return persistentBatchFixture(application);
   ProcessSupervisorTests tests;
   return QTest::qExec(&tests,argc,argv);
 }

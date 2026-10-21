@@ -8,7 +8,7 @@
 
 ## Native Desktop Preview
 
-- Version: `0.3.5-native-preview`
+- Version: `0.3.6-native-preview`
 - Documentation updated: `2026-10-21`; runtime controls, camera/scale and general-reconstruction support limits are documented below. Local acceptance and complete cloud CI are separate delivery records; an in-progress run is not a full pass.
 - Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
@@ -17,6 +17,7 @@ The default `main` branch contains the **native desktop application** and its su
 
 ### Current capabilities
 
+- **Recorded PLY and persistent batches:** ordinary point clouds/indexed meshes can use recorded-frame restoration with hash-bound cameras, attributes and safe `TextureFile` assets. Explicit proper uniform scene edits are tracked separately from passive frame/unit conversion, including Gaussian orientation/appearance; repeat exports do not bake the same edit twice. Native batch observation can detach/reopen independently of the coordinator, with verified-session pause, checkpoint-preserving cancellation and explicit full-state continuation. See [precise scope and verification boundaries](docs/RECORDED_PLY_AND_BATCH.md).
 - **Independent training runtime controls:** 3DGS/2DGS memory-growth protection is separate from exact-image staging, camera prefetch, capacity storage, loss and backend-specific auxiliary execution. Version-two requests retain dependency-resolved settings and observed execution separately; old disabled presets do not re-enable their children. Guard-only overrides apply through validated full-state resume, not an unverified hot switch. The existing-job observer uses OS/session-bound liveness, read-only attachment and explicit pause/stop; Windows persistent training can continue after the desktop closes. See [schema, migration, lifecycle and remaining acceptance gates](docs/RUNTIME_DECOUPLING.md). Guard OFF does not suppress real CUDA out-of-memory errors or guarantee model quality.
 - **Traceable metric delivery:** known-scale 3DGS/2DGS results use the same restoration module for manual export and separate default metre-coordinate delivery, retaining the original training model. Current-frame/unit tracking prevents double restoration; centres, two/three log sizes, orientation/covariance and SH0–4 appearance rotate together. Hash-bound per-model camera bundles retain complete intrinsics and transformed poses. Unknown scale blocks metric success rather than guessing metres. See [format support and acceptance limits](docs/RUNTIME_DECOUPLING.md#recorded-frame-and-metric-delivery-instruction-version3).
 

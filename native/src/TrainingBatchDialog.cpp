@@ -103,7 +103,7 @@ public:
   QWidget *inputs = nullptr;
   QLabel *summary = nullptr;
   QPushButton *preview = nullptr, *create = nullptr, *start = nullptr, *resume = nullptr,
-      *cancel = nullptr, *load = nullptr, *save = nullptr, *refresh = nullptr, *loadPlan = nullptr;
+      *cancel = nullptr, *load = nullptr, *save = nullptr, *refresh = nullptr, *loadPlan = nullptr,*observe=nullptr;
   QProcess *process = nullptr;
   QTimer *timeout = nullptr;
   std::unique_ptr<QTemporaryDir> scratch;
@@ -178,8 +178,9 @@ TrainingBatchDialog::TrainingBatchDialog(const QString &python, const QString &b
   auto *runButtons = new QHBoxLayout; runButtons->addStretch();
   m->start = AppLanguage::text(new QPushButton(this), AppLanguage::source("启动所选批量计划")); m->start->setObjectName(QStringLiteral("batchStartButton"));
   m->resume = AppLanguage::text(new QPushButton(this), AppLanguage::source("请求核验并继续批量计划")); m->resume->setObjectName(QStringLiteral("batchResumeButton"));
+  m->observe = AppLanguage::text(new QPushButton(this), AppLanguage::source("观察批量队列")); m->observe->setObjectName(QStringLiteral("batchObserveButton"));
   m->cancel = new QPushButton(this); m->cancel->setObjectName(QStringLiteral("batchCancelButton"));
-  for (auto *button : {m->start,m->resume,m->cancel}) runButtons->addWidget(button); root->addLayout(runButtons);
+  for (auto *button : {m->observe,m->start,m->resume,m->cancel}) runButtons->addWidget(button); root->addLayout(runButtons);
   connect(addDataset,&QPushButton::clicked,this,[this] {
     const int row=m->datasets->rowCount(); if(row>=256)return fail(AppLanguage::source("批量数据集引用超过 256；未抽样或截断。"));
     m->loading=true; m->datasets->insertRow(row); for(int column=0;column<4;++column)put(m->datasets,row,column,{});
@@ -201,6 +202,7 @@ TrainingBatchDialog::TrainingBatchDialog(const QString &python, const QString &b
   connect(m->base,&QPlainTextEdit::textChanged,this,[this]{invalidate();});connect(m->failurePolicy,&QComboBox::currentIndexChanged,this,[this]{invalidate();});
   connect(m->preview,&QPushButton::clicked,this,&TrainingBatchDialog::previewPlan);connect(m->create,&QPushButton::clicked,this,&TrainingBatchDialog::createPlan);
   connect(m->start,&QPushButton::clicked,this,&TrainingBatchDialog::startBatch);connect(m->resume,&QPushButton::clicked,this,&TrainingBatchDialog::resumeBatch);
+  connect(m->observe,&QPushButton::clicked,this,&TrainingBatchDialog::observeBatch);
   connect(m->refresh,&QPushButton::clicked,this,&TrainingBatchDialog::refreshHistory);
   connect(m->loadPlan,&QPushButton::clicked,this,[this]{const int row=m->history->currentRow();if(row>=0)loadPlan(m->history->item(row,0)->data(Qt::UserRole).toString());});
   connect(m->cancel,&QPushButton::clicked,this,[this]{if(m->busy)cancelOperation();else reject();});
@@ -280,14 +282,15 @@ void TrainingBatchDialog::finishHelper(int exitCode,bool normalExit){
 }
 void TrainingBatchDialog::cancelOperation(){if(!m->busy||m->cancelled)return;m->cancelled=true;m->report={};m->plan.clear();m->process->write("cancel\n");const quint64 run=m->run;QTimer::singleShot(5000,this,[this,run]{if(m->busy&&m->run==run)m->process->terminate();});QTimer::singleShot(7000,this,[this,run]{if(m->busy&&m->run==run)m->process->kill();});refreshPresentation();}
 void TrainingBatchDialog::startBatch(){if(m->busy||m->plan.isEmpty()||m->persistentState.value(QStringLiteral("status"))!=QStringLiteral("ready"))return;const QString path=m->plan;if(!loadPlan(path)||m->persistentState.value(QStringLiteral("status"))!=QStringLiteral("ready"))return;emit runRequested(path,false);}
-void TrainingBatchDialog::resumeBatch(){if(m->busy||m->plan.isEmpty())return;const QString path=m->plan;if(!loadPlan(path))return;const QString status=m->persistentState.value(QStringLiteral("status")).toString();if(status!=QStringLiteral("paused")&&status!=QStringLiteral("interrupted")&&status!=QStringLiteral("running"))return;emit runRequested(path,true);}
+void TrainingBatchDialog::resumeBatch(){if(m->busy||m->plan.isEmpty())return;const QString path=m->plan;if(!loadPlan(path))return;const QString status=m->persistentState.value(QStringLiteral("status")).toString();if(status!=QStringLiteral("paused")&&status!=QStringLiteral("interrupted"))return;emit runRequested(path,true);}
+void TrainingBatchDialog::observeBatch(){if(m->busy||m->plan.isEmpty())return;const QString path=m->plan;if(loadPlan(path))emit observeRequested(path);}
 bool TrainingBatchDialog::loadPlan(const QString&path){
   if(m->busy)return false;const QString workspace=QFileInfo(m->workspace).canonicalFilePath();const QString canonical=QFileInfo(path).canonicalFilePath();QJsonObject plan,state;
   if(workspace.isEmpty()||!canonical.startsWith(workspace+QStringLiteral("/.gsw/training-batches/"),Qt::CaseInsensitive)||!readJson(canonical,&plan)||plan.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch/1")||!sha(plan.value(QStringLiteral("plan_sha256")))||!readJson(QDir(QFileInfo(canonical).absolutePath()).filePath(QStringLiteral("state.json")),&state)||state.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_batch_state/1")||state.value(QStringLiteral("plan_sha256"))!=plan.value(QStringLiteral("plan_sha256"))){fail(AppLanguage::source("持久批量计划或状态无效、不属于当前工程，或身份不匹配；未启动训练。"));return false;}
   setRequestDocument(plan.value(QStringLiteral("request")).toObject());if(m->failure)return false;m->report=plan;m->persistentState=state;m->plan=canonical;refreshEnabled();refreshPresentation();return true;
 }
 void TrainingBatchDialog::refreshHistory(){if(m->busy)return;m->history->setRowCount(0);const QString root=QDir(m->workspace).filePath(QStringLiteral(".gsw/training-batches"));const auto directories=QDir(root).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);for(const auto&directory:directories){QJsonObject plan,state;const QString path=QDir(directory.absoluteFilePath()).filePath(QStringLiteral("plan.json"));if(directory.isSymLink()||!readJson(path,&plan)||!readJson(QDir(directory.absoluteFilePath()).filePath(QStringLiteral("state.json")),&state))continue;const int row=m->history->rowCount();m->history->insertRow(row);put(m->history,row,0,directory.fileName());m->history->item(row,0)->setData(Qt::UserRole,path);put(m->history,row,1,state.value(QStringLiteral("status")).toString());m->history->item(row,1)->setData(Qt::UserRole,state.value(QStringLiteral("status")));put(m->history,row,2,QString::number(plan.value(QStringLiteral("runs")).toArray().size()));put(m->history,row,3,plan.value(QStringLiteral("plan_sha256")).toString());}refreshPresentation();}
-void TrainingBatchDialog::refreshEnabled(){m->inputs->setEnabled(!m->busy);for(auto*button:{m->load,m->save,m->preview,m->refresh,m->loadPlan})button->setEnabled(!m->busy);m->create->setEnabled(!m->busy&&!m->report.isEmpty()&&m->plan.isEmpty());const QString status=m->persistentState.value(QStringLiteral("status")).toString();m->start->setEnabled(!m->busy&&!m->plan.isEmpty()&&status==QStringLiteral("ready"));m->resume->setEnabled(!m->busy&&!m->plan.isEmpty()&&(status==QStringLiteral("paused")||status==QStringLiteral("interrupted")||status==QStringLiteral("running")));}
+void TrainingBatchDialog::refreshEnabled(){m->inputs->setEnabled(!m->busy);for(auto*button:{m->load,m->save,m->preview,m->refresh,m->loadPlan})button->setEnabled(!m->busy);m->observe->setEnabled(!m->busy&&!m->plan.isEmpty());m->create->setEnabled(!m->busy&&!m->report.isEmpty()&&m->plan.isEmpty());const QString status=m->persistentState.value(QStringLiteral("status")).toString();m->start->setEnabled(!m->busy&&!m->plan.isEmpty()&&status==QStringLiteral("ready"));m->resume->setEnabled(!m->busy&&!m->plan.isEmpty()&&(status==QStringLiteral("paused")||status==QStringLiteral("interrupted")));}
 void TrainingBatchDialog::refreshPresentation(){
   m->datasets->setHorizontalHeaderLabels({batchText(AppLanguage::source("数据集 ID")),batchText(AppLanguage::source("数据集路径")),batchText(AppLanguage::source("已核验数据身份")),batchText(AppLanguage::source("显示名称"))});
   m->axes->setHorizontalHeaderLabels({batchText(AppLanguage::source("参数路径（原始标识）")),batchText(AppLanguage::source("参数取值 JSON 列表"))});

@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QCryptographicHash>
 #include <QSaveFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,8 +30,11 @@
 #include <cstdio>
 
 int main(int argc, char **argv) {
+  std::setvbuf(stdout,nullptr,_IONBF,0);
   qputenv("QT_QPA_PLATFORM", "offscreen");
+  std::fprintf(stderr,"Runtime UI bootstrap: QApplication\n");std::fflush(stderr);
   QApplication app(argc, argv);
+  std::fprintf(stderr,"Runtime UI bootstrap: QApplication ready\n");std::fflush(stderr);
   app.setOrganizationName(QStringLiteral("GSW-owned-runtime-ui-probe"));
   app.setApplicationName(QStringLiteral("GSW-owned-runtime-ui-probe"));
   const auto arguments=app.arguments();
@@ -45,6 +49,7 @@ int main(int argc, char **argv) {
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
   gsw::AppLanguage::apply(QStringLiteral("zh_CN"), false);
+  std::fprintf(stderr,"Runtime UI bootstrap: language ready\n");std::fflush(stderr);
   gsw::TrainingDialog dialog(temporary.path(), QStringLiteral("generated UI fixture"), temporary.path(), true, true);
   bool passed=true;
   int checks=0;
@@ -292,6 +297,33 @@ int main(int argc, char **argv) {
       retry.refreshJobs();check(waitFor([&]{return !retry.isBusy();})&&!retry.isConnected(),"retry succeeds after an observation helper failure without starting training");
       retry.disconnectJob();
     }
+  }
+  {
+    const QString batchRoot=temporary.filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('c')));
+    QDir().mkpath(batchRoot);const QString planPath=QDir(batchRoot).filePath(QStringLiteral("plan.json"));
+    const QString runId=QStringLiteral("run-")+QString(24,QLatin1Char('d'));
+    const auto planBytes=QJsonDocument(QJsonObject{{"schema","gsw.training_batch/1"},{"plan_sha256",QString(64,QLatin1Char('e'))},
+      {"runs",QJsonArray{QJsonObject{{"id",runId}}}}}).toJson();
+    QFile plan(planPath);if(!plan.open(QIODevice::WriteOnly))return 2;plan.write(planBytes);plan.close();
+    const auto hash=QString::fromLatin1(QCryptographicHash::hash(planBytes,QCryptographicHash::Sha256).toHex());
+    const auto stateBytes=QJsonDocument(QJsonObject{{"schema","gsw.training_batch_state/1"},{"plan_sha256",QString(64,QLatin1Char('e'))},
+      {"plan_file_sha256",hash},{"status","paused"},{"runs",QJsonObject{{runId,QJsonObject{{"status","paused"}}}}}}).toJson();
+    QFile stateFile(QDir(batchRoot).filePath(QStringLiteral("state.json")));if(!stateFile.open(QIODevice::WriteOnly))return 2;stateFile.write(stateBytes);stateFile.close();
+    auto env=QProcessEnvironment::systemEnvironment();env.insert("PYTHONUTF8","1");
+    gsw::ExistingTrainingDialog observer(python,repository,env,temporary.path());
+    check(observer.connectBatch(planPath),"explicit batch observation accepts a saved plan without launching a coordinator");
+    check(waitFor([&]{return !observer.isBusy()&&!observer.currentReport().isEmpty();}),"batch observation uses only the actual read-only CPU metadata helper");
+    const auto report=observer.currentReport();
+    check(report.value("kind")==QStringLiteral("training_batch")&&report.value("queueState")==QStringLiteral("paused")&&
+      report.value("liveness")==QStringLiteral("unknown"),"batch and underlying queue state are separate from single-job records and unverified ownership");
+    auto *pause=observer.findChild<QPushButton*>("existingTrainingPause");auto *stop=observer.findChild<QPushButton*>("existingTrainingStop");
+    auto *resume=observer.findChild<QPushButton*>("existingTrainingResume");auto *label=observer.findChild<QLabel*>("existingTrainingState");
+    check(pause&&stop&&resume&&label&&!pause->isEnabled()&&!stop->isEnabled()&&!resume->isEnabled(),"ambiguous legacy batch metadata cannot authorize control or duplicate resume");
+    QSet<QString> texts;
+    for(const auto &locale:gsw::AppLanguage::supported()){gsw::AppLanguage::apply(locale,false);texts.insert(label->text());check(observer.currentReport()==report&&observer.isConnected(),"batch locale switching preserves plan, queue and observation without repair or launch");}
+    check(texts.size()==3,"batch queue and coordinator status translate immediately in all three languages");
+    observer.close();plan.open(QIODevice::ReadOnly);stateFile.open(QIODevice::ReadOnly);
+    check(plan.readAll()==planBytes&&stateFile.readAll()==stateBytes&&!QFileInfo::exists(QDir(batchRoot).filePath(".coordinator.json")),"closing batch observation keeps original queue bytes and creates no coordinator");
   }
   std::printf("Runtime UI checks: %d; result: %s\n",checks,passed?"PASS":"FAIL");
   return passed?0:1;

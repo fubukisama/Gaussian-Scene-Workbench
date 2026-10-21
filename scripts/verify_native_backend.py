@@ -23,6 +23,7 @@ BACKEND_FILES = (
     "native/worker/scale_constraints.py",
     "native/worker/training_seed.py",
     "native/worker/training_batch.py",
+    "native/worker/training_batch_connection.py",
     "native/worker/initialization.py",
     "native/worker/gs_geometry.py",
     "native/worker/gs_geometry_runtime.py",

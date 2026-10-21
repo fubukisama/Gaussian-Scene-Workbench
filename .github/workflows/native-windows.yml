@@ -197,6 +197,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native camera/scale P1 worker tests failed." }
           & $env:QA_PYTHON -B -m unittest native.backend.tests.test_initialization native.worker.test_initialization native.backend.tests.test_gs_geometry native.worker.test_gs_geometry native.worker.test_geometry_cli_utf8 native.worker.test_gs_geometry_runtime native.backend.tests.test_geometry_evaluation native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests
           if ($LASTEXITCODE -ne 0) { throw "General reconstruction worker contracts failed." }
+          & $env:QA_PYTHON -B -m unittest native.backend.tests.test_recorded_ply_export native.worker.test_training_batch_connection
+          if ($LASTEXITCODE -ne 0) { throw "Recorded PLY export and persistent batch contracts failed." }
 
       - name: Install SPZ codec dependencies
         shell: pwsh

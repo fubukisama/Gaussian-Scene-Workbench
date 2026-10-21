@@ -1213,7 +1213,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     return;
   }
 
-  if (mProcessSupervisor.isPersistentTraining()) {
+  if (mProcessSupervisor.isPersistentTask()) {
     if (!confirmDiscardChanges(true)) {
       mExitConfirmed = false;
       event->ignore();
@@ -2830,11 +2830,12 @@ void MainWindow::connectServices() {
           if (state.open(QIODevice::ReadOnly) && state.size() <= 16 * 1024 * 1024)
             batchState = QJsonDocument::fromJson(state.readAll()).object();
         }
-        const bool batchPaused = finishingBatch && !processCancelled && (exitCode == 75 || exitCode == 76) &&
+        const bool batchRetained = finishingBatch && (exitCode == 75 || exitCode == 76 || exitCode == 130) &&
             batchState.value(QStringLiteral("plan_sha256")).toString() == mPendingTrainingBatch->planSha256 &&
             batchState.value(QStringLiteral("schema")).toString() == QStringLiteral("gsw.training_batch_state/1") &&
             (batchState.value(QStringLiteral("status")).toString() == QStringLiteral("paused") ||
              batchState.value(QStringLiteral("status")).toString() == QStringLiteral("interrupted"));
+        const bool batchPaused = batchRetained && !processCancelled;
         const bool paused = batchPaused || (finishingTraining && !processCancelled && exitCode == 75 &&
             mActiveWorkerState == QStringLiteral("paused") &&
             nativeResumeIteration(mPendingTraining->outputDirectory) > 0);
@@ -2857,17 +2858,17 @@ void MainWindow::connectServices() {
               batchState.value(QStringLiteral("schema")).toString() == QStringLiteral("gsw.training_batch_state/1") &&
               batchState.value(QStringLiteral("status")).toString() == QStringLiteral("completed");
           if (comparablePath(mWorkspace.rootPath()) == pending.projectRoot) {
-            mResumeBatchPlan = batchPaused ? QDir(mWorkspace.rootPath()).relativeFilePath(pending.planPath) : QString();
+            mResumeBatchPlan = batchRetained ? QDir(mWorkspace.rootPath()).relativeFilePath(pending.planPath) : QString();
             QString error;
             if (!mWorkspace.projectFilePath().isEmpty() && !mWorkspace.saveManifest({}, &error)) appendTaskEvent(error);
           }
           completionDetail = effectiveSucceeded
               ? QCoreApplication::translate("Workbench", "批量训练已完成；每个任务的结果与检核记录已分别保存。")
-              : batchPaused ? QCoreApplication::translate("Workbench", "批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
+              : batchRetained ? QCoreApplication::translate("Workbench", "批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
                             : QCoreApplication::translate("Workbench", "批量训练未完成；请查看批量计划中的逐任务记录。");
           if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount()) {
             const char *source = effectiveSucceeded ? AppLanguage::source("批量训练已完成；每个任务的结果与检核记录已分别保存。")
-                : batchPaused ? AppLanguage::source("批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
+                : batchRetained ? AppLanguage::source("批量计划已停止在安全边界；继续时将重新核验数据和可用完整检查点。")
                               : AppLanguage::source("批量训练未完成；请查看批量计划中的逐任务记录。");
             mTaskTable->item(mActiveTaskRow, 3)->setData(Qt::UserRole + 34, QString::fromUtf8(source));
             mTaskTable->item(mActiveTaskRow, 3)->setData(Qt::UserRole + 35, QVariantList{});
@@ -4055,7 +4056,7 @@ bool MainWindow::confirmExit() {
       QCoreApplication::translate("Workbench", "确定要退出 Gaussian Scene Workbench Native 吗？"),
       QMessageBox::NoButton, this);
   prompt.setObjectName(QStringLiteral("exitConfirmationDialog"));
-  prompt.setInformativeText(mProcessSupervisor.isPersistentTraining()
+  prompt.setInformativeText(mProcessSupervisor.isPersistentTask()
       ? QCoreApplication::translate("Workbench", "退出前如有未保存进度，软件将继续询问是否保存。\n持久训练将继续在后台运行；关闭观察不会停止训练。其他由当前窗口管理的 COLMAP、导入及辅助任务仍会停止。")
       : QCoreApplication::translate("Workbench", "退出前如有未保存进度，软件将继续询问是否保存。\n"
                      "退出后会停止当前软件启动的训练、COLMAP、"
@@ -4177,7 +4178,7 @@ bool MainWindow::discardCurrentRecovery(QString *errorMessage) {
     return true;
   }
   if (ProcessSupervisor::hasUnfinishedTraining(QDir(mCurrentRecovery->rootPath)
-          .filePath(QStringLiteral(".gsw/jobs/training")))) {
+          .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(mCurrentRecovery->rootPath)) {
     if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "后台训练尚未结束或状态未验证；保留原工作区，不迁移或删除训练数据。请连接现有任务确认状态。");
     return false;
   }
@@ -4201,7 +4202,7 @@ bool MainWindow::completeCurrentRecovery(
     return true;
   }
   if (ProcessSupervisor::hasUnfinishedTraining(QDir(mCurrentRecovery->rootPath)
-          .filePath(QStringLiteral(".gsw/jobs/training")))) {
+          .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(mCurrentRecovery->rootPath)) {
     if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "后台训练尚未结束或状态未验证；保留原工作区，不迁移或删除训练数据。请连接现有任务确认状态。");
     return false;
   }
@@ -4315,7 +4316,7 @@ void MainWindow::showRecoveryCenter(const bool startupPrompt) {
       [candidates](int id) { return candidates.at(id).displayName + QLatin1Char('\n') + QDir::toNativeSeparators(candidates.at(id).rootPath); },
       [store = *mRecoveryStore, candidates](int id, QString *error) {
         if (ProcessSupervisor::hasUnfinishedTraining(QDir(candidates.at(id).rootPath)
-                .filePath(QStringLiteral(".gsw/jobs/training")))) {
+                .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(candidates.at(id).rootPath)) {
           if (error) *error = QCoreApplication::translate("Workbench", "后台训练尚未结束或状态未验证；保留原工作区，不迁移或删除训练数据。请连接现有任务确认状态。");
           return false;
         }
@@ -4778,7 +4779,7 @@ bool MainWindow::saveProject(const bool forceChoosePath) {
   }
   const bool taskRunning = mProcessSupervisor.isRunning() ||
       ProcessSupervisor::hasUnfinishedTraining(QDir(mWorkspace.rootPath())
-          .filePath(QStringLiteral(".gsw/jobs/training")));
+          .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(mWorkspace.rootPath());
   if (taskRunning && forceChoosePath && mWorkspace.hasPendingDataMigration()) {
     QMessageBox::information(
         this, QCoreApplication::translate("Workbench", "工程另存正在等待迁移"),
@@ -4867,7 +4868,7 @@ bool MainWindow::finalizePendingProjectSave(QString *errorMessage) {
   }
   const QString oldRoot = mWorkspace.rootPath();
   if (ProcessSupervisor::hasUnfinishedTraining(QDir(oldRoot)
-          .filePath(QStringLiteral(".gsw/jobs/training")))) {
+          .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(oldRoot)) {
     if (errorMessage) *errorMessage = QCoreApplication::translate("Workbench", "后台训练尚未结束或状态未验证；保留原工作区，不迁移或删除训练数据。请连接现有任务确认状态。");
     return false;
   }
@@ -4891,7 +4892,7 @@ bool MainWindow::finalizePendingProjectSave(QString *errorMessage) {
 
 bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
   if (ProcessSupervisor::hasUnfinishedTraining(QDir(mWorkspace.rootPath())
-          .filePath(QStringLiteral(".gsw/jobs/training")))) return true;
+          .filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(mWorkspace.rootPath())) return true;
   QString loadError;
   const ActiveTrainingJob job =
       loadActiveTrainingJob(mWorkspace.rootPath(), &loadError);
@@ -6328,6 +6329,9 @@ void MainWindow::showTrainingBatch() {
       [this, projectRoot](const QString &plan, const bool resume) {
     if (comparablePath(mWorkspace.rootPath()) == projectRoot) startTrainingBatch(plan, resume);
   });
+  connect(mTrainingBatchDialog,&TrainingBatchDialog::observeRequested,this,[this,projectRoot](const QString &plan){
+    if(comparablePath(mWorkspace.rootPath())==projectRoot)observeTrainingBatch(plan);
+  });
   mTrainingBatchDialog->show(); // Explicit action only; opening history never launches training.
 }
 
@@ -6336,7 +6340,7 @@ void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) 
   const QString root = BackendLocator::findRepositoryRoot(
       QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
   const QString python = findTrainingPython(root);
-  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/training_batch.py"));
+  const QString helper = QDir(root).filePath(QStringLiteral("native/worker/training_batch_connection.py"));
   QString error;
   QFile planFile(planPath);
   QJsonObject plan;
@@ -6368,11 +6372,22 @@ void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) 
   mPendingTrainingBatch = PendingTrainingBatch{name, comparablePath(mWorkspace.rootPath()),
       QFileInfo(planPath).absoluteFilePath(), planSha};
   mPauseRequested = false;
-  if (!mProcessSupervisor.start(name, python,
+  const QString logPath=QDir(QFileInfo(planPath).absolutePath()).filePath(
+      QStringLiteral("coordinator-%1.log").arg(QUuid::createUuid().toString(QUuid::Id128)));
+  if (!mProcessSupervisor.startPersistentBatch(name, python,
       {helper, QStringLiteral("--operation"), resume ? QStringLiteral("resume") : QStringLiteral("run"),
-          QStringLiteral("--plan"), planPath}, root, pythonProcessEnvironment(python), true)) {
+          QStringLiteral("--plan"), planPath}, root, pythonProcessEnvironment(python),logPath,planPath)) {
     mPendingTrainingBatch.reset();
   }
+}
+
+void MainWindow::observeTrainingBatch(const QString &planPath){
+  const QString root=BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(),qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const QString python=findTrainingPython(root);if(root.isEmpty()||python.isEmpty())return;
+  ExistingTrainingDialog dialog(python,root,pythonProcessEnvironment(python),mWorkspace.rootPath(),this);
+  QString resumePlan;connect(&dialog,&ExistingTrainingDialog::resumeBatchRequested,&dialog,[&](const QString &path){resumePlan=path;dialog.accept();});
+  if(!dialog.connectBatch(planPath))return;dialog.exec();
+  if(!resumePlan.isEmpty())startTrainingBatch(resumePlan,true);
 }
 
 void MainWindow::showExistingTraining() {
@@ -6533,7 +6548,7 @@ void MainWindow::pauseTraining() {
   QString error;
   // A batch owns its children. Never write a pause request into the unrelated
   // historical single-run active-training record (including the 4407 checkpoint).
-  const bool durableRequest = !mProcessSupervisor.isPersistentTraining() &&
+  const bool durableRequest = !mProcessSupervisor.isPersistentTask() &&
       !mPendingTrainingBatch && requestActiveTrainingPause(mWorkspace.rootPath(), &error);
   const bool stdinRequest = mProcessSupervisor.requestPause();
   if (durableRequest || stdinRequest) {
@@ -7167,8 +7182,8 @@ void MainWindow::updateActionAvailability() {
   const bool running = mProcessSupervisor.isRunning();
   const bool hasProject = mWorkspace.hasProject();
   const bool workspaceReady = hasProject && !mRecoveryBlocked;
-  const bool externalWriter = !running && hasProject && ProcessSupervisor::hasUnfinishedTraining(
-      QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs/training")));
+  const bool externalWriter = !running && hasProject && (ProcessSupervisor::hasUnfinishedTraining(
+      QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs/training"))) || ProcessSupervisor::hasUnfinishedBatches(mWorkspace.rootPath()));
   const bool dataEntryReady = !running && !externalWriter && (!hasProject || !mRecoveryBlocked);
 
   mNewProjectAction->setEnabled(!running);

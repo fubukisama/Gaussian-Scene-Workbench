@@ -3,6 +3,7 @@
 #include <QDialog>
 
 class QComboBox;
+class QCheckBox;
 class QLineEdit;
 class QLabel;
 
@@ -21,6 +22,7 @@ private:
   QStringList mProtectedPaths;
   QComboBox *mFormat;
   QComboBox *mCoordinates;
+  QCheckBox *mBakeSceneTransform;
   QComboBox *mOutputUnit;
   CameraScaleRecoveryCapability mRecovery;
   QLabel *mCoordinateInfo;

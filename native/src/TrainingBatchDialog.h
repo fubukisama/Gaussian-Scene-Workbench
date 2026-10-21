@@ -26,9 +26,11 @@ public slots:
   void startBatch();
   void resumeBatch();
   void refreshHistory();
+  void observeBatch();
 signals:
   void runRequested(const QString &planPath, bool resume);
   void planningFinished(const QJsonObject &report);
+  void observeRequested(const QString &planPath);
 protected:
   void reject() override;
   void closeEvent(QCloseEvent *event) override;

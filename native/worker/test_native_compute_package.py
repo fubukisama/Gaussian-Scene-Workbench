@@ -33,14 +33,15 @@ class NativeComputePackageTests(unittest.TestCase):
             probe = r'''
 import json, sys
 sys.path.insert(0, sys.argv[1])
-from native.worker import training_configuration, training_failure, training_job_connection
+from native.worker import (training_configuration, training_failure,
+                           training_job_connection, training_batch_connection)
 report = training_configuration.normalize_runtime_options(
     {"version": 2, "resourceGuard": {"enabled": False},
      "execution": {"image_staging": False, "camera_prefetch": True}})
 failure = training_failure.training_failure_record(RuntimeError("owned normal failure"), "3dgs")
 print(json.dumps({"runtime": report, "failure": failure, "modules": {
     module.__name__: module.__file__ for module in
-    (training_configuration, training_failure, training_job_connection)},
+    (training_configuration, training_failure, training_job_connection, training_batch_connection)},
     "forbidden": [name for name in sys.modules if name == "torch" or name.startswith("torch.")
                   or name == "native.backend.compute" or name in ("http.server", "webbrowser")]},
     allow_nan=False))
@@ -77,7 +78,8 @@ print(json.dumps({"runtime": report, "failure": failure, "modules": {
             manifest_path = repository / "backend_manifest.json"
             if manifest_path.is_file():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                for module in ("training_configuration", "training_failure", "training_job_connection"):
+                for module in ("training_configuration", "training_failure", "training_job_connection",
+                               "training_batch_connection"):
                     self.assertIn("native/worker/" + module + ".py", manifest["components"])
 
     def test_import_command_publishes_photos_and_preserves_existing_dataset(self):

@@ -86,6 +86,7 @@ private slots:
   void metadataFailureUsesCurrentLanguageWithoutReloadingModel();
   void clippingLengthsUseTheModelFrame();
   void loadsConfiguredNativeBundleSample();
+  void validatesEditedV3ModelAndCameraFrameTogether();
 };
 
 void CameraTrajectoryTests::loadsBoundCameraBundleWithoutImages() {
@@ -96,6 +97,108 @@ void CameraTrajectoryTests::loadsBoundCameraBundleWithoutImages() {
   QVERIFY2(trajectory.error().isEmpty(), qPrintable(trajectory.error()));
   QCOMPARE(trajectory.cameras().size(), qsizetype(1));
   QCOMPARE(trajectory.cameras().first().imageName, QString("not-present/image.png"));
+}
+
+void CameraTrajectoryTests::validatesEditedV3ModelAndCameraFrameTogether() {
+  QTemporaryDir directory; QVERIFY(directory.isValid());
+  const QString scene=directory.filePath("edited-point-model.ply");
+  const QByteArray original="ply\nformat ascii 1.0\nelement vertex 1\nproperty double x\nproperty double y\nproperty double z\nend_header\n3 6 9\n";
+  const QByteArray edited="ply\nformat ascii 1.0\nelement vertex 1\nproperty double x\nproperty double y\nproperty double z\nend_header\n6 22 36\n";
+  QVERIFY(write(directory.filePath("original-training.ply"),original));
+  QVERIFY(write(scene,edited));
+  const QJsonArray quarterTurn{vector3(0,-1,0),vector3(1,0,0),vector3(0,0,1)};
+  const auto sim=[](double scale,const QJsonArray &rotation,const QJsonArray &translation,const QString &from,const QString &to) {
+    return QJsonObject{{"s",scale},{"R",rotation},{"t",translation},{"input_frame",from},{"output_frame",to},{"applied",true}};
+  };
+  const auto oldScene=sim(1.,identityRotation(),{0,0,0},"canonical","canonical");
+  const auto newScene=sim(2.,quarterTurn,{10,20,30},"canonical","canonical");
+  auto immutable=contract({view("retained-view")});
+  auto scale=immutable["scale"].toObject();scale["evidence"]=QJsonArray{QJsonObject{{"kind","user_declaration"}}};
+  immutable["scale"]=scale;immutable["ply_sha256"]=digest(original);
+  immutable["clipping"]=QJsonObject{{"frame","training"},{"znear",.2},{"backend_near",.4},{"zfar",100.}};
+  auto camera=view("retained-view");
+  camera["c2w_opencv"]=QJsonArray{QJsonArray{0,-1,0,2},QJsonArray{1,0,0,26},QJsonArray{0,0,1,40},QJsonArray{0,0,0,1}};
+  const QString modelHash=digest(edited),assetsHash=digest("[]");
+  auto bundle=bundleRecord(modelHash,{camera});
+  bundle["clipping"]=QJsonObject{{"frame","canonical"},{"znear",.2},{"backend_near",.4},{"zfar",100.}};
+  const QByteArray cameraBytes=QJsonDocument(bundle).toJson(QJsonDocument::Compact);
+  QVERIFY(write(directory.filePath("edited-point-model.cameras.json"),cameraBytes));
+  const QJsonObject requestTransform{{"s",2.},{"R",quarterTurn},{"t",QJsonArray{25,40,57}}};
+  QJsonObject sidecar{{"schema","gsw.coordinate_export/1"},{"export_version",3},
+      {"representation","point_cloud"},{"ply_sha256",modelHash},{"output_sha256",modelHash},{"input_sha256",digest(original)},
+      {"input_data_identity",QString(64,'a')},{"input_frame","training"},{"input_unit","training"},
+      {"output_frame","canonical"},{"output_unit","m"},{"current_frame","canonical"},{"current_unit","m"},
+      {"transform_applied",true},{"applied_transform",sim(1.,quarterTurn,{12,19,27},"training","canonical")},
+      {"input_canonical_scene_transform",oldScene},{"canonical_scene_transform",newScene},
+      {"scene_transform",QJsonObject{{"schema","gsw.scene_transform/1"},{"frame","training"},{"unit","training"},{"transform",requestTransform}}},
+      {"scene_scale_multiplier",2.},{"physical_scale_modified",true},{"scale_evidence_scope","immutable_training_contract"},
+      {"scene_edit_independent_validation",false},{"full_optimizer_state_transformed",false},
+      {"assets",QJsonArray{}},{"assets_sha256",assetsHash},{"training_contract",immutable},
+      {"camera_reference",QJsonObject{{"schema","gsw.model_cameras/1"},{"path","edited-point-model.cameras.json"},{"sha256",digest(cameraBytes)}}}};
+  sidecar["bundle_sha256"]=digest(QJsonDocument(QJsonObject{{"assets_sha256",assetsHash},{"camera_sha256",digest(cameraBytes)},
+      {"coordinate_frame","canonical"},{"coordinate_unit","m"},{"input_data_identity",QString(64,'a')},{"model_sha256",modelHash}}).toJson(QJsonDocument::Compact));
+  QVERIFY(writeJson(directory.filePath("edited-point-model.camera-scale.json"),sidecar));
+  const auto trajectory=gsw::CameraTrajectory::loadForScene(scene);
+  QVERIFY2(trajectory.error().isEmpty(),qPrintable(trajectory.error()));
+  QVERIFY(trajectory.metadataVerified());QCOMPARE(trajectory.cameras().size(),qsizetype(1));
+  const auto &actual=trajectory.cameras().first();
+  QCOMPARE(actual.globalPosition.x,2.);QCOMPARE(actual.globalPosition.y,26.);QCOMPARE(actual.globalPosition.z,40.);
+  QCOMPARE(actual.cameraToWorld,camera["c2w_opencv"].toArray());
+  QCOMPARE(actual.intrinsics,view("retained-view")["K"].toArray());
+  QCOMPARE(actual.viewId,QString("retained-view"));QCOMPARE(actual.split,QString("train"));
+  QCOMPARE(trajectory.clipping()["znear"].toDouble(),.2);QCOMPARE(trajectory.clipping()["zfar"].toDouble(),100.);
+  const auto metadata=gsw::parsePlyCoordinateMetadata({},scene,true);
+  QVERIFY2(metadata.validationError.isEmpty(),qPrintable(metadata.validationError));
+  QCOMPARE(metadata.scaleStatus,QString("source_declared"));QCOMPARE(metadata.metersPerCoordinate,std::optional<double>(1.));
+  QCOMPARE(metadata.provenance["canonical_scene_transform"].toObject(),newScene);
+  QCOMPARE(fileBytes(scene),edited);QCOMPARE(fileBytes(directory.filePath("original-training.ply")),original);
+  // Current geometry already contains W. Common-frame display must not undo
+  // the active edit while converting this canonical file to training units.
+  QVERIFY(writeJson(directory.filePath("original-training.camera-scale.json"),immutable));
+  const auto trainingMetadata=gsw::parsePlyCoordinateMetadata({},directory.filePath("original-training.ply"),true);
+  QVERIFY2(trainingMetadata.validationError.isEmpty(),qPrintable(trainingMetadata.validationError));
+  gsw::SceneCoordinateTracker editedTracker(metadata),trainingTracker(trainingMetadata);QVector3D local;
+  QVERIFY(editedTracker.observeAndMap(6,22,36,local));QVERIFY(trainingTracker.observeAndMap(3,6,9,local));
+  const auto mapping=gsw::sceneDisplayMapping(editedTracker.info(),trainingTracker.info());QVERIFY(mapping.verifiedAlignment);
+  const auto mapped=mapping.mapCoordinate({6,22,36});QCOMPARE(mapped.x,13.);QCOMPARE(mapped.y,46.);QCOMPARE(mapped.z,75.);
+  QVERIFY(gsw::sceneLengthUnitDescription(editedTracker.info()).contains("2"));
+  const QString metadataPath=directory.filePath("edited-point-model.camera-scale.json");
+  auto badHistory=sidecar;auto changedW=newScene;changedW["t"]=QJsonArray{11,20,30};badHistory["canonical_scene_transform"]=changedW;
+  QVERIFY(writeJson(metadataPath,badHistory));
+  QVERIFY(!gsw::CameraTrajectory::loadForScene(scene).error().isEmpty());
+  QVERIFY(!gsw::parsePlyCoordinateMetadata({},scene,true).validationError.isEmpty());
+  QVERIFY(writeJson(metadataPath,sidecar));
+  auto shiftedCamera=camera;shiftedCamera["c2w_opencv"]=pose(2,26,41);
+  auto badBundle=bundle;badBundle["views"]=QJsonArray{shiftedCamera};
+  const QByteArray badCameraBytes=QJsonDocument(badBundle).toJson(QJsonDocument::Compact);
+  QVERIFY(write(directory.filePath("edited-point-model.cameras.json"),badCameraBytes));
+  auto rehashed=sidecar;auto reference=rehashed["camera_reference"].toObject();reference["sha256"]=digest(badCameraBytes);rehashed["camera_reference"]=reference;
+  const auto rebind=[&](QJsonObject &record,const QString &cameraHash,const QString &assetHash) {
+    record["bundle_sha256"]=digest(QJsonDocument(QJsonObject{{"assets_sha256",assetHash},{"camera_sha256",cameraHash},
+        {"coordinate_frame","canonical"},{"coordinate_unit","m"},{"input_data_identity",QString(64,'a')},{"model_sha256",record["ply_sha256"]}}).toJson(QJsonDocument::Compact));
+  };
+  rebind(rehashed,digest(badCameraBytes),assetsHash);QVERIFY(writeJson(metadataPath,rehashed));
+  // A recomputed byte hash cannot legitimize a camera that disagrees with W.
+  QVERIFY(gsw::CameraTrajectory::loadForScene(scene).error().contains("camera_metadata_scene_camera_mismatch"));
+  QVERIFY(write(directory.filePath("edited-point-model.cameras.json"),cameraBytes));
+  const QByteArray texture="owned texture bytes";const QString textureName="texture.png";
+  QVERIFY(write(directory.filePath(textureName),texture));
+  const QJsonArray assets{QJsonObject{{"kind","texture_file"},{"path",textureName},{"sha256",digest(texture)},{"bytes",texture.size()},{"source_reference",QString::fromUtf8("元画像.png")}}};
+  auto textured=sidecar;const QString textureManifest=digest(QJsonDocument(assets).toJson(QJsonDocument::Compact));
+  auto texturedBytes=edited;texturedBytes.replace("end_header\n","comment TextureFile texture.png\nend_header\n");QVERIFY(write(scene,texturedBytes));
+  const auto texturedHash=digest(texturedBytes);textured["ply_sha256"]=texturedHash;textured["output_sha256"]=texturedHash;
+  auto texturedCamera=bundle;texturedCamera["model_sha256"]=texturedHash;
+  const auto texturedCameraBytes=QJsonDocument(texturedCamera).toJson(QJsonDocument::Compact);
+  QVERIFY(write(directory.filePath("edited-point-model.cameras.json"),texturedCameraBytes));
+  auto texturedReference=textured["camera_reference"].toObject();texturedReference["sha256"]=digest(texturedCameraBytes);textured["camera_reference"]=texturedReference;
+  textured["assets"]=assets;textured["assets_sha256"]=textureManifest;rebind(textured,digest(texturedCameraBytes),textureManifest);
+  QVERIFY(writeJson(metadataPath,textured));QVERIFY2(gsw::CameraTrajectory::loadForScene(scene).metadataVerified(),qPrintable(gsw::CameraTrajectory::loadForScene(scene).error()));
+  QVERIFY(gsw::parsePlyCoordinateMetadata({},scene,true).validationError.isEmpty());
+  QVERIFY(write(directory.filePath(textureName),"different texture bytes"));
+  QVERIFY(!gsw::CameraTrajectory::loadForScene(scene).error().isEmpty());
+  QVERIFY(!gsw::parsePlyCoordinateMetadata({},scene,true).validationError.isEmpty());
+  QVERIFY(write(scene,edited));QVERIFY(write(directory.filePath("edited-point-model.cameras.json"),cameraBytes));
+  QVERIFY(writeJson(metadataPath,sidecar));
 }
 
 void CameraTrajectoryTests::retainsFullCalibrationStableIdsAndAllSplits() {

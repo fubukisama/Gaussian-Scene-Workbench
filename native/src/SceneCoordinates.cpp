@@ -11,6 +11,10 @@
 #include <QSaveFile>
 #include <QStringConverter>
 #include <QTextStream>
+#include <QSet>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -155,6 +159,94 @@ DisplaySimilarity displaySimilarity(const QJsonObject &object) {
     for(int j=0;j<3;++j)result.r[i][j]=object.value(QStringLiteral("R")).toArray()[i].toArray()[j].toDouble();
   }
   return result;
+}
+
+DisplaySimilarity composeSimilarity(const DisplaySimilarity &a,const DisplaySimilarity &b) {
+  DisplaySimilarity result;result.s=a.s*b.s;
+  for(int i=0;i<3;++i) {
+    result.t[i]=a.t[i];
+    for(int j=0;j<3;++j) {
+      result.t[i]+=a.s*a.r[i][j]*b.t[j];result.r[i][j]=0.;
+      for(int k=0;k<3;++k)result.r[i][j]+=a.r[i][k]*b.r[k][j];
+    }
+  }
+  return result;
+}
+
+DisplaySimilarity inverseSimilarity(const DisplaySimilarity &value) {
+  DisplaySimilarity result;result.s=1./value.s;
+  for(int i=0;i<3;++i)for(int j=0;j<3;++j) {
+    result.r[i][j]=value.r[j][i];result.t[i]-=value.r[j][i]*value.t[j]/value.s;
+  }
+  return result;
+}
+
+QJsonObject similarityJson(const DisplaySimilarity &value) {
+  QJsonArray rotation,translation;
+  for(int i=0;i<3;++i) {
+    rotation.append(QJsonArray{value.r[i][0],value.r[i][1],value.r[i][2]});translation.append(value.t[i]);
+  }
+  return {{QStringLiteral("s"),value.s},{QStringLiteral("R"),rotation},{QStringLiteral("t"),translation}};
+}
+
+bool similaritiesClose(const DisplaySimilarity &a,const DisplaySimilarity &b) {
+  if(!std::isfinite(a.s)||!std::isfinite(b.s)||a.s<=0.||b.s<=0.||
+      std::abs(a.s-b.s)>1e-12*std::max(std::abs(a.s),std::abs(b.s)))return false;
+  for(int i=0;i<3;++i) {
+    if(!std::isfinite(a.t[i])||!std::isfinite(b.t[i])||
+        std::abs(a.t[i]-b.t[i])>2e-7+1e-12*std::abs(b.t[i]))return false;
+    for(int j=0;j<3;++j)if(!std::isfinite(a.r[i][j])||!std::isfinite(b.r[i][j])||
+        std::abs(a.r[i][j]-b.r[i][j])>1e-11)return false;
+  }
+  return true;
+}
+
+bool frameToCanonical(const QJsonObject &root,const QString &frame,const QString &unit,DisplaySimilarity &result) {
+  const auto chain=root.value(QStringLiteral("transforms")).toObject();
+  const auto source=chain.value(QStringLiteral("source_to_canonical")).toObject();
+  const auto normalization=chain.value(QStringLiteral("canonical_to_training")).toObject();
+  const auto scale=root.value(QStringLiteral("scale")).toObject();
+  const bool known=scale.value(QStringLiteral("status"))!=QStringLiteral("arbitrary")&&scale.value(QStringLiteral("meters_per_unit")).isDouble();
+  QString nativeUnit;double nativeMeters=0.;
+  result={};
+  if(frame==QStringLiteral("source")) {
+    result=displaySimilarity(source);nativeUnit=scale.value(QStringLiteral("source_unit")).toString(QStringLiteral("unknown"));
+    nativeMeters=known?scale.value(QStringLiteral("meters_per_unit")).toDouble():0.;
+  } else if(frame==QStringLiteral("training")) {
+    result=inverseSimilarity(displaySimilarity(normalization));nativeUnit=QStringLiteral("training");nativeMeters=known?result.s:0.;
+  } else if(frame==QStringLiteral("canonical")) {
+    nativeUnit=scale.value(QStringLiteral("canonical_unit")).toString(QStringLiteral("arbitrary"));nativeMeters=known?1.:0.;
+  } else return false;
+  if(unit!=nativeUnit) {
+    const auto parsed=unitFromKey(unit);
+    if(!known||parsed==SceneLengthUnit::Unknown||!std::isfinite(nativeMeters)||nativeMeters<=0.)return false;
+    result.s*=metresPerUnit(parsed)/nativeMeters;
+  }
+  return validSimilarity(similarityJson(result));
+}
+
+bool noPathLinks(QString path) {
+  for(;;) {
+    const QFileInfo info(path);if(info.isSymLink())return false;
+#ifdef Q_OS_WIN
+    const DWORD attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16()));
+    if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
+#endif
+    const QString parent=info.absoluteDir().absolutePath();if(parent==path)return true;path=parent;
+  }
+}
+
+QString fileDigest(const QString &path) {
+  if(!noPathLinks(path))return {};
+  QFile file(path);QCryptographicHash hash(QCryptographicHash::Sha256);
+  return file.open(QIODevice::ReadOnly)&&hash.addData(&file)?QString::fromLatin1(hash.result().toHex()):QString{};
+}
+
+bool safeAssetReference(const QString &relative) {
+  if(relative.isEmpty()||QDir::isAbsolutePath(relative)||relative.contains('\\')||relative.contains(':')||relative.contains(QChar(0)))return false;
+  const auto parts=relative.split('/');
+  static const QRegularExpression reserved(QStringLiteral("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?$"),QRegularExpression::CaseInsensitiveOption);
+  return std::none_of(parts.cbegin(),parts.cend(),[](const QString &part){return part==QStringLiteral("..")||part.endsWith('.')||part.endsWith(' ')||reserved.match(part).hasMatch();});
 }
 
 bool displayFrameContext(const SceneCoordinateInfo &info, DisplaySimilarity &transform,
@@ -446,6 +538,14 @@ void readCameraScaleSidecar(const QString &sourcePath,
   }
   if (exported) {
     const QString outputUnit = root.value(QStringLiteral("output_unit")).toString();
+    const int version=root.value(QStringLiteral("export_version")).toInt(1);
+    if(version<1||version>3) { fail("camera_scale_unsupported_version");return; }
+    if(version==3) {
+      QString reason;
+      if(!noPathLinks(path)||!recordedExportFrameTransforms(root,&reason)||!validateRecordedExportFiles(root,sourcePath,&reason)) {
+        metadata.validationError=reason.isEmpty()?QStringLiteral("camera_metadata_link_refused"):reason;return;
+      }
+    }
     const bool v2=root.value(QStringLiteral("export_version")).toInt(1)>=2;
     if(v2 && (root.value(QStringLiteral("current_frame"))!=frame || root.value(QStringLiteral("current_unit"))!=outputUnit ||
         root.value(QStringLiteral("transform_applied"))!=true ||
@@ -484,6 +584,12 @@ void readCameraScaleSidecar(const QString &sourcePath,
     metadata.provenance.insert(QStringLiteral("applied_transform"), root.value(QStringLiteral("applied_transform")));
     metadata.provenance.insert(QStringLiteral("input_sha256"), root.value(QStringLiteral("input_sha256")));
     metadata.provenance.insert(QStringLiteral("output_unit"), root.value(QStringLiteral("output_unit")));
+    if(root.value(QStringLiteral("export_version"))==3) {
+      for(const auto &key:{QStringLiteral("export_version"),QStringLiteral("canonical_scene_transform"),
+          QStringLiteral("input_canonical_scene_transform"),QStringLiteral("scene_transform"),QStringLiteral("scene_scale_multiplier"),
+          QStringLiteral("physical_scale_modified"),QStringLiteral("scale_evidence_scope"),QStringLiteral("scene_edit_independent_validation"),
+          QStringLiteral("full_optimizer_state_transformed")})if(root.contains(key))metadata.provenance.insert(key,root.value(key));
+    }
   }
 }
 
@@ -500,6 +606,119 @@ QString csvEscape(QString value) {
 }
 
 } // namespace
+
+std::optional<RecordedFrameTransforms> recordedExportFrameTransforms(const QJsonObject &record,QString *error) {
+  const auto fail=[&](const char *reason)->std::optional<RecordedFrameTransforms>{if(error)*error=QString::fromLatin1(reason);return std::nullopt;};
+  if(error)error->clear();
+  const auto root=record.value(QStringLiteral("training_contract")).toObject();
+  const auto chain=root.value(QStringLiteral("transforms")).toObject();
+  const auto source=chain.value(QStringLiteral("source_to_canonical")).toObject();
+  const auto normalization=chain.value(QStringLiteral("canonical_to_training")).toObject();
+  if(record.value(QStringLiteral("schema"))!=QStringLiteral("gsw.coordinate_export/1")||record.value(QStringLiteral("export_version"))!=3||
+      root.value(QStringLiteral("schema"))!=QStringLiteral("gsw.training_camera_contract/1")||
+      record.value(QStringLiteral("input_data_identity"))!=root.value(QStringLiteral("input_data_identity"))||
+      !validSimilarity(source)||!validSimilarity(normalization)||source.value(QStringLiteral("applied"))!=true||normalization.value(QStringLiteral("applied"))!=true||
+      source.value(QStringLiteral("input_frame")).toString(QStringLiteral("source"))!=QStringLiteral("source")||
+      source.value(QStringLiteral("output_frame")).toString(QStringLiteral("canonical"))!=QStringLiteral("canonical")||
+      normalization.value(QStringLiteral("input_frame")).toString(QStringLiteral("canonical"))!=QStringLiteral("canonical")||
+      normalization.value(QStringLiteral("output_frame")).toString(QStringLiteral("training"))!=QStringLiteral("training")||
+      (source.contains(QStringLiteral("inverse"))&&!validRecordedInverse(source))||
+      (normalization.contains(QStringLiteral("inverse"))&&!validRecordedInverse(normalization)))return fail("camera_scale_invalid_v3_contract");
+  const auto scale=root.value(QStringLiteral("scale")).toObject();
+  const QString status=scale.value(QStringLiteral("status")).toString();
+  const bool known=status!=QStringLiteral("arbitrary");
+  const double meters=scale.value(QStringLiteral("meters_per_unit")).toDouble(-1.);
+  if(!QStringList{QStringLiteral("arbitrary"),QStringLiteral("source_declared"),QStringLiteral("constraint_derived"),QStringLiteral("independently_checked")}.contains(status)||
+      (known&&(!std::isfinite(meters)||meters<=0.||scale.value(QStringLiteral("canonical_unit"))!=QStringLiteral("m")||
+          std::abs(source.value(QStringLiteral("s")).toDouble()-meters)>1e-12*std::abs(meters)))||
+      (!known&&(scale.value(QStringLiteral("meters_per_unit")).isDouble()||unitFromKey(scale.value(QStringLiteral("source_unit")).toString())!=SceneLengthUnit::Unknown||
+          unitFromKey(scale.value(QStringLiteral("canonical_unit")).toString())!=SceneLengthUnit::Unknown)))return fail("camera_scale_conflicting_units");
+  const QString beforeFrame=record.value(QStringLiteral("input_frame")).toString(),beforeUnit=record.value(QStringLiteral("input_unit")).toString();
+  const QString afterFrame=record.value(QStringLiteral("output_frame")).toString(),afterUnit=record.value(QStringLiteral("output_unit")).toString();
+  DisplaySimilarity before,after;
+  if(record.value(QStringLiteral("current_frame"))!=afterFrame||record.value(QStringLiteral("current_unit"))!=afterUnit||
+      record.value(QStringLiteral("transform_applied"))!=true||!frameToCanonical(root,beforeFrame,beforeUnit,before)||
+      !frameToCanonical(root,afterFrame,afterUnit,after))return fail("camera_scale_invalid_current_frame");
+  const auto oldJson=record.value(QStringLiteral("input_canonical_scene_transform")).toObject();
+  const auto newJson=record.value(QStringLiteral("canonical_scene_transform")).toObject();
+  for(const auto &value:{oldJson,newJson})if(!validSimilarity(value)||value.value(QStringLiteral("input_frame"))!=QStringLiteral("canonical")||
+      value.value(QStringLiteral("output_frame"))!=QStringLiteral("canonical")||value.value(QStringLiteral("applied"))!=true)return fail("camera_scale_invalid_scene_history");
+  const auto oldScene=displaySimilarity(oldJson),newScene=displaySimilarity(newJson);
+  auto expectedScene=oldScene;
+  if(record.contains(QStringLiteral("scene_transform"))) {
+    const auto request=record.value(QStringLiteral("scene_transform")).toObject();
+    const auto edit=request.value(QStringLiteral("transform")).toObject();
+    if(request.size()!=4||request.value(QStringLiteral("schema"))!=QStringLiteral("gsw.scene_transform/1")||
+        request.value(QStringLiteral("frame"))!=beforeFrame||request.value(QStringLiteral("unit"))!=beforeUnit||edit.size()!=3||!validSimilarity(edit))return fail("camera_scale_invalid_scene_transform");
+    expectedScene=composeSimilarity(before,composeSimilarity(displaySimilarity(edit),composeSimilarity(inverseSimilarity(before),oldScene)));
+  }
+  if(!similaritiesClose(newScene,expectedScene)||!record.value(QStringLiteral("scene_scale_multiplier")).isDouble()||
+      std::abs(record.value(QStringLiteral("scene_scale_multiplier")).toDouble()-newScene.s)>1e-12*std::abs(newScene.s)||
+      record.value(QStringLiteral("physical_scale_modified"))!=QJsonValue(std::abs(newScene.s-1.)>1e-12)||
+      record.value(QStringLiteral("scale_evidence_scope"))!=QStringLiteral("immutable_training_contract")||
+      record.value(QStringLiteral("scene_edit_independent_validation"))!=false||record.value(QStringLiteral("full_optimizer_state_transformed"))!=false)return fail("camera_scale_invalid_scene_history");
+  const auto applied=record.value(QStringLiteral("applied_transform")).toObject();
+  const auto expected=composeSimilarity(inverseSimilarity(after),composeSimilarity(newScene,composeSimilarity(inverseSimilarity(oldScene),before)));
+  if(!validSimilarity(applied)||applied.value(QStringLiteral("applied"))!=true||applied.value(QStringLiteral("input_frame"))!=beforeFrame||
+      applied.value(QStringLiteral("output_frame"))!=afterFrame||!similaritiesClose(displaySimilarity(applied),expected))return fail("camera_scale_applied_chain_mismatch");
+  RecordedFrameTransforms result;
+  result.currentToCanonical=similarityJson(after);
+  result.trainingToCurrent=similarityJson(composeSimilarity(inverseSimilarity(after),composeSimilarity(newScene,inverseSimilarity(displaySimilarity(normalization)))));
+  result.canonicalSceneTransform=newJson;result.inputCanonicalSceneTransform=oldJson;result.trainingContract=root;
+  result.sceneScaleMultiplier=newScene.s;result.physicalScaleModified=std::abs(newScene.s-1.)>1e-12;
+  return result;
+}
+
+bool validateRecordedExportFiles(const QJsonObject &record,const QString &modelPath,QString *error) {
+  const auto fail=[&](const char *reason){if(error)*error=QString::fromLatin1(reason);return false;};
+  if(error)error->clear();
+  static const QRegularExpression digestPattern(QStringLiteral("^[0-9a-f]{64}$"));
+  const auto digest=[](const QByteArray &bytes){return QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());};
+  const QString modelHash=record.value(QStringLiteral("ply_sha256")).toString();
+  if(!digestPattern.match(modelHash).hasMatch()||fileDigest(modelPath)!=modelHash||record.value(QStringLiteral("output_sha256"))!=modelHash)return fail("camera_model_hash_mismatch");
+  const auto assets=record.value(QStringLiteral("assets")).toArray();
+  const QString assetsHash=record.value(QStringLiteral("assets_sha256")).toString();
+  if(!record.value(QStringLiteral("assets")).isArray()||!digestPattern.match(assetsHash).hasMatch()||
+      digest(QJsonDocument(assets).toJson(QJsonDocument::Compact))!=assetsHash)return fail("camera_assets_manifest_mismatch");
+  const QDir directory=QFileInfo(modelPath).absoluteDir();QSet<QString> paths;
+  for(const auto &value:assets) {
+    const auto asset=value.toObject();const QString relative=asset.value(QStringLiteral("path")).toString();
+    const QString hash=asset.value(QStringLiteral("sha256")).toString();const auto count=asset.value(QStringLiteral("bytes"));
+    const double bytes=count.toDouble(-1.);const QString path=directory.filePath(relative);
+    if(!value.isObject()||asset.size()!=5||asset.value(QStringLiteral("kind"))!=QStringLiteral("texture_file")||
+        !safeAssetReference(relative)||!safeAssetReference(asset.value(QStringLiteral("source_reference")).toString())||paths.contains(relative)||
+        !count.isDouble()||!std::isfinite(bytes)||bytes<0.||std::floor(bytes)!=bytes||bytes>9007199254740991.||
+        !QFileInfo(path).isFile()||QFileInfo(path).size()!=bytes||!digestPattern.match(hash).hasMatch()||fileDigest(path)!=hash)return fail("camera_asset_hash_or_path_mismatch");
+    paths.insert(relative);
+  }
+  // The manifest binds the actual PLY TextureFile sequence, not merely a set
+  // of unrelated valid files next to a model with unverified references.
+  QFile model(modelPath);if(!model.open(QIODevice::ReadOnly))return fail("camera_asset_header_invalid");
+  QStringList textureReferences;bool ended=false;qint64 headerBytes=0;
+  static const QRegularExpression texture(QStringLiteral("^TextureFile\\s+(.+)$"),QRegularExpression::CaseInsensitiveOption);
+  static const QRegularExpression external(QStringLiteral("^(TextureFile|Texture|MaterialFile|MaterialLibrary|mtllib|map_Kd)\\b"),QRegularExpression::CaseInsensitiveOption);
+  while(!model.atEnd()&&headerBytes<=16LL*1024*1024) {
+    const auto line=model.readLine(1024*1024);headerBytes+=line.size();
+    if(line.isEmpty()||headerBytes>16LL*1024*1024||std::any_of(line.cbegin(),line.cend(),[](char c){return static_cast<unsigned char>(c)>=128;}))return fail("camera_asset_header_invalid");
+    const auto text=QString::fromLatin1(line).trimmed();if(text==QStringLiteral("end_header")){ended=true;break;}
+    if(!text.startsWith(QStringLiteral("comment ")))continue;
+    const auto comment=text.mid(8);const auto match=texture.match(comment);
+    if(match.hasMatch())textureReferences.append(match.captured(1).trimmed());
+    else if(external.match(comment).hasMatch())return fail("camera_asset_reference_mismatch");
+  }
+  if(!ended||textureReferences.size()!=assets.size())return fail("camera_asset_reference_mismatch");
+  for(qsizetype index=0;index<assets.size();++index)if(textureReferences[index]!=assets[index].toObject().value(QStringLiteral("path")).toString())return fail("camera_asset_reference_mismatch");
+  const auto reference=record.value(QStringLiteral("camera_reference")).toObject();
+  const QString relative=reference.value(QStringLiteral("path")).toString(),cameraHash=reference.value(QStringLiteral("sha256")).toString();
+  if(!safeAssetReference(relative)||relative.contains('/')||reference.value(QStringLiteral("schema"))!=QStringLiteral("gsw.model_cameras/1")||
+      !digestPattern.match(cameraHash).hasMatch()||fileDigest(directory.filePath(relative))!=cameraHash)return fail("camera_reference_hash_mismatch");
+  const QJsonObject binding{{QStringLiteral("assets_sha256"),assetsHash},{QStringLiteral("camera_sha256"),cameraHash},
+      {QStringLiteral("coordinate_frame"),record.value(QStringLiteral("current_frame"))},
+      {QStringLiteral("coordinate_unit"),record.value(QStringLiteral("current_unit"))},
+      {QStringLiteral("input_data_identity"),record.value(QStringLiteral("input_data_identity"))},{QStringLiteral("model_sha256"),modelHash}};
+  if(record.value(QStringLiteral("bundle_sha256"))!=digest(QJsonDocument(binding).toJson(QJsonDocument::Compact)))return fail("camera_bundle_binding_mismatch");
+  return true;
+}
 
 bool SceneCoordinate3D::isFinite() const {
   return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
@@ -728,6 +947,7 @@ SceneCoordinate3D SceneDisplayMapping::mapCoordinate(const SceneCoordinate3D &va
 }
 
 QString sceneLengthUnitDescription(const SceneCoordinateInfo &coordinates) {
+  const auto base=[&]() -> QString {
   if (coordinates.metersPerCoordinate && sceneMetresPerCoordinate(coordinates)) {
     QString status = QCoreApplication::translate("Workbench", "来源声明（不是独立检核）");
     if (coordinates.scaleStatus == QStringLiteral("constraint_derived"))
@@ -741,6 +961,13 @@ QString sceneLengthUnitDescription(const SceneCoordinateInfo &coordinates) {
     return QCoreApplication::translate("Workbench", "未声明（原始单位 u）");
   }
   return sceneLengthUnitSymbol(coordinates.unit);
+  };
+  QString result=base();
+  const auto edit=coordinates.provenance.value(QStringLiteral("canonical_scene_transform")).toObject();
+  if(validSimilarity(edit)&&!similaritiesClose(displaySimilarity(edit),DisplaySimilarity{}))
+    result+=QLatin1Char('\n')+QCoreApplication::translate("Workbench", "已应用用户场景编辑（尺度倍率 %1）；原尺度证据仅适用于未编辑的训练合同，不代表编辑后模型的独立精度。")
+        .arg(conciseNumber(edit.value(QStringLiteral("s")).toDouble()));
+  return result;
 }
 
 std::optional<double> sceneMetresPerCoordinate(const SceneCoordinateInfo &coordinates) {

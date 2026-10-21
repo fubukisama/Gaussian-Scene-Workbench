@@ -1,6 +1,7 @@
 #include "ModelExportDialog.h"
 #include "AppLanguage.h"
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -20,6 +21,7 @@ namespace gsw {
 ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh, bool gaussian,
     const QStringList &protectedPaths, QWidget *parent)
     : QDialog(parent), mSource(source), mGaussian(gaussian), mProtectedPaths(protectedPaths) {
+  mSource.recordedRepresentation=gaussian?QStringLiteral("gaussian"):mesh?QStringLiteral("mesh"):QStringLiteral("point_cloud");
   setObjectName(QStringLiteral("modelExportDialog"));
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("导出模型"));
   setMinimumSize(320, 220);
@@ -70,21 +72,29 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   AppLanguage::bindComboItem(mCoordinates, 1, AppLanguage::source("场景坐标（应用位移、旋转、缩放）"));
   mRecovery = cameraScaleRecoveryCapability(source.sourcePath);
   const auto &recovery = mRecovery;
-  if (gaussian && recovery.preserve && recovery.currentFrame != QStringLiteral("training"))
+  if (recovery.preserve && recovery.currentFrame != QStringLiteral("training"))
     AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("当前文件坐标（保留尺度与来源记录）"));
-  if (gaussian && recovery.source) {
-    if (recovery.currentFrame == QStringLiteral("training"))
+  if (recovery.source) {
+    if (gaussian && recovery.currentFrame == QStringLiteral("training"))
       AppLanguage::bindComboItem(mCoordinates, 0, AppLanguage::source("训练输出坐标（保留高斯原属性）"));
     mCoordinates->addItem(QString(), QVariant(QStringLiteral("source")));
-    AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复来源坐标与单位（另存高斯 PLY）"));
+    AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复来源坐标与单位（另存 PLY）"));
+    mCoordinates->addItem(QString(),QVariant(QStringLiteral("canonical")));
+    AppLanguage::bindComboItem(mCoordinates,mCoordinates->count()-1,AppLanguage::source("恢复规范坐标（另存 PLY）"));
+    mCoordinates->addItem(QString(),QVariant(QStringLiteral("training")));
+    AppLanguage::bindComboItem(mCoordinates,mCoordinates->count()-1,AppLanguage::source("恢复训练坐标（另存 PLY）"));
     if (recovery.metric) {
       mCoordinates->addItem(QString(), QVariant(QStringLiteral("metric")));
-      AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复为米制规范坐标（另存高斯 PLY）"));
+      AppLanguage::bindComboItem(mCoordinates, mCoordinates->count() - 1, AppLanguage::source("恢复为米制规范坐标（另存 PLY）"));
     }
   }
-  mCoordinates->setCurrentIndex(gaussian && recovery.metric
-      ? mCoordinates->findData(QStringLiteral("metric")) : gaussian ? 0 : 1);
+  mCoordinates->setCurrentIndex(recovery.metric
+      ? mCoordinates->findData(QStringLiteral("metric")) : recovery.preserve||gaussian ? 0 : 1);
   form->addRow(AppLanguage::text(new QLabel(this), AppLanguage::source("导出坐标")), mCoordinates);
+  mBakeSceneTransform=new QCheckBox(this);mBakeSceneTransform->setObjectName(QStringLiteral("modelExportBakeSceneTransform"));
+  AppLanguage::bind(mBakeSceneTransform,"text",AppLanguage::source("同时应用当前模型的场景变换"));
+  AppLanguage::bind(mBakeSceneTransform,"toolTip",AppLanguage::source("先在当前文件框架应用位移、旋转与等比缩放，再恢复目标框架。镜像和非等比缩放会被拒绝；不会变换完整优化器检查点。"));
+  mBakeSceneTransform->setChecked(source.applyTransform);form->addRow(QString(),mBakeSceneTransform);
   mOutputUnit = new QComboBox(this);
   mOutputUnit->setObjectName(QStringLiteral("modelExportOutputUnit"));
   mOutputUnit->addItem({},QString());
@@ -165,6 +175,7 @@ ModelExportDialog::ModelExportDialog(const ModelExportOptions &source, bool mesh
   });
   connect(mCoordinates, &QComboBox::currentIndexChanged, this, [this] { refreshDescription(); });
   connect(mOutputUnit, &QComboBox::currentIndexChanged, this, [this] { refreshDescription(); });
+  connect(mBakeSceneTransform,&QCheckBox::toggled,this,[this]{refreshDescription();});
   AppLanguage::onChanged(this, [this] { refreshDescription(); });
   refreshDescription();
 }
@@ -173,10 +184,11 @@ ModelExportOptions ModelExportDialog::options() const {
   auto result = mSource;
   result.format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
   result.destinationPath = mPath->text();
-  result.applyTransform = mCoordinates->currentIndex() == 1;
+  const bool recordedPly=result.format==ModelExportFormat::Ply&&mRecovery.preserve;
+  result.applyTransform = recordedPly?mBakeSceneTransform->isChecked():mCoordinates->currentIndex() == 1;
   result.cameraCoordinateRecovery = result.format == ModelExportFormat::Ply && mCoordinates->currentIndex() >= 2
       ? mCoordinates->currentData().toString() : QString();
-  if (mGaussian && result.format == ModelExportFormat::Ply && mCoordinates->currentIndex() == 0) {
+  if (recordedPly && mCoordinates->currentIndex() == 0) {
     if (mRecovery.preserve) result.cameraCoordinateRecovery = QStringLiteral("preserve");
   }
   result.cameraOutputUnit = mOutputUnit->isEnabled() ? mOutputUnit->currentData().toString() : QString();
@@ -189,26 +201,31 @@ ModelExportOptions ModelExportDialog::options() const {
 void ModelExportDialog::refreshDescription() {
   const auto format = static_cast<ModelExportFormat>(mFormat->currentData().toInt());
   const bool gaussianPly = mGaussian && format == ModelExportFormat::Ply;
+  const bool recordedPly=format==ModelExportFormat::Ply&&mRecovery.preserve;
   const bool spz = format == ModelExportFormat::Spz;
   mSpzOptions->setVisible(spz);
   const bool recoveryAvailable = mRecovery.source;
   mCoordinates->setEnabled(!spz && (!gaussianPly || recoveryAvailable));
-  if (spz || (gaussianPly && mCoordinates->currentIndex() == 1) || (!gaussianPly && mCoordinates->currentIndex() >= 2))
+  if (spz || ((gaussianPly||recordedPly) && mCoordinates->currentIndex() == 1) || (!recordedPly && mCoordinates->currentIndex() >= 2))
     mCoordinates->setCurrentIndex(0);
   if (auto *model = qobject_cast<QStandardItemModel *>(mCoordinates->model())) {
-    if (model->item(1)) model->item(1)->setEnabled(!gaussianPly && !spz);
+    if (model->item(1)) model->item(1)->setEnabled(!gaussianPly && !recordedPly && !spz);
     for (int index = 2; index < mCoordinates->count(); ++index)
-      if (model->item(index)) model->item(index)->setEnabled(gaussianPly);
+      if (model->item(index)) model->item(index)->setEnabled(recordedPly);
   }
-  mOutputUnit->setEnabled(format==ModelExportFormat::Ply && mRecovery.metric && mCoordinates->currentIndex()>=2);
+  mBakeSceneTransform->setVisible(recordedPly);mBakeSceneTransform->setEnabled(recordedPly);
+  mOutputUnit->setEnabled(recordedPly && mRecovery.metric);
   const QString mode=mCoordinates->currentData().toString();
+  const QString outputFrame=mode==QStringLiteral("metric")||mode==QStringLiteral("canonical")?QStringLiteral("canonical"):
+      mode.isEmpty()||mode==QStringLiteral("preserve")?mRecovery.currentFrame:mode;
+  const QString defaultUnit=mode==QStringLiteral("source")?mRecovery.sourceUnit:mode==QStringLiteral("training")?QStringLiteral("training"):
+      outputFrame==QStringLiteral("canonical")?(mRecovery.metric?QStringLiteral("m"):QStringLiteral("unknown")):mRecovery.currentUnit;
   mCoordinateInfo->setText(QCoreApplication::translate("Workbench", "当前文件：%1 · %2\n输出：%3 · %4\n尺度来源：%5（坐标转换不代表独立精度验证）")
       .arg(mRecovery.currentFrame.isEmpty()?QStringLiteral("unknown"):mRecovery.currentFrame,
            mRecovery.currentUnit.isEmpty()?QStringLiteral("unknown"):mRecovery.currentUnit,
-           mode.isEmpty()?mRecovery.currentFrame:mode,
+           outputFrame,
            mOutputUnit->isEnabled() && !mOutputUnit->currentData().toString().isEmpty()
-               ? mOutputUnit->currentData().toString() : mode==QStringLiteral("metric")?QStringLiteral("m"):
-                 mode==QStringLiteral("source")?mRecovery.sourceUnit:mRecovery.currentUnit,
+               ? mOutputUnit->currentData().toString() : defaultUnit,
            mRecovery.scaleStatus.isEmpty()?QStringLiteral("unknown"):mRecovery.scaleStatus));
   QString description;
   switch (format) {
@@ -226,12 +243,12 @@ void ModelExportDialog::refreshDescription() {
   case ModelExportFormat::Csv:
     description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性。"); break;
   }
-  if (!gaussianPly && !spz) {
+  if (!gaussianPly && !recordedPly && !spz) {
     description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
         "原始坐标保留源单位；场景坐标应用模型变换，并在源单位与场景参考单位均已声明时换算到场景参考单位。单位未知时保留数值，不猜测物理比例。GLB 随后按格式约定转换为米制。");
   }
-  if (gaussianPly && mCoordinates->currentIndex() >= 2) {
-    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "按已验证的相机尺度记录恢复高斯中心、尺寸与协方差，并保留来源证据。仅支持正相似变换；方向相关球谐的旋转尚不支持时会拒绝。不会修改原训练模型，也不会叠加当前场景变换。");
+  if (recordedPly) {
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "共享 PLY 路线保留点、网格或高斯属性，并将模型、相机、裁剪和资源绑定到同一变换记录。场景编辑另存，不会修改原始模型或完整检查点；用户缩放不是独立尺度检核。");
   } else if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
       ? QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.")
       : QCoreApplication::translate("Workbench", "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。"));
@@ -255,8 +272,9 @@ void ModelExportDialog::confirmExport() {
   mPath->setText(path);
   const QFileInfo target(path);
   if (format == ModelExportFormat::Ply && (mCoordinates->currentIndex() >= 2 ||
-      (mGaussian && mRecovery.preserve)) &&
-      (target.exists() || QFileInfo::exists(cameraScaleMetadataPath(path)))) {
+      mRecovery.preserve) &&
+      (target.exists() || QFileInfo::exists(cameraScaleMetadataPath(path)) ||
+       QFileInfo::exists(target.dir().filePath(target.completeBaseName()+QStringLiteral(".cameras.json"))))) {
     QMessageBox::warning(this, QCoreApplication::translate("Workbench", "无法导出模型"),
         QCoreApplication::translate("Workbench", "坐标恢复必须另存为新文件，不能覆盖已有模型或尺度记录。"));
     return;

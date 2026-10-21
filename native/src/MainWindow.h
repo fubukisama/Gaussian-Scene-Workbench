@@ -218,6 +218,7 @@ private:
                                   const QString &inputIdentity, const QString &projectRoot);
   void showTrainingBatch();
   void startTrainingBatch(const QString &planPath, bool resume);
+  void observeTrainingBatch(const QString &planPath);
   void resumeGenerationExperiment(const QString &id);
   bool retainGenerationExperiment(const GenerationExperiment &experiment);
   void updateGenerationExperiment(const QString &projectRoot, const QString &id,
