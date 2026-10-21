@@ -11,7 +11,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
     def test_unexpected_export_exception_preserves_optimizer_completion_and_raw_model(self):
         from unittest.mock import patch
         from native.worker.gsw_worker import publish_training_delivery
-        base=Path('D:/Apps/GSW/validation/runtime-decoupling-oct21/tmp');base.mkdir(parents=True,exist_ok=True)
+        base=Path(tempfile.gettempdir())/'gsw-runtime-delivery-tests';base.mkdir(parents=True,exist_ok=True)
         for failure in (RuntimeError('owned export failure'), MemoryError('owned allocation failure')):
             with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory(dir=base) as temporary:
                 output=Path(temporary);point=output/'point_cloud/iteration_4';point.mkdir(parents=True)
@@ -32,7 +32,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         import subprocess
         import sys
         root=Path(__file__).resolve().parents[2]
-        base=Path('D:/Apps/GSW/validation/runtime-decoupling-oct21/tmp');base.mkdir(parents=True,exist_ok=True)
+        base=Path(tempfile.gettempdir())/'gsw-runtime-delivery-tests';base.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as temporary:
             directory=Path(temporary);store=directory/'jobs';store.mkdir()
             target=directory/'output/owned'
@@ -94,7 +94,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
 
     def test_export_failure_does_not_reclassify_training_or_modify_internal_result(self):
         from native.worker.gsw_worker import publish_training_delivery
-        base=Path('D:/Apps/GSW/validation/runtime-decoupling-oct21/tmp');base.mkdir(parents=True,exist_ok=True)
+        base=Path(tempfile.gettempdir())/'gsw-runtime-delivery-tests';base.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as temporary:
             output=Path(temporary);point=output/'point_cloud/iteration_4';point.mkdir(parents=True)
             source=point/'point_cloud.ply';source.write_bytes(b'invalid model stays intact')
