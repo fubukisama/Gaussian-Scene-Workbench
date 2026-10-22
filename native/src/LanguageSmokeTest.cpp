@@ -976,22 +976,31 @@ bool runLanguageSmokeTest(MainWindow &window) {
     backendCombo->setCurrentIndex(0);
   }
   auto *qualityCombo = training.findChild<QComboBox *>(QStringLiteral("trainingQualityCombo"));
+  auto *applyQualityPreset = training.findChild<QPushButton *>(QStringLiteral("trainingApplyQualityPreset"));
   auto *resolutionCombo = training.findChild<QComboBox *>(QStringLiteral("trainingResolutionCombo"));
   auto *iterationsSpin = training.findChild<QSpinBox *>(QStringLiteral("trainingIterationsSpinBox"));
   auto *resolutionHint = training.findChild<QLabel *>(QStringLiteral("trainingResolutionHint"));
-  check(qualityCombo && qualityCombo->count() == 5 && resolutionCombo && iterationsSpin && resolutionHint,
+  check(qualityCombo && qualityCombo->count() == 5 && applyQualityPreset && resolutionCombo && iterationsSpin && resolutionHint,
         "all five presets and original-resolution controls available");
-  if (backendCombo && qualityCombo && resolutionCombo && iterationsSpin) {
+  if (backendCombo && qualityCombo && applyQualityPreset && resolutionCombo && iterationsSpin) {
     for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
       backendCombo->setCurrentIndex(backendCombo->findData(backend));
       for (const QString &quality : {QStringLiteral("full"), QStringLiteral("quality"),
                                      QStringLiteral("max_quality"), QStringLiteral("original_quality"), QStringLiteral("quick")}) {
+        const auto beforePendingPreset = training.configuration();
         qualityCombo->setCurrentIndex(qualityCombo->findData(quality));
+        const auto pendingPreset = training.configuration();
+        check(pendingPreset.quality == beforePendingPreset.quality &&
+              pendingPreset.iterations == beforePendingPreset.iterations &&
+              pendingPreset.resolution == beforePendingPreset.resolution,
+              "pending preset selection preserves applied profile and manual values");
+        applyQualityPreset->click();
         const int expectedIterations = quality == QStringLiteral("quick") ? 10000 : 30000;
         const int expectedResolution = quality == QStringLiteral("full") ? 8 :
             quality == QStringLiteral("quality") ? 4 :
             quality == QStringLiteral("original_quality") ? 1 : 2;
-        check(training.configuration().iterations == expectedIterations &&
+        check(training.configuration().quality == quality &&
+              training.configuration().iterations == expectedIterations &&
               training.configuration().resolution == expectedResolution,
               "UI/backend preset resolution and iteration parity");
         if (resolutionHint) check(resolutionHint->isHidden() == (expectedResolution != 1),
@@ -1000,6 +1009,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     }
     backendCombo->setCurrentIndex(0);
     qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("original_quality")));
+    applyQualityPreset->click();
     resolutionCombo->setCurrentIndex(resolutionCombo->findData(1));
   }
   DatasetImportDialog import({}, name, {}, QCoreApplication::applicationDirPath(), true, &window);
@@ -2048,7 +2058,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
       backendCombo->setCurrentIndex(1);
       backendCombo->setCurrentIndex(0);
     }
-    if (qualityCombo) qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("quick")));
+    if (qualityCombo && applyQualityPreset) {
+      qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("quick")));
+      applyQualityPreset->click();
+    }
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.configuration().iterations == 10000 && training.configuration().resolution == 2,
           "3DGS displayed preview values match backend defaults");
@@ -2056,8 +2069,9 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (backendCombo) backendCombo->setCurrentIndex(1);
     training.show(); training.adjustSize(); QApplication::processEvents();
     check(training.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-training.png"))), "training capabilities screenshot");
-    if (backendCombo && qualityCombo) {
+    if (backendCombo && qualityCombo && applyQualityPreset) {
       qualityCombo->setCurrentIndex(qualityCombo->findData(QStringLiteral("original_quality")));
+      applyQualityPreset->click();
       for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
         backendCombo->setCurrentIndex(backendCombo->findData(backend));
         training.adjustSize(); QApplication::processEvents();

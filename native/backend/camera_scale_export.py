@@ -1103,6 +1103,11 @@ def deliver_training_result(input_ply, output_directory, sidecar=None, cancelled
 
 
 def main(argv=None):
+    # Qt consumes UTF-8 protocol bytes, not the parent's Windows console code
+    # page or PYTHONIOENCODING override, including error/argument diagnostics.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="strict")
     parser = argparse.ArgumentParser(description="Restore recorded native Gaussian coordinates without changing the training PLY")
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)

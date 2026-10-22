@@ -201,12 +201,15 @@ Footprint footprint(const QImage &image, bool cyan, bool fullWidth = false,
       const bool colorContrast = allowPastels
           ? c.blue() > rejected + 20 && other > rejected + 20
           : c.blue() > rejected * 2 && other > rejected * 2;
-      // One-pixel GL points are multisampled over the already drawn grid.
-      // A red/green axis in the background changes the surviving channels by
-      // different amounts: equal source R/B (or G/B) need not stay equal in
-      // the captured framebuffer. Require both marker channels to contrast
-      // against the rejected channel; single colored axes/gray cannot pass.
-      const bool sourceChannelBalance = allowPastels || std::abs(c.blue() - other) < 20;
+      // One-pixel GL points blend with the already drawn grid, so their two
+      // surviving marker channels need not be equal. Keep their contrasts
+      // within a factor of two: Blender's red/pink or blue axis ink alone
+      // must not become magenta/cyan model coverage.
+      const int blueContrast = c.blue() - rejected;
+      const int otherContrast = other - rejected;
+      const bool sourceChannelBalance = allowPastels
+          ? blueContrast * 2 > otherContrast && otherContrast * 2 > blueContrast
+          : std::abs(c.blue() - other) < 20;
       if (c.blue() > 60 && other > 60 && sourceChannelBalance && colorContrast) {
         result.center += QPointF(x, y);
         result.bounds = result.pixels == 0 ? QRect(x, y, 1, 1)
@@ -265,6 +268,8 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
   coverageOracle.setPixelColor(451, 200, QColor(21,221,21));
   coverageOracle.setPixelColor(452, 200, QColor(21,21,221));
   coverageOracle.setPixelColor(453, 200, QColor(130,130,130));
+  // Captured Blender X-axis coverage is not a magenta point marker.
+  coverageOracle.setPixelColor(454, 200, QColor(184,40,62));
   const auto magentaCoverage = footprint(coverageOracle, false, false, true);
   const auto cyanCoverage = footprint(coverageOracle, true, false, true);
   check(magentaCoverage.pixels == 4 && magentaCoverage.bounds == QRect(200,200,21,21) &&

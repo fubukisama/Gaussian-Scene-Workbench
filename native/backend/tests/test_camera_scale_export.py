@@ -64,6 +64,19 @@ class CameraScaleExportTests(unittest.TestCase):
         sidecar.write_text(json.dumps(metadata), encoding="utf-8")
         return path, vertices, metadata
 
+    def run_cli_with_legacy_encoding(self, arguments, encoding):
+        environment = os.environ.copy()
+        environment["PYTHONIOENCODING"] = encoding
+        environment["PYTHONUTF8"] = "0"
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run([sys.executable, "-B", "-m", "native.backend.camera_scale_export", *arguments],
+            cwd=str(Path(__file__).resolve().parents[3]), env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        # Decode the actual protocol bytes, never the inherited console code
+        # page or a replacement-error decoder that could hide corrupt paths.
+        return result, result.stdout.decode("utf-8", errors="strict"), result.stderr.decode("utf-8", errors="strict")
+
     def test_source_export_restores_xyz_log_scales_and_covariance_together_for_both_backends(self):
         for backend in ("3dgs", "2dgs"):
             with self.subTest(backend=backend):
@@ -397,6 +410,67 @@ class CameraScaleExportTests(unittest.TestCase):
         self.assertTrue(report["success"])
         self.assertEqual(report["output_unit"], "m")
         self.assertEqual(report["ply_sha256"], hashlib.sha256(destination.read_bytes()).hexdigest())
+
+    def test_public_cli_uses_utf8_for_both_backends_under_legacy_stream_encodings(self):
+        for backend in ("3dgs", "2dgs"):
+            original, _, _ = self.fixture(backend)
+            source = self.root / ("入力 原本 🌏-" + backend + ".ply")
+            original.rename(source)
+            original.with_suffix(".camera-scale.json").rename(source.with_suffix(".camera-scale.json"))
+            source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+            for encoding in ("cp932", "cp1252"):
+                with self.subTest(backend=backend, encoding=encoding):
+                    destination = self.root / ("尺度 復元 🌏-" + backend + "-" + encoding + ".ply")
+                    result, stdout, stderr = self.run_cli_with_legacy_encoding([
+                        "--input", str(source), "--output", str(destination),
+                        "--coordinates", "metric", "--progress-json"], encoding)
+                    self.assertEqual(result.returncode, 0, stdout + stderr)
+                    lines = stdout.splitlines()
+                    self.assertTrue(any(line.startswith("[gsw-coordinate-export-progress] ") for line in lines))
+                    report = json.loads(lines[-1])
+                    self.assertTrue(report["success"])
+                    self.assertIn("🌏", stdout)
+                    self.assertEqual(report["training_contract"]["backend"], backend)
+                    self.assertEqual(report["representation"], "2dgs_surfel_gaussian" if backend == "2dgs" else "3dgs_gaussian")
+                    self.assertEqual(report["output_unit"], "m")
+                    self.assertEqual(report["ply_sha256"], hashlib.sha256(destination.read_bytes()).hexdigest())
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), source_hash)
+
+    def test_public_cli_error_json_preserves_unicode_under_legacy_stream_encodings(self):
+        for backend in ("3dgs", "2dgs"):
+            source, _, _ = self.fixture(backend)
+            source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+            for encoding in ("cp932", "cp1252"):
+                with self.subTest(backend=backend, encoding=encoding):
+                    invalid_metadata = self.root / ("重複 メタデータ 🌏-" + backend + "-" + encoding + ".json")
+                    duplicate_key = "重複したキー 🌏"
+                    invalid_metadata.write_text(json.dumps({duplicate_key: 1}, ensure_ascii=False)[:-1] +
+                        "," + json.dumps(duplicate_key, ensure_ascii=False) + ":2}", encoding="utf-8")
+                    destination = self.root / ("未生成 🌏-" + backend + "-" + encoding + ".ply")
+                    result, stdout, stderr = self.run_cli_with_legacy_encoding([
+                        "--input", str(source), "--output", str(destination),
+                        "--coordinates", "metric", "--metadata", str(invalid_metadata)], encoding)
+                    self.assertEqual(result.returncode, 2, stdout + stderr)
+                    report = json.loads(stdout)
+                    self.assertFalse(report["success"])
+                    self.assertEqual(report["code"], "camera_scale_export_duplicate_metadata_key")
+                    self.assertIn(duplicate_key, report["detail"])
+                    self.assertIn("🌏", stdout)
+                    self.assertNotIn("Traceback", stderr)
+                    self.assertFalse(destination.exists())
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), source_hash)
+
+    def test_public_cli_argument_errors_use_utf8_stderr_under_legacy_stream_encodings(self):
+        for encoding in ("cp932", "cp1252"):
+            with self.subTest(encoding=encoding):
+                unknown_argument = "--不明な引数-🌏"
+                result, stdout, stderr = self.run_cli_with_legacy_encoding([
+                    "--input", "unused.ply", "--output", "unused-output.ply",
+                    "--coordinates", "metric", unknown_argument], encoding)
+                self.assertEqual(result.returncode, 2, stdout + stderr)
+                self.assertEqual(stdout, "")
+                self.assertIn(unknown_argument, stderr)
+                self.assertNotIn("Traceback", stderr)
 
     def test_training_coordinate_subset_retains_training_chain_and_updates_model_hash(self):
         source, vertices, original_contract = self.fixture()

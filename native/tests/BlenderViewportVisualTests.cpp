@@ -16,6 +16,7 @@
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QScopeGuard>
+#include <QStorageInfo>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QWheelEvent>
@@ -41,20 +42,84 @@ void processFrames(const int milliseconds) {
 bool saveEvidence(const QImage &frame, const QString &name) {
   const QString configured = qEnvironmentVariable("GSW_BLENDER_VIEWPORT_EVIDENCE");
   if (configured.isEmpty()) return true;
+  if (!QDir::isAbsolutePath(configured)) {
+    qCritical() << "Viewport evidence requires an absolute directory:" << configured;
+    return false;
+  }
   const QString directory = QDir::cleanPath(QFileInfo(configured).absoluteFilePath());
-  if (!directory.startsWith(QStringLiteral("D:/"), Qt::CaseInsensitive)) {
-    qCritical() << "Viewport evidence must remain on D:" << directory;
+#ifdef Q_OS_WIN
+  const auto localRoot = [](const QString &path) {
+    const QString normalized = QDir::fromNativeSeparators(path);
+    if (normalized.size() >= 3 && normalized.at(0).toUpper() >= QLatin1Char('A') &&
+        normalized.at(0).toUpper() <= QLatin1Char('Z') && normalized.at(1) == QLatin1Char(':') &&
+        normalized.at(2) == QLatin1Char('/')) {
+      const QString canonical = QFileInfo(normalized.left(3)).canonicalFilePath();
+      if (canonical.size() >= 3 && canonical.at(1) == QLatin1Char(':') &&
+          canonical.at(2) == QLatin1Char('/')) return canonical;
+    }
+    return QString();
+  };
+  const QString root = localRoot(directory);
+  if (root.isEmpty()) {
+    qCritical() << "Viewport evidence requires a local drive directory:" << directory;
     return false;
   }
+  QString systemRoot = localRoot(qEnvironmentVariable("SystemRoot"));
+  if (systemRoot.isEmpty()) systemRoot = localRoot(qEnvironmentVariable("SystemDrive") + QLatin1Char('/'));
+  if (systemRoot.isEmpty()) {
+    wchar_t windowsDirectory[MAX_PATH + 1]{};
+    const UINT length = GetWindowsDirectoryW(windowsDirectory, MAX_PATH + 1);
+    if (length > 0 && length <= MAX_PATH)
+      systemRoot = localRoot(QString::fromWCharArray(windowsDirectory, static_cast<int>(length)));
+  }
+  if (systemRoot.isEmpty()) {
+    qCritical() << "Unable to identify the system volume for viewport evidence";
+    return false;
+  }
+  if (root.left(3).compare(systemRoot.left(3), Qt::CaseInsensitive) == 0) {
+    const auto volumes = QStorageInfo::mountedVolumes();
+    const bool alternative = std::any_of(volumes.cbegin(), volumes.cend(), [&](const QStorageInfo &volume) {
+      if (!volume.isValid() || !volume.isReady() || volume.isReadOnly()) return false;
+      const QString mountedRoot = localRoot(volume.rootPath());
+      return !mountedRoot.isEmpty() &&
+             mountedRoot.left(3).compare(systemRoot.left(3), Qt::CaseInsensitive) != 0 &&
+             QFileInfo(volume.rootPath()).isWritable();
+    });
+    if (alternative) {
+      qCritical() << "Viewport evidence requires an available writable non-system volume:" << directory;
+      return false;
+    }
+  }
+  const auto allowedCanonicalPath = [&root](const QFileInfo &info) {
+    const QString canonical = info.canonicalFilePath();
+    return root.size() >= 3 && root.at(1) == QLatin1Char(':') && root.at(2) == QLatin1Char('/') &&
+           !canonical.isEmpty() &&
+           (canonical.compare(root, Qt::CaseInsensitive) == 0 ||
+            canonical.startsWith(root.endsWith(QLatin1Char('/')) ? root : root + QLatin1Char('/'),
+                                 Qt::CaseInsensitive));
+  };
+#else
+  const auto allowedCanonicalPath = [](const QFileInfo &info) {
+    return !info.canonicalFilePath().isEmpty();
+  };
+#endif
   QFileInfo ancestor(directory);
-  while (!ancestor.exists()) ancestor.setFile(ancestor.absolutePath());
-  if (!ancestor.canonicalFilePath().startsWith(QStringLiteral("D:/"),
-                                               Qt::CaseInsensitive) ||
-      !QDir().mkpath(directory)) {
-    qCritical() << "Unable to create safe D: viewport evidence directory";
+  while (!ancestor.exists()) {
+    const QString parent = ancestor.absolutePath();
+    if (parent == ancestor.absoluteFilePath()) break;
+    ancestor.setFile(parent);
+  }
+  if (!ancestor.isDir() || !allowedCanonicalPath(ancestor) || !QDir().mkpath(directory) ||
+      !allowedCanonicalPath(QFileInfo(directory))) {
+    qCritical() << "Unable to create safe viewport evidence directory:" << directory;
     return false;
   }
-  return frame.save(QDir(directory).filePath(name + QStringLiteral(".png")));
+  const QString output = QDir(directory).filePath(name + QStringLiteral(".png"));
+  if (!frame.save(output)) {
+    qCritical() << "Unable to write viewport evidence image:" << output;
+    return false;
+  }
+  return true;
 }
 
 void clickViewport(NativeViewport &viewport, const QPointF &position) {
