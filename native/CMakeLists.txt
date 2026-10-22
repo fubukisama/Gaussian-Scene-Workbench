@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.6
+  VERSION 0.3.7
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-10-21" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-22" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -259,6 +259,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ScreenSpaceSelection.h
   src/TrainingDialog.cpp
   src/TrainingDialog.h
+  src/TrainingRequestStore.cpp
+  src/TrainingRequestStore.h
   src/RuntimeGuardDialog.cpp
   src/RuntimeGuardDialog.h
   src/ExistingTrainingDialog.cpp
@@ -403,6 +405,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/trace_native_ci_build.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_trace_native_ci_build.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_texture_text_masks.py"
@@ -423,6 +427,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DEST
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_PERFORMANCE.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/RUNTIME_DECOUPLING.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/RUNTIME_DECOUPLING.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/ACCEPTANCE_FOLLOWUP.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/ACCEPTANCE_FOLLOWUP.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WORKSPACE_DROP.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/TRAINING_QUALITY.md" DESTINATION .)
@@ -497,6 +503,13 @@ if(BUILD_TESTING)
     native.worker.test_mesh_generation)
   set_tests_properties(native_camera_scale_p0 PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120)
+  add_test(NAME native_camera_path_safety COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.worker.test_camera_admission_paths native.worker.test_colmap_path_budget
+    native.worker.test_solve_output_publication
+    native.backend.tests.test_camera_training_job)
+  set_tests_properties(native_camera_path_safety PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120
+    ENVIRONMENT "GSW_PATH_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/path-safety-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8")
   add_test(NAME native_camera_scale_p1 COMMAND "${Python3_EXECUTABLE}" -B -m unittest
     native.backend.tests.test_atomic_file
     native.backend.tests.test_camera_identity_portability
@@ -582,6 +595,64 @@ if(BUILD_TESTING)
   set_tests_properties(native_mesh_geometry_dialog_ui PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_executable(gsw_training_request_store_tests tests/TrainingRequestStoreTests.cpp
+    src/TrainingRequestStore.cpp src/TrainingRequestStore.h)
+  target_include_directories(gsw_training_request_store_tests PRIVATE src)
+  target_link_libraries(gsw_training_request_store_tests PRIVATE Qt6::Core)
+  if(MSVC)
+    target_compile_options(gsw_training_request_store_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_training_request_store COMMAND gsw_training_request_store_tests)
+  set_tests_properties(native_training_request_store PROPERTIES TIMEOUT 30
+    ENVIRONMENT "GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/preset-test-data"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_executable(gsw_path_handoff_tests tests/PathHandoffTests.cpp)
+  target_link_libraries(gsw_path_handoff_tests PRIVATE Qt6::Core Qt6::Gui)
+  if(MSVC)
+    target_compile_options(gsw_path_handoff_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  set(GSW_TEST_COLMAP_EXECUTABLE "" CACHE FILEPATH "Actual COLMAP for explicit local CPU path handoff acceptance")
+  if(GSW_TEST_COLMAP_EXECUTABLE)
+    if(NOT EXISTS "${GSW_TEST_COLMAP_EXECUTABLE}")
+      message(FATAL_ERROR "GSW_TEST_COLMAP_EXECUTABLE must name an existing executable")
+    endif()
+    add_test(NAME native_path_handoff_actual_colmap COMMAND gsw_path_handoff_tests
+      "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}" "${GSW_TEST_COLMAP_EXECUTABLE}"
+      "${CMAKE_CURRENT_BINARY_DIR}/path-handoff-data")
+    set_tests_properties(native_path_handoff_actual_colmap PROPERTIES TIMEOUT 90
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+  # Exercise preset ownership through actual controls without a MainWindow,
+  # user settings, a visible window, or a training process.
+  qt_add_executable(gsw_training_preset_ui_tests tests/TrainingPresetUiTests.cpp
+    src/TrainingDialog.cpp src/TrainingDialog.h
+    src/TrainingRequestStore.cpp src/TrainingRequestStore.h
+    src/TrainingInputSummary.cpp src/TrainingInputSummary.h
+    src/TrainingReconstructionSummary.cpp src/TrainingReconstructionSummary.h
+    src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h src/ColmapSupport.cpp src/ColmapSupport.h
+    src/InitializationDialog.cpp src/InitializationDialog.h
+    src/InitializationEditor.cpp src/InitializationEditor.h
+    src/InitializationPreview.cpp src/InitializationPreview.h
+    src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
+  target_include_directories(gsw_training_preset_ui_tests PRIVATE src)
+  target_link_libraries(gsw_training_preset_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
+  qt_add_resources(gsw_training_preset_ui_tests "training_preset_languages"
+    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  foreach(language zh_CN ja)
+    qt_add_resources(gsw_training_preset_ui_tests "training_preset_qtbase_${language}"
+      PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+  endforeach()
+  if(MSVC)
+    target_compile_options(gsw_training_preset_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  foreach(locale zh_CN en_US ja_JP)
+    add_test(NAME native_training_preset_${locale} COMMAND gsw_training_preset_ui_tests
+      "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}" "${locale}")
+    set_tests_properties(native_training_preset_${locale} PROPERTIES TIMEOUT 90
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/preset-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endforeach()
   # Keep runtime-policy/lifecycle acceptance independent of MainWindow and the
   # local user session. The observer controls only the generated CPU fixture.
   qt_add_executable(gsw_runtime_decoupling_ui_tests tests/RuntimeDecouplingUiTests.cpp

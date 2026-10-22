@@ -250,8 +250,11 @@ bool runTrainingPerformanceSmokeTest() {
     const std::array<int, 5> presetResolutions{2, 8, 4, 2, 1};
     if (!check(preset->count() == int(presetIterations.size()),
         "the existing five quality presets remain available")) return false;
+    auto *applyQuality = dialog.findChild<QPushButton *>(QStringLiteral("trainingApplyQualityPreset"));
+    if (!check(applyQuality, "quality presets expose an explicit apply action")) return false;
     for (int index = 0; index < preset->count(); ++index) {
       preset->setCurrentIndex(index);
+      applyQuality->click();
       const TrainingConfiguration config = dialog.configuration();
       check(config.iterations == presetIterations[index] && config.resolution == presetResolutions[index] &&
           !config.cameraPrefetch && config.capacityStorage && !config.surfelAuxiliary,

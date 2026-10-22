@@ -8,6 +8,7 @@ import sys
 
 BACKEND_FILES = (
     "native/backend/atomic_file.py",
+    "native/backend/path_budget.py",
     "native/backend/camera_dataset.py",
     "native/backend/camera_admission.py",
     "native/backend/camera_scale_export.py",

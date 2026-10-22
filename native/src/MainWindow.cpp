@@ -27,6 +27,7 @@
 #include "ResourceBudgetDialog.h"
 #include "ResourceBudget.h"
 #include "TrainingDialog.h"
+#include "TrainingRequestStore.h"
 #include "ExistingTrainingDialog.h"
 #include "RuntimeGuardDialog.h"
 #include "QualityComparisonDialog.h"
@@ -3291,6 +3292,10 @@ void MainWindow::connectServices() {
           if (auto record = taskRecordForRow(mActiveTaskRow))
             record->finish(state->data(Qt::UserRole + 31).toString());
           if (!effectiveSucceeded) {
+            const QString pathError = mTaskTable->item(mActiveTaskRow, 3)->data(Qt::UserRole + 36).toString();
+            if (pathError.contains(QRegularExpression(QStringLiteral(
+                    "\\b(?:camera_solve|colmap)_path_budget_exceeded\\b"))))
+              completionDetail = CameraDatasetInfo::importErrorText(pathError);
             mTaskTable->item(mActiveTaskRow, 3)
                 ->setText(!completionDetail.isEmpty() ? completionDetail
                           : recoveryFailed ? QCoreApplication::translate("Workbench", "事务恢复失败")
@@ -6872,6 +6877,20 @@ void MainWindow::startTraining() {
                         twoDgsAvailable(root), this);
   if (!mWorkspace.cameraDatasetInfo().isEmpty()) dialog.setCameraDatasetReference(
       mWorkspace.cameraDatasetPath(), mWorkspace.cameraDatasetIdentity(), mWorkspace.cameraPosePolicy());
+  QString requestError;
+  const auto savedRequest = TrainingRequestStore(mWorkspace.rootPath(), mWorkspace.datasetPath(),
+      mWorkspace.cameraDatasetIdentity()).load(&requestError);
+  if (!requestError.isEmpty()) {
+    appendTaskEvent(QCoreApplication::translate("Workbench", "无法读取此数据集保存的训练设置：%1；不会使用其他数据集的设置。")
+        .arg(requestError));
+  } else if (!savedRequest.isEmpty()) {
+    const bool contextChanged = savedRequest.value(QStringLiteral("contextPosePolicy")).toString() !=
+        dialog.configuration().posePolicy;
+    if (!dialog.setConfigurationDocument(savedRequest, true))
+      appendTaskEvent(QCoreApplication::translate("Workbench", "保存的训练设置不适用于当前相机策略或包含无效值；当前参数保持不变。"));
+    else if (contextChanged)
+      appendTaskEvent(QCoreApplication::translate("Workbench", "已恢复手动训练参数；当前输入的相机策略、分辨率策略与倍率保持不变，不会自动运行 SfM。"));
+  }
   dialog.setReconstructionProbe(python, root, pythonProcessEnvironment(python));
   dialog.setInitializationWorkspace(mWorkspace.rootPath());
   const QString initializationProjectRoot = comparablePath(mWorkspace.rootPath());
@@ -6882,6 +6901,11 @@ void MainWindow::startTraining() {
       dialog.useInitializationDataset(path, summary.value(QStringLiteral("dataIdentity")).toString());
   });
   if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+  if (!TrainingRequestStore(mWorkspace.rootPath(), mWorkspace.datasetPath(),
+      mWorkspace.cameraDatasetIdentity()).save(dialog.configurationDocument(), &requestError)) {
+    showError(QCoreApplication::translate("Workbench", "无法保存训练设置"), requestError);
     return;
   }
   const TrainingConfiguration config = dialog.configuration();
@@ -7542,6 +7566,14 @@ void MainWindow::appendLog(const QString &text) {
   if (mPendingDatasetImport && text.contains(QLatin1StringView("[worker] Fatal error:")) &&
       text.contains(QRegularExpression(QStringLiteral("\\btrajectory_[a-z_]+\\b"))))
     mPendingDatasetImport->cameraImportError = text.trimmed();
+  if (mActiveTaskRow >= 0 && mActiveTaskRow < mTaskTable->rowCount() &&
+      text.contains(QRegularExpression(QStringLiteral("\\b(?:camera_solve|colmap)_path_budget_exceeded\\b")))) {
+    // The source diagnostic remains unchanged in the log. Keep its separate
+    // presentation binding so language changes can refresh actionable guidance.
+    auto *detail = mTaskTable->item(mActiveTaskRow, 3);
+    detail->setData(Qt::UserRole + 36, text.trimmed());
+    detail->setText(CameraDatasetInfo::importErrorText(text.trimmed()));
+  }
   const QString line = text.endsWith(QLatin1Char('\n')) ? text : text + QLatin1Char('\n');
   if (auto record = taskRecordForRow(mActiveTaskRow)) record->appendLog(line);
   TaskRecord::appendToLogView(mConsole, line, mFollowLogsAction->isChecked());

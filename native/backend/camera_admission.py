@@ -9,10 +9,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
+import time
 import uuid
 
+from native.backend.atomic_file import atomic_sibling_directory
+from native.backend.path_budget import PathBudgetError, require_legacy_windows_paths
 from native.backend.camera_dataset import CameraDatasetError, MANIFEST_NAME, load_camera_dataset
 from native.backend.camera_dataset import write_camera_dataset
 
@@ -114,22 +116,35 @@ def prepare_solve_dataset_version(source, destination, expected_identity=None, c
         pass
     else:
         raise CameraDatasetError("camera_unsafe_solve_destination", "must remain outside original dataset")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(destination.name + ".preparing-" + uuid.uuid4().hex)
-    temporary.mkdir()
+    train_views = [view for view in dataset["views"] if view["split"] == "train"]
+    image_names = ["v%08x%s" % (index, Path(view["image_path"]).suffix.lower())
+                   for index, view in enumerate(train_views)]
+    # The shared stage basename never exceeds destination.name, and the
+    # atomic JSON sibling never exceeds its final metadata filename. Thus the
+    # final preparation paths bound all writes performed by this function.
     try:
+        require_legacy_windows_paths(
+            files=[destination / "input" / name for name in image_names]
+                  + [destination / "camera-solve-provenance.json"],
+            directories=[destination, destination / "input"])
+    except PathBudgetError as error:
+        raise CameraDatasetError("camera_solve_path_budget_exceeded", str(error)) from error
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Keep all writes on the destination volume, but do not make the path
+    # longer than the final published directory. The shared stage context
+    # also binds cleanup to the original directory and parent identities.
+    with atomic_sibling_directory(destination) as temporary:
         (temporary / "input").mkdir()
         records = []
-        for view in dataset["views"]:
-            if view["split"] != "train":
-                continue
+        for view, name in zip(train_views, image_names):
             if cancelled and cancelled():
                 raise CameraDatasetError("camera_import_cancelled")
             original = root / view["image_path"]
             original.resolve().relative_to(root)
-            # A stable encoded view ID is safe on Windows even when the source
-            # identifier itself contains Unicode, separators or reserved words.
-            name = "view-" + hashlib.sha256(view["view_id"].encode("utf-8")).hexdigest() + original.suffix.lower()
+            # A stable train-order ordinal avoids long/unsafe source names and
+            # leaves room for downstream COLMAP staging folders. The full
+            # stable view ID and SHA256 stay in the provenance mapping; an
+            # ordinal is never used as a substitute for source identity.
             relative = "input/" + name
             copied = temporary / relative
             digest = hashlib.sha256()
@@ -165,11 +180,6 @@ def prepare_solve_dataset_version(source, destination, expected_identity=None, c
                 "sourceDataIdentity": dataset["data_identity"], "solveDataIdentity": identity,
                 "provenancePath": str(destination / "camera-solve-provenance.json"),
                 "files": records, "posePolicy": "solve", "scale": semantic["scale"]}
-    finally:
-        # Only this newly-created UUID staging directory is removed. Source
-        # folders and a pre-existing destination are never cleanup candidates.
-        if temporary.exists() and temporary.parent == destination.parent and not _is_reparse(temporary):
-            shutil.rmtree(temporary)
 
 
 def validate_solve_dataset_version(dataset_path, output_root, expected_identity):
@@ -182,6 +192,17 @@ def validate_solve_dataset_version(dataset_path, output_root, expected_identity)
             raise CameraDatasetError('camera_unsafe_solve_destination')
     if candidate.resolve() != expected_root.resolve() or not candidate.is_dir():
         raise CameraDatasetError('camera_solve_resume_version_missing')
+    return validate_solve_dataset_content(candidate, expected_identity)
+
+
+def validate_solve_dataset_content(dataset_path, expected_identity):
+    """Validate portable solve bytes without relaxing resume's owned-root gate."""
+    candidate = Path(dataset_path)
+    if not candidate.is_absolute() or not candidate.is_dir():
+        raise CameraDatasetError('camera_solve_resume_version_missing')
+    for path in (candidate, *candidate.parents):
+        if _is_reparse(path):
+            raise CameraDatasetError('camera_unsafe_solve_destination')
     with (candidate / 'camera-solve-provenance.json').open(encoding='utf-8') as stream:
         provenance = json.load(stream)
     semantic = {key: value for key, value in provenance.items()
@@ -211,3 +232,231 @@ def validate_solve_dataset_version(dataset_path, output_root, expected_identity)
         if actual != record.get('sha256'):
             raise CameraDatasetError('camera_solve_resume_image_hash_mismatch')
     return provenance
+
+
+def _solve_tree(root):
+    root = Path(root)
+    if not root.is_absolute() or any(_is_reparse(path) for path in (root, *root.parents)):
+        raise CameraDatasetError('camera_unsafe_solve_destination')
+    root = root.resolve()
+    if not root.is_dir() or any(_is_reparse(path) for path in (root, *root.parents)):
+        raise CameraDatasetError('camera_unsafe_solve_destination')
+    files, directories = [], []
+    for directory, children, names in os.walk(str(root), followlinks=False):
+        for name in children + names:
+            path = Path(directory) / name
+            metadata = path.lstat()
+            if _is_reparse(path):
+                raise CameraDatasetError('camera_unsafe_solve_destination', str(path))
+            relative = path.relative_to(root).as_posix()
+            if stat.S_ISDIR(metadata.st_mode):
+                directories.append(relative)
+            elif stat.S_ISREG(metadata.st_mode):
+                files.append({'relativePath': relative, 'bytes': metadata.st_size})
+            else:
+                raise CameraDatasetError('camera_unsafe_solve_destination', str(path))
+    return sorted(files, key=lambda item: item['relativePath']), sorted(directories)
+
+
+def plan_solve_training_output(source, output, extra_source_files=(), extra_source_directories=(),
+                               iterations=None, resume=False):
+    """Read-only actual-tree and projected COLMAP-path admission before work."""
+    source, output = Path(source), Path(output)
+    if not source.is_absolute() or not output.is_absolute():
+        raise CameraDatasetError('camera_absolute_manifest_required')
+    for initial in (source, output):
+        if any(_is_reparse(path) for path in (initial, *initial.parents)):
+            raise CameraDatasetError('camera_unsafe_solve_destination')
+    source, output = source.resolve(), output.resolve()
+    portable = output / '.gsw' / 'solve-dataset'
+    permitted_resume = resume and source == portable
+    if not permitted_resume and (source == output or source in output.parents or output in source.parents):
+        raise CameraDatasetError('camera_unsafe_solve_destination', 'overlapping solve/output roots')
+    entries, relative_directories = _solve_tree(source)
+    files = [portable / item['relativePath'] for item in entries] + [output / 'training-source.json']
+    directories = [output, portable] + [portable / item for item in relative_directories]
+    for incoming, target in ((extra_source_files, files), (extra_source_directories, directories)):
+        for item in incoming:
+            try:
+                relative = Path(item).resolve().relative_to(source)
+            except ValueError:
+                raise CameraDatasetError('camera_unsafe_solve_destination', 'projected path outside solve source')
+            target.append(portable / relative)
+    # A UUID journal basename is independent of the user's output name. The
+    # eventual backup/stage basenames are never longer than output.name.
+    files.append(output.parent / '.gsw-transactions' / ('0' * 32 + '.json'))
+    # The 32-hex payload component is the actual checkpoint format enforced
+    # by training_checkpoint.CHECKPOINT_NAME, not an arbitrary task-ID bound.
+    checkpoint_component = 'state-' + uuid.uuid4().hex
+    files.extend((output / '.gsw-resume' / (checkpoint_component + '.pth'),
+                  output / '.gsw-resume' / (checkpoint_component + '.tmp'),
+                  output / '.gsw-resume/ready.json', output / 'training-performance.json',
+                  output / 'training_backend.json', output / 'reconstruction_quality.json'))
+    if iterations is not None:
+        files.append(output / 'point_cloud' / ('iteration_' + str(iterations)) / 'point_cloud.ply')
+    if output.is_dir():
+        old_files, old_directories = _solve_tree(output)
+        files.extend(output / item['relativePath'] for item in old_files)
+        directories.extend(output / item for item in old_directories)
+    try:
+        require_legacy_windows_paths(files=files, directories=directories)
+    except PathBudgetError as error:
+        raise CameraDatasetError('camera_solve_path_budget_exceeded', str(error)) from error
+    return {'schema': 'gsw.solve_output_plan/1', 'sourcePath': str(source), 'outputPath': str(output),
+            'portablePath': str(portable), 'sourceFiles': entries, 'sourceDirectories': relative_directories,
+            'files': sorted(map(str, files)), 'directories': sorted(map(str, directories))}
+
+
+def _hash_solve_file(path, cancelled=None):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            if cancelled and cancelled():
+                raise CameraDatasetError('camera_import_cancelled')
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _copy_solve_tree(source, destination, cancelled=None, destination_owned=False):
+    entries, directories = _solve_tree(source)
+    if destination_owned:
+        if not destination.is_dir() or any(destination.iterdir()):
+            raise CameraDatasetError('camera_solve_destination_exists', str(destination))
+    else:
+        destination.mkdir(parents=True, exist_ok=False)
+    for relative in directories:
+        (destination / relative).mkdir(parents=True, exist_ok=False)
+    copied = []
+    for entry in entries:
+        if cancelled and cancelled():
+            raise CameraDatasetError('camera_import_cancelled')
+        original, target = Path(source) / entry['relativePath'], destination / entry['relativePath']
+        before = original.lstat()
+        digest = hashlib.sha256()
+        with original.open('rb') as incoming, target.open('xb') as outgoing:
+            for block in iter(lambda: incoming.read(1024 * 1024), b''):
+                if cancelled and cancelled():
+                    raise CameraDatasetError('camera_import_cancelled')
+                digest.update(block)
+                outgoing.write(block)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        after = original.lstat()
+        if (_is_reparse(original) or not os.path.samestat(before, after)
+                or before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns
+                or _hash_solve_file(target, cancelled) != digest.hexdigest()):
+            raise CameraDatasetError('camera_solve_resume_image_hash_mismatch', entry['relativePath'])
+        copied.append(dict(entry, sha256=digest.hexdigest()))
+    # Detect additions/removals and changed source bytes during publication,
+    # not just a successful copy API return value.
+    if _solve_tree(source) != (entries, directories):
+        raise CameraDatasetError('camera_solve_resume_source_identity_mismatch')
+    for entry in copied:
+        if cancelled and cancelled():
+            raise CameraDatasetError('camera_import_cancelled')
+        if _hash_solve_file(Path(source) / entry['relativePath'], cancelled) != entry['sha256']:
+            raise CameraDatasetError('camera_solve_resume_image_hash_mismatch', entry['relativePath'])
+    return copied
+
+
+def publish_solve_training_output(source, output, expected_identity, training_source,
+                                  overwrite=False, allow_existing=False, cancelled=None):
+    """Atomically publish canonical-solve input without discarding old models.
+
+    All bytes are prepared and verified in an owned same-parent stage before
+    the previous output is moved. A completed previous output is retained as
+    a same-volume backup; a durable journal describes crash-recovery paths.
+    No automatic orphan GC or cross-volume atomicity is assumed.
+    """
+    plan = plan_solve_training_output(source, output)
+    source, output = Path(plan['sourcePath']), Path(plan['outputPath'])
+    validate_solve_dataset_content(source, expected_identity)
+    if (training_source.get('posePolicy') != 'solve'
+            or training_source.get('datasetPath') != '.gsw/solve-dataset'
+            or training_source.get('cameraDatasetIdentity') != expected_identity):
+        raise CameraDatasetError('camera_solve_resume_source_identity_mismatch')
+    previous = output.exists()
+    previous_identity = output.lstat() if previous else None
+    if previous and not output.is_dir():
+        raise CameraDatasetError('camera_solve_destination_exists', str(output))
+    nonempty = previous and any(output.iterdir())
+    if nonempty and not (overwrite or allow_existing):
+        raise CameraDatasetError('camera_solve_destination_exists', str(output))
+    if nonempty and allow_existing and not overwrite and (output / '.gsw/solve-dataset').exists():
+        raise CameraDatasetError('camera_solve_destination_exists', str(output / '.gsw/solve-dataset'))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    nonce = uuid.uuid4().hex
+    backup = None
+    if previous:
+        for unused in range(128):
+            candidate = output.with_name(uuid.uuid4().hex[:min(32, len(output.name))])
+            if candidate != output and not candidate.exists() and not _is_reparse(candidate):
+                backup = candidate
+                break
+        if backup is None:
+            raise CameraDatasetError('camera_solve_destination_exists', 'backup namespace exhausted')
+    journal_path = output.parent / '.gsw-transactions' / (nonce + '.json')
+    journal_path.parent.mkdir(exist_ok=True)
+    if _is_reparse(journal_path.parent) or journal_path.exists():
+        raise CameraDatasetError('camera_unsafe_solve_destination', str(journal_path))
+    journal = {'schema': 'gsw.solve_output_transaction/1', 'nonce': nonce, 'ownerPid': os.getpid(),
+               'sourcePath': str(source), 'outputPath': str(output),
+               'backupPath': str(backup) if backup else None, 'sourceDataIdentity': expected_identity}
+    with atomic_sibling_directory(output) as stage:
+        journal.update(stagePath=str(stage), state='preparing', updatedAt=time.time())
+        write_camera_dataset(journal, journal_path)
+        moved = published = False
+        stage_identity = stage.lstat()
+        try:
+            if nonempty and allow_existing and not overwrite:
+                _copy_solve_tree(output, stage, cancelled, destination_owned=True)
+            copied = _copy_solve_tree(source, stage / '.gsw/solve-dataset', cancelled)
+            validate_solve_dataset_content(stage / '.gsw/solve-dataset', expected_identity)
+            write_camera_dataset(training_source, stage / 'training-source.json')
+            journal.update(state='prepared', sourceTreeSha256=hashlib.sha256(json.dumps(
+                copied, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest(), updatedAt=time.time())
+            write_camera_dataset(journal, journal_path)
+            if cancelled and cancelled():
+                raise CameraDatasetError('camera_import_cancelled')
+            if previous:
+                if (not output.exists() or backup.exists() or _is_reparse(output)
+                        or not os.path.samestat(previous_identity, output.lstat())):
+                    raise CameraDatasetError('camera_solve_destination_exists', str(output))
+                os.rename(str(output), str(backup))
+                moved = True
+                journal.update(state='backup_moved', updatedAt=time.time())
+                write_camera_dataset(journal, journal_path)
+            elif output.exists():
+                raise CameraDatasetError('camera_solve_destination_exists', str(output))
+            os.rename(str(stage), str(output))
+            published = True
+            journal.update(state='published', updatedAt=time.time())
+            write_camera_dataset(journal, journal_path)
+        except BaseException as error:
+            state = 'failed_before_publish'
+            if moved or published:
+                try:
+                    if published:
+                        if not output.exists() or not os.path.samestat(stage_identity, output.lstat()):
+                            raise OSError('published solve output identity changed')
+                        os.rename(str(output), str(stage))
+                    if moved and not output.exists() and backup.exists():
+                        os.rename(str(backup), str(output))
+                        state = 'rolled_back'
+                    elif not moved and not output.exists():
+                        state = 'rolled_back'
+                    else:
+                        state = 'rollback_requires_manual_recovery'
+                except OSError:
+                    state = 'rollback_requires_manual_recovery'
+            journal.update(state=state, updatedAt=time.time())
+            try:
+                write_camera_dataset(journal, journal_path)
+            except OSError:
+                pass  # The previously fsynced prepared journal still names all recovery paths.
+            error.solve_output_transaction = {'journalPath': str(journal_path),
+                'backupPath': str(backup) if backup else None, 'stagePath': str(stage), 'state': state}
+            raise
+    return {'datasetPath': str(output / '.gsw/solve-dataset'), 'outputPath': str(output),
+            'backupPath': str(backup) if moved else None, 'journalPath': str(journal_path),
+            'sourceTreeSha256': journal['sourceTreeSha256']}

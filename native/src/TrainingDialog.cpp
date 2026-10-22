@@ -29,6 +29,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <cmath>
 #include <limits>
 
 namespace gsw {
@@ -109,8 +110,24 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("最高质量"));
   mQuality->addItem(QCoreApplication::translate("Workbench", "最高精度（原始分辨率）"), QStringLiteral("original_quality"));
   AppLanguage::bindComboItem(mQuality, mQuality->count() - 1, AppLanguage::source("最高精度（原始分辨率）"));
-  form->addRow(QCoreApplication::translate("Workbench", "质量预设"), mQuality);
-  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mQuality)), AppLanguage::source("质量预设"));
+  auto *presetRow = new QWidget(this);
+  presetRow->setProperty("gswLayoutContainer", true);
+  auto *presetLayout = new QHBoxLayout(presetRow);
+  presetLayout->setContentsMargins(0, 0, 0, 0);
+  presetLayout->setSpacing(6);
+  presetLayout->addWidget(mQuality, 1);
+  mApplyPresetButton = AppLanguage::text(new QPushButton(this), AppLanguage::source("应用质量预设"));
+  mApplyPresetButton->setObjectName(QStringLiteral("trainingApplyQualityPreset"));
+  AppLanguage::bind(mApplyPresetButton, "toolTip", AppLanguage::source(
+      "仅选择预设不会改变训练参数。明确应用会重设迭代和预设增密／优化默认项；保留锁定相机及保留输入尺寸策略，不改变种子、显存保护或执行选项。"));
+  presetLayout->addWidget(mApplyPresetButton);
+  form->addRow(QCoreApplication::translate("Workbench", "质量预设"), presetRow);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(presetRow)), AppLanguage::source("质量预设"));
+  mPresetSummary = new QLabel(this);
+  mPresetSummary->setObjectName(QStringLiteral("trainingQualityPresetSummary"));
+  mPresetSummary->setWordWrap(true);
+  mPresetSummary->setTextFormat(Qt::PlainText);
+  form->addRow(mPresetSummary);
 
   mIterations = new QSpinBox(this);
   mIterations->setObjectName(QStringLiteral("trainingIterationsSpinBox"));
@@ -455,7 +472,14 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
 
   // Backend-specific optimization defaults are resolved by the worker. The
   // common iteration/resolution values here are user edits, not reset triggers.
-  connect(mQuality, &QComboBox::currentIndexChanged, this, &TrainingDialog::applyPreset);
+  connect(mQuality, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mApplyPresetButton, &QPushButton::clicked, this, &TrainingDialog::applyPreset);
+  connect(mBackend, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mIterations, &QSpinBox::valueChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mResolution, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mResolutionPolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mPosePolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  AppLanguage::onChanged(this, [this] { refreshPresetSummary(); });
   connect(browseButton, &QPushButton::clicked, this, &TrainingDialog::chooseOutputRoot);
   connect(buttons, &QDialogButtonBox::accepted, this, &TrainingDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, this, &TrainingDialog::reject);
@@ -469,7 +493,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
 TrainingConfiguration TrainingDialog::configuration() const {
   TrainingConfiguration result;
   result.backend = mBackend->currentData().toString();
-  result.quality = mQuality->currentData().toString();
+  result.quality = mAppliedQuality;
   result.outputRoot = QDir::cleanPath(mOutputRoot->text().trimmed());
   result.outputScene = mOutputScene->text();
   result.outputStorageName = managedStorageName(result.outputScene);
@@ -516,6 +540,127 @@ TrainingConfiguration TrainingDialog::configuration() const {
           {QStringLiteral("gpu_mib"), result.imageGpuMiB}}},
       {QStringLiteral("monitoring"), QJsonObject{{QStringLiteral("profile_interval"), result.profileInterval}}}};
   return result;
+}
+
+QJsonObject TrainingDialog::configurationDocument() const {
+  const auto value = configuration();
+  return QJsonObject{
+      {QStringLiteral("schema"), QStringLiteral("gsw.training_dialog_configuration/1")},
+      {QStringLiteral("contextPosePolicy"), value.posePolicy},
+      {QStringLiteral("backend"), value.backend},
+      {QStringLiteral("quality"), value.quality},
+      {QStringLiteral("iterations"), value.iterations},
+      {QStringLiteral("resolution"), value.resolution},
+      {QStringLiteral("resolutionPolicy"), value.resolutionPolicy},
+      {QStringLiteral("solveResolution"), mSolveResolution},
+      {QStringLiteral("runtimeOptions"), value.runtimeOptions}};
+}
+
+bool TrainingDialog::setConfigurationDocument(const QJsonObject &document,
+                                             const bool preserveCurrentInputPolicy) {
+  const auto hasOnly = [](const QJsonObject &object, const QStringList &keys) {
+    if (object.size() != keys.size()) return false;
+    for (const auto &key : keys) if (!object.contains(key)) return false;
+    return true;
+  };
+  const auto integerIn = [](const QJsonValue &value, const int minimum, const int maximum) {
+    const double number = value.toDouble(std::numeric_limits<double>::quiet_NaN());
+    return value.isDouble() && std::isfinite(number) && std::floor(number) == number &&
+           number >= minimum && number <= maximum;
+  };
+  const auto inCombo = [](const QJsonValue &value, const QComboBox *combo) {
+    return value.isString() && combo->findData(value.toString()) >= 0;
+  };
+  if (!hasOnly(document, {QStringLiteral("schema"), QStringLiteral("contextPosePolicy"),
+      QStringLiteral("backend"), QStringLiteral("quality"), QStringLiteral("iterations"),
+      QStringLiteral("resolution"), QStringLiteral("resolutionPolicy"),
+      QStringLiteral("solveResolution"), QStringLiteral("runtimeOptions")}) ||
+      document.value(QStringLiteral("schema")).toString() != QStringLiteral("gsw.training_dialog_configuration/1") ||
+      !inCombo(document.value(QStringLiteral("contextPosePolicy")), mPosePolicy) ||
+      (!preserveCurrentInputPolicy &&
+       document.value(QStringLiteral("contextPosePolicy")).toString() != mPosePolicy->currentData().toString()) ||
+      !inCombo(document.value(QStringLiteral("backend")), mBackend) ||
+      !inCombo(document.value(QStringLiteral("quality")), mQuality) ||
+      !inCombo(document.value(QStringLiteral("resolutionPolicy")), mResolutionPolicy) ||
+      !integerIn(document.value(QStringLiteral("iterations")), mIterations->minimum(), mIterations->maximum()) ||
+      !integerIn(document.value(QStringLiteral("resolution")), 1, 8) ||
+      mResolution->findData(document.value(QStringLiteral("resolution")).toInt()) < 0 ||
+      !integerIn(document.value(QStringLiteral("solveResolution")), 1, 8) ||
+      mResolution->findData(document.value(QStringLiteral("solveResolution")).toInt()) < 0 ||
+      (document.value(QStringLiteral("resolutionPolicy")).toString() == QStringLiteral("preserve") &&
+       document.value(QStringLiteral("resolution")).toInt() != 1) ||
+      !document.value(QStringLiteral("runtimeOptions")).isObject()) return false;
+  const auto runtime = document.value(QStringLiteral("runtimeOptions")).toObject();
+  if (!hasOnly(runtime, {QStringLiteral("version"), QStringLiteral("resourceGuard"),
+      QStringLiteral("execution"), QStringLiteral("monitoring")}) ||
+      !integerIn(runtime.value(QStringLiteral("version")), 2, 2) ||
+      !runtime.value(QStringLiteral("resourceGuard")).isObject() ||
+      !runtime.value(QStringLiteral("execution")).isObject() ||
+      !runtime.value(QStringLiteral("monitoring")).isObject()) return false;
+  const auto guard = runtime.value(QStringLiteral("resourceGuard")).toObject();
+  const auto execution = runtime.value(QStringLiteral("execution")).toObject();
+  const auto monitoring = runtime.value(QStringLiteral("monitoring")).toObject();
+  const double fraction = guard.value(QStringLiteral("usage_fraction")).toDouble(-1.0);
+  const double percent = fraction * 100.0;
+  if (!hasOnly(guard, {QStringLiteral("enabled"), QStringLiteral("mode"), QStringLiteral("usage_fraction"),
+      QStringLiteral("minimum_spare_mib"), QStringLiteral("max_consecutive_denials")}) ||
+      !guard.value(QStringLiteral("enabled")).isBool() || !inCombo(guard.value(QStringLiteral("mode")), mGrowthMode) ||
+      !guard.value(QStringLiteral("usage_fraction")).isDouble() || !std::isfinite(percent) ||
+      percent < mTrainingMemoryPercent->minimum() || percent > mTrainingMemoryPercent->maximum() ||
+      std::abs(percent - std::round(percent)) > 1e-8 ||
+      !integerIn(guard.value(QStringLiteral("minimum_spare_mib")), mMinimumSpareMiB->minimum(), mMinimumSpareMiB->maximum()) ||
+      !integerIn(guard.value(QStringLiteral("max_consecutive_denials")), mMaxConsecutiveDenials->minimum(), mMaxConsecutiveDenials->maximum()) ||
+      !hasOnly(execution, {QStringLiteral("image_staging"), QStringLiteral("camera_prefetch"),
+          QStringLiteral("capacity_storage"), QStringLiteral("surfel_auxiliary"), QStringLiteral("loss_mode"),
+          QStringLiteral("engine"), QStringLiteral("gpu_slots"), QStringLiteral("pinned_mib"), QStringLiteral("gpu_mib")}) ||
+      !execution.value(QStringLiteral("image_staging")).isBool() ||
+      !execution.value(QStringLiteral("camera_prefetch")).isBool() ||
+      !execution.value(QStringLiteral("capacity_storage")).isBool() ||
+      !execution.value(QStringLiteral("surfel_auxiliary")).isBool() ||
+      !inCombo(execution.value(QStringLiteral("loss_mode")), mLossMode) ||
+      !inCombo(execution.value(QStringLiteral("engine")), mTrainingEngine) ||
+      !integerIn(execution.value(QStringLiteral("gpu_slots")), mImageGpuSlots->minimum(), mImageGpuSlots->maximum()) ||
+      !integerIn(execution.value(QStringLiteral("pinned_mib")), mImagePinnedMiB->minimum(), mImagePinnedMiB->maximum()) ||
+      !integerIn(execution.value(QStringLiteral("gpu_mib")), mImageGpuMiB->minimum(), mImageGpuMiB->maximum()) ||
+      !hasOnly(monitoring, {QStringLiteral("profile_interval")}) ||
+      !integerIn(monitoring.value(QStringLiteral("profile_interval")), mProfileInterval->minimum(), mProfileInterval->maximum())) return false;
+
+  // Validate everything before touching a widget. Restoration may refresh
+  // presentation, but cannot apply a preset, change camera admission or start
+  // another probe/worker. Explicit controls retain their saved ownership.
+  const bool keepInput = preserveCurrentInputPolicy &&
+      document.value(QStringLiteral("contextPosePolicy")).toString() != mPosePolicy->currentData().toString();
+  const QString restoredPixelPolicy = keepInput ? mResolutionPolicy->currentData().toString()
+      : document.value(QStringLiteral("resolutionPolicy")).toString();
+  const int restoredRatio = keepInput ? mResolution->currentData().toInt()
+      : document.value(QStringLiteral("resolution")).toInt();
+  mUpdatingPolicy = true;
+  mBackend->setCurrentIndex(mBackend->findData(document.value(QStringLiteral("backend")).toString()));
+  mAppliedQuality = document.value(QStringLiteral("quality")).toString();
+  mQuality->setCurrentIndex(mQuality->findData(mAppliedQuality));
+  mIterations->setValue(document.value(QStringLiteral("iterations")).toInt());
+  mResolutionPolicy->setCurrentIndex(mResolutionPolicy->findData(restoredPixelPolicy));
+  mResolution->setCurrentIndex(mResolution->findData(restoredRatio));
+  mSolveResolution = document.value(QStringLiteral("solveResolution")).toInt();
+  mResourceGuard->setChecked(guard.value(QStringLiteral("enabled")).toBool());
+  mGrowthMode->setCurrentIndex(mGrowthMode->findData(guard.value(QStringLiteral("mode")).toString()));
+  mTrainingMemoryPercent->setValue(static_cast<int>(std::round(percent)));
+  mMinimumSpareMiB->setValue(guard.value(QStringLiteral("minimum_spare_mib")).toInt());
+  mMaxConsecutiveDenials->setValue(guard.value(QStringLiteral("max_consecutive_denials")).toInt());
+  mImageStaging->setChecked(execution.value(QStringLiteral("image_staging")).toBool());
+  mCameraPrefetch->setChecked(execution.value(QStringLiteral("camera_prefetch")).toBool());
+  mCapacityStorage->setChecked(execution.value(QStringLiteral("capacity_storage")).toBool());
+  mSurfelAuxiliary->setChecked(execution.value(QStringLiteral("surfel_auxiliary")).toBool());
+  mLossMode->setCurrentIndex(mLossMode->findData(execution.value(QStringLiteral("loss_mode")).toString()));
+  mTrainingEngine->setCurrentIndex(mTrainingEngine->findData(execution.value(QStringLiteral("engine")).toString()));
+  mImageGpuSlots->setValue(execution.value(QStringLiteral("gpu_slots")).toInt());
+  mImagePinnedMiB->setValue(execution.value(QStringLiteral("pinned_mib")).toInt());
+  mImageGpuMiB->setValue(execution.value(QStringLiteral("gpu_mib")).toInt());
+  mProfileInterval->setValue(monitoring.value(QStringLiteral("profile_interval")).toInt());
+  mUpdatingPolicy = false;
+  refreshResolutionPolicy();
+  refreshPresetSummary();
+  return true;
 }
 
 void TrainingDialog::accept() {
@@ -582,12 +727,16 @@ void TrainingDialog::applyPreset() {
   } else if (quality == QStringLiteral("original_quality")) {
     resolution = 1;
   }
+  mAppliedQuality = quality;
   mIterations->setValue(iterations);
   // A fidelity preset is not permission to change an imported camera dataset's
   // training pixels. Locked input only changes ratio after an explicit policy edit.
-  if (mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")) return;
+  if ((mPosePolicy && mPosePolicy->currentData().toString() == QStringLiteral("locked")) ||
+      mResolutionPolicy->currentData().toString() == QStringLiteral("preserve")) {
+    refreshPresetSummary();
+    return;
+  }
   mUpdatingPolicy = true;
-  mResolutionPolicy->setCurrentIndex(mResolutionPolicy->findData(QStringLiteral("manual")));
   const int resolutionIndex = mResolution->findData(resolution);
   if (resolutionIndex >= 0) {
     mResolution->setCurrentIndex(resolutionIndex);
@@ -595,6 +744,26 @@ void TrainingDialog::applyPreset() {
   mSolveResolution = resolution;
   mResolution->setEnabled(true);
   mUpdatingPolicy = false;
+  refreshPresetSummary();
+}
+
+void TrainingDialog::refreshPresetSummary() {
+  if (!mPresetSummary || !mIterations || !mResolution || !mResolutionPolicy || !mPosePolicy) return;
+  const int appliedIndex = mQuality->findData(mAppliedQuality);
+  const QString applied = appliedIndex >= 0 ? mQuality->itemText(appliedIndex) : mAppliedQuality;
+  const QString selected = mQuality->currentText();
+  const QString selectedId = mQuality->currentData().toString();
+  const int suggestedIterations = selectedId == QStringLiteral("quick") ? 10000 : 30000;
+  const int suggestedResolution = selectedId == QStringLiteral("quick") || selectedId == QStringLiteral("max_quality") ? 2
+      : selectedId == QStringLiteral("quality") ? 4 : selectedId == QStringLiteral("original_quality") ? 1 : 8;
+  const bool keepResolution = mPosePolicy->currentData().toString() == QStringLiteral("locked") ||
+      mResolutionPolicy->currentData().toString() == QStringLiteral("preserve");
+  const QString resolution = keepResolution
+      ? QCoreApplication::translate("Workbench", "保留当前分辨率策略与倍率")
+      : QCoreApplication::translate("Workbench", "显式训练比例 1/%1").arg(suggestedResolution);
+  mPresetSummary->setText(QCoreApplication::translate("Workbench", "已应用：%1；待应用：%2。当前为 %3 次迭代、1/%4。\n明确应用将设置 %5 次迭代、%6，并采用当前方法的预设增密／优化参数；相机、种子、显存保护及执行选项不变。")
+      .arg(applied, selected).arg(mIterations->value()).arg(mResolution->currentData().toInt())
+      .arg(suggestedIterations).arg(resolution));
 }
 
 void TrainingDialog::setCameraDatasetReference(const QString &metadataPath,

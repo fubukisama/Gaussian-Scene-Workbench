@@ -3,6 +3,7 @@
 import argparse
 import ast
 import concurrent.futures
+from contextlib import ExitStack
 import hashlib
 import json
 import math
@@ -31,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from native.backend import reconstruction_quality
+from native.backend.atomic_file import owned_directory
 from native.worker.training_summary import (
     configured_training_summary, normalize_training_summary, PARAMETER_FIELDS,
 )
@@ -4197,14 +4199,22 @@ class ColmapPointCloudPreviewPublisher:
         dataset,
         source_roots,
         interval=COLMAP_POINT_PREVIEW_INTERVAL_SECONDS,
+        output_dir=None,
     ):
         self.job = job
         self.dataset = Path(dataset)
         self.source_roots = [Path(root) for root in source_roots]
         job_id = safe_filename(job.get("id") or uuid.uuid4().hex)
-        self.output_dir = (
-            self.dataset / ".gsw" / "previews" / "colmap" / job_id
-        )
+        self.output_dir = (Path(output_dir) if output_dir is not None else
+                           self.dataset / ".gsw" / "previews" / "colmap" / job_id)
+        if output_dir is not None:
+            from native.backend.camera_dataset import CameraDatasetError
+            if self.output_dir.parent.resolve() != self.dataset.resolve():
+                raise CameraDatasetError("camera_unsafe_solve_destination", str(self.output_dir))
+            try:
+                self.output_dir.mkdir(exist_ok=False)
+            except FileExistsError as error:
+                raise CameraDatasetError("camera_solve_destination_exists", str(self.output_dir)) from error
         self.interval = max(float(interval), 0.05)
         self.stop_event = threading.Event()
         self.thread = None
@@ -4520,7 +4530,7 @@ def validate_undistorted_colmap_output(output):
         raise RuntimeError("COLMAP image undistortion produced an incomplete sparse model")
 
 
-def publish_undistorted_colmap_output(dataset, staging):
+def publish_undistorted_colmap_output(dataset, staging, backup=None):
     """Replace trainable COLMAP folders only after staging has been validated."""
     dataset = Path(dataset).resolve()
     staging = Path(staging).resolve()
@@ -4535,7 +4545,9 @@ def publish_undistorted_colmap_output(dataset, staging):
 
     preserve_colmap_source_images(dataset)
 
-    backup = dataset / f".colmap-backup-{uuid.uuid4().hex}"
+    backup = Path(backup) if backup is not None else dataset / f".colmap-backup-{uuid.uuid4().hex}"
+    if backup.parent.resolve() != dataset or backup.exists():
+        raise ValueError("COLMAP backup must be a fresh direct dataset child")
     backup.mkdir()
     moved_existing = []
     published = []
@@ -4592,7 +4604,7 @@ def _archived_extraction_fps(dataset, record):
     return next(iter(rates)) if len(rates) == 1 else None
 
 
-def preserve_colmap_source_images(dataset, job=None):
+def preserve_colmap_source_images(dataset, job=None, staging=None):
     """Retain all raw input frames before publishing a registered subset.
 
     Older datasets are repaired from their archived media, in a private
@@ -4616,9 +4628,10 @@ def preserve_colmap_source_images(dataset, job=None):
     if destination.exists():
         raise RuntimeError("source_frames_missing: input directory is empty")
     images = dataset / "images"
-    staging = dataset / (".colmap-source-" + uuid.uuid4().hex)
-    try:
-        staging.mkdir()
+    staging = Path(staging) if staging is not None else dataset / (".colmap-source-" + uuid.uuid4().hex)
+    if staging.parent.resolve() != dataset:
+        raise ValueError("COLMAP source stage must be a fresh direct dataset child")
+    with owned_directory(staging):
         if records:
             for record in records:
                 archive = (dataset / record.get("archivePath", "")).resolve()
@@ -4663,9 +4676,6 @@ def preserve_colmap_source_images(dataset, job=None):
         if job is not None:
             add_job_log(job, "Preserved/recovered {} original COLMAP frames: {}".format(reconstruction_quality.image_count(destination), destination))
         return destination
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
 
 
 def report_reconstruction_quality(job, report, phase):
@@ -4677,13 +4687,116 @@ def report_reconstruction_quality(job, report, phase):
         report.get("modelPath", "-"), ",".join(report.get("reasons", []))))
 
 
+def plan_colmap_path_layout(job, dataset, nonce=None):
+    """Plan and admit all known COLMAP paths before cache reset/process work.
+
+    Actual IDs and the chosen per-run nonce are retained in the record. IDs
+    are never shortened to become task identity or spliced into long paths.
+    Snapshot child length follows COLMAP4.2.1 WriteSnapshot's size_t decimal
+    formatting, not today's timestamp length or the number of photographs.
+    """
+    from native.backend.camera_dataset import CameraDatasetError
+    from native.backend.camera_admission import _is_reparse
+    from native.backend.path_budget import PathBudgetError, require_legacy_windows_paths
+    dataset = Path(dataset).resolve()
+    nonce = str(nonce if nonce is not None else uuid.uuid4().hex)
+    if not nonce or not nonce.isascii() or not nonce.isalnum():
+        raise CameraDatasetError("camera_unsafe_solve_destination", "invalid COLMAP run nonce")
+    if any(_is_reparse(path) for path in (dataset, *dataset.parents)):
+        raise CameraDatasetError("camera_unsafe_solve_destination")
+    path_token = hashlib.sha256(nonce.encode("ascii")).hexdigest()[:16]
+    paths = {name: dataset / (prefix + path_token) for name, prefix in (
+        ("undistort", ".u"), ("quality", ".q"), ("snapshots", ".s"),
+        ("preview", ".p"), ("sourceStage", ".i"), ("backup", ".b"))}
+    if any(path.exists() or _is_reparse(path) for path in paths.values()):
+        raise CameraDatasetError("camera_solve_destination_exists", "COLMAP run path collision")
+    image_root = colmap_image_input_path(dataset)
+    names = {path.name for path in image_root.iterdir()
+             if path.is_file() and path.suffix.lower() in IMAGE_EXTS} if image_root.is_dir() else set()
+    metadata = dataset / "source" / "metadata_manifest.json"
+    if not names and metadata.is_file():
+        for record in json.loads(metadata.read_text(encoding="utf-8-sig")).get("files", []):
+            archive = Path(record.get("archivePath", ""))
+            if record.get("kind") == "image":
+                names.add(Path(record.get("trainingPath") or archive.name).name)
+            elif record.get("kind") == "video":
+                stem = safe_filename(archive.stem)
+                number = max(int(record.get("extractedFrames", 0)) - 1, 0)
+                names.add("%s_%06d.jpg" % (stem, number))
+    files, directories = set(), {dataset, *paths.values()}
+    model_names = ("cameras.bin", "images.bin", "points3D.bin", "rigs.bin", "frames.bin",
+                   "cameras.txt", "images.txt", "points3D.txt", "rigs.txt", "frames.txt",
+                   "reconstruction_quality.json")
+    # x64 size_t has at most twenty decimal digits. %010zu is a minimum,
+    # not a maximum field width. Keep the upstream source reference explicit.
+    model_index, snapshot_child = "9" * 20, "18446744073709551615"
+    for root in (dataset / "distorted" / "sparse" / model_index,
+                 paths["quality"] / "simple_radial" / "sparse" / model_index,
+                 paths["quality"] / "baseline" / "sparse" / model_index,
+                 paths["snapshots"] / snapshot_child,
+                 paths["undistort"] / "sparse" / "0", dataset / "sparse" / "0",
+                 dataset / ".alignment_cache" / ("sparse_tmp_" + nonce[:8]) / "0"):
+        directories.add(root)
+        files.update(root / name for name in model_names)
+    files.update((dataset / "distorted/database.db", dataset / "distorted/database.db-journal",
+                  dataset / "distorted/database.db-wal", dataset / "distorted/database.db-shm",
+                  paths["quality"] / "simple_radial/database.db",
+                  paths["preview"] / ("sparse_" + "9" * 20 + ".ply"),
+                  dataset / ".alignment_cache/metadata.json"))
+    for name in names:
+        for root in (dataset / "input", dataset / "images", paths["sourceStage"],
+                     paths["sourceStage"] / ".mask-work/images", paths["undistort"] / "images"):
+            files.add(root / name)
+            files.add((root / name).with_suffix(".png"))
+    for name in ("depth_maps", "normal_maps", "consistency_graphs"):
+        directories.add(paths["undistort"] / "stereo" / name)
+    files.update((paths["undistort"] / "stereo/fusion.cfg",
+                  paths["undistort"] / "stereo/patch-match.cfg"))
+    for original, target in ((dataset / "source/masks", paths["sourceStage"] / ".mask-work/source/masks"),
+                             (dataset / "images", paths["backup"] / "images"),
+                             (dataset / "sparse", paths["backup"] / "sparse"),
+                             (dataset / "stereo", paths["backup"] / "stereo")):
+        if original.is_dir():
+            for item in original.rglob("*"):
+                if _is_reparse(item):
+                    raise CameraDatasetError("camera_unsafe_solve_destination", str(item))
+                planned = target / item.relative_to(original)
+                (files if item.is_file() else directories).add(planned)
+    try:
+        require_legacy_windows_paths(files=files, directories=directories)
+    except PathBudgetError as error:
+        raise CameraDatasetError("camera_solve_path_budget_exceeded", str(error)) from error
+    transient_roots = {paths[name] for name in ("undistort", "quality", "snapshots", "sourceStage", "backup")}
+    def portable(path):
+        return not any(path == root or root in path.parents for root in transient_roots)
+    return {"schema": "gsw.colmap_path_layout/1", "datasetPath": str(dataset),
+            "jobId": str(job.get("id") or ""), "nonce": nonce,
+            "pathToken": path_token,
+            "paths": {key: str(value) for key, value in paths.items()},
+            "files": sorted(map(str, files)), "directories": sorted(map(str, directories)),
+            "portableFiles": sorted(str(path) for path in files if portable(path)),
+            "portableDirectories": sorted(str(path) for path in directories if portable(path)),
+            "transientRoots": sorted(map(str, transient_roots)),
+            "snapshotChildBound": {"digits": 20, "kind": "x64_size_t_decimal",
+                "source": "https://github.com/colmap/colmap/blob/bd1fcf6/src/colmap/controllers/incremental_pipeline.cc#L102-L114"}}
+
+
 def run_colmap_convert(job, dataset, options):
     dataset = Path(dataset)
     options = dict(options)
-    job_id = safe_filename(job.get("id") or uuid.uuid4().hex)
-    snapshot_root = dataset / "distorted" / f".gsw-snapshots-{job_id}"
+    prior_layout = job.get("colmapPathLayout") or {}
+    planned_nonce = (prior_layout.get("nonce") if prior_layout.get("datasetPath") == str(dataset.resolve())
+                     and not prior_layout.get("executionStartedAt") else None)
+    layout = plan_colmap_path_layout(job, dataset, nonce=planned_nonce)
+    if prior_layout.get("executionStartedAt"):
+        job.setdefault("colmapPathHistory", []).append({key: prior_layout.get(key) for key in
+            ("jobId", "datasetPath", "nonce", "pathToken", "paths", "executionStartedAt")})
+    layout["executionStartedAt"] = time.time()
+    job["colmapPathLayout"] = layout
+    planned = {name: Path(path) for name, path in layout["paths"].items()}
+    snapshot_root = planned["snapshots"]
     preview_publisher = None
-    preserve_colmap_source_images(dataset, job)
+    preserve_colmap_source_images(dataset, job, staging=planned["sourceStage"])
     if options.get("reset", True):
         database = dataset / "database.db"
         if database.exists():
@@ -4701,12 +4814,15 @@ def run_colmap_convert(job, dataset, options):
         options["single_camera"] = False
         add_job_log(job, "WARNING: Detected mixed image dimensions; disabling COLMAP single_camera to avoid CAMERA_SINGLE_DIM_ERROR.")
     add_job_log(job, f"COLMAP preset: {options['preset']}, matching: {options['matching']}, camera: {options['camera_model']}")
-    undistort_staging = dataset / f".colmap-undistorted-{uuid.uuid4().hex}"
+    undistort_staging = planned["undistort"]
     commands = colmap_convert_commands(dataset, options, undistort_staging)
-    quality_work = dataset / "distorted" / (".gsw-quality-" + job_id)
+    quality_work = planned["quality"]
     reports = []
     selected = None
+    owned = ExitStack()
     try:
+        for name in ("undistort", "quality", "snapshots"):
+            owned.enter_context(owned_directory(planned[name]))
         for command in commands:
             is_mapper = len(command) > 1 and str(command[1]).lower() == "mapper"
             if len(command) > 1 and str(command[1]).lower() == "image_undistorter":
@@ -4764,7 +4880,7 @@ def run_colmap_convert(job, dataset, options):
                 f"snapshot every {snapshot_frequency} registered frame(s)",
             )
             preview_publisher = ColmapPointCloudPreviewPublisher(
-                job, dataset, [snapshot_root]
+                job, dataset, [snapshot_root], output_dir=planned["preview"]
             )
             preview_publisher.start()
             try:
@@ -4781,7 +4897,7 @@ def run_colmap_convert(job, dataset, options):
                 report_reconstruction_quality(job, validation, "rejected")
                 raise reconstruction_quality.ReconstructionQualityError(validation)
             (undistort_staging / "sparse" / "0" / "reconstruction_quality.json").write_text(json.dumps(dict(validation, candidates=reports), indent=2), encoding="utf-8")
-            publish_undistorted_colmap_output(dataset, undistort_staging)
+            publish_undistorted_colmap_output(dataset, undistort_staging, backup=planned["backup"])
             if preview_publisher is not None:
                 preview_publisher.source_roots.append(dataset / "sparse")
                 preview_publisher.publish_latest(force=True)
@@ -4790,12 +4906,7 @@ def run_colmap_convert(job, dataset, options):
             # Unit-test and repair callers may provide an already published model.
             normalize_undistorted_sparse(dataset)
     finally:
-        if undistort_staging.exists():
-            shutil.rmtree(undistort_staging)
-        if snapshot_root.exists():
-            shutil.rmtree(snapshot_root)
-        if quality_work.exists():
-            shutil.rmtree(quality_work)
+        owned.close()
     save_alignment_cache(dataset, job)
 
 
@@ -5124,6 +5235,26 @@ def run_training_job(job, run_convert, quality, overwrite):
             job["dataset_path"] = version["datasetPath"]
             job["camera_dataset_identity"] = version.get("sourceDataIdentity", job.get("camera_dataset_identity"))
             job["cameraDataset"] = version.get("cameraDataset")
+            # Admit both the actual solver layout and its final portable copy
+            # before GPU/runtime probes, SfM or any output replacement.
+            from native.backend.camera_admission import plan_solve_training_output
+            candidate_output = OUTPUT_DIR / safe_name(job["output_scene"])
+            requested_options = training_options_from_payload(backend, quality, job.get("train_options"))
+            preview_component = ".p" + uuid.uuid4().hex
+            job["solveTrainingPreviewPath"] = str(candidate_output / ".gsw/solve-dataset" / preview_component)
+            preview_files = [Path(version["datasetPath"]) / preview_component / ("sparse_" + "9" * 20 + ".ply")]
+            preview_directories = [Path(version["datasetPath"]) / preview_component]
+            if not (job.get("native_control") or {}).get("resume"):
+                job["colmapPathLayout"] = plan_colmap_path_layout(job, version["datasetPath"])
+                future = job["colmapPathLayout"]
+                job["solveOutputPathPlan"] = plan_solve_training_output(
+                    version["datasetPath"], candidate_output,
+                    future["portableFiles"] + preview_files, future["portableDirectories"] + preview_directories,
+                    iterations=requested_options["iterations"])
+            else:
+                job["solveOutputPathPlan"] = plan_solve_training_output(
+                    version["datasetPath"], candidate_output, preview_files, preview_directories,
+                    iterations=requested_options["iterations"], resume=True)
         set_job_stage(job, "running", "environment")
         report = (ensure_training_environment(backend, require_colmap=False, camera_policy='locked') if locked_admission is not None
                   else ensure_training_environment(backend))
@@ -5141,6 +5272,8 @@ def run_training_job(job, run_convert, quality, overwrite):
                 f"Training output resolves outside the configured output root: {output}"
             )
         images_dir = colmap_image_input_path(dataset)
+        solve_publication = bool(job.get("source_camera_dataset_path") and
+                                 not (job.get("native_control") or {}).get("resume"))
         if output.exists() and any(output.iterdir()):
             ensure_output_backend_compatible(job["output_scene"], backend)
             # A predictable conflict must fail before recalibrating the source
@@ -5202,7 +5335,7 @@ def run_training_job(job, run_convert, quality, overwrite):
         # Do not discard an existing output until reconstruction admission passes.
         if job.get("cancel_requested"):
             raise RuntimeError("Training cancelled by user")
-        if output.exists() and any(output.iterdir()):
+        if output.exists() and any(output.iterdir()) and not solve_publication:
             ensure_output_backend_compatible(job["output_scene"], backend)
             if overwrite:
                 add_job_log(job, f"Removing existing output: {output}")
@@ -5215,19 +5348,30 @@ def run_training_job(job, run_convert, quality, overwrite):
         options = training_options_from_payload(backend, quality, job.get("train_options"))
         options = resolve_training_options_for_environment(backend, options, job)
         if job.get("source_camera_dataset_path"):
-            if not (job.get("native_control") or {}).get("resume"):
-                portable_dataset = output / ".gsw" / "solve-dataset"
-                if portable_dataset.exists():
-                    raise ValueError("camera_solve_output_version_exists")
-                shutil.copytree(dataset, portable_dataset)
-                dataset = portable_dataset
-                job["dataset_path"] = str(dataset.resolve())
-            atomic_write_json(output / "training-source.json", {
+            training_source = {
                 "version": 1, "posePolicy": "solve", "datasetPath": ".gsw/solve-dataset",
                 "cameraDatasetPath": job["source_camera_dataset_path"],
                 "cameraDatasetIdentity": job.get("camera_dataset_identity"),
                 "resolutionPolicy": job.get("resolution_policy") or "manual",
-            })
+            }
+            if not (job.get("native_control") or {}).get("resume"):
+                from native.backend.camera_admission import publish_solve_training_output
+                try:
+                    publication = publish_solve_training_output(
+                        dataset, output, job.get("camera_dataset_identity"), training_source,
+                        overwrite=overwrite, allow_existing=bool(job.get("allow_existing_output")),
+                        cancelled=lambda: bool(job.get("cancel_requested")))
+                except BaseException as error:
+                    recovery = getattr(error, "solve_output_transaction", None)
+                    if recovery:
+                        job["solveOutputPublication"] = recovery
+                        add_job_log(job, "Solve output recovery journal: " + recovery["journalPath"])
+                    raise
+                job["solveOutputPublication"] = publication
+                dataset = Path(publication["datasetPath"])
+                job["dataset_path"] = str(dataset.resolve())
+            else:
+                atomic_write_json(output / "training-source.json", training_source)
         if camera_prepared is not None:
             if job.get("resolution_policy") in (None, "preserve"):
                 options["resolution"] = 1
@@ -5323,7 +5467,8 @@ def run_training_job(job, run_convert, quality, overwrite):
         # Existing reconstructions need the same first point-cloud view as a
         # newly run COLMAP job. This also covers starting training after restart.
         if locked_admission is None and job.get("preview_kind") != "colmap_sparse":
-            sparse_preview = ColmapPointCloudPreviewPublisher(job, dataset, [dataset / "sparse"])
+            sparse_preview = ColmapPointCloudPreviewPublisher(job, dataset, [dataset / "sparse"],
+                output_dir=job.get("solveTrainingPreviewPath") if job.get("source_camera_dataset_path") else None)
             sparse_preview.publish_latest(force=True)
         # Keep sparse path/count correctly typed until a Gaussian frame exists;
         # clearing its kind/count early would mislabel the initialization view.

@@ -56,6 +56,11 @@ public:
                  bool twoDgsAvailable, QWidget *parent = nullptr);
 
   [[nodiscard]] TrainingConfiguration configuration() const;
+  // Request-only state. Dataset/camera identity, paths, overwrite permission and
+  // task state remain owned by the current project and are never restored here.
+  [[nodiscard]] QJsonObject configurationDocument() const;
+  [[nodiscard]] bool setConfigurationDocument(const QJsonObject &document,
+      bool preserveCurrentInputPolicy = false);
   void setReconstructionProbe(const QString &python, const QString &backendRoot,
                               const QProcessEnvironment &environment);
   [[nodiscard]] bool effectiveRunColmap() const;
@@ -77,6 +82,7 @@ protected:
 
 private:
   void applyPreset();
+  void refreshPresetSummary();
   void chooseOutputRoot();
   void refreshInputSummary();
   void scanInputSummary();
@@ -90,6 +96,9 @@ private:
   QString mDatasetPath;
   QComboBox *mBackend = nullptr;
   QComboBox *mQuality = nullptr;
+  QString mAppliedQuality = QStringLiteral("quick");
+  QLabel *mPresetSummary = nullptr;
+  QPushButton *mApplyPresetButton = nullptr;
   QComboBox *mResolution = nullptr;
   QComboBox *mResolutionPolicy = nullptr;
   QComboBox *mPosePolicy = nullptr;

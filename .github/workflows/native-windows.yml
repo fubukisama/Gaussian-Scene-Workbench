@@ -96,7 +96,7 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw "Acceptance configure failed." }
-          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests gsw_training_telemetry_tests gsw_process_output_fixture gsw_native_tests gsw_geometry_product_tests gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests gsw_mesh_geometry_dialog_ui_tests gsw_native_viewport_locale_tests gsw_training_batch_ui_tests
+          cmake --build native/build-acceptance --config Release --parallel --target GaussianSceneWorkbench gsw_blender_view_navigation_tests gsw_upload_drain_budget_tests gsw_training_telemetry_tests gsw_process_output_fixture gsw_native_tests gsw_geometry_product_tests gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests gsw_mesh_geometry_dialog_ui_tests gsw_native_viewport_locale_tests gsw_training_batch_ui_tests gsw_training_preset_ui_tests gsw_training_request_store_tests
           if ($LASTEXITCODE -ne 0) { throw "Acceptance build failed." }
       - name: Prepare real Windows display and OpenGL
         shell: pwsh
@@ -116,6 +116,13 @@ jobs:
             --output-log native/acceptance.log `
             -R '^(native_workspace_drop_(zh_CN|en_US|ja_JP)|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP)|native_point_streaming|blender_view_navigation|upload_drain_budget|native_translation_catalog|native_translation_validator_tests|native_viewport_locale_contract|native_training_performance_ui|native_quality_comparison_ui|native_quality_measurement_ui|native_scale_constraints_ui|native_training_batch_ui|native_training_batch_contract_(zh_CN|en_US|ja_JP)|native_training_batch_lifecycle|native_camera_scale_p1|native_training_performance_policy|native_training_preflight|native_processing_completion|native_language_(zh_CN|en_US|ja_JP)|native_resource_budget_hud|native_texture_text_masks|native_texture_text_(zh_CN|en_US|ja_JP)_(light|dark)|training_telemetry|native_scene_coordinates_(zh_CN|en_US|ja_JP)|native_geometry_product|native_initialization_editor_ui|native_initialization_dialog_ui|native_mesh_geometry_dialog_ui|native_general_reconstruction_contracts|native_general_version_adoption|native_mesh_generation)$'
           if ($LASTEXITCODE -ne 0) { throw "Actual viewport acceptance failed." }
+      - name: Verify focused path and preset contracts
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
+            --output-log native/acceptance-path-presets.log `
+            -R '^(native_camera_path_safety|native_training_request_store|native_training_preset_(zh_CN|en_US|ja_JP))$'
+          if ($LASTEXITCODE -ne 0) { throw "Path and preset acceptance failed." }
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -123,6 +130,7 @@ jobs:
           name: native-upstream-viewport-acceptance
           path: |
             native/acceptance.log
+            native/acceptance-path-presets.log
             native/acceptance-artifact/
             native/build-acceptance/blender-viewport-evidence/
             native/build-acceptance/texture-text-captures/
@@ -199,6 +207,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "General reconstruction worker contracts failed." }
           & $env:QA_PYTHON -B -m unittest native.backend.tests.test_recorded_ply_export native.worker.test_training_batch_connection
           if ($LASTEXITCODE -ne 0) { throw "Recorded PLY export and persistent batch contracts failed." }
+          & $env:QA_PYTHON -B -m unittest native.worker.test_camera_admission_paths native.worker.test_colmap_path_budget native.worker.test_solve_output_publication
+          if ($LASTEXITCODE -ne 0) { throw "Windows camera path safety contracts failed." }
 
       - name: Install SPZ codec dependencies
         shell: pwsh
@@ -242,7 +252,18 @@ jobs:
         id: native-build
         timeout-minutes: 75
         shell: pwsh
-        run: cmake --build native/build-ci --config Release --parallel
+        run: ./scripts/trace_native_ci_build.ps1 -BuildDirectory native/build-ci -TraceDirectory native/ci-build-trace/attempt-${{ github.run_attempt }}
+
+      # Retain only a numeric/source-basename allowlist, never process command
+      # lines, environment variables, raw CodeQL logs, or binary logs.
+      - name: Upload native build progress trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-build-progress-trace
+          path: native/ci-build-trace/**/build-trace.jsonl
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Analyze native C++ code
         if: ${{ !cancelled() && steps.native-codeql.outcome == 'success' && steps.native-build.outcome == 'success' }}
@@ -307,7 +328,9 @@ jobs:
             "scripts/test_windows_shortcut_unicode.ps1",
             "scripts/test_windows_installer_build.ps1",
             "scripts/stage_native_crt.ps1",
-            "scripts/test_native_crt.ps1"
+            "scripts/test_native_crt.ps1",
+            "scripts/trace_native_ci_build.ps1",
+            "scripts/test_trace_native_ci_build.ps1"
           )
           foreach ($script in $scripts) {
             $tokens = $null

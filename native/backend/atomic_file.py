@@ -82,6 +82,27 @@ def _remove_owned_directory(path, identity, parent, parent_identity):
 
 
 @contextmanager
+def owned_directory(path):
+    """Own one exact preplanned fresh directory, never an existing collision.
+
+    Unlike atomic_sibling_directory this does not choose another basename:
+    callers can check the exact external-tool path before filesystem work.
+    Cleanup uses the same directory/parent identity and reparse guards.
+    """
+    path = Path(path)
+    if not path.name or path.name in (".", ".."):
+        raise ValueError("atomic_invalid_target_or_mode")
+    parent, parent_identity = _checked_directory(path.parent)
+    target = parent / path.name
+    target.mkdir()
+    identity = target.lstat()
+    try:
+        yield target
+    finally:
+        _remove_owned_directory(target, identity, parent, parent_identity)
+
+
+@contextmanager
 def atomic_sibling_directory(path):
     """Yield an exclusive same-parent stage whose basename never grows.
 

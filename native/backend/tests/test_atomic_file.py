@@ -38,6 +38,30 @@ class AtomicSiblingTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), value)
         self.assertEqual({path.name for path in self.root.iterdir()}, {"x.json", "x"})
 
+    def test_owned_planned_directory_uses_exact_name_and_preserves_collisions(self):
+        target = self.root / ".u-planned-run"
+        with atomic_file.owned_directory(target) as actual:
+            self.assertEqual(actual, target.resolve())
+            (actual / "owned.bin").write_bytes(b"temporary owned data")
+        self.assertFalse(target.exists())
+        target.mkdir()
+        (target / "foreign.bin").write_bytes(b"existing collision")
+        with self.assertRaises(FileExistsError):
+            with atomic_file.owned_directory(target):
+                self.fail("pre-existing directory is never owned")
+        self.assertEqual((target / "foreign.bin").read_bytes(), b"existing collision")
+
+    def test_owned_planned_directory_preserves_replacement_identity(self):
+        target = self.root / ".u-owned"
+        moved = self.root / "moved"
+        with atomic_file.owned_directory(target) as actual:
+            (actual / "owned.bin").write_bytes(b"original owned directory")
+            actual.rename(moved)
+            target.mkdir()
+            (target / "foreign.bin").write_bytes(b"replacement directory")
+        self.assertEqual((target / "foreign.bin").read_bytes(), b"replacement directory")
+        self.assertEqual((moved / "owned.bin").read_bytes(), b"original owned directory")
+
     def test_uuid_collision_retries_exclusively_and_failed_write_preserves_old_and_foreign_files(self):
         target = self.root / "ready.json"
         target.write_bytes(b"old target")

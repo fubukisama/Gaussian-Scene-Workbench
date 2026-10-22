@@ -200,6 +200,11 @@ QString CameraDatasetInfo::decisionText(const QJsonObject &summary) {
   return QCoreApplication::translate("Workbench", "锁定相机准入通过；仅使用训练划分，不重求相机。此结果不是模型质量或尺度精度证明。");
 }
 QString CameraDatasetInfo::importErrorText(const QString &rawError) {
+  if (rawError.contains(QRegularExpression(QStringLiteral(
+          "\\b(?:camera_solve|colmap)_path_budget_exceeded\\b")))) {
+    return QCoreApplication::translate("Workbench", "生成路径超出当前 Windows／外部工具的兼容范围，已在准备写入或清理旧结果前停止。内部工作名已缩短；托管数据可另存到较短的工程目录，关联的外部数据则需先复制到较短目录再重新关联。请保留原始照片。") +
+        QLatin1Char('\n') + QCoreApplication::translate("Workbench", "原始技术错误（保持不变）：%1").arg(rawError);
+  }
   const auto match = QRegularExpression(QStringLiteral("\\b(trajectory_[a-z_]+)\\b")).match(rawError);
   if (!match.hasMatch()) return rawError;
   const QString code = match.captured(1);

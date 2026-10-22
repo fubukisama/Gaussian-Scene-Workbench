@@ -69,6 +69,7 @@ function Copy-FilteredTree {
 
 $StaticFiles = @(
   @{ Source = "native\backend\atomic_file.py"; Destination = "native\backend\atomic_file.py" },
+  @{ Source = "native\backend\path_budget.py"; Destination = "native\backend\path_budget.py" },
   @{ Source = "native\backend\camera_dataset.py"; Destination = "native\backend\camera_dataset.py" },
   @{ Source = "native\backend\camera_admission.py"; Destination = "native\backend\camera_admission.py" },
   @{ Source = "native\backend\camera_scale_export.py"; Destination = "native\backend\camera_scale_export.py" },
@@ -164,6 +165,7 @@ $Manifest = [ordered]@{
   runtime = "External Python/Conda environment required"
   components = @(
     "native/backend/atomic_file.py",
+    "native/backend/path_budget.py",
     "native/backend/camera_dataset.py",
     "native/backend/camera_admission.py",
     "native/backend/scale_constraints.py",

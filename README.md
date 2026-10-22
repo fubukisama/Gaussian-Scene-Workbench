@@ -8,8 +8,9 @@
 
 ## Native Desktop Preview
 
-- Version: `0.3.6-native-preview`
-- Documentation updated: `2026-10-21`; runtime controls, camera/scale and general-reconstruction support limits are documented below. Local acceptance and complete cloud CI are separate delivery records; an in-progress run is not a full pass.
+- Version: `0.3.7-native-preview`
+- Incremental changes: [generated-path safety and explicit quality presets](docs/ACCEPTANCE_FOLLOWUP.md).
+- Documentation updated: `2026-10-22`; runtime controls, camera/scale and general-reconstruction support limits are documented below. Local acceptance and complete cloud CI are separate delivery records; an in-progress run is not a full pass.
 - Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
@@ -105,7 +106,7 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存拟合与独立参考检核；两者均不等于模型几何精度。单相机 TUM／CSV／JSON 轨迹关联与固定身份的串行 3DGS／2DGS 参数、种子批次保留相机、初始化和测试划分。见 [P1 指南、示例与能力边界](docs/CAMERA_SCALE_P1.md)。检查点的数据、源码与优化器校验保持严格；旧运行设置迁移不能绕过完整状态校验，更不能以 PLY 热启动冒充完整续训。
 
-**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.5-native-preview`。本页文档更新日期为 **2026-10-21**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.7-native-preview`。本页文档更新日期为 **2026-10-22**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
 本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
 
@@ -151,7 +152,7 @@ GPU メモリの増密保護を、画像ステージング、カメラ先読み�
 
 P1 では既知距離、カメラ基線、制御点によるスケール推定／Sim3 整合を追加しました。フィット残差と独立した参照検証を分離して保存し、モデル全体の形状精度とはみなしません。単眼 TUM／CSV／JSON の時刻関連付け、データを固定した逐次 3DGS／2DGS パラメーター・シード実験は、カメラ・初期化・評価用画像の分割を維持します。[P1 ガイドと対応範囲](docs/CAMERA_SCALE_P1.md)を参照してください。データ・ソース・最適化器の厳密な互換性検証を保ち、旧実行設定の移行で完全状態検証を迂回したり、PLY を完全再開の代用にしたりしません。
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.5-native-preview`、本ページの文書更新日は **2026-10-21** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.7-native-preview`、本ページの文書更新日は **2026-10-22** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
 この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
 
