@@ -7074,6 +7074,21 @@
     "en_US": "Baking PLY transforms requires floating-point coordinates and normals.",
     "ja_JP": "PLY トランスフォームのベイクには、浮動小数点の座標と法線が必要です。"
   },
+  "Gaussian transform baking requires complete floating-point scale, quaternion and SH fields (degree 0–4).": {
+    "zh_CN": "高斯变换烘焙要求完整的浮点尺度、四元数和球谐字段（0–4 阶）。",
+    "en_US": "Gaussian transform baking requires complete floating-point scale, quaternion and SH fields (degree 0–4).",
+    "ja_JP": "ガウシアンのトランスフォームのベイクには、完全な浮動小数点のスケール、クォータニオン、SH フィールド（0–4 次）が必要です。"
+  },
+  "Non-uniform Gaussian scaling with non-zero directional SH cannot preserve appearance exactly. Use uniform scaling or export original coordinates.": {
+    "zh_CN": "高斯非等比缩放在方向球谐系数非零时无法精确保留外观。请使用等比缩放，或导出原始坐标。",
+    "en_US": "Non-uniform Gaussian scaling with non-zero directional SH cannot preserve appearance exactly. Use uniform scaling or export original coordinates.",
+    "ja_JP": "方向依存の SH 係数がゼロでない場合、不均等スケールではガウシアンの外観を厳密に保持できません。均等スケールを使用するか、元の座標をエクスポートしてください。"
+  },
+  "Gaussian transform baking encountered invalid or unrepresentable scale, rotation or SH values. No output was written.": {
+    "zh_CN": "高斯变换烘焙遇到无效或无法表示的尺度、旋转或球谐值，未写入输出文件。",
+    "en_US": "Gaussian transform baking encountered invalid or unrepresentable scale, rotation or SH values. No output was written.",
+    "ja_JP": "ガウシアンのトランスフォームのベイクで、無効または表現できないスケール、回転、SH の値が見つかりました。出力ファイルは書き込んでいません。"
+  },
   "Baking transforms for PLY vertex list properties is not supported.": {
     "zh_CN": "暂不支持为包含顶点列表属性的 PLY 烘焙变换。",
     "en_US": "Baking transforms for PLY vertex list properties is not supported.",
@@ -7089,10 +7104,35 @@
     "en_US": "Unable to create model file: %1",
     "ja_JP": "モデルファイルを作成できません：%1"
   },
-  "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.": {
-    "zh_CN": "高斯 PLY 导出保留源坐标和全部属性；暂不支持烘焙高斯模型变换。",
-    "en_US": "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.",
-    "ja_JP": "ガウシアン PLY のエクスポートでは元の座標と全属性を保持します。ガウシアンモデルのトランスフォームのベイクには、まだ対応していません。"
+  "原始坐标模式保留 3DGS/2DGS 的全部高斯和自定义属性，不应用模型变换。": {
+    "zh_CN": "原始坐标模式保留 3DGS/2DGS 的全部高斯和自定义属性，不应用模型变换。",
+    "en_US": "Source-coordinate mode retains all 3DGS/2DGS Gaussian and custom attributes without applying model transforms.",
+    "ja_JP": "元の座標モードは、モデルのトランスフォームを適用せず、3DGS/2DGS のすべてのガウシアン属性とカスタム属性を保持します。"
+  },
+  "带来源记录的 PLY 保留模型与相机的共同坐标链，仅接受正等比相似变换；不支持镜像或非等比缩放。通过“同时应用当前模型的场景变换”烘焙，不绕过来源验证。": {
+    "zh_CN": "带来源记录的 PLY 保留模型与相机的共同坐标链，仅接受正等比相似变换；不支持镜像或非等比缩放。通过“同时应用当前模型的场景变换”烘焙，不绕过来源验证。",
+    "en_US": "Recorded PLY retains the shared coordinate chain of the model and cameras and accepts only proper similarities with a positive uniform scale, not reflections or non-uniform scaling. Enable “Also apply the current model's scene transform” to bake edits without bypassing provenance validation.",
+    "ja_JP": "出所記録付き PLY はモデルとカメラの共通座標チェーンを保持し、正の均等スケールを伴う向きを保つ相似変換のみを受け付けます。鏡映や不均等スケールには対応しません。「現在のモデルのシーン変換も適用」を有効にして、出所の検証を迂回せずに編集をベイクします。"
+  },
+  "This PLY has a coordinate record. Bake transforms through its recorded-coordinate export options; the record cannot be bypassed.": {
+    "zh_CN": "此 PLY 带有坐标记录。请通过其记录坐标导出选项烘焙变换，不能绕过该记录。",
+    "en_US": "This PLY has a coordinate record. Bake transforms through its recorded-coordinate export options; the record cannot be bypassed.",
+    "ja_JP": "この PLY には座標記録があります。記録座標のエクスポート設定を使ってトランスフォームをベイクしてください。記録を迂回することはできません。"
+  },
+  "此模型的坐标来源记录尚未通过验证，不能绕过记录进行场景坐标烘焙。请检查来源记录后重试。": {
+    "zh_CN": "此模型的坐标来源记录尚未通过验证，不能绕过记录进行场景坐标烘焙。请检查来源记录后重试。",
+    "en_US": "This model's coordinate provenance record has not passed validation. Scene-coordinate baking cannot bypass that record. Check the provenance record and try again.",
+    "ja_JP": "このモデルの座標の出所記録は検証を通過していません。記録を迂回してシーン座標をベイクすることはできません。出所記録を確認してから再試行してください。"
+  },
+  "场景坐标模式为 3DGS/2DGS 烘焙中心、尺度、方向和球谐外观；相关数值会重算，并非逐字节复制。自定义属性保持原值，不推测其几何含义。": {
+    "zh_CN": "场景坐标模式为 3DGS/2DGS 烘焙中心、尺度、方向和球谐外观；相关数值会重算，并非逐字节复制。自定义属性保持原值，不推测其几何含义。",
+    "en_US": "Scene-coordinate mode bakes 3DGS/2DGS centers, scales, orientations and spherical-harmonic appearance. Related values are recalculated, not copied byte-for-byte. Custom attributes retain their original values; their geometric meaning is not inferred.",
+    "ja_JP": "シーン座標モードは、3DGS/2DGS の中心、スケール、向き、球面調和関数による外観をベイクします。関連する数値は再計算し、バイト単位のコピーではありません。カスタム属性は元の値を保持し、幾何学的な意味は推測しません。"
+  },
+  "严格保真：非等比缩放遇到非零方向球谐系数时拒绝导出；请改用等比缩放或原始坐标。不会近似外观或丢弃属性。": {
+    "zh_CN": "严格保真：非等比缩放遇到非零方向球谐系数时拒绝导出；请改用等比缩放或原始坐标。不会近似外观或丢弃属性。",
+    "en_US": "Strict fidelity: non-uniform scaling with nonzero directional SH coefficients is rejected. Use uniform scaling or source coordinates instead. Appearance is not approximated and attributes are not discarded.",
+    "ja_JP": "厳密な保持：方向依存の SH 係数がゼロでない場合、不均等スケールでのエクスポートは拒否します。均等スケールか元の座標を使用してください。外観の近似や属性の破棄は行いません。"
   },
   "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。": {
     "zh_CN": "生效参数：%1 · %2 次迭代 · %3 · 优化器 %4。",

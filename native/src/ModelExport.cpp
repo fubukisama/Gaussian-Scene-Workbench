@@ -170,12 +170,20 @@ QString verifiedTrainingDeliveryPath(const QString &outputDirectory, const int e
 SceneCoordinate3D exportPosition(const SceneCoordinate3D &p, const ModelExportOptions &o) {
   if (!o.applyTransform) return p;
   // Double-precision source coordinates; viewport recentering is never baked.
-  const auto r = o.transform.rotation.normalized().toRotationMatrix();
+  const auto &q = o.transform.rotation;
+  const double length = std::hypot(std::hypot(double(q.scalar()), double(q.x())),
+                                   std::hypot(double(q.y()), double(q.z())));
+  const double w = q.scalar() / length, x = q.x() / length,
+               y = q.y() / length, z = q.z() / length;
+  const std::array<std::array<double, 3>, 3> r{{
+      {1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y)},
+      {2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x)},
+      {2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)}}};
   const std::array<double, 3> v{(p.x - o.pivot.x) * o.transform.scale.x(),
       (p.y - o.pivot.y) * o.transform.scale.y(), (p.z - o.pivot.z) * o.transform.scale.z()};
-  return {(o.pivot.x + o.transform.translation.x() + r(0,0)*v[0] + r(0,1)*v[1] + r(0,2)*v[2]) * o.sceneUnitScale,
-          (o.pivot.y + o.transform.translation.y() + r(1,0)*v[0] + r(1,1)*v[1] + r(1,2)*v[2]) * o.sceneUnitScale,
-          (o.pivot.z + o.transform.translation.z() + r(2,0)*v[0] + r(2,1)*v[1] + r(2,2)*v[2]) * o.sceneUnitScale};
+  return {(o.pivot.x + o.transform.translation.x() + r[0][0]*v[0] + r[0][1]*v[1] + r[0][2]*v[2]) * o.sceneUnitScale,
+          (o.pivot.y + o.transform.translation.y() + r[1][0]*v[0] + r[1][1]*v[1] + r[1][2]*v[2]) * o.sceneUnitScale,
+          (o.pivot.z + o.transform.translation.z() + r[2][0]*v[0] + r[2][1]*v[1] + r[2][2]*v[2]) * o.sceneUnitScale};
 }
 
 QVector3D exportNormal(const QVector3D &n, const ModelExportOptions &o) {
@@ -444,6 +452,10 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
   if (sameFile(o.sourcePath, o.destinationPath))
     return fail(QCoreApplication::translate("Workbench", "Choose a new file name; model export cannot overwrite its source."));
   if (!o.cameraCoordinateRecovery.isEmpty()) return exportRecordedCameraCoordinates(o);
+  const QFileInfo coordinateRecord(cameraScaleMetadataPath(o.sourcePath));
+  if (o.format == ModelExportFormat::Ply && o.applyTransform &&
+      (coordinateRecord.exists() || coordinateRecord.isSymLink()))
+    return fail(QCoreApplication::translate("Workbench", "This PLY has a coordinate record. Bake transforms through its recorded-coordinate export options; the record cannot be bypassed."));
   if (o.applyTransform && (!o.transform.isValid() || !o.pivot.isFinite() ||
       !std::isfinite(o.sceneUnitScale) || o.sceneUnitScale <= 0.0))
     return fail(QCoreApplication::translate("Workbench", "The model transform is invalid."));
@@ -453,7 +465,7 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
     const bool sameUnit = !o.sceneUnitDeclared ||
         (o.coordinates.unitDeclared && o.coordinates.unit == o.sceneUnit);
     if (o.sceneUnitScale == 1.0 && sameUnit &&
-        o.transform.translation.isNull() && rotationsEquivalent(o.transform.rotation, QQuaternion()) &&
+        o.transform.translation.isNull() && o.transform.rotation.vector().isNull() &&
         o.transform.scale == QVector3D(1, 1, 1)) ply.applyTransform = false;
     return PlyPointCloudLoader::exportSourcePly(ply);
   }

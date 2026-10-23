@@ -12,7 +12,9 @@
 #include <QTemporaryDir>
 #include <QtEndian>
 #include <QtTest>
+#include <array>
 #include <bit>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -48,17 +50,45 @@ QByteArray gaussianPly(int degree = 3, double x = 1.12345, bool invalidRotation 
   }
   return h;
 }
+// Independent Cartesian real-SH polynomials, rather than the exporter's basis/rotation helper.
+std::array<double, 25> cartesianSh(const std::array<double, 3> &direction) {
+  const double x = direction[0], y = direction[1], z = direction[2];
+  const double xx = x*x, yy = y*y, zz = z*z;
+  return {0.28209479177387814,
+      -0.4886025119029199*y, 0.4886025119029199*z, -0.4886025119029199*x,
+      1.0925484305920792*x*y, -1.0925484305920792*y*z, 0.31539156525252005*(2*zz-xx-yy),
+      -1.0925484305920792*x*z, 0.5462742152960396*(xx-yy),
+      -0.5900435899266435*y*(3*xx-yy), 2.890611442640554*x*y*z,
+      -0.4570457994644658*y*(4*zz-xx-yy), 0.3731763325901154*z*(2*zz-3*xx-3*yy),
+      -0.4570457994644658*x*(4*zz-xx-yy), 1.445305721320277*z*(xx-yy),
+      -0.5900435899266435*x*(xx-3*yy),
+      2.5033429417967046*x*y*(xx-yy), -1.7701307697799304*y*z*(3*xx-yy),
+      0.9461746957575601*x*y*(7*zz-1), -0.6690465435572892*y*z*(7*zz-3),
+      0.10578554691520431*(zz*(35*zz-30)+3), -0.6690465435572892*x*z*(7*zz-3),
+      0.47308734787878004*(xx-yy)*(7*zz-1), -1.7701307697799304*x*z*(xx-3*yy),
+      0.6258357354491761*(xx*(xx-3*yy)-yy*(3*xx-yy))};
+}
 }
 
 class ModelExportTests final : public QObject {
   Q_OBJECT
 private slots:
   void preservesPlyAndCroppedGaussianAttributes();
+  void bakesCroppedAscii3dGaussianTransformAndPreservesAttributes();
+  void bakesBinary2dGaussianNonUniformTransformWithoutInventingThickness();
+  void recordedCameraMetadataCannotBeBypassedByPlainGaussianBake();
+  void gaussianTranslationPreservesDoublePrecisionNormalValues();
+  void nonUniformGaussianBakeRejectsOnlyRetainedDirectionalHarmonics();
+  void gaussianBakeRejectsDuplicateScaleAndRotationProperties();
+  void mirrorsBinary3dGaussiansAndDirectionalDegreeThreeAndFourAppearance();
+  void bakesNonUniformDcOnly3dGaussianCovariance();
+  void gaussianBakeCancellationKeepsDestinationAndBothSourceKinds();
+  void realGaussianPlyBakeWhenRequested();
   void exportsCoordinatesAndBakesDoublePrecisionTransform();
   void exportsSceneUnitsAndPreservesSourceCoordinates();
   void sceneUnitGlbUsesPhysicalMetresOnce();
   void sceneUnitsCoverMeshFormatsAndMetadata();
-  void sceneUnitConversionKeepsGaussianSourceProtection();
+  void sceneUnitConversionBakesGaussianPlyAndKeepsSpzSourceProtection();
   void preservesProjectionSidecarMetadataInSourcePly();
   void scenePlyDoesNotPublishSourceCrs();
   void protectsExistingProjectionSidecars();
@@ -213,6 +243,571 @@ void ModelExportTests::preservesPlyAndCroppedGaussianAttributes() {
   QCOMPARE(read(o.sourcePath), data);
 }
 
+void ModelExportTests::bakesCroppedAscii3dGaussianTransformAndPreservesAttributes() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("source-3dgs.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("baked-3dgs.ply"));
+  QByteArray source = "ply\nformat ascii 1.0\ncomment independent TRS acceptance fixture\nelement vertex 3\n";
+  for (const char *name : {"x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2", "opacity",
+                          "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"})
+    source += QByteArray("property double ") + name + '\n';
+  for (int index = 0; index < 9; ++index)
+    source += "property double f_rest_" + QByteArray::number(index) + '\n';
+  source += "property uint research_id\nproperty double confidence_raw\nend_header\n";
+  const QByteArray attributes = " 1 0 0 0.3 -0.2 0.6 0.75 0 -1 -2 1 0 0 0 1 2 3 4 5 6 7 8 9 4294967291 1.2345678901234567\n";
+  source += "1 2 3" + attributes;
+  source += "4 5 6" + attributes;
+  source += "-1 0 2" + attributes;
+  QVERIFY(save(o.sourcePath, source));
+  const auto input = PlyPointCloudLoader::load(o.sourcePath);
+  QVERIFY2(input.isValid(), qPrintable(input.error));
+  QVERIFY(input.hasGaussianAttributes);
+  QVERIFY(!input.hasSurfelAttributes);
+  o.applyTransform = true;
+  o.transform.translation = {10, 20, 30};
+  o.transform.scale = {2, 2, 2};
+  o.transform.rotation = QQuaternion::fromAxisAndAngle({0, 0, 1}, 90);
+  o.deletedVertices.resize(3);
+  o.deletedVertices.setBit(1);
+  const auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+
+  const auto output = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY2(output.isValid(), qPrintable(output.error));
+  QVERIFY(output.hasGaussianAttributes);
+  QVERIFY(!output.hasSurfelAttributes);
+  QCOMPARE(output.sourceVertexCount, 2);
+  // Known example: S2 then Rz90 then T(10,20,30), with the middle point removed.
+  const std::array<std::array<double, 3>, 2> positions{{{6, 22, 36}, {10, 18, 34}}};
+  const std::array<double, 3> logScales{0.6931471805599453, -0.3068528194400547, -1.3068528194400546};
+  // Degree-one real SH uses [-y,z,-x]; +90 degrees about Z maps [a,b,c] to [c,b,-a].
+  const std::array<double, 9> harmonics{3, 2, -1, 6, 5, -4, 9, 8, -7};
+  int seen = 0;
+  PlyGaussianVisitor gaussians;
+  gaussians.begin = [](qint64 count, int degree, bool) { return count == 2 && degree == 1; };
+  gaussians.gaussian = [&](qint64 index, const std::array<double, 86> &value) {
+    if (index < 0 || index >= 2) return false;
+    ++seen;
+    for (int axis = 0; axis < 3; ++axis) {
+      if (std::abs(value[axis] - positions[index][axis]) > 1e-6) return false;
+      if (std::abs(value[7 + axis] - logScales[axis]) > 1e-6) return false;
+    }
+    if (value[3] != 0.3 || value[4] != -0.2 || value[5] != 0.6 || value[6] != 0.75) return false;
+    // Identity source quaternion becomes Rz90, up to the equivalent quaternion sign.
+    if (std::abs(std::abs(value[10]) - 0.7071067811865476) > 1e-6 ||
+        std::abs(value[11]) > 1e-6 || std::abs(value[12]) > 1e-6 ||
+        std::abs(value[10] - value[13]) > 1e-6) return false;
+    for (int coefficient = 0; coefficient < 9; ++coefficient)
+      if (std::abs(value[14 + coefficient] - harmonics[coefficient]) > 1e-6) return false;
+    return true;
+  };
+  QString error;
+  QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(o.destinationPath, gaussians, error), qPrintable(error));
+  QCOMPARE(seen, 2);
+  int normalsSeen = 0;
+  PlyGeometryVisitor geometry;
+  geometry.vertex = [&](qint64, const PlySourceVertex &vertex) {
+    ++normalsSeen;
+    return std::abs(vertex.normal.x()) < 1e-6 && std::abs(vertex.normal.y() - 1.0F) < 1e-6 &&
+        std::abs(vertex.normal.z()) < 1e-6;
+  };
+  QVERIFY2(PlyPointCloudLoader::visitSourceGeometry(o.destinationPath, geometry, error), qPrintable(error));
+  QCOMPARE(normalsSeen, 2);
+  const QByteArray exported = read(o.destinationPath);
+  QVERIFY(exported.startsWith("ply\nformat ascii 1.0\n"));
+  QVERIFY(exported.contains("property uint research_id\nproperty double confidence_raw\n"));
+  QCOMPARE(exported.count("property "), source.count("property "));
+  const auto rows = exported.mid(exported.indexOf("end_header\n") + 11).trimmed().split('\n');
+  QCOMPARE(rows.size(), 2);
+  for (const auto &row : rows) {
+    const auto values = row.simplified().split(' ');
+    QCOMPARE(values.size(), 28);
+    QCOMPARE(values[26], QByteArray("4294967291"));
+    QCOMPARE(values[27], QByteArray("1.2345678901234567"));
+  }
+  QCOMPARE(read(o.sourcePath), source);
+}
+
+void ModelExportTests::bakesBinary2dGaussianNonUniformTransformWithoutInventingThickness() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  for (const auto endian : {QDataStream::LittleEndian, QDataStream::BigEndian}) {
+    ModelExportOptions o;
+    o.sourcePath = dir.filePath(QStringLiteral("surfel-source.ply"));
+    o.destinationPath = dir.filePath(QStringLiteral("surfel-baked.ply"));
+    QFile file(o.sourcePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray format = endian == QDataStream::LittleEndian ? "binary_little_endian" : "binary_big_endian";
+    file.write("ply\nformat " + format + " 1.0\nelement vertex 3\n");
+    file.write("property double x\nproperty double y\nproperty double z\n");
+    for (const char *name : {"nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2", "opacity",
+                            "scale_0", "scale_1", "rot_0", "rot_1", "rot_2", "rot_3"})
+      file.write(QByteArray("property float ") + name + '\n');
+    file.write("property uint research_id\nproperty double confidence_raw\nend_header\n");
+    QDataStream sourceStream(&file);
+    sourceStream.setByteOrder(endian);
+    for (int index = 0; index < 3; ++index) {
+      sourceStream.setFloatingPointPrecision(QDataStream::DoublePrecision);
+      sourceStream << 1000000000.125 + index << 2.0 + index << 3.0 + index;
+      sourceStream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+      // A zero-thickness ellipse: principal radii 2 and 3, rotated 45 degrees around Z.
+      sourceStream << 0.0F << 0.0F << 1.0F << 0.3F << -0.2F << 0.6F << 0.75F
+                   << 0.6931471805599453F << 1.0986122886681098F
+                   << 0.9238795325112867F << 0.0F << 0.0F << 0.3826834323650898F
+                   << quint32(4294967291U);
+      sourceStream.setFloatingPointPrecision(QDataStream::DoublePrecision);
+      sourceStream << 1.2345678901234567;
+    }
+    QCOMPARE(sourceStream.status(), QDataStream::Ok);
+    file.close();
+    const auto source = read(o.sourcePath);
+    const auto original = PlyPointCloudLoader::load(o.sourcePath);
+    QVERIFY2(original.isValid(), qPrintable(original.error));
+    QVERIFY(original.hasGaussianAttributes);
+    QVERIFY(original.hasSurfelAttributes);
+    o.applyTransform = true;
+    o.pivot = {1000000000.125, 2, 3};
+    o.transform.translation = {10, 20, 30};
+    o.transform.scale = {2, 3, 4};
+    o.transform.rotation = QQuaternion::fromAxisAndAngle({0, 1, 0}, 90);
+    o.deletedVertices.resize(3);
+    o.deletedVertices.setBit(1);
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+
+    const auto reloaded = PlyPointCloudLoader::load(o.destinationPath);
+    QVERIFY2(reloaded.isValid(), qPrintable(reloaded.error));
+    QVERIFY(reloaded.hasGaussianAttributes);
+    QVERIFY(reloaded.hasSurfelAttributes);
+    QCOMPARE(reloaded.sourceVertexCount, 2);
+    const auto output = read(o.destinationPath);
+    const auto headerEnd = output.indexOf("end_header\n") + 11;
+    const auto sourceHeaderEnd = source.indexOf("end_header\n") + 11;
+    QVERIFY(output.startsWith("ply\nformat " + format + " 1.0\n"));
+    QVERIFY(!output.left(headerEnd).contains("property float scale_2\n"));
+    QCOMPARE(output.left(headerEnd).count("property "), 18);
+    constexpr qsizetype recordBytes = 88;
+    QCOMPARE(output.size() - headerEnd, 2 * recordBytes);
+    QDataStream decoded(output.mid(headerEnd));
+    decoded.setByteOrder(endian);
+    const std::array<std::array<double, 3>, 2> positions{{
+        {1000000010.125, 22, 33}, {1000000018.125, 28, 29}}};
+    // R_y(90) S(2,3,4) transforms the source XY ellipse covariance into YZ.
+    const std::array<std::array<double, 3>, 3> covariance{{{0, 0, 0}, {0, 58.5, 15}, {0, 15, 26}}};
+    for (int record = 0; record < 2; ++record) {
+      decoded.setFloatingPointPrecision(QDataStream::DoublePrecision);
+      double x, y, z;
+      decoded >> x >> y >> z;
+      QVERIFY(std::abs(x - positions[record][0]) < 1e-6);
+      QVERIFY(std::abs(y - positions[record][1]) < 1e-6);
+      QVERIFY(std::abs(z - positions[record][2]) < 1e-6);
+      decoded.setFloatingPointPrecision(QDataStream::SinglePrecision);
+      float nx, ny, nz, dc0, dc1, dc2, opacity, s0, s1, qw, qx, qy, qz;
+      quint32 researchId;
+      decoded >> nx >> ny >> nz >> dc0 >> dc1 >> dc2 >> opacity >> s0 >> s1 >> qw >> qx >> qy >> qz >> researchId;
+      decoded.setFloatingPointPrecision(QDataStream::DoublePrecision);
+      double confidence;
+      decoded >> confidence;
+      QVERIFY(std::abs(nx - 1.0F) < 1e-6 && std::abs(ny) < 1e-6 && std::abs(nz) < 1e-6);
+      QCOMPARE(dc0, 0.3F); QCOMPARE(dc1, -0.2F); QCOMPARE(dc2, 0.6F); QCOMPARE(opacity, 0.75F);
+      QCOMPARE(researchId, 4294967291U);
+      QCOMPARE(confidence, 1.2345678901234567);
+      const QQuaternion orientation(qw, qx, qy, qz);
+      QVERIFY(std::abs(orientation.length() - 1.0F) < 1e-6);
+      const auto first = orientation.rotatedVector({1, 0, 0});
+      const auto second = orientation.rotatedVector({0, 1, 0});
+      const double firstVariance = std::exp(2.0 * s0), secondVariance = std::exp(2.0 * s1);
+      for (int row = 0; row < 3; ++row) for (int column = 0; column < 3; ++column)
+        QVERIFY(std::abs(firstVariance * first[row] * first[column] +
+                         secondVariance * second[row] * second[column] - covariance[row][column]) < 3e-5);
+      // The raw source DC/opacity, custom uint and custom double bytes survive both byte orders.
+      const auto outputRecord = output.mid(headerEnd + record * recordBytes, recordBytes);
+      const auto sourceRecord = source.mid(sourceHeaderEnd + (record == 0 ? 0 : 2) * recordBytes, recordBytes);
+      QCOMPARE(outputRecord.mid(36, 16), sourceRecord.mid(36, 16));
+      QCOMPARE(outputRecord.mid(76, 12), sourceRecord.mid(76, 12));
+    }
+    QCOMPARE(decoded.status(), QDataStream::Ok);
+    QVERIFY(decoded.atEnd());
+    QCOMPARE(read(o.sourcePath), source);
+  }
+}
+
+void ModelExportTests::recordedCameraMetadataCannotBeBypassedByPlainGaussianBake() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("recorded-gaussians.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("baked-gaussians.ply"));
+  const auto original = gaussianPly(0);
+  QVERIFY(save(o.sourcePath, original));
+  const QJsonArray identity{QJsonArray{1, 0, 0}, QJsonArray{0, 1, 0}, QJsonArray{0, 0, 1}};
+  const auto transform = [&](double scale, QJsonArray translation) {
+    return QJsonObject{{"s", scale}, {"R", identity}, {"t", translation}, {"applied", true}};
+  };
+  const QJsonObject record{{"schema", "gsw.training_camera_contract/1"},
+      {"ply_sha256", QString::fromLatin1(QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex())},
+      {"input_data_identity", QString(64, 'b')},
+      {"scale", QJsonObject{{"status", "source_declared"}, {"source_unit", "m"}, {"canonical_unit", "m"},
+          {"meters_per_unit", 1.0}, {"evidence", QJsonArray{QJsonObject{{"kind", "user_declaration"}}}}}},
+      {"transforms", QJsonObject{{"source_to_canonical", transform(1.0, {0, 0, 0})},
+          {"canonical_to_training", transform(2.0, {1, 2, 3})}}}};
+  const auto sidecar = QJsonDocument(record).toJson();
+  QVERIFY(save(cameraScaleMetadataPath(o.sourcePath), sidecar));
+  QVERIFY(cameraScaleRecoveryCapability(o.sourcePath).preserve);
+  o.applyTransform = true;
+  o.transform.translation = {10, 20, 30};
+  QVERIFY(save(o.destinationPath, "existing destination"));
+  // A scene-coordinate write must not silently discard a verified recorded-frame contract.
+  const auto result = exportModelFile(o);
+  QVERIFY(!result.success);
+  QVERIFY(!result.error.isEmpty());
+  QCOMPARE(read(o.destinationPath), QByteArray("existing destination"));
+  QVERIFY(!QFileInfo::exists(cameraScaleMetadataPath(o.destinationPath)));
+  QCOMPARE(read(o.sourcePath), original);
+  QCOMPARE(read(cameraScaleMetadataPath(o.sourcePath)), sidecar);
+}
+
+void ModelExportTests::gaussianTranslationPreservesDoublePrecisionNormalValues() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("double-normals.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("translated.ply"));
+  auto source = gaussianPly(0);
+  source.replace("end_header\n", "property double nx\nproperty double ny\nproperty double nz\nend_header\n");
+  const auto headerEnd = source.indexOf("end_header\n") + 11;
+  QByteArray complete = source.left(headerEnd);
+  for (const auto &row : source.mid(headerEnd).trimmed().split('\n'))
+    complete += row + " 1e-80 0 0.123456789012345\n";
+  QVERIFY(save(o.sourcePath, complete));
+  o.applyTransform = true;
+  o.transform.translation = {1, 2, 3};
+  const auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  const auto output = read(o.destinationPath);
+  const auto rows = output.mid(output.indexOf("end_header\n") + 11).trimmed().split('\n');
+  QCOMPARE(rows.size(), 3);
+  for (const auto &row : rows) {
+    const auto values = row.simplified().split(' ');
+    QCOMPARE(values.size(), 17);
+    QCOMPARE(values[14].toDouble(), 1e-80);
+    QCOMPARE(values[15].toDouble(), 0.0);
+    QCOMPARE(values[16].toDouble(), 0.123456789012345);
+  }
+  QCOMPARE(read(o.sourcePath), complete);
+}
+
+void ModelExportTests::nonUniformGaussianBakeRejectsOnlyRetainedDirectionalHarmonics() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("directional.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("strict.ply"));
+  const auto fixture = gaussianPly(1);
+  const auto headerEnd = fixture.indexOf("end_header\n") + 11;
+  QByteArray source = fixture.left(headerEnd);
+  const auto rows = fixture.mid(headerEnd).trimmed().split('\n');
+  for (int row = 0; row < rows.size(); ++row) {
+    auto values = rows[row].simplified().split(' ');
+    for (int index = 14; index < values.size(); ++index) values[index] = "0";
+    // Even a tiny but non-zero coefficient must not silently enter an approximation.
+    if (row == 1) values[14] = "1e-40";
+    source += values.join(' ') + '\n';
+  }
+  QVERIFY(save(o.sourcePath, source));
+  QVERIFY(save(o.destinationPath, "existing destination"));
+  o.applyTransform = true;
+  o.transform.scale = {2, 3, 4};
+  const auto rejected = exportModelFile(o);
+  QVERIFY(!rejected.success);
+  QVERIFY(!rejected.error.isEmpty());
+  QCOMPARE(read(o.destinationPath), QByteArray("existing destination"));
+  QCOMPARE(read(o.sourcePath), source);
+  // Once the sole directional point is removed, the retained DC-only ellipsoids are exact.
+  o.deletedVertices.resize(3);
+  o.deletedVertices.setBit(1);
+  const auto cropped = exportModelFile(o);
+  QVERIFY2(cropped.success, qPrintable(cropped.error));
+  const auto output = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY2(output.isValid(), qPrintable(output.error));
+  QVERIFY(output.hasGaussianAttributes);
+  QCOMPARE(output.sourceVertexCount, 2);
+  int checked = 0;
+  PlyGaussianVisitor visitor;
+  visitor.begin = [](qint64 count, int degree, bool) { return count == 2 && degree == 1; };
+  visitor.gaussian = [&](qint64, const std::array<double, 86> &values) {
+    ++checked;
+    for (int coefficient = 14; coefficient < 23; ++coefficient)
+      if (values[coefficient] != 0.0) return false;
+    return true;
+  };
+  QString error;
+  QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(o.destinationPath, visitor, error), qPrintable(error));
+  QCOMPARE(checked, 2);
+  QCOMPARE(read(o.sourcePath), source);
+}
+
+void ModelExportTests::gaussianBakeRejectsDuplicateScaleAndRotationProperties() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("ambiguous.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("protected.ply"));
+  o.applyTransform = true;
+  o.transform.translation = {1, 2, 3};
+  for (const QByteArray &name : {QByteArray("scale_0"), QByteArray("rot_0")}) {
+    auto fixture = gaussianPly(0);
+    fixture.replace("end_header\n", "property double " + name + "\nend_header\n");
+    const auto headerEnd = fixture.indexOf("end_header\n") + 11;
+    QByteArray source = fixture.left(headerEnd);
+    for (const auto &row : fixture.mid(headerEnd).trimmed().split('\n')) source += row + " 1\n";
+    QVERIFY(save(o.sourcePath, source));
+    QVERIFY(save(o.destinationPath, "existing destination"));
+    const auto result = exportModelFile(o);
+    QVERIFY(!result.success);
+    QVERIFY(!result.error.isEmpty());
+    QCOMPARE(read(o.destinationPath), QByteArray("existing destination"));
+    QCOMPARE(read(o.sourcePath), source);
+  }
+}
+
+void ModelExportTests::mirrorsBinary3dGaussiansAndDirectionalDegreeThreeAndFourAppearance() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  for (int degree : {3, 4}) {
+    ModelExportOptions o;
+    o.sourcePath = dir.filePath(QStringLiteral("directional-binary.ply"));
+    o.destinationPath = dir.filePath(QStringLiteral("mirrored.ply"));
+    QFile file(o.sourcePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("ply\nformat binary_little_endian 1.0\nelement vertex 1\nproperty double x\nproperty double y\nproperty double z\n");
+    for (const char *name : {"f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2",
+                            "rot_0", "rot_1", "rot_2", "rot_3"})
+      file.write(QByteArray("property float ") + name + '\n');
+    const int dim = (degree + 1) * (degree + 1) - 1;
+    for (int index = 0; index < 3*dim; ++index)
+      file.write("property float f_rest_" + QByteArray::number(index) + '\n');
+    file.write("property uchar research_class\nproperty double confidence_raw\nend_header\n");
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::DoublePrecision);
+    stream << 1.0 << 2.0 << 3.0;
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << 0.3F << -0.2F << 0.6F << 0.75F << 0.0F << 0.6931471805599453F << 1.0986122886681098F
+           << 0.9238795325112867F << 0.0F << 0.0F << 0.3826834323650898F;
+    std::array<double, 72> sourceCoefficients{};
+    for (int index = 0; index < 3*dim; ++index) {
+      const float coefficient = (index % 11 - 5) * 0.07F;
+      sourceCoefficients[index] = coefficient;
+      stream << coefficient;
+    }
+    stream << quint8(237);
+    stream.setFloatingPointPrecision(QDataStream::DoublePrecision);
+    stream << 1.2345678901234567;
+    QCOMPARE(stream.status(), QDataStream::Ok);
+    file.close();
+    const auto source = read(o.sourcePath);
+    o.applyTransform = true;
+    o.transform.scale = {-2, 2, 2};
+    o.transform.translation = {10, 20, 30};
+    const auto result = exportModelFile(o);
+    QVERIFY2(result.success, qPrintable(result.error));
+    const auto reloaded = PlyPointCloudLoader::load(o.destinationPath);
+    QVERIFY2(reloaded.isValid(), qPrintable(reloaded.error));
+    QVERIFY(reloaded.hasGaussianAttributes);
+    QVERIFY(!reloaded.hasSurfelAttributes);
+    QCOMPARE(reloaded.sourceVertexCount, 1);
+    const std::array<std::array<double, 3>, 10> directions{{
+        {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {-1, 0, 0}, {0, -1, 0}, {0, 0, -1},
+        {.6, .8, 0}, {.36, .48, .8}, {-2.0/3, 1.0/3, 2.0/3}, {.7071067811865476, 0, -.7071067811865476}}};
+    const std::array<std::array<double, 3>, 3> covariance{{{10, 6, 0}, {6, 10, 0}, {0, 0, 36}}};
+    int checked = 0;
+    PlyGaussianVisitor visitor;
+    visitor.begin = [degree](qint64 count, int outputDegree, bool) { return count == 1 && outputDegree == degree; };
+    visitor.gaussian = [&](qint64, const std::array<double, 86> &value) {
+      ++checked;
+      if (std::abs(value[0]-8) > 1e-9 || std::abs(value[1]-24) > 1e-9 || std::abs(value[2]-36) > 1e-9) return false;
+      const QQuaternion rotation(value[10], value[11], value[12], value[13]);
+      const std::array<QVector3D, 3> axes{rotation.rotatedVector({1, 0, 0}),
+          rotation.rotatedVector({0, 1, 0}), rotation.rotatedVector({0, 0, 1})};
+      for (int row = 0; row < 3; ++row) for (int column = 0; column < 3; ++column) {
+        double actual = 0;
+        for (int axis = 0; axis < 3; ++axis) actual += std::exp(2*value[7+axis])*axes[axis][row]*axes[axis][column];
+        if (std::abs(actual-covariance[row][column]) > 3e-5) return false;
+      }
+      for (const auto &direction : directions) {
+        const auto outputBasis = cartesianSh(direction);
+        const auto inputBasis = cartesianSh({-direction[0], direction[1], direction[2]});
+        for (int channel = 0; channel < 3; ++channel) {
+          double actual = 0, expected = 0;
+          for (int coefficient = 0; coefficient < dim; ++coefficient) {
+            actual += value[14+channel*dim+coefficient]*outputBasis[coefficient+1];
+            expected += sourceCoefficients[channel*dim+coefficient]*inputBasis[coefficient+1];
+          }
+          if (std::abs(actual-expected) > 2e-6) return false;
+        }
+      }
+      return true;
+    };
+    QString error;
+    QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(o.destinationPath, visitor, error), qPrintable(error));
+    QCOMPARE(checked, 1);
+    const auto output = read(o.destinationPath);
+    const auto outputHeaderEnd = output.indexOf("end_header\n") + 11;
+    const auto sourceHeaderEnd = source.indexOf("end_header\n") + 11;
+    QCOMPARE(output.left(outputHeaderEnd).count("property "), 16+3*dim);
+    QCOMPARE(output.size()-outputHeaderEnd, source.size()-sourceHeaderEnd);
+    QCOMPARE(output.mid(outputHeaderEnd+24, 16), source.mid(sourceHeaderEnd+24, 16));
+    QCOMPARE(output.right(9), source.right(9));
+    QCOMPARE(read(o.sourcePath), source);
+  }
+}
+
+void ModelExportTests::bakesNonUniformDcOnly3dGaussianCovariance() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  ModelExportOptions o;
+  o.sourcePath = dir.filePath(QStringLiteral("dc-ellipsoid.ply"));
+  o.destinationPath = dir.filePath(QStringLiteral("nonuniform.ply"));
+  const auto fixture = gaussianPly(0);
+  QByteArray source = fixture.left(fixture.indexOf("end_header\n") + 11);
+  source.replace("element vertex 3\n", "element vertex 1\n");
+  // Rz45 principal radii (1,2,3), so its source XY covariance has diagonal 2.5 and off-diagonal -1.5.
+  source += "1 2 3 0.3 -0.2 0.6 0.75 0 0.6931471805599453 1.0986122886681098 0.9238795325112867 0 0 0.3826834323650898\n";
+  QVERIFY(save(o.sourcePath, source));
+  o.applyTransform = true;
+  o.transform.scale = {2, 3, 4};
+  o.transform.rotation = QQuaternion::fromAxisAndAngle({0, 1, 0}, 90);
+  o.transform.translation = {10, 20, 30};
+  const auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  const auto output = PlyPointCloudLoader::load(o.destinationPath);
+  QVERIFY2(output.isValid(), qPrintable(output.error));
+  QVERIFY(output.hasGaussianAttributes);
+  QVERIFY(!output.hasSurfelAttributes);
+  QCOMPARE(output.sourceVertexCount, 1);
+  const std::array<std::array<double, 3>, 3> covariance{{{144, 0, 0}, {0, 22.5, 9}, {0, 9, 10}}};
+  int checked = 0;
+  PlyGaussianVisitor visitor;
+  visitor.begin = [](qint64 count, int degree, bool) { return count == 1 && degree == 0; };
+  visitor.gaussian = [&](qint64, const std::array<double, 86> &value) {
+    ++checked;
+    if (std::abs(value[0]-22) > 1e-9 || std::abs(value[1]-26) > 1e-9 || std::abs(value[2]-28) > 1e-9) return false;
+    const QQuaternion orientation(value[10], value[11], value[12], value[13]);
+    const std::array<QVector3D, 3> axes{orientation.rotatedVector({1, 0, 0}),
+        orientation.rotatedVector({0, 1, 0}), orientation.rotatedVector({0, 0, 1})};
+    for (int row = 0; row < 3; ++row) for (int column = 0; column < 3; ++column) {
+      double actual = 0;
+      for (int axis = 0; axis < 3; ++axis) actual += std::exp(2*value[7+axis])*axes[axis][row]*axes[axis][column];
+      if (std::abs(actual-covariance[row][column]) > 3e-5) return false;
+    }
+    return value[3] == .3 && value[4] == -.2 && value[5] == .6 && value[6] == .75;
+  };
+  QString error;
+  QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(o.destinationPath, visitor, error), qPrintable(error));
+  QCOMPARE(checked, 1);
+  QCOMPARE(read(o.sourcePath), source);
+}
+
+void ModelExportTests::gaussianBakeCancellationKeepsDestinationAndBothSourceKinds() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  for (bool surfel : {false, true}) {
+    ModelExportOptions o;
+    o.sourcePath = dir.filePath(QStringLiteral("source.ply"));
+    o.destinationPath = dir.filePath(QStringLiteral("existing.ply"));
+    auto source = gaussianPly(3);
+    if (surfel) {
+      source.replace("property double scale_2\n", "");
+      source.replace("0.75 -2 -3 -4 ", "0.75 -2 -3 ");
+    }
+    QVERIFY(save(o.sourcePath, source));
+    QVERIFY(save(o.destinationPath, "existing destination"));
+    o.applyTransform = true;
+    o.transform.scale = {2, 2, 2};
+    o.transform.rotation = QQuaternion::fromAxisAndAngle({0, 0, 1}, 90);
+    bool reachedCommitBoundary = false;
+    o.progress = [&](int percent) {
+      if (percent != 99) return false;
+      reachedCommitBoundary = true;
+      return true;
+    };
+    const auto result = exportModelFile(o);
+    QVERIFY(reachedCommitBoundary);
+    QVERIFY(result.cancelled);
+    QVERIFY(!result.success);
+    QCOMPARE(read(o.destinationPath), QByteArray("existing destination"));
+    QCOMPARE(read(o.sourcePath), source);
+  }
+}
+
+void ModelExportTests::realGaussianPlyBakeWhenRequested() {
+  const QString source = qEnvironmentVariable("GSW_GAUSSIAN_BAKE_SOURCE");
+  if (source.isEmpty()) QSKIP("Set GSW_GAUSSIAN_BAKE_SOURCE for an explicitly selected read-only real-model bake.");
+  const QString outputDirectory = qEnvironmentVariable("GSW_GAUSSIAN_BAKE_OUTPUT_DIR");
+  QVERIFY2(!outputDirectory.isEmpty(), "Select a separate acceptance output directory.");
+  QVERIFY(QFileInfo::exists(source));
+  QVERIFY(QDir().mkpath(outputDirectory));
+  const QDir outputs(outputDirectory);
+  const QString destination = outputs.filePath(QStringLiteral("outputbaked.ply"));
+  QVERIFY(QFileInfo(source).absoluteFilePath() != QFileInfo(destination).absoluteFilePath());
+  const auto digest = [](const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QByteArray();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&file)) return QByteArray();
+    return hash.result();
+  };
+  const auto sourceHash = digest(source);
+  QVERIFY(!sourceHash.isEmpty());
+  const QString sidecarPath = cameraScaleMetadataPath(source);
+  const bool recordedCoordinates = QFileInfo::exists(sidecarPath);
+  const auto originalSidecar = recordedCoordinates ? read(sidecarPath) : QByteArray();
+  if (recordedCoordinates) {
+    const auto capability = cameraScaleRecoveryCapability(source);
+    QVERIFY2(capability.preserve, qPrintable(capability.validationError));
+  }
+  const auto original = PlyPointCloudLoader::load(source, 64);
+  QVERIFY2(original.isValid(), qPrintable(original.error));
+  QVERIFY(original.hasGaussianAttributes);
+  QVERIFY(original.sourceVertexCount > 0);
+  ModelExportOptions o;
+  o.sourcePath = source;
+  o.destinationPath = destination;
+  o.applyTransform = true;
+  o.transform.scale = {2, 2, 2};
+  o.transform.rotation = QQuaternion::fromAxisAndAngle({0, 0, 1}, 90);
+  o.transform.translation = {10, 20, 30};
+  if (recordedCoordinates) {
+    o.cameraCoordinateRecovery = QStringLiteral("preserve");
+    o.recordedRepresentation = QStringLiteral("gaussian");
+    o.recoveryPythonPath = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_PYTHON");
+    o.recoveryRepositoryRoot = qEnvironmentVariable("GSW_CAMERA_SCALE_EXPORT_ROOT");
+    QVERIFY(QFileInfo::exists(o.recoveryPythonPath));
+    QVERIFY(QFileInfo::exists(QDir(o.recoveryRepositoryRoot).filePath(QStringLiteral("native/backend/camera_scale_export.py"))));
+  }
+  o.deletedVertices.resize(original.sourceVertexCount);
+  for (qsizetype index = 0; index < o.deletedVertices.size(); index += 7) o.deletedVertices.setBit(index);
+  const auto result = exportModelFile(o);
+  QVERIFY2(result.success, qPrintable(result.error));
+  const auto reloaded = PlyPointCloudLoader::load(destination, 64);
+  QVERIFY2(reloaded.isValid(), qPrintable(reloaded.error));
+  QVERIFY(reloaded.hasGaussianAttributes);
+  QCOMPARE(reloaded.hasSurfelAttributes, original.hasSurfelAttributes);
+  QCOMPARE(reloaded.sourceVertexCount, original.sourceVertexCount-o.deletedVertices.count(true));
+  QCOMPARE(digest(source), sourceHash);
+  if (recordedCoordinates) {
+    QCOMPARE(read(sidecarPath), originalSidecar);
+    QVERIFY(QFileInfo::exists(cameraScaleMetadataPath(destination)));
+    QVERIFY(cameraScaleRecoveryCapability(destination).preserve);
+  }
+  qInfo() << "Real Gaussian PLY bake:" << original.sourceVertexCount << "source points;"
+          << reloaded.sourceVertexCount << "retained; output" << destination
+          << "source SHA256 unchanged" << sourceHash.toHex();
+}
+
 void ModelExportTests::exportsCoordinatesAndBakesDoublePrecisionTransform() {
   QTemporaryDir dir;
   ModelExportOptions o;
@@ -363,7 +958,7 @@ void ModelExportTests::sceneUnitsCoverMeshFormatsAndMetadata() {
   }
 }
 
-void ModelExportTests::sceneUnitConversionKeepsGaussianSourceProtection() {
+void ModelExportTests::sceneUnitConversionBakesGaussianPlyAndKeepsSpzSourceProtection() {
   QTemporaryDir dir;
   ModelExportOptions o;
   o.sourcePath = dir.filePath(QStringLiteral("gaussians.ply"));
@@ -377,9 +972,30 @@ void ModelExportTests::sceneUnitConversionKeepsGaussianSourceProtection() {
     o.format = format;
     o.applyTransform = true;
     QVERIFY(save(o.destinationPath, "existing data"));
-    const auto rejected = exportModelFile(o);
-    QVERIFY(!rejected.success);
-    QCOMPARE(read(o.destinationPath), QByteArray("existing data"));
+    const auto baked = exportModelFile(o);
+    if (format == ModelExportFormat::Ply) {
+      QVERIFY2(baked.success, qPrintable(baked.error));
+      const auto loaded = PlyPointCloudLoader::load(o.destinationPath);
+      QVERIFY2(loaded.isValid(), qPrintable(loaded.error));
+      QVERIFY(loaded.hasGaussianAttributes);
+      QCOMPARE(loaded.coordinates.unit, SceneLengthUnit::Metres);
+      QVERIFY(std::abs(loaded.coordinates.globalMinimum.x - 0.0112345) < 1e-10);
+      QVERIFY(std::abs(loaded.coordinates.globalMinimum.y + 0.0225) < 1e-10);
+      int checked = 0;
+      PlyGaussianVisitor visitor;
+      visitor.gaussian = [&](qint64, const std::array<double, 86> &value) {
+        ++checked;
+        return std::abs(value[7] + 6.605170185988091) < 1e-10 &&
+               std::abs(value[8] + 7.605170185988091) < 1e-10 &&
+               std::abs(value[9] + 8.605170185988092) < 1e-10;
+      };
+      QString error;
+      QVERIFY2(PlyPointCloudLoader::visitSourceGaussians(o.destinationPath, visitor, error), qPrintable(error));
+      QCOMPARE(checked, 3);
+    } else {
+      QVERIFY(!baked.success);
+      QCOMPARE(read(o.destinationPath), QByteArray("existing data"));
+    }
     o.applyTransform = false;
     const auto preserved = exportModelFile(o);
     QVERIFY2(preserved.success, qPrintable(preserved.error));
