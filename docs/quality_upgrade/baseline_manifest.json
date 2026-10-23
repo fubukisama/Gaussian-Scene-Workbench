@@ -1,0 +1,89 @@
+{
+  "schema": "gsw.quality_baseline_preparation_receipt/1",
+  "status": "frozen_p0_direct_gpu_baseline_complete",
+  "scope": "P0/P1_fixture_generation_and_integrity_not_algorithm_or_quality_acceptance",
+  "artifact_root": "D:/Codex/validation/gsw-quality-upgrade-20261023/p0/baseline-v1",
+  "artifact_manifest": "baseline_manifest.json",
+  "artifact_manifest_sha256": "3af82d2628f9130d001d5f9dfab80b780a53e5cdf4cbbe04704a498c40606d6b",
+  "protocol_semantic_sha256": "b60b85b011d4e8fdf3afca54d9a82ae7399c5de4fd8a584d2bd7861b2c9aeb83",
+  "protocol_artifact_file_sha256": "6bb5bae166cd56ec5a650c13de11b05d4550d4e96c0fcfa856d79391cb40827b",
+  "protocol_semantic_hash_definition": "sha256_utf8_json_sort_keys_compact_separators_allow_nan_false",
+  "source_fingerprint": {
+    "files": {
+      "gaussian-splatting/train.py": "6c1ee31cc8a3030ea88f8c4a79de7989960c522fea27159408c9735798f09fb5",
+      "native/backend/camera_dataset.py": "363adf82789ef86c51e88ec04ecd403341a02b141d0f7db735cd1df6c511cae9",
+      "native/backend/initialization.py": "cee516a52f77e1cfb736b70e03404b04c7aea7572554780de8c05b7681b0fa8f",
+      "native/worker/canonical_training.py": "7cf35c7eb65c48ce889b5070ffdae7b4866b9f46c8a589e48e7d295403ff9ae9",
+      "native/worker/training_checkpoint.py": "7d4f0acc9cd6efa42f5cd95ef146e3d3a42f2c905a141de227c566f614a3b989",
+      "native/worker/training_runtime.py": "68a7413b0d002c037a300d62f6346472e6cde2c50299806ac4437ab77ecad12d",
+      "native/worker/training_seed.py": "88b9e3fad307d869b58c024bbe584357d053a66afd01f906ccd578a2b9b19b0d",
+      "native/worker/two_dgs_train.py": "f68490bf909c1798ebbae21b40fbf2835775aa8d306514997887b34b4b14a510",
+      "scripts/run_quality_benchmark.py": "e75e42e7459b32f3e0a41bdd985d34d673a4728d28ec500e0d0a9af5f11b1c2f"
+    },
+    "hash_mode": "text-lf-v1"
+  },
+  "verification": {
+    "cpu_test_command": "D:/Apps/GSW/runtime/envs/gaussian_splatting/python.exe -B -m unittest scripts.test_quality_benchmark -v",
+    "cpu_tests_passed": 9,
+    "files_verified": 271,
+    "fixture_bindings": 12,
+    "gpu_execution_performed": true,
+    "gpu_smoke_scope": "four_T0_direct_trainer_runs_only_not_worker_algorithms_quality_or_resume_acceptance",
+    "gpu_smoke_execution": "execution.json",
+    "gpu_smoke_child_wall_seconds_upper_bound": 13.198648,
+    "gpu_smoke_total_wall_seconds": 13.2902387,
+    "gpu_smoke_completed_steps_each": 64,
+    "gpu_smoke_finite_gaussians_each": 128,
+    "gpu_smoke_nonfinite_attributes": 0,
+    "inspect_status": "pass"
+  },
+  "acceptance": {
+    "cpu_preparation": "pass",
+    "geometry": "not_run",
+    "gpu": "baseline_smoke_pass_only",
+    "native": "not_run",
+    "promotion": "not_allowed",
+    "quality": "not_evaluable",
+    "real_world": "not_run",
+    "worker": "not_run"
+  },
+  "direct_trainer_plan": {
+    "count": 4,
+    "backends": [
+      "3dgs",
+      "2dgs"
+    ],
+    "seeds": [
+      17,
+      29
+    ],
+    "scheduled_steps": 64,
+    "total_gpu_seconds": 600,
+    "total_wall_seconds": 1200,
+    "plan_location": "artifact_manifest.gpu_execution_plan",
+    "no_execute_subcommand": true,
+    "root_approval_required": true,
+    "worker_path_status": "not_run_production_minimum_1000_preserved",
+    "checkpoint_kind": "legacy_scheduled_checkpoint_not_complete_state",
+    "density_events": "not_exercised_default_start_500_greater_than_64"
+  },
+  "partial_test_matrix_evidence": {
+    "QT006": "isolated_CPU_reference_only_actual_training_noise_sampler_invariance_not_run",
+    "QT011": "fixed_initial_points_and_cameras_only_unit_equivalence_not_run",
+    "QT014": "evaluation_references_kept_outside_training_dataset_actual_filter_not_run",
+    "QT015": "separate_generated_interventions_only_actual_Mip_quality_not_run",
+    "QT034": "rectangles_multiple_K_nonconsecutive_names_owned_inputs_only_full_regression_not_run",
+    "QT042": "identity_and_status_inventory_only_final_acceptance_not_run"
+  },
+  "remaining_gates": [
+    "root_freeze_and_serial_supervised_GPU_smoke",
+    "actual_worker_GUI_equivalence",
+    "complete_scheduled_state_and_resume",
+    "real_rasterizer_numerical_and_algorithm_statistics",
+    "actual_rendering_and_native_acceptance",
+    "real_non_cube_fixture_suitability_and_paired_quality_protocol",
+    "transparent_reflective_failure_scope",
+    "fixture_specific_quality_thresholds_before_candidates",
+    "default_promotion_not_allowed"
+  ]
+}

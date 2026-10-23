@@ -1,0 +1,196 @@
+{
+  "schema": "gsw.quality_paper_versions/1",
+  "checked_date": "2026-10-23",
+  "scope": "P0 primary-source design and license audit; not algorithm acceptance",
+  "source_policy": "Official author repositories, project pages, papers and gsplat documentation only. No repositories cloned or installed for this audit.",
+  "pin_policy": "The listed commits were the default-branch HEADs observed through GitHub API on checked_date. They are reference pins, not a claim that upstream HEAD exactly reproduces its paper.",
+  "local_base": "161b5581d55ea0e501c903074ccbd381c1707927",
+  "runtime_status": "not_run",
+  "license_review_status": "Engineering provenance review, not a legal opinion. Preserve complete upstream notices and restrictions. No commercial rights or GPL relicensing are inferred.",
+  "methods": [
+    {
+      "id": "P01",
+      "method": "AbsGS",
+      "paper": "https://arxiv.org/abs/2404.10484v1",
+      "paper_version": "v1",
+      "venue": "ACM MM 2024 (author repository)",
+      "repository": "https://github.com/TY424/AbsGS",
+      "branch_observed": "main",
+      "commit": "87d7a5aac21c0b237a6af9e715e3a0c7df4902d3",
+      "commit_date": "2024-07-16T09:02:37Z",
+      "license": {
+        "identifier": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "github_spdx": "NOASSERTION",
+        "path": "LICENSE.md",
+        "url": "https://github.com/TY424/AbsGS/blob/87d7a5aac21c0b237a6af9e715e3a0c7df4902d3/LICENSE.md",
+        "sha256_utf8_text": "548297b48a8710e7a729bf200cdd0afa2a67c0082c5556152ed19f65b4005488",
+        "restriction": "Noncommercial research/evaluation; preserve license and notices; no sublicensing grant. Rasterizer has the same research-license family."
+      },
+      "mechanism_sources": [
+        "https://github.com/TY424/AbsGS/blob/87d7a5aac21c0b237a6af9e715e3a0c7df4902d3/submodules/diff-gaussian-rasterization-abs/cuda_rasterizer/backward.cu#L545-L550",
+        "https://github.com/TY424/AbsGS/blob/87d7a5aac21c0b237a6af9e715e3a0c7df4902d3/scene/gaussian_model.py#L461-L483"
+      ],
+      "upstream_additions_to_exclude_from_core_ablation": ["Initial COLMAP-point filtering/pruning", "Contribution-weight pruning"],
+      "addition_evidence": "https://github.com/TY424/AbsGS/blob/87d7a5aac21c0b237a6af9e715e3a0c7df4902d3/README.md#L77-L99",
+      "local_support": "not_implemented_or_cuda_verified_by_this_audit"
+    },
+    {
+      "id": "P02",
+      "method": "Pixel-GS",
+      "paper": "https://arxiv.org/abs/2403.15530v1",
+      "paper_version": "v1",
+      "venue": "ECCV 2024 (author project page)",
+      "repository": "https://github.com/zhengzhang01/Pixel-GS",
+      "branch_observed": "main",
+      "commit": "05c9d557aa3749bb1ff05e2627943afdd9c18ffd",
+      "commit_date": "2024-08-12T14:16:20Z",
+      "license": {
+        "identifier": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "github_spdx": "NOASSERTION",
+        "path": "LICENSE.md",
+        "url": "https://github.com/zhengzhang01/Pixel-GS/blob/05c9d557aa3749bb1ff05e2627943afdd9c18ffd/LICENSE.md",
+        "sha256_utf8_text": "c5ba70a2194af2aefe85dfe3da68608dcb3abd21a3aa53b55aa297c2f0b60eb3",
+        "restriction": "Noncommercial research/evaluation. The MIT exception for utils/loss_utils.py does not apply to the trainer or rasterizer."
+      },
+      "mechanism_sources": [
+        "https://github.com/zhengzhang01/Pixel-GS/blob/05c9d557aa3749bb1ff05e2627943afdd9c18ffd/submodules/diff-gaussian-rasterization/cuda_rasterizer/forward.cu#L327-L364",
+        "https://github.com/zhengzhang01/Pixel-GS/blob/05c9d557aa3749bb1ff05e2627943afdd9c18ffd/submodules/diff-gaussian-rasterization/diff_gaussian_rasterization/__init__.py#L141-L162",
+        "https://github.com/zhengzhang01/Pixel-GS/blob/05c9d557aa3749bb1ff05e2627943afdd9c18ffd/scene/gaussian_model.py#L405-L407",
+        "https://github.com/zhengzhang01/Pixel-GS/blob/05c9d557aa3749bb1ff05e2627943afdd9c18ffd/train.py#L84-L87"
+      ],
+      "local_support": "not_implemented_or_cuda_verified_by_this_audit"
+    },
+    {
+      "id": "P03",
+      "method": "Full Mip-Splatting",
+      "paper": "https://arxiv.org/abs/2311.16493v1",
+      "paper_version": "v1; CVPR 2024 publication separately linked below",
+      "publication": "https://openaccess.thecvf.com/content/CVPR2024/html/Yu_Mip-Splatting_Alias-free_3D_Gaussian_Splatting_CVPR_2024_paper.html",
+      "venue": "CVPR 2024",
+      "repository": "https://github.com/autonomousvision/mip-splatting",
+      "branch_observed": "main",
+      "commit": "dda02ab5ecf45d6edb8c540d9bb65c7e451345a9",
+      "commit_date": "2024-12-17T10:42:50Z",
+      "license": {
+        "identifier": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "github_spdx": "NOASSERTION",
+        "path": "LICENSE.md",
+        "url": "https://github.com/autonomousvision/mip-splatting/blob/dda02ab5ecf45d6edb8c540d9bb65c7e451345a9/LICENSE.md",
+        "sha256_utf8_text": "cd5c95b3cfff3acc1bd412420c770f88809331c3db6872df11a970147aa8e81f",
+        "restriction": "Noncommercial research/evaluation; README explicitly refers to the 3DGS license."
+      },
+      "mechanism_sources": [
+        "https://github.com/autonomousvision/mip-splatting/blob/dda02ab5ecf45d6edb8c540d9bb65c7e451345a9/scene/gaussian_model.py#L100-L191",
+        "https://github.com/autonomousvision/mip-splatting/blob/dda02ab5ecf45d6edb8c540d9bb65c7e451345a9/scene/gaussian_model.py#L268-L307",
+        "https://github.com/autonomousvision/mip-splatting/blob/dda02ab5ecf45d6edb8c540d9bb65c7e451345a9/submodules/diff-gaussian-rasterization/cuda_rasterizer/forward.cu#L109-L123"
+      ],
+      "upstream_additions_to_exclude_from_core_ablation": ["GOF improved densification metric"],
+      "addition_evidence": "https://github.com/autonomousvision/mip-splatting/blob/dda02ab5ecf45d6edb8c540d9bb65c7e451345a9/README.md#L34-L35",
+      "local_support": "legacy_2d_antialiasing_is_not_full_mip; full_mip_not_implemented_or_verified_by_this_audit"
+    },
+    {
+      "id": "P04",
+      "method": "DNGaussian depth mechanism reference",
+      "paper": "https://arxiv.org/abs/2403.06912v3",
+      "paper_version": "v3 (2024-03-24)",
+      "venue": "CVPR 2024",
+      "repository": "https://github.com/Fictionarry/DNGaussian",
+      "branch_observed": "main",
+      "commit": "22a588c74db48e587294451005a05b156435b3d2",
+      "commit_date": "2025-12-30T06:08:29Z",
+      "license": {
+        "identifier": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "github_spdx": "NOASSERTION",
+        "path": "LICENSE.md",
+        "url": "https://github.com/Fictionarry/DNGaussian/blob/22a588c74db48e587294451005a05b156435b3d2/LICENSE.md",
+        "sha256_utf8_text": "cd5c95b3cfff3acc1bd412420c770f88809331c3db6872df11a970147aa8e81f",
+        "restriction": "Noncommercial research/evaluation. Neural renderer, DPT code and model weights need separate dependency/license audit before acquisition or redistribution."
+      },
+      "mechanism_sources": [
+        "https://fictionarry.github.io/DNGaussian/",
+        "https://github.com/Fictionarry/DNGaussian/blob/22a588c74db48e587294451005a05b156435b3d2/utils/loss_utils.py#L18-L21",
+        "https://github.com/Fictionarry/DNGaussian/blob/22a588c74db48e587294451005a05b156435b3d2/utils/loss_utils.py#L85-L103",
+        "https://github.com/Fictionarry/DNGaussian/blob/22a588c74db48e587294451005a05b156435b3d2/gaussian_renderer/__init__.py#L128-L269"
+      ],
+      "scope_warning": "A global-local depth-loss transplant is not reproduction of random initialization, hard/soft selective-parameter depth passes, neural renderer and full paper schedule.",
+      "local_support": "not_implemented_or_gradient_verified_by_this_audit"
+    },
+    {
+      "id": "P05",
+      "method": "3DGS-MCMC",
+      "paper": "https://arxiv.org/abs/2404.09591v3",
+      "paper_version": "v3 (2025-02-12); repository HEAD predates this revision",
+      "venue": "NeurIPS 2024 Spotlight (author repository)",
+      "repository": "https://github.com/ubc-vision/3dgs-mcmc",
+      "branch_observed": "main",
+      "commit": "7b4fc9f76a1c7b775f69603cb96e70f80c7e6d13",
+      "commit_date": "2025-01-02T02:12:02Z",
+      "license": {
+        "identifier": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "github_spdx": "NOASSERTION",
+        "path": "LICENSE.md",
+        "url": "https://github.com/ubc-vision/3dgs-mcmc/blob/7b4fc9f76a1c7b775f69603cb96e70f80c7e6d13/LICENSE.md",
+        "sha256_utf8_text": "c5ba70a2194af2aefe85dfe3da68608dcb3abd21a3aa53b55aa297c2f0b60eb3",
+        "restriction": "Noncommercial research/evaluation. The MIT loss-file exception does not relicense MCMC or its relocation rasterizer."
+      },
+      "required_upstream_kernel": {
+        "repository": "https://github.com/shakibakh/diff-gaussian-rasterization",
+        "commit": "1761eb93b8b9bfebec9fbf06af4654583c2b1ddb",
+        "symbol": "compute_relocation",
+        "license": "LicenseRef-Graphdeco-Gaussian-Splatting",
+        "license_url": "https://github.com/shakibakh/diff-gaussian-rasterization/blob/1761eb93b8b9bfebec9fbf06af4654583c2b1ddb/LICENSE.md"
+      },
+      "mechanism_sources": [
+        "https://github.com/ubc-vision/3dgs-mcmc/blob/7b4fc9f76a1c7b775f69603cb96e70f80c7e6d13/train.py#L102-L142",
+        "https://github.com/ubc-vision/3dgs-mcmc/blob/7b4fc9f76a1c7b775f69603cb96e70f80c7e6d13/scene/gaussian_model.py#L450-L529"
+      ],
+      "local_support": "not_implemented_or_resume_verified_by_this_audit"
+    },
+    {
+      "id": "P06",
+      "method": "Clean-GS postprocess reference",
+      "paper": "https://arxiv.org/abs/2601.00913v1",
+      "paper_version": "v1 (2026-01-01)",
+      "venue": "arXiv preprint; peer-reviewed venue not verified",
+      "repository": "https://github.com/smlab-niser/clean-gs",
+      "branch_observed": "v0",
+      "commit": "ba5c2fa97e9e4bec0510e25aee9f79f6bc8fa822",
+      "commit_date": "2026-01-10T12:43:15Z",
+      "license": {
+        "identifier": "MIT",
+        "github_spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://github.com/smlab-niser/clean-gs/blob/ba5c2fa97e9e4bec0510e25aee9f79f6bc8fa822/LICENSE",
+        "sha256_utf8_text": "2e67fc9920b8c97d39cc6a80316af43d56838828059c3197f13547ec8f042724",
+        "restriction": "Retain MIT notice on reused portions. This grant does not cover input datasets, masks, SAM weights or other third-party assets."
+      },
+      "mechanism_sources": [
+        "https://github.com/smlab-niser/clean-gs/blob/ba5c2fa97e9e4bec0510e25aee9f79f6bc8fa822/clean-gs.py#L70-L144",
+        "https://github.com/smlab-niser/clean-gs/blob/ba5c2fa97e9e4bec0510e25aee9f79f6bc8fa822/clean-gs.py#L211-L302"
+      ],
+      "scope_warning": "Use as reference for a separately named, provenance-preserving GSW postprocess. Current script uses masked RGB, implicit near-black background, camera-schema assumptions and center projection; these are not the requested generic supervision contract.",
+      "local_support": "not_implemented_or_quality_verified_by_this_audit"
+    }
+  ],
+  "alternative_backend_reference": {
+    "name": "gsplat",
+    "repository": "https://github.com/nerfstudio-project/gsplat",
+    "branch_observed": "main",
+    "commit": "512d366b67073d77ca099ede742683c165dfc23b",
+    "commit_date": "2026-09-19T07:14:27Z",
+    "license": "Apache-2.0",
+    "license_url": "https://github.com/nerfstudio-project/gsplat/blob/512d366b67073d77ca099ede742683c165dfc23b/LICENSE",
+    "license_sha256_utf8_text": "96a4f89293c0df19880da9b0e35f67589f5885ea61b224ef16bb2bd599a8a44d",
+    "documentation": "https://docs.gsplat.studio/main/apis/strategy.html",
+    "verified_source_features": ["DefaultStrategy absgrad mode plus rasterization absgrad", "MCMCStrategy relocation, sample-add and noise", "2D antialias opacity compensation", "2DGS rasterization API"],
+    "not_inferred": ["Full Mip 3D training-view frequency filter", "Pixel-GS contribution-pixel statistics", "GSW-compatible complete checkpoint resume", "Windows binary/runtime compatibility", "quality improvement on GSW fixtures"],
+    "integration_decision": "Do not migrate baseline in P0/P1. Consider an explicit experimental backend only if a later measured implementation-cost comparison warrants it. Strategy and optimizer layouts differ from current Graphdeco GaussianModel."
+  },
+  "baseline_reference": {
+    "repository": "https://github.com/graphdeco-inria/gaussian-splatting",
+    "commit": "54c035f7834b564019656c3e3fcc3646292f727d",
+    "commit_date": "2024-10-30T12:39:22Z",
+    "faq": "https://github.com/graphdeco-inria/gaussian-splatting#faq",
+    "note": "Official FAQ recommends reducing position initial/final and scaling learning rates for extreme close-up/far-view mixtures. Official antialiasing is not evidence of Full Mip 3D filtering."
+  }
+}

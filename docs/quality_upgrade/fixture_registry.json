@@ -1,0 +1,236 @@
+{
+  "schema": "gsw.quality_fixture_registry/1",
+  "status": "generated_owned_fixtures_bound_real_world_suitability_pending",
+  "artifact_root": "D:/Codex/validation/gsw-quality-upgrade-20261023/p0/baseline-v1",
+  "baseline_manifest_sha256": "3af82d2628f9130d001d5f9dfab80b780a53e5cdf4cbbe04704a498c40606d6b",
+  "protocol_sha256": "b60b85b011d4e8fdf3afca54d9a82ae7399c5de4fd8a584d2bd7861b2c9aeb83",
+  "ownership": "new_generated_artifacts_only_existing_sources_immutable",
+  "fixtures": [
+    {
+      "id": "T0",
+      "availability": "bound_generated",
+      "case_ids": [
+        "T0"
+      ],
+      "features": [
+        "plane",
+        "checkerboard",
+        "l_structure",
+        "thin_geometry"
+      ],
+      "ground_truth_role": "analytic_evaluation_only_no_oracle_training",
+      "quality_status": "not_evaluable_in_p0"
+    },
+    {
+      "id": "T1",
+      "availability": "bound_generated",
+      "case_ids": [
+        "T1-base",
+        "T1-distance-near",
+        "T1-distance-far",
+        "T1-focal",
+        "T1-resize"
+      ],
+      "interventions": "distance_focal_resolution_separate",
+      "rectangles": "frozen_seeded_non_square_multiple_intrinsics",
+      "unit_equivalence_status": "not_run_separate_gate",
+      "quality_status": "not_evaluable_in_p0"
+    },
+    {
+      "id": "T2",
+      "availability": "local_read_only_binding",
+      "local_ref": "local:T2-architecture-59",
+      "photo_count": 59,
+      "authorization": "user_authorized_local_stress_testing_in_current_chat",
+      "real_non_cube_quality_benchmark_suitability": "pending_visual_and_protocol_review",
+      "source_paths": "private_local_asset_bindings_only",
+      "training_status": "not_run",
+      "originals_policy": "immutable_including_existing_hardlinks"
+    },
+    {
+      "id": "T3",
+      "availability": "optional_not_default_bound",
+      "local_ref": "local:C2-optional-T3",
+      "role": "sparse_interior_additional_fixture_only_not_T2",
+      "training_status": "not_run",
+      "pristine_final_test": false
+    },
+    {
+      "id": "T4",
+      "availability": "not_bound",
+      "thin_structure_component": "generated_T0_only_not_transparent_or_reflective_acceptance",
+      "transparent_reflective_validity": "not_run",
+      "quality_status": "not_evaluable"
+    }
+  ],
+  "bindings": [
+    {
+      "fixture_id": "T0",
+      "seed": 17,
+      "data_identity": "fa06cdc1ea9ea620f831c3a328d7d8ff72e0784c2439a0b9dab4545cf830e901",
+      "dataset_root": "datasets/T0/seed-17",
+      "manifest_sha256": "5706923ba0f47ffd4ff56fe880907651a4b8cc2c2cacbbdbb2706c0acada4b03",
+      "camera_sha256": "eb938f0368659d29b72c297774bdd18d01b1c60dd9a35873d9380211ea7af2a1",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "95903da0612fdb7423c4e4324408498c154129b8a552aa98cfc0fb12075cc99d",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "0915057cecad0652afce0dcf5249e997ac3617df6490ea56c38c6cecdf227cc9"
+    },
+    {
+      "fixture_id": "T0",
+      "seed": 29,
+      "data_identity": "a5140d394e224717ab62a9ed4634a505c1672abfd23aae988e2caab6a1ccab5b",
+      "dataset_root": "datasets/T0/seed-29",
+      "manifest_sha256": "be7fd080f235982b2b6d3091ae207598b1965306348509420a3a8474ae032d3a",
+      "camera_sha256": "eb938f0368659d29b72c297774bdd18d01b1c60dd9a35873d9380211ea7af2a1",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "95903da0612fdb7423c4e4324408498c154129b8a552aa98cfc0fb12075cc99d",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "359d47db20a460ebb78b3a4c7e492cc590c5bc9bc69c24db97103dba9803bfbd"
+    },
+    {
+      "fixture_id": "T1-base",
+      "seed": 17,
+      "data_identity": "a7a039de264d609ebfb92ea05f9314edb03cde4f9437043b543029c139b1bb73",
+      "dataset_root": "datasets/T1-base/seed-17",
+      "manifest_sha256": "e9231522120f1fb1a3810437bd19f54606fa9f07270b084d0fc84f3a3e259bcb",
+      "camera_sha256": "eb938f0368659d29b72c297774bdd18d01b1c60dd9a35873d9380211ea7af2a1",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "95903da0612fdb7423c4e4324408498c154129b8a552aa98cfc0fb12075cc99d",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "0915057cecad0652afce0dcf5249e997ac3617df6490ea56c38c6cecdf227cc9"
+    },
+    {
+      "fixture_id": "T1-base",
+      "seed": 29,
+      "data_identity": "be157e0ed8e4e336105b57f5502d2f17fe56804d2b8c54e81da75451a0425bc7",
+      "dataset_root": "datasets/T1-base/seed-29",
+      "manifest_sha256": "d9cde7b1a5df970912ba227086f126cb56258bb24279dfd3f3dc84295d9582bf",
+      "camera_sha256": "eb938f0368659d29b72c297774bdd18d01b1c60dd9a35873d9380211ea7af2a1",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "95903da0612fdb7423c4e4324408498c154129b8a552aa98cfc0fb12075cc99d",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "359d47db20a460ebb78b3a4c7e492cc590c5bc9bc69c24db97103dba9803bfbd"
+    },
+    {
+      "fixture_id": "T1-distance-near",
+      "seed": 17,
+      "data_identity": "d7fe407373b0b911bec903e1854a14f44e31d1bac34de4b02dfcd11424af2f13",
+      "dataset_root": "datasets/T1-distance-near/seed-17",
+      "manifest_sha256": "a39f17122d5c0dfcd1d87603a08d9d0919276fd8774975e33a46c48134ee4f96",
+      "camera_sha256": "1105c4fdfdc5239978b6201d7d7811eb0665f32c07211c5e2f9c1bde765a31c5",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "bf2b19ad10ab4da075eafadd7da13019e8d7dcc9e36740e98a29b550c4f0e07e",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "a2092021f6211ed62b1e08ecdeb5ddca22608ad2553ad5209d244dd3dcca0d42"
+    },
+    {
+      "fixture_id": "T1-distance-near",
+      "seed": 29,
+      "data_identity": "96d5062fe911cd798c25154ce41c150669ca11d86c2bf53c9aaea41fd585bc48",
+      "dataset_root": "datasets/T1-distance-near/seed-29",
+      "manifest_sha256": "e1cdde808b0c1a580ff3a65e3c7c8bbfc86748837798277986d7fce2d124f745",
+      "camera_sha256": "1105c4fdfdc5239978b6201d7d7811eb0665f32c07211c5e2f9c1bde765a31c5",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "bf2b19ad10ab4da075eafadd7da13019e8d7dcc9e36740e98a29b550c4f0e07e",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "1d1736a07da48886b1fe5b2d529c9974908606d5bb25274b1cc709a49987abd4"
+    },
+    {
+      "fixture_id": "T1-distance-far",
+      "seed": 17,
+      "data_identity": "291d9233981148e19c96e379ce9d8e5e29db6c5e2b4ed6347af0cb5e4e53eca6",
+      "dataset_root": "datasets/T1-distance-far/seed-17",
+      "manifest_sha256": "6a3029d1c47736c92896ff9fd5255bdd0a0acdd10c02959e3a268a7223e204d9",
+      "camera_sha256": "22232ea702f6b13bc0e3afe97806d74e66f4332cb10ece98b1f1aed65e6fb80f",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "4fc659c88d75e9e7524e2d4ad1faa6b3e12c8cce7dea202bda28f4a24b201ab5",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "aa1954ae888a222a74ee87702bad59c61eeb305fd36c887ba3c8db2592bd14de"
+    },
+    {
+      "fixture_id": "T1-distance-far",
+      "seed": 29,
+      "data_identity": "353c9fa9e60d8f43e5cebf792ae59e0104b3a0c704ae209c74e6c2b8806ee7cf",
+      "dataset_root": "datasets/T1-distance-far/seed-29",
+      "manifest_sha256": "d84eb0efbc5b3141f28cf295b40ff0cfd54e88edcbceeca74ee5efead3125b1c",
+      "camera_sha256": "22232ea702f6b13bc0e3afe97806d74e66f4332cb10ece98b1f1aed65e6fb80f",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "4fc659c88d75e9e7524e2d4ad1faa6b3e12c8cce7dea202bda28f4a24b201ab5",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "d42cc2c703119a0f9b7831b95c95d70dd7b7376fd667f97e95d7c3882500688d"
+    },
+    {
+      "fixture_id": "T1-focal",
+      "seed": 17,
+      "data_identity": "943504436db401650b4468b3f120c110a5a676ff807c417d172c82ae656fa034",
+      "dataset_root": "datasets/T1-focal/seed-17",
+      "manifest_sha256": "3abcd7e77318658353fd56076f9194f5e41cbfa3a9ab6a7626e64e3b315b4e86",
+      "camera_sha256": "c9db43ce65bd1b54b6064d57a401bbb955df33791364361c87acdc5679215385",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "de61a01f503daeac9080028948059ff93dce3e390e22617f840d08fef3aaf0f1",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "0915057cecad0652afce0dcf5249e997ac3617df6490ea56c38c6cecdf227cc9"
+    },
+    {
+      "fixture_id": "T1-focal",
+      "seed": 29,
+      "data_identity": "e0c8f83d2bb3708e2d9a405eac93c55881b8eaef83afb2c66a16c313690d419d",
+      "dataset_root": "datasets/T1-focal/seed-29",
+      "manifest_sha256": "e9e17cb08c997953bd210cd39e3bf27b2b5d207f1a55fdde479ca7716c156565",
+      "camera_sha256": "c9db43ce65bd1b54b6064d57a401bbb955df33791364361c87acdc5679215385",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "de61a01f503daeac9080028948059ff93dce3e390e22617f840d08fef3aaf0f1",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "359d47db20a460ebb78b3a4c7e492cc590c5bc9bc69c24db97103dba9803bfbd"
+    },
+    {
+      "fixture_id": "T1-resize",
+      "seed": 17,
+      "data_identity": "f6e543a0fdde907272c7976cbbc23c13276bbecb698117b6796414f1d2d8ad2c",
+      "dataset_root": "datasets/T1-resize/seed-17",
+      "manifest_sha256": "3aeb522b073cefa372990707f0ab3b5f1337efebc291870fa9976ff8a7b43bd0",
+      "camera_sha256": "fc2239c05c3d0e2c0f31b16a1c35ac2872ea74306ad98891c2a56eab340b40cd",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "26678431a74f909a6eeae5fb163fc1f0474ec80c61975897a10f1cce07b8118f",
+      "initial_points_sha256": "e30517ebfca8f8599817f66d1a95f16c98098935400afe47d00ec640b152b681",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "06f872265597e47cf303eb6bebbb5b062d5ca490edbf3cf9f179d39d4f100cad",
+      "training_initialization_sha256": "0915057cecad0652afce0dcf5249e997ac3617df6490ea56c38c6cecdf227cc9"
+    },
+    {
+      "fixture_id": "T1-resize",
+      "seed": 29,
+      "data_identity": "3d47efcecbcb6b6c53f2e454c77fac2aee1d40d39635257c6cde59a326ea669e",
+      "dataset_root": "datasets/T1-resize/seed-29",
+      "manifest_sha256": "bf3b91d8a2631c857b1a793503faf3d5fef5e2f6ce04d36b737963b7065fb89c",
+      "camera_sha256": "fc2239c05c3d0e2c0f31b16a1c35ac2872ea74306ad98891c2a56eab340b40cd",
+      "split_sha256": "c6ae13e1152b4b6b8840f609cbde87e737f9cfff9a2467bc154e745377d054a0",
+      "image_set_sha256": "26678431a74f909a6eeae5fb163fc1f0474ec80c61975897a10f1cce07b8118f",
+      "initial_points_sha256": "38add607fcad739e0820b3b459db0faa51a4afa0de752b622d115a53213baea0",
+      "initial_colors_sha256": "5100a2a412e84392758419696f71a80ffa604aed5682fcd536ea878f3cd0d2ae",
+      "initial_points_colors_recipe_sha256": "701ead53795ee8f9ec69bca05494b5b90660fef4d6ff08caace9351adfbc8d5a",
+      "training_initialization_sha256": "359d47db20a460ebb78b3a4c7e492cc590c5bc9bc69c24db97103dba9803bfbd"
+    }
+  ]
+}

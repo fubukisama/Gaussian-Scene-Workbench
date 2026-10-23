@@ -401,6 +401,10 @@ install(DIRECTORY backend DESTINATION source/native
   PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 install(DIRECTORY worker DESTINATION source/native
   PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../training_kit/quality_rasterizer"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../training_kit/pinhole_rasterizer"
+  DESTINATION source/training_kit
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyd" EXCLUDE)
 # The independently built research rasterizer retains its upstream license.
 # These sources are not linked into or relicensed as the native GPL GUI.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../gaussian-splatting/submodules/diff-gaussian-rasterization"
@@ -418,6 +422,18 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_quality_rasterizer.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_quality_rasterizer.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_quality_pipeline_cuda.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_quality_training.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_supervision_gradient.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/prepare_quality_real_fixture.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/run_quality_benchmark.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/cleanup_gaussians.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/QUALITY_PLAN.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/quality_upgrade/PAPER_VERSIONS.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../docs/quality_upgrade/CAPABILITY_MATRIX.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../docs/quality_upgrade/ACCEPTANCE_REPORT.json" DESTINATION source/docs/quality_upgrade)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/trace_native_ci_build.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_trace_native_ci_build.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py"

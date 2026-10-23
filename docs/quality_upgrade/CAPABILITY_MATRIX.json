@@ -1,0 +1,1200 @@
+{
+  "schema": "gsw.quality_capabilities/1",
+  "updated": "2026-10-23",
+  "status": "in_development_not_release_acceptance",
+  "baseline_source": "161b5581d55ea0e501c903074ccbd381c1707927",
+  "source_state": "committed_feature_and_main_merge_7ff22b9_with_separately_owned_report_and_test_only_worktree_deltas",
+  "default_promotion": "none",
+  "silent_algorithm_fallback": false,
+  "evidence_legend": "Evidence IDs resolve in ACCEPTANCE_REPORT.json. Source implementation, CPU, CUDA numeric, direct trainer, native subset, worker and quality are separate fields; partial never means whole matrix pass.",
+  "backends": {
+    "3dgs": {
+      "standard": {
+        "source": {
+          "status": "existing_backend_path_preserved",
+          "backend": "3dgs"
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_baseline_only",
+          "evidence_ids": [
+            "E012",
+            "E033",
+            "E201",
+            "E202",
+            "E211",
+            "E212",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "P0 seeds17/29 and v2/v3 seed17 direct64-step Standard smoke pass at their frozen epochs. Synthetic C2/64-step stress passes pre-reset; post-reset v4 Standard also passes separately. No convergence, quality or full topology-resume acceptance; none attests later merged worker source.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun"
+        },
+        "off_regression": {
+          "status": "partial",
+          "evidence_ids": [
+            "E022",
+            "E051"
+          ],
+          "scope": "3D independent kernel flags-off equals stock bitwise on frozen numeric case. Broad T0/T2 Standard before/after remains."
+        },
+        "worker_end_to_end": {
+          "status": "pass_scoped_T0_geometry_half_pause_resume1000",
+          "evidence_ids": [
+            "E214",
+            "E215",
+            "E216"
+          ],
+          "scope": "Actual worker native1000-step configuration, pause/full state restore with fresh sessions, Standard growth, contiguous1000 train samples and ready coordinate delivery; no GUI, quality comparison or exhaustive lifecycle coverage.",
+          "final_rows": 846,
+          "resource_guard_unchanged": true,
+          "source_epoch": "backend-stage-v1_before_later_Mip_reset_only_fix",
+          "tensor_equivalence_to_independent_control": "not_tested"
+        },
+        "quality_accepted": false
+      },
+      "abs_gs": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_densification.py",
+            "native/worker/quality_render_adapter.py",
+            "training_kit/quality_rasterizer/src"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "CPU pre-cancellation statistics, split policy, statistic lifecycle and fake coverage rejection."
+        },
+        "CUDA_numerical": {
+          "status": "pass",
+          "evidence_ids": [
+            "E022",
+            "E024"
+          ],
+          "scope": "7/7 isolated quality kernel checks; actual pre-cancellation drives an actual small model split in the 6/6 pipeline gate."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E211",
+            "E212",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "T0 seed17, 64 direct 3D steps. This schedule does not itself trigger normal densification. User-selected C2 synthetic135-view/10000-point original-resolution seed17/64-step stress passed; no appearance acceptance.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_render": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "not_run"
+        },
+        "worker_end_to_end": {
+          "status": "observed_success_runtime_closure_incomplete",
+          "evidence_ids": [
+            "E260",
+            "E261",
+            "E262",
+            "E263",
+            "E264",
+            "E265",
+            "E271",
+            "E272"
+          ],
+          "source_epoch": "backend-stage-v2_final_merged_Python_7ff22b9",
+          "iterations": 1000,
+          "exit_code": 0,
+          "initial_rows": 128,
+          "final_rows": 1362,
+          "sampler_records": 1000,
+          "growth_iterations": [
+            600,
+            700,
+            800,
+            900
+          ],
+          "normal_capacity_storage_and_resource_guard_preserved": true,
+          "quick_density_parameters_unchanged": true,
+          "kernel_preflight_before_enqueue": true,
+          "checkpoint_Adam_PLY_finite": true,
+          "delivery_ready": true,
+          "predeclared_runtime_closure_complete": false,
+          "scope": "Actual fresh worker1000 completion with normal capacity/resource/density and real topology growth. Ambient optional gsw_training_loss_cuda wrapper/binary were not pre-pinned; child selftest hashes equal postflight, not retrospective full runtime closure. No resume/quality/GUI acceptance.",
+          "original_group_status": "failed_stop_no_retry_private_audit_KeyError",
+          "independent_CPU_postflight": "pass_existing_Abs_artifacts_no_GPU_retry"
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "evidence_ids": [
+            "E051",
+            "E024"
+          ],
+          "scope": "CPU full checkpoint/statistics and small CUDA topology shapes pass; GPU split/clone/prune/reset resume not complete."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No paired, predeclared-threshold all-view quality acceptance."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "method_definition": {
+          "statistic": "sum of componentwise absolute per-pixel projected-mean derivatives before cancellation; NDC unit conversion specified in kernel ABI",
+          "optimizer_gradient": "signed unchanged",
+          "split_threshold": 0.0008,
+          "extra_paper_fork_pruning_imported": false
+        }
+      },
+      "pixel_gs": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_densification.py",
+            "native/worker/quality_render_adapter.py",
+            "training_kit/quality_rasterizer/src"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "Accepted-pixel weighted accumulation and canonical relative-depth statistic cases."
+        },
+        "CUDA_numerical": {
+          "status": "pass",
+          "evidence_ids": [
+            "E022",
+            "E024"
+          ],
+          "scope": "Exact accepted alpha/T contributing pixel count=24, drives actual weighted density; no view-count/radius proxy."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E211",
+            "E212",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "T0 seed17, 64 direct 3D steps; not T1/T3 unit/quality acceptance. User-selected C2 synthetic135-view/10000-point original-resolution seed17/64-step stress passed; no appearance acceptance.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_render": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "not_run"
+        },
+        "worker_end_to_end": {
+          "status": "observed_success_runtime_closure_incomplete",
+          "evidence_ids": [
+            "E260",
+            "E266",
+            "E267",
+            "E268",
+            "E269",
+            "E271",
+            "E272"
+          ],
+          "source_epoch": "backend-stage-v2_final_merged_Python_7ff22b9",
+          "iterations": 1000,
+          "exit_code": 0,
+          "initial_rows": 128,
+          "final_rows": 987,
+          "sampler_records": 1000,
+          "growth_iterations": [
+            600,
+            700,
+            800,
+            900
+          ],
+          "normal_capacity_storage_and_resource_guard_preserved": true,
+          "quick_density_parameters_unchanged": true,
+          "kernel_preflight_before_enqueue": true,
+          "checkpoint_Adam_PLY_finite": true,
+          "delivery_ready": true,
+          "predeclared_runtime_closure_complete": false,
+          "scope": "Actual fresh worker1000 completion with normal capacity/resource/density and real topology growth. Ambient optional gsw_training_loss_cuda wrapper/binary were not pre-pinned; child selftest hashes equal postflight, not retrospective full runtime closure. No resume/quality/GUI acceptance.",
+          "original_group_status": "2_child_group_execution_pass",
+          "independent_CPU_postflight": "group_audit_pass"
+        },
+        "full_optimizer_resume": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No full GPU strategy/topology resume acceptance."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No paired, predeclared-threshold all-view quality acceptance."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "method_definition": {
+          "contributions": "actual accepted raster contributions after alpha and transmittance acceptance conditions, as versioned kernel ABI",
+          "distance_policy": "method-specific relative depth, not fixed mm threshold",
+          "default_depth_factor": 0.37,
+          "unit_K_equivalence_experiment": "not_run"
+        }
+      },
+      "full_mip": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_mip.py",
+            "native/worker/quality_export.py",
+            "native/worker/quality_render_adapter.py",
+            "native/src/QualityMipModelContract.cpp"
+          ],
+          "opacity_reset_boundary": {
+            "status": "CPU_underflow_fix_and_actual_CUDA_forced_reset16_pass_scoped",
+            "old_failure": "Tiny finite scale products underflowed and produced0/0 then nonfinite raw opacity logits.",
+            "fix": "log-domain compensation/cap; real GaussianModel/Adam CPU regression",
+            "evidence_ids": [
+              "E240",
+              "E241",
+              "E242",
+              "E243",
+              "E244",
+              "E245",
+              "E246"
+            ],
+            "scope": "Extreme tiny finite scales are CPU-regressed; actual normal T0 Mip reset16/32/48 gate is separately GPU-proven. No universal input/quality claim."
+          }
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "Full-K train-only 3D filter widths, covariance/opacity integral compensation, 2D determinant reference and raw-parameter gradchecks."
+        },
+        "CUDA_numerical": {
+          "status": "pass",
+          "evidence_ids": [
+            "E022",
+            "E024",
+            "E203",
+            "E204",
+            "E205",
+            "E206"
+          ],
+          "scope": "Known Gaussian 3D+2D opacity compensation, raw scale/opacity gradients and active/fused same-camera CUDA parity. Fresh quality-build3 seven-check gate and stock-v2 full-K numeric acceptance also pass; this does not exercise the later reset boundary."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E211",
+            "E212",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "T0 seed17, 64 direct 3D steps; does not establish multiscale appearance. User-selected C2 synthetic135-view/10000-point original-resolution seed17/64-step stress passed; no appearance acceptance.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_render": {
+          "status": "partial",
+          "evidence_ids": [
+            "E060",
+            "E063",
+            "E064",
+            "E207",
+            "E208",
+            "E210"
+          ],
+          "scope": "Actual NVIDIA offscreen GLSL image and hash-bound fused PLY/paired-export subset pass. Complete NativeViewport and T1/T2 parity remain. Current local Mip PLY/viewport2CTest, quality-plan UI1CTest and actual Publisher-to-native-GL3Qt entries pass; no full interactive app parity."
+        },
+        "worker_end_to_end": {
+          "status": "observed_success_runtime_closure_incomplete",
+          "evidence_ids": [
+            "E260",
+            "E266",
+            "E267",
+            "E268",
+            "E270",
+            "E271",
+            "E272"
+          ],
+          "source_epoch": "backend-stage-v2_final_merged_Python_7ff22b9",
+          "iterations": 1000,
+          "exit_code": 0,
+          "initial_rows": 128,
+          "final_rows": 900,
+          "sampler_records": 1000,
+          "growth_iterations": [
+            600,
+            700,
+            800,
+            900
+          ],
+          "normal_capacity_storage_and_resource_guard_preserved": true,
+          "quick_density_parameters_unchanged": true,
+          "kernel_preflight_before_enqueue": true,
+          "checkpoint_Adam_PLY_finite": true,
+          "delivery_ready": true,
+          "predeclared_runtime_closure_complete": false,
+          "scope": "Actual fresh worker1000 completion with normal capacity/resource/density and real topology growth. Ambient optional gsw_training_loss_cuda wrapper/binary were not pre-pinned; child selftest hashes equal postflight, not retrospective full runtime closure. No resume/quality/GUI acceptance.",
+          "original_group_status": "2_child_group_execution_pass",
+          "independent_CPU_postflight": "group_audit_pass",
+          "fused_nested_delivery_and_sidecar_ready": true
+        },
+        "full_optimizer_resume": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No full GPU strategy/topology resume acceptance."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No paired, predeclared-threshold all-view quality acceptance."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "filter_estimation": {
+          "source": "training_views_only",
+          "eval_camera_intervention": "CPU_contract_pass_full_T1_trainer_test_not_run"
+        },
+        "export_roundtrip": {
+          "status": "partial",
+          "evidence_ids": [
+            "E024",
+            "E060",
+            "E208",
+            "E210",
+            "E260",
+            "E267",
+            "E270"
+          ],
+          "remaining": "Full T0/T1 raw/active/fused intended app import/reexport/camera/scale workflow. Actual worker1000 fused/canonical nested delivery is observed, with incomplete optional-loss runtime prefreeze."
+        }
+      },
+      "mcmc": {
+        "source": {
+          "status": "implemented_core_model_bridge_and_controller",
+          "entrypoints": [
+            "native/worker/quality_mcmc.py",
+            "native/worker/quality_mcmc_model.py",
+            "native/worker/quality_training_runtime.py",
+            "native/worker/training_runtime.py"
+          ],
+          "license": "Original formula-based MIT implementation; not copied restricted MCMC source or official reproduction."
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "19 core + 8 actual-Adam model bridge tests include noise covariance, exact multiplicity formula, forced dead relocation, budget, moments, RNG/full snapshot and lean native restore."
+        },
+        "CUDA_numerical": {
+          "status": "partial",
+          "evidence_ids": [
+            "E094",
+            "E095",
+            "E096",
+            "E097",
+            "E098"
+          ],
+          "scope": "Actual CUDA trainer drift/noise/growth observed; independent forced dead-relocation/regularizer/budget numeric gate not complete."
+        },
+        "actual_direct_trainer": {
+          "status": "partial",
+          "evidence_ids": [
+            "E094",
+            "E095",
+            "E096",
+            "E097",
+            "E099",
+            "E100",
+            "E101"
+          ],
+          "scope": "Continuous64 and pause16 complete; stale harness session caused a valid re-pause17; fresh-session v4 resumes to64. Final rows147; 19 added. Not worker/quality."
+        },
+        "native_render": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No MCMC-specific native viewer gate."
+        },
+        "worker_end_to_end": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No actual worker MCMC end-to-end execution."
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "strict_tensor_comparison": "failed_at_predeclared_rtol_1e-5_atol_1e-6",
+          "sampler_rng_ids_counters": "exact",
+          "growth_parent_targets": "exact",
+          "model_rows": 147,
+          "model_parameter_differences": {
+            "xyz": {
+              "maximum_absolute_difference": 0.004190623760223389,
+              "strict_allclose": false,
+              "all_finite": true
+            },
+            "features_dc": {
+              "maximum_absolute_difference": 0.0024696514010429382,
+              "strict_allclose": false,
+              "all_finite": true
+            },
+            "features_rest": {
+              "maximum_absolute_difference": 0,
+              "strict_allclose": true,
+              "all_finite": true
+            },
+            "log_scales": {
+              "maximum_absolute_difference": 0.007494449615478516,
+              "strict_allclose": false,
+              "all_finite": true
+            },
+            "quaternions": {
+              "maximum_absolute_difference": 0.0081978440284729,
+              "strict_allclose": false,
+              "all_finite": true
+            },
+            "opacity_logits": {
+              "maximum_absolute_difference": 0.021887779235839844,
+              "strict_allclose": false,
+              "all_finite": true
+            }
+          },
+          "ema_loss_difference": 1.2697684065310355e-7,
+          "evidence_ids": [
+            "E096",
+            "E097",
+            "E098",
+            "E231",
+            "E232",
+            "E233",
+            "E234",
+            "E235",
+            "E236",
+            "E237",
+            "E238",
+            "E239"
+          ],
+          "hypothesis": "ContinuousA/B also exceeds original strict threshold, demonstrating a reproducibility confound, not proving restore correct. Micro1x1 fails before resume; synchronous fault-v3 first observes original render33 illegal access after all observed iter32 stages synchronized; specific kernel/cause unresolved."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No paired quality or independent geometry acceptance."
+        },
+        "GUI_request": "disabled_pending_engineering_resume_acceptance",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "resource_policy": {
+          "growth": "same_native_guard_required",
+          "capacity_storage": "explicitly_unsupported_and_rejected_not_silently_detached",
+          "sparse_Adam": "not_supported",
+          "max_multiplicity": 50,
+          "noise_requires_extra_kernel": "no_additional_kernel_for_current_Torch_formula_implementation"
+        },
+        "checkpoint_policy": "Native model/optimizer capture plus lean strategy/RNG/IDs sidecar and hash-bound rebind; no duplicate full GPU model/Adam snapshot.",
+        "actual_dead_relocation_exercised": false,
+        "failure_history": {
+          "v1": "Actual integration caller passed grow_count0 outside refinement; corrected to None, core rejection preserved.",
+          "v2": "Harness omitted seed in native control; legitimate seed identity refusal, not product bug.",
+          "v3": "Harness reused pause session; legitimate restore then re-pause17, not product bug.",
+          "v4": "Resume execution succeeded, strict numeric comparison failed; unresolved."
+        },
+        "microfixture": {
+          "status": "failed_before_resume",
+          "evidence_ids": [
+            "E233",
+            "E234"
+          ],
+          "pause_or_resume_executed": false,
+          "changed_threshold": false
+        },
+        "fault_layer_diagnostic": {
+          "status": "fault_observed_not_kernel_identified",
+          "iteration": 33,
+          "stage": "original_forward_render",
+          "all_observed_iteration32_stages_synced": true,
+          "actual_imports": 1739,
+          "unbound_or_changed_imports": 0,
+          "child_exit_code": null,
+          "child_timeout": null,
+          "approximate_file_timestamp_wall_seconds": 30.149139404296875,
+          "metadata_caveat": "Parent JSON parser failed on safe_state timestamp suffix; raw logs/actual imports preserved and CPU-only recovery used. Not a precise<=30s completion claim.",
+          "evidence_ids": [
+            "E235",
+            "E236",
+            "E237",
+            "E238",
+            "E239"
+          ]
+        }
+      },
+      "mask_supervision": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_supervision.py",
+            "native/worker/quality_training_runtime.py",
+            "native/worker/quality_render_adapter.py"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "31 provider cases plus masked-photo tests cover semantics, full-K registration, invalid/material/confidence rejection, split protection, bounded cache and real Torch backward."
+        },
+        "CUDA_numerical": {
+          "status": "pass_scoped",
+          "evidence_ids": [
+            "E037"
+          ],
+          "scope": "Isolated mask-only positive objective and finite nonzero xyz/scaling/opacity gradients; 3D alpha kernel smooth-domain derivative gate passes separately."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "3dgs mask single-feature direct T0/seed17/64-step smoke.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_UI": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No complete interactive input/settings/localization lifecycle acceptance."
+        },
+        "worker_end_to_end": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No actual worker run for this feature."
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "CPU full-state restore exercised; GPU stage/lifecycle input-hash and continuation proof incomplete."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "T1/T3 material/interior/data-level quality not established."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "depth_contract": null
+      },
+      "depth_supervision": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_supervision.py",
+            "native/worker/quality_training_runtime.py",
+            "native/worker/quality_render_adapter.py"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "31 provider cases plus masked-photo tests cover semantics, full-K registration, invalid/material/confidence rejection, split protection, bounded cache and real Torch backward."
+        },
+        "CUDA_numerical": {
+          "status": "pass_scoped",
+          "evidence_ids": [
+            "E038"
+          ],
+          "scope": "Isolated depth-only positive objective, 10834 valid pixels, finite nonzero xyz/scaling/opacity gradients; no global photo-loss confound."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "3dgs depth single-feature direct T0/seed17/64-step smoke.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_UI": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No complete interactive input/settings/localization lifecycle acceptance."
+        },
+        "worker_end_to_end": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No actual worker run for this feature."
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "CPU full-state restore exercised; GPU stage/lifecycle input-hash and continuation proof incomplete."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "T1/T3 material/interior/data-level quality not established."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "depth_contract": "Explicit depth kind/frame/unit/confidence/material/source/alignment; current 3D raster depth is accumulated inverse-Z moment, normalized only under declared moment/alpha semantics. Inherited saturated RGB/depth derivatives remain approximate."
+      }
+    },
+    "2dgs": {
+      "standard": {
+        "source": {
+          "status": "existing_backend_path_preserved",
+          "backend": "2dgs"
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_baseline_only",
+          "evidence_ids": [
+            "E012",
+            "E033",
+            "E201",
+            "E202",
+            "E211",
+            "E212",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "P0 seeds17/29 and v2/v3 seed17 direct64-step Standard smoke pass at their frozen epochs. Synthetic C2/64-step stress passes pre-reset; post-reset v4 Standard also passes separately. No convergence, quality or full topology-resume acceptance; none attests later merged worker source.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun"
+        },
+        "off_regression": {
+          "status": "incomplete",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "3D independent kernel flags-off equals stock bitwise on frozen numeric case. Broad T0/T2 Standard before/after remains."
+        },
+        "worker_end_to_end": {
+          "status": "pass_scoped_T0_geometry_half_pause_resume1000",
+          "evidence_ids": [
+            "E217",
+            "E218",
+            "E219"
+          ],
+          "scope": "Actual worker native1000-step configuration, pause/full state restore with fresh sessions, Standard growth, contiguous1000 train samples and ready coordinate delivery; no GUI, quality comparison or exhaustive lifecycle coverage.",
+          "final_rows": 729,
+          "resource_guard_unchanged": true,
+          "source_epoch": "backend-stage-v1_before_later_Mip_reset_only_fix",
+          "tensor_equivalence_to_independent_control": "not_tested"
+        },
+        "quality_accepted": false
+      },
+      "geometry_lr_multiplier": {
+        "source": {
+          "status": "connected_shared_plan_and_backend_rates"
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "Explicit multiplier modifies only position init/final and scale rates; no unrelated overrides."
+        },
+        "actual_near_far_ablation": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No T1 geometry-rate-only convergence comparison."
+        },
+        "quality_accepted": false,
+        "actual_worker": {
+          "status": "pass_scoped",
+          "evidence_ids": [
+            "E219"
+          ],
+          "scope": "Actual1000-step worker pause35/resume with0.5 position init/final+scale overrides, resource defaults retained; no near/far quality ablation."
+        }
+      },
+      "mask_supervision": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_supervision.py",
+            "native/worker/quality_training_runtime.py",
+            "native/worker/surfel_depth_adapter.py"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "31 provider cases plus masked-photo tests cover semantics, full-K registration, invalid/material/confidence rejection, split protection, bounded cache and real Torch backward."
+        },
+        "CUDA_numerical": {
+          "status": "pass_scoped",
+          "evidence_ids": [
+            "E039"
+          ],
+          "scope": "Isolated mask-only positive objective and finite nonzero xyz/scaling/opacity gradients; 3D alpha kernel smooth-domain derivative gate passes separately."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "2dgs mask single-feature direct T0/seed17/64-step smoke.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_UI": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No complete interactive input/settings/localization lifecycle acceptance."
+        },
+        "worker_end_to_end": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No actual worker run for this feature."
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "CPU full-state restore exercised; GPU stage/lifecycle input-hash and continuation proof incomplete."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "T1/T3 material/interior/data-level quality not established."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "depth_contract": null
+      },
+      "depth_supervision": {
+        "source": {
+          "status": "implemented",
+          "entrypoints": [
+            "native/worker/quality_supervision.py",
+            "native/worker/quality_training_runtime.py",
+            "native/worker/surfel_depth_adapter.py"
+          ]
+        },
+        "CPU": {
+          "status": "pass",
+          "evidence_ids": [
+            "E051",
+            "E200"
+          ],
+          "scope": "31 provider cases plus masked-photo tests cover semantics, full-K registration, invalid/material/confidence rejection, split protection, bounded cache and real Torch backward."
+        },
+        "CUDA_numerical": {
+          "status": "pass_scoped",
+          "evidence_ids": [
+            "E040"
+          ],
+          "scope": "Isolated depth-only positive objective, 10834 valid pixels, finite nonzero xyz/scaling/opacity gradients; no global photo-loss confound."
+        },
+        "actual_direct_trainer": {
+          "status": "pass_64_step_smoke_only",
+          "evidence_ids": [
+            "E032",
+            "E033",
+            "E201",
+            "E202",
+            "E243",
+            "E244",
+            "E245"
+          ],
+          "scope": "2dgs depth single-feature direct T0/seed17/64-step smoke.",
+          "latest_direct_source_epoch": "post_Mip_reset_v4_before_final_worker_only_preflight_and_main_containment_merge; final_stage_v2_is_CPU_identity_not_GPU_rerun",
+          "historical_direct_source_epoch": "training-smoke-v3_before_later_Mip_reset_controller_hash_change"
+        },
+        "native_UI": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No complete interactive input/settings/localization lifecycle acceptance."
+        },
+        "worker_end_to_end": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "No actual worker run for this feature."
+        },
+        "full_optimizer_resume": {
+          "status": "inconclusive",
+          "evidence_ids": [
+            "E051"
+          ],
+          "scope": "CPU full-state restore exercised; GPU stage/lifecycle input-hash and continuation proof incomplete."
+        },
+        "quality_acceptance": {
+          "status": "not_run",
+          "evidence_ids": [],
+          "scope": "T1/T3 material/interior/data-level quality not established."
+        },
+        "GUI_request": "experimental_source_request_only_not_release_accepted",
+        "product_release_accepted": false,
+        "default_promoted": false,
+        "depth_contract": "Explicit depth kind/frame/unit/confidence/material/source/alignment; current 3D raster depth is accumulated inverse-Z moment, normalized only under declared moment/alpha semantics. Inherited saturated RGB/depth derivatives remain approximate."
+      },
+      "3d_density_and_filter_methods": {
+        "source_request_available": false,
+        "status": "unsupported_rejected",
+        "methods": [
+          "abs_gs",
+          "pixel_gs",
+          "mcmc",
+          "full_mip"
+        ],
+        "reason": "3D covariance/density implementations do not establish a backend-appropriate surfel equivalent. Keep native surfel renderer/objective; no silent replacement.",
+        "acceptance_gate": "Independent surfel method definition, statistics/optimizer integration and CPU/CUDA/training/quality validation."
+      }
+    },
+    "mesh_generation_refinement": {
+      "quality_plan_training": false,
+      "reason": "TSDF/OpenMVS/SuGaR/GS2Mesh have distinct generation/refinement contracts; receiving a PLY is not optimizer strategy support."
+    }
+  },
+  "combinations": {
+    "source_admission": "at_most_one_nonstandard_densification_or_full_mip_or_supervision_method_axis; geometry_lr_multiplier remains explicit",
+    "actual_GPU_supported_combination_matrix": "incomplete",
+    "mask_plus_depth": "rejected_unvalidated",
+    "density_plus_mip": "rejected_unvalidated",
+    "no_silent_fallback": true
+  },
+  "postprocess": {
+    "source": {
+      "status": "implemented_copy_only_PLY_cleanup",
+      "entrypoints": [
+        "native/worker/quality_postprocess.py",
+        "scripts/cleanup_gaussians.py"
+      ]
+    },
+    "CPU": {
+      "status": "pass",
+      "evidence_ids": [
+        "E051",
+        "E200",
+        "E223"
+      ],
+      "scope": "16 real PLY file tests: property/dtype/extra-element preservation, footprint/occlusion/material veto, full K, bounded cache/chunked provenance and cancellation."
+    },
+    "authorized_dataset_cleanup": {
+      "status": "not_run",
+      "evidence_ids": [],
+      "scope": "No current selected dataset cleanup run; no T2/T4 quality gate."
+    },
+    "derived_output_only": true,
+    "raw_training_quality_accepted": false,
+    "cleanup_quality_accepted": false,
+    "packaged_public_CLI": "present_and_CPU_probed_no_fixture_photos_bundled"
+  },
+  "selected_fixture": {
+    "binding_id": "local:user-selected-C2",
+    "fixture_id": "T3_C2",
+    "source_kind": "synthetic",
+    "status": "prepared_and_5_direct_64_step_synthetic_engineering_trials_pass_not_quality",
+    "split_counts": [
+      99,
+      12,
+      24
+    ],
+    "image_count": 135,
+    "training_seeds": [
+      17,
+      29
+    ],
+    "non_cube_T2": false,
+    "previous_59_input": "superseded_excluded_retained_no_training",
+    "source_provenance": "Exact same-directory image/manifest hashes; no adjacent metric/GT pose substitution.",
+    "evidence_ids": [
+      "E070",
+      "E071",
+      "E072",
+      "E073"
+    ],
+    "C2_stress": {
+      "status": "5_direct_trials_pass_engineering_only",
+      "steps": 64,
+      "seed": 17,
+      "image_count": 135,
+      "image_size": [
+        1536,
+        1536
+      ],
+      "initial_points": 10000,
+      "methods": [
+        "3dgs_standard",
+        "3dgs_abs",
+        "3dgs_pixel",
+        "3dgs_mip",
+        "2dgs_standard"
+      ],
+      "input_hashes_unchanged": true,
+      "source_epoch": "before_later_Mip_reset_controller_change",
+      "evidence_ids": [
+        "E211",
+        "E212",
+        "E213"
+      ]
+    }
+  },
+  "release_acceptance": {
+    "worker": "partial_3D_2D_Standard_pause_resume1000_and_3D_Abs_Pixel_Mip_observed1000_optional_loss_runtime_prefreeze_incomplete",
+    "native_full_application": "not_run",
+    "installed_build_identity": "not_run",
+    "paired_appearance_quality": "not_run",
+    "geometry": "unmeasured",
+    "non_cube_real_world": "not_run",
+    "promotion_allowed": false,
+    "native_application_build": "pass_not_installed_application_acceptance"
+  },
+  "license_constraints": {
+    "quality_rasterizer": "Graphdeco-derived research/noncommercial license preserved, not GPL relicensed.",
+    "MCMC_adapter": "Independent public-formula original MIT code, not an official reproduction; renderer's separate license still applies.",
+    "reference_pins": "docs/quality_upgrade/PAPER_VERSIONS.json"
+  },
+  "current_source_gate": {
+    "status": "final_merged_source_staging_pass_worker1000_observed_optional_loss_runtime_closure_incomplete",
+    "controller_sha256": "6072c13415541bb9d3d22b82e6fd957453e25978af60674d35e4fcf0157557af",
+    "evidence_ids": [
+      "E240",
+      "E241",
+      "E242",
+      "E243",
+      "E244",
+      "E245",
+      "E246",
+      "E247",
+      "E248",
+      "E250",
+      "E251",
+      "E252",
+      "E253",
+      "E254",
+      "E255",
+      "E256",
+      "E257",
+      "E258",
+      "E260",
+      "E261",
+      "E262",
+      "E263",
+      "E266",
+      "E267",
+      "E271",
+      "E272"
+    ],
+    "reason": "Final merged backend source staging/13imports/454+455 kernel closures and native build/subset pass. Three actual fresh Abs/Pixel/Mip workers complete1000 with normal resource/capacity/density and real growth; optional ambient loss wrapper/binary were not pre-pinned, so complete predeclared training runtime acceptance remains incomplete. Historical direct9/reset16 gates retain their separate source epochs; no installed-app/quality claim.",
+    "source_commit": "7ff22b940ec323fe95b631b5558b48cb5ec9816a",
+    "worker_sha256": "ba5db44638df1f15a8933aabc2d98bed473f352a69d281a5ea3fb1143c09b8cb"
+  },
+  "native_components": {
+    "quality_plan_UI": {
+      "status": "headless_CTest_subset_pass",
+      "evidence_ids": [
+        "E207"
+      ]
+    },
+    "Mip_PLY_viewport": {
+      "status": "2_CTest_subset_pass",
+      "evidence_ids": [
+        "E208"
+      ]
+    },
+    "real_Publisher_native_GL": {
+      "status": "3_Qt_entries_pass",
+      "evidence_ids": [
+        "E210"
+      ],
+      "preserved_launcher_failure": "E209 launcher PATH/QT_PLUGIN_PATH configuration startup failure; corrected environment E210 passes. Qt6Core DLLs were same hardlink/hash; no differing-DLL or renderer root cause established."
+    },
+    "final_native_build": {
+      "status": "full_native_application_build_pass_not_installed_runtime_acceptance",
+      "evidence_ids": [
+        "E252"
+      ],
+      "candidate_version": "0.3.8"
+    },
+    "final_CTest_subset": {
+      "status": "7_CTest_pass_subset_not_full_native_application_acceptance",
+      "evidence_ids": [
+        "E253"
+      ]
+    },
+    "Mip_similarity_merge_bake": {
+      "status": "one_real_file_cross_regression_pass_3_Qt_entries",
+      "evidence_ids": [
+        "E254"
+      ],
+      "scope": "Real Gaussian PLY similarity baking, fused contract/hash rebinding, no refiltering and preserved source/derived sidecar bytes. Not GL or app lifecycle."
+    }
+  },
+  "packaging": {
+    "status": "fresh_backend_staging_CPU_identity_pass_not_formal_application_install",
+    "source_epoch": "final_merged_Python_freeze_7ff22b9",
+    "source_files": 1351,
+    "bytes": 95796709,
+    "quality_source_closure": 454,
+    "stock_source_closure": 455,
+    "manifest_schema": 2,
+    "quality_modules_imported": 13,
+    "package_tests": 5,
+    "existing_installer_tests": 44,
+    "private_fixtures_bundled": false,
+    "GLM_HTML_bundled": false,
+    "evidence_ids": [
+      "E255",
+      "E256",
+      "E257",
+      "E258",
+      "E224"
+    ],
+    "remaining": "Formal installed application/package/shortcut identity and authorized installed-app smoke remain. Final backend source staging is complete, not application installation.",
+    "source_commit": "7ff22b940ec323fe95b631b5558b48cb5ec9816a",
+    "backend_manifest_sha256": "5ca4c66dfcebce0feeca9164a99aae476e7267f967ebffc59d00a1eabd93ff0e",
+    "current_repository_source_files_equal_staged": 1351,
+    "source_mismatches": 0,
+    "package_tests_seconds": 11.717,
+    "selector_imported_Torch": false,
+    "new_GPU_executed": false,
+    "historical_evidence_ids": [
+      "E221",
+      "E222",
+      "E223"
+    ]
+  },
+  "installed_components": {
+    "application": "not_final_installed",
+    "quality_kernel": {
+      "root": "D:/Apps/GSW/runtime/kernels/quality3d-v1-20261023-build3",
+      "build_sha256": "a83b536b3f83d08cff99178a63d417fb46a1c7c26de352d61209d381858b4d65",
+      "evidence_id": "E226"
+    },
+    "stock_kernel": {
+      "root": "D:/Apps/GSW/runtime/kernels/camera-pinhole3d-quality-20261023-v2",
+      "proof_sha256": "3d377e0fc298f9c19184cec3323d320fe3ca220a00d95b67426adadb81c02604",
+      "evidence_id": "E227"
+    },
+    "old_component_roots_preserved": true,
+    "actual_CPU_selection_evidence": "E248"
+  },
+  "release_candidate_version": "0.3.8",
+  "version_is_not_quality_promotion": true,
+  "research_candidates_out_of_scope": [
+    "Spectral-GS",
+    "StableGS",
+    "TIDI-GS",
+    "TransparentGS",
+    "GLINT"
+  ],
+  "worker_kernel_preflight": {
+    "status": "CPU_process_boundary_pass_before_final_merge",
+    "tests": 62,
+    "skipped": 0,
+    "source": "gsw_worker.preflight_quality_kernel",
+    "required_consumers": [
+      "3dgs_abs",
+      "3dgs_pixel",
+      "3dgs_full_mip",
+      "3dgs_mask",
+      "3dgs_depth"
+    ],
+    "skipped_by_design": [
+      "absent_plan",
+      "explicit_Standard",
+      "geometry_LR_only",
+      "all_2dgs",
+      "stock_only_mcmc"
+    ],
+    "target_runtime": "actual3.8_selected_from3.12_worker",
+    "Torch_or_GPU_initialized": false,
+    "checks": "existing source/binary integrity and prior GPU acceptance only; trainer ABI checks remain",
+    "bounds": "45s timeout and16KiB per stream; real timeout and cap+1 process tests",
+    "evidence_ids": [
+      "E247"
+    ],
+    "evidence_limit": "Persisted test-output summary, not raw transcript.",
+    "integration_epoch": "Final merged worker is byte-bound by E256; original62-test process suite is pre-merge E247, not relabelled post-merge.",
+    "actual_worker_consumers_observed": {
+      "status": "three_real_pre_enqueue_successes_Abs_Pixel_Mip",
+      "evidence_ids": [
+        "E260",
+        "E263",
+        "E267"
+      ],
+      "full_training_runtime_closure_accepted": false
+    }
+  },
+  "current_merged_commit": "7ff22b940ec323fe95b631b5558b48cb5ec9816a",
+  "quality_worker1000_runtime_gap": {
+    "status": "incomplete_predeclared_runtime_closure",
+    "evidence_ids": [
+      "E260",
+      "E271",
+      "E272"
+    ],
+    "actual_optional_loss": "gsw_training_loss_cuda fused_l1_ssim",
+    "wrapper_sha256": "6215f4acf0dd5218b6b550d86be1600c66f2c55f740629f6583a67016a5f184f",
+    "binary_sha256": "36aadb10d8dccb5480d79f1920114371e8575a03e93d661fe37e2c633b7b5ab0",
+    "in_child_selftest_binary_hash_matches_postflight": true,
+    "postflight_is_not_predeclared_freeze": true,
+    "quality_accepted": false
+  },
+  "committed_core_history": [
+    "bc09c7d",
+    "7ff22b940ec323fe95b631b5558b48cb5ec9816a"
+  ]
+}

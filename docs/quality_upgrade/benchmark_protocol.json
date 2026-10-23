@@ -1,0 +1,103 @@
+{
+  "schema": "gsw.quality_benchmark_protocol/1",
+  "protocol_id": "quality-p0-owned-standard-smoke-20261023-v1",
+  "status": "prepared_pending_root_freeze_before_candidates",
+  "purpose": "bounded_engineering_baseline_not_quality_promotion",
+  "seeds": [17, 29],
+  "backends": ["3dgs", "2dgs"],
+  "fixture_generation": {
+    "scene_version": "analytic-plane-l-thin-checker-v1",
+    "layout_seed": 20261023,
+    "non_square_sizes": "first_128x96_then_seeded_even_rectangles",
+    "renderer": "analytic_point_sampled_pixel_center_rays_no_gaussian_renderer",
+    "resize_case": "same_fov_analytic_rerender_at_half_resolution_not_photo_interpolation"
+  },
+  "profile": {
+    "id": "p0_standard_smoke_v1",
+    "strategy": "standard",
+    "scheduled_steps": 64,
+    "checkpoint_steps": [64],
+    "resolution_policy": "preserve",
+    "data_device": "cpu",
+    "initial_point_count": 128,
+    "initial_color_policy": "neutral_0.5_rgb",
+    "initialization_policy": "independent_volume_random_not_reference_geometry",
+    "densify_from_iter": 500,
+    "densification_interval": 100,
+    "densify_until_iter": 64,
+    "densify_grad_threshold": 0.0002,
+    "density_events": "not_exercised_by_64_step_identity_smoke",
+    "three_dgs_filter": "legacy_ewa_antialiasing_true",
+    "two_dgs_filter": "surfel_default",
+    "depth_supervision": false,
+    "mask_supervision": false,
+    "postprocess": "none",
+    "gpu_shared_preview": false,
+    "network_viewer": false,
+    "two_dgs_cpu_observation_snapshots": "existing_cost_record_separately_no_window_or_network_viewer",
+    "runtime_options_policy": "existing_contract_unchanged_no_resource_policy_override",
+    "sampler_policy": "record_actual_legacy_trainer_trace_not_assumed_independent",
+    "training_trace_status": "not_run",
+    "strategy_noise_trace_status": "not_run",
+    "independent_stream_reference_is_not_trainer_acceptance": true
+  },
+  "budget": {
+    "total_gpu_seconds": 600,
+    "total_wall_seconds": 1200,
+    "maximum_trials": 4,
+    "default_gpu_fixture": "T0",
+    "execution_order": "serial_backend_then_seed",
+    "wall_as_gpu_upper_bound": true,
+    "stop_on_failure": true,
+    "stop_on_nan_inf": true,
+    "no_automatic_retry": true,
+    "execution_requires_separate_root_approval": true,
+    "prepare_inspect_never_execute_gpu": true
+  },
+  "engineering_thresholds": {
+    "expected_completed_steps": 64,
+    "nonfinite_parameter_count_max": 0,
+    "heldout_training_sample_count_max": 0,
+    "input_hash_mismatches_max": 0,
+    "pose_scale_split_mutations_max": 0,
+    "expected_trace_iterations": "1_through_64_exactly_once",
+    "checkpoint_kind": "legacy_scheduled_checkpoint_not_full_optimizer_rng_resume",
+    "full_state_resume_acceptance": "not_run_separate_gate"
+  },
+  "quality_thresholds": {
+    "status": "not_evaluable_in_p0",
+    "minimum_primary_gain_db": null,
+    "maximum_other_roi_drop_db": null,
+    "maximum_lpips_regression": null,
+    "maximum_geometry_regression": null,
+    "null_means": "not_evaluable_never_pass",
+    "next_stage_rule": "Freeze fixture-specific thresholds after baseline variability and before any candidate execution; issue a new version, never silently edit this protocol."
+  },
+  "evaluation": {
+    "raw_postprocess_fused_separate": true,
+    "all_declared_views_reported": true,
+    "roi_roles": ["object", "detail", "background"],
+    "pixel_convention": "pixel_border_intrinsics_sampled_at_pixel_centers",
+    "depth_definition": "camera_z_meters_invalid_nan_evaluation_only",
+    "ground_truth_role": "generated_analytic_reference_evaluation_only",
+    "mask_depth_location": "outside_training_dataset",
+    "oracle_training": false,
+    "geometry_accuracy_claim": "unmeasured_for_real_materials"
+  },
+  "t1_interventions": {
+    "base": "reference_camera_distance_focal_resolution",
+    "distance_near": "only_camera_centers_move_0.75_about_target",
+    "distance_far": "only_camera_centers_move_1.5_about_target",
+    "focal": "only_fx_fy_multiply_1.4",
+    "resize": "same_camera_same_fov_width_height_and_K_scale_0.5"
+  },
+  "test_matrix_trace": {
+    "prepare_inspect_cpu": ["QT006", "QT011", "QT014", "QT015", "QT034", "QT042"],
+    "trace_is_partial_not_full_test_pass": true,
+    "gpu_native_quality_items": "not_run",
+    "worker_path": "QT002_not_run_production_worker_clamps_iterations_at_1000_do_not_override_for_this_smoke",
+    "direct_trainer_only": true,
+    "scheduled_full_state_checkpoint_gate": "not_run_legacy_64_checkpoint_does_not_meet_complete_state_requirement"
+  },
+  "promotion_allowed": false
+}

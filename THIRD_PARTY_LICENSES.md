@@ -40,6 +40,28 @@ Faster-GSは別途Apache-2.0で取得し、研究用学習バックエンドの�
 
 Gaussian Scene Workbench contains components under several licenses. From the 2026-10-14 licensing change, the original native desktop main program is GPL-3.0-or-later within the scope in [native/LICENSE.md](native/LICENSE.md). Earlier MIT grants and original code outside that scope retain the root MIT terms. Neither grant overrides third-party licenses or grants commercial rights to restricted research components. The project's research purpose is not an additional use restriction on its GPL or MIT code.
 
+## Experimental quality rasterizer / 实验性质量光栅器 / 実験的品質ラスタライザ
+
+`training_kit/quality_rasterizer/src/` is derived from the Graphdeco rasterizer;
+its original copyright and research/evaluation license remain in that
+directory's `LICENSE.md`. `native/worker/quality_render_adapter.py` is an
+explicitly marked adaptation of the Graphdeco Python renderer under
+`gaussian-splatting/LICENSE.md`. These optional Python/CUDA research components
+are separate from the linked native C++ GUI and are not relabelled GPL or MIT.
+Their sources, changes and reference pins are recorded in `PROVENANCE.json`
+and `docs/quality_upgrade/PAPER_VERSIONS.json`. Independently authored formula,
+control and build helpers retain the licenses stated in their own files;
+references to a paper do not represent wholesale reuse of its repository.
+
+中文：新增质量光栅器及 Python 渲染适配保留 Graphdeco 的原版权和研究/评估许可，
+与原生 C++ 界面分开，不改标为 GPL 或 MIT。独立编写的公式、控制和构建模块按
+各文件声明处理；论文来源固定记录不等于整仓代码复用。
+
+日本語：品質ラスタライザと Python 描画アダプタは Graphdeco の元の著作権と
+研究・評価用ライセンスを保持し、ネイティブ C++ GUI と区別します。GPL/MIT
+への再表示は行いません。独立作成した数式・制御・ビルド補助は各ファイルの
+通知に従い、論文の参照をリポジトリ全体の流用と扱いません。
+
 ## Blender Transform Geometry / Blender 变换几何 / Blender 変換形状
 
 The native desktop directly adapts the cone-generation routine from Blender

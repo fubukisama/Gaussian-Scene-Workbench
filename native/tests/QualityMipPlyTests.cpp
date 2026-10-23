@@ -10,6 +10,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <cmath>
+
 namespace {
 bool write(const QString &path,const QByteArray &bytes) {
   QFile file(path);return file.open(QIODevice::WriteOnly)&&file.write(bytes)==bytes.size();
@@ -102,6 +104,109 @@ private slots:
     QCOMPARE(error,QStringLiteral("quality_mip_export_format_unsupported"));
     QVERIFY(!gsw::PlyPointCloudLoader::visitSourceGeometry(path,geometry,error));
     QCOMPARE(error,QStringLiteral("quality_mip_export_format_unsupported"));
+  }
+
+  void fusedMipSimilarityBakeRebindsContractWithoutRefilteringOrChangingSource() {
+    const QString base=qEnvironmentVariable("GSW_QUALITY_MIP_TEST_ROOT","D:/Codex/validation/gsw-quality-upgrade-20261023/native-mip-evidence");
+    QVERIFY(QDir().mkpath(base));QTemporaryDir temporary(QDir(base).filePath("similarity-XXXXXX"));
+    QVERIFY(temporary.isValid());
+    const QString source=temporary.filePath("source.ply");
+    QByteArray original=ply("full_mip_fused_v1");
+    // Reuse the owned ASCII fixture, but make all three principal radii
+    // different so the Gaussian rotation is observable, not just an isotropic
+    // position-only transform. These are already fused log-scales.
+    original.replace("0 -3 -3 -3 1 0 0 0\n","0 -2 -3 -4 1 0 0 0\n");
+    QVERIFY(write(source,original));QVERIFY(contract(source,original));
+    const QString sourceSidecar=temporary.filePath("source.quality.json");
+    const QByteArray originalSidecar=read(sourceSidecar);
+    const auto input=gsw::PlyPointCloudLoader::load(source);
+    QVERIFY2(input.isValid(),qPrintable(input.error));QVERIFY(input.qualityMip.enabled);
+    QCOMPARE(input.sourceVertexCount,qint64(3));QCOMPARE(input.vertices.size(),3);
+
+    gsw::ModelExportOptions options;options.sourcePath=source;
+    options.destinationPath=temporary.filePath("baked.ply");
+    options.format=gsw::ModelExportFormat::Ply;options.applyTransform=true;
+    options.pivot={.25,-.5,1.};options.transform.scale={2,2,2};
+    const float halfRoot=static_cast<float>(std::sqrt(.5));
+    options.transform.rotation=QQuaternion(halfRoot,0,0,halfRoot); // proper Rz90
+    options.transform.translation={10,-5,7};
+    const auto result=gsw::PlyPointCloudLoader::exportSourcePly(options);
+    QVERIFY2(result.success,qPrintable(result.error));
+    const QByteArray bakedBytes=read(options.destinationPath);
+    const QByteArray bakedSidecar=read(temporary.filePath("baked.quality.json"));
+    QVERIFY(!bakedBytes.isEmpty());QVERIFY(bakedBytes!=original);
+    QVERIFY(!bakedSidecar.isEmpty());
+    QCOMPARE(bakedBytes.count("GSW_QUALITY_REQUIRES_SIDECAR"),1);
+    QVERIFY(bakedBytes.indexOf("GSW_QUALITY_REQUIRES_SIDECAR")<bakedBytes.indexOf("end_header\n"));
+    const auto output=gsw::PlyPointCloudLoader::load(options.destinationPath);
+    QVERIFY2(output.isValid(),qPrintable(output.error));QVERIFY(output.qualityMip.enabled);
+    QVERIFY(output.hasGaussianAttributes);QVERIFY(!output.hasSurfelAttributes);
+    QCOMPARE(output.sourceVertexCount,qint64(3));QCOMPARE(output.vertices.size(),3);
+
+    const auto rows=bakedBytes.mid(bakedBytes.indexOf("end_header\n")+11).trimmed().split('\n');
+    QCOMPARE(rows.size(),3);
+    for(int index=0;index<3;++index) {
+      const auto values=rows[index].simplified().split(' ');
+      QCOMPARE(values.size(),14);
+      // Independently worked: pivot + t + Rz90*2*(p-pivot), for p=(i,0,-2).
+      const std::array<double,3> expectedPosition{9.25,2.*index-6.,2.};
+      for(int axis=0;axis<3;++axis) {
+        QVERIFY(std::abs(values[axis].toDouble()-expectedPosition[axis])<1e-12);
+        QVERIFY(std::abs(values[7+axis].toDouble()-(-2.-axis+std::log(2.)))<1e-12);
+      }
+      QVERIFY(std::abs(values[10].toDouble()-std::sqrt(.5))<1e-12);
+      QCOMPARE(values[11].toDouble(),0.);QCOMPARE(values[12].toDouble(),0.);
+      QVERIFY(std::abs(values[13].toDouble()-std::sqrt(.5))<1e-12);
+      // A second 3D filter/opacity compensation would change these values.
+      QCOMPARE(values[3],QByteArray(".1"));QCOMPARE(values[4],QByteArray(".2"));
+      QCOMPARE(values[5],QByteArray(".3"));QCOMPARE(values[6],QByteArray("0"));
+      const auto &vertex=output.vertices[index];
+      QCOMPARE(vertex.sourceIndex,quint32(index));
+      const auto position=output.coordinates.globalFromLocal({vertex.x,vertex.y,vertex.z});
+      QVERIFY(std::abs(position.x-expectedPosition[0])<1e-6);
+      QVERIFY(std::abs(position.y-expectedPosition[1])<1e-6);
+      QVERIFY(std::abs(position.z-expectedPosition[2])<1e-6);
+      QVERIFY(std::abs(vertex.scaleX-2.*std::exp(-2.))<1e-7);
+      QVERIFY(std::abs(vertex.scaleY-2.*std::exp(-3.))<1e-7);
+      QVERIFY(std::abs(vertex.scaleZ-2.*std::exp(-4.))<1e-7);
+      QVERIFY(std::abs(vertex.rotationW-std::sqrt(.5))<1e-6);
+      QCOMPARE(vertex.rotationX,0.F);QCOMPARE(vertex.rotationY,0.F);
+      QVERIFY(std::abs(vertex.rotationZ-std::sqrt(.5))<1e-6);
+      QCOMPARE(vertex.opacity,.5F);
+    }
+    const auto metadata=output.qualityMip.metadata;
+    QCOMPARE(metadata.value("schema").toString(),QStringLiteral("gsw.quality_model/1"));
+    QCOMPARE(metadata.value("representation").toString(),QStringLiteral("fused"));
+    QCOMPARE(metadata.value("filter").toString(),QStringLiteral("full_mip"));
+    QVERIFY(metadata.value("filter_3d_applied").toBool());
+    QCOMPARE(metadata.value("fused_sha256").toString(),hash(bakedBytes));
+    QCOMPARE(metadata.value("fused_file").toString(),QStringLiteral("baked.ply"));
+    QCOMPARE(metadata.value("derived_from_fused_sha256").toString(),hash(original));
+    QCOMPARE(metadata.value("raw_source_sha256"),input.qualityMip.metadata.value("raw_source_sha256"));
+    QCOMPARE(output.qualityMip.planHash,input.qualityMip.planHash);
+    QCOMPARE(metadata.value("filter_2d"),input.qualityMip.metadata.value("filter_2d"));
+    QCOMPARE(metadata.value("filter_2d").toObject().value("variance").toDouble(),.3);
+    QVERIFY(metadata.value("filter_2d").toObject().value("opacity_compensation").toBool());
+    QCOMPARE(output.qualityMip.pixelVariance,.3F);QVERIFY(output.qualityMip.opacityCompensation);
+    QVERIFY(!metadata.contains("filter_widths"));
+
+    // A source-coordinate re-export of the derived fused artifact must not
+    // bake the TRS or 3D filter again, and must remain a valid fresh pair.
+    auto repeated=options;repeated.sourcePath=options.destinationPath;
+    repeated.destinationPath=temporary.filePath("repeated.ply");repeated.applyTransform=false;
+    const auto repeatedResult=gsw::PlyPointCloudLoader::exportSourcePly(repeated);
+    QVERIFY2(repeatedResult.success,qPrintable(repeatedResult.error));
+    QCOMPARE(read(repeated.destinationPath),bakedBytes);
+    const auto reloaded=gsw::PlyPointCloudLoader::load(repeated.destinationPath);
+    QVERIFY2(reloaded.isValid(),qPrintable(reloaded.error));QVERIFY(reloaded.qualityMip.enabled);
+    QCOMPARE(reloaded.sourceVertexCount,qint64(3));
+    QCOMPARE(reloaded.qualityMip.metadata.value("fused_sha256").toString(),hash(bakedBytes));
+    QCOMPARE(reloaded.qualityMip.metadata.value("fused_file").toString(),QStringLiteral("repeated.ply"));
+    QCOMPARE(reloaded.qualityMip.metadata.value("derived_from_fused_sha256").toString(),hash(bakedBytes));
+    QCOMPARE(reloaded.qualityMip.metadata.value("filter_2d"),metadata.value("filter_2d"));
+    QCOMPARE(read(options.destinationPath),bakedBytes);
+    QCOMPARE(read(temporary.filePath("baked.quality.json")),bakedSidecar);
+    QCOMPARE(read(source),original);QCOMPARE(read(sourceSidecar),originalSidecar);
   }
 
   void actualTrainingArtifactLoadsAndReexportsWithoutSourceMutation() {
