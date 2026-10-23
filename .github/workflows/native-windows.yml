@@ -335,6 +335,7 @@ jobs:
             "scripts/test_windows_installer_build.ps1",
             "scripts/stage_native_crt.ps1",
             "scripts/test_native_crt.ps1",
+            "scripts/test_native_package_launch.ps1",
             "scripts/trace_native_ci_build.ps1",
             "scripts/test_trace_native_ci_build.ps1"
           )
@@ -425,6 +426,7 @@ jobs:
           }
           & $env:QA_PYTHON -I -B native/artifact/native/worker/import_preflight.py --backend-root native/artifact
           if ($LASTEXITCODE -ne 0) { throw "Packaged native compute import failed." }
+          ./scripts/test_native_package_launch.ps1 -Executable $exe -PythonExecutable $env:QA_PYTHON -TestRoot "$env:RUNNER_TEMP/gsw-package-startup-validation"
 
       - name: Build and verify Windows setup wizard
         shell: pwsh

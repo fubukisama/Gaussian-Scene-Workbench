@@ -407,17 +407,9 @@ function Invoke-NativeLaunchSmokeTest {
   param([Parameter(Mandatory = $true)][string]$Executable)
 
   $PackageBin = Split-Path -Parent $Executable
-  $LaunchEnvironment = @{
-    PATH = [Environment]::GetEnvironmentVariable("PATH", "Process")
-    QT_OPENGL = [Environment]::GetEnvironmentVariable("QT_OPENGL", "Process")
-    QT_PLUGIN_PATH = [Environment]::GetEnvironmentVariable("QT_PLUGIN_PATH", "Process")
-    QT_QPA_PLATFORM = [Environment]::GetEnvironmentVariable("QT_QPA_PLATFORM", "Process")
-    QT_QPA_PLATFORM_PLUGIN_PATH = [Environment]::GetEnvironmentVariable(
-      "QT_QPA_PLATFORM_PLUGIN_PATH",
-      "Process"
-    )
-  }
   $Process = $null
+  $StdoutRead = $null
+  $StderrRead = $null
   try {
     $IsolatedPath = @(
       $PackageBin,
@@ -425,26 +417,36 @@ function Invoke-NativeLaunchSmokeTest {
       $env:SystemRoot,
       (Join-Path $env:SystemRoot "System32\Wbem")
     ) -join ";"
-    [Environment]::SetEnvironmentVariable("PATH", $IsolatedPath, "Process")
-    [Environment]::SetEnvironmentVariable("QT_OPENGL", "software", "Process")
-    [Environment]::SetEnvironmentVariable("QT_PLUGIN_PATH", $null, "Process")
     # Offscreen is an explicit local packaging/dependency check, not a claim of
     # real-window/OpenGL acceptance. Keep Windows as the existing CI default.
-    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM", $PackageSmokePlatform, "Process")
-    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM_PLUGIN_PATH", $null, "Process")
-
-    $Process = Start-Process `
-      -FilePath $Executable `
-      -ArgumentList "--smoke-test" `
-      -WorkingDirectory $PackageBin `
-      -WindowStyle Hidden `
-      -PassThru `
-      -ErrorAction Stop
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $Executable
+    $StartInfo.Arguments = '--smoke-test'
+    $StartInfo.WorkingDirectory = $PackageBin
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    # Configure only this child. Never mutate the packaging process's Qt/PATH
+    # environment (including the distinction between missing and empty values).
+    $StartInfo.EnvironmentVariables['PATH'] = $IsolatedPath
+    $StartInfo.EnvironmentVariables['QT_OPENGL'] = 'software'
+    $StartInfo.EnvironmentVariables['QT_QPA_PLATFORM'] = $PackageSmokePlatform
+    $StartInfo.EnvironmentVariables.Remove('QT_PLUGIN_PATH')
+    $StartInfo.EnvironmentVariables.Remove('QT_QPA_PLATFORM_PLUGIN_PATH')
+    # GUI Qt otherwise sends diagnostics only to the Windows debugger. Drain
+    # both streams concurrently so a failed/verbose startup cannot deadlock.
+    $StartInfo.EnvironmentVariables['QT_FORCE_STDERR_LOGGING'] = '1'
+    $Process = [System.Diagnostics.Process]::Start($StartInfo)
+    $StdoutRead = $Process.StandardOutput.ReadToEndAsync()
+    $StderrRead = $Process.StandardError.ReadToEndAsync()
     if (-not $Process.WaitForExit(60000)) {
       Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
       $Process.WaitForExit(5000) | Out-Null
       throw "Native application launch smoke test timed out: $Executable"
     }
+    $Process.WaitForExit()
     if ($Process.ExitCode -ne 0) {
       $UnsignedExitCode = [BitConverter]::ToUInt32(
         [BitConverter]::GetBytes([int]$Process.ExitCode),
@@ -453,15 +455,23 @@ function Invoke-NativeLaunchSmokeTest {
       throw "Native application launch smoke test failed with exit code $($Process.ExitCode) (0x$($UnsignedExitCode.ToString('X8'))): $Executable"
     }
   } finally {
-    if ($null -ne $Process) {
-      if (-not $Process.HasExited) {
-        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-        $Process.WaitForExit(5000) | Out-Null
+    try {
+      if ($null -ne $Process -and -not $Process.HasExited) {
+          Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+          $Process.WaitForExit(5000) | Out-Null
       }
-      $Process.Dispose()
-    }
-    foreach ($Name in $LaunchEnvironment.Keys) {
-      [Environment]::SetEnvironmentVariable($Name, $LaunchEnvironment[$Name], "Process")
+      $LogRoot = Join-Path $BuildDirectory 'packaged-startup'
+      New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+      $LogStem = [IO.Path]::GetFileName((Split-Path -Parent $PackageBin)) + '-' + [guid]::NewGuid().ToString('N')
+      foreach ($Capture in @(@('stdout', $StdoutRead), @('stderr', $StderrRead))) {
+        $Task = $Capture[1]
+        if ($null -ne $Task -and $Task.Wait(5000)) {
+          [IO.File]::WriteAllText((Join-Path $LogRoot ($LogStem + '.' + $Capture[0] + '.log')),
+            $Task.Result, [Text.UTF8Encoding]::new($false))
+        }
+      }
+    } finally {
+      if ($null -ne $Process) { $Process.Dispose() }
     }
   }
 }
