@@ -129,6 +129,33 @@ The native desktop main program dynamically links Qt 6.8 Core, Concurrent, Gui, 
 
 Local packages built from the Conda Qt environment can also include dynamically linked runtime libraries such as zlib, zstd, PCRE2, double-conversion, libpng, libjpeg-turbo, libtiff, FreeType, WebP, libdeflate, Lerc, and liblzma. Those libraries retain their respective upstream open-source licenses. GitHub Actions builds use the official Qt Windows distribution.
 
+For the Conda-based native distribution, `scripts/stage_native_dependency_licenses.py`
+binds every deployed PE file to exact installed-package bytes (or explicit
+hash-bound original-program provenance), then copies unmodified notices from
+the matching package cache into `licenses/runtime-dependencies/`. Its
+`index.json` records versions, package/source links, metadata and notice hashes,
+and ordinary/delayed PE imports. Split-package notice reuse requires the same
+source URL/SHA-256, feedstock commit, version and license expression. Qt's own
+LGPLv3 text is retained; the verified unmodified repository `COPYING` supplies
+the supplemental GPLv3 text required alongside it. Missing ownership or original
+notices blocks publication; a filename, generic license summary or external
+web link alone is not a substitute. This collector does not complete the
+separate official-Qt-SDK packaging route or certify legal compatibility of
+every downstream distribution.
+
+中文：Conda 版原生包按实际 PE 文件哈希绑定安装包及原始许可，原文与版本、来源和
+校验索引放入 `licenses/runtime-dependencies/`；缺失材料会阻断，不以通用说明替代。
+拆分包必须严格匹配源码 URL/SHA-256、feedstock 提交、版本和许可表达式。保留 Qt
+原有 LGPLv3，并附已核验的 GPLv3 原文。此收集器不代表官方 Qt SDK 打包路线或全部
+下游分发的许可兼容性已完成验收。
+
+日本語：Conda 版は実際の PE のハッシュから配布パッケージを特定し、元の通知と
+版・出典・検証索引を `licenses/runtime-dependencies/` に保存します。欠落時は
+停止し、一般的な説明では代用しません。分割パッケージはソース URL/SHA-256・
+feedstock コミット・版・ライセンス表現の一致が必要です。Qt の LGPLv3 と検証済み
+GPLv3 原文を保持します。公式 Qt SDK の経路や全ての下流配布の法的互換性を認定
+するものではありません。
+
 ## Native Desktop Icons / 原生桌面图标 / ネイティブデスクトップのアイコン
 
 The desktop semantic icons directly use Lucide SVG assets pinned to commit `70562c1ee1c4fdcf736fe97bc893fb8511927934`: https://github.com/lucide-icons/lucide . Original artwork and the full upstream ISC license, including the MIT notice for Feather-derived icons, are retained in `native/third_party/lucide/`; desktop packages ship the notices in `licenses/lucide/`. Runtime palette substitution does not alter the vendored artwork. Blender, CloudCompare and Metashape icon assets and branding are not bundled. The separately licensed Blender geometry port is described above; CloudCompare and Metashape remain behavior references.

@@ -466,6 +466,45 @@ function Invoke-NativeLaunchSmokeTest {
   }
 }
 
+function Stage-CondaDependencyNotices {
+  param(
+    [Parameter(Mandatory = $true)][string]$PackageRoot,
+    [Parameter(Mandatory = $true)][string]$Executable
+  )
+  # This exact-owner collector applies only to the local Conda distribution.
+  # Official Qt SDK packaging has different provenance and is not silently
+  # certified or blocked by a fabricated Conda metadata fallback.
+  if (-not (Test-Path -LiteralPath (Join-Path $QtRoot 'conda-meta') -PathType Container)) { return }
+  $NoticeFiles = @('COPYING', 'LICENSE', 'native/LICENSE.md') | ForEach-Object {
+    $Source = Join-Path $Root $_
+    [ordered]@{
+      source = $Source
+      name = $_
+      sha256 = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+  }
+  $KnownOwners = [ordered]@{
+    schema = 'gsw.runtime_license_known_owners/1'
+    owners = @([ordered]@{
+      binary = 'Gaussian Scene Workbench.exe'
+      sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash.ToLowerInvariant()
+      owner = 'Gaussian Scene Workbench'
+      version = [string]$BuildManifest.version
+      license_expression = 'GPL-3.0-or-later'
+      source_urls = @('https://github.com/fubukisama/Gaussian-Scene-Workbench')
+      license_files = @($NoticeFiles)
+    })
+  }
+  $OwnerPath = Join-Path $BuildDirectory 'runtime-license-known-owners.json'
+  [IO.File]::WriteAllText($OwnerPath, ($KnownOwners | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+  $Output = Join-Path $PackageRoot 'licenses/runtime-dependencies'
+  $LicenseJson = & $CheckPython -I -B (Join-Path $Root 'scripts/stage_native_dependency_licenses.py') `
+    --qt-root $QtRoot --package-bin (Split-Path -Parent $Executable) --output-root $Output --known-owners $OwnerPath
+  if ($LASTEXITCODE -ne 0) { throw ('Native dependency notice staging failed: ' + ($LicenseJson -join "`n")) }
+  $Report = ($LicenseJson -join "`n") | ConvertFrom-Json
+  Write-Host "Runtime notices: $($Report.binary_count) exact PE bindings; $($Report.package_count) original notice packages."
+}
+
 function Invoke-WindowsArtifactSigning {
   param(
     [Parameter(Mandatory = $true)][string[]]$Artifacts,
@@ -638,8 +677,23 @@ if ($Package) {
   if ($LASTEXITCODE -ne 0) { throw "Native install failed with exit code $LASTEXITCODE." }
   $PackagedExecutable = Join-Path $PackageRoot "bin\Gaussian Scene Workbench.exe"
   $DeployConfigurationFlag = if ($Configuration -eq "Debug") { "--debug" } else { "--release" }
-  & $WinDeployQt $DeployConfigurationFlag --no-translations --compiler-runtime $PackagedExecutable
+  # QtWidgets uses native OpenGL. Do not copy this PC's optional system/RHI
+  # shader compilers into a portable package; they are not linked dependencies.
+  & $WinDeployQt $DeployConfigurationFlag --no-translations --compiler-runtime --no-system-d3d-compiler --no-system-dxc-compiler $PackagedExecutable
   if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE." }
+  if ($PackageSmokePlatform -eq "offscreen") {
+    # windeployqt selects qwindows for a Windows GUI. The explicitly requested
+    # background startup test must also be self-contained, not borrow a plugin
+    # from the development environment or fall back to a visible window.
+    $OffscreenPlugin = @(
+      (Join-Path $QtRoot "Library\lib\qt6\plugins\platforms\qoffscreen.dll"),
+      (Join-Path $QtRoot "Library\plugins\platforms\qoffscreen.dll")
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if (-not $OffscreenPlugin) { throw "Requested offscreen package smoke requires the matching qoffscreen.dll." }
+    $PlatformDirectory = Join-Path (Split-Path -Parent $PackagedExecutable) "platforms"
+    New-Item -ItemType Directory -Path $PlatformDirectory -Force | Out-Null
+    Copy-Item -LiteralPath $OffscreenPlugin -Destination (Join-Path $PlatformDirectory "qoffscreen.dll") -Force
+  }
   $RuntimeSearchRoots = @(
     (Join-Path $QtRoot "Library\bin"),
     $(if ($env:VCToolsRedistDir) {
@@ -651,7 +705,8 @@ if ($Package) {
     -Artifacts @($PackagedExecutable) `
     -Purpose "packaged native application"
   Invoke-NativeLaunchSmokeTest -Executable $PackagedExecutable
-  Copy-Item -LiteralPath (Join-Path $NativeRoot "README.md") -Destination $PackageRoot -Force
+  & $CheckPython -I -B (Join-Path $Root 'scripts/stage_native_readme.py') --source-root $Root --package-root $PackageRoot
+  if ($LASTEXITCODE -ne 0) { throw "Native package README/document link staging failed." }
   Copy-Item -LiteralPath (Join-Path $NativeRoot "build_manifest.json") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_MIGRATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\NATIVE_PARITY.md") -Destination $PackageRoot -Force
@@ -662,6 +717,7 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $NativeRoot "LICENSE.md") -Destination (Join-Path $PackageRoot "native/LICENSE.md") -Force
   & (Join-Path $Root 'scripts/write_native_source_manifest.ps1') -PackageRoot $PackageRoot
   Copy-Item -LiteralPath (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PackageRoot -Force
+  Stage-CondaDependencyNotices -PackageRoot $PackageRoot -Executable $PackagedExecutable
   Copy-Item -LiteralPath (Join-Path $Root "docs\LOCALIZATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\RESOURCE_BUDGETS.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\CONTINUOUS_TRAINING_PREVIEW.md") -Destination $PackageRoot -Force

@@ -19,8 +19,11 @@ from native.worker.training_quality_plan import resolve_quality_plan
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-TRAINING_PYTHON = Path('D:/Apps/GSW/runtime/envs/gaussian_splatting/python.exe')
-ACCEPTED_ROOT = Path('D:/Codex/builds/gsw-quality-rasterizer-v1-20261023-build3/runtime')
+TRAINING_PYTHON = Path(os.environ.get('GSW_QUALITY_PREFLIGHT_PYTHON', sys.executable))
+ACCEPTED_ROOT = (Path(os.environ['GSW_QUALITY_PREFLIGHT_KERNEL_ROOT'])
+                 if os.environ.get('GSW_QUALITY_PREFLIGHT_KERNEL_ROOT') else None)
+HAS_ACCEPTED_COMPONENT = bool(ACCEPTED_ROOT and TRAINING_PYTHON.is_file() and
+                             (ACCEPTED_ROOT / 'quality-rasterizer-acceptance.json').is_file())
 
 
 @contextlib.contextmanager
@@ -39,7 +42,8 @@ def environment(**values):
 
 class QualityKernelPreflightTests(unittest.TestCase):
     def setUp(self):
-        base = Path('D:/Codex/validation/gsw-quality-upgrade-20261023/p8/kernel-preflight-tests')
+        base = Path(os.environ.get('GSW_SMOKE_OUTPUT_DIR',
+                    'D:/t' if Path('D:/t').is_dir() else tempfile.gettempdir())) / 'kernel-preflight-tests'
         base.mkdir(parents=True, exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=base)
         self.addCleanup(self.temporary.cleanup)
@@ -47,6 +51,7 @@ class QualityKernelPreflightTests(unittest.TestCase):
         self.server = import_backend(REPOSITORY)
         self.plan = resolve_quality_plan({'version': 1, 'filter': {'mode': 'full_mip'}})
 
+    @unittest.skipUnless(HAS_ACCEPTED_COMPONENT, 'Explicit real accepted component and target Python required')
     def test_actual_training_python_accepts_intact_component_without_torch_or_gpu(self):
         with environment(GAUSSIAN_SPLATTING_CONDA_PREFIX=str(TRAINING_PYTHON.parent),
                          GS_CONDA_PREFIX=str(TRAINING_PYTHON.parent),
@@ -55,7 +60,10 @@ class QualityKernelPreflightTests(unittest.TestCase):
             report = preflight_quality_kernel(self.server, {'qualityPlan': self.plan},
                                               '3dgs', REPOSITORY)
             self.assertEqual(self.server.training_env('3dgs'), before)
-        self.assertEqual(report['python_version'], '3.8.20')
+        expected_version = subprocess.check_output([str(TRAINING_PYTHON), '-I', '-B', '-c',
+            'import sys; print(sys.version.split()[0])'], creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10).decode('ascii').strip()
+        self.assertEqual(report['python_version'], expected_version)
         self.assertEqual(Path(report['target_python']), TRAINING_PYTHON.resolve())
         self.assertEqual(report['target_python_sha256'], hashlib.sha256(TRAINING_PYTHON.read_bytes()).hexdigest())
         self.assertEqual(Path(report['root']), ACCEPTED_ROOT.resolve())
@@ -81,6 +89,7 @@ class QualityKernelPreflightTests(unittest.TestCase):
                 run_training(config)
         self.assertEqual(list((self.root / 'jobs').glob('*.json')), [])
 
+    @unittest.skipUnless(HAS_ACCEPTED_COMPONENT, 'Explicit real accepted component and target Python required')
     def test_old_abi_missing_files_and_damaged_acceptance_fail_closed(self):
         for name, expected in (
                 ('old-abi', 'quality_rasterizer_build_invalid'),
@@ -122,6 +131,8 @@ class QualityKernelPreflightTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, '^' + expected):
                         preflight_quality_kernel(self.server, {'qualityPlan': self.plan}, '3dgs', REPOSITORY)
 
+    @unittest.skipUnless(HAS_ACCEPTED_COMPONENT and sys.version_info[:2] == (3, 12),
+                         'Explicit Python3.8 component and Python3.12 worker required')
     def test_using_worker_python_instead_of_selected_training_python_is_rejected(self):
         # The actual test runner is the desktop worker's 3.12 environment; the
         # accepted component is explicitly bound to training Python 3.8.

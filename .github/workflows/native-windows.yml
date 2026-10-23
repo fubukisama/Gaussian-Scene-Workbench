@@ -209,6 +209,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Recorded PLY export and persistent batch contracts failed." }
           & $env:QA_PYTHON -B -m unittest native.worker.test_camera_admission_paths native.worker.test_colmap_path_budget native.worker.test_solve_output_publication
           if ($LASTEXITCODE -ne 0) { throw "Windows camera path safety contracts failed." }
+          & $env:QA_PYTHON -B -m unittest native.worker.test_training_quality_plan native.worker.test_quality_kernel_preflight native.worker.test_quality_delivery
+          if ($LASTEXITCODE -ne 0) { throw "Experimental quality plan, bounded CPU admission and delivery contracts failed." }
+          & $env:QA_PYTHON -I -B scripts/test_stage_native_readme.py
+          if ($LASTEXITCODE -ne 0) { throw "Native package document links failed." }
+          & $env:QA_PYTHON -I -B scripts/test_stage_native_dependency_licenses.py
+          if ($LASTEXITCODE -ne 0) { throw "Native dependency notice staging contracts failed." }
 
       - name: Install SPZ codec dependencies
         shell: pwsh
@@ -357,7 +363,8 @@ jobs:
           ./scripts/stage_native_crt.ps1 -PackageRoot (Join-Path $PWD 'native/artifact')
           $crt = Get-Content native/artifact/native-crt-manifest.json -Raw | ConvertFrom-Json
           ./scripts/test_native_crt.ps1 -SourcePackageRoot "$PWD/native/artifact" -TestRoot "$env:RUNNER_TEMP/gsw-crt-acceptance" -DumpBinPath $crt.dumpBin
-          Copy-Item native/README.md native/artifact/README.md
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/stage_native_readme.py --source-root $PWD --package-root (Join-Path $PWD 'native/artifact')
+          if ($LASTEXITCODE -ne 0) { throw "Native package README/document link staging failed." }
           Copy-Item native/build_manifest.json native/artifact/build_manifest.json
           Copy-Item docs/NATIVE_MIGRATION.md native/artifact/NATIVE_MIGRATION.md
           Copy-Item docs/NATIVE_PARITY.md native/artifact/NATIVE_PARITY.md

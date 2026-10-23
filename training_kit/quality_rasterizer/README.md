@@ -1,9 +1,14 @@
 # Independent quality rasterizer, ABI 1
 
-Status: source implementation and CPU references only. **Not compiled or GPU
-accepted by this implementation task.** No production trainer selects this
-package. Do not advertise AbsGS/Pixel-GS/mask/depth support from an import, ABI
-marker, successful build or CPU test.
+Status (2026-10-23): independently compiled on the recorded Windows/CUDA
+toolchain, with seven real synthetic GPU numerical checks passing. Explicit
+experimental 3DGS quality plans can select this separate runtime after
+source/binary/ABI/acceptance validation. Actual bounded AbsGS, Pixel-GS, Full Mip
+and mask/depth training evidence is recorded in
+`docs/quality_upgrade/ACCEPTANCE_REPORT.json`; it is not final appearance,
+geometry or generalization acceptance. Standard/off remains unchanged and
+MCMC desktop admission remains blocked by its separate unresolved GPU gate.
+An import, ABI marker, build or CPU test alone is never GPU acceptance.
 
 ## Interface and invariants
 
@@ -140,5 +145,7 @@ This is NOT a GPL/MIT/Apache relicensing, and no commercial permission is
 implied. Original GSW runtime/proof/reference orchestration does not override
 the derived kernel's license. No AbsGS extra pruning, GOF densification,
 MCMC relocation, Full Mip 3D filtering, 2D surfel adaptation or default promotion
-is included in this slice. Each remains a separate implementation and
-acceptance gate.
+is implemented inside this kernel. Their separate controller/supervision/export
+implementations and current acceptance boundaries are documented in
+`docs/QUALITY_PLAN.md` and the acceptance report. This kernel's numerical gate
+does not promote those higher-level features.

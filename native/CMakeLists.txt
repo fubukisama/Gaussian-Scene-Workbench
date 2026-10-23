@@ -404,7 +404,8 @@ install(DIRECTORY worker DESTINATION source/native
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../training_kit/quality_rasterizer"
   "${CMAKE_CURRENT_SOURCE_DIR}/../training_kit/pinhole_rasterizer"
   DESTINATION source/training_kit
-  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyd" EXCLUDE)
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyd" EXCLUDE
+  PATTERN ".planning" EXCLUDE)
 # The independently built research rasterizer retains its upstream license.
 # These sources are not linked into or relicensed as the native GPL GUI.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../gaussian-splatting/submodules/diff-gaussian-rasterization"
@@ -422,6 +423,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_readme.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_stage_native_readme.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_dependency_licenses.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_stage_native_dependency_licenses.py" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_quality_rasterizer.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_quality_rasterizer.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_quality_pipeline_cuda.py"
