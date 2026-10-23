@@ -15,6 +15,7 @@
 #include <QSaveFile>
 #include <QCryptographicHash>
 #include <QSysInfo>
+#include <QScopeGuard>
 
 #include <cmath>
 #include <limits>
@@ -164,10 +165,38 @@ bool persistentSafePath(const QString &path) {
 
 QJsonObject readPersistentObject(const QString &path,const qint64 maximum) {
   if (!persistentSafePath(path)) return {};
+#ifdef Q_OS_WIN
+  // Metadata publishers atomically replace these files. QFile on Windows does
+  // not share DELETE access, so it can refuse an otherwise valid lease while
+  // its publisher owns the replacement handle. Read one bounded, no-follow
+  // handle instead; replacement never changes the snapshot being validated.
+  const HANDLE file=CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),GENERIC_READ,
+      FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+      FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+  if(file==INVALID_HANDLE_VALUE)return {};
+  const auto close=qScopeGuard([&]{CloseHandle(file);});
+  BY_HANDLE_FILE_INFORMATION before{};
+  LARGE_INTEGER size{};
+  if(!GetFileInformationByHandle(file,&before)||
+      (before.dwFileAttributes&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))||
+      !GetFileSizeEx(file,&size)||size.QuadPart<0||size.QuadPart>maximum||
+      size.QuadPart>=std::numeric_limits<int>::max())return {};
+  QByteArray bytes(static_cast<qsizetype>(size.QuadPart+1),Qt::Uninitialized);
+  DWORD read=0;
+  if(!ReadFile(file,bytes.data(),static_cast<DWORD>(bytes.size()),&read,nullptr)||
+      static_cast<qint64>(read)!=size.QuadPart)return {};
+  BY_HANDLE_FILE_INFORMATION after{};
+  if(!GetFileInformationByHandle(file,&after)||after.nFileSizeHigh!=before.nFileSizeHigh||
+      after.nFileSizeLow!=before.nFileSizeLow||
+      CompareFileTime(&after.ftLastWriteTime,&before.ftLastWriteTime)!=0)return {};
+  bytes.resize(read);
+#else
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly) || file.size()>maximum) return {};
+  const auto bytes=file.readAll();
+#endif
   QJsonParseError error;
-  const auto value=QJsonDocument::fromJson(file.readAll(),&error);
+  const auto value=QJsonDocument::fromJson(bytes,&error);
   return error.error==QJsonParseError::NoError && value.isObject()?value.object():QJsonObject{};
 }
 

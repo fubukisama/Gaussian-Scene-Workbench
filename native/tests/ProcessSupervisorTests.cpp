@@ -94,6 +94,7 @@ int persistentBatchFixture(QCoreApplication &application) {
 #else
   const auto args=application.arguments();
   if(args.size()!=5) return 3;
+  const bool leasePublicationOpen=args.at(1)==QStringLiteral("--persistent-batch-publication-fixture");
   const QString plan=args.at(2),ready=args.at(3),release=args.at(4);
   QFile planFile(plan);
   if(!planFile.open(QIODevice::ReadOnly)) return 4;
@@ -121,7 +122,8 @@ int persistentBatchFixture(QCoreApplication &application) {
   std::puts("[worker-event] {\"version\":1,\"type\":\"status\",\"state\":\"running\",\"stage\":\"batch_run\",\"progressPercent\":25}");std::fflush(stdout);
   QTimer timer;
   QObject::connect(&timer,&QTimer::timeout,&application,[&]{
-    if(QFileInfo::exists(release)){application.exit(0);return;}heartbeat();
+    if(QFileInfo::exists(release)){application.exit(0);return;}
+    if(!leasePublicationOpen)heartbeat();
     QFile file(inbox);if(!file.open(QIODevice::ReadOnly))return;
     const auto command=QJsonDocument::fromJson(file.readAll()).object();file.close();file.remove();
     if(command.value("schema")!="gsw.training_batch_connection/1"||command.value("session")!=session||
@@ -245,13 +247,18 @@ void ProcessSupervisorTests::batchMigrationRejectsDamagedLaunchMarker(){
 }
 
 void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches_data(){
-  QTest::addColumn<bool>("cancel");QTest::newRow("pause")<<false;QTest::newRow("cancel-checkpoint")<<true;
+  QTest::addColumn<bool>("cancel");QTest::addColumn<bool>("leasePublicationOpen");
+  QTest::addColumn<bool>("rejectClosedLease");
+  QTest::newRow("pause")<<false<<false<<false;QTest::newRow("cancel-checkpoint")<<true<<false<<false;
+  QTest::newRow("pause-during-lease-publication")<<false<<true<<false;
+  QTest::newRow("closed-lease-during-publication")<<false<<true<<true;
 }
 void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
 #ifndef Q_OS_WIN
   QSKIP("Persistent Windows coordinator process identity boundary");
 #else
-  QFETCH(bool,cancel);QTemporaryDir temporary;QVERIFY(temporary.isValid());
+  QFETCH(bool,cancel);QFETCH(bool,leasePublicationOpen);QFETCH(bool,rejectClosedLease);
+  QTemporaryDir temporary;QVERIFY(temporary.isValid());
   const QString root=QDir(temporary.path()).filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('a')));
   QVERIFY(QDir().mkpath(root));const QString plan=QDir(root).filePath("plan.json"),log=QDir(root).filePath("stdout.log");
   QVERIFY(writeJsonFixture(plan,{{"schema","gsw.training_batch/1"},{"plan_sha256",QString(64,QLatin1Char('b'))}}));
@@ -262,7 +269,7 @@ void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
   const QString ready=QDir(root).filePath("ready"),release=QDir(root).filePath("release");
   auto supervisor=std::make_unique<ProcessSupervisor>();
   QVERIFY(supervisor->startPersistentBatch("batch",QCoreApplication::applicationFilePath(),
-    {"--persistent-batch-fixture",plan,ready,release},temporary.path(),{},log,plan));
+    {leasePublicationOpen?"--persistent-batch-publication-fixture":"--persistent-batch-fixture",plan,ready,release},temporary.path(),{},log,plan));
   QVERIFY(supervisor->isPersistentTask());QVERIFY(supervisor->isPersistentBatch());QVERIFY(!supervisor->isPersistentTraining());
   QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(ready),5000);
   QFile readyFile(ready);QVERIFY(readyFile.open(QIODevice::ReadOnly));const auto pid=readyFile.readAll().toLongLong();readyFile.close();
@@ -270,9 +277,57 @@ void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
   supervisor->shutdown();supervisor.reset();QVERIFY(processIsRunning(pid));
   QVERIFY(ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
   ProcessSupervisor observer;QSignalSpy finished(&observer,&ProcessSupervisor::taskFinished);
+  QSignalSpy output(&observer,&ProcessSupervisor::outputReady);
   QVERIFY(observer.attachPersistentBatch("batch-observe",plan,log));
+  // Atomic Windows replacement owns DELETE access to the current lease while
+  // still allowing observers to read its complete, unchanged metadata. Keep
+  // that real filesystem boundary open across the public pause request.
+  const QString leasePath=QDir(root).filePath(QStringLiteral(".coordinator.json"));
+  QJsonObject validLease;
+  if(rejectClosedLease) {
+    QFile lease(leasePath);QVERIFY(lease.open(QIODevice::ReadOnly));
+    validLease=QJsonDocument::fromJson(lease.readAll()).object();lease.close();
+    QVERIFY(!validLease.isEmpty());auto closed=validLease;closed.insert(QStringLiteral("closed"),true);
+    QVERIFY(writeJsonFixture(leasePath,closed));
+  }
+  HANDLE publication=leasePublicationOpen?
+    CreateFileW(reinterpret_cast<LPCWSTR>(leasePath.utf16()),DELETE,
+      FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,nullptr):INVALID_HANDLE_VALUE;
+  const auto closePublication=qScopeGuard([&]{if(publication!=INVALID_HANDLE_VALUE)CloseHandle(publication);});
+  if(leasePublicationOpen)QVERIFY(publication!=INVALID_HANDLE_VALUE);
+  if(leasePublicationOpen) {
+    QFile legacyRead(leasePath);SetLastError(ERROR_SUCCESS);
+    const bool opened=legacyRead.open(QIODevice::ReadOnly);const DWORD error=GetLastError();
+    qInfo("fixture-publication-read-probe: opened=%d,fileError=%d,winError=%lu",
+      opened,static_cast<int>(legacyRead.error()),static_cast<unsigned long>(error));
+  }
+  if(rejectClosedLease) {
+    QVERIFY(!observer.requestPause());QVERIFY(!observer.wasStopRequested());
+    QVERIFY(processIsRunning(pid));QCOMPARE(finished.count(),0);
+    QVERIFY(!QFileInfo::exists(QDir(root).filePath(QStringLiteral(".coordinators/")+QString(32,QLatin1Char('d'))+QStringLiteral("-cmd.json"))));
+    CloseHandle(publication);publication=INVALID_HANDLE_VALUE;
+    QVERIFY(writeJsonFixture(leasePath,validLease));
+    publication=CreateFileW(reinterpret_cast<LPCWSTR>(leasePath.utf16()),DELETE,
+      FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,nullptr);
+    QVERIFY(publication!=INVALID_HANDLE_VALUE);
+  }
   if(cancel){observer.stop();QVERIFY(observer.wasStopRequested());}
-  else QVERIFY(observer.requestPause());
+  else {
+    const bool requested=observer.requestPause();
+    QString diagnostic;
+    if(!requested) {
+      for(const auto &event:output) diagnostic+=event.first().toString();
+      QFile lease(QDir(root).filePath(QStringLiteral(".coordinator.json")));
+      SetLastError(ERROR_SUCCESS);const bool opened=lease.open(QIODevice::ReadOnly);
+      const DWORD error=GetLastError();
+      diagnostic+=QStringLiteral("\nfixtureLeaseOpened=%1,fileError=%2,winError=%3")
+        .arg(opened).arg(static_cast<int>(lease.error())).arg(error);
+      if(opened)diagnostic+=QStringLiteral("\nfixtureLease=")+QString::fromUtf8(lease.readAll());
+    }
+    QVERIFY2(requested,qPrintable(diagnostic));
+  }
   QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
   QCOMPARE(finished.first().at(1).toInt(),cancel?130:75);QVERIFY(!processIsRunning(pid));
   QVERIFY(!ProcessSupervisor::hasUnfinishedBatches(temporary.path()));
@@ -912,7 +967,8 @@ int main(int argc,char **argv) {
   QCoreApplication application(argc,argv);
   if(application.arguments().value(1)==QStringLiteral("--persistent-fixture"))
     return persistentFixture(application);
-  if(application.arguments().value(1)==QStringLiteral("--persistent-batch-fixture"))
+  if(application.arguments().value(1)==QStringLiteral("--persistent-batch-fixture")||
+      application.arguments().value(1)==QStringLiteral("--persistent-batch-publication-fixture"))
     return persistentBatchFixture(application);
   ProcessSupervisorTests tests;
   return QTest::qExec(&tests,argc,argv);
