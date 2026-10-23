@@ -1204,6 +1204,30 @@ bool runLanguageSmokeTest(MainWindow &window) {
         spzDegree->currentData().toInt() == 2, "SPZ controls preserve supplied options");
   check(spzDialog.options().format == ModelExportFormat::Spz && !spzDialog.options().applyTransform,
         "SPZ uses original coordinates and true Gaussian format");
+  auto *spzCoordinates = spzDialog.findChild<QComboBox *>(QStringLiteral("modelExportCoordinates"));
+  check(spzCoordinates && !spzCoordinates->isEnabled(), "SPZ does not offer transform baking");
+  ModelExportDialog gaussianPlyDialog(spzOptions, false, true, {ply.fileName()}, &window);
+  auto *gaussianPlyFormat = gaussianPlyDialog.findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
+  auto *gaussianPlyCoordinates = gaussianPlyDialog.findChild<QComboBox *>(QStringLiteral("modelExportCoordinates"));
+  auto *gaussianPlyDescription = gaussianPlyDialog.findChild<QLabel *>(QStringLiteral("modelExportDescription"));
+  check(gaussianPlyFormat && gaussianPlyCoordinates && gaussianPlyDescription,
+        "Gaussian PLY dialog exposes coordinate choice and fidelity explanation");
+  if (!gaussianPlyFormat || !gaussianPlyCoordinates || !gaussianPlyDescription) return false;
+  check(gaussianPlyDialog.options().format == ModelExportFormat::Ply &&
+        gaussianPlyCoordinates->isEnabled() && !gaussianPlyDialog.options().applyTransform,
+        "Gaussian PLY keeps source-coordinate default while allowing scene-coordinate baking");
+  const QString sourceGaussianDescription = gaussianPlyDescription->text();
+  gaussianPlyCoordinates->setCurrentIndex(1);
+  check(gaussianPlyDialog.options().applyTransform &&
+        gaussianPlyDescription->text() != sourceGaussianDescription,
+        "Gaussian scene-coordinate selection refreshes the strict-fidelity explanation immediately");
+  gaussianPlyFormat->setCurrentIndex(gaussianPlyFormat->findData(static_cast<int>(ModelExportFormat::Spz)));
+  check(!gaussianPlyCoordinates->isEnabled() && !gaussianPlyDialog.options().applyTransform,
+        "switching from baked PLY to SPZ enforces source coordinates");
+  gaussianPlyFormat->setCurrentIndex(gaussianPlyFormat->findData(static_cast<int>(ModelExportFormat::Ply)));
+  check(gaussianPlyCoordinates->isEnabled(), "switching back to Gaussian PLY restores coordinate choice");
+  gaussianPlyCoordinates->setCurrentIndex(1);
+  const QString gaussianPlyPath = gaussianPlyDialog.options().destinationPath;
   auto *exportFormat = exportDialog.findChild<QComboBox *>(QStringLiteral("modelExportFormat"));
   check(exportFormat && exportFormat->count() == 6, "all model export formats");
   exportFormat->setCurrentIndex(exportFormat->findData(static_cast<int>(ModelExportFormat::Glb)));
@@ -1285,6 +1309,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
        static_cast<QDialog *>(&meshing), static_cast<QDialog *>(&depthGeometry),
        static_cast<QDialog *>(&reconstruction), static_cast<QDialog *>(&namedImport),
        static_cast<QDialog *>(&box), static_cast<QDialog *>(&exportDialog),
+       static_cast<QDialog *>(&gaussianPlyDialog),
        static_cast<QDialog *>(&spzDialog)}) dialog->ensurePolished();
   QApplication::processEvents();
   const auto actionCount = window.findChildren<QAction *>().size();
@@ -1652,9 +1677,21 @@ bool runLanguageSmokeTest(MainWindow &window) {
           depthHint->text() == QCoreApplication::translate("Workbench", "深度点云使用训练视点和有效掩膜，独立另存；不是高斯中心点云，也不保证真实材料边界。透明或高反射区域可能缺失。不融合、不重跑 SfM，照片纹理烘焙不可用于此路线。") + QLatin1Char('\n') +
               QCoreApplication::translate("Workbench", "原生默认使用训练框架与原高斯模型对照。规范或源框架成果将保存但不自动叠加；请用于独立评价或同框架工程，不会猜测配准。"),
           "selected GS depth captions and limitations translate live without changing coordinates, budgets or dataset identity");
+    check(gaussianPlyDialog.windowTitle() == QCoreApplication::translate("Workbench", "导出模型") &&
+          gaussianPlyCoordinates->isEnabled() &&
+          gaussianPlyCoordinates->currentText() == QCoreApplication::translate("Workbench", "场景坐标（应用位移、旋转、缩放）") &&
+          gaussianPlyDialog.options().format == ModelExportFormat::Ply &&
+          gaussianPlyDialog.options().destinationPath == gaussianPlyPath && gaussianPlyDialog.options().applyTransform,
+          "Gaussian PLY coordinate choice and destination survive live language changes");
+    check(gaussianPlyDescription->text().contains(QCoreApplication::translate("Workbench",
+              "场景坐标模式为 3DGS/2DGS 烘焙中心、尺度、方向和球谐外观；相关数值会重算，并非逐字节复制。自定义属性保持原值，不推测其几何含义。")) &&
+          gaussianPlyDescription->text().contains(QCoreApplication::translate("Workbench",
+              "严格保真：非等比缩放遇到非零方向球谐系数时拒绝导出；请改用等比缩放或原始坐标。不会近似外观或丢弃属性。")),
+          "Gaussian PLY strict-fidelity and custom-attribute explanations translate immediately");
     check(spzQuality->currentText() == QCoreApplication::translate("Workbench", "高精度（较大文件）") &&
           spzDialog.options().spzQuality == 2 && spzDialog.options().spzVersion == 3 &&
-          spzDialog.options().spzMaximumShDegree == 2 && !spzDialog.options().applyTransform,
+          spzDialog.options().spzMaximumShDegree == 2 && !spzDialog.options().applyTransform &&
+          spzCoordinates && !spzCoordinates->isEnabled(),
           "SPZ options translate immediately without changing export parameters");
     check(trackball->text() == trackballTexts[next] && trackball->isChecked() && viewport->observationTrackballVisible(),
           "observation trackball translated and state retained");
@@ -1916,6 +1953,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
                            static_cast<QDialog *>(&meshing),
                            static_cast<QDialog *>(&import),
                            static_cast<QDialog *>(&exportDialog),
+                           static_cast<QDialog *>(&gaussianPlyDialog),
                            static_cast<QDialog *>(&spzDialog)}) {
       const bool visible = dialog->isVisible();
       const QSize retainedSize = dialog->size();
@@ -2009,7 +2047,8 @@ bool runLanguageSmokeTest(MainWindow &window) {
           twoDSettings.configuration().iterations == retainedTwoDIterations &&
           reconstruction.configuration().cameraModel == reconstructionConfig.cameraModel &&
           meshing.configuration() == retainedMeshForm &&
-          exportDialog.options().destinationPath == retainedExportDestination,
+          exportDialog.options().destinationPath == retainedExportDestination &&
+          gaussianPlyDialog.options().destinationPath == gaussianPlyPath && gaussianPlyDialog.options().applyTransform,
           "dialog resizing and font changes retain edited generation and export settings");
   }
   if (retainedAutomaticScale && automaticScale) {
@@ -2111,6 +2150,10 @@ bool runLanguageSmokeTest(MainWindow &window) {
     exportDialog.show(); exportDialog.adjustSize(); QApplication::processEvents();
     check(exportDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-export.png"))), "export dialog screenshot");
     exportDialog.hide();
+    gaussianPlyDialog.show(); gaussianPlyDialog.adjustSize(); QApplication::processEvents();
+    check(gaussianPlyDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-gaussian-ply.png"))),
+          "Gaussian PLY transform and strict-fidelity dialog screenshot");
+    gaussianPlyDialog.hide();
     spzDialog.show(); spzDialog.adjustSize(); QApplication::processEvents();
     check(spzDialog.grab().save(QDir(screenshotDirectory).filePath(locale + QStringLiteral("-spz.png"))), "SPZ dialog screenshot");
     spzDialog.hide();

@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include "PlyPointCloudLoader.h"
 #include "ModelExport.h"
+#include "GaussianPlyTransform.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QImageReader>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QStringList>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
@@ -3084,9 +3086,47 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
     error = QCoreApplication::translate("Workbench", "PLY crop export cannot remap indexed non-vertex elements.");
     return result;
   }
+  std::optional<detail::GaussianPlyTransform> gaussianBake;
+  QVector<int> gaussianScales, gaussianRotations, gaussianSh;
   if (options.applyTransform && findProperty(*vertex, {QStringLiteral("scale_0")}) >= 0) {
-    error = QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.");
-    return result;
+    const auto floating = [&](int index) {
+      return index >= 0 && !vertex->properties[index].isList &&
+          (vertex->properties[index].valueType == ScalarType::Float32 ||
+           vertex->properties[index].valueType == ScalarType::Float64);
+    };
+    bool valid = floating(findProperty(*vertex, {QStringLiteral("opacity")}));
+    QSet<QString> propertyNames;
+    for (const auto &property : vertex->properties) {
+      if (propertyNames.contains(property.name)) valid = false;
+      propertyNames.insert(property.name);
+    }
+    for (int j = 0; j < 3; ++j) {
+      const int index = findProperty(*vertex, {QStringLiteral("scale_%1").arg(j)});
+      if (j < 2 || index >= 0) { gaussianScales.append(index); valid &= floating(index); }
+    }
+    for (int j = 0; j < 4; ++j) {
+      const int index = findProperty(*vertex, {QStringLiteral("rot_%1").arg(j)});
+      gaussianRotations.append(index); valid &= floating(index);
+    }
+    // Require the entire channel-major SH layout; never silently rotate only
+    // the subset understood by the preview or discard an unknown higher band.
+    int restCount = 0;
+    for (const auto &property : vertex->properties)
+      if (property.name.startsWith(QStringLiteral("f_rest_"))) ++restCount;
+    const int perChannel = restCount / 3;
+    valid &= restCount % 3 == 0 &&
+        (perChannel == 0 || perChannel == 3 || perChannel == 8 || perChannel == 15 || perChannel == 24);
+    for (int j = 0; j < restCount; ++j) {
+      const int index = findProperty(*vertex, {QStringLiteral("f_rest_%1").arg(j)});
+      gaussianSh.append(index); valid &= floating(index);
+    }
+    if (restCount) for (int j = 0; j < 3; ++j)
+      valid &= floating(findProperty(*vertex, {QStringLiteral("f_dc_%1").arg(j)}));
+    if (!valid) {
+      error = QCoreApplication::translate("Workbench", "Gaussian transform baking requires complete floating-point scale, quaternion and SH fields (degree 0–4).");
+      return result;
+    }
+    gaussianBake.emplace(options);
   }
   if (options.applyTransform && options.transform.scale.x() * options.transform.scale.y() * options.transform.scale.z() < 0 &&
       std::any_of(header.elements.cbegin(), header.elements.cend(), [](const auto &e) { return e.name == QStringLiteral("face") && e.count > 0; })) {
@@ -3112,6 +3152,13 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
       return result;
     }
   }
+  ModelExportOptions normalRotation;
+  normalRotation.applyTransform = true;
+  normalRotation.transform.rotation = options.transform.rotation;
+  const bool normalDirectionUnchanged = options.transform.rotation.vector().isNull() &&
+      options.transform.scale.x() > 0.0F &&
+      options.transform.scale.x() == options.transform.scale.y() &&
+      options.transform.scale.x() == options.transform.scale.z();
   const QDir outputDir = QFileInfo(options.destinationPath).absoluteDir();
   QTemporaryDir assets(outputDir.filePath(QStringLiteral("gsw-assets-XXXXXX")));
   QString texture;
@@ -3207,15 +3254,44 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
             ? readAsciiElementRecord(source, e, values, lists, error)
             : readBinaryElementRecord(source, e, header.format, values, lists, error))) return result;
         const auto position = exportPosition({values[xyzNormal[0]], values[xyzNormal[1]], values[xyzNormal[2]]}, options);
-        QVector3D normal;
         const bool normals = xyzNormal[3] >= 0 && xyzNormal[4] >= 0 && xyzNormal[5] >= 0;
-        if (normals) normal = exportNormal({static_cast<float>(values[xyzNormal[3]]), static_cast<float>(values[xyzNormal[4]]), static_cast<float>(values[xyzNormal[5]])}, options);
-        const std::array<double, 6> changed{position.x, position.y, position.z, normal.x(), normal.y(), normal.z()};
+        QVector<std::pair<int, double>> changed{
+            {xyzNormal[0], position.x}, {xyzNormal[1], position.y}, {xyzNormal[2], position.z}};
+        if (normals && !normalDirectionUnchanged) {
+          // Never narrow source float64 directions through QVector3D. A pure
+          // translation/positive uniform scale leaves their original values.
+          SceneCoordinate3D normal{values[xyzNormal[3]] / double(options.transform.scale.x()),
+              values[xyzNormal[4]] / double(options.transform.scale.y()),
+              values[xyzNormal[5]] / double(options.transform.scale.z())};
+          const double length = std::hypot(normal.x, normal.y, normal.z);
+          if (length > 0.0 && std::isfinite(length)) {
+            normal = exportPosition({normal.x / length, normal.y / length, normal.z / length}, normalRotation);
+          } else if (!std::isfinite(length)) {
+            error = QCoreApplication::translate("Workbench", "The model contains non-finite coordinates; export was not written.");
+            return result;
+          }
+          changed.append({xyzNormal[3], normal.x});
+          changed.append({xyzNormal[4], normal.y});
+          changed.append({xyzNormal[5], normal.z});
+        }
+        if (gaussianBake) {
+          detail::GaussianBakeValues gaussian;
+          gaussian.dimensions = static_cast<int>(gaussianScales.size());
+          gaussian.sh.reserve(gaussianSh.size());
+          for (int j = 0; j < gaussian.dimensions; ++j) gaussian.logScale[j] = values[gaussianScales[j]];
+          for (int j = 0; j < 4; ++j) gaussian.quaternion[j] = values[gaussianRotations[j]];
+          for (int index : gaussianSh) gaussian.sh.append(values[index]);
+          if (!gaussianBake->apply(gaussian, error)) return result;
+          for (int j = 0; j < gaussian.dimensions; ++j) changed.append({gaussianScales[j], gaussian.logScale[j]});
+          for (int j = 0; j < 4; ++j) changed.append({gaussianRotations[j], gaussian.quaternion[j]});
+          for (qsizetype j = 0; j < gaussianSh.size(); ++j) changed.append({gaussianSh[j], gaussian.sh[j]});
+        }
         QList<QByteArray> tokens;
         if (header.format == PlyFormat::Ascii) tokens = raw.simplified().split(' ');
-        for (int j = 0; j < (normals ? 6 : 3); ++j) {
-          const int index = xyzNormal[j];
-          const double value = changed[j];
+        for (const auto &[index, value] : changed) {
+          // Preserve untouched fields (including their ASCII spelling, signed
+          // zero and binary payload) rather than serializing a decoded cloud.
+          if (value == values[index]) continue;
           if (!std::isfinite(value) || (e.properties[index].valueType == ScalarType::Float32 && std::abs(value) > std::numeric_limits<float>::max())) {
             error = QCoreApplication::translate("Workbench", "The model contains non-finite coordinates; export was not written.");
             return result;

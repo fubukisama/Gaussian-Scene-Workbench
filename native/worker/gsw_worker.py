@@ -1216,6 +1216,15 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
     from native.backend.camera_scale_export import deliver_training_result, inspect_coordinate_metadata, CameraScaleExportError
     from native.worker.training_checkpoint import atomic_json, file_digest
     output = _lexical_absolute(output_directory)
+    # A Windows 8.3 input spelling can differ from resolve() without being a
+    # link. Verify the output chain without following links, then use its
+    # canonical spelling only for containment checks of output-derived paths.
+    # Keep raw result/receipt spellings intact, and never resolve a model or
+    # child reparse entry. Import/removal containment semantics stay unchanged.
+    for parent in (output,) + tuple(output.parents):
+        if _is_reparse_point(parent):
+            raise ValueError('training_delivery_output_link_refused')
+    canonical_output = output.resolve()
     candidates = []
     point_root = output / 'point_cloud'
     if iteration is not None and (type(iteration) is not int or iteration < 1):
@@ -1245,7 +1254,10 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         for part in (path,) + tuple(path.parents):
             if _is_reparse_point(part):
                 fail('quality_delivery_link_refused', str(part))
-        _ensure_within_root(path, output)
+        # The output spelling may legitimately expand an 8.3 alias. Use the
+        # verified canonical output only for containment, not for dereferencing
+        # children; every original child/ancestor reparse entry was refused.
+        _ensure_within_root(canonical_output / path.relative_to(output), canonical_output)
         return path
 
     def relative_reference(value):
@@ -1255,7 +1267,8 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         if any(part in ('', '.', '..') for part in parts):
             fail('quality_delivery_fused_path_invalid')
         target = checked(raw_model.parent.joinpath(*parts))
-        _ensure_within_root(target, raw_model.parent)
+        canonical_parent = canonical_output / raw_model.parent.relative_to(output)
+        _ensure_within_root(canonical_parent / target.relative_to(raw_model.parent), canonical_parent)
         return target
 
     def read_quality(path):
@@ -1348,7 +1361,7 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         if result.get(key):
             result[key.replace('_path','_relative_path')] = str(Path(result[key]).relative_to(output)).replace('\\','/')
     receipt = output / 'model-delivery.json'
-    _ensure_within_root(receipt, output)
+    _ensure_within_root(canonical_output / receipt.relative_to(output), canonical_output)
     atomic_json(receipt, result)
     return result
 

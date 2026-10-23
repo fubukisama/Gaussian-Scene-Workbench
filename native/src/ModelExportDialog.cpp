@@ -204,12 +204,13 @@ void ModelExportDialog::refreshDescription() {
   const bool recordedPly=format==ModelExportFormat::Ply&&mRecovery.preserve;
   const bool spz = format == ModelExportFormat::Spz;
   mSpzOptions->setVisible(spz);
-  const bool recoveryAvailable = mRecovery.source;
-  mCoordinates->setEnabled(!spz && (!gaussianPly || recoveryAvailable));
-  if (spz || ((gaussianPly||recordedPly) && mCoordinates->currentIndex() == 1) || (!recordedPly && mCoordinates->currentIndex() >= 2))
+  const bool hasCoordinateRecord = QFileInfo::exists(cameraScaleMetadataPath(mSource.sourcePath));
+  const bool recordedMetadataPly = format == ModelExportFormat::Ply && hasCoordinateRecord;
+  mCoordinates->setEnabled(!spz);
+  if (spz || ((recordedPly || recordedMetadataPly) && mCoordinates->currentIndex() == 1) || (!recordedPly && mCoordinates->currentIndex() >= 2))
     mCoordinates->setCurrentIndex(0);
   if (auto *model = qobject_cast<QStandardItemModel *>(mCoordinates->model())) {
-    if (model->item(1)) model->item(1)->setEnabled(!gaussianPly && !recordedPly && !spz);
+    if (model->item(1)) model->item(1)->setEnabled(!recordedPly && !recordedMetadataPly && !spz);
     for (int index = 2; index < mCoordinates->count(); ++index)
       if (model->item(index)) model->item(index)->setEnabled(recordedPly);
   }
@@ -243,15 +244,31 @@ void ModelExportDialog::refreshDescription() {
   case ModelExportFormat::Csv:
     description = QCoreApplication::translate("Workbench", "导出 X、Y、Z 与 RGB（0–255），不包含网格面、贴图或其他顶点属性。"); break;
   }
-  if (!gaussianPly && !recordedPly && !spz) {
+  if (!recordedPly && !spz) {
     description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
         "原始坐标保留源单位；场景坐标应用模型变换，并在源单位与场景参考单位均已声明时换算到场景参考单位。单位未知时保留数值，不猜测物理比例。GLB 随后按格式约定转换为米制。");
   }
   if (recordedPly) {
     description += QLatin1Char('\n') + QCoreApplication::translate("Workbench", "共享 PLY 路线保留点、网格或高斯属性，并将模型、相机、裁剪和资源绑定到同一变换记录。场景编辑另存，不会修改原始模型或完整检查点；用户缩放不是独立尺度检核。");
-  } else if (mGaussian && !spz) description += QLatin1Char('\n') + (gaussianPly
-      ? QCoreApplication::translate("Workbench", "Gaussian PLY export preserves source coordinates and all attributes; baking Gaussian transforms is not supported yet.")
-      : QCoreApplication::translate("Workbench", "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。"));
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+        "带来源记录的 PLY 保留模型与相机的共同坐标链，仅接受正等比相似变换；不支持镜像或非等比缩放。通过“同时应用当前模型的场景变换”烘焙，不绕过来源验证。");
+  } else if (recordedMetadataPly) {
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+        "此模型的坐标来源记录尚未通过验证，不能绕过记录进行场景坐标烘焙。请检查来源记录后重试。");
+  } else if (gaussianPly) {
+    if (mCoordinates->currentIndex() == 1) {
+      description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+          "场景坐标模式为 3DGS/2DGS 烘焙中心、尺度、方向和球谐外观；相关数值会重算，并非逐字节复制。自定义属性保持原值，不推测其几何含义。");
+      description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+          "严格保真：非等比缩放遇到非零方向球谐系数时拒绝导出；请改用等比缩放或原始坐标。不会近似外观或丢弃属性。");
+    } else {
+      description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+          "原始坐标模式保留 3DGS/2DGS 的全部高斯和自定义属性，不应用模型变换。");
+    }
+  } else if (mGaussian && !spz) {
+    description += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+        "注意：此格式仅导出高斯中心点及基础颜色，不包含高斯尺度、旋转、不透明度或球谐外观。");
+  }
   mDescription->setText(description);
 }
 

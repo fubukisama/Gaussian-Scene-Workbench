@@ -198,6 +198,31 @@ class QualityDeliveryTests(unittest.TestCase):
         self.assert_failed_receipt('quality_delivery_link_refused')
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_canonical_output_spelling_change_keeps_nested_mip_delivery_and_receipt(self):
+        # Model the OS-only 8.3 canonical-name expansion without changing the
+        # volume's naming policy. All files, exports and hashes remain real.
+        from unittest.mock import patch
+        from native.worker.gsw_worker import publish_training_delivery
+        original = Path.resolve
+        canonical_output = self.output.parent / 'owned canonical output spelling'
+
+        def resolve(path, *args, **kwargs):
+            if path == self.output:
+                return canonical_output
+            return original(path, *args, **kwargs)
+
+        source = self.raw.read_bytes()
+        with patch.object(Path, 'resolve', resolve):
+            first = publish_training_delivery(self.output)
+            again = publish_training_delivery(self.output)
+        self.assertEqual(first['training_status'], 'done')
+        self.assertEqual(first['export_status'], 'ready')
+        self.assertEqual(first['internal_model_path'], str(self.raw))
+        self.assertTrue(first['quality_sidecar_relative_path'].startswith('.gsw-deliveries/'))
+        self.assertEqual(again['model_path'], first['model_path'])
+        self.assertTrue(again['already_available'])
+        self.assertEqual(self.raw.read_bytes(), source)
+
 
 if __name__ == '__main__':
     unittest.main()

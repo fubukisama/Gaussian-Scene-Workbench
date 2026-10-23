@@ -386,6 +386,34 @@ class CameraScaleExportTests(unittest.TestCase):
         np.testing.assert_allclose([data["cov_{}".format(i)][0] for i in range(6)],
                                    [.01, 0., 0., .0025, 0., .0225], rtol=1e-6)
 
+    def test_large_finite_quaternions_keep_orientation_in_exported_models_for_both_backends(self):
+        # A quaternion is homogeneous: (1e200,1e200,0,0) is the valid Rx90
+        # orientation. The recorded inverse Rz90 gives the literal Hamilton
+        # product Rz(-90)*Rx90 = (+.5,+.5,-.5,-.5), up to overall sign.
+        rotation = [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]]
+        expected = np.array([.5, .5, -.5, -.5])
+        for backend in ("3dgs", "2dgs"):
+            with self.subTest(backend=backend):
+                source, original, contract = self.fixture(backend, rotation=rotation)
+                data = np.empty(1, dtype=[(name, "f8" if name.startswith("rot_") else original.dtype[name])
+                                         for name in original.dtype.names])
+                for name in original.dtype.names:
+                    data[name] = original[name]
+                for index, value in enumerate((1e200, 1e200, 0., 0.)):
+                    data["rot_" + str(index)] = value
+                PlyData([PlyElement.describe(data, "vertex")]).write(source)
+                before = source.read_bytes()
+                contract["ply_sha256"] = hashlib.sha256(before).hexdigest()
+                source.with_suffix(".camera-scale.json").write_text(json.dumps(contract), encoding="utf-8")
+                destination = self.root / (backend + "-large-quaternion.ply")
+                camera_scale_export.export_camera_scale_ply(source, destination, mode="metric")
+                reloaded = PlyData.read(destination, mmap=False)["vertex"].data
+                actual = np.array([reloaded["rot_" + str(index)][0] for index in range(4)])
+                self.assertTrue(np.isfinite(actual).all())
+                self.assertAlmostEqual(float(actual @ actual), 1., places=12)
+                self.assertAlmostEqual(abs(float(actual @ expected)), 1., places=12)
+                self.assertEqual(source.read_bytes(), before)
+
     def test_stale_model_sidecar_hash_is_rejected_before_publication(self):
         source, _, _ = self.fixture()
         source.write_bytes(source.read_bytes() + b"\n")

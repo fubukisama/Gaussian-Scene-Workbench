@@ -83,12 +83,25 @@ def _quaternion_from_rotation(matrix):
     return q / np.linalg.norm(q)
 
 
+def _normalized_quaternions(values):
+    # Quaternion magnitude carries no orientation. Scale each row before its
+    # squared norm, so valid finite double values neither overflow to infinity
+    # nor underflow to zero during normalization.
+    if not np.isfinite(values).all():
+        _fail("camera_scale_export_invalid_quaternion")
+    largest = np.max(np.abs(values), axis=1, keepdims=True)
+    if np.any(largest <= 0.):
+        _fail("camera_scale_export_invalid_quaternion")
+    scaled = values / largest
+    norms = np.linalg.norm(scaled, axis=1, keepdims=True)
+    if not np.isfinite(norms).all() or np.any(norms <= 0.):
+        _fail("camera_scale_export_invalid_quaternion")
+    return scaled / norms
+
+
 def _rotate_quaternions(values, rotation):
     q = _quaternion_from_rotation(rotation)
-    norms = np.linalg.norm(values, axis=1, keepdims=True)
-    if not np.isfinite(values).all() or np.any(norms <= 1e-20):
-        _fail("camera_scale_export_invalid_quaternion")
-    p = values / norms
+    p = _normalized_quaternions(values)
     w = q[0] * p[:, :1] - p[:, 1:] @ q[1:, None]
     xyz = q[0] * p[:, 1:] + p[:, :1] * q[1:] + np.cross(q[1:], p[:, 1:])
     return np.concatenate((w, xyz), axis=1)
@@ -990,8 +1003,7 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
             _fail("camera_scale_export_nonfinite_gaussian")
         if gaussian:
             quaternions = np.stack([block[name] for name in rotations], axis=1).astype(np.float64)
-            if not np.isfinite(quaternions).all() or np.any(np.linalg.norm(quaternions, axis=1) <= 1e-20):
-                _fail("camera_scale_export_invalid_quaternion")
+            _normalized_quaternions(quaternions)
         if s != 1. or rotated or bool(np.any(translation != 0.)):
             xyz = s * (xyz @ rotation.T) + translation
         if not np.isfinite(xyz).all():

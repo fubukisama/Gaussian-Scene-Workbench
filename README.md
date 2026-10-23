@@ -11,14 +11,16 @@
 - Version: `0.3.8-native-preview`
 - Experimental quality plans: [English / 简体中文 / 日本語 guide](docs/QUALITY_PLAN.md). Methods remain opt-in; engineering checks are not final quality or independent geometry acceptance, and MCMC is not enabled in the desktop selector.
 - Incremental changes: [generated-path safety and explicit quality presets](docs/ACCEPTANCE_FOLLOWUP.md).
+- Reliability fixes: [equivalent Windows output paths and pause during metadata publication](docs/CI_RELIABILITY.md).
 - Documentation updated: `2026-10-23`; runtime controls, camera/scale and general-reconstruction support limits are documented below. Local acceptance and complete cloud CI are separate delivery records; an in-progress run is not a full pass.
 - Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
 - Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
 
-The default `main` branch contains the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
+The `main` branch is the single maintained branch for the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
 
 ### Current capabilities
 
+- **Gaussian PLY transform baking:** ordinary 3DGS/2DGS PLY exports bake full-source scene translation, rotation and scale while preserving field types and unrelated values. Two-scale 2DGS gains no invented thickness; nonuniform transforms with directional SH are rejected rather than approximated. Recorded-camera exports keep their proper-Sim3 provenance constraints. See the [route selection, fidelity limits and source-protection guide](docs/GAUSSIAN_PLY_BAKING.md).
 - **Recorded PLY and persistent batches:** ordinary point clouds/indexed meshes can use recorded-frame restoration with hash-bound cameras, attributes and safe `TextureFile` assets. Explicit proper uniform scene edits are tracked separately from passive frame/unit conversion, including Gaussian orientation/appearance; repeat exports do not bake the same edit twice. Native batch observation can detach/reopen independently of the coordinator, with verified-session pause, checkpoint-preserving cancellation and explicit full-state continuation. See [precise scope and verification boundaries](docs/RECORDED_PLY_AND_BATCH.md).
 - **Independent training runtime controls:** 3DGS/2DGS memory-growth protection is separate from exact-image staging, camera prefetch, capacity storage, loss and backend-specific auxiliary execution. Version-two requests retain dependency-resolved settings and observed execution separately; old disabled presets do not re-enable their children. Guard-only overrides apply through validated full-state resume, not an unverified hot switch. The existing-job observer uses OS/session-bound liveness, read-only attachment and explicit pause/stop; Windows persistent training can continue after the desktop closes. See [schema, migration, lifecycle and remaining acceptance gates](docs/RUNTIME_DECOUPLING.md). Guard OFF does not suppress real CUDA out-of-memory errors or guarantee model quality.
 - **Traceable metric delivery:** known-scale 3DGS/2DGS results use the same restoration module for manual export and separate default metre-coordinate delivery, retaining the original training model. Current-frame/unit tracking prevents double restoration; centres, two/three log sizes, orientation/covariance and SH0–4 appearance rotate together. Hash-bound per-model camera bundles retain complete intrinsics and transformed poses. Unknown scale blocks metric success rather than guessing metres. See [format support and acceptance limits](docs/RUNTIME_DECOUPLING.md#recorded-frame-and-metric-delivery-instruction-version3).
@@ -107,9 +109,13 @@ The original native desktop main program is **GPL-3.0-or-later** from the 2026-1
 
 P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存拟合与独立参考检核；两者均不等于模型几何精度。单相机 TUM／CSV／JSON 轨迹关联与固定身份的串行 3DGS／2DGS 参数、种子批次保留相机、初始化和测试划分。见 [P1 指南、示例与能力边界](docs/CAMERA_SCALE_P1.md)。检查点的数据、源码与优化器校验保持严格；旧运行设置迁移不能绕过完整状态校验，更不能以 PLY 热启动冒充完整续训。
 
-**高斯场景研究工作台**在 `main` 分支开发原生桌面预览版，版本为 `0.3.8-native-preview`。本页文档更新日期为 **2026-10-23**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
+**高斯场景研究工作台**在唯一维护的 `main` 分支开发原生桌面预览版，版本为 `0.3.8-native-preview`。本页文档更新日期为 **2026-10-23**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
 
 新增默认关闭的[实验性质量计划](docs/QUALITY_PLAN.md)：工程验证、最终画质与独立几何分别验收，不自动切换默认算法；MCMC 在桌面仍不可选。
+
+增量可靠性修复覆盖 Windows 等价长短路径交付及状态文件原子发布期间的暂停请求；仍保留路径、会话及取消保护。见[支持边界与验收说明](docs/CI_RELIABILITY.md)。
+
+普通 3DGS／2DGS PLY 可将场景平移、旋转和缩放烘焙到完整源数据，保留字段类型及无关属性；双轴 2DGS 不增加厚度。保留点含非零方向 SH 时拒绝非等比缩放，不近似外观；记录相机路线仍遵守 proper-Sim3 来源约束。见[高斯 PLY 烘焙路线、保真边界与原件保护](docs/GAUSSIAN_PLY_BAKING.md)。
 
 本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
 
@@ -155,9 +161,13 @@ GPU メモリの増密保護を、画像ステージング、カメラ先読み�
 
 P1 では既知距離、カメラ基線、制御点によるスケール推定／Sim3 整合を追加しました。フィット残差と独立した参照検証を分離して保存し、モデル全体の形状精度とはみなしません。単眼 TUM／CSV／JSON の時刻関連付け、データを固定した逐次 3DGS／2DGS パラメーター・シード実験は、カメラ・初期化・評価用画像の分割を維持します。[P1 ガイドと対応範囲](docs/CAMERA_SCALE_P1.md)を参照してください。データ・ソース・最適化器の厳密な互換性検証を保ち、旧実行設定の移行で完全状態検証を迂回したり、PLY を完全再開の代用にしたりしません。
 
-**ガウスシーン研究ワークベンチ**のネイティブ版は `main` で開発中です。バージョンは `0.3.8-native-preview`、本ページの文書更新日は **2026-10-23** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
+**ガウスシーン研究ワークベンチ**のネイティブ版は、唯一の保守対象ブランチ `main` で開発中です。バージョンは `0.3.8-native-preview`、本ページの文書更新日は **2026-10-23** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
 
 初期状態で無効の[実験的品質プラン](docs/QUALITY_PLAN.md)を追加しています。実装試験と最終画質・独立幾何を区別し、既定方式へ自動昇格しません。MCMC はデスクトップでは未選択です。
+
+今回の信頼性修正は、Windowsの等価な長短パスによる成果物交付と、状態ファイルの原子更新中の一時停止要求を対象とします。パス・セッション・取消保護は維持します。[対応範囲と検収境界](docs/CI_RELIABILITY.md)を参照してください。
+
+通常の 3DGS／2DGS PLY は、フィールド型と無関係な属性を保持し、完全な元データにシーンの移動・回転・スケールをベイクできます。2 軸の 2DGS に厚みは追加しません。保持する点に非ゼロの方向依存 SH がある場合、不均等スケールは近似せず拒否します。記録付きカメラのルートでは proper-Sim3 の出所制約を維持します。[Gaussian PLY のルート、忠実性の限界と元ファイル保護](docs/GAUSSIAN_PLY_BAKING.md)を参照してください。
 
 この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
 
