@@ -2,8 +2,27 @@
 
 import argparse
 import ast
-from pathlib import Path
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
 import sys
+
+
+QUALITY_WORKER_FILES = tuple("native/worker/" + name + ".py" for name in (
+    "training_quality_plan", "quality_random", "quality_densification", "quality_mip",
+    "quality_supervision", "quality_training_runtime", "quality_render_adapter", "quality_rasterizer_runtime",
+    "quality_mcmc", "quality_mcmc_model", "quality_postprocess", "quality_export", "surfel_depth_adapter",
+))
+QUALITY_SCRIPT_FILES = tuple("scripts/" + name for name in (
+    "cleanup_gaussians.py", "run_quality_benchmark.py", "prepare_quality_real_fixture.py",
+    "verify_quality_rasterizer.py", "verify_pinhole_rasterizer_gpu.py", "verify_quality_pipeline_cuda.py",
+    "verify_quality_training.py", "verify_supervision_gradient.py", "build_quality_rasterizer.ps1",
+    "verify_native_backend.py", "native_i18n.py",
+))
+# Public defaults/catalog only. Never discover/copy local bindings, photos,
+# models, checkpoint files or validation directories into an application.
+QUALITY_ASSET_FILES = ("native/i18n/catalog.json", "docs/quality_upgrade/benchmark_protocol.json")
+QUALITY_STAGE_FILES = QUALITY_WORKER_FILES + QUALITY_SCRIPT_FILES + QUALITY_ASSET_FILES
 
 
 BACKEND_FILES = (
@@ -41,7 +60,7 @@ BACKEND_FILES = (
     "native/backend/video_extract.py",
     "scripts/postprocess_2dgs_mesh.py",
     "scripts/run_sugar.py",
-)
+) + QUALITY_WORKER_FILES + tuple(name for name in QUALITY_SCRIPT_FILES if name.endswith(".py"))
 RETIRED_TREES = ("crop_editor", "desktop_app", "resources/app")
 WEB_IMPORTS = ("http.server", "cgi", "cgitb", "webbrowser", "socketserver", "wsgiref")
 WEB_EXTENSIONS = {".htm", ".html", ".js", ".mjs", ".cjs", ".css", ".asar", ".wasm"}
@@ -71,6 +90,52 @@ def imported_modules(tree):
                     yield module
 
 
+def verify_manifest(root):
+    """Bind actual staged backend bytes, not an import or GPU certificate."""
+    path = root / "backend_manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        return ["Invalid native backend manifest: " + str(exc)]
+    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2 or not isinstance(manifest.get("files"), list):
+        return ["Native backend manifest requires schemaVersion2 file identities"]
+    issues, recorded = [], set()
+    components = manifest.get("components")
+    if (not isinstance(components, list) or not all(isinstance(value, str) for value in components)
+            or not set(QUALITY_STAGE_FILES).issubset(components)):
+        issues.append("Native backend manifest is missing quality components")
+    for record in manifest["files"]:
+        if not isinstance(record, dict):
+            issues.append("Invalid backend manifest file record")
+            continue
+        relative = record.get("path")
+        if (not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative
+                or PurePosixPath(relative).is_absolute() or any(part in ("", ".", "..") for part in relative.split("/"))):
+            issues.append("Unsafe backend manifest file path")
+            continue
+        if relative in recorded:
+            issues.append("Duplicate backend manifest file: " + relative)
+            continue
+        recorded.add(relative)
+        selected = root / relative
+        try:
+            selected.resolve().relative_to(root.resolve())
+            if not selected.is_file():
+                raise ValueError("missing")
+            digest = hashlib.sha256()
+            with selected.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 ** 2), b""):
+                    digest.update(block)
+            if record.get("bytes") != selected.stat().st_size or record.get("sha256") != digest.hexdigest():
+                issues.append("Native backend manifest hash mismatch: " + relative)
+        except (OSError, ValueError):
+            issues.append("Native backend manifest file missing/escaping root: " + relative)
+    missing = set(BACKEND_FILES) | set(QUALITY_STAGE_FILES)
+    for relative in sorted(missing - recorded):
+        issues.append("Native backend manifest has no file identity: " + relative)
+    return issues
+
+
 def verify(root, package=False):
     issues = []
     for relative in RETIRED_TREES:
@@ -90,7 +155,24 @@ def verify(root, package=False):
             for module in sorted(set(imported_modules(tree))):
                 if is_web_import(module):
                     issues.append("Compute backend imports a retired web dependency: " + module)
+    for relative in QUALITY_STAGE_FILES:
+        if not (root / relative).is_file():
+            message = "Required native backend file is missing: " + relative
+            if message not in issues:
+                issues.append(message)
+    catalog = root / "native/i18n/catalog.json"
+    if catalog.is_file():
+        try:
+            entries = json.loads(catalog.read_text(encoding="utf-8"))
+            if (not isinstance(entries, dict) or not entries or any(
+                    not isinstance(row, dict) or set(row) != {"zh_CN", "en_US", "ja_JP"}
+                    or any(not isinstance(value, str) or not value for value in row.values())
+                    for row in entries.values())):
+                issues.append("Native catalog must retain complete zh_CN/en_US/ja_JP entries")
+        except (OSError, ValueError) as exc:
+            issues.append("Invalid native catalog: " + str(exc))
     if package:
+        issues.extend(verify_manifest(root))
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
@@ -106,7 +188,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--package", action="store_true", help="Also reject web files in an installed package")
+    parser.add_argument("--list-quality-stage-files", action="store_true", help="Print the explicit public quality payload file list as JSON")
     args = parser.parse_args(argv)
+    if args.list_quality_stage_files:
+        print(json.dumps(QUALITY_STAGE_FILES))
+        return 0
     root = args.root.resolve()
     if not root.is_dir():
         parser.error("Root directory does not exist: {}".format(root))

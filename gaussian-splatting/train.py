@@ -73,20 +73,41 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     first_iter = 0
     native_runtime = None
+    quality_training = None
+    quality_controller = None
+    native_control = None
     control_json = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
     if control_json:
         repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         if repository_root not in sys.path:
             sys.path.insert(0, repository_root)
         from native.worker.training_runtime import NativeTrainingRuntime
-        native_runtime = NativeTrainingRuntime(json.loads(control_json), torch, emit_gsw_event, "3dgs")
+        from native.worker.training_checkpoint import prepare_quality_training
+        from native.worker.training_quality_plan import reject_legacy_quality_checkpoint
+        native_control = json.loads(control_json)
+        reject_legacy_quality_checkpoint(native_control.get("qualityPlan"), checkpoint)
+        quality_training = prepare_quality_training(native_control, dataset, opt, "3dgs")
+        native_runtime = NativeTrainingRuntime(native_control, torch, emit_gsw_event, "3dgs")
+        if quality_training is not None:
+            emit_gsw_event("[gsw-quality-plan]", quality_training.report())
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
     gaussians._gsw_training_seed = getattr(dataset, "training_seed", 0)
+    if quality_training is not None:
+        quality_training.bind_model(gaussians)
     scene = Scene(dataset, gaussians, load_iteration=load_iteration)
     if native_runtime:
         native_runtime.report_images(scene.getTrainCameras())
+    # Bind the actual quality controller here before readiness/restore. A saved
+    # algorithm selection without its execution controller must never run Standard.
+    if quality_training is not None:
+        from native.worker.quality_training_runtime import bind_quality_controller
+        quality_controller = bind_quality_controller(torch, gaussians, scene, pipe,
+            quality_training, native_runtime, '3dgs', emit_gsw_event)
+        quality_training.assert_ready()
     gaussians.training_setup(opt)
+    if quality_controller is not None:
+        quality_controller.initialize_optimizer()
     from native.worker.canonical_training import assert_camera_optimizer_locked
     assert_camera_optimizer_locked(scene, gaussians)
     if load_iteration and not checkpoint:
@@ -124,7 +145,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         from native.worker.training_density_control import NativeDensityControl
         from native.worker.training_summary import emit_loaded_training_summary
         density_control = NativeDensityControl(torch, gaussians, scene.cameras_extent, "3dgs", emit_gsw_event)
-        native_checkpoint = TrainingCheckpoint(scene.model_path, json.loads(control_json))
+        native_checkpoint = TrainingCheckpoint(scene.model_path, native_control)
         emit_loaded_training_summary(emit_gsw_event, native_checkpoint.control, scene.getTrainCameras())
         native_identity = training_identity(dataset, opt, pipe)
         # Scene construction shuffles cameras. Stable ordering lets saved sampler
@@ -149,6 +170,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             del state
     render_training = (native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
                        if native_runtime is not None else render)
+    if quality_controller is not None and quality_controller.renderer is not None:
+        render_training = quality_controller.renderer
     stock_ssim = (lambda image, target: fused_ssim(image.unsqueeze(0), target.unsqueeze(0))) if FUSED_SSIM_AVAILABLE else ssim
     photometric = native_runtime.photometric_loss(l1_loss, stock_ssim) if native_runtime else None
     if native_runtime:
@@ -166,12 +189,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
             preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
             file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
-            file_preview.publish_gaussians(gaussians, first_iter, initial=True)
+            file_preview.publish_gaussians(quality_controller.preview_model() if quality_controller else gaussians,
+                                           first_iter, initial=True)
             from native.worker.gpu_preview_publisher import create_publisher, emit_descriptor
             gpu_preview_emit = emit_descriptor
-            gpu_preview, failure_descriptor = create_publisher(
-                torch, fps=gpu_preview_fps, policy=preview_policy
-            )
+            if quality_controller is not None and quality_controller.mip is not None:
+                # The IPC protocol has no per-model 2D filtering contract.
+                # Use explicit fused+sidecar snapshots instead of misrendering.
+                gpu_preview, failure_descriptor = None, None
+                emit_gsw_event('[gsw-quality-preview]', {'mode': 'fused_file_with_filter_sidecar',
+                    'reason': 'ipc_filter_contract_unavailable'})
+            else:
+                gpu_preview, failure_descriptor = create_publisher(
+                    torch, fps=gpu_preview_fps, policy=preview_policy)
             if gpu_preview is not None:
                 gpu_preview_emit(gpu_preview.descriptor())
             elif failure_descriptor is not None:
@@ -221,7 +251,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
             viewpoint_indices = list(range(len(viewpoint_stack)))
-        rand_idx = randint(0, len(viewpoint_indices) - 1)
+        rand_idx = (quality_training.choose_index(len(viewpoint_indices)) if quality_training is not None
+                    else randint(0, len(viewpoint_indices) - 1))
         viewpoint_cam = viewpoint_stack.pop(rand_idx)
         vind = viewpoint_indices.pop(rand_idx)
         if hasattr(scene, "audit_sample"):
@@ -235,8 +266,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         if native_runtime:
             native_runtime.profiler.mark('transfer')
-            ready_image = native_runtime.image(viewpoint_cam, scene.getTrainCameras(), viewpoint_indices)
+            if quality_training is None:
+                ready_image = native_runtime.image(viewpoint_cam, scene.getTrainCameras(), viewpoint_indices)
+            else:
+                ready_image = native_runtime.image(viewpoint_cam, scene.getTrainCameras(), viewpoint_indices,
+                    python_rng_state=quality_training.random_streams.image_sampler_state())
             native_runtime.profiler.mark('render')
+        if quality_controller is not None:
+            quality_controller.before_render(iteration)
         render_pkg = render_training(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
@@ -248,7 +285,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if native_runtime:
             native_runtime.profiler.mark('loss')
         gt_image = ready_image.image if native_runtime else viewpoint_cam.original_image.cuda()
-        if photometric:
+        if quality_controller is not None and quality_controller.replaces_photometric:
+            loss, Ll1 = quality_controller.loss(viewpoint_cam, render_pkg, gt_image, None, None, opt.lambda_dssim)
+        elif photometric:
             loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
             native_runtime.observe_loss(iteration)
         elif FUSED_SSIM_AVAILABLE:
@@ -259,6 +298,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1 = l1_loss(image, gt_image)
             ssim_value = ssim(image, gt_image)
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
+
+        if quality_controller is not None and not quality_controller.replaces_photometric:
+            loss, Ll1 = quality_controller.loss(viewpoint_cam, render_pkg, gt_image, loss, Ll1, opt.lambda_dssim)
 
         # Depth regularization
         Ll1depth_pure = 0.0
@@ -277,6 +319,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if native_runtime:
             native_runtime.profiler.mark('backward')
         loss.backward()
+        if quality_controller is not None:
+            quality_controller.after_backward(render_pkg, viewpoint_cam)
 
         iter_end.record()
 
@@ -321,12 +365,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     file_preview = None
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
+                fused_preview = quality_controller.export_saved_model(iteration) if quality_controller else None
                 preview_path = os.path.abspath(os.path.join(
                     scene.model_path,
                     "point_cloud",
                     "iteration_{}".format(iteration),
                     "point_cloud.ply",
                 ))
+                preview_path = fused_preview or preview_path
                 emit_gsw_event(
                     "[gsw-training-preview]",
                     {
@@ -338,7 +384,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Densification
             if native_runtime:
                 native_runtime.profiler.mark('densification')
-            if iteration < opt.densify_until_iter:
+            if iteration < opt.densify_until_iter and not (quality_controller and quality_controller.is_mcmc):
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -346,16 +392,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     if density_control is not None and native_runtime.admit(
-                            gaussians, opt.densify_grad_threshold, scene.cameras_extent, iteration):
+                            gaussians, opt.densify_grad_threshold, scene.cameras_extent, iteration,
+                            **(quality_controller.density_arguments() if quality_controller else {})):
                         density_control.densify_and_prune(
                             gaussians, opt.densify_grad_threshold, .005, size_threshold,
                             iteration, opt.opacity_reset_interval, radii=radii,
-                            white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter)
+                            white_background=dataset.white_background, densify_from_iter=opt.densify_from_iter,
+                            **(quality_controller.density_arguments() if quality_controller else {}))
+                        if quality_controller is not None:
+                            quality_controller.topology_changed(iteration)
                     elif density_control is None:
                         gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii)
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+                    quality_controller.reset_opacity() if quality_controller is not None else gaussians.reset_opacity()
 
             # Optimizer step
             if native_runtime:
@@ -370,6 +420,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 else:
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
+
+            if quality_controller is not None:
+                quality_controller.after_optimizer_step(iteration, opt, native_runtime)
 
             if native_runtime:
                 native_runtime.profiler.mark('preview')
@@ -389,7 +442,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             if file_preview is not None:
                 try:
-                    file_preview.publish_gaussians(gaussians, iteration,
+                    file_preview.publish_gaussians(quality_controller.preview_model() if quality_controller else gaussians, iteration,
                                                  shared_gpu_healthy=gpu_preview is not None and
                                                  gpu_preview.has_active_consumer())
                 except Exception as preview_error:
@@ -402,6 +455,22 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     native_runtime.profiler.mark('checkpoint')
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+                if quality_training is not None and native_checkpoint is not None:
+                    # Complete opt-in snapshots are after optimizer/density updates,
+                    # separate from the legacy tuple and from pause-ready state.
+                    scene.save(iteration)
+                    if quality_controller is not None:
+                        quality_controller.export_saved_model(iteration)
+                    scheduled_state = capture_state(torch, np, gaussians, iteration, opt.iterations,
+                        native_identity, camera_names, viewpoint_indices, time.monotonic() - training_started_at,
+                        ema_loss_for_log, ema_Ll1depth_for_log)
+                    scheduled_state["density_control"] = density_control.capture()
+                    native_runtime.capture(scheduled_state)
+                    scheduled_manifest = native_checkpoint.save_scheduled(torch, scheduled_state)
+                    emit_gsw_event("[gsw-training-checkpoint]", {"iteration": iteration,
+                        "state_kind": "scheduled", "completed": scheduled_manifest["completed"],
+                        "quality_plan_hash": quality_training.plan["plan_hash"]})
+                    del scheduled_state
 
             if (native_checkpoint is not None and iteration < opt.iterations
                     and (native_checkpoint.pause_requested() or native_runtime.pause_for_resources())):
@@ -412,6 +481,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     close_preview_safely(file_preview, emit_gsw_event)
                     file_preview = None
                 scene.save(iteration)
+                pause_preview = quality_controller.export_saved_model(iteration) if quality_controller else None
                 native_state = capture_state(
                     torch, np, gaussians, iteration, opt.iterations, native_identity,
                     camera_names, viewpoint_indices, time.monotonic() - training_started_at,
@@ -423,7 +493,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 native_checkpoint.save(torch, native_state)
                 emit_gsw_event("[gsw-training-preview]", {
                     "iteration": iteration,
-                    "point_cloud_path": os.path.abspath(os.path.join(
+                    "point_cloud_path": pause_preview or os.path.abspath(os.path.join(
                         scene.model_path, "point_cloud", "iteration_{}".format(iteration), "point_cloud.ply"))})
                 paused = True
                 progress_bar.close()

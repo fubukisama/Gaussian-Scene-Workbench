@@ -54,7 +54,8 @@ class NativeDensityControl:
 
     def densify_and_prune(self, model, max_grad, min_opacity, max_screen_size,
                           iteration, reset_interval, radii=None,
-                          white_background=False, densify_from_iter=500):
+                          white_background=False, densify_from_iter=500,
+                          clone_grads=None, split_grads=None, split_threshold=None):
         torch = self.torch
         grads = model.xyz_gradient_accum / model.denom
         grads[~torch.isfinite(grads)] = 0.
@@ -64,8 +65,11 @@ class NativeDensityControl:
             model.tmp_radii = radii
         try:
             # Never replace the camera extent used for clone/split or learning rates.
-            model.densify_and_clone(grads, max_grad, self.camera_extent)
-            model.densify_and_split(grads, max_grad, self.camera_extent)
+            model.densify_and_clone(grads if clone_grads is None else clone_grads,
+                                    max_grad, self.camera_extent)
+            model.densify_and_split(grads if split_grads is None else split_grads,
+                                    max_grad if split_threshold is None else split_threshold,
+                                    self.camera_extent)
             opacity = model.get_opacity.reshape(-1)
             scales = model.get_scaling
             invalid = (~torch.isfinite(model.get_xyz).all(dim=1)

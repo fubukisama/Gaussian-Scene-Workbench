@@ -13,12 +13,15 @@
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QLineEdit>
 #include <QLocale>
 #include <QMessageBox>
@@ -28,11 +31,123 @@
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace gsw {
+namespace {
+constexpr qint64 maximumQualityPlanBytes = 256 * 1024;
+
+bool qualityKeys(const QJsonObject &object, const QStringList &allowed) {
+  for (auto it = object.begin(); it != object.end(); ++it)
+    if (!allowed.contains(it.key())) return false;
+  return true;
+}
+
+bool qualityNumber(const QJsonValue &value, const bool allowZero = false) {
+  const double number = value.toDouble(std::numeric_limits<double>::quiet_NaN());
+  return value.isDouble() && std::isfinite(number) && (allowZero ? number >= 0. : number > 0.);
+}
+
+void configureQualityMultiplier(QDoubleSpinBox &editor, const double multiplier) {
+  const int decimals = std::clamp(17 + static_cast<int>(std::max(0., std::ceil(-std::log10(multiplier)))), 17, 323);
+  editor.setDecimals(decimals);
+  editor.setRange(std::min(.000001, multiplier), std::max(1000000., multiplier));
+  editor.setValue(multiplier);
+}
+
+QString qualityPlanIssue(const QJsonObject &plan, const QString &backend) {
+  const auto invalid = QStringLiteral("quality_plan_structure");
+  if (!qualityKeys(plan, {QStringLiteral("version"), QStringLiteral("densification"), QStringLiteral("filter"),
+      QStringLiteral("geometry_lr_multiplier"), QStringLiteral("supervision")}) ||
+      !plan.value(QStringLiteral("version")).isDouble() || plan.value(QStringLiteral("version")).toDouble() != 1. ||
+      QJsonDocument(plan).toJson(QJsonDocument::Compact).size() > maximumQualityPlanBytes) return invalid;
+  if (plan.contains(QStringLiteral("geometry_lr_multiplier")) &&
+      !qualityNumber(plan.value(QStringLiteral("geometry_lr_multiplier")))) return invalid;
+  // Check the real native editor before mutating either the request or widgets.
+  // Qt cannot represent every positive JSON double at its maximum precision.
+  const double multiplier = plan.value(QStringLiteral("geometry_lr_multiplier")).toDouble(1.);
+  QDoubleSpinBox multiplierProbe;
+  configureQualityMultiplier(multiplierProbe, multiplier);
+  if (multiplierProbe.value() != multiplier || multiplierProbe.minimum() <= 0.)
+    return QStringLiteral("quality_plan_multiplier_editor_limit");
+  for (const auto &key : {QStringLiteral("densification"), QStringLiteral("filter"), QStringLiteral("supervision")})
+    if (plan.contains(key) && !plan.value(key).isObject()) return invalid;
+  const auto density = plan.value(QStringLiteral("densification")).toObject();
+  if (!qualityKeys(density, {QStringLiteral("strategy"), QStringLiteral("parameters")}) ||
+      (density.contains(QStringLiteral("strategy")) && !density.value(QStringLiteral("strategy")).isString()) ||
+      (density.contains(QStringLiteral("parameters")) && !density.value(QStringLiteral("parameters")).isObject())) return invalid;
+  const QString strategy = density.value(QStringLiteral("strategy")).toString(QStringLiteral("standard"));
+  if (strategy == QStringLiteral("mcmc")) return QStringLiteral("quality_plan_mcmc_pending");
+  QStringList parameters;
+  if (strategy == QStringLiteral("abs_gs")) parameters << QStringLiteral("split_threshold");
+  else if (strategy == QStringLiteral("pixel_gs")) parameters << QStringLiteral("depth_factor");
+  else if (strategy != QStringLiteral("standard")) return invalid;
+  const auto values = density.value(QStringLiteral("parameters")).toObject();
+  if (!qualityKeys(values, parameters)) return invalid;
+  for (auto it = values.begin(); it != values.end(); ++it) if (!qualityNumber(it.value())) return invalid;
+  if (backend != QStringLiteral("3dgs") && strategy != QStringLiteral("standard"))
+    return QStringLiteral("quality_plan_unsupported_backend");
+  const auto filter = plan.value(QStringLiteral("filter")).toObject();
+  if (!qualityKeys(filter, {QStringLiteral("mode"), QStringLiteral("pixel_variance"), QStringLiteral("margin"), QStringLiteral("update_interval")}) ||
+      (filter.contains(QStringLiteral("mode")) && !filter.value(QStringLiteral("mode")).isString())) return invalid;
+  const QString mode = filter.value(QStringLiteral("mode")).toString(QStringLiteral("backend_default"));
+  if (mode == QStringLiteral("full_mip")) {
+    if (backend != QStringLiteral("3dgs")) return QStringLiteral("quality_plan_unsupported_backend");
+    for (const auto &key : {QStringLiteral("pixel_variance"), QStringLiteral("margin"), QStringLiteral("update_interval")})
+      if (filter.contains(key) && !qualityNumber(filter.value(key))) return invalid;
+    if (filter.value(QStringLiteral("margin")).toDouble(.15) > 1.) return invalid;
+    const double interval = filter.value(QStringLiteral("update_interval")).toDouble(100.);
+    if (std::floor(interval) != interval || interval > 1000000.) return invalid;
+  } else {
+    if (mode != QStringLiteral("backend_default") && mode != QStringLiteral("legacy_ewa") && mode != QStringLiteral("surfel_default")) return invalid;
+    if ((mode == QStringLiteral("legacy_ewa") && backend != QStringLiteral("3dgs")) ||
+        (mode == QStringLiteral("surfel_default") && backend != QStringLiteral("2dgs")))
+      return QStringLiteral("quality_plan_unsupported_backend");
+    if (!qualityKeys(filter, {QStringLiteral("mode")})) return invalid;
+  }
+  const auto supervision = plan.value(QStringLiteral("supervision")).toObject();
+  if (!qualityKeys(supervision, {QStringLiteral("mask"), QStringLiteral("depth")})) return invalid;
+  int supervised = 0;
+  const QRegularExpression hash(QStringLiteral("^[0-9a-f]{64}$"));
+  for (auto it = supervision.begin(); it != supervision.end(); ++it) {
+    if (it.value().isNull()) continue;
+    if (!it.value().isObject()) return invalid;
+    ++supervised;
+    const bool depth = it.key() == QStringLiteral("depth");
+    const auto row = it.value().toObject();
+    const QStringList allowed = depth ? QStringList{QStringLiteral("manifest"), QStringLiteral("weight"),
+        QStringLiteral("unit_to_training_scale"), QStringLiteral("scale_evidence_identity"), QStringLiteral("allow_oracle")}
+        : QStringList{QStringLiteral("manifest"), QStringLiteral("foreground_weight"), QStringLiteral("background_alpha_weight"),
+            QStringLiteral("unit_to_training_scale"), QStringLiteral("scale_evidence_identity")};
+    if (!qualityKeys(row, allowed) || !row.value(QStringLiteral("manifest")).isString() ||
+        row.value(QStringLiteral("manifest")).toString().trimmed().isEmpty()) return invalid;
+    for (const auto &key : {QStringLiteral("weight"), QStringLiteral("foreground_weight"), QStringLiteral("background_alpha_weight")})
+      if (row.contains(key) && !qualityNumber(row.value(key), key == QStringLiteral("background_alpha_weight"))) return invalid;
+    const bool scale = row.contains(QStringLiteral("unit_to_training_scale"));
+    const bool evidence = row.contains(QStringLiteral("scale_evidence_identity"));
+    if (scale != evidence || (depth && !scale) || (scale &&
+        (!qualityNumber(row.value(QStringLiteral("unit_to_training_scale"))) ||
+         !row.value(QStringLiteral("scale_evidence_identity")).isString() ||
+         !hash.match(row.value(QStringLiteral("scale_evidence_identity")).toString()).hasMatch()))) return invalid;
+    if (row.contains(QStringLiteral("allow_oracle")) && !row.value(QStringLiteral("allow_oracle")).isBool()) return invalid;
+  }
+  if ((strategy != QStringLiteral("standard")) + (mode == QStringLiteral("full_mip")) + supervised > 1)
+    return QStringLiteral("quality_plan_combination");
+  return {};
+}
+
+QString qualityPlanIssueText(const QString &issue) {
+  if (issue == QStringLiteral("quality_plan_multiplier_editor_limit")) return QCoreApplication::translate("Workbench", "几何学习率倍率无法由原生数值控件精确表示；计划保持不变。");
+  if (issue == QStringLiteral("quality_plan_mcmc_pending")) return QCoreApplication::translate("Workbench", "MCMC 的重定位与完整状态训练验收尚未完成，当前不可选。");
+  if (issue == QStringLiteral("quality_plan_unsupported_backend")) return QCoreApplication::translate("Workbench", "当前质量策略或过滤仅适用于另一后端；不会静默回退到 Standard。");
+  if (issue == QStringLiteral("quality_plan_combination")) return QCoreApplication::translate("Workbench", "此质量方法组合尚未验证，不能开始训练。请单独选择一种增密、完整 Mip 或监督方式。");
+  return QCoreApplication::translate("Workbench", "质量计划结构或参数无效；未知字段与未知方法会被拒绝，当前参数保持不变。");
+}
+} // namespace
 
 TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projectName,
                                const QString &defaultOutputRoot,
@@ -128,6 +243,51 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   mPresetSummary->setWordWrap(true);
   mPresetSummary->setTextFormat(Qt::PlainText);
   form->addRow(mPresetSummary);
+
+  mQualityPlanEnabled = AppLanguage::text(new WrappingCheckBox(this), AppLanguage::source("启用实验性质量计划"));
+  mQualityPlanEnabled->setObjectName(QStringLiteral("trainingQualityPlanEnabled"));
+  mQualityPlanEnabled->setChecked(false);
+  AppLanguage::bind(mQualityPlanEnabled, "toolTip", AppLanguage::source("默认关闭，保留原有训练行为。启用后仅提交实验性请求；不保证质量改善，也不改变相机、分辨率、显存保护或执行选项。"));
+  form->addRow(QString(), mQualityPlanEnabled);
+  mGeometryLrMultiplier = new QDoubleSpinBox(this);
+  mGeometryLrMultiplier->setObjectName(QStringLiteral("trainingGeometryLrMultiplier"));
+  mGeometryLrMultiplier->setDecimals(6);
+  mGeometryLrMultiplier->setRange(.000001, 1000000.);
+  mGeometryLrMultiplier->setSingleStep(.1);
+  mGeometryLrMultiplier->setValue(1.);
+  mGeometryLrMultiplier->setSuffix(QStringLiteral(" ×"));
+  AppLanguage::bind(mGeometryLrMultiplier, "toolTip", AppLanguage::source("仅按声明倍率调整位置与尺度学习率；不改变相机、数值归一化、其他学习率或图像分辨率。"));
+  form->addRow(QCoreApplication::translate("Workbench", "几何学习率倍率"), mGeometryLrMultiplier);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mGeometryLrMultiplier)), AppLanguage::source("几何学习率倍率"));
+  mDensificationStrategy = new QComboBox(this);
+  mDensificationStrategy->setObjectName(QStringLiteral("trainingDensificationStrategy"));
+  for (const auto &id : {QStringLiteral("standard"), QStringLiteral("abs_gs"), QStringLiteral("pixel_gs"), QStringLiteral("mcmc")})
+    mDensificationStrategy->addItem(QString(), id);
+  AppLanguage::bindComboItem(mDensificationStrategy, 0, AppLanguage::source("标准增密（Standard）"));
+  AppLanguage::bindComboItem(mDensificationStrategy, 1, AppLanguage::source("AbsGS（绝对梯度）"));
+  AppLanguage::bindComboItem(mDensificationStrategy, 2, AppLanguage::source("Pixel-GS（像素覆盖）"));
+  AppLanguage::bindComboItem(mDensificationStrategy, 3, AppLanguage::source("MCMC（尚未验收）"));
+  AppLanguage::bind(mDensificationStrategy, "toolTip", AppLanguage::source("显式更换策略会重置该策略的方法参数，保留学习率倍率、过滤与监督声明；仅更改倍率不会丢弃导入参数。"));
+  form->addRow(QCoreApplication::translate("Workbench", "增密策略"), mDensificationStrategy);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mDensificationStrategy)), AppLanguage::source("增密策略"));
+  mSamplingFilter = new QComboBox(this);
+  mSamplingFilter->setObjectName(QStringLiteral("trainingSamplingFilter"));
+  mSamplingFilter->addItem(QString(), QStringLiteral("backend_default"));
+  mSamplingFilter->addItem(QString(), QStringLiteral("full_mip"));
+  AppLanguage::bindComboItem(mSamplingFilter, 0, AppLanguage::source("后端原有过滤"));
+  AppLanguage::bindComboItem(mSamplingFilter, 1, AppLanguage::source("完整 Mip-Splatting（实验性）"));
+  AppLanguage::bind(mSamplingFilter, "toolTip", AppLanguage::source("显式更换过滤会重置该过滤的方法参数，保留增密策略、学习率倍率与监督声明。"));
+  form->addRow(QCoreApplication::translate("Workbench", "采样过滤"), mSamplingFilter);
+  AppLanguage::text(qobject_cast<QLabel *>(form->labelForField(mSamplingFilter)), AppLanguage::source("采样过滤"));
+  mImportQualityPlan = AppLanguage::text(new QPushButton(this), AppLanguage::source("导入质量计划 JSON…"));
+  mImportQualityPlan->setObjectName(QStringLiteral("trainingImportQualityPlan"));
+  AppLanguage::bind(mImportQualityPlan, "toolTip", AppLanguage::source("读取并原样保留方法参数与 mask／depth 监督声明和路径；不启动训练，不核验监督文件或质量结果。"));
+  form->addRow(QString(), mImportQualityPlan);
+  mQualityPlanStatus = new QLabel(this);
+  mQualityPlanStatus->setObjectName(QStringLiteral("trainingQualityPlanStatus"));
+  mQualityPlanStatus->setWordWrap(true);
+  mQualityPlanStatus->setTextFormat(Qt::PlainText);
+  form->addRow(mQualityPlanStatus);
 
   mIterations = new QSpinBox(this);
   mIterations->setObjectName(QStringLiteral("trainingIterationsSpinBox"));
@@ -479,6 +639,17 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   connect(mResolution, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
   connect(mResolutionPolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
   connect(mPosePolicy, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshPresetSummary);
+  connect(mQualityPlanEnabled, &QCheckBox::toggled, this, [this] {
+    if (mUpdatingQualityPlan) return;
+    if (mQualityPlanEnabled->isChecked() && mQualityPlan.isEmpty()) updateQualityPlanFromControls();
+    refreshQualityPlan();
+  });
+  connect(mGeometryLrMultiplier, &QDoubleSpinBox::valueChanged, this, [this] { updateQualityPlanFromControls(); });
+  connect(mDensificationStrategy, &QComboBox::currentIndexChanged, this, [this] { updateQualityPlanFromControls(true, false); });
+  connect(mSamplingFilter, &QComboBox::currentIndexChanged, this, [this] { updateQualityPlanFromControls(false, true); });
+  connect(mBackend, &QComboBox::currentIndexChanged, this, &TrainingDialog::refreshQualityPlan);
+  connect(mImportQualityPlan, &QPushButton::clicked, this, &TrainingDialog::chooseQualityPlan);
+  AppLanguage::onChanged(this, [this] { refreshQualityPlan(); });
   AppLanguage::onChanged(this, [this] { refreshPresetSummary(); });
   connect(browseButton, &QPushButton::clicked, this, &TrainingDialog::chooseOutputRoot);
   connect(buttons, &QDialogButtonBox::accepted, this, &TrainingDialog::accept);
@@ -488,6 +659,7 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
   if (QFileInfo(canonicalManifest).isFile()) setCameraDatasetReference(canonicalManifest);
   scanInputSummary();
   refreshReconstructionSummary();
+  refreshQualityPlan();
 }
 
 TrainingConfiguration TrainingDialog::configuration() const {
@@ -539,12 +711,13 @@ TrainingConfiguration TrainingDialog::configuration() const {
           {QStringLiteral("pinned_mib"), result.imagePinnedMiB},
           {QStringLiteral("gpu_mib"), result.imageGpuMiB}}},
       {QStringLiteral("monitoring"), QJsonObject{{QStringLiteral("profile_interval"), result.profileInterval}}}};
+  result.qualityPlan = mQualityPlanEnabled && mQualityPlanEnabled->isChecked() ? mQualityPlan : QJsonObject();
   return result;
 }
 
 QJsonObject TrainingDialog::configurationDocument() const {
   const auto value = configuration();
-  return QJsonObject{
+  QJsonObject document{
       {QStringLiteral("schema"), QStringLiteral("gsw.training_dialog_configuration/1")},
       {QStringLiteral("contextPosePolicy"), value.posePolicy},
       {QStringLiteral("backend"), value.backend},
@@ -554,6 +727,8 @@ QJsonObject TrainingDialog::configurationDocument() const {
       {QStringLiteral("resolutionPolicy"), value.resolutionPolicy},
       {QStringLiteral("solveResolution"), mSolveResolution},
       {QStringLiteral("runtimeOptions"), value.runtimeOptions}};
+  if (!value.qualityPlan.isEmpty()) document.insert(QStringLiteral("qualityPlan"), value.qualityPlan);
+  return document;
 }
 
 bool TrainingDialog::setConfigurationDocument(const QJsonObject &document,
@@ -571,7 +746,15 @@ bool TrainingDialog::setConfigurationDocument(const QJsonObject &document,
   const auto inCombo = [](const QJsonValue &value, const QComboBox *combo) {
     return value.isString() && combo->findData(value.toString()) >= 0;
   };
-  if (!hasOnly(document, {QStringLiteral("schema"), QStringLiteral("contextPosePolicy"),
+  QJsonObject baseDocument = document;
+  if (baseDocument.contains(QStringLiteral("qualityPlan"))) {
+    if (!baseDocument.value(QStringLiteral("qualityPlan")).isObject()) return false;
+    baseDocument.remove(QStringLiteral("qualityPlan"));
+  }
+  const auto restoredQualityPlan = document.value(QStringLiteral("qualityPlan")).toObject();
+  if (!restoredQualityPlan.isEmpty() &&
+      !qualityPlanIssue(restoredQualityPlan, document.value(QStringLiteral("backend")).toString()).isEmpty()) return false;
+  if (!hasOnly(baseDocument, {QStringLiteral("schema"), QStringLiteral("contextPosePolicy"),
       QStringLiteral("backend"), QStringLiteral("quality"), QStringLiteral("iterations"),
       QStringLiteral("resolution"), QStringLiteral("resolutionPolicy"),
       QStringLiteral("solveResolution"), QStringLiteral("runtimeOptions")}) ||
@@ -657,13 +840,131 @@ bool TrainingDialog::setConfigurationDocument(const QJsonObject &document,
   mImagePinnedMiB->setValue(execution.value(QStringLiteral("pinned_mib")).toInt());
   mImageGpuMiB->setValue(execution.value(QStringLiteral("gpu_mib")).toInt());
   mProfileInterval->setValue(monitoring.value(QStringLiteral("profile_interval")).toInt());
+  const bool qualityRestored = setQualityPlanDocument(restoredQualityPlan);
+  Q_ASSERT(qualityRestored);
+  Q_UNUSED(qualityRestored);
   mUpdatingPolicy = false;
   refreshResolutionPolicy();
   refreshPresetSummary();
   return true;
 }
 
+bool TrainingDialog::setQualityPlanDocument(const QJsonObject &plan) {
+  const QString issue = plan.isEmpty() ? QString() : qualityPlanIssue(plan, mBackend->currentData().toString());
+  if (!issue.isEmpty()) return false;
+  mUpdatingQualityPlan = true;
+  mQualityPlan = plan;
+  mQualityPlanEnabled->setChecked(!plan.isEmpty());
+  const double multiplier = plan.value(QStringLiteral("geometry_lr_multiplier")).toDouble(1.);
+  configureQualityMultiplier(*mGeometryLrMultiplier, multiplier);
+  const QString strategy = plan.value(QStringLiteral("densification")).toObject()
+      .value(QStringLiteral("strategy")).toString(QStringLiteral("standard"));
+  mDensificationStrategy->setCurrentIndex(mDensificationStrategy->findData(strategy));
+  const QString mode = plan.value(QStringLiteral("filter")).toObject()
+      .value(QStringLiteral("mode")).toString(QStringLiteral("backend_default"));
+  mSamplingFilter->setCurrentIndex(mSamplingFilter->findData(mode == QStringLiteral("full_mip") ? mode : QStringLiteral("backend_default")));
+  mUpdatingQualityPlan = false;
+  refreshQualityPlan();
+  return true;
+}
+
+bool TrainingDialog::importQualityPlanFile(const QString &path) {
+  mQualityPlanImportError = QStringLiteral("quality_plan_import_file");
+  QFile file(path);
+  if (file.size() > maximumQualityPlanBytes || !file.open(QIODevice::ReadOnly)) return false;
+  QJsonParseError parse;
+  const auto document = QJsonDocument::fromJson(file.readAll(), &parse);
+  if (parse.error != QJsonParseError::NoError || !document.isObject() || document.object().isEmpty()) return false;
+  const auto issue = qualityPlanIssue(document.object(), mBackend->currentData().toString());
+  if (!issue.isEmpty()) { mQualityPlanImportError = issue; return false; }
+  if (!setQualityPlanDocument(document.object())) return false;
+  mQualityPlanImportError.clear();
+  return true;
+}
+
+QString TrainingDialog::qualityPlanValidationText() const {
+  if (!mQualityPlanEnabled || !mQualityPlanEnabled->isChecked()) return {};
+  const auto issue = qualityPlanIssue(mQualityPlan, mBackend->currentData().toString());
+  return issue.isEmpty() ? QString() : qualityPlanIssueText(issue);
+}
+
+bool TrainingDialog::qualityPlanReady() const {
+  return qualityPlanValidationText().isEmpty();
+}
+
+void TrainingDialog::updateQualityPlanFromControls(const bool strategyChanged, const bool filterChanged) {
+  if (mUpdatingQualityPlan || !mQualityPlanEnabled->isChecked()) return;
+  const bool create = mQualityPlan.isEmpty();
+  if (create) mQualityPlan.insert(QStringLiteral("version"), 1);
+  mQualityPlan.insert(QStringLiteral("geometry_lr_multiplier"), mGeometryLrMultiplier->value());
+  if (create || strategyChanged)
+    mQualityPlan.insert(QStringLiteral("densification"), QJsonObject{
+        {QStringLiteral("strategy"), mDensificationStrategy->currentData().toString()},
+        {QStringLiteral("parameters"), QJsonObject()}});
+  if (create || filterChanged)
+    mQualityPlan.insert(QStringLiteral("filter"), QJsonObject{{QStringLiteral("mode"), mSamplingFilter->currentData().toString()}});
+  refreshQualityPlan();
+}
+
+void TrainingDialog::refreshQualityPlan() {
+  if (!mQualityPlanEnabled) return;
+  const bool enabled = mQualityPlanEnabled->isChecked();
+  const bool threeD = mBackend->currentData().toString() == QStringLiteral("3dgs");
+  mGeometryLrMultiplier->setEnabled(enabled);
+  mDensificationStrategy->setEnabled(enabled);
+  mSamplingFilter->setEnabled(enabled);
+  if (auto *model = qobject_cast<QStandardItemModel *>(mDensificationStrategy->model())) {
+    for (int index = 0; index < model->rowCount(); ++index)
+      model->item(index)->setEnabled(index == 0 || (threeD && index < 3));
+  }
+  if (auto *model = qobject_cast<QStandardItemModel *>(mSamplingFilter->model()))
+    model->item(1)->setEnabled(threeD);
+  const QSignalBlocker densityBlocker(mDensificationStrategy);
+  const QSignalBlocker filterBlocker(mSamplingFilter);
+  mDensificationStrategy->setItemData(0, QCoreApplication::translate("Workbench", "使用当前后端的原有增密规则；不新增研究方法。"), Qt::ToolTipRole);
+  mDensificationStrategy->setItemData(1, QCoreApplication::translate("Workbench", "在像素梯度相消前累计绝对梯度，供 3DGS 增密使用；不等于对汇总梯度取绝对值。"), Qt::ToolTipRole);
+  mDensificationStrategy->setItemData(2, QCoreApplication::translate("Workbench", "使用贡献像素覆盖和距离相关梯度调整的 3DGS 增密策略。"), Qt::ToolTipRole);
+  mDensificationStrategy->setItemData(3, QCoreApplication::translate("Workbench", "MCMC 的重定位与完整状态训练验收尚未完成，当前不可选。"), Qt::ToolTipRole);
+  mSamplingFilter->setItemData(0, QCoreApplication::translate("Workbench", "保留当前后端的原有过滤，不把 2D EWA 误称为完整 Mip。"), Qt::ToolTipRole);
+  mSamplingFilter->setItemData(1, QCoreApplication::translate("Workbench", "包含训练视图决定的 3D 频率约束与 2D Mip 过滤，仅支持 3DGS；不只开启抗锯齿。"), Qt::ToolTipRole);
+  if (!enabled) {
+    mQualityPlanStatus->setText(QCoreApplication::translate("Workbench", "未启用质量计划：不创建 qualityPlan，保留原有训练与随机序列行为。"));
+  } else {
+    const auto issue = qualityPlanIssue(mQualityPlan, mBackend->currentData().toString());
+    const QString state = issue.isEmpty()
+        ? QCoreApplication::translate("Workbench", "实验性请求，未通过质量验收。执行前由 Python 解析器核验配置、输入、后端与实际内核；界面不生成验收哈希。")
+        : qualityPlanIssueText(issue);
+    mQualityPlanStatus->setText(state + QLatin1Char('\n') +
+        QCoreApplication::translate("Workbench", "请求策略：%1；请求过滤：%2")
+          .arg(mQualityPlan.value(QStringLiteral("densification")).toObject().value(QStringLiteral("strategy")).toString(QStringLiteral("standard")),
+               mQualityPlan.value(QStringLiteral("filter")).toObject().value(QStringLiteral("mode")).toString(QStringLiteral("backend_default"))));
+  }
+  if (mStartButton) {
+    bool existingReady = !mReconstructionProbeConfigured ||
+        (reconstructionPreflightReady() && !mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool());
+    if (existingReady && mReconstructionProbeConfigured &&
+        (mPosePolicy->currentData().toString() == QStringLiteral("locked") ||
+         mReconstructionSummary.report.value(QStringLiteral("decision")).toString() == QStringLiteral("new_solve_version")))
+      existingReady = !CameraDatasetInfo::blocked(cameraDatasetSummary());
+    mStartButton->setEnabled(existingReady && qualityPlanReady());
+  }
+}
+
+void TrainingDialog::chooseQualityPlan() {
+  const QString path = QFileDialog::getOpenFileName(this, QCoreApplication::translate("Workbench", "导入质量计划 JSON…"), {},
+      QCoreApplication::translate("Workbench", "JSON 文件 (*.json);;所有文件 (*)"));
+  if (path.isEmpty() || importQualityPlanFile(path)) return;
+  QMessageBox::critical(this, QCoreApplication::translate("Workbench", "无法导入质量计划"),
+      mQualityPlanImportError == QStringLiteral("quality_plan_import_file")
+          ? QCoreApplication::translate("Workbench", "无法读取有效的质量计划 JSON；文件须为对象且不超过 256 KiB，原计划保持不变。")
+          : qualityPlanIssueText(mQualityPlanImportError));
+}
+
 void TrainingDialog::accept() {
+  if (!qualityPlanReady()) {
+    QMessageBox::critical(this, QCoreApplication::translate("Workbench", "实验性质量计划不可用"), qualityPlanValidationText());
+    return;
+  }
   if (mReconstructionProbeConfigured &&
       (!reconstructionPreflightReady() || mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool())) {
     QMessageBox::critical(this, QCoreApplication::translate("Workbench", "相机与重建来源不可用"),
@@ -1017,7 +1318,7 @@ void TrainingDialog::refreshReconstructionSummary() {
       !mCameraDatasetIdentity.isEmpty() && !CameraDatasetInfo::blocked(cameraDatasetSummary()));
   if (mStartButton && mReconstructionProbeConfigured)
     mStartButton->setEnabled(reconstructionPreflightReady() &&
-                            !mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool());
+                            !mReconstructionSummary.report.value(QStringLiteral("blocked")).toBool() && qualityPlanReady());
   if (mReconstructionSummaryPending) {
     const QString pending = QCoreApplication::translate("Workbench", "正在读取相机与重建来源（只读）…");
     mReconstructionSummaryLabel->setText(pending);
@@ -1038,7 +1339,7 @@ void TrainingDialog::refreshReconstructionSummary() {
     const auto camera = cameraDatasetSummary();
     mReconstructionSummaryLabel->setText(CameraDatasetInfo::summaryText(camera));
     mReconstructionDecisionLabel->setText(CameraDatasetInfo::decisionText(camera));
-    if (mStartButton) mStartButton->setEnabled(reconstructionPreflightReady() && !CameraDatasetInfo::blocked(camera));
+    if (mStartButton) mStartButton->setEnabled(reconstructionPreflightReady() && !CameraDatasetInfo::blocked(camera) && qualityPlanReady());
     refreshInputSummary();
     return;
   }

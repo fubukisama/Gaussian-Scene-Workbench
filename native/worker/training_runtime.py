@@ -416,13 +416,14 @@ class NativeTrainingRuntime:
         else:
             self.storage_status = {'enabled': False, 'reason': 'disabled_by_policy'}
 
-    def image(self, camera, cameras=None, pending_indices=None):
+    def image(self, camera, cameras=None, pending_indices=None, python_rng_state=None):
         from native.worker.training_image_pipeline import ReadyImage
         if self.images:
             next_camera = None
             if self.configuration['camera_prefetch'] and cameras is not None and pending_indices is not None:
                 from native.worker.training_camera_lookahead import predict_next_camera
-                next_camera = predict_next_camera(cameras, pending_indices)
+                next_camera = (predict_next_camera(cameras, pending_indices) if python_rng_state is None
+                               else predict_next_camera(cameras, pending_indices, python_rng_state))
                 if next_camera is not None:
                     self.lookahead_opportunities += 1
             return self.images.prepare(camera, next_camera=next_camera)
@@ -431,20 +432,38 @@ class NativeTrainingRuntime:
         return ReadyImage(cuda(camera.original_image), cuda(getattr(camera, 'alpha_mask', None)),
                           cuda(getattr(camera, 'invdepthmap', None)), cuda(getattr(camera, 'depth_mask', None)))
 
-    def admit(self, model, threshold, extent, iteration):
+    def admit(self, model, threshold, extent, iteration, **quality_density_arguments):
         from native.worker.training_resource_policy import admit_densification
         def observed(kind, value):
             if kind == '[gsw-training-growth]':
                 self.last_growth_decision = dict(value)
             self.emit(kind, value)
         allowed = admit_densification(self.torch, model, self.backend, threshold, extent,
-                                      self.admission, observed, iteration)
+                                      self.admission, observed, iteration, **quality_density_arguments)
         if self.admission is not None:
             self.growth_quality.observe(allowed, (self.last_growth_decision or {}).get('reason'))
         return allowed
 
     def pause_for_resources(self):
         return self.admission is not None and self.growth_quality.should_pause()
+
+    def admit_mcmc_growth(self, model, growth, iteration):
+        """Same resource policy, explicit MCMC additions instead of split stats."""
+        if self.admission is None:
+            return True
+        from dataclasses import asdict
+        base = self.admission.evaluate(model, self.backend, clone_count=0, split_count=0)
+        if not base.allowed:
+            raise ValueError('quality_mcmc_iteration_headroom_unavailable')
+        decision = self.admission.evaluate(model, self.backend, clone_count=growth, split_count=0)
+        event = asdict(decision)
+        event.update(version=1, backend=self.backend, iteration=iteration,
+            state='admitted' if decision.allowed else 'deferred', clone_count=growth, split_count=0,
+            candidate_counts_known=True, guard_enabled=True)
+        self.last_growth_decision = event
+        self.emit('[gsw-training-growth]', event)
+        self.growth_quality.observe(decision.allowed, decision.reason)
+        return decision.allowed
 
     def resource_pause_reason(self):
         reason = self.growth_quality.snapshot().get('last_reason')

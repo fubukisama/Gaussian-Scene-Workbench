@@ -1803,6 +1803,7 @@ void NativeViewport::setScene(const QString &scenePath,
   const bool renderModeChangedToPoints = mScene->mRenderMode != RenderMode::Points;
   mScene->mHasGaussianAttributes = false;
   mScene->mHasSurfelAttributes = false;
+  mScene->mQualityMip = {};
   mScene->mHasMesh = false;
   mScene->mPreviewOnlyScene = false;
   mScene->mRenderMode = RenderMode::Points;
@@ -2745,7 +2746,7 @@ void main() {
   const QByteArray surfelEvaluator = surfelSource.readAll();
   const bool gaussianVertexCompiled =
       mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
-          QByteArray("#version 330 core\n") + shEvaluator + surfelEvaluator + R"GLSL(
+          QByteArray("#version 330 core\n") + shEvaluator + surfelEvaluator + qualityMipProjectionGlsl() + R"GLSL(
 layout(location = 0) in vec3 attributePosition;
 layout(location = 1) in vec3 attributeColor;
 layout(location = 2) in float attributeOpacity;
@@ -2760,6 +2761,7 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec2 viewportPixels;
 uniform bool surfelRendering;
+uniform bool fullMipFilter;
 
 out vec3 vertexColor;
 out float vertexOpacity;
@@ -2897,11 +2899,13 @@ void main() {
     jacobianY = vec3(0.0, focalY / depth,
                      focalY * cameraCenter.y / (depth * depth));
   }
-  float covarianceXX =
-      dot(jacobianX, cameraCovariance * jacobianX) + 0.09;
-  float covarianceXY = dot(jacobianX, cameraCovariance * jacobianY);
-  float covarianceYY =
-      dot(jacobianY, cameraCovariance * jacobianY) + 0.09;
+  vec3 filteredCovariance = gswApplyGaussian2dFilter(vec3(
+      dot(jacobianX, cameraCovariance * jacobianX),
+      dot(jacobianX, cameraCovariance * jacobianY),
+      dot(jacobianY, cameraCovariance * jacobianY)), vertexOpacity, fullMipFilter);
+  float covarianceXX = filteredCovariance.x;
+  float covarianceXY = filteredCovariance.y;
+  float covarianceYY = filteredCovariance.z;
 
   float discriminant = sqrt(max(
       0.0, (covarianceXX - covarianceYY) *
@@ -3639,6 +3643,8 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             if (foreground) sceneSignals.unblock();
             PointCloudData data = watcher->result();
             watcher->deleteLater();
+            // File attributes and the hash-verified Mip contract commit as one
+            // snapshot below; stale path/generation results cannot replace it.
             if (scenePath != mScene->mRequestedScenePath ||
                 generation != mScene->mSceneGeneration) {
               return;
@@ -3779,6 +3785,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
                 data.hasGaussianAttributes && !mScene->mPreviewOnlyScene;
             mScene->mHasSurfelAttributes =
                 data.hasSurfelAttributes && mScene->mHasGaussianAttributes;
+            mScene->mQualityMip = std::move(data.qualityMip);
             const bool isAvailable = gaussianRenderingAvailable();
             if (isAvailable != wasAvailable) {
               emit gaussianRenderingAvailabilityChanged(isAvailable);
@@ -5377,9 +5384,11 @@ void NativeViewport::setMaximumShDegree(int degree) {
 
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
-  const bool livePreview = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame());
+  // File-based live previews use the same validated per-snapshot attributes as
+  // saved scenes. Only an actual IPC frame bypasses that file-owned contract.
+  const bool ipcPreview = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame());
   const qsizetype drawCount =
-      livePreview ? mTrainingGpuPreview.pointCount() : mScene->mRenderedPointCount;
+      ipcPreview ? mTrainingGpuPreview.pointCount() : mScene->mRenderedPointCount;
   if (drawCount <= 0 || mGaussianProgram == nullptr ||
       !mGaussianProgram->isLinked()) {
     return;
@@ -5394,9 +5403,11 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   mGaussianProgram->bind();
-  const bool indexed = !livePreview && mScene->indexedGaussians;
+  const bool indexed = !ipcPreview && mScene->indexedGaussians;
   mGaussianProgram->setUniformValue("indexedAttributes", indexed);
-  mGaussianProgram->setUniformValue("surfelRendering", !livePreview && mScene->mHasSurfelAttributes);
+  mGaussianProgram->setUniformValue("surfelRendering", !ipcPreview && mScene->mHasSurfelAttributes);
+  mGaussianProgram->setUniformValue("fullMipFilter",
+      mScene->mQualityMip.appliesToRasterFrame(ipcPreview, mScene->mHasSurfelAttributes));
   mGaussianProgram->setUniformValue("gaussianAttributes", 2);
   mGaussianProgram->setUniformValue("gaussianOrder", 3);
   mGaussianProgram->setUniformValue("gaussianSh", 4);
@@ -5413,7 +5424,7 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   mGaussianProgram->setUniformValue(
       "viewportPixels", QVector2D(static_cast<float>(width() * ratio),
                                   static_cast<float>(height() * ratio)));
-  if (livePreview) {
+  if (ipcPreview) {
     glBindVertexArray(mTrainingGpuPreview.activeVertexArray());
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
@@ -7906,7 +7917,7 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   } else if (mScene->previewLoadFailed) {
     count = QCoreApplication::translate("Workbench", "预览更新失败 · 继续显示上一结果");
   } else if (!mScene->mSceneLoadMessage.isEmpty()) {
-    count = mScene->mSceneLoadMessage;
+    count = AppLanguage::diagnosticText(mScene->mSceneLoadMessage);
   } else if (pagedMeshAvailable()) {
     count = QCoreApplication::translate("Workbench", "%1 顶点 | %2 面 | %3 三角形 | %4 | 当前绘制 %5 | "
                 "GPU LOD 缓存 %6 | 只读")

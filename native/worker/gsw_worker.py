@@ -77,6 +77,17 @@ def load_configuration(path, requested_task=None):
         except ModuleNotFoundError:
             from training_seed import validate_training_seed
         config["trainingSeed"] = validate_training_seed(config["trainingSeed"])
+    if task == "training" and config.get("qualityPlan") is not None:
+        if config.get("nativeCheckpoint") is not True or config.get("backend") not in ("3dgs", "2dgs"):
+            raise ValueError("quality_requires_native_checkpoint")
+        try:
+            from native.worker.training_quality_plan import resolve_quality_plan
+        except ModuleNotFoundError:
+            from training_quality_plan import resolve_quality_plan
+        # Fail before backend import, output admission, GPU allocation or process
+        # creation. The legacy preset/camera/runtime options remain independent.
+        config["qualityPlan"] = resolve_quality_plan(config["qualityPlan"],
+                                                    backend=config["backend"])["requested"]
     if task == "training" and ("runtimeOptions" in config or "performanceOptions" in config):
         try:
             from native.worker.training_configuration import normalize_runtime_options
@@ -95,6 +106,153 @@ def import_backend(repository_root):
     except ModuleNotFoundError:
         from import_preflight import load_compute_module
     return load_compute_module(repository_root)
+
+
+class QualityKernelPreflightError(ValueError):
+    """Machine diagnostic for CPU admission; the trainer still verifies real ABI."""
+    def __init__(self, code, detail=""):
+        self.code, self.detail = code, str(detail)[:1024]
+        super().__init__(code + (": " + self.detail if self.detail else ""))
+
+
+def preflight_quality_kernel(server, native_control, backend, repository_root):
+    """Check the selected training Python's optional component before enqueueing.
+
+    No probe is added to legacy/default, geometry-LR-only, 2DGS or stock MCMC
+    paths. This only checks integrity and an existing GPU acceptance declaration;
+    it neither imports Torch nor replaces the trainer's binary ABI verification.
+    """
+    plan = (native_control or {}).get("qualityPlan")
+    if plan is None:
+        return None
+    if (not isinstance(plan, dict) or plan.get("schema") != "gsw.quality_plan_resolution/1"
+            or plan.get("backend") != backend or not isinstance(plan.get("effective"), dict)):
+        raise QualityKernelPreflightError("quality_plan_resolution_invalid")
+    effective = plan["effective"]
+    try:
+        required = backend == "3dgs" and (
+            effective["densification"]["strategy"] in ("abs_gs", "pixel_gs")
+            or effective["filter"]["mode"] == "full_mip" or bool(effective.get("supervision")))
+    except (KeyError, TypeError):
+        raise QualityKernelPreflightError("quality_plan_resolution_invalid")
+    if not required:
+        return None
+
+    import subprocess
+    target = Path(server.training_python(backend)).resolve()
+    child_environment = dict(server.training_env(backend))
+    child_environment.update(CUDA_VISIBLE_DEVICES="-1", PYTHONDONTWRITEBYTECODE="1",
+                             PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    # -I ignores inherited Python path/startup variables. Only the selected
+    # repository is inserted explicitly; no quality extension is imported.
+    code = r'''
+import hashlib, json, os, re, sys
+from pathlib import Path
+result = {"schema": "gsw.quality_kernel_preflight/1", "success": False}
+try:
+    if "torch" in sys.modules:
+        raise ValueError("quality_kernel_preflight_torch_loaded")
+    sys.path.insert(0, str(Path(sys.argv[1]).resolve()))
+    from native.worker.quality_training_runtime import quality_kernel_root
+    from native.worker.quality_rasterizer_runtime import select_quality_rasterizer
+    selected = select_quality_rasterizer(sys.argv[1], quality_kernel_root())
+    if "torch" in sys.modules:
+        raise ValueError("quality_kernel_preflight_torch_loaded")
+    executable = Path(sys.executable).resolve()
+    result.update(success=True, target_python=str(executable),
+        target_python_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
+        python_version="{}.{}.{}".format(*sys.version_info[:3]),
+        root=selected["root"], build_sha256=selected["buildSha256"],
+        acceptance_sha256=selected["acceptanceSha256"], cpu_only=True,
+        torch_imported=False, gpu_executed=False, quality_accepted=False,
+        cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
+        isolated=bool(sys.flags.isolated), dont_write_bytecode=bool(sys.dont_write_bytecode))
+except Exception as exc:
+    detail = str(exc)[:1024]
+    name = detail.split(":", 1)[0]
+    result.update(code=name if re.fullmatch(r"quality_[a-z0-9_]+", name) else
+        "quality_kernel_preflight_failed", detail=detail)
+payload = json.dumps(result, ensure_ascii=True, separators=(",", ":"))
+if len(payload) > 8192:
+    payload = '{"schema":"gsw.quality_kernel_preflight/1","success":false,"code":"quality_kernel_preflight_output_invalid"}'
+print(payload, flush=True)
+sys.exit(0 if result.get("success") else 1)
+'''
+    output_limit = 16384
+    captured = [bytearray(), bytearray()]
+    oversized = threading.Event()
+    try:
+        process = subprocess.Popen(
+            [str(target), "-I", "-B", "-c", code, str(Path(repository_root).resolve())],
+            cwd=str(Path(server.GAUSSIAN_DIR).resolve()), env=child_environment,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, ValueError) as exc:
+        raise QualityKernelPreflightError("quality_kernel_preflight_launch_failed", exc)
+
+    def capture(stream, index):
+        try:
+            while True:
+                # A short, flushed cap+1 write must not wait for a full next
+                # block or EOF before the excess byte is noticed.
+                block = stream.read1(4096)
+                if not block:
+                    break
+                remaining = output_limit - len(captured[index])
+                captured[index].extend(block[:max(0, remaining)])
+                if len(block) > remaining:
+                    oversized.set()
+                    with contextlib.suppress(OSError):
+                        process.kill()
+        finally:
+            stream.close()
+
+    readers = [threading.Thread(target=capture, args=(stream, index), daemon=True)
+               for index, stream in enumerate((process.stdout, process.stderr))]
+    for reader in readers:
+        reader.start()
+    timed_out = False
+    try:
+        process.wait(timeout=45)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+    for reader in readers:
+        reader.join(timeout=2)
+    if timed_out:
+        raise QualityKernelPreflightError("quality_kernel_preflight_timeout")
+    if oversized.is_set() or any(reader.is_alive() for reader in readers):
+        raise QualityKernelPreflightError("quality_kernel_preflight_output_invalid")
+    try:
+        report = json.loads(captured[0].decode("utf-8"))
+        if not isinstance(report, dict) or report.get("schema") != "gsw.quality_kernel_preflight/1":
+            raise ValueError()
+    except (ValueError, UnicodeError):
+        raise QualityKernelPreflightError("quality_kernel_preflight_output_invalid",
+                                         captured[1].decode("utf-8", errors="replace"))
+    if report.get("success") is not True:
+        error_code = report.get("code", "")
+        if not isinstance(error_code, str) or not re.fullmatch(r"quality_[a-z0-9_]+", error_code):
+            error_code = "quality_kernel_preflight_failed"
+        raise QualityKernelPreflightError(error_code, report.get("detail", ""))
+    try:
+        valid = (process.returncode == 0 and Path(report["target_python"]).resolve() == target
+                 and report["target_python_sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
+                 and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", report["python_version"])
+                 and Path(report["root"]).is_absolute()
+                 and all(re.fullmatch(r"[0-9a-f]{64}", report[key])
+                         for key in ("build_sha256", "acceptance_sha256"))
+                 and report["cpu_only"] is True and report["torch_imported"] is False
+                 and report["gpu_executed"] is False and report["quality_accepted"] is False
+                 and report["cuda_visible_devices"] == "-1"
+                 and report["isolated"] is True and report["dont_write_bytecode"] is True)
+    except (KeyError, TypeError, ValueError, OSError):
+        valid = False
+    if not valid:
+        raise QualityKernelPreflightError("quality_kernel_preflight_output_invalid")
+    print("[gsw-quality-kernel-preflight] " + json.dumps(report, ensure_ascii=True), flush=True)
+    return report
 
 
 def watch_cancel_input(cancel_callback, job_id, pause_callback=None):
@@ -1055,8 +1213,8 @@ def run_import_project_recovery(config):
 
 def publish_training_delivery(output_directory, iteration=None, cancelled=None, progress=None):
     """Deliver coordinates separately from optimizer success; safe to retry."""
-    from native.backend.camera_scale_export import deliver_training_result
-    from native.worker.training_checkpoint import atomic_json
+    from native.backend.camera_scale_export import deliver_training_result, inspect_coordinate_metadata, CameraScaleExportError
+    from native.worker.training_checkpoint import atomic_json, file_digest
     output = _lexical_absolute(output_directory)
     candidates = []
     point_root = output / 'point_cloud'
@@ -1074,22 +1232,119 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         return {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
                 'reason':'training_delivery_model_missing','model_path':None}
     actual_iteration, model = max(candidates)
-    _ensure_within_root(model, output)
+    raw_model = model
     destination = output / '.gsw-deliveries' / ('i' + str(actual_iteration))
-    _ensure_within_root(destination, output)
-    destination.mkdir(parents=True, exist_ok=True)
+    binding_files = []
+    fused_selected = False
+
+    def fail(code, detail=''):
+        raise CameraScaleExportError(code, detail)
+
+    def checked(path):
+        path = _lexical_absolute(path)
+        for part in (path,) + tuple(path.parents):
+            if _is_reparse_point(part):
+                fail('quality_delivery_link_refused', str(part))
+        _ensure_within_root(path, output)
+        return path
+
+    def relative_reference(value):
+        if not isinstance(value, str) or not value or ':' in value or '\x00' in value or value.startswith(('/', '\\')):
+            fail('quality_delivery_fused_path_invalid')
+        parts = re.split(r'[/\\]', value)
+        if any(part in ('', '.', '..') for part in parts):
+            fail('quality_delivery_fused_path_invalid')
+        target = checked(raw_model.parent.joinpath(*parts))
+        _ensure_within_root(target, raw_model.parent)
+        return target
+
+    def read_quality(path):
+        checked(path)
+        if not path.is_file() or path.stat().st_size > 1024 * 1024:
+            fail('quality_delivery_sidecar_invalid')
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    fail('quality_delivery_sidecar_invalid')
+                result[key] = value
+            return result
+        with path.open(encoding='utf-8') as stream:
+            result = json.load(stream, object_pairs_hook=pairs,
+                parse_constant=lambda unused: fail('quality_delivery_sidecar_invalid'))
+        if type(result) is not dict:
+            fail('quality_delivery_sidecar_invalid')
+        return result
+
     try:
+        checked(model)
+        quality_path = model.with_suffix('.quality.json')
+        checked(quality_path)
+        if _path_exists_no_follow(quality_path):
+            quality_hash = file_digest(quality_path)
+            quality = read_quality(quality_path)
+            hash_string = lambda value: isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+            filter_2d = quality.get('filter_2d')
+            if (quality.get('schema') != 'gsw.quality_model/1' or quality.get('filter') != 'full_mip' or
+                    quality.get('representation') != 'raw' or quality.get('filter_3d_applied') is not False or
+                    any(not hash_string(quality.get(key)) for key in ('raw_source_sha256', 'fused_sha256', 'plan_hash')) or
+                    type(filter_2d) is not dict or type(filter_2d.get('variance')) not in (int, float) or
+                    not math.isfinite(filter_2d['variance']) or abs(filter_2d['variance'] - .3) > 1e-12 or
+                    filter_2d.get('opacity_compensation') is not True):
+                fail('quality_delivery_sidecar_invalid')
+            if file_digest(raw_model) != quality['raw_source_sha256']:
+                fail('quality_delivery_raw_hash_mismatch')
+            fused = relative_reference(quality.get('fused_file'))
+            if not fused.is_file() or fused.suffix.lower() != '.ply' or os.path.samefile(raw_model, fused):
+                fail('quality_delivery_fused_path_invalid')
+            if file_digest(fused) != quality['fused_sha256']:
+                fail('quality_delivery_fused_hash_mismatch')
+            info = inspect_coordinate_metadata(fused)
+            fused_quality = info.get('quality')
+            if (fused_quality is None or fused_quality.get('representation') != 'fused' or
+                    any(fused_quality.get(key) != quality.get(key) for key in
+                        ('raw_source_sha256', 'fused_sha256', 'plan_hash', 'kernel_build_sha256', 'filter_2d'))):
+                fail('quality_delivery_fused_binding_invalid')
+            binding_files.extend(((raw_model, quality['raw_source_sha256']), (quality_path, quality_hash),
+                (fused, quality['fused_sha256']), (Path(info['quality_path']), info['quality_sha256'])))
+            if 'raw_source_file' in quality:
+                snapshot = relative_reference(quality['raw_source_file'])
+                if not snapshot.is_file() or file_digest(snapshot) != quality['raw_source_sha256']:
+                    fail('quality_delivery_raw_hash_mismatch')
+                binding_files.append((snapshot, quality['raw_source_sha256']))
+            if 'filter_widths' in quality:
+                widths = quality['filter_widths']
+                if (type(widths) is not dict or set(widths) not in ({'path', 'sha256'}, {'path', 'sha256', 'frame'}) or
+                        'frame' in widths and widths['frame'] != 'training' or not hash_string(widths.get('sha256'))):
+                    fail('quality_delivery_sidecar_invalid')
+                width_path = relative_reference(widths['path'])
+                source_width_hash = fused_quality.get('filter_widths', {}).get('sha256',
+                    fused_quality.get('source_filter_widths_sha256'))
+                if not width_path.is_file() or file_digest(width_path) != widths['sha256'] or source_width_hash != widths['sha256']:
+                    fail('quality_delivery_fused_binding_invalid')
+                binding_files.append((width_path, widths['sha256']))
+            model, fused_selected = fused, True
+        checked(destination)
+        destination.mkdir(parents=True, exist_ok=True)
         result = deliver_training_result(model, destination, cancelled=cancelled, progress=progress)
+        if result.get('export_status') == 'ready':
+            for path, expected_hash in binding_files:
+                checked(path)
+                if not path.is_file() or file_digest(path) != expected_hash:
+                    fail('quality_delivery_source_changed')
     except Exception as exc:
         # Optimization already completed. An export/plugin allocation or other
         # ordinary exception is an independent failed delivery, not failed
         # training. Preserve KeyboardInterrupt/SystemExit and the raw state.
         result = {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
                   'reason':getattr(exc,'code','training_delivery_failed'),'detail':str(exc),
-                  'model_path':str(model)}
-    result.update(iteration=actual_iteration, internal_model_path=str(model))
-    result['internal_model_relative_path'] = str(model.relative_to(output)).replace('\\','/')
-    for key in ('model_path','sidecar_path','camera_path'):
+                  'model_path':str(raw_model)}
+    result.update(iteration=actual_iteration, internal_model_path=str(raw_model))
+    result['internal_model_relative_path'] = str(raw_model.relative_to(output)).replace('\\','/')
+    if fused_selected:
+        result.update(fused_internal_model_path=str(model),
+            fused_internal_model_relative_path=str(model.relative_to(output)).replace('\\','/'))
+    for key in ('model_path','sidecar_path','camera_path','quality_sidecar_path'):
         if result.get(key):
             result[key.replace('_path','_relative_path')] = str(Path(result[key]).relative_to(output)).replace('\\','/')
     receipt = output / 'model-delivery.json'
@@ -1105,6 +1360,9 @@ def run_training(config, resume=False):
     own_root = str(Path(__file__).resolve().parents[2])
     if own_root not in sys.path:
         sys.path.insert(0,own_root)
+    if config.get("qualityPlan") is not None and (
+            config.get("nativeCheckpoint") is not True or config.get("backend") not in ("3dgs", "2dgs")):
+        raise ValueError("quality_requires_native_checkpoint")
     # Claim output before compute can enqueue/start an optimizer thread, not
     # only when a later GUI observer lease is registered. Closing an observer
     # does not release this worker-owned gate.
@@ -1151,6 +1409,11 @@ def _run_training_owned(config, resume=False, output_gate=None, session=None):
             if manifest.get("backend", "3dgs") != config["backend"]:
                 raise ValueError("Checkpoint backend does not match the selected training method")
             native_options["resume_checkpoint_iteration"] = manifest["iteration"]
+        from native.worker.training_checkpoint import quality_plan_for_control
+        quality_plan = quality_plan_for_control(config.get("qualityPlan"), backend=config["backend"],
+            checkpoint_plan=(manifest or {}).get("quality_plan"), resume=resume)
+        if quality_plan is not None:
+            native_options["native_control"]["qualityPlan"] = quality_plan
         from native.worker.training_runtime import runtime_configuration
         runtime_request = {"resume": resume, "backend": config["backend"]}
         if "runtimeOptions" in config:
@@ -1182,6 +1445,8 @@ def _run_training_owned(config, resume=False, output_gate=None, session=None):
             resolution_policy=config.get("resolutionPolicy", "preserve" if policy == "locked" else "manual"),
         )
 
+    preflight_quality_kernel(server, native_options.get("native_control"),
+                             config.get("backend", "3dgs"), config["repositoryRoot"])
     snapshot = server.start_training(
         config.get("scene") or "native-project",
         config["outputScene"],

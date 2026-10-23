@@ -6,6 +6,8 @@ param(
   [string]$MsvcEnvironmentScript = "",
   [string]$BuildDirectory = "",
   [string]$PackageDirectoryName = "Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64",
+  [ValidateSet("windows", "offscreen")]
+  [string]$PackageSmokePlatform = "windows",
   [switch]$Clean,
   [switch]$Package,
   [string]$SigningCertificateThumbprint = "",
@@ -426,7 +428,9 @@ function Invoke-NativeLaunchSmokeTest {
     [Environment]::SetEnvironmentVariable("PATH", $IsolatedPath, "Process")
     [Environment]::SetEnvironmentVariable("QT_OPENGL", "software", "Process")
     [Environment]::SetEnvironmentVariable("QT_PLUGIN_PATH", $null, "Process")
-    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM", "windows", "Process")
+    # Offscreen is an explicit local packaging/dependency check, not a claim of
+    # real-window/OpenGL acceptance. Keep Windows as the existing CI default.
+    [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM", $PackageSmokePlatform, "Process")
     [Environment]::SetEnvironmentVariable("QT_QPA_PLATFORM_PLUGIN_PATH", $null, "Process")
 
     $Process = Start-Process `
@@ -667,6 +671,13 @@ if ($Package) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\MESH_GENERATION.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\RECONSTRUCTION_QUALITY.md") -Destination $PackageRoot -Force
   Copy-Item -LiteralPath (Join-Path $Root "docs\ORIGINAL_RESOLUTION_TRAINING.md") -Destination $PackageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $Root "docs\QUALITY_PLAN.md") -Destination $PackageRoot -Force
+  $QualityDocumentationRoot = Join-Path $PackageRoot "quality_upgrade"
+  New-Item -ItemType Directory -Path $QualityDocumentationRoot -Force | Out-Null
+  foreach ($QualityDocument in @("CAPABILITY_MATRIX.json", "ACCEPTANCE_REPORT.json", "PAPER_VERSIONS.json")) {
+    Copy-Item -LiteralPath (Join-Path (Join-Path $Root "docs\quality_upgrade") $QualityDocument) `
+      -Destination $QualityDocumentationRoot -Force
+  }
   Copy-Item -LiteralPath (Join-Path $Root "docs\WINDOWS_NATIVE_RUNTIME.md") -Destination $PackageRoot -Force
   & (Join-Path $Root "scripts\stage_native_backend.ps1") `
     -SourceRoot $Root `

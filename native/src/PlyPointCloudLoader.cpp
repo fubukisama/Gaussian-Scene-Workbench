@@ -783,6 +783,42 @@ int findProperty(const ElementDefinition &element, const QStringList &names) {
   return -1;
 }
 
+QualityMipModelContract qualityForHeader(const QString &path, const PlyHeader &header) {
+  const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
+      [](const auto &element) { return element.name == QStringLiteral("vertex"); });
+  bool gaussian = false, surfel = false, rawFilter = false, requiresSidecar = false;
+  if (vertex != header.elements.cend()) {
+    const auto scalar = [&vertex](const QString &name) {
+      const int index = findProperty(*vertex, {name});
+      return index >= 0 && !vertex->properties[index].isList;
+    };
+    gaussian = scalar(QStringLiteral("opacity")) && scalar(QStringLiteral("scale_0")) &&
+        scalar(QStringLiteral("scale_1")) && scalar(QStringLiteral("rot_0")) && scalar(QStringLiteral("rot_1")) &&
+        scalar(QStringLiteral("rot_2")) && scalar(QStringLiteral("rot_3")) &&
+        (findProperty(*vertex, {QStringLiteral("scale_2")}) < 0 || scalar(QStringLiteral("scale_2")));
+    surfel = gaussian && findProperty(*vertex, {QStringLiteral("scale_2")}) < 0;
+    for (const auto &property : vertex->properties) {
+      const QString name = property.name.toLower();
+      rawFilter |= name == QStringLiteral("filter_3d") || name == QStringLiteral("filter_3d_0") ||
+          name == QStringLiteral("filter_width") || name == QStringLiteral("filter_width_0");
+    }
+  }
+  int markers = 0;
+  for (const auto &raw : header.rawLines) {
+    const QByteArray line = raw.trimmed();
+    if (!line.startsWith("comment GSW_QUALITY_REQUIRES_SIDECAR ")) continue;
+    requiresSidecar = true;
+    ++markers;
+    if (line == "comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_raw_v1") rawFilter = true;
+    else if (line != "comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1" || markers > 1) {
+      QualityMipModelContract invalid;
+      invalid.errorCode = QStringLiteral("quality_mip_header_state_invalid");
+      return invalid;
+    }
+  }
+  return QualityMipModelContract::load(path, gaussian, surfel, rawFilter, requiresSidecar);
+}
+
 float normalizedColor(const double value, const ScalarType type) {
   double normalized = value;
   if (isIntegralType(type)) {
@@ -2190,6 +2226,11 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
                   isScalarProperty);
   result.hasSurfelAttributes = result.hasGaussianAttributes && scaleIndices[2] < 0;
+  result.qualityMip = qualityForHeader(filePath, header);
+  if (!result.qualityMip.errorCode.isEmpty()) {
+    result.error = result.qualityMip.errorCode;
+    return result;
+  }
 
   // Obtain image metadata before decoding. Source pixels, an RGBA conversion
   // and its mirrored upload copy can coexist; budget 16 bytes per pixel, plus
@@ -2622,6 +2663,8 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
   if (error.isEmpty() && !parseHeader(source, header, error)) {
     // parseHeader provides the error.
   }
+  const auto quality = error.isEmpty() ? qualityForHeader(sourceFilePath, header) : QualityMipModelContract{};
+  if (error.isEmpty() && !quality.errorCode.isEmpty()) error = quality.errorCode;
 
   const auto vertexElementIterator = std::find_if(
       header.elements.cbegin(), header.elements.cend(),
@@ -2671,7 +2714,12 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
   }
 
   QSaveFile destination(destinationFilePath);
-  if (error.isEmpty() && !destination.open(QIODevice::WriteOnly)) {
+  std::unique_ptr<QualityMipExportTransaction> qualityExport;
+  QIODevice *writer = &destination;
+  if (error.isEmpty() && quality.enabled) {
+    qualityExport = std::make_unique<QualityMipExportTransaction>(quality, destinationFilePath);
+    if (qualityExport->open(error)) writer = &qualityExport->device();
+  } else if (error.isEmpty() && !destination.open(QIODevice::WriteOnly)) {
     error = QCoreApplication::translate("Workbench", "Unable to create cropped PLY: %1").arg(destination.errorString());
   }
 
@@ -2679,6 +2727,9 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
     const qint64 remaining = deletedVertices.size() - deletedCount;
     for (qsizetype lineIndex = 0; lineIndex < header.rawLines.size(); ++lineIndex) {
       QByteArray line = header.rawLines.at(lineIndex);
+      if (quality.enabled && line.trimmed().startsWith("comment GSW_QUALITY_REQUIRES_SIDECAR ")) continue;
+      if (quality.enabled && line.trimmed() == "end_header" &&
+          !writeBytes(*writer, "comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1\n", error)) break;
       if (lineIndex == header.vertexElementLine) {
         QByteArray newline;
         if (line.endsWith("\r\n")) {
@@ -2688,7 +2739,7 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
         }
         line = "element vertex " + QByteArray::number(remaining) + newline;
       }
-      if (!writeBytes(destination, line, error)) {
+      if (!writeBytes(*writer, line, error)) {
         break;
       }
     }
@@ -2712,7 +2763,7 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
           keep = !deletedVertices.testBit(sourceVertexIndex);
           ++sourceVertexIndex;
         }
-        if (keep && !writeBytes(destination, record, error)) {
+        if (keep && !writeBytes(*writer, record, error)) {
           break;
         }
       }
@@ -2728,13 +2779,19 @@ bool PlyPointCloudLoader::writeFiltered(const QString &sourceFilePath,
       error = QCoreApplication::translate("Workbench", "Unable to read trailing PLY data: %1").arg(source.errorString());
       break;
     }
-    if (!writeBytes(destination, trailing, error)) {
+    if (!writeBytes(*writer, trailing, error)) {
       break;
     }
   }
 
   bool succeeded = error.isEmpty();
-  if (succeeded && !destination.commit()) {
+  if (succeeded && qualityExport) {
+    const auto current = qualityForHeader(sourceFilePath, header);
+    if (!current.errorCode.isEmpty() || current.modelSha256 != quality.modelSha256 || current.metadata != quality.metadata) {
+      error = QStringLiteral("quality_mip_export_source_changed");
+      succeeded = false;
+    } else succeeded = qualityExport->commit(error);
+  } else if (succeeded && !destination.commit()) {
     error = QCoreApplication::translate("Workbench", "Unable to finalize cropped PLY: %1").arg(destination.errorString());
     succeeded = false;
   } else if (!succeeded) {
@@ -2755,6 +2812,11 @@ bool PlyPointCloudLoader::visitSourceGeometry(const QString &sourcePath,
   }
   PlyHeader header;
   if (!parseHeader(source, header, error)) return false;
+  const auto quality = qualityForHeader(sourcePath, header);
+  if (!quality.errorCode.isEmpty() || quality.enabled) {
+    error = quality.errorCode.isEmpty() ? QStringLiteral("quality_mip_export_format_unsupported") : quality.errorCode;
+    return false;
+  }
   const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
       [](const auto &e) { return e.name == QStringLiteral("vertex"); });
   if (vertex == header.elements.cend() || vertex->count <= 0) {
@@ -2881,6 +2943,11 @@ bool PlyPointCloudLoader::visitSourceGaussians(const QString &path,
   }
   PlyHeader header;
   if (!parseHeader(file, header, error)) return false;
+  const auto quality = qualityForHeader(path, header);
+  if (!quality.errorCode.isEmpty() || quality.enabled) {
+    error = quality.errorCode.isEmpty() ? QStringLiteral("quality_mip_export_format_unsupported") : quality.errorCode;
+    return false;
+  }
   const auto vertex = std::find_if(header.elements.cbegin(), header.elements.cend(),
       [](const auto &e) { return e.name == QStringLiteral("vertex"); });
   const auto invalid = [&] {
@@ -2943,6 +3010,8 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
   }
   PlyHeader header;
   if (!parseHeader(source, header, error)) return result;
+  const auto quality = qualityForHeader(options.sourcePath, header);
+  if (!quality.errorCode.isEmpty()) { error = quality.errorCode; return result; }
   // Embed only metadata that depends on a sidecar. Geometry/attributes still
   // stream unchanged for source-coordinate export; no auxiliary file is copied.
   struct ProjectionSnapshot {
@@ -3064,7 +3133,13 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
     texture = QDir(assets.path()).dirName() + QLatin1Char('/') + name;
   }
   QSaveFile destination(options.destinationPath);
-  if (!destination.open(QIODevice::WriteOnly)) {
+  std::unique_ptr<QualityMipExportTransaction> qualityExport;
+  QIODevice *writer = &destination;
+  if (quality.enabled) {
+    qualityExport = std::make_unique<QualityMipExportTransaction>(quality, options.destinationPath);
+    if (!qualityExport->open(error)) return result;
+    writer = &qualityExport->device();
+  } else if (!destination.open(QIODevice::WriteOnly)) {
     error = QCoreApplication::translate("Workbench", "Unable to create model file: %1").arg(destination.errorString());
     return result;
   }
@@ -3077,7 +3152,7 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
       return false;
     }
     headerBytes += line.size();
-    return writeBytes(destination, line, error);
+    return writeBytes(*writer, line, error);
   };
   const QRegularExpression unitDeclaration(QStringLiteral(
       R"(((?:^|\b)(?:coordinate[_ ]?unit|units?)\s*[:=]?\s*)(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)\b)"),
@@ -3087,6 +3162,7 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
       QRegularExpression::CaseInsensitiveOption);
   for (qsizetype i = 0; i < header.rawLines.size(); ++i) {
     QByteArray line = header.rawLines[i];
+    if (quality.enabled && line.trimmed().startsWith("comment GSW_QUALITY_REQUIRES_SIDECAR ")) continue;
     const QByteArray key = line.trimmed().toLower();
     if (key.startsWith("comment ") || key.startsWith("obj_info ")) {
       QString metadata = QString::fromUtf8(line);
@@ -3099,6 +3175,7 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
       wroteUnit |= unitDeclaration.match(metadata).hasMatch();
       wroteCrs |= crsDeclaration.match(metadata).hasMatch();
     } else if (key == "end_header") {
+      if (quality.enabled && !writeHeader("comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1\n")) return result;
       if (!wroteUnit && outputMetadata.unitDeclared && (options.applyTransform || sourceProjection.readable))
         if (!writeHeader("comment units " + sceneLengthUnitSymbol(outputMetadata.unit).toUtf8() + '\n')) return result;
       if (!options.applyTransform && !wroteCrs && sourceProjection.readable && !outputMetadata.coordinateReferenceSystem.isEmpty())
@@ -3160,7 +3237,7 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
         }
         if (header.format == PlyFormat::Ascii) raw = tokens.join(' ') + '\n';
       }
-      if (!writeBytes(destination, raw, error)) return result;
+      if (!writeBytes(*writer, raw, error)) return result;
     }
   }
   while (!source.atEnd()) {
@@ -3168,7 +3245,7 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
       result.cancelled = true; return result;
     }
     const QByteArray trailing = source.read(1024 * 1024);
-    if ((trailing.isEmpty() && source.error() != QFileDevice::NoError) || !writeBytes(destination, trailing, error)) return result;
+    if ((trailing.isEmpty() && source.error() != QFileDevice::NoError) || !writeBytes(*writer, trailing, error)) return result;
   }
   if (options.progress && options.progress(99)) { result.cancelled = true; return result; }
   const QFileInfo sourceAfter(options.sourcePath);
@@ -3178,7 +3255,12 @@ ModelExportResult PlyPointCloudLoader::exportSourcePly(const ModelExportOptions 
     return result;
   }
   if (!projectionCompatible()) return result;
-  if (!destination.commit()) error = QCoreApplication::translate("Workbench", "Unable to finalize model file: %1").arg(destination.errorString());
+  if (qualityExport) {
+    const auto current = qualityForHeader(options.sourcePath, header);
+    if (!current.errorCode.isEmpty() || current.modelSha256 != quality.modelSha256 || current.metadata != quality.metadata)
+      error = QStringLiteral("quality_mip_export_source_changed");
+    else result.success = qualityExport->commit(error);
+  } else if (!destination.commit()) error = QCoreApplication::translate("Workbench", "Unable to finalize model file: %1").arg(destination.errorString());
   else { result.success = true; if (!texture.isEmpty()) assets.setAutoRemove(false); }
   return result;
 }

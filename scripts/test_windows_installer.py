@@ -14,7 +14,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import prepare_windows_installer as installer
-from verify_native_backend import BACKEND_FILES
+from verify_native_backend import BACKEND_FILES, QUALITY_STAGE_FILES
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,7 +56,7 @@ def create_fixture_payload(package, *, version="0.3.1-native-preview", installer
     """
     package = Path(package)
     package.mkdir(parents=True, exist_ok=False)
-    for relative in set(installer.REQUIRED) | set(BACKEND_FILES):
+    for relative in set(installer.REQUIRED) | set(BACKEND_FILES) | set(QUALITY_STAGE_FILES):
         path = package / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"# GPL-3.0-or-later fixture, never execute\n" if path.suffix == ".py"
@@ -77,8 +77,14 @@ def create_fixture_payload(package, *, version="0.3.1-native-preview", installer
         build["channel"] = "installer-fixture"
     write_json(package / "build_manifest.json", build)
     write_json(package / "source/native/build_manifest.json", build)
-    write_json(package / "backend_manifest.json", {"runtime": "External Python/Conda environment required",
-                                                    "purpose": "Synthetic installer boundary fixture only"})
+    write_json(package / "native/i18n/catalog.json", {"fixture_only": {
+        "zh_CN": "仅用于边界测试", "en_US": "Boundary test only", "ja_JP": "境界テスト専用"}})
+    write_json(package / "docs/quality_upgrade/benchmark_protocol.json", {"schema": "synthetic_installer_fixture_never_execute"})
+    backend_files = sorted(set(BACKEND_FILES) | set(QUALITY_STAGE_FILES))
+    write_json(package / "backend_manifest.json", {"schemaVersion": 2,
+        "runtime": "External Python/Conda environment required", "purpose": "Synthetic installer boundary fixture only",
+        "components": backend_files, "files": [{"path": name, "bytes": (package / name).stat().st_size,
+            "sha256": file_hash(package / name)} for name in backend_files]})
     write_fixture_source_manifest(package)
     return build
 

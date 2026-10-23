@@ -1,0 +1,40 @@
+{
+  "schema": "gsw.quality_rasterizer_provenance/1",
+  "derived_from": "gaussian-splatting/submodules/diff-gaussian-rasterization in GSW base 161b5581d55ea0e501c903074ccbd381c1707927",
+  "upstream": "https://github.com/graphdeco-inria/diff-gaussian-rasterization",
+  "license": "LicenseRef-Graphdeco-Gaussian-Splatting",
+  "license_file": "src/LICENSE.md",
+  "license_sha256_text_lf": "cd5c95b3cfff3acc1bd412420c770f88809331c3db6872df11a970147aa8e81f",
+  "restriction": "Noncommercial research/evaluation; no GPL, MIT or Apache regrant is made for the derived kernel or wrapper.",
+  "changes": [
+    "Independent package name and quality ABI marker 1; original full-pinhole covariance marker remains 1",
+    "Optional per-pixel-before-reduction absolute NDC screen gradient diagnostic; signed optimizer gradient is separate",
+    "Optional accepted alpha/transmittance contribution-pixel count",
+    "Optional coverage-alpha output and its backward derivative",
+    "Separate D-only build/proof and opt-in synthetic numerical verifier; no stock path edits"
+  ],
+  "method_references_not_wholesale_imports": [
+    "https://github.com/TY424/AbsGS/tree/87d7a5aac21c0b237a6af9e715e3a0c7df4902d3",
+    "https://github.com/zhengzhang01/Pixel-GS/tree/05c9d557aa3749bb1ff05e2627943afdd9c18ffd"
+  ],
+  "original_text_lf_sha256": {
+    "conv.cu": "e9e662554bcae5a66a88191d35b21bbc5b6b08e69c63ef9973db0e35142fd644",
+    "ext.cpp": "021797db24e708b1e5b425a9c134ca7da2958e87b9613e3c10ef5de26a394611",
+    "LICENSE.md": "cd5c95b3cfff3acc1bd412420c770f88809331c3db6872df11a970147aa8e81f",
+    "rasterize_points.cu": "9a4e7ae1162b6c568da4e595d334043d89d0fb1b57bb9c82fab19e9032743c12",
+    "rasterize_points.h": "b5c7a12a502844f0314e06fa71fd5c8918ea2a7be286ba90c94ed7509fdcc778",
+    "cuda_rasterizer/adam.cu": "2db0674b2e438e545f8fc0c47c76775e9dc820eb7c1b6fd3253076e5609d8851",
+    "cuda_rasterizer/adam.h": "753b2e8acbf92258a8ed39ffbade395108dce55e10af20470cd59d588ebff670",
+    "cuda_rasterizer/auxiliary.h": "96bc161986ba7730378c3fa04b49b33ae37a88f01a837e8e4d678eff40a67e2c",
+    "cuda_rasterizer/backward.cu": "90d872c04efef86469b11ffcb5fa8e4cfdfa556b74a6cbe486ea2f2c476fbd53",
+    "cuda_rasterizer/backward.h": "aaaa6128ab12e03559940a5f3891e5bae662550fbe891f290110c77698aef387",
+    "cuda_rasterizer/config.h": "9d3753e740bd9cdb5af6fbe6b5e2c6bbb2975acc60b8e0cc14b27ebfc5c79830",
+    "cuda_rasterizer/forward.cu": "4818a043931ed873e35e54fd2025b3aa2300e424d16fa8b4cbf6c3513090b8cd",
+    "cuda_rasterizer/forward.h": "58dfd720efba0d94d5ae7f0a1de0c87bd942dcb91a9b91549862c87e87fcc507",
+    "cuda_rasterizer/pinhole_bounds.h": "85ae7d11c69d1de852a8e49593a54f53d0c082bf8a98ed3c01029faad66f21f0",
+    "cuda_rasterizer/rasterizer_impl.cu": "5c897be73dbfa387e6edca836cc9abb2a47ee62c1b6df0628ff0fd4c6157bcba",
+    "cuda_rasterizer/rasterizer_impl.h": "44c18fb4628677613af20ca4819bde1e0c10196276c57d34d94ee803d071979d",
+    "cuda_rasterizer/rasterizer.h": "9d82fc9780c709874ec8e938bb2d0a63fbcb62265f8e2e6b4eb9c0c2d5c24c06",
+    "diff_gaussian_rasterization/__init__.py": "4a686b40179981a9678df89cf81cbe026978ba67d0560032e35a202a362aa152"
+  }
+}

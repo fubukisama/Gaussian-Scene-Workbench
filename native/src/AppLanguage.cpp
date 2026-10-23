@@ -118,6 +118,26 @@ bool AppLanguage::apply(const QString &language, const bool persist) {
   return true;
 }
 
+QString AppLanguage::diagnosticText(const QString &message) {
+  const QString code = message.trimmed();
+  const auto explain = [&](const QString &text) {
+    return text + QLatin1Char('\n') + message;
+  };
+  if (code.startsWith(QStringLiteral("quality_mip_raw_requires_fusion")))
+    return explain(QCoreApplication::translate("Workbench", "这是未融合的 Mip 原始模型；请打开对应的融合显示模型。"));
+  if (code.startsWith(QStringLiteral("quality_mip_export_format_unsupported")))
+    return explain(QCoreApplication::translate("Workbench", "此格式无法保留 Mip 过滤信息；请导出为带质量信息的新 PLY 文件。"));
+  if (code.startsWith(QStringLiteral("quality_mip_export_requires_fresh_destination")))
+    return explain(QCoreApplication::translate("Workbench", "Mip 导出需要新的文件位置；不会覆盖已有模型或质量信息。"));
+  if (code.startsWith(QStringLiteral("quality_mip_")))
+    return explain(QCoreApplication::translate("Workbench", "Mip 模型或过滤信息未通过验证，已停止操作以避免错误显示；原文件保持不变。"));
+  if (code.startsWith(QStringLiteral("quality_mcmc_capacity_storage_adapter_required")))
+    return explain(QCoreApplication::translate("Workbench", "MCMC 与当前容量缓存的组合尚未适配；不会自动关闭缓存或改变执行选项。"));
+  if (code.startsWith(QStringLiteral("quality_")) || code.startsWith(QStringLiteral("supervision_")))
+    return explain(QCoreApplication::translate("Workbench", "质量计划或监督输入未通过验证；请检查方法兼容性、相机绑定和输入文件，原数据保持不变。"));
+  return message;
+}
+
 bool AppLanguage::save(const QString &language) {
   if (!supported().contains(language)) return false;
   QSettings settings;

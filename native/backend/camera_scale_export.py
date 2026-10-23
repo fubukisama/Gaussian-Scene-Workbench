@@ -405,6 +405,131 @@ def _json_read(path):
                          parse_constant=lambda value: _fail("camera_scale_export_nonfinite_metadata", value))
 
 
+def _quality_header(source):
+    """Read only the bounded PLY header; never interpret training filter data."""
+    markers, properties, element, faces, total = [], [], None, False, 0
+    with source.open("rb") as stream:
+        while True:
+            line = stream.readline(1024 * 1024 + 1)
+            total += len(line)
+            if not line or total > 1024 * 1024:
+                _fail("quality_mip_header_state_invalid")
+            tokens = line.strip().split()
+            if tokens[:1] == [b"element"] and len(tokens) == 3:
+                element = tokens[1]
+                faces |= element == b"face" and tokens[2] != b"0"
+            elif tokens[:1] == [b"property"] and element == b"vertex":
+                properties.append(tokens[-1])
+            if b"GSW_QUALITY_REQUIRES_SIDECAR" in line:
+                markers.append(line.strip())
+            if tokens == [b"end_header"]:
+                break
+    allowed = (b"comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1",
+               b"comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_raw_v1")
+    if len(markers) > 1 or any(value not in allowed for value in markers):
+        _fail("quality_mip_header_state_invalid")
+    raw_attributes = any(name in properties for name in
+        (b"filter_3d", b"filter_3d_0", b"filter_width", b"filter_width_0"))
+    return markers[0] if markers else None, properties, faces, raw_attributes
+
+
+def _quality_context(source, digest, coordinate_record):
+    """Validate Full Mip fused identity. Widths are provenance, not reapplied."""
+    path = source.with_suffix(".quality.json")
+    _no_links(path)
+    marker, names, faces, raw_attributes = _quality_header(source)
+    raw_marker = marker == b"comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_raw_v1"
+    reference = coordinate_record.get("quality_reference")
+    if not path.exists():
+        if raw_marker or raw_attributes:
+            _fail("quality_mip_raw_requires_fusion")
+        if marker is not None or reference is not None:
+            _fail("quality_mip_sidecar_required")
+        return None
+    if not path.is_file() or path.stat().st_size > 1024 * 1024:
+        _fail("quality_mip_sidecar_invalid")
+    quality_hash = _hash(path)
+    record = _json_read(path)
+    hash_string = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    if (type(record) is not dict or record.get("schema") != "gsw.quality_model/1" or
+            record.get("filter") != "full_mip" or
+            any(not hash_string(record.get(key)) for key in ("raw_source_sha256", "fused_sha256", "plan_hash"))):
+        _fail("quality_mip_sidecar_invalid")
+    filter_2d = record.get("filter_2d")
+    if (type(filter_2d) is not dict or type(filter_2d.get("variance")) not in (int, float) or
+            not math.isfinite(filter_2d["variance"]) or abs(filter_2d["variance"] - .3) > 1e-12 or
+            filter_2d.get("opacity_compensation") is not True):
+        _fail("quality_mip_sidecar_invalid")
+    representation = record.get("representation")
+    expected_hash = record["raw_source_sha256"] if representation == "raw" else record["fused_sha256"]
+    if digest != expected_hash:
+        _fail("quality_mip_model_hash_mismatch")
+    if representation == "raw" or raw_marker:
+        _fail("quality_mip_raw_requires_fusion")
+    if representation != "fused" or record.get("filter_3d_applied") is not True:
+        _fail("quality_mip_filter_state_invalid")
+    if raw_attributes:
+        _fail("quality_mip_double_application_risk")
+    scales = sorted(name for name in names if re.fullmatch(rb"scale_\d+", name))
+    if (coordinate_record.get("backend", _root_contract(coordinate_record).get("backend")) != "3dgs" or
+            scales != [b"scale_0", b"scale_1", b"scale_2"] or faces or
+            any(name not in names for name in (b"opacity", b"f_dc_0", b"f_dc_1", b"f_dc_2",
+                b"rot_0", b"rot_1", b"rot_2", b"rot_3"))):
+        _fail("quality_mip_representation_unsupported")
+    if "fused_file" in record and record["fused_file"] != source.name:
+        _fail("quality_mip_model_binding_invalid")
+    for key in ("kernel_build_sha256", "source_filter_widths_sha256"):
+        if key in record and not hash_string(record[key]):
+            _fail("quality_mip_filter_state_invalid")
+    inputs = []
+    if "filter_widths" in record:
+        widths = record["filter_widths"]
+        if (type(widths) is not dict or set(widths) not in ({"path", "sha256"}, {"path", "sha256", "frame"}) or
+                "frame" in widths and widths["frame"] != "training" or
+                not isinstance(widths.get("path"), str) or not widths["path"] or
+                re.search(r"[:\\]", widths["path"]) or Path(widths["path"]).is_absolute() or
+                ".." in Path(widths["path"]).parts or not hash_string(widths.get("sha256"))):
+            _fail("quality_mip_filter_widths_invalid")
+        widths_path = source.parent / widths["path"]
+        _no_links(widths_path)
+        if not widths_path.is_file() or _hash(widths_path) != widths["sha256"]:
+            _fail("quality_mip_filter_widths_invalid")
+        inputs.append((widths_path, widths["sha256"]))
+    if _hash(path) != quality_hash:
+        _fail("camera_scale_export_source_changed")
+    inputs.append((path, quality_hash))
+    if reference is not None and (type(reference) is not dict or reference !=
+            {"path": path.name, "sha256": quality_hash, "schema": "gsw.quality_model/1"}):
+        _fail("quality_mip_model_binding_invalid")
+    if reference is not None:
+        provenance = record.get("coordinate_provenance")
+        expected = {"schema": "gsw.quality_coordinate_provenance/1",
+            "source_model_sha256": coordinate_record.get("input_sha256"),
+            "input_metadata_sha256": coordinate_record.get("input_metadata_sha256"),
+            "coordinate_bundle_sha256": coordinate_record.get("bundle_sha256"),
+            "input_frame": coordinate_record.get("input_frame"), "input_unit": coordinate_record.get("input_unit"),
+            "output_frame": coordinate_record.get("output_frame"), "output_unit": coordinate_record.get("output_unit"),
+            "applied_transform": coordinate_record.get("applied_transform"),
+            "deleted_vertices": coordinate_record.get("deleted_vertices"),
+            "retained_vertices": coordinate_record.get("vertex_count")}
+        if (type(provenance) is not dict or any(provenance.get(key) != value for key, value in expected.items()) or
+                not hash_string(provenance.get("source_quality_sha256")) or
+                record.get("derived_from_fused_sha256") != expected["source_model_sha256"]):
+            _fail("quality_mip_model_binding_invalid")
+    return dict(record=record, path=path, sha256=quality_hash, inputs=inputs)
+
+
+def _quality_sources_unchanged(source, quality):
+    if quality is None:
+        if source.with_suffix(".quality.json").exists():
+            _fail("camera_scale_export_source_changed")
+        return
+    for path, expected in quality["inputs"]:
+        _no_links(path)
+        if not path.is_file() or _hash(path) != expected:
+            _fail("camera_scale_export_source_changed")
+
+
 def _assets_hash(assets):
     return hashlib.sha256(json.dumps(assets, sort_keys=True, ensure_ascii=False,
                                     separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -596,14 +721,18 @@ def inspect_coordinate_metadata(input_ply, sidecar=None):
     metadata = Path(sidecar) if sidecar else source.with_suffix(".camera-scale.json")
     record, digest, metadata_digest, camera_path = _read_context(source, metadata)
     root, frame, unit, transform = _context(record)
+    quality = _quality_context(source, digest, record)
     known = root["scale"].get("status") != "arbitrary" and root["scale"].get("meters_per_unit") is not None
-    return {"schema": "gsw.coordinate_metadata/2", "current_frame": frame, "current_unit": unit,
+    result = {"schema": "gsw.coordinate_metadata/2", "current_frame": frame, "current_unit": unit,
             "scale_status": root["scale"]["status"], "scale_evidence": copy.deepcopy(root["scale"].get("evidence", [])),
             "input_data_identity": root["input_data_identity"], "metric_available": known,
             "metric_reason": "" if known else "camera_scale_export_unknown_metric_scale",
             "training_contract": copy.deepcopy(root), "frame_to_canonical": dict(transform, applied=False),
             "model_sha256": digest, "metadata_sha256": metadata_digest,
             "camera_path": str(camera_path) if camera_path else None}
+    if quality is not None:
+        result.update(quality=copy.deepcopy(quality["record"]), quality_sha256=quality["sha256"], quality_path=str(quality["path"]))
+    return result
 
 
 def _camera_bundle(root, model_hash, frame, unit, canonical_scene_transform=None):
@@ -753,15 +882,19 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
     metadata = Path(sidecar) if sidecar else source.with_suffix(".camera-scale.json")
     output_metadata = output.with_suffix(".camera-scale.json")
     output_cameras = output.with_suffix(".cameras.json")
+    output_quality = output.with_suffix(".quality.json")
     if _same_file(source, output) or _same_file(metadata, output_metadata):
         _fail("camera_scale_export_cannot_overwrite_source")
-    if output.exists() or output_metadata.exists() or output_cameras.exists():
+    if any(path.exists() or path.is_symlink() for path in (output, output_metadata, output_cameras, output_quality)):
         _fail("camera_scale_export_requires_new_output")
     if not output.parent.is_dir() or output.parent.is_symlink() or output.is_symlink():
         _fail("camera_scale_export_invalid_output_directory")
     _no_links(output.parent)
     _check_cancel(cancelled)
     contract, source_hash, metadata_hash, input_cameras = _read_context(source, metadata)
+    quality = _quality_context(source, source_hash, contract)
+    if quality is not None and output.suffix.lower() != ".ply":
+        _fail("quality_mip_export_format_unsupported")
     input_camera_hash = _hash(input_cameras) if input_cameras else None
     root_contract, current_frame, current_unit, current_to_canonical = _context(contract)
     geometry_provenance = _geometry_provenance(contract, root_contract, source_hash, metadata_hash, current_frame, current_unit)
@@ -803,6 +936,8 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
     if representation == "mesh" and not has_faces:
         _fail("camera_scale_export_invalid_mesh_indices")
     gaussian = representation == "gaussian"
+    if quality is not None and not gaussian:
+        _fail("quality_mip_representation_unsupported")
     scale_fields = sorted((name for name in names if name.startswith("scale_") and name[6:].isdigit()),
                           key=lambda name: int(name[6:])) if gaussian else []
     if gaussian and (scale_fields not in (["scale_0", "scale_1"], ["scale_0", "scale_1", "scale_2"]) or not all(name in names for name in ("x", "y", "z", "opacity"))):
@@ -906,6 +1041,7 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
     temporary = output.with_name("." + output.name + "." + uuid.uuid4().hex + ".tmp")
     temporary_metadata = output_metadata.with_name("." + output_metadata.name + "." + uuid.uuid4().hex + ".tmp")
     temporary_cameras = output_cameras.with_name("." + output_cameras.name + "." + uuid.uuid4().hex + ".tmp")
+    temporary_quality = output_quality.with_name("." + output_quality.name + "." + uuid.uuid4().hex + ".tmp")
     published = []
     temporary_assets, assets = [], []
     owned_asset_directory = False
@@ -931,6 +1067,9 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
             assets.append({"kind": "texture_file", "path": final.relative_to(output.parent).as_posix(),
                 "sha256": asset["sha256"], "bytes": asset["bytes"], "source_reference": asset["source_reference"]})
         comments = [value for value in ply.comments if not value.lower().startswith(("units ", "unit ", "coordinate_unit "))]
+        if quality is not None:
+            comments = [value for value in comments if not value.startswith("GSW_QUALITY_REQUIRES_SIDECAR ")]
+            comments.append("GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1")
         texture_index = 0
         def rewrite_texture_comments(values):
             nonlocal texture_index
@@ -949,6 +1088,11 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
         elements = []
         for element in ply.elements:
             element_comments = rewrite_texture_comments(element.comments)
+            if quality is not None:
+                # Historical trainer markers were written before end_header,
+                # which plyfile associates with the last element. Normalize a
+                # validated source to one global marker, never duplicate it.
+                element_comments = [value for value in element_comments if not value.startswith("GSW_QUALITY_REQUIRES_SIDECAR ")]
             data = vertices if element.name == "vertex" else mesh_element.data if element.name == "face" and mesh_element is not None else element.data
             elements.append(_describe_like(data, element, element_comments))
         PlyData(elements, text=False, byte_order="<", comments=comments, obj_info=ply.obj_info).write(temporary)
@@ -996,6 +1140,24 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
         report["bundle_sha256"] = _bundle_hash(report["output_sha256"], camera_hash, root_contract["input_data_identity"], frame, unit,
             report.get("assets_sha256") if version >= 3 else None)
         report["camera_count"] = len(cameras["views"])
+        if quality is not None:
+            derived_quality = copy.deepcopy(quality["record"])
+            derived_quality.update(fused_sha256=report["output_sha256"], fused_file=output.name,
+                derived_from_fused_sha256=source_hash,
+                coordinate_provenance={"schema": "gsw.quality_coordinate_provenance/1",
+                    "source_model_sha256": source_hash, "source_quality_sha256": quality["sha256"],
+                    "input_metadata_sha256": metadata_hash, "coordinate_bundle_sha256": report["bundle_sha256"],
+                    "input_frame": current_frame, "input_unit": current_unit,
+                    "output_frame": frame, "output_unit": unit, "applied_transform": copy.deepcopy(transform),
+                    "deleted_vertices": report["deleted_vertices"], "retained_vertices": count})
+            if "filter_widths" in derived_quality:
+                derived_quality["source_filter_widths_sha256"] = derived_quality.pop("filter_widths")["sha256"]
+            with temporary_quality.open("x", encoding="utf-8") as stream:
+                json.dump(derived_quality, stream, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            report["quality_reference"] = {"path": output_quality.name, "sha256": _hash(temporary_quality),
+                "schema": "gsw.quality_model/1"}
         sidecar_record = report
         operations = copy.deepcopy(contract.get("export_operations", []))
         if not isinstance(operations, list) or len(operations) >= 1024 or any(type(item) is not dict for item in operations):
@@ -1021,6 +1183,7 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
         if _hash(source) != source_hash or _hash(metadata) != metadata_hash or input_cameras and _hash(input_cameras) != input_camera_hash:
             _fail("camera_scale_export_source_changed")
         _source_assets_unchanged(source_assets)
+        _quality_sources_unchanged(source, quality)
         # Atomic exclusive publication: no existing output can be overwritten,
         # including a file created by another writer after the initial check.
         if asset_directory is not None:
@@ -1029,6 +1192,11 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
             for temporary_asset, final in temporary_assets:
                 os.link(temporary_asset, final)
                 published.append((final, temporary_asset))
+        if quality is not None:
+            # Publish mandatory semantics first; marker prevents orphaned PLY
+            # from ever silently rendering under the legacy filter.
+            os.link(temporary_quality, output_quality)
+            published.append((output_quality, temporary_quality))
         os.link(temporary, output)
         published.append((output, temporary))
         os.link(temporary_cameras, output_cameras)
@@ -1050,7 +1218,7 @@ def _export_recorded_ply(input_ply, output_ply, mode, sidecar, cancelled, delete
                 pass
         raise
     finally:
-        for path in (temporary, temporary_metadata, temporary_cameras) + tuple(item[0] for item in temporary_assets):
+        for path in (temporary, temporary_metadata, temporary_cameras, temporary_quality) + tuple(item[0] for item in temporary_assets):
             if path.exists():
                 path.unlink()
 
@@ -1080,12 +1248,16 @@ def deliver_training_result(input_ply, output_directory, sidecar=None, cancelled
             stem = stem[:64] + "-" + hashlib.sha256(stem.encode("utf-8")).hexdigest()[:16]
         output = destination / (stem + ".metric-m.ply")
         metadata = output.with_suffix(".camera-scale.json")
-        if output.exists() or metadata.exists() or output.with_suffix(".cameras.json").exists():
-            inspect_coordinate_metadata(output)
+        if any(path.exists() or path.is_symlink() for path in
+                (output, metadata, output.with_suffix(".cameras.json"), output.with_suffix(".quality.json"))):
+            delivered_info = inspect_coordinate_metadata(output)
             report = _json_read(metadata)
             if (report.get("input_sha256") != info["model_sha256"] or
                     report.get("input_metadata_sha256") != info["metadata_sha256"] or
                     report.get("output_frame") != "canonical" or report.get("output_unit") != "m"):
+                _fail("camera_scale_export_existing_delivery_mismatch")
+            if (("quality" in info) != ("quality" in delivered_info) or "quality" in info and
+                    delivered_info["quality"].get("coordinate_provenance", {}).get("source_quality_sha256") != info["quality_sha256"]):
                 _fail("camera_scale_export_existing_delivery_mismatch")
             result["already_available"] = True
         else:
@@ -1093,6 +1265,8 @@ def deliver_training_result(input_ply, output_directory, sidecar=None, cancelled
                                              progress=progress, output_unit="m")
         result.update(export_status="ready", model_path=str(output), sidecar_path=str(metadata),
                       camera_path=str(output.parent / report["camera_reference"]["path"]), report=report)
+        if "quality_reference" in report:
+            result["quality_sidecar_path"] = str(output.parent / report["quality_reference"]["path"])
     except (OSError, ValueError, KeyError, TypeError) as error:
         result.update(reason=getattr(error, "code", "camera_scale_export_failed"), detail=str(error))
         if result["reason"] == "camera_scale_export_cancelled":

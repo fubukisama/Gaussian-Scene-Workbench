@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
   $PathPython = Get-Command python.exe, python -ErrorAction SilentlyContinue |
@@ -34,6 +35,7 @@ $DestinationRoot = (Resolve-Path -LiteralPath $DestinationRoot).Path
 $ExcludedDirectories = @(
   ".git",
   ".pytest_cache",
+  ".planning",
   "__pycache__",
   "build",
   "dist",
@@ -41,6 +43,21 @@ $ExcludedDirectories = @(
   "docs"
 )
 $ExcludedExtensions = @(".css", ".htm", ".html", ".js", ".mjs", ".cjs", ".asar", ".wasm", ".map", ".pyc", ".pyd")
+$ExcludedFileNames = @("test_source_closure.py")
+$StagedRelativePaths = [System.Collections.Generic.List[string]]::new()
+
+function Get-StagedSha256 {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  # Do not depend on a host-specific PSModulePath/Get-FileHash autoload.
+  $Algorithm = [System.Security.Cryptography.SHA256]::Create()
+  $Stream = [System.IO.File]::OpenRead($Path)
+  try {
+    return [System.BitConverter]::ToString($Algorithm.ComputeHash($Stream)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $Stream.Dispose()
+    $Algorithm.Dispose()
+  }
+}
 
 function Copy-FilteredTree {
   param(
@@ -58,12 +75,16 @@ function Copy-FilteredTree {
     if ($ExcludedExtensions -contains $_.Extension.ToLowerInvariant()) {
       return
     }
+    if ($ExcludedFileNames -contains $_.Name) {
+      return
+    }
     $Target = Join-Path $Destination $RelativePath
     $TargetDirectory = Split-Path -Parent $Target
     if (-not (Test-Path -LiteralPath $TargetDirectory)) {
       New-Item -ItemType Directory -Path $TargetDirectory -Force | Out-Null
     }
     Copy-Item -LiteralPath $_.FullName -Destination $Target -Force
+    $script:StagedRelativePaths.Add($Target.Substring($DestinationRoot.Length).TrimStart([char]92, [char]47).Replace([char]92, [char]47))
   }
 }
 
@@ -141,6 +162,14 @@ $StaticFiles = @(
   @{ Source = "scripts\install_colmap.ps1"; Destination = "scripts\install_colmap.ps1" },
   @{ Source = "scripts\sign_windows_artifacts.ps1"; Destination = "scripts\sign_windows_artifacts.ps1" }
 )
+# The verifier owns the explicit public quality dependency list; no photo or
+# local evidence directory is discovered or copied by this registry.
+$QualityFilesJson = & $PythonExecutable -I -B (Join-Path $SourceRoot 'scripts/verify_native_backend.py') --list-quality-stage-files
+if ($LASTEXITCODE -ne 0) { throw "Quality backend file registry could not be read." }
+$QualityStageFiles = ConvertFrom-Json -InputObject ($QualityFilesJson -join [Environment]::NewLine)
+foreach ($Relative in $QualityStageFiles) {
+  $StaticFiles += @{ Source = $Relative; Destination = $Relative }
+}
 foreach ($Entry in $StaticFiles) {
   $Source = Join-Path $SourceRoot $Entry.Source
   if (-not (Test-Path -LiteralPath $Source)) {
@@ -150,6 +179,7 @@ foreach ($Entry in $StaticFiles) {
   $DestinationDirectory = Split-Path -Parent $Destination
   New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
   Copy-Item -LiteralPath $Source -Destination $Destination -Force
+  $StagedRelativePaths.Add($Entry.Destination.Replace([char]92, [char]47))
 }
 
 Copy-FilteredTree `
@@ -160,85 +190,15 @@ Copy-FilteredTree `
   -Destination (Join-Path $DestinationRoot "training_kit")
 
 $Manifest = [ordered]@{
-  schemaVersion = 1
+  schemaVersion = 2
   purpose = "Native compute backend"
   runtime = "External Python/Conda environment required"
-  components = @(
-    "native/backend/atomic_file.py",
-    "native/backend/path_budget.py",
-    "native/backend/camera_dataset.py",
-    "native/backend/camera_admission.py",
-    "native/backend/scale_constraints.py",
-    "native/backend/model_scale_version.py",
-    "native/backend/trajectory_dataset.py",
-    "native/backend/training_batch_plan.py",
-    "native/backend/initialization.py",
-    "native/backend/gs_geometry.py",
-    "native/backend/geometry_evaluation.py",
-    "native/backend/reconstruction_comparison.py",
-    "native/worker/scale_constraints.py",
-    "native/worker/training_seed.py",
-    "native/worker/training_batch.py",
-    "native/worker/training_batch_connection.py",
-    "native/worker/initialization.py",
-    "native/worker/gs_geometry.py",
-    "native/worker/gs_geometry_runtime.py",
-    "native/worker/geometry_evaluation.py",
-    "native/worker/reconstruction_comparison.py",
-    "native/backend/camera_scale_export.py",
-    "native/worker/camera_import.py",
-    "native/worker/canonical_training.py",
-    "native/worker/camera_rasterizer_runtime.py",
-    "native/worker/gsw_worker.py",
-    "native/worker/import_preflight.py",
-    "native/worker/training_preflight.py",
-    "native/worker/gpu_preview_publisher.py",
-    "native/worker/training_preview.py",
-    "native/worker/training_preview_policy.py",
-    "native/worker/training_reconstruction_summary.py",
-    "native/worker/training_checkpoint.py",
-    "native/worker/training_summary.py",
-    "native/worker/training_runtime.py",
-    "native/worker/training_configuration.py",
-    "native/worker/training_failure.py",
-    "native/worker/training_job_connection.py",
-    "native/worker/training_image_pipeline.py",
-    "native/worker/training_camera_lookahead.py",
-    "native/worker/training_capacity_storage.py",
-    "native/worker/training_quality.py",
-    "native/worker/image_quality_measurement.py",
-    "native/worker/surfel_render_adapter.py",
-    "native/worker/training_resource_policy.py",
-    "native/worker/training_step_profile.py",
-    "native/worker/training_acceleration.py",
-    "native/worker/training_loss.py",
-    "native/worker/surfel_regularization.py",
-    "native/worker/training_density_control.py",
-    "native/worker/two_dgs_train.py",
-    "native/worker/generation_capabilities.py",
-    "native/worker/mesh_generation.py",
-    "native/worker/mesh_material_preview.py",
-    "native/worker/licenses/2dgs-LICENSE.md",
-    "native/backend/__init__.py",
-    "native/backend/compute.py",
-    "native/backend/reconstruction_quality.py",
-    "native/backend/video_extract.py",
-    "gaussian-splatting",
-    "training_kit",
-    "scripts/check_3dgs_env.ps1",
-    "scripts/postprocess_2dgs_mesh.py",
-    "scripts/run_sugar.py",
-    "scripts/compare_training_quality.py",
-    "scripts/measure_image_quality.py",
-    "scripts/requirements-native-3dgs.txt",
-    "scripts/requirements-native-2dgs.txt",
-    "scripts/requirements-native-sugar.txt",
-    "scripts/requirements-native-gs2mesh.txt",
-    "scripts/patches/pytorch3d-0.7.4-windows-cub.patch",
-    "scripts/patches/sugar-windows-stage-paths.patch",
-    "scripts/install_colmap.ps1",
-    "scripts/sign_windows_artifacts.ps1"
-  )
+  components = @($StaticFiles | ForEach-Object { $_.Destination.Replace([char]92, [char]47) }) + @("gaussian-splatting", "training_kit")
+  files = @($StagedRelativePaths | Sort-Object -Unique | ForEach-Object {
+    $StagedPath = Join-Path $DestinationRoot $_
+    [ordered]@{ path = $_; bytes = (Get-Item -LiteralPath $StagedPath).Length;
+      sha256 = Get-StagedSha256 -Path $StagedPath }
+  })
   forbiddenWebRuntime = @("html", "js", "css", "electron", "node")
 }
 $ManifestPath = Join-Path $DestinationRoot "backend_manifest.json"

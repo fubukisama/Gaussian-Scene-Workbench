@@ -53,5 +53,16 @@ int main(int argc, char **argv) {
         "restoration never stores an output-overwrite target");
   check(store.load(&error) == request && error.isEmpty(),
         "invalid save retains the last accepted request");
+  auto qualityRequest = request;
+  const QJsonObject qualityPlan{{QStringLiteral("version"), 1},
+      {QStringLiteral("geometry_lr_multiplier"), .5},
+      {QStringLiteral("densification"), QJsonObject{{QStringLiteral("strategy"), QStringLiteral("standard")},
+          {QStringLiteral("parameters"), QJsonObject()}}},
+      {QStringLiteral("filter"), QJsonObject{{QStringLiteral("mode"), QStringLiteral("backend_default")}}}};
+  qualityRequest.insert(QStringLiteral("qualityPlan"), qualityPlan);
+  const gsw::TrainingRequestStore qualityStore(workspace, dataset, QStringLiteral("quality-plan-dataset"));
+  check(qualityStore.save(qualityRequest, &error) && error.isEmpty() &&
+            qualityStore.load(&error) == qualityRequest,
+        "optional quality plan survives project-store reopen without normalization");
   return passed ? 0 : 1;
 }

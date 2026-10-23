@@ -204,6 +204,14 @@ def _estimate(model, backend, clone_count, split_count):
                 raise ValueError("Density statistic row counts disagree")
             statistic_bytes += size
             largest_element = max(largest_element, itemsize)
+    # Opt-in quality adapters expose their real per-row buffers. Old models
+    # have no such attribute and retain the existing estimate exactly.
+    for tensor in getattr(model, '_gsw_quality_buffers', ()):
+        shape, size, itemsize = _tensor_metadata(tensor)
+        if not shape or shape[0] != points:
+            raise ValueError('Quality statistic row counts disagree')
+        statistic_bytes += size
+        largest_element = max(largest_element, itemsize)
     divisor = max(points, 1)
     parameter_per_point = parameter_bytes // divisor
     optimizer_per_point = (moment_bytes + divisor - 1) // divisor
@@ -341,7 +349,8 @@ class GrowthAdmission:
 
 
 def admit_densification(torch, model, backend, threshold, extent, policy,
-                        emit=None, iteration=0):
+                        emit=None, iteration=0, clone_grads=None, split_grads=None,
+                        split_threshold=None):
     """Return permission only; the caller retains its existing density routine.
 
     None explicitly preserves the legacy full-state-resume execution route.
@@ -377,14 +386,22 @@ def admit_densification(torch, model, backend, threshold, extent, policy,
                 if len(grads.shape) != 2 or grads.shape[1] != 1:
                     raise ValueError("Unsupported density gradient layout")
                 grads[~torch.isfinite(grads)] = 0.
+                clone = grads if clone_grads is None else clone_grads.detach()
+                split = grads if split_grads is None else split_grads.detach()
+                split_limit = threshold if split_threshold is None else split_threshold
+                if (clone.shape != grads.shape or split.shape != grads.shape
+                        or not bool(torch.isfinite(clone).all() and torch.isfinite(split).all())
+                        or isinstance(split_limit, bool) or not isinstance(split_limit, numbers.Real)
+                        or not math.isfinite(split_limit) or split_limit < 0):
+                    raise ValueError('Invalid quality density candidates')
                 scales = model.get_scaling
                 max_scale = scales.max(dim=1).values
                 cutoff = model.percent_dense * extent
                 # The upstream clone rule uses the norm; its split rule uses
                 # the signed padded gradient. Do not silently replace either.
-                clone_count = int(((torch.norm(grads, dim=-1) >= threshold) &
+                clone_count = int(((torch.norm(clone, dim=-1) >= threshold) &
                                    (max_scale <= cutoff)).sum().item())
-                split_count = int(((grads.squeeze(-1) >= threshold) &
+                split_count = int(((split.squeeze(-1) >= split_limit) &
                                    (max_scale > cutoff)).sum().item())
                 del grads, scales, max_scale
             candidates_known = True

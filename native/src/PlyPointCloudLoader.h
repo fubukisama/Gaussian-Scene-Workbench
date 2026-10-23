@@ -4,6 +4,7 @@
 #include "PointCloudCache.h"
 #include "ResourceBudget.h"
 #include "SceneCoordinates.h"
+#include "QualityMipModelContract.h"
 
 #include <QBitArray>
 #include <QImage>
@@ -102,6 +103,7 @@ struct PointCloudData {
   QString meshTextureError;
   bool meshHasTextureCoordinates = false;
   SceneCoordinateInfo coordinates;
+  QualityMipModelContract qualityMip;
   QVector3D boundsMinimum;
   QVector3D boundsMaximum;
   qint64 sourceVertexCount = 0;

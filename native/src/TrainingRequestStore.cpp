@@ -71,11 +71,14 @@ bool validRequest(const QJsonObject &request) {
   const QSet<QString> fields{QStringLiteral("schema"), QStringLiteral("backend"),
       QStringLiteral("quality"), QStringLiteral("iterations"), QStringLiteral("resolution"),
       QStringLiteral("resolutionPolicy"), QStringLiteral("solveResolution"),
-      QStringLiteral("runtimeOptions"), QStringLiteral("contextPosePolicy")};
+      QStringLiteral("runtimeOptions"), QStringLiteral("contextPosePolicy"),
+      QStringLiteral("qualityPlan")};
   if (request.value(QStringLiteral("schema")) != QStringLiteral("gsw.training_dialog_configuration/1"))
     return false;
   for (auto it = request.begin(); it != request.end(); ++it)
     if (!fields.contains(it.key())) return false;
+  if (request.contains(QStringLiteral("qualityPlan")) &&
+      !request.value(QStringLiteral("qualityPlan")).isObject()) return false;
   return QJsonDocument(request).toJson(QJsonDocument::Compact).size() <= maximumStoreBytes / 2;
 }
 

@@ -1,5 +1,81 @@
 # Native desktop localization
 
+## Per-install runtime component environment
+
+`runtime-components.json` belongs beside an installation's `bin/` directory,
+not in global settings. The optional `gsw.runtime_components/1` object contains
+only `camera_rasterizer` and `quality_rasterizer` components. Component roots
+must be absolute local directories without links/junctions or traversal.
+`manifest_sha256` binds the fixed camera proof or quality build manifest;
+quality additionally requires `acceptance_sha256` for the fixed acceptance file.
+These hashes establish local integrity, not publisher trust or quality acceptance.
+Actual Python selectors retain all source/ABI/GPU checks unchanged.
+
+Missing configuration preserves every inherited environment entry. Explicit
+inherited component variables, including empty values, take precedence; no
+process/global variable is written. Failed resolution never applies a partial
+overlay. Before any Python launch, the shared environment factory returns the
+localized error through the existing dialog/export error path. Ordinary probes,
+workers, persistent training/batches and coordinate-export Python use the same
+binding. Language changes affect the error caption only, not the plan/runtime.
+
+| English | 简体中文 | 日本語 |
+| --- | --- | --- |
+| Python runtime unavailable | Python 运行环境不可用 | Python 実行環境を利用できません |
+| Runtime component configuration | 运行组件配置 | 実行コンポーネントの設定 |
+
+中文：绑定仅作用于本安装启动的 Python 子进程，不覆盖旧组件、全局环境或
+暂停工程；配置错误会在启动前返回，不会静默回退。
+
+日本語：この設定は本インストールから起動する Python 子プロセスのみに
+適用します。旧コンポーネント、グローバル環境、一時停止中のプロジェクトは
+変更しません。設定エラーは起動前に返し、暗黙に切り替えません。
+
+## Experimental training quality plans
+
+The training dialog keeps the experimental plan disabled by default. An empty
+plan is omitted from the version-one saved request and worker configuration,
+preserving legacy behavior and sampling RNG policy. The explicit checkbox,
+geometry learning-rate multiplier, densification and sampling-filter controls
+are separate from quality presets, camera policy, resolution and resource guard.
+The interface never claims quality acceptance or manufactures a plan hash.
+Python remains the sole execution resolver for actual input/kernel capability.
+Positive multipliers that the native numeric editor cannot represent exactly
+are rejected before restoration; they are never silently clamped or rounded.
+
+Quality-plan JSON import is read-only, limited to a 256 KiB object and rejects
+unknown structures and unverified combinations. Imported method parameters,
+supervision declarations and paths remain verbatim; no files are probed and no
+worker starts. Mask registration scale/evidence fields must be paired. Changing
+only the multiplier preserves method parameters. Only an explicit strategy or
+filter change resets that section's method parameters. MCMC remains visible but
+disabled pending GPU/trainer acceptance. Unsupported 3DGS choices do not become
+Standard when switching to 2DGS; the request is retained and starting is blocked.
+All captions, tooltips and validation summaries change language immediately,
+without altering the plan, input identities, runtime options or worker state.
+
+| English | 简体中文 | 日本語 |
+| --- | --- | --- |
+| Experimental quality plan | 实验性质量计划 | 実験的な品質計画 |
+| Geometry learning-rate multiplier | 几何学习率倍率 | 幾何学習率の倍率 |
+| Densification strategy | 增密策略 | 高密度化の戦略 |
+| Absolute gradient | 绝对梯度 | 絶対勾配 |
+| Contributing pixel coverage | 贡献像素覆盖 | 寄与画素の被覆 |
+| Sampling filter | 采样过滤 | サンプリングフィルター |
+| Full Mip-Splatting | 完整 Mip-Splatting | 完全な Mip-Splatting |
+
+中文：质量计划默认关闭且不生成默认字段；启用只提交实验性请求，不承诺质量
+改善。导入只读取 JSON，保留方法参数、监督和路径；只改倍率不丢参数，明确
+切换策略或过滤才重置对应部分。未验证组合和后端不兼容会阻止开始，MCMC
+尚不可选。语言即时切换仅更新文字，不改计划或任务。
+
+日本語：品質計画は既定で無効で、既定フィールドも生成しません。有効化は
+実験的な要求を送るだけで、品質向上を保証しません。JSON の取り込みは手法
+パラメーター・教師信号・パスを保持し、倍率だけの変更では失いません。
+戦略またはフィルターを明示的に変更したときのみ該当部分を初期化します。
+未検証の組合せと非対応バックエンドでは開始を拒否し、MCMC は未選択と
+します。言語変更は表示のみを更新し、計画やタスクは変更しません。
+
 ## Known-camera initialization terminology
 
 | English | 简体中文 | 日本語 |

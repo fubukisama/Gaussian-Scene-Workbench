@@ -11,6 +11,7 @@ class QComboBox;
 class QLineEdit;
 class QLabel;
 class QSpinBox;
+class QDoubleSpinBox;
 class QPushButton;
 
 namespace gsw {
@@ -45,6 +46,7 @@ struct TrainingConfiguration {
   QString cameraDatasetIdentity;
   QString resolutionPolicy = QStringLiteral("manual");
   QJsonObject runtimeOptions;
+  QJsonObject qualityPlan;
 };
 
 class TrainingDialog final : public QDialog {
@@ -61,6 +63,9 @@ public:
   [[nodiscard]] QJsonObject configurationDocument() const;
   [[nodiscard]] bool setConfigurationDocument(const QJsonObject &document,
       bool preserveCurrentInputPolicy = false);
+  [[nodiscard]] bool setQualityPlanDocument(const QJsonObject &plan);
+  [[nodiscard]] bool importQualityPlanFile(const QString &path);
+  [[nodiscard]] QString qualityPlanValidationText() const;
   void setReconstructionProbe(const QString &python, const QString &backendRoot,
                               const QProcessEnvironment &environment);
   [[nodiscard]] bool effectiveRunColmap() const;
@@ -92,6 +97,10 @@ private:
   void refreshCameraPolicy();
   void refreshResolutionPolicy();
   void openInitialization();
+  void refreshQualityPlan();
+  void updateQualityPlanFromControls(bool strategyChanged = false, bool filterChanged = false);
+  void chooseQualityPlan();
+  [[nodiscard]] bool qualityPlanReady() const;
 
   QString mDatasetPath;
   QComboBox *mBackend = nullptr;
@@ -146,6 +155,15 @@ private:
   QString mInitializationWorkspace;
   QPushButton *mInitializationButton = nullptr;
   QLabel *mDatasetValue = nullptr;
+  QJsonObject mQualityPlan;
+  QCheckBox *mQualityPlanEnabled = nullptr;
+  QDoubleSpinBox *mGeometryLrMultiplier = nullptr;
+  QComboBox *mDensificationStrategy = nullptr;
+  QComboBox *mSamplingFilter = nullptr;
+  QPushButton *mImportQualityPlan = nullptr;
+  QLabel *mQualityPlanStatus = nullptr;
+  QString mQualityPlanImportError;
+  bool mUpdatingQualityPlan = false;
 };
 
 } // namespace gsw

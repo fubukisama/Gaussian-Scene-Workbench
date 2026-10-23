@@ -20,6 +20,9 @@ public:
   static bool save(const QString &language);
   static bool apply(const QString &language, bool persist = true);
   static AppLanguage *instance();
+  // Machine identifiers remain stable; human error explanations follow the
+  // current language at the presentation boundary, never in model data.
+  static QString diagnosticText(const QString &message);
   static void onChanged(QObject *context, const std::function<void()> &callback);
   static void bind(QObject *object, const char *property, const char *source);
   static void bindComboItem(QComboBox *combo, int index, const char *source);

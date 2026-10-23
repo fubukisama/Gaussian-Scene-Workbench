@@ -2,6 +2,7 @@
 #include "PlyPointCloudLoader.h"
 #include "CameraTrajectory.h"
 #include "SpzIO.h"
+#include "RuntimeComponentEnvironment.h"
 
 #include <QBuffer>
 #include <QCache>
@@ -360,6 +361,13 @@ ModelExportResult exportRecordedCameraCoordinates(const ModelExportOptions &o) {
   }
   QProcess process;
   auto environment = QProcessEnvironment::systemEnvironment();
+  const auto componentEnvironment = resolveRuntimeComponents(
+      runtimeComponentInstallationRoot(QCoreApplication::applicationDirPath()), environment);
+  if (!componentEnvironment.ready()) {
+    result.error = runtimeComponentEnvironmentError(componentEnvironment);
+    return result;
+  }
+  environment = componentEnvironment.environment;
   environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
   environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
   environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));

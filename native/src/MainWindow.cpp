@@ -8,6 +8,7 @@
 
 #include "AppTheme.h"
 #include "BackendLocator.h"
+#include "RuntimeComponentEnvironment.h"
 #include "ColmapSupport.h"
 #include "DatasetImportDialog.h"
 #include "DatasetImportPlan.h"
@@ -665,7 +666,7 @@ bool twoDgsAvailable(const QString &repositoryRoot) {
   return false;
 }
 
-QProcessEnvironment pythonProcessEnvironment(const QString &pythonPath) {
+RuntimeComponentEnvironmentResult pythonProcessEnvironment(const QString &pythonPath) {
   QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
   const QString prefix = QFileInfo(pythonPath).absolutePath();
   const QStringList pathParts = {
@@ -684,7 +685,7 @@ QProcessEnvironment pythonProcessEnvironment(const QString &pythonPath) {
   environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
   environment.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"),
                      QStringLiteral("1"));
-  return environment;
+  return resolveRuntimeComponents(runtimeComponentInstallationRoot(QCoreApplication::applicationDirPath()), environment);
 }
 
 bool hasImportRecoveryArtifacts(const QString &datasetRoot) {
@@ -5157,7 +5158,12 @@ bool MainWindow::recoverDatasetImport(const PendingDatasetImport &pending,
   QProcess recovery;
   recovery.setProcessChannelMode(QProcess::MergedChannels);
   recovery.setWorkingDirectory(pending.workingDirectory);
-  recovery.setProcessEnvironment(pythonProcessEnvironment(pending.python));
+  const auto pythonEnvironment = pythonProcessEnvironment(pending.python);
+  if (!pythonEnvironment.ready()) {
+    if (errorMessage) *errorMessage = runtimeComponentEnvironmentError(pythonEnvironment);
+    return false;
+  }
+  recovery.setProcessEnvironment(pythonEnvironment.environment);
   recovery.start(pending.python,
                  {pending.workerScript, QStringLiteral("--task"),
                   pending.recoveryTask, QStringLiteral("--config"),
@@ -5507,10 +5513,15 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths, const QJso
     return;
   }
 
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   statusBar()->showMessage(QCoreApplication::translate("Workbench", "正在预检媒体导入环境…"));
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const ImportEnvironmentProbeResult preflight = ImportEnvironmentProbe::run(
-      python, root, plan.videoCount() > 0, pythonProcessEnvironment(python));
+      python, root, plan.videoCount() > 0, pythonEnvironment.environment);
   QApplication::restoreOverrideCursor();
   statusBar()->clearMessage();
   if (!preflight.ready) {
@@ -5594,7 +5605,7 @@ void MainWindow::importDatasetSources(const QStringList &sourcePaths, const QJso
       taskName, python,
       {workerScript, QStringLiteral("--task"), QStringLiteral("import"),
        QStringLiteral("--config"), configurationPath},
-      root, pythonProcessEnvironment(python), false);
+      root, pythonEnvironment.environment, false);
   if (!started) {
     mPendingDatasetImport.reset();
     QFile::remove(configurationPath);
@@ -6075,7 +6086,12 @@ void MainWindow::startReconstruction() {
     return;
   }
 
-  QProcessEnvironment environment = pythonProcessEnvironment(python);
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
+  QProcessEnvironment environment = pythonEnvironment.environment;
   environment.insert(QStringLiteral("COLMAP_PATH"), config.colmapExecutable);
   environment.insert(QStringLiteral("COLMAP_EXE"), config.colmapExecutable);
   const QString taskName =
@@ -6143,8 +6159,13 @@ void MainWindow::showQualityComparison() {
     showError(QCoreApplication::translate("Workbench", "质量对照工具不可用"), qualityStorageError);
     return;
   }
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   mQualityComparisonDialog = new QualityComparisonDialog(
-      python, root, qualityStorage, pythonProcessEnvironment(python), this);
+      python, root, qualityStorage, pythonEnvironment.environment, this);
   mQualityComparisonDialog->setAttribute(Qt::WA_DeleteOnClose);
   mQualityComparisonDialog->show(); // Only the explicit workflow-menu action opens it.
 }
@@ -6177,8 +6198,13 @@ void MainWindow::showScaleConstraints(const bool modelSource) {
       {QStringLiteral("path"), modelSource ? mWorkspace.scenePath() : mWorkspace.cameraDatasetPath()},
       {QStringLiteral("frame"), QStringLiteral("source")},
       {QStringLiteral("identity"), modelSource ? QString() : sourceIdentity}};
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   mScaleConstraintsDialog = new ScaleConstraintsDialog(python, root, mWorkspace.rootPath(),
-      descriptor, pythonProcessEnvironment(python), this);
+      descriptor, pythonEnvironment.environment, this);
   mScaleConstraintsDialog->setAttribute(Qt::WA_DeleteOnClose);
   connect(mScaleConstraintsDialog, &ScaleConstraintsDialog::versionCreated, this,
       [this, projectRoot, sourceIdentity, sourceSceneId, sourceModelPath](
@@ -6292,10 +6318,15 @@ void MainWindow::showInitialization() {
   }
   const QString projectRoot = comparablePath(mWorkspace.rootPath());
   const QString sourceIdentity = mWorkspace.cameraDatasetIdentity();
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   mInitializationDialog = new InitializationDialog(python, root, mWorkspace.rootPath(),
       mWorkspace.cameraDatasetPath(), sourceIdentity,
       mWorkspace.cameraDatasetInfo().value(QStringLiteral("initialization")).toObject(),
-      pythonProcessEnvironment(python), this);
+      pythonEnvironment.environment, this);
   mInitializationDialog->setAttribute(Qt::WA_DeleteOnClose);
   connect(mInitializationDialog, &InitializationDialog::versionCreated, this,
       [this, projectRoot, sourceIdentity](const QString &path, const QJsonObject &summary) {
@@ -6319,8 +6350,13 @@ void MainWindow::showTrainingBatch() {
       {QStringLiteral("path"), mWorkspace.cameraDatasetPath()},
       {QStringLiteral("data_identity"), mWorkspace.cameraDatasetIdentity()},
       {QStringLiteral("display_name"), QFileInfo(mWorkspace.datasetPath()).fileName()}};
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   mTrainingBatchDialog = new TrainingBatchDialog(python, root, mWorkspace.rootPath(),
-      descriptor, pythonProcessEnvironment(python), this);
+      descriptor, pythonEnvironment.environment, this);
   mTrainingBatchDialog->setAttribute(Qt::WA_DeleteOnClose);
   connect(mTrainingBatchDialog, &TrainingBatchDialog::planningFinished, this, [this, projectRoot] {
     if (!mTrainingBatchDialog || comparablePath(mWorkspace.rootPath()) != projectRoot ||
@@ -6372,6 +6408,11 @@ void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) 
         error.isEmpty() ? backendUnavailableMessage(root, helper, python) : error);
     return;
   }
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   const QString name = QCoreApplication::translate("Workbench", "批量训练正在运行：%1")
       .arg(QFileInfo(QFileInfo(planPath).absolutePath()).fileName());
   mPendingTrainingBatch = PendingTrainingBatch{name, comparablePath(mWorkspace.rootPath()),
@@ -6381,7 +6422,7 @@ void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) 
       QStringLiteral("coordinator-%1.log").arg(QUuid::createUuid().toString(QUuid::Id128)));
   if (!mProcessSupervisor.startPersistentBatch(name, python,
       {helper, QStringLiteral("--operation"), resume ? QStringLiteral("resume") : QStringLiteral("run"),
-          QStringLiteral("--plan"), planPath}, root, pythonProcessEnvironment(python),logPath,planPath)) {
+          QStringLiteral("--plan"), planPath}, root, pythonEnvironment.environment,logPath,planPath)) {
     mPendingTrainingBatch.reset();
   }
 }
@@ -6389,7 +6430,12 @@ void MainWindow::startTrainingBatch(const QString &planPath, const bool resume) 
 void MainWindow::observeTrainingBatch(const QString &planPath){
   const QString root=BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(),qEnvironmentVariable("GSW_BACKEND_ROOT"));
   const QString python=findTrainingPython(root);if(root.isEmpty()||python.isEmpty())return;
-  ExistingTrainingDialog dialog(python,root,pythonProcessEnvironment(python),mWorkspace.rootPath(),this);
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
+  ExistingTrainingDialog dialog(python,root,pythonEnvironment.environment,mWorkspace.rootPath(),this);
   QString resumePlan;connect(&dialog,&ExistingTrainingDialog::resumeBatchRequested,&dialog,[&](const QString &path){resumePlan=path;dialog.accept();});
   if(!dialog.connectBatch(planPath))return;dialog.exec();
   if(!resumePlan.isEmpty())startTrainingBatch(resumePlan,true);
@@ -6404,7 +6450,12 @@ void MainWindow::showExistingTraining() {
               backendUnavailableMessage(root, QDir(root).filePath(QStringLiteral("native/worker/training_job_connection.py")), python));
     return;
   }
-  ExistingTrainingDialog dialog(python, root, pythonProcessEnvironment(python),
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
+  ExistingTrainingDialog dialog(python, root, pythonEnvironment.environment,
       QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/jobs/training")), this);
   QString resumeConfiguration, resumeOutput;
   connect(&dialog, &ExistingTrainingDialog::resumeRequested, &dialog,
@@ -6685,6 +6736,11 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
     showError(QCoreApplication::translate("Workbench", "训练后端不可用"), backendUnavailableMessage(root, worker, python));
     return;
   }
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const auto archivedTrainingOptions = config.value(QStringLiteral("trainOptions")).toObject();
   const TrainingCameraProbeOptions resumeCameraOptions{
@@ -6694,7 +6750,7 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
       config.value(QStringLiteral("resolutionPolicy")).toString(QStringLiteral("manual")),
       archivedTrainingOptions.value(QStringLiteral("resolution")).toInt(2)};
   const auto preflight = TrainingEnvironmentProbe::run(python, root, dataset,
-      backend, false, pythonProcessEnvironment(python), 60000, resumeCameraOptions);
+      backend, false, pythonEnvironment.environment, 60000, resumeCameraOptions);
   QApplication::restoreOverrideCursor();
   if (!preflight.ready) {
     showError(QCoreApplication::translate("Workbench", "无法继续训练"), preflight.errorMessage);
@@ -6757,7 +6813,7 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
       QStringLiteral("l-%1.log").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
   if (!mProcessSupervisor.startPersistentTraining(taskName, python,
           {worker, QStringLiteral("--config"), configPath, QStringLiteral("--resume-training")},
-          root, pythonProcessEnvironment(python), logPath,
+          root, pythonEnvironment.environment, logPath,
           config.value(QStringLiteral("jobStore")).toString())) {
     mPendingTraining.reset();
     QString rollbackError;
@@ -6799,6 +6855,11 @@ void MainWindow::startMeshGeneration() {
         QCoreApplication::translate("Workbench", "所选已知相机训练产物尚未通过此网格后端的完整内参与尺度验收。已停止，原模型和编辑保持不变，不会重新求解相机。请使用受支持的原有流程。"));
     return;
   }
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   const bool depthProduct = config.value(QStringLiteral("mode")) == QStringLiteral("gs_depth");
   if (!depthProduct && !confirmDiscardSceneEdits()) return;
   const QString run = QStringLiteral("mesh-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -6831,7 +6892,7 @@ void MainWindow::startMeshGeneration() {
   mPendingMesh->historyId = run;
   mShowGeneratedMesh = false;
   if (!mProcessSupervisor.start(name, python, {worker, QStringLiteral("--config"), configurationPath},
-                                root, pythonProcessEnvironment(python), true)) {
+                                root, pythonEnvironment.environment, true)) {
     mPendingMesh.reset();
     updateGenerationExperiment(mWorkspace.rootPath(), experiment.id, QStringLiteral("failed"));
   }
@@ -6866,6 +6927,11 @@ void MainWindow::startTraining() {
     return;
   }
 
+  const auto pythonEnvironment = pythonProcessEnvironment(python);
+  if (!pythonEnvironment.ready()) {
+    showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(pythonEnvironment));
+    return;
+  }
   const QString defaultOutputRoot =
       QDir(mWorkspace.rootPath()).filePath(QStringLiteral("output"));
   QString suggestedExperiment = mWorkspace.projectName();
@@ -6891,7 +6957,7 @@ void MainWindow::startTraining() {
     else if (contextChanged)
       appendTaskEvent(QCoreApplication::translate("Workbench", "已恢复手动训练参数；当前输入的相机策略、分辨率策略与倍率保持不变，不会自动运行 SfM。"));
   }
-  dialog.setReconstructionProbe(python, root, pythonProcessEnvironment(python));
+  dialog.setReconstructionProbe(python, root, pythonEnvironment.environment);
   dialog.setInitializationWorkspace(mWorkspace.rootPath());
   const QString initializationProjectRoot = comparablePath(mWorkspace.rootPath());
   connect(&dialog, &TrainingDialog::initializationVersionCreated, this,
@@ -6941,7 +7007,7 @@ void MainWindow::startTraining() {
   const TrainingEnvironmentProbeResult preflight =
       TrainingEnvironmentProbe::run(python, root, mWorkspace.datasetPath(),
                                     config.backend, dialog.effectiveRunColmap(),
-                                    pythonProcessEnvironment(python), 60000,
+                                    pythonEnvironment.environment, 60000,
                                     {config.posePolicy, config.cameraDatasetPath, config.cameraDatasetIdentity,
                                      config.resolutionPolicy, config.resolution});
   QApplication::restoreOverrideCursor();
@@ -7004,6 +7070,8 @@ void MainWindow::startTraining() {
   workerConfig.insert(QStringLiteral("colmapOptions"), QJsonObject());
   workerConfig.insert(QStringLiteral("trainOptions"), trainOptions);
   workerConfig.insert(QStringLiteral("runtimeOptions"), config.runtimeOptions);
+  if (!config.qualityPlan.isEmpty())
+    workerConfig.insert(QStringLiteral("qualityPlan"), config.qualityPlan);
   workerConfig.insert(QStringLiteral("reconstructionPreflight"), dialog.reconstructionSummary().report);
 
   const QString configPath = QDir(jobsRoot).filePath(
@@ -7057,7 +7125,7 @@ void MainWindow::startTraining() {
       QStringLiteral("l-%1.log").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
   const bool started = mProcessSupervisor.startPersistentTraining(
       taskName, python, {workerScript, QStringLiteral("--config"), configPath},
-      root, pythonProcessEnvironment(python), logPath, trainingJobStore);
+      root, pythonEnvironment.environment, logPath, trainingJobStore);
   if (!started) {
     mPendingTraining.reset();
     updateGenerationExperiment(mWorkspace.rootPath(), experiment.id, QStringLiteral("failed"));
@@ -7587,8 +7655,9 @@ void MainWindow::appendTaskEvent(const QString &text) {
 }
 
 void MainWindow::showError(const QString &title, const QString &message) {
-  QMessageBox::critical(this, title, message);
-  appendTaskEvent(QCoreApplication::translate("Workbench", "错误：%1").arg(message));
+  const QString display = AppLanguage::diagnosticText(message);
+  QMessageBox::critical(this, title, display);
+  appendTaskEvent(QCoreApplication::translate("Workbench", "错误：%1").arg(display));
 }
 
 QString MainWindow::findTrainingPython(const QString &repositoryRoot) const {

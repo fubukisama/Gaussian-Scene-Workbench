@@ -6,6 +6,8 @@ array; slow disks skip intermediate updates rather than queueing unbounded work.
 import os
 import time
 import uuid
+import copy
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -43,9 +45,16 @@ class TrainingPreviewPublisher:
             fields = (model.get_xyz[::stride], model._features_dc[::stride, 0, :],
                       model._opacity[::stride], scaling, model._rotation[::stride])
             rows = torch.cat(fields, dim=1).detach().to(device="cpu", dtype=torch.float32).numpy()
-        return self.publish_rows(rows, iteration, count, initial)
+            quality = copy.deepcopy(getattr(model, '_gsw_quality_display', None))
+            if quality is not None:
+                source = model._gsw_raw_preview_model
+                raw_fields = (source.get_xyz[::stride], source._features_dc[::stride, 0, :],
+                              source._opacity[::stride], source._scaling[::stride], source._rotation[::stride])
+                raw_rows = torch.cat(raw_fields, dim=1).detach().to(device='cpu', dtype=torch.float32).numpy()
+                quality['raw_source_sha256'] = hashlib.sha256(raw_rows.tobytes()).hexdigest()
+        return self.publish_rows(rows, iteration, count, initial, quality_metadata=quality)
 
-    def publish_rows(self, rows, iteration, source_count=None, initial=False):
+    def publish_rows(self, rows, iteration, source_count=None, initial=False, quality_metadata=None):
         if not self.due():
             return False
         import numpy as np
@@ -58,10 +67,14 @@ class TrainingPreviewPublisher:
         self.last_time = time.monotonic()
         self.sequence += 1
         path = self.directory / f"preview_{self.sequence:06d}.ply"
-        self.future = self.executor.submit(self._write, path, rows, int(iteration), source_count, initial)
+        if quality_metadata is None:
+            self.future = self.executor.submit(self._write, path, rows, int(iteration), source_count, initial)
+        else:
+            self.future = self.executor.submit(self._write, path, rows, int(iteration), source_count, initial,
+                                              copy.deepcopy(quality_metadata))
         return True
 
-    def _write(self, path, rows, iteration, source_count, initial):
+    def _write(self, path, rows, iteration, source_count, initial, quality_metadata=None):
         temporary = path.with_suffix(".tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,12 +85,18 @@ class TrainingPreviewPublisher:
             if getattr(rows, "shape", (len(rows), 14))[1] == 13:
                 properties = tuple(name for name in properties if name != "scale_2")
             header = "ply\nformat binary_little_endian 1.0\ncomment gsw observation preview, not a checkpoint\n"
+            if quality_metadata is not None:
+                header += 'comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1\n'
             header += f"element vertex {len(rows)}\n"
             header += "".join(f"property float {name}\n" for name in properties) + "end_header\n"
             with temporary.open("wb") as stream:
                 stream.write(header.encode("ascii"))
                 stream.write(rows.tobytes())
             os.replace(temporary, path)
+            if quality_metadata is not None:
+                from native.worker.training_checkpoint import atomic_json, file_digest
+                quality_metadata['fused_sha256'] = file_digest(path)
+                atomic_json(path.with_suffix('.quality.json'), quality_metadata)
             self.emit("[gsw-training-preview]", {
                 "iteration": iteration, "point_cloud_path": str(path.resolve()),
                 "preview_kind": "gaussian_initial" if initial else "gaussian_live",
@@ -88,6 +107,11 @@ class TrainingPreviewPublisher:
                 obsolete = self.paths.pop(0)
                 try:
                     obsolete.unlink()
+                    if quality_metadata is not None:
+                        try:
+                            obsolete.with_suffix('.quality.json').unlink()
+                        except OSError:
+                            pass
                 except OSError:
                     pass  # A viewer may still be reading it on Windows.
         except Exception as error:

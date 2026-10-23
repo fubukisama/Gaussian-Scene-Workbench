@@ -377,6 +377,7 @@ private:
     bool mSelectionBusy = false;
     bool mHasGaussianAttributes = false;
     bool mHasSurfelAttributes = false;
+    QualityMipModelContract mQualityMip;
     bool mHasMesh = false;
     bool mPreviewOnlyScene = false;
     bool mProgressiveUploadActive = false;

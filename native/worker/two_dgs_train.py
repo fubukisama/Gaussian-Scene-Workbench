@@ -70,18 +70,28 @@ def emit_gsw_event(prefix, payload):
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
-    if checkpoint:
-        raise ValueError("Native resume cannot be combined with a legacy checkpoint")
     control = os.environ.get("GSW_NATIVE_TRAINING_CONTROL")
+    if checkpoint:
+        if control:
+            from native.worker.training_quality_plan import reject_legacy_quality_checkpoint
+            reject_legacy_quality_checkpoint(json.loads(control).get("qualityPlan"), checkpoint)
+        raise ValueError("Native resume cannot be combined with a legacy checkpoint")
     if not control:
         raise RuntimeError("This entry point is for supervised native 2DGS jobs only")
-    native_runtime = NativeTrainingRuntime(json.loads(control), torch, emit_gsw_event, "2dgs")
+    from native.worker.training_checkpoint import prepare_quality_training
+    native_control = json.loads(control)
+    quality_training = prepare_quality_training(native_control, dataset, opt, "2dgs")
+    native_runtime = NativeTrainingRuntime(native_control, torch, emit_gsw_event, "2dgs")
+    if quality_training is not None:
+        emit_gsw_event("[gsw-quality-plan]", quality_training.report())
     from native.worker.training_image_pipeline import install_two_dgs_camera_adapter
     install_two_dgs_camera_adapter()
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians._gsw_training_seed = getattr(dataset, "training_seed", 0)
+    if quality_training is not None:
+        quality_training.bind_model(gaussians)
     from native.worker.canonical_training import create_canonical_scene
     scene = create_canonical_scene(dataset, gaussians, "2dgs")
     if scene is None:
@@ -89,7 +99,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             dataset.eval = True
         scene = Scene(dataset, gaussians)
     native_runtime.report_images(scene.getTrainCameras())
+    # Root binds the real quality controller at this seam before optimizer setup
+    # and full-state restore. Unsupported/unbound mechanisms fail closed.
+    if quality_training is not None:
+        from native.worker.quality_training_runtime import bind_quality_controller
+        quality_controller = bind_quality_controller(torch, gaussians, scene, pipe,
+            quality_training, native_runtime, '2dgs', emit_gsw_event)
+        quality_training.assert_ready()
+    else:
+        quality_controller = None
     gaussians.training_setup(opt)
+    if quality_controller is not None:
+        quality_controller.initialize_optimizer()
     from native.worker.canonical_training import assert_camera_optimizer_locked
     assert_camera_optimizer_locked(scene, gaussians)
 
@@ -103,7 +124,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_dist_for_log = 0.0
     ema_normal_for_log = 0.0
     started = time.monotonic()
-    native_checkpoint = TrainingCheckpoint(scene.model_path, json.loads(control))
+    native_checkpoint = TrainingCheckpoint(scene.model_path, native_control)
     # Do not resume against changed runtime implementations, even when the
     # tensors happen to have matching shapes.
     runtime_files = [source_root / name for name in (
@@ -133,6 +154,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         ema_normal_for_log = state["ema_normal"]
         del state
     render_training = native_runtime.select_renderer(opt, dataset, pipe, render, checkpoint_engine)
+    if quality_controller is not None and 'depth' in quality_controller.providers:
+        from native.worker.surfel_depth_adapter import SurfelDepthAdapter
+        render_training = SurfelDepthAdapter(render_training)
     if native_runtime.configuration['surfel_auxiliary']:
         from native.worker.surfel_render_adapter import SurfelRenderAdapter
         render_training = SurfelRenderAdapter(render_training)
@@ -168,12 +192,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Pick a random Camera
         if not viewpoint_indices:
             viewpoint_indices = list(range(len(cameras)))
-        viewpoint_cam = cameras[viewpoint_indices.pop(randint(0, len(viewpoint_indices)-1))]
+        selected_index = (quality_training.choose_index(len(viewpoint_indices)) if quality_training is not None
+                          else randint(0, len(viewpoint_indices)-1))
+        viewpoint_cam = cameras[viewpoint_indices.pop(selected_index)]
         if hasattr(scene, "audit_sample"):
             scene.audit_sample(viewpoint_cam, iteration)
 
         native_runtime.profiler.mark('transfer')
-        ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices)
+        if quality_training is None:
+            ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices)
+        else:
+            ready_image = native_runtime.image(viewpoint_cam, cameras, viewpoint_indices,
+                python_rng_state=quality_training.random_streams.image_sampler_state())
         native_runtime.profiler.mark('render')
         if native_runtime.configuration['surfel_auxiliary']:
             render_pkg = render_training(viewpoint_cam, gaussians, pipe, background,
@@ -186,8 +216,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         native_runtime.profiler.mark('loss')
         gt_image = ready_image.image
-        loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
-        native_runtime.observe_loss(iteration)
+        if quality_controller is not None and quality_controller.replaces_photometric:
+            loss, Ll1 = quality_controller.loss(viewpoint_cam, render_pkg, gt_image, None, None, opt.lambda_dssim)
+        else:
+            loss, Ll1 = photometric.compute(image, gt_image, opt.lambda_dssim)
+            native_runtime.observe_loss(iteration)
+            if quality_controller is not None:
+                loss, Ll1 = quality_controller.loss(viewpoint_cam, render_pkg, gt_image, loss, Ll1, opt.lambda_dssim)
 
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
@@ -284,6 +319,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 native_runtime.profiler.mark('checkpoint')
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+                if quality_training is not None:
+                    scene.save(iteration)
+                    scheduled_state = capture_state(torch, np, gaussians, iteration, opt.iterations, identity,
+                        camera_names, viewpoint_indices, time.monotonic() - started,
+                        ema_loss_for_log, ema_dist_for_log, backend="2dgs")
+                    scheduled_state["ema_normal"] = ema_normal_for_log
+                    scheduled_state["density_control"] = density_control.capture()
+                    native_runtime.capture(scheduled_state)
+                    scheduled_manifest = native_checkpoint.save_scheduled(torch, scheduled_state)
+                    emit_gsw_event("[gsw-training-checkpoint]", {"iteration": iteration,
+                        "state_kind": "scheduled", "completed": scheduled_manifest["completed"],
+                        "quality_plan_hash": quality_training.plan["plan_hash"]})
+                    del scheduled_state
 
             if iteration < opt.iterations and (native_checkpoint.pause_requested() or native_runtime.pause_for_resources()):
                 native_runtime.profiler.mark('checkpoint')

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.7
+  VERSION 0.3.8
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-10-22" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-23" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -68,6 +68,18 @@ if(MSVC)
 endif()
 
 add_library(gsw_resource_budget STATIC src/ResourceBudget.cpp src/ResourceBudget.h)
+add_library(gsw_runtime_components STATIC src/RuntimeComponentEnvironment.cpp src/RuntimeComponentEnvironment.h)
+target_include_directories(gsw_runtime_components PUBLIC src)
+target_link_libraries(gsw_runtime_components PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(gsw_runtime_components PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+add_library(gsw_quality_mip_contract STATIC src/QualityMipModelContract.cpp src/QualityMipModelContract.h)
+target_include_directories(gsw_quality_mip_contract PUBLIC src)
+target_link_libraries(gsw_quality_mip_contract PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(gsw_quality_mip_contract PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
 target_include_directories(gsw_resource_budget PUBLIC src)
 target_link_libraries(gsw_resource_budget PUBLIC Qt6::Core)
 if(MSVC)
@@ -334,6 +346,7 @@ endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
+  gsw_runtime_components
   gsw_blender_view_navigation
   gsw_blender_grid
   gsw_lichtfeld_streaming
@@ -607,6 +620,29 @@ if(BUILD_TESTING)
     ENVIRONMENT "GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/preset-test-data"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_executable(gsw_path_handoff_tests tests/PathHandoffTests.cpp)
+  add_executable(gsw_runtime_component_environment_tests tests/RuntimeComponentEnvironmentTests.cpp)
+  # Compile only the two changed launch-integration units, without linking or
+  # rebuilding the desktop executable or unrelated native/graphics targets.
+  add_library(gsw_runtime_component_launch_compile OBJECT EXCLUDE_FROM_ALL
+    src/MainWindow.cpp src/ModelExport.cpp)
+  set_target_properties(gsw_runtime_component_launch_compile PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+  target_include_directories(gsw_runtime_component_launch_compile PRIVATE src)
+  target_link_libraries(gsw_runtime_component_launch_compile PRIVATE
+    Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg)
+  target_compile_definitions(gsw_runtime_component_launch_compile PRIVATE
+    GSW_VERSION="${PROJECT_VERSION}" GSW_RELEASE_DATE="${GSW_RELEASE_DATE}")
+  if(MSVC)
+    target_compile_options(gsw_runtime_component_launch_compile PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_dependencies(gsw_runtime_component_environment_tests gsw_runtime_component_launch_compile)
+  target_link_libraries(gsw_runtime_component_environment_tests PRIVATE gsw_runtime_components Qt6::Core)
+  if(MSVC)
+    target_compile_options(gsw_runtime_component_environment_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_runtime_component_environment COMMAND gsw_runtime_component_environment_tests
+    "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_BINARY_DIR}/runtime-component-test-data")
+  set_tests_properties(native_runtime_component_environment PROPERTIES TIMEOUT 30
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   target_link_libraries(gsw_path_handoff_tests PRIVATE Qt6::Core Qt6::Gui)
   if(MSVC)
     target_compile_options(gsw_path_handoff_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
@@ -655,6 +691,32 @@ if(BUILD_TESTING)
   endforeach()
   # Keep runtime-policy/lifecycle acceptance independent of MainWindow and the
   # local user session. The observer controls only the generated CPU fixture.
+  qt_add_executable(gsw_quality_plan_ui_tests tests/QualityPlanTests.cpp
+    src/TrainingDialog.cpp src/TrainingDialog.h
+    src/TrainingRequestStore.cpp src/TrainingRequestStore.h
+    src/TrainingInputSummary.cpp src/TrainingInputSummary.h
+    src/TrainingReconstructionSummary.cpp src/TrainingReconstructionSummary.h
+    src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h src/ColmapSupport.cpp src/ColmapSupport.h
+    src/InitializationDialog.cpp src/InitializationDialog.h
+    src/InitializationEditor.cpp src/InitializationEditor.h
+    src/InitializationPreview.cpp src/InitializationPreview.h
+    src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
+  target_include_directories(gsw_quality_plan_ui_tests PRIVATE src)
+  target_link_libraries(gsw_quality_plan_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
+  qt_add_resources(gsw_quality_plan_ui_tests "quality_plan_languages"
+    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  foreach(language zh_CN ja)
+    qt_add_resources(gsw_quality_plan_ui_tests "quality_plan_qtbase_${language}"
+      PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
+  endforeach()
+  if(MSVC)
+    target_compile_options(gsw_quality_plan_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_quality_plan_ui COMMAND gsw_quality_plan_ui_tests)
+  set_tests_properties(native_quality_plan_ui PROPERTIES TIMEOUT 90
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-plan-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
   qt_add_executable(gsw_runtime_decoupling_ui_tests tests/RuntimeDecouplingUiTests.cpp
     src/TrainingDialog.cpp src/TrainingDialog.h src/RuntimeGuardDialog.cpp src/RuntimeGuardDialog.h
     src/ExistingTrainingDialog.cpp src/ExistingTrainingDialog.h
@@ -1251,7 +1313,7 @@ if(BUILD_TESTING)
       src/WorkspaceDocument.h
     )
     target_include_directories(gsw_native_tests PRIVATE src)
-    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget)
+    target_link_libraries(gsw_native_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget gsw_runtime_components)
     if(MSVC)
       target_compile_options(gsw_native_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -1311,11 +1373,33 @@ if(BUILD_TESTING)
       src/SceneCoordinates.cpp
     )
     target_include_directories(gsw_model_export_tests PRIVATE src)
-    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget)
+    target_link_libraries(gsw_model_export_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test gsw_spz gsw_resource_budget gsw_runtime_components)
     if(MSVC)
       target_compile_options(gsw_model_export_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME model_export COMMAND gsw_model_export_tests)
+    qt_add_executable(gsw_quality_mip_ply_tests tests/QualityMipPlyTests.cpp
+      src/ModelExport.cpp src/CameraTrajectory.cpp src/SpzIO.cpp src/ModelInteraction.cpp
+      src/PlyPointCloudLoader.cpp src/PointCloudCache.cpp src/MeshCache.cpp src/SceneCoordinates.cpp)
+    target_include_directories(gsw_quality_mip_ply_tests PRIVATE src)
+    target_link_libraries(gsw_quality_mip_ply_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test
+      gsw_spz gsw_resource_budget gsw_quality_mip_contract gsw_runtime_components)
+    if(MSVC)
+      target_compile_options(gsw_quality_mip_ply_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME native_quality_mip_ply COMMAND gsw_quality_mip_ply_tests)
+    qt_add_executable(gsw_quality_mip_preview_tests tests/QualityMipPreviewTests.cpp
+      src/ModelExport.cpp src/CameraTrajectory.cpp src/SpzIO.cpp src/ModelInteraction.cpp
+      src/PlyPointCloudLoader.cpp src/PointCloudCache.cpp src/MeshCache.cpp src/SceneCoordinates.cpp)
+    target_include_directories(gsw_quality_mip_preview_tests PRIVATE src)
+    target_link_libraries(gsw_quality_mip_preview_tests PRIVATE Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::Test
+      gsw_spz gsw_resource_budget gsw_quality_mip_contract gsw_runtime_components)
+    if(MSVC)
+      target_compile_options(gsw_quality_mip_preview_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    set_tests_properties(native_quality_mip_ply PROPERTIES TIMEOUT 60
+      ENVIRONMENT "GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-mip-ply-data"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     qt_add_executable(gsw_coordinate_delivery_ui_tests
       tests/CoordinateDeliveryUiTests.cpp src/ModelExportDialog.cpp src/ModelExportDialog.h
@@ -1323,7 +1407,7 @@ if(BUILD_TESTING)
       src/ModelInteraction.cpp src/PlyPointCloudLoader.cpp src/PointCloudCache.cpp
       src/MeshCache.cpp src/SceneCoordinates.cpp)
     target_include_directories(gsw_coordinate_delivery_ui_tests PRIVATE src)
-    target_link_libraries(gsw_coordinate_delivery_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test gsw_spz gsw_resource_budget)
+    target_link_libraries(gsw_coordinate_delivery_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test gsw_spz gsw_resource_budget gsw_runtime_components)
     if(MSVC)
       target_compile_options(gsw_coordinate_delivery_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
@@ -1371,7 +1455,7 @@ if(BUILD_TESTING)
     endforeach()
     target_include_directories(gsw_native_viewport_locale_tests PRIVATE src)
     target_link_libraries(gsw_native_viewport_locale_tests PRIVATE
-      gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
+      gsw_runtime_components gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
       gsw_blender_gizmo_geometry gsw_spz gsw_resource_budget
       Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Test)
     qt_add_resources(gsw_native_viewport_locale_tests viewport_locale_languages PREFIX "/i18n"
@@ -1756,6 +1840,17 @@ if(BUILD_TESTING)
       TIMEOUT 20 ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin")
 
+    qt_add_executable(gsw_quality_mip_viewport_tests tests/QualityMipViewportTests.cpp)
+    target_link_libraries(gsw_quality_mip_viewport_tests PRIVATE
+      gsw_quality_mip_contract Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_quality_mip_viewport_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME native_quality_mip_viewport COMMAND gsw_quality_mip_viewport_tests)
+    set_tests_properties(native_quality_mip_viewport PROPERTIES TIMEOUT 60
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_QPA_PLATFORM=windows;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-mip-test-data"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
     qt_add_executable(gsw_navigation_gizmo_tests
       tests/NavigationGizmoTests.cpp
       src/NavigationGizmo.cpp
@@ -1780,3 +1875,10 @@ if(BUILD_TESTING)
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>/../../../bin"
     )
 endif()
+
+foreach(quality_consumer GaussianSceneWorkbench gsw_native_tests gsw_model_export_tests
+    gsw_coordinate_delivery_ui_tests gsw_native_viewport_locale_tests)
+  if(TARGET ${quality_consumer})
+    target_link_libraries(${quality_consumer} PRIVATE gsw_quality_mip_contract)
+  endif()
+endforeach()
