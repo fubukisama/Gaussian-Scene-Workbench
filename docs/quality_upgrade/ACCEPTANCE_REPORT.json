@@ -19,7 +19,23 @@
     "native/worker/quality_mcmc_model.py": "e3393b45df9faf6649e6355981ebd06ee27d8bcb5bc18f3fc556782d8bdce26c",
     "native/worker/quality_postprocess.py": "60a3d39edd25bacf1133d8c5e2e5b582a50908d9c2cc3e34337b122961af4e45"
   },
-  "installed_build": null,
+  "installed_build": {
+    "version": "0.3.8-native-preview",
+    "root": "D:/Apps/GSW/native/0.3.8-quality-preview-oct23-d626906",
+    "package_source_commit": "d626906d50d47b8ec4882491fd5407c6607e4982",
+    "application_core_commit": "0006eef64d582724d5a9f83718e62a5747bfc7ad",
+    "executable_sha256": "fbe1d0a83d9ceb297d8bdd8708136df89aa425be3ec2037cef10b8231c9b1721",
+    "source_manifest_sha256": "d69f6bb4891bd8acca28f5d3608bb22effa43a9e0f68d5ee0ac671549d25a46f",
+    "backend_manifest_sha256": "a9ddfe8ec35986897b9e13758a2c06c53407c5d36714b4b200e2769cbf5b4cea",
+    "status": "background_installed_contracts_pass_not_full_release_acceptance",
+    "evidence_ids": ["E280", "E281", "E285", "E286"],
+    "passed_scope": ["actual installed startup", "per-install runtime binding", "actual training Python CPU source and kernel selection", "backend integrity", "auxiliary live three-language quality dialog", "actual RTX QOffscreenSurface Mip OpenGL contracts:8pass0skip"],
+    "full_application_real_window_three_locale_matrix": "not_accepted_locally_offscreen_has_no_QOpenGLWidget_context; remote Windows gate retained",
+    "app_opened_or_restarted_for_user": false,
+    "real_training_started_or_resumed": false,
+    "formal_Setup_or_GitHub_Release_published": false,
+    "as_built_snapshot_note": "The package contains the exact pre-install report at d626906. This subsequent delivery record does not rewrite corresponding source or imply historical GPU results used the new binary."
+  },
   "runtime_binary_hashes": {
     "cuda": "11.8",
     "device": "NVIDIA GeForce RTX 4080 Laptop GPU",
@@ -1563,10 +1579,16 @@
     },
     "E083": {
       "path": "D:/CodexData/CodexHome/worktrees/windows-installer/git/docs/quality_upgrade/CAPABILITY_MATRIX.json",
-      "sha256": "af9ecbf1e441266f7cb76278f0bd2c4b879714c520985e50c509b83630cfa344",
-      "bytes": 47188,
+      "sha256": "559abf864acc1fb8769394cbc26c79aefb471ca60468ce35a59dccda575bec95",
+      "bytes": 47750,
       "kind": "current_interim_scoped_capability_inventory",
-      "scope": "Current interim capability matrix includes observed Abs/Pixel/Mip actualworker1000 success with incomplete predeclared optional-loss runtime closure, plus per-epoch direct/native/staging evidence. No quality/installed application promotion.",
+      "scope": "Current interim matrix adds actual scoped installed delivery to historical per-epoch evidence. Worker optional-loss closure, MCMC and final quality/geometry remain unaccepted; no default promotion.",
+      "previous_pre_delivery_snapshot": {
+        "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/CAPABILITY_MATRIX-before-delivery.json",
+        "sha256": "af9ecbf1e441266f7cb76278f0bd2c4b879714c520985e50c509b83630cfa344",
+        "bytes": 47188,
+        "preserved_from_package_source_commit": "d626906d50d47b8ec4882491fd5407c6607e4982"
+      },
       "hash_kind": "raw_file_bytes_sha256"
     },
     "E243": {
@@ -1791,6 +1813,62 @@
       "sha256": "6215f4acf0dd5218b6b550d86be1600c66f2c55f740629f6583a67016a5f184f",
       "kind": "observed_optional_loss_wrapper_postflight_not_prefrozen",
       "scope": "Current ambient optional CUDA loss wrapper hash observed after execution only; absent from predeclared runtime closure.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E280": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/installed-acceptance-v4.json",
+      "bytes": 5850,
+      "sha256": "167dcd4bbf3f994368a45ece1e3f27fd6b426a3f5abf5b62b6f459c64ce747ad",
+      "kind": "actual_installed_background_contracts",
+      "scope": "Six real installed/auxiliary process boundaries pass; not whole real-window UI or final training quality.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E281": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/shortcut-delivery-v1.json",
+      "bytes": 1243,
+      "sha256": "b69abf3ba2cd4fb61ab66feb4dd331176598123e70d5162dc3a0996746004f6b",
+      "kind": "shortcut_backup_and_future_launch_binding",
+      "scope": "Original shortcut archived on D; target/icon/hash verified, no user process launched or restarted.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E282": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/quality-build4-numeric-protocol-v1.json",
+      "bytes": 1525,
+      "sha256": "5a396184070e272a61cd4ce85d4c59fd8fded3f64144b6828a4cacf769cf7407",
+      "kind": "pre_execution_frozen_numeric_protocol",
+      "scope": "One120s attempt, unchanged seven synthetic numeric checks after README-only source closure change; no training/default promotion.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E283": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/quality-build4-numeric-execution-v1.json",
+      "bytes": 666,
+      "sha256": "833373b08b93fd682c5a3129e2738d354d15506d8a3b1ab7fccaffa9c049c084",
+      "kind": "fresh_build4_actual_numeric_GPU_execution",
+      "scope": "Single2.328s real GPU child,7of7pass. This is not a rerun of whole trainer or quality acceptance.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E284": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/preflight-build4-current-v1.log",
+      "bytes": 814,
+      "sha256": "04f89f689323f04b99a7d7d52decb4f3e8a1ef7d3f5167d8ff1c2b5fc2ae9b3a",
+      "kind": "actual_target_python_CPU_preflight_regression",
+      "scope": "Current62tests pass48.407s with explicit accepted build4 and Python3.8; no Torch/GPU imported by admission probe.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E285": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/package-candidate-v6.log",
+      "bytes": 334098,
+      "sha256": "f9579f577018515047f148b6c74612b62bfb463283023876e0c2235eac1927c8",
+      "kind": "actual_fresh_native_package_execution",
+      "scope": "Exact repository packaging block after scoped native tests; no local full-window CTest shortcut or quality claim.367stagedPython syntax/import checks and startup pass.",
+      "hash_kind": "raw_file_bytes_sha256"
+    },
+    "E286": {
+      "path": "D:/Codex/validation/gsw-quality-upgrade-20261023/p8/package-final-audit-v6.json",
+      "bytes": 6289,
+      "sha256": "becbb3c887a0789922557fcb549777b10a4c62f34e529bf6cf2d12e086c5ec23",
+      "kind": "independent_final_static_package_and_installed_audit",
+      "scope": "d626906 snapshot:1341source/1351backend/all29READMElinks/58PE/72originalnotices pass;2911package files exactly match install, onlylocal component JSON added.0newP1/P2; no app/GPU/training execution by auditor.",
       "hash_kind": "raw_file_bytes_sha256"
     }
   },
@@ -4782,7 +4860,7 @@
       "E226",
       "E227"
     ],
-    "installed_application": null,
+    "installed_application": "E280; future shortcut E281",
     "historical_backend_staging_audit": "E221",
     "backend_manifest": "E256"
   },
@@ -4844,11 +4922,14 @@
     }
   ],
   "installed_components": {
-    "application": "not_final_installed",
+    "application": "D:/Apps/GSW/native/0.3.8-quality-preview-oct23-d626906; background contracts only:E280",
     "quality_kernel": {
-      "root": "D:/Apps/GSW/runtime/kernels/quality3d-v1-20261023-build3",
-      "build_sha256": "a83b536b3f83d08cff99178a63d417fb46a1c7c26de352d61209d381858b4d65",
-      "evidence_id": "E226"
+      "root": "D:/Apps/GSW/runtime/kernels/quality3d-v1-20261023-build4",
+      "build_sha256": "e2c7e178f89671047c81fd727908760ce175cad19a642d75124d96fb82aee5cc",
+      "acceptance_sha256": "e9e7cad218d9c3f5a4edb9cd592fc15b1d7727f9c6cd853cb35de3760aacd2ee",
+      "binary_sha256": "f65e2a5705c143486c00de2604e855c66d1db3c0371d5acd97915815def55e3c",
+      "evidence_ids": ["E282", "E283", "E280"],
+      "historical_build3_evidence": "E226 retained; not rewritten as build4 training proof"
     },
     "stock_kernel": {
       "root": "D:/Apps/GSW/runtime/kernels/camera-pinhole3d-quality-20261023-v2",
@@ -4856,7 +4937,7 @@
       "evidence_id": "E227"
     },
     "old_roots_preserved": true,
-    "actual_CPU_selection_evidence": "E248"
+    "actual_CPU_selection_evidence": "E280 and E284; historical E248 retained"
   },
   "implementation_epochs": [
     {
@@ -4954,6 +5035,15 @@
   "source_snapshot_after_CPU_execution_meaning": "Historical CPU audit snapshot, retained unchanged; current merged source byte inventory is E256.",
   "committed_core_history": [
     "bc09c7d",
-    "7ff22b940ec323fe95b631b5558b48cb5ec9816a"
-  ]
+    "7ff22b940ec323fe95b631b5558b48cb5ec9816a",
+    "0006eef64d582724d5a9f83718e62a5747bfc7ad",
+    "1ba62731ddcd2f03ab047cab4a24be2e35856aa3",
+    "d626906d50d47b8ec4882491fd5407c6607e4982"
+  ],
+  "delivery_remaining_gates": {
+    "quality_and_geometry": "Unchanged inconclusive/not_run statuses and MCMC CUDA/strict-resume failure remain; no default promotion.",
+    "full_Windows_UI": "Remote real-window/OpenGL/three-language matrix remains required; local offscreen full-language failure preserved rather than bypassed.",
+    "preexisting_remote_CI": "Native Windows run39901253574 failed after75min while CodeQL extractor stayed CPU-active without object progress; source TU not identified. Current quality work does not claim this issue fixed or reduce scan/test coverage.",
+    "formal_release": "No GitHub Release/Setup promotion in this scoped delivery."
+  }
 }
