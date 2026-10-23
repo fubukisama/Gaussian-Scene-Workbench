@@ -1058,6 +1058,15 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
     from native.backend.camera_scale_export import deliver_training_result
     from native.worker.training_checkpoint import atomic_json
     output = _lexical_absolute(output_directory)
+    # A Windows 8.3 input spelling can differ from resolve() without being a
+    # link. Verify the output chain without following links, then use its
+    # canonical spelling only for containment checks of output-derived paths.
+    # Keep raw result/receipt spellings intact, and never resolve a model or
+    # child reparse entry. Import/removal containment semantics stay unchanged.
+    for parent in (output,) + tuple(output.parents):
+        if _is_reparse_point(parent):
+            raise ValueError('training_delivery_output_link_refused')
+    canonical_output = output.resolve()
     candidates = []
     point_root = output / 'point_cloud'
     if iteration is not None and (type(iteration) is not int or iteration < 1):
@@ -1074,9 +1083,9 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         return {'schema':'gsw.model_delivery/1','training_status':'done','export_status':'failed',
                 'reason':'training_delivery_model_missing','model_path':None}
     actual_iteration, model = max(candidates)
-    _ensure_within_root(model, output)
+    _ensure_within_root(canonical_output / model.relative_to(output), canonical_output)
     destination = output / '.gsw-deliveries' / ('i' + str(actual_iteration))
-    _ensure_within_root(destination, output)
+    _ensure_within_root(canonical_output / destination.relative_to(output), canonical_output)
     destination.mkdir(parents=True, exist_ok=True)
     try:
         result = deliver_training_result(model, destination, cancelled=cancelled, progress=progress)
@@ -1093,7 +1102,7 @@ def publish_training_delivery(output_directory, iteration=None, cancelled=None, 
         if result.get(key):
             result[key.replace('_path','_relative_path')] = str(Path(result[key]).relative_to(output)).replace('\\','/')
     receipt = output / 'model-delivery.json'
-    _ensure_within_root(receipt, output)
+    _ensure_within_root(canonical_output / receipt.relative_to(output), canonical_output)
     atomic_json(receipt, result)
     return result
 
