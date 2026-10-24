@@ -7309,6 +7309,24 @@ void MainWindow::startTraining() {
 }
 
 void MainWindow::updateWorkspaceUi() {
+  // Visibility can also be restored by document/recovery commands. Preserve
+  // the tree's independent selection while the viewport drops hidden IDs from
+  // its transform selection, not just when a specific eye QAction is used.
+  const auto objects = mWorkspace.sceneObjects();
+  bool visibilityMutation = objects.size() == mViewport->sceneObjectCount();
+  bool flagsChanged = false;
+  for (const auto &object : objects) {
+    bool existsInTree = false;
+    for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it)
+      if ((*it)->data(0, Qt::UserRole + 2).toString() == object.id) { existsInTree = true; break; }
+    visibilityMutation &= existsInTree;
+    flagsChanged |= object.visible != mViewport->sceneObjectVisible(object.id);
+  }
+  visibilityMutation &= flagsChanged;
+  QScopedValueRollback<bool> preserveTree(mPreserveProjectTree,
+      mPreserveProjectTree || visibilityMutation);
+  QScopedValueRollback<bool> preserveSelection(mPreserveSceneTreeSelection,
+      mPreserveSceneTreeSelection || visibilityMutation);
   if (!mLiveReconstructionPreviewPath.isEmpty() &&
       !pathsReferToSameLocation(mWorkspace.datasetPath(),
                                 mLiveReconstructionDatasetPath)) {

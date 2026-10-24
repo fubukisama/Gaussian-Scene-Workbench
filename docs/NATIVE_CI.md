@@ -1,27 +1,31 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
-## Local delivery and background full CI / 本地交付与后台全量检查 / ローカル配布と全 CI
+## Remote acceptance and static local delivery / 远端验收与本地静态交付 / リモート検証とローカル静的配布
 
-中文：本机原生更新采用两条验收通道。相机、尺度、独立检核、真实 3DGS／2DGS
-训练与完整续训、三语言、相关界面回归及安装内容校验通过后，可以交付本地已验证
-版本，不再等待耗时的整套 GitHub 构建与扫描。完整 CI 继续后台执行，已知失败必须
-先修复；本地通过与云端全绿分别记录，不得把运行中、历史成功或预览正常称为全套
-通过。源码有变化时重新核对受影响的证据；未经同意不打开、关闭或重启用户窗口。
+中文：自动测试默认在远端 CI 执行，包括所有会弹出应用窗口的图形与交互测试。
+本地只进行静态校验、编译及安装包文件核验；只有用户明确要求才执行本地测试，
+远端不可用时也不自动回退本地 GUI。三语言、真实显示／拾取、工程持久化和相关
+回归由当前提交对应的 Windows runner 生成日志与截图。相关验收通过后可以交付
+对应源码的桌面包；完整 CI 与安全扫描继续独立记录。运行中、历史成功或静态
+文件检查不能称为全部测试通过。未经同意不打开、关闭或重启用户窗口。
 
-English: Native updates use separate local-delivery and full-CI lanes. A locally
-verified build may be delivered after camera/scale/independent-check contracts,
-actual 3DGS/2DGS training and full-state resume, localization, affected UI
-regressions and installed-content checks pass. The complete GitHub build and
-scans continue in the background. Resolve known failures first; record local
-acceptance separately from full CI success. Revalidate affected evidence after
-source changes, and never open, close or restart user windows without consent.
+English: Run automated tests on remote CI by default, including every graphical
+or interaction test that opens a window. Local work is limited to static
+validation, compilation and package-file verification. Run local tests only
+after an explicit user request; unavailable CI never enables a local GUI fallback.
+Windows runners record trilingual display/picking, project persistence and related
+regressions against the current commit. Deliver its matching desktop package after
+affected acceptance passes, recording full CI and security scans separately.
+Pending runs, historical success and static checks are not full test acceptance.
+Never open, close or restart user windows without consent.
 
-日本語：原生版の更新はローカル配布と全 CI を分離します。カメラ・尺度・独立
-検証、実際の 3DGS／2DGS 学習と完全状態の再開、三言語、関連 UI 回帰、導入内容
-の検証後、全 GitHub ビルド・走査を待たずに検証済み版を配布できます。全 CI は
-バックグラウンドで継続し、既知の失敗は先に修正します。ローカル合格と全 CI
-成功を区別し、ソース変更時は影響する証拠を再検証します。許可なくユーザーの
-ウィンドウを開いたり、閉じたり、再起動したりしません。
+日本語：ウィンドウを開く描画・操作テストを含め、自動テストは原則リモート CI
+で実行します。ローカルでは静的検証・コンパイル・配布ファイル検証のみ行い、
+ユーザーの明示的な依頼なしにローカルテストや GUI への代替実行はしません。
+Windows runner が現在のコミットに対する三言語・描画・選択・保存の証拠を記録
+します。関連検証後に対応するソースのデスクトップ版を配布し、全 CI と安全
+走査の結果は別に記録します。実行中・過去の成功・静的検査を全テスト成功と
+表現せず、許可なくユーザーのウィンドウを操作しません。
 
 ## Upstream adaptation acceptance / 源码移植验收 / ソース移植の検証
 
