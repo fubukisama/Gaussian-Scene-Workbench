@@ -326,7 +326,11 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
     for (QTreeWidgetItemIterator it(tree); *it; ++it) {
       if ((*it)->data(0, Qt::UserRole + 2).toString() != id) continue;
       tree->scrollToItem(*it);
-      const QPointF point = tree->visualItemRect(*it).center();
+      // Qt's visualItemRect spans every column. Target the name cell, not
+      // the independent eye cell, even in a narrow dock with deep indentation.
+      const QPointF point = tree->visualRect(tree->indexFromItem(*it, 0)).center();
+      if (!check(tree->indexAt(point.toPoint()).column() == 0 && tree->itemAt(point.toPoint()) == *it,
+                 "tree selection input targets the model name cell")) return;
       QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point.toPoint()),
                         Qt::LeftButton, Qt::LeftButton, modifiers);
       QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point.toPoint()),
