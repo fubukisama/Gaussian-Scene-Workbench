@@ -230,6 +230,11 @@ private:
   void updateTaskLabels();
   void rebuildProjectTree();
   void syncProjectTreeSelection();
+  void syncProjectTreeVisibility();
+  void updateSceneVisibilityActions();
+  QStringList selectedSceneTreeIds() const;
+  void setSceneVisibility(const QStringList &ids, bool visible);
+  void isolateSceneTreeSelection();
   void updateInspector();
   [[nodiscard]] QVector3D workspaceTranslationForViewport() const;
   [[nodiscard]] QVector3D viewportTranslationForWorkspace(
@@ -336,6 +341,10 @@ private:
   QAction *mLockEditToolsAction = nullptr;
   QAction *mObservationTrackballAction = nullptr;
   QAction *mFindModelAction = nullptr;
+  QAction *mShowSelectedModelsAction = nullptr;
+  QAction *mHideSelectedModelsAction = nullptr;
+  QAction *mIsolateSelectedModelsAction = nullptr;
+  QAction *mShowAllModelsAction = nullptr;
   QAction *mMoveModelAction = nullptr;
   QAction *mRotateModelAction = nullptr;
   QAction *mScaleModelAction = nullptr;
@@ -392,6 +401,7 @@ private:
   bool mModelReady = false;
   bool mModelSelected = false;
   bool mPreserveProjectTree = false;
+  bool mPreserveSceneTreeSelection = false;
   bool mSelectionBusy = false;
   bool mCanUndoEdit = false;
   bool mCanRedoEdit = false;

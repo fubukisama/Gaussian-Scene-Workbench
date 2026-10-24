@@ -1205,7 +1205,8 @@ QJsonObject WorkspaceDocument::sceneCollectionJson(const QString &rootPath) cons
         {QStringLiteral("path"), portablePathForRoot(
              remapManagedPath(object.path, mRootPath, targetRoot), targetRoot)},
         {QStringLiteral("transform"), sceneTransformJson(object.translation, object.rotation, object.scale)},
-        {QStringLiteral("vertexCount"), object.vertexCount}});
+        {QStringLiteral("vertexCount"), object.vertexCount},
+        {QStringLiteral("visible"), object.visible}});
   }
   return {{QStringLiteral("objects"), objects},
           {QStringLiteral("activeId"), mActiveSceneId}};
@@ -1229,6 +1230,8 @@ void WorkspaceDocument::restoreSceneCollection(const QJsonObject &state) {
     object.rotation = sceneRotationFromJson(item.value(QStringLiteral("transform")));
     object.scale = sceneScaleFromJson(item.value(QStringLiteral("transform")));
     object.vertexCount = item.value(QStringLiteral("vertexCount")).toInteger();
+    // Projects predating display controls show all source objects.
+    object.visible = item.value(QStringLiteral("visible")).toBool(true);
     mSceneObjects.append(object);
   }
   if (mSceneObjects.isEmpty() && !mScenePath.isEmpty() && state.isEmpty()) {
@@ -1285,6 +1288,50 @@ bool WorkspaceDocument::removeSceneObjects(const QStringList &ids) {
     if (!ids.contains(value.toObject().value(QStringLiteral("id")).toString())) remaining.append(value);
   state.insert(QStringLiteral("objects"), remaining);
   restoreSceneCollection(state);
+  setModified(true);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::setSceneObjectVisibility(const QStringList &ids,
+                                                const bool visible) {
+  // Batch hide/reveal policy adapted from Blender object_edit.cc at
+  // 8cb6b388974a817afedf1317ce26f0c75aa5f181 (object_hide_view_set_exec /
+  // object_hide_view_clear_exec). Copyright 2001-2002 NaN Holding BV;
+  // SPDX-License-Identifier: GPL-2.0-or-later. See THIRD_PARTY_LICENSES.md.
+  auto updated = sceneObjects();
+  for (const auto &id : ids) {
+    if (std::none_of(updated.cbegin(), updated.cend(),
+                     [&](const auto &object) { return object.id == id; })) return false;
+  }
+  bool anyChanged = false;
+  for (auto &object : updated) {
+    if (!ids.contains(object.id) || object.visible == visible) continue;
+    object.visible = visible;
+    anyChanged = true;
+  }
+  if (!anyChanged) return true;
+  mSceneObjects = std::move(updated);
+  setModified(true);
+  emit changed();
+  return true;
+}
+
+bool WorkspaceDocument::isolateSceneObjects(const QStringList &ids) {
+  auto updated = sceneObjects();
+  for (const auto &id : ids) {
+    if (std::none_of(updated.cbegin(), updated.cend(),
+                     [&](const auto &object) { return object.id == id; })) return false;
+  }
+  bool anyChanged = false;
+  for (auto &object : updated) {
+    const bool visible = ids.contains(object.id);
+    if (object.visible == visible) continue;
+    object.visible = visible;
+    anyChanged = true;
+  }
+  if (!anyChanged) return true;
+  mSceneObjects = std::move(updated);
   setModified(true);
   emit changed();
   return true;

@@ -1021,6 +1021,19 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     }
   }
   if (mProcessingActive) return;
+  const bool visibilityChanged = std::any_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
+    const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+        [&](const auto &state) { return state->id == object.id; });
+    return found != mSceneStates.cend() && (*found)->visible != object.visible;
+  });
+  if (visibilityChanged) {
+    if (mModelDragActive) finishModelTransform(false);
+    ++mSelectionRequestEpoch;
+    mSelectionGestureActive = false;
+    mSelectionPath.clear();
+    mTransformGizmoHover = {};
+    mObservationDragActive = false;
+  }
   const bool collectionChanged = objects.size() != mSceneStates.size() ||
       std::any_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
         return std::none_of(mSceneStates.cbegin(), mSceneStates.cend(), [&](const auto &state) {
@@ -1037,6 +1050,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
           [&](const auto &state) { return state->id == object.id; });
       if (found == mSceneStates.cend()) continue;
       const auto &state = *found;
+      state->visible = object.visible;
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
       QScopedValueRollback<bool> background(mRenderingInactiveScene, true);
       state->sourceTranslation = object.translation;
@@ -1067,6 +1081,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
           (found == mSceneStates.cend() || (*found)->mRequestedScenePath != object.path);
       auto state = adoptPreview ? previewToAdopt : found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
       state->id = object.id;
+      state->visible = object.visible;
       retained.append(state);
       const bool isActive = object.id == activeId;
       if (isActive) active = state;
@@ -1139,7 +1154,7 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       if(mCameraViewActive&&mStoredCameraView)toggleCameraView();
       mCameraViewActive=false;mStoredCameraView.reset();mSourceCameraIntrinsics.reset();mSourceCameraClipping.reset();
     }
-    mModelSelected = !objects.isEmpty();
+    mModelSelected = !objects.isEmpty() && mScene->visible;
     mSelectedSceneIds.clear();
     if (mModelSelected) mSelectedSceneIds.insert(mScene->id);
     mTransformGizmoHover = {};
@@ -1147,8 +1162,17 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     notifySceneSelection();
   }
   QSet<QString> existing;
-  for (const auto &state : mSceneStates) existing.insert(state->id);
+  for (const auto &state : mSceneStates) {
+    if (state->visible) existing.insert(state->id);
+  }
   mSelectedSceneIds.intersect(existing);
+  mModelSelected = !mSelectedSceneIds.isEmpty();
+  if (visibilityChanged) {
+    notifySceneSelection();
+    notifyEditState();
+    notifyModelInteractionState();
+    updateFrameRefreshPolicy();
+  }
   if (!mProcessingScene && mProcessingPreviewPaused) {
     mProcessingPreviewPaused = false;
     mProcessingPausedImage = {};
@@ -1178,6 +1202,17 @@ bool NativeViewport::activateSceneObject(const QString &id) {
   return setSceneSelection({id}, id);
 }
 
+bool NativeViewport::sceneObjectVisible(const QString &id) const {
+  const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
+      [&](const auto &state) { return state->id == id; });
+  return found != mSceneStates.cend() && (*found)->visible;
+}
+
+qsizetype NativeViewport::visibleSceneObjectCount() const {
+  return std::count_if(mSceneStates.cbegin(), mSceneStates.cend(),
+      [](const auto &state) { return state->visible; });
+}
+
 QStringList NativeViewport::selectedSceneIds() const {
   QStringList result;
   for (const auto &state : mSceneStates) {
@@ -1193,7 +1228,7 @@ void NativeViewport::notifySceneSelection() {
 void NativeViewport::selectAllModels() {
   QStringList ids;
   for (const auto &state : mSceneStates) {
-    if (state->mSceneLoadMessage.isEmpty() &&
+    if (state->visible && state->mSceneLoadMessage.isEmpty() &&
         (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0)) ids.append(state->id);
   }
   setSceneSelection(ids, mScene->id);
@@ -1203,9 +1238,11 @@ bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &ac
   if (mScene == mProcessingScene) return false;
   QSet<QString> selected;
   for (const auto &state : mSceneStates) {
-    if (ids.contains(state->id)) selected.insert(state->id);
+    if (state->visible && ids.contains(state->id)) selected.insert(state->id);
   }
-  QString id = selected.contains(activeId) ? activeId :
+  const bool requestedActiveExists = std::any_of(mSceneStates.cbegin(), mSceneStates.cend(),
+      [&](const auto &state) { return state->id == activeId && ids.contains(activeId); });
+  QString id = requestedActiveExists ? activeId :
       selected.contains(mScene->id) ? mScene->id : selected.isEmpty() ? mScene->id : *selected.cbegin();
   const auto found = std::find_if(mSceneStates.cbegin(), mSceneStates.cend(),
       [&](const auto &state) { return state->id == id; });
@@ -1381,6 +1418,7 @@ QList<std::shared_ptr<NativeViewport::SceneState>> NativeViewport::displayedScen
   if (mScene == mProcessingScene) return {mProcessingScene};
   auto states = mSceneStates;
   if (states.isEmpty()) states.append(mScene);
+  states.removeIf([](const auto &state) { return !state->visible; });
   return states;
 }
 
@@ -1924,8 +1962,16 @@ void NativeViewport::setShowObservationTrackball(const bool visible) {
 }
 
 bool NativeViewport::observationTrackballVisible() const {
+  const auto displayed = displayedSceneStates();
+  const bool collectionAvailable = visibleModelAvailable() ||
+      std::any_of(displayed.cbegin(), displayed.cend(), [](const auto &state) {
+        return state->visible && !state->mScenePath.isEmpty() &&
+            (state->mPreviewPointCount > 0 || state->mPreviewTriangleCount > 0 ||
+             state->mRenderedPointCount > 0 || state->mRenderedMeshIndexCount > 0 ||
+             state->mFullResolutionPointCount > 0 || state->mFullResolutionMeshTriangleCount > 0);
+      });
   return mEditToolsLocked && mShowObservationTrackball &&
-         mMode == InteractionMode::Inspect && visibleModelAvailable();
+         mMode == InteractionMode::Inspect && collectionAvailable;
 }
 
 float NativeViewport::observationTrackballRadius() const {
@@ -2170,18 +2216,26 @@ void NativeViewport::selectModel() {
 
 bool NativeViewport::focusModel() {
   mObservationDragActive = false;
-  if (mScene->mSelectionBusy || !selectableModelAvailable()) {
+  const bool focusVisibleCollection = !mScene->visible && !mProcessingActive &&
+      mScene != mProcessingScene && visibleSceneObjectCount() > 0;
+  if (mScene->mSelectionBusy || (!selectableModelAvailable() && !focusVisibleCollection)) {
     return false;
   }
   if (mModelDragActive) {
     finishModelTransform(false);
   }
-  selectModel();
-  if (!mModelSelected) {
-    return false;
+  QVector<QVector3D> corners;
+  if (focusVisibleCollection) {
+    // A hidden active row can remain the properties/export identity. Framing
+    // is a camera operation: use its remaining visible selection or display
+    // collection without revealing it, activating a source, or clearing edits.
+    corners = selectionBoundsCorners();
+    if (corners.isEmpty()) corners = displayedBoundsCorners();
+  } else {
+    selectModel();
+    if (!mModelSelected) return false;
+    corners = selectionBoundsCorners();
   }
-
-  const QVector<QVector3D> corners = selectionBoundsCorners();
   mPerspectiveFovDegrees = 46.0F;
   mFocalAspectCorrection = 1.0F;
   const float aspectRatio =
@@ -2370,7 +2424,7 @@ void NativeViewport::invertSelection() {
 
 void NativeViewport::deleteSelection() {
   if (mEditToolsLocked) return;
-  if (mScene->mSelectionBusy || mScene->mEditModel.deleteSelection() == 0) {
+  if (!hasEditableScene() || mScene->mSelectionBusy || mScene->mEditModel.deleteSelection() == 0) {
     return;
   }
   rebuildRenderedVertices();
@@ -2380,7 +2434,7 @@ void NativeViewport::deleteSelection() {
 
 void NativeViewport::undoEdit() {
   if (mEditToolsLocked) return;
-  if (mScene->mSelectionBusy) {
+  if (!mScene->visible || mScene->mSelectionBusy) {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
@@ -2405,7 +2459,7 @@ void NativeViewport::undoEdit() {
 
 void NativeViewport::redoEdit() {
   if (mEditToolsLocked) return;
-  if (mScene->mSelectionBusy) {
+  if (!mScene->visible || mScene->mSelectionBusy) {
     return;
   }
   if ((mMode == InteractionMode::Move || mMode == InteractionMode::Rotate ||
@@ -2466,7 +2520,7 @@ void NativeViewport::discardSceneEdits() {
 }
 
 bool NativeViewport::hasEditableScene() const {
-  return !mProcessingActive && mScene != mProcessingScene &&
+  return mScene->visible && !mProcessingActive && mScene != mProcessingScene &&
          !mScene->previewLoadBusy && !mScene->previewLoadFailed &&
          mSelectedSceneIds.size() <= 1 && !mScene->mPreviewOnlyScene && !mScene->mHasMesh && !mScene->mScenePath.isEmpty() &&
          mScene->mEditModel.pointCount() > 0;
@@ -2478,12 +2532,12 @@ bool NativeViewport::selectableModelAvailable() const {
 }
 
 bool NativeViewport::visibleModelAvailable() const {
-  return (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ||
+  return mScene->visible && ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ||
       (!mScene->mScenePath.isEmpty() &&
          (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
           mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
           mScene->mFullResolutionPointCount > 0 ||
-          mScene->mFullResolutionMeshTriangleCount > 0));
+          mScene->mFullResolutionMeshTriangleCount > 0)));
 }
 
 void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
@@ -2499,7 +2553,11 @@ double NativeViewport::referencePlaneElevation() const {
   if (mReferencePlaneMode != ReferencePlaneMode::ModelBase) return 0.0;
   double minimum=std::numeric_limits<double>::infinity();
   const auto reference=sceneReferenceCoordinates();
-  for(const auto &state:displayedSceneStates()) {
+  // The original source base is a stable project reference, not the bounds of
+  // the currently visible display subset. Eye toggles must not move the grid.
+  auto states = mScene == mProcessingScene ? QList<std::shared_ptr<SceneState>>{mScene} : mSceneStates;
+  if (states.isEmpty()) states.append(mScene);
+  for(const auto &state:states) {
     const auto &coordinates=state->mSceneCoordinates;if(!coordinates.valid)continue;
     const auto mapping=sceneDisplayMapping(coordinates,reference);
     for(int corner=0;corner<8;++corner)minimum=std::min(minimum,mapping.mapCoordinate({
@@ -3397,7 +3455,7 @@ void NativeViewport::paintGL() {
 }
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
-  if (mScene->processingGpuSuspended) return;
+  if (!mScene->visible || mScene->processingGpuSuspended) return;
   const bool frozenPreview = mProcessingPreviewPaused && mScene == mProcessingScene;
   if (!frozenPreview) initializeSceneBuffers();
   if (mScene->mRenderMode == RenderMode::Gaussians &&
@@ -3902,7 +3960,7 @@ void NativeViewport::startSelection(const ScreenSelectionRequest &request,
               return;
             }
             mScene->mSelectionBusy = false;
-            if (epoch == mSelectionRequestEpoch && !mEditToolsLocked)
+            if (epoch == mSelectionRequestEpoch && !mEditToolsLocked && mScene->visible)
               mScene->mEditModel.applySelection(matches, operation);
             rebuildRenderedVertices();
             notifyEditState();
@@ -4021,12 +4079,12 @@ void NativeViewport::updateFrameRefreshPolicy() {
   mFrameRefreshTimer->setInterval(mProcessingActive ? 33 : 0);
   mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
   const auto needsRefresh = [](const auto &scene) {
-    return scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
+    return scene->visible && (scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
         !scene->mPendingPointCachePages.isEmpty() || scene->pointReadsActive() ||
         !scene->mPointCacheReadsInFlight.isEmpty() ||
         !scene->mFullResolutionPointGpuChunks.isEmpty() || scene->mRenderedMeshIndexCount > 0 ||
         scene->mMeshTextureUploadPending || !scene->mPendingMeshCachePages.isEmpty() ||
-        !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty();
+        !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty());
   };
   const bool shouldRefreshContinuously =
       !(mProcessingPreviewPaused && mProcessingPreviewVisible) &&
@@ -4040,17 +4098,25 @@ void NativeViewport::updateFrameRefreshPolicy() {
 
 void NativeViewport::notifyEditState() {
   emit editStateChanged(mScene->mEditModel.selectedCount(), mScene->mEditModel.deletedCount(),
-                        mScene->mEditModel.canUndo() || canUndoModelTransform(),
-                        mScene->mEditModel.canRedo() || canRedoModelTransform(),
+                        mScene->visible && (mScene->mEditModel.canUndo() || canUndoModelTransform()),
+                        mScene->visible && (mScene->mEditModel.canRedo() || canRedoModelTransform()),
                         hasEditableScene(), mScene->mEditModel.hasUnsavedChanges());
 }
 
 bool NativeViewport::canUndoModelTransform() const {
-  return mTransformHistoryIndex > 0 && mTransformHistoryIndex <= mTransformHistory.size();
+  if (mTransformHistoryIndex <= 0 || mTransformHistoryIndex > mTransformHistory.size()) return false;
+  const auto &objects = mTransformHistory.at(mTransformHistoryIndex - 1).before;
+  return std::all_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
+    return sceneObjectVisible(object.id);
+  });
 }
 
 bool NativeViewport::canRedoModelTransform() const {
-  return mTransformHistoryIndex < mTransformHistory.size();
+  if (mTransformHistoryIndex >= mTransformHistory.size()) return false;
+  const auto &objects = mTransformHistory.at(mTransformHistoryIndex).after;
+  return std::all_of(objects.cbegin(), objects.cend(), [&](const auto &object) {
+    return sceneObjectVisible(object.id);
+  });
 }
 
 void NativeViewport::resetModelTransformHistory() {
@@ -4079,10 +4145,10 @@ void NativeViewport::commitModelTransform() {
 QList<SceneObject> NativeViewport::selectedTransforms() const {
   QList<SceneObject> result;
   for (const auto &state : mSceneStates) {
-    if (!mSelectedSceneIds.contains(state->id)) continue;
+    if (!state->visible || !mSelectedSceneIds.contains(state->id)) continue;
     result.append({state->id, state->mScenePath,
         state->mModelTranslation / static_cast<float>(state->mSceneCoordinates.displayScale),
-        state->mModelRotation, state->mModelScale, state->mGaussianCount});
+        state->mModelRotation, state->mModelScale, state->mGaussianCount, state->visible});
   }
   return result;
 }
@@ -4112,7 +4178,7 @@ void NativeViewport::applySceneTransforms(const QList<SceneObject> &objects, con
 QVector<QVector3D> NativeViewport::selectionBoundsCorners() const {
   QVector<QVector3D> result;
   for (const auto &state : mSceneStates) {
-    if (!mSelectedSceneIds.contains(state->id)) continue;
+    if (!state->visible || !mSelectedSceneIds.contains(state->id)) continue;
     const QVector3D low = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMinimum() :
         state->mSceneCenter - QVector3D(state->mSceneRadius, state->mSceneRadius, state->mSceneRadius);
     const QVector3D high = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMaximum() :
@@ -6413,7 +6479,9 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
       mScene->mSceneRadius *
       std::max({std::abs(mScene->mModelScale.x()), std::abs(mScene->mModelScale.y()),
                 std::abs(mScene->mModelScale.z())});
-  float farPlane = std::max(100.0F * referenceLocalUnit, modelDistance + transformedRadius * 12.0F);
+  float farPlane = mScene->visible
+      ? std::max(100.0F * referenceLocalUnit, modelDistance + transformedRadius * 12.0F)
+      : std::max(100.0F * referenceLocalUnit, mDistance * 2.0F);
   for (const auto &state : displayedSceneStates()) {
     const auto mapping = sceneDisplayTransform(*state, *mScene);
     const float radius = state->mSceneRadius *
@@ -6487,13 +6555,46 @@ NativeViewport::transformedModelBoundsCorners() const {
   return corners;
 }
 
+QVector<QVector3D> NativeViewport::displayedBoundsCorners() const {
+  QVector<QVector3D> corners;
+  for (const auto &state : displayedSceneStates()) {
+    const QVector3D low = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMinimum() :
+        state->mSceneCenter - QVector3D(state->mSceneRadius, state->mSceneRadius, state->mSceneRadius);
+    const QVector3D high = state->mSceneCoordinates.valid ? state->mSceneCoordinates.localMaximum() :
+        state->mSceneCenter + QVector3D(state->mSceneRadius, state->mSceneRadius, state->mSceneRadius);
+    const QMatrix4x4 transform = sceneDisplayTransform(*state, *mScene) *
+        ModelTransform{state->mModelTranslation, state->mModelRotation, state->mModelScale}.matrix(state->mSceneCenter);
+    for (int corner = 0; corner < 8; ++corner) corners.append(transform.map(QVector3D(
+        corner & 1 ? high.x() : low.x(), corner & 2 ? high.y() : low.y(),
+        corner & 4 ? high.z() : low.z())));
+  }
+  return corners;
+}
+
 QVector3D NativeViewport::transformedSceneCenter() const {
+  if (!mScene->visible) {
+    const auto corners = displayedBoundsCorners();
+    if (corners.isEmpty()) return {};
+    QVector3D low = corners.first(), high = low;
+    for (const auto &corner : corners) {
+      for (int axis = 0; axis < 3; ++axis) {
+        low[axis] = std::min(low[axis], corner[axis]);
+        high[axis] = std::max(high[axis], corner[axis]);
+      }
+    }
+    return (low + high) * 0.5F;
+  }
   return mScene->mSceneCenter + mScene->mModelTranslation;
 }
 
 float NativeViewport::transformedSceneRadius() const {
   const QVector3D center = transformedSceneCenter();
   float radius = 0.0F;
+  if (!mScene->visible) {
+    for (const auto &corner : displayedBoundsCorners())
+      radius = std::max(radius, (corner - center).length());
+    return std::max(radius, 1.0e-4F);
+  }
   for (const QVector3D &corner : transformedModelBoundsCorners()) {
     radius = std::max(radius, (corner - center).length());
   }
@@ -6553,6 +6654,7 @@ QString NativeViewport::sceneObjectAt(const QPointF &position) {
 std::optional<bool>
 NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
                                   QVector3D *hitWorldPosition) {
+  if (!mScene->visible) return false;
   if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
       !mModelPickProgram->isLinked() || context() == nullptr ||
       !context()->isValid()) {
@@ -7652,7 +7754,7 @@ void NativeViewport::drawDepthAwareModelBounds(
 
 void NativeViewport::drawCameraTrajectory(QPainter &painter,
                                           const QMatrix4x4 &viewProjection) {
-  if (!mShowCameras || !camerasAvailable()) {
+  if (!mScene->visible || !mShowCameras || !camerasAvailable()) {
     return;
   }
 

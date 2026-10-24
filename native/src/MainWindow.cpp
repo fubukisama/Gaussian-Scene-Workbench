@@ -79,6 +79,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -87,6 +88,8 @@
 #include <QMouseEvent>
 #include <QMoveEvent>
 #include <QPlainTextEdit>
+#include <QPainter>
+#include <QPersistentModelIndex>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QProgressDialog>
@@ -102,6 +105,7 @@
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QStyledItemDelegate>
 #include <QStorageInfo>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -131,6 +135,97 @@ namespace {
 constexpr int kDockLayoutStateVersion = 5;
 constexpr int kDefaultTaskDockHeight = 105;
 constexpr int kWorkbenchTreeIconRole = Qt::UserRole + 20;
+
+// Keep visibility clicks separate from selection, like Blender's Outliner.
+// The underlying check-state remains available to keyboard and accessibility
+// clients; the delegate presents it as an eye rather than another checkbox.
+class SceneTreeWidget final : public QTreeWidget {
+public:
+  using QTreeWidget::QTreeWidget;
+  std::function<void()> toggleSelectedVisibility;
+protected:
+  void keyPressEvent(QKeyEvent *event) override {
+    if (event->key() == Qt::Key_Space && event->modifiers() == Qt::NoModifier && toggleSelectedVisibility) {
+      if (!event->isAutoRepeat()) toggleSelectedVisibility();
+      event->accept();
+      return;
+    }
+    QTreeWidget::keyPressEvent(event);
+  }
+  void mousePressEvent(QMouseEvent *event) override {
+    const QModelIndex index = indexAt(event->position().toPoint());
+    if (event->button() == Qt::LeftButton && isVisibilityCell(index)) {
+      mVisibilityPress = index;
+      event->accept();
+      return;
+    }
+    mVisibilityPress = QPersistentModelIndex();
+    QTreeWidget::mousePressEvent(event);
+  }
+  void mouseReleaseEvent(QMouseEvent *event) override {
+    if (event->button() == Qt::LeftButton && mVisibilityPress.isValid()) {
+      const QModelIndex pressed = mVisibilityPress;
+      mVisibilityPress = QPersistentModelIndex();
+      if (pressed == indexAt(event->position().toPoint()) && isVisibilityCell(pressed))
+        model()->setData(pressed, pressed.data(Qt::CheckStateRole).toInt() == Qt::Checked
+            ? Qt::Unchecked : Qt::Checked, Qt::CheckStateRole);
+      event->accept();
+      return;
+    }
+    QTreeWidget::mouseReleaseEvent(event);
+  }
+  void mouseDoubleClickEvent(QMouseEvent *event) override {
+    if (isVisibilityCell(indexAt(event->position().toPoint()))) {
+      event->accept();
+      return;
+    }
+    QTreeWidget::mouseDoubleClickEvent(event);
+  }
+private:
+  static bool isVisibilityCell(const QModelIndex &index) {
+    return index.isValid() && index.column() == 1 &&
+        index.data(Qt::CheckStateRole).isValid() &&
+        (!index.data(Qt::UserRole).isValid() || index.data(Qt::UserRole).toBool()) &&
+        index.flags().testFlag(Qt::ItemIsEnabled);
+  }
+  QPersistentModelIndex mVisibilityPress;
+};
+
+class SceneVisibilityDelegate final : public QStyledItemDelegate {
+public:
+  using QStyledItemDelegate::QStyledItemDelegate;
+  bool editorEvent(QEvent *event, QAbstractItemModel *model,
+                   const QStyleOptionViewItem &option, const QModelIndex &index) override {
+    if (index.data(Qt::UserRole).isValid() && !index.data(Qt::UserRole).toBool()) return true;
+    return QStyledItemDelegate::editorEvent(event, model, option, index);
+  }
+  void paint(QPainter *painter, const QStyleOptionViewItem &option,
+             const QModelIndex &index) const override {
+    QStyleOptionViewItem background(option);
+    initStyleOption(&background, index);
+    background.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+    background.text.clear();
+    const QWidget *widget = option.widget;
+    (widget ? widget->style() : QApplication::style())->drawControl(
+        QStyle::CE_ItemViewItem, &background, painter, widget);
+    if (!index.data(Qt::CheckStateRole).isValid()) return;
+    const bool visible = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
+    const qreal edge = qMin(option.rect.width() - 10, option.rect.height() - 6);
+    const QRectF icon(QPointF(option.rect.center()) - QPointF(edge / 2, edge / 2), QSizeF(edge, edge));
+    const bool enabled = option.state.testFlag(QStyle::State_Enabled) &&
+        (!index.data(Qt::UserRole).isValid() || index.data(Qt::UserRole).toBool());
+    const QColor ink = option.palette.color(enabled
+        ? QPalette::Active : QPalette::Disabled, QPalette::Text);
+    paintWorkbenchIcon(*painter, WorkbenchIconId::VisibleOnly, icon, ink);
+    if (!visible) {
+      painter->save();
+      painter->setRenderHint(QPainter::Antialiasing);
+      painter->setPen(QPen(ink, qMax(1.3, edge / 12), Qt::SolidLine, Qt::RoundCap));
+      painter->drawLine(icon.topLeft() + QPointF(1, 1), icon.bottomRight() - QPointF(1, 1));
+      painter->restore();
+    }
+  }
+};
 
 void setWorkbenchActionIcon(QAction *action, const WorkbenchIconId id,
                             const QPalette &palette) {
@@ -1585,6 +1680,28 @@ void MainWindow::createActions() {
     }
   });
 
+  mShowSelectedModelsAction = AppLanguage::text(new QAction(this), AppLanguage::source("显示所选模型"));
+  mHideSelectedModelsAction = AppLanguage::text(new QAction(this), AppLanguage::source("隐藏所选模型"));
+  mIsolateSelectedModelsAction = AppLanguage::text(new QAction(this), AppLanguage::source("仅显示所选模型"));
+  mShowAllModelsAction = AppLanguage::text(new QAction(this), AppLanguage::source("显示全部模型"));
+  mShowSelectedModelsAction->setObjectName(QStringLiteral("showSelectedModelsAction"));
+  mHideSelectedModelsAction->setObjectName(QStringLiteral("hideSelectedModelsAction"));
+  mIsolateSelectedModelsAction->setObjectName(QStringLiteral("isolateSelectedModelsAction"));
+  mShowAllModelsAction->setObjectName(QStringLiteral("showAllModelsAction"));
+  for (auto *action : {mShowSelectedModelsAction, mHideSelectedModelsAction,
+                       mIsolateSelectedModelsAction, mShowAllModelsAction})
+    AppLanguage::bind(action, "toolTip", AppLanguage::source("只切换视口显示，不卸载模型或修改源文件；隐藏状态随工程保存。"));
+  connect(mShowSelectedModelsAction, &QAction::triggered, this,
+          [this] { setSceneVisibility(selectedSceneTreeIds(), true); });
+  connect(mHideSelectedModelsAction, &QAction::triggered, this,
+          [this] { setSceneVisibility(selectedSceneTreeIds(), false); });
+  connect(mIsolateSelectedModelsAction, &QAction::triggered, this, &MainWindow::isolateSceneTreeSelection);
+  connect(mShowAllModelsAction, &QAction::triggered, this, [this] {
+    QStringList ids;
+    for (const auto &object : mWorkspace.sceneObjects()) ids.append(object.id);
+    setSceneVisibility(ids, true);
+  });
+
   mMoveModelAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "移动模型"), this), AppLanguage::source("移动模型"));
   mMoveModelAction->setObjectName(QStringLiteral("moveModelAction"));
   mMoveModelAction->setCheckable(true);
@@ -1862,6 +1979,11 @@ void MainWindow::createMenus() {
   sceneMenu->addAction(mImportSceneAction);
   sceneMenu->addAction(actions().at(4));
   sceneMenu->addAction(mFindModelAction);
+  sceneMenu->addSeparator();
+  sceneMenu->addAction(mShowSelectedModelsAction);
+  sceneMenu->addAction(mHideSelectedModelsAction);
+  sceneMenu->addAction(mIsolateSelectedModelsAction);
+  sceneMenu->addAction(mShowAllModelsAction);
   sceneMenu->addSeparator();
   sceneMenu->addAction(mInspectAction);
   sceneMenu->addAction(mMoveModelAction);
@@ -2204,17 +2326,30 @@ void MainWindow::createProjectDock() {
   mProjectDock->setMinimumSize(0, 0);
   mProjectDock->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   installDockTitleBar(mProjectDock, mUiScalePercent);
-  mProjectTree = new QTreeWidget(mProjectDock);
+  mProjectTree = new SceneTreeWidget(mProjectDock);
+  static_cast<SceneTreeWidget *>(mProjectTree)->toggleSelectedVisibility = [this] {
+    const QStringList ids = selectedSceneTreeIds();
+    const auto objects = mWorkspace.sceneObjects();
+    const bool anyVisible = std::any_of(objects.cbegin(), objects.cend(),
+        [&](const auto &object) { return object.visible && ids.contains(object.id); });
+    setSceneVisibility(ids, !anyVisible);
+  };
   mProjectTree->setMinimumSize(0, 0);
   mProjectTree->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   mProjectTree->setHeaderHidden(true);
+  mProjectTree->setColumnCount(2);
+  mProjectTree->header()->setStretchLastSection(false);
+  mProjectTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+  mProjectTree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
+  mProjectTree->setColumnWidth(1, AppTheme::scaled(30, mUiScalePercent));
+  mProjectTree->setItemDelegateForColumn(1, new SceneVisibilityDelegate(mProjectTree));
+  mProjectTree->setSelectionBehavior(QAbstractItemView::SelectRows);
   mProjectTree->setAlternatingRowColors(false);
   mProjectTree->setUniformRowHeights(true);
   mProjectTree->setObjectName(QStringLiteral("projectTree"));
   mProjectTree->viewport()->setAcceptDrops(true);
   mProjectTree->viewport()->installEventFilter(this);
   mProjectTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  AppLanguage::bind(mProjectTree, "toolTip", AppLanguage::source("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型"));
   mProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
   mProjectDock->setWidget(mProjectTree);
   auto *projectList = new MultiItemList(mProjectTree, AppLanguage::source("卸载所选模型"),
@@ -2222,6 +2357,7 @@ void MainWindow::createProjectDock() {
         for (const auto *item : mProjectTree->selectedItems())
           if (!item->data(0, Qt::UserRole + 2).toString().isEmpty()) { clearSceneImport(); return; }
       }, false);
+  AppLanguage::bind(mProjectTree, "toolTip", AppLanguage::source("Ctrl 点选增减模型 · Shift 连选 · Ctrl+A 全选模型 · 点击眼睛或按空格显示或隐藏"));
   addDockWidget(Qt::LeftDockWidgetArea, mProjectDock);
 
   connect(mProjectTree, &QTreeWidget::itemSelectionChanged, this, [this]() {
@@ -2234,15 +2370,28 @@ void MainWindow::createProjectDock() {
     }
     const auto *current = mProjectTree->currentItem();
     const QString active = current ? current->data(0, Qt::UserRole + 2).toString() : QString();
+    QStringList visibleIds;
+    for (const QString &id : ids)
+      if (mViewport->sceneObjectVisible(id)) visibleIds.append(id);
     QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
-    if (!ids.isEmpty() && (!ids.contains(mWorkspace.activeSceneId()) ||
-                          (ids.contains(active) && active != mWorkspace.activeSceneId())) &&
+    if (!visibleIds.isEmpty() && (!visibleIds.contains(mWorkspace.activeSceneId()) ||
+                          (visibleIds.contains(active) && active != mWorkspace.activeSceneId())) &&
         !confirmDiscardSceneEdits()) {
       syncProjectTreeSelection(); return;
     }
-    if (!mViewport->setSceneSelection(ids, active)) syncProjectTreeSelection();
-    statusBar()->showMessage(QCoreApplication::translate("Workbench", "已选中 %1 个模型：G 整体移动 · R 整体旋转 · S 等比缩放")
-                                .arg(ids.size()), 6000);
+    {
+      QScopedValueRollback<bool> keepRows(mPreserveSceneTreeSelection, true);
+      mViewport->setSceneSelection(visibleIds,
+          visibleIds.contains(active) ? active : mViewport->activeSceneId());
+    }
+    updateSceneVisibilityActions();
+    statusBar()->showMessage(QCoreApplication::translate("Workbench", "已选中 %1 个模型（%2 个可见）；可用眼睛按钮或右键菜单切换显示。")
+                                .arg(ids.size()).arg(visibleIds.size()), 6000);
+  });
+  connect(mProjectTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) {
+    if (column != 1 || !item) return;
+    const QString id = item->data(0, Qt::UserRole + 2).toString();
+    if (!id.isEmpty()) setSceneVisibility({id}, item->checkState(1) == Qt::Checked);
   });
   connect(mProjectTree, &QTreeWidget::customContextMenuRequested, this,
           [this, projectList](const QPoint &position) {
@@ -2256,7 +2405,7 @@ void MainWindow::createProjectDock() {
             else if (kind == QStringLiteral("scene") && !mProcessSupervisor.isRunning() && !mSelectionBusy) {
               const QString id = item->data(0, Qt::UserRole + 2).toString();
               QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
-              if (id != mViewport->activeSceneId() && confirmDiscardSceneEdits())
+              if (mViewport->sceneObjectVisible(id) && id != mViewport->activeSceneId() && confirmDiscardSceneEdits())
                 mViewport->setSceneSelection(mViewport->selectedSceneIds(), id);
             }
             QMenu menu(mProjectTree);
@@ -2266,6 +2415,12 @@ void MainWindow::createProjectDock() {
               menu.addAction(mClearReconstructionAction);
             } else if (kind == QStringLiteral("scene")) {
               menu.addAction(mFindModelAction);
+              menu.addSeparator();
+              updateSceneVisibilityActions();
+              menu.addAction(mShowSelectedModelsAction);
+              menu.addAction(mHideSelectedModelsAction);
+              menu.addAction(mIsolateSelectedModelsAction);
+              menu.addAction(mShowAllModelsAction);
               menu.addSeparator();
               projectList->addToMenu(menu);
             } else if (kind == QStringLiteral("tasks")) {
@@ -3705,6 +3860,8 @@ void MainWindow::updateDockMetrics() {
   if (mProjectDock != nullptr) {
     mProjectDock->setMinimumWidth(0);
   }
+  if (mProjectTree != nullptr)
+    mProjectTree->setColumnWidth(1, AppTheme::scaled(30, mUiScalePercent));
   if (mInspectorDock != nullptr) {
     mInspectorDock->setMinimumWidth(0);
   }
@@ -3767,6 +3924,10 @@ void MainWindow::refreshThemePresentation() {
           ? WorkbenchIconId::Locked : WorkbenchIconId::Unlocked},
       {mObservationTrackballAction, WorkbenchIconId::Orbit},
       {mFindModelAction, WorkbenchIconId::FitView},
+      {mShowSelectedModelsAction, WorkbenchIconId::VisibleOnly},
+      {mHideSelectedModelsAction, WorkbenchIconId::VisibleOnly},
+      {mIsolateSelectedModelsAction, WorkbenchIconId::Scene},
+      {mShowAllModelsAction, WorkbenchIconId::VisibleOnly},
       {mMoveModelAction, WorkbenchIconId::Move},
       {mRotateModelAction, WorkbenchIconId::Rotate},
       {mScaleModelAction, WorkbenchIconId::Scale},
@@ -3973,9 +4134,11 @@ void MainWindow::updateEditActions() {
   const bool modelInteractive = baseInteractive && mModelReady;
   const bool modelNavigationAvailable = !mSelectionBusy && mModelReady;
   const bool pointInteractive = baseInteractive && mSceneReady;
+  updateSceneVisibilityActions();
   // Observations are navigable even before a full editable source is ready.
   // Do not use model-selection eligibility to hide the navigation controls.
-  const bool anyScene = mViewport->visibleModelAvailable() || mModelReady || mSceneReady;
+  const bool anyScene = mViewport->visibleModelAvailable() ||
+      mViewport->visibleSceneObjectCount() > 0 || mModelReady || mSceneReady;
   if (mInspectAction == nullptr) {
     return;
   }
@@ -3989,7 +4152,8 @@ void MainWindow::updateEditActions() {
     mEditToolbar->setVisible(anyScene);
   }
   mInspectAction->setEnabled(!mSelectionBusy && anyScene);
-  mFindModelAction->setEnabled(modelNavigationAvailable);
+  mFindModelAction->setEnabled(!mSelectionBusy &&
+      (modelNavigationAvailable || mViewport->visibleSceneObjectCount() > 0));
   mExportModelAction->setEnabled(modelNavigationAvailable && !mRecoveryBlocked &&
       !mProcessSupervisor.isRunning() && !mViewport->modelTransformActive());
   mMoveModelAction->setEnabled(modelInteractive);
@@ -7319,11 +7483,17 @@ void MainWindow::updateActionAvailability() {
   mGenerationHistoryAction->setEnabled(!running && workspaceReady);
   mPausePreviewAction->setEnabled(mViewport->hasProcessingPreview() ||
       (running && (mPendingTraining || mPendingReconstruction || mPendingMesh)));
+  updateSceneVisibilityActions();
   updateEditActions();
 }
 
 void MainWindow::rebuildProjectTree() {
-  if (mPreserveProjectTree) { syncProjectTreeSelection(); return; }
+  if (mPreserveProjectTree) {
+    syncProjectTreeVisibility();
+    syncProjectTreeSelection();
+    return;
+  }
+  const QStringList retainedTreeIds = selectedSceneTreeIds();
   const QSignalBlocker blocker(mProjectTree);
   mProjectTree->clear();
   const QString projectName = mWorkspace.hasProject()
@@ -7376,6 +7546,13 @@ void MainWindow::rebuildProjectTree() {
     item->setData(0, Qt::UserRole + 2, object.id);
     setWorkbenchTreeIcon(item, WorkbenchIconId::ImportModel, mProjectTree->palette());
     item->setToolTip(0, QDir::toNativeSeparators(object.path));
+    item->setCheckState(1, object.visible ? Qt::Checked : Qt::Unchecked);
+    item->setToolTip(1, object.visible
+        ? QCoreApplication::translate("Workbench", "隐藏模型（仅视口）")
+        : QCoreApplication::translate("Workbench", "显示模型（仅视口）"));
+    item->setData(1, Qt::AccessibleTextRole, object.visible
+        ? QCoreApplication::translate("Workbench", "模型可见")
+        : QCoreApplication::translate("Workbench", "模型已隐藏"));
     if (object.id == mWorkspace.activeSceneId())
       mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
   }
@@ -7420,10 +7597,16 @@ void MainWindow::rebuildProjectTree() {
   dataset->setExpanded(true);
   scene->setExpanded(true);
   syncProjectTreeSelection();
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    const QString id = (*it)->data(0, Qt::UserRole + 2).toString();
+    if (retainedTreeIds.contains(id) && (!mViewport->sceneObjectVisible(id) ||
+        mViewport->selectedSceneIds().isEmpty())) (*it)->setSelected(true);
+  }
+  updateSceneVisibilityActions();
 }
 
 void MainWindow::syncProjectTreeSelection() {
-  if (!mProjectTree || !mViewport) return;
+  if (!mProjectTree || !mViewport || mPreserveSceneTreeSelection) return;
   const QSignalBlocker blocker(mProjectTree);
   const QStringList ids = mViewport->selectedSceneIds();
   for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
@@ -7434,6 +7617,86 @@ void MainWindow::syncProjectTreeSelection() {
       mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
     }
   }
+  updateSceneVisibilityActions();
+}
+
+QStringList MainWindow::selectedSceneTreeIds() const {
+  QStringList ids;
+  if (!mProjectTree) return ids;
+  for (const auto *item : mProjectTree->selectedItems()) {
+    const QString id = item->data(0, Qt::UserRole + 2).toString();
+    if (!id.isEmpty()) ids.append(id);
+  }
+  return ids;
+}
+
+void MainWindow::syncProjectTreeVisibility() {
+  if (!mProjectTree) return;
+  const QSignalBlocker blocker(mProjectTree);
+  const auto objects = mWorkspace.sceneObjects();
+  const bool enabled = !mProcessSupervisor.isRunning() && !mSelectionBusy &&
+      !mViewport->modelTransformActive() && !mRecoveryBlocked;
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
+    auto *item = *it;
+    const QString id = item->data(0, Qt::UserRole + 2).toString();
+    const auto found = std::find_if(objects.cbegin(), objects.cend(),
+        [&](const auto &object) { return object.id == id; });
+    if (found == objects.cend()) continue;
+    item->setCheckState(1, found->visible ? Qt::Checked : Qt::Unchecked);
+    item->setToolTip(1, found->visible
+        ? QCoreApplication::translate("Workbench", "隐藏模型（仅视口）")
+        : QCoreApplication::translate("Workbench", "显示模型（仅视口）"));
+    item->setData(1, Qt::AccessibleTextRole, found->visible
+        ? QCoreApplication::translate("Workbench", "模型可见")
+        : QCoreApplication::translate("Workbench", "模型已隐藏"));
+    item->setData(1, Qt::UserRole, enabled);
+  }
+  updateSceneVisibilityActions();
+}
+
+void MainWindow::updateSceneVisibilityActions() {
+  if (!mShowSelectedModelsAction || !mProjectTree) return;
+  const bool available = !mProcessSupervisor.isRunning() && !mSelectionBusy &&
+      !mViewport->modelTransformActive() && !mRecoveryBlocked;
+  const QSignalBlocker blocker(mProjectTree);
+  for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it)
+    if (!(*it)->data(0, Qt::UserRole + 2).toString().isEmpty())
+      (*it)->setData(1, Qt::UserRole, available);
+  const auto selected = selectedSceneTreeIds();
+  bool selectedVisible = false, selectedHidden = false, anyHidden = false;
+  for (const auto &object : mWorkspace.sceneObjects()) {
+    anyHidden |= !object.visible;
+    if (!selected.contains(object.id)) continue;
+    selectedVisible |= object.visible;
+    selectedHidden |= !object.visible;
+  }
+  mShowSelectedModelsAction->setEnabled(available && selectedHidden);
+  mHideSelectedModelsAction->setEnabled(available && selectedVisible);
+  mIsolateSelectedModelsAction->setEnabled(available && !selected.isEmpty());
+  mShowAllModelsAction->setEnabled(available && anyHidden);
+}
+
+void MainWindow::setSceneVisibility(const QStringList &ids, const bool visible) {
+  if (ids.isEmpty()) return;
+  if (mProcessSupervisor.isRunning() || mSelectionBusy ||
+      mViewport->modelTransformActive() || mRecoveryBlocked) {
+    syncProjectTreeVisibility();
+    return;
+  }
+  QScopedValueRollback<bool> preserveTree(mPreserveProjectTree, true);
+  QScopedValueRollback<bool> preserveSelection(mPreserveSceneTreeSelection, true);
+  mWorkspace.setSceneObjectVisibility(ids, visible);
+  syncProjectTreeVisibility();
+}
+
+void MainWindow::isolateSceneTreeSelection() {
+  const QStringList ids = selectedSceneTreeIds();
+  if (ids.isEmpty() || mProcessSupervisor.isRunning() || mSelectionBusy ||
+      mViewport->modelTransformActive() || mRecoveryBlocked) return;
+  QScopedValueRollback<bool> preserveTree(mPreserveProjectTree, true);
+  QScopedValueRollback<bool> preserveSelection(mPreserveSceneTreeSelection, true);
+  mWorkspace.isolateSceneObjects(ids);
+  syncProjectTreeVisibility();
 }
 
 QVector3D MainWindow::workspaceTranslationForViewport() const {

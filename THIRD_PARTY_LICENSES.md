@@ -62,6 +62,29 @@ references to a paper do not represent wholesale reuse of its repository.
 への再表示は行いません。独立作成した数式・制御・ビルド補助は各ファイルの
 通知に従い、論文の参照をリポジトリ全体の流用と扱いません。
 
+## Blender object visibility / Blender 对象可见性 / Blender オブジェクトの表示
+
+The native scene collection adapts Blender v4.5.0 hide/reveal batch predicates and
+the hidden-implies-not-selectable rule from pinned revision
+`8cb6b388974a817afedf1317ce26f0c75aa5f181`:
+[object_edit.cc](https://github.com/blender/blender/blob/8cb6b388974a817afedf1317ce26f0c75aa5f181/source/blender/editors/object/object_edit.cc#L276)
+and [layer.cc](https://github.com/blender/blender/blob/8cb6b388974a817afedf1317ce26f0c75aa5f181/source/blender/blenkernel/intern/layer.cc#L2150).
+The adaptation replaces Blender Base/RNA/dependency-graph plumbing with GSW
+scene IDs, persistent visibility flags and retained Qt/OpenGL resources; only
+the viewport display state is affected, not original data or exports.
+Upstream copyright: 2001–2002 NaN Holding BV and 2023 Blender Authors;
+GPL-2.0-or-later, combined with this application under GPL-3.0. Existing Blender
+license notices are shipped with native source. Eye artwork is the separately
+licensed vendored Lucide eye, with an original native strike-through overlay;
+Blender application icons and branding are not copied.
+
+中文：显示／隐藏批处理和隐藏对象不可选规则改编自上述固定版本源码，
+适配为本软件的模型 ID、工程显示状态和保留的 GPU 资源，不嵌入完整 Blender。
+
+日本語：表示・非表示の一括処理と非表示モデルを選択不可とする規則を上記
+ソースから適応し、GSW のモデル ID・保存状態・GPU 資産に接続しています。
+Blender 全体やブランド画像を組み込むものではありません。
+
 ## Blender Transform Geometry / Blender 变换几何 / Blender 変換形状
 
 The native desktop directly adapts the cone-generation routine from Blender

@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -14,6 +15,8 @@ private slots:
   void fallsBackToInputWhenImagesDirectoryIsEmpty();
   void prefersInputWhenBothStandardDirectoriesContainImages();
   void rejectsNestedOnlyImagesThatTrainingCannotConsume();
+  void persistsPerObjectVisibilityWithoutChangingModelData();
+  void oldSceneCollectionsDefaultToVisible();
 };
 
 void WorkspaceSceneFormatTests::acceptsBigEndianPlySceneMetadata() {
@@ -115,6 +118,94 @@ void WorkspaceSceneFormatTests::rejectsNestedOnlyImagesThatTrainingCannotConsume
   nestedFrame.close();
 
   QCOMPARE(gsw::WorkspaceDocument::countDatasetImages(dataset.path()), qint64(0));
+}
+
+void WorkspaceSceneFormatTests::persistsPerObjectVisibilityWithoutChangingModelData() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath("working");
+  QVERIFY(QDir().mkpath(working));
+  const QString path = QDir(temporary.path()).filePath("source.ply");
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  const QByteArray source("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n");
+  QCOMPARE(file.write(source), source.size());
+  file.close();
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(working, "Visibility", &error), qPrintable(error));
+  QVERIFY2(document.addScenePath(path, &error), qPrintable(error));
+  const QString first = document.activeSceneId();
+  QVERIFY2(document.setSceneTranslation({1, 2, 3}, &error), qPrintable(error));
+  QVERIFY2(document.addScenePath(path, &error), qPrintable(error));
+  const QString second = document.activeSceneId();
+  const auto before = document.sceneObjects();
+  QVERIFY(document.setSceneObjectVisibility({first, second}, false));
+  QCOMPARE(document.activeSceneId(), second);
+  QCOMPARE(document.sceneObjects().size(), 2);
+  QVERIFY(!document.sceneObjects()[0].visible);
+  QVERIFY(!document.sceneObjects()[1].visible);
+  const auto hidden = document.sceneCollectionJson();
+  QVERIFY(!document.setSceneObjectVisibility({first, "unknown-scene"}, true));
+  QCOMPARE(document.sceneCollectionJson(), hidden);
+  const auto recovery = QJsonDocument::fromJson(document.recoveryManifestJson()).object();
+  QCOMPARE(recovery.value("sceneCollection").toObject(), hidden);
+  const QString manifest = QDir(temporary.path()).filePath("visibility.gsw.json");
+  QVERIFY2(document.saveManifest(manifest, &error), qPrintable(error));
+  QVERIFY(!document.isModified());
+  QVERIFY(document.setSceneObjectVisibility({first}, false));
+  QVERIFY(!document.isModified());
+  gsw::WorkspaceDocument restored;
+  QVERIFY2(restored.load(manifest, &error), qPrintable(error));
+  QCOMPARE(restored.activeSceneId(), second);
+  QCOMPARE(restored.sceneObjects().size(), 2);
+  const auto restoredObjects = restored.sceneObjects();
+  for (int index = 0; index < 2; ++index) {
+    const auto &actual = restoredObjects[index];
+    QCOMPARE(actual.id, before[index].id);
+    QCOMPARE(actual.path, before[index].path);
+    QCOMPARE(actual.translation, before[index].translation);
+    QCOMPARE(actual.rotation, before[index].rotation);
+    QCOMPARE(actual.scale, before[index].scale);
+    QVERIFY(!actual.visible);
+  }
+  QVERIFY(restored.setSceneObjectVisibility({first}, true));
+  QVERIFY(restored.sceneObjects()[0].visible);
+  QVERIFY(!restored.sceneObjects()[1].visible);
+  const auto partial = restored.sceneCollectionJson();
+  QVERIFY(!restored.isolateSceneObjects({second, "unknown-scene"}));
+  QCOMPARE(restored.sceneCollectionJson(), partial);
+  QVERIFY(restored.isolateSceneObjects({second}));
+  QVERIFY(!restored.sceneObjects()[0].visible);
+  QVERIFY(restored.sceneObjects()[1].visible);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  QCOMPARE(file.readAll(), source);
+}
+
+void WorkspaceSceneFormatTests::oldSceneCollectionsDefaultToVisible() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString path = QDir(temporary.path()).filePath("legacy.ply");
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  file.write("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n");
+  file.close();
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY(document.create(temporary.path(), &error));
+  QVERIFY(document.addScenePath(path, &error));
+  auto legacy = document.sceneCollectionJson();
+  QJsonArray objects;
+  for (const auto &value : legacy.value("objects").toArray()) {
+    auto object = value.toObject();
+    object.remove("visible");
+    objects.append(object);
+  }
+  legacy.insert("objects", objects);
+  QVERIFY(document.setSceneObjectVisibility({document.activeSceneId()}, false));
+  document.restoreSceneCollection(legacy);
+  QCOMPARE(document.sceneObjects().size(), 1);
+  QVERIFY(document.sceneObjects()[0].visible);
 }
 
 QTEST_GUILESS_MAIN(WorkspaceSceneFormatTests)

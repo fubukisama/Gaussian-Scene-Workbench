@@ -230,6 +230,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/CatalogPathGuard.h
   src/MultiSceneSmokeTest.cpp
   src/MultiSceneSmokeTest.h
+  src/SceneVisibilitySmokeTest.cpp
+  src/SceneVisibilitySmokeTest.h
   src/SceneObject.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
@@ -396,7 +398,8 @@ install(FILES LICENSE.md DESTINATION native)
 # Corresponding original native source and build resources accompany binaries.
 # Restricted training components remain separate; the obsolete shader is not
 # compiled, loaded or represented as GPL source in this desktop source bundle.
-install(DIRECTORY src tests assets i18n DESTINATION source/native)
+install(DIRECTORY src tests assets i18n DESTINATION source/native
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 install(DIRECTORY backend DESTINATION source/native
   PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 install(DIRECTORY worker DESTINATION source/native
@@ -1179,6 +1182,17 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  foreach(GSW_VISIBILITY_LANGUAGE zh_CN en_US ja_JP)
+    foreach(GSW_VISIBILITY_THEME light dark)
+      add_test(NAME native_scene_visibility_${GSW_VISIBILITY_LANGUAGE}_${GSW_VISIBILITY_THEME}
+        COMMAND GaussianSceneWorkbench --smoke-test-scene-visibility
+          --language ${GSW_VISIBILITY_LANGUAGE} --theme ${GSW_VISIBILITY_THEME})
+      set_tests_properties(native_scene_visibility_${GSW_VISIBILITY_LANGUAGE}_${GSW_VISIBILITY_THEME} PROPERTIES
+        TIMEOUT 90
+        ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    endforeach()
+  endforeach()
   add_test(NAME native_gaussian_interaction
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
   set_tests_properties(native_gaussian_interaction PROPERTIES

@@ -108,6 +108,8 @@ public:
         ? mProcessingReferenceScene->id : mScene->id;
   }
   [[nodiscard]] qsizetype sceneObjectCount() const { return mSceneStates.size(); }
+  [[nodiscard]] bool sceneObjectVisible(const QString &id) const;
+  [[nodiscard]] qsizetype visibleSceneObjectCount() const;
   void setShowCameras(bool enabled);
   void setInteractionMode(InteractionMode mode);
   void setEditToolsLocked(bool locked);
@@ -299,6 +301,7 @@ protected:
   void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
+  [[nodiscard]] QVector<QVector3D> displayedBoundsCorners() const;
   [[nodiscard]] QVector<QVector3D> selectionBoundsCorners() const;
   [[nodiscard]] QVector3D selectionPivot() const;
   [[nodiscard]] QList<SceneObject> selectedTransforms() const;
@@ -349,6 +352,7 @@ private:
 
   struct SceneState final {
     QString id;
+    bool visible = true;
     QVector3D sourceTranslation;
     bool buffersInitialized = false;
     bool processingGpuSuspended = false;

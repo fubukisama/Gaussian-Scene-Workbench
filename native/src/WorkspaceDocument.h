@@ -83,6 +83,8 @@ public:
                              QString *errorMessage = nullptr);
   bool activateSceneObject(const QString &id);
   bool removeSceneObjects(const QStringList &ids);
+  bool setSceneObjectVisibility(const QStringList &ids, bool visible);
+  bool isolateSceneObjects(const QStringList &ids);
   bool setSceneObjectTransforms(const QList<SceneObject> &objects,
                                 QString *errorMessage = nullptr);
   [[nodiscard]] bool hasPendingDataMigration() const;

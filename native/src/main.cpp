@@ -7,6 +7,7 @@
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "MultiSceneSmokeTest.h"
+#include "SceneVisibilitySmokeTest.h"
 #include "GaussianPerformanceSmokeTest.h"
 #include "MeshRenderingSmokeTest.h"
 #include "TextureTextSmokeTest.h"
@@ -321,6 +322,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-multi-scene"),
       QStringLiteral("Verify multi-object import, rendering, selection and persistence."));
   parser.addOption(multiSceneSmokeTestOption);
+  QCommandLineOption sceneVisibilitySmokeTestOption(
+      QStringLiteral("smoke-test-scene-visibility"),
+      QStringLiteral("Verify per-object display controls across point, mesh, 3DGS and 2DGS scenes."));
+  parser.addOption(sceneVisibilitySmokeTestOption);
   QCommandLineOption smokeSceneOption(
       QStringLiteral("smoke-scene"),
       QStringLiteral("Scene PLY used by viewport smoke tests."),
@@ -484,6 +489,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(windowMinimizeSmokeOption) ||
                          parser.isSet(languageSmokeOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
+                         parser.isSet(sceneVisibilitySmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
                          exitConfirmationSmokeTest || infiniteGridSmokeTest ||
                          orthographicNavigationSmokeTest ||
@@ -713,6 +719,11 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(multiSceneSmokeTestOption)) {
     QTimer::singleShot(650, &application, [&] {
       smokeTestCompleted = gsw::runMultiSceneSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(sceneVisibilitySmokeTestOption)) {
+    QTimer::singleShot(650, &application, [&] {
+      smokeTestCompleted = gsw::runSceneVisibilitySmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (gpuPreviewInteropProbe) {

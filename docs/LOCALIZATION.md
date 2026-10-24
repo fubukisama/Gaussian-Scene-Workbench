@@ -130,6 +130,37 @@ desktop application's language, settings, model or worker state.
 
 ## Language switching
 
+### Per-model viewport visibility
+
+The project scene tree has a fixed, UI-scaled eye column. Clicking an eye changes
+only that model's viewport visibility and does not alter the tree's selection or
+the camera. Ctrl/Shift selection and the scene/context menus support Show Selected
+Models, Hide Selected Models, Isolate Selected Models, and Show All Models.
+Space in the project tree hides the selected visible models, or reveals the
+selection when all selected models are hidden; it never intercepts viewport keys.
+Hidden rows remain in the tree and can be selected for revealing or unloading;
+hidden geometry cannot be picked or transformed in the viewport. The same path
+covers point clouds, meshes, 3DGS and 2DGS. Source data, transforms and crop edits
+are retained; visibility is saved in the project and old projects default to
+visible. This is viewport visibility, not an export filter or model deletion.
+Changing visibility does not change the fixed original-model reference plane.
+Eye tooltips, accessible state labels and batch actions update immediately in all
+three languages. The icon/target column follows the UI scale and theme palette.
+
+| English | 简体中文 | 日本語 |
+| --- | --- | --- |
+| Show Selected Models | 显示所选模型 | 選択モデルを表示 |
+| Hide Selected Models | 隐藏所选模型 | 選択モデルを非表示 |
+| Isolate Selected Models | 仅显示所选模型 | 選択モデルのみ表示 |
+| Show All Models | 显示全部模型 | すべてのモデルを表示 |
+
+中文：眼睛仅控制视口显示，不卸载、删除或改写原始模型。隐藏模型仍可在
+场景列表选择并恢复显示；不可从视口误选或变换。显示状态随工程保存。
+
+日本語：目のアイコンはビューポートの表示のみを制御します。読み込み解除・
+削除・元データの変更は行いません。非表示モデルは一覧から再表示できますが、
+ビューポートでは選択・変換できません。表示状態はプロジェクトに保存します。
+
 Blender-derived viewport navigation uses localized **Perspective / Orthographic**
 labels (`透视 / 正交`, `透視 / 平行`) rather than calling every orthographic view
 `Iso`. Its independent projection-button and axis-navigation tooltips are translated in all three

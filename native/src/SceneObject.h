@@ -15,6 +15,8 @@ struct SceneObject final {
   QQuaternion rotation;
   QVector3D scale{1, 1, 1};
   qint64 vertexCount = 0;
+  // Display-only project state. Hiding never removes or rewrites source data.
+  bool visible = true;
 };
 
 } // namespace gsw
