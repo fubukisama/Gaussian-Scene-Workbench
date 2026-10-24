@@ -4294,15 +4294,15 @@
     "en_US": "Ctrl + LMB: orbit view",
     "ja_JP": "Ctrl + 左ドラッグ: ビューを回転"
   },
-  "拖动环绕视图": {
-    "zh_CN": "拖动环绕视图",
-    "en_US": "Drag to orbit view",
-    "ja_JP": "ドラッグでビューを回転"
+  "拖动环绕视图；从轴向视图旋转时自动切换到透视": {
+    "zh_CN": "拖动环绕视图；从轴向视图旋转时自动切换到透视",
+    "en_US": "Drag to orbit; rotating away from an axis view automatically switches to perspective",
+    "ja_JP": "ドラッグでビューを回転。軸方向ビューから回転すると自動的に透視投影へ切り替わります"
   },
-  "拖动环绕视图；单击 %1 轴吸附视角": {
-    "zh_CN": "拖动环绕视图；单击 %1 轴吸附视角",
-    "en_US": "Drag to orbit; click %1 to align view",
-    "ja_JP": "ドラッグでビューを回転、%1 軸をクリックして軸方向に整列"
+  "单击 %1 轴进入正交视图；拖动旋转，离开轴向时恢复透视": {
+    "zh_CN": "单击 %1 轴进入正交视图；拖动旋转，离开轴向时恢复透视",
+    "en_US": "Click %1 for an orthographic axis view; drag to orbit, returning to perspective when leaving an axis view",
+    "ja_JP": "%1 軸をクリックして平行投影へ。ドラッグで回転し、軸方向を離れると透視投影に戻ります"
   },
   "上下拖动缩放视图（%1 – %2）": {
     "zh_CN": "上下拖动缩放视图（%1 – %2）",
@@ -4339,15 +4339,15 @@
     "en_US": "Persp",
     "ja_JP": "透視"
   },
-  "中心投影控件：切换到透视；Shift+单击恢复默认透视": {
-    "zh_CN": "中心投影控件：切换到透视；Shift+单击恢复默认透视",
-    "en_US": "Center projection control: switch to perspective; Shift-click restores default perspective",
-    "ja_JP": "中央の投影コントロール：透視投影へ切替、Shift クリックで既定の透視ビュー"
+  "切换到透视投影": {
+    "zh_CN": "切换到透视投影",
+    "en_US": "Switch to Perspective Projection",
+    "ja_JP": "透視投影に切り替え"
   },
-  "中心投影控件：切换到正交；Shift+单击恢复默认透视": {
-    "zh_CN": "中心投影控件：切换到正交；Shift+单击恢复默认透视",
-    "en_US": "Center projection control: switch to orthographic; Shift-click restores default perspective",
-    "ja_JP": "中央の投影コントロール：平行投影へ切替、Shift クリックで既定の透視ビュー"
+  "切换到正交投影": {
+    "zh_CN": "切换到正交投影",
+    "en_US": "Switch to Orthographic Projection",
+    "ja_JP": "平行投影に切り替え"
   },
   "沿 %1 轴移动": {
     "zh_CN": "沿 %1 轴移动",

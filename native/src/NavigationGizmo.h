@@ -39,6 +39,7 @@ struct NavigationAxisHandle {
   int axisIndex = 0;
   bool positive = false;
   bool hidden = false;
+  bool aligned = false;
 };
 
 struct NavigationGizmoLayout {
@@ -49,8 +50,7 @@ struct NavigationGizmoLayout {
   QRectF zoomButton;
   QRectF panButton;
   QRectF cameraButton;
-  QRectF projectionCube;
-  QRectF projectionHitArea;
+  QRectF projectionButton;
   QRectF projectionLabel;
   std::array<NavigationAxisHandle, 6> handles;
 };

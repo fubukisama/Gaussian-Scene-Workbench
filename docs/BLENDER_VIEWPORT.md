@@ -15,7 +15,21 @@ This is source reuse, not embedding Blender's entire application or engine.
   introducing a Blender 3D cursor.
 - `native/src/BlenderNavigationPresentation.h`: axis-end discs, front/back
   ordering, faded negative ends and XYZ labels from Blender's navigation gizmo.
-  The GSW click/drag/projection behavior and semantic command icons remain.
+- `native/src/NavigationGizmo.cpp` and `native/third_party/blender-navigation/`:
+  nearest projected-axis picking, opposite-axis selection at the aligned center,
+  and Blender's default Auto Perspective predicates. Qt event dispatch and
+  GSW's semantic command icons provide the application adapter.
+
+Clicking a signed axis selects its orthographic view. Orbiting from that axis
+view restores perspective; panning and zooming preserve projection. An oblique
+user view that was manually switched to orthographic stays orthographic when
+orbiting. The central projection control is removed, with a separate projection
+button below the camera button. The aligned near-axis disc remains visible at
+the center and selects the opposite view when clicked. Selection covers the
+gizmo circle using the nearest projected axis, and dragging from any part of
+the circle orbits without also triggering the click's axis snap. Precise source
+paths, pinned hashes and the Qt adaptation boundary are recorded in
+`native/third_party/blender-navigation/README.gsw.md`.
 
 The background still uses GSW's existing live light/dark theme setting: white
 or the existing night color, **not Blender gray**. No new custom-color picker
@@ -47,7 +61,11 @@ training/resume semantics are not replaced by Blender code.
 
 网格仍遵守同源共享坐标和“模型底部/世界零点”参考面。Blender 的红白圆环是
 三维游标，不是世界原点或模型变换手柄，因此不放入默认视口。右上导航使用圆点轴端及
-前后层次，文字信息去除常驻底框，任务进度保留。各类模型、编辑、训练预览和
+前后层次，点击轴端进入对应正交视图，从轴向视图开始自由旋转时恢复透视；平移和
+缩放保持投影。斜角下手动选择的正交视图旋转时仍保持正交。中心的投影切换控件删除，
+独立投影按钮放在相机按钮下方。沿视线的近端轴圆点仍在中心显示，点击切到反向；
+圆形区域内按最近轴端选择，拖动只旋转视角。文字信息去除常驻底框，任务进度保留。
+各类模型、编辑、训练预览和
 完整优化器状态续训语义保持原有实现。此移植不等于嵌入完整 Blender 引擎。
 
 ## 日本語
@@ -60,7 +78,12 @@ training/resume semantics are not replaced by Blender code.
 
 共有ソース座標と基準面を維持します。Blender の赤白リングは 3D カーソルで
 あり、座標原点やモデル変換ハンドルではないため、既定の表示には追加しません。
-右上のナビゲーションと枠なしの情報表示に変更し、タスク進捗は残します。
+右上のナビゲーションは軸端のクリックで平行投影の軸ビューに切り替え、そこから
+回転を始めると透視投影に戻ります。パンとズームは投影を維持し、斜めのビューで
+手動選択した平行投影も回転時に維持します。中央の投影切り替えを削除し、独立した
+ボタンをカメラボタンの下に置きます。視線方向の軸は手前の円を中央に残し、クリック
+で反対側を表示します。円形領域内は最も近い軸端を選び、ドラッグは回転だけを行います。
+情報表示は枠なしとし、タスク進捗は残します。
 各モデルの描画・編集・学習プレビュー・完全状態再開は既存の実装を保ちます。
 Blender 全体のエンジンを組み込んだものではありません。
 
@@ -74,8 +97,9 @@ wheel zoom, live theme switching, no misleading default cursor, six signed
 orthographic planes and shallow perspective horizon fade. Tiny test-owned
 point, indexed-mesh, 3DGS and 2DGS fixtures must actually render in both themes
 and projections without changing transforms or original fixture bytes. No real
-project or training task is used. `GSW_BLENDER_VIEWPORT_EVIDENCE` may name a D-drive QA
-directory for retained PNGs.
+project or training task is used. `GSW_BLENDER_VIEWPORT_EVIDENCE` may name a QA
+directory on a writable non-system drive for retained PNGs. When no writable
+non-system drive is available, an existing system-drive workspace remains valid.
 
 Existing native geometry/navigation, scene-coordinate and rendering checks
 remain in the full CI suite. The older orientation smoke now tests the compact

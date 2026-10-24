@@ -100,17 +100,28 @@ The native viewport directly adapts Blender v4.5.0 at
 `8cb6b388974a817afedf1317ce26f0c75aa5f181`: its overlay-grid filtering/LOD/fade
 subset is retained in `native/third_party/blender-grid/`, and theme/axis
 navigation drawing adaptations are in `native/src/ViewportPresentation.h` and
-`native/src/BlenderNavigationPresentation.h`. Exact official paths, SHA256 and
+`native/src/BlenderNavigationPresentation.h`. `native/src/NavigationGizmo.cpp`
+also adapts `gizmo_axis_test_select` and signed-axis click/drag dispatch; the
+camera navigation adapter reuses `axis_set_view` and `ED_view3d_persp_ensure`
+projection predicates. The central projection control is removed; a separate
+projection button remains, and aligned-center axis clicks select the opposite
+view. Exact official paths and SHA256 are recorded in
+`native/third_party/blender-navigation/README.gsw.md`. The
 original Blender Authors copyright/GPL-2.0-or-later notices are retained there.
 GPLv3 is selected for the combined GSW desktop; full text is in `COPYING`.
 This does not copy Blender's branding, entire renderer, project system or
 training code. See [viewport scope](docs/BLENDER_VIEWPORT.md).
 
 中文：网格、轴配色和导航圆点实际移植上述 Blender 源码子集，保留固定
-来源、哈希、版权和 GPL 声明；背景、模型数据、训练及工程语义仍由 GSW 管理。
+来源、哈希、版权和 GPL 声明。轴端拾取、轴向正交／旋转回透视条件也采用上游逻辑；
+删除中心投影切换，保留独立投影按钮，沿视线的中心轴端点击切换到反向。
+背景、模型数据、训练及工程语义仍由 GSW 管理。
 
 日本語：グリッド・軸の配色・軸ナビゲーションは上記 Blender
-ソースの部分移植です。出典・ハッシュ・著作権・GPL を保持し、背景・モデル・
+ソースの部分移植です。軸端の選択と、軸ビューの平行投影／回転時の透視投影への
+切り替え条件にも上流の処理を使用します。中央の投影切り替えを削除して独立した
+投影ボタンを残し、視線方向の中央の軸端はクリックで反対側に切り替えます。
+出典・ハッシュ・著作権・GPL を保持し、背景・モデル・
 学習・プロジェクトの管理は GSW に残します。
 
 Native 2DGS training: `native/worker/two_dgs_train.py` adapts the actual official hbb1/2d-gaussian-splatting `train.py`, commit `f3e3b9fa67bbd1c75e05167ff37391d8dab2a678`: https://github.com/hbb1/2d-gaussian-splatting . Original Inria GRAPHDECO notices are retained. The complete upstream Gaussian-Splatting research/evaluation license is shipped at `native/worker/licenses/2dgs-LICENSE.md`. Changes add native state control, telemetry and observation snapshots. `native/worker/training_density_control.py` adapts the final densification/pruning orchestration from that model and the vendored Graphdeco `scene/gaussian_model.py`, under their existing research/evaluation licenses. It adds a robust geometry-aware size limit, reset-recovery grace and bounded final pruning. Upstream clone/split and optimizer surgery remain in their original modules. No commercial-use permission is implied.

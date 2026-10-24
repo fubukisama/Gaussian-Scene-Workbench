@@ -458,6 +458,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   setMinimumSize(0, 0);
   setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
   AppLanguage::onChanged(this, [this]() {
+    if (mNavigationHover.part != NavigationGizmoPart::None)
+      updateNavigationGizmoHover(mPointerPosition);
     updateObservationNavigationToolTip();
     auto states = mSceneStates;
     if (!states.contains(mScene)) states.append(mScene);
@@ -970,13 +972,17 @@ void NativeViewport::mapViewToScene(const QMatrix4x4 &mapping) {
         QVector3D::dotProduct(baseUp,up))*180.F/kPi;
     return result;
   };
-  const auto angles=mappedAngles(viewOrbitAngles());
+  const auto beforeAngles=viewOrbitAngles();
+  const auto angles=mappedAngles(beforeAngles);
+  if (angles != beforeAngles) mAxisView = NavigationAxis::None;
   mTarget=mapping.map(mTarget);
   mDistance*=lengthScale;mYawDegrees=angles.yawDegrees;mPitchDegrees=angles.pitchDegrees;mRollDegrees=angles.rollDegrees;
   if(mCameraViewActive&&mSourceCameraClipping)for(auto &length:*mSourceCameraClipping)length*=lengthScale;
   if(mStoredCameraView) {
     auto &stored=*mStoredCameraView;
     const auto savedAngles=mappedAngles({stored.yawDegrees,stored.pitchDegrees,stored.rollDegrees});
+    if (savedAngles != OrbitAngles{stored.yawDegrees,stored.pitchDegrees,stored.rollDegrees})
+      stored.axisView = NavigationAxis::None;
     stored.target=mapping.map(stored.target);stored.distance*=lengthScale;
     stored.yawDegrees=savedAngles.yawDegrees;stored.pitchDegrees=savedAngles.pitchDegrees;stored.rollDegrees=savedAngles.rollDegrees;
   }
@@ -1385,7 +1391,7 @@ bool NativeViewport::trainingGpuPreviewForScene() const {
 
 NativeViewport::StoredCameraView NativeViewport::currentProcessingView() const {
   return {mTarget, mYawDegrees, mPitchDegrees, mDistance, mOrthographic,
-          mRollDegrees, mPerspectiveFovDegrees, mFocalAspectCorrection};
+          mRollDegrees, mPerspectiveFovDegrees, mFocalAspectCorrection, mAxisView};
 }
 
 void NativeViewport::restoreProcessingView(const StoredCameraView &view) {
@@ -1397,6 +1403,7 @@ void NativeViewport::restoreProcessingView(const StoredCameraView &view) {
   mRollDegrees = view.rollDegrees;
   mPerspectiveFovDegrees = view.fovDegrees;
   mFocalAspectCorrection = view.focalAspectCorrection;
+  mAxisView = view.axisView;
 }
 
 void NativeViewport::discardProcessingScene() {
@@ -1968,6 +1975,7 @@ void NativeViewport::beginObservationRotation(const QPointF &position, const boo
   mViewSnapTimer->stop();
   leaveCameraView();
   mObservationDragActive = true;
+  mObservationDragMoved = false;
   mObservationDragStart = position;
   mObservationDragAngles = viewOrbitAngles();
   mObservationDragProjection = viewProjectionMatrix();
@@ -1977,6 +1985,9 @@ void NativeViewport::beginObservationRotation(const QPointF &position, const boo
 
 void NativeViewport::updateObservationRotation(const QPointF &position) {
   if (!mObservationDragActive) return;
+  if (!mObservationDragMoved && position == mObservationDragStart) return;
+  if (prepareCameraOrbit()) mObservationDragProjection = viewProjectionMatrix();
+  mObservationDragMoved = true;
   OrbitAngles angles;
   if (mObservationDragAxis >= 0) {
     QVector3D axis;
@@ -2312,6 +2323,7 @@ void NativeViewport::resetCamera() {
   mDistance = clampViewportDistance(
       std::max(radius * 2.8F, 0.1F), radius);
   mOrthographic = false;
+  mAxisView = NavigationAxis::None;
   mCameraViewActive = false;
   mStoredCameraView.reset();
   update();
@@ -5688,7 +5700,6 @@ void NativeViewport::mousePressEvent(QMouseEvent *event) {
     mNavigationInteractionActive = true;
     mNavigationDragging = false;
     mNavigationPress = mNavigationHover;
-    mNavigationPressModifiers = event->modifiers();
     mNavigationPressPosition = event->position().toPoint();
     mLastMousePosition = mNavigationPressPosition;
     mPressedButtons = Qt::NoButton;
@@ -5935,19 +5946,23 @@ NavigationGizmoLayout NativeViewport::navigationGizmo() const {
 void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
   const NavigationGizmoHit hit =
       hitTestNavigationGizmo(navigationGizmo(), position);
-  if (hit == mNavigationHover) {
+  const bool hoverChanged = hit != mNavigationHover;
+  if (!hoverChanged && hit.part == NavigationGizmoPart::None) {
     return;
   }
 
   mNavigationHover = hit;
+  const auto navigationCursor = [&](const Qt::CursorShape cursor) {
+    if (!mNavigationInteractionActive && !mObservationDragActive) setCursor(cursor);
+  };
   QString tooltip;
   switch (hit.part) {
   case NavigationGizmoPart::Rotate:
     tooltip = hit.axis == NavigationAxis::None
-                  ? QCoreApplication::translate("Workbench", "拖动环绕视图")
-                  : QCoreApplication::translate("Workbench", "拖动环绕视图；单击 %1 轴吸附视角")
+                  ? QCoreApplication::translate("Workbench", "拖动环绕视图；从轴向视图旋转时自动切换到透视")
+                  : QCoreApplication::translate("Workbench", "单击 %1 轴进入正交视图；拖动旋转，离开轴向时恢复透视")
                         .arg(navigationAxisLabel(hit.axis));
-    setCursor(Qt::OpenHandCursor);
+    navigationCursor(Qt::OpenHandCursor);
     break;
   case NavigationGizmoPart::Zoom:
     {
@@ -5957,33 +5972,33 @@ void NativeViewport::updateNavigationGizmoHover(const QPointF &position) {
                     .arg(formatViewportDistance(limits.minimumDistance),
                          formatViewportDistance(limits.maximumDistance));
     }
-    setCursor(Qt::SizeVerCursor);
+    navigationCursor(Qt::SizeVerCursor);
     break;
   case NavigationGizmoPart::Pan:
     tooltip = QCoreApplication::translate("Workbench", "拖动平移视图");
-    setCursor(Qt::OpenHandCursor);
+    navigationCursor(Qt::OpenHandCursor);
     break;
   case NavigationGizmoPart::Camera:
     tooltip = camerasAvailable()
                   ? (mCameraViewActive ? QCoreApplication::translate("Workbench", "返回用户视图")
                                        : QCoreApplication::translate("Workbench", "切换到场景相机视图"))
                   : QCoreApplication::translate("Workbench", "当前场景没有可用相机");
-    setCursor(camerasAvailable() ? Qt::PointingHandCursor
-                                 : Qt::ForbiddenCursor);
+    navigationCursor(camerasAvailable() ? Qt::PointingHandCursor
+                                        : Qt::ForbiddenCursor);
     break;
   case NavigationGizmoPart::Projection:
     tooltip =
         mOrthographic
-            ? QCoreApplication::translate("Workbench", "中心投影控件：切换到透视；Shift+单击恢复默认透视")
-            : QCoreApplication::translate("Workbench", "中心投影控件：切换到正交；Shift+单击恢复默认透视");
-    setCursor(Qt::PointingHandCursor);
+            ? QCoreApplication::translate("Workbench", "切换到透视投影")
+            : QCoreApplication::translate("Workbench", "切换到正交投影");
+    navigationCursor(Qt::PointingHandCursor);
     break;
   case NavigationGizmoPart::None:
-    setCursor(defaultInteractionCursor(mMode));
+    navigationCursor(defaultInteractionCursor(mMode));
     break;
   }
   setToolTip(tooltip);
-  update();
+  if (hoverChanged) update();
 }
 
 void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
@@ -6031,13 +6046,10 @@ void NativeViewport::updateNavigationGizmoInteraction(const QPoint &current) {
 
 void NativeViewport::finishNavigationGizmoInteraction() {
   const NavigationGizmoHit pressed = mNavigationPress;
-  const Qt::KeyboardModifiers pressedModifiers =
-      mNavigationPressModifiers;
   const bool dragged = mNavigationDragging;
   mNavigationInteractionActive = false;
   mNavigationDragging = false;
   mNavigationPress = {};
-  mNavigationPressModifiers = Qt::NoModifier;
 
   if (!dragged) {
     if (pressed.part == NavigationGizmoPart::Rotate) {
@@ -6045,13 +6057,9 @@ void NativeViewport::finishNavigationGizmoInteraction() {
     } else if (pressed.part == NavigationGizmoPart::Camera) {
       toggleCameraView();
     } else if (pressed.part == NavigationGizmoPart::Projection) {
-      if (pressedModifiers.testFlag(Qt::ShiftModifier)) {
-        if (!mRenderingInactiveScene) resetCamera();
-      } else {
-        leaveCameraView();
-        mOrthographic = !mOrthographic;
-        update();
-      }
+      leaveCameraView();
+      mOrthographic = !mOrthographic;
+      update();
     }
   }
 
@@ -6067,6 +6075,10 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
 
   mViewSnapTimer->stop();
   leaveCameraView();
+  // Adapted axis_set_view (Blender v4.5.0 view3d_navigate.cc): with Auto
+  // Perspective enabled, a named axis view uses orthographic projection.
+  mOrthographic = true;
+  mAxisView = axis;
   const float targetYaw =
       shortestEquivalentAngle(mYawDegrees, target->yawDegrees);
   mSnapStartAngles = viewOrbitAngles();
@@ -6075,8 +6087,18 @@ void NativeViewport::setAxisView(const NavigationAxis axis) {
   mViewSnapTimer->start();
 }
 
+bool NativeViewport::prepareCameraOrbit() {
+  const bool before = mOrthographic;
+  mOrthographic = blenderViewOrbitOrthographic(
+      mOrthographic, mAxisView != NavigationAxis::None);
+  mAxisView = NavigationAxis::None;
+  return before != mOrthographic;
+}
+
 void NativeViewport::orbitCamera(const QPoint &delta) {
+  if (delta.isNull()) return;
   mViewSnapTimer->stop();
+  (void)prepareCameraOrbit();
   // Editing and the navigation gizmo must follow the current screen axes,
   // just like locked observation. World yaw/pitch reverses drags after a
   // rolled/upside-down view and collapses horizontal orbit at the poles.
@@ -6105,6 +6127,7 @@ void NativeViewport::toggleCameraView() {
         clampViewportDistance(mStoredCameraView->distance,
                               transformedSceneRadius());
     mOrthographic = mStoredCameraView->orthographic;
+    mAxisView = mStoredCameraView->axisView;
     mCameraViewActive = false;
     mStoredCameraView.reset();
     update();
@@ -6145,7 +6168,7 @@ bool NativeViewport::setSourceCameraView(const qsizetype index) {
   if (!mCameraViewActive)
     mStoredCameraView = StoredCameraView{mTarget, mYawDegrees, mPitchDegrees,
         mDistance, mOrthographic, mRollDegrees, mPerspectiveFovDegrees,
-        mFocalAspectCorrection};
+        mFocalAspectCorrection, mAxisView};
   mViewSnapTimer->stop();
   mRollDegrees = 0.0F;
   const QVector3D cameraOffset = -forward;
@@ -6159,6 +6182,7 @@ bool NativeViewport::setSourceCameraView(const qsizetype index) {
   mPerspectiveFovDegrees = camera.verticalFovDegrees;
   mFocalAspectCorrection = camera.focalAspectCorrection;
   mOrthographic = false;
+  mAxisView = NavigationAxis::None;
   mCameraViewActive = true;
   update();
   return true;

@@ -229,7 +229,7 @@ bool runUpstreamNavigationSmokeTest(NativeViewport &viewport) {
         if (viewport.orthographicProjection() != orthographic) {
           const auto layout = navigationGizmoLayout(QMatrix4x4(), viewport.size(),
                                                     QFontMetricsF(viewport.font()).height());
-          drag(layout.projectionCube.center(), {}, Qt::LeftButton);
+          drag(layout.projectionButton.center(), {}, Qt::LeftButton);
         }
         check(viewport.orthographicProjection() == orthographic, "real projection button selects the test mode");
         const QString label = QStringLiteral("%1x%2-%3-%4").arg(size.width()).arg(size.height())
@@ -249,15 +249,17 @@ bool runUpstreamNavigationSmokeTest(NativeViewport &viewport) {
         wheel(cursor, 120);
         check(QLineF(projectPoint(viewport, *anchor), cursor).length() < 0.2,
               "enabled wheel zoom preserves the original target-plane cursor anchor");
-        check(viewport.viewOrbitAngles() == angles, "wheel zoom does not rotate the camera");
+        check(viewport.viewOrbitAngles() == angles && viewport.orthographicProjection() == orthographic,
+              "wheel zoom preserves camera orientation and projection");
         const QPointF dragDelta(24, -17);
         const QPointF beforePan = projectPoint(viewport, *anchor);
         const float panDistance = viewport.viewDistance();
         drag(emptyArea, dragDelta, Qt::MiddleButton);
         check(QLineF(projectPoint(viewport, *anchor), beforePan + dragDelta).length() < 0.2,
               "actual middle-button pan follows the pointer in projection pixels");
-        check(viewport.viewOrbitAngles() == angles && viewport.viewDistance() == panDistance,
-              "pan preserves camera orientation and distance");
+        check(viewport.viewOrbitAngles() == angles && viewport.viewDistance() == panDistance &&
+              viewport.orthographicProjection() == orthographic,
+              "pan preserves camera orientation, distance, and projection");
         if (!capture(label)) return false;
 
         const auto limitAnchor = targetPlanePoint(viewport, cursor);
@@ -278,6 +280,7 @@ bool runUpstreamNavigationSmokeTest(NativeViewport &viewport) {
   }
   viewport.resetCamera();
   viewport.setAxisView(NavigationAxis::PositiveX);
+  check(viewport.orthographicProjection(), "axis alignment automatically selects orthographic projection");
   processFor(25);
   wheel(QPointF(viewport.width() * 0.6, viewport.height() * 0.4), 120);
   const auto stoppedAngles = viewport.viewOrbitAngles();
@@ -285,7 +288,8 @@ bool runUpstreamNavigationSmokeTest(NativeViewport &viewport) {
   const float stoppedDistance = viewport.viewDistance();
   processFor(cameraSnapDurationMilliseconds + 40);
   check(viewport.viewOrbitAngles() == stoppedAngles && viewport.viewTarget() == stoppedTarget &&
-        viewport.viewDistance() == stoppedDistance, "real wheel input stops an in-flight axis-view animation");
+        viewport.viewDistance() == stoppedDistance && viewport.orthographicProjection(),
+        "real wheel input stops an in-flight axis-view animation without leaving orthographic projection");
   check(fileHash(source) == originalHash && !originalHash.isEmpty(), "original fixture bytes remain unchanged");
   check(viewport.scenePath() == source && viewport.modelTranslation() == translation &&
         viewport.modelRotation() == rotation && viewport.modelScale() == scale &&

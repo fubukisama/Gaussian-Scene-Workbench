@@ -13,6 +13,11 @@
 
 namespace gsw {
 
+// Blender Auto Perspective: rotating out of a named axis view enters
+// perspective; a manually selected oblique User Orthographic view stays
+// orthographic. This adapts ED_view3d_persp_ensure with USER_AUTOPERSP enabled.
+[[nodiscard]] bool blenderViewOrbitOrthographic(bool orthographic, bool axisView);
+
 // Adapted Blender view navigation for Qt camera matrices and top-left logical
 // pixels. Inputs are value-only: no model, project, GPU or window state changes.
 // The zoom frames have the same target and orientation, with the caller's

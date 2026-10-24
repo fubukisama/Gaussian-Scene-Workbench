@@ -14,13 +14,16 @@ class NavigationGizmoTests final : public QObject {
 private slots:
   void projectsAxesAndHidesAlignedBackHandle();
   void selectsNearestAxisInsideRotationCircle();
-  void exposesUnityStyleProjectionControl();
-  void keepsAxisHandlesClearOfProjectionCube();
+  void exposesSeparateBlenderProjectionControl();
+  void preservesBlenderProjectedAxisLengths();
+  void alignedCenterSelectsOppositeAxis();
+  void obliqueCenterSelectsNearestAxisWithoutProjection();
   void selectsVisibleCircularHandleRims();
-  void doesNotSnapEmptyFormerConeTails();
-  void selectsFrontmostOverlappingHandle();
+  void selectsNearestAxisInUnpaintedCircleArea();
+  void usesRawProjectedAxesForSelection();
+  void keepsBlenderStableTieOrder();
   void circularButtonCornersDoNotActivate();
-  void leavesEmptyOrbitAreaFreeOfAxisSnapping();
+  void excludesPointsOutsideRotationCircle();
   void mapsSixAxisViews();
   void keepsNavigationButtonsInsideViewport();
 };
@@ -42,8 +45,12 @@ void NavigationGizmoTests::projectsAxesAndHidesAlignedBackHandle() {
   QVERIFY(positiveX.center.x() < layout.center.x());
   QVERIFY(positiveZ.center.y() < layout.center.y());
   QVERIFY(negativeY.hidden);
-  QVERIFY(positiveY.hidden);
+  QVERIFY(!positiveY.hidden);
+  QVERIFY(positiveY.aligned);
   QCOMPARE(positiveY.center, layout.center);
+  QCOMPARE(hitTestNavigationGizmo(layout, layout.center),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate,
+                               NavigationAxis::NegativeY}));
 }
 
 void NavigationGizmoTests::selectsNearestAxisInsideRotationCircle() {
@@ -64,28 +71,20 @@ void NavigationGizmoTests::selectsNearestAxisInsideRotationCircle() {
            NavigationGizmoPart::None);
 }
 
-void NavigationGizmoTests::exposesUnityStyleProjectionControl() {
+void NavigationGizmoTests::exposesSeparateBlenderProjectionControl() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
 
-  QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionCube.center()).part,
+  QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionButton.center()).part,
            NavigationGizmoPart::Projection);
-  QCOMPARE(hitTestNavigationGizmo(
-               layout, layout.projectionCube.topLeft() + QPointF(1.0, 1.0))
-               .part,
-           NavigationGizmoPart::Projection);
-  const QPointF enlargedTargetEdge(layout.projectionHitArea.right() - 1.0,
-                                   layout.projectionHitArea.center().y());
-  QVERIFY(!layout.projectionCube.contains(enlargedTargetEdge));
-  QCOMPARE(hitTestNavigationGizmo(layout, enlargedTargetEdge).part,
-           NavigationGizmoPart::Projection);
-  const QPointF freeOrbitCorner =
-      layout.projectionHitArea.topLeft() + QPointF(1.0, 1.0);
-  QCOMPARE(hitTestNavigationGizmo(layout, freeOrbitCorner),
-           (NavigationGizmoHit{NavigationGizmoPart::Rotate,
-                               NavigationAxis::None}));
+  QVERIFY(layout.projectionButton.top() > layout.cameraButton.bottom());
+  QCOMPARE(layout.projectionButton.size(), layout.cameraButton.size());
+  QCOMPARE(layout.projectionButton.center().x(), layout.cameraButton.center().x());
+  QVERIFY(!layout.rotateBounds.intersects(layout.projectionButton));
   QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionLabel.center()).part,
-           NavigationGizmoPart::Projection);
+           NavigationGizmoPart::None);
+  QVERIFY(hitTestNavigationGizmo(layout, layout.center).part !=
+          NavigationGizmoPart::Projection);
   QCOMPARE(hitTestNavigationGizmo(layout,
                                   layout.center + QPointF(layout.radius * 0.62,
                                                           layout.radius * 0.18))
@@ -93,54 +92,66 @@ void NavigationGizmoTests::exposesUnityStyleProjectionControl() {
            NavigationGizmoPart::Rotate);
 }
 
-void NavigationGizmoTests::keepsAxisHandlesClearOfProjectionCube() {
-  QMatrix4x4 view;
-  view.lookAt(QVector3D(0.4F, 10.0F, 0.0F), QVector3D(),
-              QVector3D(0.0F, 0.0F, 1.0F));
-  const NavigationGizmoLayout layout =
-      navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
-
-  QVERIFY(layout.projectionCube.width() >= layout.radius * 0.40);
-  QVERIFY(layout.projectionCube.width() <= layout.radius * 0.48);
-  QVERIFY(layout.projectionHitArea.contains(layout.projectionCube));
-  QVERIFY(layout.projectionHitArea.width() >=
-          layout.projectionCube.width() + 10.0);
-  const qreal projectionHitRadius = layout.projectionHitArea.width() * 0.5;
-  for (const NavigationAxisHandle &handle : layout.handles) {
-    if (handle.hidden) {
-      continue;
-    }
-    const qreal distance = QLineF(layout.center, handle.center).length();
-    if (distance < 1.0) {
-      continue;
-    }
-    QVERIFY2(distance >= projectionHitRadius + handle.radius + 4.0,
-             "A visible direction handle overlaps the projection hit target");
-    QCOMPARE(hitTestNavigationGizmo(layout, handle.center),
-             (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}));
-    const QPointF direction = (handle.center - layout.center) / distance;
-    const QPointF innerRim = handle.center - direction * handle.radius;
-    QVERIFY(QLineF(layout.center, innerRim).length() >=
-            projectionHitRadius + 4.0);
-    const NavigationGizmoHit rimHit =
-        hitTestNavigationGizmo(layout, innerRim);
-    QVERIFY2(rimHit ==
-                 (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}),
-             qPrintable(QStringLiteral("Expected axis %1 at circular rim, got "
-                                       "part %2 axis %3")
-                            .arg(static_cast<int>(handle.axis))
-                            .arg(static_cast<int>(rimHit.part))
-                            .arg(static_cast<int>(rimHit.axis))));
-    QVERIFY2(distance + handle.radius <= layout.radius + 0.01,
-             "The full painted circular handle must fit inside the rotation hit boundary");
+void NavigationGizmoTests::preservesBlenderProjectedAxisLengths() {
+  // A nearly end-on axis must approach the center continuously. Reserving a
+  // minimum radius for a center button causes the old artificial outward jump.
+  qreal previousExtent = 0.0;
+  for (const float eyeX : {0.02F, 0.4F, 2.0F, 5.0F}) {
+    QMatrix4x4 view;
+    view.lookAt(QVector3D(eyeX, 10.0F, 0.0F), QVector3D(),
+                QVector3D(0.0F, 0.0F, 1.0F));
+    const auto layout = navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
+    const auto &nearY = layout.handles[3];
+    const auto &farY = layout.handles[2];
+    QVERIFY(!nearY.hidden);
+    QVERIFY(!farY.hidden);
+    const qreal extent = QLineF(layout.center, nearY.center).length();
+    const qreal expected = layout.radius * 0.8 * eyeX / std::hypot(eyeX, 10.0F);
+    QVERIFY(std::abs(extent - expected) < 0.001);
+    QVERIFY(extent > previousExtent);
+    previousExtent = extent;
+    QVERIFY(nearY.radius > farY.radius);
+    QVERIFY(std::abs(QLineF(layout.center, farY.center).length() - extent) < 0.001);
+    QCOMPARE(hitTestNavigationGizmo(layout, nearY.center),
+             (NavigationGizmoHit{NavigationGizmoPart::Rotate, nearY.axis}));
   }
+}
+
+void NavigationGizmoTests::alignedCenterSelectsOppositeAxis() {
+  for (int index = 0; index < 3; ++index) {
+    for (const float sign : {-1.0F, 1.0F}) {
+      QVector3D eye;
+      eye[index] = 10.0F * sign;
+      QMatrix4x4 view;
+      view.lookAt(eye, QVector3D(), index == 2 ? QVector3D(0, 1, 0)
+                                               : QVector3D(0, 0, 1));
+      const auto layout = navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
+      const auto &near = layout.handles[static_cast<std::size_t>(index * 2 + (sign > 0 ? 1 : 0))];
+      const auto &far = layout.handles[static_cast<std::size_t>(index * 2 + (sign > 0 ? 0 : 1))];
+      QVERIFY(near.aligned);
+      QVERIFY(!near.hidden);
+      QVERIFY(far.hidden);
+      QCOMPARE(near.center, layout.center);
+      QCOMPARE(hitTestNavigationGizmo(layout, layout.center),
+               (NavigationGizmoHit{NavigationGizmoPart::Rotate, far.axis}));
+    }
+  }
+}
+
+void NavigationGizmoTests::obliqueCenterSelectsNearestAxisWithoutProjection() {
+  QMatrix4x4 view;
+  view.lookAt(QVector3D(6, 8, 5), QVector3D(), QVector3D(0, 0, 1));
+  const auto layout = navigationGizmoLayout(view, QSizeF(800.0, 600.0), 18.0);
+  for (const auto &handle : layout.handles) QVERIFY(!handle.hidden);
+  QCOMPARE(hitTestNavigationGizmo(layout, layout.center),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::NegativeY}));
 }
 
 void NavigationGizmoTests::selectsVisibleCircularHandleRims() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
   for (const auto &handle : layout.handles) {
-    if (handle.hidden) continue;
+    if (handle.hidden || handle.aligned) continue;
     const QPointF direction = (handle.center - layout.center) /
         QLineF(layout.center, handle.center).length();
     const QPointF side(-direction.y(), direction.x());
@@ -152,53 +163,68 @@ void NavigationGizmoTests::selectsVisibleCircularHandleRims() {
   }
 }
 
-void NavigationGizmoTests::doesNotSnapEmptyFormerConeTails() {
+void NavigationGizmoTests::selectsNearestAxisInUnpaintedCircleArea() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
   for (const auto &handle : layout.handles) {
-    if (handle.hidden) continue;
+    if (handle.hidden || handle.aligned) continue;
     const QPointF direction = (handle.center - layout.center) /
         QLineF(layout.center, handle.center).length();
     const QPointF empty = handle.center - direction * (handle.radius + 4.0);
-    QVERIFY(!layout.projectionHitArea.contains(empty));
     QCOMPARE(hitTestNavigationGizmo(layout, empty),
-             (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::None}));
+             (NavigationGizmoHit{NavigationGizmoPart::Rotate, handle.axis}));
   }
 }
 
-void NavigationGizmoTests::selectsFrontmostOverlappingHandle() {
+void NavigationGizmoTests::keepsBlenderStableTieOrder() {
   NavigationGizmoLayout layout;
   layout.center = {200, 200};
   layout.radius = 100;
-  for (auto &handle : layout.handles) handle.hidden = true;
-  layout.handles[0] = {NavigationAxis::NegativeX, {250, 200}, 12, -0.5F, 0, false, false};
-  layout.handles[1] = {NavigationAxis::PositiveX, {251, 200}, 12, 0.5F, 0, true, false};
-  QCOMPARE(hitTestNavigationGizmo(layout, {250, 200}),
-           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::PositiveX}));
+  layout.handles[0] = {NavigationAxis::NegativeX, {240, 200}, 12, -0.5F, 0, false, false};
+  layout.handles[1] = {NavigationAxis::PositiveX, {240, 200}, 12, 0.5F, 0, true, false};
+  QCOMPARE(hitTestNavigationGizmo(layout, {240, 200}),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::NegativeX}));
   std::swap(layout.handles[0].depth, layout.handles[1].depth);
-  QCOMPARE(hitTestNavigationGizmo(layout, {250, 200}),
+  QCOMPARE(hitTestNavigationGizmo(layout, {240, 200}),
+           (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::NegativeX}));
+}
+
+void NavigationGizmoTests::usesRawProjectedAxesForSelection() {
+  NavigationGizmoLayout layout;
+  layout.center = {200, 200};
+  layout.radius = 100;
+  // Projected unit endpoints are at x=.6 and x=.8. Their painted positions
+  // are inset to x=.48 and x=.64. Blender picks the former at x=.6 even though
+  // that location is closer to the latter painted disc.
+  layout.handles[0] = {NavigationAxis::NegativeX, {248, 200}, 20, 0.8F, 0, false, false};
+  layout.handles[1] = {NavigationAxis::PositiveY, {264, 200}, 20, -0.6F, 1, true, false};
+  QCOMPARE(hitTestNavigationGizmo(layout, {260, 200}),
            (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::NegativeX}));
 }
 
 void NavigationGizmoTests::circularButtonCornersDoNotActivate() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
-  for (const QRectF &button : {layout.zoomButton, layout.panButton, layout.cameraButton}) {
+  for (const QRectF &button : {layout.zoomButton, layout.panButton,
+                             layout.cameraButton, layout.projectionButton}) {
     QCOMPARE(hitTestNavigationGizmo(layout, button.topLeft() + QPointF(1, 1)).part,
              NavigationGizmoPart::None);
     QVERIFY(hitTestNavigationGizmo(layout, button.center()).part != NavigationGizmoPart::None);
   }
 }
 
-void NavigationGizmoTests::leavesEmptyOrbitAreaFreeOfAxisSnapping() {
+void NavigationGizmoTests::excludesPointsOutsideRotationCircle() {
   const NavigationGizmoLayout layout =
       navigationGizmoLayout(QMatrix4x4(), QSizeF(800.0, 600.0), 18.0);
-  const QPointF emptyOrbitArea =
-      layout.center + QPointF(layout.radius * 0.52, layout.radius * 0.52);
-
-  QCOMPARE(
-      hitTestNavigationGizmo(layout, emptyOrbitArea),
-      (NavigationGizmoHit{NavigationGizmoPart::Rotate, NavigationAxis::None}));
+  for (const QPointF direction : {QPointF(1, 0), QPointF(-1, 0),
+                                  QPointF(0, -1), QPointF(0.8, -0.6)}) {
+    const QPointF outside = layout.center + direction * (layout.radius + 0.1);
+    QCOMPARE(hitTestNavigationGizmo(layout, outside), NavigationGizmoHit{});
+    const QPointF inside = layout.center + direction * (layout.radius - 0.1);
+    const auto hit = hitTestNavigationGizmo(layout, inside);
+    QCOMPARE(hit.part, NavigationGizmoPart::Rotate);
+    QVERIFY(hit.axis != NavigationAxis::None);
+  }
 }
 
 void NavigationGizmoTests::mapsSixAxisViews() {
@@ -217,16 +243,27 @@ void NavigationGizmoTests::mapsSixAxisViews() {
 }
 
 void NavigationGizmoTests::keepsNavigationButtonsInsideViewport() {
-  const NavigationGizmoLayout layout =
-      navigationGizmoLayout(QMatrix4x4(), QSizeF(420.0, 280.0), 24.0);
-  const QRectF viewport(0.0, 0.0, 420.0, 280.0);
-  QVERIFY(viewport.contains(layout.rotateBounds));
-  QVERIFY(viewport.contains(layout.zoomButton));
-  QVERIFY(viewport.contains(layout.panButton));
-  QVERIFY(viewport.contains(layout.cameraButton));
-  QVERIFY(viewport.contains(layout.projectionCube));
-  QVERIFY(viewport.contains(layout.projectionHitArea));
-  QVERIFY(viewport.contains(layout.projectionLabel));
+  for (const QSizeF viewportSize : {QSizeF(420, 280), QSizeF(240, 180),
+                                    QSizeF(800, 600), QSizeF(1920, 1080)}) {
+    for (const qreal fontHeight : {12.0, 18.0, 24.0, 36.0}) {
+      const auto layout = navigationGizmoLayout(QMatrix4x4(), viewportSize, fontHeight);
+      const QRectF viewport(QPointF(), viewportSize);
+      for (const QRectF bounds : {layout.rotateBounds, layout.zoomButton,
+                                  layout.panButton, layout.cameraButton,
+                                  layout.projectionButton, layout.projectionLabel}) {
+        QVERIFY2(viewport.adjusted(-0.01, -0.01, 0.01, 0.01).contains(bounds),
+                 "The navigation control must fit both compact and high-DPI viewports");
+      }
+      QVERIFY(layout.zoomButton.top() > layout.projectionLabel.bottom());
+      QVERIFY(layout.panButton.top() > layout.zoomButton.bottom());
+      QVERIFY(layout.cameraButton.top() > layout.panButton.bottom());
+      QVERIFY(layout.projectionButton.top() > layout.cameraButton.bottom());
+      QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionButton.center()).part,
+               NavigationGizmoPart::Projection);
+      QCOMPARE(hitTestNavigationGizmo(layout, layout.projectionLabel.center()).part,
+               NavigationGizmoPart::None);
+    }
+  }
 }
 
 QTEST_GUILESS_MAIN(NavigationGizmoTests)

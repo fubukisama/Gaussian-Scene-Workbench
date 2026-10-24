@@ -60,10 +60,13 @@ bool runObservationNavigationSmokeTest(NativeViewport &viewport, const QString &
            (first.upDirection - second.upDirection).length() < 1.0e-4F;
   };
   const QPointF start = center + QPointF(radius * 2.3, 0);
+  // This matrix covers free perspective and explicitly chosen User Ortho.
+  // Axis-view auto-perspective transitions have their own navigation checks.
+  viewport.resetCamera();
   for (const bool orthographic : {false, true}) {
     if (viewport.orthographicProjection() != orthographic) {
       const auto layout = navigationGizmoLayout(QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-      drag(layout.projectionCube.center(), layout.projectionCube.center());
+      drag(layout.projectionButton.center(), layout.projectionButton.center());
     }
     check(viewport.orthographicProjection() == orthographic, "projection control remains usable while locked");
     for (const bool visible : {true, false}) {

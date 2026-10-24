@@ -27,7 +27,7 @@ static bool verifyProjectionFootprint(NativeViewport &viewport, const QString &d
   });
   const auto toggleProjection = [&]() {
     const auto layout = navigationGizmoLayout(QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-    const QPointF point = layout.projectionCube.center();
+    const QPointF point = layout.projectionButton.center();
     QMouseEvent press(QEvent::MouseButtonPress, point, viewport.mapToGlobal(point.toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QMouseEvent release(QEvent::MouseButtonRelease, point, viewport.mapToGlobal(point.toPoint()),
@@ -185,7 +185,7 @@ static bool verifyShAppearance(NativeViewport &viewport, const QString &director
   viewport.setEditToolsLocked(true);
   const auto toggleProjection = [&]() {
     const auto layout = navigationGizmoLayout(QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-    const auto point = layout.projectionCube.center();
+    const auto point = layout.projectionButton.center();
     QMouseEvent press(QEvent::MouseButtonPress, point, viewport.mapToGlobal(point.toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QMouseEvent release(QEvent::MouseButtonRelease, point, viewport.mapToGlobal(point.toPoint()),
@@ -198,11 +198,13 @@ static bool verifyShAppearance(NativeViewport &viewport, const QString &director
     viewport.setModelTransform({4, 5, 6}, rotation, scale);
     if (!viewport.focusModel()) return false;
     viewport.clearSelection();
-    if (viewport.orthographicProjection() != (pass == 2)) toggleProjection();
-    if (viewport.orthographicProjection() != (pass == 2)) return false;
     for (const auto axis : {NavigationAxis::PositiveZ, NavigationAxis::NegativeZ, NavigationAxis::PositiveX}) {
       viewport.setAxisView(axis);
       QEventLoop loop; QTimer::singleShot(350, &loop, &QEventLoop::quit); loop.exec();
+      // Axis alignment now enters orthographic automatically. Restore the
+      // requested projection after each snap so both SH rendering paths run.
+      if (viewport.orthographicProjection() != (pass == 2)) toggleProjection();
+      if (viewport.orthographicProjection() != (pass == 2)) return false;
       QMatrix4x4 model; model.rotate(rotation); model.scale(scale);
       const auto direction = model.inverted().mapVector(-orbitFrame(viewport.viewOrbitAngles()).cameraOffsetDirection).normalized();
       const double z = direction.z();

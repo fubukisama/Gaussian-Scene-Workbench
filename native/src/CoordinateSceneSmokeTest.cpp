@@ -91,16 +91,6 @@ bool waitUntil(const std::function<bool()> &predicate) {
 bool useTopOrthographicView(NativeViewport &viewport) {
   viewport.setAxisView(NavigationAxis::PositiveZ);
   processFor(300);
-  if (!viewport.orthographicProjection()) {
-    const QPointF center = navigationGizmoLayout(QMatrix4x4(), viewport.size(),
-        QFontMetricsF(viewport.font()).height()).projectionCube.center();
-    QMouseEvent press(QEvent::MouseButtonPress, center, center,
-        viewport.mapToGlobal(center.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, center, center,
-        viewport.mapToGlobal(center.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(&viewport, &press);
-    QApplication::sendEvent(&viewport, &release);
-  }
   return viewport.orthographicProjection();
 }
 
@@ -807,11 +797,13 @@ bool runCoordinateSceneSmokeTest(NativeViewport &viewport) {
       viewport.setModelGizmoMode(TransformGizmoMode::Move);
       viewport.selectModel();
       check(viewport.focusModel(), "Z drag fixture can be focused");
-      if (orthographic) {
+      if (viewport.orthographicProjection() != orthographic) {
         const auto navigation = navigationGizmoLayout({}, viewport.size(), QFontMetricsF(viewport.font()).height());
-        mouse(QEvent::MouseButtonPress, navigation.projectionCube.center(), Qt::LeftButton, Qt::LeftButton);
-        mouse(QEvent::MouseButtonRelease, navigation.projectionCube.center(), Qt::LeftButton, Qt::NoButton);
+        mouse(QEvent::MouseButtonPress, navigation.projectionButton.center(), Qt::LeftButton, Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, navigation.projectionButton.center(), Qt::LeftButton, Qt::NoButton);
       }
+      check(viewport.orthographicProjection() == orthographic,
+            "Z drag fixture uses the requested real projection in every model family");
       // Leave room for the one-metre elevation change instead of clipping the
       // flat point/surfel fixture against the top of a tightly framed view.
       const QPointF zZoomCenter = viewport.rect().center();

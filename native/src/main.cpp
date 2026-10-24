@@ -1118,9 +1118,9 @@ int main(int argc, char *argv[]) {
                         const auto navigation = gsw::navigationGizmoLayout(
                             QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
                             QFontMetricsF(viewport->font()).height());
-                        mouse(QEvent::MouseButtonPress, navigation.projectionCube.center(),
+                        mouse(QEvent::MouseButtonPress, navigation.projectionButton.center(),
                               Qt::LeftButton, Qt::LeftButton);
-                        mouse(QEvent::MouseButtonRelease, navigation.projectionCube.center(),
+                        mouse(QEvent::MouseButtonRelease, navigation.projectionButton.center(),
                               Qt::LeftButton, Qt::NoButton);
                       }
                       mouse(QEvent::MouseMove, start, Qt::NoButton, Qt::NoButton);
@@ -1190,7 +1190,7 @@ int main(int argc, char *argv[]) {
                         if (viewport->orthographicProjection() != orthographic) {
                           const auto navigation = gsw::navigationGizmoLayout(
                               {}, viewport->size(), QFontMetricsF(viewport->font()).height());
-                          const QPointF point = navigation.projectionCube.center();
+                          const QPointF point = navigation.projectionButton.center();
                           for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
                             QMouseEvent event(type, point, point, viewport->mapToGlobal(point.toPoint()),
                                 Qt::LeftButton, type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
@@ -1353,100 +1353,114 @@ int main(int argc, char *argv[]) {
             QCoreApplication::sendEvent(viewport, &release);
           };
 
-          viewport->setAxisView(gsw::NavigationAxis::PositiveX);
-          const bool perspectiveAxisPreserved =
-              !viewport->orthographicProjection();
           const gsw::NavigationGizmoLayout gizmo =
               gsw::navigationGizmoLayout(
                   QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
                   QFontMetricsF(viewport->font()).height());
-          drag(Qt::LeftButton, gizmo.projectionCube.center(),
-               gizmo.projectionCube.center(), Qt::NoModifier);
-          const bool centerEntersOrthographic =
-              viewport->orthographicProjection();
+          const auto waitForAxis = [&](const gsw::NavigationAxis axis) {
+            const auto expected = gsw::navigationAxisViewAngles(axis);
+            if (!expected) return false;
+            const auto expectedFrame = gsw::orbitFrame(*expected);
+            const auto atAxis = [&]() {
+              const auto frame = gsw::orbitFrame(viewport->viewOrbitAngles());
+              return (frame.cameraOffsetDirection - expectedFrame.cameraOffsetDirection).lengthSquared() < 1.0e-10F &&
+                     (frame.upDirection - expectedFrame.upDirection).lengthSquared() < 1.0e-10F;
+            };
+            QElapsedTimer deadline;
+            deadline.start();
+            while (!atAxis() && deadline.elapsed() < 1500) {
+              QEventLoop events;
+              QTimer::singleShot(20, &events, &QEventLoop::quit);
+              events.exec(QEventLoop::ExcludeUserInputEvents);
+            }
+            return atAxis();
+          };
+          bool orientationReady = true;
+          const auto checkOrientation = [&](const bool ready, const char *message) {
+            orientationReady &= ready;
+            if (!ready) qCritical() << "Blender orientation FAIL:" << message;
+          };
+          viewport->resetCamera();
+          const auto initialFrame = gsw::orbitFrame(viewport->viewOrbitAngles());
+          QMatrix4x4 actualView;
+          actualView.lookAt(initialFrame.cameraOffsetDirection * 10.0F, {}, initialFrame.upDirection);
+          const auto actualGizmo = gsw::navigationGizmoLayout(actualView, viewport->size(),
+              QFontMetricsF(viewport->font()).height());
+          const auto positiveX = std::find_if(actualGizmo.handles.begin(), actualGizmo.handles.end(),
+              [](const auto &handle) { return handle.axis == gsw::NavigationAxis::PositiveX; });
+          drag(Qt::LeftButton, positiveX->center, positiveX->center, Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection() && waitForAxis(gsw::NavigationAxis::PositiveX),
+              "clicking the X endpoint enters its orthographic axis view");
+          for (const auto axis : {gsw::NavigationAxis::PositiveX, gsw::NavigationAxis::NegativeX,
+                                 gsw::NavigationAxis::PositiveY, gsw::NavigationAxis::NegativeY,
+                                 gsw::NavigationAxis::PositiveZ, gsw::NavigationAxis::NegativeZ}) {
+            viewport->setAxisView(axis);
+            checkOrientation(viewport->orthographicProjection() && waitForAxis(axis),
+                "all six named axis views use orthographic projection");
+          }
+          viewport->setAxisView(gsw::NavigationAxis::PositiveZ);
+          checkOrientation(waitForAxis(gsw::NavigationAxis::PositiveZ), "top view reaches its public pose");
+          drag(Qt::LeftButton, gizmo.center, gizmo.center, Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection() && waitForAxis(gsw::NavigationAxis::NegativeZ),
+              "the aligned center axis selects the opposite view without toggling projection");
+          drag(Qt::LeftButton, gizmo.center, gizmo.center, Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection() && waitForAxis(gsw::NavigationAxis::PositiveZ),
+              "the opposite center axis returns to the front view");
+          const auto labelAngles = viewport->viewOrbitAngles();
+          drag(Qt::LeftButton, gizmo.projectionLabel.center(), gizmo.projectionLabel.center(), Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection() && viewport->viewOrbitAngles() == labelAngles,
+              "projection caption is read-only");
 
-          viewport->setAxisView(gsw::NavigationAxis::PositiveY);
-          const bool orthographicAxisPreserved =
-              viewport->orthographicProjection();
           const QPointF canvasStart(viewport->width() * 0.50,
                                     viewport->height() * 0.45);
+          const auto zoomAtCanvas = [&]() {
+            QWheelEvent zoom(canvasStart, viewport->mapToGlobal(canvasStart.toPoint()), QPoint(),
+                             QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(viewport, &zoom);
+          };
+          drag(Qt::MiddleButton, canvasStart, canvasStart + QPointF(-28.0, 20.0), Qt::NoModifier);
+          zoomAtCanvas();
+          checkOrientation(viewport->orthographicProjection(), "axis-view pan and zoom remain orthographic");
           drag(Qt::LeftButton, canvasStart,
                canvasStart + QPointF(32.0, -24.0), Qt::NoModifier);
-          const bool canvasOrbitKeepsOrthographic =
-              viewport->orthographicProjection();
-
+          checkOrientation(!viewport->orthographicProjection(),
+              "canvas orbit leaves axis view for perspective, including after pan and zoom");
           viewport->setAxisView(gsw::NavigationAxis::PositiveX);
-          const QPointF gizmoOrbitStart =
-              gizmo.center +
-              QPointF(gizmo.radius * 0.62, gizmo.radius * 0.18);
-          drag(Qt::LeftButton, gizmoOrbitStart,
-               gizmoOrbitStart + QPointF(30.0, -18.0), Qt::NoModifier);
-          const bool gizmoOrbitKeepsOrthographic =
-              viewport->orthographicProjection();
-
-          drag(Qt::MiddleButton, canvasStart,
-               canvasStart + QPointF(-28.0, 20.0), Qt::NoModifier);
-          const QPointF globalCanvasStart =
-              viewport->mapToGlobal(canvasStart.toPoint());
-          QWheelEvent zoom(canvasStart, globalCanvasStart, QPoint(),
-                           QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
-                           Qt::NoScrollPhase, false);
-          QCoreApplication::sendEvent(viewport, &zoom);
-          const bool panZoomKeepOrthographic =
-              viewport->orthographicProjection();
-
-          drag(Qt::LeftButton, gizmo.projectionLabel.center(),
-               gizmo.projectionLabel.center(), Qt::NoModifier);
-          const bool labelReturnsPerspective =
-              !viewport->orthographicProjection();
-
-          drag(Qt::LeftButton, gizmo.projectionCube.center(),
-               gizmo.projectionCube.center(), Qt::NoModifier);
-          drag(Qt::LeftButton, gizmo.projectionCube.center(),
-               gizmo.projectionCube.center(), Qt::ShiftModifier);
-          const gsw::OrbitAngles resetAngles = viewport->viewOrbitAngles();
-          const bool shiftRestoresDefaultPerspective =
-              !viewport->orthographicProjection() &&
-              std::abs(resetAngles.yawDegrees - 42.0F) < 0.01F &&
-              std::abs(resetAngles.pitchDegrees - 24.0F) < 0.01F;
-
-          smokeTestCompleted =
-              perspectiveAxisPreserved && centerEntersOrthographic &&
-              orthographicAxisPreserved && canvasOrbitKeepsOrthographic &&
-              gizmoOrbitKeepsOrthographic && panZoomKeepOrthographic &&
-              labelReturnsPerspective && shiftRestoresDefaultPerspective;
-          if (!perspectiveAxisPreserved) {
-            smokeTestFailureCode = 3;
-          } else if (!centerEntersOrthographic) {
-            smokeTestFailureCode = 4;
-          } else if (!orthographicAxisPreserved) {
-            smokeTestFailureCode = 5;
-          } else if (!canvasOrbitKeepsOrthographic) {
-            smokeTestFailureCode = 6;
-          } else if (!gizmoOrbitKeepsOrthographic) {
-            smokeTestFailureCode = 7;
-          } else if (!panZoomKeepOrthographic) {
-            smokeTestFailureCode = 8;
-          } else if (!labelReturnsPerspective) {
-            smokeTestFailureCode = 9;
-          } else if (!shiftRestoresDefaultPerspective) {
-            smokeTestFailureCode = 10;
-          } else {
-            smokeTestFailureCode = 0;
+          checkOrientation(waitForAxis(gsw::NavigationAxis::PositiveX), "side view reaches its public pose");
+          drag(Qt::LeftButton, gizmo.center, gizmo.center + QPointF(30.0, -18.0), Qt::NoModifier);
+          checkOrientation(!viewport->orthographicProjection(), "gizmo drag restores perspective without snapping on release");
+          viewport->setEditToolsLocked(true);
+          viewport->setAxisView(gsw::NavigationAxis::PositiveZ);
+          checkOrientation(waitForAxis(gsw::NavigationAxis::PositiveZ), "locked observation reaches top view");
+          drag(Qt::LeftButton, canvasStart, canvasStart, Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection(), "a click without rotation keeps axis projection");
+          drag(Qt::LeftButton, canvasStart, canvasStart + QPointF(32.0, -24.0), Qt::NoModifier);
+          checkOrientation(!viewport->orthographicProjection(), "locked observation also restores perspective on rotation");
+          viewport->setEditToolsLocked(false);
+          viewport->resetCamera();
+          drag(Qt::LeftButton, gizmo.projectionButton.center(), gizmo.projectionButton.center(), Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection(), "independent button enters user orthographic projection");
+          drag(Qt::LeftButton, canvasStart, canvasStart + QPointF(32.0, -24.0), Qt::NoModifier);
+          drag(Qt::LeftButton, gizmo.center, gizmo.center + QPointF(30.0, -18.0), Qt::NoModifier);
+          checkOrientation(viewport->orthographicProjection(), "manual oblique user orthographic orbit stays orthographic");
+          const auto beforeToggleAngles = viewport->viewOrbitAngles();
+          const auto beforeToggleTarget = viewport->viewTarget();
+          const auto beforeToggleDistance = viewport->viewDistance();
+          for (const auto modifiers : {Qt::KeyboardModifiers(Qt::ShiftModifier), Qt::KeyboardModifiers(Qt::NoModifier)}) {
+            const bool before = viewport->orthographicProjection();
+            drag(Qt::LeftButton, gizmo.projectionButton.center(), gizmo.projectionButton.center(), modifiers);
+            checkOrientation(viewport->orthographicProjection() != before && viewport->viewOrbitAngles() == beforeToggleAngles &&
+                viewport->viewTarget() == beforeToggleTarget && viewport->viewDistance() == beforeToggleDistance,
+                "projection button toggles only projection, without a hidden view reset");
           }
-          qInfo() << "Unity-style orientation smoke:"
-                  << "perspective-axis" << perspectiveAxisPreserved
-                  << "center-orthographic" << centerEntersOrthographic
-                  << "orthographic-axis" << orthographicAxisPreserved
-                  << "canvas-orbit" << canvasOrbitKeepsOrthographic
-                  << "gizmo-orbit" << gizmoOrbitKeepsOrthographic
-                  << "pan-zoom" << panZoomKeepOrthographic
-                  << "label-perspective" << labelReturnsPerspective
-                  << "shift-reset" << shiftRestoresDefaultPerspective;
+          smokeTestCompleted = orientationReady;
+          smokeTestFailureCode = orientationReady ? 0 : 3;
+          qInfo() << "Blender Auto Perspective orientation smoke:" << orientationReady;
+          viewport->resetCamera();
           const QImage orientationFrame = viewport->grabFramebuffer();
           if (!orientationFrame.isNull()) {
             orientationFrame.save(QDir::temp().filePath(
-                QStringLiteral("gsw-unity-orientation-smoke.png")));
+                QStringLiteral("gsw-blender-orientation-smoke.png")));
           }
           // The fixed world-origin grid axes keep a stable local footprint as
           // the camera zooms. There is no default 3D cursor or growing tripod.
@@ -1506,8 +1520,8 @@ int main(int argc, char *argv[]) {
           farFrame.save(QDir::temp().filePath(
               QStringLiteral("gsw-reference-axis-far.png")));
           const int farMarkerPixels = markerPixels(farFrame);
-          drag(Qt::LeftButton, gizmo.projectionLabel.center(),
-               gizmo.projectionLabel.center(), Qt::NoModifier);
+          drag(Qt::LeftButton, gizmo.projectionButton.center(),
+               gizmo.projectionButton.center(), Qt::NoModifier);
           const QImage orthoFrame = viewport->grabFramebuffer();
           orthoFrame.save(QDir::temp().filePath(
               QStringLiteral("gsw-reference-axis-ortho.png")));
@@ -1613,7 +1627,7 @@ int main(int argc, char *argv[]) {
                 gsw::navigationGizmoLayout(
                     QMatrix4x4(), QSizeF(viewport->width(), viewport->height()),
                     QFontMetricsF(viewport->font()).height());
-            const QPointF projectionPosition = gizmo.projectionCube.center();
+            const QPointF projectionPosition = gizmo.projectionButton.center();
             const QPointF globalProjectionPosition =
                 viewport->mapToGlobal(projectionPosition.toPoint());
             QMouseEvent projectionPress(

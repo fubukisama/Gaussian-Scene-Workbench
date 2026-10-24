@@ -132,16 +132,16 @@ desktop application's language, settings, model or worker state.
 
 Blender-derived viewport navigation uses localized **Perspective / Orthographic**
 labels (`透视 / 正交`, `透視 / 平行`) rather than calling every orthographic view
-`Iso`. Its center projection-control tooltips are translated in all three
+`Iso`. Its independent projection-button and axis-navigation tooltips are translated in all three
 languages and refresh through the existing live viewport language callback.
 The unframed captions retain translated scene/task information. These changes
 only redraw presentation; they do not rebuild the camera, model or worker.
 Blender's separate 3D cursor is not added as a coordinate-origin marker.
 
-中文：Blender 风格视口的“透视／正交”和中心投影控件提示均随语言即时更新，
+中文：Blender 风格视口的“透视／正交”、独立投影按钮和轴向导航提示均随语言即时更新，
 不把所有正交视图误称为等轴视图，也不把三维游标当作坐标原点或编辑手柄。
 
-日本語：Blender 由来のビューポートでは「透視／平行」と中央投影コントロール
+日本語：Blender 由来のビューポートでは「透視／平行」と独立した投影ボタン・軸ナビゲーション
 の説明を即時に翻訳します。平行投影をすべて等角投影と呼ぶことはなく、
 3D カーソルを座標原点や編集ハンドルとして追加しません。
 

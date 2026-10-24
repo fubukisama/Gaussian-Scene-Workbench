@@ -478,6 +478,7 @@ private:
     float rollDegrees = 0.0F;
     float fovDegrees = 46.0F;
     float focalAspectCorrection = 1.0F;
+    NavigationAxis axisView = NavigationAxis::None;
   };
 
   enum class TransformConstraintKind { None, Axis, Plane };
@@ -569,6 +570,7 @@ private:
   void updateNavigationGizmoInteraction(const QPoint &current);
   void finishNavigationGizmoInteraction();
   void orbitCamera(const QPoint &delta);
+  [[nodiscard]] bool prepareCameraOrbit();
   void panCamera(const QPoint &delta);
   void zoomCamera(float factor, const QPointF &cursor);
   void toggleCameraView();
@@ -675,6 +677,7 @@ private:
   bool mEditToolsLocked = false;
   bool mShowObservationTrackball = true;
   bool mObservationDragActive = false;
+  bool mObservationDragMoved = false;
   int mObservationDragAxis = -1;
   QPointF mObservationDragStart;
   OrbitAngles mObservationDragAngles;
@@ -688,8 +691,8 @@ private:
   bool mTemporaryOrbitActive = false;
   bool mNavigationInteractionActive = false;
   bool mNavigationDragging = false;
-  Qt::KeyboardModifiers mNavigationPressModifiers = Qt::NoModifier;
   bool mOrthographic = false;
+  NavigationAxis mAxisView = NavigationAxis::None;
   int mMaximumShDegree = -1; // automatic = use the source degree
   bool mCameraViewActive = false;
   bool mShowCameras = false;

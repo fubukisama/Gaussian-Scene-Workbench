@@ -14,10 +14,13 @@
  *
  * Ported subset: depth ordering, background/axis color interpolation,
  * positive/negative circular axis handles, upright labels and hover backdrop.
- * Qt replaces Blender's GPU immediate drawing and font API. The existing GSW
- * layout and hit targets remain authoritative, including its center projection
- * switch. Mini buttons retain GSW's shared semantic artwork. No navigation
- * operator, coordinate, camera or selection state is changed by this adapter.
+ * Qt replaces Blender's GPU immediate drawing and font API. Axis projection
+ * and aligned-front visibility follow the source. Axis picking uses Blender's
+ * nearest projected endpoint; GSW distinguishes clicks from orbit drags.
+ * Projection is a separate mini
+ * button below the camera button, matching Blender's navigation placement.
+ * Mini buttons retain GSW's shared semantic artwork. No coordinate or model
+ * selection state is changed by this drawing adapter.
  * GSW selects GPL-3.0-or-later for the combined desktop; see COPYING.
  */
 #pragma once
@@ -66,10 +69,17 @@ inline bool active(const BlenderNavigationPresentationState &state,
 }
 
 inline bool highlighted(const BlenderNavigationPresentationState &state,
-                         const NavigationAxis axis) {
-  return (state.hover.part == NavigationGizmoPart::Rotate && state.hover.axis == axis) ||
+                         const NavigationAxisHandle &handle) {
+  const auto matches = [&handle](const NavigationAxis axis) {
+    if (axis == handle.axis) return true;
+    if (!handle.aligned || axis == NavigationAxis::None) return false;
+    // Aligned-center picking selects the opposite view; highlight the visible
+    // near disc, as Blender's aligned-front/back mapping does.
+    return (static_cast<int>(axis) - 1) / 2 == handle.axisIndex;
+  };
+  return (state.hover.part == NavigationGizmoPart::Rotate && matches(state.hover.axis)) ||
       (state.interactionActive && state.press.part == NavigationGizmoPart::Rotate &&
-       state.press.axis == axis);
+       matches(state.press.axis));
 }
 
 } // namespace blender_navigation_detail
@@ -115,7 +125,7 @@ inline void drawBlenderNavigationPresentation(
     // the far end, full axis ink at the near end; the center uses 75% axis ink.
     const QColor fading = mix(backdrop, axis, ((handle->depth + 1.0) * 0.25) + 0.5);
     const QColor middle = mix(backdrop, axis, 0.75);
-    const bool highlight = highlighted(state, handle->axis);
+    const bool highlight = highlighted(state, *handle);
     const QPointF delta = handle->center - layout.center;
     const qreal extent = std::hypot(delta.x(), delta.y());
     if ((handle->positive || axisAligned) && extent > handle->radius) {
@@ -132,16 +142,21 @@ inline void drawBlenderNavigationPresentation(
     }
 
     QColor fill = fading;
+    QColor outline = fading;
     if (!handle->positive) {
-      fill = mix(backdrop, axis, 0.25);
-      fill.setAlphaF(std::clamp(handle->depth + 1.0F, 0.0F, 1.0F));
+      if (handle->aligned) {
+        outline = mix(QColor(Qt::white), axis, 0.5);
+      } else {
+        fill = mix(backdrop, axis, 0.25);
+        fill.setAlphaF(std::clamp(handle->depth + 1.0F, 0.0F, 1.0F));
+      }
     }
-    painter.setPen(QPen(highlight ? QColor(Qt::white) : fading,
+    painter.setPen(QPen(highlight ? QColor(Qt::white) : outline,
                         highlight ? ringWidth + 0.5 : ringWidth));
     painter.setBrush(fill);
     painter.drawEllipse(handle->center, handle->radius, handle->radius);
 
-    if (handle->positive || highlight) {
+    if (handle->positive || highlight || handle->aligned) {
       QString label(QChar('X' + handle->axisIndex));
       if (!handle->positive) label.prepend(QChar('-'));
       painter.setPen(highlight ? QColor(Qt::white) : QColor(0, 0, 0, rotationActive ? 255 : 230));
@@ -151,25 +166,11 @@ inline void drawBlenderNavigationPresentation(
     }
   }
 
-  // Preserve the existing center projection-switch hit region. Its small
-  // neutral sphere and semantic projection icon replace the unrelated cube.
-  const bool projectionActive = active(state, NavigationGizmoPart::Projection);
-  const qreal centerRadius = std::max(4.0, layout.projectionCube.width() * 0.5);
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(projectionActive
-      ? state.light ? QColor(77, 105, 142, 85) : QColor(173, 187, 203, 95)
-      : state.light ? QColor(130, 137, 146, 75) : QColor(170, 176, 185, 65));
-  painter.drawEllipse(layout.center, centerRadius, centerRadius);
-  const qreal projectionSize = centerRadius * 1.35;
-  paintWorkbenchIcon(painter, WorkbenchIconId::Projection,
-      QRectF(layout.center - QPointF(projectionSize * 0.5, projectionSize * 0.5),
-               QSizeF(projectionSize, projectionSize)), ink);
-
   QFont labelFont = axisFont;
   labelFont.setBold(false);
   labelFont.setPixelSize(std::clamp(qRound(layout.projectionLabel.height() * 0.5), 9, 13));
   painter.setFont(labelFont);
-  painter.setPen(projectionActive ? ink : mix(backdrop, ink, 0.75));
+  painter.setPen(mix(backdrop, ink, 0.75));
   painter.drawText(layout.projectionLabel, Qt::AlignCenter,
                     state.orthographic
                         ? QCoreApplication::translate("Workbench", "正交")
@@ -196,6 +197,8 @@ inline void drawBlenderNavigationPresentation(
   miniButton(layout.panButton, NavigationGizmoPart::Pan, WorkbenchIconId::Pan);
   miniButton(layout.cameraButton, NavigationGizmoPart::Camera, WorkbenchIconId::Camera,
                state.cameraActive, state.cameraAvailable);
+  miniButton(layout.projectionButton, NavigationGizmoPart::Projection,
+               WorkbenchIconId::Projection, state.orthographic);
   painter.restore();
 }
 

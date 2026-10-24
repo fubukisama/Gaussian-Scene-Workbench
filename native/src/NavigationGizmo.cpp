@@ -1,3 +1,16 @@
+/* SPDX-FileCopyrightText: 2023 Blender Authors
+ * SPDX-FileCopyrightText: 2026 Gaussian Scene Workbench contributors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Axis projection, endpoint scaling and aligned front/back handling adapted
+ * from Blender v4.5.0, commit 8cb6b388974a817afedf1317ce26f0c75aa5f181,
+ * source/blender/editors/space_view3d/view3d_gizmo_navigate_type.cc,
+ * gizmo_axis_draw(), lines 53-287; aligned-axis reversal follows
+ * gizmo_axis_test_select(), lines 289-340. Qt supplies layout and hit testing.
+ * Picking follows Blender's nearest projected axis over the whole unit circle;
+ * GSW's input handler distinguishes axis clicks from orbit drags.
+ */
 #include "NavigationGizmo.h"
 
 #include <QVector3D>
@@ -11,12 +24,11 @@
 namespace gsw {
 
 namespace {
-constexpr qreal kHandleSizeRatio = 0.18;
+constexpr qreal kHandleSizeRatio = 0.20;
 // Blender's circular axis endpoints leave room for the complete round handle
 // inside the rotation sphere, rather than ending at the old cone's tip.
 constexpr qreal kAxisExtentRatio = 0.80;
-constexpr qreal kProjectionCubeRatio = 0.44;
-constexpr qreal kCollapsedAxisProjection = 0.16;
+constexpr qreal kAlignedAxisProjectionSquared = 1.0e-6;
 
 NavigationAxis axisDirection(const int axisIndex, const bool positive) {
   static constexpr std::array<NavigationAxis, 6> directions = {
@@ -66,12 +78,15 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   qreal projectionLabelHeight = std::clamp(fontHeight * 1.25, 20.0, 30.0);
   qreal projectionLabelGap = std::clamp(fontHeight * 0.20, 3.0, 6.0);
   const qreal requiredHeight = layout.radius * 2.0 + projectionLabelHeight +
-                               projectionLabelGap + buttonSize * 3.0 +
-                               buttonGap * 3.0;
+                               projectionLabelGap + buttonSize * 4.0 +
+                               buttonGap * 4.0;
   const qreal availableHeight =
       std::max(1.0, viewportSize.height() - margin * 2.0);
-  if (requiredHeight > availableHeight) {
-    const qreal fit = availableHeight / requiredHeight;
+  const qreal availableWidth =
+      std::max(1.0, viewportSize.width() - margin * 2.0);
+  const qreal fit = std::min({1.0, availableHeight / requiredHeight,
+                             availableWidth / (layout.radius * 2.0)});
+  if (fit < 1.0) {
     layout.radius *= fit;
     buttonSize *= fit;
     buttonGap *= fit;
@@ -95,20 +110,10 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
   layout.panButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
   buttonCenterY += buttonSize + buttonGap;
   layout.cameraButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
-
-  const qreal projectionCubeSize =
-      std::clamp(layout.radius * kProjectionCubeRatio, 20.0, 25.0);
-  layout.projectionCube = QRectF(layout.center.x() - projectionCubeSize * 0.5,
-                                 layout.center.y() - projectionCubeSize * 0.5,
-                                 projectionCubeSize, projectionCubeSize);
-  const qreal projectionHitSize = std::clamp(
-      projectionCubeSize + std::max(12.0, layout.radius * 0.18), 34.0, 42.0);
-  layout.projectionHitArea =
-      QRectF(layout.center.x() - projectionHitSize * 0.5,
-             layout.center.y() - projectionHitSize * 0.5, projectionHitSize,
-             projectionHitSize);
+  buttonCenterY += buttonSize + buttonGap;
+  layout.projectionButton = buttonRect(buttonRight, buttonCenterY, buttonSize);
   const qreal projectionLabelWidth =
-      std::max(layout.radius * 1.35, fontHeight * 3.0);
+      std::min(availableWidth, std::max(layout.radius * 1.35, fontHeight * 3.0 * fit));
   layout.projectionLabel =
       QRectF(layout.center.x() - projectionLabelWidth * 0.5,
              layout.center.y() + layout.radius + projectionLabelGap,
@@ -116,13 +121,13 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
   const qreal handleBaseRadius = layout.radius * kHandleSizeRatio;
   const qreal axisExtent = layout.radius * kAxisExtentRatio;
-  const qreal projectionHitRadius = layout.projectionHitArea.width() * 0.5;
   int handleIndex = 0;
   for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
     const QVector3D viewAxis =
         (viewMatrix * QVector4D(worldAxis(axisIndex), 0.0F)).toVector3D();
-    const qreal projectedLength = std::hypot(static_cast<qreal>(viewAxis.x()),
-                                             static_cast<qreal>(viewAxis.y()));
+    const qreal projectedLengthSquared =
+        static_cast<qreal>(viewAxis.x()) * viewAxis.x() +
+        static_cast<qreal>(viewAxis.y()) * viewAxis.y();
     for (const bool positive : {false, true}) {
       const float sign = positive ? 1.0F : -1.0F;
       NavigationAxisHandle &handle =
@@ -134,23 +139,10 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
       const qreal depthScale =
           (static_cast<qreal>(handle.depth) + 1.0) * 0.08 + 0.92;
       handle.radius = handleBaseRadius * depthScale;
-      handle.hidden = projectedLength < kCollapsedAxisProjection;
-      if (projectedLength < 1.0e-4) {
-        handle.center = layout.center;
-        continue;
-      }
-
-      const QPointF projectedDirection(
-          static_cast<qreal>(viewAxis.x()) / projectedLength,
-          -static_cast<qreal>(viewAxis.y()) / projectedLength);
-      const qreal minimumExtent =
-          projectionHitRadius + handle.radius +
-          std::max(4.0, layout.lineWidth * 1.5);
-      const qreal projectedExtent =
-          std::max(axisExtent * projectedLength, minimumExtent);
-      handle.center = layout.center + projectedDirection *
-                                          static_cast<qreal>(sign) *
-                                          projectedExtent;
+      handle.aligned = projectedLengthSquared < kAlignedAxisProjectionSquared;
+      handle.hidden = handle.aligned && handle.depth < 0.0F;
+      handle.center = layout.center +
+          QPointF(viewAxis.x(), -viewAxis.y()) * static_cast<qreal>(sign) * axisExtent;
     }
   }
   return layout;
@@ -158,8 +150,7 @@ NavigationGizmoLayout navigationGizmoLayout(const QMatrix4x4 &viewMatrix,
 
 NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
                                           const QPointF &position) {
-  if (ellipseContains(layout.projectionHitArea, position) ||
-      layout.projectionLabel.contains(position)) {
+  if (ellipseContains(layout.projectionButton, position)) {
     return {NavigationGizmoPart::Projection, NavigationAxis::None};
   }
   if (ellipseContains(layout.zoomButton, position)) {
@@ -177,35 +168,25 @@ NavigationGizmoHit hitTestNavigationGizmo(const NavigationGizmoLayout &layout,
     return {};
   }
 
+  if (layout.radius <= 0.0) return {};
+  const QPointF normalizedPosition = centerDelta / layout.radius;
   qreal bestDistanceSquared = std::numeric_limits<qreal>::max();
-  float bestDepth = -std::numeric_limits<float>::max();
-  bool foundPaintedHandle = false;
   NavigationAxis bestAxis = NavigationAxis::None;
   for (const NavigationAxisHandle &handle : layout.handles) {
-    if (handle.hidden) {
-      continue;
-    }
     if (handle.radius <= 0.0) continue;
-    const QPointF fromCenter = position - handle.center;
+    // Blender excludes the currently facing endpoint only when the view is
+    // axis-aligned. The hidden far endpoint remains selectable to flip sides.
+    if (handle.aligned && !handle.hidden) continue;
+    // Drawing insets endpoints to 0.8 of the sphere radius; selection uses the
+    // raw projected unit axis, as gizmo_axis_test_select() does upstream.
+    const QPointF projectedAxis =
+        (handle.center - layout.center) / (layout.radius * kAxisExtentRatio);
+    const QPointF fromCenter = normalizedPosition - projectedAxis;
     const qreal distanceSquared = QPointF::dotProduct(fromCenter, fromCenter);
-    constexpr qreal hitSlop = 3.0;
-    const bool painted = distanceSquared <= handle.radius * handle.radius;
-    const qreal targetRadius = handle.radius + hitSlop;
-    if (distanceSquared > targetRadius * targetRadius) continue;
-    // Match the painter's far-to-near ordering when actual discs overlap. A
-    // nearby tolerance-only target must never steal a painted foreground disc.
-    if (painted) {
-      if (foundPaintedHandle &&
-          (handle.depth < bestDepth ||
-           (handle.depth == bestDepth && distanceSquared >= bestDistanceSquared))) continue;
-    } else {
-      if (foundPaintedHandle || distanceSquared > bestDistanceSquared ||
-          (distanceSquared == bestDistanceSquared && handle.depth <= bestDepth)) continue;
+    if (distanceSquared < bestDistanceSquared) {
+      bestDistanceSquared = distanceSquared;
+      bestAxis = handle.axis;
     }
-    foundPaintedHandle = painted;
-    bestDistanceSquared = distanceSquared;
-    bestDepth = handle.depth;
-    bestAxis = handle.axis;
   }
   return {NavigationGizmoPart::Rotate, bestAxis};
 }

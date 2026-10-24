@@ -4,6 +4,9 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFontMetricsF>
+#include <QMouseEvent>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -54,6 +57,86 @@ private slots:
       QCOMPARE(selections.size(), 0);
       QVERIFY(!viewport.isVisible());
       QVERIFY(viewport.context() == nullptr);
+    }
+  }
+
+  void projectionTooltipRetranslatesUnderStationaryPointer() {
+    const auto previousLanguage = gsw::AppLanguage::current();
+    const auto restoreLanguage = qScopeGuard([&] {
+      gsw::AppLanguage::apply(previousLanguage, false);
+    });
+    QVERIFY(gsw::AppLanguage::apply(QStringLiteral("zh_CN"), false));
+    gsw::NativeViewport viewport;
+    viewport.resize(960, 720);
+    viewport.setEditToolsLocked(true);
+    viewport.setModelTransform({1, 2, 3}, QQuaternion::fromEulerAngles(12, 23, 34), {2, 3, 4});
+    const auto translation = viewport.modelTranslation();
+    const auto rotation = viewport.modelRotation();
+    const auto scale = viewport.modelScale();
+    const auto selected = viewport.selectedSceneIds();
+    const auto target = viewport.viewTarget();
+    const auto distance = viewport.viewDistance();
+    const auto angles = viewport.viewOrbitAngles();
+    QSignalSpy coordinates(&viewport, &gsw::NativeViewport::sceneCoordinatesChanged);
+    QSignalSpy cameras(&viewport, &gsw::NativeViewport::cameraTrajectoryChanged);
+    QSignalSpy loads(&viewport, &gsw::NativeViewport::sceneLoadStarted);
+    QSignalSpy selections(&viewport, &gsw::NativeViewport::sceneSelectionChanged);
+
+    const auto layout = gsw::navigationGizmoLayout(
+        QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
+    const auto point = layout.projectionButton.center();
+    const auto mouse = [&](QEvent::Type type, Qt::MouseButton button, Qt::MouseButtons buttons) {
+      QMouseEvent event(type, point, point, viewport.mapToGlobal(point.toPoint()),
+                        button, buttons, Qt::NoModifier);
+      QCoreApplication::sendEvent(&viewport, &event);
+    };
+    const auto click = [&] {
+      mouse(QEvent::MouseButtonPress, Qt::LeftButton, Qt::LeftButton);
+      mouse(QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+    };
+    // One real hover establishes the pointer location. Language changes and
+    // clicks must refresh the tooltip without moving the pointer afterward.
+    mouse(QEvent::MouseMove, Qt::NoButton, Qt::NoButton);
+    QVERIFY(!viewport.orthographicProjection());
+    struct ExpectedLocale {
+      const char *locale;
+      const char *toOrthographic;
+      const char *toPerspective;
+    };
+    const ExpectedLocale locales[] = {
+        {"zh_CN", "切换到正交投影", "切换到透视投影"},
+        {"en_US", "Switch to Orthographic Projection", "Switch to Perspective Projection"},
+        {"ja_JP", "平行投影に切り替え", "透視投影に切り替え"}};
+    for (const bool orthographic : {false, true}) {
+      if (viewport.orthographicProjection() != orthographic) click();
+      for (const auto &locale : locales) {
+        QVERIFY(gsw::AppLanguage::apply(QString::fromLatin1(locale.locale), false));
+        const auto expected = QString::fromUtf8(orthographic ? locale.toPerspective : locale.toOrthographic);
+        const auto toggled = QString::fromUtf8(orthographic ? locale.toOrthographic : locale.toPerspective);
+        QCOMPARE(viewport.toolTip(), expected);
+        QCOMPARE(viewport.orthographicProjection(), orthographic);
+        click();
+        QCOMPARE(viewport.orthographicProjection(), !orthographic);
+        QCOMPARE(viewport.toolTip(), toggled);
+        click();
+        QCOMPARE(viewport.orthographicProjection(), orthographic);
+        QCOMPARE(viewport.toolTip(), expected);
+        QCOMPARE(viewport.modelTranslation(), translation);
+        QCOMPARE(viewport.modelRotation(), rotation);
+        QCOMPARE(viewport.modelScale(), scale);
+        QCOMPARE(viewport.selectedSceneIds(), selected);
+        QCOMPARE(viewport.viewTarget(), target);
+        QCOMPARE(viewport.viewDistance(), distance);
+        QVERIFY(viewport.viewOrbitAngles() == angles);
+        QCOMPARE(coordinates.size(), 0);
+        QCOMPARE(cameras.size(), 0);
+        QCOMPARE(loads.size(), 0);
+        QCOMPARE(selections.size(), 0);
+        QVERIFY(!viewport.hasUnsavedSceneEdits());
+        QVERIFY(!viewport.modelTransformActive());
+        QVERIFY(!viewport.isVisible());
+        QVERIFY(viewport.context() == nullptr);
+      }
     }
   }
 

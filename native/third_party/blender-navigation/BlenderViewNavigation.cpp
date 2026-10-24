@@ -66,6 +66,14 @@ std::optional<QVector3D> targetPlaneOffset(
 }
 } // namespace
 
+bool blenderViewOrbitOrthographic(const bool orthographic, const bool axisView) {
+  // Blender v4.5.0 view3d_utils.cc, ED_view3d_persp_ensure, lines 534-559.
+  // The host resolves scene-camera exit separately. Keep Blender's distinction
+  // between RV3D_VIEW_IS_AXIS and a manually chosen user orthographic view.
+  if (orthographic && axisView) return false;
+  return orthographic;
+}
+
 std::optional<QVector3D> blenderViewZoomTarget(
     const QVector3D &target, const QMatrix4x4 &viewBefore,
     const QMatrix4x4 &projectionBefore, const QMatrix4x4 &viewAfter,

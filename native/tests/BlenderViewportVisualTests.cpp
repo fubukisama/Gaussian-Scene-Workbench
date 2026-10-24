@@ -425,10 +425,10 @@ bool verifyModelRendering(NativeViewport &viewport, QApplication &application) {
     for (int configuration = 0; configuration < 4; ++configuration) {
       const bool light = configuration == 1 || configuration == 2;
       AppTheme::applyTheme(application, light ? UiTheme::Light : UiTheme::Dark, false);
-      if (configuration == 2) {
+      if (viewport.orthographicProjection() != (configuration >= 2)) {
         const auto navigation = navigationGizmoLayout(
             QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-        clickViewport(viewport, navigation.projectionCube.center());
+        clickViewport(viewport, navigation.projectionButton.center());
       }
       processFrames(30);
       const QImage frame = viewport.grabFramebuffer();
@@ -492,7 +492,7 @@ int runBlenderViewportVisualTests(QApplication &application) {
   // camera members, GL state or shader-source inspection participate.
   const NavigationGizmoLayout navigation = navigationGizmoLayout(
       QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-  clickViewport(viewport, navigation.projectionCube.center());
+  clickViewport(viewport, navigation.projectionButton.center());
   if (!viewport.orthographicProjection()) {
     qCritical() << "Projection control did not switch to orthographic";
     return 4;

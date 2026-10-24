@@ -141,7 +141,7 @@ static bool runEditNavigationSmokeTestImpl(NativeViewport &viewport) {
       processFor(260);
     }
     if (viewport.orthographicProjection() != orthographic) {
-      dragAt(navigationLayout().projectionCube.center(), {});
+      dragAt(navigationLayout().projectionButton.center(), {});
     }
     check(viewport.orthographicProjection() == orthographic, "projection control selects the test projection");
   };
@@ -192,6 +192,10 @@ static bool runEditNavigationSmokeTestImpl(NativeViewport &viewport) {
         const auto lockedBefore = capture(label + "-locked-before");
         dragAt(emptyArea, delta);
         const auto lockedAfter = capture(label + "-locked-after");
+        const bool axisView = pose == Pose::Opposite || pose == Pose::Pole;
+        const bool expectedOrthographic = orthographic && !axisView;
+        check(viewport.orthographicProjection() == expectedOrthographic,
+              "orbit leaves an axis orthographic view for perspective and preserves User Ortho");
         check(lockedBefore.pixels > 100 && lockedAfter.pixels > 100,
               "observation reference marker is visible");
         prepare(pose, orthographic);
@@ -203,8 +207,8 @@ static bool runEditNavigationSmokeTestImpl(NativeViewport &viewport) {
         const auto editAfter = capture(label + "-edit-after");
         sameDirection(editBefore, editAfter, lockedAfter.center - lockedBefore.center, label);
         check(viewport.viewTarget() == target && viewport.viewDistance() == distance &&
-              viewport.orthographicProjection() == orthographic,
-              "orbit preserves camera pivot, distance, and projection");
+              viewport.orthographicProjection() == expectedOrthographic,
+              "edit orbit preserves pivot and distance and follows the same automatic projection rule");
       }
     }
   }
@@ -226,8 +230,9 @@ static bool runEditNavigationSmokeTestImpl(NativeViewport &viewport) {
         check(QPointF::dotProduct(movement, delta) > 30 &&
               std::abs(movement.x() * delta.y() - movement.y() * delta.x()) < 30,
               "middle/right/Shift-left pan follows the cursor, without swapped screen axes");
-        check(viewport.viewOrbitAngles() == angles && viewport.viewDistance() == distance,
-              "pan preserves viewing orientation and distance");
+        check(viewport.viewOrbitAngles() == angles && viewport.viewDistance() == distance &&
+              viewport.orthographicProjection() == orthographic,
+              "pan preserves viewing orientation, distance, and projection");
       }
     }
   }
@@ -256,8 +261,8 @@ static bool runEditNavigationSmokeTestImpl(NativeViewport &viewport) {
       viewport.setEditToolsLocked(false);
       const auto gizmoBefore = capture("gizmo-before");
       const auto layout = navigationLayout();
-      // A drag anywhere on the surrounding navigation sphere rotates; the
-      // center projection toggle is deliberately avoided.
+      // A drag on the navigation sphere rotates. The separate projection
+      // button below it does not participate in the gesture.
       dragAt(layout.center + QPointF(layout.radius * 0.65, 0), delta);
       const auto gizmoAfter = capture("gizmo-after");
       sameDirection(gizmoBefore, gizmoAfter, reference, "navigation gizmo orbit");
