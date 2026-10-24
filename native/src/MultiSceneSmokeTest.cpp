@@ -39,11 +39,14 @@ bool waitUntil(const std::function<bool()> &predicate, int timeout = 5000) {
 
 struct ColorFootprint {
   int count = 0;
+  int interiorCount = 0;
   QPointF center;
+  QPointF interiorCenter;
 };
 
 ColorFootprint footprint(const QImage &image, bool red) {
   ColorFootprint result;
+  QVector<quint8> mask(image.width() * image.height(), 0);
   // Ignore toolbars, labels and the navigation gizmo at the image edges.
   for (int y = 100; y < image.height() - 100; ++y) {
     for (int x = 120; x < image.width() - 140; ++x) {
@@ -53,10 +56,29 @@ ColorFootprint footprint(const QImage &image, bool red) {
       if (primary > 70 && primary > secondary * 2 && primary > c.green() * 2) {
         ++result.count;
         result.center += QPointF(x, y);
+        mask[y * image.width() + x] = 1;
       }
     }
   }
+  // Thin reference axes and transform handles have the same axis colors as
+  // these fixtures. Their global color centroid can lie outside the mesh on
+  // a differently sized CI viewport. Erode to a genuine 9x9 model interior;
+  // keep the real mouse event and active-object assertions unchanged.
+  constexpr int inset = 4;
+  for (int y = 100 + inset; y < image.height() - 100 - inset; ++y) {
+    for (int x = 120 + inset; x < image.width() - 140 - inset; ++x) {
+      if (!mask[y * image.width() + x]) continue;
+      bool interior = true;
+      for (int dy = -inset; dy <= inset && interior; ++dy)
+        for (int dx = -inset; dx <= inset; ++dx)
+          if (!mask[(y + dy) * image.width() + x + dx]) { interior = false; break; }
+      if (!interior) continue;
+      ++result.interiorCount;
+      result.interiorCenter += QPointF(x, y);
+    }
+  }
   if (result.count > 0) result.center /= result.count;
+  if (result.interiorCount > 0) result.interiorCenter /= result.interiorCount;
   return result;
 }
 }
@@ -264,12 +286,12 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   QImage frame;
   if (!check(waitUntil([&] {
         frame = viewport->grabFramebuffer();
-        return footprint(frame, true).count > 500 && footprint(frame, false).count > 500;
+        return footprint(frame, true).interiorCount > 500 && footprint(frame, false).interiorCount > 500;
       }), "both meshes visible in the same framebuffer")) return false;
   const QString capture = qEnvironmentVariable("GSW_MULTI_SCENE_CAPTURE");
   if (!capture.isEmpty()) frame.save(capture);
   // Click real red geometry rather than its bounding rectangle or the tree.
-  const QPointF red = footprint(frame, true).center / viewport->devicePixelRatioF();
+  const QPointF red = footprint(frame, true).interiorCenter / viewport->devicePixelRatioF();
   QMouseEvent press(QEvent::MouseButtonPress, red, viewport->mapToGlobal(red.toPoint()),
                     Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
   QMouseEvent release(QEvent::MouseButtonRelease, red, viewport->mapToGlobal(red.toPoint()),
@@ -282,7 +304,7 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
     QKeyEvent event(QEvent::KeyPress, code, modifiers, text);
     QApplication::sendEvent(viewport, &event);
   };
-  const QPointF blue = footprint(frame, false).center / viewport->devicePixelRatioF();
+  const QPointF blue = footprint(frame, false).interiorCenter / viewport->devicePixelRatioF();
   const auto click = [&](const QPointF &point, Qt::KeyboardModifiers modifiers) {
     QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()),
                       Qt::LeftButton, Qt::LeftButton, modifiers);
