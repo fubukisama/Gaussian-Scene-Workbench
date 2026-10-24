@@ -1,0 +1,151 @@
+name: Native Scene Visibility
+
+# Additional manual diagnosis/acceptance lane. It does not replace or weaken
+# Native Windows, the full native suite, worker tests, packaging or code scans.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scene-visibility:
+    name: Focused model visibility and multiselection
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      QT_FORCE_STDERR_LOGGING: "1"
+      QT_LOGGING_TO_CONSOLE: "1"
+      GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/scene-visibility-artifact/screenshots
+      GSW_MULTI_SCENE_CAPTURE: ${{ github.workspace }}/native/scene-visibility-artifact/screenshots/multi-scene.png
+    steps:
+      - name: Checkout exact dispatched source
+        uses: actions/checkout@v7
+
+      - name: Record actual source commit and run identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $PWD 'native/scene-visibility-artifact'
+          New-Item -ItemType Directory -Path "$evidence/screenshots" -Force | Out-Null
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'Checkout differs from the dispatched source commit.' }
+          $head | Set-Content -LiteralPath "$evidence/source-commit.txt" -Encoding utf8
+          [ordered]@{
+            sourceCommit = $head
+            repository = $env:GITHUB_REPOSITORY
+            ref = $env:GITHUB_REF
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+            workflow = $env:GITHUB_WORKFLOW
+            workflowSha = $env:GITHUB_WORKFLOW_SHA
+            runnerOS = $env:RUNNER_OS
+            recordedAtUtc = [DateTime]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Set-Content -LiteralPath "$evidence/source-run.json" -Encoding utf8
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Set up QA Python
+        id: qa-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+
+      - name: Install focused native dependencies
+        shell: pwsh
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Focused QA dependency installation failed.' }
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
+          if ($LASTEXITCODE -ne 0) { throw 'Native source boundary verification failed.' }
+          $root = Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw 'Focused codec dependency installation failed.' }
+
+      - name: Configure and build only application and workspace-format target
+        id: focused-build
+        shell: pwsh
+        run: |
+          $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-scene-visibility -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            '-DPython3_EXECUTABLE=${{ steps.qa-python.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw 'Focused native configure failed.' }
+          cmake --build native/build-scene-visibility --config Release --parallel `
+            --target GaussianSceneWorkbench gsw_workspace_scene_format_tests 2>&1 |
+            Tee-Object -FilePath native/scene-visibility-artifact/build.log
+          if ($LASTEXITCODE -ne 0) { throw 'Focused native build failed.' }
+
+      - name: Prepare real Windows display and OpenGL
+        id: focused-graphics
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+
+      # First reproduce the existing multiselection regression, without changing
+      # its assertions, registered timeout, fixture, launch mode or renderer.
+      - name: Run existing multiselection regression first with Qt diagnostics
+        id: multi-scene
+        shell: pwsh
+        run: |
+          try {
+            ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
+              --output-log native/scene-visibility-artifact/multi-scene.log `
+              --output-junit native/scene-visibility-artifact/multi-scene.xml `
+              -R '^native_multi_scene_import$'
+            $result = $LASTEXITCODE
+          } finally {
+            $last = 'native/build-scene-visibility/Testing/Temporary/LastTest.log'
+            if (Test-Path -LiteralPath $last) { Copy-Item -LiteralPath $last -Destination native/scene-visibility-artifact/multi-scene-LastTest.log }
+            $failed = 'native/build-scene-visibility/Testing/Temporary/LastTestsFailed.log'
+            if (Test-Path -LiteralPath $failed) { Copy-Item -LiteralPath $failed -Destination native/scene-visibility-artifact/multi-scene-LastTestsFailed.log }
+          }
+          if ($result -ne 0) { throw 'Existing native_multi_scene_import failed; exact Qt/CTest diagnostics are retained.' }
+
+      # Still collect the six display cases if multiselection is red. The prior
+      # failure remains a job failure; no continue-on-error or assertion bypass.
+      - name: Verify all visibility languages and themes plus project and translation contracts
+        if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          try {
+            ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
+              --output-log native/scene-visibility-artifact/visibility-contracts.log `
+              --output-junit native/scene-visibility-artifact/visibility-contracts.xml `
+              -R '^(native_scene_visibility_(zh_CN|en_US|ja_JP)_(light|dark)|workspace_scene_format|native_translation_catalog|native_translation_validator_tests)$'
+            $result = $LASTEXITCODE
+          } finally {
+            $last = 'native/build-scene-visibility/Testing/Temporary/LastTest.log'
+            if (Test-Path -LiteralPath $last) { Copy-Item -LiteralPath $last -Destination native/scene-visibility-artifact/visibility-contracts-LastTest.log }
+            $failed = 'native/build-scene-visibility/Testing/Temporary/LastTestsFailed.log'
+            if (Test-Path -LiteralPath $failed) { Copy-Item -LiteralPath $failed -Destination native/scene-visibility-artifact/visibility-contracts-LastTestsFailed.log }
+          }
+          if ($result -ne 0) { throw 'Focused model visibility, workspace-format or translation contracts failed.' }
+
+      - name: Upload exact-commit diagnostic and visual acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-scene-visibility-acceptance
+          path: |
+            native/scene-visibility-artifact/
+            native/build-scene-visibility/Testing/Temporary/LastTest.log
+            native/build-scene-visibility/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: warn
+          retention-days: 7
