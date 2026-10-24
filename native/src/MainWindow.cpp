@@ -2380,7 +2380,11 @@ void MainWindow::createProjectDock() {
       syncProjectTreeSelection(); return;
     }
     {
-      QScopedValueRollback<bool> keepRows(mPreserveSceneTreeSelection, true);
+      // Only hidden rows need a selection independent from transform IDs.
+      // For an ordinary visible range, retain the pre-visibility Qt/viewport
+      // synchronization rather than changing its selection/anchor lifecycle.
+      QScopedValueRollback<bool> keepRows(mPreserveSceneTreeSelection,
+          ids.size() != visibleIds.size());
       mViewport->setSceneSelection(visibleIds,
           visibleIds.contains(active) ? active : mViewport->activeSceneId());
     }
