@@ -128,7 +128,7 @@ jobs:
             ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
               --output-log native/scene-visibility-artifact/visibility-contracts.log `
               --output-junit native/scene-visibility-artifact/visibility-contracts.xml `
-              -R '^(native_scene_visibility_(zh_CN|en_US|ja_JP)_(light|dark)|workspace_scene_format|native_translation_catalog|native_translation_validator_tests)$'
+              -R '^(native_scene_visibility_(zh_CN|en_US|ja_JP)_(light|dark)|native_viewport_scheduling_(light|dark)|workspace_scene_format|native_translation_catalog|native_translation_validator_tests)$'
             $result = $LASTEXITCODE
           } finally {
             $last = 'native/build-scene-visibility/Testing/Temporary/LastTest.log'

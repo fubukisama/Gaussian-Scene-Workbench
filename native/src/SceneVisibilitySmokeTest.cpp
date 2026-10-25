@@ -2,6 +2,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include "MainWindow.h"
+#include "ModelExportDialog.h"
 #include "NativeViewport.h"
 #include "WorkspaceDocument.h"
 
@@ -14,8 +15,12 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QKeyEvent>
+#include <QLabel>
+#include <QMessageBox>
+#include <QAbstractButton>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QSet>
@@ -186,6 +191,18 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     }
     return selected;
   };
+  const auto nameClick = [&](const QString &id) {
+    auto *item = sceneItem(tree, id);
+    if (!item) return false;
+    tree->scrollToItem(item);
+    const QPoint point = tree->visualRect(tree->indexFromItem(item, 0)).center();
+    if (tree->indexAt(point).column() != 0 || tree->itemAt(point) != item) return false;
+    QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(tree->viewport(), &down);
+    QApplication::sendEvent(tree->viewport(), &up);
+    return true;
+  };
   for (int kind = 0; kind < 4; ++kind) {
     auto *item = sceneItem(tree, ids[kind]);
     if (!check(item && item->checkState(1) == Qt::Checked, "visible eye cell state")) return false;
@@ -226,6 +243,67 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     if (!check(waitUntil([&] { return viewport->sceneObjectVisible(ids[kind]) && patches(viewport->grabFramebuffer())[kind].count > baseline[kind].count / 2; }), "eye click restores model without re-import")) return false;
     if (!check(selectedTreeIds() == selectedBeforeEye, "restoring an eye retains exact selected tree rows")) return false;
   }
+  bool sourceUiChecks = true;
+  auto *exportAction = window.findChild<QAction *>("exportModelAction");
+  if (!check(exportAction != nullptr, "export action available for source identity checks")) return false;
+  for (int kind = 0; kind < 4; ++kind) {
+    const int other = (kind + 1) % 4;
+    if (!check(viewport->activateSceneObject(ids[other]) && document->setSceneObjectVisibility({ids[kind]}, false),
+               "prepare a hidden model beside another active source")) return false;
+    tree->clearSelection();
+    if (!check(nameClick(ids[kind]), "click hidden model name cell")) return false;
+    sourceUiChecks &= check(document->activeSceneId() == ids[kind] && viewport->activeSceneId() == ids[kind] &&
+        viewport->modelExportOptions().sourcePath == paths[kind] && !viewport->sceneObjectVisible(ids[kind]) &&
+        viewport->selectedSceneIds().isEmpty() && !viewport->modelSelected(),
+        "hidden row becomes the inspected/export source without being shown or transform-selected");
+    bool inspectorSource = false;
+    for (const auto *label : window.findChildren<QLabel *>())
+      inspectorSource |= label->text().contains(QFileInfo(paths[kind]).fileName());
+    sourceUiChecks &= check(inspectorSource, "inspector identifies the selected hidden source");
+    sourceUiChecks &= check(exportAction->isEnabled(), "hidden loaded source remains exportable");
+    bool dialogSeen = false, dialogSource = false;
+    QTimer dialogTimer;
+    dialogTimer.setInterval(10);
+    QObject::connect(&dialogTimer, &QTimer::timeout, &window, [&] {
+      auto *dialog = window.findChild<QDialog *>(QStringLiteral("modelExportDialog"));
+      if (!dialog) return;
+      dialogSeen = true;
+      dialogSource = static_cast<ModelExportDialog *>(dialog)->options().sourcePath == paths[kind];
+      dialog->reject();
+    });
+    dialogTimer.start();
+    exportAction->trigger();
+    dialogTimer.stop();
+    sourceUiChecks &= check(dialogSeen && dialogSource, "real export dialog uses the selected hidden model, not the previous visible source");
+    if (!check(document->setSceneObjectVisibility({ids[kind]}, true) && viewport->activateSceneObject(active),
+               "restore display after hidden source identity check")) return false;
+    viewport->clearSelection();
+  }
+  // A hidden target must not bypass the normal unsaved-crop confirmation.
+  if (!check(viewport->activateSceneObject(ids[0]), "activate point source before pending crop check")) return false;
+  viewport->invertSelection();
+  viewport->deleteSelection();
+  if (!check(viewport->hasUnsavedSceneEdits(), "test-owned point deletion creates pending crop edits")) return false;
+  if (!check(document->setSceneObjectVisibility({ids[1]}, false), "hide the pending-crop navigation target")) return false;
+  bool cancelPromptSeen = false;
+  QTimer cancelTimer;
+  cancelTimer.setInterval(10);
+  QObject::connect(&cancelTimer, &QTimer::timeout, &window, [&] {
+    auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+    if (!box || !box->button(QMessageBox::Cancel)) return;
+    cancelPromptSeen = true;
+    box->button(QMessageBox::Cancel)->click();
+  });
+  cancelTimer.start();
+  if (!check(nameClick(ids[1]), "request hidden source while crop edits are pending")) return false;
+  cancelTimer.stop();
+  sourceUiChecks &= check(cancelPromptSeen && document->activeSceneId() == ids[0] &&
+      viewport->activeSceneId() == ids[0] && viewport->hasUnsavedSceneEdits() &&
+      !selectedTreeIds().contains(ids[1]), "canceling the crop prompt keeps source identity, edits and tree selection consistent");
+  viewport->undoEdit();
+  if (!check(!viewport->hasUnsavedSceneEdits() && document->setSceneObjectVisibility({ids[1]}, true) &&
+             viewport->activateSceneObject(active), "restore test-owned crop and visibility state")) return false;
+  viewport->clearSelection();
   auto *hide = window.findChild<QAction *>("hideSelectedModelsAction");
   auto *show = window.findChild<QAction *>("showSelectedModelsAction");
   auto *isolate = window.findChild<QAction *>("isolateSelectedModelsAction");
@@ -268,6 +346,18 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
                hide->text() == QCoreApplication::translate("Workbench", "隐藏所选模型") &&
                isolate->text() == QCoreApplication::translate("Workbench", "仅显示所选模型") &&
                showAll->text() == QCoreApplication::translate("Workbench", "显示全部模型"), "language switch preserves visibility and updates exact action labels")) return false;
+    const QLabel *renderer = nullptr;
+    for (const auto *label : window.findChildren<QLabel *>())
+      if (label->property("gswStatusRole").toString() == QStringLiteral("renderer")) renderer = label;
+    const QString expectedMode = viewport->renderMode() == NativeViewport::RenderMode::Mesh
+        ? QCoreApplication::translate("Workbench", "网格预览")
+        : viewport->renderMode() == NativeViewport::RenderMode::Gaussians
+            ? QCoreApplication::translate("Workbench", "高斯预览")
+            : QCoreApplication::translate("Workbench", "点预览");
+    sourceUiChecks &= check(renderer && renderer->text().startsWith(expectedMode + QStringLiteral(" | ")) &&
+        !renderer->text().contains(QCoreApplication::translate("Workbench", "未载入场景")) &&
+        renderer->text() != QCoreApplication::translate("Workbench", "正在读取 PLY 场景"),
+        "live language switch immediately retains the actual loaded renderer status without waiting for a new frame");
     window.grab().save(QDir(evidence).filePath("window-" + language + ".png"));
   }
   const UiTheme originalTheme = AppTheme::currentTheme();
@@ -314,6 +404,7 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
                hashes[kind] == sha256(paths[kind]), "visibility never rewrites sources or model transforms")) return false;
   }
   document->createUntitled(temporary.path(), "Empty", &error);
+  if (!sourceUiChecks) return false;
   qInfo() << "SCENE_VISIBILITY PASS: real point/mesh/3DGS/2DGS render suppression, eye picking isolation, batch hide/show/isolate, live trilingual labels, save/reopen, unchanged sources and transforms";
   return true;
 }

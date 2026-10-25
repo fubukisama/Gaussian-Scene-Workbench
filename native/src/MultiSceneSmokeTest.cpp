@@ -46,7 +46,8 @@ struct ColorFootprint {
 
 ColorFootprint footprint(const QImage &image, bool red) {
   ColorFootprint result;
-  QVector<quint8> mask(image.width() * image.height(), 0);
+  const qsizetype stride = image.width();
+  QVector<quint8> mask(stride * image.height(), 0);
   // Ignore toolbars, labels and the navigation gizmo at the image edges.
   for (int y = 100; y < image.height() - 100; ++y) {
     for (int x = 120; x < image.width() - 140; ++x) {
@@ -56,7 +57,7 @@ ColorFootprint footprint(const QImage &image, bool red) {
       if (primary > 70 && primary > secondary * 2 && primary > c.green() * 2) {
         ++result.count;
         result.center += QPointF(x, y);
-        mask[y * image.width() + x] = 1;
+        mask[qsizetype(y) * stride + x] = 1;
       }
     }
   }
@@ -67,11 +68,11 @@ ColorFootprint footprint(const QImage &image, bool red) {
   constexpr int inset = 4;
   for (int y = 100 + inset; y < image.height() - 100 - inset; ++y) {
     for (int x = 120 + inset; x < image.width() - 140 - inset; ++x) {
-      if (!mask[y * image.width() + x]) continue;
+      if (!mask[qsizetype(y) * stride + x]) continue;
       bool interior = true;
       for (int dy = -inset; dy <= inset && interior; ++dy)
         for (int dx = -inset; dx <= inset; ++dx)
-          if (!mask[(y + dy) * image.width() + x + dx]) { interior = false; break; }
+          if (!mask[qsizetype(y + dy) * stride + x + dx]) { interior = false; break; }
       if (!interior) continue;
       ++result.interiorCount;
       result.interiorCenter += QPointF(x, y);

@@ -232,6 +232,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/MultiSceneSmokeTest.h
   src/SceneVisibilitySmokeTest.cpp
   src/SceneVisibilitySmokeTest.h
+  src/ViewportSchedulingSmokeTest.cpp
+  src/ViewportSchedulingSmokeTest.h
   src/SceneObject.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
@@ -1192,6 +1194,14 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     endforeach()
+  endforeach()
+  foreach(GSW_SCHEDULING_THEME light dark)
+    add_test(NAME native_viewport_scheduling_${GSW_SCHEDULING_THEME}
+      COMMAND GaussianSceneWorkbench --smoke-test-viewport-scheduling --theme ${GSW_SCHEDULING_THEME})
+    set_tests_properties(native_viewport_scheduling_${GSW_SCHEDULING_THEME} PROPERTIES
+      TIMEOUT 120
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   add_test(NAME native_gaussian_interaction
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
