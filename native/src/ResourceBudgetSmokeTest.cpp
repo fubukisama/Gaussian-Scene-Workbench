@@ -1283,7 +1283,7 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
   viewport->setAxisView(NavigationAxis::PositiveZ);
   waitUntil([] { return false; }, 300);
   if (!check(waitUntil([&] {
-        viewport->focusModel();
+        if (!viewport->focusModel()) return false;
         const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
         const auto status = viewport->resourceBudgetStatus();
         return viewport->meshRenderingAvailable() && status.loadingMeshCount == 0 &&
@@ -1292,7 +1292,7 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
   cold[0].visible = true;
   viewport->setSceneObjects(cold, cold[0].id);
   viewport->selectAllModels();
-  viewport->focusModel();
+  if (!check(viewport->focusModel(), "cold mesh reveal can be framed")) return false;
   viewport->clearSelection();
   if (!check(waitUntil([&] {
         const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
@@ -1305,7 +1305,7 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
     for (int i = 0; i < cold.size(); ++i) cold[i].visible = i == kind;
     viewport->setSceneObjects(cold, cold[kind].id);
     viewport->selectAllModels();
-    viewport->focusModel();
+    if (!check(viewport->focusModel(), "cold point and Gaussian reveal can be framed")) return false;
     viewport->clearSelection();
     if (!check(waitUntil([&] {
           const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
@@ -1322,6 +1322,58 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
         return status.managedGpuBytes == 0 && status.loadingMeshCount == 0 &&
             status.reservedRamBytes == 0 && status.reservedGpuBytes == 0;
       }), "cold source matrix releases every physical allocation and reservation")) return false;
+  const QString coldTexturedPath = QDir(fixtures.path()).filePath("cold-textured.ply");
+  const QString coldAtlasPath = QDir(fixtures.path()).filePath("cold-atlas.png");
+  QImage coldAtlas(4096, 4096, QImage::Format_RGBA8888);
+  coldAtlas.fill(QColor(240, 20, 20));
+  if (!check(!coldAtlas.isNull() && coldAtlas.save(coldAtlasPath) &&
+             writeTexturedSurface(coldTexturedPath, "cold-atlas.png"),
+             "bounded cold texture fixture with a full mip chain")) return false;
+  coldAtlas = {};
+  const auto coldTextureHash = hash(coldTexturedPath), coldAtlasHash = hash(coldAtlasPath);
+  policy.gpuLimitMiB = 94;
+  viewport->setResourceBudgetPolicy(policy);
+  SceneObject coldTextured{"cold-hidden-textured", coldTexturedPath, {}, {}, {1, 1, 1}, 66049, false};
+  viewport->setSceneObjects({coldTextured}, coldTextured.id);
+  if (!check(waitUntil([&] {
+        const auto status = viewport->resourceBudgetStatus();
+        return status.loadingMeshCount == 0 && status.pagedMeshCount == 1 && viewport->exportableModelAvailable();
+      }), "cold textured source is genuinely paged and CPU-exportable")) return false;
+  coldStatus = viewport->resourceBudgetStatus();
+  if (!check(coldStatus.managedGpuBytes == 0 && coldStatus.reservedRamBytes == 0 && coldStatus.reservedGpuBytes == 0,
+             "hidden paged texture retains CPU data without GPU reservation")) return false;
+  policy.gpuLimitMiB = 80;
+  viewport->setResourceBudgetPolicy(policy);
+  coldTextured.visible = true;
+  viewport->setSceneObjects({coldTextured}, coldTextured.id);
+  if (!check(viewport->focusModel(), "deferred texture source retains framing metadata")) return false;
+  viewport->clearSelection();
+  viewport->grabFramebuffer();
+  waitUntil([] { return false; }, 1200);
+  const auto deniedTexture = viewport->resourceBudgetStatus();
+  if (!check(deniedTexture.managedGpuBytes == 0 && deniedTexture.reservedRamBytes == 0 &&
+             deniedTexture.reservedGpuBytes == 0 && !viewport->meshTextureAvailable() &&
+             viewport->exportableModelAvailable(),
+             "a budget below the full mip-chain cost refuses allocation without losing CPU export")) return false;
+  policy.gpuLimitMiB = 128;
+  viewport->setResourceBudgetPolicy(policy);
+  if (!check(waitUntil([&] {
+        const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+        const auto status = viewport->resourceBudgetStatus();
+        return viewport->meshTextureAvailable() && status.loadingMeshCount == 0 &&
+            status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
+            status.managedGpuBytes > 80LL * 1024LL * 1024LL && status.managedGpuBytes <= 128LL * 1024LL * 1024LL &&
+            modelColorPixels(frame, true) > 100;
+      }), "increased real budget admits the complete texture mip chain and presents the source")) return false;
+  if (!check(hash(coldTexturedPath) == coldTextureHash && hash(coldAtlasPath) == coldAtlasHash,
+             "deferred texture admission preserves source and atlas")) return false;
+  viewport->setSceneObjects({}, {});
+  if (!check(waitUntil([&] {
+        const auto status = viewport->resourceBudgetStatus();
+        return status.managedGpuBytes == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0;
+      }), "cold texture returns all allocation and lease ownership")) return false;
+  policy.gpuLimitMiB = 64;
+  viewport->setResourceBudgetPolicy(policy);
   QList<SceneObject> objects{
       {"hidden-budget-red", redPath, {-1.5F, 0, 0}, {}, {1, 1, 1}, 589825},
       {"hidden-budget-blue", bluePath, {1.5F, 0, 0}, {}, {1, 1, 1}, 589825}};

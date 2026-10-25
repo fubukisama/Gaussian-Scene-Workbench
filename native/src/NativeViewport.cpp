@@ -466,9 +466,14 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     auto states = mSceneStates;
     if (!states.contains(mScene)) states.append(mScene);
     for (const auto &state : states) {
-      if (state->resourceNeedsReload && !state->resourceLoading)
-        state->mSceneLoadMessage = QCoreApplication::translate(
-            "Workbench", "Insufficient memory for the mesh preview and texture.");
+      if (!state->resourceLoading) {
+        if (state->resourceUploadDeferred && !state->mSceneLoadMessage.isEmpty())
+          state->mSceneLoadMessage = QCoreApplication::translate(
+              "Workbench", "Insufficient GPU memory budget to show this model.");
+        else if (state->resourceNeedsReload)
+          state->mSceneLoadMessage = QCoreApplication::translate(
+              "Workbench", "Insufficient memory for the mesh preview and texture.");
+      }
     }
     // Presentation changes must not masquerade as a coordinate/data update:
     // owners use those signals to apply workspace TRS and rebuild the tree.
@@ -740,6 +745,81 @@ void NativeViewport::finishResourceUpload() {
   emit resourceBudgetStatusChanged();
 }
 
+void NativeViewport::deferHiddenResourceUpload() {
+  if (mScene->visible || mScene->resourceLoading || !mScene->resourceLoadReservation) return;
+  // CPU results are now owned by SceneState and must become managed usage
+  // before the loader's temporary peak reservation is relinquished. No GL
+  // storage is allocated for an invisible source just to finish its lease.
+  updateManagedResourceUsage();
+  (void)mScene->resourceLoadReservation->tryResize(0, 0);
+  mScene->resourceLoadReservation.reset();
+  mScene->resourceUploadDeferred = mScene->mPointUploadPending || mScene->mMeshUploadPending ||
+      mScene->mMeshTextureUploadPending;
+}
+
+bool NativeViewport::admitDeferredResourceUpload() {
+  if (!mScene->resourceUploadDeferred) return true;
+  if (!mScene->visible || mScene->resourceLoading) return false;
+  qint64 pendingGpu = 0;
+  const auto appendCost = [&](qsizetype count, qsizetype stride) {
+    if (count < 0 || stride < 0 || (stride > 0 && count > std::numeric_limits<qint64>::max() / stride)) return false;
+    const qint64 bytes = qint64(count) * qint64(stride);
+    if (bytes > std::numeric_limits<qint64>::max() - pendingGpu) return false;
+    pendingGpu += bytes;
+    return true;
+  };
+  // This guards the native staging buffers accounted by this controller.
+  // Gaussian attribute/CUDA allocations retain their existing independent
+  // accounting; this is not a new global Gaussian VRAM-budget guarantee.
+  bool valid = !mScene->mPointUploadPending || appendCost(mScene->mPendingVertices.size(), sizeof(PointCloudVertex));
+  if (mScene->mMeshUploadPending)
+    valid = valid && appendCost(mScene->mPendingMeshVertices.size(), sizeof(MeshVertex)) &&
+        appendCost(mScene->mPendingMeshIndices.size(), sizeof(quint32));
+  if (mScene->mMeshTextureUploadPending && !mScene->mPendingMeshTexture.isNull()) {
+    const auto &image = mScene->mPendingMeshTexture;
+    int width = image.width(), height = image.height();
+    // uploadPendingMeshTexture generates the complete RGBA8 mip chain. Admit
+    // every level, not just the base image; hardware downsizing only reduces
+    // this conservative estimate of the original dimensions.
+    do {
+      valid = valid && appendCost(height, qint64(width) * 4);
+      if (width == 1 && height == 1) break;
+      width = std::max(1, width / 2);
+      height = std::max(1, height / 2);
+    } while (valid);
+  }
+  if (!valid) {
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "Insufficient GPU memory budget to show this model.");
+    return false;
+  }
+  if (mScene->mHasMesh && !mScene->mMeshCache.isValid()) {
+    const qint64 residentGpu = mScene->resourcePointGpuBytes + mScene->resourceMeshGpuBytes + mScene->resourceTextureGpuBytes;
+    pendingGpu = std::max(pendingGpu, std::max<qint64>(0, mScene->resourceResidentGpuBytes - residentGpu));
+  }
+  trimHiddenPageCaches(pendingGpu);
+  updateManagedResourceUsage();
+  auto reservation = mResources->createReservation();
+  if (!reservation->tryResize(0, pendingGpu)) {
+    mScene->mSceneLoadMessage = QCoreApplication::translate("Workbench", "Insufficient GPU memory budget to show this model.");
+    if (mScene->mHasMesh && !mScene->mMeshCache.isValid()) {
+      // The previously hidden complete mesh may no longer fit alongside the
+      // visible collection. Use the existing admitted paged loader, not an
+      // unchecked VBO allocation. Mesh sources have no point-crop edit model.
+      mScene->resourceNeedsReload = true;
+      mScene->resourceForcePagedRetry = true;
+      mScene->resourceRetryAfterMs = mResourceClock.elapsed();
+    }
+    return false;
+  }
+  mScene->resourceLoadReservation = std::move(reservation);
+  mScene->resourceUploadDeferred = false;
+  mScene->resourceNeedsReload = false;
+  mScene->resourceForcePagedRetry = false;
+  mScene->mSceneLoadMessage.clear();
+  emit resourceBudgetStatusChanged();
+  return true;
+}
+
 void NativeViewport::discardResidentMeshStorage() {
   const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
   if (!alreadyCurrent) makeCurrent();
@@ -754,6 +834,10 @@ void NativeViewport::discardResidentMeshStorage() {
   mScene->mRenderedPointCount = 0;
   mScene->mRenderedMeshIndexCount = 0;
   mScene->resourceLoadReservation.reset();
+  mScene->resourceUploadDeferred = false;
+  mScene->mPointUploadPending = false;
+  mScene->mMeshUploadPending = false;
+  mScene->mMeshTextureUploadPending = false;
   updateManagedResourceUsage();
 }
 
@@ -811,6 +895,12 @@ void NativeViewport::rebalanceResourceResidency() {
       qaObservation("reload-needed");
       if (state->resourceForcePagedRetry) discardResidentMeshStorage();
       startSceneLoad(state->mRequestedScenePath, false, true, state->resourceForcePagedRetry);
+      continue;
+    }
+    if (state->resourceUploadDeferred) {
+      QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+      QScopedValueRollback<bool> background(mRenderingInactiveScene, state != active);
+      if (admitDeferredResourceUpload()) update();
       continue;
     }
     if (!state->mHasMesh || state->resourceLoading || state->resourceLoadReservation ||
@@ -1122,6 +1212,8 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
         state->mPendingMeshCachePages.clear();
         state->resourcePointPageReservations.clear();
         state->resourceMeshPageReservations.clear();
+        QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+        deferHiddenResourceUpload();
       }
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
       QScopedValueRollback<bool> background(mRenderingInactiveScene, true);
@@ -1159,6 +1251,8 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
         state->mPendingMeshCachePages.clear();
         state->resourcePointPageReservations.clear();
         state->resourceMeshPageReservations.clear();
+        QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+        deferHiddenResourceUpload();
       }
       retained.append(state);
       const bool isActive = object.id == activeId;
@@ -1877,6 +1971,7 @@ void NativeViewport::setScene(const QString &scenePath,
   mScene->resourceResidentGpuBytes = 0;
   mScene->resourceResidentStorageSupported = true;
   mScene->resourceLoadReservation.reset();
+  mScene->resourceUploadDeferred = false;
   mScene->resourceMeshPageReservations.clear();
   mScene->resourcePointPageReservations.clear();
   mScene->previewLoadBusy = false;
@@ -3586,6 +3681,7 @@ void NativeViewport::paintGL() {
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
   if (!mScene->visible || mScene->processingGpuSuspended) return;
+  if (!admitDeferredResourceUpload()) return;
   const bool frozenPreview = mProcessingPreviewPaused && mScene == mProcessingScene;
   if (!frozenPreview) initializeSceneBuffers();
   if (mScene->mRenderMode == RenderMode::Gaussians &&
@@ -3892,6 +3988,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->resourceNeedsReload = false;
             mScene->resourceForcePagedRetry = false;
             mScene->resourceLoadReservation = reservation;
+            mScene->resourceUploadDeferred = false;
             mScene->mScenePath = scenePath;
             mScene->metadataSourceSize=QFileInfo(scenePath).size();
             mScene->metadataSourceModified=QFileInfo(scenePath).lastModified().toMSecsSinceEpoch();
@@ -4018,6 +4115,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               });
             }
             rebuildRenderedVertices();
+            deferHiddenResourceUpload();
             updateFrameRefreshPolicy();
             notifyEditState();
             notifyModelInteractionState();
@@ -4207,7 +4305,7 @@ bool NativeViewport::hasPendingFrameUploads() const {
   const bool pointUploadAvailable = mPointProgram && mPointProgram->isLinked();
   const bool meshUploadAvailable = mMeshProgram && mMeshProgram->isLinked();
   const auto needsRefresh = [pointUploadAvailable, meshUploadAvailable](const auto &scene) {
-    return scene->visible && ((pointUploadAvailable && scene->mPointUploadPending) ||
+    return scene->visible && !scene->resourceUploadDeferred && ((pointUploadAvailable && scene->mPointUploadPending) ||
         (meshUploadAvailable && scene->mMeshUploadPending) ||
         scene->mFullResolutionPointClearPending || scene->mFullResolutionMeshClearPending ||
         scene->mMeshTextureClearPending || (meshUploadAvailable && scene->mMeshTextureUploadPending) ||
@@ -6815,6 +6913,7 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
       !context()->isValid()) {
     return std::nullopt;
   }
+  if (!admitDeferredResourceUpload()) return false;
   const auto mapping =
       modelPickViewport(position, size(), devicePixelRatioF(), 6.0);
   if (!mapping.has_value()) {

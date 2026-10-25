@@ -1,4 +1,5 @@
 {
+  "Insufficient GPU memory budget to show this model.": {"zh_CN":"显存预算不足，暂时无法显示此模型。","en_US":"Insufficient GPU memory budget to show this model.","ja_JP":"GPU メモリの予算が不足しているため、このモデルを表示できません。"},
   "显示所选模型": {"zh_CN":"显示所选模型","en_US":"Show Selected Models","ja_JP":"選択モデルを表示"},
   "隐藏所选模型": {"zh_CN":"隐藏所选模型","en_US":"Hide Selected Models","ja_JP":"選択モデルを非表示"},
   "仅显示所选模型": {"zh_CN":"仅显示所选模型","en_US":"Isolate Selected Models","ja_JP":"選択モデルのみ表示"},

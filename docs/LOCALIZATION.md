@@ -188,14 +188,31 @@ visible allocation pressure their disposable GPU pages are physically released
 first; unreleased memory is never credited to the resource guard. Revealing a
 layer restores ordinary admission, preserving source files and edits.
 
+For sources restored as hidden, retained CPU data remains in managed memory
+accounting, while unused loader peak/GPU reservations are released without
+uploading invisible geometry. Revealing a source must reacquire its pending GPU
+storage through the shared budget; refusal does not start an idle repaint loop.
+The regression covers mesh, point-cloud, 3DGS and 2DGS source identity, export
+availability and actual frames. This does not add a new global GPU allocator for
+Gaussian renderer buffers or change training memory policy.
+
 中文：静止画面按需重绘，最小化时停止刷新与预览轮询；交互、动画、异步完成和
 待上传数据仍能唤醒显示。隐藏分页模型保留可恢复缓存，但不抢占可见模型的分页
 份额，也不在后台提升完整驻留；资源紧张时优先物理释放其可重建 GPU 页。
+工程恢复时已隐藏的模型仍计入实际 CPU 内存，但释放尚未使用的加载峰值／GPU
+预约，不为其强制上传。重新显示须通过共享预算准入；拒绝时不空转重绘。
+回归覆盖网格、点云、3DGS 和 2DGS 的来源、导出和实际画面，不宣称新增全局
+高斯显存分配器，也不改变训练内存策略。
 
 日本語：静止画面は必要時のみ再描画し、最小化中は描画・プレビューのタイマー
 を停止します。操作・アニメーション・非同期完了・未転送データは表示を再開
 できます。非表示のページ化モデルは復元用キャッシュを保持しますが、表示中
 モデルの割当を減らさず、バックグラウンドで完全常駐へ昇格させません。
+復元時から非表示のモデルは保持する CPU データを計上し、未使用の読込時
+ピーク／GPU 予約を解放します。再表示には共有予算の再承認が必要で、拒否時に
+空回りの再描画はしません。メッシュ・点群・3DGS・2DGS の対象、書き出しと
+実フレームを検証します。Gaussian 描画バッファの新たな全体アロケーターや
+学習メモリ方針の変更ではありません。
 
 Blender-derived viewport navigation uses localized **Perspective / Orthographic**
 labels (`透视 / 正交`, `透視 / 平行`) rather than calling every orthographic view

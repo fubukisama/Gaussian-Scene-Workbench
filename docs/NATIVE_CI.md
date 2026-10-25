@@ -19,6 +19,21 @@ affected acceptance passes, recording full CI and security scans separately.
 Pending runs, historical success and static checks are not full test acceptance.
 Never open, close or restart user windows without consent.
 
+The focused `native_resource_budget_hidden_mesh` regression includes cold
+project restoration with hidden mesh, point-cloud, 3DGS and 2DGS sources. It
+checks real managed CPU/GPU usage and reservations, visible-peer admission,
+reveal frames under the shared cap, source hashes and physical allocation
+cleanup. It retains the existing warm-cache/headroom assertions and timeout.
+
+中文：隐藏资源回归还覆盖工程恢复时已隐藏的网格、点云、3DGS 与 2DGS，核验
+真实内存／显存和预约、可见模型准入、共享上限内重新显示、来源哈希及实际分配
+清理；保留原有热缓存／预算提升断言与超时，不以账面扣除代替物理释放。
+
+日本語：非表示リソースの回帰は、復元時から非表示のメッシュ・点群・3DGS・
+2DGS も検査します。実際の使用量・予約、表示モデルの割当、共有上限内の
+再表示、元データのハッシュと実割当の解放を確認し、従来のキャッシュ／予算
+増加の条件と制限時間を保持します。帳簿上の減算で実メモリ解放を代用しません。
+
 日本語：ウィンドウを開く描画・操作テストを含め、自動テストは原則リモート CI
 で実行します。ローカルでは静的検証・コンパイル・配布ファイル検証のみ行い、
 ユーザーの明示的な依頼なしにローカルテストや GUI への代替実行はしません。

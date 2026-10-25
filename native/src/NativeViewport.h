@@ -471,6 +471,7 @@ private:
     bool resourceForcePagedRetry = false;
     bool resourceResidentUploadFailed = false;
     std::shared_ptr<ResourceReservation> resourceLoadReservation;
+    bool resourceUploadDeferred = false;
     QHash<int, std::shared_ptr<ResourceReservation>> resourceMeshPageReservations;
     QHash<int, std::shared_ptr<ResourceReservation>> resourcePointPageReservations;
     QOpenGLVertexArrayObject mPointVertexArray;
@@ -666,6 +667,8 @@ private:
   qsizetype sharedPageGpuBudget() const;
   void trimHiddenPageCaches(qsizetype requiredBytes);
   void finishResourceUpload();
+  void deferHiddenResourceUpload();
+  [[nodiscard]] bool admitDeferredResourceUpload();
   void discardResidentMeshStorage();
   std::shared_ptr<ResourceBudgetController> mResources;
   QTimer *mResourceBudgetTimer = nullptr;
