@@ -1235,6 +1235,93 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
   policy.ramLimitMiB = 1024;
   policy.gpuLimitMiB = 64;
   viewport->setResourceBudgetPolicy(policy);
+  // A restored project can start with every source hidden. CPU metadata and
+  // export remain available, but a never-painted source must not retain the
+  // loader's peak RAM/GPU reservation indefinitely.
+  QStringList coldPaths{redPath};
+  for (int kind = 0; kind < 3; ++kind) {
+    const QString path = QDir(fixtures.path()).filePath(QString("cold-hidden-%1.ply").arg(kind));
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    QByteArray ply("ply\nformat ascii 1.0\nelement vertex 441\nproperty float x\nproperty float y\nproperty float z\n");
+    if (kind == 0) ply += "property uchar red\nproperty uchar green\nproperty uchar blue\n";
+    else {
+      ply += "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\nproperty float scale_0\nproperty float scale_1\n";
+      if (kind == 1) ply += "property float scale_2\n";
+      ply += "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n";
+    }
+    ply += "end_header\n";
+    for (int y = -10; y <= 10; ++y) for (int x = -10; x <= 10; ++x) {
+      ply += QString("%1 %2 20 ").arg(21.0 + x * 0.08).arg(21.0 + y * 0.08).toUtf8();
+      if (kind == 0) ply += "240 20 20\n";
+      else if (kind == 1) ply += "1.5 -1.5 -1.5 3 -3.3 -3.3 -3.3 1 0 0 0\n";
+      else ply += "1.5 -1.5 -1.5 3 -3.3 -3.3 1 0 0 0\n";
+    }
+    if (file.write(ply) != ply.size() || !file.flush()) return false;
+    coldPaths.append(path);
+  }
+  QList<QByteArray> coldHashes;
+  QList<SceneObject> cold;
+  for (int i = 0; i < coldPaths.size(); ++i) {
+    coldHashes.append(hash(coldPaths[i]));
+    cold.append({QString("cold-hidden-%1").arg(i), coldPaths[i], {}, {}, {1, 1, 1}, i == 0 ? 589825 : 441, false});
+  }
+  viewport->setSceneObjects(cold, cold[0].id);
+  if (!check(waitUntil([&] {
+        if (viewport->resourceBudgetStatus().loadingMeshCount != 0) return false;
+        for (const auto &object : cold)
+          if (!viewport->activateSceneObject(object.id) || !viewport->exportableModelAvailable()) return false;
+        return true;
+      }), "cold hidden mesh/point/3DGS/2DGS retain loaded metadata and export identity")) return false;
+  auto coldStatus = viewport->resourceBudgetStatus();
+  if (!check(coldStatus.managedRamBytes > 0 && coldStatus.managedGpuBytes == 0 &&
+             coldStatus.reservedRamBytes == 0 && coldStatus.reservedGpuBytes == 0,
+             "cold hidden CPU data is accounted without retaining unused whole-source RAM/GPU leases")) return false;
+  const SceneObject peer{"cold-visible-peer", bluePath, {1.5F, 0, 0}, {}, {1, 1, 1}, 589825};
+  cold.append(peer);
+  viewport->setSceneObjects(cold, peer.id);
+  viewport->setAxisView(NavigationAxis::PositiveZ);
+  waitUntil([] { return false; }, 300);
+  if (!check(waitUntil([&] {
+        viewport->focusModel();
+        const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+        const auto status = viewport->resourceBudgetStatus();
+        return viewport->meshRenderingAvailable() && status.loadingMeshCount == 0 &&
+            status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 && modelColorPixels(frame, false) > 500;
+      }), "a visible peer receives real GPU admission while cold sources remain hidden")) return false;
+  cold[0].visible = true;
+  viewport->setSceneObjects(cold, cold[0].id);
+  viewport->selectAllModels();
+  viewport->focusModel();
+  viewport->clearSelection();
+  if (!check(waitUntil([&] {
+        const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+        const auto status = viewport->resourceBudgetStatus();
+        return status.loadingMeshCount == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
+            status.managedGpuBytes > 0 && status.managedGpuBytes <= 64LL * 1024LL * 1024LL &&
+            modelColorPixels(frame, true) > 500 && modelColorPixels(frame, false) > 500;
+      }), "revealing a cold mesh reacquires admission or normal paging without exceeding the real shared cap")) return false;
+  for (int kind = 1; kind < 4; ++kind) {
+    for (int i = 0; i < cold.size(); ++i) cold[i].visible = i == kind;
+    viewport->setSceneObjects(cold, cold[kind].id);
+    viewport->selectAllModels();
+    viewport->focusModel();
+    viewport->clearSelection();
+    if (!check(waitUntil([&] {
+          const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+          const auto status = viewport->resourceBudgetStatus();
+          return status.loadingMeshCount == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0 &&
+              modelColorPixels(frame, true) > 100;
+        }), "cold point/3DGS/2DGS can reveal and present without a held source lease")) return false;
+  }
+  for (int i = 0; i < coldPaths.size(); ++i)
+    if (!check(hash(coldPaths[i]) == coldHashes[i], "cold hidden admission preserves original source files")) return false;
+  viewport->setSceneObjects({}, {});
+  if (!check(waitUntil([&] {
+        const auto status = viewport->resourceBudgetStatus();
+        return status.managedGpuBytes == 0 && status.loadingMeshCount == 0 &&
+            status.reservedRamBytes == 0 && status.reservedGpuBytes == 0;
+      }), "cold source matrix releases every physical allocation and reservation")) return false;
   QList<SceneObject> objects{
       {"hidden-budget-red", redPath, {-1.5F, 0, 0}, {}, {1, 1, 1}, 589825},
       {"hidden-budget-blue", bluePath, {1.5F, 0, 0}, {}, {1, 1, 1}, 589825}};
