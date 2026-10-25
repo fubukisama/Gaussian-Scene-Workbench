@@ -1,4 +1,5 @@
 #include "BlenderViewportVisualTests.h"
+#include "BlenderViewportVisualTestSupport.h"
 
 #include "AppTheme.h"
 #include "NativeViewport.h"
@@ -6,477 +7,20 @@
 
 #include <QApplication>
 #include <QDebug>
-#include <QDir>
-#include <QElapsedTimer>
-#include <QEventLoop>
-#include <QFile>
-#include <QFileInfo>
 #include <QFontMetricsF>
-#include <QImage>
-#include <QMouseEvent>
 #include <QOpenGLContext>
-#include <QScopeGuard>
-#include <QStorageInfo>
-#include <QTemporaryDir>
-#include <QTimer>
-#include <QWheelEvent>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <vector>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 
 namespace gsw {
 namespace {
+using namespace viewportqa;
 
-void processFrames(const int milliseconds) {
-  QEventLoop loop;
-  QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
-  loop.exec();
-}
-
-bool saveEvidence(const QImage &frame, const QString &name) {
-  const QString configured = qEnvironmentVariable("GSW_BLENDER_VIEWPORT_EVIDENCE");
-  if (configured.isEmpty()) return true;
-  if (!QDir::isAbsolutePath(configured)) {
-    qCritical() << "Viewport evidence requires an absolute directory:" << configured;
-    return false;
-  }
-  const QString directory = QDir::cleanPath(QFileInfo(configured).absoluteFilePath());
-#ifdef Q_OS_WIN
-  const auto localRoot = [](const QString &path) {
-    const QString normalized = QDir::fromNativeSeparators(path);
-    if (normalized.size() >= 3 && normalized.at(0).toUpper() >= QLatin1Char('A') &&
-        normalized.at(0).toUpper() <= QLatin1Char('Z') && normalized.at(1) == QLatin1Char(':') &&
-        normalized.at(2) == QLatin1Char('/')) {
-      const QString canonical = QFileInfo(normalized.left(3)).canonicalFilePath();
-      if (canonical.size() >= 3 && canonical.at(1) == QLatin1Char(':') &&
-          canonical.at(2) == QLatin1Char('/')) return canonical;
-    }
-    return QString();
-  };
-  const QString root = localRoot(directory);
-  if (root.isEmpty()) {
-    qCritical() << "Viewport evidence requires a local drive directory:" << directory;
-    return false;
-  }
-  QString systemRoot = localRoot(qEnvironmentVariable("SystemRoot"));
-  if (systemRoot.isEmpty()) systemRoot = localRoot(qEnvironmentVariable("SystemDrive") + QLatin1Char('/'));
-  if (systemRoot.isEmpty()) {
-    wchar_t windowsDirectory[MAX_PATH + 1]{};
-    const UINT length = GetWindowsDirectoryW(windowsDirectory, MAX_PATH + 1);
-    if (length > 0 && length <= MAX_PATH)
-      systemRoot = localRoot(QString::fromWCharArray(windowsDirectory, static_cast<int>(length)));
-  }
-  if (systemRoot.isEmpty()) {
-    qCritical() << "Unable to identify the system volume for viewport evidence";
-    return false;
-  }
-  if (root.left(3).compare(systemRoot.left(3), Qt::CaseInsensitive) == 0) {
-    const auto volumes = QStorageInfo::mountedVolumes();
-    const bool alternative = std::any_of(volumes.cbegin(), volumes.cend(), [&](const QStorageInfo &volume) {
-      if (!volume.isValid() || !volume.isReady() || volume.isReadOnly()) return false;
-      const QString mountedRoot = localRoot(volume.rootPath());
-      return !mountedRoot.isEmpty() &&
-             mountedRoot.left(3).compare(systemRoot.left(3), Qt::CaseInsensitive) != 0 &&
-             QFileInfo(volume.rootPath()).isWritable();
-    });
-    if (alternative) {
-      qCritical() << "Viewport evidence requires an available writable non-system volume:" << directory;
-      return false;
-    }
-  }
-  const auto allowedCanonicalPath = [&root](const QFileInfo &info) {
-    const QString canonical = info.canonicalFilePath();
-    return root.size() >= 3 && root.at(1) == QLatin1Char(':') && root.at(2) == QLatin1Char('/') &&
-           !canonical.isEmpty() &&
-           (canonical.compare(root, Qt::CaseInsensitive) == 0 ||
-            canonical.startsWith(root.endsWith(QLatin1Char('/')) ? root : root + QLatin1Char('/'),
-                                 Qt::CaseInsensitive));
-  };
-#else
-  const auto allowedCanonicalPath = [](const QFileInfo &info) {
-    return !info.canonicalFilePath().isEmpty();
-  };
-#endif
-  QFileInfo ancestor(directory);
-  while (!ancestor.exists()) {
-    const QString parent = ancestor.absolutePath();
-    if (parent == ancestor.absoluteFilePath()) break;
-    ancestor.setFile(parent);
-  }
-  if (!ancestor.isDir() || !allowedCanonicalPath(ancestor) || !QDir().mkpath(directory) ||
-      !allowedCanonicalPath(QFileInfo(directory))) {
-    qCritical() << "Unable to create safe viewport evidence directory:" << directory;
-    return false;
-  }
-  const QString output = QDir(directory).filePath(name + QStringLiteral(".png"));
-  if (!frame.save(output)) {
-    qCritical() << "Unable to write viewport evidence image:" << output;
-    return false;
-  }
-  return true;
-}
-
-void clickViewport(NativeViewport &viewport, const QPointF &position) {
-  const QPointF global(viewport.mapToGlobal(position.toPoint()));
-  QMouseEvent press(QEvent::MouseButtonPress, position, position, global,
-                    Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-  QMouseEvent release(QEvent::MouseButtonRelease, position, position, global,
-                      Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-  QCoreApplication::sendEvent(&viewport, &press);
-  QCoreApplication::sendEvent(&viewport, &release);
-}
-
-struct AxisPixels final {
-  int red = 0;
-  int green = 0;
-  int blue = 0;
-};
-
-AxisPixels groundAxisPixels(const QImage &frame) {
-  AxisPixels result;
-  // Observe the long world-origin axes, not the small reference triad or the
-  // navigation gizmo. The rectangles are screen regions, not shader internals.
-  const QRect sample(qRound(frame.width() * 0.20),
-                     qRound(frame.height() * 0.20),
-                     qRound(frame.width() * 0.60),
-                     qRound(frame.height() * 0.60));
-  const QPointF center(frame.width() * 0.5, frame.height() * 0.5);
-  const qreal excludedRadius = frame.height() * 0.13;
-  for (int y = sample.top(); y <= sample.bottom(); ++y) {
-    for (int x = sample.left(); x <= sample.right(); ++x) {
-      const QPointF fromCenter = QPointF(x, y) - center;
-      if (QPointF::dotProduct(fromCenter, fromCenter) <
-          excludedRadius * excludedRadius) continue;
-      const QColor pixel = frame.pixelColor(x, y);
-      if (pixel.red() > pixel.green() + 8 &&
-          pixel.red() > pixel.blue() + 8) ++result.red;
-      if (pixel.green() > pixel.red() + 8 &&
-          pixel.green() > pixel.blue() + 8) ++result.green;
-      if (pixel.blue() > pixel.red() + 8 &&
-          pixel.blue() > pixel.green() + 8) ++result.blue;
-    }
-  }
-  return result;
-}
-
-double neutralGridInk(const QImage &frame) {
-  const QRect sample(qRound(frame.width() * 0.18),
-                     qRound(frame.height() * 0.22),
-                     qRound(frame.width() * 0.64),
-                     qRound(frame.height() * 0.56));
-  const QPoint center(frame.width() / 2, frame.height() / 2);
-  double ink = 0.0;
-  for (int y = sample.top(); y <= sample.bottom(); ++y) {
-    for (int x = sample.left(); x <= sample.right(); ++x) {
-      // Keep the measurement independent of world-axis colour and the origin
-      // marker. The remaining region contains only the neutral ground grid.
-      if (std::abs(x - center.x()) <= 12 ||
-          std::abs(y - center.y()) <= 12) continue;
-      const QColor pixel = frame.pixelColor(x, y);
-      const int high = std::max({pixel.red(), pixel.green(), pixel.blue()});
-      const int low = std::min({pixel.red(), pixel.green(), pixel.blue()});
-      if (high - low > 12) continue;
-      ink += std::max(0.0, (pixel.red() + pixel.green() + pixel.blue()) / 3.0 - 13.0);
-    }
-  }
-  return ink;
-}
-
-void wheelViewport(NativeViewport &viewport, const int angleDelta) {
-  const QPointF center(viewport.width() * 0.5, viewport.height() * 0.5);
-  const QPointF global(viewport.mapToGlobal(center.toPoint()));
-  QWheelEvent wheel(center, global, QPoint(), QPoint(0, angleDelta),
-                    Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-  QCoreApplication::sendEvent(&viewport, &wheel);
-}
-
-QColor unobstructedBackdrop(const QImage &frame) {
-  // A median rejects the few thin neutral grid strokes in this background
-  // sample without masking or changing the viewport's actual rendering.
-  const QRect sample(qRound(frame.width() * 0.40),
-                     qRound(frame.height() * 0.08),
-                     qRound(frame.width() * 0.20),
-                     qRound(frame.height() * 0.06));
-  std::array<std::vector<int>, 3> channels;
-  for (int y = sample.top(); y <= sample.bottom(); ++y) {
-    for (int x = sample.left(); x <= sample.right(); ++x) {
-      const QColor pixel = frame.pixelColor(x, y);
-      channels[0].push_back(pixel.red());
-      channels[1].push_back(pixel.green());
-      channels[2].push_back(pixel.blue());
-    }
-  }
-  std::array<int, 3> median{};
-  for (std::size_t index = 0; index < channels.size(); ++index) {
-    auto &values = channels[index];
-    const auto middle = values.begin() + values.size() / 2;
-    std::nth_element(values.begin(), middle, values.end());
-    median[index] = *middle;
-  }
-  return QColor(median[0], median[1], median[2]);
-}
-
-int cursorRedArcPixels(const QImage &frame, const QSize &logicalSize) {
-  const qreal ratio = static_cast<qreal>(frame.width()) / logicalSize.width();
-  const QPoint center(frame.width() / 2, frame.height() / 2);
-  const int radius = qRound(36.0 * ratio);
-  int count = 0;
-  for (int y = center.y() - radius; y <= center.y() + radius; ++y) {
-    for (int x = center.x() - radius; x <= center.x() + radius; ++x) {
-      const QColor pixel = frame.pixelColor(x, y);
-      // A Blender 3D cursor is a separate user-positionable tool, not the
-      // source origin. Its bright red ink differs from the world X axis.
-      if (pixel.red() >= 220 && pixel.green() <= 40 && pixel.blue() <= 40)
-        ++count;
-    }
-  }
-  return count;
-}
-
-void dragViewport(NativeViewport &viewport, const QPointF &start,
-                  const QPointF &end) {
-  const QPointF globalStart(viewport.mapToGlobal(start.toPoint()));
-  const QPointF globalEnd(viewport.mapToGlobal(end.toPoint()));
-  QMouseEvent press(QEvent::MouseButtonPress, start, start, globalStart,
-                    Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-  QMouseEvent move(QEvent::MouseMove, end, end, globalEnd,
-                   Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-  QMouseEvent release(QEvent::MouseButtonRelease, end, end, globalEnd,
-                      Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-  QCoreApplication::sendEvent(&viewport, &press);
-  QCoreApplication::sendEvent(&viewport, &move);
-  QCoreApplication::sendEvent(&viewport, &release);
-}
-
-struct BackgroundContrast final {
-  double meanNeutralInk = 0.0;
-  int visiblyChangedPixels = 0;
-};
-
-BackgroundContrast backgroundContrast(const QImage &frame,
-                                       const QRectF &normalizedRect) {
-  const QRect sample(qRound(frame.width() * normalizedRect.x()),
-                     qRound(frame.height() * normalizedRect.y()),
-                     qRound(frame.width() * normalizedRect.width()),
-                     qRound(frame.height() * normalizedRect.height()));
-  BackgroundContrast result;
-  double ink = 0.0;
-  for (int y = sample.top(); y <= sample.bottom(); ++y) {
-    for (int x = sample.left(); x <= sample.right(); ++x) {
-      const QColor pixel = frame.pixelColor(x, y);
-      const int high = std::max({pixel.red(), pixel.green(), pixel.blue()});
-      const int low = std::min({pixel.red(), pixel.green(), pixel.blue()});
-      if (std::abs(pixel.red() - 12) > 8 ||
-          std::abs(pixel.green() - 13) > 8 ||
-          std::abs(pixel.blue() - 14) > 8) ++result.visiblyChangedPixels;
-      if (high - low <= 12)
-        ink += std::max(0.0, (pixel.red() + pixel.green() + pixel.blue()) / 3.0 - 13.0);
-    }
-  }
-  result.meanNeutralInk = ink / std::max(1, sample.width() * sample.height());
-  return result;
-}
-
-enum class FixtureKind { Points, Mesh, Gaussian3D, Surfel2D };
-
-QByteArray modelFixture(const FixtureKind kind) {
-  const bool gaussian = kind == FixtureKind::Gaussian3D ||
-                        kind == FixtureKind::Surfel2D;
-  const bool mesh = kind == FixtureKind::Mesh;
-  const int side = gaussian ? 3 : 15;
-  const int count = mesh ? 4 : side * side;
-  QByteArray contents = "ply\nformat ascii 1.0\nelement vertex " +
-                        QByteArray::number(count) +
-                        "\nproperty float x\nproperty float y\nproperty float z\n";
-  if (gaussian) {
-    contents += "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
-                "property float opacity\nproperty float scale_0\nproperty float scale_1\n";
-    if (kind == FixtureKind::Gaussian3D) contents += "property float scale_2\n";
-    contents += "property float rot_0\nproperty float rot_1\n"
-                "property float rot_2\nproperty float rot_3\n";
-  } else {
-    contents += "property uchar red\nproperty uchar green\nproperty uchar blue\n";
-  }
-  if (mesh) contents += "element face 2\nproperty list uchar int vertex_indices\n";
-  contents += "end_header\n";
-  if (mesh) {
-    contents += "19 19 20 225 35 215\n21 19 20 225 35 215\n"
-                "21 21 20 225 35 215\n19 21 20 225 35 215\n"
-                "3 0 1 2\n3 0 2 3\n";
-  } else {
-    for (int y = 0; y < side; ++y) {
-      for (int x = 0; x < side; ++x) {
-        contents += QByteArray::number(19.0 + 2.0 * x / (side - 1), 'g', 9) + ' ' +
-                    QByteArray::number(19.0 + 2.0 * y / (side - 1), 'g', 9) + " 20 ";
-        if (gaussian) {
-          contents += "1.2 -1.5 1.2 8 -1.7 -1.7 ";
-          if (kind == FixtureKind::Gaussian3D) contents += "-1.7 ";
-          contents += "1 0 0 0\n";
-        } else {
-          contents += "225 35 215\n";
-        }
-      }
-    }
-  }
-  return contents;
-}
-
-int renderedMagentaPixels(const QImage &frame) {
-  const QRect sample(qRound(frame.width() * 0.20),
-                     qRound(frame.height() * 0.20),
-                     qRound(frame.width() * 0.60),
-                     qRound(frame.height() * 0.60));
-  int count = 0;
-  for (int y = sample.top(); y <= sample.bottom(); ++y) {
-    for (int x = sample.left(); x <= sample.right(); ++x) {
-      const QColor pixel = frame.pixelColor(x, y);
-      // None of the grid, world axes, cursor, navigation or neutral UI uses
-      // this magenta signature. Positive evidence must come from the model.
-      if (pixel.red() >= 80 && pixel.blue() >= 80 &&
-          pixel.red() - pixel.green() >= 40 &&
-          pixel.blue() - pixel.green() >= 40) ++count;
-    }
-  }
-  return count;
-}
-
-bool verifyModelRendering(NativeViewport &viewport, QApplication &application) {
-  const QString root = QDir(QCoreApplication::applicationDirPath())
-                           .filePath(QStringLiteral("test-settings"));
-  if (!QDir().mkpath(root)) return false;
-  QTemporaryDir fixtures(QDir(root).filePath(QStringLiteral("viewport-models-XXXXXX")));
-  if (!fixtures.isValid()) return false;
-  struct ModelCase final { FixtureKind kind; const char *name; };
-  constexpr std::array<ModelCase, 4> cases{{
-      {FixtureKind::Points, "points"}, {FixtureKind::Mesh, "mesh"},
-      {FixtureKind::Gaussian3D, "3dgs"}, {FixtureKind::Surfel2D, "2dgs"},
-  }};
-  for (const auto &model : cases) {
-    const QString path = QDir(fixtures.path()).filePath(
-        QString::fromLatin1(model.name) + QStringLiteral(".ply"));
-    const QByteArray original = modelFixture(model.kind);
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(original) != original.size())
-      return false;
-    file.close();
-    bool loaded = false;
-    bool loadFailed = false;
-    const auto loadedConnection = QObject::connect(
-        &viewport, &NativeViewport::sceneLoaded, &viewport,
-        [&](qint64 vertices, qsizetype displayed, qint64, qsizetype) {
-          loaded = vertices > 0 && displayed > 0;
-        });
-    const auto failedConnection = QObject::connect(
-        &viewport, &NativeViewport::sceneLoadFailed, &viewport,
-        [&](const QString &, const QString &message) {
-          qCritical() << "Viewport model fixture failed to load:" << model.name << message;
-          loadFailed = true;
-        });
-    const auto disconnect = qScopeGuard([&]() {
-      QObject::disconnect(loadedConnection);
-      QObject::disconnect(failedConnection);
-    });
-    viewport.setScene(path, 0);
-    QElapsedTimer deadline;
-    deadline.start();
-    while (!loaded && !loadFailed && deadline.elapsed() < 5000) processFrames(20);
-    if (!loaded || loadFailed) return false;
-    const bool gaussian = model.kind == FixtureKind::Gaussian3D ||
-                          model.kind == FixtureKind::Surfel2D;
-    const bool surfel = model.kind == FixtureKind::Surfel2D;
-    if (viewport.sourceHasGaussianAttributes() != gaussian ||
-        viewport.sourceHasSurfelAttributes() != surfel ||
-        (gaussian && !viewport.gaussianRenderingAvailable()) ||
-        (model.kind == FixtureKind::Mesh && !viewport.meshRenderingAvailable())) {
-      qCritical() << "Required real model renderer unavailable:" << model.name
-                  << "Gaussian/surfel attributes" << viewport.sourceHasGaussianAttributes()
-                  << viewport.sourceHasSurfelAttributes()
-                  << "Gaussian/mesh renderer" << viewport.gaussianRenderingAvailable()
-                  << viewport.meshRenderingAvailable();
-      return false;
-    }
-    const auto mode = gaussian ? NativeViewport::RenderMode::Gaussians
-        : model.kind == FixtureKind::Mesh ? NativeViewport::RenderMode::Mesh
-                                         : NativeViewport::RenderMode::Points;
-    viewport.setRenderMode(mode);
-    viewport.setEditToolsLocked(true);
-    viewport.setShowCameras(false);
-    viewport.setShowObservationTrackball(false);
-    const QVector3D translation(0.25F, -0.125F, 0.375F);
-    const QQuaternion rotation = QQuaternion::fromAxisAndAngle(QVector3D(0, 0, 1), 17.0F);
-    const QVector3D scale(1.1F, 0.9F, 1.2F);
-    viewport.setModelTransform(translation, rotation, scale);
-    const QVector3D storedTranslation = viewport.modelTranslation();
-    const QQuaternion storedRotation = viewport.modelRotation();
-    const QVector3D storedScale = viewport.modelScale();
-    if (storedTranslation != translation || storedScale != scale ||
-        storedRotation.isIdentity()) return false;
-    viewport.resetCamera();
-    viewport.setAxisView(NavigationAxis::PositiveZ);
-    processFrames(300);
-    if (!viewport.focusModel()) return false;
-    // Four actual image captures cover both themes and both projections.
-    for (int configuration = 0; configuration < 4; ++configuration) {
-      const bool light = configuration == 1 || configuration == 2;
-      AppTheme::applyTheme(application, light ? UiTheme::Light : UiTheme::Dark, false);
-      if (viewport.orthographicProjection() != (configuration >= 2)) {
-        const auto navigation = navigationGizmoLayout(
-            QMatrix4x4(), viewport.size(), QFontMetricsF(viewport.font()).height());
-        clickViewport(viewport, navigation.projectionButton.center());
-      }
-      processFrames(30);
-      const QImage frame = viewport.grabFramebuffer();
-      if (frame.isNull()) return false;
-      const int modelPixels = renderedMagentaPixels(frame);
-      const bool matchingState = viewport.renderMode() == mode &&
-          viewport.modelTranslation() == storedTranslation &&
-          viewport.modelRotation() == storedRotation && viewport.modelScale() == storedScale &&
-          viewport.orthographicProjection() == (configuration >= 2) &&
-          (!gaussian || viewport.gaussianRenderingAvailable());
-      qInfo() << "Blender viewport real model rendering:" << model.name
-              << "configuration" << configuration << "magenta-pixels" << modelPixels
-              << "transform/render-path-preserved" << matchingState;
-      if (!saveEvidence(frame, QStringLiteral("blender-model-") +
-                               QString::fromLatin1(model.name) + QLatin1Char('-') +
-                               QString::number(configuration))) return false;
-      if (modelPixels < 20 || !matchingState) return false;
-    }
-    if (!file.open(QIODevice::ReadOnly) || file.readAll() != original) return false;
-    file.close();
-  }
-  viewport.setScene({}, 0);
-  processFrames(30);
-  return true;
-}
-
-} // namespace
-
-int runBlenderViewportVisualTests(QApplication &application) {
-  AppTheme::applyTheme(application, UiTheme::Dark, false);
-  NativeViewport viewport;
-  viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
-  viewport.setAttribute(Qt::WA_ShowWithoutActivating, true);
-  viewport.setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
-  viewport.resize(960, 720);
-  viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::WorldZero);
-  viewport.setShowObservationTrackball(false);
-  viewport.show();
-  processFrames(250);
-
-#ifdef Q_OS_WIN
-  if (IsWindowVisible(reinterpret_cast<HWND>(viewport.winId()))) {
-    viewport.hide();
-    qCritical() << "Viewport acceptance unexpectedly exposed a native window";
-    return 2;
-  }
-#endif
-
+// Zero means continue. Nonzero preserves the original immediate-return code;
+// failureCode retains the first non-fatal assertion failure across stages.
+int verifyGridAndZoom(NativeViewport &viewport, QImage &topFrame, int &failureCode) {
   const QImage initialFrame = viewport.grabFramebuffer();
   if (!viewport.isValid() || viewport.context() == nullptr ||
       !viewport.context()->isValid() || initialFrame.isNull() ||
@@ -499,7 +43,7 @@ int runBlenderViewportVisualTests(QApplication &application) {
   }
   viewport.setAxisView(NavigationAxis::PositiveZ);
   processFrames(350);
-  const QImage topFrame = viewport.grabFramebuffer();
+  topFrame = viewport.grabFramebuffer();
   if (topFrame.isNull() ||
       !saveEvidence(topFrame, QStringLiteral("blender-ground-top-dark"))) {
     qCritical() << "Unable to capture real top-view framebuffer evidence";
@@ -512,7 +56,6 @@ int runBlenderViewportVisualTests(QApplication &application) {
   // Blender's documented world-axis convention is X red / Y green / Z blue.
   // Looking down +Z must leave red X and green Y on the XY ground, with no
   // long blue ground line. A tolerance allows antialiasing and driver variance.
-  int failureCode = 0;
   if (axes.red < 80 || axes.green < 80 || axes.blue > 20) {
     qCritical() << "Top-view XY ground does not use Blender red-X / green-Y axes";
     failureCode = 6;
@@ -567,6 +110,11 @@ int runBlenderViewportVisualTests(QApplication &application) {
     if (failureCode == 0) failureCode = 9;
   }
 
+  return 0;
+}
+
+int verifyThemeAndOrigin(NativeViewport &viewport, QApplication &application,
+                         const QImage &topFrame, int &failureCode) {
   // Compatibility gate: the Blender overlay must not import Blender's grey
   // backdrop. The public GSW AppTheme seam still changes a live viewport, and
   // it must not rebuild or reset any scene/camera/render-mode state.
@@ -628,6 +176,10 @@ int runBlenderViewportVisualTests(QApplication &application) {
     if (failureCode == 0) failureCode = 14;
   }
 
+  return 0;
+}
+
+int verifySignedPlanes(NativeViewport &viewport, int &failureCode) {
   struct PlaneCase final {
     NavigationAxis axis;
     const char *name;
@@ -664,6 +216,10 @@ int runBlenderViewportVisualTests(QApplication &application) {
     }
   }
 
+  return 0;
+}
+
+int verifyShallowHorizon(NativeViewport &viewport, int &failureCode) {
   // Establish a shallow perspective using real navigation input. Looking only
   // ten degrees down, the distant ground must soften before the visible
   // horizon, not terminate at a rectangular patch or continue into the sky.
@@ -693,7 +249,31 @@ int runBlenderViewportVisualTests(QApplication &application) {
     qCritical() << "Perspective ground does not fade naturally before the visible horizon";
     if (failureCode == 0) failureCode = 20;
   }
-  if (!verifyModelRendering(viewport, application)) {
+  return 0;
+}
+
+} // namespace
+
+int runBlenderViewportVisualTests(QApplication &application) {
+  AppTheme::applyTheme(application, UiTheme::Dark, false);
+  NativeViewport viewport;
+  viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+  viewport.setAttribute(Qt::WA_ShowWithoutActivating, true);
+  viewport.setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
+  viewport.resize(960, 720);
+  viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::WorldZero);
+  viewport.setShowObservationTrackball(false);
+  viewport.show();
+  viewportqa::processFrames(250);
+  if (viewportqa::nativeWindowExposed(viewport)) return 2;
+
+  int failureCode = 0;
+  QImage topFrame;
+  if (const int fatal = verifyGridAndZoom(viewport, topFrame, failureCode)) return fatal;
+  if (const int fatal = verifyThemeAndOrigin(viewport, application, topFrame, failureCode)) return fatal;
+  if (const int fatal = verifySignedPlanes(viewport, failureCode)) return fatal;
+  if (const int fatal = verifyShallowHorizon(viewport, failureCode)) return fatal;
+  if (!viewportqa::verifyModelRendering(viewport, application)) {
     qCritical() << "A real point, indexed mesh, 3DGS or 2DGS renderer regressed";
     if (failureCode == 0) failureCode = 21;
   }

@@ -14,6 +14,8 @@ private slots:
   void keepsOnlyTheLatestSixtyFrames();
   void ignoresNonIncreasingFrameCompletions();
   void reportsActualFrameCadence();
+  void excludesPausedTimeWithoutResettingMeasuredCadence();
+  void pauseIsSafeBeforeAnyFrame();
 };
 
 void FrameRateCounterTests::averagesWarmupFramesWithoutZeroPadding() {
@@ -71,6 +73,32 @@ void FrameRateCounterTests::reportsActualFrameCadence() {
 
   QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
   QCOMPARE(counter.framesPerSecond(), 125.0);
+}
+
+void FrameRateCounterTests::excludesPausedTimeWithoutResettingMeasuredCadence() {
+  FrameRateCounter counter;
+  const FrameRateCounter::TimePoint origin{};
+  counter.frameCompleted(origin);
+  counter.frameCompleted(origin + std::chrono::milliseconds(8));
+  counter.frameCompleted(origin + std::chrono::milliseconds(16));
+  counter.pause();
+  QCOMPARE(counter.sampleCount(), std::size_t(2));
+  QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+  counter.frameCompleted(origin + std::chrono::hours(1));
+  QCOMPARE(counter.sampleCount(), std::size_t(2));
+  QCOMPARE(counter.framesPerSecond(), 125.0);
+  counter.frameCompleted(origin + std::chrono::hours(1) + std::chrono::milliseconds(8));
+  QCOMPARE(counter.sampleCount(), std::size_t(3));
+  QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+}
+
+void FrameRateCounterTests::pauseIsSafeBeforeAnyFrame() {
+  FrameRateCounter counter;
+  counter.pause();
+  counter.pause();
+  counter.frameCompleted(FrameRateCounter::TimePoint{});
+  QCOMPARE(counter.sampleCount(), std::size_t(0));
+  QCOMPARE(counter.framesPerSecond(), 0.0);
 }
 
 QTEST_GUILESS_MAIN(FrameRateCounterTests)

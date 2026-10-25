@@ -228,6 +228,7 @@ private:
   void updateWorkspaceUi();
   void retranslateUi();
   void updateTaskLabels();
+  void refreshRendererStatus();
   void rebuildProjectTree();
   void syncProjectTreeSelection();
   void syncProjectTreeVisibility();
@@ -304,6 +305,13 @@ private:
   QLabel *mRendererStatus = nullptr;
   QLabel *mEditStatus = nullptr;
   QLabel *mScaleStatus = nullptr;
+  enum class RendererStatusPhase { Normal, Loading, Failed };
+  RendererStatusPhase mRendererStatusPhase = RendererStatusPhase::Normal;
+  qsizetype mRendererPreviewPrimitiveCount = -1;
+  double mRendererFramesPerSecond = 0.0;
+  double mRendererFrameMilliseconds = 0.0;
+  bool mRendererHasFrameMetrics = false;
+  bool mRendererShowGpuNotice = false;
 
   QAction *mNewProjectAction = nullptr;
   QAction *mOpenProjectAction = nullptr;

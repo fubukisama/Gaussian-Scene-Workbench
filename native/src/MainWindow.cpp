@@ -2373,21 +2373,38 @@ void MainWindow::createProjectDock() {
     QStringList visibleIds;
     for (const QString &id : ids)
       if (mViewport->sceneObjectVisible(id)) visibleIds.append(id);
+    const QString requestedActive = ids.contains(active) ? active
+        : (ids.contains(mWorkspace.activeSceneId()) || ids.isEmpty())
+            ? mWorkspace.activeSceneId() : ids.constLast();
     QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
-    if (!visibleIds.isEmpty() && (!visibleIds.contains(mWorkspace.activeSceneId()) ||
-                          (visibleIds.contains(active) && active != mWorkspace.activeSceneId())) &&
-        !confirmDiscardSceneEdits()) {
-      syncProjectTreeSelection(); return;
+    const auto restoreSourceSelection = [this] {
+      QScopedValueRollback<bool> restoreTree(mPreserveProjectTree, false);
+      QScopedValueRollback<bool> restoreRows(mPreserveSceneTreeSelection, false);
+      syncProjectTreeSelection();
+      if (mViewport->selectedSceneIds().isEmpty() &&
+          !mViewport->sceneObjectVisible(mViewport->activeSceneId())) {
+        const QSignalBlocker blocker(mProjectTree);
+        for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it)
+          if ((*it)->data(0, Qt::UserRole + 2).toString() == mViewport->activeSceneId())
+            (*it)->setSelected(true);
+      }
+      updateSceneVisibilityActions();
+    };
+    if (requestedActive != mWorkspace.activeSceneId() && !confirmDiscardSceneEdits()) {
+      restoreSourceSelection(); return;
     }
+    bool applied = false;
     {
       // Only hidden rows need a selection independent from transform IDs.
       // For an ordinary visible range, retain the pre-visibility Qt/viewport
       // synchronization rather than changing its selection/anchor lifecycle.
       QScopedValueRollback<bool> keepRows(mPreserveSceneTreeSelection,
-          ids.size() != visibleIds.size());
-      mViewport->setSceneSelection(visibleIds,
-          visibleIds.contains(active) ? active : mViewport->activeSceneId());
+          mPreserveSceneTreeSelection || ids.size() != visibleIds.size());
+      // Full row IDs retain the inspected/exported source identity. The
+      // viewport independently excludes hidden IDs from transform selection.
+      applied = mViewport->setSceneSelection(ids, requestedActive);
     }
+    if (!applied) { restoreSourceSelection(); return; }
     updateSceneVisibilityActions();
     statusBar()->showMessage(QCoreApplication::translate("Workbench", "已选中 %1 个模型（%2 个可见）；可用眼睛按钮或右键菜单切换显示。")
                                 .arg(ids.size()).arg(visibleIds.size()), 6000);
@@ -2409,8 +2426,10 @@ void MainWindow::createProjectDock() {
             else if (kind == QStringLiteral("scene") && !mProcessSupervisor.isRunning() && !mSelectionBusy) {
               const QString id = item->data(0, Qt::UserRole + 2).toString();
               QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
-              if (mViewport->sceneObjectVisible(id) && id != mViewport->activeSceneId() && confirmDiscardSceneEdits())
-                mViewport->setSceneSelection(mViewport->selectedSceneIds(), id);
+              if (!id.isEmpty() && id != mViewport->activeSceneId() && confirmDiscardSceneEdits()) {
+                QScopedValueRollback<bool> preserveRows(mPreserveSceneTreeSelection, true);
+                mViewport->setSceneSelection(selectedSceneTreeIds(), id);
+              }
             }
             QMenu menu(mProjectTree);
             if (kind == QStringLiteral("dataset")) {
@@ -2501,6 +2520,7 @@ void MainWindow::createInspectorDock() {
   sceneForm->setHorizontalSpacing(12);
   sceneForm->setVerticalSpacing(7);
   mSceneValue = createValueLabel(panel);
+  mSceneValue->setProperty("gswValueRole", QStringLiteral("sceneFile"));
   mGaussianCountValue = createValueLabel(panel);
   mPlyFormatValue = createValueLabel(panel);
   mCameraCountValue = createValueLabel(panel);
@@ -2665,8 +2685,9 @@ void MainWindow::createTaskDock() {
 void MainWindow::createStatusBar() {
   mProjectStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "未打开工程"), this), AppLanguage::source("未打开工程"));
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  mRendererStatus = AppLanguage::text(new QLabel(
-      QCoreApplication::translate("Workbench", "点预览 | 未载入场景 | FPS — (— ms)"), this), AppLanguage::source("点预览 | 未载入场景 | FPS — (— ms)"));
+  // This label is generated from cached live state, never rebound to its
+  // initial empty-scene text when the application language changes.
+  mRendererStatus = new QLabel(this);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
   mEditStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "选择 0 | 删除 0"), this), AppLanguage::source("选择 0 | 删除 0"));
@@ -2677,6 +2698,51 @@ void MainWindow::createStatusBar() {
   statusBar()->addPermanentWidget(mRendererStatus);
   statusBar()->addPermanentWidget(mEditStatus);
   statusBar()->addPermanentWidget(mScaleStatus);
+  refreshRendererStatus();
+}
+
+void MainWindow::refreshRendererStatus() {
+  if (!mRendererStatus || !mViewport) return;
+  QString text;
+  const bool gpuPreview = mViewport->trainingGpuPreviewActive();
+  const bool gpuNotice = gpuPreview || mRendererShowGpuNotice;
+  const bool hasScene = !mViewport->scenePath().isEmpty() || mViewport->visibleModelAvailable();
+  const QString mode = mViewport->renderMode() == NativeViewport::RenderMode::Mesh
+      ? QCoreApplication::translate("Workbench", "网格预览")
+      : mViewport->renderMode() == NativeViewport::RenderMode::Gaussians
+          ? QCoreApplication::translate("Workbench", "高斯预览")
+          : QCoreApplication::translate("Workbench", "点预览");
+  const QString frameRate = mRendererHasFrameMetrics && mRendererFramesPerSecond > 0.0 &&
+      mRendererFrameMilliseconds > 0.0
+      ? QStringLiteral("%1 FPS (%2 ms)").arg(mRendererFramesPerSecond, 0, 'f', 1)
+            .arg(mRendererFrameMilliseconds, 0, 'f', 1)
+      : QStringLiteral("FPS — (— ms)");
+  if (gpuNotice) {
+    const QString previewMode = mRendererStatus->property("gpuPreviewMode").toString();
+    const QString detail = mRendererStatus->property("gpuPreviewDetail").toString();
+    text = detail.isEmpty() ? previewMode : QStringLiteral("%1 | %2").arg(previewMode, detail);
+    if (mRendererHasFrameMetrics) text += QStringLiteral(" | ") + frameRate;
+  } else if (mRendererStatusPhase == RendererStatusPhase::Loading) {
+    text = QCoreApplication::translate("Workbench", "正在读取 PLY 场景");
+  } else if (mRendererStatusPhase == RendererStatusPhase::Failed) {
+    text = QCoreApplication::translate("Workbench", "PLY 场景读取失败");
+  } else if (!hasScene) {
+    text = QCoreApplication::translate("Workbench", "%1 | 未载入场景").arg(mode) +
+        QStringLiteral(" | FPS — (— ms)");
+  } else if (!mRendererHasFrameMetrics && mRendererPreviewPrimitiveCount >= 0) {
+    text = QCoreApplication::translate("Workbench", "%1 | %2 个预览图元")
+        .arg(mode).arg(mRendererPreviewPrimitiveCount);
+  } else {
+    text = QStringLiteral("%1 | %2").arg(mode, frameRate);
+  }
+  if (mRendererStatus->text() != text) mRendererStatus->setText(text);
+  const QString role = (gpuNotice ? gpuPreview : hasScene && mRendererStatusPhase == RendererStatusPhase::Normal)
+      ? QStringLiteral("statusOk") : QStringLiteral("statusWarn");
+  if (mRendererStatus->objectName() != role) {
+    mRendererStatus->setObjectName(role);
+    mRendererStatus->style()->unpolish(mRendererStatus);
+    mRendererStatus->style()->polish(mRendererStatus);
+  }
 }
 
 QSharedPointer<TaskRecord> MainWindow::taskRecordForRow(const int row) const {
@@ -3513,38 +3579,11 @@ void MainWindow::connectServices() {
       mViewport, &NativeViewport::frameMetricsChanged, this,
       [this](const double framesPerSecond,
              const double averageFrameMilliseconds) {
-        const bool trainingPreview = mViewport->trainingGpuPreviewActive();
-        QString renderer;
-        if (trainingPreview) {
-          const QString mode =
-              mRendererStatus->property("gpuPreviewMode").toString();
-          const QString detail =
-              mRendererStatus->property("gpuPreviewDetail").toString();
-          renderer = detail.isEmpty()
-                         ? mode
-                         : QStringLiteral("%1 | %2").arg(mode, detail);
-        } else {
-          const QString mode =
-              mRenderMode == NativeViewport::RenderMode::Mesh
-                  ? QCoreApplication::translate("Workbench", "网格预览")
-                  : mRenderMode == NativeViewport::RenderMode::Gaussians
-                        ? QCoreApplication::translate("Workbench", "高斯预览")
-                        : QCoreApplication::translate("Workbench", "点预览");
-          renderer = mWorkspace.scenePath().isEmpty()
-                         ? QCoreApplication::translate("Workbench", "%1 | 未载入场景").arg(mode)
-                         : mode;
-        }
-        const QString frameRate =
-            framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
-                ? QStringLiteral("%1 FPS (%2 ms)")
-                      .arg(framesPerSecond, 0, 'f', 1)
-                      .arg(averageFrameMilliseconds, 0, 'f', 1)
-                : QStringLiteral("FPS — (— ms)");
-        const QString statusText =
-            QStringLiteral("%1 | %2").arg(renderer, frameRate);
-        if (mRendererStatus->text() != statusText) {
-          mRendererStatus->setText(statusText);
-        }
+        mRendererFramesPerSecond = framesPerSecond;
+        mRendererFrameMilliseconds = averageFrameMilliseconds;
+        mRendererHasFrameMetrics = true;
+        mRendererShowGpuNotice = mViewport->trainingGpuPreviewActive();
+        refreshRendererStatus();
       });
   connect(
       mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,
@@ -3555,15 +3594,8 @@ void MainWindow::connectServices() {
         mRendererStatus->setProperty("gpuPreviewActive", active);
         mRendererStatus->setProperty("gpuPreviewMode", mode);
         mRendererStatus->setProperty("gpuPreviewDetail", detail);
-        mRendererStatus->setText(
-            detail.isEmpty() ? mode : QStringLiteral("%1 | %2").arg(mode, detail));
-        if (active) {
-          mRendererStatus->setObjectName(QStringLiteral("statusOk"));
-        } else {
-          mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
-        }
-        mRendererStatus->style()->unpolish(mRendererStatus);
-        mRendererStatus->style()->polish(mRendererStatus);
+        mRendererShowGpuNotice = active || !mode.isEmpty();
+        refreshRendererStatus();
         if (stateChanged) {
           appendTaskEvent(QCoreApplication::translate("Workbench", "训练预览：%1%2")
                               .arg(mode, detail.isEmpty()
@@ -3573,7 +3605,10 @@ void MainWindow::connectServices() {
       });
   connect(mViewport, &NativeViewport::sceneLoadStarted, this,
           [this](const QString &scenePath) {
-            AppLanguage::text(mRendererStatus, AppLanguage::source("正在读取 PLY 场景"));
+            mRendererStatusPhase = RendererStatusPhase::Loading;
+            mRendererShowGpuNotice = false;
+            mRendererHasFrameMetrics = false;
+            refreshRendererStatus();
             appendTaskEvent(QCoreApplication::translate("Workbench", "读取场景：%1")
                                 .arg(QDir::toNativeSeparators(scenePath)));
           });
@@ -3582,18 +3617,14 @@ void MainWindow::connectServices() {
                  const qsizetype previewVertexCount,
                  const qint64 sourceFaceCount,
                  const qsizetype previewTriangleCount) {
-            const QString renderer =
-                mRenderMode == NativeViewport::RenderMode::Mesh
-                    ? QCoreApplication::translate("Workbench", "网格预览")
-                    : mRenderMode == NativeViewport::RenderMode::Gaussians
-                          ? QCoreApplication::translate("Workbench", "高斯预览")
-                          : QCoreApplication::translate("Workbench", "点预览");
             const qsizetype previewPrimitiveCount =
                 sourceFaceCount > 0 ? previewTriangleCount
                                     : previewVertexCount;
-            mRendererStatus->setText(QCoreApplication::translate("Workbench", "%1 | %2 个预览图元")
-                                         .arg(renderer)
-                                         .arg(previewPrimitiveCount));
+            mRendererStatusPhase = RendererStatusPhase::Normal;
+            mRendererShowGpuNotice = false;
+            mRendererHasFrameMetrics = false;
+            mRendererPreviewPrimitiveCount = previewPrimitiveCount;
+            refreshRendererStatus();
             if (sourceFaceCount > 0) {
               appendTaskEvent(
                   QCoreApplication::translate("Workbench", "PLY 网格已载入 GPU：%1 个顶点，%2 个面，显示 %3 个三角形。")
@@ -3611,6 +3642,9 @@ void MainWindow::connectServices() {
           [this](const QString &id) {
             QScopedValueRollback<bool> preserve(mPreserveProjectTree, true);
             mWorkspace.activateSceneObject(id);
+            mRendererStatusPhase = RendererStatusPhase::Normal;
+            mRendererPreviewPrimitiveCount = -1;
+            refreshRendererStatus();
           });
   connect(mViewport, &NativeViewport::sceneSelectionChanged, this,
           [this]() { syncProjectTreeSelection(); updateEditActions(); updateInspector(); });
@@ -3647,7 +3681,9 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::sceneLoadFailed, this,
           [this](const QString &, const QString &message) {
-            AppLanguage::text(mRendererStatus, AppLanguage::source("PLY 场景读取失败"));
+            mRendererStatusPhase = RendererStatusPhase::Failed;
+            mRendererShowGpuNotice = false;
+            refreshRendererStatus();
             appendTaskEvent(QCoreApplication::translate("Workbench", "场景读取失败：%1").arg(message));
           });
   connect(
@@ -3793,6 +3829,7 @@ void MainWindow::connectServices() {
                 mode == NativeViewport::RenderMode::Mesh);
             mPointRenderAction->setChecked(mode ==
                                            NativeViewport::RenderMode::Points);
+            refreshRendererStatus();
           });
 }
 
@@ -4158,7 +4195,7 @@ void MainWindow::updateEditActions() {
   mInspectAction->setEnabled(!mSelectionBusy && anyScene);
   mFindModelAction->setEnabled(!mSelectionBusy &&
       (modelNavigationAvailable || mViewport->visibleSceneObjectCount() > 0));
-  mExportModelAction->setEnabled(modelNavigationAvailable && !mRecoveryBlocked &&
+  mExportModelAction->setEnabled(!mSelectionBusy && mViewport->exportableModelAvailable() && !mRecoveryBlocked &&
       !mProcessSupervisor.isRunning() && !mViewport->modelTransformActive());
   mMoveModelAction->setEnabled(modelInteractive);
   mRotateModelAction->setEnabled(modelInteractive);
@@ -5179,7 +5216,7 @@ bool MainWindow::recoverInterruptedTraining(QString *errorMessage) {
 }
 
 bool MainWindow::exportModel() {
-  if (!mViewport->selectableModelAvailable() || mViewport->modelTransformActive() ||
+  if (!mViewport->exportableModelAvailable() || mViewport->modelTransformActive() ||
       mProcessSupervisor.isRunning() || !ensureProjectRecoveryReady()) return false;
   QStringList protectedPaths{mWorkspace.projectFilePath()};
   for (const auto &object : mWorkspace.sceneObjects()) protectedPaths.append(object.path);
@@ -7358,6 +7395,14 @@ void MainWindow::updateWorkspaceUi() {
   } else {
     mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
   }
+  if (mWorkspace.sceneObjects().isEmpty() && mViewport->scenePath().isEmpty() &&
+      !mViewport->trainingGpuPreviewActive()) {
+    mRendererStatusPhase = RendererStatusPhase::Normal;
+    mRendererPreviewPrimitiveCount = -1;
+    mRendererHasFrameMetrics = false;
+    mRendererShowGpuNotice = false;
+  }
+  refreshRendererStatus();
   mProjectStatus->setText(
       projectName +
       (mWorkspace.isModified() ? QStringLiteral(" *") : QString()) +
@@ -7444,6 +7489,7 @@ void MainWindow::retranslateUi() {
   updateInspector();
   updateTaskLabels();
   updateEditStatus();
+  refreshRendererStatus();
   updateScaleStatus();
   const QString name = mWorkspace.hasProject() ? mWorkspace.projectName()
       : QCoreApplication::translate("Workbench", "未打开工程");
@@ -7481,7 +7527,7 @@ void MainWindow::updateActionAvailability() {
   mExportCoordinateReportAction->setEnabled(
       mViewport->sceneCoordinates().valid);
   mReloadModelMetadataAction->setEnabled(!mViewport->scenePath().isEmpty());
-  mExportModelAction->setEnabled(!running && !mRecoveryBlocked && mViewport->selectableModelAvailable());
+  mExportModelAction->setEnabled(!running && !mRecoveryBlocked && mViewport->exportableModelAvailable());
   mModelBasePlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
   mWorldZeroPlaneAction->setEnabled(mViewport->sceneCoordinates().valid);
   const bool cleanupReady =
@@ -7765,6 +7811,7 @@ void MainWindow::updateInspector() {
       : CameraDatasetInfo::summaryText(mWorkspace.cameraDatasetInfo()));
   }
   mSceneValue->setText(compactPath(mWorkspace.scenePath()));
+  mSceneValue->setToolTip(QDir::toNativeSeparators(mWorkspace.scenePath()));
   const PlyMetadata metadata = mWorkspace.sceneMetadata();
   mGaussianCountValue->setText(
       metadata.valid

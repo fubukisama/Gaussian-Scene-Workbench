@@ -104,6 +104,9 @@ endif()
 qt_add_executable(GaussianSceneWorkbench WIN32
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
+  tests/BlenderViewportVisualTestSupport.cpp
+  tests/BlenderViewportVisualTestSupport.h
+  tests/BlenderViewportModelVisualTests.cpp
   resources.qrc
   lucide_icons.qrc
   src/AppTheme.cpp
@@ -1203,6 +1206,12 @@ if(BUILD_TESTING)
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
+  add_test(NAME native_resource_budget_hidden_mesh
+    COMMAND GaussianSceneWorkbench --smoke-test-resource-budget-hidden)
+  set_tests_properties(native_resource_budget_hidden_mesh PROPERTIES
+    TIMEOUT 180
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_gaussian_interaction
     COMMAND GaussianSceneWorkbench --smoke-test-gaussian-performance)
   set_tests_properties(native_gaussian_interaction PROPERTIES

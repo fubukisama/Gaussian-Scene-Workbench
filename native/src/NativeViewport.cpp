@@ -28,6 +28,7 @@
 #include <QFontMetricsF>
 #include <QFutureWatcher>
 #include <QHash>
+#include <QHideEvent>
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
@@ -38,6 +39,7 @@
 #include <QPolygonF>
 #include <QRadialGradient>
 #include <QSizePolicy>
+#include <QShowEvent>
 #include <QTimer>
 #include <QToolTip>
 #include <QVector2D>
@@ -492,13 +494,15 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     update();
   });
   mTrainingGpuPreviewTimer = new QTimer(this);
+  mTrainingGpuPreviewTimer->setObjectName(QStringLiteral("trainingPreviewPollTimer"));
   mTrainingGpuPreviewTimer->setTimerType(Qt::PreciseTimer);
-  mTrainingGpuPreviewTimer->setInterval(0);
+  mTrainingGpuPreviewTimer->setInterval(33);
   connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
           [this] {
             if (mProcessingPreviewVisible && isVisible() && !window()->isMinimized()) update();
           });
   mFrameRefreshTimer = new QTimer(this);
+  mFrameRefreshTimer->setObjectName(QStringLiteral("viewportUploadRefreshTimer"));
   mFrameRefreshTimer->setTimerType(Qt::PreciseTimer);
   mFrameRefreshTimer->setInterval(0);
   connect(mFrameRefreshTimer, &QTimer::timeout, this,
@@ -518,9 +522,11 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
       return;
     }
     mFrameRateCounter.frameCompleted(FrameRateCounter::Clock::now());
+    if (!frameTimingBurstActive()) mFrameRateCounter.pause();
     emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
                              mFrameRateCounter.averageFrameMilliseconds());
   });
+  monitorRefreshWindow();
 }
 
 NativeViewport::~NativeViewport() {
@@ -638,6 +644,7 @@ void NativeViewport::refreshResourceBudgets() {
     if (!alreadyCurrent) makeCurrent();
     auto states = mSceneStates;
     if (!states.contains(mScene)) states.append(mScene);
+    trimHiddenPageCaches(0);
     for (const auto &state : states) {
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
       evictMeshCacheUntilFits(0);
@@ -661,7 +668,7 @@ qsizetype NativeViewport::sharedPageGpuBudget() const {
   if (!states.contains(mScene)) states.append(mScene);
   for (const auto &state : states) {
     cacheBytes += state->mMeshCacheResidentBytes + state->mPointCacheResidentBytes;
-    if (state->mMeshCache.isValid() || state->mPointCache.isValid()) ++owners;
+    if (state->visible && (state->mMeshCache.isValid() || state->mPointCache.isValid())) ++owners;
   }
   const qint64 mandatory = std::max<qint64>(0, status.managedGpuBytes - cacheBytes);
   const qint64 pool = std::max<qint64>(0,
@@ -670,7 +677,59 @@ qsizetype NativeViewport::sharedPageGpuBudget() const {
       // recomputing that conservative target after every deletion would keep
       // lowering it and evict the entire cache instead of only the shortfall.
       qint64(mMeshCacheGpuBudgetBytes) - mandatory - status.reservedGpuBytes);
+  // Hidden pages stay warm while there is room, but cannot reduce a visible
+  // layer's fair share. Actual allocations still pass the shared controller;
+  // trimHiddenPageCaches physically releases lower-priority pages on demand.
+  if (!mScene->visible)
+    return mScene->mMeshCacheResidentBytes + mScene->mPointCacheResidentBytes;
   return static_cast<qsizetype>(pool / std::max<qint64>(1, owners));
+}
+
+void NativeViewport::trimHiddenPageCaches(const qsizetype requiredBytes) {
+  if (!context() || !context()->isValid()) return;
+  const bool alreadyCurrent = QOpenGLContext::currentContext() == context();
+  if (!alreadyCurrent) makeCurrent();
+  updateManagedResourceUsage();
+  const auto observed = mResources->status();
+  qint64 needed = std::max<qint64>(0, observed.managedGpuBytes + observed.reservedGpuBytes +
+      std::max<qsizetype>(0, requiredBytes) - qint64(mMeshCacheGpuBudgetBytes));
+  auto states = mSceneStates;
+  if (!states.contains(mScene)) states.append(mScene);
+  for (const auto &state : states) {
+    if (needed <= 0) break;
+    if (state->visible) continue;
+    QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
+    while (needed > 0 && !state->mFullResolutionPointGpuChunks.isEmpty()) {
+      const auto oldest = std::min_element(state->mFullResolutionPointGpuChunks.cbegin(),
+          state->mFullResolutionPointGpuChunks.cend(), [](const auto &a, const auto &b) {
+            return a.lastUsedFrame < b.lastUsedFrame;
+          });
+      const auto chunk = state->mFullResolutionPointGpuChunks.takeAt(
+          oldest - state->mFullResolutionPointGpuChunks.cbegin());
+      if (chunk.buffer) glDeleteBuffers(1, &chunk.buffer);
+      if (chunk.vertexArray) glDeleteVertexArrays(1, &chunk.vertexArray);
+      state->mPointCacheResidentBytes -= chunk.byteCount;
+      state->mUploadedFullResolutionPointCount -= chunk.pointCount;
+      needed -= chunk.byteCount;
+      updateManagedResourceUsage();
+    }
+    while (needed > 0 && !state->mFullResolutionMeshGpuChunks.isEmpty()) {
+      const auto oldest = std::min_element(state->mFullResolutionMeshGpuChunks.cbegin(),
+          state->mFullResolutionMeshGpuChunks.cend(), [](const auto &a, const auto &b) {
+            return a.lastUsedFrame < b.lastUsedFrame;
+          });
+      const auto chunk = state->mFullResolutionMeshGpuChunks.takeAt(
+          oldest - state->mFullResolutionMeshGpuChunks.cbegin());
+      if (chunk.indexBuffer) glDeleteBuffers(1, &chunk.indexBuffer);
+      if (chunk.vertexBuffer) glDeleteBuffers(1, &chunk.vertexBuffer);
+      if (chunk.vertexArray) glDeleteVertexArrays(1, &chunk.vertexArray);
+      state->mMeshCacheResidentBytes -= chunk.byteCount;
+      state->mUploadedFullResolutionMeshTriangleCount -= chunk.indexCount / 3;
+      needed -= chunk.byteCount;
+      updateManagedResourceUsage();
+    }
+  }
+  if (!alreadyCurrent) doneCurrent();
 }
 
 void NativeViewport::finishResourceUpload() {
@@ -705,6 +764,9 @@ void NativeViewport::rebalanceResourceResidency() {
   if (!states.contains(mScene)) states.append(mScene);
   const auto active = mScene;
   for (const auto &state : states) {
+    // Hiding is not an instruction to reload or promote a background source.
+    // Retain its existing representation until reveal or real visible demand.
+    if (!state->visible) continue;
     const auto qaObservation = [this, &state](const char *stage,
                                              const ResourceReservation *lease = nullptr) {
       if (!meshPagingQaEnabled()) return;
@@ -754,7 +816,7 @@ void NativeViewport::rebalanceResourceResidency() {
     if (!state->mHasMesh || state->resourceLoading || state->resourceLoadReservation ||
         state->mScenePath.isEmpty() || state->resourceRetryAfterMs > mResourceClock.elapsed()) continue;
     updateManagedResourceUsage();
-    const auto budget = mResources->status();
+    auto budget = mResources->status();
     // Compare GPU usage with the target captured before this trim pass. A freed
     // cache page is not immediately credited by an old hardware observation;
     // recomputing its shortfall here would subtract it twice and demote a mesh
@@ -773,6 +835,10 @@ void NativeViewport::rebalanceResourceResidency() {
     } else if (!pressure && !state->resourceResidentUploadFailed &&
                state->resourceResidentStorageSupported && state->mMeshCache.isValid() &&
                state->resourceResidentRamPeakBytes > 0 && state->resourceResidentGpuBytes > 0) {
+      const qint64 replaceable = state->resourcePointGpuBytes + state->resourceMeshGpuBytes +
+          state->resourceTextureGpuBytes + state->mMeshCacheResidentBytes + state->mPointCacheResidentBytes;
+      trimHiddenPageCaches(std::max<qint64>(0, state->resourceResidentGpuBytes - replaceable));
+      budget = mResources->status();
       auto reservation = mResources->createReservation();
       if (!reservation->tryResize(state->resourceResidentRamPeakBytes,
                                   state->resourceResidentGpuBytes)) {
@@ -1051,6 +1117,12 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       if (found == mSceneStates.cend()) continue;
       const auto &state = *found;
       state->visible = object.visible;
+      if (!state->visible) {
+        state->mPendingPointCachePages.clear();
+        state->mPendingMeshCachePages.clear();
+        state->resourcePointPageReservations.clear();
+        state->resourceMeshPageReservations.clear();
+      }
       QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, state);
       QScopedValueRollback<bool> background(mRenderingInactiveScene, true);
       state->sourceTranslation = object.translation;
@@ -1082,6 +1154,12 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
       auto state = adoptPreview ? previewToAdopt : found == mSceneStates.cend() ? std::make_shared<SceneState>() : *found;
       state->id = object.id;
       state->visible = object.visible;
+      if (!state->visible) {
+        state->mPendingPointCachePages.clear();
+        state->mPendingMeshCachePages.clear();
+        state->resourcePointPageReservations.clear();
+        state->resourceMeshPageReservations.clear();
+      }
       retained.append(state);
       const bool isActive = object.id == activeId;
       if (isActive) active = state;
@@ -1283,9 +1361,8 @@ void NativeViewport::setTrainingGpuPreviewDescriptor(
   mTrainingGpuPreviewStopPending = false;
   if (descriptor.state == TrainingGpuPreviewState::Ready && !mProcessingPreviewPaused) {
     mTrainingGpuPreviewCameraFramed = false;
-    mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
-    mTrainingGpuPreviewTimer->start();
   }
+  updateFrameRefreshPolicy();
   update();
 }
 
@@ -1645,7 +1722,7 @@ void NativeViewport::setProcessingPreviewPaused(const bool paused) {
     if (mLatestTrainingGpuPreviewDescriptor) {
       mPendingTrainingGpuPreviewDescriptor = mLatestTrainingGpuPreviewDescriptor;
       mTrainingGpuPreviewStopPending = false;
-      mTrainingGpuPreviewTimer->start();
+      updateFrameRefreshPolicy();
     }
     const QString candidate = mPausedPreviewCandidatePath;
     const qint64 candidateCount = mPausedPreviewCandidateCount;
@@ -2531,6 +2608,15 @@ bool NativeViewport::selectableModelAvailable() const {
       !mScene->previewLoadBusy && !mScene->previewLoadFailed && visibleModelAvailable();
 }
 
+bool NativeViewport::exportableModelAvailable() const {
+  return !mProcessingActive && mScene != mProcessingScene &&
+      !mScene->previewLoadBusy && !mScene->previewLoadFailed &&
+      !mScene->mPreviewOnlyScene && !mScene->mScenePath.isEmpty() &&
+      (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
+       mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
+       mScene->mFullResolutionPointCount > 0 || mScene->mFullResolutionMeshTriangleCount > 0);
+}
+
 bool NativeViewport::visibleModelAvailable() const {
   return mScene->visible && ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame()) ||
       (!mScene->mScenePath.isEmpty() &&
@@ -3294,8 +3380,49 @@ void NativeViewport::changeEvent(QEvent *event) {
   }
 }
 
+void NativeViewport::monitorRefreshWindow() {
+  QWidget *current = window();
+  if (mRefreshPolicyWindow == current) return;
+  if (mRefreshPolicyWindow) mRefreshPolicyWindow->removeEventFilter(this);
+  mRefreshPolicyWindow = current;
+  if (mRefreshPolicyWindow) mRefreshPolicyWindow->installEventFilter(this);
+}
+
+bool NativeViewport::eventFilter(QObject *watched, QEvent *event) {
+  if (watched == mRefreshPolicyWindow &&
+      (event->type() == QEvent::WindowStateChange || event->type() == QEvent::Hide ||
+       event->type() == QEvent::Show)) {
+    if (event->type() == QEvent::Hide || window()->isMinimized()) {
+      mFrameRefreshTimer->stop();
+      mTrainingGpuPreviewTimer->stop();
+      mFrameRateCounter.pause();
+    }
+    // Observe final visibility after Qt has completed the top-level transition.
+    QTimer::singleShot(0, this, [this] {
+      updateFrameRefreshPolicy();
+      if (isVisible() && !window()->isMinimized()) update();
+    });
+  }
+  return QOpenGLWidget::eventFilter(watched, event);
+}
+
+void NativeViewport::showEvent(QShowEvent *event) {
+  QOpenGLWidget::showEvent(event);
+  monitorRefreshWindow();
+  updateFrameRefreshPolicy();
+  update();
+}
+
+void NativeViewport::hideEvent(QHideEvent *event) {
+  mFrameRefreshTimer->stop();
+  mTrainingGpuPreviewTimer->stop();
+  mFrameRateCounter.pause();
+  QOpenGLWidget::hideEvent(event);
+}
+
 void NativeViewport::paintGL() {
-  if (!isVisible() || window()->isMinimized()) return;
+  if (!isVisible() || window()->isMinimized()) { updateFrameRefreshPolicy(); return; }
+  if (!frameTimingBurstActive()) mFrameRateCounter.pause();
   if (!mCapturingProcessingReferenceImage) {
     QScopedValueRollback<std::shared_ptr<SceneState>> previewScope(mScene,
         mProcessingScene ? mProcessingScene : mScene);
@@ -3371,6 +3498,7 @@ void NativeViewport::paintGL() {
     drawAxisGizmo(painter);
     painter.end();
     ++mRenderedFrameSerial;
+    updateFrameRefreshPolicy();
     return;
   }
   if (!mCapturingProcessingReferenceImage && mProcessingActive &&
@@ -3384,6 +3512,7 @@ void NativeViewport::paintGL() {
     drawAxisGizmo(painter);
     painter.end();
     ++mRenderedFrameSerial;
+    updateFrameRefreshPolicy();
     return;
   }
   const QMatrix4x4 view = viewMatrix();
@@ -3452,6 +3581,7 @@ void NativeViewport::paintGL() {
       });
     }
   }
+  updateFrameRefreshPolicy();
 }
 
 void NativeViewport::drawSceneGeometry(const QMatrix4x4 &view, const QMatrix4x4 &projection) {
@@ -4073,22 +4203,42 @@ void NativeViewport::rebuildRenderedVertices() {
   updateFrameRefreshPolicy();
 }
 
+bool NativeViewport::hasPendingFrameUploads() const {
+  const bool pointUploadAvailable = mPointProgram && mPointProgram->isLinked();
+  const bool meshUploadAvailable = mMeshProgram && mMeshProgram->isLinked();
+  const auto needsRefresh = [pointUploadAvailable, meshUploadAvailable](const auto &scene) {
+    return scene->visible && ((pointUploadAvailable && scene->mPointUploadPending) ||
+        (meshUploadAvailable && scene->mMeshUploadPending) ||
+        scene->mFullResolutionPointClearPending || scene->mFullResolutionMeshClearPending ||
+        scene->mMeshTextureClearPending || (meshUploadAvailable && scene->mMeshTextureUploadPending) ||
+        (pointUploadAvailable && !scene->mPendingPointCachePages.isEmpty()) ||
+        (meshUploadAvailable && !scene->mPendingMeshCachePages.isEmpty()));
+  };
+  return needsRefresh(mScene) || std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), needsRefresh);
+}
+
+bool NativeViewport::frameTimingBurstActive() const {
+  return hasPendingFrameUploads() || mPressedButtons != Qt::NoButton ||
+      mModelDragActive || mSelectionGestureActive || mObservationDragActive || mViewSnapTimer->isActive() ||
+      (mProcessingActive && mProcessingPreviewVisible && !mProcessingPreviewPaused);
+}
+
 void NativeViewport::updateFrameRefreshPolicy() {
   // The optimizer has priority while a task is running. This changes actual
   // drawing cadence only; FrameRateCounter still counts completed frames.
   mFrameRefreshTimer->setInterval(mProcessingActive ? 33 : 0);
-  mTrainingGpuPreviewTimer->setInterval(mProcessingActive ? 33 : 0);
-  const auto needsRefresh = [](const auto &scene) {
-    return scene->visible && (scene->mRenderedPointCount > 0 || scene->mProgressiveUploadActive ||
-        !scene->mPendingPointCachePages.isEmpty() || scene->pointReadsActive() ||
-        !scene->mPointCacheReadsInFlight.isEmpty() ||
-        !scene->mFullResolutionPointGpuChunks.isEmpty() || scene->mRenderedMeshIndexCount > 0 ||
-        scene->mMeshTextureUploadPending || !scene->mPendingMeshCachePages.isEmpty() ||
-        !scene->mMeshCacheReadsInFlight.isEmpty() || !scene->mFullResolutionMeshGpuChunks.isEmpty());
-  };
+  // Only a live worker mapping requires polling. Resident scenes and snapshots
+  // are event-driven, including async completion and navigation update() calls.
+  mTrainingGpuPreviewTimer->setInterval(33);
+  const bool exposed = isVisible() && window() && !window()->isMinimized();
+  const bool pollTraining = exposed && mProcessingActive && mProcessingPreviewVisible &&
+      !mProcessingPreviewPaused && (mPendingTrainingGpuPreviewDescriptor.has_value() ||
+                                   mTrainingGpuPreview.attached());
+  if (pollTraining && !mTrainingGpuPreviewTimer->isActive()) mTrainingGpuPreviewTimer->start();
+  else if (!pollTraining && mTrainingGpuPreviewTimer->isActive()) mTrainingGpuPreviewTimer->stop();
   const bool shouldRefreshContinuously =
-      !(mProcessingPreviewPaused && mProcessingPreviewVisible) &&
-      (needsRefresh(mScene) || std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), needsRefresh));
+      exposed && !(mProcessingPreviewPaused && mProcessingPreviewVisible) &&
+      hasPendingFrameUploads();
   if (shouldRefreshContinuously && !mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->start();
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
@@ -4390,7 +4540,7 @@ void NativeViewport::updatePointCacheSelection(
 }
 
 void NativeViewport::requestMissingPointCachePages() {
-  if (!mScene->mPointCache.isValid()) {
+  if (!mScene->visible || !mScene->mPointCache.isValid()) {
     return;
   }
   const auto isResident = [this](const int nodeId) {
@@ -4496,6 +4646,7 @@ void NativeViewport::requestMissingPointCachePages() {
                 update();
                 return;
               }
+              if (!mScene->visible) { updateFrameRefreshPolicy(); return; }
               for (auto &page : pages) {
                 if (page.isValid()) {
                   mScene->resourcePointPageReservations.insert(
@@ -4610,6 +4761,7 @@ void NativeViewport::uploadPendingPointCachePages() {
         page.nodeId < mScene->mPointCache.nodes.size()) {
       const qsizetype byteCount =
           page.vertices.size() * static_cast<qsizetype>(sizeof(PointPreviewVertex));
+      trimHiddenPageCaches(byteCount);
       evictPointCacheUntilFits(byteCount);
       updateManagedResourceUsage();
       auto gpuReservation = mResources->createReservation();
@@ -4889,6 +5041,7 @@ void NativeViewport::updateMeshCacheSelection(
 }
 
 void NativeViewport::requestMissingMeshCachePages() {
+  if (!mScene->visible) return;
   if (!pagedMeshAvailable() || mScene->resourceLoading) {
     return;
   }
@@ -4989,6 +5142,7 @@ void NativeViewport::requestMissingMeshCachePages() {
                 return;
               }
               mScene->mMeshCacheReadsInFlight.remove(nodeId);
+              if (!mScene->visible) { updateFrameRefreshPolicy(); return; }
               if (page.isValid()) {
                 if (meshPagingQaEnabled())
                   logMeshPagingQa(MeshPagingQaEvent::Enqueue, mScene->mMeshCache, mScene->mDesiredMeshCacheNodes,
@@ -5114,6 +5268,7 @@ void NativeViewport::uploadPendingMeshCachePages() {
       const qsizetype indexBytes =
           page.indices.size() * static_cast<qsizetype>(sizeof(quint32));
       const qsizetype byteCount = vertexBytes + indexBytes;
+      trimHiddenPageCaches(byteCount);
       evictMeshCacheUntilFits(byteCount);
       updateManagedResourceUsage();
       auto gpuReservation = mResources->createReservation();

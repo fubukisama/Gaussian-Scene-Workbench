@@ -87,7 +87,7 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Focused native configure failed.' }
           cmake --build native/build-scene-visibility --config Release --parallel `
-            --target GaussianSceneWorkbench gsw_workspace_scene_format_tests 2>&1 |
+            --target GaussianSceneWorkbench gsw_workspace_scene_format_tests gsw_frame_rate_counter_tests 2>&1 |
             Tee-Object -FilePath native/scene-visibility-artifact/build.log
           if ($LASTEXITCODE -ne 0) { throw 'Focused native build failed.' }
 
@@ -128,7 +128,7 @@ jobs:
             ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
               --output-log native/scene-visibility-artifact/visibility-contracts.log `
               --output-junit native/scene-visibility-artifact/visibility-contracts.xml `
-              -R '^(native_scene_visibility_(zh_CN|en_US|ja_JP)_(light|dark)|native_viewport_scheduling_(light|dark)|workspace_scene_format|native_translation_catalog|native_translation_validator_tests)$'
+              -R '^(native_scene_visibility_(zh_CN|en_US|ja_JP)_(light|dark)|native_viewport_scheduling_(light|dark)|native_resource_budget_hidden_mesh|frame_rate_counter|workspace_scene_format|native_translation_catalog|native_translation_validator_tests)$'
             $result = $LASTEXITCODE
           } finally {
             $last = 'native/build-scene-visibility/Testing/Temporary/LastTest.log'

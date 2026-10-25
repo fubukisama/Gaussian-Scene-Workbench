@@ -28,6 +28,7 @@
 #include <QPoint>
 #include <QPointF>
 #include <QPolygonF>
+#include <QPointer>
 #include <QQuaternion>
 #include <QRectF>
 #include <QSet>
@@ -45,6 +46,8 @@ class QEvent;
 class QKeyEvent;
 class QWheelEvent;
 class QTimer;
+class QShowEvent;
+class QHideEvent;
 
 namespace gsw {
 
@@ -224,6 +227,7 @@ public:
   }
   [[nodiscard]] bool orthographicProjection() const { return mOrthographic; }
   [[nodiscard]] bool selectableModelAvailable() const;
+  [[nodiscard]] bool exportableModelAvailable() const;
   [[nodiscard]] bool visibleModelAvailable() const;
   [[nodiscard]] double referencePlaneElevation() const;
   [[nodiscard]] QString referencePlaneDescription() const;
@@ -290,6 +294,9 @@ protected:
   void resizeGL(int width, int height) override;
   void paintGL() override;
   void changeEvent(QEvent *event) override;
+  bool eventFilter(QObject *watched, QEvent *event) override;
+  void showEvent(QShowEvent *event) override;
+  void hideEvent(QHideEvent *event) override;
   void enterEvent(QEnterEvent *event) override;
   void leaveEvent(QEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;
@@ -527,6 +534,9 @@ private:
   void finishSelectionGesture(Qt::KeyboardModifiers modifiers);
   void rebuildRenderedVertices();
   void updateFrameRefreshPolicy();
+  [[nodiscard]] bool hasPendingFrameUploads() const;
+  [[nodiscard]] bool frameTimingBurstActive() const;
+  void monitorRefreshWindow();
   void notifyEditState();
   void uploadPendingPointCloud();
   void updatePointCacheSelection(const QMatrix4x4 &viewProjection);
@@ -654,6 +664,7 @@ private:
   void updateManagedResourceUsage();
   void rebalanceResourceResidency();
   qsizetype sharedPageGpuBudget() const;
+  void trimHiddenPageCaches(qsizetype requiredBytes);
   void finishResourceUpload();
   void discardResidentMeshStorage();
   std::shared_ptr<ResourceBudgetController> mResources;
@@ -761,6 +772,7 @@ private:
   QString mTrainingGpuPreviewError;
   QTimer *mTrainingGpuPreviewTimer = nullptr;
   QTimer *mFrameRefreshTimer = nullptr;
+  QPointer<QWidget> mRefreshPolicyWindow;
   QTimer *mViewSnapTimer = nullptr;
   bool mZoomToCursorEnabled = true;
   FrameRateCounter mFrameRateCounter;

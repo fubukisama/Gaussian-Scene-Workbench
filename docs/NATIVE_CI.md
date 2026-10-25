@@ -29,6 +29,31 @@ Windows runner が現在のコミットに対する三言語・描画・選択�
 
 ## Upstream adaptation acceptance / 源码移植验收 / ソース移植の検証
 
+### Independent complete build and C++ extraction
+
+中文：全量原生构建／全部 CTest／worker／打包与 C++ CodeQL 提取分别在独立
+Windows job 执行。扫描仍为 `manual`、`security-extended`、`BUILD_TESTING=ON`
+并构建全部目标，保留 `/native/c-cpp` 类别；不排除测试文件或改用无构建扫描。
+两条结果独立记录：普通打包完成不代表 C++ 扫描通过，提取超时仍是失败门禁。
+视觉验收模块按证据／输入辅助、模型矩阵、视口断言拆分；原阈值、执行顺序和
+截图名称保留。是否解决提取瓶颈必须由新提交对应的真实扫描结果确认。
+
+English: The complete native build, every CTest/worker/package gate and C++
+CodeQL extraction run in independent Windows jobs. Extraction remains manual,
+security-extended and BUILD_TESTING=ON with all targets and the /native/c-cpp
+category. No test source is excluded and no build-free mode replaces it. Ordinary
+delivery is not a successful security scan; extraction timeouts remain failures.
+Visual QA is split into evidence/input helpers, the actual model matrix and
+viewport assertions without changing thresholds, order or evidence names. Only
+the exact commit's real scan can establish whether extraction is fixed.
+
+日本語：全原生ビルド・全 CTest・worker・配布検証と、C++ CodeQL の抽出は
+独立した Windows job で実行します。manual／security-extended／全ターゲット
+および BUILD_TESTING=ON と /native/c-cpp を維持し、テストの除外や無ビルドへの
+切替は行いません。通常の配布成功と走査成功は別で、抽出タイムアウトは失敗
+として残します。視覚検証の分割でも閾値・順序・証拠名を保持し、新コミット
+の実際の走査でのみ改善を確認します。
+
 中文：`Upstream viewport acceptance` 并行执行三语言真实滚轮／平移／菜单操作、
 小样本真实点云分页及两处纯模块回归，上传实际帧缓冲和日志。它没有 CodeQL
 跟踪构建的耗时，但不替代原全量构建、115 项原生测试、worker 或安全扫描。

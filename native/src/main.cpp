@@ -226,6 +226,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption resourceBudgetSharedSmokeOption(QStringLiteral("smoke-test-resource-budget-shared"),
       QStringLiteral("Verify serial and concurrent mesh imports share one resource budget."));
   parser.addOption(resourceBudgetSharedSmokeOption);
+  QCommandLineOption resourceBudgetHiddenSmokeOption(QStringLiteral("smoke-test-resource-budget-hidden"),
+      QStringLiteral("Verify hidden mesh cache priority, deferred promotion and reveal under a real shared GPU cap."));
+  parser.addOption(resourceBudgetHiddenSmokeOption);
   QCommandLineOption resourceBudgetTexturePageSmokeOption(QStringLiteral("smoke-test-resource-budget-texture-page"),
       QStringLiteral("Verify a texture-compatible budget can display a fitting mesh page."));
   parser.addOption(resourceBudgetTexturePageSmokeOption);
@@ -478,6 +481,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(resourceBudgetSmokeOption) ||
                          parser.isSet(resourceBudgetMeshSmokeOption) ||
                          parser.isSet(resourceBudgetSharedSmokeOption) ||
+                         parser.isSet(resourceBudgetHiddenSmokeOption) ||
                          parser.isSet(resourceBudgetTexturePageSmokeOption) ||
                          parser.isSet(resourceBudgetMinimumPageSmokeOption) ||
                          parser.isSet(resourceBudgetCacheFirstSmokeOption) ||
@@ -580,6 +584,11 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(resourceBudgetTexturePageSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runResourceBudgetTexturePageSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(resourceBudgetHiddenSmokeOption)) {
+    QTimer::singleShot(650, &application, [&] {
+      smokeTestCompleted = gsw::runResourceBudgetHiddenMeshSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(resourceBudgetSharedSmokeOption)) {

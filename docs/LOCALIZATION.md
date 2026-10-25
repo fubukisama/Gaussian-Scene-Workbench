@@ -139,7 +139,12 @@ Models, Hide Selected Models, Isolate Selected Models, and Show All Models.
 Space in the project tree hides the selected visible models, or reveals the
 selection when all selected models are hidden; it never intercepts viewport keys.
 Hidden rows remain in the tree and can be selected for revealing or unloading;
-hidden geometry cannot be picked or transformed in the viewport. The same path
+selecting their names also changes the inspected/exported source without
+revealing them. Visibility controls viewport picking/transforms, not export
+eligibility. An unsaved-crop cancellation restores the actual source and tree
+selection together. Dynamic renderer status is regenerated from cached live
+state on language changes, not rebound to its initial empty-scene caption.
+Hidden geometry cannot be picked or transformed in the viewport. The same path
 covers point clouds, meshes, 3DGS and 2DGS. Source data, transforms and crop edits
 are retained; visibility is saved in the project and old projects default to
 visible. This is viewport visibility, not an export filter or model deletion.
@@ -155,11 +160,42 @@ three languages. The icon/target column follows the UI scale and theme palette.
 | Show All Models | 显示全部模型 | すべてのモデルを表示 |
 
 中文：眼睛仅控制视口显示，不卸载、删除或改写原始模型。隐藏模型仍可在
-场景列表选择并恢复显示；不可从视口误选或变换。显示状态随工程保存。
+场景列表选择、查看属性、导出及恢复显示；不可从视口误选或变换。取消裁剪
+确认会同时恢复实际来源和列表选择，显示状态随工程保存。切换语言立即按
+当前模型刷新渲染状态，不重放“未载入场景”的初始文字。
 
 日本語：目のアイコンはビューポートの表示のみを制御します。読み込み解除・
 削除・元データの変更は行いません。非表示モデルは一覧から再表示できますが、
-ビューポートでは選択・変換できません。表示状態はプロジェクトに保存します。
+ビューポートでは選択・変換できません。一覧で非表示モデルを選ぶと、表示
+を変えずにプロパティと書き出し対象が切り替わります。切り抜き変更の確認を
+取り消すと対象と選択を復元します。表示状態はプロジェクトに保存し、言語
+変更時には実際の描画状態を直ちに再生成します。
+
+### On-demand viewport scheduling
+
+Loaded static geometry does not keep a zero-interval repaint timer alive.
+Navigation/edits, animations and actual pending GPU work request frames;
+asynchronous completions wake their own redraw. Minimized/hidden viewports stop
+their refresh/poll timers and drain pending uploads after restoration. A live
+training preview retains its existing 33 ms cadence while exposed and unpaused.
+Idle/minimized gaps are not measured as rendering time; measured frame samples
+are retained, not fabricated. This applies to point clouds, meshes, 3DGS and
+2DGS without changing model data, camera parameters or training execution.
+
+Hidden paged layers keep warm data while resources permit, but do not divide a
+visible layer's page share or get promoted/reloaded in the background. Under
+visible allocation pressure their disposable GPU pages are physically released
+first; unreleased memory is never credited to the resource guard. Revealing a
+layer restores ordinary admission, preserving source files and edits.
+
+中文：静止画面按需重绘，最小化时停止刷新与预览轮询；交互、动画、异步完成和
+待上传数据仍能唤醒显示。隐藏分页模型保留可恢复缓存，但不抢占可见模型的分页
+份额，也不在后台提升完整驻留；资源紧张时优先物理释放其可重建 GPU 页。
+
+日本語：静止画面は必要時のみ再描画し、最小化中は描画・プレビューのタイマー
+を停止します。操作・アニメーション・非同期完了・未転送データは表示を再開
+できます。非表示のページ化モデルは復元用キャッシュを保持しますが、表示中
+モデルの割当を減らさず、バックグラウンドで完全常駐へ昇格させません。
 
 Blender-derived viewport navigation uses localized **Perspective / Orthographic**
 labels (`透视 / 正交`, `透視 / 平行`) rather than calling every orthographic view

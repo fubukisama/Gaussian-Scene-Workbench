@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QColor>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDataStream>
 #include <QDebug>
 #include <QDialog>
@@ -1200,6 +1201,99 @@ bool runResourceBudgetTexturePageSmokeTest(MainWindow &window) {
   if (!check(visible, "a texture-compatible budget can present a fitting mesh page instead of a blank viewport")) return false;
   viewport->setScene({}, 0);
   qInfo() << "RESOURCE_BUDGET_TEXTURE_PAGE PASS: bounded texture paging presents real geometry without exhausting hardware";
+  return true;
+}
+
+bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  const auto check = [](bool good, const char *message) {
+    if (!good) qCritical() << "RESOURCE_BUDGET_HIDDEN FAIL:" << message;
+    return good;
+  };
+  if (!check(viewport != nullptr, "real viewport available")) return false;
+  const auto originalPolicy = viewport->resourceBudgetPolicy();
+  QTemporaryDir fixtures(QDir(QCoreApplication::applicationDirPath()).filePath("resource-hidden-XXXXXX"));
+  if (!check(fixtures.isValid(), "bounded owned fixture directory")) return false;
+  const auto restore = qScopeGuard([&] {
+    viewport->setSceneObjects({}, {});
+    viewport->setResourceBudgetPolicy(originalPolicy);
+  });
+  const QString redPath = QDir(fixtures.path()).filePath("hidden-red.ply");
+  const QString bluePath = QDir(fixtures.path()).filePath("hidden-blue.ply");
+  if (!check(writeSurface(redPath, 768, QColor(240, 20, 20)) &&
+             writeSurface(bluePath, 768, QColor(20, 20, 240)), "actual bounded mesh sources written")) return false;
+  const auto hash = [](const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QByteArray();
+    QCryptographicHash digest(QCryptographicHash::Sha256);
+    if (!digest.addData(&file)) return QByteArray();
+    return digest.result();
+  };
+  const auto redHash = hash(redPath), blueHash = hash(bluePath);
+  ResourceBudgetPolicy policy = originalPolicy;
+  policy.mode = ResourceBudgetPolicy::Mode::Manual;
+  policy.ramLimitMiB = 1024;
+  policy.gpuLimitMiB = 64;
+  viewport->setResourceBudgetPolicy(policy);
+  QList<SceneObject> objects{
+      {"hidden-budget-red", redPath, {-1.5F, 0, 0}, {}, {1, 1, 1}, 589825},
+      {"hidden-budget-blue", bluePath, {1.5F, 0, 0}, {}, {1, 1, 1}, 589825}};
+  viewport->setSceneObjects(objects, objects[0].id);
+  viewport->setEditToolsLocked(true);
+  viewport->setShowCameras(false);
+  viewport->setShowObservationTrackball(false);
+  if (!check(waitUntil([&] {
+        viewport->grabFramebuffer();
+        const auto status = viewport->resourceBudgetStatus();
+        return status.residentMeshCount + status.pagedMeshCount == 2 && status.pagedMeshCount >= 1 &&
+            status.loadingMeshCount == 0 && status.reservedRamBytes == 0 && status.reservedGpuBytes == 0;
+      }), "real shared cap forces at least one source into paging")) return false;
+  viewport->setAxisView(NavigationAxis::PositiveZ);
+  waitUntil([] { return false; }, 300);
+  viewport->selectAllModels();
+  if (!check(viewport->focusModel(), "both imported meshes framed")) return false;
+  viewport->clearSelection();
+  if (!check(waitUntil([&] {
+        const auto frame = viewport->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+        return modelColorPixels(frame, true) > 500 && modelColorPixels(frame, false) > 500;
+      }), "both models have actual visible geometry")) return false;
+  int hidden = -1;
+  for (int i = 0; i < objects.size(); ++i) {
+    if (!viewport->activateSceneObject(objects[i].id)) return false;
+    viewport->grabFramebuffer();
+    if (viewport->residentMeshTriangleCount() > 0) { hidden = i; break; }
+  }
+  if (!check(hidden >= 0, "a real GPU-paged model selected for the visibility regression")) return false;
+  const int visible = 1 - hidden;
+  objects[hidden].visible = false;
+  viewport->setSceneObjects(objects, objects[visible].id);
+  policy.gpuLimitMiB = 128;
+  viewport->setResourceBudgetPolicy(policy);
+  // Observe more than the real one-second residency probe interval. Merely
+  // checking immediately after hiding could miss a later background promotion.
+  waitUntil([] { return false; }, 2200);
+  if (!check(waitUntil([&] { return viewport->resourceBudgetStatus().loadingMeshCount == 0; }),
+             "visible-source residency transitions finish")) return false;
+  const auto hiddenStatus = viewport->resourceBudgetStatus();
+  if (!check(hiddenStatus.residentMeshCount == 1 && hiddenStatus.pagedMeshCount == 1 &&
+             !viewport->sceneObjectVisible(objects[hidden].id),
+             "hidden paged source is not promoted despite available headroom")) return false;
+  objects[hidden].visible = true;
+  viewport->setSceneObjects(objects, objects[visible].id);
+  if (!check(waitUntil([&] {
+        viewport->grabFramebuffer();
+        const auto status = viewport->resourceBudgetStatus();
+        return status.residentMeshCount == 2 && status.pagedMeshCount == 0 &&
+            status.loadingMeshCount == 0 && status.reservedGpuBytes == 0;
+      }), "revealing makes the second source eligible for normal full-residency promotion")) return false;
+  if (!check(hash(redPath) == redHash && hash(bluePath) == blueHash,
+             "visibility and residency never rewrite source data")) return false;
+  viewport->setSceneObjects({}, {});
+  if (!check(waitUntil([&] {
+        const auto status = viewport->resourceBudgetStatus();
+        return status.managedGpuBytes == 0 && status.reservedGpuBytes == 0 && status.reservedRamBytes == 0;
+      }), "all real GPU allocations and leases are returned")) return false;
+  qInfo() << "RESOURCE_BUDGET_HIDDEN PASS: visible-first residency, deferred hidden promotion, reveal and unchanged sources";
   return true;
 }
 

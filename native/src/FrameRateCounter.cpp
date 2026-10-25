@@ -4,6 +4,8 @@
 
 namespace gsw {
 
+void FrameRateCounter::pause() { mLastCompletionTime.reset(); }
+
 void FrameRateCounter::frameCompleted(const TimePoint completionTime) {
   if (!mLastCompletionTime.has_value()) {
     mLastCompletionTime = completionTime;

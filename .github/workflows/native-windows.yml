@@ -139,6 +139,87 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  native-codeql:
+    name: Native C++ CodeQL
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
+    runs-on: windows-2022
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Set up QA Python
+        id: qa-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Install native analysis dependencies
+        shell: pwsh
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Native analysis dependencies failed.' }
+          $root = Join-Path $env:GITHUB_WORKSPACE 'native/.deps-codeql'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw 'Native analysis codec dependencies failed.' }
+      - name: Initialize native C++ code scanning
+        id: native-codeql
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended
+      - name: Configure complete native analysis build
+        shell: pwsh
+        run: |
+          $releaseDate = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-codeql -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$releaseDate" `
+            '-DPython3_EXECUTABLE=${{ steps.qa-python.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps-codeql/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw 'Native analysis configure failed.' }
+      # Preserve the full all-target extraction, including test translation
+      # units. This independent scan remains red if extraction or analysis fails;
+      # it cannot prevent the ordinary full regression/package job from running.
+      - name: Build all native targets under CodeQL
+        id: native-build
+        timeout-minutes: 75
+        shell: pwsh
+        run: ./scripts/trace_native_ci_build.ps1 -BuildDirectory native/build-codeql -TraceDirectory native/codeql-build-trace/attempt-${{ github.run_attempt }}
+      - name: Upload native analysis build progress trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-codeql-build-progress-trace
+          path: native/codeql-build-trace/**/build-trace.jsonl
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Analyze native C++ code
+        if: ${{ !cancelled() && steps.native-codeql.outcome == 'success' && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 20
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /native/c-cpp
+
   build:
     name: Qt 6 native preview
     # Feature PRs into native main run the same gates as main pushes.
@@ -148,14 +229,12 @@ jobs:
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     # Qt's win64_msvc2022_64 package must use the VS 2022 runner image.
     runs-on: windows-2022
-    # Run 38698219759 needed 55m traced compilation plus analysis/bootstrap;
-    # the 90m job cap cancelled during test 59/115 after 58 passes. Budget the pipeline
-    # while preserving every CTest timeout, assertion and package gate.
+    # Keep every target, worker/CTest assertion and package gate. Native C++
+    # extraction has its own required job, so its cost cannot block these gates.
     timeout-minutes: 150
     permissions:
       contents: read
       actions: read
-      security-events: write
 
     steps:
       - name: Checkout source
@@ -192,7 +271,7 @@ jobs:
           & $env:QA_PYTHON -I -B scripts/verify_native_backend.py --root .
           if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 
-      # Fail fast on CPU/backend regressions before the traced C++ build.
+      # Fail fast on CPU/backend regressions before the ordinary C++ build.
       # This is the same complete worker suite, not a filtered replacement.
       - name: Test native worker
         shell: pwsh
@@ -228,17 +307,6 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw "SPZ codec dependencies failed to build." }
 
-      - name: Initialize native C++ code scanning
-        id: native-codeql
-        if: >-
-          (github.event_name == 'pull_request' && github.base_ref == 'main') ||
-          (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
-        uses: github/codeql-action/init@v4
-        with:
-          languages: c-cpp
-          build-mode: manual
-          queries: security-extended
-
       - name: Configure
         shell: pwsh
         env:
@@ -271,13 +339,6 @@ jobs:
           path: native/ci-build-trace/**/build-trace.jsonl
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Analyze native C++ code
-        if: ${{ !cancelled() && steps.native-codeql.outcome == 'success' && steps.native-build.outcome == 'success' }}
-        timeout-minutes: 20
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: /native/c-cpp
 
       - name: Prepare native test display
         shell: pwsh

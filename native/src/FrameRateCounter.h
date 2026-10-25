@@ -14,6 +14,9 @@ public:
   static constexpr std::size_t kSmoothingWindow = 60;
 
   void frameCompleted(TimePoint completionTime);
+  // End a presentation burst without discarding measured render intervals.
+  // The first completion after resumption is an anchor, not an idle sample.
+  void pause();
 
   [[nodiscard]] std::size_t sampleCount() const;
   [[nodiscard]] double averageFrameMilliseconds() const;
