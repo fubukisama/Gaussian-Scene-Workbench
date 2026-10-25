@@ -406,7 +406,22 @@ function Assert-NinjaHeaderDependency {
 function Invoke-NativeLaunchSmokeTest {
   param([Parameter(Mandatory = $true)][string]$Executable)
 
-  $PackageBin = Split-Path -Parent $Executable
+  $PackageBin = [IO.Path]::GetFullPath((Split-Path -Parent $Executable))
+  $SmokeSettingsRoot = [IO.Path]::GetFullPath((Join-Path $PackageBin 'test-settings'))
+  # Snapshot ownership before starting the one process this gate owns. Existing
+  # QA data, including an empty directory, must never be adopted for cleanup.
+  $SmokeSettingsRootExisted = Test-Path -LiteralPath $SmokeSettingsRoot
+  if (-not [IO.Path]::GetDirectoryName($SmokeSettingsRoot).Equals(
+        $PackageBin.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar),
+        [StringComparison]::OrdinalIgnoreCase) -or
+      [IO.Path]::GetFileName($SmokeSettingsRoot) -cne 'test-settings') {
+    throw 'Invalid fixed smoke-settings child path.'
+  }
+  $PackageBinInfo = Get-Item -LiteralPath $PackageBin -Force
+  if (-not $PackageBinInfo.PSIsContainer -or
+      ($PackageBinInfo.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Package launch requires a regular application-bin directory.'
+  }
   $Process = $null
   $StdoutRead = $null
   $StderrRead = $null
@@ -471,7 +486,32 @@ function Invoke-NativeLaunchSmokeTest {
         }
       }
     } finally {
-      if ($null -ne $Process) { $Process.Dispose() }
+      try {
+        # QTemporaryDir removes the per-run settings folder, but not the empty
+        # parent created by the smoke bootstrap. Do not ship that generated
+        # parent in an installer payload. This is deliberately non-recursive:
+        # pre-existing roots and every remaining entry are retained unchanged.
+        if (-not $SmokeSettingsRootExisted -and $null -ne $Process -and $Process.HasExited -and
+            (Test-Path -LiteralPath $SmokeSettingsRoot)) {
+          $CurrentBin = Get-Item -LiteralPath $PackageBin -Force
+          $SettingsItem = Get-Item -LiteralPath $SmokeSettingsRoot -Force
+          if ($CurrentBin.PSIsContainer -and $SettingsItem.PSIsContainer -and
+              -not ($CurrentBin.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+              -not ($SettingsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+              [IO.Path]::GetDirectoryName($SettingsItem.FullName).Equals(
+                  $PackageBin.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar),
+                  [StringComparison]::OrdinalIgnoreCase) -and
+              [IO.Directory]::GetFileSystemEntries($SmokeSettingsRoot).Length -eq 0) {
+            [IO.Directory]::Delete($SmokeSettingsRoot, $false)
+          }
+        }
+      } catch {
+        # Preserve the process's real exit diagnostic and any uncertain data.
+        # The package/installer boundary still rejects generated leftovers.
+        Write-Warning 'Smoke-settings cleanup was unavailable; existing data was preserved.'
+      } finally {
+        if ($null -ne $Process) { $Process.Dispose() }
+      }
     }
   }
 }

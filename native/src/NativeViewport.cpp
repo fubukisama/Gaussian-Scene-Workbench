@@ -2704,9 +2704,11 @@ bool NativeViewport::selectableModelAvailable() const {
 }
 
 bool NativeViewport::exportableModelAvailable() const {
+  // Paged representations are read-only for point editing, not for export:
+  // modelExportOptions identifies the complete source, never a cache proxy.
   return !mProcessingActive && mScene != mProcessingScene &&
       !mScene->previewLoadBusy && !mScene->previewLoadFailed &&
-      !mScene->mPreviewOnlyScene && !mScene->mScenePath.isEmpty() &&
+      !mScene->mScenePath.isEmpty() &&
       (mScene->mPreviewPointCount > 0 || mScene->mPreviewTriangleCount > 0 ||
        mScene->mRenderedPointCount > 0 || mScene->mRenderedMeshIndexCount > 0 ||
        mScene->mFullResolutionPointCount > 0 || mScene->mFullResolutionMeshTriangleCount > 0);

@@ -3,6 +3,7 @@
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "AppLanguage.h"
+#include "WorkspaceDocument.h"
 
 #include <QAction>
 #include <QApplication>
@@ -1335,13 +1336,47 @@ bool runResourceBudgetHiddenMeshSmokeTest(MainWindow &window) {
   viewport->setResourceBudgetPolicy(policy);
   SceneObject coldTextured{"cold-hidden-textured", coldTexturedPath, {}, {}, {1, 1, 1}, 66049, false};
   viewport->setSceneObjects({coldTextured}, coldTextured.id);
-  if (!check(waitUntil([&] {
+  const bool coldTextureReady = waitUntil([&] {
         const auto status = viewport->resourceBudgetStatus();
         return status.loadingMeshCount == 0 && status.pagedMeshCount == 1 && viewport->exportableModelAvailable();
-      }), "cold textured source is genuinely paged and CPU-exportable")) return false;
+      });
   coldStatus = viewport->resourceBudgetStatus();
+  qInfo() << "RESOURCE_BUDGET_HIDDEN: cold texture resident/paged/loading/exportable"
+          << coldStatus.residentMeshCount << coldStatus.pagedMeshCount << coldStatus.loadingMeshCount
+          << viewport->exportableModelAvailable() << "managed RAM/GPU" << coldStatus.managedRamBytes
+          << coldStatus.managedGpuBytes << "reserved RAM/GPU" << coldStatus.reservedRamBytes
+          << coldStatus.reservedGpuBytes;
+  if (!check(coldTextureReady, "cold textured source is genuinely paged and CPU-exportable")) return false;
   if (!check(coldStatus.managedGpuBytes == 0 && coldStatus.reservedRamBytes == 0 && coldStatus.reservedGpuBytes == 0,
              "hidden paged texture retains CPU data without GPU reservation")) return false;
+  auto coldExport = viewport->modelExportOptions();
+  coldExport.destinationPath = QDir(fixtures.path()).filePath("cold-textured-export.ply");
+  coldExport.format = ModelExportFormat::Ply;
+  coldExport.applyTransform = false;
+  if (!check(coldExport.sourcePath == coldTexturedPath && coldExport.deletedVertices.isEmpty() &&
+             !viewport->hasEditableScene(), "paged source export does not enable point editing or use a cache proxy")) return false;
+  const auto coldExportResult = exportModelFile(coldExport);
+  if (!coldExportResult.success) qCritical() << "RESOURCE_BUDGET_HIDDEN: cold source export" << coldExportResult.error;
+  if (!check(coldExportResult.success, "hidden paged source exports through the actual full-source PLY path")) return false;
+  const auto geometryPayloadHash = [](const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QByteArray();
+    while (!file.atEnd() && file.pos() < 1024 * 1024) {
+      if (file.readLine(65537).trimmed() != "end_header") continue;
+      QCryptographicHash digest(QCryptographicHash::Sha256);
+      return digest.addData(&file) ? digest.result() : QByteArray();
+    }
+    return QByteArray();
+  };
+  const auto exportedMetadata = WorkspaceDocument::inspectPly(coldExport.destinationPath);
+  const auto originalPayload = geometryPayloadHash(coldTexturedPath);
+  const auto exportedPayload = geometryPayloadHash(coldExport.destinationPath);
+  coldStatus = viewport->resourceBudgetStatus();
+  if (!check(exportedMetadata.valid && exportedMetadata.vertexCount == 66049 && exportedMetadata.faceCount == 131072 &&
+             !originalPayload.isEmpty() && originalPayload == exportedPayload &&
+             hash(coldTexturedPath) == coldTextureHash && hash(coldAtlasPath) == coldAtlasHash &&
+             coldStatus.managedGpuBytes == 0 && coldStatus.reservedRamBytes == 0 && coldStatus.reservedGpuBytes == 0,
+             "hidden paged export preserves every source vertex, face, UV and attribute without GPU admission")) return false;
   policy.gpuLimitMiB = 80;
   viewport->setResourceBudgetPolicy(policy);
   coldTextured.visible = true;

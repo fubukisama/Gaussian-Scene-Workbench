@@ -29,6 +29,21 @@ cleanup. It retains the existing warm-cache/headroom assertions and timeout.
 真实内存／显存和预约、可见模型准入、共享上限内重新显示、来源哈希及实际分配
 清理；保留原有热缓存／预算提升断言与超时，不以账面扣除代替物理释放。
 
+Package-startup acceptance removes only a newly created, empty, non-reparse
+`bin/test-settings` parent after its owned process exits. Pre-existing roots or
+remaining data are never adopted for cleanup. Real copied-runtime regressions
+preserve both an existing empty root and a sentinel file; installer input
+validation continues to reject generated/private payload entries unchanged.
+
+中文：打包启动验收只在自有进程退出后，非递归删除本次新建且为空的普通
+`bin/test-settings` 目录；已有目录和剩余数据均保留。复制运行库的真实回归分别
+验证已有空目录及哨兵文件不受影响，安装包对生成数据／隐私数据的拒绝规则不变。
+
+日本語：配布物の起動検証は、自身のプロセス終了後に新規作成した空の通常
+`bin/test-settings` ディレクトリだけを再帰せず削除します。既存のディレクトリと
+残存データは保持します。コピーした実ランタイムで空の既存ディレクトリと
+センチネルの保持を検証し、生成・私有データの配布拒否条件は維持します。
+
 日本語：非表示リソースの回帰は、復元時から非表示のメッシュ・点群・3DGS・
 2DGS も検査します。実際の使用量・予約、表示モデルの割当、共有上限内の
 再表示、元データのハッシュと実割当の解放を確認し、従来のキャッシュ／予算
