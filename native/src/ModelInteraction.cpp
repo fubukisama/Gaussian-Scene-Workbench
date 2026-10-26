@@ -1,4 +1,5 @@
 #include "ModelInteraction.h"
+#include "PlyPointCloudLoader.h"
 
 #include <QVector4D>
 
@@ -254,6 +255,47 @@ modelPickViewport(const QPointF &screenPosition, const QSize &viewportSize,
 bool modelPickBufferHasCoverage(const std::span<const quint8> redSamples) {
   return std::any_of(redSamples.begin(), redSamples.end(),
                      [](const quint8 sample) { return sample != 0; });
+}
+
+std::optional<float> pointModelPickDepth(
+    const std::span<const PointCloudVertex> vertices, const QBitArray &deleted,
+    const QMatrix4x4 &modelViewProjection, const ModelPickViewport &mapping,
+    const qreal pointDiameterPhysicalPixels, const bool nearestDepth) {
+  if (!mapping.isValid() || !std::isfinite(pointDiameterPhysicalPixels) ||
+      pointDiameterPhysicalPixels <= 0.0) return std::nullopt;
+  const qreal radiusSquared = pointDiameterPhysicalPixels *
+                              pointDiameterPhysicalPixels * 0.25;
+  if (!std::isfinite(radiusSquared)) return std::nullopt;
+  const qreal lastX = mapping.framebufferSize.width() - 1.0;
+  const qreal lastY = mapping.framebufferSize.height() - 1.0;
+  std::optional<float> result;
+  for (const auto &vertex : vertices) {
+    const qsizetype sourceIndex = static_cast<qsizetype>(vertex.sourceIndex);
+    if (sourceIndex < deleted.size() && deleted.testBit(sourceIndex)) continue;
+    const QVector4D clip = modelViewProjection * QVector4D(vertex.x, vertex.y, vertex.z, 1.0F);
+    if (!std::isfinite(clip.x()) || !std::isfinite(clip.y()) ||
+        !std::isfinite(clip.z()) || !std::isfinite(clip.w()) || clip.w() <= 0.0001F ||
+        clip.x() < -clip.w() || clip.x() > clip.w() ||
+        clip.y() < -clip.w() || clip.y() > clip.w() ||
+        clip.z() < -clip.w() || clip.z() >= clip.w()) continue;
+    const float inverseW = 1.0F / clip.w();
+    const float depth = (clip.z() * inverseW) * 0.5F + 0.5F;
+    if (!std::isfinite(depth) || depth < 0.0F || depth >= 1.0F) continue;
+    if (result && depth >= *result) continue;
+    const qreal x = (clip.x() * inverseW * 0.5F + 0.5F) *
+                        mapping.sourceViewportSize.width() + mapping.viewportOrigin.x();
+    const qreal y = (clip.y() * inverseW * 0.5F + 0.5F) *
+                        mapping.sourceViewportSize.height() + mapping.viewportOrigin.y();
+    // The closest pixel centre in the rectangular readback region decides
+    // whether any fragment of the circular point footprint can be covered.
+    // Do not replace this with a radial mouse tolerance: the mask is square.
+    const qreal dx = std::clamp(std::floor(x), 0.0, lastX) + 0.5 - x;
+    const qreal dy = std::clamp(std::floor(y), 0.0, lastY) + 0.5 - y;
+    if (dx * dx + dy * dy > radiusSquared) continue;
+    if (!nearestDepth) return depth;
+    result = depth;
+  }
+  return result;
 }
 
 std::optional<float> rayAxisParameter(const WorldRay &ray,

@@ -1,10 +1,14 @@
 #include "ModelInteraction.h"
+#include "PlyPointCloudLoader.h"
 #include "TransformGizmo.h"
 
 #include <QMatrix4x4>
 #include <QTest>
 
 #include <array>
+#include <cmath>
+#include <limits>
+#include <vector>
 
 using namespace gsw;
 
@@ -38,7 +42,140 @@ private slots:
   void doesNotPickInvisibleLegacyHeadAreasWhenSolidFacesExist();
   void modelsTransformOrientationLocking();
   void mapsPreciseModelPickNeighborhood();
+  void picksActualPointCentresWithoutAcceptingEmptyBounds();
+  void keepsSquarePhysicalPixelToleranceAndCircularFootprints();
+  void rejectsInvalidPointPickInputsAndClippedCentres();
+  void picksNearestPointDepthAndDeletedSourceIndices();
+  void picksTransformedThreeAndTwoDimensionalGaussianCentres();
+  void visitsEveryPointWithoutSamplingOrMutatingInputs();
 };
+
+namespace {
+PointCloudVertex pickVertex(float x, float y, float z, quint32 sourceIndex = 0) {
+  PointCloudVertex vertex;
+  vertex.x = x; vertex.y = y; vertex.z = z; vertex.sourceIndex = sourceIndex;
+  return vertex;
+}
+
+PointCloudVertex pickWindowVertex(float x, float y, float depth = 0.0F) {
+  // Power-of-two viewport dimensions make the edge cases exactly representable.
+  return pickVertex(x / 64.0F - 1.0F, y / 64.0F - 1.0F, depth);
+}
+}
+
+void ModelInteractionTests::picksActualPointCentresWithoutAcceptingEmptyBounds() {
+  const auto mapping = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  QVERIFY(mapping);
+  const std::array vertices{pickVertex(-0.8F, 0, 0, 0), pickVertex(0.8F, 0, 0, 1)};
+  QVERIFY(!pointModelPickDepth(vertices, {}, {}, *mapping, 3.0));
+  const std::array centre{pickVertex(0, 0, 0)};
+  QCOMPARE(pointModelPickDepth(centre, {}, {}, *mapping, 3.0).value(), 0.5F);
+  QVERIFY(!pointModelPickDepth({}, {}, {}, *mapping, 3.0));
+}
+
+void ModelInteractionTests::keepsSquarePhysicalPixelToleranceAndCircularFootprints() {
+  const auto ordinary = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  const auto highDpi = modelPickViewport({32, 32}, {64, 64}, 2.0);
+  QVERIFY(ordinary && highDpi);
+  // A square pick mask covers its corners, even beyond a radial 6 px tolerance.
+  const std::array corner{pickWindowVertex(70.5F, 69.5F)};
+  QVERIFY(pointModelPickDepth(corner, {}, {}, *ordinary, 3.0));
+  const std::array circleEdge{pickWindowVertex(72.0F, 69.5F)};
+  QVERIFY(pointModelPickDepth(circleEdge, {}, {}, *ordinary, 3.0));
+  const std::array beyondCircle{pickWindowVertex(72.125F, 69.5F)};
+  QVERIFY(!pointModelPickDepth(beyondCircle, {}, {}, *ordinary, 3.0));
+  const std::array diagonalOutside{pickWindowVertex(72.0F, 71.0F)};
+  QVERIFY(!pointModelPickDepth(diagonalOutside, {}, {}, *ordinary, 3.0));
+  const std::array dpiOnly{pickWindowVertex(76.0F, 63.0F)};
+  QVERIFY(!pointModelPickDepth(dpiOnly, {}, {}, *ordinary, 3.0));
+  QVERIFY(pointModelPickDepth(dpiOnly, {}, {}, *highDpi, 6.0));
+  const std::array dpiEdge{pickWindowVertex(79.5F, 75.5F)};
+  QVERIFY(pointModelPickDepth(dpiEdge, {}, {}, *highDpi, 6.0));
+  const std::array dpiOutside{pickWindowVertex(79.625F, 75.5F)};
+  QVERIFY(!pointModelPickDepth(dpiOutside, {}, {}, *highDpi, 6.0));
+}
+
+void ModelInteractionTests::rejectsInvalidPointPickInputsAndClippedCentres() {
+  const auto mapping = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  QVERIFY(mapping);
+  const std::array centre{pickVertex(0, 0, 0)};
+  QVERIFY(!pointModelPickDepth(centre, {}, {}, {}, 3.0));
+  for (const qreal diameter : {0.0, -1.0, std::numeric_limits<qreal>::infinity(),
+                              std::numeric_limits<qreal>::quiet_NaN()})
+    QVERIFY(!pointModelPickDepth(centre, {}, {}, *mapping, diameter));
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float infinity = std::numeric_limits<float>::infinity();
+  const std::array invalid{pickVertex(nan, 0, 0), pickVertex(0, infinity, 0),
+      pickVertex(0, 0, nan), pickVertex(0, 0, -1.001F), pickVertex(0, 0, 1.0F),
+      pickVertex(0, 0, 1.001F), pickVertex(1.001F, 0, 0), pickVertex(0, -1.001F, 0)};
+  // Even a huge footprint does not rescue a centre outside canonical clipping.
+  QVERIFY(!pointModelPickDepth(invalid, {}, {}, *mapping, 1000.0));
+  const std::array nearPlane{pickVertex(0, 0, -1.0F)};
+  QCOMPARE(pointModelPickDepth(nearPlane, {}, {}, *mapping, 3.0).value(), 0.0F);
+  QMatrix4x4 perspective;
+  perspective.perspective(60, 1, 0.1F, 100.0F);
+  const std::array behind{pickVertex(0, 0, 1), pickVertex(0, 0, 0), pickVertex(0, 0, -0.05F)};
+  QVERIFY(!pointModelPickDepth(behind, {}, perspective, *mapping, 3.0));
+  const std::array inFront{pickVertex(0, 0, -1)};
+  QVERIFY(pointModelPickDepth(inFront, {}, perspective, *mapping, 3.0));
+  QMatrix4x4 nonfinite;
+  nonfinite(0, 0) = nan;
+  QVERIFY(!pointModelPickDepth(centre, {}, nonfinite, *mapping, 3.0));
+}
+
+void ModelInteractionTests::picksNearestPointDepthAndDeletedSourceIndices() {
+  const auto mapping = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  QVERIFY(mapping);
+  const std::array vertices{pickVertex(0, 0, 0.5F, 2), pickVertex(0, 0, -0.5F, 7)};
+  QCOMPARE(pointModelPickDepth(vertices, {}, {}, *mapping, 3.0, true).value(), 0.25F);
+  QCOMPARE(pointModelPickDepth(vertices, {}, {}, *mapping, 3.0, false).value(), 0.75F);
+  QBitArray deleted(10);
+  deleted.setBit(7);
+  QCOMPARE(pointModelPickDepth(vertices, deleted, {}, *mapping, 3.0).value(), 0.75F);
+  deleted.setBit(2);
+  QVERIFY(!pointModelPickDepth(vertices, deleted, {}, *mapping, 3.0));
+  QCOMPARE(deleted.count(true), 2);
+}
+
+void ModelInteractionTests::picksTransformedThreeAndTwoDimensionalGaussianCentres() {
+  ModelTransform transform;
+  transform.translation = {0.5F, 0, 0};
+  transform.rotation = QQuaternion::fromAxisAndAngle({0, 0, 1}, 90);
+  transform.scale = {2, 1, 0.5F};
+  const auto mapping = modelPickViewport({96, 47}, {128, 128}, 1.0);
+  const auto empty = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  QVERIFY(mapping && empty);
+  auto gaussian = pickVertex(0.125F, 0, 0.2F);
+  gaussian.scaleX = 5; gaussian.scaleY = 3; gaussian.scaleZ = 2;
+  gaussian.rotationW = 0.5F; gaussian.rotationX = 0.5F;
+  gaussian.rotationY = 0.5F; gaussian.rotationZ = 0.5F;
+  gaussian.opacity = 0; // The existing mask picks centres, not visible alpha.
+  for (const bool surfel : {false, true}) {
+    gaussian.scaleZ = surfel ? 0.0F : 2.0F;
+    const std::array vertices{gaussian};
+    const auto depth = pointModelPickDepth(vertices, {}, transform.matrix({}), *mapping, 3.0);
+    QVERIFY(depth);
+    QVERIFY(std::abs(*depth - 0.55F) < 1e-6F);
+    QVERIFY(!pointModelPickDepth(vertices, {}, transform.matrix({}), *empty, 3.0));
+  }
+}
+
+void ModelInteractionTests::visitsEveryPointWithoutSamplingOrMutatingInputs() {
+  const auto mapping = modelPickViewport({64, 64}, {128, 128}, 1.0);
+  QVERIFY(mapping);
+  std::vector<PointCloudVertex> vertices(512202);
+  for (std::size_t i = 0; i < vertices.size(); ++i)
+    vertices[i] = pickVertex(0.75F, 0.75F, 0, static_cast<quint32>(i));
+  vertices.back().x = vertices.back().y = 0;
+  const QBitArray deleted(static_cast<qsizetype>(vertices.size()));
+  QVERIFY(pointModelPickDepth(vertices, deleted, {}, *mapping, 3.0));
+  QCOMPARE(vertices.back().sourceIndex, quint32(512201));
+  QCOMPARE(vertices.front().x, 0.75F);
+  QCOMPARE(deleted.count(true), 0);
+  auto hiddenLast = deleted;
+  hiddenLast.setBit(512201);
+  QVERIFY(!pointModelPickDepth(vertices, hiddenLast, {}, *mapping, 3.0));
+}
 
 void ModelInteractionTests::picksNearHandlesForSmallResolvableDepthDifferences() {
   TransformGizmoLayout layout;

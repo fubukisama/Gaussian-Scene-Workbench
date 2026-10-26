@@ -6914,18 +6914,37 @@ std::optional<bool>
 NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
                                   QVector3D *hitWorldPosition) {
   if (!mScene->visible) return false;
+  const auto mapping =
+      modelPickViewport(position, size(), devicePixelRatioF(), 6.0);
+  if (!mapping.has_value()) return std::nullopt;
+
+  // Object selection must be as read-only as selection from the scene tree.
+  // Rendering a temporary pick FBO in the main viewport changes Qt/driver GL
+  // state and used to detach the caller's current context. File-backed 3DGS
+  // and 2DGS already retain the exact displayed point centres on the CPU.
+  // Keep world-position navigation and GPU-only IPC previews on their existing
+  // surface-picking path; neither is represented as a static CPU point set.
+  const bool liveGpuFrame = trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame();
+  if (hitWorldPosition == nullptr && mScene->mHasGaussianAttributes &&
+      mScene->mRenderMode != RenderMode::Mesh && !liveGpuFrame &&
+      !mScene->mPreviewOnlyScene && !mScene->mPreviewVertices.isEmpty()) {
+    if (mScene->processingGpuSuspended || mScene->resourceUploadDeferred ||
+        mScene->mPointUploadPending || mScene->resourcePointGpuBytes <= 0 ||
+        mScene->mRenderedPointCount <= 0) return false;
+    const auto depth = pointModelPickDepth(
+        std::span<const PointCloudVertex>(mScene->mPreviewVertices.constData(),
+            static_cast<std::size_t>(mScene->mPreviewVertices.size())),
+        mScene->mEditModel.deletedBits(), viewProjectionMatrix() * modelMatrix(),
+        *mapping, std::max(3.0, 3.0 * devicePixelRatioF()), hitDepth != nullptr);
+    if (hitDepth) *hitDepth = depth.value_or(1.0F);
+    return depth.has_value();
+  }
   if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
       !mModelPickProgram->isLinked() || context() == nullptr ||
       !context()->isValid()) {
     return std::nullopt;
   }
   if (!admitDeferredResourceUpload()) return false;
-  const auto mapping =
-      modelPickViewport(position, size(), devicePixelRatioF(), 6.0);
-  if (!mapping.has_value()) {
-    return std::nullopt;
-  }
-
   makeCurrent();
   if (QOpenGLContext::currentContext() != context()) {
     return std::nullopt;

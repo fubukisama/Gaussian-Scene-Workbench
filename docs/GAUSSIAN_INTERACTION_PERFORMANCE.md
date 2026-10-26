@@ -78,3 +78,11 @@ total static vertex/index storage in this example is 65,561,856 bytes (about
 
 Very large on-screen splats can still be GPU fill-rate limited. This change does
 not alter the rasterizer, SH representation, splat size or source data.
+
+## Read-only static Gaussian object selection
+
+中文：静态文件中的 3DGS／2DGS 对象点选使用当前可见点中心的只读几何检测，不在主视口创建拾取帧缓冲、绘制拾取图像或切换 OpenGL 上下文。保留既有六逻辑像素方形邻域、圆形点覆盖、删除掩码、裁剪、模型变换和多对象最近深度规则；不改变高斯参数、源文件或显示点数。驱动的点光栅边界取整可能与几何计算略有差异，不宣称逐像素位级等价。表面双击定位、网格／分页数据以及没有 CPU 几何的 IPC 实时预览仍使用原来的 GPU 路径；此修正不代表这些路径的上下文隔离已验收。录屏中的前台消失现象仍需实际界面复测，后台正常不能替代该验收。
+
+English: Static file-backed 3DGS/2DGS object clicks use read-only geometry tests against currently displayed point centers, without creating a pick framebuffer, drawing a pick mask, or switching the main viewport's OpenGL context. The existing six-logical-pixel square neighborhood, circular point footprint, deletion mask, clipping, model transforms and nearest-depth object ordering remain. Gaussian parameters, source files and displayed counts are unchanged. Driver point-raster rounding may differ at pixel boundaries; bit-exact raster equivalence is not claimed. Surface double-click recentering, mesh/paged data and IPC live previews without CPU geometry retain the GPU path; their context isolation is not accepted by this fix. The recorded foreground disappearance still requires interactive acceptance; successful background checks do not replace it.
+
+日本語：静的ファイルの 3DGS／2DGS オブジェクトのクリック選択は、表示中の点中心に対する読み取り専用の幾何判定を使用し、主ビューポートに選択用フレームバッファーを作成せず、選択画像の描画や OpenGL コンテキストの切り替えを行いません。既存の論理 6 ピクセルの正方形領域、円形点の被覆、削除マスク、クリッピング、モデル変換、複数オブジェクトの最前面深度を維持します。ガウスパラメーター、元ファイル、表示点数は変更しません。画素境界ではドライバーの丸めとの差があり、ビット単位の同一性は保証しません。表面のダブルクリックによる再中心化、メッシュ／ページングデータ、CPU 幾何を持たない IPC ライブプレビューは GPU 経路を維持し、この修正でそれらのコンテキスト分離を検証済みとはしません。録画の前面表示で発生した消失は実際の画面での再確認が必要で、バックグラウンド検査だけでは代替できません。

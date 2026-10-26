@@ -254,6 +254,59 @@ bool runLargeSelectionRegression(MainWindow &window) {
     QApplication::sendEvent(viewport, &up);
     return backgroundIsolated();
   };
+  const auto clickPreservingGlState = [&](const QPointF &point) {
+    auto *previousContext = QOpenGLContext::currentContext();
+    auto *previousSurface = previousContext ? previousContext->surface() : nullptr;
+    viewport->makeCurrent();
+    auto *expectedContext = viewport->context();
+    if (!check(expectedContext && QOpenGLContext::currentContext() == expectedContext,
+               "state contract starts with the actual viewport context current")) return false;
+    auto *expectedSurface = expectedContext->surface();
+    auto *functions = expectedContext->extraFunctions();
+    GLint originalActiveTexture = GL_TEXTURE0, originalTexture0 = 0;
+    functions->glGetIntegerv(GL_ACTIVE_TEXTURE, &originalActiveTexture);
+    functions->glActiveTexture(GL_TEXTURE0);
+    functions->glGetIntegerv(GL_TEXTURE_BINDING_2D, &originalTexture0);
+    GLuint sentinel = 0;
+    functions->glGenTextures(1, &sentinel);
+    functions->glBindTexture(GL_TEXTURE_2D, sentinel);
+    // Binding creates a valid texture object without uploading pixels or
+    // depending on any inherited unpack/PBO state.
+    functions->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    const auto cleanup = qScopeGuard([&] {
+      // Record violations before any recovery makeCurrent(): cleanup must
+      // never mask a picking path that detached the caller's context.
+      if (QOpenGLContext::currentContext() != expectedContext) viewport->makeCurrent();
+      if (QOpenGLContext::currentContext() == expectedContext) {
+        functions->glActiveTexture(GL_TEXTURE0);
+        functions->glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(originalTexture0));
+        functions->glDeleteTextures(1, &sentinel);
+        functions->glActiveTexture(static_cast<GLenum>(originalActiveTexture));
+      }
+      if (previousContext && previousSurface) previousContext->makeCurrent(previousSurface);
+      else expectedContext->doneCurrent();
+    });
+    if (!check(sentinel != 0 && functions->glIsTexture(sentinel), "valid QA sentinel texture is bound before clicking")) return false;
+    QElapsedTimer clickTimer;
+    clickTimer.start();
+    const bool delivered = click(point);
+    const qint64 clickMicroseconds = clickTimer.nsecsElapsed() / 1000;
+    const bool sameContext = QOpenGLContext::currentContext() == expectedContext;
+    const bool sameSurface = sameContext && expectedContext->surface() == expectedSurface;
+    GLint activeAfter = -1, textureAfter = -1;
+    if (sameContext) {
+      functions->glGetIntegerv(GL_ACTIVE_TEXTURE, &activeAfter);
+      functions->glGetIntegerv(GL_TEXTURE_BINDING_2D, &textureAfter);
+    }
+    qInfo() << "GAUSSIAN_CLICK_STATE_CONTRACT context/surface-preserved" << sameContext << sameSurface
+            << "active-before/after" << GL_TEXTURE0 << activeAfter
+            << "texture-before/after" << sentinel << textureAfter
+            << "click-us" << clickMicroseconds;
+    return check(delivered && sameContext && sameSurface && activeAfter == GL_TEXTURE0 &&
+                 textureAfter == static_cast<GLint>(sentinel),
+                 "static Gaussian click preserves caller context, surface, active unit and existing texture binding");
+  };
+  const bool stateContractOnly = qEnvironmentVariable("GSW_SCENE_SELECTION_STATE_CONTRACT") == QStringLiteral("1");
   for (const bool surfel : {false, true}) {
     qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
     const QString label = surfel ? "2dgs" : "3dgs";
@@ -316,7 +369,8 @@ bool runLargeSelectionRegression(MainWindow &window) {
       if (!check(before.save(QDir(evidence).filePath(prefix + "-before.png")), "retain real baseline pixels")) return false;
       const QPointF pick = baseline.center / viewport->devicePixelRatioF();
       for (int repeat = 0; repeat < 2; ++repeat) {
-        if (!check(click(pick), "actual body click keeps the background window isolated")) return false;
+        if (!check(repeat == 0 ? clickPreservingGlState(pick) : click(pick),
+                   "actual body click keeps the background window and current rendering state isolated")) return false;
         QImage selected = viewport->grabFramebuffer();
         if (!check(selected.save(QDir(evidence).filePath(prefix + QString("-selected-%1.png").arg(repeat))), "retain selected-model pixels")) return false;
         auto *item = sceneItem(tree, object.id);
@@ -357,6 +411,10 @@ bool runLargeSelectionRegression(MainWindow &window) {
                    "deselection restores unchanged full geometry without reimport")) return false;
         if (!check(cleared.save(QDir(evidence).filePath(prefix + QString("-cleared-%1.png").arg(repeat))), "retain deselection pixels")) return false;
       }
+    }
+    if (stateContractOnly) {
+      if (!check(!sourceHash.isEmpty() && sha256(path) == sourceHash, "state-contract clicks never rewrite input data")) return false;
+      continue;
     }
     // Replay the visible sequence from the recording as well as the immediate
     // framebuffer checks above. Precollect the empty image at the final zoom
@@ -527,8 +585,12 @@ bool runRecordedInputRegression(MainWindow &window, const QString &path) {
     viewport->setZoomToCursorEnabled(false);
     QString error;
     const QString workspace = temporary.filePath("workspace");
-    if (!check(QDir().mkpath(workspace) && document->createUntitled(workspace, "Private click diagnosis", &error) &&
-               document->addScenePath(path, &error), "import private input without modifying its source")) return false;
+    if (!check(QDir().mkpath(workspace) && document->createUntitled(workspace, "Private click diagnosis", &error),
+               "create isolated private-input workspace")) return false;
+    const bool importCore = qEnvironmentVariable("GSW_GAUSSIAN_CLICK_IMPORT_CORE") == QStringLiteral("1");
+    qInfo() << "GAUSSIAN_CLICK_DIAG import-core" << importCore;
+    if (!check(importCore ? window.importSceneFile(path) : document->addScenePath(path, &error),
+               "import private input without modifying its source")) return false;
     if (!check(waitUntil([&] {
           (void)viewport->grabFramebuffer();
           return viewport->gaussianRenderingAvailable() && viewport->renderedPointCount() > 0;

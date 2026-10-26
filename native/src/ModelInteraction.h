@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QBitArray>
 #include <QMatrix4x4>
 #include <QPoint>
 #include <QPointF>
@@ -11,6 +12,8 @@
 #include <span>
 
 namespace gsw {
+
+struct PointCloudVertex;
 
 struct WorldRay final {
   QVector3D origin;
@@ -73,6 +76,16 @@ modelPickViewport(const QPointF &screenPosition, const QSize &viewportSize,
 
 [[nodiscard]] bool
 modelPickBufferHasCoverage(std::span<const quint8> redSamples);
+
+// Read-only centre-point picking for resident Gaussian models. The square
+// physical-pixel neighbourhood and circular point footprint match the model
+// pick mask, without binding a context or modifying renderer resources. Empty
+// deletion bits mean no deleted source indices. This is not an ellipsoid hit.
+[[nodiscard]] std::optional<float>
+pointModelPickDepth(std::span<const PointCloudVertex> vertices,
+                   const QBitArray &deleted, const QMatrix4x4 &modelViewProjection,
+                   const ModelPickViewport &mapping,
+                   qreal pointDiameterPhysicalPixels, bool nearestDepth = true);
 
 [[nodiscard]] std::optional<float>
 rayAxisParameter(const WorldRay &ray, const QVector3D &axisOrigin,
