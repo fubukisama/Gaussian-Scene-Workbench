@@ -37,4 +37,14 @@
 
 ## 验证
 
+### 混合模型的渲染状态隔离
+
+中文：切换活动模型不再为了空的移除列表切换或释放 OpenGL 上下文。普通点云、网格和 GPU 预览的拾取使用独立帧缓冲，并恢复调用方上下文、表面、读写帧缓冲、纹理／渲染缓冲、像素缓冲和属性 divisor。像素读回使用明确的紧密行布局，深度清除为 1，再恢复调用方的原始设置；输入回调不会为尚未显示的数据申请上传。静态 3DGS／2DGS 的只读几何拾取保持不变，不修改源数据、显示精度或模型变换。后台检查不代替录屏所示前台异常的实际复测。
+
+English: Activating a model no longer changes or releases an OpenGL context for an empty removal list. Point-cloud, mesh and GPU-preview picking uses an isolated framebuffer and restores the caller's context, surface, read/draw framebuffers, texture/renderbuffer, pixel buffers and attribute divisor. Readback uses an explicit tightly packed layout and clear depth 1 before restoring the original caller settings; input callbacks do not admit uploads for undisplayed data. Static 3DGS/2DGS read-only geometry picking remains unchanged, without altering source data, display precision or model transforms. Background acceptance does not replace an interactive recheck of the recorded foreground anomaly.
+
+日本語：アクティブモデルの切り替えでは、削除対象がない場合に OpenGL コンテキストを切り替えたり解放したりしません。点群・メッシュ・GPU プレビューの選択判定は独立したフレームバッファーを使用し、呼び出し元のコンテキスト、サーフェス、読み取り／描画 FBO、テクスチャ／レンダーバッファー、ピクセルバッファー、属性 divisor を復元します。読み出し時には密な行配置と深度クリア値 1 を明示し、終了後に元の設定へ戻します。入力処理で未表示データのアップロードを要求しません。静的な 3DGS／2DGS の読み取り専用幾何判定、元データ、表示精度、モデル変換は変更しません。バックグラウンド検査だけでは、録画の前面表示で発生した異常の再確認を代替できません。
+
 `native_multi_scene_import` 使用真实导入弹窗验证追加、替换和取消；检查同帧中的两个 Mesh、实际几何 Ctrl 点选、工程树 Ctrl/Shift 选择、共同中心旋转/缩放、整组移动/取消/撤销/重做、未选中对象隔离、保存重开、快速替换的异步失效处理，以及采用不同局部偏移的大坐标点云与高斯模型同时显示。`workspace_document` 覆盖多对象保存、另存为、托管迁移和单对象清除，以及批量变换原子提交与无效成员整组拒绝，`recovery_store` 覆盖集合恢复记录。
+
+`native_multi_gaussian_isolation` additionally covers ordinary points, mesh, SH3 3DGS and SH1 two-scale 2DGS with unequal counts, resident/compatibility/mixed renderer configurations and two camera poses. Actual tree and viewport clicks must preserve deliberately non-default caller GL state and each visible source's rendered pixels, transforms and file hash.

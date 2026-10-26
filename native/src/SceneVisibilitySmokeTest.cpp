@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <memory>
 
 namespace gsw {
 namespace {
@@ -544,6 +545,311 @@ bool runLargeSelectionRegression(MainWindow &window) {
   return true;
 }
 
+bool mixedGaussianFixture(const QString &path, int kind) {
+  if (kind < 2) return fixture(path, kind);
+  const int side = kind == 2 ? 128 : 64;
+  const int rest = kind == 2 ? 45 : 9;
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly)) return false;
+  QByteArray header = "ply\nformat binary_little_endian 1.0\nelement vertex " + QByteArray::number(side * side) + '\n';
+  for (const auto *name : {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2"})
+    header += QByteArray("property float ") + name + '\n';
+  for (int index = 0; index < rest; ++index) header += "property float f_rest_" + QByteArray::number(index) + '\n';
+  for (const auto *name : {"opacity", "scale_0", "scale_1"}) header += QByteArray("property float ") + name + '\n';
+  if (kind == 2) header += "property float scale_2\n";
+  for (const auto *name : {"rot_0", "rot_1", "rot_2", "rot_3"}) header += QByteArray("property float ") + name + '\n';
+  header += "end_header\n";
+  if (file.write(header) != header.size()) return false;
+  QDataStream data(&file);
+  data.setByteOrder(QDataStream::LittleEndian);
+  data.setFloatingPointPrecision(QDataStream::SinglePrecision);
+  const float center = -4.5F + kind * 3.0F;
+  const float scale = std::log(1.5F / side);
+  for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) {
+    data << center - 0.75F + 1.5F * x / (side - 1) << -0.75F + 1.5F * y / (side - 1) << 0.0F;
+    data << (kind == 2 ? -1.5F : 1.5F) << -1.5F << 1.5F;
+    for (int coefficient = 0; coefficient < rest; ++coefficient) data << (coefficient % 7 == 0 ? 0.005F : 0.0F);
+    data << 3.0F << scale << scale;
+    if (kind == 2) data << scale;
+    data << 1.0F << 0.0F << 0.0F << 0.0F;
+  }
+  return data.status() == QDataStream::Ok && file.flush();
+}
+
+bool runMixedGaussianIsolation(MainWindow &window) {
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "MIXED_GAUSSIAN_ISOLATION FAIL:" << message;
+    return ok;
+  };
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  auto *lock = window.findChild<QAction *>("lockEditToolsAction");
+  QTemporaryDir temporary(QDir(QCoreApplication::applicationDirPath()).filePath("mixed-gaussian-XXXXXX"));
+  if (!check(viewport && document && tree && lock && temporary.isValid(), "real window services and isolated fixture directory")) return false;
+  const bool hadOverride = qEnvironmentVariableIsSet("GSW_DISABLE_INDEXED_GAUSSIANS");
+  const auto previousOverride = qgetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+  const auto restore = qScopeGuard([&] {
+    if (hadOverride) qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", previousOverride);
+    else qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+  });
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", temporary.path())).filePath("mixed-gaussian-isolation");
+  if (!QDir().mkpath(evidence)) return false;
+  const bool backgroundRun = qEnvironmentVariable("GSW_SMOKE_BACKGROUND") == QStringLiteral("1");
+  const auto backgroundSafe = [&] {
+    if (!backgroundRun) return true;
+    bool intersects = false;
+    for (const auto *screen : QGuiApplication::screens()) intersects |= window.frameGeometry().intersects(screen->geometry());
+    if (!intersects && !window.isActiveWindow()) return true;
+    window.hide();
+    qCritical() << "MIXED_GAUSSIAN_ISOLATION FAIL: background window became visible or active; hidden";
+    return false;
+  };
+  if (!check(backgroundSafe(), "mixed background window remains outside all screens and inactive")) return false;
+  window.resize(1440, 900);
+  if (!check(backgroundSafe(), "resized mixed background window remains isolated")) return false;
+  viewport->setShowCameras(false);
+  viewport->setShowObservationTrackball(false);
+  lock->setChecked(false);
+  QStringList paths;
+  QList<QByteArray> hashes;
+  for (int kind = 0; kind < 4; ++kind) {
+    const QString path = temporary.filePath(QString("mixed-%1.ply").arg(kind));
+    if (!check(mixedGaussianFixture(path, kind), "write distinct point, mesh, SH3 3DGS and SH1 2DGS fixtures")) return false;
+    paths.append(path); hashes.append(sha256(path));
+  }
+  const auto mouse = [&](QWidget *widget, const QPointF &point) {
+    QMouseEvent down(QEvent::MouseButtonPress, point, widget->mapToGlobal(point.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, widget->mapToGlobal(point.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(widget, &down); QApplication::sendEvent(widget, &up);
+  };
+  const auto stateClick = [&](QWidget *widget, const QPointF &point, int config, int pose, int route, int kind) {
+    if (!backgroundSafe()) return false;
+    auto *previous = QOpenGLContext::currentContext();
+    auto *previousSurface = previous ? previous->surface() : nullptr;
+    auto *context = viewport->context();
+    if (context && previous != context) viewport->makeCurrent();
+    if (!context || QOpenGLContext::currentContext() != context) return false;
+    auto *surface = context->surface();
+    auto *gl = context->extraFunctions();
+    GLint oldUnit = GL_TEXTURE0, oldTexture = 0, oldDrawFbo = 0, oldReadFbo = 0;
+    GLint oldReadBuffer = 0, oldPackRowLength = 0, oldUnpackBuffer = 0, oldRenderbuffer = 0;
+    GLfloat oldClearDepth = 1.0F;
+    gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &oldUnit);
+    gl->glActiveTexture(GL_TEXTURE0); gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture);
+    gl->glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDrawFbo);
+    gl->glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldReadFbo);
+    gl->glGetIntegerv(GL_READ_BUFFER, &oldReadBuffer);
+    gl->glGetIntegerv(GL_PACK_ROW_LENGTH, &oldPackRowLength);
+    gl->glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &oldUnpackBuffer);
+    gl->glGetIntegerv(GL_RENDERBUFFER_BINDING, &oldRenderbuffer);
+    gl->glGetFloatv(GL_DEPTH_CLEAR_VALUE, &oldClearDepth);
+    GLuint sentinel = 0, unpack = 0;
+    std::unique_ptr<QOpenGLFramebufferObject> callerFramebuffer;
+    const auto cleanup = qScopeGuard([&] {
+      if (QOpenGLContext::currentContext() != context) viewport->makeCurrent();
+      if (QOpenGLContext::currentContext() == context) {
+        // Qt's FBO destructor can change bindings. Delete every owned object
+        // first, then restore the caller state, never the opposite order.
+        callerFramebuffer.reset();
+        if (unpack) gl->glDeleteBuffers(1, &unpack);
+        if (sentinel) gl->glDeleteTextures(1, &sentinel);
+        gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(oldUnpackBuffer));
+        gl->glPixelStorei(GL_PACK_ROW_LENGTH, oldPackRowLength);
+        gl->glClearDepthf(oldClearDepth);
+        gl->glActiveTexture(GL_TEXTURE0); gl->glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture));
+        gl->glBindRenderbuffer(GL_RENDERBUFFER, static_cast<GLuint>(oldRenderbuffer));
+        gl->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(oldDrawFbo));
+        gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(oldReadFbo));
+        gl->glReadBuffer(static_cast<GLenum>(oldReadBuffer));
+        gl->glActiveTexture(static_cast<GLenum>(oldUnit));
+      }
+      if (previous && previousSurface) previous->makeCurrent(previousSurface); else context->doneCurrent();
+    });
+    // Allocate the caller's small FBO with no unpack PBO bound. Only after it
+    // is complete do we install intentionally nondefault, valid caller state.
+    gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    QOpenGLFramebufferObjectFormat callerFormat;
+    callerFormat.setSamples(0);
+    callerFormat.setAttachment(QOpenGLFramebufferObject::NoAttachment);
+    callerFormat.setInternalTextureFormat(GL_RGBA8);
+    callerFramebuffer = std::make_unique<QOpenGLFramebufferObject>(QSize(4, 4), callerFormat);
+    if (!check(callerFramebuffer->isValid() && callerFramebuffer->bind() &&
+               gl->glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
+               "complete custom caller framebuffer before mixed click")) return false;
+    const GLuint callerFbo = callerFramebuffer->handle();
+    gl->glGenBuffers(1, &unpack); gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
+    gl->glBufferData(GL_PIXEL_UNPACK_BUFFER, 16, nullptr, GL_STATIC_DRAW);
+    gl->glGenTextures(1, &sentinel); gl->glBindTexture(GL_TEXTURE_2D, sentinel);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl->glPixelStorei(GL_PACK_ROW_LENGTH, 1);
+    gl->glClearDepthf(0.0F);
+    if (!check(sentinel && gl->glIsTexture(sentinel) && unpack && gl->glIsBuffer(unpack),
+               "valid texture and unpack-buffer sentinels before mixed click")) return false;
+    mouse(widget, point);
+    const bool sameContext = QOpenGLContext::currentContext() == context;
+    const bool sameSurface = sameContext && context->surface() == surface;
+    GLint unit = -1, texture = -1, drawFbo = -1, readFbo = -1, packRowLength = -1, unpackBuffer = -1;
+    GLfloat clearDepth = -1.0F;
+    if (sameContext) {
+      gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &unit); gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+      gl->glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo); gl->glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFbo);
+      gl->glGetIntegerv(GL_PACK_ROW_LENGTH, &packRowLength); gl->glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
+      gl->glGetFloatv(GL_DEPTH_CLEAR_VALUE, &clearDepth);
+    }
+    qInfo() << "MIXED_GAUSSIAN_STATE_CONTRACT" << config << pose << route << kind
+            << "context/surface" << sameContext << sameSurface << "active" << unit << "texture" << sentinel << texture
+            << "caller/draw/read-fbo" << callerFbo << drawFbo << readFbo << "pack-row" << packRowLength
+            << "clear-depth" << clearDepth << "unpack-before/after" << unpack << unpackBuffer;
+    return check(backgroundSafe() && sameContext && sameSurface && unit == GL_TEXTURE0 && texture == static_cast<GLint>(sentinel) &&
+                 drawFbo == static_cast<GLint>(callerFbo) && readFbo == static_cast<GLint>(callerFbo) &&
+                 packRowLength == 1 && clearDepth == 0.0F && unpackBuffer == static_cast<GLint>(unpack),
+                 "mixed scene selection preserves caller framebuffer, pack/unpack, clear depth, context and texture before repaint");
+  };
+  for (int config = 0; config < 3; ++config) {
+    QString error;
+    const QString working = temporary.filePath(QString("workspace-%1").arg(config));
+    if (!check(QDir().mkpath(working) && document->createUntitled(working, "Mixed Gaussian isolation", &error), "create isolated empty project")) return false;
+    QStringList ids;
+    for (int kind = 0; kind < 4; ++kind) {
+      QTimer answer;
+      bool appended = false, unexpected = false;
+      QObject::connect(&answer, &QTimer::timeout, &window, [&] {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+          auto *box = qobject_cast<QMessageBox *>(widget);
+          if (!box || !box->isVisible()) continue;
+          auto *button = box->findChild<QAbstractButton *>("appendSceneButton");
+          if (box->objectName() == QStringLiteral("sceneImportChoiceDialog") && button) {
+            appended = true; button->click();
+          } else { unexpected = true; box->reject(); }
+        }
+      });
+      if (kind && !backgroundRun) { answer.setInterval(10); answer.start(); }
+      // The two-argument MainWindow append overload is private. Background QA
+      // invokes its public document mutation instead of exposing a dialog;
+      // ordinary remote acceptance still exercises the actual confirmation.
+      const bool imported = backgroundRun && kind ? document->addScenePath(paths[kind], &error) : window.importSceneFile(paths[kind]);
+      answer.stop();
+      if (!check(backgroundSafe() && imported && !unexpected && (!kind || backgroundRun || appended),
+                 "import completes through actual confirmation or isolated background append core")) return false;
+      ids.append(document->activeSceneId());
+      if (!check(waitUntil([&] {
+            (void)viewport->grabFramebuffer();
+            return kind == 1 ? viewport->meshRenderingAvailable() : kind >= 2 ? viewport->gaussianRenderingAvailable() : viewport->selectableModelAvailable();
+          }), "each imported source reaches its own renderer")) return false;
+      if (kind >= 2 && !check(viewport->sourceShDegree() == (kind == 2 ? 3 : 1) &&
+                  viewport->sourceHasSurfelAttributes() == (kind == 3) && viewport->renderedPointCount() == (kind == 2 ? 16384 : 4096),
+                  "unequal Gaussian counts, SH degrees and real surfel attributes remain source-owned")) return false;
+    }
+    viewport->setAxisView(NavigationAxis::PositiveZ);
+    waitUntil([&] { return false; }, 400);
+    viewport->selectAllModels();
+    if (!check(viewport->focusModel(), "fit all imported geometry once")) return false;
+    viewport->clearSelection();
+    const auto initial = document->sceneObjects();
+    for (int pose = 0; pose < 2; ++pose) {
+      if (pose) {
+        lock->setChecked(true);
+        const QPointF start(viewport->width() * 0.15, viewport->height() * 0.75), end = start + QPointF(37, 19);
+        QMouseEvent down(QEvent::MouseButtonPress, start, viewport->mapToGlobal(start.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, end, viewport->mapToGlobal(end.toPoint()), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease, end, viewport->mapToGlobal(end.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(viewport, &down); QApplication::sendEvent(viewport, &move); QApplication::sendEvent(viewport, &up);
+        lock->setChecked(false);
+      }
+      viewport->clearSelection();
+      if (!check(document->setSceneObjectVisibility(ids, false), "geometry-free reference hides every layer")) return false;
+      const QImage empty = viewport->grabFramebuffer();
+      if (!check(!empty.isNull() && document->setSceneObjectVisibility(ids, true), "restore all sources before the selection replay")) return false;
+      // Construct all-resident, all-compatibility and a genuinely mixed pair
+      // after any visibility-driven resource reload, using public mode APIs.
+      for (int kind : {2, 3}) {
+        const bool indexed = config == 0 || (config == 2 && kind == 2);
+        if (indexed) qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS"); else qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", "1");
+        if (!check(document->activateSceneObject(ids[kind]), "activate renderer-path fixture")) return false;
+        viewport->setRenderMode(NativeViewport::RenderMode::Points);
+        viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+        if (!check(waitUntil([&] { (void)viewport->grabFramebuffer(); return viewport->indexedGaussianRendering() == indexed && viewport->gaussianRenderingAvailable(); }),
+                   "required resident/compatibility path is actually active")) return false;
+      }
+      viewport->clearSelection();
+      QImage baseline;
+      std::array<Patch, 4> body;
+      if (!check(waitUntil([&] { baseline = viewport->grabFramebuffer(); body = patches(baseline);
+              return std::all_of(body.begin(), body.end(), [](const Patch &p) { return p.count > 120; }); }),
+                 "all four distinct source bodies render before selection")) return false;
+      const QString stem = QString("config-%1-pose-%2").arg(config).arg(pose);
+      if (!baseline.save(QDir(evidence).filePath(stem + "-all.png"))) return false;
+      for (int route = 0; route < 2; ++route) for (int kind : {2, 0, 1, 3}) {
+        viewport->clearSelection();
+        QPointF point;
+        QWidget *receiver = viewport;
+        if (route == 0) {
+          auto *item = sceneItem(tree, ids[kind]); if (!check(item, "actual tree row exists")) return false;
+          tree->scrollToItem(item); receiver = tree->viewport();
+          point = tree->visualRect(tree->indexFromItem(item, 0)).center();
+        } else point = body[kind].center / viewport->devicePixelRatioF();
+        if (!stateClick(receiver, point, config, pose, route, kind)) return false;
+        const QImage selected = viewport->grabFramebuffer();
+        const QString selectedStem = stem + QString("-route-%1-source-%2").arg(route).arg(kind);
+        if (!selected.save(QDir(evidence).filePath(selectedStem + "-selected.png"))) return false;
+        if (!check(viewport->selectedSceneIds() == QStringList{ids[kind]} && viewport->visibleSceneObjectCount() == 4,
+                   "selection changes only the intended active source, not visibility")) return false;
+        const auto hint = viewport->selectionHintBounds(); const qreal ratio = viewport->devicePixelRatioF();
+        const QRect hintPixels = QRectF(hint.x() * ratio, hint.y() * ratio, hint.width() * ratio,
+                                         hint.height() * ratio).toAlignedRect().adjusted(-3, -3, 3, 3);
+        for (int peer = 0; peer < 4; ++peer) {
+          const auto bounds = body[peer].bounds; const int strip = std::max(1, bounds.height() / 5);
+          QRegion sample(QRect(bounds.left(), bounds.top(), bounds.width(), strip));
+          sample += QRect(bounds.left(), bounds.bottom() - strip + 1, bounds.width(), strip); sample -= hintPixels;
+          int expected = 0, retained = 0; Patch beforePatch, afterPatch;
+          for (const auto &region : sample) {
+            if (peer == kind) {
+              for (int y = region.top(); y <= region.bottom(); ++y) for (int x = region.left(); x <= region.right(); ++x) {
+                const auto base = baseline.pixelColor(x, y), after = selected.pixelColor(x, y), background = empty.pixelColor(x, y);
+                const auto distance = [&](const QColor &color) { return std::max({std::abs(color.red() - background.red()),
+                      std::abs(color.green() - background.green()), std::abs(color.blue() - background.blue())}); };
+                if (distance(base) > 45) { ++expected; retained += distance(after) > 30; }
+              }
+            } else {
+              const auto before = patches(baseline, region)[peer], after = patches(selected, region)[peer];
+              beforePatch.center += before.center * before.count; beforePatch.count += before.count;
+              afterPatch.center += after.center * after.count; afterPatch.count += after.count;
+            }
+          }
+          if (peer == kind) {
+            qInfo() << "MIXED_GAUSSIAN_PIXELS" << config << pose << route << kind << peer << "selected-before/retained" << expected << retained;
+            if (!check(expected > 40 && retained >= expected * 85 / 100, "selected source retains its real body, not merely bounds or gizmo")) return false;
+          } else {
+            if (beforePatch.count) beforePatch.center /= beforePatch.count;
+            if (afterPatch.count) afterPatch.center /= afterPatch.count;
+            qInfo() << "MIXED_GAUSSIAN_PIXELS" << config << pose << route << kind << peer << "peer-before/after" << beforePatch.count << afterPatch.count;
+            if (!check(beforePatch.count > 40 && afterPatch.count >= beforePatch.count * 9 / 10 &&
+                       afterPatch.count <= beforePatch.count * 11 / 10 && QLineF(beforePatch.center, afterPatch.center).length() < 1.0,
+                       "unselected peer body retains its source color, position and size")) return false;
+          }
+        }
+        viewport->clearSelection();
+        const QImage cleared = viewport->grabFramebuffer();
+        if (!cleared.save(QDir(evidence).filePath(selectedStem + "-cleared.png"))) return false;
+        const auto restored = patches(cleared);
+        for (int peer = 0; peer < 4; ++peer) if (!check(restored[peer].count >= body[peer].count * 9 / 10 &&
+              restored[peer].count <= body[peer].count * 11 / 10 && QLineF(restored[peer].center, body[peer].center).length() < 1.0,
+              "deselection restores all source bodies without reimport")) return false;
+        const auto after = document->sceneObjects();
+        for (int peer = 0; peer < 4; ++peer) if (!check(after[peer].path == initial[peer].path && after[peer].visible &&
+              after[peer].translation == initial[peer].translation && after[peer].rotation == initial[peer].rotation &&
+              after[peer].scale == initial[peer].scale, "click does not rewrite source transforms, paths or visibility")) return false;
+      }
+    }
+    for (int kind = 0; kind < 4; ++kind) if (!check(sha256(paths[kind]) == hashes[kind], "all source files remain byte-for-byte unchanged")) return false;
+  }
+  QString error;
+  if (!document->createUntitled(temporary.path(), "Empty isolation", &error)) return false;
+  qInfo() << "MIXED_GAUSSIAN_ISOLATION PASS: distinct counts/SH, all resident/all compatibility/mixed paths, real source clicks, pixels and immutable sources";
+  return true;
+}
+
 bool runRecordedInputRegression(MainWindow &window, const QString &path) {
   const auto check = [](bool ok, const char *message) {
     if (!ok) qCritical() << "GAUSSIAN_CLICK_DIAG FAIL:" << message;
@@ -865,6 +1171,7 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
   if (!QDir().mkpath(workspace) || !document->createUntitled(workspace, "Selection diagnostic", &error)) return false;
   const QString stagedProject = qEnvironmentVariable("GSW_SCENE_SELECTION_PROJECT");
   if (!stagedProject.isEmpty() && !document->load(stagedProject, &error)) return false;
+  const QString initialActiveId = document->activeSceneId();
   QStringList ids, paths;
   QList<QByteArray> hashes;
   for (const auto &input : inputs) {
@@ -884,6 +1191,7 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
       });
       if (found == objects.cend()) return false;
       ids.append(found->id);
+      if (!viewport->setSceneSelection({found->id}, found->id)) return false;
     }
     paths.append(path);
     if (!waitUntil([&] {
@@ -891,9 +1199,11 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
           return viewport->sceneCoordinates().valid && viewport->selectableModelAvailable();
         }, 30000)) return false;
   }
+  if (!initialActiveId.isEmpty() && !viewport->setSceneSelection({initialActiveId}, initialActiveId)) return false;
   auto *lockTools = window.findChild<QAction *>("lockEditToolsAction");
   if (!lockTools) return false;
   lockTools->setChecked(false);
+  viewport->selectAllModels();
   if (!viewport->focusModel()) return false;
   viewport->clearSelection();
   const auto initialObjects = document->sceneObjects();
@@ -1009,6 +1319,7 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
+  if (qEnvironmentVariable("GSW_MULTI_GAUSSIAN_ISOLATION") == QStringLiteral("1")) return runMixedGaussianIsolation(window);
   const QString privateInput = qEnvironmentVariable("GSW_GAUSSIAN_CLICK_INPUT");
   if (!privateInput.isEmpty()) return runRecordedInputRegression(window, privateInput);
   if (qEnvironmentVariable("GSW_SCENE_SELECTION_LARGE_SYNTHETIC") == QStringLiteral("1"))

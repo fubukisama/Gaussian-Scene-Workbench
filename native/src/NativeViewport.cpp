@@ -6,6 +6,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include <QScopedValueRollback>
+#include <QScopeGuard>
 #include <QSignalBlocker>
 
 #include "ModelInteraction.h"
@@ -33,6 +34,7 @@
 #include <QLineF>
 #include <QMouseEvent>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QPainterPath>
@@ -1282,14 +1284,29 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
                         object.rotation, object.scale);
       if (adoptPreview) mProcessingPreviewPresent = false;
     }
-    if (context() != nullptr && context()->isValid()) {
-      makeCurrent();
+    const bool hasRemovedScene = std::any_of(mSceneStates.cbegin(), mSceneStates.cend(),
+        [&](const auto &state) { return !retained.contains(state); });
+    if (hasRemovedScene && context() != nullptr && context()->isValid()) {
+      auto *previousContext = QOpenGLContext::currentContext();
+      auto *previousSurface = previousContext ? previousContext->surface() : nullptr;
+      auto *viewportContext = context();
+      const bool canRestoreContext = !previousContext || previousContext == viewportContext || previousSurface;
+      const auto restoreContext = qScopeGuard([&] {
+        if (previousContext && previousSurface) {
+          if (QOpenGLContext::currentContext() != previousContext ||
+              previousContext->surface() != previousSurface)
+            previousContext->makeCurrent(previousSurface);
+        } else if (!previousContext && QOpenGLContext::currentContext() == viewportContext) {
+          viewportContext->doneCurrent();
+        }
+      });
+      if (canRestoreContext && QOpenGLContext::currentContext() != viewportContext) makeCurrent();
       for (const auto &removed : mSceneStates) {
         if (retained.contains(removed)) continue;
+        if (!canRestoreContext || QOpenGLContext::currentContext() != viewportContext) break;
         QScopedValueRollback<std::shared_ptr<SceneState>> scope(mScene, removed);
         releaseSceneBuffers();
       }
-      doneCurrent();
     }
     mSceneStates = retained;
     mScene = active ? active : !retained.isEmpty() ? retained.first() : std::make_shared<SceneState>();
@@ -6939,16 +6956,36 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
     if (hitDepth) *hitDepth = depth.value_or(1.0F);
     return depth.has_value();
   }
+  // Picking only observes already displayed storage. Promotion/upload belongs
+  // to paintGL(), not an input callback with an arbitrary current context.
+  if (mScene->processingGpuSuspended || mScene->resourceUploadDeferred) return false;
   if (!mModelPickShaderReady || mModelPickProgram == nullptr ||
       !mModelPickProgram->isLinked() || context() == nullptr ||
       !context()->isValid()) {
     return std::nullopt;
   }
-  if (!admitDeferredResourceUpload()) return false;
-  makeCurrent();
-  if (QOpenGLContext::currentContext() != context()) {
+  auto *previousContext = QOpenGLContext::currentContext();
+  auto *previousSurface = previousContext ? previousContext->surface() : nullptr;
+  auto *viewportContext = context();
+  if (previousContext && previousContext != viewportContext && !previousSurface)
+    return std::nullopt;
+  const auto restoreContext = qScopeGuard([&] {
+    if (previousContext && previousSurface) {
+      if (QOpenGLContext::currentContext() != previousContext ||
+          previousContext->surface() != previousSurface)
+        previousContext->makeCurrent(previousSurface);
+    } else if (!previousContext && QOpenGLContext::currentContext() == viewportContext) {
+      viewportContext->doneCurrent();
+    }
+  });
+  // makeCurrent() also binds the widget FBO, so do not call it when the
+  // caller already owns this context with a different framebuffer bound.
+  if (previousContext != viewportContext) makeCurrent();
+  if (QOpenGLContext::currentContext() != viewportContext) {
     return std::nullopt;
   }
+  QOpenGLFunctions_3_3_Core desktopGl;
+  if (!desktopGl.initializeOpenGLFunctions()) return std::nullopt;
 
   GLint previousDrawFramebuffer = 0;
   GLint previousReadFramebuffer = 0;
@@ -6957,9 +6994,19 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
   GLint previousVertexArray = 0;
   GLint previousArrayBuffer = 0;
   GLint previousPixelPackBuffer = 0;
+  GLint previousPixelUnpackBuffer = 0;
   GLint previousReadBuffer = GL_BACK;
   GLint previousPackAlignment = 4;
+  GLint previousPackRowLength = 0;
+  GLint previousPackSkipRows = 0;
+  GLint previousPackSkipPixels = 0;
+  GLint previousPackSwapBytes = GL_FALSE;
+  GLint previousPackLsbFirst = GL_FALSE;
+  GLint previousActiveTexture = GL_TEXTURE0;
+  GLint previousTexture0 = 0;
+  GLint previousRenderbuffer = 0;
   GLint previousDepthFunction = GL_LESS;
+  GLdouble previousClearDepth = 1.0;
   GLfloat previousClearColor[4] = {0.0F, 0.0F, 0.0F, 1.0F};
   GLboolean previousDepthMask = GL_TRUE;
   GLboolean previousColorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
@@ -6970,9 +7017,20 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
   glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
   glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousArrayBuffer);
   glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &previousPixelPackBuffer);
+  glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &previousPixelUnpackBuffer);
   glGetIntegerv(GL_READ_BUFFER, &previousReadBuffer);
   glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
+  glGetIntegerv(GL_PACK_ROW_LENGTH, &previousPackRowLength);
+  glGetIntegerv(GL_PACK_SKIP_ROWS, &previousPackSkipRows);
+  glGetIntegerv(GL_PACK_SKIP_PIXELS, &previousPackSkipPixels);
+  glGetIntegerv(GL_PACK_SWAP_BYTES, &previousPackSwapBytes);
+  glGetIntegerv(GL_PACK_LSB_FIRST, &previousPackLsbFirst);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+  glActiveTexture(GL_TEXTURE0);
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture0);
+  glGetIntegerv(GL_RENDERBUFFER_BINDING, &previousRenderbuffer);
   glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunction);
+  desktopGl.glGetDoublev(GL_DEPTH_CLEAR_VALUE, &previousClearDepth);
   glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
   glGetBooleanv(GL_DEPTH_WRITEMASK, &previousDepthMask);
   glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
@@ -6986,8 +7044,49 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
   const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
   const GLboolean stencilEnabled = glIsEnabled(GL_STENCIL_TEST);
 
+  const auto restoreGlState = qScopeGuard([&] {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(previousDrawFramebuffer));
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previousReadFramebuffer));
+    glReadBuffer(static_cast<GLenum>(previousReadBuffer));
+    glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+    glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+    desktopGl.glClearDepth(previousClearDepth);
+    glDepthFunc(static_cast<GLenum>(previousDepthFunction));
+    glDepthMask(previousDepthMask);
+    glColorMask(previousColorMask[0], previousColorMask[1], previousColorMask[2], previousColorMask[3]);
+    glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
+    glPixelStorei(GL_PACK_ROW_LENGTH, previousPackRowLength);
+    glPixelStorei(GL_PACK_SKIP_ROWS, previousPackSkipRows);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, previousPackSkipPixels);
+    glPixelStorei(GL_PACK_SWAP_BYTES, previousPackSwapBytes);
+    glPixelStorei(GL_PACK_LSB_FIRST, previousPackLsbFirst);
+    glUseProgram(static_cast<GLuint>(previousProgram));
+    glBindVertexArray(static_cast<GLuint>(previousVertexArray));
+    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousArrayBuffer));
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(previousPixelPackBuffer));
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(previousPixelUnpackBuffer));
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previousTexture0));
+    glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+    glBindRenderbuffer(GL_RENDERBUFFER, static_cast<GLuint>(previousRenderbuffer));
+    const auto restoreCapability = [this](const GLenum capability, const GLboolean enabled) {
+      enabled == GL_TRUE ? glEnable(capability) : glDisable(capability);
+    };
+    restoreCapability(GL_BLEND, blendEnabled);
+    restoreCapability(GL_CULL_FACE, cullEnabled);
+    restoreCapability(GL_DEPTH_TEST, depthEnabled);
+    restoreCapability(GL_DITHER, ditherEnabled);
+    restoreCapability(GL_MULTISAMPLE, multisampleEnabled);
+    restoreCapability(GL_PROGRAM_POINT_SIZE, pointSizeEnabled);
+    restoreCapability(GL_SCISSOR_TEST, scissorEnabled);
+    restoreCapability(GL_STENCIL_TEST, stencilEnabled);
+  });
+
   std::optional<bool> result;
   {
+    // A null texture pointer must mean allocation-only, never offset zero in
+    // a caller's unpack PBO. FBO construction also changes texture/RBO binds.
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     QOpenGLFramebufferObjectFormat format;
     format.setAttachment(QOpenGLFramebufferObject::Depth);
     format.setInternalTextureFormat(GL_RGBA8);
@@ -7009,6 +7108,7 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
       glDepthMask(GL_TRUE);
       glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
       glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+      desktopGl.glClearDepth(1.0);
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
       const QMatrix4x4 modelViewProjection =
@@ -7050,9 +7150,11 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
         if (vertexArray != 0 && pointCount > 0) {
           mModelPickProgram->setUniformValue("pointPrimitive", true);
           glBindVertexArray(vertexArray);
+          GLint previousDivisor = 0;
+          glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &previousDivisor);
           glVertexAttribDivisor(0, 0);
           glDrawArrays(GL_POINTS, 0, pointCount);
-          glVertexAttribDivisor(0, 1);
+          glVertexAttribDivisor(0, static_cast<GLuint>(previousDivisor));
           drewPrimitives = true;
         }
       } else if (mScene->mRenderMode == RenderMode::Gaussians &&
@@ -7067,9 +7169,11 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
         if (vertexArray != 0 && pointCount > 0) {
           mModelPickProgram->setUniformValue("pointPrimitive", true);
           glBindVertexArray(vertexArray);
+          GLint previousDivisor = 0;
+          glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &previousDivisor);
           glVertexAttribDivisor(0, 0);
           glDrawArrays(GL_POINTS, 0, pointCount);
-          glVertexAttribDivisor(0, 1);
+          glVertexAttribDivisor(0, static_cast<GLuint>(previousDivisor));
           drewPrimitives = true;
         }
       } else {
@@ -7100,6 +7204,14 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
         std::vector<quint8> samples(static_cast<std::size_t>(sampleCount));
         glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        // Both vectors below are tightly packed W*H allocations. Inherited
+        // row strides/skips can overwrite them, and byte swapping corrupts
+        // the float depth samples used for ordering and surface navigation.
+        glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_PACK_SWAP_BYTES, GL_FALSE);
+        glPixelStorei(GL_PACK_LSB_FIRST, GL_FALSE);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         glReadPixels(0, 0, mapping->framebufferSize.width(),
                      mapping->framebufferSize.height(), GL_RED,
@@ -7149,39 +7261,6 @@ NativeViewport::modelGeometryHitAt(const QPointF &position, float *hitDepth,
     }
   }
 
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
-                    static_cast<GLuint>(previousDrawFramebuffer));
-  glBindFramebuffer(GL_READ_FRAMEBUFFER,
-                    static_cast<GLuint>(previousReadFramebuffer));
-  glReadBuffer(static_cast<GLenum>(previousReadBuffer));
-  glViewport(previousViewport[0], previousViewport[1], previousViewport[2],
-             previousViewport[3]);
-  glClearColor(previousClearColor[0], previousClearColor[1],
-               previousClearColor[2], previousClearColor[3]);
-  glDepthFunc(static_cast<GLenum>(previousDepthFunction));
-  glDepthMask(previousDepthMask);
-  glColorMask(previousColorMask[0], previousColorMask[1],
-              previousColorMask[2], previousColorMask[3]);
-  glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
-  glUseProgram(static_cast<GLuint>(previousProgram));
-  glBindVertexArray(static_cast<GLuint>(previousVertexArray));
-  glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousArrayBuffer));
-  glBindBuffer(GL_PIXEL_PACK_BUFFER,
-               static_cast<GLuint>(previousPixelPackBuffer));
-
-  const auto restoreCapability = [this](const GLenum capability,
-                                        const GLboolean enabled) {
-    enabled == GL_TRUE ? glEnable(capability) : glDisable(capability);
-  };
-  restoreCapability(GL_BLEND, blendEnabled);
-  restoreCapability(GL_CULL_FACE, cullEnabled);
-  restoreCapability(GL_DEPTH_TEST, depthEnabled);
-  restoreCapability(GL_DITHER, ditherEnabled);
-  restoreCapability(GL_MULTISAMPLE, multisampleEnabled);
-  restoreCapability(GL_PROGRAM_POINT_SIZE, pointSizeEnabled);
-  restoreCapability(GL_SCISSOR_TEST, scissorEnabled);
-  restoreCapability(GL_STENCIL_TEST, stencilEnabled);
-  doneCurrent();
   return result;
 }
 

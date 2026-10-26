@@ -81,6 +81,12 @@ not alter the rasterizer, SH representation, splat size or source data.
 
 ## Read-only static Gaussian object selection
 
+The following paragraph records the initial static-selection scope. Follow-up mixed-model isolation now also protects the GPU picking path and object activation; see [Multi-scene import](MULTI_SCENE_IMPORT.md). GPU-only IPC hardware/zero-copy acceptance remains a separate gate.
+
+上述边界说明记录初版静态点选修正的范围。后续混合模型修正也保护 GPU 拾取和活动对象切换，详见 [多对象导入](MULTI_SCENE_IMPORT.md)；GPU-only IPC 的硬件／零拷贝验收仍是独立门槛。
+
+以下の説明は初回の静的選択修正の範囲を記録したものです。後続の混合モデル修正では GPU 選択判定とアクティブオブジェクト切り替えも保護します。[複数オブジェクトのインポート](MULTI_SCENE_IMPORT.md) を参照してください。GPU-only IPC のハードウェア／ゼロコピー検証は別の確認項目です。
+
 中文：静态文件中的 3DGS／2DGS 对象点选使用当前可见点中心的只读几何检测，不在主视口创建拾取帧缓冲、绘制拾取图像或切换 OpenGL 上下文。保留既有六逻辑像素方形邻域、圆形点覆盖、删除掩码、裁剪、模型变换和多对象最近深度规则；不改变高斯参数、源文件或显示点数。驱动的点光栅边界取整可能与几何计算略有差异，不宣称逐像素位级等价。表面双击定位、网格／分页数据以及没有 CPU 几何的 IPC 实时预览仍使用原来的 GPU 路径；此修正不代表这些路径的上下文隔离已验收。录屏中的前台消失现象仍需实际界面复测，后台正常不能替代该验收。
 
 English: Static file-backed 3DGS/2DGS object clicks use read-only geometry tests against currently displayed point centers, without creating a pick framebuffer, drawing a pick mask, or switching the main viewport's OpenGL context. The existing six-logical-pixel square neighborhood, circular point footprint, deletion mask, clipping, model transforms and nearest-depth object ordering remain. Gaussian parameters, source files and displayed counts are unchanged. Driver point-raster rounding may differ at pixel boundaries; bit-exact raster equivalence is not claimed. Surface double-click recentering, mesh/paged data and IPC live previews without CPU geometry retain the GPU path; their context isolation is not accepted by this fix. The recorded foreground disappearance still requires interactive acceptance; successful background checks do not replace it.

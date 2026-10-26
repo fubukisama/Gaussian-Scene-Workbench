@@ -98,9 +98,18 @@ jobs:
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
 
-      # First reproduce the existing multiselection regression, without changing
-      # its assertions, registered timeout, fixture, launch mode or renderer.
-      - name: Run existing multiselection regression first with Qt diagnostics
+      # Exercise mixed Gaussian peers first, then retain the unchanged existing
+      # multiselection assertions, timeout, fixture, launch mode and renderer.
+      - name: Verify mixed SH Gaussian and ordinary-model resource isolation
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/scene-visibility-artifact/multi-gaussian-isolation.log `
+            --output-junit (Join-Path $PWD 'native/scene-visibility-artifact/multi-gaussian-isolation.xml') `
+            -R '^native_multi_gaussian_isolation$'
+          if ($LASTEXITCODE -ne 0) { throw 'Mixed Gaussian/model resource isolation failed; diagnostics retained.' }
+
+      - name: Run existing multiselection regression with Qt diagnostics
         id: multi-scene
         shell: pwsh
         run: |
