@@ -19,6 +19,25 @@ affected acceptance passes, recording full CI and security scans separately.
 Pending runs, historical success and static checks are not full test acceptance.
 Never open, close or restart user windows without consent.
 
+Selection diagnosis can optionally read `GSW_SCENE_SELECTION_INPUTS_JSON` (an
+explicit array of local PLY paths) while running `--smoke-test-scene-visibility`.
+`GSW_SCENE_SELECTION_PROJECT` may point to a project-owned diagnostic manifest
+copy; original projects must never be used as writable diagnostic roots.
+`GSW_SMOKE_BACKGROUND=1` makes only explicit smoke-test windows non-activating
+and off-desktop. These inputs are default-off and never apply to a normal app
+launch. Original-model captures stay local and require explicit authorization
+for local testing; no model content is uploaded by this path. Capture completion
+does not mean a reported visual failure was reproduced or fixed.
+
+中文：原始模型诊断必须显式提供 PLY 路径及 D 盘工程副本；后台窗口不激活且位于
+屏幕外。普通启动不受影响，本地测试仍需用户明确授权。保存帧图不等于已复现或
+修复缺陷，不能将原模型或原工程作为可写诊断输出，也不自动上传模型内容。
+
+日本語：実データの診断は明示した PLY と専用のプロジェクトコピーを使用し、
+バックグラウンドのテストウィンドウは非アクティブかつ画面外に配置します。
+通常の起動には適用せず、ローカル検証には明示的な許可が必要です。画像の保存を
+不具合の再現・修正と同一視せず、元データを書き換えたり自動送信したりしません。
+
 The focused `native_resource_budget_hidden_mesh` regression includes cold
 project restoration with hidden mesh, point-cloud, 3DGS and 2DGS sources. It
 checks real managed CPU/GPU usage and reservations, visible-peer admission,

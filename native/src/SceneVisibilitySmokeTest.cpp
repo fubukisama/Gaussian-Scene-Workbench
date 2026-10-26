@@ -17,6 +17,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineF>
@@ -27,10 +29,12 @@
 #include <QOpenGLExtraFunctions>
 #include <QPixmap>
 #include <QSet>
+#include <QScreen>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
+#include <QWheelEvent>
 
 #include <array>
 #include <algorithm>
@@ -79,6 +83,24 @@ std::array<Patch, 4> patches(const QImage &image, const QRect &region = {}) {
     }
   }
   for (auto &patch : result) if (patch.count) patch.center /= patch.count;
+  return result;
+}
+
+Patch coverage(const QImage &image, const QImage &background, const QRect &region) {
+  Patch result;
+  const QRect sample = region.intersected(image.rect()).intersected(background.rect());
+  for (int y = sample.top(); y <= sample.bottom(); ++y) {
+    for (int x = sample.left(); x <= sample.right(); ++x) {
+      const auto actual = image.pixelColor(x, y);
+      const auto empty = background.pixelColor(x, y);
+      if (std::max({std::abs(actual.red() - empty.red()), std::abs(actual.green() - empty.green()),
+                    std::abs(actual.blue() - empty.blue())}) > 45) {
+        ++result.count;
+        result.center += QPointF(x, y);
+      }
+    }
+  }
+  if (result.count) result.center /= result.count;
   return result;
 }
 
@@ -132,9 +154,159 @@ bool fixture(const QString &path, int kind) {
   }
   return file.write(ply) == ply.size();
 }
+
+bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  QTemporaryDir temporary;
+  if (!viewport || !document || !tree || !temporary.isValid() || inputs.size() < 2) return false;
+  if (qEnvironmentVariable("GSW_SMOKE_BACKGROUND") == QStringLiteral("1")) {
+    for (const auto *screen : QGuiApplication::screens()) {
+      if (window.frameGeometry().intersects(screen->geometry()) || window.isActiveWindow()) {
+        window.hide();
+        qCritical() << "SCENE_INPUT_DIAGNOSTIC FAIL: background window is not isolated from the desktop";
+        return false;
+      }
+    }
+  }
+  const QString evidence = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+  if (evidence.isEmpty() || !QDir().mkpath(evidence)) return false;
+  QString error;
+  const QString workspace = temporary.filePath("workspace");
+  if (!QDir().mkpath(workspace) || !document->createUntitled(workspace, "Selection diagnostic", &error)) return false;
+  const QString stagedProject = qEnvironmentVariable("GSW_SCENE_SELECTION_PROJECT");
+  if (!stagedProject.isEmpty() && !document->load(stagedProject, &error)) return false;
+  QStringList ids, paths;
+  QList<QByteArray> hashes;
+  for (const auto &input : inputs) {
+    const QString path = input.toString();
+    const QFileInfo source(path);
+    if (!source.isAbsolute() || !source.isFile() || source.isSymLink() ||
+        source.suffix().compare(QStringLiteral("ply"), Qt::CaseInsensitive) != 0) return false;
+    hashes.append(sha256(path));
+    if (hashes.last().isEmpty()) return false;
+    if (stagedProject.isEmpty()) {
+      if (!document->addScenePath(path, &error)) return false;
+      ids.append(document->activeSceneId());
+    } else {
+      const auto objects = document->sceneObjects();
+      const auto found = std::find_if(objects.cbegin(), objects.cend(), [&](const auto &object) {
+        return QFileInfo(object.path).canonicalFilePath() == source.canonicalFilePath();
+      });
+      if (found == objects.cend()) return false;
+      ids.append(found->id);
+    }
+    paths.append(path);
+    if (!waitUntil([&] {
+          (void)viewport->grabFramebuffer();
+          return viewport->sceneCoordinates().valid && viewport->selectableModelAvailable();
+        }, 30000)) return false;
+  }
+  auto *lockTools = window.findChild<QAction *>("lockEditToolsAction");
+  if (!lockTools) return false;
+  lockTools->setChecked(false);
+  if (!viewport->focusModel()) return false;
+  viewport->clearSelection();
+  const auto initialObjects = document->sceneObjects();
+  const auto snapshot = [&](const QString &name) {
+    const QImage image = viewport->grabFramebuffer();
+    viewport->makeCurrent();
+    auto *gl = viewport->context()->extraFunctions();
+    GLboolean depthWrite = GL_TRUE;
+    GLint depthFunction = 0;
+    gl->glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWrite);
+    gl->glGetIntegerv(GL_DEPTH_FUNC, &depthFunction);
+    qInfo() << "SCENE_INPUT_DIAGNOSTIC" << name << "active" << viewport->activeSceneId()
+            << "mode/gaussian/indexed/points" << viewport->renderMode() << viewport->sourceHasGaussianAttributes()
+            << viewport->indexedGaussianRendering() << viewport->renderedPointCount()
+            << "model-translation" << viewport->modelTranslation()
+            << "view" << viewport->viewTarget() << viewport->viewDistance()
+            << "orbit" << viewport->viewOrbitAngles().yawDegrees << viewport->viewOrbitAngles().pitchDegrees
+            << "depth-write/function" << depthWrite << depthFunction
+            << "stencil/scissor/alpha-coverage" << gl->glIsEnabled(GL_STENCIL_TEST)
+            << gl->glIsEnabled(GL_SCISSOR_TEST) << gl->glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE)
+            << "renderer" << reinterpret_cast<const char *>(gl->glGetString(GL_RENDERER));
+    viewport->doneCurrent();
+    return !image.isNull() && image.save(QDir(evidence).filePath(name + QStringLiteral(".png")));
+  };
+  if (!snapshot(QStringLiteral("before-selection"))) return false;
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int index = 0; index < ids.size(); ++index) {
+      auto *item = sceneItem(tree, ids[index]);
+      if (!item) return false;
+      tree->scrollToItem(item);
+      const QPoint point = tree->visualRect(tree->indexFromItem(item, 0)).center();
+      QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point),
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+      QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point),
+                     Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+      QApplication::sendEvent(tree->viewport(), &down);
+      QApplication::sendEvent(tree->viewport(), &up);
+      if (viewport->activeSceneId() != ids[index] ||
+          !snapshot(QStringLiteral("selected-%1-%2").arg(pass).arg(index))) return false;
+      viewport->clearSelection();
+      if (!snapshot(QStringLiteral("cleared-%1-%2").arg(pass).arg(index))) return false;
+    }
+  }
+  if (!snapshot(QStringLiteral("before-viewport-pick"))) return false;
+  const QPointF pick = viewport->rect().center();
+  QMouseEvent pickDown(QEvent::MouseButtonPress, pick, viewport->mapToGlobal(pick.toPoint()),
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+  QMouseEvent pickUp(QEvent::MouseButtonRelease, pick, viewport->mapToGlobal(pick.toPoint()),
+                     Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+  QApplication::sendEvent(viewport, &pickDown);
+  QApplication::sendEvent(viewport, &pickUp);
+  if (!snapshot(QStringLiteral("after-viewport-pick"))) return false;
+  viewport->clearSelection();
+  if (!snapshot(QStringLiteral("cleared-viewport-pick"))) return false;
+  // The saved project does not contain the live observation angle. Exercise
+  // the opposite side and a closer view through public navigation events.
+  lockTools->setChecked(true);
+  const QPointF end = pick + QPointF(viewport->width() * 0.45, 0);
+  QMouseEvent orbitDown(QEvent::MouseButtonPress, pick, viewport->mapToGlobal(pick.toPoint()),
+                        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+  QMouseEvent orbitMove(QEvent::MouseMove, end, viewport->mapToGlobal(end.toPoint()),
+                        Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+  QMouseEvent orbitUp(QEvent::MouseButtonRelease, end, viewport->mapToGlobal(end.toPoint()),
+                      Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+  QApplication::sendEvent(viewport, &orbitDown);
+  QApplication::sendEvent(viewport, &orbitMove);
+  QApplication::sendEvent(viewport, &orbitUp);
+  lockTools->setChecked(false);
+  viewport->clearSelection();
+  if (!snapshot(QStringLiteral("opposite-before-selection"))) return false;
+  viewport->selectModel();
+  if (!snapshot(QStringLiteral("opposite-selected"))) return false;
+  viewport->clearSelection();
+  QWheelEvent zoom(pick, viewport->mapToGlobal(pick.toPoint()), {}, QPoint(0, 360),
+                   Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+  QApplication::sendEvent(viewport, &zoom);
+  if (!snapshot(QStringLiteral("close-before-selection"))) return false;
+  viewport->selectModel();
+  if (!snapshot(QStringLiteral("close-selected"))) return false;
+  viewport->clearSelection();
+  for (int index = 0; index < paths.size(); ++index) {
+    const auto after = document->sceneObjects().at(index);
+    const auto before = initialObjects.at(index);
+    if (hashes[index] != sha256(paths[index]) || before.translation != after.translation ||
+        before.rotation != after.rotation || before.scale != after.scale || before.visible != after.visible) return false;
+  }
+  // This is a diagnostic capture, not a claim that its visual anomaly passed.
+  document->createUntitled(temporary.path(), "Empty diagnostic", &error);
+  qInfo() << "SCENE_INPUT_DIAGNOSTIC CAPTURED: owned settings/process, unchanged original hashes and transforms";
+  return true;
+}
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
+  const QByteArray inputJson = qgetenv("GSW_SCENE_SELECTION_INPUTS_JSON");
+  if (!inputJson.isEmpty()) {
+    QJsonParseError error;
+    const auto inputs = QJsonDocument::fromJson(inputJson, &error);
+    return error.error == QJsonParseError::NoError && inputs.isArray() &&
+        runInputSelectionDiagnostic(window, inputs.array());
+  }
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *tree = window.findChild<QTreeWidget *>("projectTree");
@@ -171,6 +343,10 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
   viewport->selectAllModels();
   if (!check(viewport->focusModel(), "fit imported models")) return false;
   viewport->clearSelection();
+  if (!check(document->setSceneObjectVisibility(ids, false), "capture geometry-free selection reference")) return false;
+  const QImage emptyFrame = viewport->grabFramebuffer();
+  if (!check(!emptyFrame.isNull() && document->setSceneObjectVisibility(ids, true),
+             "restore all four sources after the background capture")) return false;
   QImage frame;
   std::array<Patch, 4> baseline;
   if (!check(waitUntil([&] {
@@ -260,8 +436,14 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
         const int stripHeight = std::max(1, bounds.height() / 5);
         for (const auto &region : {QRect(bounds.left(), bounds.top(), bounds.width(), stripHeight),
                                   QRect(bounds.left(), bounds.bottom() - stripHeight + 1, bounds.width(), stripHeight)}) {
-          const auto expected = patches(baselineFrame, region)[peer];
-          const auto actual = patches(frame, region)[peer];
+          // Object selection intentionally tints its RGB, especially the
+          // antialiased edge of a small point. For that source compare actual
+          // foreground coverage against the same empty backdrop, not a hue
+          // threshold. Unselected peers retain the original color predicate.
+          const auto expected = peer == kind ? coverage(baselineFrame, emptyFrame, region)
+                                              : patches(baselineFrame, region)[peer];
+          const auto actual = peer == kind ? coverage(frame, emptyFrame, region)
+                                            : patches(frame, region)[peer];
           qInfo() << "SCENE_SELECTION peer" << pass << kind << peer << region
                   << "pixels before/after" << expected.count << actual.count
                   << "centers before/after" << expected.center << actual.center;

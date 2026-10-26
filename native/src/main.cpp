@@ -510,6 +510,17 @@ int main(int argc, char *argv[]) {
   if (!projectPath.isEmpty()) {
     window.openProjectFile(QFileInfo(projectPath).absoluteFilePath());
   }
+  const bool backgroundSmoke = smokeTest &&
+      qEnvironmentVariable("GSW_SMOKE_BACKGROUND") == QStringLiteral("1");
+  if (backgroundSmoke) {
+    // Explicit QA only: never activate an interactive user's window or use
+    // their saved geometry. The ordinary application path is unchanged.
+    window.setAttribute(Qt::WA_ShowWithoutActivating);
+    window.setWindowFlag(Qt::WindowDoesNotAcceptFocus);
+    window.setWindowFlag(Qt::Tool);
+    window.setWindowState(Qt::WindowNoState);
+    window.move(-30000, -30000);
+  }
   window.show();
   if (projectPath.isEmpty() && !smokeTest) {
     window.offerStartupRecovery();
