@@ -13,6 +13,7 @@
 #include <QDebug>
 #include <QDataStream>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QEnterEvent>
 #include <QEventLoop>
@@ -574,6 +575,201 @@ bool mixedGaussianFixture(const QString &path, int kind) {
     data << 1.0F << 0.0F << 0.0F << 0.0F;
   }
   return data.status() == QDataStream::Ok && file.flush();
+}
+
+// Infrastructure acceptance only: the final presented desktop is captured by
+// F12 before any diagnostic GL readback. This does not assert that the user's
+// original visual corruption was reproduced by these synthetic fixtures.
+bool runRenderDiagnosticsSmoke(MainWindow &window) {
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "RENDER_DIAGNOSTICS_SMOKE FAIL:" << message;
+    return ok;
+  };
+  if (!check(qEnvironmentVariable("GSW_SMOKE_BACKGROUND") != QStringLiteral("1"),
+             "presentation diagnostics cannot run in an unexposed background window")) return false;
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *screen = QGuiApplication::primaryScreen();
+  const QString output = qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR");
+  if (!check(viewport && document && screen && !output.isEmpty() &&
+             QDir::isAbsolutePath(output) && QDir().mkpath(output),
+             "real window services and explicit absolute diagnostic output directory")) return false;
+  QTemporaryDir temporary(QDir(QCoreApplication::applicationDirPath()).filePath("render-diagnostics-XXXXXX"));
+  if (!check(temporary.isValid(), "isolated synthetic input directory")) return false;
+  const auto available = screen->availableGeometry();
+  if (!check(available.width() >= 1000 && available.height() >= 750,
+             "runner desktop is sufficiently large for an exposed diagnostic window")) return false;
+  window.showNormal();
+  window.resize(std::min(1440, available.width() - 100), std::min(900, available.height() - 100));
+  window.move(available.topLeft() + QPoint(30, 30));
+  if (qEnvironmentVariable("GITHUB_ACTIONS") == QStringLiteral("true")) {
+    // This smoke entry is run only on an owned remote CI desktop. Never raise
+    // a local user's application as a side effect of the diagnostic module.
+    window.raise();
+    window.activateWindow();
+  }
+  const auto exposed = [&] {
+    if (!window.isVisible() || window.isMinimized() || !window.windowHandle() ||
+        !window.windowHandle()->isExposed() || !window.isActiveWindow()) return false;
+    const QRect viewportRect(viewport->mapToGlobal(QPoint()), viewport->size());
+    int containingScreens = 0;
+    for (const auto *candidate : QGuiApplication::screens())
+      containingScreens += candidate->geometry().contains(viewportRect);
+    return containingScreens == 1 && screen->availableGeometry().contains(window.frameGeometry());
+  };
+  if (!check(waitUntil(exposed, 5000), "owned test window is active, exposed and entirely on one screen")) return false;
+  quint64 lastPresented = 0;
+  const auto connection = QObject::connect(viewport, &QOpenGLWidget::frameSwapped, viewport, [&] {
+    lastPresented = viewport->renderedFrameSerial();
+  });
+  const auto disconnect = qScopeGuard([&] { QObject::disconnect(connection); });
+  QString error;
+  const QString workspace = temporary.filePath("workspace");
+  if (!check(QDir().mkpath(workspace) && document->createUntitled(workspace, "Render diagnostics smoke", &error),
+             "create isolated diagnostic workspace")) return false;
+  QStringList paths;
+  QList<QByteArray> hashes;
+  for (const int kind : {0, 2, 3}) {
+    const QString path = temporary.filePath(QString("diagnostic-%1.ply").arg(kind));
+    const auto before = viewport->renderedFrameSerial();
+    if (!check(mixedGaussianFixture(path, kind) && document->addScenePath(path, &error),
+               "import ordinary points, SH3 3DGS and true two-scale SH1 2DGS")) return false;
+    paths.append(path); hashes.append(sha256(path));
+    if (!check(waitUntil([&] {
+          return exposed() && lastPresented > before && viewport->selectableModelAvailable() &&
+              (kind == 0 || (viewport->gaussianRenderingAvailable() &&
+               viewport->sourceHasSurfelAttributes() == (kind == 3)));
+        }, 15000), "import reaches a normally rendered and presented frame without forced capture")) return false;
+  }
+  viewport->setShowCameras(false);
+  viewport->setShowObservationTrackball(false);
+  viewport->setEditToolsLocked(true);
+  viewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
+  const auto beforeFit = viewport->renderedFrameSerial();
+  viewport->selectAllModels();
+  if (!check(viewport->focusModel(), "frame three synthetic model sources")) return false;
+  viewport->clearSelection();
+  viewport->setFocus(Qt::OtherFocusReason);
+  if (!check(waitUntil([&] { return exposed() && lastPresented > beforeFit; }, 5000),
+             "fit operation reaches normal composition")) return false;
+  QElapsedTimer stable;
+  stable.start();
+  auto stableSerial = viewport->renderedFrameSerial();
+  if (!check(waitUntil([&] {
+        const auto serial = viewport->renderedFrameSerial();
+        if (serial != stableSerial) { stableSerial = serial; stable.restart(); }
+        return exposed() && serial > 0 && lastPresented == serial && stable.elapsed() >= 400;
+      }, 10000), "normally presented scene is stable for 400ms before critical capture")) return false;
+  const auto manifests = [&] {
+    QSet<QString> result;
+    QDirIterator iterator(output, {"manifest.json"}, QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) result.insert(iterator.next());
+    return result;
+  };
+  const auto oldManifests = manifests();
+  const auto requestSerial = viewport->renderedFrameSerial();
+  const auto objects = document->sceneObjects();
+  const auto cameraTarget = viewport->viewTarget();
+  const auto cameraDistance = viewport->viewDistance();
+  const auto cameraAngles = viewport->viewOrbitAngles();
+  const auto cameraOrthographic = viewport->orthographicProjection();
+  // Critical phase: no grabFramebuffer(), QPaintEvent, QWidget::render/grab,
+  // makeCurrent() or GL-state sentinels. F12 is delivered through the owned
+  // top-level QWindow, followed only by normal events and artifact-file reads.
+  QKeyEvent down(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier);
+  QKeyEvent up(QEvent::KeyRelease, Qt::Key_F12, Qt::NoModifier);
+  QApplication::sendEvent(window.windowHandle(), &down);
+  QApplication::sendEvent(window.windowHandle(), &up);
+  QString manifestPath;
+  QJsonObject manifest;
+  if (!check(waitUntil([&] {
+        const auto current = manifests();
+        for (const auto &path : current) {
+          if (oldManifests.contains(path)) continue;
+          QFile file(path);
+          if (!file.open(QIODevice::ReadOnly)) continue;
+          const auto parsed = QJsonDocument::fromJson(file.readAll());
+          if (!parsed.isObject()) continue;
+          const auto candidate = parsed.object();
+          const auto status = candidate.value("status").toString();
+          if (status == "complete" || status == "rejected") {
+            manifestPath = path; manifest = candidate; return true;
+          }
+        }
+        return false;
+      }, 20000), "F12 creates a completed or explicitly rejected diagnostic manifest")) return false;
+  qInfo() << "RENDER_DIAGNOSTICS_SMOKE manifest" << manifestPath << "status" << manifest.value("status");
+  if (!check(manifest.value("status").toString() == "complete", "capture privacy/visibility guards accept the owned test window")) return false;
+  const auto serial = [&](const char *name) {
+    return manifest.value(QLatin1String(name)).toVariant().toULongLong();
+  };
+  if (!check(manifest.value("requestSerialMatch").toBool() && manifest.value("stageSerialMatch").toBool() &&
+             serial("requestRenderedSerial") >= requestSerial && serial("requestRenderedSerial") > 0 &&
+             serial("requestRenderedSerial") == serial("requestPresentedSerial") &&
+             serial("stageFrameSerial") > serial("requestRenderedSerial") &&
+             serial("stageFrameSerial") == serial("stagePresentedSerial"),
+             "capture binds its before and staged output to actually presented serials")) return false;
+  const QString captureRoot = QFileInfo(manifestPath).absolutePath();
+  const auto image = [&](const QString &path, const bool nonuniform) {
+    const QString absolute = QFileInfo(path).isAbsolute() ? QFileInfo(path).absoluteFilePath()
+                                                         : QDir(captureRoot).absoluteFilePath(path);
+    const auto clean = QDir::cleanPath(absolute);
+    if (!clean.startsWith(QDir::cleanPath(captureRoot) + '/', Qt::CaseInsensitive) || QFileInfo(clean).isSymLink()) return false;
+    const QImage pixels(clean);
+    if (pixels.isNull() || pixels.width() < 100 || pixels.height() < 100) return false;
+    if (!nonuniform) return true;
+    int minimum = 255, maximum = 0;
+    for (int y = 0; y < pixels.height(); y += std::max(1, pixels.height() / 64))
+      for (int x = 0; x < pixels.width(); x += std::max(1, pixels.width() / 64)) {
+        const auto color = pixels.pixelColor(x, y);
+        const int peak = std::max({color.red(), color.green(), color.blue()});
+        minimum = std::min(minimum, peak); maximum = std::max(maximum, peak);
+      }
+    return maximum - minimum > 32;
+  };
+  for (const auto *name : {"presented-before.png", "existing-before.png", "presented-after.png"})
+    if (!check(image(QDir(captureRoot).filePath(name), true), "presented and existing images are decodable, substantial and nonblank")) return false;
+  const QImage presentedBefore(QDir(captureRoot).filePath("presented-before.png"));
+  const QImage presentedAfter(QDir(captureRoot).filePath("presented-after.png"));
+  const QImage existingBefore(QDir(captureRoot).filePath("existing-before.png"));
+  if (!check(presentedBefore.size() == presentedAfter.size() &&
+             std::abs(presentedBefore.width() - existingBefore.width()) <= 2 &&
+             std::abs(presentedBefore.height() - existingBefore.height()) <= 2,
+             "presented and existing captures retain consistent physical pixel dimensions")) return false;
+  const auto stages = manifest.value("stages").toArray();
+  int validColors = 0, validDepths = 0;
+  bool postPainter = false;
+  if (!check(stages.size() >= 4 && stages.size() <= 32, "staged capture stays within its bounded pipeline")) return false;
+  for (const auto &value : stages) {
+    const auto stage = value.toObject();
+    const auto name = stage.value("name").toString();
+    if (stage.value("colorValid").toBool()) {
+      if (!check(image(stage.value("colorPath").toString(), false), "valid stage color flag names a decodable in-root image")) return false;
+      ++validColors;
+      postPainter |= name == QStringLiteral("after-painter");
+    }
+    if (stage.value("depthValid").toBool()) {
+      if (!check(image(stage.value("depthPath").toString(), false), "valid depth flag names a decodable in-root image")) return false;
+      ++validDepths;
+    }
+    if (stage.value("stencilValid").toBool() &&
+        !check(image(stage.value("stencilPath").toString(), false), "valid stencil flag names a decodable in-root image")) return false;
+  }
+  if (!check(validColors >= 4 && validDepths >= 1 && postPainter,
+             "capture includes scene colors, depth and the post-QPainter boundary")) return false;
+  if (!check(viewport->viewTarget() == cameraTarget && viewport->viewDistance() == cameraDistance &&
+             viewport->viewOrbitAngles() == cameraAngles && viewport->orthographicProjection() == cameraOrthographic,
+             "diagnostics leave camera target, distance, orbit and projection unchanged")) return false;
+  const auto after = document->sceneObjects();
+  if (!check(after.size() == objects.size(), "diagnostics preserve the imported collection")) return false;
+  for (qsizetype index = 0; index < after.size(); ++index)
+    if (!check(after[index].id == objects[index].id && after[index].path == objects[index].path &&
+               after[index].translation == objects[index].translation && after[index].rotation == objects[index].rotation &&
+               after[index].scale == objects[index].scale && after[index].visible == objects[index].visible &&
+               sha256(paths[index]) == hashes[index], "diagnostics leave fixture sources and model state unchanged")) return false;
+  if (!document->createUntitled(temporary.path(), "Empty diagnostics smoke", &error)) return false;
+  qInfo() << "RENDER_DIAGNOSTICS_SMOKE PASS: presented-first infrastructure, serial binding and bounded stage artifacts; NOT original visual-anomaly reproduction";
+  return true;
 }
 
 bool runMixedGaussianIsolation(MainWindow &window) {
@@ -1319,6 +1515,7 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
+  if (qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_SMOKE") == QStringLiteral("1")) return runRenderDiagnosticsSmoke(window);
   if (qEnvironmentVariable("GSW_MULTI_GAUSSIAN_ISOLATION") == QStringLiteral("1")) return runMixedGaussianIsolation(window);
   const QString privateInput = qEnvironmentVariable("GSW_GAUSSIAN_CLICK_INPUT");
   if (!privateInput.isEmpty()) return runRecordedInputRegression(window, privateInput);

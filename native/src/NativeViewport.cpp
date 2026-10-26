@@ -10,6 +10,7 @@
 #include <QSignalBlocker>
 
 #include "ModelInteraction.h"
+#include "RenderFrameDiagnostics.h"
 #include "TransformGizmoRenderer.h"
 #include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
@@ -31,6 +32,7 @@
 #include <QHash>
 #include <QHideEvent>
 #include <QKeyEvent>
+#include <QJsonArray>
 #include <QLineF>
 #include <QMouseEvent>
 #include <QOpenGLFramebufferObject>
@@ -522,6 +524,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     // a newly rendered viewport image that has actually reached composition.
     if (mPresentedFrameSerial == mRenderedFrameSerial) return;
     mPresentedFrameSerial = mRenderedFrameSerial;
+    if (mRenderDiagnostics) mRenderDiagnostics->presented(this, mPresentedFrameSerial);
     if (mScene->mRenderedPointCount <= 0 && mScene->mFullResolutionPointCount <= 0 &&
         mScene->mRenderedMeshIndexCount <= 0 &&
         mScene->mFullResolutionMeshTriangleCount <= 0 &&
@@ -533,6 +536,9 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
                              mFrameRateCounter.averageFrameMilliseconds());
   });
+  const QString diagnosticsRoot = qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR");
+  if (!diagnosticsRoot.isEmpty())
+    mRenderDiagnostics = std::make_unique<RenderFrameDiagnostics>(diagnosticsRoot);
   monitorRefreshWindow();
 }
 
@@ -554,6 +560,7 @@ NativeViewport::~NativeViewport() {
     mDepthOverlayVertexArray.destroy();
     mGridVertexArray.destroy();
     mDepthOverlayBuffer.destroy();
+    mRenderDiagnostics.reset();
     doneCurrent();
   }
 }
@@ -3534,6 +3541,54 @@ void NativeViewport::hideEvent(QHideEvent *event) {
   QOpenGLWidget::hideEvent(event);
 }
 
+QJsonObject NativeViewport::renderDiagnosticMetadata() const {
+  const auto vector = [](const QVector3D &v) { return QJsonArray{v.x(), v.y(), v.z()}; };
+  const auto matrix = [](const QMatrix4x4 &m) {
+    QJsonArray result;
+    for (int index = 0; index < 16; ++index) result.append(m.constData()[index]);
+    return result; // column-major, same ordering as OpenGL uniforms
+  };
+  QJsonArray objects;
+  for (const auto &state : mSceneStates) {
+    objects.append(QJsonObject{{"id", state->id}, {"path", state->mScenePath},
+        {"requestedPath", state->mRequestedScenePath}, {"visible", state->visible},
+        {"renderMode", int(state->mRenderMode)}, {"sourceCount", state->mSourceVertexCount},
+        {"translation", vector(state->mModelTranslation)}, {"scale", vector(state->mModelScale)},
+        {"rotationWxyz", QJsonArray{state->mModelRotation.scalar(), state->mModelRotation.x(),
+                                    state->mModelRotation.y(), state->mModelRotation.z()}}});
+  }
+  const QMatrix4x4 model = modelMatrix();
+  const bool ipc = trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame();
+  const QMatrix4x4 effectiveModel = model * (ipc ? trainingPreviewCoordinateTransform() : QMatrix4x4());
+  return {{"activeId", mRenderDiagnosticActiveId}, {"sourceSceneId", mScene->id},
+      {"objects", objects}, {"sourcePath", mScene->mScenePath},
+      {"renderMode", int(mScene->mRenderMode)}, {"sourceCount", mScene->mSourceVertexCount},
+      {"basePointCount", qint64(mScene->mRenderedPointCount)},
+      {"fullPointCount", qint64(mScene->mFullResolutionPointCount)},
+      {"uploadedFullPointCount", qint64(mScene->mUploadedFullResolutionPointCount)},
+      {"pointChunks", qint64(mScene->mFullResolutionPointGpuChunks.size())},
+      {"meshIndexCount", qint64(mScene->mRenderedMeshIndexCount)},
+      {"drawnFullMeshTriangleCount", qint64(mScene->mDrawnFullResolutionMeshTriangleCount)},
+      {"visible", mScene->visible}, {"suspended", mScene->processingGpuSuspended},
+      {"deferred", mScene->resourceUploadDeferred}, {"indexedGaussians", mScene->indexedGaussians},
+      {"surfelAttributes", mScene->mHasSurfelAttributes}, {"ipcPreview", ipc},
+      {"modelSelected", mModelSelected}, {"editToolsLocked", mEditToolsLocked},
+      {"layerDisplayTransform", matrix(mLayerDisplayTransform)}, {"modelMatrix", matrix(model)},
+      {"expectedMvp", matrix(projectionMatrix() * viewMatrix() * effectiveModel)},
+      {"viewMatrix", matrix(viewMatrix())}, {"projectionMatrix", matrix(projectionMatrix())},
+      {"cameraTarget", vector(mTarget)}, {"cameraPosition", vector(cameraPosition())},
+      {"cameraDistance", mDistance}, {"orthographic", mOrthographic},
+      {"cameraAngles", QJsonArray{mYawDegrees, mPitchDegrees, mRollDegrees}},
+      {"matrixEncoding", "column-major-float32"}};
+}
+
+void NativeViewport::noteRenderDiagnosticDraw(const char *name, const qint64 count) {
+  if (!mRenderDiagnostics || !mRenderDiagnostics->recording()) return;
+  auto meta = renderDiagnosticMetadata();
+  meta.insert("drawCount", count);
+  mRenderDiagnostics->note(QString::fromLatin1(name), meta);
+}
+
 void NativeViewport::paintGL() {
   if (!isVisible() || window()->isMinimized()) { updateFrameRefreshPolicy(); return; }
   if (!frameTimingBurstActive()) mFrameRateCounter.pause();
@@ -3595,12 +3650,25 @@ void NativeViewport::paintGL() {
   if (!mCapturingProcessingReferenceImage && mProcessingPreviewVisible &&
       hasProcessingPreview() && mScene != mProcessingScene)
     setProcessingPreviewVisible(true);
+  // Opt-in diagnostics retain the already-presented image before requesting
+  // this separate normal frame. Never use this frame as the original failure.
+  bool diagnosticFrame = false;
+  if (mRenderDiagnostics && mRenderDiagnostics->pendingFrame() && !mCapturingProcessingReferenceImage) {
+    mRenderDiagnosticActiveId = mScene->id;
+    diagnosticFrame = mRenderDiagnostics->beginFrame(
+        this, mRenderedFrameSerial + 1, renderDiagnosticMetadata());
+  }
+  const auto finishDiagnostic = qScopeGuard([&] {
+    if (diagnosticFrame) mRenderDiagnostics->endFrame(mRenderedFrameSerial);
+  });
+  if (diagnosticFrame) mRenderDiagnostics->note(QStringLiteral("before-clear"));
   // Resolve the current theme at frame time so live changes also affect every
   // Gaussian path (resident, compatibility and training preview). The splats
   // continue to use unchanged premultiplied-alpha blending over this backdrop.
   const QVector4D clearColor = viewportClearColor();
   glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-clear"));
   if (!mCapturingProcessingReferenceImage && mProcessingPreviewVisible &&
       mScene == mProcessingScene && !mProcessingPausedImage.isNull() &&
       (mProcessingPreviewPaused || mProcessingPreviewResumePending)) {
@@ -3611,6 +3679,7 @@ void NativeViewport::paintGL() {
     drawTransformToolStrip(painter);
     drawAxisGizmo(painter);
     painter.end();
+    if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-paused-painter"));
     ++mRenderedFrameSerial;
     updateFrameRefreshPolicy();
     return;
@@ -3625,6 +3694,7 @@ void NativeViewport::paintGL() {
     drawTransformToolStrip(painter);
     drawAxisGizmo(painter);
     painter.end();
+    if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-reference-painter"));
     ++mRenderedFrameSerial;
     updateFrameRefreshPolicy();
     return;
@@ -3635,6 +3705,7 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 viewProjection = projection * view;
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
   drawInfiniteGrid(viewProjection);
+  if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-grid"));
   const auto active = mScene;
   auto ordered = displayedSceneStates();
   // Opaque objects share depth. Draw transparent objects back-to-front at the
@@ -3649,6 +3720,11 @@ void NativeViewport::paintGL() {
     };
     return leftTransparent && distance(left) > distance(right);
   });
+  if (diagnosticFrame) {
+    QJsonArray order;
+    for (const auto &state : ordered) order.append(state->id);
+    mRenderDiagnostics->note(QStringLiteral("draw-order"), {{"ids", order}});
+  }
   for (const auto &state : ordered) {
     const bool inactive = state != active;
     QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
@@ -3660,6 +3736,9 @@ void NativeViewport::paintGL() {
     QSignalBlocker signalBlocker(this);
     if (!inactive) signalBlocker.unblock();
     drawSceneGeometry(view, projection);
+    if (diagnosticFrame)
+      mRenderDiagnostics->stage(QStringLiteral("after-model-%1").arg(state->id),
+                                renderDiagnosticMetadata());
   }
 
   // Selection is an annotation, never a scene-depth occluder. In particular,
@@ -3673,6 +3752,7 @@ void NativeViewport::paintGL() {
         mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
     drawDepthAwareModelBounds(viewProjection * modelMatrix());
   }
+  if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-bounds"));
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
@@ -3688,6 +3768,7 @@ void NativeViewport::paintGL() {
     drawAxisGizmo(painter);
   }
   painter.end();
+  if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-painter"));
   if (!mCapturingProcessingReferenceImage) {
     ++mRenderedFrameSerial;
     if (mProcessingActive && mProcessingPreviewVisible && !hasProcessingPreview() &&
@@ -5555,6 +5636,7 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
   {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mPointVertexArray);
     if (mScene->mRenderedPointCount > 0) {
+      noteRenderDiagnosticDraw("draw-points-base", mScene->mRenderedPointCount);
       glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mScene->mRenderedPointCount));
     }
   }
@@ -5597,6 +5679,7 @@ void NativeViewport::drawPointCloud(const QMatrix4x4 &viewProjection) {
         (mScene->mPointCache.isValid() &&
          mScene->mPointCache.nodes.at(nodeId).depth < PointCloudCacheIndex::OctreeDepth);
     glBindVertexArray(chunk->vertexArray);
+    noteRenderDiagnosticDraw("draw-points-chunk", chunk->pointCount);
     glDrawArrays(GL_POINTS, 0, chunk->pointCount);
   }
   mInteractionLodActive = hierarchicalLod;
@@ -5636,6 +5719,7 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
   if (mScene->mRenderedMeshIndexCount >= 3 && mScene->mMeshIndexBuffer.isCreated()) {
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mMeshVertexArray);
     mScene->mMeshIndexBuffer.bind();
+    noteRenderDiagnosticDraw("draw-mesh-base", mScene->mRenderedMeshIndexCount);
     glDrawElements(GL_TRIANGLES,
                    static_cast<GLsizei>(mScene->mRenderedMeshIndexCount),
                    GL_UNSIGNED_INT, nullptr);
@@ -5679,6 +5763,7 @@ void NativeViewport::drawMesh(const QMatrix4x4 &viewProjection) {
         hierarchicalLod ||
         (pagedMeshAvailable() && !mScene->mMeshCache.nodes.at(nodeId).isLeaf());
     glBindVertexArray(chunk->vertexArray);
+    noteRenderDiagnosticDraw("draw-mesh-chunk", chunk->indexCount);
     glDrawElements(GL_TRIANGLES, chunk->indexCount, GL_UNSIGNED_INT, nullptr);
     mScene->mDrawnFullResolutionMeshTriangleCount += chunk->indexCount / 3;
   }
@@ -5717,6 +5802,7 @@ void NativeViewport::drawTrainingPointCloud(
   // so temporarily switch position/color back to a per-vertex rate.
   glVertexAttribDivisor(0, 0);
   glVertexAttribDivisor(1, 0);
+  noteRenderDiagnosticDraw("draw-training-points", drawCount);
   glDrawArrays(GL_POINTS, 0, drawCount);
   glVertexAttribDivisor(0, 1);
   glVertexAttribDivisor(1, 1);
@@ -5780,16 +5866,19 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                   static_cast<float>(height() * ratio)));
   if (ipcPreview) {
     glBindVertexArray(mTrainingGpuPreview.activeVertexArray());
+    noteRenderDiagnosticDraw("draw-ipc-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
     glBindVertexArray(0);
   } else if (indexed) {
     mScene->gaussianGpu.bind();
+    noteRenderDiagnosticDraw("draw-indexed-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(drawCount));
     mScene->gaussianGpu.unbind();
   } else {
     mScene->gaussianGpu.bindTextures();
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
+    noteRenderDiagnosticDraw("draw-compatibility-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
     mScene->gaussianGpu.unbindTextures();
@@ -6544,6 +6633,17 @@ QVector3D NativeViewport::cameraPosition() const {
 }
 
 void NativeViewport::keyPressEvent(QKeyEvent *event) {
+  if (mRenderDiagnostics && event->key() == Qt::Key_F12 &&
+      event->modifiers() == Qt::NoModifier && !event->isAutoRepeat()) {
+    mRenderDiagnosticActiveId = mScene->id;
+    // request() must save desktop pixels before any GL access; update only
+    // after that request has finished capturing the existing frame.
+    if (mRenderDiagnostics->request(this, mRenderedFrameSerial,
+                                    mPresentedFrameSerial, renderDiagnosticMetadata()))
+      update();
+    event->accept();
+    return;
+  }
   if (mEditToolsLocked) {
     // Do not let edit shortcuts change mode, selection, or transform state.
     // Unhandled keys still reach window-level navigation and lock actions.

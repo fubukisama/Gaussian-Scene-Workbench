@@ -81,7 +81,7 @@ jobs:
         run: |
           $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
           cmake -S native -B native/build-scene-visibility -G 'Visual Studio 17 2022' -A x64 `
-            -DBUILD_TESTING=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            -DBUILD_TESTING=ON -DGSW_ENABLE_RENDER_DIAGNOSTICS_CAPTURE_TEST=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
             '-DPython3_EXECUTABLE=${{ steps.qa-python.outputs.python-path }}' `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
@@ -100,6 +100,15 @@ jobs:
 
       # Exercise mixed Gaussian peers first, then retain the unchanged existing
       # multiselection assertions, timeout, fixture, launch mode and renderer.
+      - name: Verify presented-first manual frame diagnostics infrastructure
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/scene-visibility-artifact/render-diagnostics.log `
+            --output-junit (Join-Path $PWD 'native/scene-visibility-artifact/render-diagnostics.xml') `
+            -R '^native_render_diagnostics_capture$'
+          if ($LASTEXITCODE -ne 0) { throw 'Presented-first diagnostic capture infrastructure failed; this is not a visual-anomaly acceptance test.' }
+
       - name: Verify mixed SH Gaussian and ordinary-model resource isolation
         shell: pwsh
         run: |
@@ -164,6 +173,7 @@ jobs:
           name: native-scene-visibility-acceptance
           path: |
             native/scene-visibility-artifact/
+            native/build-scene-visibility/render-diagnostics/
             native/build-scene-visibility/Testing/Temporary/LastTest.log
             native/build-scene-visibility/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: warn

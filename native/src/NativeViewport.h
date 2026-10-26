@@ -19,6 +19,7 @@
 #include <memory>
 
 #include <QImage>
+#include <QJsonObject>
 #include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
@@ -51,6 +52,7 @@ class QHideEvent;
 
 namespace gsw {
 
+class RenderFrameDiagnostics;
 enum class ReferenceGridPlane;
 struct ReferenceGridScale;
 
@@ -510,6 +512,8 @@ private:
   [[nodiscard]] QMatrix4x4 projectionMatrix() const;
   [[nodiscard]] QMatrix4x4 viewProjectionMatrix() const;
   [[nodiscard]] QMatrix4x4 modelMatrix() const;
+  [[nodiscard]] QJsonObject renderDiagnosticMetadata() const;
+  void noteRenderDiagnosticDraw(const char *name, qint64 count);
   [[nodiscard]] QVector3D modelBoundsMinimum() const;
   [[nodiscard]] QVector3D modelBoundsMaximum() const;
   [[nodiscard]] std::array<QVector3D, 8>
@@ -782,6 +786,8 @@ private:
   QTimer *mViewSnapTimer = nullptr;
   bool mZoomToCursorEnabled = true;
   FrameRateCounter mFrameRateCounter;
+  std::unique_ptr<RenderFrameDiagnostics> mRenderDiagnostics;
+  QString mRenderDiagnosticActiveId;
 };
 
 } // namespace gsw

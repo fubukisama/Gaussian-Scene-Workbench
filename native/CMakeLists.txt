@@ -102,6 +102,8 @@ if(MSVC)
 endif()
 
 qt_add_executable(GaussianSceneWorkbench WIN32
+  src/RenderFrameDiagnostics.cpp
+  src/RenderFrameDiagnostics.h
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
   tests/BlenderViewportVisualTestSupport.cpp
@@ -1217,6 +1219,15 @@ if(BUILD_TESTING)
     TIMEOUT 180
     ENVIRONMENT "GSW_MULTI_GAUSSIAN_ISOLATION=1;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  option(GSW_ENABLE_RENDER_DIAGNOSTICS_CAPTURE_TEST "Enable exposed-desktop diagnostic infrastructure test" OFF)
+  if(GSW_ENABLE_RENDER_DIAGNOSTICS_CAPTURE_TEST)
+  add_test(NAME native_render_diagnostics_capture
+    COMMAND GaussianSceneWorkbench --smoke-test-scene-visibility --language zh_CN --theme dark)
+  set_tests_properties(native_render_diagnostics_capture PROPERTIES
+    TIMEOUT 90
+    ENVIRONMENT "GSW_RENDER_DIAGNOSTICS_SMOKE=1;GSW_RENDER_DIAGNOSTICS_DIR=${CMAKE_CURRENT_BINARY_DIR}/render-diagnostics;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   foreach(GSW_SCHEDULING_THEME light dark)
     add_test(NAME native_viewport_scheduling_${GSW_SCHEDULING_THEME}
       COMMAND GaussianSceneWorkbench --smoke-test-viewport-scheduling --theme ${GSW_SCHEDULING_THEME})
