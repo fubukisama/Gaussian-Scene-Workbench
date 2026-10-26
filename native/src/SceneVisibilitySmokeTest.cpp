@@ -23,6 +23,8 @@
 #include <QMessageBox>
 #include <QAbstractButton>
 #include <QMouseEvent>
+#include <QOpenGLContext>
+#include <QOpenGLExtraFunctions>
 #include <QPixmap>
 #include <QSet>
 #include <QTemporaryDir>
@@ -183,6 +185,7 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
       "scene-visibility-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
   QDir().mkpath(evidence);
   frame.save(QDir(evidence).filePath("all-visible.png"));
+  const QImage baselineFrame = frame;
   const auto initialObjects = document->sceneObjects();
   const auto target = viewport->viewTarget();
   const float distance = viewport->viewDistance();
@@ -210,27 +213,63 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
   };
   // The real tree-name seam must not move, shrink or replace any visible
   // peer when switching between point, mesh, 3DGS and 2DGS sources. Compare
-  // each peer's original screen region, so the selected source's colored
-  // transform gizmo cannot masquerade as another model's geometry.
+  // each source's original upper/lower screen strips. The center hint and
+  // transform gizmo are deliberately not geometry and can cover a peer.
+  // Keep the same pixel-count and centroid limits outside those overlays.
   for (int pass = 0; pass < 2; ++pass) {
     for (int kind = 0; kind < 4; ++kind) {
-      if (!check(nameClick(ids[kind]), "click visible source name")) return false;
+      if (pass == 0) {
+        if (!check(nameClick(ids[kind]), "click visible source name")) return false;
+      } else {
+        const QPointF point = baseline[kind].center / viewport->devicePixelRatioF();
+        QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()),
+                         Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease, point, viewport->mapToGlobal(point.toPoint()),
+                       Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(viewport, &down);
+        QApplication::sendEvent(viewport, &up);
+      }
       frame = viewport->grabFramebuffer();
       frame.save(QDir(evidence).filePath(QString("selected-%1-%2.png").arg(pass).arg(kind)));
       if (!check(viewport->activeSceneId() == ids[kind] && document->activeSceneId() == ids[kind] &&
                  viewport->selectedSceneIds() == QStringList{ids[kind]} &&
                  viewport->visibleSceneObjectCount() == 4,
                  "name click changes only the active and selected source")) return false;
+      const auto expectedMode = kind == 0 ? NativeViewport::RenderMode::Points
+          : kind == 1 ? NativeViewport::RenderMode::Mesh : NativeViewport::RenderMode::Gaussians;
+      if (!check(viewport->renderMode() == expectedMode &&
+                 viewport->sourceHasGaussianAttributes() == (kind >= 2) &&
+                 viewport->sourceHasSurfelAttributes() == (kind == 3),
+                 "tree and viewport selection retain the source's actual render mode and attributes")) return false;
+      // Read-only diagnostics, not assertions about private renderer details:
+      // retain the actual post-QPainter state if a driver's frame diverges.
+      viewport->makeCurrent();
+      auto *gl = viewport->context()->extraFunctions();
+      GLboolean depthWrite = GL_TRUE;
+      GLint depthFunction = 0;
+      gl->glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWrite);
+      gl->glGetIntegerv(GL_DEPTH_FUNC, &depthFunction);
+      qInfo() << "SCENE_SELECTION render" << pass << kind << viewport->renderMode()
+              << "indexed/points" << viewport->indexedGaussianRendering() << viewport->renderedPointCount()
+              << "depth-write/function" << depthWrite << depthFunction
+              << "stencil/scissor/alpha-coverage" << gl->glIsEnabled(GL_STENCIL_TEST)
+              << gl->glIsEnabled(GL_SCISSOR_TEST) << gl->glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE);
+      viewport->doneCurrent();
       for (int peer = 0; peer < 4; ++peer) {
-        if (peer == kind) continue;
-        const auto actual = patches(frame, baseline[peer].bounds.adjusted(-3, -3, 3, 3))[peer];
-        qInfo() << "SCENE_SELECTION peer" << pass << kind << peer
-                << "pixels before/after" << baseline[peer].count << actual.count
-                << "centers before/after" << baseline[peer].center << actual.center;
-        if (!check(actual.count >= baseline[peer].count * 9 / 10 &&
-                   actual.count <= baseline[peer].count * 11 / 10 &&
-                   QLineF(actual.center, baseline[peer].center).length() < 1.0,
-                   "selecting a source preserves every other model's actual screen footprint")) return false;
+        const auto bounds = baseline[peer].bounds;
+        const int stripHeight = std::max(1, bounds.height() / 5);
+        for (const auto &region : {QRect(bounds.left(), bounds.top(), bounds.width(), stripHeight),
+                                  QRect(bounds.left(), bounds.bottom() - stripHeight + 1, bounds.width(), stripHeight)}) {
+          const auto expected = patches(baselineFrame, region)[peer];
+          const auto actual = patches(frame, region)[peer];
+          qInfo() << "SCENE_SELECTION peer" << pass << kind << peer << region
+                  << "pixels before/after" << expected.count << actual.count
+                  << "centers before/after" << expected.center << actual.center;
+          if (!check(expected.count > 60 && actual.count >= expected.count * 9 / 10 &&
+                     actual.count <= expected.count * 11 / 10 &&
+                     QLineF(actual.center, expected.center).length() < 1.0,
+                     "selection preserves the selected model and peer geometry outside center overlays")) return false;
+        }
       }
       viewport->clearSelection();
       const auto cleared = patches(viewport->grabFramebuffer());
