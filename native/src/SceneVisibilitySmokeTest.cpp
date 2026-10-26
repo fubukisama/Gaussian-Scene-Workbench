@@ -19,6 +19,7 @@
 #include <QImage>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineF>
 #include <QMessageBox>
 #include <QAbstractButton>
 #include <QMouseEvent>
@@ -49,13 +50,16 @@ bool waitUntil(const std::function<bool()> &predicate, int timeout = 7000) {
 struct Patch {
   int count = 0;
   QPointF center;
+  QRect bounds;
 };
 
-std::array<Patch, 4> patches(const QImage &image) {
+std::array<Patch, 4> patches(const QImage &image, const QRect &region = {}) {
   std::array<Patch, 4> result;
   // Only the scene body: exclude badges, axes, toolbar and lower caption.
-  for (int y = 110; y < image.height() - 120; ++y) {
-    for (int x = 20; x < image.width() - 20; ++x) {
+  QRect body(20, 110, image.width() - 40, image.height() - 230);
+  if (!region.isNull()) body = body.intersected(region);
+  for (int y = body.top(); y <= body.bottom(); ++y) {
+    for (int x = body.left(); x <= body.right(); ++x) {
       const QColor color = image.pixelColor(x, y);
       const int r = color.red(), g = color.green(), b = color.blue();
       const std::array<bool, 4> matches{
@@ -67,6 +71,7 @@ std::array<Patch, 4> patches(const QImage &image) {
         if (matches[kind]) {
           ++result[kind].count;
           result[kind].center += QPointF(x, y);
+          result[kind].bounds |= QRect(x, y, 1, 1);
         }
       }
     }
@@ -203,6 +208,48 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     QApplication::sendEvent(tree->viewport(), &up);
     return true;
   };
+  // The real tree-name seam must not move, shrink or replace any visible
+  // peer when switching between point, mesh, 3DGS and 2DGS sources. Compare
+  // each peer's original screen region, so the selected source's colored
+  // transform gizmo cannot masquerade as another model's geometry.
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int kind = 0; kind < 4; ++kind) {
+      if (!check(nameClick(ids[kind]), "click visible source name")) return false;
+      frame = viewport->grabFramebuffer();
+      frame.save(QDir(evidence).filePath(QString("selected-%1-%2.png").arg(pass).arg(kind)));
+      if (!check(viewport->activeSceneId() == ids[kind] && document->activeSceneId() == ids[kind] &&
+                 viewport->selectedSceneIds() == QStringList{ids[kind]} &&
+                 viewport->visibleSceneObjectCount() == 4,
+                 "name click changes only the active and selected source")) return false;
+      for (int peer = 0; peer < 4; ++peer) {
+        if (peer == kind) continue;
+        const auto actual = patches(frame, baseline[peer].bounds.adjusted(-3, -3, 3, 3))[peer];
+        qInfo() << "SCENE_SELECTION peer" << pass << kind << peer
+                << "pixels before/after" << baseline[peer].count << actual.count
+                << "centers before/after" << baseline[peer].center << actual.center;
+        if (!check(actual.count >= baseline[peer].count * 9 / 10 &&
+                   actual.count <= baseline[peer].count * 11 / 10 &&
+                   QLineF(actual.center, baseline[peer].center).length() < 1.0,
+                   "selecting a source preserves every other model's actual screen footprint")) return false;
+      }
+      viewport->clearSelection();
+      const auto cleared = patches(viewport->grabFramebuffer());
+      for (int peer = 0; peer < 4; ++peer)
+        if (!check(cleared[peer].count >= baseline[peer].count * 9 / 10 &&
+                   cleared[peer].count <= baseline[peer].count * 11 / 10 &&
+                   QLineF(cleared[peer].center, baseline[peer].center).length() < 1.0,
+                   "selection round-trip retains each model's size and position")) return false;
+      const auto after = document->sceneObjects();
+      for (int peer = 0; peer < 4; ++peer)
+        if (!check(after[peer].path == initialObjects[peer].path &&
+                   after[peer].translation == initialObjects[peer].translation &&
+                   after[peer].rotation == initialObjects[peer].rotation &&
+                   after[peer].scale == initialObjects[peer].scale && after[peer].visible,
+                   "source selection never rewrites peer transforms or visibility")) return false;
+    }
+  }
+  if (!check(nameClick(active), "restore initial active source after selection regression")) return false;
+  viewport->clearSelection();
   for (int kind = 0; kind < 4; ++kind) {
     auto *item = sceneItem(tree, ids[kind]);
     if (!check(item && item->checkState(1) == Qt::Checked, "visible eye cell state")) return false;
