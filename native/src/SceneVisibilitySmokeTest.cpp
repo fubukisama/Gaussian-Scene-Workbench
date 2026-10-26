@@ -328,6 +328,114 @@ bool runLargeSelectionRegression(MainWindow &window) {
         if (!check(cleared.save(QDir(evidence).filePath(prefix + QString("-cleared-%1.png").arg(repeat))), "retain deselection pixels")) return false;
       }
     }
+    // Replay the visible sequence from the recording as well as the immediate
+    // framebuffer checks above. Precollect the empty image at the final zoom
+    // before starting: never toggle visibility or rebuild render modes between
+    // the initial click, deselection, zoom-out and subsequent click.
+    const bool zoomToCursor = viewport->zoomToCursorEnabled();
+    const auto restoreZoomPreference = qScopeGuard([&] { viewport->setZoomToCursorEnabled(zoomToCursor); });
+    viewport->setZoomToCursorEnabled(false);
+    const auto queuedFrames = [&] {
+      for (int frame = 0; frame < 2; ++frame) {
+        const auto beforeSerial = viewport->renderedFrameSerial();
+        viewport->update();
+        if (!waitUntil([&] { return viewport->renderedFrameSerial() > beforeSerial; }, 5000)) return false;
+      }
+      return true;
+    };
+    const auto wheel = [&](int delta) {
+      const QPointF center = viewport->rect().center();
+      QWheelEvent event(center, viewport->mapToGlobal(center.toPoint()), {}, QPoint(0, delta),
+                        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+      QApplication::sendEvent(viewport, &event);
+    };
+    for (int compatibility = 0; compatibility < 2; ++compatibility) {
+      if (compatibility) qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", "1");
+      else qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+      viewport->setRenderMode(NativeViewport::RenderMode::Points);
+      viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+      viewport->clearSelection();
+      wheel(-240);
+      if (!check(document->setSceneObjectVisibility({object.id}, false), "prepare only the future-zoom background reference")) return false;
+      const QImage futureEmpty = viewport->grabFramebuffer();
+      if (!check(!futureEmpty.isNull() && document->setSceneObjectVisibility({object.id}, true),
+                 "restore synthetic input before replaying the uninterrupted recording sequence")) return false;
+      wheel(240);
+      if (!check(queuedFrames(), "initial recording state receives two real queued viewport paints")) return false;
+      const QImage initial = viewport->grabFramebuffer();
+      const auto initialSignature = patches(initial)[3];
+      const float initialDistance = viewport->viewDistance();
+      if (!check(initialSignature.count > 5000 && viewport->indexedGaussianRendering() == !compatibility,
+                 "recording sequence starts with the full visible Gaussian input on its required renderer")) return false;
+      click(initialSignature.center / viewport->devicePixelRatioF());
+      if (!check(queuedFrames() && viewport->modelSelected() && viewport->selectedSceneIds() == QStringList{object.id},
+                 "initial body click reaches selection and two normal queued paints")) return false;
+      const QString prefix = label + (compatibility ? "-compatibility-replay" : "-resident-replay");
+      const QImage initialSelected = viewport->grabFramebuffer();
+      if (!check(initialSelected.save(QDir(evidence).filePath(prefix + "-initial-selected.png")),
+                 "retain initial selected state after actual queued paints")) return false;
+      const auto initialSelectedSignature = patches(initialSelected)[3];
+      if (!check(initialSelectedSignature.count >= initialSignature.count * 85 / 100 &&
+                 initialSelectedSignature.count <= initialSignature.count * 115 / 100 &&
+                 QLineF(initialSelectedSignature.center, initialSignature.center).length() < 2.0,
+                 "initial clicked model also remains visible through subsequent queued paints")) return false;
+      viewport->clearSelection();
+      if (!check(queuedFrames(), "deselection completes its normal viewport paints")) return false;
+      wheel(-240);
+      if (!check(queuedFrames() && viewport->viewDistance() > initialDistance * 1.4F &&
+                 viewport->viewDistance() < initialDistance * 1.43F,
+                 "two actual wheel detents move the camera out before the second click")) return false;
+      const QImage zoomed = viewport->grabFramebuffer();
+      const QRect sceneBody(35, 120, zoomed.width() - 70, zoomed.height() - 230);
+      const auto zoomedSignature = patches(zoomed, sceneBody)[3];
+      const QRect body = zoomedSignature.bounds.intersected(sceneBody);
+      const auto targetAfterZoom = viewport->viewTarget();
+      const auto distanceAfterZoom = viewport->viewDistance();
+      const auto anglesAfterZoom = viewport->viewOrbitAngles();
+      if (!check(zoomedSignature.count > 2500 && zoomed.save(QDir(evidence).filePath(prefix + "-zoomed-before.png")),
+                 "retain actually visible zoomed model immediately before the recorded second click")) return false;
+      click(zoomedSignature.center / viewport->devicePixelRatioF());
+      if (!check(queuedFrames(), "second body click completes two real queued viewport paints")) return false;
+      const QImage selected = viewport->grabFramebuffer();
+      if (!check(selected.save(QDir(evidence).filePath(prefix + "-zoomed-selected.png")),
+                 "retain zoomed selected pixels after two queued paints")) return false;
+      const auto *item = sceneItem(tree, object.id);
+      if (!check(viewport->modelSelected() && viewport->selectedSceneIds() == QStringList{object.id} &&
+                 item && item->isSelected() && item->checkState(1) == Qt::Checked &&
+                 viewport->visibleSceneObjectCount() == 1 && viewport->renderedPointCount() == 512202 &&
+                 viewport->indexedGaussianRendering() == !compatibility &&
+                 viewport->viewTarget() == targetAfterZoom && viewport->viewDistance() == distanceAfterZoom &&
+                 viewport->viewOrbitAngles() == anglesAfterZoom && viewport->modelTranslation() == object.translation &&
+                 viewport->modelRotation() == object.rotation && viewport->modelScale() == object.scale &&
+                 !viewport->hasUnsavedSceneEdits(), "recording replay changes selection only, retaining the visible source and camera")) return false;
+      const int strip = std::max(1, body.height() / 5);
+      QRegion sample(QRect(body.left(), body.top(), body.width(), strip));
+      sample += QRect(body.left(), body.bottom() - strip + 1, body.width(), strip);
+      const auto hint = viewport->selectionHintBounds();
+      const qreal ratio = viewport->devicePixelRatioF();
+      sample -= QRectF(hint.x() * ratio, hint.y() * ratio, hint.width() * ratio,
+                       hint.height() * ratio).toAlignedRect().adjusted(-3, -3, 3, 3);
+      Patch expected, actual;
+      for (const auto &region : sample) {
+        const auto a = coverage(zoomed, futureEmpty, region);
+        const auto b = coverage(selected, futureEmpty, region);
+        expected.center += a.center * a.count; expected.count += a.count;
+        actual.center += b.center * b.count; actual.count += b.count;
+      }
+      if (expected.count) expected.center /= expected.count;
+      if (actual.count) actual.center /= actual.count;
+      qInfo() << "GAUSSIAN_CLICK_REPLAY" << label << "compatibility" << compatibility
+              << "foreground-before/selected" << expected.count << actual.count
+              << "centroid-delta" << QLineF(expected.center, actual.center).length()
+              << "distance-before/after-wheel" << initialDistance << distanceAfterZoom;
+      if (!check(expected.count > 600 && actual.count >= expected.count * 85 / 100 &&
+                 actual.count <= expected.count * 115 / 100 && QLineF(expected.center, actual.center).length() < 2.0,
+                 "zoomed Gaussian body stays visible after the recorded click sequence and queued paints")) return false;
+      viewport->clearSelection();
+      if (!check(queuedFrames() && viewport->grabFramebuffer().save(QDir(evidence).filePath(prefix + "-zoomed-cleared.png")),
+                 "retain normal deselection paints after recording replay")) return false;
+      wheel(240);
+    }
     if (!check(!sourceHash.isEmpty() && sha256(path) == sourceHash, "model clicks never rewrite input data")) return false;
   }
   QString error;
