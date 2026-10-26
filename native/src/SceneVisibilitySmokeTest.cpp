@@ -11,6 +11,7 @@
 #include <QCryptographicHash>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -30,6 +31,7 @@
 #include <QPixmap>
 #include <QSet>
 #include <QScreen>
+#include <QScopeGuard>
 #include <QRegion>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -39,6 +41,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 namespace gsw {
@@ -98,6 +101,7 @@ Patch coverage(const QImage &image, const QImage &background, const QRect &regio
                     std::abs(actual.blue() - empty.blue())}) > 45) {
         ++result.count;
         result.center += QPointF(x, y);
+        result.bounds |= QRect(x, y, 1, 1);
       }
     }
   }
@@ -154,6 +158,182 @@ bool fixture(const QString &path, int kind) {
       for (int x = -24; x <= 24; ++x) ply += vertex(x / 32.0F, y / 32.0F);
   }
   return file.write(ply) == ply.size();
+}
+
+// This synthetic input has the recorded model's size and vertex count, but
+// never includes a user's PLY or photos in public CI artifacts.
+bool largeSelectionFixture(const QString &path, bool surfel) {
+  constexpr int count = 512202;
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly)) return false;
+  QByteArray header("ply\nformat binary_little_endian 1.0\nelement vertex 512202\n");
+  for (const auto *name : {"x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2"})
+    header += QByteArray("property float ") + name + '\n';
+  for (int coefficient = 0; coefficient < 45; ++coefficient)
+    header += "property float f_rest_" + QByteArray::number(coefficient) + '\n';
+  for (const auto *name : {"opacity", "scale_0", "scale_1"})
+    header += QByteArray("property float ") + name + '\n';
+  if (!surfel) header += "property float scale_2\n";
+  for (const auto *name : {"rot_0", "rot_1", "rot_2", "rot_3"})
+    header += QByteArray("property float ") + name + '\n';
+  header += "end_header\n";
+  if (file.write(header) != header.size()) return false;
+  QDataStream stream(&file);
+  stream.setByteOrder(QDataStream::LittleEndian);
+  stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+  for (int i = 0; i < count; ++i) {
+    const float x = -22.0F + 42.0F * (i % 714) / 713.0F;
+    const float y = -16.0F + 30.0F * (i / 714) / 717.0F;
+    const float z = -1.76F + 9.0F * std::sin(x * 0.13F) * std::cos(y * 0.11F);
+    stream << x << y << z << 0.0F << 0.0F << 1.0F << 1.5F << -1.5F << 1.5F;
+    // Degree three exercises the separate SH texture used by real trained
+    // PLYs; small finite coefficients preserve the unique magenta signature.
+    for (int coefficient = 0; coefficient < 45; ++coefficient)
+      stream << (coefficient % 7 == 0 ? 0.015F : 0.0F);
+    stream << -0.3F << -3.1F << -2.6F;
+    if (!surfel) stream << -4.2F;
+    stream << 1.0F << 0.0F << 0.0F << 0.0F;
+  }
+  return stream.status() == QDataStream::Ok && file.flush();
+}
+
+bool runLargeSelectionRegression(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  const QString root = QDir(QCoreApplication::applicationDirPath()).filePath("test-settings");
+  if (!QDir().mkpath(root)) return false;
+  QTemporaryDir temporary(QDir(root).filePath("selection-large-XXXXXX"));
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "GAUSSIAN_CLICK_VISIBILITY FAIL:" << message;
+    return ok;
+  };
+  if (!check(viewport && document && tree && temporary.isValid(), "real window services")) return false;
+  const bool originallyDisabled = qEnvironmentVariableIsSet("GSW_DISABLE_INDEXED_GAUSSIANS");
+  const auto originalDisabled = qgetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+  const auto restoreEnvironment = qScopeGuard([&] {
+    if (originallyDisabled) qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", originalDisabled);
+    else qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+  });
+  window.resize(1440, 900);
+  auto *lock = window.findChild<QAction *>("lockEditToolsAction");
+  if (!check(lock, "actual edit-lock action")) return false;
+  lock->setChecked(false);
+  viewport->setShowCameras(false);
+  viewport->setShowObservationTrackball(false);
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", temporary.path())).filePath(
+      "gaussian-click-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
+  if (!QDir().mkpath(evidence)) return false;
+  const auto click = [&](const QPointF &point) {
+    QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()),
+                     Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, viewport->mapToGlobal(point.toPoint()),
+                   Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(viewport, &down);
+    QApplication::sendEvent(viewport, &up);
+  };
+  for (const bool surfel : {false, true}) {
+    qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+    const QString label = surfel ? "2dgs" : "3dgs";
+    const QString path = temporary.filePath(label + ".ply");
+    const QString working = temporary.filePath("workspace-" + label);
+    QString error;
+    if (!check(largeSelectionFixture(path, surfel) &&
+               QDir().mkpath(working) && document->createUntitled(working, "Click visibility", &error) &&
+               document->addScenePath(path, &error), "import exact-size synthetic model")) return false;
+    if (!check(waitUntil([&] {
+          (void)viewport->grabFramebuffer();
+          return viewport->gaussianRenderingAvailable() && viewport->renderedPointCount() == 512202;
+        }, 30000), "all 512202 Gaussians loaded and rendered without decimation")) return false;
+    viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+    viewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
+    viewport->resetCamera();
+    if (!check(viewport->focusModel() && !viewport->orthographicProjection() &&
+               viewport->sourceHasSurfelAttributes() == surfel && viewport->sourceShDegree() == 3,
+               "angled perspective and actual SH3/model attributes")) return false;
+    viewport->clearSelection();
+    const auto object = document->sceneObjects().first();
+    const auto sourceHash = sha256(path);
+    const auto target = viewport->viewTarget();
+    const auto distance = viewport->viewDistance();
+    const auto angles = viewport->viewOrbitAngles();
+    const auto unchanged = [&] {
+      const auto after = document->sceneObjects().first();
+      return viewport->sceneObjectCount() == 1 && viewport->visibleSceneObjectCount() == 1 &&
+          viewport->renderedPointCount() == 512202 && viewport->renderMode() == NativeViewport::RenderMode::Gaussians &&
+          viewport->modelTranslation() == object.translation && viewport->modelRotation() == object.rotation &&
+          viewport->modelScale() == object.scale && viewport->viewTarget() == target && viewport->viewDistance() == distance &&
+          viewport->viewOrbitAngles() == angles && after.visible && after.translation == object.translation &&
+          after.rotation == object.rotation && after.scale == object.scale && !viewport->hasUnsavedSceneEdits();
+    };
+    for (int compatibility = 0; compatibility < 2; ++compatibility) {
+      if (compatibility) qputenv("GSW_DISABLE_INDEXED_GAUSSIANS", "1");
+      else qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
+      viewport->setRenderMode(NativeViewport::RenderMode::Points);
+      viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+      viewport->clearSelection();
+      if (!check(document->setSceneObjectVisibility({object.id}, false), "hide only synthetic geometry for reference")) return false;
+      const QImage empty = viewport->grabFramebuffer();
+      if (!check(!empty.isNull() && document->setSceneObjectVisibility({object.id}, true), "restore synthetic geometry")) return false;
+      const QImage before = viewport->grabFramebuffer();
+      const QRect sceneBody(35, 120, before.width() - 70, before.height() - 230);
+      const auto signature = patches(before, sceneBody)[3];
+      const QRect body = signature.bounds.intersected(sceneBody);
+      const Patch baseline = coverage(before, empty, body);
+      if (!check(signature.count > 5000 && baseline.count > 5000 && viewport->indexedGaussianRendering() == !compatibility,
+                 "large model visible on required resident or compatibility renderer")) return false;
+      const QString prefix = label + (compatibility ? "-compatibility" : "-resident");
+      if (!check(before.save(QDir(evidence).filePath(prefix + "-before.png")), "retain real baseline pixels")) return false;
+      const QPointF pick = baseline.center / viewport->devicePixelRatioF();
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        click(pick);
+        QImage selected = viewport->grabFramebuffer();
+        if (!check(selected.save(QDir(evidence).filePath(prefix + QString("-selected-%1.png").arg(repeat))), "retain selected-model pixels")) return false;
+        auto *item = sceneItem(tree, object.id);
+        if (!check(viewport->selectedSceneIds() == QStringList{object.id} && viewport->modelSelected() &&
+                   item && item->isSelected() && item->checkState(1) == Qt::Checked && unchanged(),
+                   "actual model click selects without hiding, moving, resizing or editing source")) return false;
+        // Compare the outside strips of the model, away from the central
+        // transform gizmo and the exact selection-hint rectangle. A bounding
+        // box by itself cannot supply the thousands of foreground pixels.
+        const QRect bounds = baseline.bounds.intersected(body);
+        const int strip = std::max(1, bounds.height() / 5);
+        QRegion sample(QRect(bounds.left(), bounds.top(), bounds.width(), strip));
+        sample += QRect(bounds.left(), bounds.bottom() - strip + 1, bounds.width(), strip);
+        const auto hint = viewport->selectionHintBounds();
+        const qreal ratio = viewport->devicePixelRatioF();
+        sample -= QRectF(hint.x() * ratio, hint.y() * ratio, hint.width() * ratio,
+                         hint.height() * ratio).toAlignedRect().adjusted(-3, -3, 3, 3);
+        Patch expected, actual;
+        for (const auto &region : sample) {
+          const auto a = coverage(before, empty, region);
+          const auto b = coverage(selected, empty, region);
+          expected.center += a.center * a.count; expected.count += a.count;
+          actual.center += b.center * b.count; actual.count += b.count;
+        }
+        if (expected.count) expected.center /= expected.count;
+        if (actual.count) actual.center /= actual.count;
+        qInfo() << "GAUSSIAN_CLICK_VISIBILITY" << label << "compatibility" << compatibility << "repeat" << repeat
+                << "foreground-before/selected" << expected.count << actual.count
+                << "centroid-delta" << QLineF(expected.center, actual.center).length();
+        if (!check(expected.count > 1000 && actual.count >= expected.count * 85 / 100 &&
+                   actual.count <= expected.count * 115 / 100 && QLineF(expected.center, actual.center).length() < 2.0,
+                   "click-selected Gaussian body stays visible outside the selection overlays")) return false;
+        viewport->clearSelection();
+        const QImage cleared = viewport->grabFramebuffer();
+        const auto clearedPatch = coverage(cleared, empty, body);
+        if (!check(clearedPatch.count >= baseline.count * 95 / 100 && clearedPatch.count <= baseline.count * 105 / 100 &&
+                   QLineF(clearedPatch.center, baseline.center).length() < 1.0 && unchanged(),
+                   "deselection restores unchanged full geometry without reimport")) return false;
+        if (!check(cleared.save(QDir(evidence).filePath(prefix + QString("-cleared-%1.png").arg(repeat))), "retain deselection pixels")) return false;
+      }
+    }
+    if (!check(!sourceHash.isEmpty() && sha256(path) == sourceHash, "model clicks never rewrite input data")) return false;
+  }
+  QString error;
+  if (!document->createUntitled(temporary.path(), "Empty regression", &error)) return false;
+  qInfo() << "GAUSSIAN_CLICK_VISIBILITY PASS: 512202-Gaussian 3DGS/2DGS real click, both renderer paths, unchanged pixels and source data";
+  return true;
 }
 
 bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
@@ -322,6 +502,8 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
+  if (qEnvironmentVariable("GSW_SCENE_SELECTION_LARGE_SYNTHETIC") == QStringLiteral("1"))
+    return runLargeSelectionRegression(window);
   const QByteArray inputJson = qgetenv("GSW_SCENE_SELECTION_INPUTS_JSON");
   if (!inputJson.isEmpty()) {
     QJsonParseError error;

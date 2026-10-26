@@ -1205,6 +1205,12 @@ if(BUILD_TESTING)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     endforeach()
   endforeach()
+  add_test(NAME native_gaussian_click_visibility
+    COMMAND GaussianSceneWorkbench --smoke-test-scene-visibility --language zh_CN --theme dark)
+  set_tests_properties(native_gaussian_click_visibility PROPERTIES
+    TIMEOUT 600
+    ENVIRONMENT "GSW_SCENE_SELECTION_LARGE_SYNTHETIC=1;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   foreach(GSW_SCHEDULING_THEME light dark)
     add_test(NAME native_viewport_scheduling_${GSW_SCHEDULING_THEME}
       COMMAND GaussianSceneWorkbench --smoke-test-viewport-scheduling --theme ${GSW_SCHEDULING_THEME})

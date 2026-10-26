@@ -138,6 +138,16 @@ jobs:
           }
           if ($result -ne 0) { throw 'Focused model visibility, workspace-format or translation contracts failed.' }
 
+      - name: Reproduce 512k Gaussian selection with real clicks in both render paths
+        if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-scene-visibility -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/scene-visibility-artifact/gaussian-click.log `
+            --output-junit native/scene-visibility-artifact/gaussian-click.xml `
+            -R '^native_gaussian_click_visibility$'
+          if ($LASTEXITCODE -ne 0) { throw '512k Gaussian pointer-selection visibility regression failed.' }
+
       - name: Upload exact-commit diagnostic and visual acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7
