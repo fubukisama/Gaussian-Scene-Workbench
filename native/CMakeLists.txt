@@ -336,8 +336,19 @@ add_custom_command(OUTPUT ${GSW_I18N_QM}
   COMMAND Qt6::lrelease "${GSW_I18N_DIR}/workbench_ja_JP.ts" -qm "${GSW_I18N_DIR}/workbench_ja_JP.qm"
   DEPENDS ${GSW_I18N_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/i18n/catalog.json" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   VERBATIM)
-qt_add_resources(GaussianSceneWorkbench "workbench_languages"
+# One resource object owns generation and embedding of the shared catalogs.
+# Independent Visual Studio projects must not each run the same QM output rule
+# while another project's RCC reads those files. Linking this object target
+# preserves the resource URLs and embeds the catalogs in every consumer.
+# Use Qt's finalizer so IDE exposure does not create a second utility project
+# containing the generated QM files and duplicate their custom build rule.
+qt_add_library(gsw_native_language_resources OBJECT)
+set_target_properties(gsw_native_language_resources PROPERTIES
+  AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_link_libraries(gsw_native_language_resources PRIVATE Qt6::Core)
+qt_add_resources(gsw_native_language_resources "workbench_languages"
   PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+target_link_libraries(GaussianSceneWorkbench PRIVATE gsw_native_language_resources)
 foreach(language zh_CN ja)
   find_file(GSW_QTBASE_${language} NAMES "qtbase_${language}.qm"
     HINTS "${Qt6_DIR}/../../../share/qt6/translations" "${Qt6_DIR}/../../../translations" REQUIRED)
@@ -498,6 +509,7 @@ install(FILES
   DESTINATION source/scripts)
 install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-windows.yml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-language-resources.yml"
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/windows-installer.yml"
   DESTINATION source/.github/workflows)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION source/docs)
@@ -609,7 +621,7 @@ if(BUILD_TESTING)
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data")
   foreach(target gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests)
     target_include_directories(${target} PRIVATE src)
-    qt_add_resources(${target} "${target}_languages" PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    target_link_libraries(${target} PRIVATE gsw_native_language_resources)
     foreach(language zh_CN ja)
       qt_add_resources(${target} "${target}_qtbase_${language}" PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
     endforeach()
@@ -628,8 +640,7 @@ if(BUILD_TESTING)
     src/WorkspaceDocument.cpp src/WorkspaceDocument.h src/AppLanguage.cpp src/AppLanguage.h)
   target_include_directories(gsw_mesh_geometry_dialog_ui_tests PRIVATE src)
   target_link_libraries(gsw_mesh_geometry_dialog_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
-  qt_add_resources(gsw_mesh_geometry_dialog_ui_tests "mesh_geometry_dialog_languages"
-    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  target_link_libraries(gsw_mesh_geometry_dialog_ui_tests PRIVATE gsw_native_language_resources)
   foreach(language zh_CN ja)
     qt_add_resources(gsw_mesh_geometry_dialog_ui_tests "mesh_geometry_dialog_qtbase_${language}"
       PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -707,8 +718,7 @@ if(BUILD_TESTING)
     src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
   target_include_directories(gsw_training_preset_ui_tests PRIVATE src)
   target_link_libraries(gsw_training_preset_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
-  qt_add_resources(gsw_training_preset_ui_tests "training_preset_languages"
-    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  target_link_libraries(gsw_training_preset_ui_tests PRIVATE gsw_native_language_resources)
   foreach(language zh_CN ja)
     qt_add_resources(gsw_training_preset_ui_tests "training_preset_qtbase_${language}"
       PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -737,8 +747,7 @@ if(BUILD_TESTING)
     src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
   target_include_directories(gsw_quality_plan_ui_tests PRIVATE src)
   target_link_libraries(gsw_quality_plan_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
-  qt_add_resources(gsw_quality_plan_ui_tests "quality_plan_languages"
-    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  target_link_libraries(gsw_quality_plan_ui_tests PRIVATE gsw_native_language_resources)
   foreach(language zh_CN ja)
     qt_add_resources(gsw_quality_plan_ui_tests "quality_plan_qtbase_${language}"
       PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -768,8 +777,7 @@ if(BUILD_TESTING)
     src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
   target_include_directories(gsw_runtime_decoupling_ui_tests PRIVATE src)
   target_link_libraries(gsw_runtime_decoupling_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
-  qt_add_resources(gsw_runtime_decoupling_ui_tests "runtime_decoupling_languages"
-    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  target_link_libraries(gsw_runtime_decoupling_ui_tests PRIVATE gsw_native_language_resources)
   foreach(language zh_CN ja)
     qt_add_resources(gsw_runtime_decoupling_ui_tests "runtime_decoupling_qtbase_${language}"
       PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -792,8 +800,7 @@ if(BUILD_TESTING)
     src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h)
   target_include_directories(gsw_training_batch_ui_tests PRIVATE src)
   target_link_libraries(gsw_training_batch_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
-  qt_add_resources(gsw_training_batch_ui_tests "training_batch_languages"
-    PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+  target_link_libraries(gsw_training_batch_ui_tests PRIVATE gsw_native_language_resources)
   foreach(language zh_CN ja)
     qt_add_resources(gsw_training_batch_ui_tests "training_batch_qtbase_${language}"
       PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -1470,8 +1477,7 @@ if(BUILD_TESTING)
     if(MSVC)
       target_compile_options(gsw_coordinate_delivery_ui_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
-    qt_add_resources(gsw_coordinate_delivery_ui_tests coordinate_delivery_languages PREFIX "/i18n"
-      BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    target_link_libraries(gsw_coordinate_delivery_ui_tests PRIVATE gsw_native_language_resources)
     foreach(language zh_CN ja)
       qt_add_resources(gsw_coordinate_delivery_ui_tests "coordinate_delivery_qt_${language}"
         PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")
@@ -1517,8 +1523,7 @@ if(BUILD_TESTING)
       gsw_runtime_components gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
       gsw_blender_gizmo_geometry gsw_spz gsw_resource_budget
       Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Test)
-    qt_add_resources(gsw_native_viewport_locale_tests viewport_locale_languages PREFIX "/i18n"
-      BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
+    target_link_libraries(gsw_native_viewport_locale_tests PRIVATE gsw_native_language_resources)
     foreach(language zh_CN ja)
       qt_add_resources(gsw_native_viewport_locale_tests "viewport_locale_qt_${language}"
         PREFIX "/i18n" FILES "${GSW_QTBASE_${language}}")

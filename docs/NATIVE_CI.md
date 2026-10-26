@@ -1,5 +1,31 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
+## Native language resource diagnosis
+
+`Native Language Resources` is an additional manual Windows lane, not a
+replacement for full native, worker, package or CodeQL gates. Its full scope
+uses the ordinary all-target parallel build. `require_single_generator=true`
+requires exactly one native catalog generation in a clean build. The original
+initialization-editor test runs twenty times, including actual three-language
+catalog loading, actual control-caption changes and unchanged numeric/frame data.
+Related initialization/mesh dialogs and catalog contracts are also retained.
+Source/run metadata, generation observations, logs, QM/QRC inputs and exact
+test executables are uploaded even on failure. This addresses CMake's
+[shared-output parallel-build restriction](https://cmake.org/cmake/help/v3.24/command/add_custom_command.html)
+without weakening a failed language-switch assertion.
+
+中文：新增手动语言资源诊断通道，全量模式使用正常的全目标并行构建，干净构建
+须只生成一次目录。原初始化编辑器测试连续运行二十次，核验真实目录加载、
+即时标题翻译，以及数值和坐标框架不变；相关对话框和翻译契约继续保留。
+失败时仍上传绑定提交／run 的证据，不替代全量测试、worker、打包或安全扫描。
+
+日本語：追加の手動言語リソース診断では通常の全ターゲット並列ビルドを使い、
+クリーンビルドのカタログ生成が一回であることを確認します。従来の初期化
+エディタ検査を二十回実行し、実カタログの読込み、即時翻訳、数値と座標
+フレームの保持を検証します。関連ダイアログと翻訳契約を維持し、失敗時も
+コミット／run に結び付いた証拠を保存します。全検証・worker・配布・安全
+走査の代替ではありません。
+
 ## Remote acceptance and static local delivery / 远端验收与本地静态交付 / リモート検証とローカル静的配布
 
 中文：自动测试默认在远端 CI 执行，包括所有会弹出应用窗口的图形与交互测试。

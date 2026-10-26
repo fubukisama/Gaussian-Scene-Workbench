@@ -1,5 +1,26 @@
 # Native desktop localization
 
+## Shared catalog build ownership
+
+One `gsw_native_language_resources` object target generates and embeds the
+Workbench catalogs for `zh_CN`, `en_US` and `ja_JP`. All ten application/dialog
+consumers link that same object; independent parallel projects must not rewrite
+the same QM files while another resource compiler reads them. The `:/i18n/`
+resource URLs and immediate language-change transaction are unchanged. Qtbase
+catalogs remain read-only inputs. This is common UI infrastructure for 3DGS,
+2DGS, point-cloud and mesh workflows, not a change to model or optimizer state.
+
+中文：三语 Workbench 目录由同一个对象目标生成并嵌入，十个应用／对话框目标
+共享该对象，避免并行写入时读取不完整的 QM 文件。资源路径和即时语言切换
+保持不变；Qtbase 目录只读。此修复统一覆盖各模型生成流程，不改变模型数据
+或优化器状态。
+
+日本語：Workbench の三言語カタログは単一のオブジェクトターゲットで生成・
+埋込みし、十個のアプリケーション／ダイアログターゲットで共有します。
+並列書込み中の不完全な QM 読込みを防ぎ、リソースパスと即時言語変更を
+維持します。Qtbase は読取り専用です。各モデル処理に共通する UI の修正で、
+モデルデータや最適化器の状態は変更しません。
+
 ## Per-install runtime component environment
 
 `runtime-components.json` belongs beside an installation's `bin/` directory,

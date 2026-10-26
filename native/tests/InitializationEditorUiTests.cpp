@@ -4,15 +4,12 @@
 #include "InitializationPreview.h"
 #include <QApplication>
 #include <QComboBox>
-#include <QCryptographicHash>
 #include <QDir>
-#include <QFile>
 #include <QJsonArray>
 #include <QLineEdit>
 #include <QImage>
 #include <QPushButton>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QTranslator>
 #include <cstdio>
 
@@ -40,35 +37,24 @@ int main(int argc, char **argv) {
   if (!frame || !count || !seed) return 1;
   frame->setCurrentIndex(frame->findData(QStringLiteral("source")));
   check(editor.initialization()==declaration && frame->currentData()==QStringLiteral("canonical"), "changing the frame cannot silently relabel existing coordinates");
-  const auto probeCatalog = [&](const QString &locale, const char *role, const QString &path) {
-    QFile resource(path);
-    const bool exists = resource.exists();
-    const qint64 size = resource.size();
-    const bool opened = resource.open(QIODevice::ReadOnly);
-    QCryptographicHash digest(QCryptographicHash::Sha256);
-    const bool hashed = opened && digest.addData(&resource);
-    const QByteArray sha256 = hashed ? digest.result().toHex() : QByteArray("unavailable");
-    QTranslator probe;
-    const bool loaded = probe.load(path);
-    std::printf("[GSW-LANG-DIAG] locale=%s role=%s resource=%s exists=%d bytes=%lld opened=%d sha256=%s standalone_load=%d current=%s gui_thread=%d\n",
-        qPrintable(locale), role, qPrintable(path), int(exists), static_cast<long long>(size),
-        int(opened), sha256.constData(), int(loaded), qPrintable(gsw::AppLanguage::current()),
-        int(QThread::currentThread() == app.thread()));
-    // This uninstalled translator only inspects the compiled resource. It must
-    // not change application language, widget state or the original apply path.
-    return loaded ? probe.translate("Workbench", "规范坐标（已记录的尺度）") : QString();
+  const auto catalogCaption = [&](const QString &locale, const char *role, const QString &path) {
+    QTranslator catalog;
+    const bool loaded = catalog.load(path);
+    if (!loaded)
+      std::fprintf(stderr, "Initialization language resource FAIL: locale=%s role=%s resource=%s\n",
+          qPrintable(locale), role, qPrintable(path));
+    check(loaded, "actual embedded language catalog is complete and loadable");
+    // Do not install this independent reader or alter the real apply path.
+    return loaded ? catalog.translate("Workbench", "规范坐标（已记录的尺度）") : QString();
   };
   for (const QString &locale: gsw::AppLanguage::supported()) {
-    const QString expectedFrameCaption = probeCatalog(locale, "workbench",
+    const QString expectedFrameCaption = catalogCaption(locale, "workbench",
         QStringLiteral(":/i18n/workbench_%1.qm").arg(locale));
     if (locale != QStringLiteral("en_US")) {
       const QString qtSuffix = locale == QStringLiteral("zh_CN") ? QStringLiteral("zh_CN") : QStringLiteral("ja");
-      probeCatalog(locale, "qtbase", QStringLiteral(":/i18n/qtbase_%1.qm").arg(qtSuffix));
+      catalogCaption(locale, "qtbase", QStringLiteral(":/i18n/qtbase_%1.qm").arg(qtSuffix));
     }
     const bool applied = gsw::AppLanguage::apply(locale,false);
-    std::printf("[GSW-LANG-DIAG] locale=%s phase=after-apply applied=%d current=%s gui_thread=%d\n",
-        qPrintable(locale), int(applied), qPrintable(gsw::AppLanguage::current()),
-        int(QThread::currentThread() == app.thread()));
     check(applied, "actual native catalog switches immediately");
     check(gsw::AppLanguage::current()==locale && !expectedFrameCaption.isEmpty() && frame->currentText()==expectedFrameCaption,
         "actual coordinate-frame caption matches the requested native catalog immediately");

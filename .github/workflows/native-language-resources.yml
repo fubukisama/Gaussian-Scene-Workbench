@@ -17,7 +17,7 @@ on:
         description: Require exactly one native catalog generation invocation
         type: boolean
         required: true
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -95,9 +95,9 @@ jobs:
         run: |
           $scope = $env:GSW_LANGUAGE_BUILD_SCOPE
           if ($scope -notin @('focused','full')) { throw 'Unsupported native language build scope.' }
-          if (Test-Path -LiteralPath native/build-language-resources) { throw 'A fresh diagnostic build directory is required.' }
+          if (Test-Path -LiteralPath native/build-lr) { throw 'A fresh diagnostic build directory is required.' }
           $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
-          cmake -S native -B native/build-language-resources -G 'Visual Studio 17 2022' -A x64 `
+          cmake -S native -B native/build-lr -G 'Visual Studio 17 2022' -A x64 `
             -DBUILD_TESTING=ON -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
             '-DPython3_EXECUTABLE=${{ steps.qa-python.outputs.python-path }}' `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
@@ -105,7 +105,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Language QA configure failed.' }
           # One normal solution build, never simultaneous independent CMake
           # processes. Full scope preserves the ordinary all-target build graph.
-          $arguments = @('--build','native/build-language-resources','--config','Release','--parallel')
+          $arguments = @('--build','native/build-lr','--config','Release','--parallel')
           if ($scope -ceq 'focused') {
             $arguments += @('--target','gsw_initialization_editor_ui_tests','gsw_initialization_dialog_ui_tests','gsw_mesh_geometry_dialog_ui_tests')
           }
@@ -158,16 +158,16 @@ jobs:
         run: |
           $result = 1
           try {
-            ctest --test-dir native/build-language-resources -C Release --no-tests=error --verbose --output-on-failure `
+            ctest --test-dir native/build-lr -C Release --no-tests=error --verbose --output-on-failure `
               --repeat until-fail:20 `
               --output-log native/language-resources-artifact/editor.log `
-              --output-junit native/language-resources-artifact/editor.xml `
+              --output-junit (Join-Path $PWD 'native/language-resources-artifact/editor.xml') `
               -R '^native_initialization_editor_ui$'
             $result = $LASTEXITCODE
           } finally {
-            $last = 'native/build-language-resources/Testing/Temporary/LastTest.log'
+            $last = 'native/build-lr/Testing/Temporary/LastTest.log'
             if (Test-Path -LiteralPath $last) { Copy-Item -LiteralPath $last -Destination native/language-resources-artifact/editor-LastTest.log }
-            $failed = 'native/build-language-resources/Testing/Temporary/LastTestsFailed.log'
+            $failed = 'native/build-lr/Testing/Temporary/LastTestsFailed.log'
             if (Test-Path -LiteralPath $failed) { Copy-Item -LiteralPath $failed -Destination native/language-resources-artifact/editor-LastTestsFailed.log }
           }
           if ($result -ne 0) { throw 'Original initialization editor regression failed; exact diagnostics are retained.' }
@@ -178,15 +178,15 @@ jobs:
         run: |
           $result = 1
           try {
-            ctest --test-dir native/build-language-resources -C Release --no-tests=error --verbose --output-on-failure `
+            ctest --test-dir native/build-lr -C Release --no-tests=error --verbose --output-on-failure `
               --output-log native/language-resources-artifact/related-contracts.log `
-              --output-junit native/language-resources-artifact/related-contracts.xml `
+              --output-junit (Join-Path $PWD 'native/language-resources-artifact/related-contracts.xml') `
               -R '^(native_initialization_dialog_ui|native_mesh_geometry_dialog_ui|native_translation_catalog|native_translation_validator_tests)$'
             $result = $LASTEXITCODE
           } finally {
-            $last = 'native/build-language-resources/Testing/Temporary/LastTest.log'
+            $last = 'native/build-lr/Testing/Temporary/LastTest.log'
             if (Test-Path -LiteralPath $last) { Copy-Item -LiteralPath $last -Destination native/language-resources-artifact/related-contracts-LastTest.log }
-            $failed = 'native/build-language-resources/Testing/Temporary/LastTestsFailed.log'
+            $failed = 'native/build-lr/Testing/Temporary/LastTestsFailed.log'
             if (Test-Path -LiteralPath $failed) { Copy-Item -LiteralPath $failed -Destination native/language-resources-artifact/related-contracts-LastTestsFailed.log }
           }
           if ($result -ne 0) { throw 'Related initialization, mesh or translation contracts failed.' }
@@ -196,7 +196,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $build = Join-Path $PWD 'native/build-language-resources'
+          $build = Join-Path $PWD 'native/build-lr'
           $evidence = Join-Path $PWD 'native/language-resources-artifact'
           New-Item -ItemType Directory -Path $evidence -Force | Out-Null
           $records = [Collections.Generic.List[object]]::new()
