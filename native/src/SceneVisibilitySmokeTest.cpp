@@ -14,6 +14,7 @@
 #include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEnterEvent>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -28,6 +29,8 @@
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
+#include <QOpenGLFramebufferObject>
+#include <QPaintEvent>
 #include <QPixmap>
 #include <QSet>
 #include <QScreen>
@@ -38,6 +41,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QWheelEvent>
+#include <QWindow>
 
 #include <array>
 #include <algorithm>
@@ -209,6 +213,21 @@ bool runLargeSelectionRegression(MainWindow &window) {
     return ok;
   };
   if (!check(viewport && document && tree && temporary.isValid(), "real window services")) return false;
+  const auto backgroundIsolated = [&] {
+    if (qEnvironmentVariable("GSW_SMOKE_BACKGROUND") != QStringLiteral("1")) return true;
+    bool intersectsScreen = false;
+    for (const auto *screen : QGuiApplication::screens())
+      intersectsScreen |= window.frameGeometry().intersects(screen->geometry());
+    const bool activeWindow = window.isActiveWindow();
+    if (intersectsScreen || activeWindow) {
+      window.hide();
+      qCritical() << "GAUSSIAN_CLICK_DIAG FAIL: background window isolation violated; window hidden"
+                  << "intersects-screen" << intersectsScreen << "active" << activeWindow;
+      return false;
+    }
+    return true;
+  };
+  if (!check(backgroundIsolated(), "background regression remains outside every screen without activation")) return false;
   const bool originallyDisabled = qEnvironmentVariableIsSet("GSW_DISABLE_INDEXED_GAUSSIANS");
   const auto originalDisabled = qgetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
   const auto restoreEnvironment = qScopeGuard([&] {
@@ -216,6 +235,7 @@ bool runLargeSelectionRegression(MainWindow &window) {
     else qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
   });
   window.resize(1440, 900);
+  if (!check(backgroundIsolated(), "resized regression window remains isolated from the user's desktop")) return false;
   auto *lock = window.findChild<QAction *>("lockEditToolsAction");
   if (!check(lock, "actual edit-lock action")) return false;
   lock->setChecked(false);
@@ -225,12 +245,14 @@ bool runLargeSelectionRegression(MainWindow &window) {
       "gaussian-click-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
   if (!QDir().mkpath(evidence)) return false;
   const auto click = [&](const QPointF &point) {
+    if (!backgroundIsolated()) return false;
     QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()),
                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QMouseEvent up(QEvent::MouseButtonRelease, point, viewport->mapToGlobal(point.toPoint()),
                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QApplication::sendEvent(viewport, &down);
     QApplication::sendEvent(viewport, &up);
+    return backgroundIsolated();
   };
   for (const bool surfel : {false, true}) {
     qunsetenv("GSW_DISABLE_INDEXED_GAUSSIANS");
@@ -245,6 +267,14 @@ bool runLargeSelectionRegression(MainWindow &window) {
           (void)viewport->grabFramebuffer();
           return viewport->gaussianRenderingAvailable() && viewport->renderedPointCount() == 512202;
         }, 30000), "all 512202 Gaussians loaded and rendered without decimation")) return false;
+    if (!check(backgroundIsolated() && viewport->context(), "loaded regression retains an isolated real OpenGL context")) return false;
+    viewport->makeCurrent();
+    auto *gl = viewport->context()->extraFunctions();
+    qInfo() << "GAUSSIAN_CLICK_DIAG OpenGL"
+            << "vendor" << reinterpret_cast<const char *>(gl->glGetString(GL_VENDOR))
+            << "renderer" << reinterpret_cast<const char *>(gl->glGetString(GL_RENDERER))
+            << "version" << reinterpret_cast<const char *>(gl->glGetString(GL_VERSION));
+    viewport->doneCurrent();
     viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
     viewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
     viewport->resetCamera();
@@ -286,7 +316,7 @@ bool runLargeSelectionRegression(MainWindow &window) {
       if (!check(before.save(QDir(evidence).filePath(prefix + "-before.png")), "retain real baseline pixels")) return false;
       const QPointF pick = baseline.center / viewport->devicePixelRatioF();
       for (int repeat = 0; repeat < 2; ++repeat) {
-        click(pick);
+        if (!check(click(pick), "actual body click keeps the background window isolated")) return false;
         QImage selected = viewport->grabFramebuffer();
         if (!check(selected.save(QDir(evidence).filePath(prefix + QString("-selected-%1.png").arg(repeat))), "retain selected-model pixels")) return false;
         auto *item = sceneItem(tree, object.id);
@@ -336,10 +366,12 @@ bool runLargeSelectionRegression(MainWindow &window) {
     const auto restoreZoomPreference = qScopeGuard([&] { viewport->setZoomToCursorEnabled(zoomToCursor); });
     viewport->setZoomToCursorEnabled(false);
     const auto queuedFrames = [&] {
+      if (!backgroundIsolated()) return false;
       for (int frame = 0; frame < 2; ++frame) {
         const auto beforeSerial = viewport->renderedFrameSerial();
         viewport->update();
         if (!waitUntil([&] { return viewport->renderedFrameSerial() > beforeSerial; }, 5000)) return false;
+        if (!backgroundIsolated()) return false;
       }
       return true;
     };
@@ -367,7 +399,7 @@ bool runLargeSelectionRegression(MainWindow &window) {
       const float initialDistance = viewport->viewDistance();
       if (!check(initialSignature.count > 5000 && viewport->indexedGaussianRendering() == !compatibility,
                  "recording sequence starts with the full visible Gaussian input on its required renderer")) return false;
-      click(initialSignature.center / viewport->devicePixelRatioF());
+      if (!check(click(initialSignature.center / viewport->devicePixelRatioF()), "initial replay click retains background isolation")) return false;
       if (!check(queuedFrames() && viewport->modelSelected() && viewport->selectedSceneIds() == QStringList{object.id},
                  "initial body click reaches selection and two normal queued paints")) return false;
       const QString prefix = label + (compatibility ? "-compatibility-replay" : "-resident-replay");
@@ -394,7 +426,7 @@ bool runLargeSelectionRegression(MainWindow &window) {
       const auto anglesAfterZoom = viewport->viewOrbitAngles();
       if (!check(zoomedSignature.count > 2500 && zoomed.save(QDir(evidence).filePath(prefix + "-zoomed-before.png")),
                  "retain actually visible zoomed model immediately before the recorded second click")) return false;
-      click(zoomedSignature.center / viewport->devicePixelRatioF());
+      if (!check(click(zoomedSignature.center / viewport->devicePixelRatioF()), "zoomed replay click retains background isolation")) return false;
       if (!check(queuedFrames(), "second body click completes two real queued viewport paints")) return false;
       const QImage selected = viewport->grabFramebuffer();
       if (!check(selected.save(QDir(evidence).filePath(prefix + "-zoomed-selected.png")),
@@ -417,10 +449,20 @@ bool runLargeSelectionRegression(MainWindow &window) {
                        hint.height() * ratio).toAlignedRect().adjusted(-3, -3, 3, 3);
       Patch expected, actual;
       for (const auto &region : sample) {
-        const auto a = coverage(zoomed, futureEmpty, region);
-        const auto b = coverage(selected, futureEmpty, region);
-        expected.center += a.center * a.count; expected.count += a.count;
-        actual.center += b.center * b.count; actual.count += b.count;
+        for (int y = region.top(); y <= region.bottom(); ++y) {
+          for (int x = region.left(); x <= region.right(); ++x) {
+            const auto base = zoomed.pixelColor(x, y), after = selected.pixelColor(x, y), clear = futureEmpty.pixelColor(x, y);
+            const auto difference = [&](const QColor &color) {
+              return std::max({std::abs(color.red() - clear.red()), std::abs(color.green() - clear.green()),
+                               std::abs(color.blue() - clear.blue())});
+            };
+            // New bounds/gizmo pixels are annotations, not retained source
+            // geometry. Restrict both centroid masks to baseline coverage.
+            if (difference(base) <= 45) continue;
+            ++expected.count; expected.center += QPointF(x, y);
+            if (difference(after) > 30) { ++actual.count; actual.center += QPointF(x, y); }
+          }
+        }
       }
       if (expected.count) expected.center /= expected.count;
       if (actual.count) actual.center /= actual.count;
@@ -442,6 +484,301 @@ bool runLargeSelectionRegression(MainWindow &window) {
   if (!document->createUntitled(temporary.path(), "Empty regression", &error)) return false;
   qInfo() << "GAUSSIAN_CLICK_VISIBILITY PASS: 512202-Gaussian 3DGS/2DGS real click, both renderer paths, unchanged pixels and source data";
   return true;
+}
+
+bool runRecordedInputRegression(MainWindow &window, const QString &path) {
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "GAUSSIAN_CLICK_DIAG FAIL:" << message;
+    return ok;
+  };
+  const QFileInfo source(path);
+  if (!check(source.isAbsolute() && source.isFile() && !source.isSymLink() &&
+             source.suffix().compare("ply", Qt::CaseInsensitive) == 0,
+             "private input is an existing absolute regular PLY")) return false;
+  const auto originalHash = sha256(path);
+  if (!check(!originalHash.isEmpty(), "hash complete private input before diagnosis")) return false;
+  const bool passed = [&]() -> bool {
+    auto *viewport = window.findChild<NativeViewport *>();
+    auto *document = window.findChild<WorkspaceDocument *>();
+    auto *tree = window.findChild<QTreeWidget *>("projectTree");
+    const QString root = QDir(QCoreApplication::applicationDirPath()).filePath("test-settings");
+    if (!QDir().mkpath(root)) return false;
+    QTemporaryDir temporary(QDir(root).filePath("private-click-XXXXXX"));
+    const auto isolated = [&] {
+      if (qEnvironmentVariable("GSW_SMOKE_BACKGROUND") != QStringLiteral("1")) return true;
+      bool intersects = false;
+      for (const auto *screen : QGuiApplication::screens())
+        intersects |= window.frameGeometry().intersects(screen->geometry());
+      const bool active = window.isActiveWindow();
+      if (!intersects && !active) return true;
+      window.hide();
+      qCritical() << "GAUSSIAN_CLICK_DIAG FAIL: private-input window isolation violated; hidden"
+                  << "intersects-screen" << intersects << "active" << active;
+      return false;
+    };
+    if (!check(viewport && document && tree && temporary.isValid() && isolated(), "isolated private-input services")) return false;
+    window.resize(1440, 900);
+    if (!check(isolated(), "resized private-input window remains outside every screen")) return false;
+    auto *lock = window.findChild<QAction *>("lockEditToolsAction");
+    if (!check(lock, "private-input edit lock action")) return false;
+    lock->setChecked(false);
+    viewport->setShowCameras(false);
+    viewport->setShowObservationTrackball(false);
+    viewport->setZoomToCursorEnabled(false);
+    QString error;
+    const QString workspace = temporary.filePath("workspace");
+    if (!check(QDir().mkpath(workspace) && document->createUntitled(workspace, "Private click diagnosis", &error) &&
+               document->addScenePath(path, &error), "import private input without modifying its source")) return false;
+    if (!check(waitUntil([&] {
+          (void)viewport->grabFramebuffer();
+          return viewport->gaussianRenderingAvailable() && viewport->renderedPointCount() > 0;
+        }, 30000) && isolated(), "private Gaussian input loaded in isolated window")) return false;
+    viewport->makeCurrent();
+    auto *context = viewport->context();
+    if (!context || context->isOpenGLES()) {
+      viewport->doneCurrent();
+      return check(false, "private diagnosis requires actual desktop OpenGL");
+    }
+    auto *gl = context->extraFunctions();
+    qInfo() << "GAUSSIAN_CLICK_DIAG private desktop OpenGL"
+            << "vendor" << reinterpret_cast<const char *>(gl->glGetString(GL_VENDOR))
+            << "renderer" << reinterpret_cast<const char *>(gl->glGetString(GL_RENDERER))
+            << "version" << reinterpret_cast<const char *>(gl->glGetString(GL_VERSION))
+            << "vertices" << viewport->renderedPointCount() << "SH" << viewport->sourceShDegree()
+            << "indexed" << viewport->indexedGaussianRendering();
+    viewport->doneCurrent();
+    viewport->setRenderMode(NativeViewport::RenderMode::Gaussians);
+    viewport->setInteractionMode(NativeViewport::InteractionMode::Inspect);
+    viewport->resetCamera();
+    if (!check(viewport->focusModel(), "frame private input once before replay")) return false;
+    viewport->clearSelection();
+    const auto object = document->sceneObjects().first();
+    const auto sourceCount = viewport->renderedPointCount();
+    const QString evidence = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+    if (!check(!evidence.isEmpty() && QDir().mkpath(evidence), "explicit private evidence location")) return false;
+    const bool paintEventReadback = qEnvironmentVariable("GSW_GAUSSIAN_CLICK_PAINT_EVENT") == QStringLiteral("1");
+    qInfo() << "GAUSSIAN_CLICK_DIAG readback" << (paintEventReadback ? "QPaintEvent-existing-FBO" : "grabFramebuffer");
+    const auto existingFramebuffer = [&]() -> QImage {
+      auto *previousContext = QOpenGLContext::currentContext();
+      auto *previousSurface = previousContext ? previousContext->surface() : nullptr;
+      auto *readContext = viewport->context();
+      if (!readContext) return {};
+      if (previousContext != readContext) viewport->makeCurrent();
+      if (QOpenGLContext::currentContext() != readContext) return {};
+      auto *functions = readContext->extraFunctions();
+      GLint drawFramebuffer = 0, readFramebuffer = 0, readBuffer = 0, packBuffer = 0, unpackBuffer = 0;
+      GLint viewportState[4] = {}, activeTexture = GL_TEXTURE0, texture2d = 0, renderbuffer = 0;
+      GLint packAlignment = 4, packRowLength = 0, packSkipRows = 0, packSkipPixels = 0;
+      functions->glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFramebuffer);
+      functions->glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFramebuffer);
+      functions->glGetIntegerv(GL_READ_BUFFER, &readBuffer);
+      functions->glGetIntegerv(GL_VIEWPORT, viewportState);
+      functions->glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packBuffer);
+      functions->glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
+      functions->glGetIntegerv(GL_PACK_ALIGNMENT, &packAlignment);
+      functions->glGetIntegerv(GL_PACK_ROW_LENGTH, &packRowLength);
+      functions->glGetIntegerv(GL_PACK_SKIP_ROWS, &packSkipRows);
+      functions->glGetIntegerv(GL_PACK_SKIP_PIXELS, &packSkipPixels);
+      functions->glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+      functions->glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture2d);
+      functions->glGetIntegerv(GL_RENDERBUFFER_BINDING, &renderbuffer);
+      const GLboolean scissor = functions->glIsEnabled(GL_SCISSOR_TEST);
+      const auto restore = qScopeGuard([&] {
+        functions->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(drawFramebuffer));
+        functions->glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(readFramebuffer));
+        functions->glReadBuffer(static_cast<GLenum>(readBuffer));
+        functions->glViewport(viewportState[0], viewportState[1], viewportState[2], viewportState[3]);
+        functions->glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(packBuffer));
+        functions->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(unpackBuffer));
+        functions->glPixelStorei(GL_PACK_ALIGNMENT, packAlignment);
+        functions->glPixelStorei(GL_PACK_ROW_LENGTH, packRowLength);
+        functions->glPixelStorei(GL_PACK_SKIP_ROWS, packSkipRows);
+        functions->glPixelStorei(GL_PACK_SKIP_PIXELS, packSkipPixels);
+        functions->glActiveTexture(static_cast<GLenum>(activeTexture));
+        functions->glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture2d));
+        functions->glBindRenderbuffer(GL_RENDERBUFFER, static_cast<GLuint>(renderbuffer));
+        if (scissor) functions->glEnable(GL_SCISSOR_TEST); else functions->glDisable(GL_SCISSOR_TEST);
+        if (previousContext && previousSurface) previousContext->makeCurrent(previousSurface);
+        else readContext->doneCurrent();
+      });
+      functions->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+      functions->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+      functions->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+      functions->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+      functions->glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+      functions->glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+      functions->glDisable(GL_SCISSOR_TEST);
+      const QSize pixels(qRound(viewport->width() * viewport->devicePixelRatioF()),
+                         qRound(viewport->height() * viewport->devicePixelRatioF()));
+      QImage result;
+      {
+        QOpenGLFramebufferObjectFormat format;
+        format.setSamples(0);
+        format.setAttachment(QOpenGLFramebufferObject::NoAttachment);
+        format.setInternalTextureFormat(GL_RGBA8);
+        QOpenGLFramebufferObject resolved(pixels, format);
+        if (!resolved.isValid()) return {};
+        functions->glBindFramebuffer(GL_READ_FRAMEBUFFER, viewport->defaultFramebufferObject());
+        functions->glReadBuffer(GL_COLOR_ATTACHMENT0);
+        functions->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolved.handle());
+        if (!check(functions->glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE &&
+                   functions->glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
+                   "existing-frame readback requires complete source and resolve framebuffers")) return {};
+        functions->glBlitFramebuffer(0, 0, pixels.width(), pixels.height(), 0, 0, pixels.width(), pixels.height(),
+                                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        // toImage() may skip bind() when the draw target is already this FBO.
+        // Its readPixels must use the resolved target, not the MSAA source.
+        functions->glBindFramebuffer(GL_FRAMEBUFFER, resolved.handle());
+        result = resolved.toImage();
+      }
+      result.setDevicePixelRatio(viewport->devicePixelRatioF());
+      return result;
+    };
+    const auto frame = [&](const int frameCount = 3) {
+      QImage result;
+      // The ordinary UI may keep the first input-triggered frame while idle.
+      // Do not let extra forced paints repair a bad first selection frame.
+      for (int pass = 0; pass < frameCount; ++pass) {
+        if (!isolated()) return QImage();
+        QEventLoop loop;
+        QTimer::singleShot(20, &loop, &QEventLoop::quit);
+        loop.exec();
+        if (paintEventReadback) {
+          const auto serial = viewport->renderedFrameSerial();
+          QPaintEvent event(viewport->rect());
+          QApplication::sendEvent(viewport, &event);
+          if (!check(viewport->renderedFrameSerial() > serial,
+                     "normal QPaintEvent must actually render before existing-FBO readback")) return QImage();
+          result = existingFramebuffer();
+        } else {
+          result = viewport->grabFramebuffer();
+        }
+      }
+      return isolated() ? result : QImage();
+    };
+    const auto wheel = [&](int delta) {
+      const QPointF center = viewport->rect().center();
+      QWheelEvent event(center, viewport->mapToGlobal(center.toPoint()), {}, QPoint(0, delta),
+                        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+      QApplication::sendEvent(viewport, &event);
+    };
+    std::array<QImage, 2> empty;
+    for (int view = 0; view < 2; ++view) {
+      if (view) wheel(-480);
+      if (!document->setSceneObjectVisibility({object.id}, false)) return false;
+      empty[view] = frame();
+      if (!check(!empty[view].isNull() && document->setSceneObjectVisibility({object.id}, true),
+                 "precollect geometry-free reference before the uninterrupted input sequence")) return false;
+    }
+    wheel(480);
+    const auto mouse = [&](QWidget *widget, const QPointF &point) {
+      if (!isolated() || !window.windowHandle()) return false;
+      const QPointF windowPoint = widget->mapTo(&window, point.toPoint());
+      const QPointF globalPoint = widget->mapToGlobal(point.toPoint());
+      QEnterEvent enter(windowPoint, windowPoint, globalPoint);
+      QMouseEvent move(QEvent::MouseMove, windowPoint, windowPoint, globalPoint,
+                       Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+      QMouseEvent down(QEvent::MouseButtonPress, windowPoint, windowPoint, globalPoint,
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+      QMouseEvent up(QEvent::MouseButtonRelease, windowPoint, windowPoint, globalPoint,
+                     Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+      // Route through the native window's QWidgetWindow dispatcher, not
+      // directly to a child. Qt resolves the child and its hover/focus state
+      // while every logical and global position remains outside the desktop.
+      QApplication::sendEvent(window.windowHandle(), &enter);
+      QApplication::sendEvent(window.windowHandle(), &move);
+      QApplication::sendEvent(window.windowHandle(), &down);
+      QApplication::sendEvent(window.windowHandle(), &up);
+      return isolated();
+    };
+    const auto retained = [&](const QImage &before, const QImage &after, const QImage &background,
+                              const QString &stage) {
+      if (before.isNull() || after.isNull() || background.isNull()) return false;
+      const QRect body(35, 120, before.width() - 70, before.height() - 230);
+      const auto model = coverage(before, background, body);
+      const int strip = std::max(1, model.bounds.height() / 5);
+      QRegion sample(QRect(model.bounds.left(), model.bounds.top(), model.bounds.width(), strip));
+      sample += QRect(model.bounds.left(), model.bounds.bottom() - strip + 1, model.bounds.width(), strip);
+      const auto hint = viewport->selectionHintBounds();
+      const auto ratio = viewport->devicePixelRatioF();
+      sample -= QRectF(hint.x() * ratio, hint.y() * ratio, hint.width() * ratio,
+                       hint.height() * ratio).toAlignedRect().adjusted(-3, -3, 3, 3);
+      int expected = 0, actual = 0;
+      for (const auto &region : sample) {
+        for (int y = region.top(); y <= region.bottom(); ++y) {
+          for (int x = region.left(); x <= region.right(); ++x) {
+            const auto base = before.pixelColor(x, y), selected = after.pixelColor(x, y), clear = background.pixelColor(x, y);
+            const auto difference = [&](const QColor &color) {
+              return std::max({std::abs(color.red() - clear.red()), std::abs(color.green() - clear.green()),
+                               std::abs(color.blue() - clear.blue())});
+            };
+            if (difference(base) > 45) { ++expected; actual += difference(selected) > 30; }
+          }
+        }
+      }
+      qInfo() << "GAUSSIAN_CLICK_DIAG coverage" << stage << "before/retained" << expected << actual;
+      return check(expected > 300 && actual >= expected * 85 / 100,
+                   "selected private model retains its rendered body outside actual selection overlays");
+    };
+    for (int view = 0; view < 2; ++view) {
+      if (view) wheel(-480);
+      viewport->clearSelection();
+      const QImage before = frame();
+      const QString prefix = QString("private-view-%1").arg(view);
+      if (!check(!before.isNull() && before.save(QDir(evidence).filePath(prefix + "-before.png")), "save private-input baseline")) return false;
+      const QRect body(35, 120, before.width() - 70, before.height() - 230);
+      const auto model = coverage(before, empty[view], body);
+      if (!check(model.count > 1000, "private input has substantial actual foreground before clicking")) return false;
+      const auto cameraTarget = viewport->viewTarget();
+      const auto cameraDistance = viewport->viewDistance();
+      const auto cameraAngles = viewport->viewOrbitAngles();
+      auto *item = sceneItem(tree, object.id);
+      if (!check(item, "private input appears in the actual scene tree")) return false;
+      tree->scrollToItem(item);
+      if (!check(mouse(tree->viewport(), tree->visualRect(tree->indexFromItem(item, 0)).center()), "real tree-name control click")) return false;
+      const QImage treeSelected = frame(paintEventReadback ? 1 : 3);
+      if (!check(viewport->modelSelected() && treeSelected.save(QDir(evidence).filePath(prefix + "-tree-selected.png")) &&
+                 retained(before, treeSelected, empty[view], prefix + "-tree"), "tree control preserves the actual private model")) return false;
+      viewport->clearSelection();
+      (void)frame();
+      QList<QPointF> candidates{model.center};
+      for (int y = model.bounds.top() + 2; y <= model.bounds.bottom() - 2; y += std::max(3, model.bounds.height() / 18)) {
+        for (int x = model.bounds.left() + 2; x <= model.bounds.right() - 2; x += std::max(3, model.bounds.width() / 18)) {
+          const auto actual = before.pixelColor(x, y), clear = empty[view].pixelColor(x, y);
+          if (std::max({std::abs(actual.red() - clear.red()), std::abs(actual.green() - clear.green()),
+                        std::abs(actual.blue() - clear.blue())}) > 60) candidates.append(QPointF(x, y));
+        }
+      }
+      std::stable_sort(candidates.begin() + 1, candidates.end(), [&](const auto &a, const auto &b) {
+        return QLineF(a, model.center).length() < QLineF(b, model.center).length();
+      });
+      for (int attempt = 0; attempt < std::min(9, static_cast<int>(candidates.size())) && !viewport->modelSelected(); ++attempt) {
+        if (!mouse(viewport, candidates[attempt] / viewport->devicePixelRatioF())) return false;
+      }
+      const QImage selected = frame(paintEventReadback ? 1 : 3);
+      item = sceneItem(tree, object.id);
+      if (!check(selected.save(QDir(evidence).filePath(prefix + "-viewport-selected.png")) &&
+                 viewport->modelSelected() && viewport->selectedSceneIds() == QStringList{object.id} &&
+                 item && item->isSelected() && item->checkState(1) == Qt::Checked,
+                 "real foreground viewport click selects the private input while its eye remains open")) return false;
+      if (!retained(before, selected, empty[view], prefix + "-viewport")) return false;
+      if (!check(viewport->viewTarget() == cameraTarget && viewport->viewDistance() == cameraDistance &&
+                 viewport->viewOrbitAngles() == cameraAngles && viewport->renderedPointCount() == sourceCount &&
+                 viewport->modelTranslation() == object.translation && viewport->modelRotation() == object.rotation &&
+                 viewport->modelScale() == object.scale && !viewport->hasUnsavedSceneEdits(),
+                 "viewport selection preserves private model, count and camera")) return false;
+      viewport->clearSelection();
+      const QImage cleared = frame();
+      if (!check(cleared.save(QDir(evidence).filePath(prefix + "-cleared.png")) &&
+                 retained(before, cleared, empty[view], prefix + "-cleared"), "deselection restores the complete private model")) return false;
+    }
+    if (!document->createUntitled(temporary.path(), "Empty private diagnosis", &error)) return false;
+    qInfo() << "GAUSSIAN_CLICK_DIAG PASS: private input tree control, real viewport click, zoom and source invariants";
+    return true;
+  }();
+  const auto finalHash = sha256(path);
+  qInfo() << "GAUSSIAN_CLICK_DIAG source SHA256 before/after" << originalHash.toHex() << finalHash.toHex();
+  return check(originalHash == finalHash, "complete private input remains byte-for-byte unchanged") && passed;
 }
 
 bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
@@ -610,6 +947,8 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
+  const QString privateInput = qEnvironmentVariable("GSW_GAUSSIAN_CLICK_INPUT");
+  if (!privateInput.isEmpty()) return runRecordedInputRegression(window, privateInput);
   if (qEnvironmentVariable("GSW_SCENE_SELECTION_LARGE_SYNTHETIC") == QStringLiteral("1"))
     return runLargeSelectionRegression(window);
   const QByteArray inputJson = qgetenv("GSW_SCENE_SELECTION_INPUTS_JSON");
