@@ -30,6 +30,7 @@
 #include <QPixmap>
 #include <QSet>
 #include <QScreen>
+#include <QRegion>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
@@ -286,6 +287,27 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
   viewport->selectModel();
   if (!snapshot(QStringLiteral("close-selected"))) return false;
   viewport->clearSelection();
+  viewport->setAxisView(NavigationAxis::PositiveY);
+  if (!waitUntil([&] { return std::abs(viewport->viewOrbitAngles().yawDegrees) < 0.01F &&
+      std::abs(viewport->viewOrbitAngles().pitchDegrees) < 0.01F; })) return false;
+  lockTools->setChecked(true);
+  const auto dragView = [&](const QPointF &delta) {
+    const QPointF start = viewport->rect().center();
+    const QPointF finish = start + delta;
+    QMouseEvent down(QEvent::MouseButtonPress, start, viewport->mapToGlobal(start.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent move(QEvent::MouseMove, finish, viewport->mapToGlobal(finish.toPoint()), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, finish, viewport->mapToGlobal(finish.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(viewport, &down); QApplication::sendEvent(viewport, &move); QApplication::sendEvent(viewport, &up);
+  };
+  dragView(QPointF(-297, 0));
+  dragView(QPointF(0, 58));
+  lockTools->setChecked(false);
+  if (!viewport->focusModel()) return false;
+  viewport->clearSelection();
+  if (!snapshot(QStringLiteral("recording-view-before-selection"))) return false;
+  viewport->selectModel();
+  if (!snapshot(QStringLiteral("recording-view-selected"))) return false;
+  viewport->clearSelection();
   for (int index = 0; index < paths.size(); ++index) {
     const auto after = document->sceneObjects().at(index);
     const auto before = initialObjects.at(index);
@@ -431,27 +453,39 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
               << "stencil/scissor/alpha-coverage" << gl->glIsEnabled(GL_STENCIL_TEST)
               << gl->glIsEnabled(GL_SCISSOR_TEST) << gl->glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE);
       viewport->doneCurrent();
+      const auto hint = viewport->selectionHintBounds();
+      const qreal ratio = viewport->devicePixelRatioF();
+      const QRect hintPixels = hint.isEmpty() ? QRect() :
+          QRectF(hint.x() * ratio, hint.y() * ratio, hint.width() * ratio,
+                 hint.height() * ratio).toAlignedRect().adjusted(-2, -2, 2, 2);
       for (int peer = 0; peer < 4; ++peer) {
         const auto bounds = baseline[peer].bounds;
         const int stripHeight = std::max(1, bounds.height() / 5);
-        for (const auto &region : {QRect(bounds.left(), bounds.top(), bounds.width(), stripHeight),
-                                  QRect(bounds.left(), bounds.bottom() - stripHeight + 1, bounds.width(), stripHeight)}) {
+        QRegion sample(QRect(bounds.left(), bounds.top(), bounds.width(), stripHeight));
+        sample += QRect(bounds.left(), bounds.bottom() - stripHeight + 1, bounds.width(), stripHeight);
+        if (!hintPixels.isEmpty()) sample -= hintPixels;
+        Patch expected, actual;
+        for (const auto &region : sample) {
           // Object selection intentionally tints its RGB, especially the
           // antialiased edge of a small point. For that source compare actual
           // foreground coverage against the same empty backdrop, not a hue
           // threshold. Unselected peers retain the original color predicate.
-          const auto expected = peer == kind ? coverage(baselineFrame, emptyFrame, region)
+          const auto before = peer == kind ? coverage(baselineFrame, emptyFrame, region)
                                               : patches(baselineFrame, region)[peer];
-          const auto actual = peer == kind ? coverage(frame, emptyFrame, region)
+          const auto after = peer == kind ? coverage(frame, emptyFrame, region)
                                             : patches(frame, region)[peer];
-          qInfo() << "SCENE_SELECTION peer" << pass << kind << peer << region
-                  << "pixels before/after" << expected.count << actual.count
-                  << "centers before/after" << expected.center << actual.center;
-          if (!check(expected.count > 60 && actual.count >= expected.count * 9 / 10 &&
+          expected.center += before.center * before.count; expected.count += before.count;
+          actual.center += after.center * after.count; actual.count += after.count;
+        }
+        if (expected.count) expected.center /= expected.count;
+        if (actual.count) actual.center /= actual.count;
+        qInfo() << "SCENE_SELECTION peer" << pass << kind << peer << "hint" << hintPixels
+                << "pixels before/after" << expected.count << actual.count
+                << "centers before/after" << expected.center << actual.center;
+        if (!check(expected.count > 60 && actual.count >= expected.count * 9 / 10 &&
                      actual.count <= expected.count * 11 / 10 &&
                      QLineF(actual.center, expected.center).length() < 1.0,
-                     "selection preserves the selected model and peer geometry outside center overlays")) return false;
-        }
+                   "selection preserves the selected model and peer geometry outside actual hint bounds")) return false;
       }
       viewport->clearSelection();
       const auto cleared = patches(viewport->grabFramebuffer());

@@ -217,6 +217,7 @@ public:
     return mModelDragActive;
   }
   [[nodiscard]] bool modelSelected() const { return mModelSelected; }
+  [[nodiscard]] QRectF selectionHintBounds() const;
   [[nodiscard]] quint64 renderedFrameSerial() const {
     return mRenderedFrameSerial;
   }
@@ -564,12 +565,14 @@ private:
   void drawDepthAwareLines(const QVector<DepthOverlayVertex> &vertices,
                            const QMatrix4x4 &viewProjection,
                            float logicalLineWidth,
-                           GLenum primitiveMode = GL_LINES);
+                           GLenum primitiveMode = GL_LINES,
+                           bool writeDepth = true);
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
   void drawModelSelection(QPainter &painter,
                           const QMatrix4x4 &modelViewProjection);
+  [[nodiscard]] QString selectionHintText() const;
   void drawModelTransformGizmo(QPainter &painter);
   void drawTransformToolStrip(QPainter &painter);
   void drawOverlay(QPainter &painter);

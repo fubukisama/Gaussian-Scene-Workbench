@@ -3619,14 +3619,6 @@ void NativeViewport::paintGL() {
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
   drawInfiniteGrid(viewProjection);
   const auto active = mScene;
-  for (const auto &state : displayedSceneStates()) {
-    if (!mSelectedSceneIds.contains(state->id)) continue;
-    QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
-    QScopedValueRollback<bool> selectionScope(mModelSelected, true);
-    QScopedValueRollback<QMatrix4x4> displayScope(
-        mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
-    drawDepthAwareModelBounds(viewProjection * modelMatrix());
-  }
   auto ordered = displayedSceneStates();
   // Opaque objects share depth. Draw transparent objects back-to-front at the
   // object level, using the existing per-object Gaussian renderer.
@@ -3651,6 +3643,18 @@ void NativeViewport::paintGL() {
     QSignalBlocker signalBlocker(this);
     if (!inactive) signalBlocker.unblock();
     drawSceneGeometry(view, projection);
+  }
+
+  // Selection is an annotation, never a scene-depth occluder. In particular,
+  // transparent Gaussian/surfel fragments must not be rejected by a bound's
+  // depth written before the model. Draw these after geometry, read-only.
+  for (const auto &state : displayedSceneStates()) {
+    if (!mSelectedSceneIds.contains(state->id)) continue;
+    QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, state);
+    QScopedValueRollback<bool> selectionScope(mModelSelected, true);
+    QScopedValueRollback<QMatrix4x4> displayScope(
+        mLayerDisplayTransform, sceneDisplayTransform(*state, *active));
+    drawDepthAwareModelBounds(viewProjection * modelMatrix());
   }
 
   QPainter painter(this);
@@ -5729,7 +5733,7 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
 
   const qreal ratio = devicePixelRatioF();
   // Keep sorted Gaussian blending, but respect depth already written by the
-  // physical reference axes and selection bounds. Gaussian fragments still do
+  // physical reference axes and opaque models. Gaussian fragments still do
   // not write depth, so their back-to-front compositing remains unchanged.
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_FALSE);
@@ -7878,7 +7882,7 @@ NativeViewport::projectPoint(const QVector3D &point,
 void NativeViewport::drawDepthAwareLines(
     const QVector<DepthOverlayVertex> &vertices,
     const QMatrix4x4 &viewProjection, const float logicalLineWidth,
-    const GLenum primitiveMode) {
+    const GLenum primitiveMode, const bool writeDepth) {
   if (vertices.isEmpty() || !mDepthOverlayShaderReady ||
       mDepthOverlayProgram == nullptr ||
       !mDepthOverlayProgram->isLinked() ||
@@ -7888,11 +7892,10 @@ void NativeViewport::drawDepthAwareLines(
   }
 
   glEnable(GL_DEPTH_TEST);
-  // The marker is the first scene-depth pass. Its coplanar bevel/outline
-  // layers use painter order to avoid depth-quantization stripes, but still
-  // write their true depth for all subsequently drawn model geometry.
-  glDepthFunc(primitiveMode == GL_TRIANGLES ? GL_ALWAYS : GL_LESS);
-  glDepthMask(GL_TRUE);
+  // Physical markers own scene depth. Read-only selection annotations run
+  // afterwards and may be coplanar with a mesh without suppressing its pixels.
+  glDepthFunc(primitiveMode == GL_TRIANGLES ? GL_ALWAYS : writeDepth ? GL_LESS : GL_LEQUAL);
+  glDepthMask(writeDepth ? GL_TRUE : GL_FALSE);
   glDisable(GL_CULL_FACE);
   glEnable(GL_BLEND);
   glEnable(GL_MULTISAMPLE);
@@ -7915,6 +7918,7 @@ void NativeViewport::drawDepthAwareLines(
     mDepthOverlayBuffer.release();
   }
   mDepthOverlayProgram->release();
+  glDepthMask(GL_TRUE);
   glDepthFunc(GL_LESS);
   glLineWidth(1.0F);
   glDisable(GL_BLEND);
@@ -8005,7 +8009,7 @@ void NativeViewport::drawDepthAwareModelBounds(
     }
   }
   drawDepthAwareLines(vertices, modelViewProjection,
-                      mModelDragActive ? 1.8F : 1.35F);
+                      mModelDragActive ? 1.8F : 1.35F, GL_LINES, false);
 }
 
 void NativeViewport::drawCameraTrajectory(QPainter &painter,
@@ -8042,6 +8046,23 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
                       Qt::RoundCap, Qt::RoundJoin));
   drawSegments(mScene->mCameraGeometry.frustums);
   painter.restore();
+}
+
+QString NativeViewport::selectionHintText() const {
+  return mModelDragActive ? transformStatusText()
+      : mSelectedSceneIds.size() > 1
+          ? QCoreApplication::translate("Workbench", "已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放")
+                .arg(mSelectedSceneIds.size())
+          : QCoreApplication::translate("Workbench", "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
+}
+
+QRectF NativeViewport::selectionHintBounds() const {
+  if (mEditToolsLocked || !mModelSelected || !selectableModelAvailable() ||
+      !projectPoint(selectionPivot(), viewProjectionMatrix()).has_value()) return {};
+  const QFontMetrics metrics(font());
+  const QRect textBounds = metrics.boundingRect(selectionHintText()).adjusted(-7, -4, 7, 4);
+  return transformGizmoHintRect(modelTransformGizmo(), QSizeF(textBounds.size()),
+                                QSizeF(width(), height()));
 }
 
 void NativeViewport::drawModelSelection(
@@ -8087,18 +8108,8 @@ void NativeViewport::drawModelSelection(
                               QColor(195, 131, 28, 50)));
     const qreal pivotRadius = modelTransformGizmo().centerHandle.width() * 0.3;
     painter.drawEllipse(*center, pivotRadius, pivotRadius);
-    const QString hint =
-        mModelDragActive
-            ? transformStatusText()
-            : mSelectedSceneIds.size() > 1
-                  ? QCoreApplication::translate("Workbench", "已选中 %1 个模型 · G 整体移动 · R 共同中心旋转 · S 等比缩放")
-                        .arg(mSelectedSceneIds.size())
-                  : QCoreApplication::translate("Workbench", "模型已选中 · G 移动 · R 旋转 · R R 轨迹球 · S 缩放");
-    const QFontMetrics metrics(painter.font());
-    const QRect textBounds = metrics.boundingRect(hint).adjusted(-7, -4, 7, 4);
-    const QRectF badge = transformGizmoHintRect(
-        modelTransformGizmo(), QSizeF(textBounds.size()),
-        QSizeF(width(), height()));
+    const QString hint = selectionHintText();
+    const QRectF badge = selectionHintBounds();
     painter.setPen(overlayBorder());
     painter.setBrush(overlaySurface(colors.hintCard, 225));
     painter.drawRoundedRect(badge, 5.0, 5.0);
