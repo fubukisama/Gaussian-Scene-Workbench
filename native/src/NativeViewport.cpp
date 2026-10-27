@@ -1095,7 +1095,13 @@ bool NativeViewport::collectionReferenceBounds(QVector3D &minimum,
                                                QVector3D &maximum) const {
   bool found = false;
   const auto &reference = coordinateReferenceScene();
-  for (const auto &state : displayedSceneStates()) {
+  // The grid is a retained project reference, not a bound of the currently
+  // drawable subset. Match referencePlaneElevation(): an eye toggle must not
+  // change the base plane, including when the last visible object is hidden.
+  auto states = mScene == mProcessingScene
+      ? QList<std::shared_ptr<SceneState>>{mScene} : mSceneStates;
+  if (states.isEmpty()) states.append(mScene);
+  for (const auto &state : states) {
     const auto &coordinates = state->mSceneCoordinates;
     if (!coordinates.valid) continue;
     const auto low = coordinates.localMinimum();

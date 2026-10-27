@@ -39,11 +39,11 @@
 
 ### 隐藏模型时保持观察画布
 
-中文：眼睛按钮只改变模型可见性。工程仍保留模型对象时，即使全部隐藏，渲染／选择／编辑工具栏也保留原有布局占位；不因工具栏折叠改变视口尺寸和投影比例。隐藏对象仍不能移动、旋转或缩放，已有操作可用性约束不变。恢复可见性不重新导入、不重设相机，也不修改源文件或模型变换。空工程或移除全部对象属于不同的布局状态。
+中文：眼睛按钮只改变模型可见性。工程仍保留模型对象时，即使全部隐藏，渲染／选择／编辑工具栏也保留原有布局占位；不因工具栏折叠改变视口尺寸和投影比例。固定网格以保留对象的原始范围为基准，不因隐藏对象改用可见子集或退回零平面；仍与属性中记录的基准一致。隐藏对象仍不能移动、旋转或缩放，已有操作可用性约束不变。恢复可见性不重新导入、不重设相机，也不修改源文件或模型变换。空工程或移除全部对象属于不同的布局状态。
 
-English: Eye buttons change model visibility only. While imported objects remain in the project, the render/selection/edit toolbar row keeps its layout space even when every model is hidden, so collapsing controls cannot resize the viewport or change its projection aspect. Hidden objects remain unavailable for move, rotate and scale; existing action eligibility is unchanged. Revealing an object does not reimport it, reset the camera, or modify its source file or transform. An empty project or removal of all objects is a separate layout state.
+English: Eye buttons change model visibility only. While imported objects remain in the project, the render/selection/edit toolbar row keeps its layout space even when every model is hidden, so collapsing controls cannot resize the viewport or change its projection aspect. The fixed grid uses retained objects' original bounds, not just visible objects or a zero-plane fallback when hidden, and stays consistent with the recorded reference. Hidden objects remain unavailable for move, rotate and scale; existing action eligibility is unchanged. Revealing an object does not reimport it, reset the camera, or modify its source file or transform. An empty project or removal of all objects is a separate layout state.
 
-日本語：目のボタンはモデルの表示／非表示だけを変更します。プロジェクトにモデルオブジェクトが残っている場合、すべて非表示でも描画・選択・編集ツールバーの領域を維持し、折りたたみによるビューポート寸法や投影比率の変化を防ぎます。非表示オブジェクトの移動・回転・拡大縮小は引き続き無効で、既存の操作条件は変えません。再表示で再インポートやカメラのリセットを行わず、元ファイルやモデル変換も変更しません。空のプロジェクトや全オブジェクトの削除は別のレイアウト状態です。
+日本語：目のボタンはモデルの表示／非表示だけを変更します。プロジェクトにモデルオブジェクトが残っている場合、すべて非表示でも描画・選択・編集ツールバーの領域を維持し、折りたたみによるビューポート寸法や投影比率の変化を防ぎます。固定グリッドは保持中オブジェクトの元の範囲を基準とし、非表示によって可視部分やゼロ平面へ切り替えず、記録された基準との一致を維持します。非表示オブジェクトの移動・回転・拡大縮小は引き続き無効で、既存の操作条件は変えません。再表示で再インポートやカメラのリセットを行わず、元ファイルやモデル変換も変更しません。空のプロジェクトや全オブジェクトの削除は別のレイアウト状態です。
 
 ### 混合模型的渲染状态隔离
 
