@@ -178,13 +178,13 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   const QString nativeLauncher = QDir::toNativeSeparators(launcher);
   const QString directory = QDir::toNativeSeparators(QFileInfo(launcher).absolutePath());
   const QString stage = nativePath + QLatin1Char('.') + QUuid::createUuid().toString(QUuid::Id128) + QStringLiteral(".lnk");
-  wchar_t description[32768]{};
+  wchar_t description[4096]{};
   WORD hotkey = 0;
   int show = SW_SHOWNORMAL;
   if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
   if (good && QFileInfo(path).exists())
     good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(nativePath.utf16()), STGM_READ));
-  if (good) good = SUCCEEDED(link->GetDescription(description, 32768)) &&
+  if (good) good = SUCCEEDED(link->GetDescription(description, 4096)) &&
       SUCCEEDED(link->GetHotkey(&hotkey)) && SUCCEEDED(link->GetShowCmd(&show));
   // Remember a fresh sibling before property-store Commit, which may persist
   // immediately. Even that implementation must never modify the original link.
@@ -198,7 +198,10 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
     PROPVARIANT value;
     PropVariantInit(&value);
     good = SUCCEEDED(InitPropVariantFromString(reinterpret_cast<LPCWSTR>(appUserModelId.utf16()), &value)) &&
-           SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value)) && SUCCEEDED(store->Commit());
+           SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value));
+    PropVariantClear(&value);
+    if (good) good = SUCCEEDED(InitPropVariantFromString(description, &value)) &&
+        SUCCEEDED(store->SetValue(PKEY_Comment, value)) && SUCCEEDED(store->Commit());
     PropVariantClear(&value);
   }
   // Changing the link target can reset standard shell fields. Restore the user
@@ -211,6 +214,20 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   if (store) store->Release();
   if (file) file->Release();
   if (link) link->Release();
+  if (good) {
+    IShellLinkW *verify = nullptr;
+    IPersistFile *verifyFile = nullptr;
+    good = SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&verify)));
+    if (good) good = SUCCEEDED(verify->QueryInterface(IID_PPV_ARGS(&verifyFile)));
+    if (good) good = SUCCEEDED(verifyFile->Load(reinterpret_cast<LPCOLESTR>(stage.utf16()), STGM_READ));
+    wchar_t retainedDescription[4096]{}; WORD retainedHotkey = 0; int retainedShow = 0;
+    if (good) good = SUCCEEDED(verify->GetDescription(retainedDescription, 4096)) &&
+        QString::fromWCharArray(retainedDescription) == QString::fromWCharArray(description) &&
+        SUCCEEDED(verify->GetHotkey(&retainedHotkey)) && retainedHotkey == hotkey &&
+        SUCCEEDED(verify->GetShowCmd(&retainedShow)) && retainedShow == show;
+    if (verifyFile) verifyFile->Release();
+    if (verify) verify->Release();
+  }
   if (good) {
     good = false;
     for (int attempt = 0; attempt < 80; ++attempt) {
