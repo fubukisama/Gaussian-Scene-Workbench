@@ -161,13 +161,15 @@ bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPat
 }
 
 bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
-                                const QString &arguments, const QString &appUserModelId) {
+                                const QString &arguments, const QString &appUserModelId, QString *diagnostic) {
+  if (diagnostic) *diagnostic = QStringLiteral("shortcut_path_invalid");
 #ifdef Q_OS_WIN
   if (!QDir::isAbsolutePath(path) || QFileInfo(path).suffix().compare(QLatin1String("lnk"), Qt::CaseInsensitive) ||
       !localOrdinaryTree(QFileInfo(path).absolutePath()) ||
       (QFileInfo(path).exists() && !ordinaryPath(path)) || !localOrdinaryTree(launcher) ||
       !QFileInfo(launcher).isFile()) return false;
   const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (diagnostic) *diagnostic = QStringLiteral("shortcut_com_initialization");
   if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return false;
   IShellLinkW *link = nullptr;
   IPersistFile *file = nullptr;
@@ -181,6 +183,7 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   wchar_t description[4096]{};
   WORD hotkey = 0;
   int show = SW_SHOWNORMAL;
+  QString phase = QStringLiteral("shortcut_load");
   if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
   if (good && QFileInfo(path).exists())
     good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(nativePath.utf16()), STGM_READ));
@@ -188,33 +191,40 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
       SUCCEEDED(link->GetHotkey(&hotkey)) && SUCCEEDED(link->GetShowCmd(&show));
   // Remember a fresh sibling before property-store Commit, which may persist
   // immediately. Even that implementation must never modify the original link.
-  if (good) good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE));
-  if (good) good = SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()))) &&
+  if (good) { phase = QStringLiteral("shortcut_stage_clone"); good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE)); }
+  if (good) { phase = QStringLiteral("shortcut_target"); good = SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()))) &&
       SUCCEEDED(link->SetArguments(reinterpret_cast<LPCWSTR>(arguments.utf16()))) &&
       SUCCEEDED(link->SetWorkingDirectory(reinterpret_cast<LPCWSTR>(directory.utf16()))) &&
       SUCCEEDED(link->SetIconLocation(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()), 0)) &&
-      SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&store)));
+      SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&store))); }
   if (good) {
+    phase = QStringLiteral("shortcut_properties");
     PROPVARIANT value;
     PropVariantInit(&value);
     good = SUCCEEDED(InitPropVariantFromString(reinterpret_cast<LPCWSTR>(appUserModelId.utf16()), &value)) &&
            SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value));
     PropVariantClear(&value);
-    if (good) good = SUCCEEDED(InitPropVariantFromString(description, &value)) &&
-        SUCCEEDED(store->SetValue(PKEY_Comment, value)) && SUCCEEDED(store->Commit());
+    if (good) good = SUCCEEDED(InitPropVariantFromString(description, &value));
+    if (good) {
+      const HRESULT comment = store->SetValue(PKEY_Comment, value);
+      phase = QStringLiteral("shortcut_comment_%1").arg(quint32(comment), 8, 16, QLatin1Char('0'));
+      good = SUCCEEDED(comment);
+    }
+    if (good) { phase = QStringLiteral("shortcut_property_commit"); good = SUCCEEDED(store->Commit()); }
     PropVariantClear(&value);
   }
   // Changing the link target can reset standard shell fields. Restore the user
   // options explicitly, after property-store changes and before the final save.
-  if (good) good = SUCCEEDED(link->SetDescription(description)) &&
-      SUCCEEDED(link->SetHotkey(hotkey)) && SUCCEEDED(link->SetShowCmd(show));
+  if (good) { phase = QStringLiteral("shortcut_restore_options"); good = SUCCEEDED(link->SetDescription(description)) &&
+      SUCCEEDED(link->SetHotkey(hotkey)) && SUCCEEDED(link->SetShowCmd(show)); }
   // Save a fresh sibling before atomically replacing the link. Never leave an
   // existing taskbar/desktop link partially written after an interrupted update.
-  if (good) good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE));
+  if (good) { phase = QStringLiteral("shortcut_stage_save"); good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE)); }
   if (store) store->Release();
   if (file) file->Release();
   if (link) link->Release();
   if (good) {
+    phase = QStringLiteral("shortcut_readback");
     IShellLinkW *verify = nullptr;
     IPersistFile *verifyFile = nullptr;
     good = SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&verify)));
@@ -225,10 +235,14 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
         QString::fromWCharArray(retainedDescription) == QString::fromWCharArray(description) &&
         SUCCEEDED(verify->GetHotkey(&retainedHotkey)) && retainedHotkey == hotkey &&
         SUCCEEDED(verify->GetShowCmd(&retainedShow)) && retainedShow == show;
+    if (!good) phase = QStringLiteral("shortcut_retained_options_description_%1_%2_hotkey_%3_%4_show_%5_%6")
+        .arg(QString::fromWCharArray(description).size()).arg(QString::fromWCharArray(retainedDescription).size())
+        .arg(hotkey).arg(retainedHotkey).arg(show).arg(retainedShow);
     if (verifyFile) verifyFile->Release();
     if (verify) verify->Release();
   }
   if (good) {
+    phase = QStringLiteral("shortcut_atomic_publish");
     good = false;
     for (int attempt = 0; attempt < 80; ++attempt) {
       if (MoveFileExW(reinterpret_cast<LPCWSTR>(stage.utf16()), reinterpret_cast<LPCWSTR>(nativePath.utf16()),
@@ -242,6 +256,7 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   if (good) SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT,
                            reinterpret_cast<LPCWSTR>(nativePath.utf16()), nullptr);
   if (SUCCEEDED(initialized)) CoUninitialize();
+  if (diagnostic) *diagnostic = good ? QString() : phase;
   return good;
 #else
   Q_UNUSED(path); Q_UNUSED(launcher); Q_UNUSED(arguments); Q_UNUSED(appUserModelId);

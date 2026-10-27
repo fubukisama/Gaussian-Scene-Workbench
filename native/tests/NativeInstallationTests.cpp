@@ -123,7 +123,8 @@ private slots:
     QVERIFY(SUCCEEDED(before->GetDescription(beforeDescription, 4096)));
     QCOMPARE(QString::fromWCharArray(beforeDescription), "user description retained");
     const QString args = "--project \"name with spaces & ;.gsw\"";
-    QVERIFY(gsw::writeNativeLauncherShortcut(path, launcher, args, "GSW.Test.Stable"));
+    QString diagnostic;
+    QVERIFY2(gsw::writeNativeLauncherShortcut(path, launcher, args, "GSW.Test.Stable", &diagnostic), qPrintable(diagnostic));
     IShellLinkW *loaded = nullptr;
     QVERIFY(SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&loaded))));
     const auto releaseLoaded = qScopeGuard([&] { loaded->Release(); });

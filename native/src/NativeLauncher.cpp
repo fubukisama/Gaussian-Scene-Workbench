@@ -31,8 +31,11 @@ int main(int argc, char **argv) {
     const QString path = arguments.at(1);
     const QString linkArguments = arguments.size() == 3 ? arguments.at(2) : QString();
     if (arguments.size() > 3) return 2;
-    return gsw::writeNativeLauncherShortcut(path, application.applicationFilePath(), linkArguments,
-                                           QString::fromLatin1(GSW_APP_USER_MODEL_ID)) ? 0 : 2;
+    QString diagnostic;
+    if (gsw::writeNativeLauncherShortcut(path, application.applicationFilePath(), linkArguments,
+                                       QString::fromLatin1(GSW_APP_USER_MODEL_ID), &diagnostic)) return 0;
+    QTextStream(stderr) << diagnostic << '\n';
+    return 2;
   }
   const bool planOnly = !arguments.isEmpty() && arguments.first() == QLatin1String("--print-launch-plan");
   if (planOnly) arguments.removeFirst();

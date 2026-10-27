@@ -59,7 +59,7 @@ jobs:
           New-Item -ItemType Directory -Path native/update-evidence -Force | Out-Null
           ctest --test-dir native/build-updates -C Release --no-tests=error --verbose --output-on-failure `
             -R '^native_managed_installation$' --output-junit "$PWD/native/update-evidence/contracts.xml" `
-            --output-log native/update-evidence/contracts.log
+            --output-log "$PWD/native/update-evidence/contracts.log"
           $result=$LASTEXITCODE
           if(Test-Path native/build-updates/native-managed-installation.log){Get-Content native/build-updates/native-managed-installation.log}
           if ($result -ne 0) { throw "Native installation boundary failed (ctest exit $result)." }

@@ -34,5 +34,6 @@ struct NativeLaunchPlan final {
 void clearManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPath);
 // Installation action only: never pins/unpins, reorders, or executes a link.
 [[nodiscard]] bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
-                                              const QString &arguments, const QString &appUserModelId);
+                                              const QString &arguments, const QString &appUserModelId,
+                                              QString *diagnostic = nullptr);
 } // namespace gsw
