@@ -22,6 +22,10 @@ SHA-256 防止文件错配，不等同于发布者数字签名；不要对来源
 应用标识统一到固定入口。不取消固定、不重排任务栏，不重启资源管理器、不结束软件。
 不会恢复回收站中被安全软件标记的旧诊断链接，也不设置杀毒白名单。
 
+入口迁移只需执行一次。之后的常规更新只发布版本，不再扫描或重写快捷方式。
+`-SynchronizeShortcuts` 用于首次迁移或显式修复；如其他软件的无效链接使扫描失败，
+可用 `-ShortcutDirectories` 限定已识别的原生入口目录，保留失败记录和原链接。
+
 手动诊断使用固定启动器的 `--diagnostics` 参数，抓帧仍须手动按 F12，保存在安装根目录
 下的 `diagnostics/`，不上传。普通启动清除仅用于该子进程的诊断变量。安装错误提示
 使用当前保存的中／英／日语言，应用内语言切换仍立即生效。
@@ -52,6 +56,11 @@ Migration backs up each recognized native shortcut and retains arguments, hotkey
 state and description. Target, working directory, icon and application identity use the
 stable entry. It does not unpin, reorder the taskbar, restart Explorer or close applications.
 It does not restore a quarantined/deleted diagnostic link or change antivirus trust settings.
+
+Entry-point migration is a one-time operation. Ordinary updates publish a version without
+rescanning or rewriting shortcuts. Use `-SynchronizeShortcuts` only for initial migration or
+explicit repair; if an unreadable unrelated link stops a scan, restrict it with
+`-ShortcutDirectories` to identified native entry-point folders and retain the failure record.
 
 Manual capture uses the native launcher's `--diagnostics` option; F12 remains opt-in and saves
 locally under the managed root's `diagnostics/`, without uploads. Ordinary launch removes the
@@ -84,6 +93,11 @@ CI では発行できません。SHA-256 はファイル整合性であり、発
 ピン留め解除・並べ替え、Explorer の再起動、アプリ終了は行いません。削除・隔離された
 旧診断リンクを復元せず、ウイルス対策の信頼設定も変更しません。
 
+入口の移行は一度だけです。通常更新ではバージョンを発行し、ショートカットの再走査・
+再書込みは行いません。`-SynchronizeShortcuts` は初回移行または明示的な修復に使用します。
+他アプリの読取り不能なリンクで停止した場合は、失敗記録と元リンクを保持し、
+`-ShortcutDirectories` で確認済みのネイティブ入口フォルダーに対象を限定できます。
+
 診断はネイティブランチャーの `--diagnostics` で手動起動します。F12 による収集先は
 管理ルート内の `diagnostics/` で、自動アップロードしません。通常起動では子プロセスの
 診断変数のみ解除します。エラー表示は保存済みの中・英・日言語を使用し、アプリ内の
@@ -100,7 +114,8 @@ Developer CLI messages remain English. / 开发 CLI 原始输出保留英文。 
   -SourceCommit $commit -AcceptanceProof $fullAcceptance -OutputPath $freshManifest
 ./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
   -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance `
-  -SynchronizeShortcuts
+# One-time migration/repair only: append -SynchronizeShortcuts, optionally
+# -ShortcutDirectories $identifiedNativeShortcutFolders.
 # Roll back without deleting either slot or closing a running application.
 ./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
   -ActivateVersion $previousInstalledVersion
