@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QDebug>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -271,8 +272,31 @@ int main(int argc, char **argv) {
     check(stageFixture(QStringLiteral("train")),"return the owned fixture to optimization for the original pause lifecycle assertions");
     observer.refreshJobs();check(waitFor([&]{return !observer.isBusy()&&observer.currentReport().value("stage").toString()==QStringLiteral("train");})&&
         pause->isEnabled()&&stop->isEnabled(),"refresh re-enables pause only for actual training without replacing the lease");
-    observer.pauseJob();check(waitFor([&]{return !observer.isBusy()&&observer.currentReport().value("recordedState").toString()==QStringLiteral("paused")&&owned.state()==QProcess::NotRunning;}),
-        "explicit pause uses the validated atomic command and waits for actual terminal acknowledgement");
+    QElapsedTimer pauseClock;pauseClock.start();
+    observer.pauseJob();
+    const bool pauseAcknowledged=waitFor([&]{return !observer.isBusy()&&observer.currentReport().value("recordedState").toString()==QStringLiteral("paused")&&owned.state()==QProcess::NotRunning;});
+    if(!pauseAcknowledged){
+      // This fixture alone owns these files/processes. Preserve the narrow
+      // pause boundary evidence instead of treating any ended lease as success.
+      qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY elapsed_ms"<<pauseClock.elapsed()
+          <<"helper_busy"<<observer.isBusy()<<"owned_state"<<int(owned.state())
+          <<"owned_exit_code"<<owned.exitCode()<<"owned_exit_status"<<int(owned.exitStatus())
+          <<"owned_process_error"<<owned.errorString();
+      qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY report"
+          <<QString::fromUtf8(QJsonDocument(observer.currentReport()).toJson(QJsonDocument::Compact));
+      qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY observer_state"<<state->text();
+      qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY owned_stdout"<<QString::fromUtf8(owned.readAllStandardOutput()).left(8192);
+      qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY owned_stderr"<<QString::fromUtf8(owned.readAllStandardError()).left(8192);
+      for(const auto &relative:QStringList{id+QStringLiteral(".json"),QStringLiteral(".c/")+session+QStringLiteral(".json"),QStringLiteral(".c/")+session+QStringLiteral("-cmd.json")}){
+        QFile evidence(QDir(store).filePath(relative));
+        const bool readable=evidence.open(QIODevice::ReadOnly);
+        qCritical().noquote()<<"RUNTIME_PAUSE_BOUNDARY fixture_file"<<relative<<"readable"<<readable
+            <<(readable?QString::fromUtf8(evidence.read(8192)):evidence.errorString());
+      }
+    }
+    check(pauseAcknowledged,"explicit pause uses the validated atomic command and waits for actual terminal acknowledgement");
+    check(pauseAcknowledged&&owned.exitStatus()==QProcess::NormalExit&&owned.exitCode()==0,
+        "pause acknowledgement comes from a cleanly exited owned fixture, not a crashed or merely closed lease");
     check(observer.currentReport().value("liveness").toString()==QStringLiteral("ended")&&!resume->isEnabled(),"ended session without a complete checkpoint is not presented as optimizer-state resumable");
     observer.close();check(!observer.isConnected()&&!observer.isBusy(),"closing observer releases only its own helpers and connection");
     if(owned.state()!=QProcess::NotRunning){owned.kill();owned.waitForFinished(1000);}

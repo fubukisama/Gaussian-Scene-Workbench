@@ -372,6 +372,25 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
   QElapsedTimer total;
   total.start();
 
+  // Closing a modeless WA_DeleteOnClose dialog only queues its destruction.
+  // Reopen synchronously, before processing that DeferredDelete event, to
+  // catch reuse of a closing dialog independently of platform/event timing.
+  detailsAction->trigger();
+  QPointer<QDialog> closing;
+  for (auto *dialog : window.findChildren<QDialog *>(QStringLiteral("viewportDetailsDialog")))
+    if (dialog->isVisible()) { closing = dialog; break; }
+  if (!check(closing && closeDetails(*closing), "close details before deferred destruction")) return false;
+  detailsAction->trigger();
+  QPointer<QDialog> reopened;
+  for (auto *dialog : window.findChildren<QDialog *>(QStringLiteral("viewportDetailsDialog")))
+    if (dialog->isVisible()) { reopened = dialog; break; }
+  if (!check(reopened && reopened != closing,
+      "immediate details reopen must not reuse the pending-delete dialog")) return false;
+  dispatchFor(20);
+  if (!check(reopened && reopened->isVisible() &&
+      reopened->findChild<QPlainTextEdit *>(QStringLiteral("viewportDetailsText")) &&
+      closeDetails(*reopened), "reopened details survive deferred destruction and remain usable")) return false;
+
   const auto loadFixture = [&](const QString &name, const QByteArray &unit) {
     const QString path = QDir(temporary.path()).filePath(name + QStringLiteral(".ply"));
     const QString root = QDir(temporary.path()).filePath(name + QStringLiteral("-workspace"));

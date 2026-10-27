@@ -12,6 +12,7 @@ on:
         options:
           - all
           - project-only
+          - ci-repair
 
 permissions:
   contents: read
@@ -98,6 +99,9 @@ jobs:
           if ($env:GSW_STATUS_SCOPE -eq 'all') {
             $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests', 'gsw_recovery_store_tests', 'gsw_viewport_camera_tests')
           }
+          elseif ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
+            $targets += @('GaussianSceneWorkbench', 'gsw_runtime_decoupling_ui_tests')
+          }
           elseif ($env:GSW_STATUS_SCOPE -ne 'project-only') { throw 'Unknown contract group.' }
           cmake --build native/build-viewport-status --config Release --parallel --target $targets 2>&1 |
             Tee-Object -FilePath native/viewport-status-artifact/build.log
@@ -115,6 +119,14 @@ jobs:
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' }}
         shell: pwsh
         run: |
+          $contracts = '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
+          $repeat = @()
+          if ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
+            # Match the unoverridden platform style used by the full suite.
+            Remove-Item Env:QT_STYLE_OVERRIDE -ErrorAction SilentlyContinue
+            $contracts = '^(native_runtime_decoupling_ui|native_adaptive_display_layout|native_viewport_scheduling_(light|dark))$'
+            $repeat = @('--repeat', 'until-fail:5')
+          }
           ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
             --output-log native/viewport-status-artifact/project-contracts.log `
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/project-contracts.xml') `
@@ -128,7 +140,7 @@ jobs:
           ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
             --output-log native/viewport-status-artifact/status-contracts.log `
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/status-contracts.xml') `
-            -R '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
+            -R $contracts @repeat
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status contracts failed; existing assertions and deadlines remain unchanged.' }
 
       - name: Retain exact source status logs and screenshots
