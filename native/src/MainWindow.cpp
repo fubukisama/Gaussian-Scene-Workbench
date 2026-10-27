@@ -4180,17 +4180,22 @@ void MainWindow::updateEditActions() {
   // Do not use model-selection eligibility to hide the navigation controls.
   const bool anyScene = mViewport->visibleModelAvailable() ||
       mViewport->visibleSceneObjectCount() > 0 || mModelReady || mSceneReady;
+  // Eye toggles change drawable/editable content, not the viewport canvas.
+  // Retained (possibly all-hidden) objects still own this toolbar row; hiding
+  // it changes the QOpenGLWidget aspect and moves the observed scene even
+  // though the camera target, distance and orbit have not changed.
+  const bool sceneToolsPresent = anyScene || mViewport->sceneObjectCount() > 0;
   if (mInspectAction == nullptr) {
     return;
   }
   if (mRenderToolbar != nullptr) {
-    mRenderToolbar->setVisible(anyScene);
+    mRenderToolbar->setVisible(sceneToolsPresent);
   }
   if (mSelectionToolbar != nullptr) {
-    mSelectionToolbar->setVisible(anyScene);
+    mSelectionToolbar->setVisible(sceneToolsPresent);
   }
   if (mEditToolbar != nullptr) {
-    mEditToolbar->setVisible(anyScene);
+    mEditToolbar->setVisible(sceneToolsPresent);
   }
   mInspectAction->setEnabled(!mSelectionBusy && anyScene);
   mFindModelAction->setEnabled(!mSelectionBusy &&

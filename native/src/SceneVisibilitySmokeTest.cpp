@@ -19,6 +19,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontMetricsF>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1513,74 +1514,234 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
   return true;
 }
 
+bool runHiddenReferenceGridRegression(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  QTemporaryDir temporary;
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "HIDDEN_GRID_REGRESSION FAIL:" << message;
+    return ok;
+  };
+  if (!check(viewport && document && tree && temporary.isValid(), "public window services")) return false;
+  window.resize(1440, 900);
+  const QString path = QDir(temporary.path()).filePath("reference-volume.ply");
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly)) return false;
+  QByteArray ply("ply\nformat ascii 1.0\nelement vertex 8\n");
+  for (const auto *name : {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"})
+    ply += QByteArray("property float ") + name + '\n';
+  ply += "end_header\n";
+  // A non-planar, offset source bounds fixture. Negligible opacity isolates
+  // the real grid pixels without putting a model or selection overlay over
+  // them; its source bounds remain an ordinary imported model's bounds.
+  for (int corner = 0; corner < 8; ++corner) {
+    ply += QString("%1 %2 %3 0 0 0 -20 -4 -4 -4 1 0 0 0\n")
+        .arg(corner & 1 ? 1.1 : -0.5).arg(corner & 2 ? 0.8 : -0.6).arg(corner & 4 ? 1.7 : 0.5).toUtf8();
+  }
+  if (file.write(ply) != ply.size()) return false;
+  file.close();
+  const QByteArray sourceHash = sha256(path);
+  QString error;
+  const QString working = QDir(temporary.path()).filePath("working");
+  if (!check(QDir().mkpath(working) && document->createUntitled(working, "Reference grid regression", &error) &&
+      document->addScenePath(path, &error) && waitUntil([&] { return viewport->gaussianRenderingAvailable() && viewport->renderedPointCount() == 8; }),
+      "import independent bounded source without rendered geometry")) return false;
+  viewport->resetCamera();
+  if (!check(viewport->focusModel(), "frame reference volume")) return false;
+  viewport->clearSelection();
+  viewport->setReferencePlaneMode(NativeViewport::ReferencePlaneMode::ModelBase);
+  QImage before;
+  QRect previous;
+  int stable = 0;
+  if (!check(waitUntil([&] {
+        before = viewport->grabFramebuffer();
+        const QRect rect(viewport->mapToGlobal(QPoint()), viewport->size());
+        stable = !before.isNull() && rect == previous ? stable + 1 : 0;
+        previous = rect;
+        return stable >= 2;
+      }), "settle bounded-source grid and canvas")) return false;
+  const QRect beforeRect(viewport->mapToGlobal(QPoint()), viewport->size());
+  const auto target = viewport->viewTarget();
+  const auto distance = viewport->viewDistance();
+  const auto angles = viewport->viewOrbitAngles();
+  const auto elevation = viewport->referencePlaneElevation();
+  const auto id = document->activeSceneId();
+  auto *item = sceneItem(tree, id);
+  if (!check(item && std::abs(elevation) > 0.1, "nonzero recorded reference elevation")) return false;
+  tree->scrollToItem(item);
+  const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2, tree->visualItemRect(item).center().y());
+  QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+  QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+  QApplication::sendEvent(tree->viewport(), &down);
+  QApplication::sendEvent(tree->viewport(), &up);
+  QImage hidden;
+  if (!check(waitUntil([&] { hidden = viewport->grabFramebuffer(); return !viewport->sceneObjectVisible(id) && !hidden.isNull(); }),
+      "real eye hides the last source")) return false;
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+      "hidden-reference-grid-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
+  QDir().mkpath(evidence);
+  before.save(QDir(evidence).filePath("before-hide.png"));
+  hidden.save(QDir(evidence).filePath("after-hide.png"));
+  if (!check(QRect(viewport->mapToGlobal(QPoint()), viewport->size()) == beforeRect && before.size() == hidden.size() &&
+      viewport->viewTarget() == target && viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
+      viewport->referencePlaneElevation() == elevation && sha256(path) == sourceHash,
+      "grid comparison keeps actual canvas, camera, recorded elevation and original source unchanged")) return false;
+  const QRect sample(80, 110, before.width() - 220, before.height() - 230);
+  int sampled = 0, changed = 0, minimum = 255, maximum = 0;
+  for (int y = sample.top(); y <= sample.bottom(); ++y) for (int x = sample.left(); x <= sample.right(); ++x) {
+    const QColor a = before.pixelColor(x, y), b = hidden.pixelColor(x, y);
+    // Exclude coloured physical markers; sample the actual grey grid, away
+    // from HUD, toolbar overlays, navigation controls and frame-rate labels.
+    if (std::max({a.red(), a.green(), a.blue()}) - std::min({a.red(), a.green(), a.blue()}) > 8) continue;
+    ++sampled;
+    minimum = std::min(minimum, a.red()); maximum = std::max(maximum, a.red());
+    if (std::max({std::abs(a.red() - b.red()), std::abs(a.green() - b.green()), std::abs(a.blue() - b.blue())}) > 6) ++changed;
+  }
+  qInfo() << "HIDDEN_GRID_REGRESSION sampled/changed/contrast" << sampled << changed << maximum - minimum << "recorded elevation" << elevation;
+  if (!check(sampled > 1000 && maximum - minimum > 8 && changed <= sampled / 100,
+      "hiding a nonzero bounded source preserves the actual reference grid pixels")) return false;
+  return check(document->createUntitled(temporary.path(), "After grid regression", &error), "release owned source");
+}
+
 bool runLastVisibleEyeRegression(MainWindow &window) {
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *tree = window.findChild<QTreeWidget *>("projectTree");
   auto *lockTools = window.findChild<QAction *>("lockEditToolsAction");
+  auto *move = window.findChild<QAction *>("moveModelAction");
+  auto *rotate = window.findChild<QAction *>("rotateModelAction");
+  auto *scale = window.findChild<QAction *>("scaleModelAction");
   QTemporaryDir temporary;
   const auto check = [](bool success, const char *message) {
     if (!success) qCritical() << "HIDE_VIEW_REGRESSION FAIL:" << message;
     return success;
   };
-  if (!check(viewport && document && tree && lockTools && temporary.isValid(), "public window services")) return false;
+  if (!check(viewport && document && tree && lockTools && move && rotate && scale && temporary.isValid(), "public window services")) return false;
   window.resize(1440, 900);
   QString error;
-  const QString working = QDir(temporary.path()).filePath("working");
-  const QString path = QDir(temporary.path()).filePath("last-visible-3dgs.ply");
-  if (!check(QDir().mkpath(working) && document->createUntitled(working, "Hide view regression", &error) &&
-      fixture(path, 2) && document->addScenePath(path, &error), "create independent Gaussian fixture")) return false;
-  lockTools->setChecked(false);
-  if (!check(waitUntil([&] { return viewport->gaussianRenderingAvailable(); }) && viewport->focusModel(),
-             "frame the only visible Gaussian in perspective")) return false;
-  viewport->clearSelection();
-  const QString id = document->activeSceneId();
-  const QByteArray sourceHash = sha256(path);
-  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+  const QString evidenceRoot = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
       "hide-view-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
-  QDir().mkpath(evidence);
-  const QImage before = viewport->grabFramebuffer();
-  before.save(QDir(evidence).filePath("before-hide.png"));
-  const QRect viewportRect(viewport->mapToGlobal(QPoint()), viewport->size());
-  const auto target = viewport->viewTarget();
-  const auto distance = viewport->viewDistance();
-  const auto angles = viewport->viewOrbitAngles();
-  const auto projection = viewport->orthographicProjection();
-  const auto fov = viewport->perspectiveFovDegrees();
-  const auto eyeClick = [&] {
-    auto *item = sceneItem(tree, id);
-    if (!item) return false;
-    tree->scrollToItem(item);
-    const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2,
-                       tree->visualItemRect(item).center().y());
-    if (tree->indexAt(point).column() != 1 || tree->itemAt(point) != item) return false;
-    QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(tree->viewport(), &down);
-    QApplication::sendEvent(tree->viewport(), &up);
-    return true;
-  };
-  const quint64 frameSerial = viewport->renderedFrameSerial();
-  if (!check(eyeClick() && waitUntil([&] {
-        return !viewport->sceneObjectVisible(id) && viewport->renderedFrameSerial() > frameSerial;
-      }), "real eye click hides the last visible object and presents its empty frame")) return false;
-  const QImage hidden = viewport->grabFramebuffer();
-  hidden.save(QDir(evidence).filePath("after-hide.png"));
-  const QRect hiddenRect(viewport->mapToGlobal(QPoint()), viewport->size());
-  qInfo() << "HIDE_VIEW_REGRESSION viewport before/hidden" << viewportRect << hiddenRect
-          << "camera" << target << viewport->viewTarget() << distance << viewport->viewDistance();
-  if (!check(hiddenRect == viewportRect && hidden.size() == before.size(),
-             "hiding the last object preserves the actual viewport rectangle and projection canvas")) return false;
-  if (!check(viewport->viewTarget() == target && viewport->viewDistance() == distance &&
-      viewport->viewOrbitAngles() == angles && viewport->orthographicProjection() == projection &&
-      viewport->perspectiveFovDegrees() == fov, "eye toggle preserves the observed camera and projection")) return false;
-  if (!check(eyeClick() && waitUntil([&] { return viewport->sceneObjectVisible(id) && viewport->gaussianRenderingAvailable(); }),
-             "same eye reveals the original model without reimport")) return false;
-  viewport->grabFramebuffer().save(QDir(evidence).filePath("after-restore.png"));
-  if (!check(QRect(viewport->mapToGlobal(QPoint()), viewport->size()) == viewportRect &&
-      viewport->viewTarget() == target && viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
-      document->activeSceneId() == id && sha256(path) == sourceHash,
-      "restoring visibility retains the view, source identity and original bytes")) return false;
+  // Keep the independently red single-3DGS/perspective case first. The same
+  // public eye operation then covers every supported geometry kind and both
+  // projection modes, without changing the production state via a test hook.
+  for (const int kind : {2, 0, 1, 3}) {
+    for (const bool orthographic : {false, true}) {
+      const bool firstCase = kind == 2 && !orthographic;
+      const QString caseName = QString("kind-%1-%2").arg(kind).arg(orthographic ? "orthographic" : "perspective");
+      const QString working = QDir(temporary.path()).filePath(caseName);
+      const QString path = QDir(temporary.path()).filePath(caseName + ".ply");
+      if (!check(QDir().mkpath(working) && document->createUntitled(working, "Hide view regression", &error) &&
+          fixture(path, kind) && document->addScenePath(path, &error), "create independent supported-model fixture")) return false;
+      lockTools->setChecked(false);
+      const auto resourceReady = [&] {
+        return kind == 1 ? viewport->meshRenderingAvailable()
+            : kind >= 2 ? viewport->gaussianRenderingAvailable() : viewport->selectableModelAvailable();
+      };
+      if (!check(waitUntil(resourceReady), "load the only visible model")) return false;
+      // Other matrix cases also prove that visibility cannot silently reset
+      // non-identity source TRS; retain the original red case unchanged.
+      if (!firstCase) viewport->setModelTransform(QVector3D(0.2F, -0.1F, 0.3F),
+          QQuaternion::fromEulerAngles(5.0F, 7.0F, 11.0F), QVector3D(1.1F, 1.1F, 1.1F));
+      viewport->resetCamera();
+      if (!check(viewport->focusModel(), "frame the only visible model")) return false;
+      viewport->clearSelection();
+      if (viewport->orthographicProjection() != orthographic) {
+        const auto navigation = navigationGizmoLayout(QMatrix4x4(), viewport->size(), QFontMetricsF(viewport->font()).height());
+        const QPointF point = navigation.projectionButton.center();
+        QMouseEvent down(QEvent::MouseButtonPress, point, viewport->mapToGlobal(point.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease, point, viewport->mapToGlobal(point.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(viewport, &down);
+        QApplication::sendEvent(viewport, &up);
+      }
+      if (!check(viewport->orthographicProjection() == orthographic, "requested perspective or orthographic mode is active")) return false;
+      const auto settledFrame = [&](QImage &image, bool geometryVisible) {
+        QRect previousRect;
+        QSize previousSize;
+        int stableSamples = 0;
+        return waitUntil([&] {
+          image = viewport->grabFramebuffer();
+          const QRect rect(viewport->mapToGlobal(QPoint()), viewport->size());
+          const bool ready = !image.isNull() && (!geometryVisible || patches(image)[kind].count > 120);
+          stableSamples = ready && rect == previousRect && image.size() == previousSize ? stableSamples + 1 : 0;
+          previousRect = rect;
+          previousSize = image.size();
+          return stableSamples >= 2;
+        });
+      };
+      QImage before;
+      if (!check(settledFrame(before, true), "baseline has rendered geometry and settled window layout")) return false;
+      const Patch beforePatch = patches(before)[kind];
+      const QString id = document->activeSceneId();
+      const auto original = document->sceneObjects().constFirst();
+      const QByteArray sourceHash = sha256(path);
+      const QString evidence = firstCase ? evidenceRoot : QDir(evidenceRoot).filePath(caseName);
+      QDir().mkpath(evidence);
+      before.save(QDir(evidence).filePath("before-hide.png"));
+      const QRect viewportRect(viewport->mapToGlobal(QPoint()), viewport->size());
+      const auto target = viewport->viewTarget();
+      const auto distance = viewport->viewDistance();
+      const auto angles = viewport->viewOrbitAngles();
+      const auto projection = viewport->orthographicProjection();
+      const auto fov = viewport->perspectiveFovDegrees();
+      const auto elevation = viewport->referencePlaneElevation();
+      const auto plane = viewport->referencePlaneDescription();
+      const auto sameCamera = [&] {
+        return viewport->viewTarget() == target && viewport->viewDistance() == distance &&
+            viewport->viewOrbitAngles() == angles && viewport->orthographicProjection() == projection &&
+            viewport->perspectiveFovDegrees() == fov;
+      };
+      const auto sameSource = [&] {
+        const auto objects = document->sceneObjects();
+        return objects.size() == 1 && objects.constFirst().id == original.id && objects.constFirst().path == original.path &&
+            objects.constFirst().translation == original.translation && objects.constFirst().rotation == original.rotation &&
+            objects.constFirst().scale == original.scale && objects.constFirst().vertexCount == original.vertexCount && sha256(path) == sourceHash;
+      };
+      const auto eyeClick = [&] {
+        auto *item = sceneItem(tree, id);
+        if (!item) return false;
+        tree->scrollToItem(item);
+        const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2,
+                           tree->visualItemRect(item).center().y());
+        if (tree->indexAt(point).column() != 1 || tree->itemAt(point) != item) return false;
+        QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(tree->viewport(), &down);
+        QApplication::sendEvent(tree->viewport(), &up);
+        return true;
+      };
+      const quint64 frameSerial = viewport->renderedFrameSerial();
+      if (!check(eyeClick() && waitUntil([&] {
+            return !viewport->sceneObjectVisible(id) && viewport->renderedFrameSerial() > frameSerial;
+          }), "real eye click hides the last visible object and presents its empty frame")) return false;
+      QImage hidden;
+      if (!check(settledFrame(hidden, false), "hidden frame and queued layout have settled")) return false;
+      hidden.save(QDir(evidence).filePath("after-hide.png"));
+      const QRect hiddenRect(viewport->mapToGlobal(QPoint()), viewport->size());
+      qInfo() << "HIDE_VIEW_REGRESSION" << caseName << "viewport before/hidden" << viewportRect << hiddenRect
+              << "camera" << target << viewport->viewTarget() << distance << viewport->viewDistance();
+      if (!check(hiddenRect == viewportRect && hidden.size() == before.size(),
+                 "hiding the last object preserves the actual viewport rectangle and projection canvas")) return false;
+      if (!check(sameCamera(), "eye toggle preserves the observed camera and projection")) return false;
+      if (!check(viewport->referencePlaneElevation() == elevation && viewport->referencePlaneDescription() == plane &&
+          document->activeSceneId() == id && sameSource(), "hidden object retains reference plane, source identity, TRS and original bytes")) return false;
+      if (!check(viewport->visibleSceneObjectCount() == 0 && !move->isEnabled() && !rotate->isEnabled() && !scale->isEnabled() &&
+          !viewport->hasEditableScene(), "all-hidden models cannot be moved, rotated, scaled or point-edited")) return false;
+      if (!check(eyeClick() && waitUntil([&] { return viewport->sceneObjectVisible(id) && resourceReady(); }),
+                 "same eye reveals the original model without reimport")) return false;
+      QImage restored;
+      if (!check(settledFrame(restored, true), "restored model and queued layout have settled")) return false;
+      restored.save(QDir(evidence).filePath("after-restore.png"));
+      const Patch restoredPatch = patches(restored)[kind];
+      if (!check(QRect(viewport->mapToGlobal(QPoint()), viewport->size()) == viewportRect && restored.size() == before.size() &&
+          sameCamera() && viewport->referencePlaneElevation() == elevation && viewport->referencePlaneDescription() == plane &&
+          document->activeSceneId() == id && sameSource(),
+          "restoring visibility retains the view, source identity and original bytes")) return false;
+      if (!check(restoredPatch.count >= beforePatch.count * 9 / 10 && restoredPatch.count <= beforePatch.count * 11 / 10 &&
+          QLineF(restoredPatch.center, beforePatch.center).length() < 1.0,
+          "restoring the model retains its actual body size and screen position")) return false;
+    }
+  }
   return check(document->createUntitled(temporary.path(), "After hide regression", &error), "release the owned fixture");
 }
 }
@@ -1599,7 +1760,7 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     return error.error == QJsonParseError::NoError && inputs.isArray() &&
         runInputSelectionDiagnostic(window, inputs.array());
   }
-  if (!runLastVisibleEyeRegression(window)) return false;
+  if (!runHiddenReferenceGridRegression(window) || !runLastVisibleEyeRegression(window)) return false;
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *tree = window.findChild<QTreeWidget *>("projectTree");
@@ -1798,6 +1959,14 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
                viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
                viewport->selectedSceneIds().isEmpty() && selectedTreeIds() == selectedBeforeEye,
                "eye click leaves active model, camera and exact tree selection unchanged")) return false;
+    const auto remaining = patches(frame);
+    for (int peer = 0; peer < 4; ++peer) {
+      if (peer == kind) continue;
+      if (!check(remaining[peer].count >= baseline[peer].count * 9 / 10 &&
+          remaining[peer].count <= baseline[peer].count * 11 / 10 &&
+          QLineF(remaining[peer].center, baseline[peer].center).length() < 1.0,
+          "hiding one model preserves each visible peer's actual size and screen position")) return false;
+    }
     lockTools->setChecked(true);
     const auto beforeMiss = viewport->viewTarget();
     if (!check(!viewport->centerObservationAt(baseline[kind].center / viewport->devicePixelRatioF()) &&
