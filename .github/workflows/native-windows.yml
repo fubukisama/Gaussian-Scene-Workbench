@@ -378,6 +378,7 @@ jobs:
             native/build-ci/Testing/Temporary/LastTest.log
             native/build-ci/Testing/Temporary/LastTestsFailed.log
             native/build-ci/Testing/Temporary/CTestCostData.txt
+            native/build-ci/native-managed-installation.log
             ${{ runner.temp }}/gsw-infinite-grid-initial.png
             ${{ runner.temp }}/gsw-infinite-grid-smoke.png
           if-no-files-found: warn

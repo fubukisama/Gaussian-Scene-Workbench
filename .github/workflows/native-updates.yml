@@ -60,7 +60,9 @@ jobs:
           ctest --test-dir native/build-updates -C Release --no-tests=error --verbose --output-on-failure `
             -R '^native_managed_installation$' --output-junit "$PWD/native/update-evidence/contracts.xml" `
             --output-log native/update-evidence/contracts.log
-          if ($LASTEXITCODE -ne 0) { throw 'Native installation boundary failed.' }
+          $result=$LASTEXITCODE
+          if(Test-Path native/build-updates/native-managed-installation.log){Get-Content native/build-updates/native-managed-installation.log}
+          if ($result -ne 0) { throw "Native installation boundary failed (ctest exit $result)." }
       - name: Verify publish, retained old slot, link migration and rollback
         shell: pwsh
         run: |
@@ -86,5 +88,6 @@ jobs:
             native/update-evidence/*.xml
             native/update-evidence/owned-fixtures/acceptance.json
             native/update-evidence/owned-fixtures/*/publication*.json
+            native/build-updates/native-managed-installation.log
           if-no-files-found: error
           retention-days: 14

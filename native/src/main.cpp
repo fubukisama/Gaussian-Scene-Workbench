@@ -528,6 +528,12 @@ int main(int argc, char *argv[]) {
           QStringLiteral(GSW_APP_USER_MODEL_ID))) {
     qWarning() << "managed_installation_taskbar_relaunch_failed";
   }
+  if (!smokeTest) {
+    QObject::connect(&application, &QCoreApplication::aboutToQuit, &window, [&window] {
+      gsw::clearManagedTaskbarRelaunch(reinterpret_cast<void *>(window.winId()),
+                                     QCoreApplication::applicationFilePath());
+    });
+  }
   if (projectPath.isEmpty() && !smokeTest) {
     window.offerStartupRecovery();
   }

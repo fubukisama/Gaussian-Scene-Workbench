@@ -215,4 +215,21 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   return false;
 #endif
 }
+
+void clearManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPath) {
+#ifdef Q_OS_WIN
+  if (managedInstallationForApplication(applicationPath).isEmpty()) return;
+  IPropertyStore *store = nullptr;
+  if (FAILED(SHGetPropertyStoreForWindow(static_cast<HWND>(windowHandle), IID_PPV_ARGS(&store)))) return;
+  // Window property stores are immediate, not persistent. Microsoft requires
+  // VT_EMPTY removal before destroying the HWND so the property resources free.
+  PROPVARIANT empty; PropVariantInit(&empty);
+  for (const auto &key : {PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand,
+                          PKEY_AppUserModel_RelaunchDisplayNameResource, PKEY_AppUserModel_RelaunchIconResource})
+    store->SetValue(key, empty);
+  store->Release();
+#else
+  Q_UNUSED(windowHandle); Q_UNUSED(applicationPath);
+#endif
+}
 } // namespace gsw

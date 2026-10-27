@@ -1018,7 +1018,8 @@ if(BUILD_TESTING)
   if(MSVC)
     target_compile_options(gsw_native_installation_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
   endif()
-  add_test(NAME native_managed_installation COMMAND gsw_native_installation_tests -o -,txt)
+  add_test(NAME native_managed_installation COMMAND gsw_native_installation_tests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/native-managed-installation.log,txt")
   set_tests_properties(native_managed_installation PROPERTIES TIMEOUT 30
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)

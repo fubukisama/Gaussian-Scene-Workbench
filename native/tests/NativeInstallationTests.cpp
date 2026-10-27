@@ -158,6 +158,9 @@ private slots:
     PropVariantClear(&value);
     QVERIFY(SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &value)));
     QCOMPARE(QString::fromWCharArray(value.pwszVal), "GSW.Test.Stable"); PropVariantClear(&value);
+    gsw::clearManagedTaskbarRelaunch(window, oldApplication);
+    QVERIFY(SUCCEEDED(store->GetValue(PKEY_AppUserModel_RelaunchCommand, &value)));
+    QCOMPARE(value.vt, VARTYPE(VT_EMPTY)); PropVariantClear(&value);
     QVERIFY(gsw::setManagedTaskbarRelaunch(nullptr, "not-a-managed-install.exe", "GSW.Test.Stable"));
 #endif
   }
