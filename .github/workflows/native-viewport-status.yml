@@ -119,14 +119,6 @@ jobs:
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' }}
         shell: pwsh
         run: |
-          $contracts = '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
-          $repeat = @()
-          if ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
-            # Match the unoverridden platform style used by the full suite.
-            Remove-Item Env:QT_STYLE_OVERRIDE -ErrorAction SilentlyContinue
-            $contracts = '^(native_runtime_decoupling_ui|native_adaptive_display_layout|native_viewport_scheduling_(light|dark))$'
-            $repeat = @('--repeat', 'until-fail:5')
-          }
           ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
             --output-log native/viewport-status-artifact/project-contracts.log `
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/project-contracts.xml') `
@@ -137,6 +129,14 @@ jobs:
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
         shell: pwsh
         run: |
+          $contracts = '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
+          $repeat = @()
+          if ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
+            # Match the unoverridden platform style used by the full suite.
+            Remove-Item Env:QT_STYLE_OVERRIDE -ErrorAction SilentlyContinue
+            $contracts = '^(native_runtime_decoupling_ui|native_adaptive_display_layout|native_viewport_scheduling_(light|dark))$'
+            $repeat = @('--repeat', 'until-fail:5')
+          }
           ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
             --output-log native/viewport-status-artifact/status-contracts.log `
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/status-contracts.xml') `
