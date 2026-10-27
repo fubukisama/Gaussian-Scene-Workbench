@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include "BlenderGridSteps.h"
+
 #include <QByteArray>
 
 namespace gsw::blender_grid {
-
-inline constexpr int StepCount = 8;
 
 // Shader-only adapter. The caller owns its GL program, empty VAO, framebuffer,
 // colors and immutable scene reference. Draw one triangle (three vertices).

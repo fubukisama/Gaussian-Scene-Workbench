@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -17,6 +18,8 @@ private slots:
   void removesRecoveryMetadataWhenWorkspaceBecomesManaged();
   void retainsAndRestoresProjectSnapshots();
   void rejectsUnsafeRecoveryDeletion();
+  void preservesViewportGridValuesWithoutLosingRecoveryModelState();
+  void legacyRecoveryOmitsViewportGridUntilExplicitlyProvided();
 };
 
 void RecoveryStoreTests::recoversAndDiscardsAnUntitledWorkspace() {
@@ -193,6 +196,106 @@ void RecoveryStoreTests::rejectsUnsafeRecoveryDeletion() {
   QVERIFY(store.discardWorkspace(*first, &error));
   QCOMPARE(store.recoverableWorkspaces().size(), 1);
   QVERIFY(QFileInfo::exists(second->rootPath));
+}
+
+void RecoveryStoreTests::preservesViewportGridValuesWithoutLosingRecoveryModelState() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString base = QDir(temporary.path()).filePath("recovery");
+  gsw::RecoveryStore store(base);
+  QString error;
+  const auto started = store.beginWorkspace("Grid recovery", &error);
+  QVERIFY2(started.has_value(), qPrintable(error));
+  auto checkpoint = *started;
+  checkpoint.projectFilePath = QDir(checkpoint.rootPath).filePath("saved.gsw.json");
+  checkpoint.datasetPath = QDir(checkpoint.rootPath).filePath("dataset");
+  checkpoint.scenePath = QDir(checkpoint.rootPath).filePath("source.ply");
+  checkpoint.sceneTranslation = {2.0F, -3.0F, 0.75F};
+  checkpoint.sceneRotation = QQuaternion::fromAxisAndAngle({0.0F, 0.0F, 1.0F}, 42.0F);
+  checkpoint.sceneScale = {1.25F, 0.8F, 2.0F};
+  checkpoint.sceneCollection = {{"activeId", "retained-model"}, {"objects", QJsonArray{
+      QJsonObject{{"id", "retained-model"}, {"path", checkpoint.scenePath}, {"visible", false}}}}};
+  const QByteArray source("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n");
+  QFile payload(checkpoint.scenePath);
+  QVERIFY(payload.open(QIODevice::WriteOnly));
+  QCOMPARE(payload.write(source), source.size());
+  payload.close();
+  const QJsonObject full{{"version", 1}, {"spacingMode", "fixed"}, {"majorSpacing", 2.5},
+      {"subdivisions", 5}, {"density", 1.0}, {"displayUnit", "scene"},
+      {"gridVisible", true}, {"axesVisible", true}};
+  const QList<QJsonValue> values{full, QJsonObject{{"majorSpacing", 0.25}, {"gridVisible", false}},
+      QJsonObject{}, QJsonValue(QJsonValue::Null), QJsonValue(QStringLiteral("unexpected")),
+      QJsonValue(42), QJsonValue(true), QJsonArray{1, 2},
+      QJsonObject{{"version", 99}, {"density", "malformed"}}};
+  for (const auto &value : values) {
+    // Recovery is a lossless transport for the optional presentation value.
+    // Its caller validates/warns; bad view preferences must not drop models.
+    checkpoint.viewportGrid = value;
+    QVERIFY2(store.checkpoint(checkpoint, &error), qPrintable(error));
+    QFile state(QDir(checkpoint.rootPath).filePath(".gsw/recovery-state.json"));
+    QVERIFY(state.open(QIODevice::ReadOnly));
+    const auto serialized = QJsonDocument::fromJson(state.readAll()).object();
+    state.close();
+    QVERIFY(serialized.contains("viewportGrid"));
+    QCOMPARE(serialized.value("viewportGrid"), value);
+    const auto recovered = gsw::RecoveryStore(base).recoverableWorkspaces(&error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(recovered.size(), 1);
+    const auto actual = recovered.constFirst();
+    QCOMPARE(actual.viewportGrid, value);
+    QCOMPARE(actual.sessionId, checkpoint.sessionId);
+    QCOMPARE(actual.displayName, checkpoint.displayName);
+    QCOMPARE(actual.rootPath, QDir::cleanPath(checkpoint.rootPath));
+    QCOMPARE(actual.projectFilePath, QDir::cleanPath(checkpoint.projectFilePath));
+    QCOMPARE(actual.datasetPath, QDir::cleanPath(checkpoint.datasetPath));
+    QCOMPARE(actual.scenePath, QDir::cleanPath(checkpoint.scenePath));
+    QCOMPARE(actual.sceneCollection, checkpoint.sceneCollection);
+    QCOMPARE(actual.sceneTranslation, checkpoint.sceneTranslation);
+    QCOMPARE(actual.sceneScale, checkpoint.sceneScale);
+    QVERIFY(1.0F - std::abs(QQuaternion::dotProduct(actual.sceneRotation.normalized(),
+        checkpoint.sceneRotation.normalized())) < 1.0e-6F);
+    QVERIFY(actual.updatedUtc.isValid() && actual.updatedUtc >= started->updatedUtc);
+    QVERIFY(payload.open(QIODevice::ReadOnly));
+    QCOMPARE(payload.readAll(), source);
+    payload.close();
+  }
+}
+
+void RecoveryStoreTests::legacyRecoveryOmitsViewportGridUntilExplicitlyProvided() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString base = QDir(temporary.path()).filePath("legacy-recovery");
+  gsw::RecoveryStore store(base);
+  QString error;
+  const auto started = store.beginWorkspace("Legacy view preferences", &error);
+  QVERIFY2(started.has_value(), qPrintable(error));
+  QVERIFY(started->viewportGrid.isUndefined());
+  const QString statePath = QDir(started->rootPath).filePath(".gsw/recovery-state.json");
+  QFile state(statePath);
+  QVERIFY(state.open(QIODevice::ReadOnly));
+  QVERIFY(!QJsonDocument::fromJson(state.readAll()).object().contains("viewportGrid"));
+  state.close();
+  auto recovered = store.recoverableWorkspaces(&error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  QCOMPARE(recovered.size(), 1);
+  QVERIFY(recovered.constFirst().viewportGrid.isUndefined());
+  auto checkpoint = recovered.constFirst();
+  checkpoint.viewportGrid = QJsonObject{};
+  QVERIFY(store.checkpoint(checkpoint, &error));
+  recovered = store.recoverableWorkspaces(&error);
+  QCOMPARE(recovered.size(), 1);
+  QVERIFY(recovered.constFirst().viewportGrid.isObject());
+  QVERIFY(recovered.constFirst().viewportGrid.toObject().isEmpty());
+  checkpoint.viewportGrid = QJsonValue(QJsonValue::Undefined);
+  QVERIFY(store.checkpoint(checkpoint, &error));
+  QVERIFY(state.open(QIODevice::ReadOnly));
+  QVERIFY(!QJsonDocument::fromJson(state.readAll()).object().contains("viewportGrid"));
+  state.close();
+  recovered = store.recoverableWorkspaces(&error);
+  QCOMPARE(recovered.size(), 1);
+  QVERIFY(recovered.constFirst().viewportGrid.isUndefined());
+  QCOMPARE(recovered.constFirst().sessionId, started->sessionId);
+  QCOMPARE(recovered.constFirst().rootPath, QDir::cleanPath(started->rootPath));
 }
 
 QTEST_GUILESS_MAIN(RecoveryStoreTests)

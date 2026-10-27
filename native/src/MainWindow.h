@@ -21,6 +21,7 @@
 class QAction;
 class QActionGroup;
 class QCloseEvent;
+class QDialog;
 class QDockWidget;
 class QFrame;
 class QLabel;
@@ -229,6 +230,9 @@ private:
   void retranslateUi();
   void updateTaskLabels();
   void refreshRendererStatus();
+  void showViewportDetails();
+  void showViewportGridSettings();
+  void applyWorkspaceGridSettings();
   void rebuildProjectTree();
   void syncProjectTreeSelection();
   void syncProjectTreeVisibility();
@@ -258,6 +262,8 @@ private:
   QPointer<ScaleConstraintsDialog> mScaleConstraintsDialog;
   QPointer<TrainingBatchDialog> mTrainingBatchDialog;
   QPointer<InitializationDialog> mInitializationDialog;
+  QPointer<QDialog> mViewportDetailsDialog;
+  bool mWorkspaceGridRefreshPending = false;
   QDockWidget *mProjectDock = nullptr;
   QDockWidget *mInspectorDock = nullptr;
   QDockWidget *mTaskDock = nullptr;
@@ -369,6 +375,8 @@ private:
   QAction *mExportModelAction = nullptr;
   QAction *mExportCoordinateReportAction = nullptr;
   QAction *mReloadModelMetadataAction = nullptr;
+  QAction *mViewportGridSettingsAction = nullptr;
+  QAction *mViewportDetailsAction = nullptr;
   QAction *mModelBasePlaneAction = nullptr;
   QAction *mWorldZeroPlaneAction = nullptr;
   QAction *mAutoScaleAction = nullptr;

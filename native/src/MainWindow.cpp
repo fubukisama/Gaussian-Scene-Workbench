@@ -35,6 +35,7 @@
 #include "ScaleConstraintsDialog.h"
 #include "InitializationDialog.h"
 #include "TrainingBatchDialog.h"
+#include "ViewportGridDialog.h"
 #include "WrappingCheckBox.h"
 #include "TrainingEnvironmentProbe.h"
 #include "TrainingMonitorWidget.h"
@@ -1838,6 +1839,23 @@ void MainWindow::createActions() {
     mViewport->refreshActiveSceneMetadata();
   });
 
+  mViewportGridSettingsAction = AppLanguage::text(
+      new QAction(this), AppLanguage::source("网格设置"));
+  mViewportGridSettingsAction->setObjectName(
+      QStringLiteral("viewportGridSettingsAction"));
+  setWorkbenchActionIcon(mViewportGridSettingsAction,
+                         WorkbenchIconId::Settings, palette());
+  connect(mViewportGridSettingsAction, &QAction::triggered, this,
+          &MainWindow::showViewportGridSettings);
+  mViewportDetailsAction = AppLanguage::text(
+      new QAction(this), AppLanguage::source("视口详情"));
+  mViewportDetailsAction->setObjectName(
+      QStringLiteral("viewportDetailsAction"));
+  setWorkbenchActionIcon(mViewportDetailsAction,
+                         WorkbenchIconId::Info, palette());
+  connect(mViewportDetailsAction, &QAction::triggered, this,
+          &MainWindow::showViewportDetails);
+
   mReferencePlaneActionGroup = new QActionGroup(this);
   mReferencePlaneActionGroup->setExclusive(true);
   mModelBasePlaneAction =
@@ -2018,6 +2036,9 @@ void MainWindow::createMenus() {
   });
   viewMenu->addAction(mTaskPreviewAction);
   viewMenu->addAction(mPausePreviewAction);
+  viewMenu->addSeparator();
+  viewMenu->addAction(mViewportGridSettingsAction);
+  viewMenu->addAction(mViewportDetailsAction);
   viewMenu->addSeparator();
   auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
@@ -2707,35 +2728,21 @@ void MainWindow::refreshRendererStatus() {
   const bool gpuPreview = mViewport->trainingGpuPreviewActive();
   const bool gpuNotice = gpuPreview || mRendererShowGpuNotice;
   const bool hasScene = !mViewport->scenePath().isEmpty() || mViewport->visibleModelAvailable();
-  const QString mode = mViewport->renderMode() == NativeViewport::RenderMode::Mesh
-      ? QCoreApplication::translate("Workbench", "网格预览")
-      : mViewport->renderMode() == NativeViewport::RenderMode::Gaussians
-          ? QCoreApplication::translate("Workbench", "高斯预览")
-          : QCoreApplication::translate("Workbench", "点预览");
-  const QString frameRate = mRendererHasFrameMetrics && mRendererFramesPerSecond > 0.0 &&
-      mRendererFrameMilliseconds > 0.0
-      ? QStringLiteral("%1 FPS (%2 ms)").arg(mRendererFramesPerSecond, 0, 'f', 1)
-            .arg(mRendererFrameMilliseconds, 0, 'f', 1)
-      : QStringLiteral("FPS — (— ms)");
-  if (gpuNotice) {
+  const QString frameRate = mViewport->viewportPerformanceText();
+  if (gpuNotice && !gpuPreview) {
     const QString previewMode = mRendererStatus->property("gpuPreviewMode").toString();
     const QString detail = mRendererStatus->property("gpuPreviewDetail").toString();
     text = detail.isEmpty() ? previewMode : QStringLiteral("%1 | %2").arg(previewMode, detail);
-    if (mRendererHasFrameMetrics) text += QStringLiteral(" | ") + frameRate;
+    text += QStringLiteral(" · ") + frameRate;
   } else if (mRendererStatusPhase == RendererStatusPhase::Loading) {
     text = QCoreApplication::translate("Workbench", "正在读取 PLY 场景");
   } else if (mRendererStatusPhase == RendererStatusPhase::Failed) {
     text = QCoreApplication::translate("Workbench", "PLY 场景读取失败");
-  } else if (!hasScene) {
-    text = QCoreApplication::translate("Workbench", "%1 | 未载入场景").arg(mode) +
-        QStringLiteral(" | FPS — (— ms)");
-  } else if (!mRendererHasFrameMetrics && mRendererPreviewPrimitiveCount >= 0) {
-    text = QCoreApplication::translate("Workbench", "%1 | %2 个预览图元")
-        .arg(mode).arg(mRendererPreviewPrimitiveCount);
   } else {
-    text = QStringLiteral("%1 | %2").arg(mode, frameRate);
+    text = mViewport->viewportStatusText();
   }
   if (mRendererStatus->text() != text) mRendererStatus->setText(text);
+  mRendererStatus->setToolTip(mViewport->viewportDetailsText());
   const QString role = (gpuNotice ? gpuPreview : hasScene && mRendererStatusPhase == RendererStatusPhase::Normal)
       ? QStringLiteral("statusOk") : QStringLiteral("statusWarn");
   if (mRendererStatus->objectName() != role) {
@@ -2743,6 +2750,107 @@ void MainWindow::refreshRendererStatus() {
     mRendererStatus->style()->unpolish(mRendererStatus);
     mRendererStatus->style()->polish(mRendererStatus);
   }
+}
+
+void MainWindow::showViewportDetails() {
+  if (mViewportDetailsDialog) {
+    mViewportDetailsDialog->show();
+    return;
+  }
+  auto *dialog = new QDialog(this);
+  dialog->setObjectName(QStringLiteral("viewportDetailsDialog"));
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  AppLanguage::bind(dialog, "windowTitle", AppLanguage::source("视口详情"));
+  dialog->resize(AppTheme::scaled(620, mUiScalePercent),
+                 AppTheme::scaled(360, mUiScalePercent));
+  mViewportDetailsDialog = dialog;
+  auto *layout = new QVBoxLayout(dialog);
+  auto *details = new QPlainTextEdit(dialog);
+  details->setObjectName(QStringLiteral("viewportDetailsText"));
+  details->setReadOnly(true);
+  AppLanguage::bind(details, "accessibleName", AppLanguage::source("视口详情"));
+  details->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+  layout->addWidget(details, 1);
+  auto *buttons = new QDialogButtonBox(dialog);
+  auto *copy = AppLanguage::text(
+      buttons->addButton(QString(), QDialogButtonBox::ActionRole),
+      AppLanguage::source("复制详情"));
+  copy->setObjectName(QStringLiteral("copyViewportDetailsButton"));
+  auto *grid = AppLanguage::text(
+      buttons->addButton(QString(), QDialogButtonBox::ActionRole),
+      AppLanguage::source("网格设置"));
+  grid->setObjectName(QStringLiteral("viewportDetailsGridSettingsButton"));
+  auto *close = AppLanguage::text(
+      buttons->addButton(QString(), QDialogButtonBox::RejectRole),
+      AppLanguage::source("关闭"));
+  close->setObjectName(QStringLiteral("closeViewportDetailsButton"));
+  layout->addWidget(buttons);
+  const auto refresh = [this, details]() {
+    const QString current = mViewport->viewportDetailsText();
+    if (details->toPlainText() == current) return;
+    const QTextCursor previous = details->textCursor();
+    const int scroll = details->verticalScrollBar()->value();
+    const int horizontalScroll = details->horizontalScrollBar()->value();
+    details->setPlainText(current);
+    QTextCursor cursor = details->textCursor();
+    const int end = static_cast<int>(current.size());
+    cursor.setPosition(std::min(previous.anchor(), end));
+    cursor.setPosition(std::min(previous.position(), end), QTextCursor::KeepAnchor);
+    details->setTextCursor(cursor);
+    details->verticalScrollBar()->setValue(scroll);
+    details->horizontalScrollBar()->setValue(horizontalScroll);
+  };
+  connect(mViewport, &NativeViewport::viewportPresentationChanged,
+          dialog, refresh);
+  AppLanguage::onChanged(dialog, refresh);
+  connect(copy, &QPushButton::clicked, dialog, [this]() {
+    QApplication::clipboard()->setText(mViewport->viewportDetailsText());
+  });
+  connect(grid, &QPushButton::clicked, this,
+          &MainWindow::showViewportGridSettings);
+  connect(close, &QPushButton::clicked, dialog, &QDialog::reject);
+  refresh();
+  dialog->show();
+}
+
+void MainWindow::showViewportGridSettings() {
+  const ViewportGridSettings previous = mViewport->viewportGridSettings();
+  ViewportGridDialog dialog(previous, mViewport->sceneReferenceCoordinates(), this);
+  if (dialog.exec() != QDialog::Accepted) return;
+  const ViewportGridSettings selected = dialog.settings();
+  const auto json = selected.toJson();
+  QString error;
+  if (!json) {
+    showError(QCoreApplication::translate("Workbench", "网格设置"),
+              QCoreApplication::translate("Workbench", "视口网格设置无效。"));
+    return;
+  }
+  if (!mViewport->validateViewportGridSettingsForDisplay(selected, &error) ||
+      !mViewport->setViewportGridSettings(selected, &error)) {
+    showError(QCoreApplication::translate("Workbench", "网格设置"), error);
+    return;
+  }
+  if (mWorkspace.hasProject() &&
+      !mWorkspace.setViewportGridSettings(*json, &error)) {
+    // The document is authoritative for persistence. A failed write must not
+    // leave the viewport displaying an unrecorded, partly applied setting.
+    QString rollbackError;
+    const bool restored = mViewport->setViewportGridSettings(previous, &rollbackError);
+    showError(QCoreApplication::translate("Workbench", "网格设置"), error);
+    if (!restored) appendTaskEvent(AppLanguage::diagnosticText(rollbackError));
+  }
+}
+
+void MainWindow::applyWorkspaceGridSettings() {
+  const auto settings =
+      ViewportGridSettings::fromJson(mWorkspace.viewportGridSettings());
+  QString error;
+  if (!settings) {
+    appendTaskEvent(QCoreApplication::translate("Workbench", "视口网格设置无效。"));
+    return;
+  }
+  if (!mViewport->setViewportGridSettings(*settings, &error))
+    appendTaskEvent(AppLanguage::diagnosticText(error));
 }
 
 QSharedPointer<TaskRecord> MainWindow::taskRecordForRow(const int row) const {
@@ -2862,6 +2970,31 @@ void MainWindow::connectServices() {
           &MainWindow::checkpointCurrentRecovery);
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
           &MainWindow::snapshotCurrentProject);
+  connect(&mWorkspace, &WorkspaceDocument::viewportGridSettingsChanged, this,
+          [this]() {
+            // Project loads also emit this signal before scene presentation has
+            // settled. Coalesce it and read the current document, not an old
+            // captured settings object. Never reload models for a display edit.
+            if (mWorkspaceGridRefreshPending) return;
+            mWorkspaceGridRefreshPending = true;
+            QTimer::singleShot(0, this, [this]() {
+              mWorkspaceGridRefreshPending = false;
+              applyWorkspaceGridSettings();
+              checkpointCurrentRecovery();
+              snapshotCurrentProject();
+              const QString name = mWorkspace.hasProject()
+                  ? mWorkspace.projectName()
+                  : QCoreApplication::translate("Workbench", "未打开工程");
+              mProjectStatus->setText(name +
+                  (mWorkspace.isModified() ? QStringLiteral(" *") : QString()) +
+                  (mWorkspace.hasPendingDataMigration()
+                      ? QCoreApplication::translate("Workbench", " · 数据迁移待完成")
+                      : QString()) +
+                  (mRecoveryBlocked
+                      ? QCoreApplication::translate("Workbench", " · 导入恢复待处理")
+                      : QString()));
+            });
+          });
   connect(&mWorkspace, &WorkspaceDocument::modifiedChanged, this,
           [this](const bool modified) { setWindowModified(modified); });
   connect(&mProcessSupervisor, &ProcessSupervisor::runningChanged, this,
@@ -3585,6 +3718,10 @@ void MainWindow::connectServices() {
         mRendererShowGpuNotice = mViewport->trainingGpuPreviewActive();
         refreshRendererStatus();
       });
+  connect(mViewport, &NativeViewport::viewportPresentationChanged,
+          this, &MainWindow::refreshRendererStatus);
+  connect(mViewport, &NativeViewport::viewportDetailsRequested,
+          this, &MainWindow::showViewportDetails);
   connect(
       mViewport, &NativeViewport::trainingGpuPreviewStateChanged, this,
       [this](const bool active, const QString &mode, const QString &detail) {
@@ -3657,6 +3794,10 @@ void MainWindow::connectServices() {
           });
   connect(mViewport, &NativeViewport::sceneCoordinatesChanged, this,
           [this]() {
+            // A saved display unit can become interpretable only after async
+            // metadata loading. Reapply preferences without a scene reload or
+            // writing inferred units back to the document.
+            applyWorkspaceGridSettings();
             if (!mWorkspace.scenePath().isEmpty() &&
                 pathsReferToSameLocation(mViewport->scenePath(),
                                           mWorkspace.scenePath())) {
@@ -4359,6 +4500,7 @@ void MainWindow::checkpointCurrentRecovery() {
   mCurrentRecovery->sceneRotation = mWorkspace.sceneRotation();
   mCurrentRecovery->sceneScale = mWorkspace.sceneScale();
   mCurrentRecovery->sceneCollection = mWorkspace.sceneCollectionJson();
+  mCurrentRecovery->viewportGrid = mWorkspace.viewportGridSettings();
   QString error;
   if (!mRecoveryStore->checkpoint(*mCurrentRecovery, &error)) {
     appendTaskEvent(
@@ -4643,6 +4785,19 @@ bool MainWindow::restoreRecoveryWorkspace(
   if (!workspace.sceneCollection.isEmpty()) {
     mWorkspace.restoreSceneCollection(workspace.sceneCollection);
     updateWorkspaceUi();
+  }
+  if (!workspace.viewportGrid.isUndefined()) {
+    // Invalid presentation metadata must not prevent recovering models,
+    // transforms, datasets or complete training checkpoints.
+    const auto grid = ViewportGridSettings::fromJson(workspace.viewportGrid);
+    if (!grid || !workspace.viewportGrid.isObject()) {
+      appendTaskEvent(QCoreApplication::translate("Workbench", "视口网格设置无效。"));
+    } else {
+      QString gridError;
+      if (!mWorkspace.setViewportGridSettings(workspace.viewportGrid.toObject(),
+                                               &gridError))
+        appendTaskEvent(AppLanguage::diagnosticText(gridError));
+    }
   }
   if (!mRecoveryBlocked) {
     QString trainingRecoveryError;
@@ -7400,6 +7555,7 @@ void MainWindow::updateWorkspaceUi() {
   } else {
     mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
   }
+  applyWorkspaceGridSettings();
   if (mWorkspace.sceneObjects().isEmpty() && mViewport->scenePath().isEmpty() &&
       !mViewport->trainingGpuPreviewActive()) {
     mRendererStatusPhase = RendererStatusPhase::Normal;

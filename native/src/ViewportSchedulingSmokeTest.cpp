@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "WorkspaceDocument.h"
+#include "ViewportStatusControlsSmokeTest.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -77,6 +78,29 @@ bool hasZeroIntervalTimer(const NativeViewport &viewport) {
   return false;
 }
 
+bool sharedPresentationSemantics(MainWindow &window, const NativeViewport &viewport) {
+  QLabel *renderer = nullptr;
+  for (auto *label : window.findChildren<QLabel *>())
+    if (label->property("gswStatusRole").toString() == QStringLiteral("renderer")) renderer = label;
+  auto *hud = viewport.findChild<QLabel *>(QStringLiteral("viewportStatusLabel"));
+  const QString canonical = viewport.viewportStatusText();
+  const QString performance = viewport.viewportPerformanceText();
+  // The HUD may intentionally elide its visible caption on narrow windows.
+  // Its actual accessible label retains the same full presentation as the
+  // main status; neither surface computes a separate stale FPS string.
+  const bool good = renderer && renderer->isVisible() && hud && hud->isVisible() &&
+      !hud->text().isEmpty() && !canonical.isEmpty() && !performance.isEmpty() &&
+      renderer->text() == canonical && canonical.contains(performance) &&
+      hud->accessibleName() == canonical;
+  if (!good)
+    qCritical() << "VIEWPORT_PERFORMANCE_STATE FAIL: main status and actual HUD share presentation semantics"
+                << "main" << (renderer ? renderer->text() : QString())
+                << "HUD visible/accessibility" << (hud ? hud->text() : QString())
+                << (hud ? hud->accessibleName() : QString())
+                << "canonical/performance" << canonical << performance;
+  return good;
+}
+
 bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport) {
   const auto check = [](bool ok, const char *message) {
     if (!ok) qCritical() << "VIEWPORT_PERFORMANCE_STATE FAIL:" << message;
@@ -118,6 +142,7 @@ bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
       std::isfinite(lastFps) && lastFps > 0.0 && std::isfinite(lastMilliseconds) && lastMilliseconds > 0.0 &&
       activeFps.hasMatch() && activeFps.captured(1).toDouble() > 0.0,
       "real pan presents new viewport frames and updates the visible measured FPS")) return false;
+  if (!sharedPresentationSemantics(window, viewport)) return false;
   const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
       QStringLiteral("viewport-performance-state-") + qApp->property("gswUiTheme").toString());
   if (!check(QDir().mkpath(evidence) && window.grab().save(QDir(evidence).filePath("after-real-pan.png")),
@@ -144,6 +169,7 @@ bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
   window.grab().save(QDir(evidence).filePath("after-input-stops.png"));
   if (!check(remainsIdle,
       "idle state remains visible without a counter-only redraw loop or camera movement")) return false;
+  if (!sharedPresentationSemantics(window, viewport)) return false;
   return true;
 }
 }
@@ -159,12 +185,27 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
   if (!check(viewport && document && temporary.isValid(), "owned viewport and temporary workspace")) return false;
   quint64 timerCallbacks = 0;
   quint64 presentedFrames = 0;
+  quint64 freshPresentations = 0;
+  quint64 lastPresentedRenderSerial = viewport->renderedFrameSerial();
+  double latestFps = 0.0, latestMilliseconds = 0.0;
   QList<QMetaObject::Connection> timerConnections;
   for (auto *timer : viewport->findChildren<QTimer *>())
     if (timer->interval() == 0)
       timerConnections.append(QObject::connect(timer, &QTimer::timeout, viewport, [&] { ++timerCallbacks; }));
   const auto framesConnection = QObject::connect(viewport, &NativeViewport::frameMetricsChanged,
-      viewport, [&](double, double) { ++presentedFrames; });
+      viewport, [&](double fps, double milliseconds) {
+        ++presentedFrames;
+        latestFps = fps;
+        latestMilliseconds = milliseconds;
+      });
+  const auto presentationConnection = QObject::connect(viewport, &QOpenGLWidget::frameSwapped,
+      viewport, [&] {
+        const quint64 serial = viewport->renderedFrameSerial();
+        if (serial != lastPresentedRenderSerial) {
+          lastPresentedRenderSerial = serial;
+          ++freshPresentations;
+        }
+      });
   const bool originallyMaximized = window.isMaximized();
   QString error;
   bool passed = true;
@@ -192,14 +233,58 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
     if (kind == 0 && !idlePerformanceLabelRegression(window, *viewport)) { passed = false; break; }
     const float beforeZoom = viewport->viewDistance();
     const auto beforeFrames = presentedFrames;
+    const auto beforePresentations = freshPresentations;
+    const auto beforeRenderSerial = viewport->renderedFrameSerial();
     const QPointF center = viewport->rect().center();
     QWheelEvent wheel(center, viewport->mapToGlobal(center.toPoint()), {}, {0, 120},
                       Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
     QApplication::sendEvent(viewport, &wheel);
+    QElapsedTimer inputStopped;
+    inputStopped.start();
     if (!check(viewport->viewDistance() != beforeZoom && waitUntil([&] { return presentedFrames > beforeFrames; }),
                "camera input still schedules a presented frame")) { passed = false; break; }
     dispatchFor(120);
     if (!check(!hasZeroIntervalTimer(*viewport), "camera interaction settles back to on-demand redraw")) { passed = false; break; }
+    if (!check(freshPresentations > beforePresentations && viewport->renderedFrameSerial() > beforeRenderSerial &&
+        presentedFrames > beforeFrames && std::isfinite(latestFps) && latestFps >= 0.0 &&
+        std::isfinite(latestMilliseconds) && latestMilliseconds >= 0.0,
+        "discrete wheel input completes a newly rendered/presented image and emits a fresh metric, not just FBO composition")) {
+      passed = false; break;
+    }
+    if (!sharedPresentationSemantics(window, *viewport)) { passed = false; break; }
+    const auto targetAfterWheel = viewport->viewTarget();
+    const auto distanceAfterWheel = viewport->viewDistance();
+    const auto orbitAfterWheel = viewport->viewOrbitAngles();
+    const bool projectionAfterWheel = viewport->orthographicProjection();
+    const QString idle = QCoreApplication::translate("Workbench", "空闲");
+    // Observe natural event processing only: no update(), framebuffer grab or
+    // screenshot is allowed to manufacture work while deciding idle/loop state.
+    if (!check(waitUntil([&] { return viewport->viewportPerformanceText() == idle; }, 2500),
+        "discrete navigation returns to the shared idle presentation after input stops")) { passed = false; break; }
+    if (inputStopped.elapsed() < 350) dispatchFor(350 - static_cast<int>(inputStopped.elapsed()));
+    const auto idlePresentations = freshPresentations;
+    const auto idleMetrics = presentedFrames;
+    const auto idleRenderSerial = viewport->renderedFrameSerial();
+    dispatchFor(300);
+    if (!check(viewport->viewportPerformanceText() == idle &&
+        viewport->viewTarget() == targetAfterWheel && viewport->viewDistance() == distanceAfterWheel &&
+        viewport->viewOrbitAngles() == orbitAfterWheel && viewport->orthographicProjection() == projectionAfterWheel &&
+        freshPresentations <= idlePresentations + 1 && presentedFrames <= idleMetrics + 1 &&
+        viewport->renderedFrameSerial() <= idleRenderSerial + 1 && !hasZeroIntervalTimer(*viewport),
+        "after at least 350 ms without input, idle stays stable with no counter-only GL/metric loop or camera change")) {
+      passed = false; break;
+    }
+    if (!sharedPresentationSemantics(window, *viewport)) { passed = false; break; }
+    qInfo() << "VIEWPORT_PERFORMANCE_STATE discrete wheel" << kind
+            << "fresh images/metric updates" << freshPresentations - beforePresentations << presentedFrames - beforeFrames
+            << "post-idle GL/images/metrics" << viewport->renderedFrameSerial() - idleRenderSerial
+            << freshPresentations - idlePresentations << presentedFrames - idleMetrics
+            << "status" << viewport->viewportStatusText();
+    const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+        QStringLiteral("viewport-performance-state-") + qApp->property("gswUiTheme").toString());
+    if (!check(QDir().mkpath(evidence) && window.grab().save(QDir(evidence).filePath(
+        QStringLiteral("after-wheel-idle-%1.png").arg(kind))),
+        "retain real discrete-input idle evidence only after the verdict")) { passed = false; break; }
     window.showMinimized();
     if (!check(waitUntil([&] { return window.isMinimized(); }), "test-owned window minimizes")) { passed = false; break; }
     dispatchFor(60);
@@ -225,9 +310,11 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
     if (originallyMaximized) window.showMaximized(); else window.showNormal();
   }
   QObject::disconnect(framesConnection);
+  QObject::disconnect(presentationConnection);
   // The callbacks must not retain stack references after returning to the app.
   for (const auto &connection : timerConnections) QObject::disconnect(connection);
   document->createUntitled(temporary.path(), "Empty", &error);
+  if (passed) passed = runViewportStatusControlsSmokeTest(window);
   if (passed) qInfo() << "VIEWPORT_SCHEDULING PASS: idle, input wake-up, minimization and restore-upload across point/mesh/3DGS/2DGS";
   return passed;
 }

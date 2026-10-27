@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -18,6 +19,8 @@ private slots:
   void persistsPerObjectVisibilityWithoutChangingModelData();
   void oldSceneCollectionsDefaultToVisible();
   void preservesOptionalViewportGridWithoutChangingSceneTransforms();
+  void rejectsInvalidViewportGridBeforeReplacingTheCurrentProject();
+  void updatesViewportGridWithoutReloadingSceneState();
 };
 
 void WorkspaceSceneFormatTests::acceptsBigEndianPlySceneMetadata() {
@@ -270,6 +273,192 @@ void WorkspaceSceneFormatTests::preservesOptionalViewportGridWithoutChangingScen
   QCOMPARE(reopened.sceneTranslation(), translation);
   QCOMPARE(reopened.sceneRotation(), rotation);
   QCOMPARE(reopened.sceneScale(), scale);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  QCOMPARE(file.readAll(), source);
+}
+
+void WorkspaceSceneFormatTests::rejectsInvalidViewportGridBeforeReplacingTheCurrentProject() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath("working");
+  const QString rejectedRoot = QDir(temporary.path()).filePath("different-project");
+  QVERIFY(QDir().mkpath(working));
+  QVERIFY(QDir().mkpath(rejectedRoot));
+  const QString path = QDir(temporary.path()).filePath("atomic-source.ply");
+  const QByteArray source("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0.5 1.25 -2\n");
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write(source), source.size());
+  file.close();
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(working, "Keep current project", &error), qPrintable(error));
+  QVERIFY2(document.addScenePath(path, &error), qPrintable(error));
+  QVERIFY2(document.setSceneTransform({0.5F, -0.75F, 1.25F},
+      QQuaternion::fromEulerAngles(4.0F, 9.0F, 12.0F), {1.2F, 0.8F, 1.1F}, &error), qPrintable(error));
+  const QJsonObject settings{{"spacingMode", "fixed"}, {"majorSpacing", 0.75}};
+  QVERIFY2(document.setViewportGridSettings(settings, &error), qPrintable(error));
+  const QString manifest = QDir(temporary.path()).filePath("current.gsw.json");
+  QVERIFY2(document.saveManifest(manifest, &error), qPrintable(error));
+  QFile currentManifest(manifest);
+  QVERIFY(currentManifest.open(QIODevice::ReadOnly));
+  const QByteArray manifestBytes = currentManifest.readAll();
+  currentManifest.close();
+  const auto baseline = document.sceneCollectionJson();
+  const auto rootPath = document.rootPath();
+  const auto filePath = document.projectFilePath();
+  const auto name = document.projectName();
+  const auto camera = document.cameraDatasetInfo();
+  const auto artifacts = document.workflowArtifacts();
+  const auto pendingMigration = document.hasPendingDataMigration();
+  QVERIFY(!document.isModified());
+  QSignalSpy changed(&document, &gsw::WorkspaceDocument::changed);
+  QSignalSpy modified(&document, &gsw::WorkspaceDocument::modifiedChanged);
+  QSignalSpy gridChanged(&document, &gsw::WorkspaceDocument::viewportGridSettingsChanged);
+  QList<QJsonValue> invalid{QJsonValue(QJsonValue::Null), QJsonValue(true), QJsonValue(1),
+      QJsonValue(QStringLiteral("fixed")), QJsonValue(QJsonArray{})};
+  const auto invalidField = [&](const QString &key, const QJsonValue &value) {
+    auto object = settings;
+    object.insert(key, value);
+    invalid.append(object);
+  };
+  invalidField("version", 2);
+  invalidField("version", "1");
+  invalidField("spacingMode", "auto");
+  invalidField("displayUnit", "feet");
+  invalidField("majorSpacing", 0);
+  invalidField("majorSpacing", -1);
+  invalidField("majorSpacing", "1.25");
+  invalidField("subdivisions", 3);
+  invalidField("subdivisions", 5.5);
+  invalidField("density", 0.24);
+  invalidField("density", 4.01);
+  invalidField("gridVisible", 1);
+  invalidField("axesVisible", "true");
+  invalidField("physicalScale", 0.05);
+  int index = 0;
+  for (const auto &value : invalid) {
+    auto rejected = QJsonDocument::fromJson(manifestBytes).object();
+    rejected.insert("projectName", "Must not replace the current project");
+    rejected.insert("rootPath", rejectedRoot);
+    rejected.insert("viewportGrid", value);
+    const QString rejectedPath = QDir(temporary.path()).filePath(QString("invalid-%1.gsw.json").arg(index++));
+    QFile rejectedFile(rejectedPath);
+    QVERIFY(rejectedFile.open(QIODevice::WriteOnly));
+    const QByteArray bytes = QJsonDocument(rejected).toJson(QJsonDocument::Indented);
+    QCOMPARE(rejectedFile.write(bytes), bytes.size());
+    rejectedFile.close();
+    error.clear();
+    QVERIFY(!document.load(rejectedPath, &error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(document.viewportGridSettings(), settings);
+    QCOMPARE(document.sceneCollectionJson(), baseline);
+    QCOMPARE(document.rootPath(), rootPath);
+    QCOMPARE(document.projectFilePath(), filePath);
+    QCOMPARE(document.projectName(), name);
+    QCOMPARE(document.cameraDatasetInfo(), camera);
+    QCOMPARE(document.workflowArtifacts(), artifacts);
+    QCOMPARE(document.hasPendingDataMigration(), pendingMigration);
+    QVERIFY(!document.isModified());
+    QCOMPARE(changed.count(), 0);
+    QCOMPARE(modified.count(), 0);
+    QCOMPARE(gridChanged.count(), 0);
+  }
+  QVERIFY(currentManifest.open(QIODevice::ReadOnly));
+  QCOMPARE(currentManifest.readAll(), manifestBytes);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  QCOMPARE(file.readAll(), source);
+}
+
+void WorkspaceSceneFormatTests::updatesViewportGridWithoutReloadingSceneState() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath("working");
+  QVERIFY(QDir().mkpath(working));
+  const QString path = QDir(temporary.path()).filePath("presentation-source.ply");
+  const QByteArray source("ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1.5 -0.75 2.25\n");
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write(source), source.size());
+  file.close();
+  gsw::WorkspaceDocument document;
+  QString error;
+  QVERIFY2(document.createUntitled(working, "Display only", &error), qPrintable(error));
+  QVERIFY2(document.addScenePath(path, &error), qPrintable(error));
+  QVERIFY2(document.setSceneTranslation({0.5F, 0.75F, -1.0F}, &error), qPrintable(error));
+  const QString manifest = QDir(temporary.path()).filePath("display.gsw.json");
+  QVERIFY2(document.saveManifest(manifest, &error), qPrintable(error));
+  const auto collection = document.sceneCollectionJson();
+  const auto camera = document.cameraDatasetInfo();
+  QVERIFY(document.viewportGridSettings().isEmpty());
+  QVERIFY(!QJsonDocument::fromJson(document.recoveryManifestJson()).object().contains("viewportGrid"));
+  QSignalSpy changed(&document, &gsw::WorkspaceDocument::changed);
+  QSignalSpy modified(&document, &gsw::WorkspaceDocument::modifiedChanged);
+  QSignalSpy gridChanged(&document, &gsw::WorkspaceDocument::viewportGridSettingsChanged);
+  // Valid partial objects are stored exactly, not silently canonicalised to
+  // a full defaults object or mixed into the scene's physical transform.
+  const QJsonObject settings{{"spacingMode", "fixed"}, {"majorSpacing", 2.5}, {"gridVisible", false}};
+  QVERIFY2(document.setViewportGridSettings(settings, &error), qPrintable(error));
+  QCOMPARE(document.viewportGridSettings(), settings);
+  QCOMPARE(QJsonDocument::fromJson(document.recoveryManifestJson()).object().value("viewportGrid").toObject(), settings);
+  QVERIFY(document.isModified());
+  QCOMPARE(changed.count(), 0);
+  QCOMPARE(modified.count(), 1);
+  QCOMPARE(gridChanged.count(), 1);
+  QCOMPARE(document.sceneCollectionJson(), collection);
+  QCOMPARE(document.cameraDatasetInfo(), camera);
+  QVERIFY(document.setViewportGridSettings(settings, &error));
+  QCOMPARE(changed.count(), 0);
+  QCOMPARE(modified.count(), 1);
+  QCOMPARE(gridChanged.count(), 1);
+  QVERIFY(!document.setViewportGridSettings({{"majorSpacing", 0}}, &error));
+  QVERIFY(!error.isEmpty());
+  QCOMPARE(document.viewportGridSettings(), settings);
+  QCOMPARE(changed.count(), 0);
+  QCOMPARE(modified.count(), 1);
+  QCOMPARE(gridChanged.count(), 1);
+  QVERIFY2(document.save({}, &error), qPrintable(error));
+  QFile manifestFile(manifest);
+  QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+  const auto saved = QJsonDocument::fromJson(manifestFile.readAll()).object();
+  manifestFile.close();
+  QCOMPARE(saved.value("viewportGrid").toObject(), settings);
+  QCOMPARE(document.sceneCollectionJson(), collection);
+  QCOMPARE(document.cameraDatasetInfo(), camera);
+  QVERIFY(document.setViewportGridSettings({}, &error));
+  const auto explicitEmpty = QJsonDocument::fromJson(document.recoveryManifestJson()).object();
+  QVERIFY(explicitEmpty.contains("viewportGrid"));
+  QVERIFY(explicitEmpty.value("viewportGrid").isObject());
+  QVERIFY(explicitEmpty.value("viewportGrid").toObject().isEmpty());
+  QVERIFY2(document.saveManifest({}, &error), qPrintable(error));
+  gsw::WorkspaceDocument emptyRestored;
+  QVERIFY2(emptyRestored.load(manifest, &error), qPrintable(error));
+  QVERIFY(QJsonDocument::fromJson(emptyRestored.recoveryManifestJson()).object().contains("viewportGrid"));
+  auto legacy = saved;
+  legacy.remove("viewportGrid");
+  const QString legacyPath = QDir(temporary.path()).filePath("legacy-grid.gsw.json");
+  QFile legacyFile(legacyPath);
+  QVERIFY(legacyFile.open(QIODevice::WriteOnly));
+  const QByteArray legacyBytes = QJsonDocument(legacy).toJson(QJsonDocument::Indented);
+  QCOMPARE(legacyFile.write(legacyBytes), legacyBytes.size());
+  legacyFile.close();
+  QVERIFY(document.setViewportGridSettings(settings, &error));
+  QVERIFY2(document.load(legacyPath, &error), qPrintable(error));
+  QVERIFY(document.viewportGridSettings().isEmpty());
+  QVERIFY(!QJsonDocument::fromJson(document.recoveryManifestJson()).object().contains("viewportGrid"));
+  QCOMPARE(document.sceneCollectionJson(), collection);
+  QVERIFY2(document.saveManifest({}, &error), qPrintable(error));
+  QVERIFY(legacyFile.open(QIODevice::ReadOnly));
+  QVERIFY(!QJsonDocument::fromJson(legacyFile.readAll()).object().contains("viewportGrid"));
+  legacyFile.close();
+  QVERIFY(document.setViewportGridSettings(settings, &error));
+  QVERIFY(document.create(working, &error));
+  QVERIFY(document.viewportGridSettings().isEmpty());
+  QVERIFY(!QJsonDocument::fromJson(document.recoveryManifestJson()).object().contains("viewportGrid"));
+  QVERIFY(document.setViewportGridSettings(settings, &error));
+  QVERIFY(document.createUntitled(working, "New presentation project", &error));
+  QVERIFY(document.viewportGridSettings().isEmpty());
+  QVERIFY(!QJsonDocument::fromJson(document.recoveryManifestJson()).object().contains("viewportGrid"));
   QVERIFY(file.open(QIODevice::ReadOnly));
   QCOMPARE(file.readAll(), source);
 }

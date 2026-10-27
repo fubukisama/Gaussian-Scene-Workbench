@@ -98,8 +98,8 @@ referenceGridDrawSpans(const ReferenceGridScale &scale);
 // that footprint to the physical pixels expected by OpenGL.
 [[nodiscard]] float pointPreviewDiameterPixels(float devicePixelRatio);
 
-// Display convention: one scene unit is treated as one metre until a project
-// supplies an explicit scale calibration.
+// Formats an explicitly metre-valued length only. Unknown scene coordinates
+// are arbitrary units and must not be passed here as implicit metres.
 [[nodiscard]] QString formatMetricDistance(float metres);
 
 } // namespace gsw

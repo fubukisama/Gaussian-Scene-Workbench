@@ -36,6 +36,9 @@ uniform float gridSteps[8];
 uniform vec2 gridPhase[8];
 uniform float gridDistance;
 uniform float gridLineSize;
+uniform int fixedGrid = 0;
+uniform float gridDensity = 1.0;
+uniform int gridSubdivisions = 10;
 uniform int isOrthographic;
 uniform int showGrid;
 uniform int showAxes;
@@ -68,6 +71,14 @@ float get_grid(vec2 co, vec2 fwidthCos, int level) {
 
 vec2 get_axes(vec2 co, vec2 fwidthCos) {
   return vec2(1.0) - LINE_STEP(abs(co) / fwidthCos - (0.1 + gridLineSize));
+}
+
+float fixed_spacing_visibility(float spacing, vec2 footprint) {
+  // Fixed spacing never silently chooses a coarser level. Fade both families
+  // if even the denser projected direction drops below two to three pixels,
+  // rather than turning an over-dense set of lines into an opaque sheet.
+  float pixelSpacing = spacing / max(footprint.x, footprint.y);
+  return smoothstep(2.0, 3.0, pixelSpacing);
 }
 
 void main() {
@@ -111,26 +122,48 @@ void main() {
 
   vec4 color = vec4(gridColor.rgb, 0.0);
   if (showGrid != 0) {
-    // Upstream notes the max of the two projected derivatives is more accurate
-    // than using x alone. This also treats rolled orthographic views uniformly.
-    float resolution = max(abs(dot(dx, viewToPlane[0])),
-                           abs(dot(dy, viewToPlane[1]))) * 4.0;
-    int level = 7;
-    for (int i = 6; i >= 0; --i) {
-      level = resolution < gridSteps[i] ? i : level;
+    if (fixedGrid != 0) {
+      // The host supplies exact minor/major spacings and their independent
+      // double-reduced phases. N == 1 is explicitly a major-only grid.
+      float majorCoverage = get_grid(relativeHit.xy, fwidthPosition, 1) *
+          fixed_spacing_visibility(gridSteps[1], fwidthPosition);
+      float minorCoverage = 0.0;
+      if (gridSubdivisions > 1 && gridSteps[0] < gridSteps[1]) {
+        minorCoverage = get_grid(relativeHit.xy, fwidthPosition, 0) *
+            fixed_spacing_visibility(gridSteps[0], fwidthPosition);
+      }
+      float minorAlpha = gridColor.a * minorCoverage;
+      float majorAlpha = gridEmphasisColor.a * majorCoverage;
+      color.a = max(minorAlpha, majorAlpha);
+      // An intersecting major line takes its own colour without counting the
+      // same coverage twice or introducing a background-colour wash.
+      float majorWeight = majorAlpha / max(color.a, 1e-12);
+      color.rgb = mix(gridColor.rgb, gridEmphasisColor.rgb, majorWeight);
+    } else {
+      // Upstream notes the max of the two projected derivatives is more accurate
+      // than using x alone. This also treats rolled orthographic views uniformly.
+      // Preserve legacy density for callers that have not set the new uniform;
+      // the public caller must nevertheless supply a finite positive value.
+      float density = gridDensity > 0.0 ? gridDensity : 1.0;
+      float resolution = max(abs(dot(dx, viewToPlane[0])),
+                             abs(dot(dy, viewToPlane[1]))) * 4.0 / density;
+      int level = 7;
+      for (int i = 6; i >= 0; --i) {
+        level = resolution < gridSteps[i] ? i : level;
+      }
+      int nextLevel = min(level + 1, 7);
+      int emphasisLevel = min(level + 2, 7);
+      float scale0 = level > 0 ? gridSteps[level - 1] : 0.0;
+      float blend = 1.0 - linearstep(scale0, gridSteps[level], resolution);
+      blend = blend * blend * blend;
+      float gridA = get_grid(relativeHit.xy, fwidthPosition, level);
+      float gridB = get_grid(relativeHit.xy, fwidthPosition, nextLevel);
+      float gridC = get_grid(relativeHit.xy, fwidthPosition, emphasisLevel);
+      color = gridColor;
+      color.a *= gridA * blend;
+      color = mix(color, mix(gridColor, gridEmphasisColor, blend), gridB);
+      color = mix(color, gridEmphasisColor, gridC);
     }
-    int nextLevel = min(level + 1, 7);
-    int emphasisLevel = min(level + 2, 7);
-    float scale0 = level > 0 ? gridSteps[level - 1] : 0.0;
-    float blend = 1.0 - linearstep(scale0, gridSteps[level], resolution);
-    blend = blend * blend * blend;
-    float gridA = get_grid(relativeHit.xy, fwidthPosition, level);
-    float gridB = get_grid(relativeHit.xy, fwidthPosition, nextLevel);
-    float gridC = get_grid(relativeHit.xy, fwidthPosition, emphasisLevel);
-    color = gridColor;
-    color.a *= gridA * blend;
-    color = mix(color, mix(gridColor, gridEmphasisColor, blend), gridB);
-    color = mix(color, gridEmphasisColor, gridC);
   }
   if (showAxes != 0) {
     // Absolute coordinates are used only for the two nonperiodic origin axes.

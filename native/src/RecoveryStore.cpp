@@ -156,6 +156,7 @@ readRecoveryWorkspace(const QString &workspaceRoot, QString *errorMessage) {
   workspace.scenePath =
       optionalAbsolutePath(root.value(QStringLiteral("scenePath")).toString());
   workspace.sceneCollection = root.value(QStringLiteral("sceneCollection")).toObject();
+  workspace.viewportGrid = root.value(QStringLiteral("viewportGrid"));
   workspace.sceneTranslation =
       translationFromJson(root.value(QStringLiteral("sceneTranslation")));
   workspace.sceneRotation =
@@ -285,6 +286,9 @@ bool RecoveryStore::checkpoint(const RecoveryWorkspace &workspace,
               rotationJson(workspace.sceneRotation));
   root.insert(QStringLiteral("sceneScale"), scaleJson(workspace.sceneScale));
   root.insert(QStringLiteral("sceneCollection"), workspace.sceneCollection);
+  if (!workspace.viewportGrid.isUndefined()) {
+    root.insert(QStringLiteral("viewportGrid"), workspace.viewportGrid);
+  }
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
 

@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include "WorkspaceDocument.h"
+#include "ViewportGridSettings.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -526,6 +527,28 @@ QString WorkspaceDocument::cameraDatasetPath() const { return mCameraDatasetInfo
 QString WorkspaceDocument::cameraDatasetIdentity() const { return mCameraDatasetInfo.value(QStringLiteral("dataIdentity")).toString(); }
 QString WorkspaceDocument::cameraPosePolicy() const { return mCameraDatasetInfo.value(QStringLiteral("posePolicy")).toString(QStringLiteral("solve")); }
 QJsonObject WorkspaceDocument::cameraDatasetInfo() const { return mCameraDatasetInfo; }
+QJsonObject WorkspaceDocument::viewportGridSettings() const { return mViewportGridSettings; }
+
+bool WorkspaceDocument::setViewportGridSettings(const QJsonObject &settings,
+                                                QString *errorMessage) {
+  if (!hasProject()) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "No project is open."));
+    return false;
+  }
+  if (!ViewportGridSettings::fromJson(settings).has_value()) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "视口网格设置无效。"));
+    return false;
+  }
+  if (mHasViewportGridSettings && mViewportGridSettings == settings) return true;
+  mViewportGridSettings = settings;
+  mHasViewportGridSettings = true;
+  setModified(true);
+  // Deliberately not changed(): presentation edits must not reload models,
+  // workers, cameras, coordinate contracts or the scene collection.
+  emit viewportGridSettingsChanged();
+  return true;
+}
+
 QJsonArray WorkspaceDocument::workflowArtifacts() const {
   QJsonArray result;
   for (const QJsonValue &value : mWorkflowArtifacts) {
@@ -608,6 +631,8 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mCameraDatasetInfo = {};
+  mViewportGridSettings = {};
+  mHasViewportGridSettings = false;
   mWorkflowArtifacts = {};
   mScenePath.clear();
   mSceneObjects.clear();
@@ -619,6 +644,7 @@ bool WorkspaceDocument::create(const QString &rootPath, QString *errorMessage) {
   mImageCount = 0;
   mSceneMetadata = {};
   setModified(true);
+  emit viewportGridSettingsChanged();
   emit changed();
   return true;
 }
@@ -640,6 +666,8 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mProjectFilePath.clear();
   mDatasetPath.clear();
   mCameraDatasetInfo = {};
+  mViewportGridSettings = {};
+  mHasViewportGridSettings = false;
   mWorkflowArtifacts = {};
   mScenePath.clear();
   mSceneObjects.clear();
@@ -651,6 +679,7 @@ bool WorkspaceDocument::createUntitled(const QString &workingRoot,
   mImageCount = 0;
   mSceneMetadata = {};
   setModified(false);
+  emit viewportGridSettingsChanged();
   emit changed();
   return true;
 }
@@ -681,6 +710,16 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
     return false;
   }
 
+  // Keep a malformed present optional field distinct from a missing legacy
+  // field, and validate before replacing any part of the current project.
+  const QJsonValue loadedGridValue = root.value(QStringLiteral("viewportGrid"));
+  if (!ViewportGridSettings::fromJson(loadedGridValue).has_value()) {
+    assignError(errorMessage, QCoreApplication::translate("Workbench", "视口网格设置无效。"));
+    return false;
+  }
+  const bool hasLoadedGridSettings = !loadedGridValue.isUndefined();
+  const QJsonObject loadedGridSettings = hasLoadedGridSettings ? loadedGridValue.toObject() : QJsonObject{};
+
   const QString loadedProjectFilePath = normalizedAbsolutePath(filePath);
   const QString storedRoot = root.value(QStringLiteral("rootPath")).toString();
   const QString projectDirectory = QFileInfo(loadedProjectFilePath).absolutePath();
@@ -699,6 +738,8 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   mProjectFilePath = loadedProjectFilePath;
   mRootPath = loadedRootPath;
   mWorkflowArtifacts = loadedWorkflowArtifacts;
+  mViewportGridSettings = loadedGridSettings;
+  mHasViewportGridSettings = hasLoadedGridSettings;
   mProjectName = root.value(QStringLiteral("projectName"))
                      .toString(QDir(mRootPath).dirName());
   mDatasetPath =
@@ -727,6 +768,7 @@ bool WorkspaceDocument::load(const QString &filePath, QString *errorMessage) {
   mSceneMetadata = inspectPly(mScenePath);
   restoreSceneCollection(root.value(QStringLiteral("sceneCollection")).toObject());
   setModified(false);
+  emit viewportGridSettingsChanged();
   emit changed();
   return true;
 }
@@ -826,6 +868,7 @@ bool WorkspaceDocument::save(const QString &filePath, QString *errorMessage) {
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
   root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(savedRootPath));
+  if (mHasViewportGridSettings) root.insert(QStringLiteral("viewportGrid"), mViewportGridSettings);
   root.insert(QStringLiteral("workflowArtifacts"), mWorkflowArtifacts);
   root.insert(QStringLiteral("updatedUtc"),
               QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
@@ -941,6 +984,7 @@ bool WorkspaceDocument::saveManifest(const QString &filePath,
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
   root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(mRootPath));
+  if (mHasViewportGridSettings) root.insert(QStringLiteral("viewportGrid"), mViewportGridSettings);
   if (!pendingDataRoot.isEmpty()) {
     QString relativePendingRoot;
     root.insert(QStringLiteral("pendingDataRoot"),
@@ -1003,6 +1047,7 @@ QByteArray WorkspaceDocument::recoveryManifestJson() const {
               sceneTransformJson(mSceneTranslation, mSceneRotation,
                                  mSceneScale));
   root.insert(QStringLiteral("sceneCollection"), sceneCollectionJson(mRootPath));
+  if (mHasViewportGridSettings) root.insert(QStringLiteral("viewportGrid"), mViewportGridSettings);
   root.insert(QStringLiteral("workflowArtifacts"), mWorkflowArtifacts);
   if (!mPendingDataRoot.isEmpty()) {
     root.insert(QStringLiteral("pendingDataRoot"), mPendingDataRoot);

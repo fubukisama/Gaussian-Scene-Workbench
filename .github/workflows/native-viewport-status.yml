@@ -95,7 +95,9 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status configure failed.' }
           $targets = @('gsw_workspace_scene_format_tests')
-          if ($env:GSW_STATUS_SCOPE -eq 'all') { $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests') }
+          if ($env:GSW_STATUS_SCOPE -eq 'all') {
+            $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests', 'gsw_recovery_store_tests', 'gsw_viewport_camera_tests')
+          }
           elseif ($env:GSW_STATUS_SCOPE -ne 'project-only') { throw 'Unknown contract group.' }
           cmake --build native/build-viewport-status --config Release --parallel --target $targets 2>&1 |
             Tee-Object -FilePath native/viewport-status-artifact/build.log
@@ -126,7 +128,7 @@ jobs:
           ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
             --output-log native/viewport-status-artifact/status-contracts.log `
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/status-contracts.xml') `
-            -R '^(native_viewport_scheduling_(light|dark)|frame_rate_counter)$'
+            -R '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status contracts failed; existing assertions and deadlines remain unchanged.' }
 
       - name: Retain exact source status logs and screenshots

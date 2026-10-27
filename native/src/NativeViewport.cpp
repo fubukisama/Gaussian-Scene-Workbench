@@ -32,6 +32,7 @@
 #include <QHash>
 #include <QHideEvent>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QJsonArray>
 #include <QLineF>
 #include <QMouseEvent>
@@ -46,6 +47,7 @@
 #include <QShowEvent>
 #include <QTimer>
 #include <QToolTip>
+#include <QToolButton>
 #include <QVector2D>
 #include <QVector4D>
 #include <QWheelEvent>
@@ -518,6 +520,33 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
           [this] {
             if (isVisible() && !window()->isMinimized()) update();
           });
+  mPresentationIdleTimer = new QTimer(this);
+  mPresentationIdleTimer->setObjectName(QStringLiteral("viewportPresentationIdleTimer"));
+  mPresentationIdleTimer->setSingleShot(true);
+  mPresentationIdleTimer->setInterval(350);
+  connect(mPresentationIdleTimer, &QTimer::timeout, this, [this] {
+    if (frameTimingBurstActive()) {
+      mPresentationWaiting = true;
+      // Recheck a stalled drag/worker without requesting a GL frame. A button
+      // release or completed worker may not itself produce another image.
+      mPresentationIdleTimer->start();
+    } else {
+      pausePresentationMetrics();
+      return;
+    }
+    refreshViewportPresentation();
+    emit viewportPresentationChanged();
+  });
+  mViewportStatusLabel = new QLabel(this);
+  mViewportStatusLabel->setObjectName(QStringLiteral("viewportStatusLabel"));
+  mViewportStatusLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+  mViewportDetailsButton = new QToolButton(this);
+  mViewportDetailsButton->setObjectName(QStringLiteral("viewportDetailsButton"));
+  mViewportDetailsButton->setAutoRaise(true);
+  AppLanguage::bind(mViewportDetailsButton, "toolTip", AppLanguage::source("视口详情"));
+  AppLanguage::bind(mViewportDetailsButton, "accessibleName", AppLanguage::source("视口详情"));
+  connect(mViewportDetailsButton, &QToolButton::clicked, this, &NativeViewport::viewportDetailsRequested);
+  AppLanguage::onChanged(this, [this] { refreshViewportPresentation(); });
   connect(this, &QOpenGLWidget::frameSwapped, this, [this]() {
     // Qt emits frameSwapped for top-level composition, including unrelated
     // status-label repaints that reuse this widget's existing FBO. Count only
@@ -529,17 +558,24 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
         mScene->mRenderedMeshIndexCount <= 0 &&
         mScene->mFullResolutionMeshTriangleCount <= 0 &&
         !mTrainingGpuPreview.attached()) {
+      pausePresentationMetrics();
       return;
     }
     mFrameRateCounter.frameCompleted(FrameRateCounter::Clock::now());
-    if (!frameTimingBurstActive()) mFrameRateCounter.pause();
+    mPresentationIdle = false;
+    mPresentationWaiting = false;
+    ++mFreshPresentationFrames;
+    mPresentationIdleTimer->start();
     emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
                              mFrameRateCounter.averageFrameMilliseconds());
+    refreshViewportPresentation();
+    emit viewportPresentationChanged();
   });
   const QString diagnosticsRoot = qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR");
   if (!diagnosticsRoot.isEmpty())
     mRenderDiagnostics = std::make_unique<RenderFrameDiagnostics>(diagnosticsRoot);
   monitorRefreshWindow();
+  refreshViewportPresentation();
 }
 
 NativeViewport::~NativeViewport() {
@@ -1604,6 +1640,7 @@ void NativeViewport::clearProcessingPreview() {
   mProcessingStage.clear();
   mProcessingIteration = mProcessingTotal = mProcessingProgress = -1;
   mFrameRateCounter = {};
+  pausePresentationMetrics();
   mPresentedFrameSerial = mRenderedFrameSerial;
   updateManagedResourceUsage();
   updateFrameRefreshPolicy();
@@ -3495,6 +3532,7 @@ void NativeViewport::initializeSceneBuffers() {
 void NativeViewport::resizeGL(const int width, const int height) {
   const qreal ratio = devicePixelRatioF();
   glViewport(0, 0, qRound(width * ratio), qRound(height * ratio));
+  refreshViewportPresentation();
 }
 
 void NativeViewport::changeEvent(QEvent *event) {
@@ -3504,6 +3542,7 @@ void NativeViewport::changeEvent(QEvent *event) {
       event->type() == QEvent::StyleChange) {
     // Repaint only: never rebuild scene data or interrupt a worker/navigation.
     update();
+    refreshViewportPresentation();
   }
 }
 
@@ -3522,7 +3561,9 @@ bool NativeViewport::eventFilter(QObject *watched, QEvent *event) {
     if (event->type() == QEvent::Hide || window()->isMinimized()) {
       mFrameRefreshTimer->stop();
       mTrainingGpuPreviewTimer->stop();
-      mFrameRateCounter.pause();
+      pausePresentationMetrics();
+      refreshViewportPresentation();
+      emit viewportPresentationChanged();
     }
     // Observe final visibility after Qt has completed the top-level transition.
     QTimer::singleShot(0, this, [this] {
@@ -3537,13 +3578,16 @@ void NativeViewport::showEvent(QShowEvent *event) {
   QOpenGLWidget::showEvent(event);
   monitorRefreshWindow();
   updateFrameRefreshPolicy();
+  refreshViewportPresentation();
   update();
 }
 
 void NativeViewport::hideEvent(QHideEvent *event) {
   mFrameRefreshTimer->stop();
   mTrainingGpuPreviewTimer->stop();
-  mFrameRateCounter.pause();
+  pausePresentationMetrics();
+  refreshViewportPresentation();
+  emit viewportPresentationChanged();
   QOpenGLWidget::hideEvent(event);
 }
 
@@ -3597,7 +3641,6 @@ void NativeViewport::noteRenderDiagnosticDraw(const char *name, const qint64 cou
 
 void NativeViewport::paintGL() {
   if (!isVisible() || window()->isMinimized()) { updateFrameRefreshPolicy(); return; }
-  if (!frameTimingBurstActive()) mFrameRateCounter.pause();
   if (!mCapturingProcessingReferenceImage) {
     QScopedValueRollback<std::shared_ptr<SceneState>> previewScope(mScene,
         mProcessingScene ? mProcessingScene : mScene);
@@ -4429,6 +4472,228 @@ bool NativeViewport::frameTimingBurstActive() const {
   return hasPendingFrameUploads() || mPressedButtons != Qt::NoButton ||
       mModelDragActive || mSelectionGestureActive || mObservationDragActive || mViewSnapTimer->isActive() ||
       (mProcessingActive && mProcessingPreviewVisible && !mProcessingPreviewPaused);
+}
+
+void NativeViewport::pausePresentationMetrics() {
+  if (mPresentationIdleTimer) mPresentationIdleTimer->stop();
+  mFrameRateCounter.pause();
+  mPresentationIdle = true;
+  mPresentationWaiting = false;
+  mFreshPresentationFrames = 0;
+  refreshViewportPresentation();
+  emit viewportPresentationChanged();
+}
+
+QString NativeViewport::viewportPerformanceText() const {
+  if (mProcessingPreviewVisible && mProcessingPreviewPaused)
+    return QCoreApplication::translate("Workbench", "预览已暂停");
+  if (mPresentationIdle || !isVisible() || (window() && window()->isMinimized()))
+    return QCoreApplication::translate("Workbench", "空闲");
+  if (mPresentationWaiting)
+    return QCoreApplication::translate("Workbench", "等待新画面…");
+  if (mFreshPresentationFrames < 2 || mFrameRateCounter.framesPerSecond() <= 0.0)
+    return QCoreApplication::translate("Workbench", "帧率统计中…");
+  return QStringLiteral("%1 FPS").arg(mFrameRateCounter.framesPerSecond(), 0, 'f', 0);
+}
+
+QString NativeViewport::viewportStatusText() const {
+  if (!mProcessingPreviewVisible && visibleSceneObjectCount() == 0 && sceneObjectCount() > 0)
+    return QCoreApplication::translate("Workbench", "模型已隐藏") + QStringLiteral(" · ") + viewportPerformanceText();
+  if (!visibleModelAvailable() && !mTrainingGpuPreview.attached() && mScene->mScenePath.isEmpty())
+    return QCoreApplication::translate("Workbench", "未载入场景");
+  const QString mode = mProcessingPreviewVisible && hasProcessingPreview()
+      ? QCoreApplication::translate("Workbench", "任务预览")
+      : mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
+          ? QCoreApplication::translate("Workbench", "网格预览")
+          : mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
+              ? QCoreApplication::translate("Workbench", "高斯预览")
+              : QCoreApplication::translate("Workbench", "点预览");
+  return mode + QStringLiteral(" · ") + viewportPerformanceText();
+}
+
+QString NativeViewport::viewportDetailsText() const {
+  QStringList rows{viewportStatusText(), QString()};
+  rows << QCoreApplication::translate("Workbench", "网格模式：%1").arg(
+      mViewportGridSettings.spacingMode == ViewportGridSettings::SpacingMode::Fixed
+          ? QCoreApplication::translate("Workbench", "固定间距")
+          : QCoreApplication::translate("Workbench", "自动（随缩放）"));
+  if (mViewportGridSettings.spacingMode == ViewportGridSettings::SpacingMode::Fixed) {
+    rows << QCoreApplication::translate("Workbench", "主网格间距：%1").arg(formatReferenceLength(mViewportGridSettings.majorSpacing));
+    rows << QCoreApplication::translate("Workbench", "细网格间距：%1")
+        .arg(formatReferenceLength(mViewportGridSettings.majorSpacing / mViewportGridSettings.subdivisions));
+  } else if (const auto steps = displayGridSteps(mViewportGridSettings)) {
+    const double worldPerPixel = (mOrthographic ? 2.0 : 2.0 * mDistance) /
+        std::max(1e-12, static_cast<double>(std::abs(projectionMatrix()(1, 1)))) /
+        std::max(1.0, height() * devicePixelRatioF());
+    const double resolution = worldPerPixel * 4.0 / mViewportGridSettings.density;
+    int level = 7;
+    for (int i = 6; i >= 0; --i) if (resolution < (*steps)[i]) level = i;
+    rows << QCoreApplication::translate("Workbench", "自动主网格间距（中心参考）：%1")
+        .arg(formatViewportDistance((*steps)[std::min(level + 2, 7)]));
+  }
+  if (!displayGridSteps(mViewportGridSettings))
+    rows << QCoreApplication::translate("Workbench", "当前间距超出视口显示范围，请调整网格间距。");
+  rows << QCoreApplication::translate("Workbench", "视点到观察中心的距离：%1").arg(formatViewportDistance(mDistance));
+  rows << QCoreApplication::translate("Workbench", "基准面：%1").arg(referencePlaneDescription());
+  rows << QCoreApplication::translate("Workbench", "场景单位：%1").arg(sceneLengthUnitDescription(sceneReferenceCoordinates()));
+  if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable())
+    rows << QCoreApplication::translate("Workbench", "球谐阶数：%1").arg(effectiveShDegree());
+  if (mFrameRateCounter.sampleCount() > 0) {
+    rows << QString();
+    rows << QCoreApplication::translate("Workbench", "最近测得帧率：%1 FPS")
+        .arg(mFrameRateCounter.framesPerSecond(), 0, 'f', 1);
+    rows << QCoreApplication::translate("Workbench", "平均帧间隔：%1 ms")
+        .arg(mFrameRateCounter.averageFrameMilliseconds(), 0, 'f', 1);
+  }
+  rows << QString() << QCoreApplication::translate("Workbench", "网格和基准面仅用于显示参考，不代表重建精度。")
+       << QCoreApplication::translate("Workbench", "帧率只统计实际绘制并完成显示的视口帧；空闲时间不计入，也不是训练速度。");
+  return rows.join(QLatin1Char('\n'));
+}
+
+double NativeViewport::referenceCoordinateToLocalLength() const {
+  const double unitScale = sourceToSceneUnitScale();
+  const double display = mScene->mSceneCoordinates.valid ? mScene->mSceneCoordinates.displayScale : 1.0;
+  return std::isfinite(unitScale) && unitScale > 0.0 && std::isfinite(display) && display > 0.0
+      ? display / unitScale : 1.0;
+}
+
+std::optional<std::array<float, 8>> NativeViewport::displayGridSteps(const ViewportGridSettings &settings) const {
+  static_assert(blender_grid::StepCount == 8);
+  if (!settings.isValid()) return std::nullopt;
+  const double localPerCoordinate = referenceCoordinateToLocalLength();
+  if (!std::isfinite(localPerCoordinate) || localPerCoordinate <= 0.0) return std::nullopt;
+  const auto asStep = [](double logValue) -> std::optional<float> {
+    const double value = std::pow(10.0, logValue);
+    if (!std::isfinite(value) || value < std::numeric_limits<float>::min() ||
+        value > static_cast<double>(std::numeric_limits<float>::max()) / 8.0) return std::nullopt;
+    const float narrowed = static_cast<float>(value);
+    return std::isnormal(narrowed) && narrowed > 0.0F ? std::optional<float>(narrowed) : std::nullopt;
+  };
+  if (settings.spacingMode == ViewportGridSettings::SpacingMode::Fixed) {
+    const double majorLog = std::log10(settings.majorSpacing) + std::log10(localPerCoordinate);
+    const auto major = asStep(majorLog);
+    const auto minor = asStep(majorLog - std::log10(settings.subdivisions));
+    if (!major || !minor) return std::nullopt;
+    std::array<float, 8> result;
+    // Fixed mode uses only these two levels. Padding repeats the last valid
+    // level, as in Blender's unit-table path; it is not an overflowing hierarchy.
+    result.fill(*major);
+    result[0] = *minor;
+    return result;
+  }
+  const double worldPerPixel = (mOrthographic ? 2.0 : 2.0 * mDistance) /
+      std::max(1e-12, static_cast<double>(std::abs(projectionMatrix()(1, 1)))) /
+      std::max(1.0, height() * devicePixelRatioF());
+  if (!std::isfinite(worldPerPixel) || worldPerPixel <= 0.0) return std::nullopt;
+  double unitLog = std::log10(localPerCoordinate);
+  // A metre is a unit-table base only when a physical scale was declared.
+  // Unknown/arbitrary coordinates use their own u base, never implicit metres.
+  if (const auto metres = sceneMetresPerCoordinate(sceneReferenceCoordinates())) unitLog -= std::log10(*metres);
+  const double level = std::floor(std::log10(worldPerPixel * 4.0 / settings.density) - unitLog) - 2.0;
+  const auto first = asStep(unitLog + level);
+  if (!first) return std::nullopt;
+  const auto steps = blender_grid::subdivisionSteps(*first, 10);
+  if (!steps || std::any_of(steps->begin(), steps->end(), [](float step) {
+        return step > std::numeric_limits<float>::max() / 8.0F;
+      })) return std::nullopt;
+  return steps;
+}
+
+bool NativeViewport::validateViewportGridSettingsForDisplay(
+    const ViewportGridSettings &settings, QString *error) const {
+  if (!settings.isValid()) {
+    if (error) *error = QCoreApplication::translate("Workbench", "视口网格设置无效。");
+    return false;
+  }
+  if (settings.spacingMode == ViewportGridSettings::SpacingMode::Fixed && settings.gridVisible &&
+      mScene->mSceneCoordinates.valid && !displayGridSteps(settings)) {
+    if (error) *error = QCoreApplication::translate("Workbench", "当前间距超出视口显示范围，请调整网格间距。");
+    return false;
+  }
+  return true;
+}
+
+bool NativeViewport::setViewportGridSettings(const ViewportGridSettings &settings, QString *error) {
+  if (!settings.isValid()) {
+    if (error) *error = QCoreApplication::translate("Workbench", "视口网格设置无效。");
+    return false;
+  }
+  // Replay valid project preferences even if the current GPU coordinate range
+  // cannot draw their periodic grid. Never leak the previous project's display
+  // settings into a reopened project; drawInfiniteGrid omits unsafe levels and
+  // details expose the limitation. Explicit UI Apply uses the display preflight.
+  const bool changed = settings.toJson() != mViewportGridSettings.toJson();
+  mViewportGridSettings = settings;
+  refreshViewportPresentation();
+  emit viewportPresentationChanged();
+  if (changed) update();
+  return true;
+}
+
+QString NativeViewport::formatReferenceLength(const double value) const {
+  const auto coordinates = sceneReferenceCoordinates();
+  const auto metres = sceneMetresPerCoordinate(coordinates);
+  QString symbol = QStringLiteral("u");
+  double shown = value;
+  if (mViewportGridSettings.displayUnit == ViewportGridSettings::DisplayUnit::Scene) {
+    if (metres && coordinates.unit != SceneLengthUnit::Unknown) {
+      const double nominal = coordinates.unit == SceneLengthUnit::Millimetres ? 0.001 :
+          coordinates.unit == SceneLengthUnit::Centimetres ? 0.01 : 1.0;
+      if (std::abs(*metres / nominal - 1.0) < 1e-10) symbol = sceneLengthUnitSymbol(coordinates.unit);
+    }
+  } else if (metres) {
+    double target = 1.0;
+    if (mViewportGridSettings.displayUnit == ViewportGridSettings::DisplayUnit::Millimetres) { target = 0.001; symbol = QStringLiteral("mm"); }
+    else if (mViewportGridSettings.displayUnit == ViewportGridSettings::DisplayUnit::Centimetres) { target = 0.01; symbol = QStringLiteral("cm"); }
+    else symbol = QStringLiteral("m");
+    if (value != 0.0) {
+      int a = 0, b = 0, c = 0;
+      const double mantissa = std::frexp(value, &a) * std::frexp(*metres, &b) / std::frexp(target, &c);
+      shown = std::ldexp(mantissa, a + b - c);
+      if (!std::isfinite(shown) || shown == 0.0)
+        return QCoreApplication::translate("Workbench", "超出显示范围");
+    }
+  }
+  return QStringLiteral("%1 %2").arg(QString::number(shown, 'g', 7), symbol);
+}
+
+void NativeViewport::refreshViewportPresentation() {
+  if (!mViewportStatusLabel || !mViewportDetailsButton) return;
+  const int scale = qApp->property("gswUiScalePercent").toInt();
+  const int margin = AppTheme::scaled(10, scale);
+  const int buttonEdge = std::max(32, AppTheme::scaled(28, scale));
+  const int iconEdge = AppTheme::scaled(17, scale);
+  if (mViewportStatusLabel->font() != font()) mViewportStatusLabel->setFont(font());
+  const auto colors = viewportColors();
+  if (mPresentationInk != colors.muted) {
+    mPresentationInk = colors.muted;
+    mViewportStatusLabel->setStyleSheet(QStringLiteral(
+        "QLabel#viewportStatusLabel{background:transparent;color:%1;border:0;padding:0;}")
+        .arg(colors.muted.name(QColor::HexRgb)));
+    QPalette ink = palette();
+    for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+      ink.setColor(role, colors.muted);
+    mViewportDetailsButton->setIcon(workbenchIcon(WorkbenchIconId::Info, ink));
+    mViewportDetailsButton->setStyleSheet(QStringLiteral(
+        "QToolButton#viewportDetailsButton{background:transparent;border:0;padding:0;}"
+        "QToolButton#viewportDetailsButton:hover{background:%1;border-radius:4px;}")
+        .arg(lightViewport() ? QStringLiteral("rgba(0,0,0,18)") : QStringLiteral("rgba(255,255,255,24)")));
+  }
+  mViewportDetailsButton->setIconSize(QSize(iconEdge, iconEdge));
+  const QRect buttonRect(margin, std::max(0, height() - margin - buttonEdge), buttonEdge, buttonEdge);
+  if (mViewportDetailsButton->geometry() != buttonRect) mViewportDetailsButton->setGeometry(buttonRect);
+  const QFontMetrics metrics(mViewportStatusLabel->font());
+  const int available = std::max(1, width() - 2 * margin - buttonEdge - AppTheme::scaled(100, scale));
+  const QString full = viewportStatusText();
+  QString shown = full;
+  if (metrics.horizontalAdvance(shown) > available) shown = viewportPerformanceText();
+  shown = metrics.elidedText(shown, Qt::ElideRight, available);
+  if (mViewportStatusLabel->text() != shown) mViewportStatusLabel->setText(shown);
+  mViewportStatusLabel->setAccessibleName(full);
+  const QRect labelRect(buttonRect.right() + 5,
+      buttonRect.center().y() - (metrics.height() + 4) / 2,
+      available, metrics.height() + 4);
+  if (mViewportStatusLabel->geometry() != labelRect) mViewportStatusLabel->setGeometry(labelRect);
 }
 
 void NativeViewport::updateFrameRefreshPolicy() {
@@ -5896,6 +6161,7 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
 }
 
 void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
+  if (!mViewportGridSettings.gridVisible && !mViewportGridSettings.axesVisible) return;
   if (!mGridShaderReady || mGridProgram == nullptr ||
       !mGridProgram->isLinked() || !mGridVertexArray.isCreated()) {
     return;
@@ -5914,7 +6180,6 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
                       GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glLineWidth(1.0F);
   mGridProgram->bind();
-  const ReferenceGridScale scale = sceneGridScale();
   const auto referenceMapping=sceneDisplayTransform(coordinateReferenceScene(),*mScene);
   const auto referenceOffset=referenceMapping.inverted().mapVector(orbitFrame(viewOrbitAngles()).cameraOffsetDirection).normalized();
   const ReferenceGridPlane plane = referenceGridPlane({std::atan2(referenceOffset.x(),referenceOffset.y())*180.F/kPi,
@@ -5950,18 +6215,12 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
       QVector3D::dotProduct(relativeCamera, grid.axisU),
       QVector3D::dotProduct(relativeCamera, grid.axisV),
       QVector3D::dotProduct(relativeCamera, grid.normal));
-  // Keep eight real decimal scales around the visible resolution. Sliding the
-  // window never changes a visible scale; the shader blends levels per pixel.
-  const double minimumStep = std::max(static_cast<double>(scale.minimumStep), 1e-20);
-  const double worldPerPixel = (mOrthographic ? 2.0 : 2.0 * mDistance) /
-      std::max(1e-12, static_cast<double>(std::abs(projection(1, 1)))) /
-      std::max(1.0, height() * devicePixelRatioF());
-  const double startExponent = std::max(0.0,
-      std::floor(std::log10(std::max(worldPerPixel * 4.0 / minimumStep, 1.0))) - 2.0);
+  const auto configuredSteps = displayGridSteps(mViewportGridSettings);
   std::array<GLfloat, blender_grid::StepCount> steps;
+  if (configuredSteps) steps = *configuredSteps;
+  else steps.fill(1.0F); // Axes remain safe; an invalid periodic grid is not drawn.
   std::array<QVector2D, blender_grid::StepCount> phases;
   for (int level = 0; level < blender_grid::StepCount; ++level) {
-    steps[level] = static_cast<float>(minimumStep * std::pow(10.0, startExponent + level));
     phases[level] = QVector2D(
         static_cast<float>(std::remainder(static_cast<double>(cameraInPlane.x()), static_cast<double>(steps[level]))),
         static_cast<float>(std::remainder(static_cast<double>(cameraInPlane.y()), static_cast<double>(steps[level]))));
@@ -5972,11 +6231,15 @@ void NativeViewport::drawInfiniteGrid(const QMatrix4x4 &viewProjection) {
   mGridProgram->setUniformValue("cameraPlanePosition", cameraInPlane);
   mGridProgram->setUniformValueArray("gridSteps", steps.data(), blender_grid::StepCount, 1);
   mGridProgram->setUniformValueArray("gridPhase", phases.data(), blender_grid::StepCount);
-  mGridProgram->setUniformValue("gridDistance", std::max(mDistance * 8.0F, scale.minimumStep * 40.0F));
+  mGridProgram->setUniformValue("gridDistance", static_cast<float>(std::min(
+      static_cast<double>(mDistance) * 8.0, static_cast<double>(std::numeric_limits<float>::max()) / 16.0)));
   mGridProgram->setUniformValue("gridLineSize", static_cast<float>(std::max(devicePixelRatioF() - 1.0, 0.0) * 0.5));
   mGridProgram->setUniformValue("isOrthographic", mOrthographic ? 1 : 0);
-  mGridProgram->setUniformValue("showGrid", 1);
-  mGridProgram->setUniformValue("showAxes", 1);
+  mGridProgram->setUniformValue("showGrid", mViewportGridSettings.gridVisible && configuredSteps ? 1 : 0);
+  mGridProgram->setUniformValue("showAxes", mViewportGridSettings.axesVisible ? 1 : 0);
+  mGridProgram->setUniformValue("fixedGrid", mViewportGridSettings.spacingMode == ViewportGridSettings::SpacingMode::Fixed ? 1 : 0);
+  mGridProgram->setUniformValue("gridDensity", static_cast<float>(mViewportGridSettings.density));
+  mGridProgram->setUniformValue("gridSubdivisions", mViewportGridSettings.subdivisions);
   mGridProgram->setUniformValue("gridColor", lightViewport()
       ? QVector4D(0.33F, 0.33F, 0.33F, 0.18F)
       : QVector4D(0.50F, 0.50F, 0.50F, 0.28F));
@@ -6802,12 +7065,7 @@ QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
 }
 
 QString NativeViewport::formatViewportDistance(const float localDistance) const {
-  if (!mScene->mSceneCoordinates.valid) {
-    return formatMetricDistance(localDistance);
-  }
-  const double sourceDistance =
-      static_cast<double>(localDistance) / mScene->mSceneCoordinates.displayScale * sourceToSceneUnitScale();
-  return formatSceneLength(sourceDistance, sceneReferenceCoordinates());
+  return formatReferenceLength(static_cast<double>(localDistance) / referenceCoordinateToLocalLength());
 }
 
 ReferenceGridScale NativeViewport::sceneGridScale() const {
@@ -8606,7 +8864,6 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const int headerPaddingX = 9;
   const int headerPaddingY = 5;
   const int lineGap = 1;
-  const int badgeHeight = (std::max)(22, lineHeight + 6);
   const QString mode =
       mEditToolsLocked ? QCoreApplication::translate("Workbench", "工具已锁定") :
       mScene->mSelectionBusy ? QCoreApplication::translate("Workbench", "选择处理中") : modeLabel(mMode);
@@ -8666,43 +8923,6 @@ void NativeViewport::drawOverlay(QPainter &painter) {
           panel.width() * std::clamp(mProcessingProgress, 0, 100) / 100, 2));
     }
   }
-
-  const QString renderer =
-      mScene->mRenderMode == RenderMode::Mesh && meshRenderingAvailable()
-          ? pagedMeshAvailable() ? QCoreApplication::translate("Workbench", "分页三角网格")
-                                 : QCoreApplication::translate("Workbench", "三角网格")
-          : mScene->mRenderMode == RenderMode::Gaussians &&
-                    gaussianRenderingAvailable()
-                ? effectiveShDegree() >= 0
-                    ? QCoreApplication::translate("Workbench", "高斯 SH %1 阶").arg(effectiveShDegree())
-                    : QCoreApplication::translate("Workbench", "高斯 DC（无可用 SH）")
-                : QCoreApplication::translate("Workbench", "点预览");
-
-  const ReferenceGridScale gridScale = sceneGridScale();
-  const double framesPerSecond = mFrameRateCounter.framesPerSecond();
-  const double averageFrameMilliseconds =
-      mFrameRateCounter.averageFrameMilliseconds();
-  const QString frameRateText =
-      framesPerSecond > 0.0 && averageFrameMilliseconds > 0.0
-          ? QStringLiteral("%1 FPS (%2 ms)")
-                .arg(framesPerSecond, 0, 'f', 1)
-                .arg(averageFrameMilliseconds, 0, 'f', 1)
-          : QStringLiteral("FPS —");
-  const QString statusText =
-      QCoreApplication::translate("Workbench", "网格 %1  ·  视距 %2  ·  精度 %3  ·  %4  |  %5  ·  %6")
-          .arg(formatViewportDistance(gridScale.displayMajorStep),
-               formatViewportDistance(mDistance),
-               formatViewportDistance(gridScale.minimumStep),
-               referencePlaneDescription(), renderer, frameRateText);
-  const int statusWidth = metrics.horizontalAdvance(statusText) + 20;
-  const QRect statusRect(
-      viewportMargin, height() - badgeHeight - viewportMargin,
-      (std::min)(statusWidth, qMax(1, width() - viewportMargin * 2)),
-      badgeHeight);
-  drawViewportCaption(painter,
-      statusRect.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft,
-      metrics.elidedText(statusText, Qt::ElideRight,
-                         statusRect.width() - 16), colors.muted);
 
   painter.restore();
 }

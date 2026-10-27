@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QList>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QQuaternion>
 #include <QString>
 #include <QVector3D>
@@ -24,6 +25,9 @@ struct RecoveryWorkspace {
   QQuaternion sceneRotation;
   QVector3D sceneScale = QVector3D(1.0F, 1.0F, 1.0F);
   QDateTime updatedUtc;
+  // Lossless optional display preference. Undefined means a legacy record
+  // omitted the field; malformed present values are diagnosed by the caller.
+  QJsonValue viewportGrid{QJsonValue::Undefined};
 
   [[nodiscard]] bool isValid() const {
     return !sessionId.isEmpty() && !rootPath.isEmpty();

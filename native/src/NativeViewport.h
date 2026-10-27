@@ -16,9 +16,11 @@
 #include "SceneObject.h"
 #include "ModelExport.h"
 #include "ResourceBudget.h"
+#include "ViewportGridSettings.h"
 #include <memory>
 
 #include <QImage>
+#include <QColor>
 #include <QJsonObject>
 #include <QElapsedTimer>
 #include <QMatrix4x4>
@@ -49,6 +51,8 @@ class QWheelEvent;
 class QTimer;
 class QShowEvent;
 class QHideEvent;
+class QLabel;
+class QToolButton;
 
 namespace gsw {
 
@@ -236,6 +240,13 @@ public:
   [[nodiscard]] QString referencePlaneDescription() const;
   [[nodiscard]] SceneCoordinateInfo sceneReferenceCoordinates() const;
   [[nodiscard]] double sourceToSceneUnitScale() const;
+  [[nodiscard]] QString viewportStatusText() const;
+  [[nodiscard]] QString viewportPerformanceText() const;
+  [[nodiscard]] QString viewportDetailsText() const;
+  [[nodiscard]] ViewportGridSettings viewportGridSettings() const { return mViewportGridSettings; }
+  bool setViewportGridSettings(const ViewportGridSettings &settings, QString *error = nullptr);
+  bool validateViewportGridSettingsForDisplay(const ViewportGridSettings &settings,
+                                             QString *error = nullptr) const;
   [[nodiscard]] QString sceneCoordinateSummary() const;
   [[nodiscard]] QString sceneCoordinateDetail() const;
   void refreshActiveSceneMetadata();
@@ -252,6 +263,8 @@ public:
   }
 
 signals:
+  void viewportPresentationChanged();
+  void viewportDetailsRequested();
   void processingPreviewChanged();
   void processingPreviewPausedChanged(bool paused);
   void resourceBudgetStatusChanged();
@@ -542,6 +555,8 @@ private:
   void updateFrameRefreshPolicy();
   [[nodiscard]] bool hasPendingFrameUploads() const;
   [[nodiscard]] bool frameTimingBurstActive() const;
+  void refreshViewportPresentation();
+  void pausePresentationMetrics();
   void monitorRefreshWindow();
   void notifyEditState();
   void uploadPendingPointCloud();
@@ -665,6 +680,9 @@ private:
   [[nodiscard]] const SceneState &coordinateReferenceScene() const;
   [[nodiscard]] double sourceToReferenceUnitScale(const SceneState &state) const;
   [[nodiscard]] ReferenceGridScale sceneGridScale() const;
+  [[nodiscard]] std::optional<std::array<float, 8>> displayGridSteps(const ViewportGridSettings &settings) const;
+  [[nodiscard]] double referenceCoordinateToLocalLength() const;
+  [[nodiscard]] QString formatReferenceLength(double value) const;
   [[nodiscard]] bool collectionReferenceBounds(QVector3D &minimum,
                                               QVector3D &maximum) const;
   void publishActiveSceneState();
@@ -786,6 +804,14 @@ private:
   QTimer *mViewSnapTimer = nullptr;
   bool mZoomToCursorEnabled = true;
   FrameRateCounter mFrameRateCounter;
+  QTimer *mPresentationIdleTimer = nullptr;
+  QLabel *mViewportStatusLabel = nullptr;
+  QToolButton *mViewportDetailsButton = nullptr;
+  bool mPresentationIdle = true;
+  bool mPresentationWaiting = false;
+  quint64 mFreshPresentationFrames = 0;
+  QColor mPresentationInk;
+  ViewportGridSettings mViewportGridSettings;
   std::unique_ptr<RenderFrameDiagnostics> mRenderDiagnostics;
   QString mRenderDiagnosticActiveId;
 };

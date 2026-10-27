@@ -60,6 +60,8 @@ if(MSVC)
 endif()
 
 add_library(gsw_blender_grid STATIC
+  third_party/blender-grid/BlenderGridSteps.cpp
+  third_party/blender-grid/BlenderGridSteps.h
   third_party/blender-grid/BlenderGridShaders.cpp
   third_party/blender-grid/BlenderGridShaders.h)
 target_link_libraries(gsw_blender_grid PUBLIC Qt6::Core)
@@ -239,6 +241,11 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/SceneVisibilitySmokeTest.h
   src/ViewportSchedulingSmokeTest.cpp
   src/ViewportSchedulingSmokeTest.h
+  src/ViewportStatusControlsSmokeTest.cpp
+  src/ViewportStatusControlsSmokeTest.h
+  src/ViewportGridSettings.h
+  src/ViewportGridDialog.cpp
+  src/ViewportGridDialog.h
   src/SceneObject.h
   src/MediaProjectBootstrap.cpp
   src/MediaProjectBootstrap.h
@@ -520,6 +527,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINA
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/WINDOWS_INSTALLER.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/BLENDER_VIEWPORT.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/VIEWPORT_DISPLAY.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/VIEWPORT_DISPLAY.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P0.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/CAMERA_SCALE_P1.md" DESTINATION source/docs)
@@ -1829,6 +1838,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(gsw_viewport_camera_tests PRIVATE src)
     target_link_libraries(gsw_viewport_camera_tests PRIVATE
+      gsw_blender_grid
       Qt6::Core
       Qt6::Gui
       Qt6::Test

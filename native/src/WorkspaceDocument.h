@@ -61,6 +61,11 @@ public:
   [[nodiscard]] QString cameraDatasetIdentity() const;
   [[nodiscard]] QString cameraPosePolicy() const;
   [[nodiscard]] QJsonObject cameraDatasetInfo() const;
+  // Presentation-only project data. An absent optional field stays absent;
+  // valid partial objects are retained without silently writing defaults.
+  [[nodiscard]] QJsonObject viewportGridSettings() const;
+  bool setViewportGridSettings(const QJsonObject &settings,
+                                QString *errorMessage = nullptr);
   // Paths are portable workspace-relative directories; availability is
   // evaluated when read and never replaces the durable source records.
   [[nodiscard]] QJsonArray workflowArtifacts() const;
@@ -130,6 +135,7 @@ public:
 signals:
   void changed();
   void modifiedChanged(bool modified);
+  void viewportGridSettingsChanged();
 
 private:
   void setModified(bool modified);
@@ -141,6 +147,8 @@ private:
   QString mProjectFilePath;
   QString mDatasetPath;
   QJsonObject mCameraDatasetInfo;
+  QJsonObject mViewportGridSettings;
+  bool mHasViewportGridSettings = false;
   QJsonArray mWorkflowArtifacts;
   QString mScenePath;
   QList<SceneObject> mSceneObjects;

@@ -1,6 +1,9 @@
 #include "ViewportCamera.h"
 #include "ReferenceAxisGeometry.h"
+#include "ViewportGridSettings.h"
+#include "../third_party/blender-grid/BlenderGridSteps.h"
 
+#include <QJsonArray>
 #include <QtTest>
 
 #include <algorithm>
@@ -32,6 +35,11 @@ private slots:
   void keepsGridStepsOnConcreteDecimalScales();
   void enforcesMinimumGridStepAtClosestZoom();
   void keepsColoredAxesInsideRenderedGridCoverage();
+  void producesLiteralBlenderSubdivisionLevels();
+  void rejectsInvalidBlenderSubdivisionInputs();
+  void keepsBlenderSubdivisionLevelsWithinNormalFloatRange();
+  void roundTripsStrictViewportGridSettings();
+  void rejectsInvalidViewportGridSettings();
   void usesMetashapeStylePointPreviewDiameter();
   void formatsGridScaleWithReadableMetricUnits();
   void keepsReferenceAxesAtExactWorldLength();
@@ -300,6 +308,167 @@ void ViewportCameraTests::keepsColoredAxesInsideRenderedGridCoverage() {
 
   QVERIFY(spans.fineHalfSpan < spans.majorHalfSpan);
   QCOMPARE(spans.axisHalfSpan, spans.majorHalfSpan);
+}
+
+void ViewportCameraTests::producesLiteralBlenderSubdivisionLevels() {
+  struct Example {
+    int subdivisions;
+    std::array<float, 8> expected;
+  };
+  // Worked unitless examples: each expected sequence is literal, rather than
+  // another implementation of the subdivision loop under test.
+  constexpr std::array<Example, 4> examples{{
+      {1, {0.125F, 0.125F, 0.125F, 0.125F, 0.125F, 0.125F, 0.125F, 0.125F}},
+      {2, {0.125F, 0.25F, 0.5F, 1.0F, 2.0F, 4.0F, 8.0F, 16.0F}},
+      {5, {0.125F, 0.625F, 3.125F, 15.625F, 78.125F, 390.625F,
+           1953.125F, 9765.625F}},
+      {10, {0.125F, 1.25F, 12.5F, 125.0F, 1250.0F, 12500.0F,
+            125000.0F, 1250000.0F}},
+  }};
+  for (const auto &example : examples) {
+    const auto actual = blender_grid::subdivisionSteps(0.125, example.subdivisions);
+    QVERIFY2(actual.has_value(), qPrintable(QStringLiteral("N=%1").arg(example.subdivisions)));
+    QCOMPARE(actual->size(), example.expected.size());
+    for (std::size_t index = 0; index < example.expected.size(); ++index) {
+      QCOMPARE((*actual)[index], example.expected[index]);
+    }
+  }
+}
+
+void ViewportCameraTests::rejectsInvalidBlenderSubdivisionInputs() {
+  for (const double base : {0.0, -0.0, -0.125,
+       std::numeric_limits<double>::quiet_NaN(),
+       std::numeric_limits<double>::infinity(),
+       -std::numeric_limits<double>::infinity()}) {
+    QVERIFY(!blender_grid::subdivisionSteps(base, 1).has_value());
+  }
+  for (const int subdivisions : {0, -1, std::numeric_limits<int>::min()}) {
+    QVERIFY(!blender_grid::subdivisionSteps(0.125, subdivisions).has_value());
+  }
+  // A valid first level does not permit publishing a later overflowing level.
+  QVERIFY(!blender_grid::subdivisionSteps(0.125, std::numeric_limits<int>::max()).has_value());
+}
+
+void ViewportCameraTests::keepsBlenderSubdivisionLevelsWithinNormalFloatRange() {
+  const double minimum = static_cast<double>(std::numeric_limits<float>::min());
+  const double maximum = static_cast<double>(std::numeric_limits<float>::max());
+  for (const double boundary : {minimum, maximum}) {
+    const auto repeated = blender_grid::subdivisionSteps(boundary, 1);
+    QVERIFY(repeated.has_value());
+    for (const float step : *repeated) {
+      QCOMPARE(static_cast<double>(step), boundary);
+      QVERIFY(std::isnormal(step));
+    }
+  }
+  const auto smallestIncreasing = blender_grid::subdivisionSteps(minimum, 2);
+  QVERIFY(smallestIncreasing.has_value());
+  QCOMPARE(smallestIncreasing->front(), std::numeric_limits<float>::min());
+  QCOMPARE(static_cast<double>(smallestIncreasing->back()), minimum * 128.0);
+  const auto largestIncreasing = blender_grid::subdivisionSteps(maximum / 128.0, 2);
+  QVERIFY(largestIncreasing.has_value());
+  QCOMPARE(largestIncreasing->back(), std::numeric_limits<float>::max());
+  for (const float step : *largestIncreasing) QVERIFY(std::isnormal(step));
+
+  // Check the double inputs on both sides of the float boundary, including
+  // values that would round back to a normal float if narrowing happened first.
+  QVERIFY(!blender_grid::subdivisionSteps(std::nextafter(minimum, 0.0), 1).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(std::nextafter(maximum,
+      std::numeric_limits<double>::infinity()), 1).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(static_cast<double>(
+      std::numeric_limits<float>::denorm_min()), 1).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(std::numeric_limits<double>::min(), 1).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(std::numeric_limits<double>::max(), 1).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(maximum, 2).has_value());
+  QVERIFY(!blender_grid::subdivisionSteps(std::nextafter(maximum / 128.0,
+      std::numeric_limits<double>::infinity()), 2).has_value());
+}
+
+void ViewportCameraTests::roundTripsStrictViewportGridSettings() {
+  const QJsonObject defaults{{"version", 1}, {"spacingMode", "automatic"},
+      {"majorSpacing", 1.0}, {"subdivisions", 10}, {"density", 1.0},
+      {"displayUnit", "scene"}, {"gridVisible", true}, {"axesVisible", true}};
+  for (const QJsonValue input : {QJsonValue(QJsonValue::Undefined),
+                                QJsonValue(QJsonObject{})}) {
+    const auto parsed = ViewportGridSettings::fromJson(input);
+    QVERIFY(parsed.has_value());
+    QVERIFY(parsed->toJson().has_value());
+    QCOMPARE(*parsed->toJson(), defaults);
+  }
+  const QJsonObject fixed{{"version", 1}, {"spacingMode", "fixed"},
+      {"majorSpacing", 0.125}, {"subdivisions", 5}, {"density", 0.25},
+      {"displayUnit", "mm"}, {"gridVisible", false}, {"axesVisible", false}};
+  const auto parsed = ViewportGridSettings::fromJson(fixed);
+  QVERIFY(parsed.has_value());
+  QCOMPARE(parsed->spacingMode, ViewportGridSettings::SpacingMode::Fixed);
+  QCOMPARE(parsed->displayUnit, ViewportGridSettings::DisplayUnit::Millimetres);
+  QCOMPARE(parsed->majorSpacing, 0.125);
+  QCOMPARE(parsed->subdivisions, 5);
+  QCOMPARE(parsed->density, 0.25);
+  QVERIFY(!parsed->gridVisible && !parsed->axesVisible);
+  QVERIFY(parsed->toJson().has_value());
+  QCOMPARE(*parsed->toJson(), fixed);
+
+  struct UnitExample {
+    const char *name;
+    ViewportGridSettings::DisplayUnit value;
+  };
+  for (const UnitExample unit : {
+      UnitExample{"scene", ViewportGridSettings::DisplayUnit::Scene},
+      UnitExample{"mm", ViewportGridSettings::DisplayUnit::Millimetres},
+      UnitExample{"cm", ViewportGridSettings::DisplayUnit::Centimetres},
+      UnitExample{"m", ViewportGridSettings::DisplayUnit::Metres}}) {
+    const auto settings = ViewportGridSettings::fromJson(QJsonObject{
+        {"displayUnit", QString::fromLatin1(unit.name)}, {"density", 4.0}});
+    QVERIFY(settings.has_value());
+    QCOMPARE(settings->displayUnit, unit.value);
+    QCOMPARE(settings->density, 4.0);
+    QCOMPARE(settings->majorSpacing, 1.0);
+    QVERIFY(settings->toJson().has_value());
+    QCOMPARE(settings->toJson()->value("displayUnit").toString(), QString::fromLatin1(unit.name));
+  }
+  for (const int subdivisions : {1, 2, 5, 10}) {
+    const auto settings = ViewportGridSettings::fromJson(QJsonObject{{"subdivisions", subdivisions}});
+    QVERIFY(settings.has_value());
+    QCOMPARE(settings->subdivisions, subdivisions);
+  }
+}
+
+void ViewportCameraTests::rejectsInvalidViewportGridSettings() {
+  for (const QJsonValue malformed : {QJsonValue(QJsonValue::Null), QJsonValue(true),
+       QJsonValue(1.0), QJsonValue(QStringLiteral("fixed")), QJsonValue(QJsonArray{})}) {
+    QVERIFY(!ViewportGridSettings::fromJson(malformed).has_value());
+  }
+  const QList<QJsonObject> invalid{
+      {{"version", 2}}, {{"version", "1"}}, {{"version", QJsonValue(QJsonValue::Null)}},
+      {{"spacingMode", "auto"}}, {{"spacingMode", 1}},
+      {{"displayUnit", "feet"}}, {{"displayUnit", false}},
+      {{"majorSpacing", 0.0}}, {{"majorSpacing", -0.125}}, {{"majorSpacing", "0.125"}},
+      {{"subdivisions", 0}}, {{"subdivisions", 3}}, {{"subdivisions", 5.5}}, {{"subdivisions", "5"}},
+      {{"density", 0.24}}, {{"density", 4.01}}, {{"density", "1"}},
+      {{"gridVisible", 1}}, {{"axesVisible", "true"}}, {{"physicalScale", 1000.0}}};
+  for (const auto &object : invalid) {
+    QVERIFY(!ViewportGridSettings::fromJson(object).has_value());
+  }
+  for (const double value : {0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+       std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
+    ViewportGridSettings settings;
+    settings.majorSpacing = value;
+    QVERIFY(!settings.isValid());
+    QVERIFY(!settings.toJson().has_value());
+  }
+  for (const double value : {0.0, 0.24, 4.01, std::numeric_limits<double>::quiet_NaN(),
+       std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
+    ViewportGridSettings settings;
+    settings.density = value;
+    QVERIFY(!settings.isValid());
+    QVERIFY(!settings.toJson().has_value());
+  }
+  ViewportGridSettings invalidMode;
+  invalidMode.spacingMode = static_cast<ViewportGridSettings::SpacingMode>(-1);
+  QVERIFY(!invalidMode.toJson().has_value());
+  ViewportGridSettings invalidUnit;
+  invalidUnit.displayUnit = static_cast<ViewportGridSettings::DisplayUnit>(-1);
+  QVERIFY(!invalidUnit.toJson().has_value());
 }
 
 void ViewportCameraTests::usesMetashapeStylePointPreviewDiameter() {
