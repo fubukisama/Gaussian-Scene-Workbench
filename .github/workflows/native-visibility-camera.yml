@@ -1,6 +1,9 @@
 name: Native Visibility Camera
 
 # Fast manual feedback for the six existing visibility locale/theme cases.
+# Pin the available Windows 11 widget style: its native item-column rules are
+# absent from the Windows Server default style. The full native workflows keep
+# testing the runner's default style independently.
 # This is scoped acceptance, not a replacement for Native Scene Visibility,
 # Native Windows, the full native suite, workers, packaging or code scans.
 on:
@@ -18,6 +21,7 @@ jobs:
     env:
       QT_FORCE_STDERR_LOGGING: "1"
       QT_LOGGING_TO_CONSOLE: "1"
+      QT_STYLE_OVERRIDE: windows11
       GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/visibility-camera-artifact/screenshots
     steps:
       - name: Checkout exact dispatched source
