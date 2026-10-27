@@ -3,6 +3,8 @@ import json
 import pickle
 from pathlib import Path
 import random
+import sys
+import ctypes
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -43,6 +45,134 @@ class PickleStore:
 
 
 class CheckpointTests(unittest.TestCase):
+    @staticmethod
+    def _replace_denial(winerror):
+        failure = PermissionError(13, "owned Windows atomic-publication denial")
+        failure.winerror = winerror
+        return failure
+
+    def test_atomic_json_retries_only_transient_windows_replacement_and_keeps_one_stage(self):
+        for backend in ("3dgs", "2dgs"):
+            for winerror in (5, 32, 33):
+                with self.subTest(backend=backend, winerror=winerror):
+                    target = self.root / "lease.json"
+                    before = b'{"retained":"old"}'
+                    target.write_bytes(before)
+                    replacement = {"backend": backend, "iteration": 9, "closed": False}
+                    original_replace = checkpoint.os.replace
+                    calls = []
+
+                    def replace_after_readers_release(source, destination):
+                        calls.append((source, destination))
+                        self.assertEqual(target.read_bytes(), before)
+                        if len(calls) < 3:
+                            raise self._replace_denial(winerror)
+                        return original_replace(source, destination)
+
+                    with mock.patch.object(checkpoint.sys, "platform", "win32"), \
+                            mock.patch.object(checkpoint.os, "replace", side_effect=replace_after_readers_release), \
+                            mock.patch.object(checkpoint.time, "sleep") as sleep:
+                        checkpoint.atomic_json(target, replacement)
+                    self.assertEqual(len(calls), 3)
+                    self.assertEqual(len(set(calls)), 1, "the same complete, closed sibling is retried")
+                    self.assertEqual(sleep.call_args_list, [mock.call(0.01), mock.call(0.01)])
+                    self.assertEqual(json.loads(target.read_text(encoding="utf-8")), replacement)
+                    self.assertEqual(list(self.root.iterdir()), [target])
+
+    def test_atomic_json_permanent_windows_denial_is_bounded_and_keeps_previous_bytes(self):
+        target = self.root / "lease.json"
+        before = b'{"retained":"old"}'
+        target.write_bytes(before)
+        failure = self._replace_denial(5)
+        with mock.patch.object(checkpoint.sys, "platform", "win32"), \
+                mock.patch.object(checkpoint.os, "replace", side_effect=failure) as replace, \
+                mock.patch.object(checkpoint.time, "sleep") as sleep:
+            with self.assertRaises(PermissionError) as raised:
+                checkpoint.atomic_json(target, {"retained": "new"})
+        self.assertIs(raised.exception, failure)
+        self.assertEqual(replace.call_count, 20)
+        self.assertEqual(sleep.call_args_list, [mock.call(0.01)] * 19)
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(list(self.root.iterdir()), [target], "only the owned unpublished sibling is removed")
+
+    def test_atomic_json_nonsharing_and_nonwindows_errors_are_not_retried(self):
+        for platform, failure in (("win32", self._replace_denial(19)),
+                                  ("linux", self._replace_denial(5)),
+                                  ("win32", OSError(28, "owned full-disk failure"))):
+            with self.subTest(platform=platform, failure=type(failure).__name__):
+                target = self.root / "lease.json"
+                before = b'{"retained":"old"}'
+                target.write_bytes(before)
+                with mock.patch.object(checkpoint.sys, "platform", platform), \
+                        mock.patch.object(checkpoint.os, "replace", side_effect=failure) as replace, \
+                        mock.patch.object(checkpoint.time, "sleep") as sleep:
+                    with self.assertRaises(type(failure)) as raised:
+                        checkpoint.atomic_json(target, {"retained": "new"})
+                self.assertIs(raised.exception, failure)
+                replace.assert_called_once()
+                sleep.assert_not_called()
+                self.assertEqual(target.read_bytes(), before)
+                self.assertEqual(list(self.root.iterdir()), [target])
+
+    @unittest.skipUnless(sys.platform == "win32", "actual Windows reader-sharing boundary")
+    def test_atomic_json_publishes_after_a_real_windows_reader_releases_rename_denial(self):
+        from ctypes import wintypes
+        target = self.root / "lease.json"
+        before = b'{"retained":"old"}'
+        target.write_bytes(before)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                     wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel.CloseHandle.restype = wintypes.BOOL
+        # Read/write sharing deliberately omits FILE_SHARE_DELETE. Windows
+        # therefore refuses rename/replace until this owned reader is closed.
+        handle = kernel.CreateFileW(str(target), 0x80000000, 0x1 | 0x2, None, 3, 0x80, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        denied, released = threading.Event(), threading.Event()
+        release_errors = []
+
+        def release_reader():
+            if not denied.wait(2):
+                release_errors.append("no actual replacement denial was observed")
+            if not kernel.CloseHandle(handle):
+                release_errors.append(str(ctypes.WinError(ctypes.get_last_error())))
+            released.set()
+
+        release = threading.Thread(target=release_reader)
+        release.start()
+        original_replace = checkpoint.os.replace
+        calls, errors = [], []
+
+        def replace_with_reader_barrier(source, destination):
+            calls.append((source, destination))
+            try:
+                return original_replace(source, destination)
+            except PermissionError as error:
+                errors.append(getattr(error, "winerror", None))
+                self.assertEqual(target.read_bytes(), before)
+                denied.set()
+                self.assertTrue(released.wait(2), "the owned reader must release before the retry")
+                raise
+
+        try:
+            with mock.patch.object(checkpoint.os, "replace", side_effect=replace_with_reader_barrier):
+                checkpoint.atomic_json(target, {"retained": "new"})
+        finally:
+            denied.set()
+            release.join(2)
+        self.assertFalse(release.is_alive())
+        self.assertEqual(release_errors, [])
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertLessEqual(len(calls), 20)
+        self.assertEqual(len(set(calls)), 1)
+        self.assertEqual(len(errors), len(calls) - 1)
+        self.assertTrue(all(code in (5, 32, 33) for code in errors))
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"retained": "new"})
+        self.assertEqual(list(self.root.iterdir()), [target])
+
     def test_atomic_json_retries_exclusive_uuid_collision_without_overwriting_foreign_file(self):
         target = self.root / "ready.json"
         target.write_bytes(b"old target")

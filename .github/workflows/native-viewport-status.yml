@@ -84,6 +84,23 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw 'Codec dependency installation failed.' }
 
+      - name: Verify atomic publication and job control boundaries
+        if: ${{ inputs.contract_scope == 'ci-repair' }}
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          $fixtures = Join-Path $PWD 'native/atomic-publication-fixtures'
+          New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
+          $env:TEMP = $fixtures
+          $env:TMP = $fixtures
+          & '${{ steps.qa-python.outputs.python-path }}' -B -m unittest -v `
+            native.worker.test_training_checkpoint native.worker.test_training_job_connection `
+            native.backend.tests.test_atomic_file 2>&1 |
+            Tee-Object -FilePath native/viewport-status-artifact/atomic-publication.log
+          if ($LASTEXITCODE -ne 0) { throw 'Atomic publication or existing-job control regression failed.' }
+
       - name: Build only the requested contract targets
         id: focused-build
         shell: pwsh

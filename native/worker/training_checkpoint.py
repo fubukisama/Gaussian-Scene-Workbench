@@ -12,6 +12,8 @@ from pathlib import Path
 import random
 import copy
 import re
+import sys
+import time
 import uuid
 
 from native.backend.atomic_file import atomic_sibling, atomic_sibling_directory
@@ -143,7 +145,19 @@ def atomic_json(path, value):
         stream.flush()
         os.fsync(stream.fileno())
         stream.close()
-        os.replace(str(temporary), str(path))
+        # A concurrent Windows JSON reader (or indexer) can briefly deny the
+        # delete/rename access needed by replace. Retry only that publication
+        # boundary: never truncate the destination, rebuild the stage, or claim
+        # success before the same complete sibling has been atomically replaced.
+        for attempt in range(20):
+            try:
+                os.replace(str(temporary), str(path))
+                break
+            except PermissionError as error:
+                if (sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32, 33)
+                        or attempt == 19):
+                    raise
+                time.sleep(0.01)
 
 
 def file_digest(path, text_source=False):
