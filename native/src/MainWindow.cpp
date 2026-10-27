@@ -2764,6 +2764,11 @@ void MainWindow::showViewportDetails() {
   dialog->resize(AppTheme::scaled(620, mUiScalePercent),
                  AppTheme::scaled(360, mUiScalePercent));
   mViewportDetailsDialog = dialog;
+  // WA_DeleteOnClose schedules DeferredDelete. A finished dialog must stop
+  // being the reopen target immediately, not only when QPointer later clears.
+  connect(dialog, &QDialog::finished, this, [this, dialog] {
+    if (mViewportDetailsDialog == dialog) mViewportDetailsDialog.clear();
+  });
   auto *layout = new QVBoxLayout(dialog);
   auto *details = new QPlainTextEdit(dialog);
   details->setObjectName(QStringLiteral("viewportDetailsText"));

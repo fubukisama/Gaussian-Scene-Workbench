@@ -2106,37 +2106,89 @@ int main(int argc, char *argv[]) {
             }
           }
 
-          smokeTestCompleted =
-              window.isVisible() && autoScale != nullptr &&
-              fitWindow != nullptr && resolution != nullptr &&
-              mainToolbar != nullptr && renderToolbar != nullptr &&
-              selectionToolbar != nullptr && editToolbar != nullptr &&
-              !renderToolbar->isVisible() &&
-              !selectionToolbar->isVisible() && !editToolbar->isVisible() &&
-              environment != nullptr && resetCamera != nullptr &&
-              findModel != nullptr && !findModel->isEnabled() &&
-              selectionToolbar->actions().contains(findModel) &&
-              !mainToolbar->actions().contains(environment) &&
-              !mainToolbar->actions().contains(resetCamera) &&
-              projectDock != nullptr && inspectorDock != nullptr &&
-              taskDock != nullptr && hasCompactDockTitle(projectDock) &&
-              hasCompactDockTitle(inspectorDock) &&
-              hasCompactDockTitle(taskDock) &&
-              projectDock->minimumWidth() == 0 &&
-              inspectorDock->minimumWidth() == 0 &&
-              taskDock->minimumHeight() <=
-                  taskDock->titleBarWidget()->height() +
-                      gsw::AppTheme::scaled(2, uiScalePercent) &&
-              viewport != nullptr && !viewportFrame.isNull() &&
-              viewport->minimumWidth() == 0 &&
-              viewport->minimumHeight() == 0 &&
-              taskDock->height() <=
-                  gsw::AppTheme::scaled(140, uiScalePercent) &&
-              rendererStatus != nullptr &&
-              rendererStatus->text().contains(QStringLiteral("FPS")) &&
-              rendererStatus->text().contains(QStringLiteral("ms")) &&
-              scaleStatus != nullptr && scaleStatus->text().contains('%') &&
-              scaleStatus->text().contains(QChar(0x00D7));
+          // Empty workspaces now show the truthful concise status instead of
+          // synthetic FPS/ms placeholders. Keep every layout assertion, and
+          // verify the shared status/details contract rather than obsolete
+          // tokens that can never appear in the documented empty-scene label.
+          const bool emptySceneStatusReady = viewport != nullptr &&
+              viewport->sceneObjectCount() == 0 &&
+              viewport->scenePath().isEmpty() &&
+              !viewport->visibleModelAvailable() && rendererStatus != nullptr &&
+              rendererStatus->text() ==
+                  QCoreApplication::translate("Workbench", "未载入场景") &&
+              rendererStatus->text() == viewport->viewportStatusText() &&
+              !rendererStatus->text().contains(QStringLiteral("FPS")) &&
+              !rendererStatus->text().contains(QStringLiteral("ms")) &&
+              rendererStatus->toolTip() == viewport->viewportDetailsText();
+          bool predicatesReady = true;
+          const auto check = [&predicatesReady](const bool ok, const char *name) {
+            if (!ok) qCritical() << "ADAPTIVE_DISPLAY_LAYOUT FAIL:" << name;
+            predicatesReady = predicatesReady && ok;
+          };
+          check(window.isVisible(), "main window visible");
+          check(autoScale != nullptr && fitWindow != nullptr &&
+                    resolution != nullptr,
+                "adaptive display actions exist");
+          check(mainToolbar != nullptr && renderToolbar != nullptr &&
+                    selectionToolbar != nullptr && editToolbar != nullptr &&
+                    !renderToolbar->isVisible() &&
+                    !selectionToolbar->isVisible() && !editToolbar->isVisible(),
+                "empty workspace hides render, selection and edit toolbars");
+          check(environment != nullptr && resetCamera != nullptr &&
+                    findModel != nullptr && !findModel->isEnabled() &&
+                    selectionToolbar != nullptr && mainToolbar != nullptr &&
+                    selectionToolbar->actions().contains(findModel) &&
+                    !mainToolbar->actions().contains(environment) &&
+                    !mainToolbar->actions().contains(resetCamera),
+                "empty-workspace actions remain routed to the proper toolbar");
+          check(hasCompactDockTitle(projectDock), "compact project dock title");
+          check(hasCompactDockTitle(inspectorDock), "compact inspector dock title");
+          check(hasCompactDockTitle(taskDock), "compact task dock title");
+          check(projectDock != nullptr && inspectorDock != nullptr &&
+                    taskDock != nullptr && taskDock->titleBarWidget() != nullptr &&
+                    projectDock->minimumWidth() == 0 &&
+                    inspectorDock->minimumWidth() == 0 &&
+                    taskDock->minimumHeight() <=
+                        taskDock->titleBarWidget()->height() +
+                            gsw::AppTheme::scaled(2, uiScalePercent) &&
+                    taskDock->height() <=
+                        gsw::AppTheme::scaled(140, uiScalePercent),
+                "dock minimum sizes and initial task height stay compact");
+          check(viewport != nullptr && !viewportFrame.isNull() &&
+                    viewport->minimumWidth() == 0 &&
+                    viewport->minimumHeight() == 0,
+                "viewport renders with flexible minimum dimensions");
+          check(emptySceneStatusReady,
+                "empty scene has current localized status and live details without fictitious FPS/ms");
+          check(scaleStatus != nullptr && scaleStatus->text().contains('%') &&
+                    scaleStatus->text().contains(QChar(0x00D7)),
+                "UI scale status includes percent and device-pixel ratio");
+          smokeTestCompleted = predicatesReady;
+          if (!smokeTestCompleted) {
+            qCritical() << "ADAPTIVE_DISPLAY_LAYOUT context: UI scale"
+                        << uiScalePercent << "window" << window.size()
+                        << "viewport" << (viewport ? viewport->size() : QSize())
+                        << "frame" << viewportFrame.size()
+                        << "renderer status"
+                        << (rendererStatus ? rendererStatus->text() : QString())
+                        << "expected status"
+                        << (viewport ? viewport->viewportStatusText() : QString())
+                        << "source objects"
+                        << (viewport ? viewport->sceneObjectCount() : -1)
+                        << "details tooltip matches"
+                        << (viewport && rendererStatus &&
+                            rendererStatus->toolTip() == viewport->viewportDetailsText());
+            for (const QDockWidget *dock : {projectDock, inspectorDock, taskDock}) {
+              if (dock == nullptr) continue;
+              qCritical() << "ADAPTIVE_DISPLAY_LAYOUT dock:"
+                          << dock->objectName() << dock->size()
+                          << "minimum" << dock->minimumSize()
+                          << "title height"
+                          << (dock->titleBarWidget() ? dock->titleBarWidget()->height() : -1);
+            }
+          } else {
+            qInfo() << "ADAPTIVE_DISPLAY_LAYOUT PASS: compact layout and truthful empty-scene status";
+          }
           application.exit(smokeTestCompleted ? 0 : 2);
         });
   } else if (importDialogSmokeTest) {

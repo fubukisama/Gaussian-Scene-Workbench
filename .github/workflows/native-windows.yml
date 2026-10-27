@@ -204,6 +204,13 @@ jobs:
         id: native-build
         timeout-minutes: 75
         shell: pwsh
+        # Test per-source compiler invocations with a global cap, retaining the
+        # full target set and deadline; this is not a timeout/coverage bypass.
+        # https://devblogs.microsoft.com/cppblog/cpp-build-throughput-investigation-and-tune-up/
+        env:
+          UseMultiToolTask: "true"
+          EnforceProcessCountAcrossBuilds: "true"
+          CL_MPCount: "2"
         run: ./scripts/trace_native_ci_build.ps1 -BuildDirectory native/build-codeql -TraceDirectory native/codeql-build-trace/attempt-${{ github.run_attempt }}
       - name: Upload native analysis build progress trace
         if: always()

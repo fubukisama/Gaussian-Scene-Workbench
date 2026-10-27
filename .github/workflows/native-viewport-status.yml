@@ -125,6 +125,17 @@ jobs:
             -R '^workspace_scene_format$'
           if ($LASTEXITCODE -ne 0) { throw 'Project presentation persistence contracts failed; existing assertions remain unchanged.' }
 
+      - name: Repeat the original pause acknowledgement boundary
+        if: ${{ !cancelled() && inputs.contract_scope == 'ci-repair' && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          Remove-Item Env:QT_STYLE_OVERRIDE -ErrorAction SilentlyContinue
+          ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/viewport-status-artifact/runtime-pause-repeat.log `
+            --output-junit (Join-Path $PWD 'native/viewport-status-artifact/runtime-pause-repeat.xml') `
+            -R '^native_runtime_decoupling_ui$' --repeat until-fail:30
+          if ($LASTEXITCODE -ne 0) { throw 'Original pause acknowledgement failed under repetition; boundary diagnostics retained.' }
+
       - name: Verify existing cadence and actual window scheduling
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
         shell: pwsh
