@@ -113,7 +113,7 @@ Developer CLI messages remain English. / 开发 CLI 原始输出保留英文。 
 ./scripts/write_native_release_manifest.ps1 -PackageRoot $verifiedPackage `
   -SourceCommit $commit -AcceptanceProof $fullAcceptance -OutputPath $freshManifest
 ./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
-  -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance `
+  -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance
 # One-time migration/repair only: append -SynchronizeShortcuts, optionally
 # -ShortcutDirectories $identifiedNativeShortcutFolders.
 # Roll back without deleting either slot or closing a running application.
