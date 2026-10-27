@@ -8,6 +8,12 @@ Experimental quality plans / 实验性质量计划 / 実験的品質プラン: [
 
 ## Current preview
 
+- [Managed native updates](../docs/NATIVE_UPDATES.md): desktop, Start menu and taskbar use a stable native entry point. Verified releases switch atomically for the next launch, retaining running and previous versions; this is not live patching or an automatic downloader.
+
+中文：[原生版本更新](../docs/NATIVE_UPDATES.md)让桌面、开始菜单和任务栏统一使用固定入口。验证通过后下次启动自动使用新版，保留运行中的版本和旧版；不属于热更新或后台自动下载。
+
+日本語：[ネイティブ版の更新](../docs/NATIVE_UPDATES.md)ではデスクトップ・スタートメニュー・タスクバーを固定入口に統一します。検証後の次回起動から新版になり、起動中の版と旧版を保持します。ホットパッチや自動ダウンロードではありません。
+
 - Ordinary 3DGS/2DGS PLY transform baking reads the complete source, preserves field types/custom values, transforms covariance/tangents and SH through degree 4, and rejects nonuniform directional-SH appearance rather than approximating it. Recorded-camera exports retain their proper-Sim3 provenance constraints; original files/checkpoints remain unchanged. See [Gaussian PLY baking routes and fidelity limits](../docs/GAUSSIAN_PLY_BAKING.md).
 
 中文：普通 3DGS／2DGS PLY 变换烘焙读取完整源数据，保留字段类型和自定义属性，处理协方差／切向与 0–4 阶 SH；方向 SH 的非等比缩放明确拒绝，不近似外观。记录相机路线保持 proper-Sim3 来源约束，原件和检查点不变。见[烘焙路线与保真边界](../docs/GAUSSIAN_PLY_BAKING.md)。

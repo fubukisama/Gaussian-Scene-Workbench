@@ -39,6 +39,7 @@
 #include "ResourceBudgetUiSmokeTest.h"
 #include "FileDialogHistorySmokeTest.h"
 #include "FileDialogHistoryGuardSmokeTest.h"
+#include "NativeInstallation.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -522,6 +523,11 @@ int main(int argc, char *argv[]) {
     window.move(-30000, -30000);
   }
   window.show();
+  if (!smokeTest && !gsw::setManagedTaskbarRelaunch(
+          reinterpret_cast<void *>(window.winId()), QCoreApplication::applicationFilePath(),
+          QStringLiteral(GSW_APP_USER_MODEL_ID))) {
+    qWarning() << "managed_installation_taskbar_relaunch_failed";
+  }
   if (projectPath.isEmpty() && !smokeTest) {
     window.offerStartupRecovery();
   }

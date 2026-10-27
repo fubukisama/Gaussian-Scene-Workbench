@@ -1,0 +1,114 @@
+# Managed native updates / 原生版本更新 / ネイティブ版の更新
+
+## 简体中文
+
+桌面、开始菜单、任务栏统一使用固定的原生启动器。已验证的新版本放入独立的
+`versions/<version>/`，完成全文件校验后才原子切换 `current.json`。下一次启动直接
+进入新版，不必重新固定图标。运行中的版本继续工作，不强制重启；旧版本不删除，
+工程、素材、设置和训练状态不搬迁、不覆盖。此入口对 3DGS、2DGS、点云、网格及
+其他生成链路一致，不改变训练算法，也不将预览或 PLY 热启动宣称为优化器续训。
+
+本机托管目录：`E:\Apps\Gaussian Scene Workbench`。其他机器可选可写的非系统盘；
+只有系统盘时支持现有 C: 目录。启动器和最初的 Qt 引导运行库保留在 `bin/`，
+各版本自带自己的运行库。普通版本更新不覆盖引导程序；更换引导协议需要单独迁移。
+原有安装向导仍使用固定安装目录，无须套用此版本目录结构。
+
+这不是运行中热更新，也没有添加后台联网下载或定时拉取 Git。发布者先确认对应提交的
+完整远端 CI、相关验收及包文件通过，再执行下方命令。局部验收或等待中的 CI 不能发布。
+SHA-256 防止文件错配，不等同于发布者数字签名；不要对来源不明的包生成验收凭证。
+失败会保留当前版本及记录；回退只切换到已安装并重新校验通过的版本。
+
+快捷方式迁移前备份原链接，保留参数、热键、窗口状态和说明；目标、工作目录、图标及
+应用标识统一到固定入口。不取消固定、不重排任务栏，不重启资源管理器、不结束软件。
+不会恢复回收站中被安全软件标记的旧诊断链接，也不设置杀毒白名单。
+
+手动诊断使用固定启动器的 `--diagnostics` 参数，抓帧仍须手动按 F12，保存在安装根目录
+下的 `diagnostics/`，不上传。普通启动清除仅用于该子进程的诊断变量。安装错误提示
+使用当前保存的中／英／日语言，应用内语言切换仍立即生效。
+
+## English
+
+Desktop, Start menu and taskbar entry points use one stable native launcher. Each verified
+release has an immutable `versions/<version>/` directory. Only after all payload hashes
+pass does publication atomically replace `current.json`. The next launch uses the new
+release without repinning. A running release is not restarted or overwritten, old releases
+remain available for rollback, and projects, assets, settings and training state are untouched.
+The entry point is shared by 3DGS, 2DGS, point clouds, meshes and all generation pipelines;
+it changes no training algorithm or optimizer-state resume capability.
+
+The local managed root is `E:\Apps\Gaussian Scene Workbench`. Prefer a writable non-system
+drive elsewhere; existing C: locations are supported on system-drive-only devices. The
+bootstrap and its initial Qt runtime remain in `bin/`; each release owns its own runtime.
+Ordinary updates do not replace the bootstrap. A bootstrap-protocol migration is separate.
+The classic setup wizard retains its existing fixed-directory installation adapter.
+
+This is not live patching or an automatic network downloader/Git poller. The publisher must
+first verify full remote CI, relevant acceptance and the exact-source package. Scoped or
+pending acceptance is insufficient. SHA-256 binds file integrity, not publisher authenticity;
+never manufacture acceptance evidence for an untrusted package. Failure retains the active
+release and a record; rollback selects and revalidates an already-installed release.
+
+Migration backs up each recognized native shortcut and retains arguments, hotkey, window
+state and description. Target, working directory, icon and application identity use the
+stable entry. It does not unpin, reorder the taskbar, restart Explorer or close applications.
+It does not restore a quarantined/deleted diagnostic link or change antivirus trust settings.
+
+Manual capture uses the native launcher's `--diagnostics` option; F12 remains opt-in and saves
+locally under the managed root's `diagnostics/`, without uploads. Ordinary launch removes the
+diagnostic variable for that child only. Launcher errors use the saved Chinese/English/Japanese
+language; in-application language switching remains immediate.
+
+## 日本語
+
+デスクトップ・スタートメニュー・タスクバーは共通の固定ネイティブランチャーを使用します。
+検証済みの各バージョンを変更しない `versions/<version>/` に配置し、全ファイルのハッシュ
+確認後に `current.json` を原子的に切り替えます。次回起動から新バージョンになり、再度の
+ピン留めは不要です。起動中の旧版は終了・上書きせず、ロールバック用に残します。
+プロジェクト・素材・設定・学習状態は移動・上書きしません。3DGS・2DGS・点群・メッシュ・
+その他の生成経路で共通です。学習方式や最適化状態の再開機能を変更するものではありません。
+
+本機の管理先は `E:\Apps\Gaussian Scene Workbench` です。他の端末でも書込み可能な
+非システムドライブを優先し、C: のみの端末では既存ディレクトリーを利用できます。
+ランチャーと初期 Qt ランタイムは `bin/` に保持し、各バージョンは独自のランタイムを
+持ちます。通常更新でブートストラップを置換せず、プロトコル変更は別途移行します。
+従来のセットアップウィザードは固定インストール先を使用する方式のままです。
+
+実行中のホットパッチや自動ダウンロード、Git の定期取得ではありません。発行前に対応
+コミットの完全なリモート CI・関連受入検証・パッケージを確認します。限定検証や実行中の
+CI では発行できません。SHA-256 はファイル整合性であり、発行元の署名ではありません。
+不明な配布物に受入証跡を作成しないでください。失敗時は現行版と記録を保持します。
+ロールバックはインストール済みの版を再検証して選択する操作です。
+
+対象のネイティブショートカットは移行前にバックアップし、引数・ホットキー・表示状態・
+説明を保持します。起動先・作業先・アイコン・アプリ識別子は固定入口に統一します。
+ピン留め解除・並べ替え、Explorer の再起動、アプリ終了は行いません。削除・隔離された
+旧診断リンクを復元せず、ウイルス対策の信頼設定も変更しません。
+
+診断はネイティブランチャーの `--diagnostics` で手動起動します。F12 による収集先は
+管理ルート内の `diagnostics/` で、自動アップロードしません。通常起動では子プロセスの
+診断変数のみ解除します。エラー表示は保存済みの中・英・日言語を使用し、アプリ内の
+言語変更は引き続き即時反映されます。
+
+## Publisher commands / 发布命令 / 発行コマンド
+
+Developer CLI messages remain English. / 开发 CLI 原始输出保留英文。 /
+開発 CLI の生出力は英語です。
+
+```powershell
+# Exact-source full remote acceptance, not a scoped test claim.
+./scripts/write_native_release_manifest.ps1 -PackageRoot $verifiedPackage `
+  -SourceCommit $commit -AcceptanceProof $fullAcceptance -OutputPath $freshManifest
+./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
+  -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance `
+  -SynchronizeShortcuts
+# Roll back without deleting either slot or closing a running application.
+./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
+  -ActivateVersion $previousInstalledVersion
+# Manual capture: native executable and arguments, no shell execution-policy override.
+& 'E:\Apps\Gaussian Scene Workbench\bin\Gaussian Scene Workbench Launcher.exe' --diagnostics
+```
+
+Evidence: `update-records/<id>/publication.json`, shortcut backups and `current-before.json`.
+A partial entry-point failure is explicitly recorded in `publication-failed.json` with the
+actual activation status. Remote gates include `native_managed_installation`,
+`scripts/test_native_installation.ps1`, Native Managed Updates and the full Native Windows run.

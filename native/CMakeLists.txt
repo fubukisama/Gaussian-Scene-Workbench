@@ -358,6 +358,25 @@ target_link_libraries(gsw_native_language_resources PRIVATE Qt6::Core)
 qt_add_resources(gsw_native_language_resources "workbench_languages"
   PREFIX "/i18n" BASE "${GSW_I18N_DIR}" FILES ${GSW_I18N_QM})
 target_link_libraries(GaussianSceneWorkbench PRIVATE gsw_native_language_resources)
+add_library(gsw_native_installation STATIC src/NativeInstallation.cpp src/NativeInstallation.h)
+set_target_properties(gsw_native_installation PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(gsw_native_installation PUBLIC src)
+target_link_libraries(gsw_native_installation PUBLIC Qt6::Core)
+if(WIN32)
+  target_link_libraries(gsw_native_installation PRIVATE Shell32 Ole32 Propsys User32 Uuid)
+endif()
+qt_add_executable(GaussianSceneWorkbenchLauncher WIN32 src/NativeLauncher.cpp)
+target_link_libraries(GaussianSceneWorkbenchLauncher PRIVATE gsw_native_installation gsw_native_language_resources Qt6::Core)
+target_compile_definitions(GaussianSceneWorkbenchLauncher PRIVATE GSW_APP_USER_MODEL_ID="${GSW_APP_USER_MODEL_ID}")
+target_link_libraries(GaussianSceneWorkbench PRIVATE gsw_native_installation)
+set_target_properties(GaussianSceneWorkbenchLauncher PROPERTIES OUTPUT_NAME "Gaussian Scene Workbench Launcher")
+if(WIN32)
+  target_sources(GaussianSceneWorkbenchLauncher PRIVATE assets/gsw-app-icon.rc)
+endif()
+if(MSVC)
+  target_compile_options(gsw_native_installation PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  target_compile_options(GaussianSceneWorkbenchLauncher PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
 foreach(language zh_CN ja)
   find_file(GSW_QTBASE_${language} NAMES "qtbase_${language}.qm"
     HINTS "${Qt6_DIR}/../../../share/qt6/translations" "${Qt6_DIR}/../../../translations" REQUIRED)
@@ -406,7 +425,7 @@ set_target_properties(GaussianSceneWorkbench PROPERTIES
 )
 
 include(GNUInstallDirs)
-install(TARGETS GaussianSceneWorkbench
+install(TARGETS GaussianSceneWorkbench GaussianSceneWorkbenchLauncher
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(DIRECTORY third_party/spz DESTINATION licenses)
@@ -450,6 +469,11 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_release_manifest.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/publish_native_installation.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_installation.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_package_launch.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_readme.py"
@@ -988,6 +1012,14 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  qt_add_executable(gsw_native_installation_tests tests/NativeInstallationTests.cpp)
+  target_link_libraries(gsw_native_installation_tests PRIVATE gsw_native_installation Qt6::Core Qt6::Test)
+  if(MSVC)
+    target_compile_options(gsw_native_installation_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME native_managed_installation COMMAND gsw_native_installation_tests -o -,txt)
+  set_tests_properties(native_managed_installation PROPERTIES TIMEOUT 30
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
   add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
   add_test(NAME native_quality_comparison_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-comparison)

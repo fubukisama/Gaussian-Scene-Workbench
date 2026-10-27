@@ -535,15 +535,15 @@ function Stage-CondaDependencyNotices {
   }
   $KnownOwners = [ordered]@{
     schema = 'gsw.runtime_license_known_owners/1'
-    owners = @([ordered]@{
-      binary = 'Gaussian Scene Workbench.exe'
-      sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash.ToLowerInvariant()
+    owners = @(@('Gaussian Scene Workbench.exe', 'Gaussian Scene Workbench Launcher.exe') | ForEach-Object { [ordered]@{
+      binary = $_
+      sha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $Executable) $_) -Algorithm SHA256).Hash.ToLowerInvariant()
       owner = 'Gaussian Scene Workbench'
       version = [string]$BuildManifest.version
       license_expression = 'GPL-3.0-or-later'
       source_urls = @('https://github.com/fubukisama/Gaussian-Scene-Workbench')
       license_files = @($NoticeFiles)
-    })
+    }})
   }
   $OwnerPath = Join-Path $BuildDirectory 'runtime-license-known-owners.json'
   [IO.File]::WriteAllText($OwnerPath, ($KnownOwners | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))

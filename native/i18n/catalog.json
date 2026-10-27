@@ -1,4 +1,8 @@
 {
+  "无法启动软件": {"zh_CN":"无法启动软件","en_US":"Unable to start the application","ja_JP":"ソフトウェアを起動できません"},
+  "程序文件校验失败，已阻止启动。请重新安装已验证版本。": {"zh_CN":"程序文件校验失败，已阻止启动。请重新安装已验证版本。","en_US":"Application integrity verification failed. Launch was blocked. Reinstall a verified version.","ja_JP":"プログラムファイルの整合性検証に失敗したため、起動を停止しました。検証済みバージョンを再インストールしてください。"},
+  "无法启动当前版本。请检查安装文件，原有工程和设置未修改。": {"zh_CN":"无法启动当前版本。请检查安装文件，原有工程和设置未修改。","en_US":"The current version could not be started. Check the installation files. Existing projects and settings were not changed.","ja_JP":"現在のバージョンを起動できませんでした。インストールファイルを確認してください。既存のプロジェクトと設定は変更していません。"},
+  "安装版本信息无效，未启动程序。请重新部署已验证版本。": {"zh_CN":"安装版本信息无效，未启动程序。请重新部署已验证版本。","en_US":"The installed-version information is invalid. Nothing was launched. Deploy a verified version again.","ja_JP":"インストール済みバージョンの情報が無効なため、起動していません。検証済みバージョンを再配置してください。"},
   "网格设置": {"zh_CN":"网格设置","en_US":"Grid Settings","ja_JP":"グリッド設定"},
   "视口详情": {"zh_CN":"视口详情","en_US":"Viewport Details","ja_JP":"ビューポートの詳細"},
   "复制详情": {"zh_CN":"复制详情","en_US":"Copy Details","ja_JP":"詳細をコピー"},

@@ -1,0 +1,88 @@
+name: Native Managed Updates
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/src/NativeInstall*'
+      - 'native/src/NativeLauncher.cpp'
+      - 'native/tests/NativeInstallationTests.cpp'
+      - 'scripts/*native*installation.ps1'
+      - 'scripts/write_native_release_manifest.ps1'
+      - '.github/workflows/native-updates.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  managed-updates:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - name: Prepare codec dependencies for native configure
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw 'Codec configure dependencies failed.' }
+      - name: Build native launcher and installation boundary
+        shell: pwsh
+        run: |
+          cmake -S native -B native/build-updates -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON '-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw 'Native update configure failed.' }
+          cmake --build native/build-updates --config Release --parallel --target GaussianSceneWorkbenchLauncher gsw_native_installation_tests
+          if ($LASTEXITCODE -ne 0) { throw 'Native update build failed.' }
+      - name: Verify pure plans and Windows taskbar relaunch properties
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/update-evidence -Force | Out-Null
+          ctest --test-dir native/build-updates -C Release --no-tests=error --verbose --output-on-failure `
+            -R '^native_managed_installation$' --output-junit "$PWD/native/update-evidence/contracts.xml" `
+            --output-log native/update-evidence/contracts.log
+          if ($LASTEXITCODE -ne 0) { throw 'Native installation boundary failed.' }
+      - name: Verify publish, retained old slot, link migration and rollback
+        shell: pwsh
+        run: |
+          $runtime=Join-Path $PWD 'native/update-runtime/bin'
+          New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+          Copy-Item -LiteralPath 'native/build-updates/Release/Gaussian Scene Workbench Launcher.exe' -Destination $runtime
+          windeployqt --release --no-translations --compiler-runtime "$runtime/Gaussian Scene Workbench Launcher.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher runtime staging failed.' }
+          ./scripts/test_native_installation.ps1 -RuntimeDirectory $runtime -TestRoot "$PWD/native/update-evidence/owned-fixtures"
+      - name: Retain exact-source contract evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/update-evidence -Force | Out-Null
+          [ordered]@{sourceCommit=(git rev-parse HEAD).Trim();runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/update-evidence/source.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-managed-updates-evidence
+          path: |
+            native/update-evidence/*.json
+            native/update-evidence/*.log
+            native/update-evidence/*.xml
+            native/update-evidence/owned-fixtures/acceptance.json
+            native/update-evidence/owned-fixtures/*/publication*.json
+          if-no-files-found: error
+          retention-days: 14

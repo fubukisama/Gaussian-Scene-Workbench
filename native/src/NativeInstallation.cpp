@@ -1,0 +1,218 @@
+#include "NativeInstallation.h"
+
+#include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QSet>
+#include <QThread>
+#include <QUuid>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <shobjidl.h>
+#include <propkey.h>
+#include <propvarutil.h>
+#endif
+
+namespace gsw {
+namespace {
+bool ordinaryPath(const QString &path) {
+  const QFileInfo file(path);
+  if (!file.exists() || file.isSymLink()) return false;
+#ifdef Q_OS_WIN
+  const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16()));
+  if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+#endif
+  return true;
+}
+
+bool localOrdinaryTree(const QString &path) {
+  if (!QDir::isAbsolutePath(path) || path.startsWith(QLatin1String("//")) ||
+      path.startsWith(QLatin1String("\\\\"))) return false;
+  QString cursor = QDir::cleanPath(path);
+  for (;;) {
+    if (!ordinaryPath(cursor)) return false;
+    const QString parent = QFileInfo(cursor).absolutePath();
+    if (parent == cursor) return true;
+    cursor = parent;
+  }
+}
+
+bool versionName(const QString &value) {
+  static const QRegularExpression allowed(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"));
+  static const QRegularExpression reserved(QStringLiteral("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?$"),
+                                             QRegularExpression::CaseInsensitiveOption);
+  return allowed.match(value).hasMatch() && !value.endsWith(QLatin1Char('.')) &&
+      !reserved.match(value).hasMatch();
+}
+
+QString launcherFor(const QString &root) {
+  return QDir(root).filePath(QLatin1String("bin/") + QString::fromLatin1(kNativeLauncherName));
+}
+} // namespace
+
+NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagnostics,
+    const QStringList &arguments, const QProcessEnvironment &inherited) {
+  NativeLaunchPlan result;
+  result.error = QStringLiteral("managed_installation_manifest_invalid");
+  result.root = QDir::cleanPath(root);
+  if (!localOrdinaryTree(result.root) || !QFileInfo(result.root).isDir()) return result;
+  const QString manifestPath = QDir(result.root).filePath(QStringLiteral("current.json"));
+  if (!localOrdinaryTree(manifestPath)) return result;
+  QFile manifest(manifestPath);
+  if (!manifest.open(QIODevice::ReadOnly) || manifest.size() > 16384) return result;
+  QJsonParseError parse;
+  const auto document = QJsonDocument::fromJson(manifest.readAll(), &parse);
+  if (parse.error != QJsonParseError::NoError || !document.isObject()) return result;
+  const auto object = document.object();
+  const QSet<QString> required{QStringLiteral("schema"), QStringLiteral("version"),
+                              QStringLiteral("executableSha256")};
+  const auto keys = object.keys();
+  if (QSet<QString>(keys.cbegin(), keys.cend()) != required ||
+      object.value(QStringLiteral("schema")).toString() != QLatin1String("gsw.native_active_version/1")) return result;
+  result.version = object.value(QStringLiteral("version")).toString();
+  const QString digest = object.value(QStringLiteral("executableSha256")).toString();
+  static const QRegularExpression sha(QStringLiteral("^[a-f0-9]{64}$"));
+  if (!versionName(result.version) || !sha.match(digest).hasMatch()) return result;
+  result.workingDirectory = QDir(result.root).filePath(QLatin1String("versions/") + result.version);
+  result.program = QDir(result.workingDirectory).filePath(
+      QLatin1String("bin/") + QString::fromLatin1(kNativeApplicationName));
+  if (!localOrdinaryTree(result.program) || !QFileInfo(result.program).isFile() ||
+      !localOrdinaryTree(launcherFor(result.root)) || !QFileInfo(launcherFor(result.root)).isFile()) return result;
+  QFile application(result.program);
+  QCryptographicHash hash(QCryptographicHash::Sha256);
+  if (!application.open(QIODevice::ReadOnly) || !hash.addData(&application) ||
+      QString::fromLatin1(hash.result().toHex()) != digest) {
+    result.error = QStringLiteral("managed_installation_integrity_failed");
+    return result;
+  }
+  result.arguments = arguments;
+  result.environment = inherited;
+  result.environment.insert(QStringLiteral("GSW_NATIVE_INSTALL_ROOT"), result.root);
+  // Diagnostics are explicit for this one child, never a persistent setting.
+  result.environment.remove(QStringLiteral("GSW_RENDER_DIAGNOSTICS_DIR"));
+  if (diagnostics)
+  {
+    const QString diagnosticRoot = QDir(result.root).filePath(QStringLiteral("diagnostics"));
+    if (QFileInfo(diagnosticRoot).exists() &&
+        (!localOrdinaryTree(diagnosticRoot) || !QFileInfo(diagnosticRoot).isDir())) return result;
+    result.environment.insert(QStringLiteral("GSW_RENDER_DIAGNOSTICS_DIR"),
+                              diagnosticRoot);
+  }
+  result.error.clear();
+  return result;
+}
+
+QString nativeInstallationErrorText(const QString &code) {
+  if (code == QLatin1String("managed_installation_integrity_failed"))
+    return QCoreApplication::translate("Workbench", "程序文件校验失败，已阻止启动。请重新安装已验证版本。");
+  if (code == QLatin1String("managed_installation_start_failed"))
+    return QCoreApplication::translate("Workbench", "无法启动当前版本。请检查安装文件，原有工程和设置未修改。");
+  return QCoreApplication::translate("Workbench", "安装版本信息无效，未启动程序。请重新部署已验证版本。");
+}
+
+QString managedInstallationForApplication(const QString &applicationPath) {
+  const QFileInfo application(applicationPath);
+  if (application.fileName() != QString::fromLatin1(kNativeApplicationName) ||
+      !localOrdinaryTree(applicationPath)) return {};
+  QDir bin = application.absoluteDir();
+  if (bin.dirName() != QLatin1String("bin") || !bin.cdUp() || !versionName(bin.dirName()) ||
+      !bin.cdUp() || bin.dirName() != QLatin1String("versions") || !bin.cdUp()) return {};
+  const QString root = bin.absolutePath();
+  if (!localOrdinaryTree(launcherFor(root)) ||
+      !localOrdinaryTree(QDir(root).filePath(QStringLiteral("current.json")))) return {};
+  return root;
+}
+
+bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPath,
+                             const QString &appUserModelId) {
+  const QString root = managedInstallationForApplication(applicationPath);
+  if (root.isEmpty()) return true; // Classic fixed-directory installer, no redirect.
+#ifdef Q_OS_WIN
+  IPropertyStore *store = nullptr;
+  if (FAILED(SHGetPropertyStoreForWindow(static_cast<HWND>(windowHandle), IID_PPV_ARGS(&store)))) return false;
+  const QString launcher = QDir::toNativeSeparators(launcherFor(root));
+  const auto set = [&](REFPROPERTYKEY key, const QString &value) {
+    PROPVARIANT variant;
+    PropVariantInit(&variant);
+    HRESULT status = InitPropVariantFromString(reinterpret_cast<LPCWSTR>(value.utf16()), &variant);
+    if (SUCCEEDED(status)) status = store->SetValue(key, variant);
+    PropVariantClear(&variant);
+    return SUCCEEDED(status);
+  };
+  // Microsoft requires explicit window ID and both relaunch properties.
+  const bool good = set(PKEY_AppUserModel_ID, appUserModelId) &&
+      set(PKEY_AppUserModel_RelaunchCommand, QLatin1Char('"') + launcher + QLatin1Char('"')) &&
+      set(PKEY_AppUserModel_RelaunchDisplayNameResource, QLatin1Char('@') + launcher + QStringLiteral(",-201")) &&
+      set(PKEY_AppUserModel_RelaunchIconResource, launcher + QStringLiteral(",0")) && SUCCEEDED(store->Commit());
+  store->Release();
+  return good;
+#else
+  Q_UNUSED(windowHandle); Q_UNUSED(appUserModelId);
+  return true;
+#endif
+}
+
+bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
+                                const QString &arguments, const QString &appUserModelId) {
+#ifdef Q_OS_WIN
+  if (!QDir::isAbsolutePath(path) || QFileInfo(path).suffix().compare(QLatin1String("lnk"), Qt::CaseInsensitive) ||
+      !localOrdinaryTree(QFileInfo(path).absolutePath()) ||
+      (QFileInfo(path).exists() && !ordinaryPath(path)) || !localOrdinaryTree(launcher) ||
+      !QFileInfo(launcher).isFile()) return false;
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return false;
+  IShellLinkW *link = nullptr;
+  IPersistFile *file = nullptr;
+  IPropertyStore *store = nullptr;
+  bool good = SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                         IID_PPV_ARGS(&link)));
+  const QString nativePath = QDir::toNativeSeparators(path);
+  const QString nativeLauncher = QDir::toNativeSeparators(launcher);
+  const QString directory = QDir::toNativeSeparators(QFileInfo(launcher).absolutePath());
+  if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
+  if (good && QFileInfo(path).exists())
+    good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(nativePath.utf16()), STGM_READ));
+  if (good) good = SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()))) &&
+      SUCCEEDED(link->SetArguments(reinterpret_cast<LPCWSTR>(arguments.utf16()))) &&
+      SUCCEEDED(link->SetWorkingDirectory(reinterpret_cast<LPCWSTR>(directory.utf16()))) &&
+      SUCCEEDED(link->SetIconLocation(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()), 0)) &&
+      SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&store)));
+  if (good) {
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    good = SUCCEEDED(InitPropVariantFromString(reinterpret_cast<LPCWSTR>(appUserModelId.utf16()), &value)) &&
+           SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value)) && SUCCEEDED(store->Commit());
+    PropVariantClear(&value);
+  }
+  // Save a fresh sibling before atomically replacing the link. Never leave an
+  // existing taskbar/desktop link partially written after an interrupted update.
+  const QString stage = nativePath + QLatin1Char('.') + QUuid::createUuid().toString(QUuid::Id128) + QStringLiteral(".lnk");
+  if (good) good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE));
+  if (store) store->Release();
+  if (file) file->Release();
+  if (link) link->Release();
+  if (good) {
+    good = false;
+    for (int attempt = 0; attempt < 80; ++attempt) {
+      if (MoveFileExW(reinterpret_cast<LPCWSTR>(stage.utf16()), reinterpret_cast<LPCWSTR>(nativePath.utf16()),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { good = true; break; }
+      const DWORD error = GetLastError();
+      if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) break;
+      QThread::msleep(100);
+    }
+  }
+  if (QFileInfo(stage).exists()) QFile::remove(stage); // Only this call's fresh sibling.
+  if (SUCCEEDED(initialized)) CoUninitialize();
+  return good;
+#else
+  Q_UNUSED(path); Q_UNUSED(launcher); Q_UNUSED(arguments); Q_UNUSED(appUserModelId);
+  return false;
+#endif
+}
+} // namespace gsw

@@ -8,7 +8,7 @@
 或训练状态；不同模型类型只记录其实际经过的绘制阶段。
 
 1. 保存当前工程，然后自行关闭正常版程序；启动器不会关闭已有窗口。
-2. 手动运行单独提供的诊断快捷方式，或按下方示例执行启动脚本。不要用正常版
+2. 使用下方原生启动器的 `--diagnostics` 参数。不要用正常版
    桌面快捷方式代替诊断启动器。模型与抓帧留在本地，不会上传。
 3. 用相同文件、相同顺序导入并重现异常。也可打开保存的工程；若重开工程没有
    复现，请恢复原来的逐个导入步骤，而不是把正常画面当作复现成功。
@@ -28,10 +28,9 @@
 
 捕获文件可能包含模型画面、原始文件名、绝对路径及相机／绘制状态。它们只保存在
 指定目录，启动器不自动打开或上传任何数据，也不更改持久环境变量或程序设置。
-请使用可写的非系统盘目录（本机使用 E:）；只有系统盘可用时允许该盘，不需要
-另行确认。启动器拒绝已有程序实例、相对／网络路径和穿过链接或目录联接的
-抓帧目录，避免悄悄写入其他盘。结束后自行正常关闭诊断版；正常快捷方式仍启动
-原安装，未设置此变量时 `F12` 诊断关闭。
+新版使用[托管安装目录](NATIVE_UPDATES.md)内的 `diagnostics/`（本机 E:），拒绝
+穿过链接或目录联接的抓帧目录。请先自行保存并关闭已有实例；原生启动器不会结束
+已有程序。结束后正常关闭诊断版；普通入口仍使用当前版本，但不启用 `F12` 诊断。
 
 ## English (en_US)
 
@@ -43,7 +42,7 @@ training state; each source records only the draw stages it actually uses.
 
 1. Save the project, then manually close the normal application. The launcher never
    closes an existing window.
-2. Manually run the separate diagnostic shortcut or the script below. Do not substitute
+2. Use the native launcher's `--diagnostics` option below. Do not substitute
    the normal desktop shortcut. Models and captures remain local and are not uploaded.
 3. Import the same files in the same order and reproduce the defect. Opening the saved
    project is also possible; if that does not reproduce it, repeat the original sequential
@@ -69,10 +68,11 @@ Evidence can contain model pixels, original filenames, absolute paths and camera
 state. It is saved only under the chosen local directory; the launcher does not open or
 upload it, or change persistent environment/settings. Prefer a writable non-system drive
 (E: on this machine); a system-drive-only machine remains supported without additional
-confirmation. The launcher refuses running application instances, relative/network paths
-and capture paths passing through links/junctions. Close the diagnostic application
-normally when finished. The ordinary shortcut still starts the original installation;
-without this variable, the F12 diagnostic is disabled.
+confirmation. The native launcher uses `diagnostics/` within the
+[managed installation](NATIVE_UPDATES.md), rejecting links/junctions there. Save and manually
+close existing instances first; the native launcher does not terminate them. Close the
+diagnostic application normally when finished. Ordinary launch uses the current release
+without enabling the F12 diagnostic.
 
 ## 日本語（ja_JP）
 
@@ -84,7 +84,7 @@ without this variable, the F12 diagnostic is disabled.
 
 1. プロジェクトを保存し、通常版を自分で終了してください。ランチャーが既存の
    ウィンドウを閉じることはありません。
-2. 別途提供された診断用ショートカット、または下記スクリプトを手動で実行します。
+2. 下記ネイティブランチャーの `--diagnostics` オプションを使用します。
    通常版のショートカットで代用しないでください。モデルと記録はローカルに保持し、
    アップロードしません。
 3. 同じファイルを同じ順序でインポートし、不具合を再現します。保存済みプロジェクトを
@@ -110,30 +110,31 @@ without this variable, the F12 diagnostic is disabled.
 記録にはモデルの画面、元のファイル名、絶対パス、カメラ・描画状態が含まれる場合が
 あります。指定したローカルフォルダーにのみ保存し、自動表示・アップロードや永続的な
 環境変数・設定の変更は行いません。書込み可能な非システムドライブ（本機では E:）を
-優先し、システムドライブしかない場合は追加確認なしで利用できます。起動中のアプリ、
-相対・ネットワークパス、リンク・ジャンクションを経由する記録先は拒否します。終了時は
-診断版を通常どおり自分で閉じてください。通常のショートカットは元のインストールを
-起動し、この変数がなければ F12 診断は無効です。
+優先し、システムドライブしかない場合は追加確認なしで利用できます。ネイティブ版は
+[管理インストール先](NATIVE_UPDATES.md)内の `diagnostics/` を使用し、リンク・
+ジャンクションを経由する記録先を拒否します。既存のアプリは事前に保存し、自分で
+閉じてください。ランチャーは強制終了しません。診断版も通常どおり自分で閉じます。
+通常起動は現行版を使用し、F12 診断を有効にしません。
 
 ## Manual command / 手动命令 / 手動コマンド
 
-Replace the executable with the separately supplied diagnostic build, not the normal
-installation. / 使用单独提供的诊断版路径，不是正常安装路径。 /
-通常版ではなく、別途提供された診断版の実行ファイルを指定してください。
+Use the verified managed native launcher. / 使用已验证的托管原生启动器。 /
+検証済みの管理ネイティブランチャーを使用してください。
 
 ```powershell
-& 'E:\Gaussian-Scene-Workbench-Dev\scripts\launch_native_render_diagnostics.ps1' `
-  -ExecutablePath 'E:\path-to-diagnostic-package\bin\Gaussian Scene Workbench.exe' `
-  -CaptureDirectory 'E:\Gaussian-Scene-Workbench-Dev\.tmp\render-diagnostics-20261027'
+& 'E:\Apps\Gaussian Scene Workbench\bin\Gaussian Scene Workbench Launcher.exe' --diagnostics
 ```
 
-The script is a developer/manual CLI; its raw console diagnostics remain English as
-documented in [LOCALIZATION.md](LOCALIZATION.md). Native application language selection
-continues to apply immediately and is not overridden by this launcher.
+The old PowerShell script is retained only as a developer/manual legacy CLI. Do not
+generate desktop links using hidden PowerShell or `ExecutionPolicy Bypass`. Native
+application language selection continues to apply immediately. Raw legacy CLI output
+remains English as documented in [LOCALIZATION.md](LOCALIZATION.md).
 
-脚本属于开发／手动命令行，其原始控制台诊断按 [LOCALIZATION.md](LOCALIZATION.md)
-保留英文。原生程序的语言选择仍即时生效，启动器不会覆盖。
+旧 PowerShell 脚本仅作为开发／手动兼容 CLI 保留，不再创建隐藏 PowerShell 或
+`ExecutionPolicy Bypass` 的桌面链接。原始 CLI 输出按 [LOCALIZATION.md](LOCALIZATION.md)
+保留英文，原生语言选择仍即时生效。
 
-このスクリプトは開発・手動用 CLI です。生のコンソール診断は
-[LOCALIZATION.md](LOCALIZATION.md) に従って英語のままです。アプリの言語選択は
-引き続き即時反映され、ランチャーは上書きしません。
+旧 PowerShell スクリプトは開発・手動互換 CLI としてのみ保持します。非表示の
+PowerShell や `ExecutionPolicy Bypass` を使うデスクトップリンクは作成しません。
+生の CLI 出力は [LOCALIZATION.md](LOCALIZATION.md) に従って英語のままです。
+アプリの言語選択は引き続き即時反映されます。

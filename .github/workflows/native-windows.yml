@@ -389,6 +389,9 @@ jobs:
           $scripts = @(
             "scripts/build_native.ps1",
             "scripts/write_native_source_manifest.ps1",
+            "scripts/write_native_release_manifest.ps1",
+            "scripts/publish_native_installation.ps1",
+            "scripts/test_native_installation.ps1",
             "scripts/bootstrap_native.ps1",
             "scripts/check_3dgs_env.ps1",
             "scripts/install_colmap.ps1",
@@ -457,6 +460,10 @@ jobs:
           -SourceRoot $PWD
           -DestinationRoot (Join-Path $PWD "native/artifact")
           -PythonExecutable $env:QA_PYTHON
+
+      - name: Verify managed update publication and stable entry points
+        shell: pwsh
+        run: ./scripts/test_native_installation.ps1 -RuntimeDirectory "$PWD/native/artifact/bin" -TestRoot "$env:RUNNER_TEMP/gsw-managed-update-acceptance"
 
       - name: Verify native-only package
         shell: pwsh
