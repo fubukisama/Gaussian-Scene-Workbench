@@ -148,6 +148,9 @@ private slots:
     PROPVARIANT value; PropVariantInit(&value);
     QVERIFY(SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &value)));
     QCOMPARE(QString::fromWCharArray(value.pwszVal), "GSW.Test.Stable"); PropVariantClear(&value);
+    const QString freshPath = QDir(root).filePath("fresh owned shortcut.lnk");
+    QVERIFY2(gsw::writeNativeLauncherShortcut(freshPath, launcher, {}, "GSW.Test.Stable", &diagnostic), qPrintable(diagnostic));
+    QVERIFY(QFileInfo(freshPath).isFile());
     QVERIFY(!gsw::writeNativeLauncherShortcut(QDir(root).filePath("not-a-link.txt"), launcher, {}, "GSW.Test.Stable"));
 #endif
   }

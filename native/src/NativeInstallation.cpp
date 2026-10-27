@@ -185,13 +185,17 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   int show = SW_SHOWNORMAL;
   QString phase = QStringLiteral("shortcut_load");
   if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
-  if (good && QFileInfo(path).exists())
-    good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(nativePath.utf16()), STGM_READ));
+  // A shell-link property store retains the IPersistFile load mode. Loading
+  // the original read-only and subsequently using Save As still makes Comment
+  // read-only (STG_E_ACCESSDENIED). Copy first, then open only our stage writable.
+  if (good && QFileInfo(path).exists()) {
+    phase = QStringLiteral("shortcut_stage_copy");
+    good = QFile::copy(path, stage);
+    if (good) { phase = QStringLiteral("shortcut_stage_load");
+      good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(stage.utf16()), STGM_READWRITE)); }
+  }
   if (good) good = SUCCEEDED(link->GetDescription(description, 4096)) &&
       SUCCEEDED(link->GetHotkey(&hotkey)) && SUCCEEDED(link->GetShowCmd(&show));
-  // Remember a fresh sibling before property-store Commit, which may persist
-  // immediately. Even that implementation must never modify the original link.
-  if (good) { phase = QStringLiteral("shortcut_stage_clone"); good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE)); }
   if (good) { phase = QStringLiteral("shortcut_target"); good = SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()))) &&
       SUCCEEDED(link->SetArguments(reinterpret_cast<LPCWSTR>(arguments.utf16()))) &&
       SUCCEEDED(link->SetWorkingDirectory(reinterpret_cast<LPCWSTR>(directory.utf16()))) &&
