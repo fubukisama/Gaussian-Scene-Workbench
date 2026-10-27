@@ -22,14 +22,24 @@
 
 namespace gsw {
 namespace {
-bool ordinaryPath(const QString &path) {
+bool pathExists(const QString &path) {
+#ifdef Q_OS_WIN
+  // QFileInfo treats .lnk as a symlink, so exists() tests the target instead
+  // of the link file. Installation metadata must inspect the actual file.
+  return GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16())) != INVALID_FILE_ATTRIBUTES;
+#else
   const QFileInfo file(path);
-  if (!file.exists() || file.isSymLink()) return false;
+  return file.exists() || file.isSymbolicLink();
+#endif
+}
+bool ordinaryPath(const QString &path) {
 #ifdef Q_OS_WIN
   const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16()));
-  if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+  return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
+  const QFileInfo file(path);
+  return file.exists() && !file.isSymLink();
 #endif
-  return true;
 }
 
 bool localOrdinaryTree(const QString &path) {
@@ -100,7 +110,7 @@ NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagn
   if (diagnostics)
   {
     const QString diagnosticRoot = QDir(result.root).filePath(QStringLiteral("diagnostics"));
-    if (QFileInfo(diagnosticRoot).exists() &&
+    if (pathExists(diagnosticRoot) &&
         (!localOrdinaryTree(diagnosticRoot) || !QFileInfo(diagnosticRoot).isDir())) return result;
     result.environment.insert(QStringLiteral("GSW_RENDER_DIAGNOSTICS_DIR"),
                               diagnosticRoot);
@@ -166,7 +176,7 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
 #ifdef Q_OS_WIN
   if (!QDir::isAbsolutePath(path) || QFileInfo(path).suffix().compare(QLatin1String("lnk"), Qt::CaseInsensitive) ||
       !localOrdinaryTree(QFileInfo(path).absolutePath()) ||
-      (QFileInfo(path).exists() && !ordinaryPath(path)) || !localOrdinaryTree(launcher) ||
+      (pathExists(path) && !ordinaryPath(path)) || !localOrdinaryTree(launcher) ||
       !QFileInfo(launcher).isFile()) return false;
   const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (diagnostic) *diagnostic = QStringLiteral("shortcut_com_initialization");
@@ -185,10 +195,9 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   int show = SW_SHOWNORMAL;
   QString phase = QStringLiteral("shortcut_load");
   if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
-  // A shell-link property store retains the IPersistFile load mode. Loading
-  // the original read-only and subsequently using Save As still makes Comment
-  // read-only (STG_E_ACCESSDENIED). Copy first, then open only our stage writable.
-  if (good && QFileInfo(path).exists()) {
+  // Property handlers may commit immediately: copy first, then open only our
+  // stage writable. The original must stay untouched until final publication.
+  if (good && pathExists(path)) {
     phase = QStringLiteral("shortcut_stage_copy");
     good = QFile::copy(path, stage);
     if (good) { phase = QStringLiteral("shortcut_stage_load");
@@ -208,12 +217,6 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
     good = SUCCEEDED(InitPropVariantFromString(reinterpret_cast<LPCWSTR>(appUserModelId.utf16()), &value)) &&
            SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value));
     PropVariantClear(&value);
-    if (good) good = SUCCEEDED(InitPropVariantFromString(description, &value));
-    if (good) {
-      const HRESULT comment = store->SetValue(PKEY_Comment, value);
-      phase = QStringLiteral("shortcut_comment_%1").arg(quint32(comment), 8, 16, QLatin1Char('0'));
-      good = SUCCEEDED(comment);
-    }
     if (good) { phase = QStringLiteral("shortcut_property_commit"); good = SUCCEEDED(store->Commit()); }
     PropVariantClear(&value);
   }
@@ -256,7 +259,7 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
       QThread::msleep(100);
     }
   }
-  if (QFileInfo(stage).exists()) QFile::remove(stage); // Only this call's fresh sibling.
+  if (pathExists(stage)) QFile::remove(stage); // Only this call's fresh sibling.
   if (good) SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT,
                            reinterpret_cast<LPCWSTR>(nativePath.utf16()), nullptr);
   if (SUCCEEDED(initialized)) CoUninitialize();

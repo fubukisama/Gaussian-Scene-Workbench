@@ -102,6 +102,8 @@ private slots:
     IShellLinkW *original = nullptr;
     QVERIFY(SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&original))));
     const auto releaseOriginal = qScopeGuard([&] { original->Release(); });
+    // Deliberately dangling: the .lnk itself still exists and must be loaded,
+    // not mistaken for a new shortcut by QFileInfo's target-following checks.
     QVERIFY(SUCCEEDED(original->SetPath(L"C:\\Windows\\not-executed.exe")));
     QVERIFY(SUCCEEDED(original->SetHotkey(MAKEWORD('G', HOTKEYF_CONTROL | HOTKEYF_ALT))));
     QVERIFY(SUCCEEDED(original->SetShowCmd(SW_SHOWMAXIMIZED)));
