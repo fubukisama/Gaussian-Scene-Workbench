@@ -17,6 +17,7 @@ private slots:
   void rejectsNestedOnlyImagesThatTrainingCannotConsume();
   void persistsPerObjectVisibilityWithoutChangingModelData();
   void oldSceneCollectionsDefaultToVisible();
+  void preservesOptionalViewportGridWithoutChangingSceneTransforms();
 };
 
 void WorkspaceSceneFormatTests::acceptsBigEndianPlySceneMetadata() {
@@ -206,6 +207,71 @@ void WorkspaceSceneFormatTests::oldSceneCollectionsDefaultToVisible() {
   document.restoreSceneCollection(legacy);
   QCOMPARE(document.sceneObjects().size(), 1);
   QVERIFY(document.sceneObjects()[0].visible);
+}
+
+void WorkspaceSceneFormatTests::preservesOptionalViewportGridWithoutChangingSceneTransforms() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString working = QDir(temporary.path()).filePath("working");
+  QVERIFY(QDir().mkpath(working));
+  const QString path = QDir(temporary.path()).filePath("grid-reference.ply");
+  const QByteArray source("ply\nformat ascii 1.0\nelement vertex 2\nproperty double x\nproperty double y\nproperty double z\nend_header\n0.25 -0.5 1.5\n2.75 1.25 4.0\n");
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write(source), source.size());
+  file.close();
+  gsw::WorkspaceDocument original;
+  QString error;
+  QVERIFY2(original.createUntitled(working, "Project grid settings", &error), qPrintable(error));
+  QVERIFY2(original.addScenePath(path, &error), qPrintable(error));
+  QVERIFY2(original.setSceneTransform({0.25F, -0.5F, 1.0F},
+      QQuaternion::fromEulerAngles(7.0F, 11.0F, 13.0F), {1.1F, 0.9F, 1.2F}, &error), qPrintable(error));
+  const QString manifest = QDir(temporary.path()).filePath("grid.gsw.json");
+  QVERIFY2(original.saveManifest(manifest, &error), qPrintable(error));
+  QFile manifestFile(manifest);
+  QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+  auto input = QJsonDocument::fromJson(manifestFile.readAll()).object();
+  manifestFile.close();
+  QVERIFY(!input.isEmpty());
+  const QJsonObject grid{{"version", 1}, {"spacingMode", "fixed"}, {"majorSpacing", 1.25},
+      {"subdivisions", 5}, {"density", 1.0}, {"displayUnit", "scene"},
+      {"gridVisible", true}, {"axesVisible", true}};
+  input.insert("viewportGrid", grid);
+  QVERIFY(manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  const QByteArray inputBytes = QJsonDocument(input).toJson(QJsonDocument::Indented);
+  QCOMPARE(manifestFile.write(inputBytes), inputBytes.size());
+  manifestFile.close();
+
+  // Exercise the existing public project loader and persistence channels.
+  // No new getter, private member, rendering hook or model mutation is used
+  // to manufacture a red result: an older loader naturally drops this field.
+  gsw::WorkspaceDocument loaded;
+  QVERIFY2(loaded.load(manifest, &error), qPrintable(error));
+  const auto collection = loaded.sceneCollectionJson();
+  const auto translation = loaded.sceneTranslation();
+  const auto rotation = loaded.sceneRotation();
+  const auto scale = loaded.sceneScale();
+  const auto recovery = QJsonDocument::fromJson(loaded.recoveryManifestJson()).object();
+  QCOMPARE(recovery.value("viewportGrid").toObject(), grid);
+  QCOMPARE(recovery.value("sceneCollection").toObject(), collection);
+  QVERIFY2(loaded.saveManifest({}, &error), qPrintable(error));
+  QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+  const auto saved = QJsonDocument::fromJson(manifestFile.readAll()).object();
+  manifestFile.close();
+  QCOMPARE(saved.value("viewportGrid").toObject(), grid);
+  QCOMPARE(loaded.sceneCollectionJson(), collection);
+  QCOMPARE(loaded.sceneTranslation(), translation);
+  QCOMPARE(loaded.sceneRotation(), rotation);
+  QCOMPARE(loaded.sceneScale(), scale);
+  gsw::WorkspaceDocument reopened;
+  QVERIFY2(reopened.load(manifest, &error), qPrintable(error));
+  QCOMPARE(QJsonDocument::fromJson(reopened.recoveryManifestJson()).object().value("viewportGrid").toObject(), grid);
+  QCOMPARE(reopened.sceneCollectionJson(), collection);
+  QCOMPARE(reopened.sceneTranslation(), translation);
+  QCOMPARE(reopened.sceneRotation(), rotation);
+  QCOMPARE(reopened.sceneScale(), scale);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  QCOMPARE(file.readAll(), source);
 }
 
 QTEST_GUILESS_MAIN(WorkspaceSceneFormatTests)

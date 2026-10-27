@@ -4,6 +4,14 @@ name: Native Viewport Status
 # retains the separate Native Windows/full-scene/security workflows.
 on:
   workflow_dispatch:
+    inputs:
+      contract_scope:
+        description: Focused contract group
+        type: choice
+        default: all
+        options:
+          - all
+          - project-only
 
 permissions:
   contents: read
@@ -18,6 +26,7 @@ jobs:
       QT_FORCE_STDERR_LOGGING: "1"
       QT_LOGGING_TO_CONSOLE: "1"
       QT_STYLE_OVERRIDE: windows11
+      GSW_STATUS_SCOPE: ${{ inputs.contract_scope || 'all' }}
       GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/viewport-status-artifact/screenshots
     steps:
       - name: Checkout exact dispatched source
@@ -74,7 +83,7 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw 'Codec dependency installation failed.' }
 
-      - name: Build application and frame cadence unit target
+      - name: Build only the requested contract targets
         id: focused-build
         shell: pwsh
         run: |
@@ -85,17 +94,30 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status configure failed.' }
-          cmake --build native/build-viewport-status --config Release --parallel `
-            --target GaussianSceneWorkbench gsw_frame_rate_counter_tests 2>&1 |
+          $targets = @('gsw_workspace_scene_format_tests')
+          if ($env:GSW_STATUS_SCOPE -eq 'all') { $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests') }
+          elseif ($env:GSW_STATUS_SCOPE -ne 'project-only') { throw 'Unknown contract group.' }
+          cmake --build native/build-viewport-status --config Release --parallel --target $targets 2>&1 |
             Tee-Object -FilePath native/viewport-status-artifact/build.log
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status build failed.' }
 
       - name: Prepare real Windows display and OpenGL
         id: focused-graphics
+        if: ${{ inputs.contract_scope != 'project-only' }}
         shell: pwsh
         run: |
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
+
+      - name: Verify project presentation persistence without model mutation
+        if: ${{ !cancelled() && steps.focused-build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/viewport-status-artifact/project-contracts.log `
+            --output-junit (Join-Path $PWD 'native/viewport-status-artifact/project-contracts.xml') `
+            -R '^workspace_scene_format$'
+          if ($LASTEXITCODE -ne 0) { throw 'Project presentation persistence contracts failed; existing assertions remain unchanged.' }
 
       - name: Verify existing cadence and actual window scheduling
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
