@@ -156,6 +156,11 @@ ViewportGridDialog::ViewportGridDialog(const ViewportGridSettings &source,
   bodyLayout->addLayout(form);
   const auto caption = [&](const char *sourceText, QWidget *control) {
     auto *title = label(body, sourceText);
+    // A form label must contribute its actual width to QFormLayout. The
+    // explanatory word-wrapped labels use Ignored to permit narrow dialogs;
+    // reusing that policy here collapses the entire caption column to zero.
+    title->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    title->setWordWrap(false);
     title->setBuddy(control);
     AppLanguage::bind(control, "accessibleName", sourceText);
     return title;

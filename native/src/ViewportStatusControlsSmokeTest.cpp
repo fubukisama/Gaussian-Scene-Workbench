@@ -21,6 +21,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QImage>
 #include <QJsonDocument>
 #include <QLabel>
@@ -501,6 +502,16 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
           controls.grid->text() == translated("显示网格") && controls.axes->text() == translated("显示坐标轴") &&
           controls.mode->itemText(controls.mode->findData(static_cast<int>(Settings::SpacingMode::Fixed))) == translated("固定间距") &&
           controls.unit->currentText() == translated("毫米（mm）"), "grid captions immediately use the selected catalog")) return false;
+      for (QWidget *field : QList<QWidget *>{controls.mode, controls.spacing, controls.subdivisions,
+                                           controls.density, controls.unit}) {
+        QLabel *caption = nullptr;
+        for (auto *candidate : dialog.findChildren<QLabel *>())
+          if (candidate->buddy() == field) { caption = candidate; break; }
+        if (!check(caption && caption->isVisible() && !caption->text().isEmpty() &&
+            caption->width() >= QFontMetrics(caption->font()).horizontalAdvance(caption->text()) &&
+            caption->height() >= QFontMetrics(caption->font()).height(),
+            "every translated form caption has real visible geometry, not a collapsed zero-width column")) return false;
+      }
       if (!check(controls.spacing->text() == numeric && controls.mode->currentData() == beforeMode &&
           controls.unit->currentData() == beforeUnit && controls.subdivisions->currentData() == beforeSubdivisions &&
           near(controls.density->value(), 1.0) && controls.grid->isChecked() && controls.axes->isChecked() &&
