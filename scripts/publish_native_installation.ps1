@@ -63,9 +63,11 @@ function Maintenance([string]$Program,[string[]]$Arguments){
   $start=[Diagnostics.ProcessStartInfo]::new($Program);$start.UseShellExecute=$false
   $start.CreateNoWindow=$true;$start.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
   $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+  $start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false);$start.StandardErrorEncoding=[Text.UTF8Encoding]::new($false)
   foreach($argument in $Arguments){$start.ArgumentList.Add($argument)}
   $process=[Diagnostics.Process]::Start($start)
-  try{Require ($process.WaitForExit(15000)) 'Native shortcut maintenance timed out.';Require ($process.ExitCode -eq 0) ('Native shortcut maintenance failed: '+$process.StandardError.ReadToEnd())}finally{$process.Dispose()}
+  $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+  try{Require ($process.WaitForExit(15000)) 'Native shortcut maintenance timed out.';Require ($process.ExitCode -eq 0) ('Native shortcut maintenance failed: '+$stderr.GetAwaiter().GetResult());return $stdout.GetAwaiter().GetResult()}finally{$process.Dispose()}
 }
 
 $root=FullLocal $InstallRoot;NoLinks $root
@@ -146,15 +148,13 @@ try{
   $activated=$true
   if($SynchronizeShortcuts){
     if(-not $ShortcutDirectories){$ShortcutDirectories=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),(Join-Path $env:APPDATA 'Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar'))}
-    $shell=New-Object -ComObject WScript.Shell
-    try{
     foreach($directory in $ShortcutDirectories){
       if(-not(Test-Path -LiteralPath $directory -PathType Container)){continue}
       NoLinks $directory
       foreach($file in Get-ChildItem -LiteralPath $directory -Filter *.lnk -File -Recurse -ErrorAction SilentlyContinue){
         NoLinks $file.FullName
-        $link=$shell.CreateShortcut($file.FullName);$target=[string]$link.TargetPath;$arguments=[string]$link.Arguments
-        try{
+        $link=(Maintenance $launcher @('--read-shortcut',$file.FullName))|ConvertFrom-Json
+        $target=[string]$link.target;$arguments=[string]$link.arguments
         if([IO.Path]::GetFileName($target) -ine 'Gaussian Scene Workbench.exe' -and $target -ine $launcher){continue}
         $targetRoot=[IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($target))
         $owned=$target -ieq $launcher
@@ -170,16 +170,13 @@ try{
         $before=[ordered]@{path=$file.FullName;target=$target;arguments=$arguments;sha256=(Retry {Hash $file.FullName});backup=$backup}
         Retry {Copy-Item -LiteralPath $file.FullName -Destination $backup}
         Require ((Retry {Hash $backup}) -ceq $before.sha256) 'Shortcut backup differs.'
-        Retry {Maintenance $launcher @('--write-shortcut',$file.FullName,$arguments)}
-        $after=$shell.CreateShortcut($file.FullName)
-        try{
-        Require ($after.TargetPath -ieq $launcher -and $after.Arguments -ceq $arguments) 'Stable shortcut readback differs.'
-        $changed.Add([ordered]@{before=$before;target=$after.TargetPath;arguments=$after.Arguments;sha256=(Retry {Hash $file.FullName})})
-        }finally{[Runtime.InteropServices.Marshal]::FinalReleaseComObject($after)|Out-Null}
-        }finally{[Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)|Out-Null}
+        $null=Retry {Maintenance $launcher @('--write-shortcut',$file.FullName,$arguments)}
+        $after=(Maintenance $launcher @('--read-shortcut',$file.FullName))|ConvertFrom-Json
+        Require ($after.target -ieq $launcher -and $after.arguments -ceq $arguments -and
+          $after.description -ceq $link.description -and $after.hotkey -eq $link.hotkey -and $after.showCommand -eq $link.showCommand) 'Stable shortcut readback differs.'
+        $changed.Add([ordered]@{before=$before;target=$after.target;arguments=$after.arguments;sha256=(Retry {Hash $file.FullName})})
       }
     }
-    }finally{[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)|Out-Null}
   }
   NewJson (Join-Path $evidence 'publication.json') ([ordered]@{sourceCommit=$receipt.sourceCommit;installRoot=$root;previous=$previous;current=$pointer;changedShortcuts=$changed.ToArray();oldVersionsRemoved=0;userApplicationsStarted=0;userApplicationsStopped=0;publishedAt=(Get-Date).ToString('o')})
   Write-Output ('ACTIVE NATIVE VERSION: '+$version)

@@ -170,6 +170,37 @@ bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPat
 #endif
 }
 
+NativeShortcutInfo readNativeShortcut(const QString &path) {
+  NativeShortcutInfo result;
+  result.error = QStringLiteral("shortcut_read_invalid");
+#ifdef Q_OS_WIN
+  if (!localOrdinaryTree(path) || QFileInfo(path).suffix().compare(QLatin1String("lnk"), Qt::CaseInsensitive)) return result;
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return result;
+  IShellLinkW *link = nullptr;
+  IPersistFile *file = nullptr;
+  bool good = SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link)));
+  if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
+  const QString native = QDir::toNativeSeparators(path);
+  if (good) good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(native.utf16()), STGM_READ));
+  wchar_t buffer[32768]{};
+  const auto take = [&](HRESULT status, QString &target) {
+    if (FAILED(status)) return false;
+    target = QString::fromWCharArray(buffer); buffer[0] = L'\0'; return true;
+  };
+  if (good) good = take(link->GetPath(buffer, 32768, nullptr, SLGP_RAWPATH), result.target) &&
+      take(link->GetArguments(buffer, 32768), result.arguments) &&
+      take(link->GetWorkingDirectory(buffer, 32768), result.workingDirectory) &&
+      take(link->GetDescription(buffer, 4096), result.description) &&
+      SUCCEEDED(link->GetShowCmd(&result.showCommand)) && SUCCEEDED(link->GetHotkey(&result.hotkey));
+  if (file) file->Release();
+  if (link) link->Release();
+  if (SUCCEEDED(initialized)) CoUninitialize();
+  if (good) result.error.clear();
+#endif
+  return result;
+}
+
 bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
                                 const QString &arguments, const QString &appUserModelId, QString *diagnostic) {
   if (diagnostic) *diagnostic = QStringLiteral("shortcut_path_invalid");

@@ -464,7 +464,7 @@ jobs:
 
       - name: Verify managed update publication and stable entry points
         shell: pwsh
-        run: ./scripts/test_native_installation.ps1 -RuntimeDirectory "$PWD/native/artifact/bin" -TestRoot "$env:RUNNER_TEMP/gsw-managed-update-acceptance"
+        run: ./scripts/test_native_installation.ps1 -RuntimeDirectory "$PWD/native/artifact/bin" -ShortcutFixture "$PWD/native/build-ci/Release/gsw_native_shortcut_fixture.exe" -TestRoot "$env:RUNNER_TEMP/gsw-managed-update-acceptance"
 
       - name: Verify native-only package
         shell: pwsh

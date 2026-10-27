@@ -27,6 +27,14 @@ int main(int argc, char **argv) {
   if (QStringList{QStringLiteral("zh_CN"), QStringLiteral("en_US"), QStringLiteral("ja_JP")}.contains(language) &&
       catalog.load(QStringLiteral(":/i18n/workbench_%1.qm").arg(language))) application.installTranslator(&catalog);
   auto arguments = application.arguments().mid(1);
+  if (arguments.size() == 2 && arguments.first() == QLatin1String("--read-shortcut")) {
+    const auto info = gsw::readNativeShortcut(arguments.at(1));
+    const QJsonObject record{{"valid", info.valid()}, {"target", info.target}, {"arguments", info.arguments},
+        {"workingDirectory", info.workingDirectory}, {"description", info.description},
+        {"showCommand", info.showCommand}, {"hotkey", info.hotkey}, {"error", info.error}};
+    QTextStream(stdout) << QJsonDocument(record).toJson(QJsonDocument::Compact) << '\n';
+    return info.valid() ? 0 : 2;
+  }
   if (arguments.size() >= 2 && arguments.first() == QLatin1String("--write-shortcut")) {
     const QString path = arguments.at(1);
     const QString linkArguments = arguments.size() == 3 ? arguments.at(2) : QString();

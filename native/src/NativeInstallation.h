@@ -32,6 +32,13 @@ struct NativeLaunchPlan final {
                                           const QString &applicationPath,
                                           const QString &appUserModelId);
 void clearManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPath);
+struct NativeShortcutInfo final {
+  QString target, arguments, workingDirectory, description, error;
+  int showCommand = 1;
+  unsigned short hotkey = 0;
+  [[nodiscard]] bool valid() const { return error.isEmpty(); }
+};
+[[nodiscard]] NativeShortcutInfo readNativeShortcut(const QString &path);
 // Installation action only: never pins/unpins, reorders, or executes a link.
 [[nodiscard]] bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
                                               const QString &arguments, const QString &appUserModelId,

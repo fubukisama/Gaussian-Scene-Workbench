@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$RuntimeDirectory,
+  [Parameter(Mandatory=$true)][string]$ShortcutFixture,
   [Parameter(Mandatory=$true)][string]$TestRoot
 )
 # Remote CI only. Fixtures and shortcut folders are owned by this test; no
@@ -18,8 +19,16 @@ function Json([string]$Path,$Value){[IO.File]::WriteAllText($Path,($Value|Conver
 function Plan([string]$Launcher){
   $start=[Diagnostics.ProcessStartInfo]::new($Launcher);$start.UseShellExecute=$false;$start.CreateNoWindow=$true
   $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true;$start.ArgumentList.Add('--print-launch-plan')
+  $start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
   $process=[Diagnostics.Process]::Start($start)
   try{Check ($process.WaitForExit(10000)) 'Launch-plan query timed out.';Check ($process.ExitCode -eq 0) 'Launch-plan query failed.';return ($process.StandardOutput.ReadToEnd()|ConvertFrom-Json)}finally{$process.Dispose()}
+}
+function ReadShortcut([string]$Path){
+  $start=[Diagnostics.ProcessStartInfo]::new($launcher);$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+  $start.RedirectStandardOutput=$true;$start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
+  $start.ArgumentList.Add('--read-shortcut');$start.ArgumentList.Add($Path)
+  $process=[Diagnostics.Process]::Start($start)
+  try{Check ($process.WaitForExit(10000)) 'Native shortcut query timed out.';Check ($process.ExitCode -eq 0) 'Native shortcut query failed.';return ($process.StandardOutput.ReadToEnd()|ConvertFrom-Json)}finally{$process.Dispose()}
 }
 function Publish([string]$Package,[string]$Manifest,[string]$Proof,[string]$Evidence){
   & (Join-Path $scripts 'publish_native_installation.ps1') -InstallRoot $installation -PackageRoot $Package -FilesManifest $Manifest -AcceptanceProof $Proof -SynchronizeShortcuts -ShortcutDirectories @($shortcuts) -EvidenceDirectory (Join-Path $root $Evidence)
@@ -36,28 +45,27 @@ Json (Join-Path $package 'source-manifest.json') @{schema='gsw-native-correspond
 $proof1=Join-Path $root 'acceptance1.json';$manifest1=Join-Path $root 'files1.json'
 Json $proof1 @{sourceCommit=('1'*40);fullAcceptance=$true;compiledExecutableSha256=(Hash $app);scope='owned CI fixture only, not product acceptance'}
 & (Join-Path $scripts 'write_native_release_manifest.ps1') -PackageRoot $package -SourceCommit ('1'*40) -AcceptanceProof $proof1 -OutputPath $manifest1
-$shell=New-Object -ComObject WScript.Shell
 $linkPath=Join-Path $shortcuts 'GSW 日本語 中文.lnk'
 $arguments='--project "name with spaces & ;.gsw"'
-$link=$shell.CreateShortcut($linkPath);$link.TargetPath=$app;$link.Arguments=$arguments;$link.Description='retained user description';$link.WindowStyle=3;$link.Save()
-[Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)|Out-Null
+& $ShortcutFixture $linkPath $app $arguments
+Check ($LASTEXITCODE -eq 0) 'Unicode shortcut fixture creation failed.'
 Publish $package $manifest1 $proof1 'publish-one'
 $pointer=Join-Path $installation 'current.json';$first=Get-Content -LiteralPath $pointer -Raw|ConvertFrom-Json
 $launcher=Join-Path $installation 'bin/Gaussian Scene Workbench Launcher.exe'
 $bootstrapHash=Hash $launcher
 $plan1=Plan $launcher
 Check ($plan1.valid -and $plan1.version -ceq $first.version) 'First version was not resolved.'
-$link=$shell.CreateShortcut($linkPath)
-Check ($link.TargetPath -ieq $launcher -and $link.Arguments -ceq $arguments -and $link.Description -ceq 'retained user description' -and $link.WindowStyle -eq 3) 'Migrated shortcut lost its stable target or user options.'
-[Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)|Out-Null
+$link=ReadShortcut $linkPath
+Check ($link.target -ieq $launcher -and $link.arguments -ceq $arguments -and $link.description -ceq 'retained user description' -and $link.showCommand -eq 3) 'Migrated shortcut lost its stable target or user options.'
 Check (@(Get-ChildItem -LiteralPath (Join-Path $root 'publish-one') -Filter *.lnk.bak -File).Count -eq 1) 'Original shortcut was not backed up.'
 # An unrelated executable with the same filename and no native source identity
 # must not be treated as our application.
 $unrelated=Join-Path $root 'unrelated/Gaussian Scene Workbench.exe'
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($unrelated))|Out-Null
 [IO.File]::WriteAllText($unrelated,'unrelated owned fixture')
-$otherPath=Join-Path $shortcuts 'unrelated.lnk';$other=$shell.CreateShortcut($otherPath);$other.TargetPath=$unrelated;$other.Save()
-[Runtime.InteropServices.Marshal]::FinalReleaseComObject($other)|Out-Null
+$otherPath=Join-Path $shortcuts 'unrelated.lnk'
+& $ShortcutFixture $otherPath $unrelated ''
+Check ($LASTEXITCODE -eq 0) 'Unrelated shortcut fixture creation failed.'
 $otherHash=Hash $otherPath
 # Open the old executable for reading exactly as a running slot remains in use.
 # Updating must not overwrite or remove it.
@@ -86,6 +94,6 @@ try{
   & (Join-Path $scripts 'publish_native_installation.ps1') -InstallRoot $installation -ActivateVersion $first.version -EvidenceDirectory (Join-Path $root 'rollback')
   Check ((Plan $launcher).program -ceq $plan1.program) 'Rollback did not restore the selected old slot.'
   Check ((Test-Path -LiteralPath $plan2.program) -and (Hash $launcher) -ceq $bootstrapHash) 'Rollback removed a slot or changed the bootstrap.'
-}finally{$held.Dispose();[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)|Out-Null}
+}finally{$held.Dispose()}
 Json (Join-Path $root 'acceptance.json') @{schema='gsw.native_installation_test/1';accepted=$true;contracts=@('stable-entry','unicode-shortcuts','retained-shortcut-options','immutable-in-use-slot','exact-version-activation','corruption-rejected','traversal-rejected','rollback','unrelated-link-preserved');realUserApplicationsStarted=0;realUserApplicationsStopped=0}
 Write-Output 'Native managed installation contracts PASS.'

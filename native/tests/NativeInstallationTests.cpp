@@ -19,7 +19,7 @@
 
 class NativeInstallationTests final : public QObject {
   Q_OBJECT
-  QTemporaryDir temporary;
+  QTemporaryDir temporary{QDir(QCoreApplication::applicationDirPath()).filePath("managed-installation-tests-XXXXXX")};
   QString root;
   QByteArray digest;
   void write(const QString &path, const QByteArray &bytes) {
@@ -124,6 +124,8 @@ private slots:
     wchar_t beforeDescription[4096]{};
     QVERIFY(SUCCEEDED(before->GetDescription(beforeDescription, 4096)));
     QCOMPARE(QString::fromWCharArray(beforeDescription), "user description retained");
+    const auto beforeDetails = gsw::readNativeShortcut(path);
+    QVERIFY(beforeDetails.valid()); QCOMPARE(beforeDetails.description, "user description retained");
     const QString args = "--project \"name with spaces & ;.gsw\"";
     QString diagnostic;
     QVERIFY2(gsw::writeNativeLauncherShortcut(path, launcher, args, "GSW.Test.Stable", &diagnostic), qPrintable(diagnostic));
@@ -153,6 +155,9 @@ private slots:
     const QString freshPath = QDir(root).filePath("fresh owned shortcut.lnk");
     QVERIFY2(gsw::writeNativeLauncherShortcut(freshPath, launcher, {}, "GSW.Test.Stable", &diagnostic), qPrintable(diagnostic));
     QVERIFY(QFileInfo(freshPath).isFile());
+    const auto readback = gsw::readNativeShortcut(path);
+    QVERIFY(readback.valid()); QCOMPARE(readback.description, "user description retained");
+    QCOMPARE(readback.arguments, args);
     QVERIFY(!gsw::writeNativeLauncherShortcut(QDir(root).filePath("not-a-link.txt"), launcher, {}, "GSW.Test.Stable"));
 #endif
   }

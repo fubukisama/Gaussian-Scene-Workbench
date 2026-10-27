@@ -51,7 +51,7 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Native update configure failed.' }
-          cmake --build native/build-updates --config Release --parallel --target GaussianSceneWorkbenchLauncher gsw_native_installation_tests
+          cmake --build native/build-updates --config Release --parallel --target GaussianSceneWorkbenchLauncher gsw_native_installation_tests gsw_native_shortcut_fixture
           if ($LASTEXITCODE -ne 0) { throw 'Native update build failed.' }
       - name: Verify pure plans and Windows taskbar relaunch properties
         shell: pwsh
@@ -71,7 +71,7 @@ jobs:
           Copy-Item -LiteralPath 'native/build-updates/Release/Gaussian Scene Workbench Launcher.exe' -Destination $runtime
           windeployqt --release --no-translations --compiler-runtime "$runtime/Gaussian Scene Workbench Launcher.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher runtime staging failed.' }
-          ./scripts/test_native_installation.ps1 -RuntimeDirectory $runtime -TestRoot "$PWD/native/update-evidence/owned-fixtures"
+          ./scripts/test_native_installation.ps1 -RuntimeDirectory $runtime -ShortcutFixture "$PWD/native/build-updates/Release/gsw_native_shortcut_fixture.exe" -TestRoot "$PWD/native/update-evidence/owned-fixtures"
       - name: Retain exact-source contract evidence
         if: always()
         shell: pwsh
