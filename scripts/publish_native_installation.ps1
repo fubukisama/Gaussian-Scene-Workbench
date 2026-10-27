@@ -44,7 +44,9 @@ function AtomicJson([string]$Path,$Value){
   try{
     for($attempt=0;$attempt -lt 40;$attempt++){
       try{
-        if(Test-Path -LiteralPath $Path){[IO.File]::Replace($stage,$Path,$null)}else{[IO.File]::Move($stage,$Path)}
+        # PowerShell converts a plain $null string argument to "". File.Replace
+        # needs an actual null backup filename, not an empty path.
+        if(Test-Path -LiteralPath $Path){[IO.File]::Replace($stage,$Path,[NullString]::Value)}else{[IO.File]::Move($stage,$Path)}
         return
       }catch [IO.IOException],[UnauthorizedAccessException]{if($attempt -eq 39){throw};Start-Sleep -Milliseconds 25}
     }
