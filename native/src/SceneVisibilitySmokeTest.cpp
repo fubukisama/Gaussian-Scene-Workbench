@@ -1514,6 +1514,78 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
   return true;
 }
 
+bool runProjectTreeBlankRuleRegression(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  QTemporaryDir temporary;
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "PROJECT_TREE_CHROME FAIL:" << message;
+    return ok;
+  };
+  if (!check(viewport && document && tree && temporary.isValid(), "public window and project-tree services")) return false;
+  window.resize(1440, 900);
+  QString error;
+  const QString working = QDir(temporary.path()).filePath("working");
+  const QString path = QDir(temporary.path()).filePath("tree-rule.ply");
+  if (!check(QDir().mkpath(working) && document->createUntitled(working, "Project tree chrome", &error) &&
+      fixture(path, 0) && document->addScenePath(path, &error) &&
+      waitUntil([&] { return viewport->selectableModelAvailable(); }), "load an independent source with a real eye row")) return false;
+  auto *item = sceneItem(tree, document->activeSceneId());
+  if (!check(item && item->checkState(1) == Qt::Checked, "ordinary name and visibility columns are present")) return false;
+  tree->scrollToItem(item);
+  QImage image;
+  QRect previous;
+  int stable = 0;
+  if (!check(waitUntil([&] {
+        image = tree->viewport()->grab().toImage();
+        const QRect rect(tree->viewport()->mapToGlobal(QPoint()), tree->viewport()->size());
+        stable = tree->isVisible() && !image.isNull() && rect == previous ? stable + 1 : 0;
+        previous = rect;
+        return stable >= 2;
+      }), "settle the actual rendered project-tree viewport")) return false;
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+      "project-tree-chrome-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
+  if (!check(QDir().mkpath(evidence) && image.save(QDir(evidence).filePath("tree-viewport.png")) &&
+      window.grab().save(QDir(evidence).filePath("full-window.png")), "retain actual tree and full-window chrome evidence")) return false;
+  int lastRowBottom = 0;
+  for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+    const QRect row = tree->visualItemRect(*it);
+    if (row.isValid() && row.intersects(tree->viewport()->rect())) lastRowBottom = std::max(lastRowBottom, row.bottom());
+  }
+  const double ratioX = double(image.width()) / tree->viewport()->width();
+  const double ratioY = double(image.height()) / tree->viewport()->height();
+  const int boundary = qRound(tree->columnViewportPosition(1) * ratioX);
+  const int left = qRound((tree->columnViewportPosition(1) - 8) * ratioX);
+  const int right = qRound((tree->columnViewportPosition(1) + 8) * ratioX);
+  const int firstY = int(std::ceil((lastRowBottom + 12) * ratioY));
+  const int lastY = int(std::floor((tree->viewport()->height() - 12) * ratioY));
+  if (!check(left >= 0 && right < image.width() && boundary >= 2 && boundary + 2 < image.width() &&
+      firstY >= 0 && lastY < image.height() && lastY - firstY >= 64,
+      "a sizeable empty body exists on both sides of the actual column boundary")) return false;
+  const auto difference = [](const QColor &a, const QColor &b) {
+    return std::max({std::abs(a.red() - b.red()), std::abs(a.green() - b.green()), std::abs(a.blue() - b.blue())});
+  };
+  int sampled = 0;
+  std::array<int, 5> contrastingRows{};
+  for (int y = firstY; y <= lastY; ++y) {
+    const QColor a = image.pixelColor(left, y), b = image.pixelColor(right, y);
+    // Only genuinely empty, uniform background rows participate. This avoids
+    // text, selection, branches and horizontal row decorations without using
+    // a stylesheet string or a hard-coded theme/background colour as truth.
+    if (difference(a, b) > 2) continue;
+    ++sampled;
+    for (int offset = -2; offset <= 2; ++offset)
+      if (difference(image.pixelColor(boundary + offset, y), a) > 6) ++contrastingRows[offset + 2];
+  }
+  const int persistent = *std::max_element(contrastingRows.cbegin(), contrastingRows.cend());
+  qInfo() << "PROJECT_TREE_CHROME blank rows/persistent rule rows/boundary" << sampled << persistent << boundary
+          << "sample y" << firstY << lastY << "image" << image.size();
+  if (!check(sampled >= 64 && persistent <= sampled / 10,
+      "the name and eye boundary has no persistent vertical rule through empty project-tree space")) return false;
+  return check(document->createUntitled(temporary.path(), "After project tree chrome", &error), "release the independent chrome fixture");
+}
+
 bool runHiddenReferenceGridRegression(MainWindow &window) {
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
@@ -1769,7 +1841,8 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     return error.error == QJsonParseError::NoError && inputs.isArray() &&
         runInputSelectionDiagnostic(window, inputs.array());
   }
-  if (!runHiddenReferenceGridRegression(window) || !runLastVisibleEyeRegression(window)) return false;
+  if (!runProjectTreeBlankRuleRegression(window) || !runHiddenReferenceGridRegression(window) ||
+      !runLastVisibleEyeRegression(window)) return false;
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *tree = window.findChild<QTreeWidget *>("projectTree");
