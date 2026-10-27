@@ -406,7 +406,14 @@ QAbstractItemView {
   border: 0;
   outline: 0;
 }
-QTreeView::item, QTableView::item { min-height: @ROW_HEIGHT@px; }
+/* Own ordinary item chrome too, not only hover/selection. Otherwise the
+   Windows 11 style draws implicit column rules in normal tree/list cells. */
+QTreeView::item, QTableView::item {
+  min-height: @ROW_HEIGHT@px;
+  background: transparent;
+  border: 0;
+}
+QListView::item { background: transparent; border: 0; }
 QTreeView::item:hover, QTableView::item:hover { background: @ITEM_HOVER@; }
 QTreeView::item:selected, QTableView::item:selected { background: @PRESSED@; color: @TEXT@; }
 QListView::item:hover { background: @ITEM_HOVER@; }
@@ -454,7 +461,6 @@ QTabBar::tab {
   color: @TAB_TEXT@;
   padding: @TAB_V@px @TAB_H@px;
   border: 0;
-  border-right: 1px solid @BORDER@;
 }
 QTabBar::tab:selected { color: @ACTIVE_TAB_TEXT@; background: @BUTTON@; border-top: 2px solid @FOCUS@; }
 QTabBar::tab:hover:!selected { background: @TAB_HOVER@; }
@@ -482,6 +488,7 @@ QLabel#sectionTitle {
   padding-bottom: @SECTION_BOTTOM@px;
   border-bottom: 1px solid @SECTION_BORDER@;
 }
+QFrame#inspectorPanel QLabel#sectionTitle { border-bottom: 0; }
 QLabel#mutedLabel, QLabel#uiScaleStatus { color: @MUTED_TEXT@; }
 QLabel#statusGood { color: @GOOD_TEXT@; }
   QLabel#statusWarn, QLabel#densityGuardWarning, QLabel#trainingGrowthWarning { color: @WARN_TEXT@; }

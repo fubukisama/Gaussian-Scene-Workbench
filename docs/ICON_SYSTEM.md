@@ -55,3 +55,11 @@ The authoritative full mapping is `native/src/WorkbenchIcons.cpp`.
 This icon presentation is shared by point clouds, 3DGS, 2DGS, reconstruction and all supported mesh-generation workflows. It introduces no backend or processing-state change.
 该图标显示统一覆盖点云、3DGS、2DGS、重建及所有支持的网格生成流程，不改变后端或处理状态。
 このアイコン表示は点群・3DGS・2DGS・再構築・対応するすべてのメッシュ生成で共通し、バックエンドや処理状態を変更しません。
+
+## Quiet list and panel chrome / 列表与面板减线 / リストとパネルの装飾線
+
+普通树、列表及表格项使用明确的透明、无边框样式，避免 Windows 11 原生样式在模型名称与“眼睛”等列之间自动绘制贯穿空单元格的竖线。选中与悬停仍有独立反馈，交替行底色保留；真正的数据表格格线由各表自身控制，不随装饰线一起关闭。标签页用现有选中强调及底色区分，不再增加竖隔栏；属性面板分节沿用字重与留白，不重复画下划线。输入框、键盘焦点、弹出层边界和真实可拖动分隔区保持原规则。三语即时切换只刷新显示，不改变选择、可见性、相机或任务。
+
+Normal tree, list and table items explicitly use transparent, borderless chrome so the Windows 11 native style cannot add column rules through empty cells, including the model-name/eye boundary. Selection and hover feedback and alternating row surfaces remain. Real table grids remain controlled by each table, independently of decorative item rules. Tabs retain the existing active accent and surfaces without extra vertical partitions; inspector headings use their existing weight and spacing without duplicate underlines. Input boundaries, keyboard focus, popup edges and real draggable separators retain their contracts. Immediate three-language switching changes presentation only, not selection, visibility, cameras or jobs.
+
+通常のツリー・リスト・表の項目には透明で枠のない装飾を明示し、Windows 11 の標準スタイルがモデル名と可視性アイコンの間など、空のセルにも縦線を描かないようにします。選択・ホバーの表示と交互の行背景は維持し、実際の表の罫線は各表で独立に制御します。タブは既存の選択アクセントと背景で区別し、余分な縦区切りを付けません。プロパティーの見出しは既存の字重と余白を使い、下線を重ねません。入力欄、キーボードフォーカス、ポップアップの境界、実際にドラッグできる区切りは維持します。三言語の即時切替は表示だけを更新し、選択・可視性・カメラ・タスクは変更しません。

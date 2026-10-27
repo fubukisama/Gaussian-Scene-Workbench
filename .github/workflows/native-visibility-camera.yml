@@ -79,7 +79,7 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw 'Focused codec dependency installation failed.' }
 
-      - name: Configure and build only the native application
+      - name: Configure and build the application and shared theme contracts
         id: focused-build
         shell: pwsh
         run: |
@@ -92,7 +92,7 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Focused native configure failed.' }
           cmake --build native/build-visibility-camera --config Release --parallel `
-            --target GaussianSceneWorkbench 2>&1 |
+            --target GaussianSceneWorkbench gsw_app_theme_tests 2>&1 |
             Tee-Object -FilePath native/visibility-camera-artifact/build.log
           if ($LASTEXITCODE -ne 0) { throw 'Focused native build failed.' }
 
@@ -102,6 +102,16 @@ jobs:
         run: |
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
+
+      - name: Verify unchanged shared theme and real resize interactions
+        if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-visibility-camera -C Release --no-tests=error --verbose --output-on-failure `
+            --output-log native/visibility-camera-artifact/app-theme-contracts.log `
+            --output-junit (Join-Path $PWD 'native/visibility-camera-artifact/app-theme-contracts.xml') `
+            -R '^app_theme$'
+          if ($LASTEXITCODE -ne 0) { throw 'Shared theme/control/resize contracts failed; original assertions are unchanged.' }
 
       - name: Verify six unchanged visibility locale and theme cases
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
