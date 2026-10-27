@@ -2221,6 +2221,7 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
              selectedTreeIds() == QSet<QString>{ids[1], ids[3]}, "isolate preserves exact selected model rows")) return false;
   const auto visibilityState = document->sceneCollectionJson();
   for (const QString &language : AppLanguage::supported()) {
+    const auto framesBeforeLanguage = viewport->renderedFrameSerial();
     if (!check(AppLanguage::apply(language, false), "live language switch")) return false;
     if (!check(document->sceneCollectionJson() == visibilityState && viewport->visibleSceneObjectCount() == 2 &&
                show->text() == QCoreApplication::translate("Workbench", "显示所选模型") &&
@@ -2235,7 +2236,10 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
         : viewport->renderMode() == NativeViewport::RenderMode::Gaussians
             ? QCoreApplication::translate("Workbench", "高斯预览")
             : QCoreApplication::translate("Workbench", "点预览");
-    sourceUiChecks &= check(renderer && renderer->text().startsWith(expectedMode + QStringLiteral(" | ")) &&
+    sourceUiChecks &= check(renderer && renderer->text().startsWith(expectedMode + QStringLiteral(" · ")) &&
+        renderer->text() == viewport->viewportStatusText() &&
+        renderer->text().contains(viewport->viewportPerformanceText()) &&
+        viewport->renderedFrameSerial() == framesBeforeLanguage &&
         !renderer->text().contains(QCoreApplication::translate("Workbench", "未载入场景")) &&
         renderer->text() != QCoreApplication::translate("Workbench", "正在读取 PLY 场景"),
         "live language switch immediately retains the actual loaded renderer status without waiting for a new frame");
