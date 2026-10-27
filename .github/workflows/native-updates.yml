@@ -36,6 +36,8 @@ jobs:
       - name: Prepare codec dependencies for native configure
         shell: pwsh
         run: |
+          & '${{ steps.python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Native configure QA dependencies failed.' }
           $root = Join-Path $PWD 'native/.deps'
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
             "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `

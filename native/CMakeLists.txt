@@ -542,6 +542,7 @@ install(FILES
   DESTINATION source/scripts)
 install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-windows.yml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-updates.yml"
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-language-resources.yml"
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-visibility-camera.yml"
   "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-viewport-status.yml"
