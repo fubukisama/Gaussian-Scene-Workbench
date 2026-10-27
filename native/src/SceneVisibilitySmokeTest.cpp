@@ -1512,6 +1512,77 @@ bool runInputSelectionDiagnostic(MainWindow &window, const QJsonArray &inputs) {
   qInfo() << "SCENE_INPUT_DIAGNOSTIC CAPTURED: owned settings/process, unchanged original hashes and transforms";
   return true;
 }
+
+bool runLastVisibleEyeRegression(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *tree = window.findChild<QTreeWidget *>("projectTree");
+  auto *lockTools = window.findChild<QAction *>("lockEditToolsAction");
+  QTemporaryDir temporary;
+  const auto check = [](bool success, const char *message) {
+    if (!success) qCritical() << "HIDE_VIEW_REGRESSION FAIL:" << message;
+    return success;
+  };
+  if (!check(viewport && document && tree && lockTools && temporary.isValid(), "public window services")) return false;
+  window.resize(1440, 900);
+  QString error;
+  const QString working = QDir(temporary.path()).filePath("working");
+  const QString path = QDir(temporary.path()).filePath("last-visible-3dgs.ply");
+  if (!check(QDir().mkpath(working) && document->createUntitled(working, "Hide view regression", &error) &&
+      fixture(path, 2) && document->addScenePath(path, &error), "create independent Gaussian fixture")) return false;
+  lockTools->setChecked(false);
+  if (!check(waitUntil([&] { return viewport->gaussianRenderingAvailable(); }) && viewport->focusModel(),
+             "frame the only visible Gaussian in perspective")) return false;
+  viewport->clearSelection();
+  const QString id = document->activeSceneId();
+  const QByteArray sourceHash = sha256(path);
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+      "hide-view-" + AppLanguage::current() + (AppTheme::currentTheme() == UiTheme::Light ? "-light" : "-dark"));
+  QDir().mkpath(evidence);
+  const QImage before = viewport->grabFramebuffer();
+  before.save(QDir(evidence).filePath("before-hide.png"));
+  const QRect viewportRect(viewport->mapToGlobal(QPoint()), viewport->size());
+  const auto target = viewport->viewTarget();
+  const auto distance = viewport->viewDistance();
+  const auto angles = viewport->viewOrbitAngles();
+  const auto projection = viewport->orthographicProjection();
+  const auto fov = viewport->perspectiveFovDegrees();
+  const auto eyeClick = [&] {
+    auto *item = sceneItem(tree, id);
+    if (!item) return false;
+    tree->scrollToItem(item);
+    const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2,
+                       tree->visualItemRect(item).center().y());
+    if (tree->indexAt(point).column() != 1 || tree->itemAt(point) != item) return false;
+    QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(tree->viewport(), &down);
+    QApplication::sendEvent(tree->viewport(), &up);
+    return true;
+  };
+  const quint64 frameSerial = viewport->renderedFrameSerial();
+  if (!check(eyeClick() && waitUntil([&] {
+        return !viewport->sceneObjectVisible(id) && viewport->renderedFrameSerial() > frameSerial;
+      }), "real eye click hides the last visible object and presents its empty frame")) return false;
+  const QImage hidden = viewport->grabFramebuffer();
+  hidden.save(QDir(evidence).filePath("after-hide.png"));
+  const QRect hiddenRect(viewport->mapToGlobal(QPoint()), viewport->size());
+  qInfo() << "HIDE_VIEW_REGRESSION viewport before/hidden" << viewportRect << hiddenRect
+          << "camera" << target << viewport->viewTarget() << distance << viewport->viewDistance();
+  if (!check(hiddenRect == viewportRect && hidden.size() == before.size(),
+             "hiding the last object preserves the actual viewport rectangle and projection canvas")) return false;
+  if (!check(viewport->viewTarget() == target && viewport->viewDistance() == distance &&
+      viewport->viewOrbitAngles() == angles && viewport->orthographicProjection() == projection &&
+      viewport->perspectiveFovDegrees() == fov, "eye toggle preserves the observed camera and projection")) return false;
+  if (!check(eyeClick() && waitUntil([&] { return viewport->sceneObjectVisible(id) && viewport->gaussianRenderingAvailable(); }),
+             "same eye reveals the original model without reimport")) return false;
+  viewport->grabFramebuffer().save(QDir(evidence).filePath("after-restore.png"));
+  if (!check(QRect(viewport->mapToGlobal(QPoint()), viewport->size()) == viewportRect &&
+      viewport->viewTarget() == target && viewport->viewDistance() == distance && viewport->viewOrbitAngles() == angles &&
+      document->activeSceneId() == id && sha256(path) == sourceHash,
+      "restoring visibility retains the view, source identity and original bytes")) return false;
+  return check(document->createUntitled(temporary.path(), "After hide regression", &error), "release the owned fixture");
+}
 }
 
 bool runSceneVisibilitySmokeTest(MainWindow &window) {
@@ -1528,6 +1599,7 @@ bool runSceneVisibilitySmokeTest(MainWindow &window) {
     return error.error == QJsonParseError::NoError && inputs.isArray() &&
         runInputSelectionDiagnostic(window, inputs.array());
   }
+  if (!runLastVisibleEyeRegression(window)) return false;
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *tree = window.findChild<QTreeWidget *>("projectTree");
