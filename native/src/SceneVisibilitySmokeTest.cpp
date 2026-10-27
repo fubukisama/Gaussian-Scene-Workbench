@@ -1641,8 +1641,17 @@ bool runLastVisibleEyeRegression(MainWindow &window) {
       if (!check(waitUntil(resourceReady), "load the only visible model")) return false;
       // Other matrix cases also prove that visibility cannot silently reset
       // non-identity source TRS; retain the original red case unchanged.
-      if (!firstCase) viewport->setModelTransform(QVector3D(0.2F, -0.1F, 0.3F),
-          QQuaternion::fromEulerAngles(5.0F, 7.0F, 11.0F), QVector3D(1.1F, 1.1F, 1.1F));
+      if (!firstCase) {
+        auto transformed = document->sceneObjects().constFirst();
+        transformed.translation = QVector3D(0.2F, -0.1F, 0.3F);
+        transformed.rotation = QQuaternion::fromEulerAngles(5.0F, 7.0F, 11.0F);
+        transformed.scale = QVector3D(1.1F, 1.1F, 1.1F);
+        // The workspace owns committed source-unit TRS. setModelTransform is
+        // an inbound display-state replay setter, not a user edit commit; a
+        // temporary viewport-only pose would correctly be replaced on sync.
+        if (!check(document->setSceneObjectTransforms({transformed}, &error),
+                   "commit the fixture source transform through the real workspace interface")) return false;
+      }
       viewport->resetCamera();
       if (!check(viewport->focusModel(), "frame the only visible model")) return false;
       viewport->clearSelection();
