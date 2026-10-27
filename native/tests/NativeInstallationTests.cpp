@@ -110,6 +110,18 @@ private slots:
     QVERIFY(SUCCEEDED(original->QueryInterface(IID_PPV_ARGS(&save))));
     const auto releaseSave = qScopeGuard([&] { save->Release(); });
     QVERIFY(SUCCEEDED(save->Save(reinterpret_cast<LPCOLESTR>(path.utf16()), TRUE)));
+    // Verify the on-disk fixture first; retaining it is an actual contract, not
+    // a comparison against an unpersisted original COM object's cached state.
+    IShellLinkW *before = nullptr;
+    QVERIFY(SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&before))));
+    const auto releaseBefore = qScopeGuard([&] { before->Release(); });
+    IPersistFile *beforeFile = nullptr;
+    QVERIFY(SUCCEEDED(before->QueryInterface(IID_PPV_ARGS(&beforeFile))));
+    const auto releaseBeforeFile = qScopeGuard([&] { beforeFile->Release(); });
+    QVERIFY(SUCCEEDED(beforeFile->Load(reinterpret_cast<LPCOLESTR>(path.utf16()), STGM_READ)));
+    wchar_t beforeDescription[4096]{};
+    QVERIFY(SUCCEEDED(before->GetDescription(beforeDescription, 4096)));
+    QCOMPARE(QString::fromWCharArray(beforeDescription), "user description retained");
     const QString args = "--project \"name with spaces & ;.gsw\"";
     QVERIFY(gsw::writeNativeLauncherShortcut(path, launcher, args, "GSW.Test.Stable"));
     IShellLinkW *loaded = nullptr;

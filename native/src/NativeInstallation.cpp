@@ -15,6 +15,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shobjidl.h>
+#include <shlobj.h>
 #include <propkey.h>
 #include <propvarutil.h>
 #endif
@@ -146,10 +147,11 @@ bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPat
     return SUCCEEDED(status);
   };
   // Microsoft requires explicit window ID and both relaunch properties.
-  const bool good = set(PKEY_AppUserModel_ID, appUserModelId) &&
-      set(PKEY_AppUserModel_RelaunchCommand, QLatin1Char('"') + launcher + QLatin1Char('"')) &&
+  // The taskbar reacts to the ID update; publish the relaunch values first.
+  const bool good = set(PKEY_AppUserModel_RelaunchCommand, QLatin1Char('"') + launcher + QLatin1Char('"')) &&
       set(PKEY_AppUserModel_RelaunchDisplayNameResource, QLatin1Char('@') + launcher + QStringLiteral(",-201")) &&
-      set(PKEY_AppUserModel_RelaunchIconResource, launcher + QStringLiteral(",0")) && SUCCEEDED(store->Commit());
+      set(PKEY_AppUserModel_RelaunchIconResource, launcher + QStringLiteral(",0")) &&
+      set(PKEY_AppUserModel_ID, appUserModelId);
   store->Release();
   return good;
 #else
@@ -175,9 +177,18 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
   const QString nativePath = QDir::toNativeSeparators(path);
   const QString nativeLauncher = QDir::toNativeSeparators(launcher);
   const QString directory = QDir::toNativeSeparators(QFileInfo(launcher).absolutePath());
+  const QString stage = nativePath + QLatin1Char('.') + QUuid::createUuid().toString(QUuid::Id128) + QStringLiteral(".lnk");
+  wchar_t description[32768]{};
+  WORD hotkey = 0;
+  int show = SW_SHOWNORMAL;
   if (good) good = SUCCEEDED(link->QueryInterface(IID_PPV_ARGS(&file)));
   if (good && QFileInfo(path).exists())
     good = SUCCEEDED(file->Load(reinterpret_cast<LPCOLESTR>(nativePath.utf16()), STGM_READ));
+  if (good) good = SUCCEEDED(link->GetDescription(description, 32768)) &&
+      SUCCEEDED(link->GetHotkey(&hotkey)) && SUCCEEDED(link->GetShowCmd(&show));
+  // Remember a fresh sibling before property-store Commit, which may persist
+  // immediately. Even that implementation must never modify the original link.
+  if (good) good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE));
   if (good) good = SUCCEEDED(link->SetPath(reinterpret_cast<LPCWSTR>(nativeLauncher.utf16()))) &&
       SUCCEEDED(link->SetArguments(reinterpret_cast<LPCWSTR>(arguments.utf16()))) &&
       SUCCEEDED(link->SetWorkingDirectory(reinterpret_cast<LPCWSTR>(directory.utf16()))) &&
@@ -190,9 +201,12 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
            SUCCEEDED(store->SetValue(PKEY_AppUserModel_ID, value)) && SUCCEEDED(store->Commit());
     PropVariantClear(&value);
   }
+  // Changing the link target can reset standard shell fields. Restore the user
+  // options explicitly, after property-store changes and before the final save.
+  if (good) good = SUCCEEDED(link->SetDescription(description)) &&
+      SUCCEEDED(link->SetHotkey(hotkey)) && SUCCEEDED(link->SetShowCmd(show));
   // Save a fresh sibling before atomically replacing the link. Never leave an
   // existing taskbar/desktop link partially written after an interrupted update.
-  const QString stage = nativePath + QLatin1Char('.') + QUuid::createUuid().toString(QUuid::Id128) + QStringLiteral(".lnk");
   if (good) good = SUCCEEDED(file->Save(reinterpret_cast<LPCOLESTR>(stage.utf16()), TRUE));
   if (store) store->Release();
   if (file) file->Release();
@@ -208,6 +222,8 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
     }
   }
   if (QFileInfo(stage).exists()) QFile::remove(stage); // Only this call's fresh sibling.
+  if (good) SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT,
+                           reinterpret_cast<LPCWSTR>(nativePath.utf16()), nullptr);
   if (SUCCEEDED(initialized)) CoUninitialize();
   return good;
 #else
