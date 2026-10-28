@@ -17,6 +17,7 @@
 #include "ViewportCamera.h"
 #include "ViewportPresentation.h"
 #include "BlenderNavigationPresentation.h"
+#include "NavigationOverlayKey.h"
 #include "WorkbenchIcons.h"
 
 #include <QApplication>
@@ -8933,16 +8934,42 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   if (mUiPaintObservation.enabled) hostSpan.start();
   QJsonObject diagnostics;
   const bool recording = mRenderDiagnostics && mRenderDiagnostics->recording();
-  drawBlenderNavigationPresentation(painter, navigationGizmo(),
-      {.hover = mNavigationHover,
+  const auto layout = navigationGizmo();
+  const BlenderNavigationPresentationState state{
+       .hover = mNavigationHover,
        .press = mNavigationPress,
        .interactionActive = mNavigationInteractionActive,
        .light = lightViewport(),
        .orthographic = mOrthographic,
        .cameraActive = mCameraViewActive,
        .cameraAvailable = camerasAvailable(),
-       .backdrop = viewportColors().backdrop}, recording ? &diagnostics : nullptr);
-  if (recording) mRenderDiagnostics->note(QStringLiteral("navigation-presentation"), diagnostics);
+       .backdrop = viewportColors().backdrop};
+  const bool covered = mNavigationCoverage.paint(painter, navigationOverlayBounds(layout),
+      navigationOverlayKey(layout, state, AppLanguage::current()),
+      [&](QPainter &raster, QJsonObject &metadata) {
+        drawBlenderNavigationPresentation(raster, layout, state, &metadata);
+      });
+  if (!covered)
+    drawBlenderNavigationPresentation(painter, layout, state, recording ? &diagnostics : nullptr);
+  if (recording) {
+    if (covered) {
+      diagnostics = mNavigationCoverage.diagnostics();
+      diagnostics.insert("rasterPaint", diagnostics.value("paint"));
+      const auto transform = painter.deviceTransform();
+      diagnostics.insert("paint", QJsonObject{
+          {"engine", painter.paintEngine() ? int(painter.paintEngine()->type()) : -1},
+          {"dpr", devicePixelRatioF()},
+          {"deviceTransform", QJsonArray{transform.m11(), transform.m12(), transform.m21(), transform.m22(), transform.dx(), transform.dy()}},
+          {"opacity", painter.opacity()}, {"compositionMode", int(painter.compositionMode())}});
+    }
+    diagnostics.insert("coverage", QJsonObject{
+        {"method", covered ? "native-dpr-raster-aa/1" : "original-vector-fallback"},
+        {"generation", qint64(mNavigationCoverage.generation())}, {"cacheHit", mNavigationCoverage.lastHit()},
+        {"peakOwnedCpuBytes", qint64(mNavigationCoverage.peakCpuBytes())},
+        {"requestedImageUploadBytes", qint64(mNavigationCoverage.requestedGpuBytes())},
+        {"fullViewportSupersampling", false}, {"actualDriverResidencyMeasured", false}});
+    mRenderDiagnostics->note(QStringLiteral("navigation-presentation"), diagnostics);
+  }
   if (mUiPaintObservation.enabled) {
     if (mUiPaintObservation.count < UiPaintObservation::capacity) {
       mUiPaintObservation.samples[mUiPaintObservation.count++] = {
@@ -8950,6 +8977,10 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
           .hostNanoseconds = hostSpan.nsecsElapsed(),
           .logicalWidth = width(), .logicalHeight = height(),
           .devicePixelRatio = devicePixelRatioF(),
+          .ownedCpuBytes = mNavigationCoverage.peakCpuBytes(),
+          .requestedGpuBytes = mNavigationCoverage.requestedGpuBytes(),
+          .cacheGeneration = mNavigationCoverage.generation(),
+          .cacheHit = covered && mNavigationCoverage.lastHit(),
           .diagnosticOverlap = recording};
     } else {
       mUiPaintObservation.overflow = true;

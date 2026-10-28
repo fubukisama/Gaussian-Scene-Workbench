@@ -111,6 +111,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/UiPerformanceSmokeTest.cpp
   src/UiPerformanceSmokeTest.h
   src/UiPaintObservation.h
+  src/UiOverlayLifecycleSmokeTest.cpp
+  src/UiOverlayLifecycleSmokeTest.h
+  src/UiOverlayRaster.h
+  src/NavigationOverlayKey.h
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
   tests/BlenderViewportVisualTestSupport.cpp
@@ -591,6 +595,10 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_clarity.py"
       --root "${GSW_UI_CLARITY_ROOT}" --output "${GSW_UI_CLARITY_ROOT}/edge-results.json")
     set_tests_properties(native_ui_clarity_edges PROPERTIES TIMEOUT 30 FIXTURES_REQUIRED ui_clarity_frame)
+    add_test(NAME native_ui_overlay_lifecycle COMMAND GaussianSceneWorkbench --smoke-test-ui-overlay-lifecycle)
+    set_tests_properties(native_ui_overlay_lifecycle PROPERTIES TIMEOUT 30
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
   if(WIN32)
     add_test(NAME native_surfel_projection_gl COMMAND "${Python3_EXECUTABLE}"
@@ -2015,6 +2023,16 @@ if(BUILD_TESTING)
     set_tests_properties(native_quality_mip_viewport PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_QPA_PLATFORM=windows;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-mip-test-data"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
+    qt_add_executable(gsw_ui_overlay_raster_tests tests/UiOverlayRasterTests.cpp src/UiOverlayRaster.h)
+    target_include_directories(gsw_ui_overlay_raster_tests PRIVATE src)
+    target_link_libraries(gsw_ui_overlay_raster_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_ui_overlay_raster_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ui_overlay_raster COMMAND gsw_ui_overlay_raster_tests)
+    set_tests_properties(ui_overlay_raster PROPERTIES TIMEOUT 20 ENVIRONMENT "QT_QPA_PLATFORM=windows"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
 
     qt_add_executable(gsw_navigation_gizmo_tests
       tests/NavigationGizmoTests.cpp

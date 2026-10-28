@@ -18,6 +18,7 @@
 #include "ResourceBudget.h"
 #include "ViewportGridSettings.h"
 #include "UiPaintObservation.h"
+#include "UiOverlayRaster.h"
 #include <memory>
 
 #include <QImage>
@@ -661,6 +662,7 @@ private:
   quint64 mRenderedFrameSerial = 0;
   quint64 mPresentedFrameSerial = 0;
   UiPaintObservation mUiPaintObservation;
+  UiOverlayRaster mNavigationCoverage;
   QSet<QString> mProcessingReferenceSelection;
   bool mProcessingReferenceSelected = false;
   bool mProcessingPreviewVisible = false;

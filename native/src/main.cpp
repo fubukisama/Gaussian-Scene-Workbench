@@ -42,6 +42,7 @@
 #include "NativeInstallation.h"
 #include "UiClaritySmokeTest.h"
 #include "UiPerformanceSmokeTest.h"
+#include "UiOverlayLifecycleSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -377,6 +378,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption uiPerformanceOption(QStringLiteral("smoke-test-ui-performance"),
       QStringLiteral("Record bounded CPU-overlay and actual presentation observations on an owned remote window."));
   parser.addOption(uiPerformanceOption);
+  QCommandLineOption uiOverlayLifecycleOption(QStringLiteral("smoke-test-ui-overlay-lifecycle"),
+      QStringLiteral("Verify real navigation cache reuse/invalidation and presentation-only state through owned layout/language/theme cycles."));
+  parser.addOption(uiOverlayLifecycleOption);
   QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
       QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
   parser.addOption(pointStreamingOption);
@@ -486,7 +490,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
-                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
+                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(uiOverlayLifecycleOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
@@ -570,7 +574,13 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(uiPerformanceOption)) {
+  if (parser.isSet(uiOverlayLifecycleOption)) {
+    QTimer::singleShot(650, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runUiOverlayLifecycleSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(uiPerformanceOption)) {
     QTimer::singleShot(650, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       const int result = viewport ? gsw::runUiPerformanceSmokeTest(*viewport) : 2;
