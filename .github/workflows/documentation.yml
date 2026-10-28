@@ -1,0 +1,42 @@
+name: Public documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README*.md'
+      - 'LICENSE'
+      - 'COPYING'
+      - 'native/README.md'
+      - 'native/LICENSE.md'
+      - 'docs/**/*.md'
+      - 'docs/images/**'
+      - '.github/scripts/check_public_docs.py'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    paths:
+      - 'README*.md'
+      - 'LICENSE'
+      - 'COPYING'
+      - 'native/README.md'
+      - 'native/LICENSE.md'
+      - 'docs/**/*.md'
+      - 'docs/images/**'
+      - '.github/scripts/check_public_docs.py'
+      - '.github/workflows/documentation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check public document formatting and links
+        run: python -B .github/scripts/check_public_docs.py

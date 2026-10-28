@@ -1,6 +1,10 @@
-# Licensing · 许可说明 · ライセンス
+<div lang="en">
 
-[English](#english) · [简体中文](#简体中文) · [日本語](#日本語)
+# Licensing · <span lang="zh-CN">许可说明</span> · <span lang="ja">ライセンス</span>
+
+[English](#english) · <span lang="zh-CN">[简体中文](#简体中文)</span> · <span lang="ja">[日本語](#日本語)</span>
+
+<div lang="en">
 
 ## English
 
@@ -16,6 +20,10 @@ When redistributing binaries, follow the applicable licenses, including the GPL 
 
 **Two GitHub tabs?** “License” is the repository scope notice and retained MIT grant; “GPL-3.0 license” is the unmodified GPL text in [COPYING](../COPYING). GitHub generates these labels automatically; they do not offer a license choice for the same file.
 
+</div>
+
+<div lang="zh-CN">
+
 ## 简体中文
 
 GSW **按组件适用不同许可**。本页只是阅读指南，不新增授权，也不表示每个文件都能任选 MIT 或 GPL。
@@ -29,6 +37,10 @@ GSW **按组件适用不同许可**。本页只是阅读指南，不新增授权
 分发二进制时须遵守相应许可，包括 GPL 对应源码与声明义务；把 worker 放到独立进程并不自动证明整个分发包的法律兼容性，见[原生许可范围](../native/LICENSE.md)。项目以研究为目标，不是额外限制 GPL 或 MIT 代码的用途；主程序许可也不授予受限后端的整体商用权。
 
 **为什么有两个标签？** “License” 是仓库许可范围说明及保留的 MIT 条款；“GPL-3.0 license” 是 [COPYING](../COPYING) 中的 GPL 正式全文。标签由 GitHub 自动生成，不代表同一文件可以任选许可。
+
+</div>
+
+<div lang="ja">
 
 ## 日本語
 
@@ -44,8 +56,25 @@ GSW は**コンポーネントごとにライセンスが異なります**。本
 
 **二つのタブの意味：**「License」は範囲の説明と保持された MIT 条項、「GPL-3.0 license」は [COPYING](../COPYING) の未変更の GPL 本文です。GitHub が自動表示する名称であり、同じファイルに対して自由に選べるという意味ではありません。
 
+</div>
+
 ---
 
-The applicable English license texts and component notices govern. 中文、日文说明仅供理解，不取代正式条款。日本語・中国語は説明であり、正式な許諾に代わるものではありません。
+The applicable English license texts and component notices govern.
+
+<div lang="zh-CN">
+
+中文、日文说明仅供理解，不取代正式条款。
+
+</div>
+
+<div lang="ja">
+
+日本語・中国語は説明であり、正式な許諾に代わるものではありません。
+
+</div>
 
 [GPL text](../COPYING) · [Native scope](../native/LICENSE.md) · [Preserved MIT grant](../LICENSE) · [Third-party notices](../THIRD_PARTY_LICENSES.md) · [GitHub license detection](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository#detecting-a-license)
+
+
+</div>

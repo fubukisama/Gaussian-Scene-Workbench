@@ -1,34 +1,60 @@
+<div lang="en">
+
 # Gaussian Scene Workbench Native
 
-Licensing / 许可 / ライセンス: [short three-language guide](../docs/LICENSING.md) · [repository terms](../LICENSE). Component-specific grants and existing notices are unchanged.
+Licensing / <span lang="zh-CN">许可</span> / <span lang="ja">ライセンス</span>: [short three-language guide](../docs/LICENSING.md) · [repository terms](../LICENSE). Component-specific grants and existing notices are unchanged.
 
 The `main` branch is the single maintained native desktop source branch. `native/` contains the Qt 6/C++ desktop and its supervised Python compute backend. The retired web/Electron implementation has been removed from this branch. The native target does not load a browser engine, start a local HTTP server, or require Node.js at runtime. Shared workflow code lives in `native/backend/compute.py`; see [migration and compatibility](../docs/NATIVE_MIGRATION.md).
 
 Documentation updated: `2026-10-23`. Product version is `0.3.8-native-preview`; the build manifest records the release date. See [result-path and persistent-control reliability](../docs/CI_RELIABILITY.md) for equivalent Windows names and bounded metadata reads during atomic publication. See [recorded PLY and persistent batches](../docs/RECORDED_PLY_AND_BATCH.md) for shared restoration, scene-edit provenance and persistent queue controls; [runtime decoupling](../docs/RUNTIME_DECOUPLING.md) covers independent resource/execution controls, old-policy migration and existing-job observation. [General reconstruction](../docs/GENERAL_RECONSTRUCTION.md) covers initialization, rendered-depth point clouds, independent geometry evaluation and named comparison recipes; [camera/scale P1](../docs/CAMERA_SCALE_P1.md) covers constraints, independent checks and trajectory association. Local acceptance, installed delivery and complete cloud CI are separately recorded; this version label is not a claim that every gate has passed.
 
-Experimental quality plans / 实验性质量计划 / 実験的品質プラン: [three-language guide](../docs/QUALITY_PLAN.md). Default off; final quality/geometry and MCMC desktop admission remain gated. 默认关闭，不把短测当画质提升。初期状態では無効で、最終品質の受入とは区別します。
+Experimental quality plans / <span lang="zh-CN">实验性质量计划</span> / <span lang="ja">実験的品質プラン</span>: [three-language guide](../docs/QUALITY_PLAN.md). Default off; final quality/geometry and MCMC desktop admission remain gated. <span lang="zh-CN">默认关闭，不把短测当画质提升。</span> <span lang="ja">初期状態では無効で、最終品質の受入とは区別します。</span>
 
 ## Current preview
 
 - [Managed native updates](../docs/NATIVE_UPDATES.md): desktop, Start menu and taskbar use a stable native entry point. Verified releases switch atomically for the next launch, retaining running and previous versions; this is not live patching or an automatic downloader.
 
+<div lang="zh-CN">
+
 中文：[原生版本更新](../docs/NATIVE_UPDATES.md)让桌面、开始菜单和任务栏统一使用固定入口。验证通过后下次启动自动使用新版，保留运行中的版本和旧版；不属于热更新或后台自动下载。
+
+</div>
+
+<div lang="ja">
 
 日本語：[ネイティブ版の更新](../docs/NATIVE_UPDATES.md)ではデスクトップ・スタートメニュー・タスクバーを固定入口に統一します。検証後の次回起動から新版になり、起動中の版と旧版を保持します。ホットパッチや自動ダウンロードではありません。
 
+</div>
+
 - Ordinary 3DGS/2DGS PLY transform baking reads the complete source, preserves field types/custom values, transforms covariance/tangents and SH through degree 4, and rejects nonuniform directional-SH appearance rather than approximating it. Recorded-camera exports retain their proper-Sim3 provenance constraints; original files/checkpoints remain unchanged. See [Gaussian PLY baking routes and fidelity limits](../docs/GAUSSIAN_PLY_BAKING.md).
+
+<div lang="zh-CN">
 
 中文：普通 3DGS／2DGS PLY 变换烘焙读取完整源数据，保留字段类型和自定义属性，处理协方差／切向与 0–4 阶 SH；方向 SH 的非等比缩放明确拒绝，不近似外观。记录相机路线保持 proper-Sim3 来源约束，原件和检查点不变。见[烘焙路线与保真边界](../docs/GAUSSIAN_PLY_BAKING.md)。
 
+</div>
+
+<div lang="ja">
+
 日本語：通常の 3DGS／2DGS PLY ベイクは完全な元データを読み、フィールド型・独自属性を保持して共分散／接線と 0–4 次 SH を変換します。方向依存 SH の不均等スケールは近似せず拒否します。記録付きカメラの proper-Sim3 出所制約を維持し、元ファイルとチェックポイントは変更しません。[ルートと忠実性の限界](../docs/GAUSSIAN_PLY_BAKING.md)を参照してください。
+
+</div>
 
 - Shared recorded-frame PLY export covers ordinary points, indexed polygon meshes and 3DGS/2DGS. Safe referenced texture bytes, face-corner UVs, custom fields and model-specific cameras remain bound to their actual hashes. Proper uniform scene TRS is an explicit active edit, not a second unit conversion; repeat exports preserve the accumulated edit. Persistent batch observers detach without owning the coordinator; pause/cancel preserve complete-state continuation and completed experiments are not relaunched. See [support matrix and limits](../docs/RECORDED_PLY_AND_BATCH.md).
 - Native 3DGS/2DGS runtime settings separate resource protection from execution features; requested options, dependency-resolved settings and observed loss/renderer history stay distinct. Legacy disabled settings remain effectively disabled. Full-state resume supports explicit guard-only changes after unchanged data/source/optimizer validation; runtime hot switching is not advertised. Probe failure, estimate failure, typed CUDA OOM, inferred legacy CUDA OOM text and normal exceptions retain different causes. Guard OFF never promises that CUDA will fit or that a short run reaches geometric accuracy. See [schema and capability matrix](../docs/RUNTIME_DECOUPLING.md).
 - The native existing-job dialog lists and observes already recorded jobs without recovery mutations or starting training. A live OS-bound worker session is required for explicit pause/stop. Closing the observer cancels only its own inspection helper, not the observed trainer. Windows persistent training can continue after the desktop closes; background lifecycles and package acceptance remain separately tested, not inferred from a unit test.
 
+<div lang="zh-CN">
+
 中文：显存保护与各项执行优化分开，请求值、依赖解析值和实际执行分开记录；旧版 OFF 不重新开启子功能。只改保护策略通过严格完整状态续训生效，不宣称热切换。现有任务观察不启动训练，明确控制须验证会话；关闭观察不停止训练。详见[运行设置与验收边界](../docs/RUNTIME_DECOUPLING.md)。
 
+</div>
+
+<div lang="ja">
+
 日本語：メモリ保護と実行最適化を分離し、要求・依存解決・実測を区別します。旧 OFF 設定を再有効化せず、保護のみの変更は厳密な完全状態再開で適用します。既存タスクの観察は学習を開始せず、明示制御にはセッション確認が必要です。観察終了は学習停止ではありません。[設定と検証範囲](../docs/RUNTIME_DECOUPLING.md)を参照してください。
+
+</div>
 
 The new geometry route uses only training views and preserves original Gaussian models/checkpoints. Camera-Z/masks/scale/frame/backend identities are saved with a separate, unfused point cloud. It is an appearance proxy, not a certified material surface. Native display defaults to the training frame; canonical/source products are saved without guessing viewport alignment. Short actual training/resume tests do not establish reconstruction accuracy.
 
@@ -38,8 +64,17 @@ The complete native/Qt/backend/source payload, shortcuts and Windows uninstall
 entry are installed without auto-starting GSW or training; research runtimes
 remain separate.
 
+<div lang="zh-CN">
+
 中文：Setup 安装向导支持目录选择、快捷方式和系统卸载，保留用户新增数据与独立训练环境。
+
+</div>
+
+<div lang="ja">
+
 日本語：Setup は導入先、ショートカット、アンインストールに対応し、追加データと独立した学習環境を保持します。
+
+</div>
 
 - Source-ported Blender cursor wheel zoom (persistent View → Zoom to Cursor) and projection-correct pan cover all model displays; zoom anchors the view-target plane, not an automatically picked surface. Source-ported LichtFeld whole-page upload budgeting is shared by paged points/meshes, with first-page progress and unchanged actual RAM/VRAM admission. See [fixed sources, capability matrix and acceptance limits](../docs/UPSTREAM_NATIVE_UPGRADES.md).
 
@@ -114,15 +149,23 @@ mesh path covers imported Metashape models and the material previews generated
 by OpenMVS/SuGaR; untextured 2DGS, TSDF, and GS2Mesh outputs retain their existing
 rendering behavior. No training or optimizer-state capability is changed.
 
+<div lang="zh-CN">
+
 中文：默认构建测试需要 NumPy 和 Pillow。纹理模型回归在三种界面语言、
 深浅两种主题中对比真实视口字形，同时确认贴图仍被绘制。真实模型仅使用
 独立副本，校验原模型和贴图未变；训练及优化器状态能力不受影响。
+
+</div>
+
+<div lang="ja">
 
 日本語：既定のビルドテストには NumPy と Pillow が必要です。テクスチャ付き
 モデルの回帰テストは、3言語・明暗2テーマの実際のビューポート文字を比較し、
 テクスチャの描画も確認します。実モデルは独立したコピーのみを使用し、元の
 モデルと画像が変更されていないことを検証します。学習やオプティマイザーの
 状態に関する機能は変更しません。
+
+</div>
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1
@@ -195,9 +238,17 @@ This path is shared by imported meshes and supported TSDF, SuGaR, GS2Mesh and Op
 
 Public regression commands include `--smoke-test-window-appearance`, `--smoke-test-mesh-rendering` and `--smoke-test-resource-budget-ui`/`--smoke-test-resource-budget-mesh`/`--smoke-test-resource-budget-shared`. `--smoke-test-icon-ui` and CTest `native_icon_ui_*` exercise real toolbar/viewport clicks, all vector states, two themes, three scales, DPR 2, short-view layouts and source/transform preservation in isolated test settings. Render-performance FPS is completed viewport-frame cadence, not GPU timing or an estimated inverse CPU duration.
 
+<div lang="zh-CN">
+
 中文：文件窗口默认加宽，工具栏标签保持连续底色；统一图标随三语、主题和缩放即时更新。网格默认采用激进自适应预算，按实际余量完整加载或分页，预算改变不重置模型与视角。普通固定面数/1 GiB 门槛已取消，保留格式与整数保护；纹理不分页，预算不足时明确报错。预算不是整个程序或训练的硬配额，不更改原始数据或完整状态续训能力。实际按钮、高 DPI、小视口及源文件保持均有原生界面回归。
 
+</div>
+
+<div lang="ja">
+
 日本語：ファイルダイアログを広くし、ツールバーのラベル背景を連続させます。統一アイコンは3言語・テーマ・スケール変更に即時追従します。メッシュは実際の余量に応じた積極的な自動予算で完全常駐またはページングし、予算変更でモデルや視点をリセットしません。通常の固定面数/1 GiB 制限は廃止し、形式・整数の保護は残します。テクスチャはページングせず不足時に明示します。全体/学習の強制的な上限ではなく、元データや完全状態再開の機能を変えません。実際の操作、高 DPI、小さなビュー、ソース保持をネイティブ UI 回帰で検証します。
+
+</div>
 
 ## License boundary
 
@@ -234,11 +285,17 @@ processes do not automatically guarantee that every distribution is legally
 an aggregate. This scope statement is not a blanket legal assurance or a
 commercial license for restricted training backends.
 
+<div lang="zh-CN">
+
 中文：自本次变更起，原创原生桌面主程序为 GPL-3.0-or-later，旧 MIT 权利不撤销。
 Blender v4.5.0 移植是圆锥/立方体几何与 Qt 展示适配，不是完整操作器系统；
 交互、约束和撤销仍由 GSW 管理。独立实现的二维高斯 shader 替代旧研究许可衍生
 shader 的主程序嵌入，旧源码保留原许可。独立 worker 及其他第三方仍遵循各自条款，
 不因 GPL 主程序而获准商用；分发须提供对应源码及声明，进程边界不等于法律保证。
+
+</div>
+
+<div lang="ja">
 
 日本語：本変更以降、独自のネイティブ主プログラムは GPL-3.0-or-later とし、
 過去の MIT の権利は維持します。Blender v4.5.0 の移植は円錐/立方体と Qt 表示で、
@@ -247,3 +304,8 @@ shader が従来の研究ライセンス派生 shader の組込みを置き換�
 元の許諾を維持します。独立 worker と第三者は各条件に従い、主プログラムの GPL
 で商用許諾を得るわけではありません。配布時は対応ソースと通知が必要であり、
 プロセスを分けるだけで法的な互換性を保証するものではありません。
+
+
+</div>
+
+</div>
