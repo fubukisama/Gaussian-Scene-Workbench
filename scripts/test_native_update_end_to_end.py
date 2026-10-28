@@ -173,6 +173,12 @@ class EndToEnd(unittest.TestCase):
         user32.GetDlgItem.restype = ctypes.c_void_p
         user32.GetParent.argtypes = [ctypes.c_void_p]
         user32.GetParent.restype = ctypes.c_void_p
+        user32.IsChild.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.IsChild.restype = ctypes.c_int
+        user32.GetDlgCtrlID.argtypes = [ctypes.c_void_p]
+        user32.GetDlgCtrlID.restype = ctypes.c_int
+        user32.EnumChildWindows.argtypes = [ctypes.c_void_p, callback_type, ctypes.c_ssize_t]
+        user32.EnumChildWindows.restype = ctypes.c_int
         user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
         user32.SetForegroundWindow.restype = ctypes.c_int
         user32.GetForegroundWindow.argtypes = []
@@ -198,13 +204,35 @@ class EndToEnd(unittest.TestCase):
                     button = user32.GetDlgItem(window, 1)  # IDOK, not window text.
                     button_owner = ctypes.c_ulong()
                     button_class = ctypes.create_unicode_buffer(256)
+                    owner_match, direct_parent, descendant, control_id = False, False, False, None
                     if button:
                         user32.GetWindowThreadProcessId(button, ctypes.byref(button_owner))
-                        if button_owner.value == process.pid and user32.GetParent(button) == window:
+                        owner_match = button_owner.value == process.pid
+                        if owner_match:
+                            direct_parent = user32.GetParent(button) == window
+                            descendant = bool(user32.IsChild(window, button))
                             user32.GetClassNameW(button, button_class, len(button_class))
-                    owned_button = (bool(button) and button_owner.value == process.pid and
-                        user32.GetParent(button) == window and button_class.value.casefold() == "button")
-                    record.update(controlFound=bool(owned_button), controlClass=button_class.value)
+                            control_id = user32.GetDlgCtrlID(button)
+                    owned_button = (bool(button) and owner_match and direct_parent and descendant and
+                        control_id == 1 and button_class.value.casefold() == "button")
+                    record.update(getDlgItemPresent=bool(button), ownerMatch=owner_match,
+                        directParent=direct_parent, isChild=descendant, controlId=control_id,
+                        controlFound=bool(owned_button), controlClass=button_class.value)
+                    if len(observations) < 20:
+                        children = []
+                        @callback_type
+                        def inspect_owned_child(child, _parameter):
+                            child_owner = ctypes.c_ulong()
+                            user32.GetWindowThreadProcessId(child, ctypes.byref(child_owner))
+                            if child_owner.value == process.pid and user32.IsChild(window, child):
+                                child_class = ctypes.create_unicode_buffer(256)
+                                user32.GetClassNameW(child, child_class, len(child_class))
+                                children.append({"class": child_class.value,
+                                    "controlId": user32.GetDlgCtrlID(child),
+                                    "directParent": user32.GetParent(child) == window})
+                            return int(len(children) < 8)
+                        user32.EnumChildWindows(window, inspect_owned_child, 0)
+                        record.update(childObservationLimit=8, children=children)
                     if owned_button:
                         # Only this verified synthetic dialog may receive a
                         # foreground request. A denied request remains evidence;
@@ -219,6 +247,22 @@ class EndToEnd(unittest.TestCase):
                         posted = bool(user32.PostMessageW(button, 0x00F5, 0, 0))  # BM_CLICK
                         record.update(postSucceeded=posted,
                             postError=ctypes.get_last_error() if not posted else 0)
+                    # Dismissing an error notification does not require a
+                    # particular button hierarchy. Request the dialog's own
+                    # WindowProc to close; never force a passing process exit.
+                    # The launcher must still genuinely exit 2 afterwards.
+                    rechecked_owner = ctypes.c_ulong()
+                    user32.GetWindowThreadProcessId(window, ctypes.byref(rechecked_owner))
+                    rechecked_class = ctypes.create_unicode_buffer(256)
+                    if rechecked_owner.value == process.pid:
+                        user32.GetClassNameW(window, rechecked_class, len(rechecked_class))
+                    can_request_close = rechecked_owner.value == process.pid and rechecked_class.value == "#32770"
+                    record.update(closeRequestAttempted=can_request_close, closeRequestSucceeded=False)
+                    if can_request_close:
+                        ctypes.set_last_error(0)
+                        close_posted = bool(user32.PostMessageW(window, 0x0010, 0, 0))  # WM_CLOSE
+                        record.update(closeRequestSucceeded=close_posted,
+                            closeRequestError=ctypes.get_last_error() if not close_posted else 0)
                 if len(observations) < 20:
                     observations.append(record)
                 return 1
