@@ -3,6 +3,7 @@
 #include "MainWindow.h"
 #include "TaskDetailsDialog.h"
 #include "TaskRecord.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QAction>
 #include <QApplication>
@@ -298,6 +299,24 @@ bool runTaskActionsSmokeTest(MainWindow &window) {
             state->text() == QCoreApplication::translate("Workbench", "失败") &&
             copyButton->text() == QCoreApplication::translate("Workbench", "复制任务摘要"), "details text translates live");
       check(name->text() == failedName && logs->toPlainText() == retained, "details language changes preserve user task name and raw logs");
+    }
+    if (qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE")) {
+      QSharedPointer<TaskRecord> observed;
+      for (const auto &record : window.mTaskRecords)
+        if (record && record->name() == failedName) observed = record;
+      if (!check(bool(observed), "matrix observes the actual retained failed task record")) {
+        dialog->reject(); return;
+      }
+      check(tests::captureUiFormMatrix(true, *dialog, QStringLiteral("retained-task-details"),
+          QSize(1000, 720), QSize(360, 560), [&] {
+        return QJsonObject{{"name", observed->name()}, {"state", observed->state()},
+            {"startedAt", observed->startedAt().toString(Qt::ISODateWithMs)},
+            {"finishedAt", observed->finishedAt().toString(Qt::ISODateWithMs)},
+            {"outputDirectory", observed->outputDirectory()}, {"rawLog", observed->logText()},
+            {"logTruncated", observed->logTruncated()}, {"displayedRawLog", logs->toPlainText()},
+            {"displayedName", name->text()}, {"taskCount", table->rowCount()},
+            {"workerRunning", window.mProcessSupervisor.isRunning()}};
+      }), "task-details native matrix retains the actual failed task and untranslated raw log");
     }
     copyButton->trigger();
     checkClipboard(QApplication::clipboard()->text().contains(failedName), "details copy button exports the selected task summary");

@@ -65,6 +65,7 @@ def prepare(args):
     flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     with (root / "server-stdout.log").open("xb") as stdout, (root / "server-stderr.log").open("xb") as stderr:
         server = subprocess.Popen(server_command, stdout=stdout, stderr=stderr, creationflags=flags, close_fds=True)
+    issuer_process = None
     try:
         deadline = time.monotonic() + 20
         while not ready.exists():
@@ -73,25 +74,40 @@ def prepare(args):
             time.sleep(.1)
         issuer = Path(__file__).with_name("create_native_update_fixture.py").absolute()
         issued = root / "issued"
-        result = subprocess.run([sys.executable, "-I", "-B", str(issuer), "--fixture-only",
+        issuer_command = [sys.executable, "-I", "-B", str(issuer), "--fixture-only",
             "--output-root", str(issued), "--server-info", str(ready), "--package-a", str(a), "--package-b", str(b),
-            "--source-commit", args.source_commit, "--source-tree", args.source_tree],
-            capture_output=True, timeout=120, encoding="utf-8")
-        if result.returncode != 0:
-            try:
-                failure = json.loads(result.stdout[:8192])
-                write_json(root / "issuer-failure.json", {key: failure.get(key) for key in ("schema", "ok", "code", "errorType")})
-            except (ValueError, OSError):
-                pass
-            raise RuntimeError("isolated_tuf_issuer_failed")
+            "--source-commit", args.source_commit, "--source-tree", args.source_tree]
+        if args.with_short_expiry:
+            issuer_command += ["--short-expiry-trigger-file", str(issued / "short-expiry-trigger.json")]
+            with (root / "issuer-stdout.log").open("xb") as stdout, (root / "issuer-stderr.log").open("xb") as stderr:
+                issuer_process = subprocess.Popen(issuer_command, stdout=stdout, stderr=stderr,
+                    creationflags=flags, close_fds=True)
+            deadline = time.monotonic() + 40
+            while not (issued / "fixture.json").exists():
+                if issuer_process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError("isolated_tuf_issuer_failed")
+                time.sleep(.1)
+        else:
+            result = subprocess.run(issuer_command, capture_output=True, timeout=120, encoding="utf-8")
+            if result.returncode != 0:
+                try:
+                    failure = json.loads(result.stdout[:8192])
+                    write_json(root / "issuer-failure.json", {key: failure.get(key) for key in ("schema", "ok", "code", "errorType")})
+                except (ValueError, OSError):
+                    pass
+                raise RuntimeError("isolated_tuf_issuer_failed")
         fixture = json.loads((issued / "fixture.json").read_text(encoding="utf-8"))
         report = {"schema": "gsw.trust_ci_preparation/1", "testOnly": True, "production": False,
             "scope": "synthetic-native-trust-only", "root": str(root), "serverPid": server.pid,
             "serverInfo": str(ready), "profile": str(issued / "profile.json"), "fixture": str(issued / "fixture.json"),
-            "controlFile": fixture["controlFile"], "sourceCommit": args.source_commit, "sourceTree": args.source_tree}
+            "controlFile": fixture["controlFile"], "sourceCommit": args.source_commit, "sourceTree": args.source_tree,
+            "issuerPid": issuer_process.pid if issuer_process is not None else None}
         write_json(root / "preparation.json", report)
         return report
     except BaseException:
+        if issuer_process is not None and issuer_process.poll() is None:
+            issuer_process.terminate()
+            issuer_process.wait(timeout=10)
         if server.poll() is None:
             server.terminate()
             server.wait(timeout=10)
@@ -103,6 +119,7 @@ def main():
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--with-short-expiry", action="store_true")
     try:
         print(json.dumps(prepare(parser.parse_args()), ensure_ascii=True))
         return 0

@@ -93,8 +93,21 @@ resets the trust journal.
 
 The initial remote stub failure is recorded in run 40656542985. Local checks
 are limited to static validation, dependency advisory analysis and compilation.
-The remote C-ABI tracer, malformed/wrong-key/expiry/replay scenarios, Windows
-storage fault injection and root rotation/revocation retention must all pass and
-be tied to exact source evidence before release. The integrated real native
+Remote run 40663657869, isolated-trust job 122732631637, commit
+`66ca2462f6a73ea063e8f1417f252f02b57b7443` / tree
+`16adf983206980a4fa7c10fbf6ff9d22a32abfbb`, executed all 10 public C-ABI test
+groups successfully with no skips (`Ran 10 tests in 3.418s`). This covered the
+real HTTPS A/B/cache/replay tracer, invalid signatures/expiry/mix/descriptors,
+runtime-override rejection, cancellation, Windows accepted-state fault points,
+whole-directory loss/corruption, root dual thresholds/exact version/adoption
+retention, fresh-TUF application counters/immutable IDs and persistent global
+revocations. It does not validate later source automatically.
+
+The additional real 60-second expiry slice is tested separately, without OS
+clock changes or runtime overrides: a bounded remote issuer keeps ephemeral
+keys only in memory, receives a public trigger after compilation, signs the
+same-root short timestamp, then exits. Cached activation must reject actual
+expiry while historical inspection remains available. Its result must be
+recorded before treating that gate as passed. The integrated real native
 A -> B -> bad C -> retained B -> explicit installed A seam is separate. No
 production root, signing key, public release or channel promotion is configured.

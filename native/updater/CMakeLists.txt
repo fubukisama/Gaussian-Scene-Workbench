@@ -32,11 +32,16 @@ if(GSW_TRUST_LIBRARY)
   target_include_directories(gsw_update_trust_bridge PUBLIC ../src PRIVATE ../updater-trust/include)
   target_link_libraries(gsw_update_trust_bridge PUBLIC gsw_activation_core gsw_update_download
     PRIVATE gsw_updater_trust kernel32 ntdll userenv ws2_32 dbghelp crypt32 secur32 bcrypt ncrypt)
-  add_executable(gsw_native_update_helper ../src/NativeUpdateHelper.cpp)
+  add_executable(gsw_native_update_helper ../src/NativeUpdateHelper.cpp
+    ../src/NativeInstallation.cpp ../src/NativeInstallation.h)
   target_include_directories(gsw_native_update_helper PRIVATE ../third_party/nlohmann ../third_party/miniz)
   target_link_libraries(gsw_native_update_helper PRIVATE gsw_update_trust_bridge)
+  if(WIN32)
+    target_link_libraries(gsw_native_update_helper PRIVATE Shell32 Ole32 Propsys User32 Uuid)
+  endif()
   if(GSW_UPDATER_FIXTURE_BUILD)
     target_compile_definitions(gsw_update_trust_bridge PRIVATE GSW_UPDATER_FIXTURE_BUILD=1)
+    target_compile_definitions(gsw_native_update_helper PRIVATE GSW_UPDATER_FIXTURE_BUILD=1)
     set_target_properties(gsw_native_update_helper PROPERTIES OUTPUT_NAME "GSW Update Fixture Helper")
   else()
     set_target_properties(gsw_native_update_helper PROPERTIES OUTPUT_NAME "Gaussian Scene Workbench Update Helper")
@@ -50,6 +55,35 @@ if(GSW_TRUST_LIBRARY)
 endif()
 if(MSVC)
   target_compile_options(gsw_update_download PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+if(GSW_UPDATER_FIXTURE_BUILD)
+  # Actual Qt windows, but NOT the GSW renderer/application. This separate
+  # product exercises stable-entry A/B updates without a user's installation.
+  find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets)
+  foreach(label A B)
+    string(TOLOWER "${label}" lower)
+    qt_add_executable(gsw_update_application_fixture_${lower} WIN32
+      ../tests/NativeUpdateApplicationFixture.cpp)
+    target_link_libraries(gsw_update_application_fixture_${lower} PRIVATE Qt6::Widgets)
+    target_compile_definitions(gsw_update_application_fixture_${lower} PRIVATE GSW_UPDATE_FIXTURE_LABEL="${label}")
+    set_target_properties(gsw_update_application_fixture_${lower} PROPERTIES
+      OUTPUT_NAME "Gaussian Scene Workbench"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixture-${label}")
+    if(MSVC)
+      target_compile_options(gsw_update_application_fixture_${lower} PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+  endforeach()
+  # Compile the exact production launcher/installation sources. There is no
+  # test root/feed/key override in this executable: root is still parent/bin.
+  qt_add_executable(gsw_update_fixture_launcher WIN32 ../src/NativeLauncher.cpp ../src/NativeInstallation.cpp)
+  target_link_libraries(gsw_update_fixture_launcher PRIVATE Qt6::Core Shell32 Ole32 Propsys User32 Uuid)
+  target_compile_definitions(gsw_update_fixture_launcher PRIVATE
+    GSW_APP_USER_MODEL_ID="Fubukisama.GaussianSceneWorkbench.UpdateFixture"
+    GSW_UPDATER_FIXTURE_BUILD=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+  set_target_properties(gsw_update_fixture_launcher PROPERTIES OUTPUT_NAME "Gaussian Scene Workbench Launcher")
+  if(MSVC)
+    target_compile_options(gsw_update_fixture_launcher PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
 endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -66,6 +100,17 @@ if(BUILD_TESTING)
   target_link_libraries(gsw_update_activation_tests PRIVATE gsw_activation_core Qt6::Test)
   add_test(NAME update_activation_contract COMMAND gsw_update_activation_tests -o -,txt)
   set_tests_properties(update_activation_contract PROPERTIES TIMEOUT 60
+    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py;QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  qt_add_executable(gsw_update_path_tests ../tests/NativeUpdatePathTests.cpp ../src/NativeDeveloperPublisher.cpp)
+  target_include_directories(gsw_update_path_tests PRIVATE ../third_party/nlohmann ../third_party/miniz)
+  target_link_libraries(gsw_update_path_tests PRIVATE gsw_activation_core Qt6::Test)
+  target_compile_definitions(gsw_update_path_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  if(MSVC)
+    target_compile_options(gsw_update_path_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME update_windows_long_paths COMMAND gsw_update_path_tests -o -,txt)
+  set_tests_properties(update_windows_long_paths PROPERTIES TIMEOUT 90
     ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py;QT_FORCE_STDERR_LOGGING=1"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 endif()

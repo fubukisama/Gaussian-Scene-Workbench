@@ -2,6 +2,7 @@
 #include "MultiItemList.h"
 #include "ManagedName.h"
 #include "AppLanguage.h"
+#include "NativeUpdateUi.h"
 #include "WindowUi.h"
 #include "WorkbenchIcons.h"
 #include "WorkspaceDropPlan.h"
@@ -2245,6 +2246,9 @@ void MainWindow::createMenus() {
   }
 
   QMenu *helpMenu = AppLanguage::text(menuBar()->addMenu(QCoreApplication::translate("Workbench", "帮助")), AppLanguage::source("帮助"), "title");
+  installNativeUpdateUi(helpMenu, this);
+  if (auto *updateAction = findChild<QAction *>(QStringLiteral("nativeUpdateAction")))
+    setWorkbenchActionIcon(updateAction, WorkbenchIconId::Refresh, palette());
   auto *aboutAction =
       AppLanguage::text(helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench")), AppLanguage::source("关于 Gaussian Scene Workbench"));
   setWorkbenchActionIcon(aboutAction, WorkbenchIconId::Info, palette());

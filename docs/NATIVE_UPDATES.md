@@ -13,8 +13,11 @@
 各版本自带自己的运行库。普通版本更新不覆盖引导程序；更换引导协议需要单独迁移。
 原有安装向导仍使用固定安装目录，无须套用此版本目录结构。
 
-这不是运行中热更新，也没有添加后台联网下载或定时拉取 Git。发布者先确认对应提交的
-完整远端 CI、相关验收及包文件通过，再执行下方命令。局部验收或等待中的 CI 不能发布。
+下方托管发布命令不是运行中热更新，也不负责后台联网下载或定时拉取 Git。新增的
+“帮助 → 软件更新…”是独立联网前端：每日静默检查，自动下载及准备下次启动需主动开启。
+生产信任或可信引导组件尚未配置时会明确报错，不能当作“已是最新”；接入界面不等于
+已批准公开更新源、签名或引导迁移。发布者先确认对应提交的完整远端 CI、相关验收及
+包文件通过，再执行下方命令。局部验收或等待中的 CI 不能发布。
 SHA-256 防止文件错配，不等同于发布者数字签名；不要对来源不明的包生成验收凭证。
 失败会保留当前版本及记录；回退只切换到已安装并重新校验通过的版本。
 
@@ -29,6 +32,12 @@ SHA-256 防止文件错配，不等同于发布者数字签名；不要对来源
 手动诊断使用固定启动器的 `--diagnostics` 参数，抓帧仍须手动按 F12，保存在安装根目录
 下的 `diagnostics/`，不上传。普通启动清除仅用于该子进程的诊断变量。安装错误提示
 使用当前保存的中／英／日语言，应用内语言切换仍立即生效。
+
+协议 2 的普通启动通过固定、无窗口的原生 helper 离线核对已接纳的可信历史、撤销记录及
+完整版本文件，并持安装锁直到创建指定版本的进程；不联网、不回写信任台账或高水位，
+不自动选择另一版本。离线校验只能拒绝本机已知的撤销，不能发现尚未同步的新撤销。
+创建进程不等于通过应用健康验收。`--print-launch-plan` 在协议 1 下仍不创建子进程；
+协议 2 下只运行只读校验 helper，不启动应用或 GUI。引导协议迁移仍须另行验证和部署。
 
 ## English
 
@@ -46,9 +55,13 @@ bootstrap and its initial Qt runtime remain in `bin/`; each release owns its own
 Ordinary updates do not replace the bootstrap. A bootstrap-protocol migration is separate.
 The classic setup wizard retains its existing fixed-directory installation adapter.
 
-This is not live patching or an automatic network downloader/Git poller. The publisher must
-first verify full remote CI, relevant acceptance and the exact-source package. Scoped or
-pending acceptance is insufficient. SHA-256 binds file integrity, not publisher authenticity;
+The managed publisher below is not live patching or a network downloader/Git poller. The
+new Help → Software Updates entry is a separate online front end: checks are silent and
+daily, while automatic download/next-launch preparation is opt-in. Missing production trust
+or a trusted bootstrap produces an explicit error, never an up-to-date claim. UI integration
+does not approve public feeds, signing or bootstrap migration. The publisher must first
+verify full remote CI, relevant acceptance and the exact-source package. Scoped or pending
+acceptance is insufficient. SHA-256 binds file integrity, not publisher authenticity;
 never manufacture acceptance evidence for an untrusted package. Failure retains the active
 release and a record; rollback selects and revalidates an already-installed release.
 
@@ -67,6 +80,15 @@ locally under the managed root's `diagnostics/`, without uploads. Ordinary launc
 diagnostic variable for that child only. Launcher errors use the saved Chinese/English/Japanese
 language; in-application language switching remains immediate.
 
+Protocol 2 ordinary startup uses the fixed headless native helper to inspect accepted trust
+history, known revocations and the complete installed slot offline, holding the installation
+lock through creation of the selected application process. It does not fetch metadata, write
+the trust ledger/high-water marks or choose another version. Offline inspection cannot learn
+revocations that have not been synchronized. Process creation is not application-health
+acceptance. `--print-launch-plan` still creates no child under protocol 1; under protocol 2
+it runs only the read-only verification helper, never the application or a GUI. Bootstrap
+protocol migration remains a separate verified deployment.
+
 ## 日本語
 
 デスクトップ・スタートメニュー・タスクバーは共通の固定ネイティブランチャーを使用します。
@@ -82,9 +104,13 @@ language; in-application language switching remains immediate.
 持ちます。通常更新でブートストラップを置換せず、プロトコル変更は別途移行します。
 従来のセットアップウィザードは固定インストール先を使用する方式のままです。
 
-実行中のホットパッチや自動ダウンロード、Git の定期取得ではありません。発行前に対応
-コミットの完全なリモート CI・関連受入検証・パッケージを確認します。限定検証や実行中の
-CI では発行できません。SHA-256 はファイル整合性であり、発行元の署名ではありません。
+下記の管理型発行コマンドはホットパッチやネットワークダウンローダー、Git の定期取得では
+ありません。新しい「ヘルプ → ソフトウェア更新…」は独立したオンライン UI です。確認は
+毎日サイレントに行い、自動ダウンロードと次回起動の準備は明示的な有効化が必要です。
+本番の信頼設定や信頼できるブートストラップが未設定なら明確に失敗し、「最新版」とは
+表示しません。UI の接続は公開配信元・署名・ブートストラップ移行の承認ではありません。
+発行前に対応コミットの完全なリモート CI・関連受入検証・パッケージを確認します。
+限定検証や実行中の CI では発行できません。SHA-256 はファイル整合性であり、発行元の署名ではありません。
 不明な配布物に受入証跡を作成しないでください。失敗時は現行版と記録を保持します。
 ロールバックはインストール済みの版を再検証して選択する操作です。
 
@@ -102,6 +128,14 @@ CI では発行できません。SHA-256 はファイル整合性であり、発
 管理ルート内の `diagnostics/` で、自動アップロードしません。通常起動では子プロセスの
 診断変数のみ解除します。エラー表示は保存済みの中・英・日言語を使用し、アプリ内の
 言語変更は引き続き即時反映されます。
+
+プロトコル 2 の通常起動は、固定の非表示ネイティブ helper で受入済みの信頼履歴・既知の
+撤回情報・インストール済み全ファイルをオフライン検証し、指定版のプロセスを作成するまで
+インストールロックを保持します。通信、信頼台帳や高水位の書換え、別版の自動選択は
+行いません。未同期の新しい撤回は検出できません。プロセス作成はアプリの健全性受入を
+意味しません。`--print-launch-plan` はプロトコル 1 では子プロセスを作らず、プロトコル 2
+では読取り専用の検証 helper のみを実行し、アプリや GUI は起動しません。
+ブートストラップのプロトコル移行は引き続き別途の検証・配備が必要です。
 
 ## Publisher commands / 发布命令 / 発行コマンド
 

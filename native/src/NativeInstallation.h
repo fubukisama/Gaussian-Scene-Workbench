@@ -15,6 +15,7 @@ struct NativeLaunchPlan final {
   QString root;
   QString version;
   QString program;
+  QString executableSha256;
   QString workingDirectory;
   QStringList arguments;
   QProcessEnvironment environment;
@@ -25,6 +26,12 @@ struct NativeLaunchPlan final {
 [[nodiscard]] NativeLaunchPlan resolveNativeInstallation(
     const QString &root, bool diagnostics, const QStringList &arguments,
     const QProcessEnvironment &inheritedEnvironment);
+// Protocol 1 remains a local integrity-only entry. Protocol 2 delegates to a
+// fixed compiled helper, which revalidates trusted history and the whole slot.
+// Inspection never creates the application; protocol 2 may create a headless
+// verifier child. Starting holds the helper's installation lock through spawn.
+[[nodiscard]] bool verifyNativeInstallationLaunch(const NativeLaunchPlan &, QString *error);
+[[nodiscard]] bool startNativeInstallation(const NativeLaunchPlan &, bool diagnostics, QString *error);
 [[nodiscard]] QString nativeInstallationErrorText(const QString &code);
 [[nodiscard]] QString managedInstallationForApplication(const QString &applicationPath);
 // Ensures pinning the running version keeps pointing to the stable launcher.

@@ -12,6 +12,27 @@
 class NativeUpdateActivationTests final : public QObject {
   Q_OBJECT
 private slots:
+  void readOnlyAdmissionLockRequiresExistingStateAndSharesPublisherExclusion() {
+    QTemporaryDir root(QDir(QCoreApplication::applicationDirPath()).filePath("startup-lock-XXXXXX"));
+    QVERIFY(root.isValid());
+    const QString path = root.filePath(QStringLiteral(".publish.lock"));
+    gsw::NativeInstallationLock missing(root.path(), gsw::NativeInstallationLock::OpenMode::RequireExisting);
+    QVERIFY(!missing.locked());
+    QVERIFY(!QFileInfo::exists(path));
+    {
+      gsw::NativeInstallationLock publisher(root.path());
+      QVERIFY(publisher.locked());
+      QVERIFY(QFileInfo::exists(path));
+      gsw::NativeInstallationLock contended(root.path(), gsw::NativeInstallationLock::OpenMode::RequireExisting);
+      QVERIFY(!contended.locked());
+    }
+    gsw::NativeInstallationLock readOnly(root.path(), gsw::NativeInstallationLock::OpenMode::RequireExisting);
+    QVERIFY(readOnly.locked());
+    QFile lockFile(path);
+    // The exclusive guard is released by the owner's destructor, not by a
+    // validation return value or a JSON receipt produced by another process.
+    QVERIFY(!lockFile.open(QIODevice::ReadOnly));
+  }
   void publishesCompleteImmutableSlotAndSwitchesOnlyThePointer() {
     QTemporaryDir temporary(QDir(QCoreApplication::applicationDirPath()).filePath("activation-XXXXXX"));
     QVERIFY(temporary.isValid());

@@ -298,6 +298,23 @@ class UiPerformanceCliContracts(unittest.TestCase):
         self.receipt()["observation"]["samples"][0]["diagnosticOverlap"] = True
         self.assert_failed("diagnostic overlap")
 
+    def test_upload_during_measured_pan_remains_rejected(self):
+        case = next(value for value in self.receipt()["cases"] if value["id"] == "3dgs")
+        case["modelAfter"]["attributeUploads"] += 1
+        case["modelAfter"]["orderUploads"] += 1
+        self.assert_failed("pan changed transforms, model fidelity or resident uploads")
+
+    def test_setup_upload_counter_drift_remains_part_of_pair_identity(self):
+        # Reproduce the observed setup race without changing geometry, SH,
+        # cameras or any measured-pan upload. Absolute counters may not be
+        # filtered or normalized to make different preparation work pass.
+        for case in self.receipt()["cases"]:
+            if case["id"] in ("3dgs", "2dgs"):
+                for boundary in ("modelBefore", "modelAfter"):
+                    case[boundary]["attributeUploads"] += 1
+                    case[boundary]["orderUploads"] += 1
+        self.assert_failed("paired fixture/fidelity/camera sequence mismatch: 3dgs/model")
+
     def test_startup_cold_dimensions_are_not_substituted_with_later_dimensions(self):
         self.receipt()["observation"]["samples"][0]["logicalSize"] = [1000, 700]
         self.assert_failed("cold or warm overlay dimensions/DPR differ")

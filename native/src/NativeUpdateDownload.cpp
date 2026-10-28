@@ -1,4 +1,5 @@
 #include "NativeUpdateDownload.h"
+#include "NativeUpdateLocalPath.h"
 
 #include <QAuthenticator>
 #include <QCryptographicHash>
@@ -35,12 +36,12 @@ QString hostKey(const QString &host) {
 }
 
 bool ordinaryLocalPath(const QString &path) {
-  if (!QDir::isAbsolutePath(path) || path.startsWith(QLatin1String("//")) ||
-      path.startsWith(QLatin1String("\\\\"))) return false;
+  if (!updatepaths::logicalLocalPath(path)) return false;
   QString cursor = QDir::cleanPath(path);
   for (;;) {
 #ifdef Q_OS_WIN
-    const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(cursor).utf16()));
+    const auto api = updatepaths::nativeApiPath(cursor);
+    const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16()));
     if (attributes != INVALID_FILE_ATTRIBUTES) {
       if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return false;
     } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
@@ -74,7 +75,8 @@ bool openOwnedPart(QFile &file, const QString &path, bool truncate) {
   file.setFileName(path);
 #ifdef Q_OS_WIN
   const QString native = QDir::toNativeSeparators(QDir::cleanPath(path));
-  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), GENERIC_READ | GENERIC_WRITE,
+  const QString api = updatepaths::nativeApiPath(path);
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(api.utf16()), GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (handle == INVALID_HANDLE_VALUE) return false;
   BY_HANDLE_FILE_INFORMATION info{};

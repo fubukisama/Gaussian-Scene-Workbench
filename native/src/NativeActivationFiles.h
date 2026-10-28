@@ -3,6 +3,7 @@
 #pragma once
 #include "json.hpp"
 #include "miniz.h"
+#include "NativeUpdateLocalPath.h"
 #include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
@@ -24,6 +25,7 @@
 #endif
 
 namespace gsw::activation {
+using updatepaths::nativeApiPath;
 using Json = nlohmann::json;
 constexpr qint64 maxArchive = 4LL * 1024 * 1024 * 1024;
 constexpr qint64 maxExpanded = 16LL * 1024 * 1024 * 1024;
@@ -73,11 +75,12 @@ inline void sha(const QString &s) {
   if (!expression.match(s).hasMatch()) fail("activation_digest_invalid");
 }
 inline bool ordinary(const QString &path, bool missing = false) {
-  if (!QDir::isAbsolutePath(path) || path.startsWith(QLatin1String("//")) || path.startsWith(QLatin1String("\\\\"))) return false;
+  if (!updatepaths::logicalLocalPath(path)) return false;
   QString cursor = QDir::cleanPath(path);
   for (;;) {
 #ifdef Q_OS_WIN
-    const DWORD a = GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(cursor).utf16()));
+    const auto api = nativeApiPath(cursor);
+    const DWORD a = GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16()));
     if (a == INVALID_FILE_ATTRIBUTES) {
       const auto error = GetLastError();
       if (!missing || (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)) return false;
@@ -133,7 +136,8 @@ inline void heldRead(QFile &file, const QString &path) {
   file.setFileName(path);
 #ifdef Q_OS_WIN
   const auto native = QDir::toNativeSeparators(QDir::cleanPath(path));
-  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), GENERIC_READ, FILE_SHARE_READ,
+  const auto api = nativeApiPath(path);
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(api.utf16()), GENERIC_READ, FILE_SHARE_READ,
       nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (handle == INVALID_HANDLE_VALUE) fail("activation_file_occupied");
   BY_HANDLE_FILE_INFORMATION info{};
@@ -173,7 +177,8 @@ public:
     // into a junction between path inspection and CREATE_NEW below.
     for (auto it = parents.crbegin(); it != parents.crend(); ++it) {
       const auto native = QDir::toNativeSeparators(QDir::cleanPath(*it));
-      HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), FILE_READ_ATTRIBUTES,
+      const auto api = nativeApiPath(*it);
+      HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(api.utf16()), FILE_READ_ATTRIBUTES,
           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
           FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
       if (handle == INVALID_HANDLE_VALUE) fail("activation_write_path_invalid");
@@ -198,7 +203,8 @@ inline void secureOutputOpen(QFile &file, const QString &path) {
   auto ancestors = std::make_unique<OutputDirectoryLease>(&file);
   ancestors->acquire(path);
   const auto native = QDir::toNativeSeparators(QDir::cleanPath(path));
-  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), GENERIC_WRITE,
+  const auto api = nativeApiPath(path);
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(api.utf16()), GENERIC_WRITE,
       0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (handle == INVALID_HANDLE_VALUE) fail("activation_extract_write_failed");
   BY_HANDLE_FILE_INFORMATION info{};
@@ -234,8 +240,8 @@ inline void durableWrite(const QString &path, const QByteArray &bytes, bool repl
   const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(file.handle()));
   if (handle == INVALID_HANDLE_VALUE || !FlushFileBuffers(handle)) fail("activation_write_failed");
   file.close();
-  if (!MoveFileExW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(temp).utf16()),
-      reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16()),
+  if (!MoveFileExW(reinterpret_cast<LPCWSTR>(nativeApiPath(temp).utf16()),
+      reinterpret_cast<LPCWSTR>(nativeApiPath(path).utf16()),
       MOVEFILE_WRITE_THROUGH | (replace ? MOVEFILE_REPLACE_EXISTING : 0))) fail("activation_atomic_write_failed");
 #else
   file.close();

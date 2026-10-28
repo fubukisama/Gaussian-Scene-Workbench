@@ -3,6 +3,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include "MainWindow.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QAction>
 #include <QApplication>
@@ -137,6 +138,26 @@ bool runResourceBudgetUiSmokeTest(MainWindow &window) {
     const ResourceBudgetPolicy edited = viewport->resourceBudgetPolicy();
     check(edited.mode == ResourceBudgetPolicy::Mode::Manual && edited.ramLimitMiB == 512 && edited.gpuLimitMiB == 64,
           "real controls apply independently specified limits immediately");
+    const auto budgetSnapshot = [&] {
+      const auto policy = viewport->resourceBudgetPolicy();
+      auto *mode = dialog->findChild<QComboBox *>(QStringLiteral("resourceBudgetMode"));
+      auto *ram = dialog->findChild<QDoubleSpinBox *>(QStringLiteral("resourceRamLimitGiB"));
+      auto *gpu = dialog->findChild<QDoubleSpinBox *>(QStringLiteral("resourceGpuLimitGiB"));
+      return QJsonObject{{"policyMode", static_cast<int>(policy.mode)},
+          {"policyRamMiB", policy.ramLimitMiB}, {"policyGpuMiB", policy.gpuLimitMiB},
+          {"controlsPresent", mode && ram && gpu},
+          {"controlMode", mode ? mode->currentData().toInt() : -1},
+          {"controlRamGiB", ram ? ram->value() : -1.0},
+          {"controlGpuGiB", gpu ? gpu->value() : -1.0},
+          {"ramEnabled", ram && ram->isEnabled()}, {"gpuEnabled", gpu && gpu->isEnabled()}};
+    };
+    // The existing default (680) and compact (360) are both narrow under the
+    // actual-width evidence contract. Explicitly expose a regular-width state
+    // too; native receipts and the public policy snapshot must both survive.
+    check(gsw::tests::captureUiFormMatrix(qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE"),
+              *dialog, QStringLiteral("resource-budget-manual"), QSize(800, 560), QSize(360, 300),
+              budgetSnapshot),
+          "owned resource policy matrix has native receipts without changing policy or live controls");
     const QSize originalSize = dialog->size();
     for (const QString &locale : AppLanguage::supported()) {
       AppLanguage::apply(locale, false);

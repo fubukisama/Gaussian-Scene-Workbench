@@ -2,6 +2,7 @@
 #include "AppLanguage.h"
 #include "GenerationHistoryDialog.h"
 #include "MainWindow.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QAction>
 #include <QApplication>
@@ -180,6 +181,21 @@ bool runGenerationHistorySmokeTest(MainWindow &window) {
                 parameters->textCursor().selectedText() == selectedText,
                 "language switching preserves selected experiment, user name and parameter selection");
         }
+      }
+      if (qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE")) {
+        check(tests::captureUiFormMatrix(true, *dialog, QStringLiteral("persisted-generation-history"),
+            QSize(1000, 720), QSize(680, 620), [&] {
+          const auto selected = dialog->selectedRecord();
+          return QJsonObject{{"id", selected.id}, {"pipeline", selected.pipeline}, {"backend", selected.backend},
+              {"displayName", selected.displayName}, {"datasetPath", selected.datasetPath},
+              {"configurationPath", selected.configurationPath}, {"outputRoot", selected.outputRoot},
+              {"resultPath", selected.resultPath}, {"resultSceneId", selected.resultSceneId},
+              {"status", selected.status}, {"parameters", selected.parameters},
+              {"action", int(dialog->selectedAction())}, {"rows", list->topLevelItemCount()},
+              {"parameterText", parameters->toPlainText()},
+              {"scenes", window.mWorkspace.sceneCollectionJson()},
+              {"workerRunning", window.mProcessSupervisor.isRunning()}};
+        }), "history native matrix preserves the real selected archive and project without launching a worker");
       }
       dialog->reject();
     } else if (mode == Mode::ViewFirst) {

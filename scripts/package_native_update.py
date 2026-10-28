@@ -5,6 +5,7 @@ Developer/CI tooling only: the native updater does not execute this script.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -12,6 +13,8 @@ from pathlib import Path
 import re
 import stat
 import sys
+import tarfile
+import tomllib
 import unicodedata
 import zipfile
 
@@ -24,6 +27,8 @@ MAX_FILES = 100_000
 MAX_MANIFEST = 64 * 1024**2
 MAX_DEPTH = 32
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
+MAX_CRATE_UNPACKED = 512 * 1024**2
+MAX_DEPENDENCY_UNPACKED = 2 * 1024**3
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 BUILD_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
@@ -225,6 +230,501 @@ def _verify_written(archive: Path, manifest: dict, manifest_bytes: bytes):
                 _fail("update_archive_file_digest_differs")
         if actual != set(expected) | {"release-files.json"}:
             _fail("update_archive_file_set_differs")
+
+
+def _claim_file(names: dict, name: str):
+    """A file cannot also be another file's parent, including case aliases."""
+    parts = validate_relative_path(name).split("/")
+    for count in range(1, len(parts)):
+        _claim(names, "/".join(parts[:count]), "directory")
+    _claim(names, name, "file")
+
+
+def _manifest_rows(rows) -> dict:
+    if not isinstance(rows, list) or not 0 < len(rows) <= MAX_FILES:
+        _fail("update_archive_manifest_invalid")
+    result, aliases = {}, {}
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {"path", "size", "sha256"}
+                or type(row["size"]) is not int or not 0 <= row["size"] <= MAX_ARCHIVE
+                or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"])):
+            _fail("update_archive_manifest_invalid")
+        name = validate_relative_path(row["path"])
+        _claim_file(aliases, name)
+        if name in result:
+            _fail("update_archive_file_set_differs")
+        result[name] = row
+    return result
+
+
+def _source_content(payload, name: str, hashes: dict) -> bytes:
+    """Bounded read of an already hash-checked source member, never a local path."""
+    key = "source/" + name
+    row = hashes.get(key)
+    if row is None or row["size"] > MAX_MANIFEST:
+        _fail("update_source_dependency_evidence_unavailable")
+    raw = payload.read(key)
+    if len(raw) != row["size"] or hashlib.sha256(raw).hexdigest() != row["sha256"]:
+        _fail("update_source_dependency_files_differ")
+    return raw
+
+
+def _toml(raw: bytes) -> dict:
+    try:
+        return tomllib.loads(raw.decode("utf-8"))
+    except (UnicodeError, tomllib.TOMLDecodeError):
+        _fail("update_source_dependency_metadata_invalid")
+
+
+def _cargo_identity(package) -> tuple[str, str]:
+    if (not isinstance(package, dict) or not isinstance(package.get("name"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", package["name"])
+            or not isinstance(package.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?", package["version"])):
+        _fail("update_source_dependency_metadata_invalid")
+    return package["name"], package["version"]
+
+
+def _cargo_path_manifest(owner: str, relative) -> str:
+    """Resolve only canonical portable relative directories, never OS aliases."""
+    if (not isinstance(relative, str) or not relative or len(relative.encode("utf-8")) > 1024
+            or relative.startswith("/") or "\\" in relative or ":" in relative):
+        _fail("update_source_dependency_path_invalid")
+    parts, parent_only = owner.split("/")[:-1], True
+    for component in relative.split("/"):
+        if component == "..":
+            if not parent_only or not parts:
+                _fail("update_source_dependency_path_invalid")
+            parts.pop()
+        else:
+            validate_relative_path(component)
+            parts.append(component)
+            parent_only = False
+    return validate_relative_path("/".join(parts + ["Cargo.toml"]))
+
+
+def _local_cargo_packages(payload, hashes: dict, recorded: set, root: str) -> tuple[set, tuple]:
+    """Narrow manifest profile: explicit Git-local path dependencies only.
+
+    All dependency/build/dev and target tables are inspected, including optional
+    and inactive targets. This is not a general Cargo resolver: workspace
+    inheritance, patches/replacements, Git and alternate registries fail closed.
+    """
+    identities, visited, pending, first = {}, set(), [(root, None, None)], None
+    dependency_keys = ("dependencies", "build-dependencies", "dev-dependencies")
+    while pending:
+        name, required_name, required_version = pending.pop()
+        if name not in recorded:
+            _fail("update_source_dependency_evidence_unavailable")
+        document = _toml(_source_content(payload, name, hashes))
+        package = document.get("package")
+        identity = _cargo_identity(package)
+        if (any(key in document for key in ("workspace", "patch", "replace", "build_dependencies", "dev_dependencies"))
+                or "workspace" in package
+                or any(isinstance(value, dict) and "workspace" in value for value in package.values())
+                or isinstance(document.get("lints"), dict) and "workspace" in document["lints"]):
+            _fail("update_source_dependency_profile_unsupported")
+        if required_name is not None and identity[0] != required_name:
+            _fail("update_source_dependency_metadata_invalid")
+        # Accept a version literal (optionally prefixed '=') only when it
+        # matches this identity; do not imitate Cargo's broader semver resolver.
+        if required_version is not None and required_version not in (identity[1], "=" + identity[1]):
+            _fail("update_source_dependency_profile_unsupported")
+        if identity in identities and identities[identity] != name:
+            _fail("update_source_dependency_metadata_invalid")
+        identities[identity] = name
+        if first is None:
+            first = identity
+        if name in visited:
+            continue
+        visited.add(name)
+        if len(visited) > MAX_FILES:
+            _fail("update_source_dependency_resource_limit")
+        # Cargo discovers enclosing workspace roots. Do not silently omit an
+        # ancestor's unsupported dependency override/inheritance semantics.
+        components = name.split("/")[:-1]
+        for count in range(len(components)):
+            ancestor = "/".join(components[:count] + ["Cargo.toml"])
+            if ancestor in recorded:
+                parent = _toml(_source_content(payload, ancestor, hashes))
+                if any(key in parent for key in ("workspace", "patch", "replace")):
+                    _fail("update_source_dependency_profile_unsupported")
+        tables = [document]
+        targets = document.get("target", {})
+        if not isinstance(targets, dict) or any(not isinstance(value, dict) for value in targets.values()):
+            _fail("update_source_dependency_metadata_invalid")
+        for target in targets.values():
+            if set(target) - set(dependency_keys):
+                _fail("update_source_dependency_profile_unsupported")
+            tables.append(target)
+        for table in tables:
+            for key in dependency_keys:
+                dependencies = table.get(key, {})
+                if not isinstance(dependencies, dict):
+                    _fail("update_source_dependency_metadata_invalid")
+                for alias, dependency in dependencies.items():
+                    if isinstance(dependency, str):
+                        continue  # Registry resolution remains independently lock/archive-bound.
+                    if not isinstance(dependency, dict):
+                        _fail("update_source_dependency_metadata_invalid")
+                    if any(key in dependency for key in ("workspace", "git", "rev", "branch", "tag", "registry", "registry-index")):
+                        _fail("update_source_dependency_profile_unsupported")
+                    if "path" in dependency:
+                        target = _cargo_path_manifest(name, dependency["path"])
+                        pending.append((target, dependency.get("package", alias), dependency.get("version")))
+                    elif not isinstance(dependency.get("version"), str):
+                        _fail("update_source_dependency_metadata_invalid")
+    return set(identities), first
+
+
+class _DependencyReader:
+    """Cap gzip expansion, including TAR metadata/padding, before TAR parsing."""
+    def __init__(self, stream, budget):
+        self.stream, self.budget = stream, budget
+        self.remaining = MAX_CRATE_UNPACKED
+
+    def read(self, size):
+        amount = min(size, self.remaining + 1, self.budget[0] + 1, MAX_MANIFEST + 1)
+        raw = self.stream.read(amount)
+        if len(raw) > self.remaining or len(raw) > self.budget[0]:
+            _fail("update_source_dependency_resource_limit")
+        self.remaining -= len(raw)
+        self.budget[0] -= len(raw)
+        return raw
+
+
+def _crate_members(payload, path: str, package: str, budget) -> dict:
+    """Inspect the exact lock-bound registry archive without extracting it."""
+    entry = payload.getinfo("source/" + path)
+    if not 0 < entry.file_size <= MAX_MANIFEST:
+        _fail("update_source_dependency_resource_limit")
+    members, seen, aliases, total = {}, set(), {}, 0
+    try:
+        with payload.open(entry) as compressed, gzip.GzipFile(fileobj=compressed) as inflated:
+            bounded = _DependencyReader(inflated, budget)
+            # Streaming TAR never executes/extracts members. Scan through zero
+            # blocks too, so a second concatenated TAR cannot hide extra files.
+            with tarfile.open(fileobj=bounded, mode="r|", ignore_zeros=True) as crate:
+                for member in crate:
+                    name = member.name.removesuffix("/") if member.isdir() else member.name
+                    validate_relative_path(name)
+                    if name in seen or len(seen) >= MAX_FILES or member.issparse():
+                        _fail("update_source_dependency_archive_invalid")
+                    seen.add(name)
+                    if not member.isdir() and not member.isfile():
+                        _fail("update_source_dependency_archive_invalid")
+                    if not (name == package or name.startswith(package + "/")):
+                        _fail("update_source_dependency_archive_invalid")
+                    if member.isdir():
+                        _claim(aliases, name, "directory")
+                        continue
+                    _claim_file(aliases, name)
+                    relative = name[len(package) + 1:]
+                    if (not relative or relative == ".cargo-checksum.json" or
+                            not 0 <= member.size <= MAX_MANIFEST or total + member.size > MAX_CRATE_UNPACKED):
+                        _fail("update_source_dependency_resource_limit")
+                    total += member.size
+                    checksum, received = hashlib.sha256(), 0
+                    stream = crate.extractfile(member)  # Read-only stream; no filesystem extraction.
+                    if stream is None:
+                        _fail("update_source_dependency_archive_invalid")
+                    with stream:
+                        while block := stream.read(min(1024**2, member.size - received + 1)):
+                            received += len(block)
+                            if received > member.size:
+                                _fail("update_source_dependency_resource_limit")
+                            checksum.update(block)
+                    if received != member.size:
+                        _fail("update_source_dependency_archive_invalid")
+                    members[relative] = {"size": received, "sha256": checksum.hexdigest()}
+            while bounded.read(1024**2):
+                pass  # Complete gzip CRC/truncation checks inside the same expansion budget.
+    except ArchiveError:
+        raise
+    except (tarfile.TarError, OSError, EOFError, UnicodeError, ValueError):
+        _fail("update_source_dependency_archive_invalid")
+    if "Cargo.toml" not in members:
+        _fail("update_source_dependency_archive_invalid")
+    return members
+
+
+def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> dict:
+    """Git lock -> original crate digest -> every vendor byte, not self-reporting.
+
+    Only the existing crates.io registry profile is supported. Missing raw
+    archives, Git dependencies and arbitrary path remapping remain fail-closed.
+    """
+    root = "native/updater-trust/"
+    lock_name, manifest_name = root + "Cargo.lock", root + "Cargo.toml"
+    if lock_name not in recorded or manifest_name not in recorded:
+        _fail("update_source_dependency_evidence_unavailable")
+    lock = _toml(_source_content(payload, lock_name, hashes))
+    local_packages, root_identity = _local_cargo_packages(payload, hashes, recorded, manifest_name)
+    packages = lock.get("package")
+    if not isinstance(packages, list) or not 0 < len(packages) <= MAX_FILES:
+        _fail("update_source_dependency_metadata_invalid")
+    locked, identities, local_locked = {}, set(), set()
+    for package in packages:
+        identity = _cargo_identity(package)
+        if identity in identities:
+            _fail("update_source_dependency_metadata_invalid")
+        identities.add(identity)
+        if "source" not in package:
+            if "checksum" in package:
+                _fail("update_source_dependency_metadata_invalid")
+            if identity not in local_packages:
+                _fail("update_source_dependency_evidence_unavailable")
+            local_locked.add(identity)
+            continue
+        if (package["source"] != "registry+https://github.com/rust-lang/crates.io-index"
+                or not isinstance(package.get("checksum"), str) or not SHA256.fullmatch(package["checksum"])
+                or package["checksum"] in locked):
+            _fail("update_source_dependency_evidence_unavailable")
+        locked[package["checksum"]] = identity
+    if local_packages - {root_identity} - local_locked:
+        _fail("update_source_dependency_evidence_unavailable")
+    generated = {}
+    if len(rows) > MAX_FILES:
+        _fail("update_source_provenance_invalid")
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {"path", "size", "sha256", "kind"}
+                or type(row["size"]) is not int or not 0 <= row["size"] <= MAX_ARCHIVE
+                or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"])
+                or row["kind"] not in ("cargo-vendor", "cargo-crate-archive")):
+            _fail("update_source_provenance_invalid")
+        name = validate_relative_path(row["path"])
+        actual = hashes.get("source/" + name)
+        if (name in recorded or name in generated or actual is None
+                or actual["size"] != row["size"] or actual["sha256"] != row["sha256"]):
+            _fail("update_source_dependency_files_differ")
+        generated[name] = row
+    if not locked:
+        if generated:
+            _fail("update_source_dependency_evidence_unavailable")
+        return {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0}
+    config_name = root + ".cargo/config.toml"
+    if config_name not in generated or generated[config_name]["kind"] != "cargo-vendor":
+        _fail("update_source_dependency_evidence_unavailable")
+    if _toml(_source_content(payload, config_name, hashes)) != {"source": {
+            "crates-io": {"replace-with": "vendored-sources"}, "vendored-sources": {"directory": "vendor"}}}:
+        _fail("update_source_dependency_metadata_invalid")
+    checked, vendor_roots, budget = {config_name}, {}, [MAX_DEPENDENCY_UNPACKED]
+    for name, row in generated.items():
+        if name.startswith(root + "vendor/") and name.endswith("/.cargo-checksum.json"):
+            directory = name[len(root + "vendor/"):-len("/.cargo-checksum.json")]
+            if "/" in directory or row["kind"] != "cargo-vendor":
+                _fail("update_source_dependency_metadata_invalid")
+            checksum = _json(_source_content(payload, name, hashes))
+            if (not isinstance(checksum, dict) or set(checksum) != {"package", "files"}
+                    or not isinstance(checksum["package"], str)
+                    or checksum["package"] not in locked or checksum["package"] in vendor_roots
+                    or not isinstance(checksum["files"], dict)):
+                _fail("update_source_dependency_metadata_invalid")
+            vendor_roots[checksum["package"]] = directory, checksum
+    if set(vendor_roots) != set(locked):
+        _fail("update_source_dependency_evidence_unavailable")
+    for digest, (name, version) in locked.items():
+        package = name + "-" + version
+        archive_name = root + "vendor-archives/" + package + ".crate"
+        archive_row = generated.get(archive_name)
+        if (archive_row is None or archive_row["kind"] != "cargo-crate-archive"
+                or archive_row["sha256"] != digest):
+            _fail("update_source_dependency_evidence_unavailable")
+        directory, checksum = vendor_roots[digest]
+        if directory not in (name, package):
+            _fail("update_source_dependency_files_differ")
+        members = _crate_members(payload, archive_name, package, budget)
+        prefix = root + "vendor/" + directory + "/"
+        if checksum["files"] != {path: row["sha256"] for path, row in members.items()}:
+            _fail("update_source_dependency_files_differ")
+        for path, row in members.items():
+            actual = generated.get(prefix + path)
+            if (actual is None or actual["kind"] != "cargo-vendor" or actual["size"] != row["size"]
+                    or actual["sha256"] != row["sha256"]):
+                _fail("update_source_dependency_files_differ")
+            checked.add(prefix + path)
+        crate_package = _toml(_source_content(payload, prefix + "Cargo.toml", hashes)).get("package")
+        if not isinstance(crate_package, dict) or crate_package.get("name") != name or crate_package.get("version") != version:
+            _fail("update_source_dependency_metadata_invalid")
+        checked.update({archive_name, prefix + ".cargo-checksum.json"})
+    if checked != set(generated):
+        _fail("update_source_dependency_files_differ")
+    return {"generated": checked, "registryPackageCount": len(locked), "dependencyArchiveCount": len(locked)}
+
+
+def _verify_git_source(metadata: dict, captured: dict, hashes: dict, expected_tree, payload) -> dict:
+    """Bind archived source to independent Git blobs and locked raw crate bytes."""
+    provenance = _json(captured["source-provenance.json"])
+    if (not isinstance(provenance, dict) or set(provenance) != {
+            "schema", "sourceCommit", "sourceTree", "trackedFiles", "generatedDependencies"}
+            or provenance["schema"] != "gsw.native_update_source_provenance/1"
+            or provenance["sourceCommit"] != metadata["sourceCommit"]
+            or provenance["sourceTree"] != metadata["sourceTree"]
+            or not isinstance(provenance["trackedFiles"], list)
+            or not isinstance(provenance["generatedDependencies"], list)
+            or not isinstance(expected_tree, list) or not 0 < len(expected_tree) <= MAX_FILES):
+        _fail("update_source_provenance_invalid")
+    expected, tree_names, aliases = {}, set(), {}
+    for entry in expected_tree:
+        if not isinstance(entry, dict):
+            _fail("update_source_tree_invalid")
+        name = validate_relative_path(entry.get("path"))
+        if name in tree_names or not isinstance(entry.get("sha"), str) or not SHA1.fullmatch(entry["sha"]):
+            _fail("update_source_tree_invalid")
+        tree_names.add(name)
+        if entry.get("type") == "tree" and entry.get("mode") == "040000":
+            _claim(aliases, name, "directory")
+            continue
+        if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
+                or type(entry.get("size")) is not int or not 0 <= entry["size"] <= MAX_ARCHIVE):
+            _fail("update_source_tree_unsupported_entry")
+        _claim_file(aliases, name)
+        expected[name] = entry
+    if not expected:
+        _fail("update_source_tree_invalid")
+    recorded = set()
+    for row in provenance["trackedFiles"]:
+        if (not isinstance(row, dict) or set(row) != {"path", "blobSha", "size"}
+                or not isinstance(row.get("blobSha"), str) or not SHA1.fullmatch(row["blobSha"])
+                or type(row.get("size")) is not int):
+            _fail("update_source_provenance_invalid")
+        name = validate_relative_path(row["path"])
+        entry, actual = expected.get(name), hashes.get("source/" + name)
+        if (name in recorded or entry is None or actual is None or row["size"] != entry["size"]
+                or row["blobSha"] != entry["sha"] or actual["size"] != entry["size"]
+                or actual["blobSha"] != entry["sha"]):
+            _fail("update_source_git_blob_differs")
+        recorded.add(name)
+    if recorded != set(expected):
+        _fail("update_source_tree_file_set_differs")
+    dependency = {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0}
+    if provenance["generatedDependencies"] or "native/updater-trust/Cargo.lock" in recorded:
+        dependency = _verify_dependencies(payload, hashes, recorded, provenance["generatedDependencies"])
+    actual_source = {name[7:] for name in hashes if name.startswith("source/")}
+    if actual_source != recorded | dependency["generated"]:
+        _fail("update_source_tree_file_set_differs")
+    return {"schema": "gsw.native_update_source_binding/1",
+        "sourceCommit": metadata["sourceCommit"], "sourceTree": metadata["sourceTree"],
+        "trackedFileCount": len(recorded), "generatedFileCount": len(dependency["generated"]),
+        "registryPackageCount": dependency["registryPackageCount"], "dependencyArchiveCount": dependency["dependencyArchiveCount"],
+        "sourceManifestSha256": hashes["source-manifest.json"]["sha256"],
+        "sourceProvenanceSha256": hashes["source-provenance.json"]["sha256"]}
+
+
+def verify_release_archive(archive: Path, report: dict, expected_tree) -> dict:
+    """Read back the actual immutable archive without extracting or executing it.
+
+    The caller separately authenticates the GitHub run/artifact and approved
+    policy. This seam verifies its exact inner payload and independently read
+    Git tree; it is not a signing or public-promotion capability.
+    """
+    if (not isinstance(report, dict) or report.get("schema") != "gsw.native_update_package/1"
+            or report.get("product") not in (PRODUCT, FIXTURE_PRODUCT)
+            or report.get("platform") != "windows-x64"
+            or any(not isinstance(report.get(key), str) or not SHA1.fullmatch(report[key])
+                   for key in ("sourceCommit", "sourceTree"))
+            or not isinstance(report.get("buildId"), str) or not BUILD_ID.fullmatch(report["buildId"])
+            or any(not isinstance(report.get(key), str) or not SHA256.fullmatch(report[key])
+                   for key in ("archiveSha256", "payloadManifestSha256", "correspondingSourceSha256"))
+            or type(report.get("archiveLength")) is not int or not 0 < report["archiveLength"] <= MAX_ARCHIVE
+            or type(report.get("unpackedLength")) is not int or not 0 < report["unpackedLength"] <= MAX_UNPACKED
+            or type(report.get("fileCount")) is not int or not 0 < report["fileCount"] <= MAX_FILES):
+        _fail("update_archive_report_invalid")
+    validate_relative_path(report["buildId"])
+    info = _ordinary(archive.absolute())
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != report["archiveLength"]:
+        _fail("update_archive_identity_differs")
+    captured, hashes = {}, {}
+    capture_names = {"source-manifest.json", "source-provenance.json", "build_manifest.json"}
+    with archive.open("rb") as held:
+        opened = os.fstat(held.fileno())
+        if ((opened.st_dev, opened.st_ino, opened.st_size) != (info.st_dev, info.st_ino, info.st_size)
+                or opened.st_nlink != 1 or hashlib.file_digest(held, "sha256").hexdigest() != report["archiveSha256"]):
+            _fail("update_archive_identity_differs")
+        held.seek(0)
+        with zipfile.ZipFile(held) as payload:
+            entries, aliases, actual, total = payload.infolist(), {}, {}, 0
+            if len(entries) != report["fileCount"] + 1:
+                _fail("update_archive_file_set_differs")
+            for entry in entries:
+                name = validate_relative_path(entry.orig_filename)
+                _claim_file(aliases, name)
+                if not entry.flag_bits & 0x800 and not name.isascii():
+                    _fail("update_archive_path_encoding_invalid")
+                kind = stat.S_IFMT(entry.external_attr >> 16)
+                if (entry.filename != name or name in actual or entry.is_dir() or entry.flag_bits & 1
+                        or kind not in (0, stat.S_IFREG) or entry.external_attr & 0x10
+                        or entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
+                    _fail("update_archive_type_or_file_set_invalid")
+                if (not 0 <= entry.file_size <= MAX_ARCHIVE or not 0 <= entry.compress_size <= MAX_ARCHIVE
+                        or total + entry.file_size > report["unpackedLength"]):
+                    _fail("update_archive_resource_limit")
+                total += entry.file_size
+                actual[name] = entry
+            if total != report["unpackedLength"] or "release-files.json" not in actual:
+                _fail("update_archive_file_set_differs")
+            manifest_entry = actual["release-files.json"]
+            if manifest_entry.file_size > MAX_MANIFEST:
+                _fail("update_manifest_too_large")
+            manifest_bytes = payload.read(manifest_entry)
+            if hashlib.sha256(manifest_bytes).hexdigest() != report["payloadManifestSha256"]:
+                _fail("update_archive_manifest_differs")
+            manifest = _json(manifest_bytes)
+            if (not isinstance(manifest, dict) or set(manifest) != {"schema", "product", "platform", "buildId", "sourceCommit", "sourceTree", "files"}
+                    or manifest["schema"] != "gsw.native_update_files/1"
+                    or any(manifest[key] != report[key] for key in ("product", "platform", "buildId", "sourceCommit", "sourceTree"))):
+                _fail("update_archive_manifest_invalid")
+            expected = _manifest_rows(manifest["files"])
+            if (len(expected) != report["fileCount"] or "release-files.json" in expected
+                    or set(actual) != set(expected) | {"release-files.json"}
+                    or not (REQUIRED | {"source-provenance.json"}) <= expected.keys()):
+                _fail("update_archive_file_set_differs")
+            for name, row in expected.items():
+                entry = actual[name]
+                if entry.file_size != row["size"]:
+                    _fail("update_archive_file_set_differs")
+                checksum = hashlib.sha256()
+                blob = hashlib.sha1(f"blob {entry.file_size}\0".encode("ascii"))
+                content, received = bytearray(), 0
+                with payload.open(entry) as stream:
+                    while block := stream.read(min(1024**2, entry.file_size - received + 1)):
+                        received += len(block)
+                        if received > entry.file_size:
+                            _fail("update_archive_resource_limit")
+                        checksum.update(block); blob.update(block)
+                        if name in capture_names:
+                            if received > MAX_MANIFEST:
+                                _fail("update_manifest_too_large")
+                            content.extend(block)
+                if received != row["size"] or checksum.hexdigest() != row["sha256"]:
+                    _fail("update_archive_file_digest_differs")
+                hashes[name] = {"size": received, "sha256": checksum.hexdigest(), "blobSha": blob.hexdigest()}
+                if name in capture_names:
+                    captured[name] = bytes(content)
+        if hashes["source-manifest.json"]["sha256"] != report["correspondingSourceSha256"]:
+            _fail("update_package_source_identity_invalid")
+        source = _json(captured["source-manifest.json"])
+        if (not isinstance(source, dict) or set(source) != {"schema", "executableSha256", "license", "sourceFileCount", "files"}
+                or source["schema"] != "gsw-native-corresponding-source-v1" or source["license"] != "GPL-3.0-or-later"
+                or source["executableSha256"] != hashes["bin/Gaussian Scene Workbench.exe"]["sha256"]
+                or type(source["sourceFileCount"]) is not int):
+            _fail("update_package_source_identity_invalid")
+        source_rows = _manifest_rows(source["files"])
+        if (len(source_rows) != source["sourceFileCount"]
+                or set(source_rows) != {name[7:] for name in hashes if name.startswith("source/")}
+                or any(row["size"] != hashes["source/" + name]["size"]
+                       or row["sha256"] != hashes["source/" + name]["sha256"] for name, row in source_rows.items())):
+            _fail("update_package_source_files_differ")
+        build = _json(captured["build_manifest.json"])
+        if (not isinstance(build, dict) or build.get("product") != "Gaussian Scene Workbench"
+                or build.get("legacyWebRuntimeIncluded") is not False):
+            _fail("update_package_product_invalid")
+        with zipfile.ZipFile(held) as payload:
+            evidence = _verify_git_source(report, captured, hashes, expected_tree, payload)
+        held.seek(0)
+        if hashlib.file_digest(held, "sha256").hexdigest() != report["archiveSha256"]:
+            _fail("update_archive_identity_differs")
+    return evidence
 
 
 def create_archive(package_root: Path, output_archive: Path, *, product: str,

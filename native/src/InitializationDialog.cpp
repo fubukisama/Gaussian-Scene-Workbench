@@ -155,7 +155,7 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   // every control reachable by scrolling, rather than growing the top-level
   // window beyond the desktop or shrinking the user's font. Actions stay out.
   auto *bodyScroll = new QScrollArea(this);
-  bodyScroll->setObjectName(QStringLiteral("dialogBodyScroll"));
+  bodyScroll->setObjectName(QStringLiteral("initializationBodyScroll"));
   bodyScroll->setWidgetResizable(true);
   bodyScroll->setFrameShape(QFrame::NoFrame);
   bodyScroll->setMinimumSize(0, 0);

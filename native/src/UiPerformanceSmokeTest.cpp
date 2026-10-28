@@ -313,6 +313,7 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
   std::vector<Presentation> presentations;
   presentations.reserve(recordCapacity);
   bool presentationOverflow = false;
+  qsizetype selectedPoints = -1;
   quint64 lastPresented = viewport.renderedFrameSerial(), metrics = 0, zeroCallbacks = 0;
   QList<QMetaObject::Connection> connections;
   connections.append(QObject::connect(&viewport, &QOpenGLWidget::frameSwapped, &viewport, [&] {
@@ -325,6 +326,8 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
   }));
   connections.append(QObject::connect(&viewport, &NativeViewport::frameMetricsChanged, &viewport,
       [&](double, double) { ++metrics; }));
+  connections.append(QObject::connect(&viewport, &NativeViewport::editStateChanged, &viewport,
+      [&](qsizetype selected, qsizetype, bool, bool, bool, bool) { selectedPoints = selected; }));
   for (auto *timer : viewport.findChildren<QTimer *>())
     if (timer->interval() == 0) connections.append(QObject::connect(timer, &QTimer::timeout, &viewport, [&] { ++zeroCallbacks; }));
   const auto disconnect = qScopeGuard([&] { for (const auto &c : connections) QObject::disconnect(c); });
@@ -445,7 +448,6 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
   viewport.setInteractionMode(NativeViewport::InteractionMode::Inspect);
   viewport.setShowCameras(false);
   viewport.setShowObservationTrackball(false);
-  viewport.clearSelection();
   const QStringList ids = scenario == "empty" ? QStringList{"empty"} :
       scenario == "light" ? QStringList{"points", "mesh", "3dgs", "2dgs"} : QStringList{"medium"};
   const auto mouse = [&](QEvent::Type type, const QPoint &point, Qt::MouseButton button, Qt::MouseButtons buttons) {
@@ -465,10 +467,15 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
     return lastPresented > before;
   };
   for (const QString &id : ids) {
+    selectedPoints = -1;
     const int kind = id == "points" ? 0 : id == "mesh" ? 1 : id == "3dgs" ? 2 : id == "2dgs" ? 3 : 4;
     Fixture fixture;
     qint64 sourceCount = 0, faceCount = 0;
-    if (id != "empty") {
+    if (id == "empty") {
+      // This case has no setScene callback; establish its own observed empty
+      // selection before measuring the fresh, geometry-free viewport.
+      viewport.clearSelection();
+    } else {
       if (!getFixture(fixtures, id, kind, fixture)) { fail("fixture_bytes_or_parameters_mismatch:" + id); break; }
       bool loaded = false;
       QString loadError;
@@ -491,8 +498,13 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
         fail("actual_renderer_or_source_count_mismatch:" + id); break;
       }
     }
+    // setScene resets point/model selection. Verify that precondition rather
+    // than clearing it again: an empty clear rebuilds Gaussian attributes and
+    // order, adding an upload only when a first load paint already occurred.
+    if (selectedPoints != 0 || viewport.modelSelected() || viewport.selectedModelCount() != 0) {
+      fail("fixture_selection_not_empty_after_load:" + id); break;
+    }
     viewport.resetCamera();
-    viewport.clearSelection();
     const QPoint center = viewport.rect().center();
     QPoint point = center;
     mouse(QEvent::MouseButtonPress, point, Qt::MiddleButton, Qt::MiddleButton);

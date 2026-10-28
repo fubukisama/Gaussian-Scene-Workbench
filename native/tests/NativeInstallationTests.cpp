@@ -57,6 +57,21 @@ private slots:
     activate("0.3.8-first");
     QCOMPARE(gsw::resolveNativeInstallation(root, false, {}, {}).program, old.program);
   }
+  void offlineInspectionNeedsNoHelperAndOnlineBootstrapFailsClosedWithoutOne() {
+    const QString bootstrap = QDir(root).filePath("bootstrap.json");
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":1,\"files\":[]}");
+    auto plan = gsw::resolveNativeInstallation(root, false, {}, {});
+    QVERIFY(plan.valid());
+    QCOMPARE(plan.executableSha256, QString::fromLatin1(digest));
+    QString error;
+    QVERIFY(gsw::verifyNativeInstallationLaunch(plan, &error));
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":2}");
+    QVERIFY(!gsw::verifyNativeInstallationLaunch(plan, &error));
+    QCOMPARE(error, QStringLiteral("managed_installation_integrity_failed"));
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":2,\"protocol\":1}");
+    QVERIFY(!gsw::verifyNativeInstallationLaunch(plan, &error));
+    QCOMPARE(error, QStringLiteral("managed_installation_manifest_invalid"));
+  }
   void diagnosticsAreOptInForOneChildAndArgumentsAreNotShellCommands() {
     QProcessEnvironment inherited;
     inherited.insert("RETAIN_ME", "owned value");
@@ -82,6 +97,21 @@ private slots:
     object.insert("program", "untrusted-other.exe");
     write(file.fileName(), QJsonDocument(object).toJson());
     QVERIFY(!gsw::resolveNativeInstallation(root, false, {}, {}).valid());
+  }
+  void resolvesAnOwnedLongUnicodeInstallationWithoutExposingDeviceNamespace() {
+#ifdef Q_OS_WIN
+    while (root.size() < 350)
+      root += QLatin1Char('/') + QString::fromUtf8("中文_日本語_") + QString(44, QLatin1Char('x'));
+    write(QDir(root).filePath("bin/Gaussian Scene Workbench Launcher.exe"), "owned launcher fixture");
+    write(QDir(root).filePath("versions/0.3.8-first/bin/Gaussian Scene Workbench.exe"), "owned application fixture");
+    activate("0.3.8-first");
+    const auto result = gsw::resolveNativeInstallation(root, false, {}, {});
+    QVERIFY2(result.valid(), qPrintable(result.error));
+    QCOMPARE(result.root, root);
+    QVERIFY(result.program.size() > 350);
+    QVERIFY(!result.program.startsWith(QLatin1String("\\\\?\\")));
+    QCOMPARE(gsw::managedInstallationForApplication(result.program), root);
+#endif
   }
   void rejectsCorruptionMissingFilesAndDoesNotGuessAnOlderVersion() {
     activate("0.3.8-next", QByteArray(64, '0'));

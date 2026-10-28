@@ -12,15 +12,19 @@ Json immutableOffer(Json offer) {
 }
 void pointToSlot(const QString &root, const QString &id, const QString &exeHash) {
   const QString pointer = QDir(root).filePath(QStringLiteral("current.json"));
+  Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", exeHash.toStdString()}};
   if (QFileInfo::exists(pointer)) {
     // A malformed pointer is backed up as bytes, never parsed as a prerequisite
     // to recovery. This operation cannot reset independent TUF state.
     const auto previous = read(pointer, 16384);
+    // Do not replace an already-correct pointer, including while an observer
+    // holds it open. Malformed JSON does not obstruct the recovery branch.
+    try { if (parse(previous, 16384) == active) return; }
+    catch (const Failure &) {} catch (const Json::exception &) {}
     const QString backups = QDir(root).filePath(QStringLiteral("updates/pointer-backups"));
     ensureDirectory(backups);
     durableWrite(QDir(backups).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json")), previous, false);
   }
-  Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", exeHash.toStdString()}};
   durableWrite(pointer, QByteArray::fromStdString(active.dump()), true);
 }
 }
@@ -31,14 +35,16 @@ struct NativeInstallationLock::Impl {
 #endif
   bool acquired = false;
 };
-NativeInstallationLock::NativeInstallationLock(const QString &root) : m(std::make_unique<Impl>()) {
+NativeInstallationLock::NativeInstallationLock(const QString &root, const OpenMode mode) : m(std::make_unique<Impl>()) {
   m->root = QDir::cleanPath(root);
   if (!ordinary(m->root) || !QFileInfo(m->root).isDir()) { m->error = QStringLiteral("activation_root_invalid"); return; }
 #ifdef Q_OS_WIN
   const auto path = QDir::toNativeSeparators(QDir(m->root).filePath(QStringLiteral(".publish.lock")));
-  if (!ordinary(path, true)) { m->error = QStringLiteral("activation_lock_invalid"); return; }
-  m->handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), GENERIC_READ | GENERIC_WRITE,
-      0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (!ordinary(path, mode == OpenMode::CreateIfMissing)) { m->error = QStringLiteral("activation_lock_invalid"); return; }
+  const auto apiPath = nativeApiPath(path);
+  m->handle = CreateFileW(reinterpret_cast<LPCWSTR>(apiPath.utf16()), GENERIC_READ | GENERIC_WRITE,
+      0, nullptr, mode == OpenMode::CreateIfMissing ? OPEN_ALWAYS : OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (m->handle != INVALID_HANDLE_VALUE) {
     BY_HANDLE_FILE_INFORMATION info{};
     m->acquired = GetFileInformationByHandle(m->handle, &info) && info.nNumberOfLinks == 1 &&
@@ -61,9 +67,48 @@ NativeActivationResult NativeActivationCore::install(const QString &root, const 
     return {false, QStringLiteral("activation_admission_invalid"), {}};
   return publish(root, archive, update.offer, lock, false, update.descriptorSha256);
 }
-NativeActivationResult NativeActivationCore::rollback(const QString &, const NativeVerifiedUpdate &,
-    const NativeInstallationLock &) {
-  return {false, QStringLiteral("rollback_not_implemented"), {}};
+NativeActivationResult NativeActivationCore::verifyInstalled(const QString &root, const NativeVerifiedUpdate &update,
+    const NativeInstallationLock &lock) {
+  QString id;
+  try {
+    if (!lock.locked() || lock.installationRoot() != QDir::cleanPath(root)) fail("activation_lock_required");
+    if (QDir::cleanPath(root) != update.installationRoot || !update.historical ||
+        update.acceptedDescriptors.isEmpty()) fail("rollback_admission_invalid");
+    if (!ordinary(root)) fail("activation_root_invalid");
+    const auto offer = parse(update.offer, 4 * 1024 * 1024);
+    id = buildId(offer.at("buildId"));
+    const auto bootstrap = parse(read(QDir(root).filePath(QStringLiteral("bootstrap.json")), 16384), 16384);
+    if (string(bootstrap.at("schema")) != QLatin1String("gsw.native_bootstrap/1") ||
+        integer(bootstrap.at("protocol"), 1, 2) != 2) fail("activation_bootstrap_migration_required");
+    const auto receipt = parse(read(QDir(root).filePath(
+        QStringLiteral("updates/receipts/") + id + QStringLiteral(".json"))));
+    exactKeys(receipt, {"schema", "mode", "offer", "manifestSha256", "executableSha256", "descriptorSha256"});
+    if (string(receipt.at("schema")) != QLatin1String("gsw.native_activation_receipt/1") ||
+        string(receipt.at("mode")) != QLatin1String("online") ||
+        immutableOffer(receipt.at("offer")) != immutableOffer(offer)) fail("rollback_receipt_invalid");
+    const auto descriptor = string(receipt.at("descriptorSha256")); sha(descriptor);
+    // Local completion receipts alone are not authority. The bridge obtains
+    // this accepted, non-revoked descriptor set from the independent TUF ledger.
+    if (!update.acceptedDescriptors.contains(descriptor)) fail("rollback_receipt_not_accepted");
+    if (receipt.at("manifestSha256") != offer.at("payloadManifestSha256")) fail("rollback_receipt_invalid");
+    const auto verified = verifyInstalledSlot(QDir(root).filePath(QStringLiteral("versions/") + id), offer);
+    if (string(receipt.at("executableSha256")) != verified.executableSha256) fail("rollback_receipt_invalid");
+    return {true, QStringLiteral("INSTALLED_VERIFIED"), id, verified.executableSha256};
+  } catch (const Failure &e) { return {false, e.code, id}; }
+    catch (const Json::exception &) { return {false, QStringLiteral("activation_json_invalid"), id}; }
+    catch (...) { return {false, QStringLiteral("installed_verification_failed"), id}; }
+}
+NativeActivationResult NativeActivationCore::rollback(const QString &root, const NativeVerifiedUpdate &update,
+    const NativeInstallationLock &lock) {
+  const auto verified = verifyInstalled(root, update, lock);
+  if (!verified.ok) return verified;
+  try {
+    // The same lock spans independent admission, full revalidation and pointer
+    // publication. Read-only launch callers never enter this mutation branch.
+    pointToSlot(root, verified.buildId, verified.executableSha256);
+    return {true, QStringLiteral("ROLLED_BACK"), verified.buildId, verified.executableSha256};
+  } catch (const Failure &e) { return {false, e.code, verified.buildId}; }
+    catch (...) { return {false, QStringLiteral("rollback_failed"), verified.buildId}; }
 }
 NativeActivationResult NativeActivationCore::publish(const QString &root, const QString &archive,
     const QByteArray &offerBytes, const NativeInstallationLock &lock, bool developer, const QString &descriptorSha256) {
@@ -80,6 +125,7 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     id = buildId(offer.at("buildId"));
     integer(offer.at("minimumBootstrapProtocol"), 2, 2);
     const auto bootstrap = parse(read(QDir(root).filePath(QStringLiteral("bootstrap.json")), 16384), 16384);
+    if (string(bootstrap.at("schema")) != QLatin1String("gsw.native_bootstrap/1")) fail("activation_bootstrap_invalid");
     if (integer(bootstrap.at("protocol"), 1, 2) != 2) fail("activation_bootstrap_migration_required");
     const qint64 archiveLength = integer(offer.at("archiveLength"), 1, maxArchive);
     const qint64 expanded = integer(offer.at("unpackedLength"), 1, maxExpanded);

@@ -54,20 +54,16 @@ int main(int argc, char **argv) {
   auto plan = gsw::resolveNativeInstallation(root.absolutePath(), diagnostics, arguments,
                                             QProcessEnvironment::systemEnvironment());
   if (planOnly) {
-    // Developer/remote-CI inspection mode never starts a GUI or a child.
+    // Never starts the application/GUI. Protocol 1 has no child; protocol 2
+    // may invoke only the fixed headless read-only installed-version verifier.
+    if (plan.valid()) (void)gsw::verifyNativeInstallationLaunch(plan, &plan.error);
     const QJsonObject record{{"valid", plan.valid()}, {"version", plan.version},
         {"program", plan.program}, {"workingDirectory", plan.workingDirectory}, {"error", plan.error}};
     QTextStream(stdout) << QJsonDocument(record).toJson(QJsonDocument::Compact) << '\n';
     return plan.valid() ? 0 : 2;
   }
   if (plan.valid()) {
-    QProcess child;
-    child.setProgram(plan.program);
-    child.setArguments(plan.arguments);
-    child.setWorkingDirectory(plan.workingDirectory);
-    child.setProcessEnvironment(plan.environment);
-    if (child.startDetached()) return 0;
-    plan.error = QStringLiteral("managed_installation_start_failed");
+    if (gsw::startNativeInstallation(plan, diagnostics, &plan.error)) return 0;
   }
   const QString title = QCoreApplication::translate("Workbench", "无法启动软件");
   const QString text = gsw::nativeInstallationErrorText(plan.error);

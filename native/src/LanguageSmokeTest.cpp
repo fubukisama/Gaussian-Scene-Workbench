@@ -1,4 +1,5 @@
 #include "LanguageSmokeTest.h"
+#include "../tests/UiFormVisualProbe.h"
 #include "MultiItemList.h"
 #include "ExternalBackupStore.h"
 #include "AppLanguage.h"
@@ -866,6 +867,133 @@ bool runListInteractionSmokeTest(MainWindow &window) {
   return passed;
 }
 
+bool runLanguageFormMatrixSmokeTest(MainWindow &window) {
+  // This standalone, opt-in process owns its form fixtures. Keep the existing
+  // behavior smoke's observation budget and all of its assertions untouched.
+  const QString evidence = qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE");
+  const QString processRoot = qApp->property("gswUiFormEvidenceProcessRoot").toString();
+  if (qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
+      QApplication::platformName() != QStringLiteral("windows") ||
+      !QDir::isAbsolutePath(evidence) || !QFileInfo(evidence).isDir() ||
+      !QDir::isAbsolutePath(processRoot) || !QFileInfo(processRoot).isDir() ||
+      qApp->property("gswSmokeSettingsDirectory").toString().isEmpty() ||
+      !qApp->findChild<QObject *>(QStringLiteral("gswUiSurfaceEvidenceAdapter"))) {
+    qCritical() << "LANGUAGE_FORM_MATRIX: isolated remote native evidence is required";
+    return false;
+  }
+  bool passed = true;
+  const auto check = [&](bool condition, const char *message) {
+    if (!condition) { qCritical() << "LANGUAGE_FORM_MATRIX:" << message; passed = false; }
+  };
+  QTemporaryDir temporary;
+  if (!temporary.isValid()) return false;
+  const QDir root(temporary.path());
+  const auto write = [](const QString &path, const QByteArray &bytes) {
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::NewOnly) &&
+        file.write(bytes) == bytes.size() && file.flush();
+  };
+  const QString name = QStringLiteral("古墳 / 日本語 📷");
+  const QString photoPath = root.filePath(QStringLiteral("images/古墳.png"));
+  check(QDir().mkpath(QFileInfo(photoPath).absolutePath()), "create owned image directory");
+  QImage photo(1928, 1084, QImage::Format_RGB32);
+  photo.fill(Qt::darkGray);
+  check(photo.save(photoPath), "write owned real image-header fixture");
+  const QString modelDirectory = root.filePath(QStringLiteral("training-output"));
+  const QString gaussianPath = QDir(modelDirectory).filePath(QStringLiteral("point_cloud/iteration_10000/point_cloud.ply"));
+  const QByteArray gaussian("ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nproperty float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\nproperty float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n0 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n1 0 0 0 0 0 1 -3 -3 -3 1 0 0 0\n0 1 0 0 0 0 1 -3 -3 -3 1 0 0 0\n");
+  check(write(gaussianPath, gaussian) &&
+        write(QDir(modelDirectory).filePath(QStringLiteral("cfg_args")), "Namespace(sh_degree=0)\n") &&
+        write(QDir(modelDirectory).filePath(QStringLiteral("training_backend.json")), "{\"backend\":\"3dgs\"}\n"),
+        "write owned Gaussian form source, not a generated training result");
+  const QString meshPath = root.filePath(QStringLiteral("mesh.ply"));
+  check(write(meshPath, "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n3 0 1 2\n3 0 2 3\n"),
+        "write owned model-export mesh fixture");
+  if (!passed) return false;
+
+  DatasetImportDialog import(root.path(), name, {photoPath}, root.path(), true, &window);
+  ReconstructionDialog reconstruction(root.path(), QCoreApplication::applicationDirPath(), &window);
+  TrainingDialog training(root.path(), name, root.path(), true, true, &window);
+  TrainingDialog twoDTraining(root.path(), name, root.path(), true, true, &window);
+  auto trainingRequest = training.configurationDocument();
+  trainingRequest.insert(QStringLiteral("iterations"), 12345);
+  check(training.setConfigurationDocument(trainingRequest), "edit real 3DGS request");
+  auto twoDRequest = twoDTraining.configurationDocument();
+  twoDRequest.insert(QStringLiteral("backend"), QStringLiteral("2dgs"));
+  twoDRequest.insert(QStringLiteral("iterations"), 23456);
+  check(twoDTraining.setConfigurationDocument(twoDRequest), "edit real 2DGS request");
+  MeshGenerationDialog meshing(modelDirectory, &window);
+  if (auto *method = meshing.findChild<QComboBox *>(QStringLiteral("meshMethodCombo")))
+    method->setCurrentIndex(method->findData(QStringLiteral("gs2mesh")));
+  else check(false, "real mesh method control exists");
+  ModelExportOptions source;
+  source.sourcePath = meshPath;
+  source.destinationPath = root.filePath(QStringLiteral("mesh-export.glb"));
+  source.format = ModelExportFormat::Glb;
+  source.deletedVertices.resize(4);
+  source.deletedVertices.setBit(1);
+  source.transform.translation = QVector3D(1, 2, 3);
+  source.transform.rotation = QQuaternion::fromEulerAngles(12, 23, 34);
+  source.transform.scale = QVector3D(2, 2, 2);
+  ModelExportDialog exportDialog(source, true, false, {meshPath}, &window);
+  const auto trainingSnapshot = [](const TrainingDialog &dialog) {
+    const auto value = dialog.configuration();
+    return QJsonObject{{"request", dialog.configurationDocument()},
+        {"outputRoot", value.outputRoot}, {"outputScene", value.outputScene},
+        {"outputStorageName", value.outputStorageName}, {"overwrite", value.overwrite},
+        {"runColmap", value.runColmap}, {"effectiveRunColmap", dialog.effectiveRunColmap()},
+        {"cameraDatasetPath", value.cameraDatasetPath}, {"cameraDatasetIdentity", value.cameraDatasetIdentity}};
+  };
+  const auto exportSnapshot = [&] {
+    const auto value = exportDialog.options();
+    const auto vector = [](const QVector3D &v) { return QJsonArray{v.x(), v.y(), v.z()}; };
+    const auto rotation = value.transform.rotation;
+    QJsonArray deleted;
+    for (qsizetype index = 0; index < value.deletedVertices.size(); ++index)
+      if (value.deletedVertices.testBit(index)) deleted.append(qint64(index));
+    return QJsonObject{{"sourcePath", value.sourcePath}, {"destinationPath", value.destinationPath},
+        {"format", int(value.format)}, {"deletedVertexCount", qint64(value.deletedVertices.size())},
+        {"deletedVertices", deleted}, {"applyTransform", value.applyTransform},
+        {"translation", vector(value.transform.translation)}, {"scale", vector(value.transform.scale)},
+        {"rotation", QJsonArray{rotation.scalar(), rotation.x(), rotation.y(), rotation.z()}},
+        {"pivot", QJsonArray{value.pivot.x, value.pivot.y, value.pivot.z}},
+        {"coordinates", sceneCoordinateInfoToJson(value.coordinates)},
+        {"sceneUnitScale", value.sceneUnitScale}, {"sceneUnit", int(value.sceneUnit)},
+        {"sceneUnitDeclared", value.sceneUnitDeclared}, {"spzVersion", value.spzVersion},
+        {"spzMaximumShDegree", value.spzMaximumShDegree}, {"spzQuality", value.spzQuality},
+        {"cameraCoordinateRecovery", value.cameraCoordinateRecovery},
+        {"recordedRepresentation", value.recordedRepresentation}, {"cameraOutputUnit", value.cameraOutputUnit},
+        {"recoveryPythonPath", value.recoveryPythonPath}, {"recoveryRepositoryRoot", value.recoveryRepositoryRoot},
+        {"hasProgressCallback", bool(value.progress)}};
+  };
+  const QSize standard(1000, 760), narrow(680, 620);
+  check(tests::captureUiFormMatrix(true, import, QStringLiteral("import-media-request"), standard, narrow, [&] {
+    const auto value = import.request();
+    return QJsonObject{{"sceneName", value.sceneName}, {"sourcePaths", QJsonArray::fromStringList(value.sourcePaths)},
+        {"framesPerSecond", value.framesPerSecond}, {"overwrite", value.overwrite}, {"cameraInput", value.cameraInput}};
+  }), "media-import native matrix retains the complete public request");
+  check(tests::captureUiFormMatrix(true, reconstruction, QStringLiteral("reconstruction-request"), standard, narrow, [&] {
+    const auto value = reconstruction.configuration();
+    return QJsonObject{{"colmapExecutable", value.colmapExecutable}, {"preset", value.preset},
+        {"matching", value.matching}, {"cameraModel", value.cameraModel},
+        {"featureMaxImageSize", value.featureMaxImageSize}, {"featureMaxNumFeatures", value.featureMaxNumFeatures},
+        {"mapperMaxRuntimeSeconds", value.mapperMaxRuntimeSeconds}, {"matcherGuided", value.matcherGuided},
+        {"useGpu", value.useGpu}, {"singleCamera", value.singleCamera}, {"reset", value.reset},
+        {"qualityRecovery", value.qualityRecovery}};
+  }), "reconstruction native matrix retains every public parameter");
+  check(tests::captureUiFormMatrix(true, training, QStringLiteral("training-3dgs-request"), standard, narrow,
+      [&] { return trainingSnapshot(training); }), "3DGS native matrix retains request and input/output context");
+  check(tests::captureUiFormMatrix(true, twoDTraining, QStringLiteral("training-2dgs-request"), standard, narrow,
+      [&] { return trainingSnapshot(twoDTraining); }), "2DGS native matrix retains request and input/output context");
+  check(tests::captureUiFormMatrix(true, meshing, QStringLiteral("mesh-generation-request"), standard, narrow,
+      [&] { return meshing.configuration(); }), "mesh native matrix retains its public request");
+  check(tests::captureUiFormMatrix(true, exportDialog, QStringLiteral("model-export-request"), standard, narrow,
+      exportSnapshot), "model-export native matrix retains full public options");
+  qInfo() << "LANGUAGE_FORM_MATRIX:" << (passed ? "PASS" : "FAIL");
+  return passed;
+}
+
 bool runLanguageSmokeTest(MainWindow &window) {
   const QString locale = AppLanguage::current();
   QElapsedTimer matrixClock;
@@ -885,6 +1013,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const QStringList pointTexts = {QStringLiteral("点云"), QStringLiteral("Point Cloud"), QStringLiteral("点群")};
   const auto *saveAction = window.findChild<QAction *>(QStringLiteral("saveProjectAction"));
   check(saveAction && saveAction->text() == saveTexts[index], "save action translation");
+  const auto *updateAction = window.findChild<QAction *>(QStringLiteral("nativeUpdateAction"));
+  check(updateAction && updateAction->isEnabled() &&
+        updateAction->text() == QCoreApplication::translate("Workbench", "软件更新…") &&
+        window.findChild<QObject *>(QStringLiteral("nativeUpdateController")),
+        "actual workbench Help entry binds the live localized native update controller");
+  check(!window.findChild<QDialog *>(QStringLiteral("nativeUpdateDialog")),
+        "normal workbench construction does not create a background update dialog");
   check(QCoreApplication::translate("Workbench", "点云") == pointTexts[index], "point cloud terminology");
   const QStringList untitled = {QStringLiteral("未命名工程"), QStringLiteral("Untitled Project"), QStringLiteral("無題のプロジェクト")};
   const auto *nameLabel = window.findChild<QLabel *>(QStringLiteral("projectNameValue"));

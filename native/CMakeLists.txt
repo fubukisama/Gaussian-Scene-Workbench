@@ -15,6 +15,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 set(GSW_RELEASE_DATE "2026-10-29" CACHE STRING "Release date shown by the application")
+option(GSW_UI_FORM_CAPTURE_TESTS "Register explicit remote-only dialog matrix capture" OFF)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -119,8 +120,6 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/UiSurfaceEvidence.cpp
   src/UiSurfaceEvidence.h
   src/FontResolutionEvidence.h
-  src/UiFormGallerySmokeTest.cpp
-  src/UiFormGallerySmokeTest.h
   src/GizmoViewportSmokeTest.cpp
   src/GizmoViewportSmokeTest.h
   src/UiCrashDiagnostics.cpp
@@ -136,6 +135,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/AppTheme.h
   src/AppLanguage.cpp
   src/AppLanguage.h
+  src/NativeUpdateUi.cpp
+  src/NativeUpdateUi.h
   src/WorkbenchIcons.cpp
   src/WorkbenchIcons.h
   src/IconUiSmokeTest.cpp
@@ -740,13 +741,6 @@ if(BUILD_TESTING)
     set_tests_properties(native_initialization_ui_surfaces PROPERTIES TIMEOUT 180
       ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    file(MAKE_DIRECTORY "${GSW_UI_SURFACE_CAPTURE_ROOT}/gallery-output")
-    foreach(gallery_group 1 2)
-      add_test(NAME native_ui_form_gallery_${gallery_group} COMMAND GaussianSceneWorkbench --smoke-test-ui-form-gallery)
-      set_tests_properties(native_ui_form_gallery_${gallery_group} PROPERTIES TIMEOUT 90
-        ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};GSW_UI_FORM_GALLERY_GROUP=${gallery_group};GSW_SMOKE_OUTPUT_DIR=${GSW_UI_SURFACE_CAPTURE_ROOT}/gallery-output;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endforeach()
   endif()
   qt_add_executable(gsw_mesh_geometry_dialog_ui_tests tests/MeshGeometryDialogUiTests.cpp
     src/MeshGenerationDialog.cpp src/MeshGenerationDialog.h src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h
@@ -916,10 +910,12 @@ if(BUILD_TESTING)
   endif()
   # Exercise the same public batch smoke without a MainWindow or training
   # process, so admission/observation regressions fail quickly in every locale.
+  # Its opt-in native matrix uses the real theme implementation as well.
   qt_add_executable(gsw_training_batch_ui_tests tests/TrainingBatchUiTests.cpp
     src/TrainingBatchSmokeTest.cpp src/TrainingBatchSmokeTest.h
     src/TrainingBatchDialog.cpp src/TrainingBatchDialog.h
-    src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h)
+    src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h
+    src/AppTheme.cpp src/AppTheme.h)
   target_include_directories(gsw_training_batch_ui_tests PRIVATE src)
   target_link_libraries(gsw_training_batch_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
   target_link_libraries(gsw_training_batch_ui_tests PRIVATE gsw_native_language_resources)
@@ -1097,6 +1093,13 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  if(WIN32 AND GSW_UI_FORM_CAPTURE_TESTS)
+    add_test(NAME native_language_form_matrix
+      COMMAND GaussianSceneWorkbench --smoke-test-language-form-matrix)
+    set_tests_properties(native_language_form_matrix PROPERTIES TIMEOUT 120
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   qt_add_executable(gsw_native_installation_tests tests/NativeInstallationTests.cpp)
   qt_add_executable(gsw_native_shortcut_fixture tests/NativeShortcutFixture.cpp)
   target_link_libraries(gsw_native_shortcut_fixture PRIVATE Qt6::Core)

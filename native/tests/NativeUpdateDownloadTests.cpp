@@ -10,6 +10,10 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#ifdef Q_OS_WIN
+#include "NativeUpdateLocalPath.h"
+#include <windows.h>
+#endif
 
 using namespace gsw;
 class NativeUpdateDownloadTests final : public QObject {
@@ -107,6 +111,50 @@ private slots:
           row.value("if_range").toString() == QLatin1String("\"owned-payload-a\"")) sawBoundRange = true;
     }
     QVERIFY(sawBoundRange);
+  }
+  void downloadsRealHttpsBytesToALongCjkOwnedCachePath() {
+    QString directory = temporary.filePath(QString::fromLatin1("long-cache"));
+    for (int i = 0; directory.size() < 350; ++i)
+      directory += QLatin1Char('/') + QString::fromUtf8("缓存_日本語_") + QString::number(i) +
+          QLatin1Char('_') + QString(42, QLatin1Char('x'));
+    QVERIFY(QDir().mkpath(directory));
+    auto r = request(QString::fromLatin1("/payload"), QString::fromLatin1("placeholder.bin"));
+    r.destinationPath = QDir(directory).filePath(QString::fromUtf8("更新_アップデート.zip"));
+    QVERIFY(r.destinationPath.size() > 350);
+    const auto result = download(r, policy());
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+  }
+  void rejectsDeviceNamespaceAndAdsDestinationsWithoutPublishing() {
+#ifdef Q_OS_WIN
+    const auto local = temporary.filePath("namespace-test.bin");
+    const QStringList destinations{gsw::updatepaths::nativeApiPath(local),
+      local + QStringLiteral(":stream"), temporary.filePath("CON.bin"),
+      temporary.filePath(QString::fromUtf8("LPT¹.bin")), temporary.filePath("trailing.")};
+    for (const auto &path : destinations) {
+      auto r = request(QStringLiteral("/payload"), QStringLiteral("unused-destination.bin"));
+      r.destinationPath = path;
+      const auto result = download(r, policy());
+      QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_path_unsafe"));
+    }
+#endif
+  }
+  void refusesHardlinkedOwnedPartWithoutChangingTheOriginal() {
+#ifdef Q_OS_WIN
+    const auto source = temporary.filePath("retained-part-original.bin");
+    const QByteArray before("unrelated owned fixture must remain unchanged");
+    QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(before), qint64(before.size())); file.close();
+    auto r = request(QStringLiteral("/payload"), QStringLiteral("hardlink-destination.bin"));
+    const auto nativePart = gsw::updatepaths::nativeApiPath(r.destinationPath + QStringLiteral(".part"));
+    const auto nativeSource = gsw::updatepaths::nativeApiPath(source);
+    QVERIFY(CreateHardLinkW(reinterpret_cast<LPCWSTR>(nativePart.utf16()),
+                           reinterpret_cast<LPCWSTR>(nativeSource.utf16()), nullptr));
+    const auto result = download(r, policy());
+    QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_path_unsafe"));
+    QCOMPARE(read(source), before); QVERIFY(!QFileInfo::exists(r.destinationPath));
+#endif
   }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)

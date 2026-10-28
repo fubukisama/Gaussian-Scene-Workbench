@@ -32,14 +32,20 @@ cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release -
 
 # REMOTE CI ONLY: start the real HTTPS server and issue ephemeral public roots.
 python -I -B scripts/prepare_native_update_trust_ci.py --root <fresh-fixture-dir> `
-  --source-commit <HEAD> --source-tree <HEAD-tree>
-# Consume its profile/fixture fields; retain serverPid for test-owned cleanup.
+  --source-commit <HEAD> --source-tree <HEAD-tree> --with-short-expiry
+# Consume profile/fixture; retain serverPid/issuerPid for test-owned cleanup.
 $env:GSW_UPDATER_FIXTURE_PROFILE_PATH = '<fixture>/issued/profile.json'
 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --features fixture-cli
 python -I -B native/updater-trust/tests/remote_trust_contract.py `
   --cli <cargo-target>/release/gsw-trust-fixture-cli.exe `
   --fixture <fixture>/issued/fixture.json --work-root <fresh-test-dir>
 ```
+
+With `--with-short-expiry`, the remote issuer stays alive with ephemeral keys
+only in memory until the last test triggers a same-root 60-second timestamp.
+It exits after signing and times out after ten minutes without a trigger. CI
+cleanup must stop its owned `issuerPid` as well as the HTTPS `serverPid` on errors.
+There is no OS clock change, runtime time override or additional production input.
 
 The fixture CLI accepts one request JSON filename, or `-` for stdin. It invokes
 the exact C ABI, prints its bounded JSON and returns `0` on success or `2` on

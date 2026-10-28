@@ -7,6 +7,7 @@
 #include "ViewportGridDialog.h"
 #include "ViewportGridSettings.h"
 #include "WorkspaceDocument.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QAction>
 #include <QApplication>
@@ -415,6 +416,23 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
   if (!dialogExercise(window, "viewportGridDialog", [&] { gridAction->trigger(); }, [&](QDialog &dialog) {
     GridControls controls(dialog);
     if (!check(controls.valid(), "real grid form controls exist")) return false;
+    if (qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE")) {
+      auto *actual = qobject_cast<ViewportGridDialog *>(&dialog);
+      if (!check(actual && tests::captureUiFormMatrix(true, dialog, QStringLiteral("unknown-unit-grid-controls"),
+          QSize(900, 600), QSize(640, 600), [&] {
+        const auto committed = actual->settings().toJson();
+        return QJsonObject{{"committed", committed.value_or(QJsonObject{})},
+            {"committedValid", committed.has_value()},
+            {"mode", QJsonValue::fromVariant(controls.mode->currentData())},
+            {"spacing", controls.spacing->text()},
+            {"subdivisions", QJsonValue::fromVariant(controls.subdivisions->currentData())},
+            {"density", controls.density->value()},
+            {"unit", QJsonValue::fromVariant(controls.unit->currentData())},
+            {"gridVisible", controls.grid->isChecked()}, {"axesVisible", controls.axes->isChecked()},
+            {"scenes", document->sceneCollectionJson()}};
+      }) && unknownBefore.unchanged(*document, *viewport),
+          "grid native matrix preserves uncommitted controls, source collection and camera")) return false;
+    }
     auto *model = qobject_cast<QStandardItemModel *>(controls.unit->model());
     bool disabledMetric = model != nullptr;
     for (const auto unit : {Settings::DisplayUnit::Millimetres, Settings::DisplayUnit::Centimetres,
