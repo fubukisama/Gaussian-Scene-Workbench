@@ -68,7 +68,12 @@ int main(int argc, char **argv) {
         root.absolutePath(), channel, build, lock, cancellation.get());
     if (!trust.ok) return failure(trust.code);
     build = trust.offer.value(QStringLiteral("buildId")).toString();
-    event(QStringLiteral("available"), QStringLiteral("VERIFIED"), {{"offer", trust.offer}});
+    // Never expose download URLs, signed query credentials or transport data
+    // in stdout/UI logs. Release notes remain plain text at the UI boundary.
+    QJsonObject display;
+    for (const auto &key : {"buildId", "displayVersion", "channel", "archiveLength", "releaseNotes"})
+      if (trust.offer.contains(QLatin1String(key))) display.insert(QLatin1String(key), trust.offer.value(QLatin1String(key)));
+    event(QStringLiteral("available"), QStringLiteral("VERIFIED"), {{"offer", display}});
     if (operation == QLatin1String("--check")) return 0;
     const QString archiveHash = trust.offer.value(QStringLiteral("archiveSha256")).toString();
     gsw::activation::sha(archiveHash);

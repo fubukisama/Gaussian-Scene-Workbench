@@ -46,7 +46,9 @@ pub extern "C" fn gsw_update_trust_request(
         let outcome = (|| {
             let request = policy::Request::parse(bytes)?;
             let profile = policy::Profile::compiled()?.ok_or("NOT_CONFIGURED")?;
-            let _guard = REQUEST_LOCK.lock().map_err(|_| "INTERNAL_ERROR")?;
+            // Do not make a cancelled/re-entrant caller wait behind another
+            // bounded refresh. The public helper serializes intents already.
+            let _guard = REQUEST_LOCK.try_lock().map_err(|_| "TRUST_BUSY")?;
             engine::execute(request, profile, network::Cancellation { callback: cancel, context: context as usize })
         })();
         let response = match outcome {

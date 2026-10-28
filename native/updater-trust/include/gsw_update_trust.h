@@ -14,7 +14,10 @@ typedef struct GswTrustBuffer {
 } GswTrustBuffer;
 
 /* The C++ helper owns its installation-wide .publish.lock for the complete
- * request. Returned bytes belong to this library and must be freed once. */
+ * request. Returned bytes belong to this library and must be freed once.
+ * Calls are synchronous. A cancel callback must not throw and its context must
+ * remain alive until this function returns; it is invoked on this call's thread.
+ * Re-entrant/concurrent in-process trust requests return TRUST_BUSY. */
 GswTrustBuffer gsw_update_trust_request(const unsigned char *json, size_t length,
                                        int (*cancel)(void *), void *context);
 void gsw_update_trust_free(GswTrustBuffer buffer);

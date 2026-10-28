@@ -30,6 +30,31 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/native/build-auto-update/rust
 
 jobs:
+  release-policy-contracts:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Actual public archive and policy boundaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-policy,native/policy-evidence -Force | Out-Null
+          $env:TEMP="$PWD/native/.tmp-policy"; $env:TMP=$env:TEMP
+          python -I -B -m unittest discover -s scripts -p test_native_update_archive.py -v 2>&1 | Tee-Object native/policy-evidence/archive.log
+          $archiveExit=$LASTEXITCODE
+          python -I -B -m unittest discover -s scripts -p test_native_release_gate.py -v 2>&1 | Tee-Object native/policy-evidence/policy.log
+          if($archiveExit -ne 0 -or $LASTEXITCODE -ne 0){throw 'Archive or release policy contract failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-policy-evidence
+          path: native/policy-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   isolated-contracts:
     runs-on: windows-2022
     timeout-minutes: 15

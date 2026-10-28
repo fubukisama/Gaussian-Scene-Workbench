@@ -114,7 +114,7 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
       if (entry.size != integer(row.at("size"), 0, maxArchive)) fail("activation_archive_file_set_differs");
       entry.sha256 = string(row.at("sha256")); sha(entry.sha256);
     }
-    const QString exe = QStringLiteral("bin/Gaussian Scene Workbench.exe");
+    const QString exe = QString::fromLatin1("bin/Gaussian Scene Workbench.exe");
     if (!entries.contains(exe) || entries[exe].sha256.isEmpty()) fail("activation_required_file_missing");
     const QString updates = QDir(root).filePath(QStringLiteral("updates"));
     const QString staging = QDir(updates).filePath(QStringLiteral("staging"));
