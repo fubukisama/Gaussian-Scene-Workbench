@@ -9,7 +9,9 @@ import argparse
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import posixpath
 import re
+import subprocess
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,7 +103,23 @@ def plain_license_errors(text):
     return errors
 
 
-def check_document(relative):
+def tracked_files():
+    result=subprocess.run(["git","ls-files","-z"],cwd=ROOT,check=True,capture_output=True,timeout=10)
+    return {path for path in result.stdout.decode("utf-8").split("\0") if path}
+
+
+def link_destination(target, html_attribute=False):
+    target=target.strip()
+    if target.startswith("<") and ">" in target:
+        return target[1:target.index(">")]
+    if not html_attribute:
+        target=re.split(r"(?<!\\)\s+",target,maxsplit=1)[0]
+        return target.replace("\\ "," ")
+    return target
+
+
+def check_document(relative, tracked=None):
+    if tracked is None:tracked=tracked_files()
     path = ROOT / relative
     errors = []
     text = path.read_text(encoding="utf-8-sig")
@@ -156,22 +174,19 @@ def check_document(relative):
         while row<len(lines) and lines[row].strip() and "|" in lines[row]:
             if len(cells(lines[row]))!=len(columns):errors.append(f"line {row+1}: table row column count differs from header")
             row+=1
-    links = re.findall(r"!?\[[^\]\n]*\]\(([^\n)]+)\)", clean) + parser.links
-    for target in links:
-        # Inline Markdown permits an optional title after its destination.
-        # An angle-bracket destination may itself contain spaces.
-        target=target.strip()
-        if target.startswith("<") and ">" in target:
-            target=target[1:target.index(">")]
-        elif target not in parser.links:
-            target=re.split(r"(?<!\\)\s+",target,maxsplit=1)[0]
-            target=target.replace("\\ "," ")
+    links = [(target,False) for target in re.findall(r"!?\[[^\]\n]*\]\(([^\n)]+)\)", clean)] + [(target,True) for target in parser.links]
+    for target,is_html in links:
+        target=link_destination(target,is_html)
         url = urlsplit(target)
         if url.scheme or url.netloc or not url.path:
             continue
         selected = (path.parent / unquote(url.path)).resolve()
         if not selected.is_relative_to(ROOT) or not selected.exists():
             errors.append(f"missing/escaping local link: {target}")
+            continue
+        public_target=posixpath.normpath(posixpath.join(posixpath.dirname(relative),unquote(url.path)))
+        published=(public_target in tracked or public_target=="." or any(item.startswith(public_target.rstrip("/")+"/") for item in tracked))
+        if not published:errors.append(f"local link target is not tracked/published: {target}")
     return errors, len(links)
 
 
@@ -182,13 +197,14 @@ def main():
     paths = sorted(set(PRIMARY) | {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs").glob("*.md")})
     findings = []
     references = 0
+    tracked=tracked_files()
     for relative in paths:
-        errors, count = check_document(relative)
+        errors, count = check_document(relative,tracked)
         references += count
         findings.extend({"path": relative, "message": error} for error in errors)
     findings.extend({"path": "LICENSE", "message": error} for error in plain_license_errors((ROOT / "LICENSE").read_text(encoding="utf-8")))
     report = {"checkedMarkdownFiles": len(paths), "checkedLinkReferences": references,
-              "plainTextLicenseChecked": True, "standardGplTextReformatted": False,
+              "plainTextLicenseChecked": True, "publishedTargetInventoryChecked":True, "standardGplTextReformatted": False,
               "findings": findings, "passed": not findings}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

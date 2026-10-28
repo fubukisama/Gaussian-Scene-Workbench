@@ -178,7 +178,7 @@ python -B -m unittest native.backend.tests.test_camera_dataset `
 
 阶段性证据（待最终匹配提交与安装版重新核对，不能当作最终交付全绿）：
 
-- [本轮计划与验收门槛](../.planning/2026-10-19-camera-scale-p0/task_plan.md)。
+- 本轮计划与验收门槛：`../.planning/2026-10-19-camera-scale-p0/task_plan.md`（本机内部记录，不随仓库发布）；公开复现方法见 [原生 CI 指南](NATIVE_CI.md)。
 - 原生核心日志：`D:/Codex/qa-camera-p0/native-model-export-final.txt`，当时 31 通过、0 失败、1 个既存可选真实 SPZ 输入用例未选择。
 - 直接 GPU 多尺度/原点矩阵：`D:/Apps/GSW/validation/camera-scale-p0-oct19/gpu-matrix-2/RESULTS.json`。其源码身份和后续原生 job / 安装候选身份必须在最终报告对齐；开发中修改后的旧结果不能替代重新验证。
 - 冻结训练实现的最终 GPU 来源 / 尺度矩阵为 `gpu-final-2/RESULTS.json`（14 组）；真实原生 worker、手动分辨率与原生测量导出分别见 `worker-final-2`、`manual-worker-final` 和 `native-final-3dgs.txt` / `native-final-2dgs.txt`。路径均在本轮 D 盘验收根目录。实际增密补验为 `density-final-1/RESULTS.json`：四组均记录 3 次真实增密、两次完整状态暂停 / 恢复和 train-only 增密统计；补足此前关闭增密的短程运行范围，不替代最终安装版和真实窗口门槛。
