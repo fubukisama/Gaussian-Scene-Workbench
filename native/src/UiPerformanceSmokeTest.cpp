@@ -313,9 +313,27 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
   std::vector<Presentation> presentations;
   presentations.reserve(recordCapacity);
   bool presentationOverflow = false;
+  // [DEBUG-ui-perf-setup-20261028] Temporary, bounded QA-only observations.
+  // They cover preparation only; no snapshots, logs or file IO are added to a
+  // measured pan/idle window, and variable setup facts are not pair identity.
+  QJsonArray setupEvidence;
+  QString setupCase, setupPhase;
+  QJsonObject previousSetupModel;
+  bool setupActive = false, setupOverflow = false;
+  const auto observeSetup = [&](const char *boundary, bool force) {
+    if (!setupActive) return;
+    const QJsonObject current = model(viewport);
+    if (!force && current == previousSetupModel) return;
+    if (setupEvidence.size() >= 128) { setupOverflow = true; return; }
+    setupEvidence.append(QJsonObject{{"case", setupCase}, {"phase", setupPhase},
+        {"boundary", QString::fromLatin1(boundary)}, {"frameSerial", qint64(viewport.renderedFrameSerial())},
+        {"model", current}});
+    previousSetupModel = current;
+  };
   quint64 lastPresented = viewport.renderedFrameSerial(), metrics = 0, zeroCallbacks = 0;
   QList<QMetaObject::Connection> connections;
   connections.append(QObject::connect(&viewport, &QOpenGLWidget::frameSwapped, &viewport, [&] {
+    observeSetup("fresh-swap-model-change", false);
     const quint64 serial = viewport.renderedFrameSerial();
     if (serial > lastPresented) {
       lastPresented = serial;
@@ -344,6 +362,17 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
     if ((!observed.enabled || (observed.count == 0 && unready.isEmpty()) || observed.overflow || presentationOverflow) &&
         !failures.contains("passive_observation_incomplete")) fail("passive_observation_incomplete");
     const QString status = !failures.isEmpty() ? "FAIL" : !unready.isEmpty() ? "INCONCLUSIVE" : "RECORDED";
+    const QJsonObject setup{{"schema", "gsw.ui_performance_setup_debug/1"},
+        {"prefix", "DEBUG-ui-perf-setup-20261028"}, {"arm", arm}, {"round", round},
+        {"scenario", scenario}, {"sourceCommit", source}, {"runnerId", runner},
+        {"capacity", 128}, {"overflow", setupOverflow}, {"setupOnly", true},
+        {"observations", setupEvidence}};
+    if (!writeNew(output.filePath("setup-evidence.json"), QJsonDocument(setup).toJson())) {
+      qCritical() << "[DEBUG-ui-perf-setup-20261028] cannot retain independent setup evidence";
+      return 2;
+    }
+    qInfo() << "[DEBUG-ui-perf-setup-20261028] retained" << setupEvidence.size()
+            << "setup observations; overflow" << setupOverflow;
     const QJsonObject result{{"schema", "gsw.native_ui_performance_process/1"}, {"status", status},
         {"arm", arm}, {"round", round}, {"scenario", scenario}, {"sourceCommit", source}, {"runnerId", runner},
         {"executableSha256", sha256(QCoreApplication::applicationFilePath())}, {"environment", environment},
@@ -465,6 +494,8 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
     return lastPresented > before;
   };
   for (const QString &id : ids) {
+    setupCase = id; setupPhase = QStringLiteral("before-scene"); setupActive = true;
+    observeSetup("boundary", true);
     const int kind = id == "points" ? 0 : id == "mesh" ? 1 : id == "3dgs" ? 2 : id == "2dgs" ? 3 : 4;
     Fixture fixture;
     qint64 sourceCount = 0, faceCount = 0;
@@ -474,11 +505,16 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
       QString loadError;
       sourceCount = -1; faceCount = -1;
       const auto loadedConnection = QObject::connect(&viewport, &NativeViewport::sceneLoaded, &viewport,
-          [&](qint64 count, qsizetype, qint64 faces, qsizetype) { sourceCount = count; faceCount = faces; loaded = true; });
+          [&](qint64 count, qsizetype, qint64 faces, qsizetype) {
+            sourceCount = count; faceCount = faces; loaded = true;
+            observeSetup("scene-loaded", true);
+          });
       const auto errorConnection = QObject::connect(&viewport, &NativeViewport::sceneLoadFailed, &viewport,
           [&](const QString &, const QString &message) { loadError = message; });
       viewport.setScene(fixture.path, kind == 4 ? mediumCount : kind == 1 ? 4 : 441);
+      setupPhase = QStringLiteral("scene-requested"); observeSetup("boundary", true);
       viewport.setRenderMode(kind == 1 ? NativeViewport::RenderMode::Mesh : kind >= 2 ? NativeViewport::RenderMode::Gaussians : NativeViewport::RenderMode::Points);
+      setupPhase = QStringLiteral("waiting-render-ready"); observeSetup("boundary", true);
       const bool ready = waitUntil([&] {
         return !loadError.isEmpty() || (loaded && (kind == 1 ? viewport.meshRenderingAvailable() && viewport.meshPagingSettled() :
             kind >= 2 ? viewport.gaussianRenderingAvailable() : viewport.selectableModelAvailable() && viewport.pointPagingSettled()));
@@ -491,12 +527,15 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
         fail("actual_renderer_or_source_count_mismatch:" + id); break;
       }
     }
+    setupPhase = QStringLiteral("render-ready"); observeSetup("boundary", true);
     viewport.resetCamera();
     viewport.clearSelection();
+    setupPhase = QStringLiteral("camera-reset"); observeSetup("boundary", true);
     const QPoint center = viewport.rect().center();
     QPoint point = center;
     mouse(QEvent::MouseButtonPress, point, Qt::MiddleButton, Qt::MiddleButton);
     dispatchFor(30);
+    setupPhase = QStringLiteral("warm-pan-pressed"); observeSetup("boundary", true);
     const qsizetype warmBegin = viewport.uiPaintObservation().count;
     const auto warmStart = Clock::now();
     const int warmEvents = scenario == "medium" ? 2 : 4;
@@ -510,8 +549,10 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
       const int bound = scenario == "medium" ? 5000 : 3000;
       const int remaining = bound - int(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - warmStart).count());
       if (remaining <= 0 || !awaitFresh(before, remaining)) { inconclusive("bounded_warmup_deadline:" + id); complete = false; break; }
+      setupPhase = QStringLiteral("warm-event-%1").arg(index + 1); observeSetup("boundary", true);
     }
     const qsizetype warmEnd = viewport.uiPaintObservation().count;
+    setupPhase = QStringLiteral("warm-end"); observeSetup("boundary", true); setupActive = false;
     if (!complete) { mouse(QEvent::MouseButtonRelease, point, Qt::MiddleButton, Qt::NoButton); break; }
     const QJsonObject modelBefore = model(viewport);
     const Camera cameraBefore = camera(viewport);
