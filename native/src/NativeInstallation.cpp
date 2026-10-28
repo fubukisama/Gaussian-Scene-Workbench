@@ -138,7 +138,25 @@ bool managedLaunch(const NativeLaunchPlan &plan, bool diagnostics, bool create, 
   if (!plan.valid()) return fail("managed_installation_manifest_invalid");
   const int protocol = bootstrapProtocol(plan.root);
   if (!protocol) return fail("managed_installation_manifest_invalid");
-  if (protocol == 1) {
+  const auto hasTrustState = [&] {
+    for (const auto &relative : {QStringLiteral(".update-trust-anchor"), QStringLiteral("updates/trust")}) {
+      const auto path = QDir(plan.root).filePath(relative);
+#ifdef Q_OS_WIN
+      const auto api = updatepaths::nativeApiPath(path);
+      if (api.isEmpty() || GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16())) != INVALID_FILE_ATTRIBUTES)
+        return true;
+      const auto error = GetLastError();
+      if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return true;
+#else
+      if (QFileInfo::exists(path) || QFileInfo(path).isSymLink()) return true;
+#endif
+    }
+    return false;
+  }();
+  // A retained public trust history cannot become an unsigned developer root
+  // just because bootstrap metadata was reverted. Missing/corrupt state must
+  // be rejected by the same independent read-only helper, never reset here.
+  if (protocol == 1 && !hasTrustState) {
     if (!create) return true;
     QProcess child;
     child.setProgram(plan.program); child.setArguments(plan.arguments);

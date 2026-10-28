@@ -116,6 +116,24 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
   try {
     if (!lock.locked() || lock.installationRoot() != QDir::cleanPath(root)) fail("activation_lock_required");
     if (!ordinary(root)) fail("activation_root_invalid");
+    if (developer) {
+      // The private adapter checks this before creating its lock and verifies
+      // every protocol-1 bootstrap row under that lock. Repeat the trust-state
+      // exclusion here: a developer admission must never mutate a public root.
+      for (const auto &relative : {QStringLiteral(".update-trust-anchor"), QStringLiteral("updates/trust")}) {
+        const auto path = QDir(root).filePath(relative);
+#ifdef Q_OS_WIN
+        const auto api = nativeApiPath(path);
+        if (GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16())) != INVALID_FILE_ATTRIBUTES)
+          fail("developer_trusted_root_forbidden");
+        const auto error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+          fail("developer_trusted_root_forbidden");
+#else
+        if (QFileInfo::exists(path) || QFileInfo(path).isSymLink()) fail("developer_trusted_root_forbidden");
+#endif
+      }
+    }
     const auto offer = parse(offerBytes, 4 * 1024 * 1024);
     if (string(offer.at("schema")) != QLatin1String("gsw.update_offer/1") ||
         string(offer.at("platform")) != QLatin1String("windows-x64")) fail("activation_offer_invalid");
@@ -126,7 +144,9 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     integer(offer.at("minimumBootstrapProtocol"), 2, 2);
     const auto bootstrap = parse(read(QDir(root).filePath(QStringLiteral("bootstrap.json")), 16384), 16384);
     if (string(bootstrap.at("schema")) != QLatin1String("gsw.native_bootstrap/1")) fail("activation_bootstrap_invalid");
-    if (integer(bootstrap.at("protocol"), 1, 2) != 2) fail("activation_bootstrap_migration_required");
+    const auto bootstrapProtocol = integer(bootstrap.at("protocol"), 1, 2);
+    if (bootstrapProtocol != 2 && !(developer && bootstrapProtocol == 1))
+      fail("activation_bootstrap_migration_required");
     const qint64 archiveLength = integer(offer.at("archiveLength"), 1, maxArchive);
     const qint64 expanded = integer(offer.at("unpackedLength"), 1, maxExpanded);
     const qint64 count = integer(offer.at("fileCount"), 1, maxFiles);

@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import traceback
 
 
 SPEC = importlib.util.spec_from_file_location("gsw_source_bundle_package", Path(__file__).with_name("package_native_update.py"))
@@ -150,10 +151,14 @@ def main():
         print(json.dumps(verify(args), ensure_ascii=True))
         return 0
     except Exception as error:
+        sites = [{"module": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
+                 for frame in traceback.extract_tb(error.__traceback__)
+                 if Path(frame.filename).name in {"package_native_update.py", "prepare_native_update_source.py",
+                                                  "verify_native_update_source_bundle.py"}][-8:]
         result = {"schema": "gsw.native_source_bundle_acceptance/1", "ok": False,
             "scope": "source-only", "production": False, "applicationAcceptance": False,
             "payloadExecuted": False, "code": getattr(error, "code", "source_bundle_acceptance_failed"),
-            "errorType": type(error).__name__}
+            "errorType": type(error).__name__, "failureSite": sites}
         print(json.dumps(result, ensure_ascii=True))
         if OWNED_EVIDENCE == args.evidence.absolute():
             try:

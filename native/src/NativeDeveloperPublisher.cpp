@@ -43,7 +43,7 @@ void requireDeveloperRoot(const QString &root) {
       fail("activation_bootstrap_digest_mismatch");
     expected.insert(path);
   }
-  if (!expected.contains(QStringLiteral("bin/Gaussian Scene Workbench Launcher.exe")))
+  if (!expected.contains(QString::fromLatin1("bin/Gaussian Scene Workbench Launcher.exe")))
     fail("activation_bootstrap_invalid");
   QDirIterator iterator(QDir(root).filePath(QStringLiteral("bin")),
       QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);

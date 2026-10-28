@@ -208,10 +208,17 @@ int main(int argc, char **argv) {
       request.sha256 = archiveHash;
       QEventLoop loop;
       QTimer timer;
+      QElapsedTimer progressWindow;
+      progressWindow.start();
+      bool progressReported = false;
       timer.setInterval(100);
       QObject::connect(&timer, &QTimer::timeout, &loop, [&] { if (cancellation->load()) downloader.cancel(); });
       QObject::connect(&downloader, &gsw::NativeUpdateDownload::progress, &loop, [&](qint64 bytes, qint64 total) {
+        const bool finalBytes = total > 0 && bytes == total;
+        if (progressReported && !finalBytes && progressWindow.elapsed() < 100) return;
         event(QStringLiteral("downloading"), {}, {{"receivedBytes", double(bytes)}, {"totalBytes", double(total)}, {"buildId", build}});
+        progressReported = true;
+        progressWindow.restart();
       });
       gsw::NativeUpdateDownloadResult downloaded;
       QObject::connect(&downloader, &gsw::NativeUpdateDownload::finished, &loop,
