@@ -4,6 +4,7 @@
 #include "BackendLocator.h"
 #include "CameraDatasetInfo.h"
 #include "ModelExportDialog.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -44,6 +45,7 @@ QByteArray fileHash(const QString &path) {
 }
 bool runScaleConstraintsSmokeTest() {
   bool passed = true;
+  const bool visualForms = !qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE").isEmpty();
   const auto check = [&](bool ok, const char *message) {
     std::fprintf(stderr, "Scale constraints %s: %s\n", ok ? "PASS" : "FAIL", message);
     std::fflush(stderr);
@@ -166,7 +168,7 @@ bool runScaleConstraintsSmokeTest() {
   QMap<QString, QByteArray> originals;
   for (const QString &path : imagePaths + QStringList{manifest}) originals[path] = fileHash(path);
   ScaleConstraintsDialog actual(python, root, workspace.path(), source, identity, QProcessEnvironment::systemEnvironment());
-  actual.show(); // Only the remote test-owned smoke path exposes this window; never raises or activates it.
+  actual.show(); // Ordinary smoke does not activate; the opt-in native matrix owns activation on CI.
   auto fitRow = QJsonObject{{"id", "fit"}, {"kind", "distance"}, {"role", "fit"}, {"reference_id", "ruler-A"},
       {"reference_unit", "m"}, {"source_a", QJsonArray{0., 0., 0.}}, {"source_b", QJsonArray{2., 0., 0.}}, {"reference_distance", 6.},
       {"provenance", QJsonObject{{"source", "generated-fixture"}, {"measurement_id", "ruler-A"}}}};
@@ -198,6 +200,29 @@ bool runScaleConstraintsSmokeTest() {
   check(waitForScale([&] { return !actual.isRunning(); }) && !actual.resultDatasetPath().isEmpty() &&
       actual.resultDatasetInfo().value("posePolicy") == "locked" && actual.resultDatasetInfo().value("scale").toObject().value("status") == "constraint_derived",
       "explicit adoption publishes a fresh locked dataset version with constraint-derived status");
+  if (visualForms) {
+    const QString resultManifest = QDir(actual.resultDatasetPath()).filePath(QStringLiteral("camera_dataset.json"));
+    bool originalBytesReadable = !originals.isEmpty();
+    for (auto it = originals.cbegin(); it != originals.cend(); ++it)
+      originalBytesReadable = fileHash(it.key()).size() == 32 && originalBytesReadable;
+    check(!actual.isRunning() && !actual.solutionReport().isEmpty() && originalBytesReadable &&
+        fileHash(resultManifest).size() == 32,
+        "native matrix begins with a real scale solution and readable source and adopted-manifest bytes");
+    const auto snapshot = [&]() {
+      QJsonObject inputHashes;
+      for (auto it = originals.cbegin(); it != originals.cend(); ++it)
+        inputHashes.insert(it.key(), QString::fromLatin1(fileHash(it.key()).toHex()));
+      return QJsonObject{{"constraintDocument", actual.constraintDocument()},
+          {"solutionReport", actual.solutionReport()}, {"sourceDescriptor", actual.sourceDescriptor()},
+          {"resultDatasetPath", actual.resultDatasetPath()}, {"resultDatasetInfo", actual.resultDatasetInfo()},
+          {"resultVersionPath", actual.resultVersionPath()}, {"isRunning", actual.isRunning()},
+          {"inputSha256", inputHashes},
+          {"resultManifestSha256", QString::fromLatin1(fileHash(resultManifest).toHex())}};
+    };
+    check(tests::captureUiFormMatrix(visualForms, actual, QStringLiteral("scale-constraints-adopted"),
+        QSize(1100, 760), QSize(680, 620), snapshot),
+        "native three-language light/dark wide/narrow evidence preserves exact constraints, real solution, adopted version and original bytes");
+  }
   QProcess exportFixture;
 #ifdef Q_OS_WIN
   exportFixture.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {

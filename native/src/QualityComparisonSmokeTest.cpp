@@ -2,6 +2,7 @@
 #include "QualityComparisonDialog.h"
 #include "AppLanguage.h"
 #include "BackendLocator.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QApplication>
 #include <QCryptographicHash>
@@ -59,6 +60,7 @@ QString untranslatedStatusToken(const QString &language) {
 
 bool runQualityComparisonSmokeTest() {
   bool passed = true;
+  const bool visualForms = !qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE").isEmpty();
   const QString originalLanguage = AppLanguage::current();
   const QLocale originalLocale;
   struct RestoreLanguage {
@@ -87,7 +89,7 @@ bool runQualityComparisonSmokeTest() {
       "test-owned baseline and candidate reports are written")) return false;
   QualityComparisonDialog dialog(python, root, fixture.path(), QProcessEnvironment::systemEnvironment());
   dialog.setReportPaths(baseline, candidate);
-  dialog.show(); // Remote acceptance only; never raise or activate the window.
+  dialog.show(); // Ordinary smoke does not activate; the opt-in native matrix owns activation on CI.
   if (!check(waitFor([&] { return dialog.windowHandle() && dialog.windowHandle()->isExposed(); }),
       "the actual test-owned quality dialog is exposed")) return false;
   auto *compare = dialog.findChild<QPushButton *>(QStringLiteral("qualityCompareButton"));
@@ -133,6 +135,21 @@ bool runQualityComparisonSmokeTest() {
   check(!dialog.saveComparisonReport(exportPath) && !dialog.saveComparisonReport(baseline) &&
       digest(exportPath) == exportedHash && digest(baseline) == originalBaseline && digest(candidate) == originalCandidate,
       "saving refuses an existing file or input report without changing any original bytes");
+  if (visualForms) {
+    check(!dialog.isRunning() && !dialog.comparisonReport().isEmpty() &&
+        digest(baseline).size() == 32 && digest(candidate).size() == 32 && digest(exportPath).size() == 32,
+        "native matrix begins with a completed real comparison and readable input and saved-report bytes");
+    const auto snapshot = [&]() {
+      return QJsonObject{{"contract", dialog.contract()}, {"comparisonReport", dialog.comparisonReport()},
+          {"isRunning", dialog.isRunning()},
+          {"baselineSha256", QString::fromLatin1(digest(baseline).toHex())},
+          {"candidateSha256", QString::fromLatin1(digest(candidate).toHex())},
+          {"savedReportSha256", QString::fromLatin1(digest(exportPath).toHex())}};
+    };
+    check(tests::captureUiFormMatrix(visualForms, dialog, QStringLiteral("quality-comparison-completed"),
+        QSize(1000, 760), QSize(680, 620), snapshot),
+        "native three-language light/dark wide/narrow evidence preserves actual comparison results, thresholds and report bytes");
+  }
   psnrLimit->setText(QStringLiteral("0.05"));
   check(dialog.comparisonReport().isEmpty(),
       "editing a threshold invalidates the previous verdict before recomparison");

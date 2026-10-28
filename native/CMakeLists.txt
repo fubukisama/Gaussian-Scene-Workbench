@@ -15,6 +15,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 set(GSW_RELEASE_DATE "2026-10-23" CACHE STRING "Release date shown by the application")
+option(GSW_UI_FORM_CAPTURE_TESTS "Register explicit remote-only dialog matrix capture" OFF)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -1088,6 +1089,13 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  if(WIN32 AND GSW_UI_FORM_CAPTURE_TESTS)
+    add_test(NAME native_language_form_matrix
+      COMMAND GaussianSceneWorkbench --smoke-test-language-form-matrix)
+    set_tests_properties(native_language_form_matrix PROPERTIES TIMEOUT 120
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   qt_add_executable(gsw_native_installation_tests tests/NativeInstallationTests.cpp)
   qt_add_executable(gsw_native_shortcut_fixture tests/NativeShortcutFixture.cpp)
   target_link_libraries(gsw_native_shortcut_fixture PRIVATE Qt6::Core)

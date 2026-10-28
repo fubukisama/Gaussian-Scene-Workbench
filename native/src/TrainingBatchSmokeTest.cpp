@@ -2,12 +2,15 @@
 #include "TrainingBatchDialog.h"
 #include "AppLanguage.h"
 #include "BackendLocator.h"
+#include "../tests/UiFormVisualProbe.h"
 #include <QCoreApplication>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -26,9 +29,15 @@ bool batchWait(const std::function<bool()> &ready) {
   QElapsedTimer timer;timer.start();while(!ready()&&timer.elapsed()<30000){QEventLoop loop;QTimer::singleShot(10,&loop,&QEventLoop::quit);loop.exec();}return ready();
 }
 bool writeBatchJson(const QString&path,const QJsonObject&value){QFile file(path);return file.open(QIODevice::WriteOnly)&&file.write(QJsonDocument(value).toJson())>0;}
+QByteArray batchFileHash(const QString &path) {
+  QFile file(path);
+  return file.open(QIODevice::ReadOnly)
+      ? QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) : QByteArray();
+}
 }
 bool runTrainingBatchSmokeTest() {
   bool passed = true;
+  const bool visualForms = !qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE").isEmpty();
   const auto check = [&](bool ok, const char *detail) {
     std::fprintf(stderr, "Training batch %s: %s\n", ok ? "PASS" : "FAIL", detail);
     std::fflush(stderr); passed = passed && ok;
@@ -75,7 +84,7 @@ bool runTrainingBatchSmokeTest() {
   actualRequest["matrix"]=QJsonObject{{"backend",QJsonArray{"3dgs","2dgs"}},{"trainingSeed",QJsonArray{7,9}}};
   actual.setRequestDocument(actualRequest);int actualStarts=0;bool lastResume=false;
   QObject::connect(&actual,&TrainingBatchDialog::runRequested,&actual,[&](const QString&path,bool resume){check(!path.isEmpty(),"run request refers to a persistent plan");++actualStarts;lastResume=resume;});
-  actual.show(); // Remote test-owned window only; no raising, activation or local execution.
+  actual.show(); // Ordinary smoke does not activate; the opt-in native matrix owns activation on CI.
   actual.previewPlan();
   check(batchWait([&]{return !actual.isRunning();})&&actual.previewReport().value("runs").toArray().size()==4&&actualStarts==0,"real CPU preview expands two backends by two seeds without training");
   const auto pinned=actual.requestDocument().value("datasets").toArray();
@@ -83,6 +92,29 @@ bool runTrainingBatchSmokeTest() {
   actual.createPlan();
   check(batchWait([&]{return !actual.isRunning();})&&!actual.planPath().isEmpty()&&actualStarts==0,"creating a durable plan does not emit a training launch");
   const QString plan=actual.planPath();
+  if (visualForms) {
+    const QString statePath = QDir(QFileInfo(plan).absolutePath()).filePath(QStringLiteral("state.json"));
+    const QStringList inputNames = QDir(source).entryList(QDir::Files);
+    bool inputBytesReadable = !inputNames.isEmpty();
+    for (const QString &name : inputNames)
+      inputBytesReadable = batchFileHash(QDir(source).filePath(name)).size() == 32 && inputBytesReadable;
+    check(!actual.isRunning() && !actual.previewReport().isEmpty() && inputBytesReadable &&
+        batchFileHash(plan).size() == 32 && batchFileHash(statePath).size() == 32 && actualStarts == 0,
+        "native matrix begins with a real persisted both-backend plan and readable queue and input bytes, without training");
+    const auto snapshot = [&]() {
+      QJsonObject inputHashes;
+      for (const QString &name : QDir(source).entryList(QDir::Files))
+        inputHashes.insert(name, QString::fromLatin1(batchFileHash(QDir(source).filePath(name)).toHex()));
+      return QJsonObject{{"requestDocument", actual.requestDocument()},
+          {"previewReport", actual.previewReport()}, {"planPath", actual.planPath()},
+          {"isRunning", actual.isRunning()}, {"trainingLaunches", actualStarts}, {"lastResume", lastResume},
+          {"inputSha256", inputHashes}, {"planSha256", QString::fromLatin1(batchFileHash(plan).toHex())},
+          {"stateSha256", QString::fromLatin1(batchFileHash(statePath).toHex())}};
+    };
+    check(tests::captureUiFormMatrix(visualForms, actual, QStringLiteral("training-batch-plan-created"),
+        QSize(1100, 760), QSize(680, 620), snapshot),
+        "native three-language light/dark wide/narrow evidence preserves both-backend plan, queue and input bytes without launching training");
+  }
   TrainingBatchDialog reopened(python,root,workspace.path(),{},QProcessEnvironment::systemEnvironment());
   int reopenedStarts=0;QString reopenedPlan;bool reopenedResume=false;
   QObject::connect(&reopened,&TrainingBatchDialog::runRequested,&reopened,[&](const QString&path,bool resume){++reopenedStarts;reopenedPlan=path;reopenedResume=resume;});
