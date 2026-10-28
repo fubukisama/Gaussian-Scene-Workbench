@@ -108,6 +108,20 @@ private slots:
     }
     QVERIFY(sawBoundRange);
   }
+  void downloadsRealHttpsBytesToALongCjkOwnedCachePath() {
+    QString directory = temporary.filePath(QString::fromLatin1("long-cache"));
+    for (int i = 0; directory.size() < 350; ++i)
+      directory += QLatin1Char('/') + QString::fromUtf8("缓存_日本語_") + QString::number(i) +
+          QLatin1Char('_') + QString(42, QLatin1Char('x'));
+    QVERIFY(QDir().mkpath(directory));
+    auto r = request(QString::fromLatin1("/payload"), QString::fromLatin1("placeholder.bin"));
+    r.destinationPath = QDir(directory).filePath(QString::fromUtf8("更新_アップデート.zip"));
+    QVERIFY(r.destinationPath.size() > 350);
+    const auto result = download(r, policy());
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+  }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)
 #include "NativeUpdateDownloadTests.moc"

@@ -118,7 +118,7 @@ def prepare(args):
     config.parent.mkdir(exist_ok=True)
     with config.open("x", encoding="utf-8", newline="\n") as target:
         target.write('[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n')
-    tracked_names = {row["path"] for row in rows}
+    tracked_names = {row["path"] for row in tracked}
     generated, source_rows = [], []
     for path, info in files(output):
         name = _package.validate_relative_path(path.relative_to(output).as_posix())

@@ -96,4 +96,15 @@ if(BUILD_TESTING)
   set_tests_properties(update_activation_contract PROPERTIES TIMEOUT 60
     ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py;QT_FORCE_STDERR_LOGGING=1"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  qt_add_executable(gsw_update_path_tests ../tests/NativeUpdatePathTests.cpp ../src/NativeDeveloperPublisher.cpp)
+  target_include_directories(gsw_update_path_tests PRIVATE ../third_party/nlohmann ../third_party/miniz)
+  target_link_libraries(gsw_update_path_tests PRIVATE gsw_activation_core Qt6::Test)
+  target_compile_definitions(gsw_update_path_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  if(MSVC)
+    target_compile_options(gsw_update_path_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME update_windows_long_paths COMMAND gsw_update_path_tests -o -,txt)
+  set_tests_properties(update_windows_long_paths PROPERTIES TIMEOUT 90
+    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py;QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 endif()

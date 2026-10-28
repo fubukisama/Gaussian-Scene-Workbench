@@ -88,7 +88,7 @@ jobs:
           cmake -S native/updater -B native/build-auto-update -G 'Visual Studio 17 2022' -A x64 `
             -DBUILD_TESTING=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Updater configure failed.' }
-          cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests gsw_update_activation_tests
+          cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests gsw_update_activation_tests gsw_update_path_tests
           if ($LASTEXITCODE -ne 0) { throw 'Updater build failed.' }
       - name: Actual HTTPS download contract
         shell: pwsh

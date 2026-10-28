@@ -84,6 +84,7 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     id = buildId(offer.at("buildId"));
     integer(offer.at("minimumBootstrapProtocol"), 2, 2);
     const auto bootstrap = parse(read(QDir(root).filePath(QStringLiteral("bootstrap.json")), 16384), 16384);
+    if (string(bootstrap.at("schema")) != QLatin1String("gsw.native_bootstrap/1")) fail("activation_bootstrap_invalid");
     if (integer(bootstrap.at("protocol"), 1, 2) != 2) fail("activation_bootstrap_migration_required");
     const qint64 archiveLength = integer(offer.at("archiveLength"), 1, maxArchive);
     const qint64 expanded = integer(offer.at("unpackedLength"), 1, maxExpanded);
