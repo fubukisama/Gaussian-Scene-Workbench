@@ -17,6 +17,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollArea>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <cstdio>
@@ -63,6 +64,17 @@ int main(int argc,char **argv) {
   check(normalize.waitForFinished(30000)&&normalize.exitCode()==0,"actual adapter admits known cameras without SfM");const QString identity=QString::fromUtf8(normalize.readAllStandardOutput()).trimmed();if(identity.size()!=64)return 1;
   const auto sourceHash=digest(metadata),imageHash=digest(QDir(source).filePath(QStringLiteral("image.png")));
   gsw::InitializationDialog dialog(python,root,workspace.path(),source,identity,initial,QProcessEnvironment::systemEnvironment());
+  const auto checkScrollBoundary=[&]{
+    auto *body=dialog.findChild<QScrollArea *>(QStringLiteral("initializationBodyScroll"));
+    auto *cancel=dialog.findChild<QPushButton *>(QStringLiteral("initializationCancel"));
+    auto *create=dialog.findChild<QPushButton *>(QStringLiteral("initializationCreateVersion"));
+    auto *summary=dialog.findChild<QLabel *>(QStringLiteral("initializationSummary"));
+    check(body&&body->widgetResizable()&&body->widget()&&cancel&&create&&summary&&
+        body->isAncestorOf(summary)&&!body->isAncestorOf(cancel)&&!body->isAncestorOf(create),
+        "wrapped reports and preview scroll independently of always-reachable create/cancel actions");
+    check(dialog.minimumSizeHint().isValid()&&dialog.minimumSizeHint().height()<=620,
+        "the dialog layout minimum fits the unchanged 620-logical-pixel narrow-window contract");
+  };
   auto request=dialog.requestDocument();
   auto depthRequest=request;depthRequest["suggestion"]=QJsonObject{{"method","user_depth_interval"},{"view_id","train-a"},{"near",2.},{"far",3.}};
   check(dialog.setRequestDocument(depthRequest)&&dialog.requestDocument()==depthRequest,"full reusable request retains explicit suggestion parameters");
@@ -92,7 +104,7 @@ int main(int argc,char **argv) {
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="ready"&&dialog.report().value("point_count")==16&&dialog.report().value("request")==request,
       "real CPU worker returns the bound actual initialization, full coverage and raw request");
   check(dialog.report().value("point_sha256").toString().size()==64&&dialog.report().value("coverage").toObject().value("not_surface_evidence").toBool(),"geometry identity and visibility do not claim a measured surface");
-  const auto report=dialog.report();for(const auto &locale:gsw::AppLanguage::supported()){check(gsw::AppLanguage::apply(locale,false),"native language applies immediately");check(dialog.requestDocument()==request&&dialog.report()==report,"three-language switching retains the request and actual worker report without rerunning");}
+  const auto report=dialog.report();for(const auto &locale:gsw::AppLanguage::supported()){check(gsw::AppLanguage::apply(locale,false),"native language applies immediately");check(dialog.requestDocument()==request&&dialog.report()==report,"three-language switching retains the request and actual worker report without rerunning");checkScrollBoundary();}
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-3dgs-ready"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
         {"report",dialog.report()},{"running",dialog.isRunning()}};}),
@@ -103,6 +115,7 @@ int main(int argc,char **argv) {
       dialog.report().value("clipping").toObject().value("surface_intersection_visibility_not_predicted").toBool()&&
       dialog.report().value("clipping").toObject().value("runtime_gpu_verified")==false,
       "2DGS uses its own clipping contract and does not relabel CPU geometry checks as GPU training proof");
+  checkScrollBoundary();
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-2dgs-ready"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
         {"report",dialog.report()},{"running",dialog.isRunning()}};}),
@@ -123,6 +136,7 @@ int main(int argc,char **argv) {
   dialog.requestSuggestion();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="suggestion_requires_confirmation"&&dialog.requestDocument()==depthRequest,
       "real camera-Z depth suggestion is visible but not automatically applied");
+  checkScrollBoundary();
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-suggestion-pending"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
         {"report",dialog.report()},{"running",dialog.isRunning()}};}),

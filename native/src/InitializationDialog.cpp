@@ -151,9 +151,19 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("初始化设置与检查"));
   setMinimumSize(560, 360); resize(1100, 760);
   auto *layout = new QVBoxLayout(this);
-  auto *source = new QLabel(QDir::toNativeSeparators(datasetPath) + QLatin1Char('\n') + identity, this);
-  source->setTextFormat(Qt::PlainText); source->setWordWrap(true); layout->addWidget(source);
-  auto *split = new QSplitter(Qt::Horizontal, this); split->setChildrenCollapsible(false); layout->addWidget(split, 1);
+  // The preview, coverage, raw report and wrapped declarations have useful
+  // individual minimum sizes. Keep their combined height in a scrollable body
+  // instead of letting it force the native window beyond a small screen.
+  // Actions remain outside this body, including cancel while a helper runs.
+  auto *bodyScroll = new QScrollArea(this);
+  bodyScroll->setObjectName(QStringLiteral("initializationBodyScroll"));
+  bodyScroll->setWidgetResizable(true);
+  auto *body = new QWidget(bodyScroll); body->setProperty("gswLayoutContainer", true);
+  bodyScroll->setWidget(body); layout->addWidget(bodyScroll, 1);
+  auto *bodyLayout = new QVBoxLayout(body); bodyLayout->setContentsMargins(0, 0, 0, 0);
+  auto *source = new QLabel(QDir::toNativeSeparators(datasetPath) + QLatin1Char('\n') + identity, body);
+  source->setTextFormat(Qt::PlainText); source->setWordWrap(true); bodyLayout->addWidget(source);
+  auto *split = new QSplitter(Qt::Horizontal, body); split->setChildrenCollapsible(false); bodyLayout->addWidget(split, 1);
   auto *scroll = new QScrollArea(split); scroll->setWidgetResizable(true);
   m->inputs = new QWidget(scroll); m->inputs->setProperty("gswLayoutContainer", true); scroll->setWidget(m->inputs);
   auto *left = new QVBoxLayout(m->inputs); m->editor = new InitializationEditor(false, m->inputs);
@@ -204,10 +214,10 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   m->coverage->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
   m->coverage->horizontalHeader()->setStretchLastSection(true); m->coverage->setMinimumHeight(130); rightLayout->addWidget(m->coverage);
   split->setStretchFactor(0, 0); split->setStretchFactor(1, 1); split->setSizes({420, 650});
-  m->summary = new QLabel(this); m->summary->setObjectName(QStringLiteral("initializationSummary"));
-  m->summary->setTextFormat(Qt::PlainText); m->summary->setWordWrap(true); layout->addWidget(m->summary);
-  m->details = new QPlainTextEdit(this); m->details->setObjectName(QStringLiteral("initializationRawReport"));
-  m->details->setReadOnly(true); m->details->setMaximumHeight(150); layout->addWidget(m->details);
+  m->summary = new QLabel(body); m->summary->setObjectName(QStringLiteral("initializationSummary"));
+  m->summary->setTextFormat(Qt::PlainText); m->summary->setWordWrap(true); bodyLayout->addWidget(m->summary);
+  m->details = new QPlainTextEdit(body); m->details->setObjectName(QStringLiteral("initializationRawReport"));
+  m->details->setReadOnly(true); m->details->setMaximumHeight(150); bodyLayout->addWidget(m->details);
   auto *buttons = new QGridLayout; layout->addLayout(buttons); int buttonIndex = 0;
   const auto button = [&](const char *caption, const QString &name) {
     auto *b = AppLanguage::text(new QPushButton(this), caption); b->setObjectName(name);

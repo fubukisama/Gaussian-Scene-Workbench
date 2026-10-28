@@ -10,6 +10,10 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#ifdef Q_OS_WIN
+#include "NativeUpdateLocalPath.h"
+#include <windows.h>
+#endif
 
 using namespace gsw;
 class NativeUpdateDownloadTests final : public QObject {
@@ -121,6 +125,36 @@ private slots:
     QVERIFY2(result.ok, qPrintable(result.code));
     QCOMPARE(result.receivedBytes, r.expectedLength);
     QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+  }
+  void rejectsDeviceNamespaceAndAdsDestinationsWithoutPublishing() {
+#ifdef Q_OS_WIN
+    const auto local = temporary.filePath("namespace-test.bin");
+    const QStringList destinations{gsw::updatepaths::nativeApiPath(local),
+      local + QStringLiteral(":stream"), temporary.filePath("CON.bin"),
+      temporary.filePath(QString::fromUtf8("LPT¹.bin")), temporary.filePath("trailing.")};
+    for (const auto &path : destinations) {
+      auto r = request(QStringLiteral("/payload"), QStringLiteral("unused-destination.bin"));
+      r.destinationPath = path;
+      const auto result = download(r, policy());
+      QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_path_unsafe"));
+    }
+#endif
+  }
+  void refusesHardlinkedOwnedPartWithoutChangingTheOriginal() {
+#ifdef Q_OS_WIN
+    const auto source = temporary.filePath("retained-part-original.bin");
+    const QByteArray before("unrelated owned fixture must remain unchanged");
+    QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(before), qint64(before.size())); file.close();
+    auto r = request(QStringLiteral("/payload"), QStringLiteral("hardlink-destination.bin"));
+    const auto nativePart = gsw::updatepaths::nativeApiPath(r.destinationPath + QStringLiteral(".part"));
+    const auto nativeSource = gsw::updatepaths::nativeApiPath(source);
+    QVERIFY(CreateHardLinkW(reinterpret_cast<LPCWSTR>(nativePart.utf16()),
+                           reinterpret_cast<LPCWSTR>(nativeSource.utf16()), nullptr));
+    const auto result = download(r, policy());
+    QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_path_unsafe"));
+    QCOMPARE(read(source), before); QVERIFY(!QFileInfo::exists(r.destinationPath));
+#endif
   }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)

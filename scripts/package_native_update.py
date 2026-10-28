@@ -227,6 +227,209 @@ def _verify_written(archive: Path, manifest: dict, manifest_bytes: bytes):
             _fail("update_archive_file_set_differs")
 
 
+def _claim_file(names: dict, name: str):
+    """A file cannot also be another file's parent, including case aliases."""
+    parts = validate_relative_path(name).split("/")
+    for count in range(1, len(parts)):
+        _claim(names, "/".join(parts[:count]), "directory")
+    _claim(names, name, "file")
+
+
+def _manifest_rows(rows) -> dict:
+    if not isinstance(rows, list) or not 0 < len(rows) <= MAX_FILES:
+        _fail("update_archive_manifest_invalid")
+    result, aliases = {}, {}
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {"path", "size", "sha256"}
+                or type(row["size"]) is not int or not 0 <= row["size"] <= MAX_ARCHIVE
+                or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"])):
+            _fail("update_archive_manifest_invalid")
+        name = validate_relative_path(row["path"])
+        _claim_file(aliases, name)
+        if name in result:
+            _fail("update_archive_file_set_differs")
+        result[name] = row
+    return result
+
+
+def _verify_git_source(metadata: dict, captured: dict, hashes: dict, expected_tree) -> dict:
+    """Bind archived source bytes to independently obtained Git blob identities.
+
+    A generated dependency's self-declared checksum is not an independent
+    archive-to-lockfile proof. The current provenance producer does not yet
+    supply that proof, so such candidates remain ineligible rather than being
+    certified by their own .cargo-checksum.json files.
+    """
+    provenance = _json(captured["source-provenance.json"])
+    if (not isinstance(provenance, dict) or set(provenance) != {
+            "schema", "sourceCommit", "sourceTree", "trackedFiles", "generatedDependencies"}
+            or provenance["schema"] != "gsw.native_update_source_provenance/1"
+            or provenance["sourceCommit"] != metadata["sourceCommit"]
+            or provenance["sourceTree"] != metadata["sourceTree"]
+            or not isinstance(provenance["trackedFiles"], list)
+            or not isinstance(provenance["generatedDependencies"], list)
+            or not isinstance(expected_tree, list) or not 0 < len(expected_tree) <= MAX_FILES):
+        _fail("update_source_provenance_invalid")
+    expected, tree_names, aliases = {}, set(), {}
+    for entry in expected_tree:
+        if not isinstance(entry, dict):
+            _fail("update_source_tree_invalid")
+        name = validate_relative_path(entry.get("path"))
+        if name in tree_names or not isinstance(entry.get("sha"), str) or not SHA1.fullmatch(entry["sha"]):
+            _fail("update_source_tree_invalid")
+        tree_names.add(name)
+        if entry.get("type") == "tree" and entry.get("mode") == "040000":
+            _claim(aliases, name, "directory")
+            continue
+        if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
+                or type(entry.get("size")) is not int or not 0 <= entry["size"] <= MAX_ARCHIVE):
+            _fail("update_source_tree_unsupported_entry")
+        _claim_file(aliases, name)
+        expected[name] = entry
+    if not expected:
+        _fail("update_source_tree_invalid")
+    recorded = set()
+    for row in provenance["trackedFiles"]:
+        if (not isinstance(row, dict) or set(row) != {"path", "blobSha", "size"}
+                or not isinstance(row.get("blobSha"), str) or not SHA1.fullmatch(row["blobSha"])
+                or type(row.get("size")) is not int):
+            _fail("update_source_provenance_invalid")
+        name = validate_relative_path(row["path"])
+        entry, actual = expected.get(name), hashes.get("source/" + name)
+        if (name in recorded or entry is None or actual is None or row["size"] != entry["size"]
+                or row["blobSha"] != entry["sha"] or actual["size"] != entry["size"]
+                or actual["blobSha"] != entry["sha"]):
+            _fail("update_source_git_blob_differs")
+        recorded.add(name)
+    if recorded != set(expected):
+        _fail("update_source_tree_file_set_differs")
+    if provenance["generatedDependencies"]:
+        _fail("update_source_dependency_evidence_unavailable")
+    actual_source = {name[7:] for name in hashes if name.startswith("source/")}
+    if actual_source != recorded:
+        _fail("update_source_tree_file_set_differs")
+    return {"schema": "gsw.native_update_source_binding/1",
+        "sourceCommit": metadata["sourceCommit"], "sourceTree": metadata["sourceTree"],
+        "trackedFileCount": len(recorded), "generatedFileCount": 0,
+        "sourceManifestSha256": hashes["source-manifest.json"]["sha256"],
+        "sourceProvenanceSha256": hashes["source-provenance.json"]["sha256"]}
+
+
+def verify_release_archive(archive: Path, report: dict, expected_tree) -> dict:
+    """Read back the actual immutable archive without extracting or executing it.
+
+    The caller separately authenticates the GitHub run/artifact and approved
+    policy. This seam verifies its exact inner payload and independently read
+    Git tree; it is not a signing or public-promotion capability.
+    """
+    if (not isinstance(report, dict) or report.get("schema") != "gsw.native_update_package/1"
+            or report.get("product") not in (PRODUCT, FIXTURE_PRODUCT)
+            or report.get("platform") != "windows-x64"
+            or any(not isinstance(report.get(key), str) or not SHA1.fullmatch(report[key])
+                   for key in ("sourceCommit", "sourceTree"))
+            or not isinstance(report.get("buildId"), str) or not BUILD_ID.fullmatch(report["buildId"])
+            or any(not isinstance(report.get(key), str) or not SHA256.fullmatch(report[key])
+                   for key in ("archiveSha256", "payloadManifestSha256", "correspondingSourceSha256"))
+            or type(report.get("archiveLength")) is not int or not 0 < report["archiveLength"] <= MAX_ARCHIVE
+            or type(report.get("unpackedLength")) is not int or not 0 < report["unpackedLength"] <= MAX_UNPACKED
+            or type(report.get("fileCount")) is not int or not 0 < report["fileCount"] <= MAX_FILES):
+        _fail("update_archive_report_invalid")
+    validate_relative_path(report["buildId"])
+    info = _ordinary(archive.absolute())
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != report["archiveLength"]:
+        _fail("update_archive_identity_differs")
+    captured, hashes = {}, {}
+    capture_names = {"source-manifest.json", "source-provenance.json", "build_manifest.json"}
+    with archive.open("rb") as held:
+        opened = os.fstat(held.fileno())
+        if ((opened.st_dev, opened.st_ino, opened.st_size) != (info.st_dev, info.st_ino, info.st_size)
+                or opened.st_nlink != 1 or hashlib.file_digest(held, "sha256").hexdigest() != report["archiveSha256"]):
+            _fail("update_archive_identity_differs")
+        held.seek(0)
+        with zipfile.ZipFile(held) as payload:
+            entries, aliases, actual, total = payload.infolist(), {}, {}, 0
+            if len(entries) != report["fileCount"] + 1:
+                _fail("update_archive_file_set_differs")
+            for entry in entries:
+                name = validate_relative_path(entry.orig_filename)
+                _claim_file(aliases, name)
+                if not entry.flag_bits & 0x800 and not name.isascii():
+                    _fail("update_archive_path_encoding_invalid")
+                kind = stat.S_IFMT(entry.external_attr >> 16)
+                if (entry.filename != name or name in actual or entry.is_dir() or entry.flag_bits & 1
+                        or kind not in (0, stat.S_IFREG) or entry.external_attr & 0x10
+                        or entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
+                    _fail("update_archive_type_or_file_set_invalid")
+                if (not 0 <= entry.file_size <= MAX_ARCHIVE or not 0 <= entry.compress_size <= MAX_ARCHIVE
+                        or total + entry.file_size > report["unpackedLength"]):
+                    _fail("update_archive_resource_limit")
+                total += entry.file_size
+                actual[name] = entry
+            if total != report["unpackedLength"] or "release-files.json" not in actual:
+                _fail("update_archive_file_set_differs")
+            manifest_entry = actual["release-files.json"]
+            if manifest_entry.file_size > MAX_MANIFEST:
+                _fail("update_manifest_too_large")
+            manifest_bytes = payload.read(manifest_entry)
+            if hashlib.sha256(manifest_bytes).hexdigest() != report["payloadManifestSha256"]:
+                _fail("update_archive_manifest_differs")
+            manifest = _json(manifest_bytes)
+            if (not isinstance(manifest, dict) or set(manifest) != {"schema", "product", "platform", "buildId", "sourceCommit", "sourceTree", "files"}
+                    or manifest["schema"] != "gsw.native_update_files/1"
+                    or any(manifest[key] != report[key] for key in ("product", "platform", "buildId", "sourceCommit", "sourceTree"))):
+                _fail("update_archive_manifest_invalid")
+            expected = _manifest_rows(manifest["files"])
+            if (len(expected) != report["fileCount"] or "release-files.json" in expected
+                    or set(actual) != set(expected) | {"release-files.json"}
+                    or not (REQUIRED | {"source-provenance.json"}) <= expected.keys()):
+                _fail("update_archive_file_set_differs")
+            for name, row in expected.items():
+                entry = actual[name]
+                if entry.file_size != row["size"]:
+                    _fail("update_archive_file_set_differs")
+                checksum = hashlib.sha256()
+                blob = hashlib.sha1(f"blob {entry.file_size}\0".encode("ascii"))
+                content, received = bytearray(), 0
+                with payload.open(entry) as stream:
+                    while block := stream.read(min(1024**2, entry.file_size - received + 1)):
+                        received += len(block)
+                        if received > entry.file_size:
+                            _fail("update_archive_resource_limit")
+                        checksum.update(block); blob.update(block)
+                        if name in capture_names:
+                            if received > MAX_MANIFEST:
+                                _fail("update_manifest_too_large")
+                            content.extend(block)
+                if received != row["size"] or checksum.hexdigest() != row["sha256"]:
+                    _fail("update_archive_file_digest_differs")
+                hashes[name] = {"size": received, "sha256": checksum.hexdigest(), "blobSha": blob.hexdigest()}
+                if name in capture_names:
+                    captured[name] = bytes(content)
+        if hashes["source-manifest.json"]["sha256"] != report["correspondingSourceSha256"]:
+            _fail("update_package_source_identity_invalid")
+        source = _json(captured["source-manifest.json"])
+        if (not isinstance(source, dict) or set(source) != {"schema", "executableSha256", "license", "sourceFileCount", "files"}
+                or source["schema"] != "gsw-native-corresponding-source-v1" or source["license"] != "GPL-3.0-or-later"
+                or source["executableSha256"] != hashes["bin/Gaussian Scene Workbench.exe"]["sha256"]
+                or type(source["sourceFileCount"]) is not int):
+            _fail("update_package_source_identity_invalid")
+        source_rows = _manifest_rows(source["files"])
+        if (len(source_rows) != source["sourceFileCount"]
+                or set(source_rows) != {name[7:] for name in hashes if name.startswith("source/")}
+                or any(row["size"] != hashes["source/" + name]["size"]
+                       or row["sha256"] != hashes["source/" + name]["sha256"] for name, row in source_rows.items())):
+            _fail("update_package_source_files_differ")
+        build = _json(captured["build_manifest.json"])
+        if (not isinstance(build, dict) or build.get("product") != "Gaussian Scene Workbench"
+                or build.get("legacyWebRuntimeIncluded") is not False):
+            _fail("update_package_product_invalid")
+        evidence = _verify_git_source(report, captured, hashes, expected_tree)
+        held.seek(0)
+        if hashlib.file_digest(held, "sha256").hexdigest() != report["archiveSha256"]:
+            _fail("update_archive_identity_differs")
+    return evidence
+
+
 def create_archive(package_root: Path, output_archive: Path, *, product: str,
                    source_commit: str, source_tree: str, build_id: str,
                    display_version: str | None = None, release_sequence: int | None = None) -> dict:

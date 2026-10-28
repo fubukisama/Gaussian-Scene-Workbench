@@ -1,4 +1,5 @@
 #include "NativeInstallation.h"
+#include "NativeUpdateLocalPath.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -27,7 +28,8 @@ bool pathExists(const QString &path) {
 #ifdef Q_OS_WIN
   // QFileInfo treats .lnk as a symlink, so exists() tests the target instead
   // of the link file. Installation metadata must inspect the actual file.
-  return GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16())) != INVALID_FILE_ATTRIBUTES;
+  const auto api = updatepaths::nativeApiPath(path);
+  return GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16())) != INVALID_FILE_ATTRIBUTES;
 #else
   const QFileInfo file(path);
   return file.exists() || file.isSymbolicLink();
@@ -35,7 +37,8 @@ bool pathExists(const QString &path) {
 }
 bool ordinaryPath(const QString &path) {
 #ifdef Q_OS_WIN
-  const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16()));
+  const auto api = updatepaths::nativeApiPath(path);
+  const DWORD attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(api.utf16()));
   return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 #else
   const QFileInfo file(path);
@@ -284,7 +287,8 @@ bool writeNativeLauncherShortcut(const QString &path, const QString &launcher,
     phase = QStringLiteral("shortcut_atomic_publish");
     good = false;
     for (int attempt = 0; attempt < 80; ++attempt) {
-      if (MoveFileExW(reinterpret_cast<LPCWSTR>(stage.utf16()), reinterpret_cast<LPCWSTR>(nativePath.utf16()),
+      if (MoveFileExW(reinterpret_cast<LPCWSTR>(updatepaths::nativeApiPath(stage).utf16()),
+                      reinterpret_cast<LPCWSTR>(updatepaths::nativeApiPath(nativePath).utf16()),
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { good = true; break; }
       const DWORD error = GetLastError();
       if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) break;

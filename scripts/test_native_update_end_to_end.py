@@ -177,11 +177,88 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(tree_hashes(self.installation / "bin"), bootstrap)
         self.assertEqual((self.installation / "bootstrap.json").read_bytes(), bootstrap_json)
         self.assertEqual(tree_hashes(self.installation / "user-data"), user_data)
+        # A local receipt is completion evidence, not publisher authority. Check
+        # the accepted-descriptor binding and exact installed bytes separately.
+        receipt = self.installation / "updates/receipts/fixture-a.json"
+        original_receipt = receipt.read_bytes()
+        for name, patch, code in (
+                ("receipt-descriptor", {"descriptorSha256": "0" * 64}, "rollback_receipt_not_accepted"),
+                ("developer-receipt", {"mode": "developer"}, "rollback_receipt_invalid")):
+            try:
+                changed = json.loads(original_receipt)
+                changed.update(patch)
+                receipt.write_text(json.dumps(changed), encoding="utf-8")
+                rejected = self.helper_request(name, "--rollback", "stable", "fixture-a", success=False)
+                self.assertEqual(rejected[-1].get("code"), code)
+                self.assertEqual(self.active("fixture-a"), pointer_a)
+                self.assertEqual(self.accepted(), accepted_before)
+            finally:
+                receipt.write_bytes(original_receipt)
+        extra = self.installation / "versions/fixture-a/unrecorded-owned-fixture.txt"
+        try:
+            extra.write_bytes(b"not in the accepted payload")
+            rejected = self.helper_request("extra-slot-file", "--rollback", "stable", "fixture-a", success=False)
+            self.assertEqual(rejected[-1].get("code"), "activation_slot_file_set_differs")
+            self.assertEqual(self.active("fixture-a"), pointer_a)
+            self.assertEqual(self.accepted(), accepted_before)
+        finally:
+            extra.unlink()
+        source_file = self.installation / "versions/fixture-a/source/native/CMakeLists.txt"
+        original_source = source_file.read_bytes()
+        try:
+            source_file.write_bytes(original_source + b"\n# tampered owned fixture\n")
+            rejected = self.helper_request("changed-slot-file", "--rollback", "stable", "fixture-a", success=False)
+            self.assertEqual(rejected[-1].get("code"), "activation_slot_digest_mismatch")
+            self.assertEqual(self.active("fixture-a"), pointer_a)
+            self.assertEqual(self.accepted(), accepted_before)
+        finally:
+            source_file.write_bytes(original_source)
+        # Explicit recovery does not trust or require parsing a damaged pointer.
+        (self.installation / "current.json").write_bytes(b"owned malformed pointer")
+        self.helper_request("recover-malformed-pointer", "--rollback", "stable", "fixture-a")
+        self.assertEqual(self.active("fixture-a"), pointer_a)
+        self.assertEqual(self.accepted(), accepted_before)
+        self.assertEqual(tree_hashes(self.installation / "versions/fixture-a"), a_files)
+        self.assertEqual(tree_hashes(self.installation / "versions/fixture-b"), b_files)
+        self.assertEqual(tree_hashes(self.installation / "bin"), bootstrap)
+        self.assertEqual(tree_hashes(self.installation / "user-data"), user_data)
         write_json(self.evidence / "result.json", {"schema": "gsw.update_end_to_end_evidence/1", "passed": True,
             "testOnly": True, "production": False, "formalGswAcceptance": False,
             "scope": "real-qt-fixture-stable-launcher-only", "steps": self.steps,
             "trustHighWaterAfterRollback": 3, "bootstrapUnchanged": True, "userSentinelsUnchanged": True,
             "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
+
+    def test_revoked_installed_build_is_refused_without_changing_trust_or_pointer(self):
+        original_root, original_helper = self.installation, self.helper
+        root = Path(self.preparation["root"]) / "revocation-installation"
+        root.mkdir()
+        shutil.copytree(original_root / "bin", root / "bin")
+        shutil.copyfile(original_root / "bootstrap.json", root / "bootstrap.json")
+        self.installation = root
+        self.helper = root / "bin" / original_helper.name
+        try:
+            self.select("A")
+            self.helper_request("revocation-install-A", "--install", "stable")
+            self.select("B")
+            self.helper_request("revocation-install-B", "--install", "stable")
+            pointer = self.active("fixture-b")
+            slots = tree_hashes(root / "versions")
+            bootstrap = tree_hashes(root / "bin")
+            self.select("revoked-a")
+            self.helper_request("adopt-revocation", "--check", "stable")
+            accepted = self.accepted()
+            self.assertIn("fixture-a", accepted["revokedBuildIds"])
+            rejected = self.helper_request("refuse-revoked-A", "--rollback", "stable", "fixture-a", success=False)
+            self.assertEqual(rejected[-1].get("code"), "BUILD_REVOKED")
+            self.assertEqual(self.active("fixture-b"), pointer)
+            self.assertEqual(self.accepted(), accepted)
+            self.assertEqual(tree_hashes(root / "versions"), slots)
+            self.assertEqual(tree_hashes(root / "bin"), bootstrap)
+            write_json(self.evidence / "revocation-result.json", {"passed": True, "testOnly": True,
+                "formalGswAcceptance": False, "revokedBuildRefused": True,
+                "sourceCommit": self.preparation["sourceCommit"]})
+        finally:
+            self.installation, self.helper = original_root, original_helper
 
 
 def main():

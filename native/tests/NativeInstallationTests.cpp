@@ -83,6 +83,21 @@ private slots:
     write(file.fileName(), QJsonDocument(object).toJson());
     QVERIFY(!gsw::resolveNativeInstallation(root, false, {}, {}).valid());
   }
+  void resolvesAnOwnedLongUnicodeInstallationWithoutExposingDeviceNamespace() {
+#ifdef Q_OS_WIN
+    while (root.size() < 350)
+      root += QLatin1Char('/') + QString::fromUtf8("中文_日本語_") + QString(44, QLatin1Char('x'));
+    write(QDir(root).filePath("bin/Gaussian Scene Workbench Launcher.exe"), "owned launcher fixture");
+    write(QDir(root).filePath("versions/0.3.8-first/bin/Gaussian Scene Workbench.exe"), "owned application fixture");
+    activate("0.3.8-first");
+    const auto result = gsw::resolveNativeInstallation(root, false, {}, {});
+    QVERIFY2(result.valid(), qPrintable(result.error));
+    QCOMPARE(result.root, root);
+    QVERIFY(result.program.size() > 350);
+    QVERIFY(!result.program.startsWith(QLatin1String("\\\\?\\")));
+    QCOMPARE(gsw::managedInstallationForApplication(result.program), root);
+#endif
+  }
   void rejectsCorruptionMissingFilesAndDoesNotGuessAnOlderVersion() {
     activate("0.3.8-next", QByteArray(64, '0'));
     auto result = gsw::resolveNativeInstallation(root, false, {}, {});

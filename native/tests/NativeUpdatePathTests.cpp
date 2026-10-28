@@ -23,6 +23,44 @@ class NativeUpdatePathTests final : public QObject {
   }
 private slots:
   void initTestCase() { QVERIFY(temporary.isValid()); }
+  void extendedSpellingIsInternalAndUnsafeLogicalNamesStayRejected() {
+#ifdef Q_OS_WIN
+    const auto root = QDir::cleanPath(temporary.path());
+    const auto internal = gsw::activation::nativeApiPath(root);
+    QVERIFY(internal.startsWith(QLatin1String("\\\\?\\")));
+    QCOMPARE(internal.mid(4), QDir::toNativeSeparators(root));
+    const QStringList rejected{
+      internal, QStringLiteral("\\\\.\\C:\\unsafe"), QStringLiteral("\\\\server\\share\\unsafe"),
+      QStringLiteral("C:relative"), QDir(root).filePath("file.bin:stream"),
+      QDir(root).filePath("CON.txt"), QDir(root).filePath(QString::fromUtf8("COM¹.log")),
+      QDir(root).filePath("NUL"), QDir(root).filePath("trailing."), QDir(root).filePath("trailing "),
+      root + QStringLiteral("/../escape"), root + QStringLiteral("/./alias")};
+    for (const auto &path : rejected) {
+      QVERIFY2(!gsw::activation::ordinary(path, true), qPrintable(path));
+      QVERIFY2(gsw::activation::nativeApiPath(path).isEmpty(), qPrintable(path));
+    }
+#endif
+  }
+  void heldReadAndExtractionStillRejectHardlinkedFiles() {
+#ifdef Q_OS_WIN
+    const auto source = temporary.filePath("original-owned.bin");
+    const auto alias = temporary.filePath("hardlinked-owned.bin");
+    const QByteArray bytes("owned original must never be overwritten");
+    QFile original(source); QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write(bytes), qint64(bytes.size())); original.close();
+    const auto nativeAlias = gsw::activation::nativeApiPath(alias);
+    const auto nativeSource = gsw::activation::nativeApiPath(source);
+    QVERIFY(CreateHardLinkW(reinterpret_cast<LPCWSTR>(nativeAlias.utf16()),
+                           reinterpret_cast<LPCWSTR>(nativeSource.utf16()), nullptr));
+    bool rejectedRead = false, rejectedWrite = false;
+    try { QFile input; gsw::activation::heldRead(input, alias); }
+    catch (const gsw::activation::Failure &) { rejectedRead = true; }
+    try { QFile output; gsw::activation::secureOutputOpen(output, alias); }
+    catch (const gsw::activation::Failure &) { rejectedWrite = true; }
+    QVERIFY(rejectedRead); QVERIFY(rejectedWrite);
+    QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(), bytes);
+#endif
+  }
   void locksARealLongCjkInstallationRootWithoutChangingItsIdentity() {
     const auto root = longDirectory(QString::fromLatin1("installation"), 350);
     QVERIFY(root.size() > 320);
