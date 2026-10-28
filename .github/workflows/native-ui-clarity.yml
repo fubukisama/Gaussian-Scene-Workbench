@@ -23,13 +23,14 @@ jobs:
       QT_LOGGING_TO_CONSOLE: '1'
       PYTHONUTF8: '1'
       PYTHONDONTWRITEBYTECODE: '1'
-      GSW_UI_ROOT: ${{ runner.temp }}/gsw-ui
     steps:
       - uses: actions/checkout@v7
       - name: Record exact source and frozen protocol
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:GSW_UI_ROOT = Join-Path $env:RUNNER_TEMP 'gsw-ui'
+          "GSW_UI_ROOT=$env:GSW_UI_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           New-Item -ItemType Directory -Path $env:GSW_UI_ROOT -Force | Out-Null
           $head = (git rev-parse HEAD).Trim()
           if ($head -cne $env:GITHUB_SHA) { throw 'Dispatched source mismatch.' }
