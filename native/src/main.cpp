@@ -226,6 +226,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption languageSmokeOption(QStringLiteral("smoke-test-language"),
       QStringLiteral("Verify the selected UI language and embedded translations."));
   parser.addOption(languageSmokeOption);
+  QCommandLineOption languageFormMatrixOption(QStringLiteral("smoke-test-language-form-matrix"),
+      QStringLiteral("Capture source-bound remote dialog matrices with unchanged public configurations."));
+  parser.addOption(languageFormMatrixOption);
   QCommandLineOption iconUiSmokeOption(QStringLiteral("smoke-test-icon-ui"),
       QStringLiteral("Verify shared icon states, responsive toolbars and real viewport tool controls."));
   parser.addOption(iconUiSmokeOption);
@@ -526,7 +529,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(fileDialogHistoryUiSmokeOption) ||
                          parser.isSet(fileDialogHistoryGuardSmokeOption) ||
                          parser.isSet(windowMinimizeSmokeOption) ||
-                         parser.isSet(languageSmokeOption) ||
+                         parser.isSet(languageSmokeOption) || parser.isSet(languageFormMatrixOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
                          parser.isSet(sceneVisibilitySmokeTestOption) ||
                          parser.isSet(viewportSchedulingSmokeTestOption) ||
@@ -549,6 +552,7 @@ int main(int argc, char *argv[]) {
       qCritical() << "Remote UI surface evidence requires fresh isolated real Windows smoke context";
       return 2;
     }
+    application.setProperty("gswUiFormEvidenceProcessRoot", evidence);
   }
   if (smokeTest && qEnvironmentVariable("GITHUB_ACTIONS") == QStringLiteral("true") &&
       qEnvironmentVariableIntValue("GSW_UI_QA_TRACE") == 1) {
@@ -830,6 +834,11 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runObservationNavigationSmokeTest(*viewport, parser.value(smokeSceneOption));
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(languageFormMatrixOption)) {
+    QTimer::singleShot(100, &application, [&] {
+      smokeTestCompleted = gsw::runLanguageFormMatrixSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(languageSmokeOption)) {

@@ -4,6 +4,7 @@
 #include "QualityComparisonDialog.h"
 #include "AppLanguage.h"
 #include "BackendLocator.h"
+#include "../tests/UiFormVisualProbe.h"
 
 #include <QApplication>
 #include <QCryptographicHash>
@@ -63,6 +64,7 @@ bool writeJson(const QString &path, const QJsonObject &object) {
 
 bool runQualityMeasurementSmokeTest() {
   bool passed = true;
+  const bool visualForms = !qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE").isEmpty();
   struct RestoreLanguage {
     QString language = AppLanguage::current();
     QLocale locale;
@@ -95,7 +97,7 @@ bool runQualityMeasurementSmokeTest() {
   const QByteArray referenceHash = digest(reference), renderHash = digest(render), manifestHash = digest(manifest);
   QualityMeasurementDialog dialog(python, root, fixture.path(), QProcessEnvironment::systemEnvironment());
   dialog.setManifestPath(manifest);
-  dialog.show(); // Remote acceptance only. Never raise or activate a local user window.
+  dialog.show(); // Ordinary smoke does not activate; the opt-in native matrix owns activation on CI.
   if (!check(waitFor([&] { return dialog.windowHandle() && dialog.windowHandle()->isExposed(); }),
       "the actual test-owned measurement dialog is exposed")) return false;
   auto *start = dialog.findChild<QPushButton *>(QStringLiteral("qualityMeasureStart"));
@@ -169,6 +171,24 @@ bool runQualityMeasurementSmokeTest() {
         dialog.reportPath() == retainedPath && selected == retainedSelectionCount,
         "all three live languages retain measurements, the manifest and explicit selection without claiming validation");
     capture(dialog, language + QStringLiteral("-manifest"));
+  }
+  if (visualForms) {
+    check(!dialog.isRunning() && !dialog.measurementReport().isEmpty() && digest(reference).size() == 32 &&
+        digest(render).size() == 32 && digest(manifest).size() == 32 && digest(dialog.reportPath()).size() == 32,
+        "native matrix begins with completed measured values and readable original and adopted-report bytes");
+    const auto snapshot = [&]() {
+      return QJsonObject{{"measurementReport", dialog.measurementReport()},
+          {"manifestPath", dialog.manifestPath()}, {"reportPath", dialog.reportPath()},
+          {"isRunning", dialog.isRunning()}, {"selectionCount", selected},
+          {"selectedPath", selectedPath}, {"selectedAsBaseline", selectedBaseline},
+          {"referenceSha256", QString::fromLatin1(digest(reference).toHex())},
+          {"renderSha256", QString::fromLatin1(digest(render).toHex())},
+          {"manifestSha256", QString::fromLatin1(digest(manifest).toHex())},
+          {"adoptedReportSha256", QString::fromLatin1(digest(dialog.reportPath()).toHex())}};
+    };
+    check(tests::captureUiFormMatrix(visualForms, dialog, QStringLiteral("quality-measurement-completed"),
+        QSize(1000, 760), QSize(680, 620), snapshot),
+        "native three-language light/dark wide/narrow evidence preserves measurements, explicit adoption and all original bytes");
   }
   check(digest(reference) == referenceHash && digest(render) == renderHash && digest(manifest) == manifestHash,
       "measurement leaves all original image and manifest bytes unchanged");

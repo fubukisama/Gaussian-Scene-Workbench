@@ -117,6 +117,9 @@ class SurfaceEvidenceCliContracts(unittest.TestCase):
         batch = {"id": "forms-core", "dpr": "1", "tests": FORMS_TESTS}
         self.plan.append(batch)
         self.add_batch(batch)
+        matrix = {"id": "forms-language-matrix", "dpr": "1", "tests": ["native_language_form_matrix"]}
+        self.plan.append(matrix)
+        self.add_batch(matrix)
         if complete:
             inventory = json.loads(INVENTORY.read_text(encoding="utf-8-sig"))
             for item in inventory["surfaces"]:
@@ -173,6 +176,12 @@ class SurfaceEvidenceCliContracts(unittest.TestCase):
         code, result = self.evaluate()
         self.assertEqual((code, result["fullSixteenDialogCoverage"]), (0, "EVIDENCE_COMPLETE"), result)
         self.assertEqual(result["visualAcceptance"], "NOT_RUN")
+
+    def test_required_independent_matrix_contract_cannot_be_omitted(self):
+        self.forms(complete=True)
+        self.plan.pop()
+        self.manifest["batches"].pop()
+        self.assert_failed("predeclared CTest/DPR plan changed")
 
     def test_source_mismatch_is_rejected(self):
         self.change_report(lambda report: report.update(sourceCommit="c" * 40))
@@ -273,7 +282,7 @@ class SurfaceEvidenceCliContracts(unittest.TestCase):
         self.assertEqual(result["integrityStatus"], "VALID")
         self.assertEqual(result["rawPngCount"], 402)
         self.assertEqual(result["nativeCaptureCount"], 222)
-        self.assertEqual(len(result["originalTests"]), 33)
+        self.assertEqual(len(result["originalTests"]), 34)
         self.assertEqual(len(result["dialogCoverage"]), 16)
         self.assertTrue(all(item["status"] == "EVIDENCE_COMPLETE" for item in result["dialogCoverage"]))
         self.assertEqual(result["visualAcceptance"], "NOT_RUN")

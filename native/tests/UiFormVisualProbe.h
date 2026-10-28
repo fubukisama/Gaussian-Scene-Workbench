@@ -82,6 +82,8 @@ inline bool hasUiFormCapture(const QWidget &window, const QString &state,
   for (const QJsonValue &entry : receipt.value(QStringLiteral("surfaces")).toArray()) {
     const QJsonObject record = entry.toObject();
     if (record.value(QStringLiteral("status")) != QStringLiteral("captured") ||
+        record.value(QStringLiteral("class")) != QString::fromLatin1(window.metaObject()->className()) ||
+        record.value(QStringLiteral("nativeWindowId")) != QString::number(quintptr(window.effectiveWinId()), 16) ||
         record.value(QStringLiteral("syntheticState")) != state ||
         record.value(QStringLiteral("objectName")) != window.objectName() ||
         record.value(QStringLiteral("locale")) != locale ||

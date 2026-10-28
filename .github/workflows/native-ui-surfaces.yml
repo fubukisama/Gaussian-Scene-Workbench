@@ -87,7 +87,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Native codec build failed.'}
           $date=(Get-Content native/build_manifest.json -Raw|ConvertFrom-Json).releaseDate
           cmake -S native -B native/build-ui-surfaces -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON `
-            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_TEST_OPENGL_BACKEND=software -DGSW_UI_FORM_CAPTURE_TESTS=ON "-DGSW_RELEASE_DATE=$date" `
             "-DGSW_UI_SURFACE_CAPTURE_ROOT=$env:GSW_UI_SURFACE_ROOT/standalone-surfaces" `
             '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
@@ -141,6 +141,10 @@ jobs:
               'native_quality_measurement_ui','native_scale_constraints_ui','native_training_batch_ui',
               'native_viewport_scheduling_light','native_viewport_scheduling_dark',
               'native_runtime_ui_surfaces','native_initialization_ui_surfaces')}
+            # Keep the original behavior receipts intact. This fresh process
+            # provides the missing six-form matrix without rotating observers
+            # or increasing the bounded per-process capture limits.
+            $plan+=@{id='forms-language-matrix';dpr='1';tests=@('native_language_form_matrix')}
           }
           $manifest['plannedBatches']=$plan
           $manifest['iconDprs']=$iconDprs

@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
     // Standalone editor evidence only: this does not exercise MainWindow's
     // nested checkpoint-trust/resume prompt or claim that a trainer resumed.
     check(gsw::tests::captureUiFormMatrix(visualForms,resume,QStringLiteral("guard-original"),
-        QSize(620,390),QSize(360,460),[&]{return QJsonObject{{"configuration",resume.configuration()}};}),
+        QSize(800,390),QSize(360,460),[&]{return QJsonObject{{"configuration",resume.configuration()}};}),
         "owned guard editor native surface matrix retains the exact original guard configuration");
     auto *enabled=resume.findChild<QCheckBox*>(QStringLiteral("resumeResourceGuard"));
     auto *target=resume.findChild<QDoubleSpinBox*>(QStringLiteral("resumeGuardMemoryPercent"));
@@ -224,7 +224,7 @@ int main(int argc, char **argv) {
     auto *accept=rejected.findChild<QPushButton*>(QStringLiteral("resumeGuardAccept"));
     check(accept&&!accept->isEnabled()&&rejected.configuration()==invalid,"invalid input is refused without silently clamping and replacing the original request");
     check(gsw::tests::captureUiFormMatrix(visualForms,rejected,QStringLiteral("guard-invalid"),
-        QSize(620,390),QSize(360,460),[&]{return QJsonObject{{"configuration",rejected.configuration()}};}),
+        QSize(800,390),QSize(360,460),[&]{return QJsonObject{{"configuration",rejected.configuration()}};}),
         "owned invalid guard editor native surface matrix preserves its refused original document");
   }
   {

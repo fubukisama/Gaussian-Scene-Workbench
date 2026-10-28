@@ -108,6 +108,7 @@ def expected_batches(scope: str, icon_dprs: list[str]) -> list[dict[str, Any]]:
             "native_quality_measurement_ui", "native_scale_constraints_ui", "native_training_batch_ui",
             "native_viewport_scheduling_light", "native_viewport_scheduling_dark",
             "native_runtime_ui_surfaces", "native_initialization_ui_surfaces"]})
+        batches.append({"id": "forms-language-matrix", "dpr": "1", "tests": ["native_language_form_matrix"]})
     return batches
 
 
