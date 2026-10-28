@@ -1,5 +1,6 @@
 """Public archive CLI contracts; execute on remote CI only."""
 import hashlib
+import gzip
 import importlib.util
 import io
 import json
@@ -97,7 +98,8 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.sequence = 0
 
-    def candidate(self, *, changed_source=False, generated=False, crate_proof=False):
+    def candidate(self, *, changed_source=False, generated=False, crate_proof=False,
+                  mutate_generated=None, raw_crate_override=None, mutate_tracked=None):
         self.sequence += 1
         source = {"native/CMakeLists.txt": b"# independently tracked source\n",
                   ".github/workflows/check.yml": b"name: isolated source fixture\n"}
@@ -113,7 +115,7 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
                     item = tarfile.TarInfo("owned-fixture-1.0.0/" + name)
                     item.size, item.mtime = len(data), 0
                     crate.addfile(item, io.BytesIO(data))
-            raw_crate = buffer.getvalue()
+            raw_crate = buffer.getvalue() if raw_crate_override is None else raw_crate_override
             checksum = hashlib.sha256(raw_crate).hexdigest()
             source["native/updater-trust/Cargo.lock"] = (
                 'version = 4\n\n[[package]]\nname = "owned-fixture"\nversion = "1.0.0"\n'
@@ -127,6 +129,8 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
             generated_data["native/updater-trust/.cargo/config.toml"] = (
                 b'[source.crates-io]\nreplace-with="vendored-sources"\n[source.vendored-sources]\ndirectory="vendor"\n', "cargo-vendor")
             generated_data["native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate"] = (raw_crate, "cargo-crate-archive")
+        if mutate_tracked is not None:
+            mutate_tracked(source)
         expected = [{"path": name, "size": len(data), "sha": subprocess.check_output(
             ["git", "hash-object", "--stdin"], input=data, timeout=10).decode("ascii").strip(),
             "mode": "100644", "type": "blob"} for name, data in sorted(source.items())]
@@ -135,6 +139,10 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
             # Re-hash both local manifests coherently; only the independent Git
             # expectation can expose that this is not the accepted source tree.
             source["native/CMakeLists.txt"] = b"# substituted source, self-consistent local hashes\n"
+        if mutate_generated is not None:
+            # Rebuild all local manifests after a substitution. The Git-bound
+            # lock and original crate, not these self-consistent rows, decide.
+            mutate_generated(generated_data)
         generated_rows = []
         for name, (data, kind) in generated_data.items():
             source[name] = data
@@ -211,6 +219,207 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.assertEqual(result["generatedFileCount"], 7)
         self.assertEqual(archive.read_bytes(), before)
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["candidate-1.zip", "payload-1"])
+
+    @staticmethod
+    def local_dependency(source, *, section="dependencies", path="../third_party/tough"):
+        source["native/updater-trust/Cargo.toml"] = (
+            '[package]\nname="wrapper-fixture"\nversion="0.1.0"\n'
+            f'[{section}]\ntough={{path={json.dumps(path)},version="=0.24.0"}}\n').encode()
+        source["native/third_party/tough/Cargo.toml"] = b'[package]\nname="tough"\nversion="0.24.0"\n'
+        source["native/third_party/tough/src/lib.rs"] = b"// tracked local dependency fixture, never executed\n"
+        source["native/updater-trust/Cargo.lock"] += b'\n[[package]]\nname="tough"\nversion="0.24.0"\n'
+
+    def test_git_local_path_dependencies_cover_all_manifest_dependency_tables(self):
+        for section in ("dependencies", "build-dependencies", "dev-dependencies",
+                "target.'cfg(windows)'.dependencies", "target.'cfg(windows)'.build-dependencies",
+                "target.'cfg(windows)'.dev-dependencies"):
+            with self.subTest(section=section):
+                archive, report, expected = self.candidate(crate_proof=True,
+                    mutate_tracked=lambda source: self.local_dependency(source, section=section))
+                before = archive.read_bytes()
+                result = ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(result["trackedFileCount"], len(expected))
+                self.assertEqual(result["registryPackageCount"], 1)
+                self.assertEqual(archive.read_bytes(), before)
+
+    def test_path_dependencies_reject_external_absolute_alias_and_noncanonical_paths(self):
+        for path in ("../../../outside", "/outside", "C:/outside", "C:\\outside", "\\\\server\\share",
+                "../third_party/tough.", "../third_party/tough ", "../THIRD_PARTY/tough",
+                "../third_party//tough", "../third_party/./tough", "../third_party/a/../tough",
+                "../third_party/CON", "../third_party/tough:stream", "."):
+            with self.subTest(path=path):
+                archive, report, expected = self.candidate(crate_proof=True,
+                    mutate_tracked=lambda source: self.local_dependency(source, path=path))
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+
+    def test_path_manifest_must_itself_be_in_the_independent_git_tree(self):
+        for untracked in (False, True):
+            def tracked(source):
+                self.local_dependency(source)
+                source.pop("native/third_party/tough/Cargo.toml")
+            def generated(files):
+                if untracked:
+                    files["native/third_party/tough/Cargo.toml"] = (
+                        b'[package]\nname="tough"\nversion="0.24.0"\n', "cargo-vendor")
+            with self.subTest(untracked_manifest=untracked):
+                archive, report, expected = self.candidate(crate_proof=True,
+                    mutate_tracked=tracked, mutate_generated=generated)
+                with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(caught.exception.code, "update_source_dependency_evidence_unavailable")
+
+    def test_orphan_source_less_lock_package_is_not_justified_by_an_unreachable_git_manifest(self):
+        def orphan(source):
+            source["native/updater-trust/Cargo.lock"] += b'\n[[package]]\nname="orphan"\nversion="0.1.0"\n'
+            source["native/third_party/orphan/Cargo.toml"] = b'[package]\nname="orphan"\nversion="0.1.0"\n'
+        archive, report, expected = self.candidate(crate_proof=True, mutate_tracked=orphan)
+        with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+            ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(caught.exception.code, "update_source_dependency_evidence_unavailable")
+
+    def test_transitive_local_manifest_and_lock_identity_must_both_be_bound(self):
+        for missing in (False, True):
+            def tracked(source):
+                self.local_dependency(source)
+                source["native/third_party/tough/Cargo.toml"] += b'[build-dependencies]\nlocal={path="../local"}\n'
+                source["native/updater-trust/Cargo.lock"] += b'\n[[package]]\nname="local"\nversion="0.2.0"\n'
+                if not missing:
+                    source["native/third_party/local/Cargo.toml"] = b'[package]\nname="local"\nversion="0.2.0"\n'
+                    source["native/third_party/local/src/lib.rs"] = b"// independently tracked transitive source fixture\n"
+            with self.subTest(missing_transitive_manifest=missing):
+                archive, report, expected = self.candidate(crate_proof=True, mutate_tracked=tracked)
+                if missing:
+                    with self.assertRaises(ARCHIVE.ArchiveError):
+                        ARCHIVE.verify_release_archive(archive, report, expected)
+                else:
+                    self.assertEqual(ARCHIVE.verify_release_archive(archive, report, expected)["trackedFileCount"], len(expected))
+
+    def test_workspace_patch_replace_git_and_unknown_path_resolution_fail_closed(self):
+        for unsupported in ("workspace", "patch", "replace", "git", "inherit", "ancestor", "version", "identity", "missing-lock"):
+            def tracked(source):
+                self.local_dependency(source)
+                name = "native/updater-trust/Cargo.toml"
+                if unsupported == "workspace":
+                    source[name] += b"[workspace]\n"
+                elif unsupported == "patch":
+                    source[name] += b'[patch.crates-io]\nother={path="../../outside"}\n'
+                elif unsupported == "replace":
+                    source[name] += b'[replace]\n"other:1.0.0"={path="../../outside"}\n'
+                elif unsupported == "git":
+                    source[name] = source[name].replace(b'path="../third_party/tough"', b'git="https://example.invalid/tough"')
+                elif unsupported == "inherit":
+                    source[name] += b'[dev-dependencies]\nother={workspace=true}\n'
+                elif unsupported == "ancestor":
+                    source["native/Cargo.toml"] = b'[workspace]\nmembers=["updater-trust"]\n'
+                elif unsupported == "version":
+                    source[name] = source[name].replace(b'=0.24.0', b'^0.24')
+                elif unsupported == "identity":
+                    source["native/third_party/tough/Cargo.toml"] = b'[package]\nname="not-tough"\nversion="0.24.0"\n'
+                else:
+                    source["native/updater-trust/Cargo.lock"] = source["native/updater-trust/Cargo.lock"].replace(
+                        b'\n[[package]]\nname="tough"\nversion="0.24.0"\n', b'')
+            with self.subTest(unsupported=unsupported):
+                archive, report, expected = self.candidate(crate_proof=True, mutate_tracked=tracked)
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+
+    def test_coherent_vendor_and_checksum_substitution_cannot_override_raw_crate(self):
+        def substitute(files):
+            prefix = "native/updater-trust/vendor/owned-fixture/"
+            data = b"// substituted vendored code with coherent local hashes\n"
+            files[prefix + "src/lib.rs"] = data, "cargo-vendor"
+            checksum = json.loads(files[prefix + ".cargo-checksum.json"][0])
+            checksum["files"]["src/lib.rs"] = hashlib.sha256(data).hexdigest()
+            files[prefix + ".cargo-checksum.json"] = json.dumps(checksum).encode(), "cargo-vendor"
+        archive, report, expected = self.candidate(crate_proof=True, mutate_generated=substitute)
+        with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+            ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(caught.exception.code, "update_source_dependency_files_differ")
+
+    def test_missing_raw_crate_or_license_never_becomes_complete_source(self):
+        for name, code in (
+                ("native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate", "update_source_dependency_evidence_unavailable"),
+                ("native/updater-trust/vendor/owned-fixture/LICENSE", "update_source_dependency_files_differ")):
+            with self.subTest(name=name):
+                archive, report, expected = self.candidate(crate_proof=True,
+                    mutate_generated=lambda files: files.pop(name))
+                with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(caught.exception.code, code)
+
+    def test_generated_archive_or_vendor_path_cannot_be_remapped(self):
+        for before, after, code in (
+                ("native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate",
+                 "native/updater-trust/vendor-archives/renamed.crate", "update_source_dependency_evidence_unavailable"),
+                ("native/updater-trust/vendor/owned-fixture/",
+                 "native/updater-trust/vendor/another-package/", "update_source_dependency_files_differ")):
+            def rename(files):
+                for path in list(files):
+                    if path == before or path.startswith(before):
+                        files[after + path[len(before):]] = files.pop(path)
+            with self.subTest(path=after):
+                archive, report, expected = self.candidate(crate_proof=True, mutate_generated=rename)
+                with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(caught.exception.code, code)
+
+    def test_additional_unproved_source_and_redirected_vendor_config_are_rejected(self):
+        for extra in (True, False):
+            def alter(files):
+                if extra:
+                    files["native/updater-trust/vendor/owned-fixture/build.rs"] = b"// unproved source\n", "cargo-vendor"
+                else:
+                    files["native/updater-trust/.cargo/config.toml"] = (
+                        b'[source.crates-io]\nreplace-with="vendored-sources"\n[source.vendored-sources]\ndirectory="../../other"\n', "cargo-vendor")
+            with self.subTest(extra_source=extra):
+                archive, report, expected = self.candidate(crate_proof=True, mutate_generated=alter)
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+
+    def test_raw_crate_must_have_the_digest_in_the_independent_git_lock(self):
+        path = "native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate"
+        def change_archive(files):
+            files[path] = b"substituted raw archive with coherent package manifests", "cargo-crate-archive"
+        archive, report, expected = self.candidate(crate_proof=True, mutate_generated=change_archive)
+        with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+            ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(caught.exception.code, "update_source_dependency_evidence_unavailable")
+
+    def test_even_git_locked_tar_links_traversal_duplicates_and_aliases_are_rejected_without_extraction(self):
+        for kind in ("symlink", "hardlink", "traversal", "duplicate", "alias"):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT) as crate:
+                names = ["owned-fixture-1.0.0/src/lib.rs"]
+                if kind == "traversal":
+                    names = ["owned-fixture-1.0.0/../outside-sentinel"]
+                elif kind == "duplicate":
+                    names *= 2
+                elif kind == "alias":
+                    names.append("owned-fixture-1.0.0/src/LIB.rs")
+                for name in names:
+                    member = tarfile.TarInfo(name)
+                    if kind in ("symlink", "hardlink"):
+                        member.type = tarfile.SYMTYPE if kind == "symlink" else tarfile.LNKTYPE
+                        member.linkname = "../../outside-sentinel"
+                    crate.addfile(member, io.BytesIO(b""))
+            with self.subTest(kind=kind):
+                archive, report, expected = self.candidate(crate_proof=True, raw_crate_override=buffer.getvalue())
+                before = archive.read_bytes()
+                owned_entries = sorted(path.name for path in self.root.iterdir())
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(archive.read_bytes(), before)
+                self.assertEqual(sorted(path.name for path in self.root.iterdir()), owned_entries)
+
+    def test_git_locked_oversized_tar_member_is_rejected_before_reading_its_body(self):
+        member = tarfile.TarInfo("owned-fixture-1.0.0/oversized.bin")
+        member.size = ARCHIVE.MAX_MANIFEST + 1
+        raw = gzip.compress(member.tobuf(format=tarfile.USTAR_FORMAT) + b"\0" * 1024, mtime=0)
+        archive, report, expected = self.candidate(crate_proof=True, raw_crate_override=raw)
+        with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+            ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(caught.exception.code, "update_source_dependency_resource_limit")
 
     def test_report_identity_and_both_digest_layers_are_bound(self):
         archive, report, expected = self.candidate()

@@ -1,17 +1,24 @@
 #include "NativeInstallation.h"
 #include "NativeUpdateLocalPath.h"
+#include "../third_party/nlohmann/json.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSet>
+#include <QProcess>
 #include <QThread>
 #include <QUuid>
+#include <set>
+#include <stdexcept>
+#include <vector>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -20,6 +27,8 @@
 #include <shlobj.h>
 #include <propkey.h>
 #include <propvarutil.h>
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 namespace gsw {
@@ -69,7 +78,148 @@ bool versionName(const QString &value) {
 QString launcherFor(const QString &root) {
   return QDir(root).filePath(QLatin1String("bin/") + QString::fromLatin1(kNativeLauncherName));
 }
+
+bool holdOrdinaryFile(QFile &file, const QString &path) {
+  if (!localOrdinaryTree(path) || !QFileInfo(path).isFile()) return false;
+  file.setFileName(path);
+#ifdef Q_OS_WIN
+  const auto api = updatepaths::nativeApiPath(path);
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(api.utf16()), GENERIC_READ, FILE_SHARE_READ,
+      nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return false;
+  BY_HANDLE_FILE_INFORMATION info{};
+  wchar_t buffer[32768]{};
+  const auto count = GetFinalPathNameByHandleW(handle, buffer, 32768, FILE_NAME_NORMALIZED);
+  QString actual = count > 0 && count < 32768 ? QString::fromWCharArray(buffer) : QString();
+  if (actual.startsWith(QLatin1String("\\\\?\\"))) actual.remove(0, 4);
+  if (!GetFileInformationByHandle(handle, &info) || info.nNumberOfLinks != 1 ||
+      (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) ||
+      actual.compare(QDir::toNativeSeparators(QDir::cleanPath(path)), Qt::CaseInsensitive)) {
+    CloseHandle(handle); return false;
+  }
+  const int descriptor = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
+  if (descriptor < 0) { CloseHandle(handle); return false; }
+  if (!file.open(descriptor, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+    _close(descriptor); return false;
+  }
+  return true;
+#else
+  return file.open(QIODevice::ReadOnly);
+#endif
+}
+
+int bootstrapProtocol(const QString &root) {
+  QFile bootstrap;
+  if (!holdOrdinaryFile(bootstrap, QDir(root).filePath(QStringLiteral("bootstrap.json"))) ||
+      bootstrap.size() <= 0 || bootstrap.size() > 4 * 1024 * 1024) return 0;
+  const auto raw = bootstrap.readAll();
+  try {
+    // Generic bounded bootstrap parsing only, never a TUF/state parser.
+    std::vector<std::set<std::string>> keys;
+    const auto value = nlohmann::json::parse(raw.constBegin(), raw.constEnd(),
+        [&](int depth, nlohmann::json::parse_event_t event, nlohmann::json &item) {
+      if (depth > 32) throw std::runtime_error("bootstrap depth");
+      if (event == nlohmann::json::parse_event_t::object_start) keys.emplace_back();
+      if (event == nlohmann::json::parse_event_t::key &&
+          (keys.empty() || !keys.back().insert(item.get<std::string>()).second))
+        throw std::runtime_error("bootstrap duplicate");
+      if (event == nlohmann::json::parse_event_t::object_end) keys.pop_back();
+      return true;
+    });
+    if (!value.is_object() || value.value("schema", std::string()) != "gsw.native_bootstrap/1" ||
+        !value.contains("protocol") || !value.at("protocol").is_number_integer()) return 0;
+    const auto protocol = value.at("protocol").get<qint64>();
+    return protocol == 1 || protocol == 2 ? int(protocol) : 0;
+  } catch (...) { return 0; }
+}
+
+bool managedLaunch(const NativeLaunchPlan &plan, bool diagnostics, bool create, QString *error) {
+  const auto fail = [&](const char *code) { if (error) *error = QString::fromLatin1(code); return false; };
+  if (!plan.valid()) return fail("managed_installation_manifest_invalid");
+  const int protocol = bootstrapProtocol(plan.root);
+  if (!protocol) return fail("managed_installation_manifest_invalid");
+  if (protocol == 1) {
+    if (!create) return true;
+    QProcess child;
+    child.setProgram(plan.program); child.setArguments(plan.arguments);
+    child.setWorkingDirectory(plan.workingDirectory); child.setProcessEnvironment(plan.environment);
+    return child.startDetached() || fail("managed_installation_start_failed");
+  }
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  const auto name = QString::fromLatin1("GSW Update Fixture Helper.exe");
+#else
+  const auto name = QString::fromLatin1("Gaussian Scene Workbench Update Helper.exe");
+#endif
+  const QString helperPath = QDir(plan.root).filePath(QStringLiteral("bin/") + name);
+  QFile heldHelper;
+  if (!holdOrdinaryFile(heldHelper, helperPath)) return fail("managed_installation_integrity_failed");
+  if (plan.arguments.size() > 128) return fail("managed_installation_integrity_failed");
+  QJsonArray arguments;
+  for (const auto &argument : plan.arguments) {
+    if (argument.contains(QChar(u'\0')) || argument.toUtf8().size() > 4096)
+      return fail("managed_installation_integrity_failed");
+    if (create) arguments.append(argument);
+  }
+  const QJsonObject intent{{"schema", "gsw.native_launch_intent/1"}, {"buildId", plan.version},
+      {"executableSha256", plan.executableSha256}, {"arguments", arguments},
+      {"diagnostics", create && diagnostics}};
+  const auto input = QJsonDocument(intent).toJson(QJsonDocument::Compact);
+  if (input.size() > 64 * 1024) return fail("managed_installation_integrity_failed");
+  QProcess helper;
+  helper.setProgram(helperPath);
+  helper.setArguments({create ? QStringLiteral("--launch-current") : QStringLiteral("--verify-installed")});
+  helper.setWorkingDirectory(QFileInfo(helperPath).absolutePath());
+  helper.setProcessEnvironment(plan.environment);
+#ifdef Q_OS_WIN
+  helper.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *parameters) {
+    parameters->flags |= CREATE_NO_WINDOW;
+  });
+#endif
+  helper.start();
+  if (!helper.waitForStarted(5000)) return fail("managed_installation_integrity_failed");
+  if (helper.write(input) != input.size()) { helper.kill(); helper.waitForFinished(5000); return fail("managed_installation_integrity_failed"); }
+  helper.closeWriteChannel();
+  QByteArray output, errors;
+  QElapsedTimer deadline; deadline.start();
+  while (helper.state() != QProcess::NotRunning && deadline.elapsed() < 120000) {
+    helper.waitForReadyRead(100);
+    output += helper.readAllStandardOutput(); errors += helper.readAllStandardError();
+    if (output.size() > 16384 || errors.size() > 16384) break;
+  }
+  if (helper.state() != QProcess::NotRunning) {
+    helper.kill(); helper.waitForFinished(5000); return fail("managed_installation_integrity_failed");
+  }
+  output += helper.readAllStandardOutput(); errors += helper.readAllStandardError();
+  if (helper.exitStatus() != QProcess::NormalExit || helper.exitCode() != 0 ||
+      output.size() > 16384 || errors.size() > 16384) return fail("managed_installation_integrity_failed");
+  QJsonParseError parse;
+  const auto document = QJsonDocument::fromJson(output, &parse);
+  if (parse.error != QJsonParseError::NoError || !document.isObject()) return fail("managed_installation_integrity_failed");
+  // The fixed helper emits exactly one canonical record. Equality rejects
+  // duplicate keys, additional records and noncanonical transport ambiguity.
+  const auto recordBytes = output.endsWith("\r\n") ? output.chopped(2)
+      : output.endsWith('\n') ? output.chopped(1) : QByteArray();
+  if (recordBytes.isEmpty() || QJsonDocument(document.object()).toJson(QJsonDocument::Compact) != recordBytes)
+    return fail("managed_installation_integrity_failed");
+  const auto record = document.object();
+  const QSet<QString> required{"schema", "phase", "code", "buildId", "executableSha256"};
+  const auto names = record.keys();
+  if (QSet<QString>(names.cbegin(), names.cend()) != required ||
+      record.value("schema") != QLatin1String("gsw.update_event/1") ||
+      record.value("phase") != (create ? QLatin1String("launched") : QLatin1String("launch_verified")) ||
+      record.value("code") != (create ? QLatin1String("PROCESS_CREATED") : QLatin1String("VERIFIED")) ||
+      record.value("buildId") != plan.version || record.value("executableSha256") != plan.executableSha256)
+    return fail("managed_installation_integrity_failed");
+  return true;
+}
 } // namespace
+
+bool verifyNativeInstallationLaunch(const NativeLaunchPlan &plan, QString *error) {
+  return managedLaunch(plan, false, false, error);
+}
+bool startNativeInstallation(const NativeLaunchPlan &plan, bool diagnostics, QString *error) {
+  return managedLaunch(plan, diagnostics, true, error);
+}
 
 NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagnostics,
     const QStringList &arguments, const QProcessEnvironment &inherited) {
@@ -107,6 +257,7 @@ NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagn
     return result;
   }
   result.arguments = arguments;
+  result.executableSha256 = digest;
   result.environment = inherited;
   result.environment.insert(QStringLiteral("GSW_NATIVE_INSTALL_ROOT"), result.root);
   // Diagnostics are explicit for this one child, never a persistent setting.

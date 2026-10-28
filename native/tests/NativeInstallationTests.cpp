@@ -57,6 +57,21 @@ private slots:
     activate("0.3.8-first");
     QCOMPARE(gsw::resolveNativeInstallation(root, false, {}, {}).program, old.program);
   }
+  void offlineInspectionNeedsNoHelperAndOnlineBootstrapFailsClosedWithoutOne() {
+    const QString bootstrap = QDir(root).filePath("bootstrap.json");
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":1,\"files\":[]}");
+    auto plan = gsw::resolveNativeInstallation(root, false, {}, {});
+    QVERIFY(plan.valid());
+    QCOMPARE(plan.executableSha256, QString::fromLatin1(digest));
+    QString error;
+    QVERIFY(gsw::verifyNativeInstallationLaunch(plan, &error));
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":2}");
+    QVERIFY(!gsw::verifyNativeInstallationLaunch(plan, &error));
+    QCOMPARE(error, QStringLiteral("managed_installation_integrity_failed"));
+    write(bootstrap, "{\"schema\":\"gsw.native_bootstrap/1\",\"protocol\":2,\"protocol\":1}");
+    QVERIFY(!gsw::verifyNativeInstallationLaunch(plan, &error));
+    QCOMPARE(error, QStringLiteral("managed_installation_manifest_invalid"));
+  }
   void diagnosticsAreOptInForOneChildAndArgumentsAreNotShellCommands() {
     QProcessEnvironment inherited;
     inherited.insert("RETAIN_ME", "owned value");

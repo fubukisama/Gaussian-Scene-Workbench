@@ -1013,6 +1013,13 @@ bool runLanguageSmokeTest(MainWindow &window) {
   const QStringList pointTexts = {QStringLiteral("点云"), QStringLiteral("Point Cloud"), QStringLiteral("点群")};
   const auto *saveAction = window.findChild<QAction *>(QStringLiteral("saveProjectAction"));
   check(saveAction && saveAction->text() == saveTexts[index], "save action translation");
+  const auto *updateAction = window.findChild<QAction *>(QStringLiteral("nativeUpdateAction"));
+  check(updateAction && updateAction->isEnabled() &&
+        updateAction->text() == QCoreApplication::translate("Workbench", "软件更新…") &&
+        window.findChild<QObject *>(QStringLiteral("nativeUpdateController")),
+        "actual workbench Help entry binds the live localized native update controller");
+  check(!window.findChild<QDialog *>(QStringLiteral("nativeUpdateDialog")),
+        "normal workbench construction does not create a background update dialog");
   check(QCoreApplication::translate("Workbench", "点云") == pointTexts[index], "point cloud terminology");
   const QStringList untitled = {QStringLiteral("未命名工程"), QStringLiteral("Untitled Project"), QStringLiteral("無題のプロジェクト")};
   const auto *nameLabel = window.findChild<QLabel *>(QStringLiteral("projectNameValue"));

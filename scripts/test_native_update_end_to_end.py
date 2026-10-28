@@ -51,8 +51,10 @@ class EndToEnd(unittest.TestCase):
         write_json(temporary, {"repository": repository})
         os.replace(temporary, control)
 
-    def helper_request(self, name, *arguments, success=True):
-        result = subprocess.run([str(self.helper), *arguments], capture_output=True,
+    def helper_request(self, name, *arguments, success=True, intent=None, raw_intent=None):
+        payload = raw_intent if raw_intent is not None else (
+            json.dumps(intent, ensure_ascii=True).encode() if intent is not None else None)
+        result = subprocess.run([str(self.helper), *arguments], input=payload, capture_output=True,
             timeout=100, creationflags=subprocess.CREATE_NO_WINDOW)
         self.assertLessEqual(len(result.stdout), 4 * 1024 * 1024)
         # The public event boundary must not expose archive URLs/query secrets.
@@ -76,7 +78,12 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(current["executableSha256"], digest(exe))
         return (self.installation / "current.json").read_bytes()
 
-    def launch(self, label):
+    def launch_intent(self):
+        current = json.loads((self.installation / "current.json").read_bytes())
+        return {"schema": "gsw.native_launch_intent/1", "buildId": current["version"],
+                "executableSha256": current["executableSha256"], "arguments": [], "diagnostics": False}
+
+    def launch(self, label, arguments=(), diagnostics=False):
         launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
         plan = subprocess.run([str(launcher), "--print-launch-plan"], capture_output=True,
             timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -89,9 +96,11 @@ class EndToEnd(unittest.TestCase):
         environment = os.environ.copy()
         environment["GSW_UPDATE_FIXTURE_MARKER"] = str(marker)
         environment["QT_QPA_PLATFORM"] = "windows"
+        environment["GSW_RENDER_DIAGNOSTICS_DIR"] = "unrequested-owned-fixture-diagnostics"
         for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH"):
             environment.pop(key, None)
-        process = subprocess.Popen([str(launcher)], env=environment, stdout=subprocess.DEVNULL,
+        launch_arguments = (["--diagnostics"] if diagnostics else []) + list(arguments)
+        process = subprocess.Popen([str(launcher), *launch_arguments], env=environment, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         try:
             self.assertEqual(process.wait(timeout=15), 0)
@@ -112,6 +121,9 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(record.get("exitCode"), 0)
             self.assertIs(record.get("windowShown"), True)
             self.assertEqual(record.get("platform"), "windows")
+            self.assertEqual(record.get("arguments"), list(arguments))
+            self.assertEqual(record.get("diagnosticsRoot"),
+                str(self.installation / "diagnostics").replace("\\", "/") if diagnostics else "")
             expected = self.installation / "versions" / build / "bin/Gaussian Scene Workbench.exe"
             self.assertEqual(Path(record["executable"]).resolve(), expected.resolve())
             self.assertEqual(Path(record["installationRoot"]).resolve(), self.installation.resolve())
@@ -238,6 +250,10 @@ class EndToEnd(unittest.TestCase):
                 receipt.write_text(json.dumps(changed), encoding="utf-8")
                 rejected = self.helper_request(name, "--rollback", "stable", "fixture-a", success=False)
                 self.assertEqual(rejected[-1].get("code"), code)
+                startup = self.helper_request(name + "-startup", "--verify-installed",
+                    intent=self.launch_intent(), success=False)
+                self.assertEqual(startup[-1].get("code"), code)
+                self.refused_launch("A")
                 self.assertEqual(self.active("fixture-a"), pointer_a)
                 self.assertEqual(self.accepted(), accepted_before)
             finally:
@@ -247,6 +263,10 @@ class EndToEnd(unittest.TestCase):
             extra.write_bytes(b"not in the accepted payload")
             rejected = self.helper_request("extra-slot-file", "--rollback", "stable", "fixture-a", success=False)
             self.assertEqual(rejected[-1].get("code"), "activation_slot_file_set_differs")
+            startup = self.helper_request("extra-slot-startup", "--verify-installed",
+                intent=self.launch_intent(), success=False)
+            self.assertEqual(startup[-1].get("code"), "activation_slot_file_set_differs")
+            self.refused_launch("A")
             self.assertEqual(self.active("fixture-a"), pointer_a)
             self.assertEqual(self.accepted(), accepted_before)
         finally:
@@ -257,6 +277,10 @@ class EndToEnd(unittest.TestCase):
             source_file.write_bytes(original_source + b"\n# tampered owned fixture\n")
             rejected = self.helper_request("changed-slot-file", "--rollback", "stable", "fixture-a", success=False)
             self.assertEqual(rejected[-1].get("code"), "activation_slot_digest_mismatch")
+            startup = self.helper_request("changed-slot-startup", "--verify-installed",
+                intent=self.launch_intent(), success=False)
+            self.assertEqual(startup[-1].get("code"), "activation_slot_digest_mismatch")
+            self.refused_launch("A")
             self.assertEqual(self.active("fixture-a"), pointer_a)
             self.assertEqual(self.accepted(), accepted_before)
         finally:
@@ -324,6 +348,69 @@ class EndToEnd(unittest.TestCase):
             self.helper_request("startup-install-B", "--install", "stable")
             pointer_b = self.active("fixture-b")
             self.launch("B")
+            # Exercise the actual read-only helper before withdrawal. Request
+            # data binds identity/arguments only; it cannot supply authority.
+            guarded = tree_hashes(root)
+            intent = self.launch_intent()
+            verified = self.helper_request("startup-verify-installed-B", "--verify-installed", intent=intent)
+            self.assertEqual(verified[-1].get("phase"), "launch_verified")
+            self.assertEqual(verified[-1].get("buildId"), "fixture-b")
+            self.assertEqual(tree_hashes(root), guarded)
+            for name, patch in (("program", {"program": "not-a-launch-target.exe"}),
+                    ("root", {"root": str(root)}), ("other-accepted-build", {"buildId": "fixture-a"}),
+                    ("digest", {"executableSha256": "0" * 64}),
+                    ("argument-type", {"arguments": [7]}),
+                    ("argument-count", {"arguments": ["x"] * 129}),
+                    ("nul-argument", {"arguments": ["before\x00after"]}),
+                    ("oversized-argument", {"arguments": ["x" * 65537]})):
+                self.helper_request("startup-invalid-" + name, "--launch-current",
+                    intent={**intent, **patch}, success=False)
+                self.assertEqual(tree_hashes(root), guarded)
+            duplicate = json.dumps(intent).replace('"buildId": "fixture-b"',
+                '"buildId": "fixture-a", "buildId": "fixture-b"').encode()
+            self.assertNotEqual(duplicate, json.dumps(intent).encode())
+            self.helper_request("startup-duplicate-request", "--launch-current", raw_intent=duplicate, success=False)
+            self.assertEqual(tree_hashes(root), guarded)
+            # Missing or hardlinked fixed helpers cannot be replaced by a
+            # runtime helper-name override or by another executable's JSON.
+            hidden_helper = self.helper.with_name(self.helper.name + ".owned-backup")
+            os.replace(self.helper, hidden_helper)
+            try:
+                self.refused_launch("B")
+                os.link(hidden_helper, self.helper)
+                try:
+                    self.refused_launch("B")
+                    self.helper_request("startup-hardlinked-helper", "--verify-installed",
+                        intent=intent, success=False)
+                finally:
+                    self.helper.unlink()
+            finally:
+                os.replace(hidden_helper, self.helper)
+            self.assertEqual(tree_hashes(root), guarded)
+            for missing_name in (".publish.lock", ".update-trust-anchor"):
+                missing = root / missing_name
+                retained = root / (missing_name + ".owned-backup")
+                os.replace(missing, retained)
+                try:
+                    self.helper_request("startup-missing-" + missing_name.strip("."),
+                        "--verify-installed", intent=intent, success=False)
+                    self.refused_launch("B")
+                    self.assertFalse(missing.exists(), "read-only guard recreated missing trusted state")
+                finally:
+                    os.replace(retained, missing)
+                self.assertEqual(tree_hashes(root), guarded)
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong,
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+            kernel.CreateFileW.restype = ctypes.c_void_p
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            lease = kernel.CreateFileW(str(root / ".publish.lock"), 0xC0000000, 0, None, 3, 0x80, None)
+            self.assertNotEqual(lease, ctypes.c_void_p(-1).value)
+            try:
+                self.refused_launch("B")
+            finally:
+                kernel.CloseHandle(lease)
+            self.assertEqual(tree_hashes(root), guarded)
             self.select("revoked-b")
             withdrawal = self.helper_request("startup-adopt-withdrawal-B", "--check", "stable", success=False)
             self.assertEqual(withdrawal[-1].get("code"), "BUILD_REVOKED")
@@ -341,7 +428,7 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(tree_hashes(root / "user-data"), data)
             self.helper_request("startup-explicit-safe-A", "--rollback", "stable", "fixture-a")
             self.assertEqual(self.active("fixture-a"), pointer_a)
-            self.launch("A")
+            self.launch("A", arguments=("--owned-fixture", "空白 日本語 & ; $(not-a-command)"), diagnostics=True)
             self.assertEqual(journal.read_bytes(), state_bytes)
             self.assertEqual(self.accepted(), accepted)
             self.assertEqual(tree_hashes(root / "versions"), slots)

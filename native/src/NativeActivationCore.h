@@ -12,13 +12,16 @@ struct NativeActivationResult final {
   bool ok = false;
   QString code;
   QString buildId;
+  QString executableSha256;
 };
 
 // The same lock is held across trust, download, staging and pointer publication.
 // It interoperates with the pre-existing publisher's exclusive .publish.lock.
 class NativeInstallationLock final {
 public:
-  explicit NativeInstallationLock(const QString &installationRoot);
+  enum class OpenMode { CreateIfMissing, RequireExisting };
+  explicit NativeInstallationLock(const QString &installationRoot,
+      OpenMode mode = OpenMode::CreateIfMissing);
   ~NativeInstallationLock();
   NativeInstallationLock(const NativeInstallationLock &) = delete;
   NativeInstallationLock &operator=(const NativeInstallationLock &) = delete;
@@ -54,6 +57,10 @@ public:
   static NativeActivationResult install(const QString &root, const QString &archive,
       const NativeVerifiedUpdate &, const NativeInstallationLock &);
   static NativeActivationResult rollback(const QString &root, const NativeVerifiedUpdate &,
+      const NativeInstallationLock &);
+  // Historical authority is minted only by the trust bridge. This rechecks
+  // the online receipt and complete slot without changing any installed state.
+  static NativeActivationResult verifyInstalled(const QString &root, const NativeVerifiedUpdate &,
       const NativeInstallationLock &);
 private:
   friend class NativeDeveloperPublisher;

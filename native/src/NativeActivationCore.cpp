@@ -35,15 +35,16 @@ struct NativeInstallationLock::Impl {
 #endif
   bool acquired = false;
 };
-NativeInstallationLock::NativeInstallationLock(const QString &root) : m(std::make_unique<Impl>()) {
+NativeInstallationLock::NativeInstallationLock(const QString &root, const OpenMode mode) : m(std::make_unique<Impl>()) {
   m->root = QDir::cleanPath(root);
   if (!ordinary(m->root) || !QFileInfo(m->root).isDir()) { m->error = QStringLiteral("activation_root_invalid"); return; }
 #ifdef Q_OS_WIN
   const auto path = QDir::toNativeSeparators(QDir(m->root).filePath(QStringLiteral(".publish.lock")));
-  if (!ordinary(path, true)) { m->error = QStringLiteral("activation_lock_invalid"); return; }
+  if (!ordinary(path, mode == OpenMode::CreateIfMissing)) { m->error = QStringLiteral("activation_lock_invalid"); return; }
   const auto apiPath = nativeApiPath(path);
   m->handle = CreateFileW(reinterpret_cast<LPCWSTR>(apiPath.utf16()), GENERIC_READ | GENERIC_WRITE,
-      0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+      0, nullptr, mode == OpenMode::CreateIfMissing ? OPEN_ALWAYS : OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (m->handle != INVALID_HANDLE_VALUE) {
     BY_HANDLE_FILE_INFORMATION info{};
     m->acquired = GetFileInformationByHandle(m->handle, &info) && info.nNumberOfLinks == 1 &&
@@ -66,7 +67,7 @@ NativeActivationResult NativeActivationCore::install(const QString &root, const 
     return {false, QStringLiteral("activation_admission_invalid"), {}};
   return publish(root, archive, update.offer, lock, false, update.descriptorSha256);
 }
-NativeActivationResult NativeActivationCore::rollback(const QString &root, const NativeVerifiedUpdate &update,
+NativeActivationResult NativeActivationCore::verifyInstalled(const QString &root, const NativeVerifiedUpdate &update,
     const NativeInstallationLock &lock) {
   QString id;
   try {
@@ -92,13 +93,22 @@ NativeActivationResult NativeActivationCore::rollback(const QString &root, const
     if (receipt.at("manifestSha256") != offer.at("payloadManifestSha256")) fail("rollback_receipt_invalid");
     const auto verified = verifyInstalledSlot(QDir(root).filePath(QStringLiteral("versions/") + id), offer);
     if (string(receipt.at("executableSha256")) != verified.executableSha256) fail("rollback_receipt_invalid");
-    // Only the launch pointer changes. Never reinstall historical network bytes,
-    // rewrite a slot/receipt, or rewind roots, revocations or high-water marks.
-    pointToSlot(root, id, verified.executableSha256);
-    return {true, QStringLiteral("ROLLED_BACK"), id};
+    return {true, QStringLiteral("INSTALLED_VERIFIED"), id, verified.executableSha256};
   } catch (const Failure &e) { return {false, e.code, id}; }
     catch (const Json::exception &) { return {false, QStringLiteral("activation_json_invalid"), id}; }
-    catch (...) { return {false, QStringLiteral("rollback_failed"), id}; }
+    catch (...) { return {false, QStringLiteral("installed_verification_failed"), id}; }
+}
+NativeActivationResult NativeActivationCore::rollback(const QString &root, const NativeVerifiedUpdate &update,
+    const NativeInstallationLock &lock) {
+  const auto verified = verifyInstalled(root, update, lock);
+  if (!verified.ok) return verified;
+  try {
+    // The same lock spans independent admission, full revalidation and pointer
+    // publication. Read-only launch callers never enter this mutation branch.
+    pointToSlot(root, verified.buildId, verified.executableSha256);
+    return {true, QStringLiteral("ROLLED_BACK"), verified.buildId, verified.executableSha256};
+  } catch (const Failure &e) { return {false, e.code, verified.buildId}; }
+    catch (...) { return {false, QStringLiteral("rollback_failed"), verified.buildId}; }
 }
 NativeActivationResult NativeActivationCore::publish(const QString &root, const QString &archive,
     const QByteArray &offerBytes, const NativeInstallationLock &lock, bool developer, const QString &descriptorSha256) {

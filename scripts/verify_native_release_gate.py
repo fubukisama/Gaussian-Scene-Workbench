@@ -415,7 +415,8 @@ def _required_results(policy, source_commit, github):
                 raise ReleaseGateError("release_check_publisher_identity_differs")
             if check.get("status") != "completed" or check.get("conclusion") != "success":
                 raise ReleaseGateError("release_required_check_not_success")
-            jobs[requirement["checkName"]] = {"jobId": job["id"], "checkRunId": check_id}
+            jobs[requirement["checkName"]] = {"jobId": job["id"], "checkRunId": check_id,
+                "appId": check["app"]["id"], "appSlug": check["app"]["slug"]}
         verified[path] = {"run": run, "jobs": jobs}
     statuses = []
     if policy["requiredStatuses"]:
@@ -594,14 +595,17 @@ def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
         raise ReleaseGateError("release_evidence_changed_during_inspection")
     return {"schema": "gsw.release_gate_result/1", "ok": True, "code": "release_eligible",
         "eligibilityOnly": True, "published": False, "signingAuthorized": False,
+        "repositoryId": policy["repositoryId"], "repository": policy["repository"],
         "sourceCommit": source_commit, "sourceTree": source_tree, "product": PRODUCT,
         "platform": "windows-x64", "buildId": report["buildId"], "displayVersion": report["displayVersion"],
-        "releaseSequence": report["releaseSequence"], "artifactId": artifact_id,
+        "releaseSequence": report["releaseSequence"], "artifactId": artifact_id, "artifactName": artifact["name"],
         "artifactDigest": artifact["digest"], "archiveLength": report["archiveLength"],
         "archiveSha256": report["archiveSha256"], "payloadManifestSha256": report["payloadManifestSha256"],
         "correspondingSourceSha256": report["correspondingSourceSha256"],
         "policySha256": approved_policy_sha256, "sourceEvidence": source_evidence,
         "workflows": [{"path": path, "runId": row["run"]["id"], "attempt": row["run"]["run_attempt"],
+                       "workflowId": row["run"]["workflow_id"], "event": row["run"]["event"],
+                       "headSha": row["run"]["head_sha"], "headBranch": row["run"]["head_branch"],
                        "jobs": row["jobs"]} for path, row in sorted(verified.items())],
         "verifiedAt": datetime.now(timezone.utc).isoformat()}
 

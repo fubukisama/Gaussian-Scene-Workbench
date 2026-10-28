@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QSaveFile>
@@ -46,6 +47,8 @@ int main(int argc, char **argv) {
       {"pid", double(QCoreApplication::applicationPid())},
       {"executable", QCoreApplication::applicationFilePath()},
       {"installationRoot", qEnvironmentVariable("GSW_NATIVE_INSTALL_ROOT")},
+      {"arguments", QJsonArray::fromStringList(app.arguments().mid(1))},
+      {"diagnosticsRoot", QDir::fromNativeSeparators(qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR"))},
       {"qtVersion", QString::fromLatin1(qVersion())},
       {"platform", QGuiApplication::platformName()}};
   window.show();

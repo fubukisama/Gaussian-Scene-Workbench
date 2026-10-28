@@ -135,6 +135,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/AppTheme.h
   src/AppLanguage.cpp
   src/AppLanguage.h
+  src/NativeUpdateUi.cpp
+  src/NativeUpdateUi.h
   src/WorkbenchIcons.cpp
   src/WorkbenchIcons.h
   src/IconUiSmokeTest.cpp

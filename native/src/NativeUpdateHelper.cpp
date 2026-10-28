@@ -3,12 +3,16 @@
 #include "NativeUpdateTrustBridge.h"
 #include "NativeUpdateDownload.h"
 #include "NativeActivationFiles.h"
+#include "NativeInstallation.h"
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextStream>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QProcess>
+#include <QThread>
 #include <atomic>
 #include <cstdio>
 #include <memory>
@@ -24,6 +28,81 @@ void event(const QString &phase, const QString &code = {}, const QJsonObject &fi
   stream << QJsonDocument(message).toJson(QJsonDocument::Compact) << '\n'; stream.flush();
 }
 int failure(const QString &code) { event(QStringLiteral("failed"), code); return 2; }
+
+QByteArray readLaunchInput() {
+#ifdef Q_OS_WIN
+  const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+  if (input == INVALID_HANDLE_VALUE || GetFileType(input) != FILE_TYPE_PIPE)
+    gsw::activation::fail("INVALID_REQUEST");
+  QByteArray bytes;
+  QElapsedTimer deadline; deadline.start();
+  while (deadline.elapsed() < 5000) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr)) {
+      if (GetLastError() == ERROR_BROKEN_PIPE) return bytes;
+      gsw::activation::fail("INVALID_REQUEST");
+    }
+    if (!available) { QThread::msleep(5); continue; }
+    if (available > 64 * 1024 - DWORD(bytes.size())) gsw::activation::fail("INVALID_REQUEST");
+    const qsizetype old = bytes.size();
+    bytes.resize(old + available);
+    DWORD received = 0;
+    if (!ReadFile(input, bytes.data() + old, available, &received, nullptr))
+      gsw::activation::fail("INVALID_REQUEST");
+    bytes.resize(old + received);
+  }
+#endif
+  gsw::activation::fail("INVALID_REQUEST");
+}
+
+int installedLaunch(const QString &operation, const QString &root,
+    const gsw::activation::Json &intent, const gsw::NativeInstallationLock &lock) {
+  using namespace gsw::activation;
+  exactKeys(intent, {"schema", "buildId", "executableSha256", "arguments", "diagnostics"});
+  if (string(intent.at("schema")) != QLatin1String("gsw.native_launch_intent/1") ||
+      !intent.at("arguments").is_array() || intent.at("arguments").size() > 128 ||
+      !intent.at("diagnostics").is_boolean()) fail("INVALID_REQUEST");
+  const auto expected = buildId(intent.at("buildId"));
+  const auto expectedHash = string(intent.at("executableSha256")); sha(expectedHash);
+  QStringList arguments;
+  for (const auto &value : intent.at("arguments")) {
+    const auto argument = string(value);
+    if (argument.contains(QChar(u'\0')) || argument.toUtf8().size() > 4096) fail("INVALID_REQUEST");
+    arguments.append(argument);
+  }
+  const bool create = operation == QLatin1String("--launch-current");
+  const bool diagnostics = intent.at("diagnostics").get<bool>();
+  if (!create && (!arguments.isEmpty() || diagnostics)) fail("INVALID_REQUEST");
+  const auto pointer = parse(read(QDir(root).filePath(QStringLiteral("current.json")), 16384), 16384);
+  exactKeys(pointer, {"schema", "version", "executableSha256"});
+  if (string(pointer.at("schema")) != QLatin1String("gsw.native_active_version/1") ||
+      buildId(pointer.at("version")) != expected || string(pointer.at("executableSha256")) != expectedHash)
+    fail("LAUNCH_IDENTITY_CHANGED");
+  auto accepted = gsw::NativeUpdateTrustBridge::rollbackAdmission(root, QStringLiteral("stable"), expected, lock);
+  if (!accepted.ok) return failure(accepted.code);
+  const auto verified = gsw::NativeActivationCore::verifyInstalled(root, *accepted.update, lock);
+  if (!verified.ok) return failure(verified.code);
+  if (verified.buildId != expected || verified.executableSha256 != expectedHash) fail("LAUNCH_IDENTITY_CHANGED");
+  const auto fields = QJsonObject{{"buildId", expected}, {"executableSha256", expectedHash}};
+  if (!create) { event(QStringLiteral("launch_verified"), QStringLiteral("VERIFIED"), fields); return 0; }
+  // All authority, receipt, complete-slot and pointer comparisons happen under
+  // this same lock. Never release it and return an executable for another
+  // process to start after admission may have changed.
+  auto plan = gsw::resolveNativeInstallation(root, diagnostics, arguments, QProcessEnvironment::systemEnvironment());
+  if (!plan.valid() || plan.version != expected || plan.executableSha256 != expectedHash)
+    fail("LAUNCH_IDENTITY_CHANGED");
+  // Re-read the exact pointer under the held lock before process creation.
+  if (parse(read(QDir(root).filePath(QStringLiteral("current.json")), 16384), 16384) != pointer)
+    fail("LAUNCH_IDENTITY_CHANGED");
+  QProcess child;
+  child.setProgram(plan.program); child.setArguments(plan.arguments);
+  child.setWorkingDirectory(plan.workingDirectory); child.setProcessEnvironment(plan.environment);
+  child.setStandardInputFile(QProcess::nullDevice());
+  child.setStandardOutputFile(QProcess::nullDevice()); child.setStandardErrorFile(QProcess::nullDevice());
+  if (!child.startDetached()) return failure(QStringLiteral("managed_installation_start_failed"));
+  event(QStringLiteral("launched"), QStringLiteral("PROCESS_CREATED"), fields);
+  return 0; // Creation is not application-health acceptance.
+}
 }
 
 int main(int argc, char **argv) {
@@ -32,17 +111,46 @@ int main(int argc, char **argv) {
   // Deliberately no root, key, feed, verified, unsigned, dev or TLS-bypass CLI.
   if (args.isEmpty() || args.size() > 3) return failure(QStringLiteral("INVALID_REQUEST"));
   const QString operation = args.takeFirst();
+  const bool launchOperation = operation == QLatin1String("--verify-installed") ||
+      operation == QLatin1String("--launch-current");
+  if (launchOperation && !args.isEmpty()) return failure(QStringLiteral("INVALID_REQUEST"));
   const QString channel = args.isEmpty() ? QStringLiteral("stable") : args.takeFirst();
   const QString expected = args.isEmpty() ? QString() : args.takeFirst();
   if (!QStringList{QStringLiteral("--check"), QStringLiteral("--prepare"),
-      QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback")}.contains(operation) ||
+      QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback"),
+      QStringLiteral("--verify-installed"), QStringLiteral("--launch-current")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel) ||
       (!expected.isEmpty() && operation != QLatin1String("--apply-prepared") && operation != QLatin1String("--rollback")) ||
       (operation == QLatin1String("--rollback") && expected.isEmpty())) return failure(QStringLiteral("INVALID_REQUEST"));
   QDir root(QCoreApplication::applicationDirPath());
   if (root.dirName() != QLatin1String("bin") || !root.cdUp()) return failure(QStringLiteral("activation_root_invalid"));
-  gsw::NativeInstallationLock lock(root.absolutePath());
+  gsw::activation::Json launchIntent;
+  QFile heldLaunchHelper;
+  if (launchOperation) {
+    // Parse before acquiring the installation lock and before the cancellation
+    // reader exists. That reader must never consume a launch intent.
+    try {
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+      const auto helperName = QString::fromLatin1("GSW Update Fixture Helper.exe");
+#else
+      const auto helperName = QString::fromLatin1("Gaussian Scene Workbench Update Helper.exe");
+#endif
+      if (QFileInfo(QCoreApplication::applicationFilePath()).fileName() != helperName)
+        gsw::activation::fail("INVALID_REQUEST");
+      gsw::activation::heldRead(heldLaunchHelper, QCoreApplication::applicationFilePath());
+      launchIntent = gsw::activation::parse(readLaunchInput(), 64 * 1024);
+    }
+    catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
+  }
+  gsw::NativeInstallationLock lock(root.absolutePath(), launchOperation
+      ? gsw::NativeInstallationLock::OpenMode::RequireExisting
+      : gsw::NativeInstallationLock::OpenMode::CreateIfMissing);
   if (!lock.locked()) return failure(lock.error());
+  if (launchOperation) {
+    try { return installedLaunch(operation, root.absolutePath(), launchIntent, lock); }
+    catch (const gsw::activation::Failure &error) { return failure(error.code); }
+    catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
+  }
   auto cancellation = std::make_shared<std::atomic_bool>(false);
   // The sole detached input reader owns only its shared atomic. It never uses
   // QObjects or library state during process shutdown. EOF is not cancellation.
