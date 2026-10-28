@@ -23,10 +23,11 @@ private slots:
     QCOMPARE(fixture.exitCode(), 0);
     QFile offer(temporary.filePath("offer.json"));
     QVERIFY(offer.open(QIODevice::ReadOnly));
+    const auto offerBytes = offer.readAll();
     const QString root = temporary.filePath("installation");
     gsw::NativeInstallationLock lock(root);
     const auto result = gsw::NativeDeveloperPublisher::publish(root,
-        temporary.filePath("B.zip"), offer.readAll(), lock);
+        temporary.filePath("B.zip"), offerBytes, lock);
     QVERIFY2(result.ok, qPrintable(result.code));
     QFile pointer(QDir(root).filePath("current.json"));
     QVERIFY(pointer.open(QIODevice::ReadOnly));
@@ -37,6 +38,11 @@ private slots:
     QFile unchanged(QDir(root).filePath("bin/launcher-sentinel"));
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), QByteArray("unchanged-bootstrap"));
+    // A completed slot and a retry after pointer failure must not become a
+    // permanent collision. Re-entry verifies bytes instead of overwriting B.
+    const auto repeated = gsw::NativeDeveloperPublisher::publish(root,
+        temporary.filePath("B.zip"), offerBytes, lock);
+    QVERIFY2(repeated.ok, qPrintable(repeated.code));
   }
 };
 QTEST_GUILESS_MAIN(NativeUpdateActivationTests)
