@@ -46,6 +46,50 @@ def files(root: Path):
                 raise ValueError("source_vendor_file_invalid")
             yield path, info
 
+
+def registry_archives(output: Path, cargo_home: Path):
+    """Original cache bytes are admitted by the exact Git lock's checksum only."""
+    lock = output / "native/updater-trust/Cargo.lock"
+    info = _package._ordinary(lock)
+    if not stat.S_ISREG(info.st_mode) or info.st_size > _package.MAX_MANIFEST:
+        raise ValueError("source_dependency_lock_invalid")
+    locked = _package.locked_registry_packages(lock.read_bytes())
+    if not locked:
+        raise ValueError("source_registry_dependency_set_empty")
+    cache = cargo_home / "registry/cache"
+    _package._ordinary(cache)
+    destination = output / "native/updater-trust/vendor-archives"
+    destination.mkdir(exist_ok=False)
+    for (name, version), checksum in sorted(locked.items()):
+        filename = _package.validate_relative_path(name + "-" + version + ".crate")
+        selected = None
+        for candidate in sorted(cache.glob("*/" + filename)):
+            source_info = _package._ordinary(candidate)
+            if (not stat.S_ISREG(source_info.st_mode) or source_info.st_nlink != 1
+                    or not 0 < source_info.st_size <= _package.MAX_MANIFEST):
+                raise ValueError("source_registry_cache_file_invalid")
+            if _package._hash(candidate) == checksum:
+                selected = candidate
+                break
+        if selected is None:
+            raise ValueError("source_locked_registry_archive_missing")
+        source_info = _package._ordinary(selected)
+        with selected.open("rb") as source, (destination / filename).open("xb") as target:
+            held = os.fstat(source.fileno())
+            if (held.st_dev, held.st_ino, held.st_size, held.st_nlink) != (
+                    source_info.st_dev, source_info.st_ino, source_info.st_size, 1):
+                raise ValueError("source_registry_archive_identity_changed")
+            digest, received = hashlib.sha256(), 0
+            while block := source.read(1024**2):
+                received += len(block)
+                if received > source_info.st_size:
+                    raise ValueError("source_registry_archive_identity_changed")
+                digest.update(block)
+                target.write(block)
+            if received != source_info.st_size or digest.hexdigest() != checksum:
+                raise ValueError("source_registry_archive_identity_changed")
+    return len(locked)
+
 def prepare(args):
     repository = args.repository.absolute()
     commit = args.source_commit
@@ -110,14 +154,32 @@ def prepare(args):
             process.wait(timeout=10)
     manifest_path = output / "native/updater-trust/Cargo.toml"
     vendor = output / "native/updater-trust/vendor"
+    lock_path = output / "native/updater-trust/Cargo.lock"
+    if _package._ordinary(lock_path).st_size > _package.MAX_MANIFEST:
+        raise ValueError("source_dependency_lock_invalid")
+    _package.locked_registry_packages(lock_path.read_bytes())
+    configured_home = args.cargo_home or os.environ.get("CARGO_HOME")
+    if configured_home:
+        cargo_home = Path(configured_home).absolute()
+    elif os.name == "nt" and Path("D:/").is_dir():
+        cargo_home = Path("D:/CodexData/Cache/updater-source-cargo")
+    else:
+        cargo_home = output.parent / ".cargo-source-cache"
+    ancestor = cargo_home
+    while not ancestor.exists():
+        ancestor = ancestor.parent
+    _package._ordinary(ancestor)
+    cargo_home.mkdir(parents=True, exist_ok=True)
+    _package._ordinary(cargo_home)
     result = subprocess.run([args.cargo, "vendor", "--locked", "--manifest-path", str(manifest_path), str(vendor)],
-                            capture_output=True, timeout=1200)
+                            capture_output=True, timeout=1200, env=dict(os.environ, CARGO_HOME=str(cargo_home)))
     if result.returncode:
         raise ValueError("source_locked_vendor_failed")
     config = output / "native/updater-trust/.cargo/config.toml"
     config.parent.mkdir(exist_ok=True)
     with config.open("x", encoding="utf-8", newline="\n") as target:
         target.write('[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n')
+    archive_count = registry_archives(output, cargo_home)
     tracked_names = {row["path"] for row in tracked}
     generated, source_rows = [], []
     for path, info in files(output):
@@ -126,9 +188,10 @@ def prepare(args):
         row = {"path": name, "size": info.st_size, "sha256": checksum}
         source_rows.append(row)
         if name not in tracked_names:
-            if not (name.startswith("native/updater-trust/vendor/") or name == "native/updater-trust/.cargo/config.toml"):
+            if not (name.startswith("native/updater-trust/vendor/") or name.startswith("native/updater-trust/vendor-archives/")
+                    or name == "native/updater-trust/.cargo/config.toml"):
                 raise ValueError("source_unclassified_generated_file")
-            generated.append({**row, "kind": "cargo-vendor"})
+            generated.append({**row, "kind": "cargo-crate-archive" if name.startswith("native/updater-trust/vendor-archives/") else "cargo-vendor"})
     provenance = {"schema": "gsw.native_update_source_provenance/1", "sourceCommit": commit,
                   "sourceTree": tree, "trackedFiles": sorted(tracked, key=lambda row: row["path"]),
                   "generatedDependencies": sorted(generated, key=lambda row: row["path"])}
@@ -139,6 +202,7 @@ def prepare(args):
     write_json(args.manifest, source_manifest)
     return {"schema": "gsw.update_source_preparation/1", "ok": True, "sourceCommit": commit,
             "sourceTree": tree, "trackedFileCount": len(tracked), "generatedFileCount": len(generated),
+            "dependencyArchiveCount": archive_count,
             "sourceManifestSha256": _package._hash(args.manifest), "provenanceSha256": _package._hash(args.provenance)}
 
 def main():
@@ -151,6 +215,7 @@ def main():
     parser.add_argument("--provenance", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--cargo", default="cargo")
+    parser.add_argument("--cargo-home", type=Path)
     try:
         print(json.dumps(prepare(parser.parse_args()), ensure_ascii=True))
         return 0

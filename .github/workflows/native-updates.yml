@@ -7,13 +7,21 @@ on:
     paths:
       - 'native/src/NativeInstall*'
       - 'native/src/NativeLauncher.cpp'
+      - 'native/src/NativeActivation*'
+      - 'native/src/NativeDeveloperPublisher*'
+      - 'native/updater-developer/**'
       - 'native/tests/NativeInstallationTests.cpp'
       - 'scripts/*native*installation.ps1'
+      - 'scripts/test_native_developer_publisher.py'
+      - 'scripts/package_native_update.py'
       - 'scripts/write_native_release_manifest.ps1'
       - '.github/workflows/native-updates.yml'
 
 permissions:
   contents: read
+
+env:
+  PIP_CACHE_DIR: ${{ github.workspace }}/native/.cache/managed-update-pip
 
 jobs:
   managed-updates:
@@ -33,10 +41,13 @@ jobs:
         id: python
         with:
           python-version: '3.12'
+          check-latest: true
       - name: Prepare codec dependencies for native configure
         shell: pwsh
         run: |
-          & '${{ steps.python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-managed-updates"
+          if ($LASTEXITCODE -ne 0) { throw 'Managed-update QA environment failed.' }
+          & "$PWD/native/.qa-managed-updates/Scripts/python.exe" -m pip install -r scripts/requirements-native-checks.txt
           if ($LASTEXITCODE -ne 0) { throw 'Native configure QA dependencies failed.' }
           $root = Join-Path $PWD 'native/.deps'
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
@@ -47,12 +58,16 @@ jobs:
         shell: pwsh
         run: |
           cmake -S native -B native/build-updates -G 'Visual Studio 17 2022' -A x64 `
-            -DBUILD_TESTING=ON '-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}' `
+            -DBUILD_TESTING=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-managed-updates/Scripts/python.exe" `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/native/.deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Native update configure failed.' }
           cmake --build native/build-updates --config Release --parallel --target GaussianSceneWorkbenchLauncher gsw_native_installation_tests gsw_native_shortcut_fixture
           if ($LASTEXITCODE -ne 0) { throw 'Native update build failed.' }
+          cmake -S native/updater-developer -B native/build-developer-publisher -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Separate developer publisher configure failed.' }
+          cmake --build native/build-developer-publisher --config Release --parallel --target gsw_native_developer_publisher
+          if ($LASTEXITCODE -ne 0) { throw 'Separate developer publisher build failed.' }
       - name: Verify pure plans and Windows taskbar relaunch properties
         shell: pwsh
         run: |
@@ -71,7 +86,16 @@ jobs:
           Copy-Item -LiteralPath 'native/build-updates/Release/Gaussian Scene Workbench Launcher.exe' -Destination $runtime
           windeployqt --release --no-translations --compiler-runtime "$runtime/Gaussian Scene Workbench Launcher.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher runtime staging failed.' }
-          ./scripts/test_native_installation.ps1 -RuntimeDirectory $runtime -ShortcutFixture "$PWD/native/build-updates/Release/gsw_native_shortcut_fixture.exe" -TestRoot "$PWD/native/update-evidence/owned-fixtures"
+          $developerRuntime=Join-Path $PWD 'native/developer-publisher-runtime'
+          New-Item -ItemType Directory -Path $developerRuntime -Force | Out-Null
+          $publisher=Join-Path $developerRuntime 'GSW Native Developer Publisher.exe'
+          Copy-Item -LiteralPath 'native/build-developer-publisher/Release/GSW Native Developer Publisher.exe' -Destination $publisher
+          windeployqt --release --no-translations --compiler-runtime $publisher
+          if ($LASTEXITCODE -ne 0) { throw 'Developer publisher runtime staging failed.' }
+          ./scripts/test_native_installation.ps1 -RuntimeDirectory $runtime `
+            -ShortcutFixture "$PWD/native/build-updates/Release/gsw_native_shortcut_fixture.exe" `
+            -TestRoot "$PWD/native/update-evidence/owned-fixtures" -DeveloperPublisher $publisher `
+            -PythonExecutable "$PWD/native/.qa-managed-updates/Scripts/python.exe"
       - name: Retain exact-source contract evidence
         if: always()
         shell: pwsh

@@ -139,20 +139,37 @@ protocol migration remains a separate verified deployment.
 
 ## Publisher commands / 发布命令 / 発行コマンド
 
-Developer CLI messages remain English. / 开发 CLI 原始输出保留英文。 /
-開発 CLI の生出力は英語です。
+开发 CLI 使用稳定的机器 JSON 代码，不本地化。开发工具仅接纳本地未签名包，
+不证明发布者身份，也不能操作带 `.update-trust-anchor` 或 `updates/trust` 的受信安装。
+目录包须预先生成完整 ZIP 和 Offer；旧脚本参数不再触发 PowerShell 激活。
+
+The developer CLI emits stable, unlocalized machine JSON codes. Its admission is local
+and unsigned, not publisher authentication. It refuses trusted roots containing
+`.update-trust-anchor` or `updates/trust`. Prepare the complete ZIP and Offer first;
+legacy directory arguments no longer invoke a PowerShell activator.
+
+開発 CLI は翻訳しない固定の機械用 JSON コードを返します。ローカル未署名配布物を
+受け入れる開発専用経路であり、発行元を認証しません。`.update-trust-anchor` または
+`updates/trust` のある信頼済みインストールは拒否します。完全 ZIP と Offer を事前に
+準備してください。旧ディレクトリー引数による PowerShell 切替は廃止されました。
+
+See [developer publisher contract](NATIVE_DEVELOPER_PUBLISHER.md). /
+详见[开发发布器约定](NATIVE_DEVELOPER_PUBLISHER.md)。 /
+詳細は[開発用発行ツールの規約](NATIVE_DEVELOPER_PUBLISHER.md)を参照してください。
 
 ```powershell
 # Exact-source full remote acceptance, not a scoped test claim.
 ./scripts/write_native_release_manifest.ps1 -PackageRoot $verifiedPackage `
   -SourceCommit $commit -AcceptanceProof $fullAcceptance -OutputPath $freshManifest
 ./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
-  -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance
+  -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance `
+  -Archive $verifiedZip -Offer $localUnsignedOffer -DeveloperPublisher $developerPublisher
 # One-time migration/repair only: append -SynchronizeShortcuts, optionally
 # -ShortcutDirectories $identifiedNativeShortcutFolders.
 # Roll back without deleting either slot or closing a running application.
 ./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
-  -ActivateVersion $previousInstalledVersion
+  -ActivateVersion $previousInstalledVersion -Archive $originalWholeZip `
+  -Offer $originalLocalUnsignedOffer -DeveloperPublisher $developerPublisher
 # Manual capture: native executable and arguments, no shell execution-policy override.
 & 'E:\Apps\Gaussian Scene Workbench\bin\Gaussian Scene Workbench Launcher.exe' --diagnostics
 ```

@@ -285,6 +285,33 @@ def _cargo_identity(package) -> tuple[str, str]:
     return package["name"], package["version"]
 
 
+def locked_registry_packages(raw: bytes) -> dict:
+    """Preflight/cache inventory; release eligibility still uses the full source verifier."""
+    if len(raw) > MAX_MANIFEST:
+        _fail("update_source_dependency_resource_limit")
+    lock = _toml(raw)
+    packages = lock.get("package")
+    if (type(lock.get("version")) is not int or lock["version"] not in (3, 4)
+            or not isinstance(packages, list) or not 0 < len(packages) <= MAX_FILES):
+        _fail("update_source_dependency_metadata_invalid")
+    result, identities = {}, set()
+    for package in packages:
+        identity = _cargo_identity(package)
+        if identity in identities:
+            _fail("update_source_dependency_metadata_invalid")
+        identities.add(identity)
+        if "source" not in package:
+            if "checksum" in package:
+                _fail("update_source_dependency_metadata_invalid")
+            continue
+        if (package["source"] != "registry+https://github.com/rust-lang/crates.io-index"
+                or not isinstance(package.get("checksum"), str) or not SHA256.fullmatch(package["checksum"])):
+            _fail("update_source_dependency_evidence_unavailable")
+        validate_relative_path(identity[0] + "-" + identity[1] + ".crate")
+        result[identity] = package["checksum"]
+    return result
+
+
 def _cargo_path_manifest(owner: str, relative) -> str:
     """Resolve only canonical portable relative directories, never OS aliases."""
     if (not isinstance(relative, str) or not relative or len(relative.encode("utf-8")) > 1024

@@ -2,10 +2,14 @@
 [CmdletBinding(DefaultParameterSetName='Publish')]
 param(
   [Parameter(Mandatory=$true)][string]$InstallRoot,
-  [Parameter(Mandatory=$true,ParameterSetName='Publish')][string]$PackageRoot,
-  [Parameter(Mandatory=$true,ParameterSetName='Publish')][string]$FilesManifest,
-  [Parameter(Mandatory=$true,ParameterSetName='Publish')][string]$AcceptanceProof,
+  # Legacy directory inputs are admitted only for the first trusted bootstrap.
+  [Parameter(ParameterSetName='Publish')][string]$PackageRoot,
+  [Parameter(ParameterSetName='Publish')][string]$FilesManifest,
+  [Parameter(ParameterSetName='Publish')][string]$AcceptanceProof,
   [Parameter(Mandatory=$true,ParameterSetName='Activate')][string]$ActivateVersion,
+  [string]$Archive,
+  [string]$Offer,
+  [string]$DeveloperPublisher,
   [switch]$SynchronizeShortcuts,
   # Tests pass only owned fixture directories. Production defaults use actual
   # known Windows entry-point folders, never the taskbar's binary registry data.
@@ -38,20 +42,6 @@ function NewJson([string]$Path,$Value){
   $stream=[IO.FileStream]::new($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try{$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($Value|ConvertTo-Json -Depth 12));$stream.Write($bytes);$stream.Flush($true)}finally{$stream.Dispose()}
 }
-function AtomicJson([string]$Path,$Value){
-  $parent=[IO.Path]::GetDirectoryName($Path);$stage=Join-Path $parent ([guid]::NewGuid().ToString('N'))
-  NewJson $stage $Value
-  try{
-    for($attempt=0;$attempt -lt 40;$attempt++){
-      try{
-        # PowerShell converts a plain $null string argument to "". File.Replace
-        # needs an actual null backup filename, not an empty path.
-        if(Test-Path -LiteralPath $Path){[IO.File]::Replace($stage,$Path,[NullString]::Value)}else{[IO.File]::Move($stage,$Path)}
-        return
-      }catch [IO.IOException],[UnauthorizedAccessException]{if($attempt -eq 39){throw};Start-Sleep -Milliseconds 25}
-    }
-  }finally{if(Test-Path -LiteralPath $stage){Remove-Item -LiteralPath $stage}}
-}
 function VerifyFiles([string]$Directory,$Rows){
   foreach($row in $Rows){$file=Child $Directory $row.path;Require ((Test-Path -LiteralPath $file -PathType Leaf) -and
     (Get-Item -LiteralPath $file).Length -eq $row.size -and (Hash $file) -ceq $row.sha256) "Installation file mismatch: $($row.path)"}
@@ -69,24 +59,44 @@ function Maintenance([string]$Program,[string[]]$Arguments){
   foreach($argument in $Arguments){$start.ArgumentList.Add($argument)}
   $process=[Diagnostics.Process]::Start($start)
   $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-  try{Require ($process.WaitForExit(15000)) 'Native shortcut maintenance timed out.';Require ($process.ExitCode -eq 0) ('Native shortcut maintenance failed: '+$stderr.GetAwaiter().GetResult());return $stdout.GetAwaiter().GetResult()}finally{$process.Dispose()}
+  try{Require ($process.WaitForExit(60000)) 'native_maintenance_timed_out';Require ($process.ExitCode -eq 0) ('native_maintenance_failed: '+$stdout.GetAwaiter().GetResult()+' '+$stderr.GetAwaiter().GetResult());return $stdout.GetAwaiter().GetResult()}finally{$process.Dispose()}
+}
+function NoTrustRoot([string]$Root){
+  foreach($relative in @('.update-trust-anchor','updates/trust')){
+    try{$null=[IO.File]::GetAttributes((Join-Path $Root $relative));throw 'developer_trusted_root_forbidden'}
+    catch [IO.FileNotFoundException],[IO.DirectoryNotFoundException]{}
+  }
+}
+
+# Missing migration inputs are rejected before creating the installation,
+# evidence, locks or any pointer. Never silently use the retired PS activator.
+Require (-not [string]::IsNullOrEmpty($Archive) -and -not [string]::IsNullOrEmpty($Offer) -and -not [string]::IsNullOrEmpty($DeveloperPublisher)) 'native_publisher_inputs_required | 请提供 Archive、Offer、DeveloperPublisher；旧脚本激活已停用。 | Supply Archive, Offer and DeveloperPublisher; the old script activator is retired. | Archive・Offer・DeveloperPublisher が必要です。旧スクリプトによる切替は廃止されました。'
+$archivePath=FullLocal $Archive;$offerPath=FullLocal $Offer;$publisherPath=FullLocal $DeveloperPublisher
+foreach($inputPath in @($archivePath,$offerPath,$publisherPath)){NoLinks $inputPath;Require (Test-Path -LiteralPath $inputPath -PathType Leaf) 'native_publisher_input_missing'}
+$descriptor=Get-Content -LiteralPath $offerPath -Raw -Encoding utf8|ConvertFrom-Json
+Require ($descriptor.schema -ceq 'gsw.update_offer/1') 'native_publisher_offer_required'
+if($PSCmdlet.ParameterSetName -eq 'Activate'){
+  Require ($descriptor.buildId -ceq $ActivateVersion) 'native_publisher_archive_version_mismatch | 回退须提供该版本的原始完整 ZIP 和 Offer。 | Re-activation requires that version''s original complete ZIP and Offer. | 再切替には対象版の元の完全 ZIP と Offer が必要です。'
 }
 
 $root=FullLocal $InstallRoot;NoLinks $root
+NoTrustRoot $root
 if(-not $EvidenceDirectory){$EvidenceDirectory=Join-Path $root ('update-records/'+[guid]::NewGuid().ToString('N'))}
 $evidence=FullLocal $EvidenceDirectory;NoLinks $evidence
 Require (-not(Test-Path -LiteralPath $evidence)) 'Evidence directory already exists; preserving it.'
 [IO.Directory]::CreateDirectory($root)|Out-Null
 [IO.Directory]::CreateDirectory($evidence)|Out-Null
-$lock=$null;$stage=$null;$previous=$null;$pointer=$null;$activated=$false
+$previous=$null;$pointer=$null;$activated=$false;$publication=$null
 $changed=[Collections.Generic.List[object]]::new()
 try{
-  $lock=[IO.FileStream]::new((Join-Path $root '.publish.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
   $launcher=Join-Path $root 'bin/Gaussian Scene Workbench Launcher.exe'
-  $versions=Join-Path $root 'versions';[IO.Directory]::CreateDirectory($versions)|Out-Null
   $current=Join-Path $root 'current.json';$previous=$null
-  if(Test-Path -LiteralPath $current){$previous=Get-Content -LiteralPath $current -Raw|ConvertFrom-Json;Copy-Item -LiteralPath $current -Destination (Join-Path $evidence 'current-before.json')}
-  if($PSCmdlet.ParameterSetName -eq 'Publish'){
+  if(Test-Path -LiteralPath $current){
+    Copy-Item -LiteralPath $current -Destination (Join-Path $evidence 'current-before.json')
+    try{$previous=Get-Content -LiteralPath $current -Raw|ConvertFrom-Json}catch{$previous=$null}
+  }
+  if(-not(Test-Path -LiteralPath $launcher)){
+    Require ($PSCmdlet.ParameterSetName -eq 'Publish' -and $PackageRoot -and $FilesManifest -and $AcceptanceProof) 'native_first_bootstrap_inputs_required'
     $package=FullLocal $PackageRoot;NoLinks $package
     $manifest=Get-Content -LiteralPath $FilesManifest -Raw|ConvertFrom-Json
     $acceptance=Get-Content -LiteralPath $AcceptanceProof -Raw|ConvertFrom-Json
@@ -100,54 +110,29 @@ try{
     VerifyFiles $package $rows
     Require ((Hash (Join-Path $package 'bin/Gaussian Scene Workbench.exe')) -ceq $acceptance.compiledExecutableSha256) 'Accepted executable differs from the payload.'
     Require ($seen.Contains('bin/Gaussian Scene Workbench.exe') -and $seen.Contains('bin/Gaussian Scene Workbench Launcher.exe')) 'Both native executables are required.'
-    $payloadHash=Hash $FilesManifest
-    $version='v1-'+$manifest.sourceCommit.Substring(0,12)+'-'+$payloadHash.Substring(0,12)
-    $versionRoot=Child $versions $version
-    if(Test-Path -LiteralPath $versionRoot){
-      VerifyFiles $versionRoot $rows
-      $receipt=Get-Content -LiteralPath (Join-Path $versionRoot 'installed-release.json') -Raw|ConvertFrom-Json
-      Require ($receipt.payloadManifestSha256 -ceq $payloadHash) 'Existing immutable version identity differs.'
-    }else{
-      $stage=Child $versions ('stage-'+[guid]::NewGuid().ToString('N'))
-      [IO.Directory]::CreateDirectory($stage)|Out-Null
-      foreach($row in $rows){$destination=Child $stage $row.path;[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))|Out-Null;Copy-Item -LiteralPath (Child $package $row.path) -Destination $destination}
-      VerifyFiles $stage $rows
-      $receipt=[ordered]@{schema='gsw.native_installed_release/1';sourceCommit=$manifest.sourceCommit;payloadManifestSha256=$payloadHash;files=$rows}
-      NewJson (Join-Path $stage 'installed-release.json') $receipt
-      # Both resolved absolute paths are checked inside this owned versions root
-      # before moving the fresh directory; no old version is moved or removed.
-      $null=Child $versions ([IO.Path]::GetFileName($stage));$null=Child $versions $version
-      Move-Item -LiteralPath $stage -Destination $versionRoot;$stage=$null
-    }
-    $bootstrapReceipt=Join-Path $root 'bootstrap.json'
-    if(-not(Test-Path -LiteralPath $launcher)){
+    # This lock belongs only to first bootstrap. Release it before the native
+    # publisher takes the one shared lock for its whole activation operation.
+    $bootstrapLock=[IO.FileStream]::new((Join-Path $root '.publish.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try{
+      NoTrustRoot $root
+      Require (-not(Test-Path -LiteralPath (Join-Path $root 'bootstrap.json'))) 'native_bootstrap_already_exists'
       Require (-not(Test-Path -LiteralPath (Join-Path $root 'bin'))) 'Unrecognized existing bootstrap directory.'
       [IO.Directory]::CreateDirectory((Join-Path $root 'bin'))|Out-Null
       $bootstrapRows=@($rows|Where-Object{$_.path.StartsWith('bin/') -and $_.path -cne 'bin/Gaussian Scene Workbench.exe'})
-      foreach($row in $bootstrapRows){$destination=Child $root $row.path;[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))|Out-Null;Copy-Item -LiteralPath (Child $versionRoot $row.path) -Destination $destination}
+      foreach($row in $bootstrapRows){$destination=Child $root $row.path;[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))|Out-Null;Copy-Item -LiteralPath (Child $package $row.path) -Destination $destination}
       VerifyFiles $root $bootstrapRows
-      NewJson $bootstrapReceipt ([ordered]@{schema='gsw.native_bootstrap/1';protocol=1;files=$bootstrapRows})
-    }else{
-      $bootstrap=Get-Content -LiteralPath $bootstrapReceipt -Raw|ConvertFrom-Json
-      Require ($bootstrap.schema -ceq 'gsw.native_bootstrap/1' -and $bootstrap.protocol -eq 1) 'Unsupported bootstrap protocol.'
-      # Bootstrap stays immutable on ordinary version updates. Versioned apps
-      # keep their own Qt/runtime; a bootstrap migration is a separate operation.
-      VerifyFiles $root $bootstrap.files
-    }
-  }else{
-    Require ($ActivateVersion -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$' -and $ActivateVersion -notmatch '[.]$|^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:[.]|$)') 'Invalid installed version identity.'
-    $version=$ActivateVersion;$versionRoot=Child $versions $version
-    $receipt=Get-Content -LiteralPath (Join-Path $versionRoot 'installed-release.json') -Raw|ConvertFrom-Json
-    Require ($receipt.schema -ceq 'gsw.native_installed_release/1') 'Invalid installed release.'
-    VerifyFiles $versionRoot $receipt.files
-    $bootstrap=Get-Content -LiteralPath (Join-Path $root 'bootstrap.json') -Raw|ConvertFrom-Json
-    Require ($bootstrap.schema -ceq 'gsw.native_bootstrap/1' -and $bootstrap.protocol -eq 1) 'Unsupported bootstrap protocol.'
-    VerifyFiles $root $bootstrap.files
+      NewJson (Join-Path $root 'bootstrap.json') ([ordered]@{schema='gsw.native_bootstrap/1';protocol=1;files=$bootstrapRows})
+    }finally{$bootstrapLock.Dispose()}
   }
-  $application=Join-Path $versionRoot 'bin/Gaussian Scene Workbench.exe'
-  $pointer=[ordered]@{schema='gsw.native_active_version/1';version=$version;executableSha256=(Hash $application)}
-  AtomicJson $current $pointer
+  # No PowerShell version-slot copy, receipt admission, pointer writer or second
+  # operation-wide lock remains. Core independently validates every ZIP byte.
+  $publication=(Maintenance $publisherPath @('--publish-unsigned-local',$root,$archivePath,$offerPath))|ConvertFrom-Json
+  Require ($publication.schema -ceq 'gsw.native_developer_publication/1' -and $publication.ok -eq $true -and
+    $publication.publisherAuthenticated -eq $false -and $publication.admission -ceq 'local-developer-unsigned') 'native_publisher_response_invalid'
   $activated=$true
+  $pointer=Get-Content -LiteralPath $current -Raw|ConvertFrom-Json
+  $version=$publication.buildId
+  Require ($pointer.version -ceq $version) 'native_publisher_pointer_readback_differs'
   if($SynchronizeShortcuts){
     if(-not $ShortcutDirectories){$ShortcutDirectories=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),(Join-Path $env:APPDATA 'Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar'))}
     foreach($directory in $ShortcutDirectories){
@@ -180,11 +165,11 @@ try{
       }
     }
   }
-  NewJson (Join-Path $evidence 'publication.json') ([ordered]@{sourceCommit=$receipt.sourceCommit;installRoot=$root;previous=$previous;current=$pointer;changedShortcuts=$changed.ToArray();oldVersionsRemoved=0;userApplicationsStarted=0;userApplicationsStopped=0;publishedAt=(Get-Date).ToString('o')})
-  Write-Output ('ACTIVE NATIVE VERSION: '+$version)
+  NewJson (Join-Path $evidence 'publication.json') ([ordered]@{sourceCommit=$descriptor.sourceCommit;installRoot=$root;previous=$previous;current=$pointer;nativePublication=$publication;publisherAuthenticated=$false;changedShortcuts=$changed.ToArray();oldVersionsRemoved=0;userApplicationsStarted=0;userApplicationsStopped=0;publishedAt=(Get-Date).ToString('o')})
+  Write-Output ($publication|ConvertTo-Json -Compress)
 }catch{
   # A failed entry-point migration must not be reported as a failed activation
   # (nor as complete success). The old links and exact backups remain available.
   NewJson (Join-Path $evidence 'publication-failed.json') ([ordered]@{installRoot=$root;activated=$activated;current=$pointer;changedShortcuts=$changed.ToArray();error=$_.Exception.Message})
   throw
-}finally{if($lock){$lock.Dispose()}}
+}

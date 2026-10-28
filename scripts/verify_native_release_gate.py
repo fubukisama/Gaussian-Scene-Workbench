@@ -432,7 +432,8 @@ def _required_results(policy, source_commit, github):
                     or status.get("creator", {}).get("login", "").casefold() != requirement["creatorLogin"].casefold()
                     or status.get("state") != "success"):
                 raise ReleaseGateError("release_required_status_not_success")
-            statuses.append({"context": requirement["context"], "id": status["id"]})
+            statuses.append({"context": requirement["context"], "id": status["id"],
+                "creatorId": status["creator"]["id"], "creatorLogin": status["creator"]["login"]})
     return verified, statuses
 
 
@@ -531,6 +532,9 @@ def _artifact_payload(policy, source_commit, source_tree, artifact_id, archive_p
         if (not isinstance(report, dict) or report.get("schema") != "gsw.native_update_package/1"
                 or report.get("product") != PRODUCT or report.get("platform") != "windows-x64"
                 or report.get("sourceCommit") != source_commit or report.get("sourceTree") != source_tree
+                or not isinstance(report.get("buildIdentity"), dict)
+                or any(type(report["buildIdentity"].get(key)) is not int
+                       for key in ("repositoryId", "workflowId", "runId", "runAttempt"))
                 or report.get("buildIdentity") != expected_build
                 or not isinstance(report.get("buildId"), str)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", report["buildId"])
@@ -561,7 +565,10 @@ def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
     if policy_path.is_symlink() or not policy_path.is_file() or policy_path.stat().st_size > MAX_POLICY:
         raise ReleaseGateError("release_policy_unavailable")
     try:
-        raw = policy_path.read_bytes()
+        with policy_path.open("rb") as stream:
+            raw = stream.read(MAX_POLICY + 1)
+        if len(raw) > MAX_POLICY:
+            raise ReleaseGateError("release_policy_unavailable")
         policy = _decode(raw)
     except (UnicodeError, json.JSONDecodeError):
         raise ReleaseGateError("release_policy_invalid") from None
@@ -599,10 +606,11 @@ def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
         "sourceCommit": source_commit, "sourceTree": source_tree, "product": PRODUCT,
         "platform": "windows-x64", "buildId": report["buildId"], "displayVersion": report["displayVersion"],
         "releaseSequence": report["releaseSequence"], "artifactId": artifact_id, "artifactName": artifact["name"],
-        "artifactDigest": artifact["digest"], "archiveLength": report["archiveLength"],
+        "artifactDigest": artifact["digest"], "artifactCreatedAt": artifact["created_at"], "archiveLength": report["archiveLength"],
         "archiveSha256": report["archiveSha256"], "payloadManifestSha256": report["payloadManifestSha256"],
         "correspondingSourceSha256": report["correspondingSourceSha256"],
         "policySha256": approved_policy_sha256, "sourceEvidence": source_evidence,
+        "protectedChecks": protected, "statuses": statuses,
         "workflows": [{"path": path, "runId": row["run"]["id"], "attempt": row["run"]["run_attempt"],
                        "workflowId": row["run"]["workflow_id"], "event": row["run"]["event"],
                        "headSha": row["run"]["head_sha"], "headBranch": row["run"]["head_branch"],
@@ -628,7 +636,7 @@ def main() -> int:
     except ReleaseGateError as error:
         print(json.dumps({"schema": "gsw.release_gate_result/1", "ok": False, "code": error.code}))
         return 2
-    except (OSError, ValueError, TypeError, KeyError, AttributeError, zipfile.BadZipFile):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, zipfile.BadZipFile, subprocess.SubprocessError):
         print(json.dumps({"schema": "gsw.release_gate_result/1", "ok": False,
                           "code": "release_evidence_unavailable"}))
         return 2

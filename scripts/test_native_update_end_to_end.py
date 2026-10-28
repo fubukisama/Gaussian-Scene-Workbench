@@ -401,6 +401,36 @@ class EndToEnd(unittest.TestCase):
             "trustHighWaterAfterRollback": 3, "bootstrapUnchanged": True, "userSentinelsUnchanged": True,
             "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
 
+    def test_legacy_protocol1_without_trust_keeps_explicit_local_developer_startup(self):
+        original_root, original_helper = self.installation, self.helper
+        root = Path(self.preparation["root"]) / "legacy-local-startup-installation"
+        root.mkdir()
+        # A legacy local developer installation has no TUF authority or helper
+        # grant. It is NOT an authenticated public update installation.
+        shutil.copytree(original_root / "bin", root / "bin",
+            ignore=shutil.ignore_patterns(original_helper.name))
+        slot = root / "versions/fixture-a"
+        shutil.copytree(Path(self.preparation["root"]) / "package-A", slot)
+        executable = slot / "bin/Gaussian Scene Workbench.exe"
+        write_json(root / "current.json", {"schema": "gsw.native_active_version/1", "version": "fixture-a",
+                                          "executableSha256": digest(executable)})
+        files = sorted(path for path in (root / "bin").rglob("*") if path.is_file())
+        write_json(root / "bootstrap.json", {"schema": "gsw.native_bootstrap/1", "protocol": 1,
+            "files": [{"path": path.relative_to(root).as_posix(), "size": path.stat().st_size,
+                       "sha256": digest(path)} for path in files]})
+        self.installation = root
+        try:
+            self.assertFalse((root / ".update-trust-anchor").exists())
+            self.assertFalse((root / "updates/trust").exists())
+            before = tree_hashes(root)
+            self.launch("A")
+            self.assertEqual(tree_hashes(root), before)
+            write_json(self.evidence / "legacy-local-startup-result.json", {"passed": True, "testOnly": True,
+                "formalGswAcceptance": False, "admission": "local-developer-unsigned", "publisherAuthenticated": False,
+                "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
+        finally:
+            self.installation, self.helper = original_root, original_helper
+
     def test_revoked_installed_build_is_refused_without_changing_trust_or_pointer(self):
         original_root, original_helper = self.installation, self.helper
         root = Path(self.preparation["root"]) / "revocation-installation"
@@ -527,6 +557,29 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(tree_hashes(root / "versions"), slots)
             self.assertEqual(tree_hashes(root / "bin"), bootstrap)
             self.assertEqual(tree_hashes(root / "user-data"), data)
+            original_bootstrap = (root / "bootstrap.json").read_bytes()
+            anchor = root / ".update-trust-anchor"
+            retained_anchor = root / ".update-trust-anchor.downgrade-owned-backup"
+            for retained_trust in ("anchor-and-state", "state-without-anchor"):
+                with self.subTest(legacy_downgrade=retained_trust):
+                    try:
+                        if retained_trust == "state-without-anchor":
+                            os.replace(anchor, retained_anchor)
+                        legacy = json.loads(original_bootstrap)
+                        legacy["protocol"] = 1
+                        (root / "bootstrap.json").write_text(json.dumps(legacy), encoding="utf-8")
+                        protected = tree_hashes(root)
+                        # Historical public trust cannot be downgraded to the
+                        # unsigned local-developer path by reverting metadata.
+                        self.refused_launch("B")
+                        self.assertEqual(self.active("fixture-b"), pointer_b)
+                        self.assertEqual(tree_hashes(root), protected)
+                    finally:
+                        (root / "bootstrap.json").write_bytes(original_bootstrap)
+                        if retained_trust == "state-without-anchor":
+                            os.replace(retained_anchor, anchor)
+            self.assertEqual(journal.read_bytes(), state_bytes)
+            self.assertEqual(self.accepted(), accepted)
             self.helper_request("startup-explicit-safe-A", "--rollback", "stable", "fixture-a")
             self.assertEqual(self.active("fixture-a"), pointer_a)
             self.launch("A", arguments=("--owned-fixture", "空白 日本語 & ; $(not-a-command)"), diagnostics=True)

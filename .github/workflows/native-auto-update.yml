@@ -7,6 +7,8 @@ on:
     paths:
       - 'native/updater/**'
       - 'native/updater-ui/**'
+      - 'native/updater-developer/**'
+      - 'native/src/NativeDeveloperPublisher*'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
       - 'native/third_party/miniz/**'
@@ -18,6 +20,9 @@ on:
       - 'scripts/*native_update*'
       - 'scripts/*native_release_gate*'
       - 'scripts/prepare_native_update_trust_ci.py'
+      - 'scripts/test_native_developer_publisher.py'
+      - 'scripts/verify_native_update_source_bundle.py'
+      - 'scripts/prepare_native_update_source.py'
       - '.github/workflows/native-auto-update.yml'
 
 # This workflow only builds/tests isolated candidates. Ordinary main pushes
@@ -31,6 +36,85 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/native/build-auto-update/rust
 
 jobs:
+  isolated-source-closure:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      CARGO_HOME: D:/gu/c
+      RUSTUP_HOME: D:/gu/r
+      CARGO_TARGET_DIR: D:/gu/source-target
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          check-latest: true
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/c
+            D:/gu/r
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Verify actual exact-source and locked registry closure without running payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-source-proof -Force | Out-Null
+          $env:TEMP="$PWD/native/.tmp-source-proof"; $env:TMP=$env:TEMP
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'Source-proof pinned Rust unavailable.'}
+          python -I -B scripts/verify_native_update_source_bundle.py --root D:/gs/pkg `
+            --repository "$PWD" --evidence "$PWD/native/source-proof-evidence" `
+            --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
+            --cargo-home D:/gu/c
+          if($LASTEXITCODE -ne 0){throw 'Actual corresponding-source closure failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-source-proof-evidence
+          path: native/source-proof-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  isolated-developer-core:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          check-latest: true
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-updater
+      - name: Build separate unsigned-local developer adapter only
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-developer -Force | Out-Null
+          $env:TEMP="$PWD/native/.tmp-developer"; $env:TMP=$env:TEMP
+          cmake -S native/updater-developer -B native/build-developer-publisher -G 'Visual Studio 17 2022' -A x64
+          if($LASTEXITCODE -ne 0){throw 'Developer adapter configure failed.'}
+          cmake --build native/build-developer-publisher --config Release --target gsw_native_developer_publisher
+          if($LASTEXITCODE -ne 0){throw 'Developer adapter build failed.'}
+          $publisher="$PWD/native/build-developer-publisher/Release/GSW Native Developer Publisher.exe"
+          windeployqt --release --no-translations --compiler-runtime $publisher
+          if($LASTEXITCODE -ne 0){throw 'Developer adapter fixture runtime failed.'}
+          python -I -B scripts/test_native_developer_publisher.py --remote-fixture-only `
+            --publisher $publisher --work-root D:/gu/developer-red --evidence "$PWD/native/developer-evidence"
+          if($LASTEXITCODE -ne 0){throw 'Shared native developer activation contract failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-developer-evidence
+          path: native/developer-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   isolated-update-ui:
     runs-on: windows-2022
     timeout-minutes: 10
