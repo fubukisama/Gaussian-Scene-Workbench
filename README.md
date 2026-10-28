@@ -1,204 +1,65 @@
-# Gaussian Scene Workbench
+<p align="center">
+  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench icon">
+</p>
 
-**Gaussian Scene Workbench** is a Windows desktop research workbench for Gaussian Splatting, photogrammetry, point clouds and meshes.
+<h1 align="center">Gaussian Scene Workbench</h1>
 
-中文：**高斯场景研究工作台** · 日本語：**ガウスシーン研究ワークベンチ**
+<p align="center">
+  <strong>Reconstruct, train and edit Gaussian scenes in one native workspace.</strong>
+</p>
 
-[English](#native-desktop-preview) · [简体中文](#简体中文) · [日本語](#日本語)
+<p align="center">
+  <img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="Native preview 0.3.8">
+  <img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64">
+  <a href="native/LICENSE.md"><img src="https://img.shields.io/badge/desktop_license-GPL--3.0--or--later-16a34a?style=flat-square" alt="Original native desktop: GPL-3.0-or-later"></a>
+</p>
 
-## Native Desktop Preview
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
+</p>
 
-- Version: `0.3.8-native-preview`
-- Experimental quality plans: [English / 简体中文 / 日本語 guide](docs/QUALITY_PLAN.md). Methods remain opt-in; engineering checks are not final quality or independent geometry acceptance, and MCMC is not enabled in the desktop selector.
-- Incremental changes: [generated-path safety and explicit quality presets](docs/ACCEPTANCE_FOLLOWUP.md).
-- Reliability fixes: [equivalent Windows output paths and pause during metadata publication](docs/CI_RELIABILITY.md).
-- Documentation updated: `2026-10-23`; runtime controls, camera/scale and general-reconstruction support limits are documented below. Local acceptance and complete cloud CI are separate delivery records; an in-progress run is not a full pass.
-- Active branch: [`main`](https://github.com/fubukisama/Gaussian-Scene-Workbench/tree/main)
-- Interface: Qt 6.8 / C++20 / native OpenGL. The desktop UI does not run HTML, Electron, Node.js, a browser engine or a local web server.
+<p align="center">
+  <a href="README_RELEASE.md"><strong>Get the Windows preview</strong></a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="native/README.md">Build from source</a> ·
+  <a href="https://github.com/fubukisama/Gaussian-Scene-Workbench/issues">Report a bug</a>
+</p>
 
-The `main` branch is the single maintained branch for the **native desktop application** and its supervised compute backend. The retired HTML/Electron interface, local HTTP server, browser tests and Node packaging have been removed. Native development remains a preview; retirement of the old interface does not imply that every former feature has been ported.
+---
 
-### Current capabilities
+GSW brings **Gaussian Splatting, photogrammetry, point clouds and meshes** into a Qt / C++ desktop application. Start with photos, video or known cameras—or open a model you already have.
 
-- **Gaussian PLY transform baking:** ordinary 3DGS/2DGS PLY exports bake full-source scene translation, rotation and scale while preserving field types and unrelated values. Two-scale 2DGS gains no invented thickness; nonuniform transforms with directional SH are rejected rather than approximated. Recorded-camera exports keep their proper-Sim3 provenance constraints. See the [route selection, fidelity limits and source-protection guide](docs/GAUSSIAN_PLY_BAKING.md).
-- **Recorded PLY and persistent batches:** ordinary point clouds/indexed meshes can use recorded-frame restoration with hash-bound cameras, attributes and safe `TextureFile` assets. Explicit proper uniform scene edits are tracked separately from passive frame/unit conversion, including Gaussian orientation/appearance; repeat exports do not bake the same edit twice. Native batch observation can detach/reopen independently of the coordinator, with verified-session pause, checkpoint-preserving cancellation and explicit full-state continuation. See [precise scope and verification boundaries](docs/RECORDED_PLY_AND_BATCH.md).
-- **Independent training runtime controls:** 3DGS/2DGS memory-growth protection is separate from exact-image staging, camera prefetch, capacity storage, loss and backend-specific auxiliary execution. Version-two requests retain dependency-resolved settings and observed execution separately; old disabled presets do not re-enable their children. Guard-only overrides apply through validated full-state resume, not an unverified hot switch. The existing-job observer uses OS/session-bound liveness, read-only attachment and explicit pause/stop; Windows persistent training can continue after the desktop closes. See [schema, migration, lifecycle and remaining acceptance gates](docs/RUNTIME_DECOUPLING.md). Guard OFF does not suppress real CUDA out-of-memory errors or guarantee model quality.
-- **Traceable metric delivery:** known-scale 3DGS/2DGS results use the same restoration module for manual export and separate default metre-coordinate delivery, retaining the original training model. Current-frame/unit tracking prevents double restoration; centres, two/three log sizes, orientation/covariance and SH0–4 appearance rotate together. Hash-bound per-model camera bundles retain complete intrinsics and transformed poses. Unknown scale blocks metric success rather than guessing metres. See [format support and acceptance limits](docs/RUNTIME_DECOUPLING.md#recorded-frame-and-metric-delivery-instruction-version3).
+## One workspace, six essentials
 
-- **General reconstruction:** editable, explainable initialization bounds and frozen point identities; native known-camera 3DGS/2DGS rendered camera-Z/mask point clouds; independent bidirectional geometry/coverage/dimension evaluation; reusable named comparison recipes. Products retain full camera/frame/scale/split/backend provenance and remain separate from original Gaussians/checkpoints. This is an unfused appearance proxy, not a certified material boundary; short-run acceptance is not accuracy certification. See [interfaces and precise support limits](docs/GENERAL_RECONSTRUCTION.md).
+| Build and train | Inspect and deliver |
+| --- | --- |
+| **Reconstruct**<br>Import photos or video, link datasets and run COLMAP. | **Explore**<br>View Gaussians, 2DGS surfels, point clouds and textured meshes. |
+| **Train**<br>Run 3DGS / 2DGS experiments with progress, safe pause and compatible full-state resume. | **Edit**<br>Select, transform and crop supported models, with undo and original-file protection. |
+| **Keep coordinates traceable**<br>Preserve locked cameras, units, scale constraints and data splits. | **Extract and evaluate**<br>Export PLY / SPZ, use optional mesh routes and compare geometry against independent references. |
 
-- **Scale constraints and controlled batches (P1):** known distances, camera baselines and control points solve scale-only or proper Sim3 alignment. Fit constraints and independent reference checks remain separate and versioned; neither is a whole-model accuracy measurement. Explicit single-camera TUM/CSV/JSON association and pinned serial 3DGS/2DGS parameter/seed batches preserve declared cameras, initialization and held-out images. See the [P1 guide, examples and capability limits](docs/CAMERA_SCALE_P1.md). Checkpoint data/source/optimizer compatibility stays strict; migration of old runtime settings does not bypass full-state validation or convert a PLY warm start into resume.
+## Start in three steps
 
-- **Known cameras and scale (P0):** Blender transforms, COLMAP text/binary, canonical JSON and an independent research-JSON adapter share explicit locked/solve policies. Locked cameras are not re-solved, full pinhole K and user-selected resolution are recorded, and validation/test views cannot enter training. Hash-bound transform/scale records accompany native measurement, complete-state resume and separate Gaussian-aware restored exports. Source-declared units are not independent geometry-accuracy evidence. See [protocol, capability matrix and acceptance limits](docs/CAMERA_SCALE_P0.md).
+1. **Install the preview.** Follow the [download guide](README_RELEASE.md) for the available installer and its prerequisites.
+2. **Bring in a scene.** Add photos / video, link a dataset, or import an existing PLY / SPZ model.
+3. **Choose your workflow.** Train, inspect, edit or export. [Find the right guide →](docs/README.md)
 
-- **Projects and media:** untitled projects, photo/folder/video import, external dataset links, portable `.gsw.json` projects and managed data, Save As/recovery, and separate dataset/reconstruction/scene/task-history cleanup.
-- **Reconstruction and training:** guarded COLMAP reconstruction, 3DGS/2DGS training, input/runtime preflight, reconstruction reuse explanations, progress, logs and cancellation. CUDA training needs a compatible external environment.
-- **Safe pause/resume:** compatible native 3DGS/2DGS jobs save full optimizer state at an iteration boundary. Resume validates inputs, settings and checkpoint contents and requires explicit trust confirmation. PLY previews and warm starts are not full-state resume.
-- **Training performance and quality:** bounded exact-pixel image staging, VRAM-aware growth admission and quality-first full-state pause, optional numerically verified MIT fused L1/SSIM, and truthful whole-step/stage/memory monitoring. Experimental Faster-GS is capability-gated, not a replacement for default densification or 2DGS. See[training performance](docs/TRAINING_PERFORMANCE.md).
-- **Independent experiments:** new jobs preserve existing models and transforms, use a separate task-preview layer, and retain individual settings, results and available resume entries. Pause Preview freezes observation, not training. Reference-model display caches can yield resources without deleting project objects.
-- **Native visualization:** Gaussian, 2DGS surfel, point-cloud and triangle-mesh display, Gaussian SH controls, camera trajectories, perspective/orthographic navigation and an adaptive infinite grid. FPS measures completed viewport-frame cadence with 60-frame smoothing, not GPU execution time or the inverse of CPU submission time.
-- **Shared coordinates and editing:** shared scene units/reference, preserved source coordinates, reversible display shifts, coordinate reports, multi-object selection, Move/Rotate/Scale/Transform, Global/Local orientation, numeric input, snapping and undo/redo. The fixed source-base grid does not lock models to the plane; independent reconstructions are not automatically registered.
-- **Large models and export:** complete mesh loading when estimated RAM/GPU costs fit, disk-backed paging otherwise, live automatic/aggressive or manual budgets, textured PLY display, full-source point/Gaussian selection and cropping where supported, and PLY/SPZ plus mesh export subject to format-specific limits.
-- **Desktop UI:** immediate Simplified Chinese/English/Japanese switching, light/dark and local-time automatic appearance, 90–150% scaling, unified vector icons, responsive edit toolbars, remembered file/folder history, persistent panels and save/exit confirmation with worker cleanup.
+> **Preview, not a bundled training environment.** Reconstruction and CUDA training need compatible external runtimes. Full-state resume is limited to compatible native 3DGS / 2DGS checkpoints. Rendered depth products are appearance proxies, not certified physical surfaces or accuracy measurements.
 
-Mesh-generation routes include bounded/unbounded TSDF, SuGaR and GS2Mesh, with optional OpenMVS photo texturing. Runtimes, weights and verification gates are backend-specific; mesh stages do **not** provide full optimizer-state resume. See the [pipeline matrix](docs/GENERATION_PIPELINES.md) and [mesh guide](docs/MESH_GENERATION.md).
+<details>
+<summary><strong>See the native viewport</strong></summary>
 
-### Download and run on Windows
+![Native viewport displaying four independently loaded synthetic layers](docs/images/native-viewport-fixture.png)
 
-1. The actual installer is `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`, with a destination/shortcut wizard and Windows uninstall support. Obtain it from native [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases) when published, or the **Windows setup installer** artifact of a fully successful [Native Windows run](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml). If no accepted Setup exists yet, use the [installer guide](docs/WINDOWS_INSTALLER.md); an in-progress run is not a release.
-2. The separate portable artifact is only a ZIP: extract the **complete package** to a writable directory and launch `bin/Gaussian Scene Workbench.exe`. Keep Qt DLLs, plugins, backend files, licenses and corresponding source. Setup prefers a writable non-system drive, remembers the chosen directory and preserves user-added data on uninstall.
-3. Verify the external runtime before reconstruction/training, then add media or import PLY/SPZ. See [Windows runtime setup](docs/WINDOWS_NATIVE_RUNTIME.md) and [COLMAP setup](docs/COLMAP_SETUP.md).
+Actual native viewport capture from an independent synthetic regression scene. It illustrates mixed-model display, not reconstruction quality. [Image provenance](docs/images/README.md).
 
-Prefer a non-system drive when available, such as `D:\Apps\GSW`. C:-only devices automatically use the existing writable workspace/build/package location. Windows Application Control may require approved signed binaries/runtimes; the app does not disable or bypass that policy.
+</details>
 
-The old HTML/Electron Releases have been retired. Setup never auto-launches GSW or training. Unsigned previews may require an approved code-signing/runtime policy; no Windows security policy is bypassed.
+## Go deeper
 
-### Build the native desktop
+[Training & resume](docs/TRAINING_RESUME.md) · [Known cameras & scale](docs/CAMERA_SCALE_P0.md) · [Geometry & evaluation](docs/GENERAL_RECONSTRUCTION.md) · [Supported pipelines](docs/GENERATION_PIPELINES.md) · [Display & navigation](docs/VIEWPORT_DISPLAY.md)
 
-From this branch's checkout, with the dependencies in [native/README.md](native/README.md):
+## License
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_native.ps1 -Configuration Release -Package
-```
+The original native desktop is **GPL-3.0-or-later**; other original code and third-party components retain their own licenses. Graphdeco research backends have separate non-commercial restrictions—GPL does not grant commercial rights to every backend.
 
-The default runnable directory is `native/dist/Gaussian-Scene-Workbench-0.3.5-native-preview-win-x64/`, with the executable under `bin/`. Use `-BuildDirectory` and `-PackageDirectoryName` for custom or side-by-side locations. Save and exit normally before switching an active installation/desktop shortcut. CUDA/PyTorch training dependencies are separate from the Qt desktop build.
-
-Translation and native regression commands:
-
-```powershell
-python -B scripts/native_i18n.py
-python -B scripts/test_native_i18n.py
-ctest --test-dir native/build -C Release --output-on-failure
-```
-
-Replace `native/build` for custom builds. GUI tests require the configured Qt/OpenGL runtime; optional CUDA integration gates are documented separately.
-
-### Important boundaries
-
-- The OpenGL preview is not the upstream CUDA tile renderer. GPU timing queries and 2DGS shared-GPU-memory live preview remain separate limitations; checkpoint-based previews are available where supported.
-- Mesh budgets are estimates, not a hard quota for all Gaussian buffers, other processes or training allocations. Geometry paging does not page texture atlases.
-- Full-state resume applies to compatible native 3DGS/2DGS checkpoints, not arbitrary external PTH files or mesh stages. Experiment metadata persists; task logs and historical metric curves remain session-only.
-- Do not assume legacy PSNR/evaluation, asset-management or all HTML features are implemented in the native interface.
-
-### Documentation and source layout
-
-- [Native build and implementation](native/README.md)
-- [Windows runtimes](docs/WINDOWS_NATIVE_RUNTIME.md) · [App Control/signing](docs/WINDOWS_APPLICATION_CONTROL.md)
-- [Generation pipelines](docs/GENERATION_PIPELINES.md) · [Training resume and experiment history](docs/TRAINING_RESUME.md)
-- [Independent runtime controls and existing-job observation](docs/RUNTIME_DECOUPLING.md)
-- [Scene coordinates](docs/SCENE_COORDINATES.md) · [Multiple models](docs/MULTI_SCENE_IMPORT.md)
-- [Resource budgets](docs/RESOURCE_BUDGETS.md) · [Mesh generation](docs/MESH_GENERATION.md)
-- [Icon system](docs/ICON_SYSTEM.md) · [Localization](docs/LOCALIZATION.md)
-- [Migration](docs/NATIVE_MIGRATION.md) · [Parity gates](docs/NATIVE_PARITY.md)
-
-`native/` contains the desktop UI, OpenGL renderer, workers and tests. `native/backend/compute.py` contains shared dataset, reconstruction, training and mesh orchestration; workers call it directly without an HTTP listener. `docs/` and `scripts/` contain documentation, build/runtime and validation tools; `training_kit/` and `gaussian-splatting/` contain compute helpers and training sources. See [backend migration and compatibility](docs/NATIVE_MIGRATION.md).
-
-Generated datasets, outputs, environments, caches, builds and packages are excluded from Git. Earlier versions remain recoverable from Git history and published tags; deleting retired code from this branch does not delete research data or rewrite that history.
-
-### License and intended use
-
-The original native desktop main program is **GPL-3.0-or-later** from the 2026-10-14 licensing change; its scope and exceptions are in [native/LICENSE.md](native/LICENSE.md), with the complete GPL text in [COPYING](COPYING). The Blender v4.5.0 cone/cube geometry port retains upstream notices; existing GSW drag, constraint and undo logic is retained rather than importing Blender's complete operator system. Earlier MIT grants and original code outside this scope remain under [LICENSE](LICENSE). Third-party training, CUDA, codec, Qt and icon components retain their own licenses. Graphdeco research components still have non-commercial research/evaluation restrictions unless separate permission is obtained. The GPL main-program grant does not grant commercial rights to every backend. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-
-## 简体中文
-
-本轮将显存增密保护与图像暂存、相机预取、容量存储、损失及后端辅助优化分开设置；保存请求值、依赖解析值与实际执行证据。旧版关闭的总开关不会重新开启子功能；只改保护策略须经完整状态校验后续训，不冒充实时热切换。现有作业按操作系统／会话身份连接，观察不改作业，暂停／停止须明确操作；Windows 持久训练可在退出桌面后继续。关闭软件保护不能免除真实 CUDA 内存不足，也不保证质量。见[配置、迁移、生命周期与待验收边界](docs/RUNTIME_DECOUPLING.md)；本地验收与云端全套结果分别记录，运行中不等于通过。
-
-已知尺度的 3DGS／2DGS 默认另存实际米制成果，手动导出共用同一恢复模块并保留训练原件；按当前坐标与单位转换，避免二次逆变换。位置、二／三轴对数尺寸、方向／协方差及0–4阶SH一起处理；每模型相机包绑定模型哈希，保存完整内参与同框架位姿。未知尺度不冒称米制成功；普通点云与网格不冒充完整GS。见[格式支持与验收边界](docs/RUNTIME_DECOUPLING.md#recorded-frame-and-metric-delivery-instruction-version3)。
-
-本轮补齐可解释的初始化范围与冻结点集、3DGS／2DGS 真实相机 Z 深度和掩膜点云、独立双向几何／缺面／尺寸评价，以及任意命名的可复用比较配置。相机、划分、尺度、变换、模型及后端来源均可追溯，原高斯和检查点保留；深度点云是未融合的外观代理，不是物理材料边界或精度认证。见[通用重建接口与支持范围](docs/GENERAL_RECONSTRUCTION.md)。
-
-P1 新增距离、相机基线和控制点定尺度／Sim3 对齐，分开保存拟合与独立参考检核；两者均不等于模型几何精度。单相机 TUM／CSV／JSON 轨迹关联与固定身份的串行 3DGS／2DGS 参数、种子批次保留相机、初始化和测试划分。见 [P1 指南、示例与能力边界](docs/CAMERA_SCALE_P1.md)。检查点的数据、源码与优化器校验保持严格；旧运行设置迁移不能绕过完整状态校验，更不能以 PLY 热启动冒充完整续训。
-
-**高斯场景研究工作台**在唯一维护的 `main` 分支开发原生桌面预览版，版本为 `0.3.8-native-preview`。本页文档更新日期为 **2026-10-23**。Qt 6.8/C++20/OpenGL 界面不运行 HTML、Electron、Node.js、浏览器引擎或本地网页服务器。
-
-新增默认关闭的[实验性质量计划](docs/QUALITY_PLAN.md)：工程验证、最终画质与独立几何分别验收，不自动切换默认算法；MCMC 在桌面仍不可选。
-
-增量可靠性修复覆盖 Windows 等价长短路径交付及状态文件原子发布期间的暂停请求；仍保留路径、会话及取消保护。见[支持边界与验收说明](docs/CI_RELIABILITY.md)。
-
-普通 3DGS／2DGS PLY 可将场景平移、旋转和缩放烘焙到完整源数据，保留字段类型及无关属性；双轴 2DGS 不增加厚度。保留点含非零方向 SH 时拒绝非等比缩放，不近似外观；记录相机路线仍遵守 proper-Sim3 来源约束。见[高斯 PLY 烘焙路线、保真边界与原件保护](docs/GAUSSIAN_PLY_BAKING.md)。
-
-本分支已移除旧网页界面、Electron 外壳、HTTP 服务、浏览器测试和 Node 打包代码。数据集、重建、训练与网格共用的后端迁至 `native/backend/compute.py`，由原生 worker 直接调用。旧版本仍可从 Git 历史和已发布标签查阅；原始研究数据不因代码清理而删除。见[迁移与兼容说明](docs/NATIVE_MIGRATION.md)。
-
-### 当前功能
-
-- **已知相机与尺度（P0）：**标准 transforms、COLMAP 文本／二进制、规范 JSON 与独立研究 JSON 适配器共用明确的锁定／求解策略。锁定相机不重求解，保留完整针孔 K 和用户选择的分辨率；验证／测试视图不进入训练。哈希绑定的尺度和变换记录贯通原生测量、完整状态续训与独立高斯坐标恢复导出。来源声明单位不是独立几何精度证明。见[协议、能力矩阵及验收边界](docs/CAMERA_SCALE_P0.md)。
-
-- **工程与素材：**未命名工程，照片/文件夹/视频导入，外部数据集关联，保存/另存为、恢复，以及数据集、重建、场景、任务历史的分别清理。
-- **重建与训练：**COLMAP、3DGS/2DGS、数据与环境预检、复用重建原因、进度、日志和取消。CUDA 训练需要兼容的独立运行环境。
-- **训练性能与质量：**有上限的无损图像缓存与传输、显存增密保护、质量优先的完整状态暂停、经过数值验证的可选MIT联合L1/SSIM，以及整步/阶段/显存监测。Fast-GS实验路径按能力回退，不代替默认增密或2DGS。见[训练性能](docs/TRAINING_PERFORMANCE.md)。
-- **完整进度保存：**原生 3DGS/2DGS 在安全迭代边界保存完整状态并暂停，校验输入、参数和可信检查点后续训；PLY 预览/热启动不等于完整优化器状态恢复。
-- **独立实验：**新任务保留原模型及变换，使用独立预览，分别记录参数、成果和续训入口。“暂停预览”不暂停训练；可让出参考模型显示缓存而不删除对象。
-- **可视化：**高斯、2DGS surfel、点云、纹理网格、球谐、相机轨迹、透视/正交导航及无限自适应网格。FPS 是实际完成的视口帧节奏，采用 60 帧平滑，不是 GPU 执行耗时或 CPU 提交耗时的倒数。
-- **坐标与编辑：**共享场景单位/参考系、源坐标、可逆显示偏移、坐标报告、多对象选择、移动/旋转/缩放/组合工具、全局/局部方向、数字输入、吸附、撤销重做。固定基准面不限制 Z 移动，也不自动配准独立重建模型。
-- **大模型与导出：**网格按实际内存/显存余量自适应加载，预算足够时完整常驻、不足时分页；支持即时激进自动/手动预算、纹理 PLY、受支持数据的完整源点选择/裁剪、PLY/SPZ 和网格导出。
-- **桌面界面：**中英日即时切换，深浅色与本地时间自动切换，90–150% 缩放，统一矢量图标，小视口工具栏适配，常用文件/文件夹记忆，持久面板及保存/退出确认。
-
-网格生成含有界/无界 TSDF、SuGaR、GS2Mesh 和可选 OpenMVS 照片纹理阶段。环境、权重及验收状态各不相同，网格阶段没有完整优化器续训；见[管线矩阵](docs/GENERATION_PIPELINES.md)和[网格指南](docs/MESH_GENERATION.md)。
-
-### 下载、安装与构建
-
-1. 真正的安装器为 `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`，带目录选择、快捷方式和系统卸载。正式发布后从 [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases) 获取，或下载 [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) **完整成功运行**的 **Windows setup installer** 附件；尚无验收通过的 Setup 时按[安装器指南](docs/WINDOWS_INSTALLER.md)构建，不能把运行中的任务当作已发布版本。
-2. 另一个便携附件只是 ZIP：完整解压后运行 `bin/Gaussian Scene Workbench.exe`，保留 Qt DLL、插件、后端、许可证和对应源码。Setup 默认优先可写非系统盘，升级记住所选目录，卸载保留用户新增数据。
-3. 重建/训练前按[运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)与[COLMAP](docs/COLMAP_SETUP.md)说明验证环境；已有 PLY/SPZ 模型可直接导入。
-
-有非系统盘时优先采用，例如 `D:\Apps\GSW`；只有 C: 时自动使用现有可写目录，不因缺少其他盘符而阻塞。旧 HTML/Electron Releases 已下架；Setup 不自动启动程序或训练，未签名预览版可能需要获准的签名/运行策略，软件不绕过安全策略。
-
-源码构建使用上方 `scripts\build_native.ps1 -Configuration Release -Package`，默认输出到 `native/dist/Gaussian-Scene-Workbench-0.3.5-native-preview-win-x64/`；完整依赖与验证见 [native/README.md](native/README.md)。
-
-### 能力边界与许可
-
-当前仍是预览版，不把旧 HTML 的 PSNR、通用资产管理等功能视为已迁移。OpenGL 预览不等于上游 CUDA 分块渲染器；网格预算不是全程序/训练的硬配额，纹理未分页；2DGS 共享 GPU 实时预览仍有独立限制。实验记录可持久保存，任务日志和历史曲线仍仅保留当前会话。
-
-自 2026-10-14 本次许可变更起，原生桌面主程序的原创代码采用 **GPL-3.0-or-later**；范围及例外见 [native/LICENSE.md](native/LICENSE.md)，完整 GPL 文本见 [COPYING](COPYING)。实际移植 Blender v4.5.0 的圆锥/立方体几何并保留上游声明，但不是复制完整 Blender 操作器系统；拖动、约束和撤销仍由 GSW 处理。此前授予的 MIT 权利及此范围以外的原创代码保留 [LICENSE](LICENSE) 条款。第三方训练、CUDA、编解码、Qt、图标仍遵循各自许可；Graphdeco 相关组件仍有非商业研究/评估限制，不因主程序 GPL 而获得商用权。见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
-
-## 日本語
-
-GPU メモリの増密保護を、画像ステージング、カメラ先読み、容量ストレージ、損失とバックエンド別の補助最適化から分離します。要求値、依存解決後の値、実際の実行証拠を区別し、旧版で無効だった機能を勝手に再有効化しません。保護方針だけの変更も、完全状態の検証後に再開して適用し、未検証のホット切替は行いません。既存ジョブは OS／セッションの生存確認後に接続し、観察と明示的な一時停止／停止を分けます。Windows の永続学習はデスクトップ終了後も継続できます。保護 OFF は CUDA メモリ不足や品質を保証しません。[設定・移行・ライフサイクルと残る検証](docs/RUNTIME_DECOUPLING.md)を参照してください。ローカル受入れとクラウド全検査の結果を分け、実行中を成功とは扱いません。
-
-尺度が既知の 3DGS／2DGS は元の学習モデルを保ち、手動出力と共通の復元処理で実際のメートル座標へ別出力します。現在のフレーム・単位を起点にし、二重逆変換を防ぎます。位置、2／3軸の対数サイズ、方向・共分散、0–4次SHを整合し、モデル固有のハッシュ付きカメラに全内参と変換後の姿勢を保存します。未知尺度をメートルと見なしたり、通常点群・メッシュを完全GSと表示したりしません。[形式別の対応と検証範囲](docs/RUNTIME_DECOUPLING.md#recorded-frame-and-metric-delivery-instruction-version3)を参照してください。
-
-説明可能な初期化範囲と固定点群、3DGS／2DGS の実 camera-Z 深度・マスク点群、独立した双方向形状・欠損・寸法評価、任意名称の比較レシピを追加しました。カメラ、分割、尺度、変換と実行元を記録し、元のガウシアンとチェックポイントは保持します。融合しない外観プロキシであり、物理的な材質境界や精度の認証ではありません。[通用再構築のインターフェースと対応範囲](docs/GENERAL_RECONSTRUCTION.md)を参照してください。
-
-P1 では既知距離、カメラ基線、制御点によるスケール推定／Sim3 整合を追加しました。フィット残差と独立した参照検証を分離して保存し、モデル全体の形状精度とはみなしません。単眼 TUM／CSV／JSON の時刻関連付け、データを固定した逐次 3DGS／2DGS パラメーター・シード実験は、カメラ・初期化・評価用画像の分割を維持します。[P1 ガイドと対応範囲](docs/CAMERA_SCALE_P1.md)を参照してください。データ・ソース・最適化器の厳密な互換性検証を保ち、旧実行設定の移行で完全状態検証を迂回したり、PLY を完全再開の代用にしたりしません。
-
-**ガウスシーン研究ワークベンチ**のネイティブ版は、唯一の保守対象ブランチ `main` で開発中です。バージョンは `0.3.8-native-preview`、本ページの文書更新日は **2026-10-23** です。Qt 6.8/C++20/OpenGL を使い、HTML、Electron、Node.js、ブラウザーエンジン、ローカル Web サーバーを実行しません。
-
-初期状態で無効の[実験的品質プラン](docs/QUALITY_PLAN.md)を追加しています。実装試験と最終画質・独立幾何を区別し、既定方式へ自動昇格しません。MCMC はデスクトップでは未選択です。
-
-今回の信頼性修正は、Windowsの等価な長短パスによる成果物交付と、状態ファイルの原子更新中の一時停止要求を対象とします。パス・セッション・取消保護は維持します。[対応範囲と検収境界](docs/CI_RELIABILITY.md)を参照してください。
-
-通常の 3DGS／2DGS PLY は、フィールド型と無関係な属性を保持し、完全な元データにシーンの移動・回転・スケールをベイクできます。2 軸の 2DGS に厚みは追加しません。保持する点に非ゼロの方向依存 SH がある場合、不均等スケールは近似せず拒否します。記録付きカメラのルートでは proper-Sim3 の出所制約を維持します。[Gaussian PLY のルート、忠実性の限界と元ファイル保護](docs/GAUSSIAN_PLY_BAKING.md)を参照してください。
-
-この分岐から旧 Web UI、Electron シェル、HTTP サービス、ブラウザーテスト、Node のパッケージ処理を削除しました。データセット・再構築・学習・メッシュに共通する処理は `native/backend/compute.py` に移し、ネイティブ worker が直接呼び出します。過去の版は Git 履歴と公開タグで確認でき、コード整理で元の研究データを削除することはありません。[移行と互換性](docs/NATIVE_MIGRATION.md)を参照してください。
-
-### 現在の機能
-
-- **既知カメラとスケール（P0）：**標準 transforms、COLMAP テキスト／バイナリ、正規 JSON、独立した研究 JSON アダプターで、固定／推定方針を明示します。固定カメラは再推定せず、全ピンホール K と選択した画像サイズを記録し、検証／テスト視点を学習から除外します。ハッシュで結び付けたスケール・座標変換を、ネイティブ測定、完全状態の学習再開、別ファイルへのガウス座標復元で共有します。ソースの単位宣言は独立した形状精度の証明ではありません。[プロトコルと対応範囲](docs/CAMERA_SCALE_P0.md)を参照してください。
-
-- **プロジェクトと素材：**未保存プロジェクト、写真/フォルダー/動画追加、外部データセット、保存/名前を付けて保存、復元、データセット・再構築・シーン・履歴の個別整理。
-- **再構築と学習：**COLMAP、3DGS/2DGS、入力と環境の事前確認、再構築を再利用する理由、進捗、ログ、キャンセル。CUDA 学習には互換性のある外部環境が必要です。
-- **学習の性能と品質：**上限付き可逆画像転送、GPUメモリ増密保護、品質優先の完全状態一時停止、数値検証済みの任意MIT融合L1/SSIM、全体/区間/メモリ測定。実験的Fast-GSは互換性で判定し、既定の増密や2DGSを置き換えません。[学習の性能](docs/TRAINING_PERFORMANCE.md)を参照してください。
-- **完全な状態からの再開：**ネイティブ 3DGS/2DGS は安全な反復境界で状態を保存して一時停止し、入力・設定・信頼できるチェックポイントを検証して再開します。PLY プレビューやウォームスタートは完全な最適化器状態の復元ではありません。
-- **実験の分離：**既存モデル/変換と独立したタスクプレビューを保持し、設定・成果・再開入口を個別に保存します。「プレビューを一時停止」は学習を止めません。表示キャッシュを解放しても参照モデルを削除しません。
-- **表示：**ガウシアン、2DGS surfel、点群、テクスチャ付きメッシュ、SH、カメラ軌跡、透視/平行投影、無限適応グリッド。FPS は実際に完了したフレームの間隔を 60 フレームで平滑化した値で、GPU 実行時間や CPU 送信時間の逆数ではありません。
-- **座標と編集：**共通単位/基準、元の座標、可逆な表示シフト、座標レポート、複数選択、移動/回転/スケール/複合ツール、グローバル/ローカル、数値入力、スナップ、取り消し/やり直し。固定基準面は Z 移動を拘束せず、別々に再構築したモデルの位置合わせを自動では行いません。
-- **大規模モデルと出力：**実際の RAM/GPU メモリ余量に応じ、収まるメッシュは完全常駐、収まらない場合はページングします。積極的な自動/手動予算、テクスチャ付き PLY、対応データの全ソース点選択/クロップ、PLY/SPZ とメッシュ出力を備えます。
-- **UI：**中英日の即時切替、ライト/ダークと現地時刻による自動切替、90–150% スケール、統一ベクターアイコン、小さなビューのツールバー、よく使うファイル/フォルダー履歴、パネル状態、保存/終了確認。
-
-メッシュ生成は有界/無界 TSDF、SuGaR、GS2Mesh と任意の OpenMVS 写真テクスチャ工程を含みます。環境・重み・検証状況は方式ごとに異なり、完全な最適化器状態からの再開には対応しません。[パイプライン表](docs/GENERATION_PIPELINES.md)と[メッシュガイド](docs/MESH_GENERATION.md)を参照してください。
-
-### 入手・起動・ビルド
-
-1. 正式なインストーラーは `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe` で、導入先、ショートカット、システムのアンインストールに対応します。公開後の [Releases](https://github.com/fubukisama/Gaussian-Scene-Workbench/releases)、または [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) の**全検査に成功した実行**の **Windows setup installer** から取得します。Setup がまだない場合は[インストーラーの手順](docs/WINDOWS_INSTALLER.md)を参照してください。実行中のジョブは公開版ではありません。
-2. 別のポータブル配布は ZIP です。全体を展開して `bin/Gaussian Scene Workbench.exe` を実行し、Qt DLL、プラグイン、バックエンド、ライセンス、対応ソースを保持してください。Setup は書き込み可能な非システムドライブを優先し、更新先を記憶し、削除時も追加データを保持します。
-3. 学習/再構築前に[実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と[COLMAP](docs/COLMAP_SETUP.md)を確認します。既存 PLY/SPZ は直接読み込めます。
-
-別ドライブが使える場合は `D:\Apps\GSW` などを優先し、C: のみでは既存の書き込み可能な場所を使います。別ドライブがないだけでは処理を止めません。Windows Application Control には承認された署名/ランタイムが必要で、ポリシーを回避しません。上記のネイティブパッケージと実行環境の手順を使用し、過去の配布物を現在の導入先とは扱いません。
-
-ビルドは上記 `scripts\build_native.ps1 -Configuration Release -Package`、既定の出力先は `native/dist/Gaussian-Scene-Workbench-0.3.5-native-preview-win-x64/` です。依存関係と検証は [native/README.md](native/README.md) を参照してください。
-
-### 制限とライセンス
-
-本版はプレビューで、旧 HTML 版の PSNR、汎用アセット管理などが移植済みとは限りません。OpenGL は上流 CUDA タイルレンダラーと同一ではなく、メッシュ予算は全体/学習の強制的な上限ではありません。テクスチャはページングせず、2DGS の共有 GPU ライブプレビューにも制限があります。実験記録は保存されますが、ログと過去の指標曲線はセッション内のみです。
-
-2026-10-14 の本変更から、独自のネイティブ主プログラムは **GPL-3.0-or-later** です。範囲と例外は [native/LICENSE.md](native/LICENSE.md)、全 GPL 本文は [COPYING](COPYING) にあります。Blender v4.5.0 の円錐/立方体形状を実際に移植して元の通知を保持しますが、操作器システム全体の移植ではありません。ドラッグ・制約・取り消しは GSW が処理します。過去の MIT の権利と対象外の独自コードは [LICENSE](LICENSE) の条件を維持します。学習・CUDA・コーデック・Qt・アイコンは各ライセンスに従い、Graphdeco 関連部の非商用研究/評価制限も維持します。GPL 主プログラムは全バックエンドの商用許諾を意味しません。[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+[License scope](native/LICENSE.md) · [Repository license](LICENSE) · [Third-party notices](THIRD_PARTY_LICENSES.md)
