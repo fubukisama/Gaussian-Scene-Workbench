@@ -62,7 +62,7 @@ class GitHubEvidence:
         self.base = "repos/" + repository
         self._trees = {}
 
-    def _get(self, path: str):
+    def _get(self, path: str, *, explicit_unprotected=False):
         try:
             result = subprocess.run(["gh", "api", "--hostname", "github.com",
                 "-H", "Accept: application/vnd.github+json", path],
@@ -70,6 +70,14 @@ class GitHubEvidence:
         except (OSError, subprocess.TimeoutExpired):
             raise ReleaseGateError("release_github_unavailable") from None
         if result.returncode != 0:
+            if explicit_unprotected and len(result.stdout) <= MAX_API_JSON:
+                try:
+                    error = _decode(result.stdout)
+                    if (isinstance(error, dict) and error.get("message") == "Branch not protected"
+                            and error.get("status") in (404, "404")):
+                        return None
+                except ReleaseGateError:
+                    pass
             # Never forward raw stderr/credentialled redirect URLs to a receipt.
             raise ReleaseGateError("release_github_evidence_unreadable")
         if len(result.stdout) > MAX_API_JSON:
@@ -119,6 +127,20 @@ class GitHubEvidence:
                     raise ReleaseGateError("release_workflow_inventory_invalid")
                 result[path] = entry["sha"]
         return result
+
+    def classic_protection(self):
+        return self._get(self.base + "/branches/main/protection", explicit_unprotected=True)
+
+    def branch_rules(self):
+        result = []
+        for page in range(1, 11):
+            rows = self._get(self.base + f"/rules/branches/main?per_page=100&page={page}")
+            if not isinstance(rows, list) or len(rows) > 100:
+                raise ReleaseGateError("release_protection_evidence_invalid")
+            result.extend(rows)
+            if len(rows) < 100:
+                return result
+        raise ReleaseGateError("release_protection_evidence_incomplete")
 
 
 def _source_and_inventory(policy, raw, source_commit, source_tree, github):
@@ -172,6 +194,80 @@ def _source_and_inventory(policy, raw, source_commit, source_tree, github):
         raise ReleaseGateError("release_required_checks_incomplete")
 
 
+def _protection_union(policy, github):
+    """Policy is a minimum, never a substitute for current effective rules."""
+    protected = []
+    classic = github.classic_protection()
+    if classic is not None:
+        if not isinstance(classic, dict):
+            raise ReleaseGateError("release_protection_evidence_invalid")
+        checks = classic.get("required_status_checks")
+        if checks is not None:
+            if not isinstance(checks, dict):
+                raise ReleaseGateError("release_protection_evidence_invalid")
+            rows, contexts = checks.get("checks", []), checks.get("contexts", [])
+            if not isinstance(rows, list) or not isinstance(contexts, list):
+                raise ReleaseGateError("release_protection_evidence_invalid")
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise ReleaseGateError("release_protection_evidence_invalid")
+                protected.append((row.get("context"), row.get("app_id")))
+            for context in contexts:
+                protected.append((context, None))
+        deployments = classic.get("required_deployments")
+        if deployments and (not isinstance(deployments, dict) or deployments.get("environments")):
+            raise ReleaseGateError("release_required_deployment_unbound")
+    rules = github.branch_rules()
+    if not isinstance(rules, list) or len(rules) > 1000:
+        raise ReleaseGateError("release_protection_evidence_invalid")
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise ReleaseGateError("release_protection_evidence_invalid")
+        kind, parameters = rule.get("type"), rule.get("parameters", {})
+        if kind == "required_status_checks":
+            if not isinstance(parameters, dict) or not isinstance(parameters.get("required_status_checks"), list):
+                raise ReleaseGateError("release_protection_evidence_invalid")
+            for row in parameters["required_status_checks"]:
+                if not isinstance(row, dict):
+                    raise ReleaseGateError("release_protection_evidence_invalid")
+                protected.append((row.get("context"), row.get("integration_id")))
+        elif kind == "workflows":
+            if not isinstance(parameters, dict) or not isinstance(parameters.get("workflows"), list):
+                raise ReleaseGateError("release_protection_evidence_invalid")
+            for workflow in parameters["workflows"]:
+                if (not isinstance(workflow, dict)
+                        or workflow.get("repository_id") != policy["repositoryId"]
+                        or workflow.get("ref") not in (None, "refs/heads/main")
+                        or not any(job["workflowPath"] == workflow.get("path") for job in policy["requiredJobs"])):
+                    raise ReleaseGateError("release_required_workflow_unbound")
+        elif kind not in {"creation", "update", "deletion", "required_linear_history",
+                          "required_signatures", "pull_request", "non_fast_forward",
+                          "required_review_thread_resolution", "required_conversation_resolution"}:
+            # Scanning/deployment/unknown future gates require a dedicated proof,
+            # not a silent assumption that a similarly named job covers them.
+            raise ReleaseGateError("release_protection_rule_unbound")
+    statuses = policy.get("requiredStatuses")
+    if not isinstance(statuses, list) or len(statuses) > 256:
+        raise ReleaseGateError("release_status_policy_invalid")
+    contexts = set()
+    for status in statuses:
+        if (not isinstance(status, dict) or not isinstance(status.get("context"), str)
+                or not status["context"].strip() or status["context"] in contexts
+                or not _positive(status.get("creatorId"))
+                or not isinstance(status.get("creatorLogin"), str) or not status["creatorLogin"]):
+            raise ReleaseGateError("release_status_policy_invalid")
+        contexts.add(status["context"])
+    for context, app_id in protected:
+        if not isinstance(context, str) or not context or (app_id is not None and not _positive(app_id)):
+            raise ReleaseGateError("release_protection_evidence_invalid")
+        matches = [job for job in policy["requiredJobs"] if job["checkName"] == context
+                   and (app_id is None or job["appId"] == app_id)]
+        status_bound = app_id is None and context in contexts
+        if len(matches) != 1 and not (not matches and status_bound):
+            raise ReleaseGateError("release_required_check_unbound")
+    return [{"context": context, "appId": app_id} for context, app_id in protected]
+
+
 def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
                     approved_policy_sha256: str | None = None, *, github=None) -> dict:
     if not re.fullmatch(r"[a-f0-9]{40}", source_commit) or not re.fullmatch(r"[a-f0-9]{40}", source_tree):
@@ -195,6 +291,7 @@ def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
         raise ReleaseGateError("release_product_identity_invalid")
     evidence = github if github is not None else GitHubEvidence(policy.get("repository", ""))
     _source_and_inventory(policy, raw, source_commit, source_tree, evidence)
+    _protection_union(policy, evidence)
     # Each following gate is added only after its real remote failing contract.
     # No intermediate source-only implementation can authorize publication.
     raise ReleaseGateError("release_gate_evidence_not_available")

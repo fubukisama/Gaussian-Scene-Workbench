@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
-use tough::gsw_store::{sha256, strict_json, Journal};
+use tough::gsw_store::{durable_anchor, sha256, strict_json, Journal};
 use tough::schema::{Root, Signed};
 use tough::{ExpirationEnforcement, IntoVec, Limits, RepositoryLoader, TargetName};
 
@@ -37,7 +37,8 @@ impl Ledger {
             || ledger.revoked_build_ids.iter().any(|id| !safe_token(id)) { return Err("TRUST_STATE_CORRUPT"); }
         for (channel, water) in &ledger.highest_by_channel {
             if !matches!(channel.as_str(), "stable" | "preview") || water.release_sequence == 0 || water.metadata_revision == 0
-                || !safe_token(&water.build_id) || !ledger.accepted.contains_key(&water.build_id)
+                || !safe_token(&water.build_id) || !ledger.accepted.get(&water.build_id)
+                    .is_some_and(|accepted| accepted.descriptor_sha256s.contains(&water.descriptor_sha256))
                 || !is_hex(&water.descriptor_sha256, 64) { return Err("TRUST_STATE_CORRUPT"); }
         }
         for (id, accepted) in &ledger.accepted {
@@ -214,10 +215,25 @@ fn validate_store(entries: &BTreeMap<String, String>, profile: &Profile, channel
 pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Result<Value> {
     cancel.check()?;
     let directory = store_path(&request)?;
+    let anchor_path = Path::new(&request.installation_root).join(".update-trust-anchor");
+    let anchor = format!("gsw.trust_anchor/1\n{}\n", profile.identity()?);
+    let anchor_exists = match fs::symlink_metadata(&anchor_path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Err("TRUST_STATE_UNAVAILABLE"),
+    };
     // inspect_accepted is strictly read-only, including on a fresh installation.
-    let store = if request.operation == "inspect_accepted" {
+    let store = if request.operation == "inspect_accepted" || anchor_exists {
+        durable_anchor(&anchor_path, anchor.as_bytes(), false).map_err(|_| "TRUST_ANCHOR_REJECTED")?;
         Journal::open(&directory).map_err(|_| "TRUST_STATE_UNAVAILABLE")?
     } else {
+        if directory.try_exists().map_err(|_| "TRUST_STATE_UNAVAILABLE")?
+            && fs::read_dir(&directory).map_err(|_| "TRUST_STATE_UNAVAILABLE")?.next().is_some() {
+            return Err("TRUST_ANCHOR_REJECTED");
+        }
+        // Write the external sentinel FIRST. Partial first initialization is an
+        // explicit fail-closed repair case, never an implicit fresh trust reset.
+        durable_anchor(&anchor_path, anchor.as_bytes(), true).map_err(|_| "TRUST_STATE_WRITE_FAILED")?;
         let store = Journal::initialize(&directory).map_err(|_| "TRUST_STATE_CORRUPT")?;
         initialize(&store, &profile)?;
         store

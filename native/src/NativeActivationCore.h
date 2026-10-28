@@ -3,6 +3,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <memory>
 
 namespace gsw {
@@ -40,6 +41,8 @@ class NativeVerifiedUpdate final {
   QByteArray offer;
   QString descriptorSha256;
   QString installationRoot;
+  QStringList acceptedDescriptors;
+  bool historical = false;
   NativeVerifiedUpdate() = default;
 public:
   NativeVerifiedUpdate(const NativeVerifiedUpdate &) = default;
@@ -50,6 +53,8 @@ class NativeActivationCore final {
 public:
   static NativeActivationResult install(const QString &root, const QString &archive,
       const NativeVerifiedUpdate &, const NativeInstallationLock &);
+  static NativeActivationResult rollback(const QString &root, const NativeVerifiedUpdate &,
+      const NativeInstallationLock &);
 private:
   friend class NativeDeveloperPublisher;
   static NativeActivationResult publish(const QString &root, const QString &archive,

@@ -35,9 +35,10 @@ int main(int argc, char **argv) {
   const QString channel = args.isEmpty() ? QStringLiteral("stable") : args.takeFirst();
   const QString expected = args.isEmpty() ? QString() : args.takeFirst();
   if (!QStringList{QStringLiteral("--check"), QStringLiteral("--prepare"),
-      QStringLiteral("--install"), QStringLiteral("--apply-prepared")}.contains(operation) ||
+      QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel) ||
-      (!expected.isEmpty() && operation != QLatin1String("--apply-prepared"))) return failure(QStringLiteral("INVALID_REQUEST"));
+      (!expected.isEmpty() && operation != QLatin1String("--apply-prepared") && operation != QLatin1String("--rollback")) ||
+      (operation == QLatin1String("--rollback") && expected.isEmpty())) return failure(QStringLiteral("INVALID_REQUEST"));
   QDir root(QCoreApplication::applicationDirPath());
   if (root.dirName() != QLatin1String("bin") || !root.cdUp()) return failure(QStringLiteral("activation_root_invalid"));
   gsw::NativeInstallationLock lock(root.absolutePath());
@@ -51,6 +52,14 @@ int main(int argc, char **argv) {
       if (QByteArray(command).trimmed() == "cancel") cancellation->store(true);
   }).detach();
   try {
+    if (operation == QLatin1String("--rollback")) {
+      event(QStringLiteral("verifying"));
+      auto accepted = gsw::NativeUpdateTrustBridge::rollbackAdmission(root.absolutePath(), channel, expected, lock, cancellation.get());
+      if (!accepted.ok) return failure(accepted.code);
+      const auto reverted = gsw::NativeActivationCore::rollback(root.absolutePath(), *accepted.update, lock);
+      if (!reverted.ok) return failure(reverted.code);
+      event(QStringLiteral("rolled_back"), QStringLiteral("NEXT_LAUNCH"), {{"buildId", reverted.buildId}}); return 0;
+    }
     QString build = expected;
     const QString preparedPath = root.filePath(QStringLiteral("updates/prepared.json"));
     if (operation == QLatin1String("--apply-prepared")) {

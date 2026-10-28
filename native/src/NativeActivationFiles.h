@@ -5,13 +5,16 @@
 #include "miniz.h"
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUuid>
+#include <QVector>
 #include <limits>
+#include <memory>
 #include <set>
 #include <vector>
 #ifdef Q_OS_WIN
@@ -149,6 +152,74 @@ inline void heldRead(QFile &file, const QString &path) {
   if (!file.open(QIODevice::ReadOnly)) fail("activation_file_read_failed");
 #endif
 }
+#ifdef Q_OS_WIN
+// Keep every ancestor stable while a new extraction file is being written.
+// This QObject lives under the caller's QFile, not a temporary open helper.
+class OutputDirectoryLease final : public QObject {
+  QVector<HANDLE> handles;
+public:
+  explicit OutputDirectoryLease(QFile *owner) : QObject(owner) {}
+  ~OutputDirectoryLease() override { for (auto handle : handles) CloseHandle(handle); }
+  void acquire(const QString &path) {
+    QStringList parents;
+    QString cursor = QFileInfo(path).absolutePath();
+    for (;;) {
+      parents.append(cursor);
+      const auto parent = QFileInfo(cursor).absolutePath();
+      if (parent == cursor) break;
+      cursor = parent;
+    }
+    // Anchor the drive first, then each descendant. A name cannot be swapped
+    // into a junction between path inspection and CREATE_NEW below.
+    for (auto it = parents.crbegin(); it != parents.crend(); ++it) {
+      const auto native = QDir::toNativeSeparators(QDir::cleanPath(*it));
+      HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), FILE_READ_ATTRIBUTES,
+          FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+      if (handle == INVALID_HANDLE_VALUE) fail("activation_write_path_invalid");
+      handles.append(handle);
+      BY_HANDLE_FILE_INFORMATION info{};
+      wchar_t finalPath[32768]{};
+      const DWORD count = GetFinalPathNameByHandleW(handle, finalPath, 32768, FILE_NAME_NORMALIZED);
+      QString actual = count > 0 && count < 32768 ? QString::fromWCharArray(finalPath) : QString();
+      if (actual.startsWith(QLatin1String("\\\\?\\"))) actual.remove(0, 4);
+      if (!GetFileInformationByHandle(handle, &info) || !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+          (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || actual.compare(native, Qt::CaseInsensitive))
+        fail("activation_write_path_invalid");
+    }
+  }
+};
+#endif
+inline void secureOutputOpen(QFile &file, const QString &path) {
+  if (file.isOpen() || !ordinary(QFileInfo(path).absolutePath()) || !ordinary(path, true))
+    fail("activation_write_path_invalid");
+  file.setFileName(path);
+#ifdef Q_OS_WIN
+  auto ancestors = std::make_unique<OutputDirectoryLease>(&file);
+  ancestors->acquire(path);
+  const auto native = QDir::toNativeSeparators(QDir::cleanPath(path));
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()), GENERIC_WRITE,
+      0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) fail("activation_extract_write_failed");
+  BY_HANDLE_FILE_INFORMATION info{};
+  wchar_t finalPath[32768]{};
+  const DWORD count = GetFinalPathNameByHandleW(handle, finalPath, 32768, FILE_NAME_NORMALIZED);
+  QString actual = count > 0 && count < 32768 ? QString::fromWCharArray(finalPath) : QString();
+  if (actual.startsWith(QLatin1String("\\\\?\\"))) actual.remove(0, 4);
+  if (!GetFileInformationByHandle(handle, &info) || info.nNumberOfLinks != 1 ||
+      (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) || actual.compare(native, Qt::CaseInsensitive)) {
+    CloseHandle(handle); fail("activation_write_path_invalid");
+  }
+  const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_WRONLY | _O_BINARY);
+  if (fd < 0) { CloseHandle(handle); fail("activation_extract_write_failed"); }
+  if (!file.open(fd, QIODevice::WriteOnly, QFileDevice::AutoCloseHandle)) {
+    _close(fd); fail("activation_extract_write_failed");
+  }
+  ancestors.release(); // QFile owns the guard until its object is destroyed.
+#else
+  if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) fail("activation_extract_write_failed");
+#endif
+}
 inline QByteArray read(const QString &path, qint64 limit = maxManifest) {
   QFile file; heldRead(file, path);
   if (file.size() > limit) fail("activation_file_resource_limit");
@@ -226,5 +297,84 @@ inline void verifySource(const QString &slot, const QMap<QString, Entry> &entrie
   if (recorded != actual) fail("activation_source_files_differ");
   const auto build = parse(read(QDir(slot).filePath(QStringLiteral("build_manifest.json"))));
   if (string(build.at("product")) != QLatin1String("Gaussian Scene Workbench") || build.at("legacyWebRuntimeIncluded") != false) fail("activation_product_invalid");
+}
+struct InstalledSlot final {
+  QString executableSha256;
+  QMap<QString, Entry> entries;
+};
+// The expected offer must come from the online trust bridge or the accepted
+// rollback ledger. Reading a local receipt/manifest alone grants no authority.
+inline InstalledSlot verifyInstalledSlot(const QString &slot, const Json &expectedOffer) {
+  if (!ordinary(slot) || !QFileInfo(slot).isDir()) fail("activation_slot_invalid");
+  if (string(expectedOffer.at("schema")) != QLatin1String("gsw.update_offer/1") ||
+      string(expectedOffer.at("platform")) != QLatin1String("windows-x64")) fail("activation_offer_invalid");
+  const auto product = string(expectedOffer.at("product"));
+  if (product != QLatin1String("Fubukisama.GaussianSceneWorkbench.Native") &&
+      product != QLatin1String("Fubukisama.GaussianSceneWorkbench.UpdateFixture")) fail("activation_product_invalid");
+  buildId(expectedOffer.at("buildId"));
+  static const QRegularExpression gitIdentity(QStringLiteral("^[a-f0-9]{40}$"));
+  if (!gitIdentity.match(string(expectedOffer.at("sourceCommit"))).hasMatch() ||
+      !gitIdentity.match(string(expectedOffer.at("sourceTree"))).hasMatch()) fail("activation_source_identity_invalid");
+  const auto fileCount = integer(expectedOffer.at("fileCount"), 1, maxFiles);
+  const auto expanded = integer(expectedOffer.at("unpackedLength"), 1, maxExpanded);
+  const auto manifestHash = string(expectedOffer.at("payloadManifestSha256")); sha(manifestHash);
+  const auto sourceHash = string(expectedOffer.at("correspondingSourceSha256")); sha(sourceHash);
+  const QString manifestName = QStringLiteral("release-files.json");
+  const auto raw = read(QDir(slot).filePath(manifestName));
+  if (digest(raw) != manifestHash) fail("activation_manifest_digest_mismatch");
+  const auto manifest = parse(raw);
+  exactKeys(manifest, {"schema", "product", "platform", "buildId", "sourceCommit", "sourceTree", "files"});
+  if (string(manifest.at("schema")) != QLatin1String("gsw.native_update_files/1") ||
+      manifest.at("product") != expectedOffer.at("product") || manifest.at("platform") != expectedOffer.at("platform") ||
+      manifest.at("buildId") != expectedOffer.at("buildId") || manifest.at("sourceCommit") != expectedOffer.at("sourceCommit") ||
+      manifest.at("sourceTree") != expectedOffer.at("sourceTree") || !manifest.at("files").is_array() ||
+      manifest.at("files").size() != size_t(fileCount)) fail("activation_manifest_identity_invalid");
+  InstalledSlot verified;
+  verified.entries.insert(manifestName, {0, manifestName, manifestHash, raw.size()});
+  QMap<QString, QPair<QString, bool>> names;
+  claim(names, manifestName);
+  QSet<QString> expectedFiles{manifestName}, expectedDirectories;
+  qint64 total = raw.size();
+  for (const auto &row : manifest.at("files")) {
+    exactKeys(row, {"path", "size", "sha256"});
+    const auto path = safePath(string(row.at("path"))); claim(names, path);
+    const auto size = integer(row.at("size"), 0, maxArchive);
+    const auto checksum = string(row.at("sha256")); sha(checksum);
+    if (total > expanded - size) fail("activation_slot_resource_limit");
+    total += size;
+    verified.entries.insert(path, {0, path, checksum, size});
+    expectedFiles.insert(path);
+    QString parent = path;
+    for (auto slash = parent.lastIndexOf('/'); slash >= 0; slash = parent.lastIndexOf('/')) {
+      parent.truncate(slash); expectedDirectories.insert(parent);
+    }
+  }
+  if (total != expanded) fail("activation_slot_resource_limit");
+  const QString exe = QString::fromLatin1("bin/Gaussian Scene Workbench.exe");
+  if (!verified.entries.contains(exe)) fail("activation_required_file_missing");
+  QSet<QString> actualFiles, actualDirectories;
+  QDirIterator iterator(slot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+      QDirIterator::Subdirectories);
+  while (iterator.hasNext()) {
+    iterator.next();
+    const auto info = iterator.fileInfo();
+    const auto path = info.absoluteFilePath();
+    const auto relative = safePath(QDir(slot).relativeFilePath(path));
+    if (!ordinary(path)) fail("activation_slot_path_invalid");
+    if (info.isDir()) {
+      if (!expectedDirectories.contains(relative)) fail("activation_slot_file_set_differs");
+      actualDirectories.insert(relative);
+    } else if (info.isFile()) {
+      if (!expectedFiles.contains(relative) || actualFiles.contains(relative)) fail("activation_slot_file_set_differs");
+      const auto &entry = verified.entries[relative];
+      QFile held; heldRead(held, path);
+      if (held.size() != entry.size || hash(held) != entry.sha256) fail("activation_slot_digest_mismatch");
+      actualFiles.insert(relative);
+    } else fail("activation_slot_path_invalid");
+  }
+  if (actualFiles != expectedFiles || actualDirectories != expectedDirectories) fail("activation_slot_file_set_differs");
+  verified.executableSha256 = verified.entries[exe].sha256;
+  verifySource(slot, verified.entries, verified.executableSha256, sourceHash);
+  return verified;
 }
 } // namespace gsw::activation

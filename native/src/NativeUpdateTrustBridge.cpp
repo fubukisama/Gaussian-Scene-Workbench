@@ -85,4 +85,34 @@ NativeTrustResult NativeUpdateTrustBridge::request(const QString &operation, con
   result.ok = true;
   return result;
 }
+NativeTrustResult NativeUpdateTrustBridge::rollbackAdmission(const QString &root,
+    const QString &channel, const QString &buildId, const NativeInstallationLock &lock,
+    const std::atomic_bool *cancellation) {
+  auto result = request(QStringLiteral("inspect_accepted"), root, channel, {}, lock, cancellation);
+  if (!result.ok) return result;
+  result.ok = false;
+  for (const auto &revoked : result.acceptedState.value(QStringLiteral("revokedBuildIds")).toArray())
+    if (revoked.toString() == buildId) { result.code = QStringLiteral("BUILD_REVOKED"); return result; }
+  const auto accepted = result.acceptedState.value(QStringLiteral("accepted")).toObject().value(buildId).toObject();
+  const auto offer = accepted.value(QStringLiteral("offer")).toObject();
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  const QString product = QStringLiteral("Fubukisama.GaussianSceneWorkbench.UpdateFixture");
+#else
+  const QString product = QStringLiteral("Fubukisama.GaussianSceneWorkbench.Native");
+#endif
+  if (offer.value(QStringLiteral("buildId")).toString() != buildId ||
+      offer.value(QStringLiteral("product")).toString() != product ||
+      offer.value(QStringLiteral("platform")).toString() != QLatin1String("windows-x64")) {
+    result.code = QStringLiteral("ROLLBACK_NOT_ACCEPTED"); return result;
+  }
+  result.update.reset(new NativeVerifiedUpdate);
+  result.update->offer = QJsonDocument(offer).toJson(QJsonDocument::Compact);
+  result.update->installationRoot = lock.installationRoot();
+  result.update->historical = true;
+  for (const auto &item : accepted.value(QStringLiteral("descriptorSha256s")).toArray())
+    if (item.isString()) result.update->acceptedDescriptors.append(item.toString());
+  if (result.update->acceptedDescriptors.isEmpty()) { result.code = QStringLiteral("ROLLBACK_NOT_ACCEPTED"); result.update.reset(); return result; }
+  result.offer = offer; result.code = QStringLiteral("ACCEPTED_HISTORY"); result.ok = true;
+  return result;
+}
 } // namespace gsw

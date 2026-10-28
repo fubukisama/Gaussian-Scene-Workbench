@@ -32,7 +32,11 @@ compiled host policy to the native archive downloader; it is not a GUI override.
 ## Durable state
 
 `<installation>/updates/trust/` lies outside every application slot. It contains
-an independent initialization sentinel and `trust-journal.json`. A missing half,
+an initialization sentinel and `trust-journal.json`; the stable installation
+root additionally holds `.update-trust-anchor`, outside the entire updates tree.
+The outer anchor is written first on a genuinely fresh initialization and is
+never cleared by update/rollback/cleanup. Its presence forbids fresh-store
+fallback even if the whole updates/trust directory has disappeared. A missing half,
 bad journal digest, malformed data, missing root, root-history gap or profile
 identity mismatch fails closed, never silently starts a new trust history.
 

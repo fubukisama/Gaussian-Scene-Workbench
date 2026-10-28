@@ -78,6 +78,11 @@ def prepare(args):
             "--source-commit", args.source_commit, "--source-tree", args.source_tree],
             capture_output=True, timeout=120, encoding="utf-8")
         if result.returncode != 0:
+            try:
+                failure = json.loads(result.stdout[:8192])
+                write_json(root / "issuer-failure.json", {key: failure.get(key) for key in ("schema", "ok", "code", "errorType")})
+            except (ValueError, OSError):
+                pass
             raise RuntimeError("isolated_tuf_issuer_failed")
         fixture = json.loads((issued / "fixture.json").read_text(encoding="utf-8"))
         report = {"schema": "gsw.trust_ci_preparation/1", "testOnly": True, "production": False,

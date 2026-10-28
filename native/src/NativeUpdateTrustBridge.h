@@ -19,5 +19,8 @@ public:
   static NativeTrustResult request(const QString &operation, const QString &root,
       const QString &channel, const QString &expectedBuildId,
       const NativeInstallationLock &, const std::atomic_bool *cancelled = nullptr);
+  static NativeTrustResult rollbackAdmission(const QString &root, const QString &channel,
+      const QString &buildId, const NativeInstallationLock &,
+      const std::atomic_bool *cancelled = nullptr);
 };
 } // namespace gsw
