@@ -107,7 +107,11 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 30
     env:
-      RUSTUP_HOME: ${{ github.workspace }}/native/.cache/updater-rustup
+      # aws-lc has deep relative includes; a short D: cache avoids MAX_PATH
+      # failures without weakening entropy, compiler or signature checks.
+      CARGO_HOME: D:/gu/c
+      CARGO_TARGET_DIR: D:/gu/p
+      RUSTUP_HOME: D:/gu/r
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -117,8 +121,8 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: |
-            native/.cache/updater-cargo
-            native/.cache/updater-rustup
+            D:/gu/c
+            D:/gu/r
           key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
       - name: Prepare isolated signed HTTPS repository
         shell: pwsh
@@ -141,16 +145,16 @@ jobs:
         run: |
           rustup toolchain install 1.99.1 --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust SDK unavailable.' }
-          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --lib --target-dir native/build-auto-update/rust-production
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --lib --target-dir D:/gu/p
           if ($LASTEXITCODE -ne 0) { throw 'Production trust library failed.' }
-          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --features fixture-cli --target-dir native/build-auto-update/rust-fixture
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --features fixture-cli --target-dir D:/gu/f
           if ($LASTEXITCODE -ne 0) { throw 'Distinct fixture trust binary failed.' }
       - name: Real signature and replay contract
         shell: pwsh
         run: |
           $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
           & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -I -B native/updater-trust/tests/remote_trust_contract.py `
-            --cli "$PWD/native/build-auto-update/rust-fixture/release/gsw-trust-fixture-cli.exe" `
+            --cli 'D:/gu/f/release/gsw-trust-fixture-cli.exe' `
             --fixture $prepared.fixture --work-root "$PWD/native/.trust-contract" 2>&1 | Tee-Object native/auto-update-trust-evidence/trust.log
           if ($LASTEXITCODE -ne 0) { throw 'Real TUF signature/replay contract failed.' }
       - name: Record scope and stop only the test server

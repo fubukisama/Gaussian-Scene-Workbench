@@ -5,6 +5,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QNetworkReply>
@@ -110,6 +112,13 @@ QString networkCode(QNetworkReply::NetworkError error) {
   default: return QStringLiteral("download_network_error");
   }
 }
+
+bool strongEtag(const QByteArray &tag) {
+  if (tag.size() < 2 || tag.size() > 1024 || tag.front() != '"' || tag.back() != '"') return false;
+  for (qsizetype i = 1; i + 1 < tag.size(); ++i)
+    if (uchar(tag[i]) < 0x21 || uchar(tag[i]) > 0x7e || tag[i] == '"') return false;
+  return true;
+}
 } // namespace
 
 class NativeUpdateDownload::Impl {
@@ -125,7 +134,9 @@ public:
   NativeUpdateDownloadPolicy policy;
   State state = State::Idle;
   bool active = false, finishing = false, headersAccepted = false, ownsPart = false;
-  qint64 bytes = 0;
+  bool ownsResume = false, resumeValid = false, resumed = false;
+  QByteArray entityTag;
+  qint64 bytes = 0, requestOffset = 0;
   quint64 generation = 0;
   int httpStatus = 0;
 
@@ -184,16 +195,85 @@ public:
     if (output) { output->cancelWriting(); output.reset(); }
     const bool ok = code.isEmpty();
     const QString partPath = request.destinationPath + QStringLiteral(".part");
-    if (ownsPart && ordinaryLocalPath(partPath)) QFile::remove(partPath);
+    const QString resumePath = request.destinationPath + QStringLiteral(".resume.json");
+    const bool retain = !ok && resumeValid && strongEtag(entityTag) &&
+        ordinaryLocalPath(partPath) && QFileInfo(partPath).size() > 0 &&
+        QFileInfo(partPath).size() <= request.expectedLength;
+    if (!retain && ownsPart && ordinaryLocalPath(partPath)) QFile::remove(partPath);
+    if (!retain && ownsResume && ordinaryLocalPath(resumePath)) QFile::remove(resumePath);
     ownsPart = false;
+    ownsResume = false;
     NativeUpdateDownloadResult result;
     result.ok = ok; result.cancelled = cancelled; result.code = code;
     result.filePath = ok ? request.destinationPath : QString();
-    result.receivedBytes = bytes; result.httpStatus = httpStatus;
+    result.receivedBytes = bytes; result.httpStatus = httpStatus; result.resumed = resumed;
     const QPointer<NativeUpdateDownload> alive(q);
     if (!transition(ok ? State::Completed : cancelled ? State::Cancelled : State::Failed) || !alive) return;
     active = false; finishing = false;
     emit q->finished(result); // Nothing below may touch Impl: caller can destroy it.
+  }
+
+  bool readResume() {
+    const QString partPath = request.destinationPath + QStringLiteral(".part");
+    const QString resumePath = request.destinationPath + QStringLiteral(".resume.json");
+    if (!ordinaryLocalPath(partPath) || !ordinaryLocalPath(resumePath)) {
+      finish(QStringLiteral("download_path_unsafe")); return false;
+    }
+    QFile stateFile(resumePath);
+    QJsonObject saved;
+    if (stateFile.open(QIODevice::ReadOnly) && stateFile.size() <= 16384) {
+      QJsonParseError error;
+      const auto doc = QJsonDocument::fromJson(stateFile.readAll(), &error);
+      if (error.error == QJsonParseError::NoError && doc.isObject()) saved = doc.object();
+    }
+    stateFile.close();
+    const QSet<QString> fields{QStringLiteral("schema"), QStringLiteral("identity"), QStringLiteral("length"),
+        QStringLiteral("sha256"), QStringLiteral("etag")};
+    const auto keys = saved.keys();
+    const auto tag = saved.value(QStringLiteral("etag")).toString().toLatin1();
+    const bool bound = QSet<QString>(keys.cbegin(), keys.cend()) == fields &&
+        saved.value(QStringLiteral("schema")).toString() == QLatin1String("gsw.native_update_resume/1") &&
+        saved.value(QStringLiteral("identity")).toString() == request.identity &&
+        saved.value(QStringLiteral("length")).isDouble() &&
+        saved.value(QStringLiteral("length")).toDouble() == double(request.expectedLength) &&
+        saved.value(QStringLiteral("sha256")).toString() == request.sha256 && strongEtag(tag);
+    if (QFileInfo::exists(partPath)) {
+      if (!openOwnedPart(part, partPath, false)) {
+        finish(QStringLiteral("download_path_unsafe")); return false;
+      }
+      ownsPart = true;
+    }
+    if (bound && part.isOpen() && part.size() > 0 && part.size() <= request.expectedLength) {
+      ownsResume = true; resumeValid = true; entityTag = tag; bytes = part.size();
+      return true;
+    }
+    // These are the helper's documented owned cache siblings, never a trust
+    // high-water/root store. Unbound/corrupt resume bytes may be discarded.
+    part.close();
+    if (ownsPart) QFile::remove(partPath);
+    if (QFileInfo::exists(resumePath)) { ownsResume = true; QFile::remove(resumePath); }
+    ownsPart = false; ownsResume = false; resumeValid = false;
+    entityTag.clear(); bytes = 0;
+    return true;
+  }
+
+  bool saveResume(const QByteArray &tag) {
+    resumeValid = false;
+    const QString path = request.destinationPath + QStringLiteral(".resume.json");
+    if (!ordinaryLocalPath(path)) { finish(QStringLiteral("download_path_unsafe")); return false; }
+    ownsResume = true;
+    entityTag = strongEtag(tag) ? tag : QByteArray();
+    if (entityTag.isEmpty()) { QFile::remove(path); return true; }
+    const QJsonObject record{{QStringLiteral("schema"), QStringLiteral("gsw.native_update_resume/1")},
+        {QStringLiteral("identity"), request.identity}, {QStringLiteral("length"), request.expectedLength},
+        {QStringLiteral("sha256"), request.sha256}, {QStringLiteral("etag"), QString::fromLatin1(entityTag)}};
+    QSaveFile file(path); file.setDirectWriteFallback(false);
+    const auto raw = QJsonDocument(record).toJson(QJsonDocument::Compact);
+    if (!file.open(QIODevice::WriteOnly) || file.write(raw) != raw.size() || !file.commit()) {
+      finish(QStringLiteral("download_resume_write_failed")); return false;
+    }
+    resumeValid = true;
+    return true;
   }
 
   void begin() {
@@ -226,6 +306,13 @@ public:
     }
     if (!QSslSocket::supportsSsl()) { finish(QStringLiteral("download_tls_unavailable")); return; }
     deadline.start(policy.totalTimeoutMs);
+    if (!readResume()) return;
+    if (bytes == request.expectedLength) {
+      resumed = true;
+      beginVerify();
+      return;
+    }
+    requestOffset = bytes;
     QNetworkRequest wire(request.url);
     wire.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     wire.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
@@ -237,6 +324,10 @@ public:
     wire.setRawHeader("Accept-Encoding", "identity");
     wire.setRawHeader("User-Agent", "GSW-Updater/1");
     wire.setRawHeader("Connection", "close");
+    if (requestOffset > 0) {
+      wire.setRawHeader("Range", "bytes=" + QByteArray::number(requestOffset) + '-');
+      wire.setRawHeader("If-Range", entityTag);
+    }
     wire.setTransferTimeout(policy.inactivityTimeoutMs);
     auto tls = policy.sslConfiguration;
     tls.setPeerVerifyMode(QSslSocket::VerifyPeer);
@@ -269,7 +360,7 @@ public:
     if (headersAccepted) return true;
     httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (httpStatus < 200) return false;
-    if (httpStatus != 200) { finish(QStringLiteral("download_http_error")); return false; }
+    if (httpStatus != 200 && httpStatus != 206) { finish(QStringLiteral("download_http_error")); return false; }
     if (!reply->attribute(QNetworkRequest::ConnectionEncryptedAttribute).toBool()) {
       finish(QStringLiteral("download_tls_failed")); return false;
     }
@@ -277,17 +368,40 @@ public:
     if (!encoding.isEmpty() && encoding != "identity") {
       finish(QStringLiteral("download_content_encoding")); return false;
     }
+    if (httpStatus == 206) {
+      const auto rawRange = reply->rawHeader("Content-Range").trimmed();
+      static const QRegularExpression range(QStringLiteral("^bytes ([0-9]+)-([0-9]+)/([0-9]+)$"));
+      const auto match = range.match(QString::fromLatin1(rawRange));
+      bool a = false, b = false, c = false;
+      const qint64 start = match.captured(1).toLongLong(&a);
+      const qint64 end = match.captured(2).toLongLong(&b);
+      const qint64 total = match.captured(3).toLongLong(&c);
+      if (!requestOffset || !match.hasMatch() || !a || !b || !c || start != requestOffset ||
+          end != request.expectedLength - 1 || total != request.expectedLength ||
+          reply->rawHeader("ETag").trimmed() != entityTag) {
+        resumeValid = false;
+        finish(QStringLiteral("download_resume_rejected")); return false;
+      }
+    }
     const auto length = reply->rawHeader("Content-Length").trimmed();
     bool goodLength = false;
     const qint64 declared = length.toLongLong(&goodLength);
-    if (!length.isEmpty() && (!goodLength || declared != request.expectedLength)) {
+    const qint64 responseLength = request.expectedLength - (httpStatus == 206 ? requestOffset : 0);
+    if (!length.isEmpty() && (!goodLength || declared != responseLength)) {
       finish(QStringLiteral("download_length_mismatch")); return false;
     }
-    if (!openOwnedPart(part, request.destinationPath + QStringLiteral(".part"), true)) {
-      finish(QStringLiteral("download_write_failed")); return false;
+    if (httpStatus == 200) {
+      part.close();
+      if (!openOwnedPart(part, request.destinationPath + QStringLiteral(".part"), true)) {
+        finish(QStringLiteral("download_write_failed")); return false;
+      }
+      ownsPart = true; bytes = 0; resumed = false;
+    } else {
+      resumed = true;
     }
-    ownsPart = true;
+    if (!saveResume(reply->rawHeader("ETag").trimmed())) return false;
     headersAccepted = true;
+    if (!emitProgress()) return false;
     return true;
   }
 
@@ -314,6 +428,11 @@ public:
       finish(QStringLiteral("download_length_mismatch")); return;
     }
     QObject::disconnect(reply, nullptr, q, nullptr); reply->deleteLater(); reply = nullptr;
+    beginVerify();
+  }
+
+  void beginVerify() {
+    const auto token = generation;
     if (!part.seek(0)) { finish(QStringLiteral("download_read_failed")); return; }
     output = std::make_unique<QSaveFile>(request.destinationPath);
     output->setDirectWriteFallback(false);
@@ -337,6 +456,7 @@ public:
         finish(QStringLiteral("download_read_failed")); return;
       }
       if (QString::fromLatin1(digest.result().toHex()) != request.sha256) {
+        resumeValid = false;
         finish(QStringLiteral("download_hash_mismatch")); return;
       }
       if (!safeDestination(request.destinationPath) || !output->commit()) {
@@ -356,6 +476,7 @@ bool NativeUpdateDownload::start(const NativeUpdateDownloadRequest &request, con
   if (m->active || m->finishing) return false;
   m->request = request; m->policy = policy; m->active = true;
   m->headersAccepted = false; m->ownsPart = false; m->bytes = 0; m->httpStatus = 0;
+  m->ownsResume = false; m->resumeValid = false; m->resumed = false; m->requestOffset = 0; m->entityTag.clear();
   const auto token = ++m->generation;
   QTimer::singleShot(0, this, [this, token] { if (m->active && token == m->generation) m->begin(); });
   return true;

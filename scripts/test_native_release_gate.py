@@ -19,8 +19,9 @@ SPEC.loader.exec_module(GATE)
 
 class GitHubSourceFixture:
     """Read-only GitHub boundary, not an imitation of gate internals."""
-    def __init__(self, policy_bytes):
+    def __init__(self, policy_bytes, *, extra_workflow=True):
         self.policy_bytes = policy_bytes
+        self.extra_workflow = extra_workflow
 
     def repository(self):
         return {"id": 7, "full_name": "fixture-owner/fixture-repo", "default_branch": "main"}
@@ -35,8 +36,28 @@ class GitHubSourceFixture:
         return self.policy_bytes
 
     def workflow_files(self, tree):
-        return {".github/workflows/build.yml": "c" * 40,
-                ".github/workflows/new-check.yml": "d" * 40}
+        result = {".github/workflows/build.yml": "c" * 40}
+        if self.extra_workflow:
+            result[".github/workflows/new-check.yml"] = "d" * 40
+        return result
+
+    def classic_protection(self):
+        return {"required_status_checks": {"checks": [
+            {"context": "Security scan not reviewed in the policy", "app_id": 15368}]}}
+
+    def branch_rules(self):
+        return []
+
+
+def approved_policy():
+    return {"schema": "gsw.release_acceptance_policy/1", "approved": True,
+        "policyId": "isolated-policy", "repository": "fixture-owner/fixture-repo",
+        "repositoryId": 7, "product": "Fubukisama.GaussianSceneWorkbench.Native",
+        "platform": "windows-x64", "requiredJobs": [
+            {"workflowPath": ".github/workflows/build.yml", "checkName": "Windows build",
+             "appSlug": "github-actions", "appId": 15368, "allowedEvents": ["push"]}],
+        "requiredStatuses": [], "workflowInventory": {
+            ".github/workflows/build.yml": {"blobSha": "c" * 40, "scope": "required"}}}
 
 
 class NativeReleaseGateTests(unittest.TestCase):
@@ -59,14 +80,7 @@ class NativeReleaseGateTests(unittest.TestCase):
             self.assertNotIn("token", response)
 
     def test_approved_policy_does_not_ignore_an_unreviewed_workflow(self):
-        policy = {"schema": "gsw.release_acceptance_policy/1", "approved": True,
-            "policyId": "isolated-policy", "repository": "fixture-owner/fixture-repo",
-            "repositoryId": 7, "product": "Fubukisama.GaussianSceneWorkbench.Native",
-            "platform": "windows-x64", "requiredJobs": [
-                {"workflowPath": ".github/workflows/build.yml", "checkName": "Windows build",
-                 "appSlug": "github-actions", "appId": 15368, "allowedEvents": ["push"]}],
-            "requiredStatuses": [], "workflowInventory": {
-                ".github/workflows/build.yml": {"blobSha": "c" * 40, "scope": "required"}}}
+        policy = approved_policy()
         raw = json.dumps(policy, sort_keys=True).encode("utf-8")
         with tempfile.TemporaryDirectory(prefix="gsw-release-gate-") as temporary:
             path = Path(temporary) / "policy.json"
@@ -75,6 +89,17 @@ class NativeReleaseGateTests(unittest.TestCase):
                 GATE.inspect_release(path, "a" * 40, "b" * 40,
                     hashlib.sha256(raw).hexdigest(), github=GitHubSourceFixture(raw))
             self.assertEqual(caught.exception.code, "release_workflow_inventory_changed")
+
+    def test_protection_cannot_add_an_unbound_required_check(self):
+        raw = json.dumps(approved_policy(), sort_keys=True).encode("utf-8")
+        with tempfile.TemporaryDirectory(prefix="gsw-release-gate-") as temporary:
+            path = Path(temporary) / "policy.json"
+            path.write_bytes(raw)
+            with self.assertRaises(GATE.ReleaseGateError) as caught:
+                GATE.inspect_release(path, "a" * 40, "b" * 40,
+                    hashlib.sha256(raw).hexdigest(),
+                    github=GitHubSourceFixture(raw, extra_workflow=False))
+            self.assertEqual(caught.exception.code, "release_required_check_unbound")
 
 
 if __name__ == "__main__":

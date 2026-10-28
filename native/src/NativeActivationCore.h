@@ -43,6 +43,7 @@ class NativeVerifiedUpdate final {
   NativeVerifiedUpdate() = default;
 public:
   NativeVerifiedUpdate(const NativeVerifiedUpdate &) = default;
+  [[nodiscard]] QString descriptorDigest() const { return descriptorSha256; }
 };
 
 class NativeActivationCore final {

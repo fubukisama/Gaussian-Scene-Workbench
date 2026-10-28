@@ -31,7 +31,7 @@ struct Ledger {
 impl Ledger {
     fn parse(entries: &BTreeMap<String, String>, profile: &Profile) -> Result<Self> {
         let text = entries.get(LEDGER).ok_or("TRUST_STATE_CORRUPT")?;
-        let value = strict_json(text.as_bytes(), 4 * 1024 * 1024).map_err(|_| "TRUST_STATE_CORRUPT")?;
+        let value = strict_json(text.as_bytes(), 3 * 1024 * 1024).map_err(|_| "TRUST_STATE_CORRUPT")?;
         let ledger: Self = serde_json::from_value(value).map_err(|_| "TRUST_STATE_CORRUPT")?;
         if ledger.accepted.len() > MAX_HISTORY || ledger.revoked_build_ids.len() > 8192
             || ledger.revoked_build_ids.iter().any(|id| !safe_token(id)) { return Err("TRUST_STATE_CORRUPT"); }
@@ -89,6 +89,7 @@ fn check_tree(path: &Path) -> Result<()> {
     for component in path.components() {
         if matches!(component, Component::ParentDir | Component::CurDir) { return Err("INSTALLATION_PATH_REJECTED"); }
         current.push(component);
+        if matches!(component, Component::Prefix(_)) { continue; }
         match fs::symlink_metadata(&current) {
             Ok(metadata) => {
                 if !metadata.is_dir() || metadata.file_type().is_symlink() { return Err("INSTALLATION_PATH_REJECTED"); }
@@ -277,6 +278,7 @@ pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Resu
         Some(raw)
     } else { None };
     let serialized = serde_json::to_string(&ledger).map_err(|_| "INTERNAL_ERROR")?;
+    if serialized.len() > 3 * 1024 * 1024 { return Err("TRUST_HISTORY_FULL"); }
     store.transact("accepted-offer", |entries| {
         entries.insert(LEDGER.into(), serialized);
         if let Some(raw) = raw {
