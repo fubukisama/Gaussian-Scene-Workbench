@@ -1,10 +1,12 @@
 """Public archive CLI contracts; execute on remote CI only."""
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -95,10 +97,36 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.sequence = 0
 
-    def candidate(self, *, changed_source=False, generated=False):
+    def candidate(self, *, changed_source=False, generated=False, crate_proof=False):
         self.sequence += 1
         source = {"native/CMakeLists.txt": b"# independently tracked source\n",
                   ".github/workflows/check.yml": b"name: isolated source fixture\n"}
+        generated_data = {}
+        if crate_proof:
+            crate_files = {"Cargo.toml": b'[package]\nname="owned-fixture"\nversion="1.0.0"\nlicense="MIT"\n',
+                "src/lib.rs": b"// owned test source; never compiled or executed\n",
+                "LICENSE": b"owned test license bytes\n",
+                ".cargo_vcs_info.json": b'{"git":{"sha1":"0000000000000000000000000000000000000000"}}'}
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT) as crate:
+                for name, data in sorted(crate_files.items()):
+                    item = tarfile.TarInfo("owned-fixture-1.0.0/" + name)
+                    item.size, item.mtime = len(data), 0
+                    crate.addfile(item, io.BytesIO(data))
+            raw_crate = buffer.getvalue()
+            checksum = hashlib.sha256(raw_crate).hexdigest()
+            source["native/updater-trust/Cargo.lock"] = (
+                'version = 4\n\n[[package]]\nname = "owned-fixture"\nversion = "1.0.0"\n'
+                'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                f'checksum = "{checksum}"\n').encode()
+            source["native/updater-trust/Cargo.toml"] = b'[package]\nname="wrapper-fixture"\nversion="0.1.0"\n'
+            prefix = "native/updater-trust/vendor/owned-fixture/"
+            generated_data.update({prefix + name: (data, "cargo-vendor") for name, data in crate_files.items()})
+            generated_data[prefix + ".cargo-checksum.json"] = (json.dumps({"package": checksum,
+                "files": {name: hashlib.sha256(data).hexdigest() for name, data in crate_files.items()}}, sort_keys=True).encode(), "cargo-vendor")
+            generated_data["native/updater-trust/.cargo/config.toml"] = (
+                b'[source.crates-io]\nreplace-with="vendored-sources"\n[source.vendored-sources]\ndirectory="vendor"\n', "cargo-vendor")
+            generated_data["native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate"] = (raw_crate, "cargo-crate-archive")
         expected = [{"path": name, "size": len(data), "sha": subprocess.check_output(
             ["git", "hash-object", "--stdin"], input=data, timeout=10).decode("ascii").strip(),
             "mode": "100644", "type": "blob"} for name, data in sorted(source.items())]
@@ -108,6 +136,9 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
             # expectation can expose that this is not the accepted source tree.
             source["native/CMakeLists.txt"] = b"# substituted source, self-consistent local hashes\n"
         generated_rows = []
+        for name, (data, kind) in generated_data.items():
+            source[name] = data
+            generated_rows.append({"path": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "kind": kind})
         if generated:
             name, data = "native/updater-trust/vendor/crate/src/lib.rs", b"// self-reported dependency source\n"
             source[name] = data
@@ -170,6 +201,16 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         with self.assertRaises(ARCHIVE.ArchiveError) as caught:
             ARCHIVE.verify_release_archive(archive, report, expected)
         self.assertEqual(caught.exception.code, "update_source_dependency_evidence_unavailable")
+
+    def test_raw_crate_binds_all_generated_vendor_files_to_exact_git_lock(self):
+        archive, report, expected = self.candidate(crate_proof=True)
+        before = archive.read_bytes()
+        result = ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(result["registryPackageCount"], 1)
+        self.assertEqual(result["dependencyArchiveCount"], 1)
+        self.assertEqual(result["generatedFileCount"], 7)
+        self.assertEqual(archive.read_bytes(), before)
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["candidate-1.zip", "payload-1"])
 
     def test_report_identity_and_both_digest_layers_are_bound(self):
         archive, report, expected = self.candidate()

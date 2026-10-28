@@ -7,10 +7,12 @@ installed GSW, project, training process or production release is touched.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import subprocess
+import time
 import unittest
 
 
@@ -21,7 +23,9 @@ class TrustContract(unittest.TestCase):
 
     def select(self, repository: str):
         control = Path(self.fixture["controlFile"])
-        control.write_text(json.dumps({"repository": repository}), encoding="utf-8")
+        temporary = control.with_name(control.name + ".setting")
+        temporary.write_text(json.dumps({"repository": repository}), encoding="utf-8")
+        temporary.replace(control)
 
     def request(self, operation: str, root: Path, expected=None, *, channel="stable", environment=None):
         request = {"schema": 1, "operation": operation, "installation_root": str(root.absolute()), "channel": channel}
@@ -236,6 +240,40 @@ class TrustContract(unittest.TestCase):
                 state = self.request("inspect_accepted", installation)
                 self.assertEqual(state["acceptedState"]["highestByChannel"]["stable"]["releaseSequence"], 2)
                 self.assertEqual(set(state["acceptedState"]["accepted"]), {"fixture-b"})
+
+    def test_zz_real_timestamp_expiry_blocks_cached_activation_but_preserves_history(self):
+        self.assertIn("shortExpiryTrigger", self.fixture, "prepare with --with-short-expiry for the required real-time slice")
+        trigger, ready = Path(self.fixture["shortExpiryTrigger"]), Path(self.fixture["shortExpiryReady"])
+        temporary = trigger.with_name(trigger.name + ".requesting")
+        with temporary.open("x", encoding="utf-8") as output:
+            json.dump({"issue": True}, output)
+        temporary.rename(trigger)
+        deadline = time.monotonic() + 10
+        while not ready.exists():
+            self.assertLess(time.monotonic(), deadline, "ephemeral in-memory issuer did not issue short timestamp")
+            time.sleep(.1)
+        metadata = json.loads(ready.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["schema"], "gsw.short_expiry_fixture/1")
+        expires = datetime.fromisoformat(metadata["expires"].replace("Z", "+00:00"))
+        remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+        self.assertGreater(remaining, 10)
+        self.assertLessEqual(remaining, 60)
+        installation = self.root / "real-time-expiry"
+        installation.mkdir()
+        self.select("short-expiry")
+        accepted = self.request("resolve", installation)
+        self.assertTrue(accepted["ok"], accepted)
+        self.assertTrue(self.request("verify_cached", installation, "fixture-a")["ok"])
+        print("phase: waiting for the signed 60-second timestamp to really expire", flush=True)
+        wait_limit = time.monotonic() + 70
+        while (remaining := (expires - datetime.now(timezone.utc)).total_seconds()) >= -.25:
+            self.assertLess(time.monotonic(), wait_limit, "OS clock did not reach the signed expiry within the bounded wait")
+            time.sleep(min(5, max(.1, remaining + .3)))
+        expired = self.request("verify_cached", installation, "fixture-a")
+        self.assertEqual((expired["ok"], expired["code"]), (False, "TUF_REJECTED"))
+        history = self.request("inspect_accepted", installation)
+        self.assertTrue(history["ok"], history)
+        self.assertIn(accepted["descriptorSha256"], history["acceptedState"]["accepted"]["fixture-a"]["descriptorSha256s"])
 
 
 def main():

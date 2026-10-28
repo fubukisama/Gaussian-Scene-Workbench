@@ -160,7 +160,7 @@ jobs:
           & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -m pip install -r packaging/updates/fixture-requirements.txt
           if ($LASTEXITCODE -ne 0) { throw 'Trust fixture dependencies unavailable.' }
           & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -I -B scripts/prepare_native_update_trust_ci.py `
-            --root "$PWD/native/.trust-fixture" --source-commit (git rev-parse HEAD).Trim() `
+            --with-short-expiry --root "$PWD/native/.trust-fixture" --source-commit (git rev-parse HEAD).Trim() `
             --source-tree (git rev-parse 'HEAD^{tree}').Trim() 2>&1 | Tee-Object native/auto-update-trust-evidence/prepare.log
           if ($LASTEXITCODE -ne 0) { throw 'Signed fixture preparation failed.' }
           $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
@@ -192,7 +192,16 @@ jobs:
             runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/auto-update-trust-evidence/source.json
           if(Test-Path native/.trust-fixture/preparation.json){
             $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
-            if($prepared.serverPid){Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue}
+            foreach($owned in @(@{pid=$prepared.serverPid;script='native_update_network_fixture.py'},
+                                @{pid=$prepared.issuerPid;script='create_native_update_fixture.py'})){
+              if($owned.pid){
+                $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($owned.pid)" -ErrorAction SilentlyContinue
+                if($process.CommandLine -and $process.CommandLine.Contains($owned.script) -and
+                    $process.CommandLine.Contains($prepared.root)){
+                  Stop-Process -Id $owned.pid -ErrorAction SilentlyContinue
+                }
+              }
+            }
           }
       - uses: actions/upload-artifact@v7
         if: always()

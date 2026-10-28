@@ -77,7 +77,7 @@ class EndToEnd(unittest.TestCase):
         return (self.installation / "current.json").read_bytes()
 
     def launch(self, label):
-        launcher = Path(self.preparation["launcher"])
+        launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
         plan = subprocess.run([str(launcher), "--print-launch-plan"], capture_output=True,
             timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
         self.assertEqual(plan.returncode, 0)
@@ -129,6 +129,54 @@ class EndToEnd(unittest.TestCase):
                     kernel.CloseHandle(handle)
             self.steps.append({"step": "launch-" + label, "buildId": build, "realQtWindow": True,
                                "formalGswAcceptance": False})
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+    def refused_launch(self, label):
+        """Click only this test-owned launcher's error box, never another app.
+
+        The actual ordinary entry is exercised before the diagnostic plan. A
+        vulnerable launcher exits 0 and starts the withdrawn fixture, producing
+        an unambiguous RED rather than a private implementation assertion.
+        """
+        launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
+        marker = self.evidence / ("refused-launch-" + label + "-" + uuid.uuid4().hex + ".json")
+        environment = os.environ.copy()
+        environment["GSW_UPDATE_FIXTURE_MARKER"] = str(marker)
+        environment["QT_QPA_PLATFORM"] = "windows"
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
+        user32.EnumWindows.argtypes = [callback_type, ctypes.c_ssize_t]
+        user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        process = subprocess.Popen([str(launcher)], env=environment, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            @callback_type
+            def close_owned_dialog(window, _context):
+                owner = ctypes.c_ulong()
+                user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+                name = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(window, name, len(name))
+                if owner.value == process.pid and name.value == "#32770":
+                    user32.PostMessageW(window, 0x0111, 1, 0)  # WM_COMMAND / IDOK
+                return True
+            deadline = time.monotonic() + 20
+            while process.poll() is None and time.monotonic() < deadline:
+                user32.EnumWindows(close_owned_dialog, 0)
+                time.sleep(.05)
+            self.assertEqual(process.wait(timeout=2), 2, "ordinary launcher started a known-revoked build")
+            time.sleep(.4)
+            self.assertFalse(marker.exists(), "withdrawn application received a normal-launch process")
+            plan = subprocess.run([str(launcher), "--print-launch-plan"], capture_output=True,
+                timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(plan.returncode, 2)
+            self.assertFalse(json.loads(plan.stdout)["valid"])
+            self.steps.append({"step": "refuse-normal-launch-" + label, "exitCode": 2,
+                               "withdrawnChildStarted": False, "formalGswAcceptance": False})
         finally:
             if process.poll() is None:
                 process.kill()
@@ -257,6 +305,52 @@ class EndToEnd(unittest.TestCase):
             write_json(self.evidence / "revocation-result.json", {"passed": True, "testOnly": True,
                 "formalGswAcceptance": False, "revokedBuildRefused": True,
                 "sourceCommit": self.preparation["sourceCommit"]})
+        finally:
+            self.installation, self.helper = original_root, original_helper
+
+    def test_revoked_current_build_cannot_restart_and_explicit_safe_A_still_launches(self):
+        original_root, original_helper = self.installation, self.helper
+        root = Path(self.preparation["root"]) / "startup-revocation-installation"
+        root.mkdir()
+        shutil.copytree(original_root / "bin", root / "bin")
+        shutil.copytree(original_root / "user-data", root / "user-data")
+        shutil.copyfile(original_root / "bootstrap.json", root / "bootstrap.json")
+        self.installation, self.helper = root, root / "bin" / original_helper.name
+        try:
+            self.select("A")
+            self.helper_request("startup-install-A", "--install", "stable")
+            pointer_a = self.active("fixture-a")
+            self.select("B")
+            self.helper_request("startup-install-B", "--install", "stable")
+            pointer_b = self.active("fixture-b")
+            self.launch("B")
+            self.select("revoked-b")
+            withdrawal = self.helper_request("startup-adopt-withdrawal-B", "--check", "stable", success=False)
+            self.assertEqual(withdrawal[-1].get("code"), "BUILD_REVOKED")
+            accepted = self.accepted()
+            self.assertIn("fixture-b", accepted["revokedBuildIds"])
+            journal = root / "updates/trust/trust-journal.json"
+            state_bytes = journal.read_bytes()
+            slots, bootstrap, data = tree_hashes(root / "versions"), tree_hashes(root / "bin"), tree_hashes(root / "user-data")
+            self.refused_launch("B")
+            self.assertEqual(self.active("fixture-b"), pointer_b)
+            self.assertEqual(journal.read_bytes(), state_bytes)
+            self.assertEqual(self.accepted(), accepted)
+            self.assertEqual(tree_hashes(root / "versions"), slots)
+            self.assertEqual(tree_hashes(root / "bin"), bootstrap)
+            self.assertEqual(tree_hashes(root / "user-data"), data)
+            self.helper_request("startup-explicit-safe-A", "--rollback", "stable", "fixture-a")
+            self.assertEqual(self.active("fixture-a"), pointer_a)
+            self.launch("A")
+            self.assertEqual(journal.read_bytes(), state_bytes)
+            self.assertEqual(self.accepted(), accepted)
+            self.assertEqual(tree_hashes(root / "versions"), slots)
+            self.assertEqual(tree_hashes(root / "bin"), bootstrap)
+            self.assertEqual(tree_hashes(root / "user-data"), data)
+            write_json(self.evidence / "startup-revocation-result.json", {"passed": True, "testOnly": True,
+                "formalGswAcceptance": False, "knownRevokedNormalLaunchRefused": True,
+                "explicitSafeRollbackStillLaunches": True, "guardStateReadOnly": True,
+                "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
         finally:
             self.installation, self.helper = original_root, original_helper
 

@@ -232,6 +232,15 @@ class NativeReleaseGateTests(unittest.TestCase):
             self.assertEqual(result["artifactId"], 55)
             self.assertEqual(result["archiveSha256"], report["archiveSha256"])
             self.assertTrue(result["eligibilityOnly"])
+            self.assertEqual(result["repositoryId"], 7)
+            self.assertEqual(result["artifactName"], "native-update-candidate-" + "a" * 40 + "-100-2")
+            workflow_result = result["workflows"][0]
+            self.assertEqual(workflow_result["workflowId"], 9)
+            self.assertEqual(workflow_result["event"], "push")
+            self.assertEqual(workflow_result["headSha"], "a" * 40)
+            self.assertEqual(workflow_result["headBranch"], "main")
+            self.assertEqual(workflow_result["jobs"]["Windows build"]["appId"], 15368)
+            self.assertEqual(workflow_result["jobs"]["Windows build"]["appSlug"], "github-actions")
 
 
 if __name__ == "__main__":

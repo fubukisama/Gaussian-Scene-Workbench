@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from urllib.parse import urlsplit
 
 from securesystemslib.signer import CryptoSigner
@@ -32,9 +33,13 @@ SERIALIZER = JSONSerializer(compact=True)
 
 def _fresh_json(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="\n") as stream:
+    if path.exists():
+        raise FileExistsError(path.name)
+    temporary = path.with_name(path.name + ".writing")
+    with temporary.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(value, stream, ensure_ascii=False, allow_nan=False, sort_keys=True)
         stream.write("\n")
+    temporary.rename(path)
 
 
 def _digest(path: Path) -> str:
@@ -105,7 +110,7 @@ def _offer(report, base_url: str, asset: str, channel: str, revision: int):
 def _repository(directory: Path, offer: dict, root_bytes: bytes, signers: dict,
                 now: datetime, version: int, *, expired=False, wrong_signature=False,
                 duplicate_offer=False, mix_snapshot=False, wrong_timestamp_signature=False,
-                root_chain=None):
+                root_chain=None, timestamp_lifetime_seconds=None):
     target_bytes = json.dumps(offer, ensure_ascii=False, allow_nan=False,
                              sort_keys=True, separators=(",", ":")).encode("utf-8")
     if duplicate_offer:
@@ -126,8 +131,9 @@ def _repository(directory: Path, offer: dict, root_bytes: bytes, signers: dict,
     if mix_snapshot:
         snapshot.signed.meta["targets.json"].hashes["sha256"] = "00" * 32
     snapshot_bytes = _signed(snapshot, signers["snapshot"])
-    timestamp = Metadata(Timestamp(version=version,
-        expires=now + (timedelta(hours=-1) if expired else timedelta(days=1))))
+    lifetime = timedelta(hours=-1) if expired else (timedelta(seconds=timestamp_lifetime_seconds)
+        if timestamp_lifetime_seconds is not None else timedelta(days=1))
+    timestamp = Metadata(Timestamp(version=version, expires=now + lifetime))
     timestamp.signed.snapshot_meta = MetaFile.from_data(version, snapshot_bytes, ["sha256"])
     timestamp_bytes = _signed(timestamp, signers["timestamp"])
     if wrong_timestamp_signature:
@@ -285,7 +291,33 @@ def prepare(args):
                          *rotation_roots, "revoked-a", "revocation-omitted", "revoked-b",
                          "release-sequence-rollback", "metadata-revision-rollback", "build-id-reused", "failed-after-revocation"],
         "archives": reports, "sourceCommit": args.source_commit, "sourceTree": args.source_tree}
+    if args.short_expiry_trigger_file is not None:
+        trigger = args.short_expiry_trigger_file.absolute()
+        ready = args.short_expiry_ready_file.absolute() if args.short_expiry_ready_file else root / "short-expiry-ready.json"
+        if trigger.parent != root or ready.parent != root or trigger.exists() or ready.exists():
+            raise ValueError("short_expiry_control_path_invalid")
+        result.update(shortExpiryTrigger=str(trigger), shortExpiryReady=str(ready), issuerPid=os.getpid())
+        result["repositories"].append("short-expiry")
     _fresh_json(root / "fixture.json", result)
+    if args.short_expiry_trigger_file is not None:
+        # Keys remain ONLY in this bounded test process's memory. Sign the short
+        # timestamp AFTER the native binary has compiled and the driver signals;
+        # otherwise a cold CI build could consume the entire intended lifetime.
+        deadline = time.monotonic() + 10 * 60
+        while not trigger.exists():
+            if time.monotonic() >= deadline:
+                raise ValueError("short_expiry_trigger_timeout")
+            time.sleep(.1)
+        if trigger.stat().st_size > 1024 or json.loads(trigger.read_text(encoding="utf-8")) != {"issue": True}:
+            raise ValueError("short_expiry_trigger_invalid")
+        short_now = datetime.now(timezone.utc).replace(microsecond=0)
+        for channel in ("stable", "preview"):
+            _repository(public / "short-expiry" / channel,
+                _offer(reports["A"], base_url, assets["A"], channel, 10),
+                root_bytes, signers, short_now, 10, timestamp_lifetime_seconds=60)
+        _fresh_json(ready, {"schema": "gsw.short_expiry_fixture/1", "testOnly": True,
+            "issuedAt": short_now.isoformat().replace("+00:00", "Z"),
+            "expires": (short_now + timedelta(seconds=60)).isoformat().replace("+00:00", "Z")})
     return result
 
 
@@ -299,6 +331,8 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-tree", required=True)
     parser.add_argument("--display-version", default="0.3.8-native-preview")
+    parser.add_argument("--short-expiry-trigger-file", type=Path)
+    parser.add_argument("--short-expiry-ready-file", type=Path)
     try:
         print(json.dumps(prepare(parser.parse_args()), ensure_ascii=True))
         return 0
