@@ -126,12 +126,21 @@ jobs:
                 $p=[Diagnostics.Process]::Start($start)
                 $stdout=$p.StandardOutput.ReadToEndAsync()
                 $stderr=$p.StandardError.ReadToEndAsync()
-                if(-not $p.WaitForExit(30000)) { $p.Kill($true); $p.WaitForExit(); throw "Owned capture timed out: $case" }
-                $p.WaitForExit()
-                [IO.File]::WriteAllText("$case/stdout.log",$stdout.Result,[Text.UTF8Encoding]::new($false))
-                [IO.File]::WriteAllText("$case/stderr.log",$stderr.Result,[Text.UTF8Encoding]::new($false))
-                $code=$p.ExitCode
-                $p.Dispose()
+                $timedOut=$false
+                $code=$null
+                try {
+                  if(-not $p.WaitForExit(30000)) { $timedOut=$true; $p.Kill($true); $p.WaitForExit() }
+                  $p.WaitForExit()
+                  $code=$p.ExitCode
+                } finally {
+                  try {
+                    if($stdout.Wait(5000)) { [IO.File]::WriteAllText("$case/stdout.log",$stdout.Result,[Text.UTF8Encoding]::new($false)) }
+                    if($stderr.Wait(5000)) { [IO.File]::WriteAllText("$case/stderr.log",$stderr.Result,[Text.UTF8Encoding]::new($false)) }
+                    [ordered]@{exitCode=$code;timedOut=$timedOut;wallLimitSeconds=30} | ConvertTo-Json |
+                      Set-Content -LiteralPath "$case/process.json" -Encoding utf8
+                  } finally { $p.Dispose() }
+                }
+                if($timedOut) { throw "Owned capture timed out: $case; logs retained" }
                 if($code -ne 0) { throw "Real window capture failed: $case exit=$code" }
               }
             }

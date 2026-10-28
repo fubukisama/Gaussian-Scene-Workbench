@@ -478,6 +478,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATIO
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_package_launch.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_clarity.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_clarity.py" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-clarity.yml" DESTINATION source/.github/workflows)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/ui_upgrade_20261028" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_readme.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_stage_native_readme.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_dependency_licenses.py"
@@ -568,7 +572,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/examples/camera-scale-p1"
 include(CTest)
 if(BUILD_TESTING)
   if(WIN32)
-    set(GSW_UI_CLARITY_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-clarity-evidence")
+    set(GSW_UI_CLARITY_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-clarity-evidence" CACHE PATH
+      "Fresh owned UI capture namespace; choose a new directory for a legitimate repeat")
     add_test(NAME native_ui_clarity_capture
       COMMAND GaussianSceneWorkbench --smoke-test-ui-clarity --theme light)
     set_tests_properties(native_ui_clarity_capture PROPERTIES TIMEOUT 30

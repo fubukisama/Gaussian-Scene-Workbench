@@ -1,0 +1,30 @@
+{
+  "schema": "gsw.native_ui_performance_acceptance/1",
+  "status": "adopted_before_first_AA_change_measurements_NOT_RUN",
+  "plan_sha256": "2e8046da5cfd68ad8a047bdee8ffac7501f6cf51d5058d4f976faafa7ae5bff6",
+  "paired_process_rounds": 3,
+  "order": [["A", "B"], ["B", "A"], ["A", "B"]],
+  "unit_of_replication": "fresh process pair on the same remote runner; frames are nested observations",
+  "same_common_passive_observer_required": true,
+  "minimum_events_per_process": {"empty": 60, "light_per_model_type": 52, "medium_512202_gaussians": 8},
+  "reason_for_more_light_events_than_draft": "At least50valid raw intervals are needed for the predeclared p95; chosen before baseline/candidate outcomes, not to replace failures.",
+  "budgets": {
+    "warm_overlay_submit_p50_delta_ms": {"absolute": 0.25, "relative_to_A": 0.20, "rule": "max"},
+    "warm_overlay_submit_p95_delta_ms": {"absolute": 0.50, "relative_to_A": 0.20, "rule": "max"},
+    "cold_overlay_build_delta_ms": {"absolute": 10.0, "relative_to_A": 0.25, "rule": "max"},
+    "fresh_present_p50_delta_ms": {"absolute": 2.0, "relative_to_A": 0.10, "rule": "max"},
+    "fresh_present_p95_delta_ms": {"absolute": 4.0, "relative_to_A": 0.15, "rule": "max"},
+    "event_to_fresh_swap_p50_delta_ms": {"absolute": 4.0, "relative_to_A": 0.10, "rule": "max"},
+    "event_to_fresh_swap_p95_delta_ms": {"absolute": 8.0, "relative_to_A": 0.15, "rule": "max"},
+    "medium_max_delta_ms": {"absolute": 50.0, "relative_to_A_max": 0.15, "rule": "max"},
+    "owned_CPU_bytes_per_viewport": 8388608,
+    "owned_requested_GPU_bytes_per_viewport": 8388608,
+    "idle": {"settle_ms": 600, "windows": 2, "window_ms": 1000, "new_rendered_frames": 0, "fresh_swaps": 0, "metrics_emissions": 0}
+  },
+  "noise_policy": "If the range of three A process summaries exceeds its fixed delta budget, that metric is INCONCLUSIVE; do not enlarge limits or rerun until green.",
+  "no_screenshots_or_framebuffer_reads_during_performance_windows": true,
+  "no_full_viewport_supersampling_or_fidelity_reduction": true,
+  "no_local_tests_or_private_user_inputs": true,
+  "real_GPU_timing_or_VRAM_residency": "NOT_RUN unless a separately valid remote measurement exists; never infer from CPU or present intervals",
+  "cross_monitor_and_user_NVIDIA_driver": "NOT_RUN with the current single-screen software-GL runner"
+}

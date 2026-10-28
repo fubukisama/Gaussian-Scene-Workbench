@@ -10,6 +10,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFontInfo>
+#include <QGlyphRun>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
@@ -19,9 +20,11 @@
 #include <QScopeGuard>
 #include <QScreen>
 #include <QSurfaceFormat>
+#include <QTextLayout>
 #include <QTimer>
 #include <QWindow>
 #include <QDebug>
+#include <iterator>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -62,6 +65,18 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
     qCritical() << "UI clarity: exposed real QOpenGLWidget required; no offscreen substitute";
     return false;
   }
+  // This explicit smoke flag runs on the isolated remote desktop only. F12
+  // correctly refuses desktop evidence from a different foreground window.
+  viewport.window()->raise();
+  viewport.window()->activateWindow();
+  viewport.setFocus(Qt::OtherFocusReason);
+  QElapsedTimer activation;
+  activation.start();
+  while (!viewport.window()->isActiveWindow() && activation.elapsed() < 5000) processFor(20);
+  if (!viewport.window()->isActiveWindow()) {
+    qCritical() << "UI clarity: owned remote window did not become active";
+    return false;
+  }
   const auto grid = viewport.viewportGridSettings();
   const auto target = viewport.viewTarget();
   const auto angles = viewport.viewOrbitAngles();
@@ -74,6 +89,10 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
     viewport.setViewportGridSettings(grid);
     viewport.setEditToolsLocked(oldLock);
   });
+  int observedSwaps = 0;
+  const auto observedPresentation = QObject::connect(&viewport, &QOpenGLWidget::frameSwapped,
+      &viewport, [&] { ++observedSwaps; });
+  const auto disconnectPresentation = qScopeGuard([&] { QObject::disconnect(observedPresentation); });
   auto quietGrid = grid;
   quietGrid.gridVisible = false;
   quietGrid.axesVisible = false;
@@ -84,8 +103,23 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
                    viewport.mapToGlobal(QPoint(12, viewport.height() - 18)),
                    Qt::NoButton, Qt::NoButton, Qt::NoModifier);
   QApplication::sendEvent(&viewport, &move);
-  processFor(250);
-  if (viewport.grabFramebuffer().isNull()) return false;
+  // grabFramebuffer() can render a fresh but not yet presented frame. Wait
+  // for the real swap signal instead, so F12's before/after serials agree.
+  QElapsedTimer settle;
+  settle.start();
+  quint64 previousSerial = viewport.renderedFrameSerial();
+  int stableObservations = 0;
+  while ((observedSwaps == 0 || stableObservations < 4) && settle.elapsed() < 10000) {
+    processFor(20);
+    const quint64 current = viewport.renderedFrameSerial();
+    stableObservations = current == previousSerial ? stableObservations + 1 : 0;
+    previousSerial = current;
+  }
+  if (observedSwaps == 0 || stableObservations < 4) {
+    qCritical() << "UI clarity: no stable actually presented frame before capture";
+    return false;
+  }
+  const int swapsBeforeCapture = observedSwaps;
   QKeyEvent capture(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier);
   QApplication::sendEvent(&viewport, &capture);
   QString manifest;
@@ -107,7 +141,8 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
       }
     }
   }
-  if (manifest.isEmpty() || !captured.value("stageSerialMatch").toBool()) {
+  if (manifest.isEmpty() || !captured.value("requestSerialMatch").toBool() ||
+      !captured.value("stageSerialMatch").toBool()) {
     qCritical() << "UI clarity: full presented diagnostic frame did not complete";
     return false;
   }
@@ -120,6 +155,8 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
       {"requestedQtScaleFactor", qEnvironmentVariable("QT_SCALE_FACTOR")},
       {"requestedSamples", QSurfaceFormat::defaultFormat().samples()},
       {"actualContextSamples", viewport.context()->format().samples()},
+      {"observedSwapsBeforeCapture", swapsBeforeCapture},
+      {"actualUiScalePercent", qApp->property("gswUiScalePercent").toInt()},
       {"actualFont", QJsonObject{{"family", actual.family()}, {"pixelSize", actual.pixelSize()},
           {"pointSize", actual.pointSizeF()}, {"exactMatch", actual.exactMatch()}}},
       {"productionCameraAndTransformUnchanged", target == viewport.viewTarget() &&
@@ -130,7 +167,44 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
     environment.insert("screenLogicalDpi", screen->logicalDotsPerInch());
     environment.insert("screenPhysicalDpi", screen->physicalDotsPerInch());
     environment.insert("screenDpr", screen->devicePixelRatio());
+    const QPixmap fullWindow = screen->grabWindow(viewport.window()->winId());
+    if (fullWindow.isNull() || !fullWindow.save(QDir(evidence).filePath(QStringLiteral("window-native.png")))) {
+      qCritical() << "UI clarity: actual owned window screenshot is unavailable";
+      return false;
+    }
+    environment.insert("nativeWindowCapture", QJsonObject{
+        {"method", "QScreen::grabWindow(owned native window id)"},
+        {"logicalWindowSize", QJsonArray{viewport.window()->width(), viewport.window()->height()}},
+        {"physicalImageSize", QJsonArray{fullWindow.width(), fullWindow.height()}},
+        {"pixmapDpr", fullWindow.devicePixelRatio()}});
   }
+  QJsonArray fonts;
+  // Immutable glyph-test data, not a translatable user-interface message.
+  const char32_t glyphProbe[]{0x4c, 0x61, 0x74, 0x69, 0x6e, 0x20, 0x4e2d, 0x6587,
+      0x20, 0x65e5, 0x672c, 0x8a9e, 0x20, 0x30, 0x31, 0x32, 0x33};
+  const QString mixedProbe = QString::fromUcs4(glyphProbe, qsizetype(std::size(glyphProbe)));
+  const auto widgets = viewport.window()->findChildren<QWidget *>();
+  for (QWidget *widget : widgets) {
+    if (!widget->isVisible()) continue;
+    const QFontInfo info(widget->font());
+    QTextLayout mixed(mixedProbe, widget->font());
+    mixed.beginLayout();
+    QTextLine line = mixed.createLine();
+    if (line.isValid()) line.setLineWidth(2000);
+    mixed.endLayout();
+    QJsonArray runs;
+    for (const QGlyphRun &run : mixed.glyphRuns()) {
+      const auto glyphs = run.glyphIndexes();
+      runs.append(QJsonObject{{"family", run.rawFont().familyName()}, {"style", run.rawFont().styleName()},
+          {"glyphCount", glyphs.size()}, {"missingGlyphCount", glyphs.count(0)}});
+    }
+    fonts.append(QJsonObject{{"class", QString::fromLatin1(widget->metaObject()->className())},
+        {"name", widget->objectName()}, {"requestedFamily", widget->font().family()},
+        {"resolvedFamily", info.family()}, {"pointSize", info.pointSizeF()},
+        {"pixelSize", info.pixelSize()}, {"weight", int(info.weight())},
+        {"mixedScriptGlyphRuns", runs}});
+  }
+  environment.insert("visibleWidgetFontResolution", fonts);
 #ifdef Q_OS_WIN
   environment.insert("actualWindowsWindowDpi", int(GetDpiForWindow(reinterpret_cast<HWND>(viewport.window()->winId()))));
 #endif
