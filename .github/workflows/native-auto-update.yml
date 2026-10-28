@@ -7,12 +7,16 @@ on:
     paths:
       - 'native/updater/**'
       - 'native/updater-trust/**'
+      - 'native/third_party/tough/**'
+      - 'native/third_party/miniz/**'
+      - 'native/third_party/nlohmann/**'
       - 'native/src/NativeUpdate*'
       - 'native/src/NativeActivation*'
       - 'native/tests/NativeUpdate*'
       - 'packaging/updates/**'
       - 'scripts/*native_update*'
       - 'scripts/*native_release_gate*'
+      - 'scripts/prepare_native_update_trust_ci.py'
       - '.github/workflows/native-auto-update.yml'
 
 # This workflow only builds/tests isolated candidates. Ordinary main pushes
@@ -95,6 +99,77 @@ jobs:
         with:
           name: native-auto-update-isolated-evidence
           path: native/auto-update-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  isolated-trust:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      RUSTUP_HOME: ${{ github.workspace }}/native/.cache/updater-rustup
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v5
+        with:
+          path: |
+            native/.cache/updater-cargo
+            native/.cache/updater-rustup
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Prepare isolated signed HTTPS repository
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-updater,native/auto-update-trust-evidence -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-updater-trust"
+          if ($LASTEXITCODE -ne 0) { throw 'Trust fixture QA environment unavailable.' }
+          & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -m pip install -r packaging/updates/fixture-requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Trust fixture dependencies unavailable.' }
+          & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -I -B scripts/prepare_native_update_trust_ci.py `
+            --root "$PWD/native/.trust-fixture" --source-commit (git rev-parse HEAD).Trim() `
+            --source-tree (git rev-parse 'HEAD^{tree}').Trim() 2>&1 | Tee-Object native/auto-update-trust-evidence/prepare.log
+          if ($LASTEXITCODE -ne 0) { throw 'Signed fixture preparation failed.' }
+          $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
+          "GSW_UPDATER_FIXTURE_PROFILE_PATH=$($prepared.profile)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build independent production and fixture trust binaries
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust SDK unavailable.' }
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --lib --target-dir native/build-auto-update/rust-production
+          if ($LASTEXITCODE -ne 0) { throw 'Production trust library failed.' }
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --features fixture-cli --target-dir native/build-auto-update/rust-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Distinct fixture trust binary failed.' }
+      - name: Real signature and replay contract
+        shell: pwsh
+        run: |
+          $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
+          & "$PWD/native/.qa-updater-trust/Scripts/python.exe" -I -B native/updater-trust/tests/remote_trust_contract.py `
+            --cli "$PWD/native/build-auto-update/rust-fixture/release/gsw-trust-fixture-cli.exe" `
+            --fixture $prepared.fixture --work-root "$PWD/native/.trust-contract" 2>&1 | Tee-Object native/auto-update-trust-evidence/trust.log
+          if ($LASTEXITCODE -ne 0) { throw 'Real TUF signature/replay contract failed.' }
+      - name: Record scope and stop only the test server
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/auto-update-trust-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='isolated';production=false;
+            sourceCommit=(git rev-parse HEAD).Trim();sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
+            runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/auto-update-trust-evidence/source.json
+          if(Test-Path native/.trust-fixture/preparation.json){
+            $prepared=Get-Content native/.trust-fixture/preparation.json -Raw | ConvertFrom-Json
+            if($prepared.serverPid){Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue}
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-trust-evidence
+          path: native/auto-update-trust-evidence/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
