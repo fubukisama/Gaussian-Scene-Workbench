@@ -149,7 +149,7 @@ jobs:
           foreach($batch in $plan){
             $case=Join-Path $root $batch.id
             New-Item -ItemType Directory -Path $case | Out-Null
-            # Adapter owns only absent process-PID subdirectories; this base is
+            # Adapter owns only absent process-PID-nonce subdirectories; this base is
             # intentionally created beforehand as its existing, owned parent.
             $env:GSW_UI_SURFACE_EVIDENCE=Join-Path $case 'surfaces'
             New-Item -ItemType Directory -Path $env:GSW_UI_SURFACE_EVIDENCE | Out-Null

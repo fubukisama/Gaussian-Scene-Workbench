@@ -467,13 +467,26 @@ QJsonArray uiSurfaceFontEvidence(QWidget *window) {
 
 bool installUiSurfaceEvidence(const QString &root, const QString &sourceCommit) {
   auto *application = qobject_cast<QApplication *>(QCoreApplication::instance());
-  if (!application || QThread::currentThread() != application->thread() ||
-      qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
-      QGuiApplication::platformName() != QStringLiteral("windows") ||
-      !QRegularExpression(QStringLiteral("^[0-9a-fA-F]{40}$")).match(sourceCommit).hasMatch() ||
-      application->findChild<QObject *>(QStringLiteral("gswUiSurfaceEvidenceAdapter"))) return false;
+  // Fixed, bounded diagnostics for the opt-in developer smoke adapter. Do not
+  // log paths or window content, and do not relax a guard to collect evidence.
+  const auto refuse = [](const char *reason) {
+    qWarning("UI_SURFACE_EVIDENCE: refused; reason=%s; pid=%lld", reason,
+             qlonglong(QCoreApplication::applicationPid()));
+    return false;
+  };
+  if (!application || QThread::currentThread() != application->thread())
+    return refuse("not-application-thread");
+  if (qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true"))
+    return refuse("not-remote-ci");
+  if (QGuiApplication::platformName() != QStringLiteral("windows"))
+    return refuse("not-real-windows-platform");
+  if (!QRegularExpression(QStringLiteral("^[0-9a-fA-F]{40}$")).match(sourceCommit).hasMatch())
+    return refuse("invalid-source-commit");
+  if (application->findChild<QObject *>(QStringLiteral("gswUiSurfaceEvidenceAdapter")))
+    return refuse("adapter-already-installed");
   const QString isolated = application->property("gswSmokeSettingsDirectory").toString();
-  if (!QDir::isAbsolutePath(isolated) || !QFileInfo(isolated).isDir()) return false;
+  if (!QDir::isAbsolutePath(isolated) || !QFileInfo(isolated).isDir())
+    return refuse("invalid-isolated-settings");
   QString smoke;
   const QRegularExpression smokeFlag(QStringLiteral("^--smoke-test(?:-[a-z0-9-]+)?$"));
   for (const QString &argument : application->arguments()) {
@@ -482,9 +495,11 @@ bool installUiSurfaceEvidence(const QString &root, const QString &sourceCommit) 
       break;
     }
   }
-  if (smoke.isEmpty() || !freshRoot(root) || !QDir().mkpath(root)) return false;
+  if (smoke.isEmpty()) return refuse("missing-smoke-argument");
+  if (!freshRoot(root)) return refuse("evidence-root-not-fresh");
+  if (!QDir().mkpath(root)) return refuse("evidence-root-create-failed");
   auto *adapter = new SurfaceEvidence(QDir::cleanPath(root), sourceCommit.toLower(), smoke, application);
-  if (!adapter->ready()) { delete adapter; return false; }
+  if (!adapter->ready()) { delete adapter; return refuse("metadata-initialization-failed"); }
   qInfo("UI_SURFACE_EVIDENCE: installed; owned synthetic remote windows only");
   return true;
 }

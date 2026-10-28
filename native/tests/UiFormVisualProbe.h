@@ -52,8 +52,7 @@ inline bool installUiFormsEvidence(QApplication &application, const bool visual,
   application.setProperty("gswSmokeSettingsDirectory", isolatedSettings);
   const QString base = qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE");
   if (!QDir::isAbsolutePath(base) || !QFileInfo(base).isDir()) return false;
-  const QString root = QDir(base).filePath(
-      QStringLiteral("process-") + QString::number(QCoreApplication::applicationPid()));
+  const QString root = newUiSurfaceEvidenceRoot(base);
   if (!installUiSurfaceEvidence(root, qEnvironmentVariable("GSW_UI_SOURCE_COMMIT"))) return false;
   application.setProperty("gswUiFormEvidenceProcessRoot", root);
   return true;

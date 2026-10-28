@@ -544,8 +544,7 @@ int main(int argc, char *argv[]) {
       qEnvironmentVariable("GSW_SMOKE_BACKGROUND") == QStringLiteral("1");
   if (smokeTest && qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE")) {
     const QString base = qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE");
-    const QString evidence = QDir(base).filePath(QStringLiteral("process-%1")
-        .arg(QCoreApplication::applicationPid()));
+    const QString evidence = gsw::newUiSurfaceEvidenceRoot(base);
     if (!gsw::installUiSurfaceEvidence(evidence, qEnvironmentVariable("GSW_UI_SOURCE_COMMIT"))) {
       qCritical() << "Remote UI surface evidence requires fresh isolated real Windows smoke context";
       return 2;
