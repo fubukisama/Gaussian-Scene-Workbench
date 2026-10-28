@@ -348,4 +348,3 @@ bool installUiCrashDiagnostics(const QString &absoluteOwnedDir) {
 }
 
 } // namespace gsw
-

@@ -177,4 +177,3 @@ inline void finishUiFormsEvidence(QApplication &application, const bool visual) 
 }
 
 } // namespace gsw::tests
-

@@ -245,4 +245,3 @@ void UiVisualRoleTests::multipliesInkAlphaAndPreservesPainterState() {
 
 QTEST_MAIN(UiVisualRoleTests)
 #include "UiVisualRoleTests.moc"
-
