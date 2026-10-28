@@ -202,3 +202,99 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+
+  isolated-stable-entry:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: D:/gu/c
+      RUSTUP_HOME: D:/gu/r
+      CARGO_TARGET_DIR: D:/gu/e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-updater
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/c
+            D:/gu/r
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Build actual test windows and exact stable launcher
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-updater,native/update-e2e-evidence -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-update-e2e"
+          if($LASTEXITCODE -ne 0){throw 'E2E isolated Python unavailable.'}
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -m pip install -r packaging/updates/fixture-requirements.txt
+          if($LASTEXITCODE -ne 0){throw 'E2E fixture dependencies unavailable.'}
+          cmake -S native/updater -B native/build-update-e2e -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=OFF -DGSW_UPDATER_FIXTURE_BUILD=ON
+          if($LASTEXITCODE -ne 0){throw 'E2E native configure failed.'}
+          cmake --build native/build-update-e2e --config Release --parallel --target gsw_update_application_fixture_a gsw_update_application_fixture_b gsw_update_fixture_launcher
+          if($LASTEXITCODE -ne 0){throw 'E2E native windows/launcher build failed.'}
+      - name: Issue private isolated A B and bad C
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/prepare_native_update_end_to_end.py `
+            --remote-fixture-only --root "$PWD/native/.update-e2e" `
+            --fixture-a "$PWD/native/build-update-e2e/fixture-A/Release/Gaussian Scene Workbench.exe" `
+            --fixture-b "$PWD/native/build-update-e2e/fixture-B/Release/Gaussian Scene Workbench.exe" `
+            --launcher "$PWD/native/build-update-e2e/Release/Gaussian Scene Workbench Launcher.exe" `
+            --windeployqt (Get-Command windeployqt).Source --source-commit (git rev-parse HEAD).Trim() `
+            --source-tree (git rev-parse 'HEAD^{tree}').Trim() 2>&1 | Tee-Object native/update-e2e-evidence/prepare.log
+          if($LASTEXITCODE -ne 0){throw 'E2E private issuer failed.'}
+          $prepared=Get-Content native/.update-e2e/preparation.json -Raw | ConvertFrom-Json
+          "GSW_UPDATER_FIXTURE_PROFILE_PATH=$($prepared.profile)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Link distinct native test helper with the issued root
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'E2E pinned Rust unavailable.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --features fixture-cli --target-dir D:/gu/e
+          if($LASTEXITCODE -ne 0){throw 'E2E fixture trust build failed.'}
+          cmake -S native/updater -B native/build-update-e2e -DGSW_TRUST_LIBRARY=D:/gu/e/release/gsw_updater_trust.lib
+          if($LASTEXITCODE -ne 0){throw 'E2E native helper configure failed.'}
+          cmake --build native/build-update-e2e --config Release --parallel --target gsw_native_update_helper
+          if($LASTEXITCODE -ne 0){throw 'E2E native helper build failed.'}
+      - name: Real HTTPS signature activation same entry and rollback
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/test_native_update_end_to_end.py `
+            --remote-fixture-only --preparation native/.update-e2e/preparation.json `
+            --helper "$PWD/native/build-update-e2e/Release/GSW Update Fixture Helper.exe" `
+            --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe --windeployqt (Get-Command windeployqt).Source `
+            --evidence "$PWD/native/update-e2e-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/end-to-end.log
+          if($LASTEXITCODE -ne 0){throw 'Real stable-entry lifecycle contract failed.'}
+      - name: Record isolated identity and stop only the test server
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/update-e2e-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='real-qt-fixture-stable-launcher-only';
+            production=false;formalGswAcceptance=false;sourceCommit=(git rev-parse HEAD).Trim();
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/update-e2e-evidence/source.json
+          if(Test-Path native/.update-e2e/preparation.json){
+            $prepared=Get-Content native/.update-e2e/preparation.json -Raw | ConvertFrom-Json
+            if($prepared.serverPid){Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue}
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-stable-entry-evidence
+          path: native/update-e2e-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

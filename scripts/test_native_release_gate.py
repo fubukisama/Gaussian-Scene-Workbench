@@ -4,10 +4,12 @@ import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 
 SCRIPT = Path(__file__).with_name("verify_native_release_gate.py")
@@ -68,12 +70,45 @@ class GitHubRunFixture(GitHubSourceFixture):
             "head_branch": "main", "head_sha": "a" * 40,
             "path": ".github/workflows/build.yml", "check_suite_id": 30,
             "repository": {"id": 7, "full_name": "fixture-owner/fixture-repo"},
+            "head_repository": {"id": 7, "full_name": "fixture-owner/fixture-repo"},
             "run_started_at": "2026-10-28T08:00:00Z", "updated_at": "2026-10-28T08:01:00Z"}
 
     def jobs(self, run_id, attempt):
         return [{"id": 20, "name": "Windows build", "status": "completed", "conclusion": "success",
             "run_id": run_id, "run_attempt": 1, "head_sha": "a" * 40,
             "check_run_url": "https://api.github.com/repos/fixture-owner/fixture-repo/check-runs/20"}]
+
+
+class GitHubCandidateFixture(GitHubRunFixture):
+    def __init__(self, policy_bytes, wrapper, tracked):
+        super().__init__(policy_bytes)
+        self.wrapper, self.tracked = wrapper, tracked
+
+    def jobs(self, run_id, attempt):
+        return [dict(row, run_attempt=attempt) for row in super().jobs(run_id, attempt)]
+
+    def check_run(self, check_id):
+        return {"id": 20, "name": "Windows build", "head_sha": "a" * 40,
+            "check_suite": {"id": 30}, "app": {"id": 15368, "slug": "github-actions"},
+            "status": "completed", "conclusion": "success"}
+
+    def workflow_files(self, tree):
+        return {row["path"]: row["blobSha"] for row in self.tracked if row["path"].startswith(".github/workflows/")}
+
+    def source_tree(self, tree):
+        return [{"path": row["path"], "sha": row["blobSha"], "size": row["size"],
+                 "type": "blob", "mode": "100644"} for row in self.tracked]
+
+    def artifact(self, artifact_id):
+        return {"id": 55, "name": "native-update-candidate-" + "a" * 40 + "-100-2",
+            "expired": False, "size_in_bytes": self.wrapper.stat().st_size,
+            "digest": "sha256:" + hashlib.sha256(self.wrapper.read_bytes()).hexdigest(),
+            "created_at": "2026-10-28T08:00:30Z", "updated_at": "2026-10-28T08:00:31Z",
+            "workflow_run": {"id": 100, "head_sha": "a" * 40, "head_branch": "main",
+                             "repository_id": 7, "head_repository_id": 7}}
+
+    def download_artifact(self, artifact_id, destination):
+        shutil.copyfile(self.wrapper, destination)
 
 
 def approved_policy():
@@ -137,6 +172,66 @@ class NativeReleaseGateTests(unittest.TestCase):
                 GATE.inspect_release(path, "a" * 40, "b" * 40,
                     hashlib.sha256(raw).hexdigest(), github=GitHubRunFixture(raw))
             self.assertEqual(caught.exception.code, "release_job_attempt_differs")
+
+    def test_exact_current_candidate_binds_outer_artifact_inner_archive_and_full_source(self):
+        with tempfile.TemporaryDirectory(prefix="gsw-release-gate-") as temporary:
+            root = Path(temporary)
+            workflow = b"name: isolated build\non: workflow_dispatch\njobs: {}\n"
+            # Git itself is the independent source of the expected blob IDs.
+            def blob(data):
+                return subprocess.check_output(["git", "hash-object", "--stdin"], input=data,
+                                               timeout=10).decode("ascii").strip()
+            policy = approved_policy()
+            policy["workflowInventory"][".github/workflows/build.yml"]["blobSha"] = blob(workflow)
+            policy["artifact"] = {"workflowPath": ".github/workflows/build.yml", "jobName": "Windows build",
+                "namePrefix": "native-update-candidate", "archiveMember": "candidate.zip", "reportMember": "candidate.json"}
+            raw = json.dumps(policy, sort_keys=True).encode("utf-8")
+            source = {"native/CMakeLists.txt": b"# isolated source, no executable code\n",
+                      ".github/workflows/build.yml": workflow,
+                      "packaging/updates/release-policy.json": raw}
+            tracked = [{"path": name, "blobSha": blob(data), "size": len(data)} for name, data in sorted(source.items())]
+            payload = {"bin/Gaussian Scene Workbench.exe": b"owned nonexecuted release gate fixture",
+                "COPYING": b"isolated GPL notice", "LICENSE": b"isolated GPL notice",
+                "THIRD_PARTY_LICENSES.md": b"isolated notices", "native/LICENSE.md": b"GPL-3.0-or-later",
+                "build_manifest.json": b'{"product":"Gaussian Scene Workbench","legacyWebRuntimeIncluded":false}',
+                "backend_manifest.json": b'{"schema":"isolated.release-gate/1"}',
+                **{"source/" + name: data for name, data in source.items()}}
+            payload["source-manifest.json"] = json.dumps({"schema": "gsw-native-corresponding-source-v1",
+                "license": "GPL-3.0-or-later",
+                "executableSha256": hashlib.sha256(payload["bin/Gaussian Scene Workbench.exe"]).hexdigest(),
+                "sourceFileCount": len(source), "files": [{"path": name, "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest()} for name, data in sorted(source.items())]}).encode()
+            payload["source-provenance.json"] = json.dumps({"schema": "gsw.native_update_source_provenance/1",
+                "sourceCommit": "a" * 40, "sourceTree": "b" * 40,
+                "trackedFiles": tracked, "generatedDependencies": []}, sort_keys=True).encode()
+            package = root / "payload"
+            for name, data in payload.items():
+                path = package / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            archive = root / "candidate.zip"
+            made = subprocess.run([sys.executable, "-I", "-B", str(SCRIPT.with_name("package_native_update.py")),
+                "--package-root", str(package), "--output-archive", str(archive), "--source-commit", "a" * 40,
+                "--source-tree", "b" * 40, "--build-id", "isolated-release-1", "--display-version", "1.0",
+                "--release-sequence", "1"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+            report = json.loads(made.stdout)
+            report["buildIdentity"] = {"repositoryId": 7, "repository": "fixture-owner/fixture-repo",
+                "workflowId": 9, "workflowPath": ".github/workflows/build.yml", "runId": 100,
+                "runAttempt": 2, "event": "push", "headBranch": "main"}
+            wrapper = root / "gha-artifact.zip"
+            with zipfile.ZipFile(wrapper, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+                zipped.write(archive, "candidate.zip")
+                zipped.writestr("candidate.json", json.dumps(report, sort_keys=True))
+            policy_path = root / "policy.json"
+            policy_path.write_bytes(raw)
+            result = GATE.inspect_release(policy_path, "a" * 40, "b" * 40, hashlib.sha256(raw).hexdigest(),
+                github=GitHubCandidateFixture(raw, wrapper, tracked), artifact_id=55, archive_path=archive)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["code"], "release_eligible")
+            self.assertEqual(result["artifactId"], 55)
+            self.assertEqual(result["archiveSha256"], report["archiveSha256"])
+            self.assertTrue(result["eligibilityOnly"])
 
 
 if __name__ == "__main__":

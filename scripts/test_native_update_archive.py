@@ -65,6 +65,22 @@ class NativeUpdateArchiveTests(unittest.TestCase):
                 self.assertEqual({entry["path"] for entry in manifest["files"]}, set(files))
             self.assertEqual(root.joinpath(".package-note").read_bytes(), files[".package-note"])
 
+    def test_existing_output_is_not_overwritten_even_for_an_invalid_package(self):
+        with tempfile.TemporaryDirectory(prefix="gsw-update-archive-") as temporary:
+            root = Path(temporary) / "payload"
+            root.mkdir()
+            archive = Path(temporary) / "candidate.zip"
+            archive.write_bytes(b"previous immutable artifact - must survive")
+            result = subprocess.run([sys.executable, "-I", "-B", str(SCRIPT),
+                "--package-root", str(root), "--output-archive", str(archive),
+                "--product", PRODUCT, "--source-commit", "a" * 40,
+                "--source-tree", "b" * 40, "--build-id", "fixture-build-2"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stdout)["code"], "update_archive_destination_not_fresh")
+            self.assertEqual(archive.read_bytes(), b"previous immutable artifact - must survive")
+            self.assertEqual(list(root.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()

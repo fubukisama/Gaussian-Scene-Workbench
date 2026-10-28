@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 from urllib.parse import quote
+from urllib.parse import urlsplit
 
 
 POLICY_PATH = "packaging/updates/release-policy.json"
@@ -142,6 +143,41 @@ class GitHubEvidence:
                 return result
         raise ReleaseGateError("release_protection_evidence_incomplete")
 
+    def _pages(self, path, key=None):
+        result = []
+        for page in range(1, 11):
+            separator = "&" if "?" in path else "?"
+            data = self._get(path + f"{separator}per_page=100&page={page}")
+            rows = data.get(key) if key and isinstance(data, dict) else data
+            if (not isinstance(rows, list) or len(rows) > 100
+                    or (key and type(data.get("total_count")) is int and data["total_count"] > 1000)):
+                raise ReleaseGateError("release_github_list_incomplete")
+            result.extend(rows)
+            if len(rows) < 100:
+                if key and type(data.get("total_count")) is int and len(result) != data["total_count"]:
+                    raise ReleaseGateError("release_github_list_incomplete")
+                return result
+        raise ReleaseGateError("release_github_list_incomplete")
+
+    def workflow(self, path):
+        return self._get(self.base + "/actions/workflows/" + quote(path.rsplit("/", 1)[-1], safe=""))
+
+    def workflow_runs(self, workflow_id, sha):
+        return self._pages(self.base + f"/actions/workflows/{workflow_id}/runs?head_sha={sha}&branch=main",
+                           "workflow_runs")
+
+    def run(self, run_id):
+        return self._get(self.base + f"/actions/runs/{run_id}")
+
+    def jobs(self, run_id, attempt):
+        return self._pages(self.base + f"/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+
+    def check_run(self, check_id):
+        return self._get(self.base + f"/check-runs/{check_id}")
+
+    def statuses(self, sha):
+        return self._pages(self.base + f"/commits/{sha}/statuses")
+
 
 def _source_and_inventory(policy, raw, source_commit, source_tree, github):
     repository = github.repository()
@@ -268,6 +304,104 @@ def _protection_union(policy, github):
     return [{"context": context, "appId": app_id} for context, app_id in protected]
 
 
+def _select_run(github, policy, workflow_path, requirements, source_commit):
+    workflow = github.workflow(workflow_path)
+    if (not isinstance(workflow, dict) or workflow.get("path") != workflow_path
+            or workflow.get("state") != "active" or not _positive(workflow.get("id"))):
+        raise ReleaseGateError("release_workflow_identity_differs")
+    events = set.intersection(*(set(job["allowedEvents"]) for job in requirements))
+    if not events:
+        raise ReleaseGateError("release_workflow_event_policy_invalid")
+    rows = github.workflow_runs(workflow["id"], source_commit)
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise ReleaseGateError("release_workflow_runs_incomplete")
+    eligible = [row for row in rows if isinstance(row, dict)
+                and row.get("head_sha") == source_commit and row.get("head_branch") == "main"
+                and row.get("event") in events]
+    if not eligible or any(not _positive(row.get("id")) for row in eligible):
+        raise ReleaseGateError("release_required_run_missing")
+    selected = max(eligible, key=lambda row: row["id"])
+    run = github.run(selected["id"])
+    if (not isinstance(run, dict) or run.get("id") != selected["id"]
+            or run.get("workflow_id") != workflow["id"] or run.get("path") != workflow_path
+            or run.get("head_sha") != source_commit or run.get("head_branch") != "main"
+            or run.get("event") not in events or not _positive(run.get("run_attempt"))
+            or run.get("repository", {}).get("id") != policy["repositoryId"]
+            or run.get("head_repository", {}).get("id") != policy["repositoryId"]
+            or not _positive(run.get("check_suite_id"))):
+        raise ReleaseGateError("release_run_identity_differs")
+    if run.get("status") != "completed" or run.get("conclusion") != "success":
+        raise ReleaseGateError("release_required_run_not_success")
+    return run
+
+
+def _check_run_id(url, repository):
+    if not isinstance(url, str):
+        raise ReleaseGateError("release_check_run_identity_invalid")
+    parsed = urlsplit(url)
+    path = re.fullmatch(r"/repos/" + re.escape(repository) + r"/check-runs/([0-9]+)", parsed.path, re.I)
+    if (parsed.scheme != "https" or parsed.hostname != "api.github.com" or parsed.port is not None
+            or parsed.username or parsed.password or parsed.query or parsed.fragment or not path):
+        raise ReleaseGateError("release_check_run_identity_invalid")
+    value = int(path.group(1))
+    if not _positive(value):
+        raise ReleaseGateError("release_check_run_identity_invalid")
+    return value
+
+
+def _required_results(policy, source_commit, github):
+    groups = {}
+    for job in policy["requiredJobs"]:
+        groups.setdefault(job["workflowPath"], []).append(job)
+    verified = {}
+    for path, requirements in sorted(groups.items()):
+        run = _select_run(github, policy, path, requirements, source_commit)
+        rows = github.jobs(run["id"], run["run_attempt"])
+        if not isinstance(rows, list) or len(rows) > 1000:
+            raise ReleaseGateError("release_jobs_incomplete")
+        jobs = {}
+        for requirement in requirements:
+            matches = [row for row in rows if isinstance(row, dict) and row.get("name") == requirement["checkName"]]
+            if len(matches) != 1:
+                raise ReleaseGateError("release_required_job_missing_or_ambiguous")
+            job = matches[0]
+            if job.get("run_attempt") != run["run_attempt"] or job.get("run_id") != run["id"]:
+                raise ReleaseGateError("release_job_attempt_differs")
+            if job.get("head_sha") != source_commit or not _positive(job.get("id")):
+                raise ReleaseGateError("release_job_source_differs")
+            if job.get("status") != "completed" or job.get("conclusion") != "success":
+                raise ReleaseGateError("release_required_job_not_success")
+            check_id = _check_run_id(job.get("check_run_url"), policy["repository"])
+            check = github.check_run(check_id)
+            if (not isinstance(check, dict) or check.get("id") != check_id
+                    or check.get("name") != requirement["checkName"] or check.get("head_sha") != source_commit
+                    or check.get("check_suite", {}).get("id") != run["check_suite_id"]
+                    or check.get("app", {}).get("slug") != "github-actions"
+                    or check.get("app", {}).get("id") != requirement["appId"]
+                    or requirement["appId"] != 15368):
+                raise ReleaseGateError("release_check_publisher_identity_differs")
+            if check.get("status") != "completed" or check.get("conclusion") != "success":
+                raise ReleaseGateError("release_required_check_not_success")
+            jobs[requirement["checkName"]] = {"jobId": job["id"], "checkRunId": check_id}
+        verified[path] = {"run": run, "jobs": jobs}
+    statuses = []
+    if policy["requiredStatuses"]:
+        rows = github.statuses(source_commit)
+        if not isinstance(rows, list) or len(rows) > 1000:
+            raise ReleaseGateError("release_statuses_incomplete")
+        for requirement in policy["requiredStatuses"]:
+            matches = [row for row in rows if isinstance(row, dict) and row.get("context") == requirement["context"]]
+            if not matches or any(not _positive(row.get("id")) for row in matches):
+                raise ReleaseGateError("release_required_status_missing")
+            status = max(matches, key=lambda row: row["id"])
+            if (status.get("creator", {}).get("id") != requirement["creatorId"]
+                    or status.get("creator", {}).get("login", "").casefold() != requirement["creatorLogin"].casefold()
+                    or status.get("state") != "success"):
+                raise ReleaseGateError("release_required_status_not_success")
+            statuses.append({"context": requirement["context"], "id": status["id"]})
+    return verified, statuses
+
+
 def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
                     approved_policy_sha256: str | None = None, *, github=None) -> dict:
     if not re.fullmatch(r"[a-f0-9]{40}", source_commit) or not re.fullmatch(r"[a-f0-9]{40}", source_tree):
@@ -292,6 +426,7 @@ def inspect_release(policy_path: Path, source_commit: str, source_tree: str,
     evidence = github if github is not None else GitHubEvidence(policy.get("repository", ""))
     _source_and_inventory(policy, raw, source_commit, source_tree, evidence)
     _protection_union(policy, evidence)
+    _required_results(policy, source_commit, evidence)
     # Each following gate is added only after its real remote failing contract.
     # No intermediate source-only implementation can authorize publication.
     raise ReleaseGateError("release_gate_evidence_not_available")

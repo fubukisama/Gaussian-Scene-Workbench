@@ -51,6 +51,34 @@ endif()
 if(MSVC)
   target_compile_options(gsw_update_download PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
 endif()
+if(GSW_UPDATER_FIXTURE_BUILD)
+  # Actual Qt windows, but NOT the GSW renderer/application. This separate
+  # product exercises stable-entry A/B updates without a user's installation.
+  find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets)
+  foreach(label A B)
+    string(TOLOWER "${label}" lower)
+    qt_add_executable(gsw_update_application_fixture_${lower} WIN32
+      ../tests/NativeUpdateApplicationFixture.cpp)
+    target_link_libraries(gsw_update_application_fixture_${lower} PRIVATE Qt6::Widgets)
+    target_compile_definitions(gsw_update_application_fixture_${lower} PRIVATE GSW_UPDATE_FIXTURE_LABEL="${label}")
+    set_target_properties(gsw_update_application_fixture_${lower} PROPERTIES
+      OUTPUT_NAME "Gaussian Scene Workbench"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixture-${label}")
+    if(MSVC)
+      target_compile_options(gsw_update_application_fixture_${lower} PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+  endforeach()
+  # Compile the exact production launcher/installation sources. There is no
+  # test root/feed/key override in this executable: root is still parent/bin.
+  qt_add_executable(gsw_update_fixture_launcher WIN32 ../src/NativeLauncher.cpp ../src/NativeInstallation.cpp)
+  target_link_libraries(gsw_update_fixture_launcher PRIVATE Qt6::Core Shell32 Ole32 Propsys User32 Uuid)
+  target_compile_definitions(gsw_update_fixture_launcher PRIVATE
+    GSW_APP_USER_MODEL_ID="Fubukisama.GaussianSceneWorkbench.UpdateFixture" NOMINMAX WIN32_LEAN_AND_MEAN)
+  set_target_properties(gsw_update_fixture_launcher PROPERTIES OUTPUT_NAME "Gaussian Scene Workbench Launcher")
+  if(MSVC)
+    target_compile_options(gsw_update_fixture_launcher PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   qt_add_executable(gsw_update_download_tests ../tests/NativeUpdateDownloadTests.cpp)

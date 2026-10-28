@@ -12,15 +12,19 @@ Json immutableOffer(Json offer) {
 }
 void pointToSlot(const QString &root, const QString &id, const QString &exeHash) {
   const QString pointer = QDir(root).filePath(QStringLiteral("current.json"));
+  Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", exeHash.toStdString()}};
   if (QFileInfo::exists(pointer)) {
     // A malformed pointer is backed up as bytes, never parsed as a prerequisite
     // to recovery. This operation cannot reset independent TUF state.
     const auto previous = read(pointer, 16384);
+    // Do not replace an already-correct pointer, including while an observer
+    // holds it open. Malformed JSON does not obstruct the recovery branch.
+    try { if (parse(previous, 16384) == active) return; }
+    catch (const Failure &) {} catch (const Json::exception &) {}
     const QString backups = QDir(root).filePath(QStringLiteral("updates/pointer-backups"));
     ensureDirectory(backups);
     durableWrite(QDir(backups).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json")), previous, false);
   }
-  Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", exeHash.toStdString()}};
   durableWrite(pointer, QByteArray::fromStdString(active.dump()), true);
 }
 }

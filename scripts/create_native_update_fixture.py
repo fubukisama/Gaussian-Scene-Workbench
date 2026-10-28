@@ -104,7 +104,8 @@ def _offer(report, base_url: str, asset: str, channel: str, revision: int):
 
 def _repository(directory: Path, offer: dict, root_bytes: bytes, signers: dict,
                 now: datetime, version: int, *, expired=False, wrong_signature=False,
-                duplicate_offer=False, mix_snapshot=False):
+                duplicate_offer=False, mix_snapshot=False, wrong_timestamp_signature=False,
+                root_chain=None):
     target_bytes = json.dumps(offer, ensure_ascii=False, allow_nan=False,
                              sort_keys=True, separators=(",", ":")).encode("utf-8")
     if duplicate_offer:
@@ -129,11 +130,28 @@ def _repository(directory: Path, offer: dict, root_bytes: bytes, signers: dict,
         expires=now + (timedelta(hours=-1) if expired else timedelta(days=1))))
     timestamp.signed.snapshot_meta = MetaFile.from_data(version, snapshot_bytes, ["sha256"])
     timestamp_bytes = _signed(timestamp, signers["timestamp"])
-    for name, data in {"1.root.json": root_bytes, "root.json": root_bytes,
+    if wrong_timestamp_signature:
+        invalid = json.loads(timestamp_bytes)
+        invalid["signatures"][0]["sig"] = "00" * 64
+        timestamp_bytes = json.dumps(invalid, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    files = {"root.json": root_bytes,
                        "targets.json": target_bytes_wire, f"{version}.targets.json": target_bytes_wire,
                        "snapshot.json": snapshot_bytes, f"{version}.snapshot.json": snapshot_bytes,
-                       "timestamp.json": timestamp_bytes}.items():
+                       "timestamp.json": timestamp_bytes}
+    files.update({f"{number}.root.json": data for number, data in (root_chain or {1: root_bytes}).items()})
+    for name, data in files.items():
         _write(metadata / name, data)
+
+
+def _rotated_root(signers: dict, second_root, signing, now: datetime, *, version=2):
+    trust = Metadata(Root(version=version, expires=now + timedelta(days=365), consistent_snapshot=False))
+    for role, signer in signers.items():
+        trust.signed.add_key(signer.public_key, role)
+    trust.signed.add_key(second_root.public_key, "root")
+    trust.signed.roles["root"].threshold = 2
+    for index, signer in enumerate(signing):
+        trust.sign(signer, append=index != 0)
+    return _wire(trust)
 
 
 def prepare(args):
@@ -193,6 +211,20 @@ def prepare(args):
     trust.sign(signers["root"])
     trust.sign(second_root, append=True)
     root_bytes = _wire(trust)
+    rotated = {role: CryptoSigner.generate_ed25519() for role in ("root", "targets", "snapshot", "timestamp")}
+    rotated_second = CryptoSigner.generate_ed25519()
+    old_threshold = [signers["root"], second_root]
+    new_threshold = [rotated["root"], rotated_second]
+    rotated_bytes = _rotated_root(rotated, rotated_second, old_threshold + new_threshold, now)
+    rotation_roots = {
+        "rotated": rotated_bytes,
+        "rotation-fetch-fails": rotated_bytes,
+        "rotated-root-omitted": rotated_bytes,
+        "root-old-threshold-only": _rotated_root(rotated, rotated_second, old_threshold, now),
+        "root-new-threshold-only": _rotated_root(rotated, rotated_second, new_threshold, now),
+        "root-new-threshold-short": _rotated_root(rotated, rotated_second, old_threshold + new_threshold[:1], now),
+        "root-version-skipped": _rotated_root(rotated, rotated_second, old_threshold + new_threshold, now, version=3),
+    }
     for channel in ("stable", "preview"):
         for name, revision in (("A", 1), ("B", 2), ("badC", 3)):
             _repository(public / name / channel,
@@ -213,6 +245,29 @@ def prepare(args):
             _repository(public / name / channel, offer, root_bytes, signers, now, 4,
                 expired=name == "expired", wrong_signature=name == "wrong-key",
                 duplicate_offer=name == "duplicate-offer", mix_snapshot=name == "mix")
+        for name, next_root in rotation_roots.items():
+            chain = {1: root_bytes}
+            if name != "rotated-root-omitted":
+                chain[2] = next_root
+            _repository(public / name / channel,
+                _offer(reports["B"], base_url, assets["B"], channel, 5), next_root, rotated, now, 5,
+                root_chain=chain, wrong_timestamp_signature=name == "rotation-fetch-fails")
+        for name, revision in (("revoked-a", 6), ("revocation-omitted", 7), ("revoked-b", 8),
+                               ("release-sequence-rollback", 8), ("metadata-revision-rollback", 8),
+                               ("build-id-reused", 8), ("failed-after-revocation", 9)):
+            offer = _offer(reports["A"] if name == "release-sequence-rollback" else reports["B"],
+                base_url, assets["A"] if name == "release-sequence-rollback" else assets["B"], channel, revision)
+            if name == "revoked-a":
+                offer["revokedBuildIds"] = ["fixture-a"]
+            elif name == "revoked-b":
+                offer["revokedBuildIds"] = ["fixture-b"]
+            elif name == "metadata-revision-rollback":
+                offer["metadataRevision"] = 1
+            elif name == "build-id-reused":
+                offer["releaseSequence"] = 3
+                offer["archiveSha256"] = "00" * 32
+            _repository(public / name / channel, offer, root_bytes, signers, now, revision,
+                        wrong_timestamp_signature=name == "failed-after-revocation")
     profile = {"schema": "gsw.update_profile/1", "product": PRODUCT, "platform": PLATFORM,
         "channels": {channel: {"metadataBase": base_url + f"/repository/{channel}/metadata/",
                               "targetsBase": base_url + f"/repository/{channel}/targets/"}
@@ -226,7 +281,9 @@ def prepare(args):
         "controlFile": server["controlFile"], "baseUrl": base_url,
         "consistentSnapshot": False, "rootThreshold": 2,
         "repositories": ["A", "B", "badC", "wrong-key", "expired", "mix", "wrong-product",
-                         "wrong-platform", "wrong-channel", "duplicate-offer", "sequence-overflow"],
+                         "wrong-platform", "wrong-channel", "duplicate-offer", "sequence-overflow",
+                         *rotation_roots, "revoked-a", "revocation-omitted", "revoked-b",
+                         "release-sequence-rollback", "metadata-revision-rollback", "build-id-reused", "failed-after-revocation"],
         "archives": reports, "sourceCommit": args.source_commit, "sourceTree": args.source_tree}
     _fresh_json(root / "fixture.json", result)
     return result
