@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
         {"en_US", QString::fromLatin1("English <b>literal</b> & <script>fixture</script>")},
         {"ja_JP", QString::fromUtf8("日本語 <b>そのまま</b> & <script>fixture</script>")}};
     emitEvent(QString::fromLatin1("available"), QString::fromLatin1("VERIFIED"),
-        {{"offer", QJsonObject{{"buildId", build}, {"displayVersion", "UI fixture 2"},
+        {{"offer", QJsonObject{{"buildId", build}, {"displayVersion", "UI fixture <b>2 & preview</b>"},
             {"channel", channel}, {"archiveLength", 16 * 1024 * 1024}, {"releaseNotes", notes}}}});
   };
   QTimer timer;

@@ -139,6 +139,14 @@ private slots:
     QCOMPARE(read(path("user-project.gsw")), QByteArray("unchanged project sentinel"));
     qunsetenv("GSW_UPDATE_UI_FIXTURE_APPLICATION");
   }
+  void helperVersionAndBuildLabelsAlwaysUsePlainText() {
+    open(); check();
+    QCOMPARE(status()->textFormat(), Qt::PlainText);
+    QVERIFY(status()->text().contains(QString::fromLatin1("UI fixture <b>2 & preview</b>")));
+    auto *running = dialog()->findChild<QLabel *>(QString::fromLatin1("nativeUpdateRunningBuild"));
+    QVERIFY(running);
+    QCOMPARE(running->textFormat(), Qt::PlainText);
+  }
   void actualHelperProgressRetranslatesWithoutRestartAndSupportsCancelRetryAndApply() {
     open(); check();
     QTest::mouseClick(button("nativeUpdateDownload"), Qt::LeftButton);

@@ -161,8 +161,11 @@ private:
     dialog->setObjectName(QStringLiteral("nativeUpdateDialog")); dialog->resize(700, 550);
     AppLanguage::bind(dialog, "windowTitle", AppLanguage::source("软件更新"));
     auto *layout = new QVBoxLayout(dialog);
-    mRunning = new QLabel(dialog); mRunning->setWordWrap(true); layout->addWidget(mRunning);
-    mStatus = new QLabel(dialog); mStatus->setObjectName(QStringLiteral("nativeUpdateStatus")); mStatus->setWordWrap(true); layout->addWidget(mStatus);
+    mRunning = new QLabel(dialog); mRunning->setObjectName(QStringLiteral("nativeUpdateRunningBuild"));
+    mRunning->setTextFormat(Qt::PlainText); mRunning->setWordWrap(true); layout->addWidget(mRunning);
+    // Version strings and helper codes are data, never QLabel rich text.
+    mStatus = new QLabel(dialog); mStatus->setObjectName(QStringLiteral("nativeUpdateStatus"));
+    mStatus->setTextFormat(Qt::PlainText); mStatus->setWordWrap(true); layout->addWidget(mStatus);
     mProgress = new QProgressBar(dialog); mProgress->setRange(0, 1000); layout->addWidget(mProgress);
     mNotes = new QPlainTextEdit(dialog); mNotes->setObjectName(QStringLiteral("nativeUpdateNotes")); mNotes->setReadOnly(true); layout->addWidget(mNotes);
     auto *form = new QFormLayout;

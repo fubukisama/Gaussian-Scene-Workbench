@@ -154,31 +154,79 @@ class EndToEnd(unittest.TestCase):
         an unambiguous RED rather than a private implementation assertion.
         """
         launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
-        marker = self.evidence / ("refused-launch-" + label + "-" + uuid.uuid4().hex + ".json")
+        identity = uuid.uuid4().hex
+        marker = self.evidence / ("refused-launch-" + label + "-" + identity + ".json")
+        window_evidence = self.evidence / ("rejection-window-" + label + "-" + identity + ".json")
         environment = os.environ.copy()
         environment["GSW_UPDATE_FIXTURE_MARKER"] = str(marker)
         environment["QT_QPA_PLATFORM"] = "windows"
         user32 = ctypes.WinDLL("user32", use_last_error=True)
-        callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
+        # Win32 WNDENUMPROC returns BOOL (32-bit), not C/C++ bool (8-bit).
+        callback_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_ssize_t)
         user32.EnumWindows.argtypes = [callback_type, ctypes.c_ssize_t]
+        user32.EnumWindows.restype = ctypes.c_int
         user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
         user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetClassNameW.restype = ctypes.c_int
+        user32.GetDlgItem.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.GetDlgItem.restype = ctypes.c_void_p
+        user32.GetParent.argtypes = [ctypes.c_void_p]
+        user32.GetParent.restype = ctypes.c_void_p
+        user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+        user32.SetForegroundWindow.restype = ctypes.c_int
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
         user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.PostMessageW.restype = ctypes.c_int
         process = subprocess.Popen([str(launcher)], env=environment, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+        observations = []
+        enumeration_count, enumeration_failures = 0, 0
+        started = time.monotonic()
         try:
             @callback_type
             def close_owned_dialog(window, _context):
                 owner = ctypes.c_ulong()
                 user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+                if owner.value != process.pid:
+                    return 1
                 name = ctypes.create_unicode_buffer(256)
                 user32.GetClassNameW(window, name, len(name))
-                if owner.value == process.pid and name.value == "#32770":
-                    user32.PostMessageW(window, 0x0111, 1, 0)  # WM_COMMAND / IDOK
-                return True
+                record = {"class": name.value, "controlFound": False, "postSucceeded": False}
+                if name.value == "#32770":
+                    button = user32.GetDlgItem(window, 1)  # IDOK, not window text.
+                    button_owner = ctypes.c_ulong()
+                    button_class = ctypes.create_unicode_buffer(256)
+                    if button:
+                        user32.GetWindowThreadProcessId(button, ctypes.byref(button_owner))
+                        if button_owner.value == process.pid and user32.GetParent(button) == window:
+                            user32.GetClassNameW(button, button_class, len(button_class))
+                    owned_button = (bool(button) and button_owner.value == process.pid and
+                        user32.GetParent(button) == window and button_class.value.casefold() == "button")
+                    record.update(controlFound=bool(owned_button), controlClass=button_class.value)
+                    if owned_button:
+                        # Only this verified synthetic dialog may receive a
+                        # foreground request. A denied request remains evidence;
+                        # never attach input queues or synthesize global input.
+                        foreground_requested = bool(user32.SetForegroundWindow(window))
+                        record.update(foregroundRequestSucceeded=foreground_requested,
+                            dialogIsForeground=user32.GetForegroundWindow() == window)
+                        ctypes.set_last_error(0)
+                        # Ask the actual same-PID IDOK Button to click itself.
+                        # MessageBox may ignore a fabricated WM_COMMAND with no
+                        # sending control handle; never close any other window.
+                        posted = bool(user32.PostMessageW(button, 0x00F5, 0, 0))  # BM_CLICK
+                        record.update(postSucceeded=posted,
+                            postError=ctypes.get_last_error() if not posted else 0)
+                if len(observations) < 20:
+                    observations.append(record)
+                return 1
             deadline = time.monotonic() + 20
             while process.poll() is None and time.monotonic() < deadline:
-                user32.EnumWindows(close_owned_dialog, 0)
+                enumeration_count += 1
+                if not user32.EnumWindows(close_owned_dialog, 0):
+                    enumeration_failures += 1
                 time.sleep(.05)
             self.assertEqual(process.wait(timeout=2), 2, "ordinary launcher started a known-revoked build")
             time.sleep(.4)
@@ -188,8 +236,17 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(plan.returncode, 2)
             self.assertFalse(json.loads(plan.stdout)["valid"])
             self.steps.append({"step": "refuse-normal-launch-" + label, "exitCode": 2,
-                               "withdrawnChildStarted": False, "formalGswAcceptance": False})
+                               "withdrawnChildStarted": False, "formalGswAcceptance": False,
+                               "windowEvidence": window_evidence.name})
         finally:
+            # Synthetic same-owner class/control facts only: no title, text,
+            # screenshot, foreign-process information or desktop contents.
+            write_json(window_evidence, {"schema": "gsw.launch_rejection_windows/1", "testOnly": True,
+                "formalGswAcceptance": False, "label": label, "launcherPid": process.pid,
+                "elapsedMilliseconds": round((time.monotonic() - started) * 1000),
+                "exitCodeBeforeCleanup": process.poll(), "observationLimit": 20,
+                "enumerations": enumeration_count, "enumerationFailures": enumeration_failures,
+                "observations": observations})
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
