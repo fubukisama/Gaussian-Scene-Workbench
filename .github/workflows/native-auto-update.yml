@@ -1,0 +1,89 @@
+name: Native Auto Update
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/updater/**'
+      - 'native/updater-trust/**'
+      - 'native/src/NativeUpdate*'
+      - 'native/src/NativeActivation*'
+      - 'native/tests/NativeUpdate*'
+      - 'packaging/updates/**'
+      - 'scripts/*native_update*'
+      - 'scripts/*native_release_gate*'
+      - '.github/workflows/native-auto-update.yml'
+
+# This workflow only builds/tests isolated candidates. Ordinary main pushes
+# never create Releases, obtain signing credentials or promote a channel.
+permissions:
+  contents: read
+
+jobs:
+  isolated-contracts:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install isolated TLS fixture dependency
+        shell: pwsh
+        run: |
+          & '${{ steps.python.outputs.python-path }}' -m pip install 'cryptography==50.0.2'
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture TLS dependency unavailable.' }
+      - name: Build native download boundary
+        shell: pwsh
+        run: |
+          cmake -S native/updater -B native/build-auto-update -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON '-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Updater configure failed.' }
+          cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests
+          if ($LASTEXITCODE -ne 0) { throw 'Updater build failed.' }
+      - name: Actual HTTPS download contract
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/auto-update-evidence -Force | Out-Null
+          ctest --test-dir native/build-auto-update -C Release --no-tests=error --output-on-failure `
+            --output-log native/auto-update-evidence/download.log `
+            --output-junit "$PWD/native/auto-update-evidence/download.xml"
+          if ($LASTEXITCODE -ne 0) { throw 'Real native HTTPS contract failed.' }
+      - name: Complete archive contract
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/auto-update-evidence -Force | Out-Null
+          & '${{ steps.python.outputs.python-path }}' -I -B -m unittest discover -s scripts -p test_native_update_archive.py -v 2>&1 | Tee-Object native/auto-update-evidence/archive.log
+          if ($LASTEXITCODE -ne 0) { throw 'Archive contract failed.' }
+      - name: Fail-closed release policy contract
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          & '${{ steps.python.outputs.python-path }}' -I -B -m unittest discover -s scripts -p test_native_release_gate.py -v 2>&1 | Tee-Object native/auto-update-evidence/release-gate.log
+          if ($LASTEXITCODE -ne 0) { throw 'Release policy contract failed.' }
+      - name: Bind isolated evidence to source
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/auto-update-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='isolated';production=false;
+            sourceCommit=(git rev-parse HEAD).Trim();sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
+            runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/auto-update-evidence/source.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-isolated-evidence
+          path: native/auto-update-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

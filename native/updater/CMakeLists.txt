@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+cmake_minimum_required(VERSION 3.24)
+project(GswNativeAutoUpdate LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Test)
+include(CTest)
+add_library(gsw_update_download STATIC
+  ../src/NativeUpdateDownload.cpp ../src/NativeUpdateDownload.h)
+target_include_directories(gsw_update_download PUBLIC ../src)
+target_link_libraries(gsw_update_download PUBLIC Qt6::Core Qt6::Network)
+if(MSVC)
+  target_compile_options(gsw_update_download PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  qt_add_executable(gsw_update_download_tests ../tests/NativeUpdateDownloadTests.cpp)
+  target_link_libraries(gsw_update_download_tests PRIVATE gsw_update_download Qt6::Test)
+  if(MSVC)
+    target_compile_options(gsw_update_download_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+  add_test(NAME update_download_https COMMAND gsw_update_download_tests)
+  set_tests_properties(update_download_https PROPERTIES TIMEOUT 60
+    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_NETWORK_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_network_fixture.py;QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endif()

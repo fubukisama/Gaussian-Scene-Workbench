@@ -1,0 +1,20 @@
+{
+  "schema": "gsw.release_acceptance_policy/1",
+  "approved": false,
+  "policyId": "native-windows-x64-initial-draft",
+  "repository": "fubukisama/Gaussian-Scene-Workbench",
+  "product": "Fubukisama.GaussianSceneWorkbench.Native",
+  "platform": "windows-x64",
+  "approvalNote": "Draft only. A human-approved complete policy and protected publication configuration are required before production signing or channel promotion.",
+  "requiredJobs": [
+    {"workflowPath": ".github/workflows/native-windows.yml", "checkName": "Upstream viewport acceptance", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-windows.yml", "checkName": "Native C++ CodeQL", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-windows.yml", "checkName": "Qt 6 native preview", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-security.yml", "checkName": "Backend security regression", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-security.yml", "checkName": "CodeQL (python)", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-security.yml", "checkName": "CodeQL (actions)", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/native-updates.yml", "checkName": "managed-updates", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]},
+    {"workflowPath": ".github/workflows/windows-installer.yml", "checkName": "Windows setup acceptance", "appSlug": "github-actions", "allowedEvents": ["push", "workflow_dispatch"]}
+  ],
+  "requiredStatuses": []
+}
