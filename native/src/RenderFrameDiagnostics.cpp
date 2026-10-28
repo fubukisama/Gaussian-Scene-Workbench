@@ -463,6 +463,7 @@ bool RenderFrameDiagnostics::beginFrame(QOpenGLWidget *w, quint64 serial, const 
   m->manifest.insert("stageFrameSerial", qint64(serial)); m->manifest.insert("frameScene", scene);
   m->manifest.insert("widgetFramebuffer", int(w->defaultFramebufferObject()));
   m->manifest.insert("widgetDpr", w->devicePixelRatioF()); m->manifest.insert("status", "capturing");
+  m->manifest.insert("logicalWidgetSize", QJsonArray{w->width(), w->height()});
   return true;
 }
 bool RenderFrameDiagnostics::pendingFrame() const { return m->armed; }

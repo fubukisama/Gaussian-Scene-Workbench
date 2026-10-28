@@ -1,0 +1,163 @@
+name: Native UI Clarity
+
+# Short, source-bound red/green feedback; does not replace Native Windows.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: UI acceptance slice
+        type: choice
+        default: baseline
+        options: [oracle-only, baseline, candidate]
+
+permissions:
+  contents: read
+
+jobs:
+  ui-clarity:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      QT_FORCE_STDERR_LOGGING: '1'
+      QT_LOGGING_TO_CONSOLE: '1'
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GSW_UI_ROOT: ${{ runner.temp }}/gsw-ui
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record exact source and frozen protocol
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:GSW_UI_ROOT -Force | Out-Null
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -cne $env:GITHUB_SHA) { throw 'Dispatched source mismatch.' }
+          Copy-Item docs/ui_upgrade_20261028/P0_PROTOCOL.json "$env:GSW_UI_ROOT/protocol.json"
+          [ordered]@{sourceCommit=$head;sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            scope='${{ inputs.scope }}';protocolSha256=(Get-FileHash docs/ui_upgrade_20261028/P0_PROTOCOL.json).Hash;
+            recordedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json |
+            Set-Content -LiteralPath "$env:GSW_UI_ROOT/source-run.json" -Encoding utf8
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Install QA and validate source and translations
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw 'QA dependencies failed.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
+          if ($LASTEXITCODE -ne 0) { throw 'Native boundary failed.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/native_i18n.py
+          if ($LASTEXITCODE -ne 0) { throw 'Native translations failed.' }
+      - name: Independent pixel oracle contracts
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_clarity.py 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_ROOT/oracle-contracts.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Independent pixel oracle failed; preserve the red signal.' }
+      - uses: jurplel/install-qt-action@v4
+        if: inputs.scope != 'oracle-only'
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build actual native window and navigation targets
+        if: inputs.scope != 'oracle-only'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw 'Codec build failed.' }
+          $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-ui -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON `
+            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$root/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw 'UI configure failed.' }
+          cmake --build native/build-ui --config Release --parallel --target GaussianSceneWorkbench gsw_navigation_gizmo_tests 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_ROOT/build.log"
+          if ($LASTEXITCODE -ne 0) { throw 'UI build failed.' }
+      - name: Prepare real remote Windows display and OpenGL
+        if: inputs.scope != 'oracle-only'
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Capture actual fractional-DPR navigation frames
+        if: inputs.scope != 'oracle-only'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $core = (Get-ChildItem "$env:QT_ROOT_DIR/bin/Qt6Core.dll" -ErrorAction Stop).DirectoryName
+          $env:PATH="$core;$env:PATH"
+          $env:QT_PLUGIN_PATH="$env:QT_ROOT_DIR/plugins"
+          $env:QT_QPA_PLATFORM='windows'
+          $env:QT_OPENGL='software'
+          $exe=(Resolve-Path 'native/build-ui/Release/Gaussian Scene Workbench.exe').Path
+          foreach($dpr in @('1','1.25','1.5','1.75','2')) {
+            foreach($samples in @('0','4')) {
+              foreach($theme in @('light','dark')) {
+                $case=Join-Path $env:GSW_UI_ROOT ('d'+$dpr+'-s'+$samples+'-'+$theme)
+                New-Item -ItemType Directory -Path $case | Out-Null
+                $env:GSW_UI_CLARITY_EVIDENCE=$case
+                $env:GSW_RENDER_DIAGNOSTICS_DIR=Join-Path $case 'captures'
+                $env:GSW_UI_QA_SAMPLES=$samples
+                $env:QT_SCALE_FACTOR=$dpr
+                # Remote runner only: suppress console creation, not the actual
+                # GUI exposure required by the real QOpenGLWidget contract.
+                $start=[Diagnostics.ProcessStartInfo]::new()
+                $start.FileName=$exe
+                $start.UseShellExecute=$false
+                $start.CreateNoWindow=$true
+                $start.RedirectStandardOutput=$true
+                $start.RedirectStandardError=$true
+                foreach($arg in @('--smoke-test-ui-clarity','--theme',$theme)) { $start.ArgumentList.Add($arg) }
+                $p=[Diagnostics.Process]::Start($start)
+                $stdout=$p.StandardOutput.ReadToEndAsync()
+                $stderr=$p.StandardError.ReadToEndAsync()
+                if(-not $p.WaitForExit(30000)) { $p.Kill($true); $p.WaitForExit(); throw "Owned capture timed out: $case" }
+                $p.WaitForExit()
+                [IO.File]::WriteAllText("$case/stdout.log",$stdout.Result,[Text.UTF8Encoding]::new($false))
+                [IO.File]::WriteAllText("$case/stderr.log",$stderr.Result,[Text.UTF8Encoding]::new($false))
+                $code=$p.ExitCode
+                $p.Dispose()
+                if($code -ne 0) { throw "Real window capture failed: $case exit=$code" }
+              }
+            }
+          }
+          $captures=@(Get-ChildItem -LiteralPath $env:GSW_UI_ROOT -Filter capture.json -Recurse -File)
+          if($captures.Count -ne 20) { throw 'The full frozen DPR/sample/theme capture matrix was not executed.' }
+      - name: Evaluate navigation edges and retain all failing cases
+        if: inputs.scope != 'oracle-only'
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/check_native_ui_clarity.py `
+            --root $env:GSW_UI_ROOT --output "$env:GSW_UI_ROOT/edge-results.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual navigation edge contract failed; no tolerance relaxation.' }
+      - name: Real navigation and camera regressions
+        if: inputs.scope == 'candidate'
+        shell: pwsh
+        run: |
+          Remove-Item Env:QT_SCALE_FACTOR -ErrorAction SilentlyContinue
+          Remove-Item Env:GSW_UI_QA_SAMPLES -ErrorAction SilentlyContinue
+          ctest --test-dir native/build-ui -C Release --no-tests=error --output-on-failure --verbose `
+            --output-log "$env:GSW_UI_ROOT/navigation.log" `
+            -R '^(navigation_gizmo|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP))$'
+          if ($LASTEXITCODE -ne 0) { throw 'Existing actual navigation contract failed.' }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-ui-clarity-${{ inputs.scope }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/gsw-ui
+          if-no-files-found: error
+          retention-days: 14

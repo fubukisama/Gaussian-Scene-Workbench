@@ -1,0 +1,183 @@
+{
+  "schema": "gsw.ui_render_font_icon_static_audit/1",
+  "as_of": "2026-10-28",
+  "baseline_commit": "5183926e09f5b568379bb1f89ee1667a9bd38121",
+  "status": "static_audit_complete_runtime_not_run",
+  "local_automated_tests_executed": false,
+  "local_application_or_GUI_executed": false,
+  "user_data_read_or_uploaded": false,
+  "production_source_modified_by_auditor": false,
+  "upstream_code_integrated_by_auditor": false,
+  "font_resolution_observed": false,
+  "root_cause_identified": false,
+  "source_hash_mode": "raw_working_tree_bytes_observed_at_baseline_not_future_mutable_file_identity",
+  "repository_source_bindings": [
+    {"path": "native/src/BlenderNavigationPresentation.h", "sha256": "86e573b039c695c0d330e01f7d4826c5c33d634c3eea4532f712a6c8007f75fa", "bytes": 9601},
+    {"path": "native/src/NavigationGizmo.cpp", "sha256": "3b7e12507a36e04b5b24ba0d8c69c232fbf1cfeacccaba7a749ec73341df19d6", "bytes": 9202},
+    {"path": "native/src/WorkbenchIcons.cpp", "sha256": "f135d41054e268707ffcb79cf583e70d74ffd870674d21c27a84f50c1bcb2019", "bytes": 5189},
+    {"path": "native/src/WorkbenchIcons.h", "sha256": "48d2bfde0caf2e43bb7348cf98fe4cad813c9a4da14bb151ea29511c29d1c686", "bytes": 1344},
+    {"path": "native/src/AppTheme.cpp", "sha256": "22a7bf44b1ff75c5a4972ff0a760634948f3d53825371cc681d08b0ac9cf5773", "bytes": 25224},
+    {"path": "native/src/AppTheme.h", "sha256": "de571ddb23ccbf977403286e8978b150d23974d218f998a187b8fc16b9196e6a", "bytes": 2448},
+    {"path": "native/src/NativeViewport.cpp", "sha256": "cbf0ae48715ebbbb401d692f8d1c70ac1d558ff41c24f6e39dac4ac44696dc55", "bytes": 407528},
+    {"path": "native/lucide_icons.qrc", "sha256": "2e4ec8af884651dbb6e26ab04de24198ffb12150069918c7d7cfd14c7a4affe6", "bytes": 4863},
+    {"path": "native/third_party/lucide/LICENSE", "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57", "bytes": 3208},
+    {"path": "native/third_party/lucide/README.gsw.md", "sha256": "3096c4a456b29548f6c0128c7b3b743bd87198beaf83c7ccbd78cc4d909f7ac6", "bytes": 990},
+    {"path": "native/third_party/blender-navigation/README.gsw.md", "sha256": "0e396418cf6ea01980568494bbed7e917ddadff1001f6cd6dc86fbe63f6b8cb8", "bytes": 7910}
+  ],
+  "upstream_blender": {
+    "repository": "https://github.com/blender/blender",
+    "tag": "v4.5.0",
+    "commit": "8cb6b388974a817afedf1317ce26f0c75aa5f181",
+    "download_root": "D:/Codex/validation/gsw-ui-upgrade-20261028/source-references/blender-8cb6b388",
+    "hash_mode": "raw_upstream_UTF8_file_bytes",
+    "files": [
+      {
+        "path": "source/blender/editors/space_view3d/view3d_gizmo_navigate_type.cc",
+        "local_name": "view3d_gizmo_navigate_type.cc",
+        "sha256": "6c1e71395e46bd8dbf6da5bced22f0bdfe3e68a460a74a8207e1be0f242604eb",
+        "bytes": 11739,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2023 Blender Authors",
+        "reviewed_scope": "gizmo_axis_draw and endpoint/line/font calls; actual stem shader at200 and roundbox endpoint at242",
+        "gsw_existing_port": "projection/depth/color/layout/picking subset; QPainter/Qt text replaces GPU/BLF",
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/editors/space_view3d/view3d_gizmo_navigate.cc",
+        "local_name": "view3d_gizmo_navigate.cc",
+        "sha256": "2cac9cfc0ac73f31a26f8ff31c362a84f8550778784a72e313fd7ff4a5da570e",
+        "bytes": 12137,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2023 Blender Authors",
+        "reviewed_scope": "navigation setup and declared source identity",
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/editors/interface/interface_draw.cc",
+        "local_name": "interface_draw.cc",
+        "sha256": "6aa06097fb25e0e03a24a0d493e58943c84116cad20a0ae3258f669ea32695d9",
+        "bytes": 80300,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2001-2002 NaN Holding BV",
+        "reviewed_scope": "UI_draw_roundbox_4fv_ex69-112: pixel-space widget parameters and GPU_SHADER_2D_WIDGET_BASE dispatch",
+        "unported_dependencies": ["Blender GPU batch/shader abstraction", "uiWidgetBaseParameters", "theme/corner state", "Blender framebuffer color-space contract"],
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/editors/interface/interface_widgets.cc",
+        "local_name": "interface_widgets.cc",
+        "sha256": "72eac700ab7949dac5ab424dc06041740d58d6c174a781e3adb820c74ffeb66f",
+        "bytes": 185887,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2009 Blender Authors",
+        "reviewed_scope": "supporting widget shader/geometry context; not the location of UI_draw_roundbox_4fv_ex",
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/gpu/shaders/gpu_shader_2D_widget_base_frag.glsl",
+        "local_name": "gpu_shader_2D_widget_base_frag.glsl",
+        "sha256": "dbf0f761ceddd18086622952f954b4fd78d9e3cb0302f910397f6fb75d313043",
+        "bytes": 3142,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2018-2023 Blender Authors",
+        "reviewed_scope": "compute_masks11-58 and alpha/color-space composition; pixel SDF/half-pixel smoothstep coverage",
+        "unported_dependencies": ["infos/gpu_shader_2D_widget_info.hh", "gpu_shader_colorspace_lib.glsl", "Blender shader-create-info declarations", "GPU derivative wrappers", "matching vertex/uniform pipeline"],
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/gpu/shaders/gpu_shader_2D_widget_base_vert.glsl",
+        "local_name": "gpu_shader_2D_widget_base_vert.glsl",
+        "sha256": "1b3dfce92b39b021ae859930e1d0ffaa9d78f5c2b4a6490ffe4b8286b0bb784e",
+        "bytes": 6770,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2018-2023 Blender Authors",
+        "reviewed_scope": "matching widget uniform/interface and pixel geometry contract",
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "source/blender/gpu/shaders/gpu_shader_3D_polyline_frag.glsl",
+        "local_name": "gpu_shader_3D_polyline_frag.glsl",
+        "sha256": "bf391cef5ccc828d16df62cadfaaeb9b41192ee2bbd0d3fcf36a8fddb1b8bb8f",
+        "bytes": 554,
+        "spdx": "GPL-2.0-or-later",
+        "copyright": "2020-2023 Blender Authors",
+        "reviewed_scope": "explicit smoothline alpha coverage and framebuffer color-space conversion",
+        "unported_dependencies": ["infos/gpu_shader_3D_polyline_info.hh", "matching vertex/distance setup", "gpu_shader_colorspace_lib.glsl"],
+        "new_port_status": "reference_only_no_code_merged"
+      },
+      {
+        "path": "COPYING",
+        "local_name": "COPYING",
+        "sha256": "19e6f4b541772f9d7b98a52bdbca3ebd5ef9e404956a9a6de68bfc3c1a178387",
+        "bytes": 302,
+        "role": "Pinned upstream license entry pointing to doc/license/GPL-license.txt"
+      },
+      {
+        "path": "doc/license/GPL-license.txt",
+        "local_name": "GPL-license.txt",
+        "sha256": "f2703dec1b0118070caabd3302e21738c00211b0cc3260dbeb1168d6eda726b7",
+        "bytes": 17992,
+        "role": "Pinned unmodified GNU GPL version2 text; later-version permission is in individual source headers"
+      }
+    ]
+  },
+  "official_documentation": [
+    {"url": "https://doc.qt.io/qt-6.8/highdpi.html", "verified_contract": "Logical/widget/event coordinates differ from physical render pixels; QT_SCALE_FACTOR is a controlled test multiplier, not proof of native cross-screen hardware behavior"},
+    {"url": "https://doc.qt.io/qt-6.8/qpainter.html#rendering-quality", "verified_contract": "Floating primitives and render hints; hints may not be honored by every paint engine"},
+    {"url": "https://doc.qt.io/qt-6.8/qiconengine.html#scaledPixmap", "verified_contract": "Size argument is device-independent and scale normally denotes device pixel ratio"},
+    {"url": "https://doc.qt.io/qt-6.8/qfontinfo.html#details", "verified_contract": "Effective screen/painter font information differs from requested QFont; the snapshot must be recreated after changes"}
+  ],
+  "icon_inventory": {
+    "provider": "Lucide SVG through WorkbenchIconEngine and direct QSvgRenderer paint",
+    "upstream_commit": "70562c1ee1c4fdcf736fe97bc893fb8511927934",
+    "license": "ISC with retained Feather-derived MIT notice",
+    "semantic_id_count": 67,
+    "unique_asset_count": 63,
+    "vendored_asset_count": 63,
+    "statically_missing_asset_names": [],
+    "renderer_cache_kind": "parsed_color_resolved_vector_not_bitmap",
+    "renderer_cache_key": ["semantic_enum_index", "full_rgba"],
+    "renderer_cache_capacity_bound": null,
+    "capacity_note": "No explicit eviction in source; this is a resource risk to measure, not an observed leak",
+    "pixmap_allocation": "qRound(logical_width*requested_scale) x qRound(logical_height*requested_scale), then setDevicePixelRatio(scale)",
+    "complete_id_to_asset": {
+      "NewProject": "file-plus-corner", "OpenProject": "folder-open", "Save": "save", "SaveAs": "save-pen",
+      "ImportMedia": "images", "ImportModel": "import", "ExportModel": "file-output", "Reconstruct": "scan",
+      "Train": "play", "Pause": "pause", "Resume": "step-forward", "Stop": "square", "GenerateMesh": "box", "Inspect": "mouse-pointer-2",
+      "Move": "move-3d", "Rotate": "rotate-3d", "Scale": "scaling", "Transform": "axis-3d", "Global": "globe", "Local": "box", "Locked": "lock", "Unlocked": "lock-open",
+      "FitView": "focus", "Camera": "camera", "Orbit": "orbit", "Pan": "hand", "Zoom": "search", "Projection": "view", "Points": "chart-scatter", "Mesh": "cuboid", "Gaussians": "circle-dot",
+      "BoxSelect": "square-dashed-mouse-pointer", "Lasso": "lasso-select", "Brush": "paintbrush", "VisibleOnly": "eye", "ClearSelection": "square-dashed", "InvertSelection": "replace",
+      "Delete": "trash", "Undo": "undo-2", "Redo": "redo-2", "Crop": "crop", "Refresh": "refresh-cw", "Settings": "sliders-horizontal", "Folder": "folder", "File": "file", "Dataset": "images", "Scene": "layers",
+      "Tasks": "list-checks", "Logs": "scroll-text", "Details": "info", "Copy": "copy", "FloatPanel": "panels-top-left", "Close": "x", "Video": "video", "Image": "image", "Home": "house",
+      "Back": "chevron-left", "Forward": "chevron-right", "Add": "plus", "Remove": "minus", "Help": "circle-question-mark", "Info": "info", "Warning": "triangle-alert", "Check": "check", "Globe": "globe", "FullScreen": "maximize-2", "Restore": "minimize-2"
+    },
+    "production_consumer_groups": [
+      "MainWindow actions/dock buttons/project tree/task tabs", "DatasetImportDialog sources/buttons", "FileDialogHistory tree/clear",
+      "GenerationHistoryDialog history/view/resume", "MultiItemList actions", "TaskDetailsDialog", "WindowUi fullscreen/file navigation",
+      "NativeViewport transform strip/status-details", "BlenderNavigationPresentation navigation mini-buttons"
+    ],
+    "platform_owned_route": "Native file provider/style artwork; not copied from Blender or commercial applications",
+    "production_emoji_placeholder_icon_identified": false,
+    "symbol_scan_note": "Arrows/multiplication signs are explanatory text, not icons; camera emoji in language smoke test is user-filename data"
+  },
+  "application_identity_raster": {
+    "png": {"path": "native/assets/gsw-app-icon.png", "size": [1024, 1024], "sha256": "e7cf3c7b845c8d08876576a303dcb855f25fd3a4c4bdde487c355e95a424cd3b"},
+    "ico": {"path": "native/assets/gsw-app-icon.ico", "sizes": [16,20,24,32,40,48,64,96,128,256], "bits_per_entry": 32, "sha256": "b902244cfca72ec362da431d4d8b26238c96b5d0725ac186b82771989d0494e6"},
+    "scope": "application/window/taskbar identity, distinct from operation icons; not a low-resolution placeholder diagnosis"
+  },
+  "font_request_roles": [
+    {"role": "body", "owner": "AppTheme.cpp:300-316", "size": "10pt*UIscale", "zh_CN": ["Microsoft YaHei UI"], "en_US": ["Segoe UI","Microsoft YaHei UI"], "ja_JP": ["Yu Gothic UI","Meiryo","Microsoft YaHei UI"], "strategy": "PreferAntialias"},
+    {"role": "dock_title", "owner": "MainWindow.cpp:304-307", "size": "scaled15px", "weight": "Normal"},
+    {"role": "navigation_axis", "owner": "BlenderNavigationPresentation.h:115-118", "size": "clamp(round(radius*0.25),9,18)px", "weight": "Bold"},
+    {"role": "navigation_projection", "owner": "BlenderNavigationPresentation.h:169-172", "size": "clamp(round(labelHeight*0.5),9,13)px", "weight": "Normal"},
+    {"role": "viewport_caption", "owner": "NativeViewport.cpp:8853-8861", "size": "base-1pt minimum8pt, or base-1px minimum11px", "title_weight": "DemiBold"},
+    {"role": "training_chart", "owner": "TrainingMonitorWidget.cpp:178-182", "size": "base*0.82 minimum7pt"},
+    {"role": "logs", "owner": "AppTheme.cpp:472", "families": ["Cascadia Mono","Consolas"], "size": "inherited"}
+  ],
+  "runtime_acceptance": {
+    "NAV-01": "NOT_RUN", "NAV-02": "NOT_RUN", "NAV-03": "NOT_RUN", "DPI-01": "NOT_RUN", "FONT-01": "NOT_RUN", "ICON-01": "NOT_RUN",
+    "static_asset_existence_is_not_visual_PASS": true,
+    "local_tests_required_or_run": false,
+    "remaining": ["real window metadata and images", "independent edge reference and frozen thresholds", "actual resolved fonts and glyph coverage", "fractional DPR hit/image agreement", "normal-size icon state contact sheets", "resource/idle measurements", "cross-screen hardware support record"]
+  }
+}

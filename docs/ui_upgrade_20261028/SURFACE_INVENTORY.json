@@ -1,0 +1,5274 @@
+{
+  "schema": "gsw.native_ui_surface_inventory/1",
+  "date": "2026-10-28",
+  "task": "Native UI upgrade P0-P1-P2",
+  "status": "STATIC_INVENTORY_ONLY_NOT_VISUAL_OR_BEHAVIOR_ACCEPTANCE",
+  "specification_root": "D:/Codex/deliveries/GSW_UI_Upgrade_Agent_20261028",
+  "baseline_source": {
+    "head": "5183926e09f5b568379bb1f89ee1667a9bd38121",
+    "files": [
+      {
+        "path": "native/src/AppTheme.cpp",
+        "sha256": "22a7bf44b1ff75c5a4972ff0a760634948f3d53825371cc681d08b0ac9cf5773",
+        "bytes": 25224
+      },
+      {
+        "path": "native/src/WindowUi.cpp",
+        "sha256": "ff87be2124ea2f27156943b1c0cc6fdd9d9c405950129eaa288962e4d71fc843",
+        "bytes": 17578
+      },
+      {
+        "path": "native/src/WorkbenchIcons.cpp",
+        "sha256": "f135d41054e268707ffcb79cf583e70d74ffd870674d21c27a84f50c1bcb2019",
+        "bytes": 5189
+      },
+      {
+        "path": "native/src/WorkbenchIcons.h",
+        "sha256": "48d2bfde0caf2e43bb7348cf98fe4cad813c9a4da14bb151ea29511c29d1c686",
+        "bytes": 1344
+      },
+      {
+        "path": "native/src/MultiItemList.cpp",
+        "sha256": "6f5fe02708903fa64033b293d3a0e8a3765ed65f480aa7376aae0e53b4005bff",
+        "bytes": 9745
+      },
+      {
+        "path": "native/src/MultiItemList.h",
+        "sha256": "b9ef2504ead9b9d240423bb9a0e11cd6c4f541bef1377e44465cc5b59a46431f",
+        "bytes": 1376
+      },
+      {
+        "path": "native/src/FileDialogHistory.cpp",
+        "sha256": "04a7cfb2e3c5ca9ee7b264185d72aa850af2c83fd504e745641f3585a5e4fd01",
+        "bytes": 18233
+      },
+      {
+        "path": "native/src/MainWindow.cpp",
+        "sha256": "c10cdf71dfa231fb3dc4dda9b5a246f6a0547b90747bf4dcc2485407fd69cb98",
+        "bytes": 437729
+      },
+      {
+        "path": "native/src/NativeViewport.cpp",
+        "sha256": "cbf0ae48715ebbbb401d692f8d1c70ac1d558ff41c24f6e39dac4ac44696dc55",
+        "bytes": 407528
+      },
+      {
+        "path": "native/src/TrainingMonitorWidget.cpp",
+        "sha256": "b7b7786430bfbba107a7560019ee9376b009fa663363bcfa70524692ceb2c89f",
+        "bytes": 41991
+      },
+      {
+        "path": "native/src/NavigationGizmo.cpp",
+        "sha256": "3b7e12507a36e04b5b24ba0d8c69c232fbf1cfeacccaba7a749ec73341df19d6",
+        "bytes": 9202
+      },
+      {
+        "path": "native/src/BlenderNavigationPresentation.h",
+        "sha256": "86e573b039c695c0d330e01f7d4826c5c33d634c3eea4532f712a6c8007f75fa",
+        "bytes": 9601
+      },
+      {
+        "path": "native/src/TransformGizmoRenderer.cpp",
+        "sha256": "b05f059526238966f9fb029fbe203d9ac74dfb93253f9da0d385171ff7a3f39c",
+        "bytes": 15270
+      },
+      {
+        "path": "native/src/TransformGizmo.cpp",
+        "sha256": "eff56cd88c86eb0ee0f0902b8917e9418d1b9def4c9a51b60c74350503be3df5",
+        "bytes": 45843
+      },
+      {
+        "path": "native/src/CameraTrajectory.cpp",
+        "sha256": "3eb0fffcf94a6879e6383ca87b68c0a4603952e0cd8e165b8e6ec181990944a2",
+        "bytes": 39543
+      },
+      {
+        "path": "native/src/ViewportPresentation.h",
+        "sha256": "a29676ef7f4165587d11e9ea7e23c930efe67971dfb4d64bb5126ebb79b5ed27",
+        "bytes": 1182
+      },
+      {
+        "path": "native/src/ViewportGridSettings.h",
+        "sha256": "06a3c2b1b89f737151f3e232cf5faddfb055fcc4ae30c872602cb397ada27bc4",
+        "bytes": 6143
+      },
+      {
+        "path": "native/src/FrameRateCounter.cpp",
+        "sha256": "c0c0d4ea8512be4aa5ecb132e79dec296b1f727040bc0b3b73b4d3d998119a51",
+        "bytes": 1509
+      },
+      {
+        "path": "native/src/DatasetImportDialog.cpp",
+        "sha256": "9fcc847c24156998e8e2fad611bd784547a976c3c7b6294dea1df0af0e4df076",
+        "bytes": 36831
+      },
+      {
+        "path": "native/src/ReconstructionDialog.cpp",
+        "sha256": "7eb6f1e3222fa4854eb3b959352e0b1268016e1bc02d3e85b88c678b023c1187",
+        "bytes": 16832
+      },
+      {
+        "path": "native/src/TrainingDialog.cpp",
+        "sha256": "05eff6962e67653704a3a868d761a5bb81f62308e552d03030b89867aac2f501",
+        "bytes": 94396
+      },
+      {
+        "path": "native/src/MeshGenerationDialog.cpp",
+        "sha256": "675ede152f5462f5725e2922dbe1d51426c729b04ac2ba029366c20cc944404c",
+        "bytes": 16170
+      },
+      {
+        "path": "native/src/ModelExportDialog.cpp",
+        "sha256": "8fc38527c4140629b39f24fbe73a772949ec6bd4f3d9d5c55fe9b79bee7b3390",
+        "bytes": 21680
+      },
+      {
+        "path": "native/src/TaskDetailsDialog.cpp",
+        "sha256": "a7b133fa63e793cb1a50a45d2cdf3e4346fe8dab774ab27065467266f4f85db3",
+        "bytes": 14438
+      },
+      {
+        "path": "native/src/GenerationHistoryDialog.cpp",
+        "sha256": "290195892a275d27b054f14bc75f403bb7b01359c6ce01ca046e6260c1ea5b96",
+        "bytes": 10889
+      },
+      {
+        "path": "native/src/QualityComparisonDialog.cpp",
+        "sha256": "4d54175d32a33551bc0f38ab4f149fd5ce77a63db696d802abcefb9de6a3c3aa",
+        "bytes": 33379
+      },
+      {
+        "path": "native/src/QualityMeasurementDialog.cpp",
+        "sha256": "e7ece1858f9863ffaa432314fc3286b61d9aeb9fc3959844616801c1ff7b8d56",
+        "bytes": 37506
+      },
+      {
+        "path": "native/src/ScaleConstraintsDialog.cpp",
+        "sha256": "aa7620b4d06abafa666503980416ac4e3a4a46995794b02d0905e98681bd6c94",
+        "bytes": 52045
+      },
+      {
+        "path": "native/src/InitializationDialog.cpp",
+        "sha256": "b96d18beddf42b5f20e073d768c0ae73ee73e4ef93b6ad7588d62be0229d7465",
+        "bytes": 41258
+      },
+      {
+        "path": "native/src/TrainingBatchDialog.cpp",
+        "sha256": "e48ef2c81ee2854a632d00a2d0ebbc00bdd1e84f7c3e7a008984735352f2126c",
+        "bytes": 38593
+      },
+      {
+        "path": "native/src/ExistingTrainingDialog.cpp",
+        "sha256": "804b75123c4fb847f4333d602b162a2f12bb877d06baa09e135229bc123510f3",
+        "bytes": 27325
+      },
+      {
+        "path": "native/src/RuntimeGuardDialog.cpp",
+        "sha256": "f80c95259ab01607ae05e068fe9ee3f715332525919cdbfcb967ca9a4c401a34",
+        "bytes": 6653
+      },
+      {
+        "path": "native/src/ResourceBudgetDialog.cpp",
+        "sha256": "4007a1f1e1b7267708b75c4e38c9ca41764ecceabc420fc3d553cc0dbe7c3054",
+        "bytes": 11604
+      },
+      {
+        "path": "native/src/ViewportGridDialog.cpp",
+        "sha256": "07066d75462d2e08ec8e1da4e69e628dc19426c3163912ecfa8bff3843b211ea",
+        "bytes": 16743
+      },
+      {
+        "path": "native/src/NativeLauncher.cpp",
+        "sha256": "c7fafb365979ce6fa6394a8f2539000165ff83f34966f8fa6ebd6b0e1b4824c3",
+        "bytes": 4044
+      },
+      {
+        "path": "native/src/InitializationEditor.cpp",
+        "sha256": "79820887cff6e3cb1f995389730bdd951a6e1be89281c20912ca7258811857e8",
+        "bytes": 16852
+      },
+      {
+        "path": "native/src/InitializationPreview.cpp",
+        "sha256": "d9a34f1eec0822b8e9851dd3dba37be87090d3650a2f24f107c7e61ecb4d6c8c",
+        "bytes": 9638
+      }
+    ],
+    "working_changes": []
+  },
+  "authority": "The supplied files are user task requirements. Workspace rules remain controlling; no production source or app/session was modified by this inventory.",
+  "matrix_ids": [
+    "BASE-01",
+    "AUDIT-01",
+    "DPI-01",
+    "NAV-01",
+    "NAV-02",
+    "NAV-03",
+    "THEME-01",
+    "FONT-01",
+    "ICON-01",
+    "SHELL-01",
+    "TREE-01",
+    "GIZMO-01",
+    "GIZMO-02",
+    "MODEL-01",
+    "MODEL-02",
+    "OVERLAY-01",
+    "GRID-01",
+    "FPS-01",
+    "FORM-01",
+    "STATE-01",
+    "LOCALE-01",
+    "A11Y-01",
+    "LIFE-01",
+    "PERF-01",
+    "PERF-02",
+    "PORT-01",
+    "PKG-01",
+    "DELIVER-01",
+    "CLOUD-01"
+  ],
+  "matrix_id_count": 29,
+  "surface_count": 66,
+  "surface_groups": {
+    "shared": 6,
+    "shell": 16,
+    "viewport": 14,
+    "dialogs": 16,
+    "inline_dialogs": 4,
+    "progress_dialogs": 4,
+    "message_families": 4,
+    "embedded": 2
+  },
+  "popup_callsite_count": 147,
+  "popup_kind_counts": {
+    "QFileDialog::getExistingDirectory": 11,
+    "QFileDialog::getOpenFileName": 12,
+    "QMessageBox::critical": 16,
+    "QFileDialog::getOpenFileNames": 2,
+    "QMessageBox": 8,
+    "QMessageBox::question": 5,
+    "QFileDialog::getSaveFileName": 12,
+    "QMessageBox::information": 28,
+    "QMessageBox::warning": 25,
+    "ResourceBudgetDialog": 1,
+    "QMessageBox::about": 1,
+    "QDialog": 4,
+    "ViewportGridDialog": 1,
+    "TaskDetailsDialog": 1,
+    "QProgressDialog": 4,
+    "ModelExportDialog": 1,
+    "DatasetImportDialog": 1,
+    "ReconstructionDialog": 1,
+    "QualityComparisonDialog": 1,
+    "ScaleConstraintsDialog": 1,
+    "InitializationDialog": 2,
+    "TrainingBatchDialog": 1,
+    "ExistingTrainingDialog": 2,
+    "GenerationHistoryDialog": 1,
+    "RuntimeGuardDialog": 1,
+    "MeshGenerationDialog": 1,
+    "TrainingDialog": 1,
+    "QualityMeasurementDialog": 1,
+    "Win32::MessageBoxW": 1
+  },
+  "enumeration_method": {
+    "scope": "native/src production *.cpp/*.h; excluded *SmokeTest* and tests source; main.cpp separately inspected for production dialog entries",
+    "method": "Source-level class/construction/static-dialog-call scan plus manual route/owner cross-check. Authoritative source path/line is retained. Constructor lambdas belong to the parent method; file-scope helper context is explicit. One call site may serve multiple UI buttons/branches.",
+    "limits": [
+      "No local/remote UI executed by inventory worker.",
+      "No plugin or dynamic third-party window was assumed reachable.",
+      "Source line anchors bind the observed baseline; rebase after production edits.",
+      "A registered source path does not prove that its appearance, hidden/busy state, keyboard behavior or lifecycle is accepted.",
+      "Current no-change-needed count is zero: no matched visual evidence has been reviewed by this worker."
+    ]
+  },
+  "common_required_variants": {
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "languages": [
+      "zh_CN",
+      "en_US",
+      "ja_JP"
+    ],
+    "windows_scaling_percent": [
+      100,
+      125,
+      150,
+      175,
+      200
+    ],
+    "ui_scale_modes": [
+      "automatic",
+      "manual"
+    ],
+    "window_widths": [
+      "standard",
+      "narrow"
+    ],
+    "rule": "Risk-based combination coverage per supplied matrix, not full Cartesian product; actual DPR/font/framebuffer metadata required.",
+    "custom_viewport_background": "Required by THEME-01 but absent as a reachable baseline setting: see capability_gaps."
+  },
+  "capability_gaps": [
+    {
+      "id": "BG-SETTING-01",
+      "status": "MISSING_REACHABLE_SETTING_IN_BASELINE",
+      "scope": "Static source observation, not a claim about the user's private stored preferences",
+      "observed_theme_key": "ui/theme",
+      "observed_theme_values": [
+        "auto",
+        "light",
+        "dark"
+      ],
+      "source_evidence": [
+        "native/src/AppTheme.cpp:54",
+        "native/src/MainWindow.cpp:2067",
+        "native/src/NativeViewport.cpp:123",
+        "native/src/NativeViewport.cpp:151",
+        "native/src/NativeViewport.cpp:211"
+      ],
+      "current_clear_values": {
+        "light": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "dark": [
+          0.047,
+          0.051,
+          0.055,
+          1
+        ]
+      },
+      "dark_backdrop_palette_8bit": [12, 15, 17],
+      "actual_clear_metadata_required": "The retained dark clear floats differ from the 8-bit backdrop field; record real GL clear/composite values rather than treating the field as framebuffer evidence. This is not an AA root-cause conclusion.",
+      "finding": "No reachable custom viewport background-color/alpha control, QColorDialog, background setter or consumed background key was found in native production source. Auto/light/dark is reachable; backdrop/clear alpha are fixed by theme. Do not claim a pre-existing user custom-background feature was preserved or accepted.",
+      "acceptance_id": "THEME-01",
+      "required_decision": "Root decides how to implement/record the custom-background requirement; do not silently force Blender grey or fabricate a settings key.",
+      "visual_status": "NOT_RUN"
+    }
+  ],
+  "migration_order": [
+    {
+      "phase": "P0",
+      "step": 1,
+      "target": [
+        "VP-02",
+        "VP-03",
+        "INF-03"
+      ],
+      "reason": "Root's remote navigation edge/DPI feedback loop; no source-only causal diagnosis."
+    },
+    {
+      "phase": "P0/P1",
+      "step": 2,
+      "target": [
+        "INF-01",
+        "SH-06",
+        "SH-12",
+        "VP-11",
+        "VP-13"
+      ],
+      "reason": "Shared type/density roles with real per-control font resolution evidence; do not swap fonts before measuring."
+    },
+    {
+      "phase": "P1",
+      "step": 3,
+      "target": [
+        "SH-02",
+        "SH-03",
+        "SH-04",
+        "SH-05",
+        "SH-07",
+        "SH-09",
+        "SH-10"
+      ],
+      "reason": "High-traffic main shell, fixed visibility column, long values and narrow controls; preserve selection/camera/units."
+    },
+    {
+      "phase": "P1",
+      "step": 4,
+      "target": [
+        "VP-04",
+        "VP-05",
+        "VP-06",
+        "VP-07",
+        "VP-08",
+        "VP-09",
+        "VP-10"
+      ],
+      "reason": "All manipulation/overlay modes together, with public hit/constraint/undo and model-renderer matrix."
+    },
+    {
+      "phase": "P2",
+      "step": 5,
+      "target": [
+        "DLG-01",
+        "DLG-02",
+        "DLG-03",
+        "DLG-04",
+        "DLG-05",
+        "DLG-15",
+        "DLG-16"
+      ],
+      "reason": "Shared scroll/form modules first; preserve configuration values and backend capability differences."
+    },
+    {
+      "phase": "P2",
+      "step": 6,
+      "target": [
+        "DLG-08",
+        "DLG-09",
+        "DLG-10",
+        "DLG-11",
+        "DLG-12",
+        "DLG-13",
+        "DLG-14",
+        "DLG-06",
+        "DLG-07",
+        "INL-01",
+        "INL-02",
+        "INL-03",
+        "INL-04",
+        "PROG-01",
+        "PROG-02",
+        "PROG-03",
+        "PROG-04",
+        "MSG-01",
+        "MSG-02",
+        "MSG-03",
+        "MSG-04"
+      ],
+      "reason": "Dense/long-lived/helper-owning and cold recovery/backup forms; observe lifetimes without starting real training."
+    }
+  ],
+  "shared_module_candidates": [
+    {
+      "name": "Typography roles",
+      "existing_seams": [
+        "AppTheme::apply",
+        "AppTheme dock title metrics",
+        "TrainingMonitorWidget metric/chart role helpers",
+        "NativeViewport caption role helpers"
+      ],
+      "change_boundary": "Presentation only; retain AppLanguage instant refresh and actual inherited font fallback. No system font bundling."
+    },
+    {
+      "name": "Layout density roles",
+      "existing_seams": [
+        "AppTheme::scaled/styleSheet",
+        "MainWindow dock metrics",
+        "per-dialog QFormLayout/QScrollArea setup"
+      ],
+      "change_boundary": "Consolidate common content margins, row spacing and minimum actionable sizes where semantics genuinely match; do not flatten specialized splitters/tables."
+    },
+    {
+      "name": "Icon/state policy",
+      "existing_seams": [
+        "workbenchIcon",
+        "paintWorkbenchIcon",
+        "WorkbenchIconEngine"
+      ],
+      "change_boundary": "Same palette/DPR contract for widgets and painter controls; retain source/ISC notices and accessible captions."
+    },
+    {
+      "name": "Form shell and read-only values",
+      "existing_seams": [
+        "WindowUi::prepare",
+        "common dialogBodyScroll/dialogBody object roles",
+        "MainWindow createValueLabel",
+        "MultiItemList"
+      ],
+      "change_boundary": "Keep actual field precision/configuration and lifecycle ownership. A helper is justified by actual repeated callers, not a generic wrapper for every widget."
+    }
+  ],
+  "existing_remote_test_families": [
+    {
+      "name": "navigation_gizmo / native_upstream_navigation_*",
+      "scope": "Navigation layout/input baseline; not a substitute for new real-window edge acceptance",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "transform_gizmo_visual / native_edit_navigation_* / native_scene_coordinates_*",
+      "scope": "Manipulation and view regression; validate both visual and public state seams",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "native_icon_ui_* / native_window_appearance_* / native_language_*",
+      "scope": "Icon, window and language families; supplement per-form capture/actual font metadata",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "native_scene_visibility_* / native_multi_scene_import / native_viewport_scheduling_*",
+      "scope": "Selection/visibility/camera and idle scheduling",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "native_file_dialog_history* / native_task_actions_* / native_generation_history",
+      "scope": "History/files/task UI and lifecycle contracts",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "native_training_preflight / native_training_batch_* / native_runtime_decoupling_ui / native_quality_* / native_scale_constraints_ui",
+      "scope": "Configuration/lifetime form routes; no real user training",
+      "status": "NOT_RUN"
+    }
+  ],
+  "cross_cutting_matrix_ownership": {
+    "ids": [
+      "BASE-01",
+      "AUDIT-01",
+      "PORT-01",
+      "PKG-01",
+      "DELIVER-01",
+      "CLOUD-01"
+    ],
+    "owner": "Root/integration and assigned CI/source-reference/delivery workers",
+    "scope": "This inventory registers UI locations only; it does not duplicate CI, license-port approval or installation audits.",
+    "status": "NOT_RUN_BY_INVENTORY_WORKER"
+  },
+  "surfaces": [
+    {
+      "id": "INF-01",
+      "group": "shared",
+      "name": "应用字体、密度与控件状态",
+      "entry_points": "应用启动、主题/语言/比例变化",
+      "source_owners": [
+        "native/src/AppTheme.cpp:300",
+        "native/src/AppTheme.cpp:326"
+      ],
+      "style_path": [
+        "AppTheme"
+      ],
+      "static_observations": [
+        "按语言选择字体家族并以point-size缩放；实际QFontInfo/字形回退、基线和分数DPR需远端测量。",
+        "QSS已有统一菜单、工具栏、输入、列表、dock、status、tooltip规则；不能因存在规则计视觉PASS。"
+      ],
+      "acceptance_ids": [
+        "FONT-01",
+        "ICON-01",
+        "SHELL-01",
+        "FORM-01",
+        "LOCALE-01",
+        "A11Y-01"
+      ],
+      "required_remote_checks": [
+        "三语×明暗、100/150/200%布局组合",
+        "125/175%字体与图标高风险例"
+      ],
+      "priority": "P0",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INF-02",
+      "group": "shared",
+      "name": "系统标题栏与窗口生命周期",
+      "entry_points": "主窗口、独立/浮动dock、全部QDialog与QFileDialog",
+      "source_owners": [
+        "native/src/WindowUi.cpp:34",
+        "native/src/WindowUi.cpp:359"
+      ],
+      "style_path": [
+        "WindowUi",
+        "AppTheme"
+      ],
+      "static_observations": [
+        "WindowUi统一最小化/最大化/全屏与文件窗口初始化；popup/tooltip不按顶层窗口装饰。",
+        "改变样式不应重建可见平台窗口或提前结束modal循环。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FORM-01",
+        "LIFE-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "真实系统按钮、恢复目录/文件名/选择",
+        "语言变化时窗口状态保持"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INF-03",
+      "group": "shared",
+      "name": "语义SVG图标与状态",
+      "entry_points": "所有workbenchIcon/paintWorkbenchIcon入口",
+      "source_owners": [
+        "native/src/WorkbenchIcons.cpp:15",
+        "native/src/WorkbenchIcons.cpp:70",
+        "native/src/WorkbenchIcons.h:12"
+      ],
+      "style_path": [
+        "WorkbenchIcons",
+        "vendored Lucide",
+        "palette"
+      ],
+      "static_observations": [
+        "共用SVG绘制与按逻辑尺寸/DPR生成QPixmap；颜色化QSvgRenderer缓存按图标/颜色。",
+        "全量入口状态接触表、实际physical size及边缘仍NOT_RUN。"
+      ],
+      "acceptance_ids": [
+        "ICON-01",
+        "DPI-01",
+        "A11Y-01",
+        "PORT-01",
+        "PERF-02"
+      ],
+      "required_remote_checks": [
+        "全部语义资产Normal/Disabled/Selected/On/hover",
+        "连续主题/DPR变化资源记录"
+      ],
+      "priority": "P0",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INF-04",
+      "group": "shared",
+      "name": "多项列表快捷键/工具条/批量移除",
+      "entry_points": "项目/任务及历史、质量、尺度、批量等表格的MultiItemList",
+      "source_owners": [
+        "native/src/MultiItemList.cpp:1",
+        "native/src/MultiItemList.cpp:144",
+        "native/src/MultiItemList.h:13"
+      ],
+      "style_path": [
+        "MultiItemList",
+        "AppTheme",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "共享全选/清空/移除、局部Delete合同；移除确认和进度入口纳入弹窗索引。",
+        "不得将列表快捷键透传成视口删除，不能为造型移除取消或错误保留语义。"
+      ],
+      "acceptance_ids": [
+        "TREE-01",
+        "FORM-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "多选、右键、快捷键、部分移除失败、取消",
+        "真实记录保留"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INF-05",
+      "group": "shared",
+      "name": "文件选择器与常用位置/历史",
+      "entry_points": "全部37个QFileDialog调用点，详见popup_call_sites",
+      "source_owners": [
+        "native/src/WindowUi.cpp:87",
+        "native/src/FileDialogHistory.cpp:180",
+        "native/src/FileDialogHistory.cpp:428"
+      ],
+      "style_path": [
+        "Qt QFileDialog",
+        "WindowUi",
+        "FileDialogHistory",
+        "AppTheme"
+      ],
+      "static_observations": [
+        "文件/目录类型、原生状态、最初宽度和历史左栏由共用层维护。",
+        "同一源回调可生成多个选择按钮，需按父表单目的分别覆盖，不能把37源码点误称37唯一运行窗口。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "打开/保存/目录、多选、Unicode、过滤/取消",
+        "重开/最小化/恢复保持选择"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INF-06",
+      "group": "shared",
+      "name": "右键菜单、tooltip及键盘焦点",
+      "entry_points": "主菜单、项目树/任务表、MultiItemList、视口悬停提示",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2455",
+        "native/src/MainWindow.cpp:2639",
+        "native/src/MultiItemList.cpp:1",
+        "native/src/NativeViewport.cpp:2322",
+        "native/src/NativeViewport.cpp:7799"
+      ],
+      "style_path": [
+        "AppTheme menu/tooltip/focus",
+        "AppLanguage",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "存在树/任务/共享列表右键菜单及视口动态tooltip；未发现NativeViewport独立QMenu，不能虚构其现有入口。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "Tab/快捷键/tooltip、禁用原因、长文案",
+        "菜单触发后原模型/任务状态保持"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-01",
+      "group": "shell",
+      "name": "主菜单及所有子菜单",
+      "entry_points": "文件/编辑/工作流/场景/视图/帮助；清理、语言、外观、资源、渲染/SH、基准、比例、窗口分辨率",
+      "source_owners": [
+        "native/src/MainWindow.cpp:1919"
+      ],
+      "style_path": [
+        "AppTheme",
+        "AppLanguage",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "6个主菜单和子菜单复用动作；应统一行高/图标/快捷键但保持原触发合同。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "required_remote_checks": [
+        "宽/窄窗口菜单访问所有关键动作",
+        "三语、明暗、禁用原因与快捷键"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-02",
+      "group": "shell",
+      "name": "第一行主工具栏",
+      "entry_points": "mainToolbar：新建/打开/保存/导出/媒体/模型导入/重建/训练/几何/暂停/续训/停止",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2234"
+      ],
+      "style_path": [
+        "AppTheme QToolBar",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "混合IconOnly和TextBesideIcon，固定不可移动；长语言与窄窗口需查溢出/关键入口可达。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "宽/窄窗口与busy状态",
+        "训练/取消/保存不被遮挡"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-03",
+      "group": "shell",
+      "name": "第二行渲染/预览工具栏",
+      "entry_points": "renderToolbar：高斯/网格/点云、SH菜单、相机轨迹、任务预览/暂停预览",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2261"
+      ],
+      "style_path": [
+        "AppTheme",
+        "WorkbenchIcons",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "按场景状态显示；渲染模式与预览控制必须保留真实后端状态。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "MODEL-02",
+        "STATE-01"
+      ],
+      "required_remote_checks": [
+        "所有模型类型和任务预览切换",
+        "暂停预览不暂停训练"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-04",
+      "group": "shell",
+      "name": "第二行选择工具栏",
+      "entry_points": "selectionToolbar：查看/锁定/轨迹球/查找、框选/套索/笔刷/仅可见、半径",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2289"
+      ],
+      "style_path": [
+        "AppTheme",
+        "WorkbenchIcons",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "状态动作保留文字，其他用图形/tooltip；半径spin有86..110逻辑宽度与px单位。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "GIZMO-02",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "三语窄窗口、spin焦点/数值",
+        "锁定/选择语义与模型数据保持"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-05",
+      "group": "shell",
+      "name": "第二行编辑操作工具栏",
+      "entry_points": "editToolbar：清选/反选/删除/撤销/重做/裁剪导出",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2328"
+      ],
+      "style_path": [
+        "AppTheme",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "动作可用性与当前编辑状态相关；视觉调整不能改变删除/撤销合同。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "GIZMO-02",
+        "STATE-01"
+      ],
+      "required_remote_checks": [
+        "禁用/选中、撤销/重做、取消"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-06",
+      "group": "shell",
+      "name": "Dock标题、浮动/关闭按钮和分隔拖动区",
+      "entry_points": "工程、属性、任务与日志3个dock",
+      "source_owners": [
+        "native/src/MainWindow.cpp:255",
+        "native/src/MainWindow.cpp:420",
+        "native/src/AppTheme.cpp:430"
+      ],
+      "style_path": [
+        "DockTitleBar",
+        "AppTheme dock-title metrics",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "自绘标题配合工具按钮；标题字体pixel-size角色与全局point-size需实际字体/DPR核对。",
+        "保留Qt dock拖拽、浮动和重停靠。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "ICON-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "三dock标题及浮动窗口三语/比例",
+        "拖分隔、浮动/还原、关闭与重开"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-07",
+      "group": "shell",
+      "name": "工程树及眼睛可见性列",
+      "entry_points": "projectTree/SceneTreeWidget/SceneVisibilityDelegate",
+      "source_owners": [
+        "native/src/MainWindow.cpp:143",
+        "native/src/MainWindow.cpp:195",
+        "native/src/MainWindow.cpp:2344",
+        "native/src/MainWindow.cpp:7724"
+      ],
+      "style_path": [
+        "AppTheme item/tree",
+        "WorkbenchIcons",
+        "MultiItemList"
+      ],
+      "static_observations": [
+        "两列、固定眼睛列、ExtendedSelection；隐藏与transform selection有独立合同。",
+        "空白区边线是否存在必须看远端画面，源码扫描不能判缺陷已修。"
+      ],
+      "acceptance_ids": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "Ctrl/Shift多选、眼睛/空格、全部隐藏再恢复",
+        "滚动/resize/空白区与相机不跳变"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-08",
+      "group": "shell",
+      "name": "工程树右键菜单",
+      "entry_points": "dataset/reconstruction/scene/task树节点",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2440"
+      ],
+      "style_path": [
+        "AppTheme menu",
+        "shared QAction",
+        "MultiItemList"
+      ],
+      "static_observations": [
+        "菜单随节点类型生成；切换当前行时须保留source identity与visibility。"
+      ],
+      "acceptance_ids": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01"
+      ],
+      "required_remote_checks": [
+        "当前/非当前/隐藏行右键、显示/隐藏/隔离/移除"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-09",
+      "group": "shell",
+      "name": "属性面板：工程/数据集",
+      "entry_points": "inspectorPanel：名称、路径、图像、相机/尺度记录",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2479",
+        "native/src/MainWindow.cpp:436",
+        "native/src/MainWindow.cpp:7957"
+      ],
+      "style_path": [
+        "AppTheme sectionTitle/mutedLabel",
+        "local QFormLayout"
+      ],
+      "static_observations": [
+        "只读QLabel可选择且word-wrap；局部边距12/4/12/12、spacing8、行间距7单独写定。",
+        "长路径/大数值与新统一令牌的迁移候选，尚非已证明裁切。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "FORM-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "窄属性栏、Unicode/长路径完整查看复制",
+        "值与单位及模型坐标保持"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-10",
+      "group": "shell",
+      "name": "属性面板：场景几何/变换/单位",
+      "entry_points": "文件、数量、格式、相机、坐标关系、单位、中心/尺寸/范围、显示/模型变换、基准面",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2530",
+        "native/src/MainWindow.cpp:7957"
+      ],
+      "style_path": [
+        "AppTheme",
+        "local QFormLayout"
+      ],
+      "static_observations": [
+        "大量只读动态值，不应因重新排版截断精度或把显示换算写入几何。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FORM-01",
+        "GRID-01",
+        "MODEL-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "长值/科学计数/未知u与已知单位",
+        "模型切换/重开数值不变"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-11",
+      "group": "shell",
+      "name": "任务表、工具条及右键菜单",
+      "entry_points": "taskDock → 任务页/双击详情/复制摘要/打开目录/移除记录",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2593",
+        "native/src/MainWindow.cpp:2639",
+        "native/src/MainWindow.cpp:2649"
+      ],
+      "style_path": [
+        "AppTheme table/toolbar",
+        "MultiItemList",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "动作来自保留TaskRecord；外部原始日志不翻译。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "空/运行/完成/失败/取消/移除状态",
+        "关闭详情不终止实际任务"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-12",
+      "group": "shell",
+      "name": "共享训练监控及曲线",
+      "entry_points": "任务区训练监控页；ExistingTrainingDialog内嵌监控",
+      "source_owners": [
+        "native/src/TrainingMonitorWidget.cpp:139",
+        "native/src/TrainingMonitorWidget.cpp:280"
+      ],
+      "style_path": [
+        "AppTheme",
+        "local metric fonts/grid",
+        "TrainingCurvesWidget"
+      ],
+      "static_observations": [
+        "7指标按宽度换行、内容滚动；标题加粗与曲线缩小字体是局部字体角色。",
+        "重构只改变呈现，不能重置指标、假进度或缩小图表到不可读。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "FPS-01"
+      ],
+      "required_remote_checks": [
+        "3DGS/2DGS owned遥测和7指标",
+        "320/520/900宽、短面板与三语"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-13",
+      "group": "shell",
+      "name": "日志页及跟随/导出工具栏",
+      "entry_points": "taskDock → 日志页",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2670",
+        "native/src/MainWindow.cpp:8129",
+        "native/src/AppTheme.cpp:472"
+      ],
+      "style_path": [
+        "AppTheme monospace log",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "日志字体使用Cascadia Mono/Consolas角色；用户文件名/外部原始日志需原样保留。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "长行/多语文件名、跟随/滚动/导出",
+        "日志保留上限与真实来源"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-14",
+      "group": "shell",
+      "name": "系统状态栏与临时消息",
+      "entry_points": "project status、renderer status、edit status、ui scale status",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2706",
+        "native/src/MainWindow.cpp:2725",
+        "native/src/MainWindow.cpp:4265"
+      ],
+      "style_path": [
+        "AppTheme QStatusBar/status role",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "renderer动态状态不得被重译为空场景默认文本；底色需按状态角色检查。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "空/测量/空闲/加载/选择/任务变化",
+        "三语切换不改变状态来源"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-15",
+      "group": "shell",
+      "name": "拖放反馈与导入摘要",
+      "entry_points": "主窗口/工程树/视口文件拖放",
+      "source_owners": [
+        "native/src/MainWindow.cpp:989",
+        "native/src/MainWindow.cpp:1089"
+      ],
+      "style_path": [
+        "AppTheme workspaceDrop*",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "反馈是copy-only分类合同，不应为了UI统一开始导入/训练或上传私有输入。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-01"
+      ],
+      "required_remote_checks": [
+        "有效/无效/混合/忙/未保存、文字反馈",
+        "原始文件和已选模型保持"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "SH-16",
+      "group": "shell",
+      "name": "界面设置/布局恢复入口",
+      "entry_points": "视图 → 外观、显示与适配、dock显示、恢复布局；F11/最大化",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2020",
+        "native/src/MainWindow.cpp:3982",
+        "native/src/MainWindow.cpp:4015",
+        "native/src/MainWindow.cpp:4168"
+      ],
+      "style_path": [
+        "AppTheme",
+        "WindowUi",
+        "QSettings UI-only"
+      ],
+      "static_observations": [
+        "手动与自动比例/日夜主题、窗口几何和dock状态持久化；不能重置工程/训练偏好。"
+      ],
+      "acceptance_ids": [
+        "SHELL-01",
+        "DPI-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "主题/比例/语言/布局保存重开",
+        "自动/手动与窗口迁移的实际元数据"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-01",
+      "group": "viewport",
+      "name": "真实模型渲染区域",
+      "entry_points": "点云/网格/3DGS/2DGS/训练预览",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:3835",
+        "native/src/NativeViewport.cpp:5887",
+        "native/src/NativeViewport.cpp:5965",
+        "native/src/NativeViewport.cpp:6096"
+      ],
+      "style_path": [
+        "NativeViewport OpenGL",
+        "ViewportPresentation"
+      ],
+      "static_observations": [
+        "UI修改不得降低模型质量或只改模式标签；原renderer身份与GL状态需实际记录。"
+      ],
+      "acceptance_ids": [
+        "MODEL-02",
+        "PERF-01",
+        "PERF-02",
+        "THEME-01"
+      ],
+      "required_remote_checks": [
+        "每种真实renderer画面/选择/隐藏/导航",
+        "相同模型负载三轮帧时间"
+      ],
+      "priority": "P0/P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-02",
+      "group": "viewport",
+      "name": "导航朝向轴圆盘/圆环/标签",
+      "entry_points": "右上navigation gizmo轴端/轨道命中区",
+      "source_owners": [
+        "native/src/NavigationGizmo.cpp:1",
+        "native/src/BlenderNavigationPresentation.h:87",
+        "native/src/NativeViewport.cpp:8930"
+      ],
+      "style_path": [
+        "BlenderNavigationPresentation",
+        "NavigationGizmo layout/hit",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "用户明确报毛边；DPR/FBO/采样/合成成因仍待真实绘制链测量。",
+        "不能以setRenderHint或请求samples声明代替实际边缘证据。"
+      ],
+      "acceptance_ids": [
+        "NAV-01",
+        "NAV-02",
+        "NAV-03",
+        "DPI-01",
+        "THEME-01",
+        "FONT-01",
+        "PERF-01"
+      ],
+      "required_remote_checks": [
+        "五DPR真实窗口原图/元数据与独立边缘参考",
+        "全部轴向点击/拖动、hover/press"
+      ],
+      "priority": "P0",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-03",
+      "group": "viewport",
+      "name": "导航小按钮与投影提示",
+      "entry_points": "相机/投影、平移、缩放、projectionLabel",
+      "source_owners": [
+        "native/src/BlenderNavigationPresentation.h:169",
+        "native/src/NavigationGizmo.cpp:1",
+        "native/src/NativeViewport.cpp:6646"
+      ],
+      "style_path": [
+        "same navigation layout",
+        "WorkbenchIcons"
+      ],
+      "static_observations": [
+        "必须统一视觉与逻辑命中区域，保留缩放到光标/投影/相机约定。"
+      ],
+      "acceptance_ids": [
+        "NAV-02",
+        "NAV-03",
+        "ICON-01",
+        "A11Y-01"
+      ],
+      "required_remote_checks": [
+        "图标状态/三语tooltip、透视/正交",
+        "窗口/DPR变更后同一输入位置"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-04",
+      "group": "viewport",
+      "name": "模型变换器：全部四种模式",
+      "entry_points": "Move/Rotate/Scale/Combined；G/R/RR/S/轴与平面/数值输入",
+      "source_owners": [
+        "native/src/TransformGizmoRenderer.cpp:1",
+        "native/src/TransformGizmo.cpp:1",
+        "native/src/NativeViewport.cpp:8584",
+        "native/src/NativeViewport.cpp:7823"
+      ],
+      "style_path": [
+        "TransformGizmoRenderer",
+        "Blender gizmo geometry",
+        "ViewportPresentation"
+      ],
+      "static_observations": [
+        "杆/锥/端帽、前后遮挡、中心自由移动需逐模式验证；不能把导航轴或3D cursor当模型变换器。"
+      ],
+      "acceptance_ids": [
+        "GIZMO-01",
+        "GIZMO-02",
+        "MODEL-01",
+        "DPI-01",
+        "PERF-01"
+      ],
+      "required_remote_checks": [
+        "透视/正交/正反/边缘/近远、四模式",
+        "轴/面约束、数值、取消、撤销/重做"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-05",
+      "group": "viewport",
+      "name": "视口内模型编辑工具条",
+      "entry_points": "左侧Move/Rotate/Scale/Transform及Global/Local/锁定提示",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8600"
+      ],
+      "style_path": [
+        "QPainter tool card",
+        "WorkbenchIcons",
+        "ViewportPresentation"
+      ],
+      "static_observations": [
+        "独立于MainWindow四个QToolBar；自绘卡片/图标/锁定badge需与命中一致。"
+      ],
+      "acceptance_ids": [
+        "GIZMO-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "全部按钮/hover/disabled、方向模式",
+        "缩放/主题不改变model selection"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-06",
+      "group": "viewport",
+      "name": "观察轨迹球",
+      "entry_points": "观察轨迹球开关与相机环绕",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:2337"
+      ],
+      "style_path": [
+        "QPainter/world projection"
+      ],
+      "static_observations": [
+        "只变相机不变模型；描边与alpha需在自定义背景检查。"
+      ],
+      "acceptance_ids": [
+        "NAV-02",
+        "OVERLAY-01",
+        "THEME-01"
+      ],
+      "required_remote_checks": [
+        "球内/球外视角导航、边缘视角",
+        "模型变换不变"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-07",
+      "group": "viewport",
+      "name": "模型选择轮廓/包围框/轴线",
+      "entry_points": "已选/非当前/隐藏对象选择反馈",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8389",
+        "native/src/NativeViewport.cpp:8530"
+      ],
+      "style_path": [
+        "Depth-aware lines/bounds",
+        "ViewportPresentation"
+      ],
+      "static_observations": [
+        "保留深度遮挡与source选择语义，不能把普通选择画成破坏模型的点阵。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "MODEL-01",
+        "GIZMO-02"
+      ],
+      "required_remote_checks": [
+        "多对象、遮挡、隐藏/全隐藏再恢复",
+        "selected/deleted counters与相机/变换"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-08",
+      "group": "viewport",
+      "name": "屏幕选择手势与笔刷半径",
+      "entry_points": "框选/套索/笔刷",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8693"
+      ],
+      "style_path": [
+        "QPainter gesture",
+        "selection interaction"
+      ],
+      "static_observations": [
+        "真实屏幕半径与input逻辑坐标要同一DPR合同；仅可见点过滤不变。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "GIZMO-02",
+        "DPI-01"
+      ],
+      "required_remote_checks": [
+        "五DPR中关键分数组合、selection/取消",
+        "未选/未删除原数据不变"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-09",
+      "group": "viewport",
+      "name": "相机轨迹/相机线框",
+      "entry_points": "显示相机开关、源相机与任务预览",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8477",
+        "native/src/CameraTrajectory.cpp:1"
+      ],
+      "style_path": [
+        "camera trajectory geometry",
+        "depth-aware lines"
+      ],
+      "static_observations": [
+        "图形符号长度不是设备物理尺寸；UI升级不改locked相机/full-K/坐标。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "MODEL-02",
+        "GRID-01"
+      ],
+      "required_remote_checks": [
+        "多尺度/不同原点/相机角度",
+        "轨迹与模型相对位置"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-10",
+      "group": "viewport",
+      "name": "网格/基准轴/标尺",
+      "entry_points": "自动/固定网格与坐标基准",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:6163",
+        "native/src/ViewportPresentation.h:1",
+        "native/src/ViewportGridSettings.h:1"
+      ],
+      "style_path": [
+        "Blender grid adapter",
+        "ViewportPresentation"
+      ],
+      "static_observations": [
+        "已有自动/固定、单位/密度合同；不为视觉改变几何单位、参考面或训练尺度。"
+      ],
+      "acceptance_ids": [
+        "GRID-01",
+        "THEME-01",
+        "MODEL-01",
+        "PERF-01"
+      ],
+      "required_remote_checks": [
+        "已知单位换算/未知u、保存重开",
+        "自然远处淡出与数值不变"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-11",
+      "group": "viewport",
+      "name": "常驻场景标题与计数/模式字幕",
+      "entry_points": "视口左上caption",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8746"
+      ],
+      "style_path": [
+        "drawViewportCaption",
+        "local font roles/elision"
+      ],
+      "static_observations": [
+        "自绘字幕已去常驻卡框；动态名/数量/readonly/texture等分支须全部实际覆盖。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "FONT-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "required_remote_checks": [
+        "长Unicode名、场景各模式、加载/失败",
+        "与导航区不重叠"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-12",
+      "group": "viewport",
+      "name": "处理/训练预览阶段面板",
+      "entry_points": "重建、加载和训练结果过渡中的processing HUD",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:8906"
+      ],
+      "style_path": [
+        "QPainter processCard/progress",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "进度/状态来源必须真实，不能固定动画伪造工作；不要遮主体或标题。"
+      ],
+      "acceptance_ids": [
+        "OVERLAY-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "未知/确定进度、失败保留上一预览",
+        "任务停止/取消后反馈"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-13",
+      "group": "viewport",
+      "name": "底部简洁帧状态与详情按钮",
+      "entry_points": "viewportStatusLabel + viewportDetailsButton",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:541",
+        "native/src/NativeViewport.cpp:4660",
+        "native/src/FrameRateCounter.cpp:1"
+      ],
+      "style_path": [
+        "NativeViewport local stylesheet",
+        "WorkbenchIcons",
+        "truthful frame counter"
+      ],
+      "static_observations": [
+        "这是仅有的AppTheme之外局部stylesheet入口族；控件透明/hover及文字/宽度按实际状态刷新。",
+        "常驻状态不要回填完整诊断；新帧/空闲/测量中不混淆。"
+      ],
+      "acceptance_ids": [
+        "FPS-01",
+        "SHELL-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "required_remote_checks": [
+        "idle scheduling/frame serial/swap断言",
+        "打开详情/网格及取消不改相机"
+      ],
+      "priority": "P0/P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "VP-14",
+      "group": "viewport",
+      "name": "空/加载/失败/全部隐藏状态",
+      "entry_points": "NativeViewport drawOverlay/frame policy",
+      "source_owners": [
+        "native/src/NativeViewport.cpp:3710",
+        "native/src/NativeViewport.cpp:8746"
+      ],
+      "style_path": [
+        "same viewport captions/rendering"
+      ],
+      "static_observations": [
+        "空场景和有数据但全隐藏不同；不能用原source数量假称可见rendering。"
+      ],
+      "acceptance_ids": [
+        "MODEL-01",
+        "MODEL-02",
+        "STATE-01",
+        "FPS-01"
+      ],
+      "required_remote_checks": [
+        "空与全隐藏/加载失败/上一结果回退",
+        "恢复显示不跳视角"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-01",
+      "group": "dialogs",
+      "name": "DatasetImportDialog",
+      "entry_points": "文件/工作流 → 导入图像/视频/文件夹/已知相机数据集；拖放媒体",
+      "source_owners": [
+        "native/src/MainWindow.cpp:5855",
+        "native/src/DatasetImportDialog.cpp:193"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "来源多项列表、SourceActions、名称、相机输入、InitializationEditor、导入/取消；工作流/媒体入口共用同一类",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-02",
+      "group": "dialogs",
+      "name": "ReconstructionDialog",
+      "entry_points": "工作流/主工具栏 → 重建",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6405",
+        "native/src/ReconstructionDialog.cpp:30"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "COLMAP预设/完整参数、滚动表单、说明/开始/取消；界面改造不实际重建",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-03",
+      "group": "dialogs",
+      "name": "TrainingDialog",
+      "entry_points": "工作流/主工具栏 → 训练；实验参数重开/续训入口的独立确认另列",
+      "source_owners": [
+        "native/src/MainWindow.cpp:7310",
+        "native/src/TrainingDialog.cpp:152"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "3DGS/2DGS、预设、实验质量、显存保护/执行、输出名、相机来源、初始化；共享滚动表单和长状态文案",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-04",
+      "group": "dialogs",
+      "name": "MeshGenerationDialog",
+      "entry_points": "工作流/主工具栏 → 生成几何",
+      "source_owners": [
+        "native/src/MainWindow.cpp:7219",
+        "native/src/MeshGenerationDialog.cpp:29"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "2DGS bounded/unbounded TSDF、SuGaR、GS2Mesh、GS depth；参数/单位/模式说明不能混译或改请求",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-05",
+      "group": "dialogs",
+      "name": "ModelExportDialog",
+      "entry_points": "文件/场景/主工具栏 → 导出模型",
+      "source_owners": [
+        "native/src/MainWindow.cpp:5388",
+        "native/src/ModelExportDialog.cpp:21"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "PLY/SPZ/网格可用性、SH/坐标/精度、输出选择与取消；取消/源属性保留",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-02"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-06",
+      "group": "dialogs",
+      "name": "TaskDetailsDialog",
+      "entry_points": "任务表双击/详情动作/任务右键",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2909",
+        "native/src/TaskDetailsDialog.cpp:54"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "摘要滚动、任务操作工具条、跟随/保留日志；视窗关闭不停止任务",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-07",
+      "group": "dialogs",
+      "name": "GenerationHistoryDialog",
+      "entry_points": "工作流 → 实验历史；相应训练结果入口",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6904",
+        "native/src/GenerationHistoryDialog.cpp:47"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "实验列表/详情/参数/查看成果/续训状态，显示真实可用性",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-08",
+      "group": "dialogs",
+      "name": "QualityComparisonDialog",
+      "entry_points": "工作流 → 质量对照",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6537",
+        "native/src/QualityComparisonDialog.cpp:83"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "基准/候选、阈值表、比较/保存、报告/设置差异、实测子窗入口",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-09",
+      "group": "dialogs",
+      "name": "QualityMeasurementDialog",
+      "entry_points": "质量对照 → 主动测量图像",
+      "source_owners": [
+        "native/src/QualityComparisonDialog.cpp:366",
+        "native/src/QualityMeasurementDialog.cpp:122"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "三种目录输入reference/render/mask、清单、配对/进度/视图表、选择为基准/候选；CPU helper生命周期",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-10",
+      "group": "dialogs",
+      "name": "ScaleConstraintsDialog",
+      "entry_points": "工作流 → 相机数据集定尺度与对齐；工作流 → 当前模型定尺度",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6543",
+        "native/src/ScaleConstraintsDialog.cpp:166"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "两个source模式；距离/点/平面标签页、约束/结果JSON、估计/独立版本、精度与单位原样",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "GRID-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-11",
+      "group": "dialogs",
+      "name": "InitializationDialog",
+      "entry_points": "工作流 → 相机数据集初始化与检查；训练窗口 → 初始化",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6696",
+        "native/src/TrainingDialog.cpp:1102",
+        "native/src/InitializationDialog.cpp:145"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "左右splitter、InitializationEditor与InitializationPreview、覆盖表/报告、选择视图、创建版本；两入口合同都保留",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "MODEL-02"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-12",
+      "group": "dialogs",
+      "name": "TrainingBatchDialog",
+      "entry_points": "工作流 → 批量训练",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6728",
+        "native/src/TrainingBatchDialog.cpp:118"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "数据集/参数轴/基础JSON、展开预览、保存历史、启动/续训/观察；关闭planner不误停持久queue",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-13",
+      "group": "dialogs",
+      "name": "ExistingTrainingDialog",
+      "entry_points": "工作流 → 现有训练；批量计划 → 观察队列",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6828",
+        "native/src/MainWindow.cpp:6808",
+        "native/src/ExistingTrainingDialog.cpp:80"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "两个观察模式、store浏览/任务选择、连接/断开/控制、共享监控/详情；断开窗不终止worker",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-14",
+      "group": "dialogs",
+      "name": "RuntimeGuardDialog",
+      "entry_points": "继续训练信任确认 → 续训显存保护设置",
+      "source_owners": [
+        "native/src/MainWindow.cpp:7060",
+        "native/src/RuntimeGuardDialog.cpp:17"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "嵌套modal；enabled/mode/usage/spare/denials、说明/错误/OK/Cancel；原guard未知字段保留",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-15",
+      "group": "dialogs",
+      "name": "ResourceBudgetDialog",
+      "entry_points": "视图 → 资源预算",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2112",
+        "native/src/ResourceBudgetDialog.cpp:50"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "模式/内存显存预算与实时状态、应用/关闭；UI修改不触碰训练策略",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "DLG-16",
+      "group": "dialogs",
+      "name": "ViewportGridDialog",
+      "entry_points": "视图 → 网格设置；视口详情 → 网格设置",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2823",
+        "native/src/ViewportGridDialog.cpp:105"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "显示/轴线、自动/固定间距、subdivision/density/display unit/provenance、应用/取消",
+        "各表单布局/最小尺寸由本类分别定义；现有AppTheme/WindowUi只能证明共用样式入口，不能证明本轮无裁切。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "GRID-01"
+      ],
+      "required_remote_checks": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INL-01",
+      "group": "inline_dialogs",
+      "name": "视口详情",
+      "entry_points": "视图/视口信息按钮 → 视口详情",
+      "source_owners": [
+        "native/src/MainWindow.cpp:2755"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "只读详情/复制/网格设置/关闭，WA_DeleteOnClose和快速重开目标清理",
+        "MainWindow内联构建而非独立Dialog类，不能因16个类已覆盖就漏掉。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INL-02",
+      "group": "inline_dialogs",
+      "name": "恢复中心",
+      "entry_points": "启动恢复提示；文件 → 恢复中心",
+      "source_owners": [
+        "native/src/MainWindow.cpp:4589"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "恢复记录表、多选移除、恢复/稍后、busy/损坏/不可用提示",
+        "MainWindow内联构建而非独立Dialog类，不能因16个类已覆盖就漏掉。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INL-03",
+      "group": "inline_dialogs",
+      "name": "版本历史",
+      "entry_points": "文件 → 版本历史",
+      "source_owners": [
+        "native/src/MainWindow.cpp:4827"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "快照表、移除、恢复/取消、来源保护",
+        "MainWindow内联构建而非独立Dialog类，不能因16个类已覆盖就漏掉。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "INL-04",
+      "group": "inline_dialogs",
+      "name": "外部备份历史",
+      "entry_points": "文件 → 外部备份；配置外部备份目录",
+      "source_owners": [
+        "native/src/MainWindow.cpp:5030"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "备份表、恢复目标目录、校验进度、结果说明",
+        "MainWindow内联构建而非独立Dialog类，不能因16个类已覆盖就漏掉。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "PROG-01",
+      "group": "progress_dialogs",
+      "name": "恢复外部备份",
+      "entry_points": "外部备份历史 → 校验恢复",
+      "source_owners": [
+        "native/src/MainWindow.cpp:5116"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "QProgressDialog不是独立QDialog子类；状态、取消/不可取消策略沿用原语义。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "PROG-02",
+      "group": "progress_dialogs",
+      "name": "导出模型",
+      "entry_points": "ModelExportDialog接受后",
+      "source_owners": [
+        "native/src/MainWindow.cpp:5401"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "QProgressDialog不是独立QDialog子类；状态、取消/不可取消策略沿用原语义。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "PROG-03",
+      "group": "progress_dialogs",
+      "name": "导入场景",
+      "entry_points": "importSceneFile耗时导入",
+      "source_owners": [
+        "native/src/MainWindow.cpp:6107"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "QProgressDialog不是独立QDialog子类；状态、取消/不可取消策略沿用原语义。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "PROG-04",
+      "group": "progress_dialogs",
+      "name": "批量移除记录",
+      "entry_points": "MultiItemList/installRecordRemoval",
+      "source_owners": [
+        "native/src/MultiItemList.cpp:168"
+      ],
+      "style_path": [
+        "AppTheme::apply/styleSheet",
+        "AppLanguage",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "QProgressDialog不是独立QDialog子类；状态、取消/不可取消策略沿用原语义。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "MSG-01",
+      "group": "message_families",
+      "name": "所有信息/警告/错误/确认/关于",
+      "entry_points": "83个QMessageBox源码调用点（逐点索引，动态目的另按父窗覆盖）",
+      "source_owners": [
+        "native/src/MainWindow.cpp:8155",
+        "native/src/FileDialogHistory.cpp:221",
+        "native/src/MultiItemList.cpp:144"
+      ],
+      "style_path": [
+        "Qt QMessageBox",
+        "AppTheme",
+        "WindowUi",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "多处短错误/不可用提示、长diagnostic/detail及默认安全按钮；不能只验证showError通用入口就把全部流程计PASS。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "按索引owner覆盖对应触发条件",
+        "长诊断/Unicode/键盘默认按钮/取消与安全默认值"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "MSG-02",
+      "group": "message_families",
+      "name": "未保存工程/场景编辑与退出确认",
+      "entry_points": "关闭/新建/打开/切换源时confirmDiscardChanges/SceneEdits/confirmExit",
+      "source_owners": [
+        "native/src/MainWindow.cpp:4390",
+        "native/src/MainWindow.cpp:4411",
+        "native/src/MainWindow.cpp:4440"
+      ],
+      "style_path": [
+        "Qt QMessageBox",
+        "WindowUi"
+      ],
+      "static_observations": [
+        "独立于一般错误：Save/Discard/Cancel和退出确认不可因主题/布局改变实际选择结果。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "无修改/仅场景编辑/工程脏三种状态",
+        "默认安全按钮及保存失败保留会话"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "MSG-03",
+      "group": "message_families",
+      "name": "完整续训信任确认与嵌套资源设置",
+      "entry_points": "实验历史/暂停恢复 → resumeTrainingJob",
+      "source_owners": [
+        "native/src/MainWindow.cpp:7037",
+        "native/src/MainWindow.cpp:7060"
+      ],
+      "style_path": [
+        "Qt QMessageBox",
+        "RuntimeGuardDialog"
+      ],
+      "static_observations": [
+        "检查点信任提示、Yes/No安全默认与guard action循环；原参数/完整状态身份不得被UI重排改写。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "拒绝不启动、guard取消保持原值",
+        "owned完整checkpoint控制夹具；不加载用户检查点"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "MSG-04",
+      "group": "message_families",
+      "name": "固定启动器错误提示",
+      "entry_points": "启动解析失败时Win32 MessageBoxW；非Windowsstderr",
+      "source_owners": [
+        "native/src/NativeLauncher.cpp:71"
+      ],
+      "style_path": [
+        "Win32 MessageBoxW",
+        "nativeInstallationErrorText",
+        "saved AppLanguage catalog"
+      ],
+      "static_observations": [
+        "这不是Qt QMessageBox，AppTheme样式不直接作用；登记为跨adapter边界，不为外观替换稳定启动协议。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PKG-01",
+        "LIFE-01"
+      ],
+      "required_remote_checks": [
+        "远端owned安装缺失/损坏/语言错误提示",
+        "系统原生样式、无训练启动；安装调查由其他owner负责"
+      ],
+      "priority": "P2",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "EMB-01",
+      "group": "embedded",
+      "name": "初始化声明编辑器",
+      "entry_points": "DatasetImportDialog及InitializationDialog",
+      "source_owners": [
+        "native/src/InitializationEditor.cpp:45"
+      ],
+      "style_path": [
+        "AppTheme",
+        "QFormLayout",
+        "AppLanguage"
+      ],
+      "static_observations": [
+        "公共输入编辑器source/frame/count/seed/prior/范围字段；更改标签或展开布局不改值、精度和输入身份。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "required_remote_checks": [
+        "两个父窗口的配置roundtrip",
+        "无效/长值/切换frame后状态"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    },
+    {
+      "id": "EMB-02",
+      "group": "embedded",
+      "name": "初始化几何预览",
+      "entry_points": "InitializationDialog右侧预览",
+      "source_owners": [
+        "native/src/InitializationPreview.cpp:70"
+      ],
+      "style_path": [
+        "QPainter independent preview"
+      ],
+      "static_observations": [
+        "独立QWidget绘制不等于NativeViewport真实OpenGL；需分别验证字体/线宽、选择视图与纯观察导航。"
+      ],
+      "acceptance_ids": [
+        "FORM-01",
+        "FONT-01",
+        "MODEL-02",
+        "OVERLAY-01"
+      ],
+      "required_remote_checks": [
+        "point/camera/bounds与所选视图",
+        "三语/明暗/尺寸变更不改实际初始化"
+      ],
+      "priority": "P1",
+      "status": "STATIC_INVENTORIED",
+      "visual_status": "NOT_RUN",
+      "interaction_status": "NOT_RUN",
+      "no_change_decision": "NOT_DECIDED_WITHOUT_MATCHED_VISUAL_EVIDENCE",
+      "evidence": []
+    }
+  ],
+  "popup_call_sites": [
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 557,
+      "owner": "DatasetImportDialog::chooseCameraSource",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "? QFileDialog::getExistingDirectory(this, QCoreApplication::translate(\"Workbench\", \"选择相机数据目录\"), mInitialDirectory)",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 558,
+      "owner": "DatasetImportDialog::chooseCameraSource",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": ": QFileDialog::getOpenFileName(this, QCoreApplication::translate(\"Workbench\", \"选择相机数据文件\"), mInitialDirectory,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 585,
+      "owner": "DatasetImportDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"场景名称为空\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 591,
+      "owner": "DatasetImportDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 599,
+      "owner": "DatasetImportDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"尺度声明缺少依据\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 606,
+      "owner": "DatasetImportDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"初始化范围无效\"), initializationError);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 621,
+      "owner": "DatasetImportDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, importRequest.cameraInput.isEmpty()",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 631,
+      "owner": "DatasetImportDialog::addFiles",
+      "kind": "QFileDialog::getOpenFileNames",
+      "source_line": "const QStringList paths = QFileDialog::getOpenFileNames(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/DatasetImportDialog.cpp",
+      "line": 644,
+      "owner": "DatasetImportDialog::addDirectory",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString path = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ExistingTrainingDialog.cpp",
+      "line": 126,
+      "owner": "ExistingTrainingDialog::ExistingTrainingDialog",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "connect(m->browse,&QPushButton::clicked,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,text(AppLanguage::source(\"选择工程或训练作业目录\")),m->store->text());if(!path.isEmp",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ExistingTrainingDialog.cpp",
+      "line": 243,
+      "owner": "ExistingTrainingDialog::stopJob",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox confirmation(QMessageBox::Question,text(m->batch?AppLanguage::source(\"取消已保存检查点的批量队列？\"):AppLanguage::source(\"停止现有训练？\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/FileDialogHistory.cpp",
+      "line": 221,
+      "owner": "FileDialogHistory (file scope)",
+      "kind": "QMessageBox::question",
+      "source_line": "const auto answer = QMessageBox::question(mDialog,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/InitializationDialog.cpp",
+      "line": 240,
+      "owner": "InitializationDialog::InitializationDialog",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this, initText(AppLanguage::source(\"载入初始化配置…\")), m->workspace,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/InitializationDialog.cpp",
+      "line": 245,
+      "owner": "InitializationDialog::InitializationDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString path = QFileDialog::getSaveFileName(this, initText(AppLanguage::source(\"保存初始化配置…\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/InitializationDialog.cpp",
+      "line": 250,
+      "owner": "InitializationDialog::InitializationDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString path = QFileDialog::getSaveFileName(this, initText(AppLanguage::source(\"保存初始化报告…\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/InitializationEditor.cpp",
+      "line": 135,
+      "owner": "InitializationEditor::InitializationEditor",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this, translated(AppLanguage::source(\"选择初始化点云\")), m->directory,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 1036,
+      "owner": "MainWindow::eventFilter",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox rejection(QMessageBox::Information, {}, {}, QMessageBox::Ok, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 1132,
+      "owner": "MainWindow::openProjectFile",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 1220,
+      "owner": "MainWindow::openProjectFile",
+      "kind": "QMessageBox::question",
+      "source_line": "QMessageBox::question(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 1270,
+      "owner": "MainWindow::openProjectFile",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 1368,
+      "owner": "MainWindow::createActions",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString filePath = QFileDialog::getOpenFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2060,
+      "owner": "MainWindow::createMenus",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"语言设置\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2112,
+      "owner": "MainWindow::createMenus",
+      "kind": "ResourceBudgetDialog",
+      "source_line": "mResourceBudgetDialog = new ResourceBudgetDialog(mViewport, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2221,
+      "owner": "MainWindow::createMenus",
+      "kind": "QMessageBox::about",
+      "source_line": "QMessageBox::about(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2760,
+      "owner": "MainWindow::showViewportDetails",
+      "kind": "QDialog",
+      "source_line": "auto *dialog = new QDialog(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2823,
+      "owner": "MainWindow::showViewportGridSettings",
+      "kind": "ViewportGridDialog",
+      "source_line": "ViewportGridDialog dialog(previous, mViewport->sceneReferenceCoordinates(), this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2909,
+      "owner": "MainWindow::showSelectedTaskDetails",
+      "kind": "TaskDetailsDialog",
+      "source_line": "TaskDetailsDialog dialog(record, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 2948,
+      "owner": "MainWindow::exportCurrentLogs",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString destination = QFileDialog::getSaveFileName(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 3421,
+      "owner": "MainWindow::connectServices",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4392,
+      "owner": "MainWindow::confirmDiscardChanges",
+      "kind": "QMessageBox::warning",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4416,
+      "owner": "MainWindow::confirmExit",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox prompt(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4444,
+      "owner": "MainWindow::confirmDiscardSceneEdits",
+      "kind": "QMessageBox::warning",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4592,
+      "owner": "MainWindow::showRecoveryCenter",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"恢复中心\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4612,
+      "owner": "MainWindow::showRecoveryCenter",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4620,
+      "owner": "MainWindow::showRecoveryCenter",
+      "kind": "QDialog",
+      "source_line": "QDialog dialog(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4759,
+      "owner": "MainWindow::restoreRecoveryWorkspace",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4813,
+      "owner": "MainWindow::restoreRecoveryWorkspace",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4830,
+      "owner": "MainWindow::showSnapshotHistory",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"版本历史\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4838,
+      "owner": "MainWindow::showSnapshotHistory",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4845,
+      "owner": "MainWindow::showSnapshotHistory",
+      "kind": "QDialog",
+      "source_line": "QDialog dialog(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4932,
+      "owner": "MainWindow::configureExternalBackup",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString selected = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4943,
+      "owner": "MainWindow::configureExternalBackup",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4961,
+      "owner": "MainWindow::startExternalBackup",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"外部备份\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 4980,
+      "owner": "MainWindow::startExternalBackup",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5043,
+      "owner": "MainWindow::showExternalBackups",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5050,
+      "owner": "MainWindow::showExternalBackups",
+      "kind": "QDialog",
+      "source_line": "QDialog dialog(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5105,
+      "owner": "MainWindow::showExternalBackups",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString destinationParent = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5116,
+      "owner": "MainWindow::showExternalBackups",
+      "kind": "QProgressDialog",
+      "source_line": "QProgressDialog progress(QCoreApplication::translate(\"Workbench\", \"正在校验并恢复外部备份…\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5143,
+      "owner": "MainWindow::showExternalBackups",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5160,
+      "owner": "MainWindow::saveProject",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5180,
+      "owner": "MainWindow::saveProject",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "target = QFileDialog::getSaveFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5388,
+      "owner": "MainWindow::exportModel",
+      "kind": "ModelExportDialog",
+      "source_line": "ModelExportDialog dialog(mViewport->modelExportOptions(), mViewport->meshRenderingAvailable(),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5401,
+      "owner": "MainWindow::exportModel",
+      "kind": "QProgressDialog",
+      "source_line": "QProgressDialog progress(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5440,
+      "owner": "MainWindow::exportCroppedScene",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "target = QFileDialog::getSaveFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5473,
+      "owner": "MainWindow::exportCoordinateReport",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "target = QFileDialog::getSaveFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5508,
+      "owner": "MainWindow::ensureProjectRecoveryReady",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5754,
+      "owner": "MainWindow::newProject",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5791,
+      "owner": "MainWindow::importDataset",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5802,
+      "owner": "MainWindow::importDataset",
+      "kind": "QFileDialog::getOpenFileNames",
+      "source_line": "sourcePaths = QFileDialog::getOpenFileNames(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5819,
+      "owner": "MainWindow::importDatasetDirectory",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5825,
+      "owner": "MainWindow::importDatasetDirectory",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString sourcePath = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5855,
+      "owner": "MainWindow::importDatasetSources",
+      "kind": "DatasetImportDialog",
+      "source_line": "DatasetImportDialog dialog(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5953,
+      "owner": "MainWindow::importDatasetSources",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5960,
+      "owner": "MainWindow::importDatasetSources",
+      "kind": "QMessageBox::warning",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5982,
+      "owner": "MainWindow::importDatasetSources",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"任务繁忙\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 5999,
+      "owner": "MainWindow::attachExistingDataset",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6008,
+      "owner": "MainWindow::attachExistingDataset",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString directory = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6040,
+      "owner": "MainWindow::importScene",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString filePath = QFileDialog::getOpenFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6062,
+      "owner": "MainWindow::importSceneFile",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox choice(QMessageBox::Question, QString(), QString(),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6107,
+      "owner": "MainWindow::importSceneFile",
+      "kind": "QProgressDialog",
+      "source_line": "QProgressDialog progress(this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6170,
+      "owner": "MainWindow::clearDatasetImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6176,
+      "owner": "MainWindow::clearDatasetImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6183,
+      "owner": "MainWindow::clearDatasetImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"没有可清理的数据集\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6197,
+      "owner": "MainWindow::clearDatasetImport",
+      "kind": "QMessageBox::warning",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6224,
+      "owner": "MainWindow::clearDatasetImport",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6239,
+      "owner": "MainWindow::clearReconstructionImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"没有数据集\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6244,
+      "owner": "MainWindow::clearReconstructionImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6252,
+      "owner": "MainWindow::clearReconstructionImport",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"没有重建结果\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6256,
+      "owner": "MainWindow::clearReconstructionImport",
+      "kind": "QMessageBox::warning",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6284,
+      "owner": "MainWindow::clearReconstructionImport",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6339,
+      "owner": "MainWindow::clearTaskHistory",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"任务仍在运行\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6343,
+      "owner": "MainWindow::clearTaskHistory",
+      "kind": "QMessageBox::question",
+      "source_line": "const QMessageBox::StandardButton answer = QMessageBox::question(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6379,
+      "owner": "MainWindow::runEnvironmentCheck",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"任务繁忙\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6389,
+      "owner": "MainWindow::startReconstruction",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"尚未导入数据集\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6405,
+      "owner": "MainWindow::startReconstruction",
+      "kind": "ReconstructionDialog",
+      "source_line": "ReconstructionDialog dialog(mWorkspace.datasetPath(), root, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6479,
+      "owner": "MainWindow::startReconstruction",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"任务繁忙\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6537,
+      "owner": "MainWindow::showQualityComparison",
+      "kind": "QualityComparisonDialog",
+      "source_line": "mQualityComparisonDialog = new QualityComparisonDialog(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6576,
+      "owner": "MainWindow::showScaleConstraints",
+      "kind": "ScaleConstraintsDialog",
+      "source_line": "mScaleConstraintsDialog = new ScaleConstraintsDialog(python, root, mWorkspace.rootPath(),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6696,
+      "owner": "MainWindow::showInitialization",
+      "kind": "InitializationDialog",
+      "source_line": "mInitializationDialog = new InitializationDialog(python, root, mWorkspace.rootPath(),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6728,
+      "owner": "MainWindow::showTrainingBatch",
+      "kind": "TrainingBatchDialog",
+      "source_line": "mTrainingBatchDialog = new TrainingBatchDialog(python, root, mWorkspace.rootPath(),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6769,
+      "owner": "MainWindow::startTrainingBatch",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox trust(QMessageBox::Question, QCoreApplication::translate(\"Workbench\", \"继续训练\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6808,
+      "owner": "MainWindow::observeTrainingBatch",
+      "kind": "ExistingTrainingDialog",
+      "source_line": "ExistingTrainingDialog dialog(python,root,pythonEnvironment.environment,mWorkspace.rootPath(),this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6828,
+      "owner": "MainWindow::showExistingTraining",
+      "kind": "ExistingTrainingDialog",
+      "source_line": "ExistingTrainingDialog dialog(python, root, pythonEnvironment.environment,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 6904,
+      "owner": "MainWindow::showGenerationHistory",
+      "kind": "GenerationHistoryDialog",
+      "source_line": "GenerationHistoryDialog dialog(mWorkspace.rootPath(), this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7035,
+      "owner": "MainWindow::resumeTrainingJob",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox resumePrompt(QMessageBox::Question, QCoreApplication::translate(\"Workbench\", \"继续训练\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7060,
+      "owner": "MainWindow::resumeTrainingJob",
+      "kind": "RuntimeGuardDialog",
+      "source_line": "RuntimeGuardDialog editor(guard, &resumePrompt);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7097,
+      "owner": "MainWindow::resumeTrainingJob",
+      "kind": "QMessageBox::question",
+      "source_line": "if (QMessageBox::question(this, QCoreApplication::translate(\"Workbench\", \"切换实验数据集\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7219,
+      "owner": "MainWindow::startMeshGeneration",
+      "kind": "MeshGenerationDialog",
+      "source_line": "MeshGenerationDialog dialog(source, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7283,
+      "owner": "MainWindow::startTraining",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7310,
+      "owner": "MainWindow::startTraining",
+      "kind": "TrainingDialog",
+      "source_line": "TrainingDialog dialog(mWorkspace.datasetPath(), suggestedExperiment,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7363,
+      "owner": "MainWindow::startTraining",
+      "kind": "QMessageBox::warning",
+      "source_line": "if (!affected.isEmpty() && QMessageBox::warning(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 7509,
+      "owner": "MainWindow::startTraining",
+      "kind": "QMessageBox::information",
+      "source_line": "QMessageBox::information(this, QCoreApplication::translate(\"Workbench\", \"任务繁忙\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MainWindow.cpp",
+      "line": 8157,
+      "owner": "MainWindow::showError",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, title, display);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MeshGenerationDialog.cpp",
+      "line": 92,
+      "owner": "MeshGenerationDialog::MeshGenerationDialog",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MeshGenerationDialog.cpp",
+      "line": 165,
+      "owner": "MeshGenerationDialog::MeshGenerationDialog",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString path = QFileDialog::getExistingDirectory(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MeshGenerationDialog.cpp",
+      "line": 262,
+      "owner": "MeshGenerationDialog::accept",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法生成网格\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MeshGenerationDialog.cpp",
+      "line": 267,
+      "owner": "MeshGenerationDialog::accept",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法生成网格\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MeshGenerationDialog.cpp",
+      "line": 276,
+      "owner": "MeshGenerationDialog::accept",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法生成网格\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ModelExportDialog.cpp",
+      "line": 278,
+      "owner": "ModelExportDialog::chooseFile",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString path = QFileDialog::getSaveFileName(this, QCoreApplication::translate(\"Workbench\", \"导出模型\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ModelExportDialog.cpp",
+      "line": 295,
+      "owner": "ModelExportDialog::confirmExport",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法导出模型\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ModelExportDialog.cpp",
+      "line": 303,
+      "owner": "ModelExportDialog::confirmExport",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法导出模型\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ModelExportDialog.cpp",
+      "line": 308,
+      "owner": "ModelExportDialog::confirmExport",
+      "kind": "QMessageBox::question",
+      "source_line": "if (target.exists() && QMessageBox::question(this, QCoreApplication::translate(\"Workbench\", \"替换导出文件\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MultiItemList.cpp",
+      "line": 144,
+      "owner": "gsw::confirmListRemoval",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox box(QMessageBox::Warning, QCoreApplication::translate(\"Workbench\", \"确认批量移除\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MultiItemList.cpp",
+      "line": 168,
+      "owner": "gsw::installRecordRemoval",
+      "kind": "QProgressDialog",
+      "source_line": "QProgressDialog progress(QCoreApplication::translate(\"Workbench\", \"正在处理所选记录…\"), QString(), 0, 0, barParent);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/MultiItemList.cpp",
+      "line": 193,
+      "owner": "gsw::installRecordRemoval",
+      "kind": "QMessageBox",
+      "source_line": "QMessageBox box(QMessageBox::Warning, QCoreApplication::translate(\"Workbench\", \"部分记录未能移除\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/QualityComparisonDialog.cpp",
+      "line": 217,
+      "owner": "QualityComparisonDialog::QualityComparisonDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString path = QFileDialog::getSaveFileName(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/QualityComparisonDialog.cpp",
+      "line": 368,
+      "owner": "QualityComparisonDialog::showMeasurement",
+      "kind": "QualityMeasurementDialog",
+      "source_line": "mMeasurementDialog = new QualityMeasurementDialog(mPython, mBackendRoot, mWorkspaceRoot, mEnvironment, this);",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/QualityComparisonDialog.cpp",
+      "line": 380,
+      "owner": "QualityComparisonDialog::chooseReport",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this, text(AppLanguage::source(\"选择质量实测报告\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/QualityMeasurementDialog.cpp",
+      "line": 183,
+      "owner": "QualityMeasurementDialog::QualityMeasurementDialog",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString path = QFileDialog::getExistingDirectory(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/QualityMeasurementDialog.cpp",
+      "line": 267,
+      "owner": "QualityMeasurementDialog::QualityMeasurementDialog",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this, text(AppLanguage::source(\"选择图像配对清单\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ReconstructionDialog.cpp",
+      "line": 250,
+      "owner": "ReconstructionDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ReconstructionDialog.cpp",
+      "line": 259,
+      "owner": "ReconstructionDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ReconstructionDialog.cpp",
+      "line": 265,
+      "owner": "ReconstructionDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ReconstructionDialog.cpp",
+      "line": 271,
+      "owner": "ReconstructionDialog::accept",
+      "kind": "QMessageBox::warning",
+      "source_line": "const auto answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ReconstructionDialog.cpp",
+      "line": 308,
+      "owner": "ReconstructionDialog::chooseExecutable",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString filePath = QFileDialog::getOpenFileName(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ScaleConstraintsDialog.cpp",
+      "line": 291,
+      "owner": "ScaleConstraintsDialog::ScaleConstraintsDialog",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const auto path = QFileDialog::getOpenFileName(this, scaleText(AppLanguage::source(\"导入约束 JSON…\")), m->workspaceRoot,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ScaleConstraintsDialog.cpp",
+      "line": 296,
+      "owner": "ScaleConstraintsDialog::ScaleConstraintsDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const auto path = QFileDialog::getSaveFileName(this, scaleText(AppLanguage::source(\"保存约束…\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/ScaleConstraintsDialog.cpp",
+      "line": 302,
+      "owner": "ScaleConstraintsDialog::ScaleConstraintsDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const auto path = QFileDialog::getSaveFileName(this, scaleText(AppLanguage::source(\"保存定尺度报告…\")),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TaskDetailsDialog.cpp",
+      "line": 268,
+      "owner": "TaskDetailsDialog::openOutputDirectory",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"任务详情\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TaskDetailsDialog.cpp",
+      "line": 275,
+      "owner": "TaskDetailsDialog::openOutputDirectory",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"任务详情\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TaskDetailsDialog.cpp",
+      "line": 289,
+      "owner": "TaskDetailsDialog::exportRetainedLog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "const QString path = QFileDialog::getSaveFileName(this,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TaskDetailsDialog.cpp",
+      "line": 296,
+      "owner": "TaskDetailsDialog::exportRetainedLog",
+      "kind": "QMessageBox::warning",
+      "source_line": "QMessageBox::warning(this, QCoreApplication::translate(\"Workbench\", \"无法导出日志\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingBatchDialog.cpp",
+      "line": 191,
+      "owner": "TrainingBatchDialog::TrainingBatchDialog",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const auto path=QFileDialog::getExistingDirectory(this,batchText(AppLanguage::source(\"选择已导入的相机数据集\")),m->datasets->item(row,1)->text());",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingBatchDialog.cpp",
+      "line": 209,
+      "owner": "TrainingBatchDialog::TrainingBatchDialog",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "connect(m->load,&QPushButton::clicked,this,[this]{const auto path=QFileDialog::getOpenFileName(this,batchText(AppLanguage::source(\"导入批量请求…\")),m->workspace,batchText(AppLanguage::so",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingBatchDialog.cpp",
+      "line": 210,
+      "owner": "TrainingBatchDialog::TrainingBatchDialog",
+      "kind": "QFileDialog::getSaveFileName",
+      "source_line": "connect(m->save,&QPushButton::clicked,this,[this]{const auto path=QFileDialog::getSaveFileName(this,batchText(AppLanguage::source(\"保存批量请求…\")),QDir(m->workspace).filePath(QStringLit",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 954,
+      "owner": "TrainingDialog::chooseQualityPlan",
+      "kind": "QFileDialog::getOpenFileName",
+      "source_line": "const QString path = QFileDialog::getOpenFileName(this, QCoreApplication::translate(\"Workbench\", \"导入质量计划 JSON…\"), {},",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 957,
+      "owner": "TrainingDialog::chooseQualityPlan",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"无法导入质量计划\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 965,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"实验性质量计划不可用\"), qualityPlanValidationText());",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 970,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"相机与重建来源不可用\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 975,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 985,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 992,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"输出目录不可用\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 1001,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::critical",
+      "source_line": "QMessageBox::critical(this, QCoreApplication::translate(\"Workbench\", \"输出已存在\"),",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 1006,
+      "owner": "TrainingDialog::accept",
+      "kind": "QMessageBox::warning",
+      "source_line": "const auto answer = QMessageBox::warning(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 1102,
+      "owner": "TrainingDialog::openInitialization",
+      "kind": "InitializationDialog",
+      "source_line": "InitializationDialog initialization(mProbePython, mProbeBackendRoot, mInitializationWorkspace,",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/TrainingDialog.cpp",
+      "line": 1152,
+      "owner": "TrainingDialog::chooseOutputRoot",
+      "kind": "QFileDialog::getExistingDirectory",
+      "source_line": "const QString directory = QFileDialog::getExistingDirectory(",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "source": "native/src/NativeLauncher.cpp",
+      "line": 75,
+      "owner": "main (stable native launcher)",
+      "kind": "Win32::MessageBoxW",
+      "source_line": "MessageBoxW(nullptr, reinterpret_cast<LPCWSTR>(text.utf16()), ... MB_OK | MB_ICONERROR)",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PKG-01"
+      ],
+      "visual_status": "NOT_RUN",
+      "behavior_status": "NOT_RUN",
+      "evidence": []
+    }
+  ]
+}

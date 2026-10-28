@@ -1,0 +1,31 @@
+{
+  "schema": "gsw.native_ui_clarity_protocol/1",
+  "status": "frozen_before_first_remote_run",
+  "baseline_production_commit": "5183926e09f5b568379bb1f89ee1667a9bd38121",
+  "seams": ["actual NativeViewport QOpenGLWidget presented frame with existing F12 diagnostic export", "independent physical-pixel circle area coverage", "existing real viewport navigation and public camera/model states"],
+  "controlled_qt_dpr_requests": [1.0, 1.25, 1.5, 1.75, 2.0],
+  "surface_sample_requests": [0, 4],
+  "themes": ["light", "dark"],
+  "real_dpr_and_framebuffer_samples_must_be_recorded": true,
+  "controlled_dpr_is_not_real_cross_monitor_acceptance": true,
+  "native_ui_default_scale_or_camera_not_overridden": true,
+  "image_oracle": {
+    "reference": "independent32x32physical-pixel area integration, not QPainter or the production renderer",
+    "circle_radius": "drawEllipse path radius in logical pixels; pen centered on path",
+    "visible_outer_radius": "(radius+strokeWidth/2)*measuredDpr",
+    "roi": "negative unhighlighted nonaligned axis handles; exclude other discs, shafts and labels",
+    "normalized_rgb_rmse_max": 0.06,
+    "p95_rgb_error_max": 0.16,
+    "outer_halo_max": 0.04,
+    "halo_roi": "more than1.25physicalpx outside nominal visible outer radius, excluding other painted controls",
+    "logical_physical_rounding_tolerance_pixels": 1,
+    "reference_working_memory_limit_bytes": 16777216,
+    "normal_size_visual_review_required": true
+  },
+  "capture_per_process_wall_limit_seconds": 30,
+  "no_local_automated_tests_or_gui": true,
+  "no_private_user_data_uploaded": true,
+  "no_whole_viewport_supersampling_or_training_changes": true,
+  "full_ci_and_local_delivery_are_separate": true,
+  "known_unmeasured_gates": ["actual user NVIDIA driver", "real cross-monitor migration", "custom RGB/alpha background feature currently absent", "full P1/P2 surfaces", "three-round performance envelope before promotion"]
+}

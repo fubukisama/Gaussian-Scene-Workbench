@@ -33,6 +33,10 @@
 #include <QCoreApplication>
 #include <QLinearGradient>
 #include <QPainter>
+#include <QPaintEngine>
+#include <QFontInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 
 #include <algorithm>
 #include <array>
@@ -86,7 +90,8 @@ inline bool highlighted(const BlenderNavigationPresentationState &state,
 
 inline void drawBlenderNavigationPresentation(
     QPainter &painter, const NavigationGizmoLayout &layout,
-    const BlenderNavigationPresentationState &state) {
+    const BlenderNavigationPresentationState &state,
+    QJsonObject *diagnostics = nullptr) {
   using namespace blender_navigation_detail;
   if (!std::isfinite(layout.radius) || layout.radius <= 0.0 ||
       !std::isfinite(layout.center.x()) || !std::isfinite(layout.center.y())) return;
@@ -96,9 +101,24 @@ inline void drawBlenderNavigationPresentation(
   const qreal lineWidth = std::clamp(layout.radius / 20.0, 1.0, 3.4);
   const qreal ringWidth = std::clamp(layout.radius / 30.0, 0.8, 2.0);
   const bool rotationActive = active(state, NavigationGizmoPart::Rotate);
+  QJsonArray observedHandles;
+  const auto rgba = [](const QColor &color) {
+    return QJsonArray{color.red(), color.green(), color.blue(), color.alpha()};
+  };
+  if (diagnostics) {
+    const QTransform device = painter.deviceTransform();
+    *diagnostics = {{"schema", "gsw.navigation_paint/1"},
+        {"backdrop", rgba(backdrop)}, {"rotationBackdrop", rotationActive},
+        {"paint", QJsonObject{
+            {"engine", painter.paintEngine() ? int(painter.paintEngine()->type()) : -1},
+            {"dpr", painter.device() ? painter.device()->devicePixelRatioF() : 0.0},
+            {"deviceTransform", QJsonArray{device.m11(), device.m12(), device.m21(), device.m22(), device.dx(), device.dy()}},
+            {"opacity", painter.opacity()}, {"compositionMode", int(painter.compositionMode())}}}};
+  }
 
   painter.save();
   painter.setRenderHint(QPainter::Antialiasing, true);
+  if (diagnostics) diagnostics->insert("antialiasingRequested", painter.testRenderHint(QPainter::Antialiasing));
   if (rotationActive) {
     painter.setPen(Qt::NoPen);
     painter.setBrush(state.light ? QColor(94, 101, 111, 30) : QColor(154, 160, 168, 45));
@@ -116,6 +136,13 @@ inline void drawBlenderNavigationPresentation(
   axisFont.setBold(true);
   axisFont.setPixelSize(std::clamp(qRound(layout.radius * 0.20 * 1.25), 9, 18));
   painter.setFont(axisFont);
+  if (diagnostics) {
+    const QFontInfo actual(axisFont);
+    diagnostics->insert("axisFont", QJsonObject{{"requestedFamily", axisFont.family()},
+        {"resolvedFamily", actual.family()}, {"pixelSize", actual.pixelSize()},
+        {"pointSize", actual.pointSizeF()}, {"weight", actual.weight()},
+        {"exactMatch", actual.exactMatch()}});
+  }
 
   for (const NavigationAxisHandle *handle : order) {
     if (handle->hidden || handle->axisIndex < 0 || handle->axisIndex >= 3 ||
@@ -128,6 +155,7 @@ inline void drawBlenderNavigationPresentation(
     const bool highlight = highlighted(state, *handle);
     const QPointF delta = handle->center - layout.center;
     const qreal extent = std::hypot(delta.x(), delta.y());
+    QJsonValue observedShaft;
     if ((handle->positive || axisAligned) && extent > handle->radius) {
       const QPointF start = layout.center -
           delta * (lineWidth / std::max(layout.radius, 1.0) * 0.66);
@@ -139,6 +167,9 @@ inline void drawBlenderNavigationPresentation(
       painter.setBrush(Qt::NoBrush);
       painter.setPen(QPen(QBrush(lineInk), lineWidth, Qt::SolidLine, Qt::FlatCap));
       painter.drawLine(start, end);
+      if (diagnostics) observedShaft = QJsonObject{
+          {"from", QJsonArray{start.x(), start.y()}}, {"to", QJsonArray{end.x(), end.y()}},
+          {"width", lineWidth}};
     }
 
     QColor fill = fading;
@@ -154,6 +185,13 @@ inline void drawBlenderNavigationPresentation(
     painter.setPen(QPen(highlight ? QColor(Qt::white) : outline,
                         highlight ? ringWidth + 0.5 : ringWidth));
     painter.setBrush(fill);
+    if (diagnostics) observedHandles.append(QJsonObject{
+        {"axisIndex", handle->axisIndex}, {"positive", handle->positive},
+        {"aligned", handle->aligned}, {"highlighted", highlight},
+        {"center", QJsonArray{handle->center.x(), handle->center.y()}},
+        {"radius", handle->radius}, {"strokeWidth", highlight ? ringWidth + 0.5 : ringWidth},
+        {"outline", rgba(highlight ? QColor(Qt::white) : outline)},
+        {"fill", rgba(fill)}, {"shaft", observedShaft}});
     painter.drawEllipse(handle->center, handle->radius, handle->radius);
 
     if (handle->positive || highlight || handle->aligned) {
@@ -199,6 +237,7 @@ inline void drawBlenderNavigationPresentation(
                state.cameraActive, state.cameraAvailable);
   miniButton(layout.projectionButton, NavigationGizmoPart::Projection,
                WorkbenchIconId::Projection, state.orthographic);
+  if (diagnostics) diagnostics->insert("handles", observedHandles);
   painter.restore();
 }
 

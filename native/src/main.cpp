@@ -40,6 +40,7 @@
 #include "FileDialogHistorySmokeTest.h"
 #include "FileDialogHistoryGuardSmokeTest.h"
 #include "NativeInstallation.h"
+#include "UiClaritySmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -123,6 +124,17 @@ int main(int argc, char *argv[]) {
   format.setDepthBufferSize(24);
   format.setStencilBufferSize(8);
   format.setSamples(4);
+  // QA exercises a valid no-MSAA fallback and the normal requested format.
+  // This cannot change ordinary launches or the full viewport resolution.
+  bool uiClarityCapture = false;
+  for (int i = 1; i < argc; ++i)
+    uiClarityCapture |= QString::fromLocal8Bit(argv[i]) == QStringLiteral("--smoke-test-ui-clarity");
+  if (uiClarityCapture && qEnvironmentVariableIsSet("GSW_UI_QA_SAMPLES")) {
+    bool valid = false;
+    const int samples = qEnvironmentVariableIntValue("GSW_UI_QA_SAMPLES", &valid);
+    if (!valid || (samples != 0 && samples != 4)) return 4;
+    format.setSamples(samples);
+  }
   // Dense point clouds make scan-out tearing especially visible while the
   // camera is moving. Synchronize presentation by default; benchmarks can
   // explicitly opt out with GSW_SWAP_INTERVAL=0.
@@ -358,6 +370,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption upstreamNavigationOption(QStringLiteral("smoke-test-upstream-navigation"),
       QStringLiteral("Verify source-ported cursor zoom and projected pan through real viewport input."));
   parser.addOption(upstreamNavigationOption);
+  QCommandLineOption uiClarityOption(QStringLiteral("smoke-test-ui-clarity"),
+      QStringLiteral("Capture a source-bound real viewport navigation/DPI frame for independent edge checks."));
+  parser.addOption(uiClarityOption);
   QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
       QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
   parser.addOption(pointStreamingOption);
@@ -467,7 +482,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
-                         parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
+                         parser.isSet(uiClarityOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
@@ -539,7 +554,13 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(workspaceDropSmokeOption)) {
+  if (parser.isSet(uiClarityOption)) {
+    QTimer::singleShot(650, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runUiClaritySmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(workspaceDropSmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runWorkspaceDropSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);

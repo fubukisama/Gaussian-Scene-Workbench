@@ -106,6 +106,8 @@ endif()
 qt_add_executable(GaussianSceneWorkbench WIN32
   src/RenderFrameDiagnostics.cpp
   src/RenderFrameDiagnostics.h
+  src/UiClaritySmokeTest.cpp
+  src/UiClaritySmokeTest.h
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
   tests/BlenderViewportVisualTestSupport.cpp
@@ -565,6 +567,19 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/examples/camera-scale-p1"
 
 include(CTest)
 if(BUILD_TESTING)
+  if(WIN32)
+    set(GSW_UI_CLARITY_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-clarity-evidence")
+    add_test(NAME native_ui_clarity_capture
+      COMMAND GaussianSceneWorkbench --smoke-test-ui-clarity --theme light)
+    set_tests_properties(native_ui_clarity_capture PROPERTIES TIMEOUT 30
+      FIXTURES_SETUP ui_clarity_frame
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_UI_QA_SAMPLES=0;GSW_UI_CLARITY_EVIDENCE=${GSW_UI_CLARITY_ROOT};GSW_RENDER_DIAGNOSTICS_DIR=${GSW_UI_CLARITY_ROOT}/captures;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    add_test(NAME native_ui_clarity_edges COMMAND "${Python3_EXECUTABLE}" -I -B
+      "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_clarity.py"
+      --root "${GSW_UI_CLARITY_ROOT}" --output "${GSW_UI_CLARITY_ROOT}/edge-results.json")
+    set_tests_properties(native_ui_clarity_edges PROPERTIES TIMEOUT 30 FIXTURES_REQUIRED ui_clarity_frame)
+  endif()
   if(WIN32)
     add_test(NAME native_surfel_projection_gl COMMAND "${Python3_EXECUTABLE}"
       -B "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.py")

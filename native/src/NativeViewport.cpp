@@ -3610,7 +3610,8 @@ QJsonObject NativeViewport::renderDiagnosticMetadata() const {
   const QMatrix4x4 model = modelMatrix();
   const bool ipc = trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame();
   const QMatrix4x4 effectiveModel = model * (ipc ? trainingPreviewCoordinateTransform() : QMatrix4x4());
-  return {{"activeId", mRenderDiagnosticActiveId}, {"sourceSceneId", mScene->id},
+  return {{"logicalWidgetSize", QJsonArray{width(), height()}},
+      {"activeId", mRenderDiagnosticActiveId}, {"sourceSceneId", mScene->id},
       {"objects", objects}, {"sourcePath", mScene->mScenePath},
       {"renderMode", int(mScene->mRenderMode)}, {"sourceCount", mScene->mSourceVertexCount},
       {"basePointCount", qint64(mScene->mRenderedPointCount)},
@@ -8928,6 +8929,8 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 }
 
 void NativeViewport::drawAxisGizmo(QPainter &painter) {
+  QJsonObject diagnostics;
+  const bool recording = mRenderDiagnostics && mRenderDiagnostics->recording();
   drawBlenderNavigationPresentation(painter, navigationGizmo(),
       {.hover = mNavigationHover,
        .press = mNavigationPress,
@@ -8936,7 +8939,8 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
        .orthographic = mOrthographic,
        .cameraActive = mCameraViewActive,
        .cameraAvailable = camerasAvailable(),
-       .backdrop = viewportColors().backdrop});
+       .backdrop = viewportColors().backdrop}, recording ? &diagnostics : nullptr);
+  if (recording) mRenderDiagnostics->note(QStringLiteral("navigation-presentation"), diagnostics);
 }
 
 } // namespace gsw
