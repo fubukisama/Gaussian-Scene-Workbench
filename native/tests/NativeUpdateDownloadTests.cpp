@@ -75,6 +75,39 @@ private slots:
     QCOMPARE(result.receivedBytes, r.expectedLength);
     QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
   }
+  void cancellationRetainsOwnedStrongEtagPrefixAndResumesActualHttpsRange() {
+    auto r = request(QStringLiteral("/slow"), QStringLiteral("resume.bin"));
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write("previous destination"), qint64(20)); previous.close();
+    const QString pointer = temporary.filePath(QStringLiteral("current.json"));
+    QFile current(pointer); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write("unchanged active release"), qint64(24)); current.close();
+    NativeUpdateDownload client;
+    QSignalSpy cancelled(&client, &NativeUpdateDownload::finished);
+    QObject::connect(&client, &NativeUpdateDownload::progress, &client,
+        [&client](qint64 received, qint64) { if (received >= 32768) client.cancel(); });
+    QVERIFY(client.start(r, policy()));
+    QVERIFY(cancelled.wait(8000));
+    const auto first = qvariant_cast<NativeUpdateDownloadResult>(cancelled.first().first());
+    QVERIFY(first.cancelled); QVERIFY(!first.ok);
+    QCOMPARE(read(r.destinationPath), QByteArray("previous destination"));
+    QCOMPARE(read(pointer), QByteArray("unchanged active release"));
+    const qint64 prefix = QFileInfo(r.destinationPath + QStringLiteral(".part")).size();
+    QVERIFY(prefix >= 32768 && prefix < r.expectedLength);
+    const auto result = download(r, policy());
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QVERIFY(result.resumed);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+    QCOMPARE(read(pointer), QByteArray("unchanged active release"));
+    bool sawBoundRange = false;
+    for (const auto &line : read(fixture.value("requestLog").toString()).split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (row.value("path").toString() == QLatin1String("/slow") &&
+          row.value("range").toString() == QStringLiteral("bytes=%1-").arg(prefix) &&
+          row.value("if_range").toString() == QLatin1String("\"owned-payload-a\"")) sawBoundRange = true;
+    }
+    QVERIFY(sawBoundRange);
+  }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)
 #include "NativeUpdateDownloadTests.moc"

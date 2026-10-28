@@ -319,7 +319,9 @@ def main() -> int:
             product=arguments.product, source_commit=arguments.source_commit,
             source_tree=arguments.source_tree, build_id=arguments.build_id,
             display_version=arguments.display_version, release_sequence=arguments.release_sequence)
-        print(json.dumps(report, ensure_ascii=False))
+        # ASCII-escaped JSON is UTF-8-compatible even when Python -I ignores
+        # PYTHONUTF8 and the Windows pipe uses a legacy locale encoding.
+        print(json.dumps(report, ensure_ascii=True))
         return 0
     except ArchiveError as error:
         print(json.dumps({"schema": "gsw.native_update_package/1", "ok": False, "code": error.code}))

@@ -23,6 +23,7 @@ public:
   NativeInstallationLock &operator=(const NativeInstallationLock &) = delete;
   [[nodiscard]] bool locked() const;
   [[nodiscard]] QString error() const;
+  [[nodiscard]] QString installationRoot() const;
 private:
   struct Impl;
   std::unique_ptr<Impl> m;
@@ -37,6 +38,8 @@ class NativeVerifiedUpdate final {
   friend class NativeUpdateTrustBridge;
   friend class NativeActivationCore;
   QByteArray offer;
+  QString descriptorSha256;
+  QString installationRoot;
   NativeVerifiedUpdate() = default;
 public:
   NativeVerifiedUpdate(const NativeVerifiedUpdate &) = default;
@@ -49,7 +52,8 @@ public:
 private:
   friend class NativeDeveloperPublisher;
   static NativeActivationResult publish(const QString &root, const QString &archive,
-      const QByteArray &offer, const NativeInstallationLock &, bool developerAdmission);
+      const QByteArray &offer, const NativeInstallationLock &, bool developerAdmission,
+      const QString &descriptorSha256 = {});
 };
 
 // This adapter is built into a separate developer-only executable/test target,

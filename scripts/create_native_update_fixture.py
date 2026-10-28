@@ -1,0 +1,256 @@
+"""Issue ephemeral, test-only TUF repositories for remote native update tests.
+
+This is not a production signer. It accepts no production product/key/profile.
+Start native_update_network_fixture.py first, then pass its ready record here.
+The TUF private keys live only in this issuer process; profiles contain public
+root metadata and the network fixture's public CA certificate only.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timedelta, timezone
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+from urllib.parse import urlsplit
+
+from securesystemslib.signer import CryptoSigner
+from tuf.api.metadata import Metadata, MetaFile, Root, Snapshot, TargetFile, Targets, Timestamp
+from tuf.api.serialization.json import JSONSerializer
+
+
+PRODUCT = "Fubukisama.GaussianSceneWorkbench.UpdateFixture"
+PLATFORM = "windows-x64"
+SERIALIZER = JSONSerializer(compact=True)
+
+
+def _fresh_json(path: Path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8", newline="\n") as stream:
+        json.dump(value, stream, ensure_ascii=False, allow_nan=False, sort_keys=True)
+        stream.write("\n")
+
+
+def _digest(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _wire(metadata) -> bytes:
+    return metadata.to_bytes(SERIALIZER)
+
+
+def _signed(metadata, signer) -> bytes:
+    metadata.sign(signer)
+    return _wire(metadata)
+
+
+def _write(path: Path, data: bytes):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("xb") as stream:
+        stream.write(data)
+
+
+def _base(server):
+    if server.get("schema") != "gsw.update_network_fixture/1" or server.get("testOnly") is not True:
+        raise ValueError("expected_test_only_https_server")
+    value = server["baseUrl"]
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or parsed.username or parsed.password or parsed.query
+            or parsed.fragment or parsed.path not in ("", "/") or not parsed.port):
+        raise ValueError("fixture_base_url_invalid")
+    if parsed.hostname != "localhost" and not ipaddress.ip_address(parsed.hostname).is_loopback:
+        raise ValueError("fixture_must_be_loopback")
+    return value.rstrip("/")
+
+
+def _archive(package: Path, destination: Path, commit: str, tree: str,
+             build_id: str, version: str, sequence: int):
+    result = subprocess.run([sys.executable, "-I", "-B",
+        str(Path(__file__).with_name("package_native_update.py")),
+        "--package-root", str(package), "--output-archive", str(destination),
+        "--source-commit", commit, "--source-tree", tree, "--build-id", build_id,
+        "--product", PRODUCT, "--display-version", version,
+        "--release-sequence", str(sequence)], capture_output=True, text=True,
+        encoding="utf-8", timeout=240)
+    if result.returncode != 0:
+        # Do not include environment, credentialled URLs or package contents.
+        raise ValueError("fixture_package_creation_failed")
+    report = json.loads(result.stdout)
+    if report.get("product") != PRODUCT or report.get("buildId") != build_id:
+        raise ValueError("fixture_package_identity_differs")
+    return report
+
+
+def _offer(report, base_url: str, asset: str, channel: str, revision: int):
+    keys = ("product", "platform", "displayVersion", "buildId", "releaseSequence",
+            "sourceCommit", "sourceTree", "archiveLength", "archiveSha256",
+            "payloadManifestSha256", "correspondingSourceSha256", "unpackedLength", "fileCount")
+    result = {key: report[key] for key in keys}
+    result.update(schema="gsw.update_offer/1", channel=channel, metadataRevision=revision,
+        archiveUrl=base_url + "/downloads/" + asset, minimumBootstrapProtocol=2,
+        revokedBuildIds=[], releaseNotes={
+            "zh_CN": "仅隔离测试：同一入口切换完整版本；不触及用户数据。",
+            "en_US": "Isolated fixture only: full slot update through the same entry.",
+            "ja_JP": "隔離テスト専用：同じ起動口から完全なバージョンを切り替えます。"})
+    return result
+
+
+def _repository(directory: Path, offer: dict, root_bytes: bytes, signers: dict,
+                now: datetime, version: int, *, expired=False, wrong_signature=False,
+                duplicate_offer=False, mix_snapshot=False):
+    target_bytes = json.dumps(offer, ensure_ascii=False, allow_nan=False,
+                             sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if duplicate_offer:
+        replacement = json.dumps(offer["product"], ensure_ascii=False).encode("utf-8")
+        target_bytes = target_bytes.replace(b'"product":', b'"product":' + replacement + b',"product":', 1)
+    metadata = directory / "metadata"
+    targets = directory / "targets"
+    _write(targets / "release.json", target_bytes)
+    target = Metadata(Targets(version=version, expires=now + timedelta(days=7)))
+    target.signed.targets["release.json"] = TargetFile.from_data("release.json", target_bytes, ["sha256"])
+    target_bytes_wire = _signed(target, signers["targets"])
+    if wrong_signature:
+        invalid = json.loads(target_bytes_wire)
+        invalid["signatures"][0]["sig"] = "00" * 64
+        target_bytes_wire = json.dumps(invalid, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    snapshot = Metadata(Snapshot(version=version, expires=now + timedelta(days=7)))
+    snapshot.signed.meta["targets.json"] = MetaFile.from_data(version, target_bytes_wire, ["sha256"])
+    if mix_snapshot:
+        snapshot.signed.meta["targets.json"].hashes["sha256"] = "00" * 32
+    snapshot_bytes = _signed(snapshot, signers["snapshot"])
+    timestamp = Metadata(Timestamp(version=version,
+        expires=now + (timedelta(hours=-1) if expired else timedelta(days=1))))
+    timestamp.signed.snapshot_meta = MetaFile.from_data(version, snapshot_bytes, ["sha256"])
+    timestamp_bytes = _signed(timestamp, signers["timestamp"])
+    for name, data in {"1.root.json": root_bytes, "root.json": root_bytes,
+                       "targets.json": target_bytes_wire, f"{version}.targets.json": target_bytes_wire,
+                       "snapshot.json": snapshot_bytes, f"{version}.snapshot.json": snapshot_bytes,
+                       "timestamp.json": timestamp_bytes}.items():
+        _write(metadata / name, data)
+
+
+def prepare(args):
+    if not args.fixture_only:
+        raise ValueError("fixture_only_acknowledgement_required")
+    if not re.fullmatch(r"[a-f0-9]{40}", args.source_commit) or not re.fullmatch(r"[a-f0-9]{40}", args.source_tree):
+        raise ValueError("fixture_source_identity_invalid")
+    root = args.output_root.absolute()
+    root.mkdir(parents=True, exist_ok=True)
+    if (root / "profile.json").exists() or (root / "fixture.json").exists():
+        raise ValueError("fixture_output_already_issued")
+    server = json.loads(args.server_info.read_text(encoding="utf-8-sig"))
+    base_url = _base(server)
+    public = Path(server["contentRoot"]).absolute()
+    for name in ("A", "B", "badC", "wrong-key", "expired", "mix", "wrong-product",
+                 "wrong-platform", "wrong-channel", "duplicate-offer", "sequence-overflow"):
+        if (public / name).exists():
+            raise ValueError("fixture_repository_already_exists")
+    ca = Path(server["caPath"]).read_text(encoding="ascii")
+    if "BEGIN CERTIFICATE" not in ca or "PRIVATE KEY" in ca or len(ca) > 65536:
+        raise ValueError("fixture_ca_invalid")
+    prepared = root / "archive-builds"
+    prepared.mkdir(exist_ok=False)
+    downloads = public / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    reports, assets = {}, {}
+    for name, package, sequence in (("A", args.package_a, 1), ("B", args.package_b, 2),
+                                     ("badC", args.package_b, 3)):
+        report = _archive(package, prepared / f"{name}.zip", args.source_commit, args.source_tree,
+                          "fixture-" + name.lower(), args.display_version, sequence)
+        asset = report["buildId"] + "-" + report["archiveSha256"][:12] + ".zip"
+        destination = downloads / asset
+        if destination.exists():
+            raise ValueError("fixture_asset_already_exists")
+        shutil.copyfile(report["archivePath"], destination)
+        if _digest(destination) != report["archiveSha256"]:
+            raise ValueError("fixture_asset_copy_differs")
+        if name == "badC":
+            # Only the test asset is corrupted after its valid bytes were bound
+            # into the Offer: metadata still authorizes the original digest.
+            with destination.open("r+b") as stream:
+                offset = report["archiveLength"] // 2
+                stream.seek(offset)
+                old = stream.read(1)
+                stream.seek(offset)
+                stream.write(bytes([old[0] ^ 1]))
+        reports[name], assets[name] = report, asset
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    signers = {role: CryptoSigner.generate_ed25519() for role in ("root", "targets", "snapshot", "timestamp")}
+    second_root = CryptoSigner.generate_ed25519()
+    trust = Metadata(Root(version=1, expires=now + timedelta(days=365), consistent_snapshot=False))
+    for role, signer in signers.items():
+        trust.signed.add_key(signer.public_key, role)
+    trust.signed.add_key(second_root.public_key, "root")
+    trust.signed.roles["root"].threshold = 2
+    trust.sign(signers["root"])
+    trust.sign(second_root, append=True)
+    root_bytes = _wire(trust)
+    for channel in ("stable", "preview"):
+        for name, revision in (("A", 1), ("B", 2), ("badC", 3)):
+            _repository(public / name / channel,
+                _offer(reports[name], base_url, assets[name], channel, revision),
+                root_bytes, signers, now, revision)
+        for name in ("wrong-key", "expired", "mix", "wrong-product", "wrong-platform",
+                     "wrong-channel", "duplicate-offer", "sequence-overflow"):
+            offer = _offer(reports["B"], base_url, assets["B"], channel, 4)
+            offer["releaseSequence"] = 4
+            if name == "wrong-product":
+                offer["product"] = "Untrusted.OtherProduct"
+            elif name == "wrong-platform":
+                offer["platform"] = "linux-x64"
+            elif name == "wrong-channel":
+                offer["channel"] = "preview" if channel == "stable" else "stable"
+            elif name == "sequence-overflow":
+                offer["releaseSequence"] = 9_007_199_254_740_992
+            _repository(public / name / channel, offer, root_bytes, signers, now, 4,
+                expired=name == "expired", wrong_signature=name == "wrong-key",
+                duplicate_offer=name == "duplicate-offer", mix_snapshot=name == "mix")
+    profile = {"schema": "gsw.update_profile/1", "product": PRODUCT, "platform": PLATFORM,
+        "channels": {channel: {"metadataBase": base_url + f"/repository/{channel}/metadata/",
+                              "targetsBase": base_url + f"/repository/{channel}/targets/"}
+                     for channel in ("stable", "preview")},
+        "approvedHosts": [urlsplit(base_url).hostname], "seedRoot": json.loads(root_bytes),
+        "fixtureCaPem": ca}
+    _fresh_json(root / "profile.json", profile)
+    result = {"schema": "gsw.update_fixture/1", "testOnly": True, "production": False,
+        "product": PRODUCT, "platform": PLATFORM, "profilePath": str(root / "profile.json"),
+        "profileSha256": _digest(root / "profile.json"), "contentRoot": str(public),
+        "controlFile": server["controlFile"], "baseUrl": base_url,
+        "consistentSnapshot": False, "rootThreshold": 2,
+        "repositories": ["A", "B", "badC", "wrong-key", "expired", "mix", "wrong-product",
+                         "wrong-platform", "wrong-channel", "duplicate-offer", "sequence-overflow"],
+        "archives": reports, "sourceCommit": args.source_commit, "sourceTree": args.source_tree}
+    _fresh_json(root / "fixture.json", result)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fixture-only", action="store_true")
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--server-info", type=Path, required=True)
+    parser.add_argument("--package-a", type=Path, required=True)
+    parser.add_argument("--package-b", type=Path, required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--display-version", default="0.3.8-native-preview")
+    try:
+        print(json.dumps(prepare(parser.parse_args()), ensure_ascii=True))
+        return 0
+    except Exception as error:
+        print(json.dumps({"schema": "gsw.update_fixture/1", "testOnly": True,
+                          "ok": False, "code": "fixture_issuance_failed",
+                          "errorType": type(error).__name__}))
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

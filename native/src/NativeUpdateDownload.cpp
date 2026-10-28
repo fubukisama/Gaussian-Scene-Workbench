@@ -170,6 +170,7 @@ public:
     if (!url.isValid() || url.scheme() != QLatin1String("https") || url.host().isEmpty() ||
         url.authority(QUrl::FullyEncoded).contains(QLatin1Char('@')) || url.hasFragment()) return false;
     const auto host = hostKey(url.host());
+    if (host.isEmpty()) return false;
     for (const auto &entry : policy.approvedHosts) if (host == hostKey(entry)) return true;
     return false;
   }
@@ -197,7 +198,8 @@ public:
 
   void begin() {
     static const QRegularExpression sha(QStringLiteral("^[a-f0-9]{64}$"));
-    if (policy.approvedHosts.isEmpty() || policy.maximumLength <= 0 || policy.maximumLength > maximumArchiveLength ||
+    if (policy.approvedHosts.isEmpty() || policy.approvedHosts.size() > 32 ||
+        policy.maximumLength <= 0 || policy.maximumLength > maximumArchiveLength ||
         policy.inactivityTimeoutMs < 100 || policy.inactivityTimeoutMs > 600000 ||
         policy.totalTimeoutMs < 100 || policy.totalTimeoutMs > 3600000 ||
         policy.maximumAttempts < 1 || policy.maximumAttempts > 5 ||
@@ -205,6 +207,12 @@ public:
         policy.retryDelayMs < 0 || policy.retryDelayMs > 5000 ||
         !policy.sslConfiguration.backendConfiguration().isEmpty()) {
       finish(QStringLiteral("download_policy_invalid")); return;
+    }
+    for (const auto &host : policy.approvedHosts) {
+      if (host.isEmpty() || host != host.trimmed() || hostKey(host).isEmpty() ||
+          host.contains(QRegularExpression(QStringLiteral("[/@:*\\\\]")))) {
+        finish(QStringLiteral("download_policy_invalid")); return;
+      }
     }
     if (!approved(request.url) || request.identity.isEmpty() || request.identity.toUtf8().size() > 1024 ||
         request.expectedLength <= 0 || request.expectedLength > policy.maximumLength || !sha.match(request.sha256).hasMatch()) {
@@ -236,8 +244,9 @@ public:
     tls.setPrivateKey(QSslKey());
     tls.setLocalCertificateChain({});
     wire.setSslConfiguration(tls);
-    if (!transition(State::Downloading) || !active) return;
-    if (!emitProgress() || !active) return;
+    const auto token = generation;
+    if (!transition(State::Downloading) || !active || token != generation) return;
+    if (!emitProgress() || !active || token != generation) return;
     reply = manager.get(wire);
     reply->setReadBufferSize(64 * 1024);
     auto *current = reply.data();
@@ -295,8 +304,10 @@ public:
 
   void received() {
     const QPointer<NativeUpdateDownload> alive(q);
+    const auto token = generation;
     consume();
     if (!alive) return;
+    if (token != generation) return;
     if (!active || !reply) return;
     if (reply->error() != QNetworkReply::NoError) { finish(networkCode(reply->error())); return; }
     if (!headersAccepted || bytes != request.expectedLength || !part.flush() || part.size() != bytes) {
@@ -308,7 +319,7 @@ public:
     output->setDirectWriteFallback(false);
     if (!output->open(QIODevice::WriteOnly)) { finish(QStringLiteral("download_write_failed")); return; }
     digest.reset();
-    if (!transition(State::Verifying) || !active) return;
+    if (!transition(State::Verifying) || !active || token != generation) return;
     scheduleVerify();
   }
 
