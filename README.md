@@ -62,4 +62,4 @@ Actual native viewport capture from an independent synthetic regression scene. I
 
 The original native desktop is **GPL-3.0-or-later**; other original code and third-party components retain their own licenses. Graphdeco research backends have separate non-commercial restrictions—GPL does not grant commercial rights to every backend.
 
-[License scope](native/LICENSE.md) · [Repository license](LICENSE) · [Third-party notices](THIRD_PARTY_LICENSES.md)
+[License guide](docs/LICENSING.md#english) · [Native scope](native/LICENSE.md) · [Repository license](LICENSE) · [Third-party notices](THIRD_PARTY_LICENSES.md)

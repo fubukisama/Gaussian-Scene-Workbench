@@ -62,4 +62,4 @@
 
 原创原生桌面主程序采用 **GPL-3.0-or-later**；范围外原创代码与第三方组件保留各自许可。Graphdeco 研究后端另有非商业限制，主程序 GPL 不等于所有后端均可商用。
 
-[许可范围](native/LICENSE.md) · [仓库许可](LICENSE) · [第三方声明](THIRD_PARTY_LICENSES.md)
+[许可说明](docs/LICENSING.md#简体中文) · [原生许可范围](native/LICENSE.md) · [仓库许可](LICENSE) · [第三方声明](THIRD_PARTY_LICENSES.md)

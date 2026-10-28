@@ -62,4 +62,4 @@
 
 独自のネイティブ主プログラムは **GPL-3.0-or-later** です。対象外の独自コードと第三者コンポーネントは各ライセンスを維持します。Graphdeco の研究用バックエンドには別途非商用の制限があり、主プログラムの GPL は全バックエンドの商用許諾を意味しません。
 
-[適用範囲](native/LICENSE.md) · [リポジトリーのライセンス](LICENSE) · [第三者の通知](THIRD_PARTY_LICENSES.md)
+[ライセンス案内](docs/LICENSING.md#日本語) · [適用範囲](native/LICENSE.md) · [リポジトリーのライセンス](LICENSE) · [第三者の通知](THIRD_PARTY_LICENSES.md)

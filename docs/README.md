@@ -30,7 +30,7 @@
 
 ## License & scope · 许可与边界 · ライセンスと範囲
 
-[Native license](../native/LICENSE.md) · [Repository license](../LICENSE) · [Third-party notices](../THIRD_PARTY_LICENSES.md) · [Corresponding source](NATIVE_SOURCE_DISTRIBUTION.md)
+[License guide / 许可说明 / ライセンス案内](LICENSING.md) · [Native license](../native/LICENSE.md) · [Repository license](../LICENSE) · [Third-party notices](../THIRD_PARTY_LICENSES.md) · [Corresponding source](NATIVE_SOURCE_DISTRIBUTION.md)
 
 The application is a native preview. Runtime checks, rendered depth products and short training runs do not certify physical geometry accuracy. CUDA/training backends have separate requirements and licenses.
 

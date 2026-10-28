@@ -524,6 +524,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_surfel_projection_gl.
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-native-checks.txt" DESTINATION source/scripts)
 install(FILES worker/licenses/2dgs-LICENSE.md DESTINATION source/native/worker/licenses)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/LICENSING.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_SOURCE_DISTRIBUTION.md" DESTINATION source RENAME BUILD.md)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/UPSTREAM_NATIVE_UPGRADES.md" DESTINATION source/docs)
