@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'native/updater/**'
+      - 'native/updater-ui/**'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
       - 'native/third_party/miniz/**'
@@ -30,6 +31,58 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/native/build-auto-update/rust
 
 jobs:
+  isolated-update-ui:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+          check-latest: true
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-updater
+      - name: Build production UI and distinct process-boundary fixtures
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-update-ui,native/build-update-ui/ui-evidence -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-update-ui" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-update-ui" | Out-File -FilePath $env:GITHUB_ENV -Append
+          cmake -S native/updater-ui -B native/build-update-ui -G 'Visual Studio 17 2022' -A x64 "-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}"
+          if($LASTEXITCODE -ne 0){throw 'Update UI configure failed.'}
+          cmake --build native/build-update-ui --config Release --parallel --target gsw_update_ui_tests gsw_update_ui_production
+          if($LASTEXITCODE -ne 0){throw 'Update UI build failed.'}
+      - name: Real widgets three languages cancellation and silent background checks
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-update-ui -C Release --no-tests=error --output-on-failure `
+            --output-log "$PWD/native/build-update-ui/ui-evidence/ctest.log" `
+            --output-junit "$PWD/native/build-update-ui/ui-evidence/results.xml"
+          if($LASTEXITCODE -ne 0){throw 'Update UI public behavior failed.'}
+      - name: Record exact UI evidence scope
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/build-update-ui/ui-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='real-widgets-external-helper-fixture';
+            production=false;formalGswAcceptance=false;sourceCommit=(git rev-parse HEAD).Trim();
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/build-update-ui/ui-evidence/source.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-ui-evidence
+          path: native/build-update-ui/ui-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   release-policy-contracts:
     runs-on: windows-2022
     timeout-minutes: 5
