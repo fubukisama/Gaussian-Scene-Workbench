@@ -398,6 +398,44 @@ class UiPerformanceCliContracts(unittest.TestCase):
                         item["group"] == "empty-dpr2" and item["round"] == 1 and item["arm"] == "B")
         self.assertFalse(observed["exposure"]["ancestors"][0]["containsViewport"])
 
+    def test_independent_lifetime_upload_offsets_do_not_change_model_identity(self):
+        report = self.receipt(round_index=2, arm="B")
+        for case in report["cases"]:
+            if case["id"] not in ("3dgs", "2dgs"):
+                continue
+            for boundary in ("modelBefore", "modelAfter"):
+                case[boundary]["attributeUploads"] += 25
+                case[boundary]["shUploads"] += 7
+                case[boundary]["orderUploads"] += 30
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"]), (0, "PASS"), result)
+        process = next(item for item in result["rawSummaries"] if
+                       item["group"] == "light-dpr1" and item["round"] == 2 and item["arm"] == "B")
+        case = process["cases"]["3dgs"]
+        self.assertEqual(case["rawModelBefore"]["attributeUploads"], 26)
+        self.assertEqual(case["rawModelAfter"]["attributeUploads"], 26)
+        self.assertEqual(case["uploadDeltas"], {"attributeUploads": 0, "shUploads": 0, "orderUploads": 0})
+        self.assertNotIn("attributeUploads", case["model"])
+        self.assertTrue(result["measurementSemantics"]["sameProcessRawModelBeforeEqualsAfterRequired"])
+
+    def test_attribute_upload_during_measured_pan_is_still_rejected(self):
+        self.receipt()["cases"][2]["modelAfter"]["attributeUploads"] += 1
+        self.assert_failed("pan changed transforms, model fidelity or resident uploads")
+
+    def test_sh_upload_during_measured_pan_is_still_rejected(self):
+        self.receipt()["cases"][2]["modelAfter"]["shUploads"] += 1
+        self.assert_failed("pan changed transforms, model fidelity or resident uploads")
+
+    def test_order_upload_during_unchanged_direction_pan_is_still_rejected(self):
+        self.receipt()["cases"][2]["modelAfter"]["orderUploads"] += 1
+        self.assert_failed("pan changed transforms, model fidelity or resident uploads")
+
+    def test_upload_offset_separation_does_not_hide_gaussian_decimation(self):
+        case = self.receipt()["cases"][2]
+        case["modelBefore"]["renderedPointCount"] = 440
+        case["modelAfter"]["renderedPointCount"] = 440
+        self.assert_failed("no Gaussian decimation")
+
 
 if __name__ == "__main__":
     unittest.main()

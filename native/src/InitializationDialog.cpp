@@ -151,16 +151,22 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("初始化设置与检查"));
   setMinimumSize(560, 360); resize(1100, 760);
   auto *layout = new QVBoxLayout(this);
-  // The preview, coverage, raw report and wrapped declarations have useful
-  // individual minimum sizes. Keep their combined height in a scrollable body
-  // instead of letting it force the native window beyond a small screen.
-  // Actions remain outside this body, including cancel while a helper runs.
+  // The request/preview/report body can be taller than a narrow screen. Keep
+  // every control reachable by scrolling, rather than growing the top-level
+  // window beyond the desktop or shrinking the user's font. Actions stay out.
   auto *bodyScroll = new QScrollArea(this);
   bodyScroll->setObjectName(QStringLiteral("initializationBodyScroll"));
   bodyScroll->setWidgetResizable(true);
-  auto *body = new QWidget(bodyScroll); body->setProperty("gswLayoutContainer", true);
-  bodyScroll->setWidget(body); layout->addWidget(bodyScroll, 1);
-  auto *bodyLayout = new QVBoxLayout(body); bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyScroll->setFrameShape(QFrame::NoFrame);
+  bodyScroll->setMinimumSize(0, 0);
+  bodyScroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  auto *body = new QWidget(bodyScroll);
+  body->setObjectName(QStringLiteral("dialogBody"));
+  body->setProperty("gswLayoutContainer", true);
+  auto *bodyLayout = new QVBoxLayout(body);
+  bodyLayout->setContentsMargins(0, 0, 0, 0);
+  bodyScroll->setWidget(body);
+  layout->addWidget(bodyScroll, 1);
   auto *source = new QLabel(QDir::toNativeSeparators(datasetPath) + QLatin1Char('\n') + identity, body);
   source->setTextFormat(Qt::PlainText); source->setWordWrap(true); bodyLayout->addWidget(source);
   auto *split = new QSplitter(Qt::Horizontal, body); split->setChildrenCollapsible(false); bodyLayout->addWidget(split, 1);
