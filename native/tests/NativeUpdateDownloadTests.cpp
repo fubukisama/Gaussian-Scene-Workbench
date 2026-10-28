@@ -14,7 +14,8 @@
 using namespace gsw;
 class NativeUpdateDownloadTests final : public QObject {
   Q_OBJECT
-  QTemporaryDir temporary;
+  QTemporaryDir temporary{QDir(qEnvironmentVariable("GSW_UPDATE_TEST_ROOT",
+      QCoreApplication::applicationDirPath())).filePath("native-update-download-tests-XXXXXX")};
   QProcess server;
   QJsonObject fixture;
 

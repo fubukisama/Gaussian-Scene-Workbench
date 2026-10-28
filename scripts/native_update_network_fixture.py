@@ -17,7 +17,7 @@ import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -64,6 +64,94 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass  # Do not print request URLs/headers or TLS credentials.
 
+    def serve_owned_file(self, path, raw_range, raw_if_range, visit):
+        """Shared static TUF/immutable-asset transport for the full upgrade test."""
+        try:
+            control = {}
+            if self.server.control_file.exists():
+                if self.server.control_file.stat().st_size > 8192:
+                    raise ValueError("control size")
+                control = json.loads(self.server.control_file.read_text(encoding="utf-8"))
+            variant = control.get("repository", "A")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", variant):
+                raise ValueError("variant")
+            if path.startswith("/repository/"):
+                base = self.server.content_root / variant
+                relative = unquote(path[len("/repository/"):])
+            else:
+                base = self.server.content_root / "downloads"
+                relative = unquote(path[len("/downloads/"):])
+            parts = relative.split("/")
+            if any(not p or p in (".", "..") or p.endswith((".", " ")) or
+                   any(c in p for c in ("\\", ":", "\x00")) for p in parts):
+                raise ValueError("path")
+            source = base.joinpath(*parts)
+            if not source.resolve().is_relative_to(base.resolve()):
+                raise ValueError("outside")
+            for cursor in (source,) + tuple(source.parents):
+                if cursor.is_symlink() or getattr(cursor, "is_junction", lambda: False)():
+                    raise ValueError("link")
+                if cursor == self.server.content_root:
+                    break
+            if not source.is_file():
+                self.send_error(404)
+                return
+            length = source.stat().st_size
+            with source.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            tag = '"sha256-' + digest + '"'
+            mode = control.get("networkMode", "normal") if control.get("faultPath") == path else "normal"
+            match = re.fullmatch(r"bytes=(\d+)-", raw_range)
+            start = int(match[1]) if match else 0
+            partial = bool(match) and mode != "range-ignored" and (
+                raw_if_range == tag or mode in ("changed-etag", "bad-range"))
+            if start >= length:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{length}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if not partial:
+                start = 0
+            self.send_response(206 if partial else 200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("ETag", '"changed-test-validator"' if mode == "changed-etag" and partial else tag)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(length - start))
+            if mode == "encoding":
+                self.send_header("Content-Encoding", "gzip")
+            if partial:
+                advertised = start + 1 if mode == "bad-range" else start
+                self.send_header("Content-Range", f"bytes {advertised}-{length-1}/{length}")
+            self.end_headers()
+            with source.open("rb") as stream:
+                stream.seek(start)
+                sent = 0
+                while data := stream.read(8192):
+                    if mode == "short":
+                        data = data[:max(0, max(1, (length-start)//2) - sent)]
+                        if not data:
+                            self.close_connection = True
+                            self.connection.shutdown(socket.SHUT_RDWR)
+                            self.connection.close()
+                            return
+                    if mode in ("changed-etag", "bad-range") and partial:
+                        data = b"X" * len(data)
+                    if mode == "bad-sha" and sent == 0:
+                        data = bytes([data[0] ^ 1]) + data[1:]
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                    sent += len(data)
+                    if (mode == "drop-once" and visit == 1 and sent >= 32768 or
+                            mode == "short" and sent >= max(1, (length-start)//2)):
+                        self.close_connection = True
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        self.connection.close()
+                        return
+        except (ValueError, OSError, json.JSONDecodeError):
+            if not self.wfile.closed:
+                self.close_connection = True
+
     def do_GET(self):
         path = urlsplit(self.path).path[:128]
         raw_range = self.headers.get("Range", "")
@@ -77,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
                       "accept_encoding": self.headers.get("Accept-Encoding", "")[:64]}
             with self.server.log_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(record) + "\n")
+        if path.startswith(("/repository/", "/downloads/")):
+            self.serve_owned_file(path, raw_range, raw_if_range, visit)
+            return
         payload = self.server.payload
         tag = '"owned-payload-a"'
         if path == "/timeout":
@@ -148,6 +239,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--ready", type=Path, required=True)
+    parser.add_argument("--content-root", type=Path)
+    parser.add_argument("--control-file", type=Path)
     args = parser.parse_args()
     args.root.mkdir(parents=True, exist_ok=True)
     ca, cert, key = certificates(args.root)
@@ -160,6 +253,8 @@ def main() -> None:
     server.counts = {}
     server.payload = payload
     server.log_path = args.root / "requests.jsonl"
+    server.content_root = args.content_root or args.root / "served"
+    server.control_file = args.control_file or args.root / "control.json"
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
@@ -167,7 +262,8 @@ def main() -> None:
     ready = {"schema": "gsw.update_network_fixture/1", "testOnly": True,
              "baseUrl": f"https://127.0.0.1:{server.server_port}", "caPath": str(ca),
              "payloadPath": str(payload_path), "length": len(payload),
-             "sha256": hashlib.sha256(payload).hexdigest(), "requestLog": str(server.log_path)}
+             "sha256": hashlib.sha256(payload).hexdigest(), "requestLog": str(server.log_path),
+             "contentRoot": str(server.content_root), "controlFile": str(server.control_file)}
     temporary = args.ready.with_suffix(args.ready.suffix + ".tmp")
     temporary.write_text(json.dumps(ready), encoding="utf-8")
     temporary.replace(args.ready)

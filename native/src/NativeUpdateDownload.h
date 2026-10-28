@@ -55,6 +55,8 @@ public:
   // produce exactly one finished signal, including invalid input/cancellation.
   // Files are owned siblings: destination + ".part" and ".resume.json".
   // Existing destination bytes change only after complete length/hash checks.
+  // The helper holds the common installation lock and derives this owned
+  // cache destination; this module does not create a competing install lock.
   bool start(const NativeUpdateDownloadRequest &, const NativeUpdateDownloadPolicy &);
   void cancel();
   [[nodiscard]] State state() const;
