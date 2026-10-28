@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QMargins>
 #include <QSize>
 #include <QString>
 #include <QPalette>
@@ -116,6 +117,13 @@ public:
   static QSize fitWindowResolution(const QSize &requestedSize,
                                    const QSize &availableSize,
                                    const QSize &minimumSize);
+  // Preserve the design minimum where it fits. Otherwise bound the client
+  // minimum by screen availability minus positive frame edges and a 16 logical
+  // pixel safety gap. Empty/invalid screen observations keep the positive design
+  // minimum; neither this policy nor the returned size changes UI font density.
+  static QSize effectiveWindowMinimum(const QSize &designMinimum,
+                                      const QSize &availableSize,
+                                      const QMargins &frameMargins);
   static int rescaledDockExtent(int currentExtent, int fromScalePercent,
                                 int toScalePercent, int minimumExtent);
   static int dockTitleFontPixelSize(int scalePercent);

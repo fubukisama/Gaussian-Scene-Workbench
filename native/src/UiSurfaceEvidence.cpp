@@ -2,6 +2,7 @@
 
 #include "AppLanguage.h"
 #include "AppTheme.h"
+#include "FontResolutionEvidence.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -19,7 +20,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFontInfo>
 #include <QGlyphRun>
 #include <QHash>
 #include <QJsonDocument>
@@ -439,7 +439,6 @@ QJsonArray uiSurfaceFontEvidence(QWidget *window) {
     if (!widget->isVisible() || widget->window() != window) continue;
     const QFont requested = widget->font();
     const QFont deviceFont(requested, widget);
-    const QFontInfo info(deviceFont);
     QTextLayout layout(text, deviceFont, widget);
     layout.beginLayout();
     QTextLine line = layout.createLine();
@@ -452,16 +451,16 @@ QJsonArray uiSurfaceFontEvidence(QWidget *window) {
           {"glyphCount", glyphs.size()}, {"missingGlyphCount", glyphs.count(0)}});
     }
     const QPoint position = widget == window ? QPoint() : widget->mapTo(window, QPoint());
-    result.append(QJsonObject{{"class", machineName(QString::fromLatin1(widget->metaObject()->className()))},
+    auto facts = fontResolutionEvidence(requested, widget);
+    const QJsonObject context{{"class", machineName(QString::fromLatin1(widget->metaObject()->className()))},
         {"name", machineName(widget->objectName())}, {"typedRole", widgetRole(widget)},
         {"fontRoleScope", "QWidget-default-not-custom-painter"},
-        {"requestedFamily", requested.family()}, {"requestedPointSize", requested.pointSizeF()},
-        {"requestedPixelSize", requested.pixelSize()}, {"resolvedFamily", info.family()},
-        {"pointSize", info.pointSizeF()}, {"pixelSize", info.pixelSize()}, {"weight", int(info.weight())},
-        {"exactMatch", info.exactMatch()}, {"enabled", widget->isEnabled()},
+        {"enabled", widget->isEnabled()},
         {"logicalRect", QJsonArray{position.x(), position.y(), widget->width(), widget->height()}},
         {"logicalDpiX", widget->logicalDpiX()}, {"logicalDpiY", widget->logicalDpiY()},
-        {"mixedScriptGlyphRuns", runs}});
+        {"mixedScriptGlyphRuns", runs}};
+    for (auto it = context.begin(); it != context.end(); ++it) facts.insert(it.key(), it.value());
+    result.append(facts);
   }
   return result;
 }

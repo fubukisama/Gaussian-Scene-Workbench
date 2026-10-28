@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QMargins>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QPalette>
@@ -41,6 +42,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 using namespace gsw;
@@ -175,6 +177,8 @@ private slots:
   void compensatesForOperatingSystemDisplayScale();
   void growsAutomaticScaleForHighResolutionWorkspaces();
   void fitsRequestedWindowResolutionInsideTheScreen();
+  void boundsEffectiveWindowMinimumByAvailableClientArea_data();
+  void boundsEffectiveWindowMinimumByAvailableClientArea();
   void keepsDockTitlesCompactAcrossScales();
   void rescalesDockExtentWhenDensityChanges();
   void clampsManualScaleToSupportedRange();
@@ -1055,6 +1059,58 @@ void AppThemeTests::fitsRequestedWindowResolutionInsideTheScreen() {
   QVERIFY(fitted.height() <= 699);
   QVERIFY(fitted.width() >= 940);
   QVERIFY(fitted.height() >= 620);
+}
+
+void AppThemeTests::boundsEffectiveWindowMinimumByAvailableClientArea_data() {
+  QTest::addColumn<QSize>("design");
+  QTest::addColumn<QSize>("available");
+  QTest::addColumn<QMargins>("frame");
+  QTest::addColumn<QSize>("expected");
+  QTest::newRow("normal-screen-retains-design")
+      << QSize(940, 620) << QSize(1920, 1040) << QMargins(8, 31, 8, 8) << QSize(940, 620);
+  QTest::newRow("compact-high-DPR-client-area")
+      << QSize(940, 620) << QSize(960, 500) << QMargins(4, 16, 4, 4) << QSize(936, 464);
+  QTest::newRow("medium-client-height-is-bounded")
+      << QSize(940, 620) << QSize(1097, 594) << QMargins(5, 18, 5, 5) << QSize(940, 555);
+  QTest::newRow("one-pixel-screen-remains-positive")
+      << QSize(940, 620) << QSize(1, 1) << QMargins(8, 31, 8, 8) << QSize(1, 1);
+  QTest::newRow("safety-gap-can-use-nearly-all-screen")
+      << QSize(940, 620) << QSize(17, 19) << QMargins() << QSize(1, 3);
+  QTest::newRow("negative-frames-cannot-increase-client-budget")
+      << QSize(940, 620) << QSize(960, 500) << QMargins(-4, -16, -4, -4) << QSize(940, 484);
+  QTest::newRow("each-frame-side-is-clamped-independently")
+      << QSize(940, 620) << QSize(960, 500) << QMargins(-4, 16, 4, -4) << QSize(940, 468);
+  QTest::newRow("unknown-screen-keeps-readable-design")
+      << QSize(940, 620) << QSize(-1, -1) << QMargins(8, 31, 8, 8) << QSize(940, 620);
+  QTest::newRow("partly-invalid-screen-keeps-design")
+      << QSize(940, 620) << QSize(-1, 500) << QMargins(8, 31, 8, 8) << QSize(940, 620);
+  QTest::newRow("zero-screen-height-is-not-a-valid-observation")
+      << QSize(940, 620) << QSize(960, 0) << QMargins(8, 31, 8, 8) << QSize(940, 620);
+  QTest::newRow("invalid-design-is-normalized-positive")
+      << QSize(0, -4) << QSize(960, 500) << QMargins() << QSize(1, 1);
+  QTest::newRow("invalid-screen-does-not-preserve-negative-design")
+      << QSize(0, 620) << QSize(-1, -1) << QMargins() << QSize(1, 620);
+  const int maximum = std::numeric_limits<int>::max();
+  const int minimum = std::numeric_limits<int>::min();
+  QTest::newRow("large-frame-sums-do-not-overflow-int")
+      << QSize(940, 620) << QSize(maximum, maximum)
+      << QMargins(maximum, maximum, maximum, maximum) << QSize(1, 1);
+  QTest::newRow("large-valid-budgets-use-full-int-range-safely")
+      << QSize(maximum, maximum) << QSize(maximum, maximum)
+      << QMargins() << QSize(2147483631, 2147483631);
+  QTest::newRow("minimum-negative-frame-is-not-negated")
+      << QSize(940, 620) << QSize(960, 500)
+      << QMargins(minimum, minimum, minimum, minimum) << QSize(940, 484);
+}
+
+void AppThemeTests::boundsEffectiveWindowMinimumByAvailableClientArea() {
+  QFETCH(QSize, design);
+  QFETCH(QSize, available);
+  QFETCH(QMargins, frame);
+  QFETCH(QSize, expected);
+  const QSize actual = AppTheme::effectiveWindowMinimum(design, available, frame);
+  QCOMPARE(actual, expected); // Independent literal budgets, not recomputed by the test.
+  QVERIFY(actual.width() >= 1 && actual.height() >= 1);
 }
 
 void AppThemeTests::keepsDockTitlesCompactAcrossScales() {

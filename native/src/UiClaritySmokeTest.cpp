@@ -3,6 +3,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include "UiSurfaceEvidence.h"
+#include "FontResolutionEvidence.h"
 
 #include <QApplication>
 #include <QDir>
@@ -10,7 +11,6 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
-#include <QFontInfo>
 #include <QGlyphRun>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -147,7 +147,6 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
     qCritical() << "UI clarity: full presented diagnostic frame did not complete";
     return false;
   }
-  const QFontInfo actual(viewport.font());
   QJsonObject environment{
       {"schema", "gsw.ui_clarity_capture/1"}, {"manifest", manifest},
       {"locale", AppLanguage::current()}, {"theme", AppTheme::currentTheme() == UiTheme::Light ? "light" : "dark"},
@@ -158,8 +157,7 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
       {"actualContextSamples", viewport.context()->format().samples()},
       {"observedSwapsBeforeCapture", swapsBeforeCapture},
       {"actualUiScalePercent", qApp->property("gswUiScalePercent").toInt()},
-      {"actualFont", QJsonObject{{"family", actual.family()}, {"pixelSize", actual.pixelSize()},
-          {"pointSize", actual.pointSizeF()}, {"exactMatch", actual.exactMatch()}}},
+      {"actualFont", fontResolutionEvidence(viewport.font(), &viewport)},
       {"productionCameraAndTransformUnchanged", target == viewport.viewTarget() &&
           angles == viewport.viewOrbitAngles() && distance == viewport.viewDistance() &&
           translation == viewport.modelTranslation() && rotation == viewport.modelRotation() && scale == viewport.modelScale()},

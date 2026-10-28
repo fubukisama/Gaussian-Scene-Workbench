@@ -28,6 +28,7 @@
 #include "NavigationGizmo.h"
 #include "ViewportPresentation.h"
 #include "WorkbenchIcons.h"
+#include "FontResolutionEvidence.h"
 
 #include <QFontMetricsF>
 #include <QCoreApplication>
@@ -35,7 +36,6 @@
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPaintEngine>
-#include <QFontInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 
@@ -140,11 +140,7 @@ inline void drawBlenderNavigationPresentation(
   if (trace) qInfo("NAV_PAINT_TRACE axis-font-set");
   if (diagnostics) {
     if (trace) qInfo("NAV_PAINT_TRACE font-info-begin");
-    const QFontInfo actual(axisFont);
-    diagnostics->insert("axisFont", QJsonObject{{"requestedFamily", axisFont.family()},
-        {"resolvedFamily", actual.family()}, {"pixelSize", actual.pixelSize()},
-        {"pointSize", actual.pointSizeF()}, {"weight", actual.weight()},
-        {"exactMatch", actual.exactMatch()}});
+    diagnostics->insert("axisFont", fontResolutionEvidence(axisFont, painter.device()));
     if (trace) qInfo("NAV_PAINT_TRACE font-info-end");
   }
 

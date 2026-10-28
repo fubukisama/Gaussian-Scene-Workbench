@@ -322,6 +322,28 @@ QSize AppTheme::fitWindowResolution(const QSize &requestedSize,
   return fitted;
 }
 
+QSize AppTheme::effectiveWindowMinimum(const QSize &designMinimum,
+                                      const QSize &availableSize,
+                                      const QMargins &frameMargins) {
+  const QSize positiveDesign(std::max(1, designMinimum.width()),
+                             std::max(1, designMinimum.height()));
+  if (availableSize.width() <= 0 || availableSize.height() <= 0)
+    return positiveDesign;
+
+  const auto clientMinimum = [](const int design, const int available,
+                                 const int firstFrame, const int secondFrame) {
+    constexpr qint64 safetyGap = 16;
+    const qint64 positiveFrames = std::max(qint64(0), qint64(firstFrame)) +
+                                  std::max(qint64(0), qint64(secondFrame));
+    const qint64 budget = qint64(available) - positiveFrames - safetyGap;
+    return int(std::clamp(budget, qint64(1), qint64(design)));
+  };
+  return QSize(clientMinimum(positiveDesign.width(), availableSize.width(),
+                              frameMargins.left(), frameMargins.right()),
+               clientMinimum(positiveDesign.height(), availableSize.height(),
+                              frameMargins.top(), frameMargins.bottom()));
+}
+
 int AppTheme::rescaledDockExtent(const int currentExtent,
                                  const int fromScalePercent,
                                  const int toScalePercent,
