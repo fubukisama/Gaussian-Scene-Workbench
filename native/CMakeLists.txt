@@ -908,10 +908,12 @@ if(BUILD_TESTING)
   endif()
   # Exercise the same public batch smoke without a MainWindow or training
   # process, so admission/observation regressions fail quickly in every locale.
+  # Its opt-in native matrix uses the real theme implementation as well.
   qt_add_executable(gsw_training_batch_ui_tests tests/TrainingBatchUiTests.cpp
     src/TrainingBatchSmokeTest.cpp src/TrainingBatchSmokeTest.h
     src/TrainingBatchDialog.cpp src/TrainingBatchDialog.h
-    src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h)
+    src/BackendLocator.cpp src/BackendLocator.h src/AppLanguage.cpp src/AppLanguage.h
+    src/AppTheme.cpp src/AppTheme.h)
   target_include_directories(gsw_training_batch_ui_tests PRIVATE src)
   target_link_libraries(gsw_training_batch_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
   target_link_libraries(gsw_training_batch_ui_tests PRIVATE gsw_native_language_resources)
