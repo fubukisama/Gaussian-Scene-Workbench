@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   GaussianSceneWorkbenchNative
-  VERSION 0.3.8
+  VERSION 0.3.9
   DESCRIPTION "Native desktop workspace for Gaussian scene reconstruction"
   LANGUAGES CXX
 )
@@ -14,7 +14,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(GSW_RELEASE_DATE "2026-10-23" CACHE STRING "Release date shown by the application")
+set(GSW_RELEASE_DATE "2026-10-29" CACHE STRING "Release date shown by the application")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/build_manifest.json" GSW_BUILD_MANIFEST_JSON)
 string(JSON GSW_APP_USER_MODEL_ID GET "${GSW_BUILD_MANIFEST_JSON}" appUserModelId)
 string(LENGTH "${GSW_APP_USER_MODEL_ID}" GSW_APP_USER_MODEL_ID_LENGTH)
@@ -119,6 +119,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/UiSurfaceEvidence.cpp
   src/UiSurfaceEvidence.h
   src/FontResolutionEvidence.h
+  src/UiFormGallerySmokeTest.cpp
+  src/UiFormGallerySmokeTest.h
   src/GizmoViewportSmokeTest.cpp
   src/GizmoViewportSmokeTest.h
   src/UiCrashDiagnostics.cpp
@@ -738,6 +740,13 @@ if(BUILD_TESTING)
     set_tests_properties(native_initialization_ui_surfaces PROPERTIES TIMEOUT 180
       ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    file(MAKE_DIRECTORY "${GSW_UI_SURFACE_CAPTURE_ROOT}/gallery-output")
+    foreach(gallery_group 1 2)
+      add_test(NAME native_ui_form_gallery_${gallery_group} COMMAND GaussianSceneWorkbench --smoke-test-ui-form-gallery)
+      set_tests_properties(native_ui_form_gallery_${gallery_group} PROPERTIES TIMEOUT 90
+        ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};GSW_UI_FORM_GALLERY_GROUP=${gallery_group};GSW_SMOKE_OUTPUT_DIR=${GSW_UI_SURFACE_CAPTURE_ROOT}/gallery-output;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    endforeach()
   endif()
   qt_add_executable(gsw_mesh_geometry_dialog_ui_tests tests/MeshGeometryDialogUiTests.cpp
     src/MeshGenerationDialog.cpp src/MeshGenerationDialog.h src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h

@@ -124,6 +124,9 @@ inline bool captureUiFormMatrix(const bool visual, QWidget &window, const QStrin
     AppTheme::apply(*qApp, 100, false);
     for (const QString &locale : AppLanguage::supported()) {
       passed = AppLanguage::apply(locale, false) && passed;
+      // Standalone form probes do not have MainWindow's language/font refresh
+      // owner. Apply the same public font policy immediately in this adapter.
+      AppTheme::apply(*qApp, 100, false);
       for (const bool isNarrow : {false, true}) {
         const QString synthetic = phase + (isNarrow ? QStringLiteral("-narrow") : QStringLiteral("-standard"));
         const QSize desired = isNarrow ? narrow : standard;

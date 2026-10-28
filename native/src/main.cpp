@@ -46,6 +46,7 @@
 #include "UiSurfaceEvidence.h"
 #include "GizmoViewportSmokeTest.h"
 #include "UiCrashDiagnostics.h"
+#include "UiFormGallerySmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -387,6 +388,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption gizmoViewportOption(QStringLiteral("smoke-test-gizmo-viewport"),
       QStringLiteral("Verify actual painted manipulation handles with public mouse/key input and raw owned evidence."));
   parser.addOption(gizmoViewportOption);
+  QCommandLineOption uiFormGalleryOption(QStringLiteral("smoke-test-ui-form-gallery"),
+      QStringLiteral("Capture every owned native dialog with public parameter snapshots across themes, languages and widths."));
+  parser.addOption(uiFormGalleryOption);
   QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
       QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
   parser.addOption(pointStreamingOption);
@@ -496,7 +500,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
-                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(uiOverlayLifecycleOption) || parser.isSet(gizmoViewportOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
+                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(uiOverlayLifecycleOption) || parser.isSet(gizmoViewportOption) || parser.isSet(uiFormGalleryOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
@@ -597,7 +601,12 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(gizmoViewportOption)) {
+  if (parser.isSet(uiFormGalleryOption)) {
+    QTimer::singleShot(650, &application, [&]() {
+      smokeTestCompleted = gsw::runUiFormGallerySmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(gizmoViewportOption)) {
     QTimer::singleShot(650, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runGizmoViewportSmokeTest(*viewport);

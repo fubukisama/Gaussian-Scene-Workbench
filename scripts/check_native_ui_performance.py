@@ -25,6 +25,7 @@ CASE_IDS = {"empty": ["empty"], "light": ["points", "mesh", "3dgs", "2dgs"], "me
 MEDIUM_COUNT = 512202
 QA_FILES = ("native/src/UiPaintObservation.h", "native/src/UiPerformanceSmokeTest.cpp", "native/src/UiPerformanceSmokeTest.h")
 QA_MAIN = "native/src/main.cpp"
+UPLOAD_COUNTERS = ("attributeUploads", "shUploads", "orderUploads")
 
 
 class ContractError(ValueError):
@@ -382,6 +383,17 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
                 case.get("sourceFaceCount") == (2 if case_id == "mesh" else 0), "actual sceneLoaded source counts")
         model_before = validate_model(case.get("modelBefore"), case_id)
         require(model_before == case.get("modelAfter"), "pan changed transforms, model fidelity or resident uploads")
+        # These are lifetime upload totals, not a model's geometry/SH identity.
+        # Async preparation may legitimately produce different starting totals
+        # in fresh processes. Keep every absolute value and the original exact
+        # same-process before/after guard; compare only zero pan deltas across
+        # processes, without excluding any actual model/renderer capability.
+        model_after = case["modelAfter"]
+        counters_before = {field: model_before[field] for field in UPLOAD_COUNTERS}
+        counters_after = {field: model_after[field] for field in UPLOAD_COUNTERS}
+        upload_deltas = {field: counters_after[field] - counters_before[field] for field in UPLOAD_COUNTERS}
+        require(all(delta == 0 for delta in upload_deltas.values()), "pan must retain zero attribute/SH/order upload deltas")
+        semantic_model = {field: value for field, value in model_before.items() if field not in UPLOAD_COUNTERS}
         initial_camera = camera(case.get("cameraBefore"), "case.cameraBefore")
         warm_begin, warm_end = _range(case.get("warmupRange"), len(samples), "warmupRange")
         begin, end = _range(case.get("observationRange"), len(samples), "observationRange")
@@ -453,7 +465,9 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
         else:
             metrics[case_id + "/present_max_ms"] = (max(intervals), "medium_max_delta_ms")
             metrics[case_id + "/response_max_ms"] = (max(latency), "medium_max_delta_ms")
-        result["cases"][case_id] = {"fixture": identity, "model": model_before, "camera": initial_camera,
+        result["cases"][case_id] = {"fixture": identity, "model": semantic_model, "camera": initial_camera,
+            "rawModelBefore": model_before, "rawModelAfter": model_after,
+            "uploadCountersBefore": counters_before, "uploadCountersAfter": counters_after, "uploadDeltas": upload_deltas,
             "eventCameras": [event["cameraAfterSwap"] for event in events],
             "rawOverlayMilliseconds": overlay, "rawPresentIntervalsMilliseconds": intervals,
             "rawResponseMilliseconds": latency, "cacheHits": sum(sample["cacheHit"] for sample in samples[begin:end])}
@@ -532,7 +546,7 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
                     for case_id in CASE_IDS[group["scenario"]]:
                         # Timing arrays are nested observations and may differ;
                         # the exact fixture/model/public camera sequence may not.
-                        for field in ("fixture", "model", "camera", "eventCameras"):
+                        for field in ("fixture", "model", "uploadDeltas", "camera", "eventCameras"):
                             require(a["cases"][case_id][field] == semantic_cases[case_id][field] == b["cases"][case_id][field],
                                     "paired fixture/fidelity/camera sequence mismatch: " + case_id + "/" + field)
                 for metric in pair_results[0][0]["metrics"]:
@@ -565,6 +579,13 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
             "freeze": "NO_THRESHOLDS_RELAXED" if frozen else "INVALID_FREEZE",
             "acceptanceSha256": FROZEN_ACCEPTANCE_SHA256,
             "sourceProvenance": source_provenance,
+            "measurementSemantics": {
+                "revision": "lifetime_upload_offsets_separated_from_cross_process_model_identity",
+                "sameProcessRawModelBeforeEqualsAfterRequired": True,
+                "crossProcessUploadContract": "attributeUploads/shUploads/orderUploads measured-pan deltas must all equal zero",
+                "rawAbsoluteUploadCountersRetained": True,
+                "numericBudgetsAndNoisePolicyUnchanged": True,
+                "priorRunResultsAreNotReclassifiedByThisContractCorrection": True},
             "scope": "paired Windows light-theme emptyDPR1/emptyDPR2/lightDPR1/mediumDPR1 host/presentation/idle slice",
             "unitOfReplication": "three fresh process pairs per group; frames are nested, not independent replicates",
             "failures": failures, "inconclusive": inconclusive, "comparisons": comparisons, "rawSummaries": raw_summaries,

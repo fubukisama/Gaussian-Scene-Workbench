@@ -27,7 +27,8 @@ FORMS_TESTS = [
     "native_generation_history", "native_resource_budget_ui", "native_quality_comparison_ui",
     "native_quality_measurement_ui", "native_scale_constraints_ui", "native_training_batch_ui",
     "native_viewport_scheduling_light", "native_viewport_scheduling_dark",
-    "native_runtime_ui_surfaces", "native_initialization_ui_surfaces"]
+    "native_runtime_ui_surfaces", "native_initialization_ui_surfaces",
+    "native_ui_form_gallery_1", "native_ui_form_gallery_2"]
 
 
 def sha(path):
