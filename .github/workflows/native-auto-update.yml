@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  PIP_CACHE_DIR: ${{ github.workspace }}/native/.cache/updater-pip
+  CARGO_HOME: ${{ github.workspace }}/native/.cache/updater-cargo
+  CARGO_TARGET_DIR: ${{ github.workspace }}/native/build-auto-update/rust
+
 jobs:
   isolated-contracts:
     runs-on: windows-2022
@@ -37,16 +42,22 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
+          dir: ${{ github.workspace }}/native/.qt-updater
       - name: Install isolated TLS fixture dependency
         shell: pwsh
         run: |
-          & '${{ steps.python.outputs.python-path }}' -m pip install 'cryptography==50.0.2'
+          New-Item -ItemType Directory -Path native/.tmp-updater -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-updater" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-updater"
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture QA environment unavailable.' }
+          & "$PWD/native/.qa-updater/Scripts/python.exe" -m pip install 'cryptography==50.0.2'
           if ($LASTEXITCODE -ne 0) { throw 'Fixture TLS dependency unavailable.' }
       - name: Build native download boundary
         shell: pwsh
         run: |
           cmake -S native/updater -B native/build-auto-update -G 'Visual Studio 17 2022' -A x64 `
-            -DBUILD_TESTING=ON '-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}'
+            -DBUILD_TESTING=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Updater configure failed.' }
           cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests
           if ($LASTEXITCODE -ne 0) { throw 'Updater build failed.' }
@@ -63,13 +74,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path native/auto-update-evidence -Force | Out-Null
-          & '${{ steps.python.outputs.python-path }}' -I -B -m unittest discover -s scripts -p test_native_update_archive.py -v 2>&1 | Tee-Object native/auto-update-evidence/archive.log
+          & "$PWD/native/.qa-updater/Scripts/python.exe" -I -B -m unittest discover -s scripts -p test_native_update_archive.py -v 2>&1 | Tee-Object native/auto-update-evidence/archive.log
           if ($LASTEXITCODE -ne 0) { throw 'Archive contract failed.' }
       - name: Fail-closed release policy contract
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
-          & '${{ steps.python.outputs.python-path }}' -I -B -m unittest discover -s scripts -p test_native_release_gate.py -v 2>&1 | Tee-Object native/auto-update-evidence/release-gate.log
+          & "$PWD/native/.qa-updater/Scripts/python.exe" -I -B -m unittest discover -s scripts -p test_native_release_gate.py -v 2>&1 | Tee-Object native/auto-update-evidence/release-gate.log
           if ($LASTEXITCODE -ne 0) { throw 'Release policy contract failed.' }
       - name: Bind isolated evidence to source
         if: always()
