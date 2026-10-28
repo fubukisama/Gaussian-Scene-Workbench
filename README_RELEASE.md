@@ -1,8 +1,12 @@
+<div lang="en">
+
 # Get Gaussian Scene Workbench
 
-[English](#english) · [简体中文](#简体中文) · [日本語](#日本語)
+[English](#english) · <span lang="zh-CN">[简体中文](#简体中文)</span> · <span lang="ja">[日本語](#日本語)</span>
 
 Windows x64 · Native preview · [Back to the project](README.md)
+
+<div lang="en">
 
 ## English
 
@@ -29,6 +33,10 @@ Managed installations use one stable native launcher and verified version slots.
 
 Portable artifacts are separate from Setup and may carry a legacy version in the artifact name. Check `build_manifest.json` and the accepted commit rather than inferring the product version from that label. A downloaded portable artifact must pass its complete file manifests before use; if anything is missing, use a verified Setup or rebuild a complete package—do not disable the check.
 
+</div>
+
+<div lang="zh-CN">
+
 ## 简体中文
 
 ### 下载预览版
@@ -53,6 +61,10 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 托管安装使用固定原生启动器和经过校验的版本目录，**目前不会自动联网检查或下载新版**。[更新说明](docs/NATIVE_UPDATES.md)记录了发布、迁移和回退流程；保留旧版，不中断运行中的会话。
 
 便携附件与 Setup 是两种产物，附件名称可能仍含旧版本号。以 `build_manifest.json` 和已验提交确认身份，不凭附件标签判断版本。便携包必须通过完整文件清单校验；缺文件时改用已验 Setup 或重新构建完整包，不能关闭校验后继续使用。
+
+</div>
+
+<div lang="ja">
 
 ## 日本語
 
@@ -79,6 +91,11 @@ Actions 添付の取得には GitHub サインインが必要な場合があり�
 
 ポータブル添付はSetupと別物で、添付名に古いバージョンが残る場合があります。`build_manifest.json` と検証済みコミットで確認してください。全ファイルのマニフェストに不足があれば、検証済みSetupまたは完全な再ビルドを使い、検証を無効にしないでください。
 
+</div>
+
 ---
 
 [License scope](native/LICENSE.md) · [Third-party notices](THIRD_PARTY_LICENSES.md) · [Source distribution](docs/NATIVE_SOURCE_DISTRIBUTION.md)
+
+
+</div>

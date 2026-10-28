@@ -1,8 +1,10 @@
+<div lang="ja">
+
 <p align="center">
   <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench のアイコン">
 </p>
 
-<h1 align="center">Gaussian Scene Workbench</h1>
+<h1 align="center" lang="en">Gaussian Scene Workbench</h1>
 
 <p align="center">
   <strong>写真からガウスシーンへ。再構築・学習・編集を一つのネイティブ環境で。</strong>
@@ -15,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <strong>日本語</strong>
+  <a href="README.md" lang="en">English</a> · <a href="README.zh-CN.md" lang="zh-CN">简体中文</a> · <strong lang="ja">日本語</strong>
 </p>
 
 <p align="center">
@@ -63,3 +65,5 @@
 独自のネイティブ主プログラムは **GPL-3.0-or-later** です。対象外の独自コードと第三者コンポーネントは各ライセンスを維持します。Graphdeco の研究用バックエンドには別途非商用の制限があり、主プログラムの GPL は全バックエンドの商用許諾を意味しません。
 
 [ライセンス案内](docs/LICENSING.md#日本語) · [適用範囲](native/LICENSE.md) · [リポジトリーのライセンス](LICENSE) · [第三者の通知](THIRD_PARTY_LICENSES.md)
+
+</div>

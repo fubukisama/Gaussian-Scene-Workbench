@@ -1,4 +1,6 @@
-# Native training performance / 原生训练性能 / 原生学習の性能
+<div lang="en">
+
+# Native training performance / <span lang="zh-CN">原生训练性能</span> / <span lang="ja">原生学習の性能</span>
 
 ## Shared 3DGS and 2DGS runtime
 
@@ -47,7 +49,7 @@ growth counters. PLY warm starts are never labelled full-state resume.
 ## Timing and observability
 
 The next-stage exact-semantics controls and user-defined quality comparison
-contract are documented in[Controllable quality](TRAINING_QUALITY.md). Training
+contract are documented in [Controllable quality](TRAINING_QUALITY.md). Training
 PSNR and a completed progress bar are not independent quality validation.
 
 The speed and ETA use a completed, synchronized **whole-step wall sample**,
@@ -80,7 +82,7 @@ site-packages. Native staging excludes compiled `.pyd`, build and egg-info files
 The private GPL LichtFeld prototype is not the release kernel and is not
 included in packages. The original desktop main program remains GPL; independent
 MIT helpers and Apache-2.0 Faster-GS do not relicense restricted research
-trainers. See[third-party notices](../THIRD_PARTY_LICENSES.md).
+trainers. See [third-party notices](../THIRD_PARTY_LICENSES.md).
 
 Faster-GS is pinned to `c60ea269b7cf3ebda527d640b6fdd31462f91b41` and remains
 experimental. Its current Torch API has no Graphdeco screen radii, view-space
@@ -134,7 +136,9 @@ Tests cover both real CUDA runtimes, exact host pixels/masks/depth/camera
 matrices, bounded stream lifetime, optimizer/RNG recovery, joint-loss values and
 gradients, resource-denial preservation, and three-language real Qt monitor
 behavior. Local tests do not launch UI; GUI acceptance uses a separate Windows
-runner. See[CI boundaries](NATIVE_CI.md).
+runner. See [CI boundaries](NATIVE_CI.md).
+
+<div lang="zh-CN">
 
 ## 中文
 
@@ -149,6 +153,10 @@ uint8主存数据，高位深/HDR不强制降成8位；2DGS的曲面、深度、
 整步速度与CUDA局部阶段分开，显示实际后端与显存；GPU共享内存含锁页主存映射时，
 非零值不等于显存溢出。联合损失核经过数值/梯度门，缺失时明确保留原损失。
 Fast-GS仅是受限的3DGS固定密度实验路径，不能替代2DGS或默认增密流程。
+
+</div>
+
+<div lang="ja">
 
 ## 日本語
 
@@ -166,3 +174,7 @@ Fast-GS仅是受限的3DGS固定密度实验路径，不能替代2DGS或默认�
 とメモリを表示します。共有GPUメモリには固定主存のマッピングが含まれ得ます。
 融合損失は数値/勾配を検証し、利用不能なら従来の損失を維持します。Fast-GSは
 増密なしの3DGS実験用であり、2DGSや既定の増密処理の代替ではありません。
+
+</div>
+
+</div>

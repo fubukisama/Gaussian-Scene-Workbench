@@ -1,51 +1,31 @@
 Gaussian Scene Workbench - License overview
 ===========================================
 
-This repository uses component-specific licenses, not a choice of MIT or GPL
-for every file. This overview does not change any existing grant.
+This repository uses component-specific licenses, not a choice of MIT or GPL for every file. This overview does not change any existing grant.
 
 Native desktop main program: GPL-3.0-or-later
 -------------------------------------------
-The original native desktop main program has been GPL-3.0-or-later since
-2026-10-14. Exact scope, exceptions and distribution requirements:
-native/LICENSE.md. The complete, unmodified GPL version 3 text is in COPYING.
+
+The original native desktop main program has been GPL-3.0-or-later since 2026-10-14. Exact scope, exceptions and distribution requirements: native/LICENSE.md. The complete, unmodified GPL version 3 text is in COPYING.
 
 Other original GSW code and preserved MIT grants
 -----------------------------------------------
-Original GSW code outside that native main-program scope remains under the MIT
-terms below, unless another notice applies. MIT rights already granted for
-earlier versions are not revoked; new GPL/Blender-derived code is not thereby
-offered under MIT.
+
+Original GSW code outside that native main-program scope remains under the MIT terms below, unless another notice applies. MIT rights already granted for earlier versions are not revoked; new GPL/Blender-derived code is not thereby offered under MIT.
 
 MIT License
 
 Copyright (c) 2026 fubukisama
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of the original Gaussian Scene Workbench software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including without
-limitation the rights to use, copy, modify, merge, publish, distribute,
-sublicense, and/or sell copies of the Software, and to permit persons to whom
-the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of the original Gaussian Scene Workbench software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the original Gaussian Scene Workbench Software.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the original Gaussian Scene Workbench Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Third-party components
 ----------------------
-Third-party code, training backends, libraries, models and assets retain their
-own licenses. In particular, Graphdeco research/evaluation restrictions are
-not removed by the main program's GPL grant. See THIRD_PARTY_LICENSES.md and
-each component's own notices.
 
-The project's research focus adds no use restriction to its GPL or MIT code.
-For a short English / Chinese / Japanese reading guide, see docs/LICENSING.md.
-The applicable license texts and component notices remain authoritative.
+Third-party code, training backends, libraries, models and assets retain their own licenses. In particular, Graphdeco research/evaluation restrictions are not removed by the main program's GPL grant. See THIRD_PARTY_LICENSES.md and each component's own notices.
+
+The project's research focus adds no use restriction to its GPL or MIT code. For a short English / Chinese / Japanese reading guide, see docs/LICENSING.md. The applicable license texts and component notices remain authoritative.

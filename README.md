@@ -1,8 +1,10 @@
+<div lang="en">
+
 <p align="center">
   <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench icon">
 </p>
 
-<h1 align="center">Gaussian Scene Workbench</h1>
+<h1 align="center" lang="en">Gaussian Scene Workbench</h1>
 
 <p align="center">
   <strong>Reconstruct, train and edit Gaussian scenes in one native workspace.</strong>
@@ -15,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
+  <strong lang="en">English</strong> · <a href="README.zh-CN.md" lang="zh-CN">简体中文</a> · <a href="README.ja.md" lang="ja">日本語</a>
 </p>
 
 <p align="center">
@@ -63,3 +65,5 @@ Actual native viewport capture from an independent synthetic regression scene. I
 The original native desktop is **GPL-3.0-or-later**; other original code and third-party components retain their own licenses. Graphdeco research backends have separate non-commercial restrictions—GPL does not grant commercial rights to every backend.
 
 [License guide](docs/LICENSING.md#english) · [Native scope](native/LICENSE.md) · [Repository license](LICENSE) · [Third-party notices](THIRD_PARTY_LICENSES.md)
+
+</div>
