@@ -2,3 +2,7 @@
 /COPYING text eol=lf
 # Retained upstream source hashes must survive Windows checkouts unchanged.
 /native/third_party/blender-grid/upstream/* text eol=lf
+# Frozen pre-change UI protocols use raw-byte digests on Windows runners too.
+/docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md text eol=lf
+/docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json text eol=lf
+/docs/ui_upgrade_20261028/P0_PROTOCOL.json text eol=lf

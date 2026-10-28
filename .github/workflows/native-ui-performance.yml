@@ -1,0 +1,121 @@
+name: Native UI Performance
+
+# Narrow paired CPU/presentation/resource check, not GPU-throughput acceptance.
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Exact40-character pre-AA commit with the same passive observer
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  paired-ui:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      QT_FORCE_STDERR_LOGGING: '1'
+      QT_LOGGING_TO_CONSOLE: '1'
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Validate static contracts and the performance evaluator
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if ($LASTEXITCODE -ne 0) { throw 'QA dependency failure.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
+          if ($LASTEXITCODE -ne 0) { throw 'Native boundary failure.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/native_i18n.py
+          if ($LASTEXITCODE -ne 0) { throw 'Translation failure.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_performance.py
+          if ($LASTEXITCODE -ne 0) { throw 'Independent performance evaluator contract failure.' }
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build both exact-source arms before any measurement
+        shell: pwsh
+        env:
+          GSW_UI_PERF_BASELINE: ${{ inputs.baseline }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:GSW_UI_PERF_BASELINE -cnotmatch '^[0-9a-f]{40}$') { throw 'Baseline must be an exact commit.' }
+          git cat-file -e "$env:GSW_UI_PERF_BASELINE^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline commit unavailable.' }
+          $root=Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if ($LASTEXITCODE -ne 0) { throw 'Codec build failed.' }
+          $a=Join-Path $root 'ui-performance-a'
+          git worktree add --detach $a $env:GSW_UI_PERF_BASELINE
+          if ($LASTEXITCODE -ne 0) { throw 'Detached baseline source unavailable.' }
+          foreach($file in @('native/src/UiPaintObservation.h','native/src/UiPerformanceSmokeTest.cpp','native/src/UiPerformanceSmokeTest.h')) {
+            if ((Get-FileHash (Join-Path $a $file)).Hash -cne (Get-FileHash $file).Hash) { throw "Common observer/harness differs: $file" }
+          }
+          $evidence=Join-Path $env:RUNNER_TEMP 'gsw-ui-performance'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          "GSW_UI_PERF_ROOT=$evidence" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $arms=@()
+          foreach($arm in @(@{name='A';source=$a;commit=$env:GSW_UI_PERF_BASELINE},@{name='B';source=$PWD.Path;commit=$env:GITHUB_SHA})) {
+            $build=Join-Path $root ('ui-perf-build-'+$arm.name)
+            $date=(Get-Content (Join-Path $arm.source 'native/build_manifest.json') -Raw|ConvertFrom-Json).releaseDate
+            cmake -S (Join-Path $arm.source 'native') -B $build -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=OFF `
+              '-DCMAKE_CXX_FLAGS=/MP2' "-DGSW_RELEASE_DATE=$date" '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
+              "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+              "-DVCPKG_INSTALLED_DIR=$root/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+            if ($LASTEXITCODE -ne 0) { throw "Configure failed: $($arm.name)" }
+            cmake --build $build --config Release --parallel --target GaussianSceneWorkbench 2>&1 |
+              Tee-Object -FilePath (Join-Path $evidence ('build-'+$arm.name+'.log'))
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $($arm.name)" }
+            $exe=Join-Path $build 'Release/Gaussian Scene Workbench.exe'
+            $tree=(git -C $arm.source rev-parse 'HEAD^{tree}').Trim()
+            $arms+=@{arm=$arm.name;sourceCommit=$arm.commit;sourceTree=$tree;executable=$exe;executableSha256=(Get-FileHash $exe).Hash.ToLowerInvariant()}
+          }
+          [ordered]@{schema='gsw.ui_performance_sources/1';runId=$env:GITHUB_RUN_ID;runner=$env:RUNNER_NAME;arms=$arms;
+            acceptanceSha256=(Get-FileHash docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json).Hash.ToLowerInvariant();
+            planSha256=(Get-FileHash docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md).Hash.ToLowerInvariant()}|ConvertTo-Json -Depth 6|
+            Set-Content -LiteralPath "$evidence/sources.json" -Encoding utf8
+      - name: Prepare isolated real Windows OpenGL display
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Record three fresh-process pairs without screenshots or readback
+        shell: pwsh
+        run: |
+          ./scripts/run_native_ui_performance.ps1 -EvidenceRoot $env:GSW_UI_PERF_ROOT
+      - name: Apply the frozen budgets without discarding noisy results
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "$env:GSW_UI_PERF_ROOT/manifest.json")) { throw 'Recording did not produce a complete manifest; retain build/process logs.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/check_native_ui_performance.py `
+            --manifest "$env:GSW_UI_PERF_ROOT/manifest.json" `
+            --acceptance docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json `
+            --plan docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md --output "$env:GSW_UI_PERF_ROOT/results.json"
+          if ($LASTEXITCODE -ne 0) { throw 'UI performance is FAIL or INCONCLUSIVE; inspect retained raw paired data.' }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-ui-performance-${{ github.run_id }}
+          path: ${{ runner.temp }}/gsw-ui-performance
+          if-no-files-found: error
+          retention-days: 14

@@ -8929,6 +8929,8 @@ void NativeViewport::drawOverlay(QPainter &painter) {
 }
 
 void NativeViewport::drawAxisGizmo(QPainter &painter) {
+  QElapsedTimer hostSpan;
+  if (mUiPaintObservation.enabled) hostSpan.start();
   QJsonObject diagnostics;
   const bool recording = mRenderDiagnostics && mRenderDiagnostics->recording();
   drawBlenderNavigationPresentation(painter, navigationGizmo(),
@@ -8941,6 +8943,18 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
        .cameraAvailable = camerasAvailable(),
        .backdrop = viewportColors().backdrop}, recording ? &diagnostics : nullptr);
   if (recording) mRenderDiagnostics->note(QStringLiteral("navigation-presentation"), diagnostics);
+  if (mUiPaintObservation.enabled) {
+    if (mUiPaintObservation.count < UiPaintObservation::capacity) {
+      mUiPaintObservation.samples[mUiPaintObservation.count++] = {
+          .frameSerial = mRenderedFrameSerial + 1,
+          .hostNanoseconds = hostSpan.nsecsElapsed(),
+          .logicalWidth = width(), .logicalHeight = height(),
+          .devicePixelRatio = devicePixelRatioF(),
+          .diagnosticOverlap = recording};
+    } else {
+      mUiPaintObservation.overflow = true;
+    }
+  }
 }
 
 } // namespace gsw

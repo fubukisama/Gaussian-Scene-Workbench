@@ -108,6 +108,9 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/RenderFrameDiagnostics.h
   src/UiClaritySmokeTest.cpp
   src/UiClaritySmokeTest.h
+  src/UiPerformanceSmokeTest.cpp
+  src/UiPerformanceSmokeTest.h
+  src/UiPaintObservation.h
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
   tests/BlenderViewportVisualTestSupport.cpp
@@ -479,8 +482,12 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATIO
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_package_launch.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/verify_native_backend.py" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_clarity.py"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_clarity.py" DESTINATION source/scripts)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-clarity.yml" DESTINATION source/.github/workflows)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_clarity.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_performance.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_performance.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/run_native_ui_performance.ps1" DESTINATION source/scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-clarity.yml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-performance.yml" DESTINATION source/.github/workflows)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/ui_upgrade_20261028" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_readme.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_stage_native_readme.py"

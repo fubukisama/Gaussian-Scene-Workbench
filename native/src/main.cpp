@@ -41,6 +41,7 @@
 #include "FileDialogHistoryGuardSmokeTest.h"
 #include "NativeInstallation.h"
 #include "UiClaritySmokeTest.h"
+#include "UiPerformanceSmokeTest.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -373,6 +374,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption uiClarityOption(QStringLiteral("smoke-test-ui-clarity"),
       QStringLiteral("Capture a source-bound real viewport navigation/DPI frame for independent edge checks."));
   parser.addOption(uiClarityOption);
+  QCommandLineOption uiPerformanceOption(QStringLiteral("smoke-test-ui-performance"),
+      QStringLiteral("Record bounded CPU-overlay and actual presentation observations on an owned remote window."));
+  parser.addOption(uiPerformanceOption);
   QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
       QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
   parser.addOption(pointStreamingOption);
@@ -482,7 +486,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
-                         parser.isSet(uiClarityOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
+                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
@@ -537,6 +541,18 @@ int main(int argc, char *argv[]) {
     window.setWindowState(Qt::WindowNoState);
     window.move(-30000, -30000);
   }
+  if (parser.isSet(uiPerformanceOption)) {
+    // Fix the test-owned viewport before its first observed paint too. Cold
+    // startup A/B samples must not silently use unrelated shell dimensions.
+    for (auto *dock : window.findChildren<QDockWidget *>()) dock->hide();
+    for (auto *bar : window.findChildren<QToolBar *>()) bar->hide();
+    window.setMinimumSize(0, 0);
+    if (auto *viewport = window.findChild<gsw::NativeViewport *>()) {
+      viewport->setFixedSize(640, 360);
+      window.adjustSize();
+      viewport->setUiPaintObservationEnabled(true);
+    }
+  }
   window.show();
   if (!smokeTest && !gsw::setManagedTaskbarRelaunch(
           reinterpret_cast<void *>(window.winId()), QCoreApplication::applicationFilePath(),
@@ -554,7 +570,15 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(uiClarityOption)) {
+  if (parser.isSet(uiPerformanceOption)) {
+    QTimer::singleShot(650, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      const int result = viewport ? gsw::runUiPerformanceSmokeTest(*viewport) : 2;
+      smokeTestCompleted = result != 2;
+      smokeTestFailureCode = result;
+      application.exit(result);
+    });
+  } else if (parser.isSet(uiClarityOption)) {
     QTimer::singleShot(650, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runUiClaritySmokeTest(*viewport);

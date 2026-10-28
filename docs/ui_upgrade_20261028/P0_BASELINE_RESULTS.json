@@ -1,0 +1,3188 @@
+{
+  "schema": "gsw.ui_clarity_baseline_evidence_review/1",
+  "as_of": "2026-10-28",
+  "status": "REMOTE_PIXEL_EDGE_FAILURE_REPRODUCED_PENDING_NORMAL_SIZE_VISUAL_REVIEW",
+  "run": {
+    "id": 40641681307,
+    "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40641681307",
+    "head_sha": "4f1dbb8f2ad086b3d855e112b835d6b641f81bf9",
+    "tree": "dcab400dae1d7a3b026ad18c8bafbe58a33d6bad",
+    "conclusion": "failure",
+    "scope": "baseline",
+    "only_failed_step": "Evaluate navigation edges",
+    "original_oracle_contract_log": "12 tests passed",
+    "real_window_cases": 20
+  },
+  "artifact": {
+    "id": 12795503046,
+    "name": "native-ui-clarity-baseline-40641681307",
+    "server_digest": "sha256:cd071964e0b404e7107e904429484096faf5402c66e3ffb66455ac2ad9b46cf5",
+    "server_zip_bytes": 3405565,
+    "local_root": "D:/Codex/validation/gsw-ui-upgrade-20261028/baseline-run40641681307",
+    "archive_digest_independently_verified": false,
+    "original_files_modified": false
+  },
+  "raw_evidence_bindings": {
+    "files": [
+      {
+        "relative_path": "source-run.json",
+        "bytes": 319,
+        "sha256": "9be07dbfd38ec6360d4a0ca66d116ac5ded333f5fd37082769cc469eba477522"
+      },
+      {
+        "relative_path": "protocol.json",
+        "bytes": 1962,
+        "sha256": "c1d3f422abeac3cebb4d5e3bf2965c7989762e71a0ad45e9fb141b2bc287586e"
+      },
+      {
+        "relative_path": "edge-results.json",
+        "bytes": 125076,
+        "sha256": "3234e63743beeb31ccf8e7e53b03355e45030b54963b7cec47abd9a99a79dd2b"
+      },
+      {
+        "relative_path": "oracle-contracts.log",
+        "bytes": 116,
+        "sha256": "6c06c2e9fe3427766c9d35ea08a22b1c7c69bbe65a192e84208b80e97cbb12c6"
+      },
+      {
+        "relative_path": "build.log",
+        "bytes": 9332,
+        "sha256": "d7d9bcba4551b24053d5264a16709d868f243c6a6b2bfad0f4230c018ca79a61"
+      }
+    ],
+    "protocol_sha256_in_source_run": "c1d3f422abeac3cebb4d5e3bf2965c7989762e71a0ad45e9fb141b2bc287586e",
+    "protocol_sha_matches": true,
+    "retained_file_count": 585,
+    "retained_file_bytes": 316938868
+  },
+  "inspection": {
+    "local_tests_or_checker_run": false,
+    "local_GUI_application_training_run": false,
+    "png_inspection": "Raw signature/IHDR metadata and file SHA only. No local decoding, filtering, metric recomputation or visual conclusion.",
+    "metrics_source": "Original remote edge-results.json only; aggregation is not a rerun."
+  },
+  "sample_caveat": "All context.samples values are0. Requested4 cases directly record sourceColorSamples4 on GL_RENDERBUFFER and source-bound GL_SAMPLES4. Requested0 color textures omit sourceColorSamples, while their bound framebuffer state records GL_SAMPLES0. Missing color-attachment sample fields remain null, not copied from context.samples.",
+  "controlled_DPR_caveat": "Actual native Windows window DPI remains96; Qt controlled widget DPR values are measured, but these are not native cross-screen hardware tests.",
+  "hardware_scope": "Windows real QOpenGLWidget and owned native window, Mesa llvmpipe LLVM23.1.2 / Mesa26.2.4; not the user's NVIDIA driver.",
+  "thresholds": {
+    "rmse": 0.06,
+    "p95": 0.16,
+    "halo": 0.04
+  },
+  "metrics_definitions": "Use the frozen protocol and original checker report. This review does not recompute or modify any threshold, ROI or metric.",
+  "cases": [
+    {
+      "case": "d1-s0-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1",
+      "actual_widget_dpr": 1,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1,
+      "ui_scale_percent": 100,
+      "logical_size": [
+        1097,
+        734
+      ],
+      "physical_size": [
+        1097,
+        734
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 97,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1-s0-dark/captures/capture-20261028-061033-119-29505eeb-7e88-4218-bb7e-8e44e76b1c58/manifest.json",
+        "bytes": 52899,
+        "sha256": "ec5f422bc4e30105201559d84af961c724bb6de45e85c6347f686d4a9b29c986"
+      },
+      "environment_file": {
+        "relative_path": "d1-s0-dark/capture.json",
+        "bytes": 53464,
+        "sha256": "34fb37868fda02d3cde72c33d7bd9cbf2a667db99d44bcbe50dd3ea4de3927aa"
+      },
+      "after_painter_png": {
+        "relative_path": "d1-s0-dark/captures/capture-20261028-061033-119-29505eeb-7e88-4218-bb7e-8e44e76b1c58/stages/04-after-painter-color.png",
+        "bytes": 14584,
+        "sha256": "ffca24c54080a7748832622c490fc1ac92fe16eca72e5de18ea0d797e263b322",
+        "width": 1097,
+        "height": 734,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1-s0-dark/window-native.png",
+        "bytes": 71132,
+        "sha256": "86756d9ae6d2d768382da868760ad919cacee66b035361c3fa4731f22e16e8c4",
+        "width": 1600,
+        "height": 936,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07815794084231699,
+          "p95": 0.182772015677419,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 172,
+          "halo_pixels": 172,
+          "excluded_pixels": 44,
+          "physical_roi": [
+            1004,
+            29,
+            30,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08787238924441604,
+          "p95": 0.19983351023882223,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 174,
+          "halo_pixels": 170,
+          "excluded_pixels": 43,
+          "physical_roi": [
+            1054,
+            30,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.09879443280466553,
+          "p95": 0.2343690083299167,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 190,
+          "halo_pixels": 207,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1028,
+            72,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1-s0-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1",
+      "actual_widget_dpr": 1,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1,
+      "ui_scale_percent": 100,
+      "logical_size": [
+        1089,
+        730
+      ],
+      "physical_size": [
+        1089,
+        730
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 97,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1-s0-light/captures/capture-20261028-061031-244-f231b067-4cd8-46f7-a2c0-d7992a494f6e/manifest.json",
+        "bytes": 52938,
+        "sha256": "0a1330f0c55650767843b71a82a0ab04ed87f7b6705d783e9d0b95a91011c11a"
+      },
+      "environment_file": {
+        "relative_path": "d1-s0-light/capture.json",
+        "bytes": 53466,
+        "sha256": "aa937dc619ae625e55dfccd699f605388b791411ed0a59f62719a23232017301"
+      },
+      "after_painter_png": {
+        "relative_path": "d1-s0-light/captures/capture-20261028-061031-244-f231b067-4cd8-46f7-a2c0-d7992a494f6e/stages/04-after-painter-color.png",
+        "bytes": 12485,
+        "sha256": "852e22c8b62ea4038ba651e570504c83bcc39a7795aaceb1244edbbf0b56eb04",
+        "width": 1089,
+        "height": 730,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1-s0-light/window-native.png",
+        "bytes": 63952,
+        "sha256": "8c0b7d646ab1cb2e979dfbf6f5fc6c8d1ac5e8cc6854f4ba3497661a78a53a88",
+        "width": 1600,
+        "height": 936,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.10546177016263765,
+          "p95": 0.24851649021455097,
+          "halo": 0,
+          "edge_pixels": 172,
+          "halo_pixels": 172,
+          "excluded_pixels": 44,
+          "physical_roi": [
+            996,
+            29,
+            30,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.10218095524733425,
+          "p95": 0.23560430869592242,
+          "halo": 0,
+          "edge_pixels": 174,
+          "halo_pixels": 170,
+          "excluded_pixels": 43,
+          "physical_roi": [
+            1046,
+            30,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.1012623623192044,
+          "p95": 0.2387861863754489,
+          "halo": 0,
+          "edge_pixels": 190,
+          "halo_pixels": 207,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1020,
+            72,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1-s4-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1",
+      "actual_widget_dpr": 1,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1,
+      "ui_scale_percent": 100,
+      "logical_size": [
+        1097,
+        734
+      ],
+      "physical_size": [
+        1097,
+        734
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 97,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1-s4-dark/captures/capture-20261028-061036-954-c64a9eae-987d-437d-8bb7-ed03e33512a4/manifest.json",
+        "bytes": 53961,
+        "sha256": "cf7778128e6fa730ceb0df838449c4984a7d49dba1d29da51b881231aaff2238"
+      },
+      "environment_file": {
+        "relative_path": "d1-s4-dark/capture.json",
+        "bytes": 53464,
+        "sha256": "0be22bbb2ffb4dbba99187f5f6df6f32b75d9ef5e6e745769eeb01d408842f8d"
+      },
+      "after_painter_png": {
+        "relative_path": "d1-s4-dark/captures/capture-20261028-061036-954-c64a9eae-987d-437d-8bb7-ed03e33512a4/stages/04-after-painter-color.png",
+        "bytes": 16740,
+        "sha256": "39801d6aa5dc5892e008bb814567457342ae4cd14edf17432462dcf8dea092cd",
+        "width": 1097,
+        "height": 734,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1-s4-dark/window-native.png",
+        "bytes": 72825,
+        "sha256": "6ca27f8815fb71243f3bfc749c6809b4040fb35ce1e65931c265233f676f529f",
+        "width": 1600,
+        "height": 936,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05171860884217148,
+          "p95": 0.11467618487354661,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 172,
+          "halo_pixels": 172,
+          "excluded_pixels": 44,
+          "physical_roi": [
+            1004,
+            29,
+            30,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05433624351269395,
+          "p95": 0.10822428357515794,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 174,
+          "halo_pixels": 170,
+          "excluded_pixels": 43,
+          "physical_roi": [
+            1054,
+            30,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06491054442547398,
+          "p95": 0.1470917815719438,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 190,
+          "halo_pixels": 207,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1028,
+            72,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1-s4-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1",
+      "actual_widget_dpr": 1,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1,
+      "ui_scale_percent": 100,
+      "logical_size": [
+        1089,
+        730
+      ],
+      "physical_size": [
+        1089,
+        730
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 97,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1-s4-light/captures/capture-20261028-061034-956-89d5049b-d6cd-473b-a857-eb36e38ffd8b/manifest.json",
+        "bytes": 54000,
+        "sha256": "f2396207fcf5478901e16e4a6d56732fe18c83deae2c3bfb92e1bb0092162380"
+      },
+      "environment_file": {
+        "relative_path": "d1-s4-light/capture.json",
+        "bytes": 53466,
+        "sha256": "dc5dcfbed93d01465b8f7257d531ad4fd7b89ff05afe23c460bcae9583b07d02"
+      },
+      "after_painter_png": {
+        "relative_path": "d1-s4-light/captures/capture-20261028-061034-956-89d5049b-d6cd-473b-a857-eb36e38ffd8b/stages/04-after-painter-color.png",
+        "bytes": 14475,
+        "sha256": "5465f02152633b43843da958e47f6e5eb86534bb247511a0f4527a1879129bc6",
+        "width": 1089,
+        "height": 730,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1-s4-light/window-native.png",
+        "bytes": 65781,
+        "sha256": "40e2efa67e551c4150ecadc728238bd4224f9f6775a283c0dcc3389ad641554a",
+        "width": 1600,
+        "height": 936,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06999178952568441,
+          "p95": 0.15499816299009891,
+          "halo": 0,
+          "edge_pixels": 172,
+          "halo_pixels": 172,
+          "excluded_pixels": 44,
+          "physical_roi": [
+            996,
+            29,
+            30,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06300416847024742,
+          "p95": 0.12533115942982473,
+          "halo": 0,
+          "edge_pixels": 174,
+          "halo_pixels": 170,
+          "excluded_pixels": 43,
+          "physical_roi": [
+            1046,
+            30,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06582728113244447,
+          "p95": 0.14691621417267509,
+          "halo": 0,
+          "edge_pixels": 190,
+          "halo_pixels": 207,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1020,
+            72,
+            29,
+            29
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.25-s0-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.25",
+      "actual_widget_dpr": 1.25,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.25,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        959,
+        558
+      ],
+      "physical_size": [
+        1199,
+        698
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.25-s0-dark/captures/capture-20261028-061040-446-fa48492d-50d3-4259-a1ca-edbbc26c8403/manifest.json",
+        "bytes": 52975,
+        "sha256": "ee61142f8addb739b25b7c72dce56c6b4882cc80dde706b6fc030ca63a91ff4f"
+      },
+      "environment_file": {
+        "relative_path": "d1.25-s0-dark/capture.json",
+        "bytes": 54269,
+        "sha256": "03e0ac40a0585bf048c000d6fce22dfe2ddf10b304800174b5621250236c1616"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.25-s0-dark/captures/capture-20261028-061040-446-fa48492d-50d3-4259-a1ca-edbbc26c8403/stages/04-after-painter-color.png",
+        "bytes": 17131,
+        "sha256": "7ad95a1c2ba106457a07b5a17524eab77361b719e4b7c45335415881c0f0048f",
+        "width": 1199,
+        "height": 698,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.25-s0-dark/window-native.png",
+        "bytes": 77125,
+        "sha256": "360baaf405513f1c6ff84d26e26a88d6191a676e5af227e2ce21d6bec1758799",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08579311049043142,
+          "p95": 0.19087197922579185,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 245,
+          "halo_pixels": 212,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1085,
+            37,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.09437108113254546,
+          "p95": 0.21665246764037546,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 244,
+          "halo_pixels": 204,
+          "excluded_pixels": 39,
+          "physical_roi": [
+            1147,
+            39,
+            34,
+            33
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.10407069448040614,
+          "p95": 0.24772912554177637,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 259,
+          "halo_pixels": 247,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1114,
+            91,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.25-s0-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.25",
+      "actual_widget_dpr": 1.25,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.25,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        953,
+        555
+      ],
+      "physical_size": [
+        1191,
+        694
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.25-s0-light/captures/capture-20261028-061038-758-27b6cb38-634f-4622-89fa-ef6716473b52/manifest.json",
+        "bytes": 53017,
+        "sha256": "87f3aaf22bde5d48bfe18b75570e31a0f55eedb07f109511caaa6b0eeb8e29b4"
+      },
+      "environment_file": {
+        "relative_path": "d1.25-s0-light/capture.json",
+        "bytes": 54271,
+        "sha256": "db4a37d9a95fb6f0e41b7f5c92f48ba2124e4e079f0ab2b82ebd593aa352a80f"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.25-s0-light/captures/capture-20261028-061038-758-27b6cb38-634f-4622-89fa-ef6716473b52/stages/04-after-painter-color.png",
+        "bytes": 13844,
+        "sha256": "119354da914e40f3e16e6bafc9bc221783261f24d51fb3e4fe8cbf65b27ba692",
+        "width": 1191,
+        "height": 694,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.25-s0-light/window-native.png",
+        "bytes": 67387,
+        "sha256": "c33da3fdd7f52218080fbfac1f40ea50f1c798f9a343c02ae1fd298c20011577",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.12165669994071325,
+          "p95": 0.2924138748630567,
+          "halo": 0,
+          "edge_pixels": 243,
+          "halo_pixels": 210,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1077,
+            37,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.10132649787845552,
+          "p95": 0.26211545213460674,
+          "halo": 0,
+          "edge_pixels": 251,
+          "halo_pixels": 214,
+          "excluded_pixels": 40,
+          "physical_roi": [
+            1140,
+            39,
+            33,
+            33
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.11074938711332037,
+          "p95": 0.2695422257164756,
+          "halo": 0,
+          "edge_pixels": 259,
+          "halo_pixels": 247,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1107,
+            91,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.25-s4-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.25",
+      "actual_widget_dpr": 1.25,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.25,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        959,
+        558
+      ],
+      "physical_size": [
+        1199,
+        698
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.25-s4-dark/captures/capture-20261028-061044-322-af15c73f-c7a3-4d72-ab59-1859775f7b8f/manifest.json",
+        "bytes": 54037,
+        "sha256": "4dd19e1a19595a6d32fe189181579f7d5af69c78c78e792a0bbf278c30b07745"
+      },
+      "environment_file": {
+        "relative_path": "d1.25-s4-dark/capture.json",
+        "bytes": 54269,
+        "sha256": "956bfd6335531224ab65ac2dee1e12645ee7738b58832de0b19e29a7397664e3"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.25-s4-dark/captures/capture-20261028-061044-322-af15c73f-c7a3-4d72-ab59-1859775f7b8f/stages/04-after-painter-color.png",
+        "bytes": 19573,
+        "sha256": "17a51014611fc6405eab9e495e4f1ec3799bc3a1018fd7762dc7682a9b0db2b9",
+        "width": 1199,
+        "height": 698,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.25-s4-dark/window-native.png",
+        "bytes": 79869,
+        "sha256": "0e6c51beaa59aa182af5e0b8dce1c19f4344e13a1e808c057867294597727781",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05792883679057639,
+          "p95": 0.12483808115959666,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 245,
+          "halo_pixels": 212,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1085,
+            37,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.062118388377329234,
+          "p95": 0.1332547612783368,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 244,
+          "halo_pixels": 204,
+          "excluded_pixels": 39,
+          "physical_roi": [
+            1147,
+            39,
+            34,
+            33
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07450200320678356,
+          "p95": 0.1684783805738777,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 259,
+          "halo_pixels": 247,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1114,
+            91,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.25-s4-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.25",
+      "actual_widget_dpr": 1.25,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.25,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        953,
+        555
+      ],
+      "physical_size": [
+        1191,
+        694
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.25-s4-light/captures/capture-20261028-061042-324-de10ec3d-9159-404d-9ef9-60166bd46c8b/manifest.json",
+        "bytes": 54079,
+        "sha256": "8e491afe781d3cb99a9cff9ac7a719ba24174b49e9171b5cf8936f8f46f81619"
+      },
+      "environment_file": {
+        "relative_path": "d1.25-s4-light/capture.json",
+        "bytes": 54271,
+        "sha256": "665bac938e057b90eec69501a370aba4488b079a6b471207e5747de78dceff22"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.25-s4-light/captures/capture-20261028-061042-324-de10ec3d-9159-404d-9ef9-60166bd46c8b/stages/04-after-painter-color.png",
+        "bytes": 16449,
+        "sha256": "3ed5281dc192d17ad54da9132145cf64b0d46f17334c6d6e41f943658653fc4a",
+        "width": 1191,
+        "height": 694,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.25-s4-light/window-native.png",
+        "bytes": 69951,
+        "sha256": "20877cc5d881b8e4654f9823f46524e91f23143125d9c392ca41dc19d07a9f2e",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.0772832856331499,
+          "p95": 0.16866546619229253,
+          "halo": 0,
+          "edge_pixels": 243,
+          "halo_pixels": 210,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1077,
+            37,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07437094198121968,
+          "p95": 0.1675160575888664,
+          "halo": 0,
+          "edge_pixels": 251,
+          "halo_pixels": 214,
+          "excluded_pixels": 40,
+          "physical_roi": [
+            1140,
+            39,
+            33,
+            33
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07477783556012793,
+          "p95": 0.1675403867374646,
+          "halo": 0,
+          "edge_pixels": 259,
+          "halo_pixels": 247,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            1107,
+            91,
+            34,
+            34
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.5-s0-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.5",
+      "actual_widget_dpr": 1.5,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.5,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        723,
+        433
+      ],
+      "physical_size": [
+        1085,
+        650
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.5-s0-dark/captures/capture-20261028-061047-882-6e5e85bb-5607-4cd5-a0ef-11c7e049801b/manifest.json",
+        "bytes": 52938,
+        "sha256": "15eb23562d7d3374d2dc4fa59e9b849f8306303bd75d4518da1f3b1ce2a02052"
+      },
+      "environment_file": {
+        "relative_path": "d1.5-s0-dark/capture.json",
+        "bytes": 54265,
+        "sha256": "f1ce7fe7ab94785cf85afe145469598e2582f9233c29adb0b444c0abe597dd40"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.5-s0-dark/captures/capture-20261028-061047-882-6e5e85bb-5607-4cd5-a0ef-11c7e049801b/stages/04-after-painter-color.png",
+        "bytes": 18872,
+        "sha256": "431274fb5765da8183a7b7642e6f00ad02a1d6879c33a3c06bbef66034033c27",
+        "width": 1085,
+        "height": 650,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.5-s0-dark/window-native.png",
+        "bytes": 86197,
+        "sha256": "ff8eda8d67872eb5ecc28c665254b15c9dcce316255eab27ef1d3c1b21abb30b",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07466441361653009,
+          "p95": 0.1687080903549209,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 312,
+          "halo_pixels": 242,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            949,
+            46,
+            38,
+            38
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07532689878865473,
+          "p95": 0.17652631325900392,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 314,
+          "halo_pixels": 249,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1024,
+            47,
+            38,
+            39
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08671066749300185,
+          "p95": 0.21356817765671635,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 328,
+          "halo_pixels": 280,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            984,
+            110,
+            39,
+            39
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.5-s0-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.5",
+      "actual_widget_dpr": 1.5,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.5,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        717,
+        430
+      ],
+      "physical_size": [
+        1076,
+        645
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.5-s0-light/captures/capture-20261028-061046-185-f58ce050-fa6b-4a37-916f-856471c6a6c8/manifest.json",
+        "bytes": 52983,
+        "sha256": "1612c5f48e5d1f592cd7aaebe501dcfcdda43e490ee173b79407be30bf587595"
+      },
+      "environment_file": {
+        "relative_path": "d1.5-s0-light/capture.json",
+        "bytes": 54267,
+        "sha256": "7cc778dd1b1d8d68f4c845357ef15a94821fc95513b30fe58efd5e3c8d0becf5"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.5-s0-light/captures/capture-20261028-061046-185-f58ce050-fa6b-4a37-916f-856471c6a6c8/stages/04-after-painter-color.png",
+        "bytes": 14862,
+        "sha256": "ec095c9f7cd1ac1a92f53072269abdfae5d39497d2280e8e9ae84d3489078ed8",
+        "width": 1076,
+        "height": 645,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.5-s0-light/window-native.png",
+        "bytes": 75127,
+        "sha256": "4a2f7bcc01e06a42ca945e6e1aed4fc5f6b575e91629edba65ec62c2a0033d0b",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.10056786191356108,
+          "p95": 0.2268118452335848,
+          "halo": 0,
+          "edge_pixels": 312,
+          "halo_pixels": 242,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            940,
+            46,
+            38,
+            38
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08747158460658097,
+          "p95": 0.20660654847875262,
+          "halo": 0,
+          "edge_pixels": 314,
+          "halo_pixels": 249,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1015,
+            47,
+            38,
+            39
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08872689786134005,
+          "p95": 0.21683522050462936,
+          "halo": 0,
+          "edge_pixels": 328,
+          "halo_pixels": 280,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            975,
+            110,
+            39,
+            39
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.5-s4-dark",
+      "passed": true,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.5",
+      "actual_widget_dpr": 1.5,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.5,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        723,
+        433
+      ],
+      "physical_size": [
+        1085,
+        650
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.5-s4-dark/captures/capture-20261028-061051-916-e0fc3cd9-2354-4759-b386-46713805adc3/manifest.json",
+        "bytes": 54000,
+        "sha256": "27c1e5c5ea31d60990a42678df6e12621890898b48f43d657c3a85f3eb137475"
+      },
+      "environment_file": {
+        "relative_path": "d1.5-s4-dark/capture.json",
+        "bytes": 54265,
+        "sha256": "6a0066ae7e96be6e9b547074952fc3c92fef8eaecd27c57e3365fd88a5eb8c05"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.5-s4-dark/captures/capture-20261028-061051-916-e0fc3cd9-2354-4759-b386-46713805adc3/stages/04-after-painter-color.png",
+        "bytes": 21629,
+        "sha256": "ac2596c58f9e2cbfa0a15246ba9a40c8ca03c25e83437dbdee0350c47324bfcc",
+        "width": 1085,
+        "height": 650,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.5-s4-dark/window-native.png",
+        "bytes": 89327,
+        "sha256": "6acd051b6eb88eda02842fd8cf08318ee1dfbee862f37b4dacaae110e6081f04",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04316859250546122,
+          "p95": 0.08728516249472373,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 312,
+          "halo_pixels": 242,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            949,
+            46,
+            38,
+            38
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04666752692299835,
+          "p95": 0.1015876001014964,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 314,
+          "halo_pixels": 249,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1024,
+            47,
+            38,
+            39
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05509626467989645,
+          "p95": 0.1207745275442044,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 328,
+          "halo_pixels": 280,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            984,
+            110,
+            39,
+            39
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.5-s4-light",
+      "passed": true,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.5",
+      "actual_widget_dpr": 1.5,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.5,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        717,
+        430
+      ],
+      "physical_size": [
+        1076,
+        645
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.5-s4-light/captures/capture-20261028-061049-797-e1c5ba94-7671-4df7-a705-688b21582374/manifest.json",
+        "bytes": 54045,
+        "sha256": "d7f6658cd53a0bc6f0b125847f8cf930bd410f9b62ab9c1982e541b59367a397"
+      },
+      "environment_file": {
+        "relative_path": "d1.5-s4-light/capture.json",
+        "bytes": 54267,
+        "sha256": "4e2bd91215d1374f32e4f87330869e43f1978ce5e99d7ac49c7b2417c81e3217"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.5-s4-light/captures/capture-20261028-061049-797-e1c5ba94-7671-4df7-a705-688b21582374/stages/04-after-painter-color.png",
+        "bytes": 17882,
+        "sha256": "96d323fca4925b08b1059254426b4355a25c21efa519103546322263c33cf52b",
+        "width": 1076,
+        "height": 645,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.5-s4-light/window-native.png",
+        "bytes": 78244,
+        "sha256": "053e13dfcd7777a1b7ba21c40a773fa40756959830d7adfd9c33e4d253d592f7",
+        "width": 1766,
+        "height": 935,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.058299328162220686,
+          "p95": 0.11801854003983388,
+          "halo": 0,
+          "edge_pixels": 312,
+          "halo_pixels": 242,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            940,
+            46,
+            38,
+            38
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05403957124715509,
+          "p95": 0.11815616306416438,
+          "halo": 0,
+          "edge_pixels": 314,
+          "halo_pixels": 249,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            1015,
+            47,
+            38,
+            39
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.05582362475560464,
+          "p95": 0.12317114091060415,
+          "halo": 0,
+          "edge_pixels": 328,
+          "halo_pixels": 280,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            975,
+            110,
+            39,
+            39
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.75-s0-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.75",
+      "actual_widget_dpr": 1.75,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.75,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        555,
+        430
+      ],
+      "physical_size": [
+        971,
+        753
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.75-s0-dark/captures/capture-20261028-061055-671-1e4654a6-9c5d-456e-a955-c1bced8d043a/manifest.json",
+        "bytes": 52962,
+        "sha256": "1fc16657361cffb03e4b459775a75167c420d242e1e9a8b9ba47c50679c276ac"
+      },
+      "environment_file": {
+        "relative_path": "d1.75-s0-dark/capture.json",
+        "bytes": 54270,
+        "sha256": "f329e56562cfc26709718a03be9bec505fa54d40a6c52429b08dbf4510ea5939"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.75-s0-dark/captures/capture-20261028-061055-671-1e4654a6-9c5d-456e-a955-c1bced8d043a/stages/04-after-painter-color.png",
+        "bytes": 20573,
+        "sha256": "cfc3caa3c5279e8a4a9d81135a5a7c62bde463c58084fad844e61663ec314d40",
+        "width": 971,
+        "height": 753,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.75-s0-dark/window-native.png",
+        "bytes": 97425,
+        "sha256": "fef6a6a08649b7bab90d208f62cbc741237c1ee9238e16a5fd656c8b4e97bc41",
+        "width": 1766,
+        "height": 1085,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06741127539119451,
+          "p95": 0.154277031541001,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 366,
+          "halo_pixels": 288,
+          "excluded_pixels": 36,
+          "physical_roi": [
+            814,
+            55,
+            43,
+            42
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.07273450172878422,
+          "p95": 0.16799144451917272,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 369,
+          "halo_pixels": 283,
+          "excluded_pixels": 39,
+          "physical_roi": [
+            901,
+            56,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08042168461894737,
+          "p95": 0.18043871470398476,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 379,
+          "halo_pixels": 319,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            855,
+            129,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.75-s0-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.75",
+      "actual_widget_dpr": 1.75,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.75,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        549,
+        427
+      ],
+      "physical_size": [
+        961,
+        747
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.75-s0-light/captures/capture-20261028-061053-753-dbcf9878-2f68-4ae4-b3d5-4162e8e87b0a/manifest.json",
+        "bytes": 53004,
+        "sha256": "a97a855074c92c423bf09a43653c4b550d20e250503aeee905db8ff346c5226d"
+      },
+      "environment_file": {
+        "relative_path": "d1.75-s0-light/capture.json",
+        "bytes": 54272,
+        "sha256": "648ca479672bdb2e4dcbdfe23d22499a9f25b0609bb8fca0268630f9cadc1576"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.75-s0-light/captures/capture-20261028-061053-753-dbcf9878-2f68-4ae4-b3d5-4162e8e87b0a/stages/04-after-painter-color.png",
+        "bytes": 16159,
+        "sha256": "a7065e496385d5af8a376fce7e9cd7796dc5e3910c6cd590f0d298d27647286a",
+        "width": 961,
+        "height": 747,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.75-s0-light/window-native.png",
+        "bytes": 84296,
+        "sha256": "7c7b6cba21ccddca77ee217cdf66bcbf35d75842876869aec03c95c1a39ff47d",
+        "width": 1766,
+        "height": 1085,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.09038920082739692,
+          "p95": 0.22122471628931978,
+          "halo": 0,
+          "edge_pixels": 363,
+          "halo_pixels": 286,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            804,
+            55,
+            42,
+            42
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08353815607116466,
+          "p95": 0.18910019208093468,
+          "halo": 0,
+          "edge_pixels": 365,
+          "halo_pixels": 288,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            891,
+            56,
+            42,
+            43
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08376589951169067,
+          "p95": 0.1919173470025083,
+          "halo": 0,
+          "edge_pixels": 379,
+          "halo_pixels": 319,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            845,
+            129,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.75-s4-dark",
+      "passed": true,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "1.75",
+      "actual_widget_dpr": 1.75,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.75,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        555,
+        430
+      ],
+      "physical_size": [
+        971,
+        753
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.75-s4-dark/captures/capture-20261028-061059-893-10e4a32b-cca7-4fe3-8695-7e120ac7e283/manifest.json",
+        "bytes": 54018,
+        "sha256": "268f783b6ec5ea5f7307e4f5838bb075b42227fae9b4be1c0efd79fa408dfb97"
+      },
+      "environment_file": {
+        "relative_path": "d1.75-s4-dark/capture.json",
+        "bytes": 54270,
+        "sha256": "7618344c2c84024d7c615c2ad8a8812fcb938973b9b31810c9d08020efeec7f4"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.75-s4-dark/captures/capture-20261028-061059-893-10e4a32b-cca7-4fe3-8695-7e120ac7e283/stages/04-after-painter-color.png",
+        "bytes": 23613,
+        "sha256": "e13d71d5e47a70a59c3fe458f66d63f6b6f4b7f562999098ad48c4830239f045",
+        "width": 971,
+        "height": 753,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.75-s4-dark/window-native.png",
+        "bytes": 100292,
+        "sha256": "ee8cce0378b02a2f0b7c28bd56d42195957f1ec093a8dc8fe0e891c3c8ac7980",
+        "width": 1766,
+        "height": 1085,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.03601034195662486,
+          "p95": 0.07948997239232927,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 366,
+          "halo_pixels": 288,
+          "excluded_pixels": 36,
+          "physical_roi": [
+            814,
+            55,
+            43,
+            42
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.039128733871710494,
+          "p95": 0.08479296689793642,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 369,
+          "halo_pixels": 283,
+          "excluded_pixels": 39,
+          "physical_roi": [
+            901,
+            56,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04256040036937593,
+          "p95": 0.09321300139821544,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 379,
+          "halo_pixels": 319,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            855,
+            129,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d1.75-s4-light",
+      "passed": true,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "1.75",
+      "actual_widget_dpr": 1.75,
+      "native_windows_dpi": 96,
+      "screen_dpr": 1.75,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        549,
+        427
+      ],
+      "physical_size": [
+        961,
+        747
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d1.75-s4-light/captures/capture-20261028-061057-794-3c84577a-62c5-443c-b580-4103e4cf4e9f/manifest.json",
+        "bytes": 54060,
+        "sha256": "6958f2322ebf469790117245b3a4ea1a8dfd69a7f25609e0964a0f0db1a19a1f"
+      },
+      "environment_file": {
+        "relative_path": "d1.75-s4-light/capture.json",
+        "bytes": 54272,
+        "sha256": "ea7ac9454b60f0b0c5e29e1f963d2325f5cd0f3faaf729aeedb606d0c37fac18"
+      },
+      "after_painter_png": {
+        "relative_path": "d1.75-s4-light/captures/capture-20261028-061057-794-3c84577a-62c5-443c-b580-4103e4cf4e9f/stages/04-after-painter-color.png",
+        "bytes": 19298,
+        "sha256": "0621b8f5fa5937739ec72c56ed7b7807dbfb88881b0041d031d1e7b9831a0679",
+        "width": 961,
+        "height": 747,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d1.75-s4-light/window-native.png",
+        "bytes": 87940,
+        "sha256": "bd173981c32dca133bcb67ffd944e0963b6d7eb81ae7e07836e55b449ded811a",
+        "width": 1766,
+        "height": 1085,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.048839491833880075,
+          "p95": 0.11340592261679239,
+          "halo": 0,
+          "edge_pixels": 363,
+          "halo_pixels": 286,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            804,
+            55,
+            42,
+            42
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.0463835658685777,
+          "p95": 0.1098484435232452,
+          "halo": 0,
+          "edge_pixels": 365,
+          "halo_pixels": 288,
+          "excluded_pixels": 37,
+          "physical_roi": [
+            891,
+            56,
+            42,
+            43
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04473051092733046,
+          "p95": 0.09857586763281279,
+          "halo": 0,
+          "edge_pixels": 379,
+          "halo_pixels": 319,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            845,
+            129,
+            43,
+            43
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d2-s0-dark",
+      "passed": false,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "2",
+      "actual_widget_dpr": 2,
+      "native_windows_dpi": 96,
+      "screen_dpr": 2,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        486,
+        430
+      ],
+      "physical_size": [
+        972,
+        860
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d2-s0-dark/captures/capture-20261028-061103-708-6d7c9e57-301f-4bc6-8b2e-2312b0170e18/manifest.json",
+        "bytes": 52862,
+        "sha256": "4c59a0ce9ec787491736e47c3b1680d91e7cf1431656cb866e7afd73739f83aa"
+      },
+      "environment_file": {
+        "relative_path": "d2-s0-dark/capture.json",
+        "bytes": 54254,
+        "sha256": "dd5db437f249838e84e37984a069dd67eabf4145eb943f39667745a95b013144"
+      },
+      "after_painter_png": {
+        "relative_path": "d2-s0-dark/captures/capture-20261028-061103-708-6d7c9e57-301f-4bc6-8b2e-2312b0170e18/stages/04-after-painter-color.png",
+        "bytes": 22878,
+        "sha256": "59d490b0968528d9c771daf707ddc0b61cc47bae4af782247e41c381c1c33f77",
+        "width": 972,
+        "height": 860,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d2-s0-dark/window-native.png",
+        "bytes": 97808,
+        "sha256": "d6ed735351558237b7c24790a910c22bfe9d94d8006e2183329eaed29c914bbf",
+        "width": 1880,
+        "height": 1240,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.062133540215192046,
+          "p95": 0.13630331710065768,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 419,
+          "halo_pixels": 328,
+          "excluded_pixels": 32,
+          "physical_roi": [
+            793,
+            63,
+            48,
+            47
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.06956412995702428,
+          "p95": 0.15424464962698928,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 422,
+          "halo_pixels": 326,
+          "excluded_pixels": 34,
+          "physical_roi": [
+            893,
+            65,
+            47,
+            48
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08063350777748288,
+          "p95": 0.18861505258547281,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 430,
+          "halo_pixels": 360,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            840,
+            148,
+            48,
+            48
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d2-s0-light",
+      "passed": false,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "2",
+      "actual_widget_dpr": 2,
+      "native_windows_dpi": 96,
+      "screen_dpr": 2,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        480,
+        427
+      ],
+      "physical_size": [
+        960,
+        854
+      ],
+      "requested_samples": 0,
+      "context_samples": 0,
+      "color_attachment_type": 5890,
+      "color_attachment_samples_recorded": false,
+      "color_attachment_samples": null,
+      "source_bound_gl_samples": 0,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [
+        "ring_normalized_rgb_rmse_limit_exceeded",
+        "ring_p95_rgb_error_limit_exceeded"
+      ],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d2-s0-light/captures/capture-20261028-061101-812-f29989ae-cded-4650-bd60-e476c129d514/manifest.json",
+        "bytes": 52904,
+        "sha256": "dca3b81a7d396d4fae6ec4e94c45bfc2162ff938b21470cf9326779baab649d5"
+      },
+      "environment_file": {
+        "relative_path": "d2-s0-light/capture.json",
+        "bytes": 54256,
+        "sha256": "b8ad4b62f69c17b631856fd91e24daa69a7daa9973d2a2431fb30c45b889dfdb"
+      },
+      "after_painter_png": {
+        "relative_path": "d2-s0-light/captures/capture-20261028-061101-812-f29989ae-cded-4650-bd60-e476c129d514/stages/04-after-painter-color.png",
+        "bytes": 18294,
+        "sha256": "b0a2bbac54fc1c305c15b45f653f38d9b208fc094352dddfac20ef22d7c66485",
+        "width": 960,
+        "height": 854,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d2-s0-light/window-native.png",
+        "bytes": 84671,
+        "sha256": "def78b2288a588784fccb889f79fe99b38cae1af877b67febd5e5c620c2183b7",
+        "width": 1880,
+        "height": 1240,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.083473604484629,
+          "p95": 0.18714749471323233,
+          "halo": 0,
+          "edge_pixels": 419,
+          "halo_pixels": 328,
+          "excluded_pixels": 32,
+          "physical_roi": [
+            781,
+            63,
+            48,
+            47
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08067835221802626,
+          "p95": 0.1805381324135809,
+          "halo": 0,
+          "edge_pixels": 422,
+          "halo_pixels": 326,
+          "excluded_pixels": 34,
+          "physical_roi": [
+            881,
+            65,
+            47,
+            48
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": false,
+          "measured": true,
+          "rmse": 0.08238531650260382,
+          "p95": 0.19050229050027212,
+          "halo": 0,
+          "edge_pixels": 430,
+          "halo_pixels": 360,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            828,
+            148,
+            48,
+            48
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d2-s4-dark",
+      "passed": true,
+      "theme": "dark",
+      "locale": "zh_CN",
+      "requested_dpr": "2",
+      "actual_widget_dpr": 2,
+      "native_windows_dpi": 96,
+      "screen_dpr": 2,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        486,
+        430
+      ],
+      "physical_size": [
+        972,
+        860
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d2-s4-dark/captures/capture-20261028-061107-924-82b92bcb-c11a-4ffe-a7d9-9c0b18d8579c/manifest.json",
+        "bytes": 53918,
+        "sha256": "11d4e0190e4dfe52f1b693086d187671860d64fa304a086347187fb6d7bab6a6"
+      },
+      "environment_file": {
+        "relative_path": "d2-s4-dark/capture.json",
+        "bytes": 54254,
+        "sha256": "a5634b24f44126f601a52ed6c367177623b2d436d2e595c9a13a556d46abea5c"
+      },
+      "after_painter_png": {
+        "relative_path": "d2-s4-dark/captures/capture-20261028-061107-924-82b92bcb-c11a-4ffe-a7d9-9c0b18d8579c/stages/04-after-painter-color.png",
+        "bytes": 26945,
+        "sha256": "3743fc63bf2ca4f5dc6ac65d6dc35045e74175c6c9e019e51b5bcc8e9f7c6499",
+        "width": 972,
+        "height": 860,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d2-s4-dark/window-native.png",
+        "bytes": 102421,
+        "sha256": "3679dc6b7a0894885e8bc839d4822bb2e1e6640cebe13a17bad8b6fee1b5e239",
+        "width": 1880,
+        "height": 1240,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.030442822794143804,
+          "p95": 0.06700257529286782,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 419,
+          "halo_pixels": 328,
+          "excluded_pixels": 32,
+          "physical_roi": [
+            793,
+            63,
+            48,
+            47
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.03202837623837856,
+          "p95": 0.07213323107979269,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 422,
+          "halo_pixels": 326,
+          "excluded_pixels": 34,
+          "physical_roi": [
+            893,
+            65,
+            47,
+            48
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04108461973205826,
+          "p95": 0.09437796271453675,
+          "halo": 0.011764705882352941,
+          "edge_pixels": 430,
+          "halo_pixels": 360,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            840,
+            148,
+            48,
+            48
+          ],
+          "declared_backdrop": [
+            12,
+            15,
+            17
+          ],
+          "observed_halo_mean": [
+            12,
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "case": "d2-s4-light",
+      "passed": true,
+      "theme": "light",
+      "locale": "zh_CN",
+      "requested_dpr": "2",
+      "actual_widget_dpr": 2,
+      "native_windows_dpi": 96,
+      "screen_dpr": 2,
+      "ui_scale_percent": 90,
+      "logical_size": [
+        480,
+        427
+      ],
+      "physical_size": [
+        960,
+        854
+      ],
+      "requested_samples": 4,
+      "context_samples": 0,
+      "color_attachment_type": 36161,
+      "color_attachment_samples_recorded": true,
+      "color_attachment_samples": 4,
+      "source_bound_gl_samples": 4,
+      "paint_engine": 13,
+      "gl_vendor": "Mesa",
+      "gl_renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "gl_version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qt_version": "6.8.3",
+      "error_codes": [],
+      "input_contract_error_codes": [],
+      "failed_validity_fields": [],
+      "stage_gl_error_fields": [],
+      "visible_widget_font_count": 99,
+      "mixed_script_missing_glyphs": 0,
+      "source_path": "",
+      "source_count": 0,
+      "manifest_file": {
+        "relative_path": "d2-s4-light/captures/capture-20261028-061105-799-d9d6ae5a-1092-4f20-a34c-d13b9933b074/manifest.json",
+        "bytes": 53960,
+        "sha256": "95415e798728c6d4eb72b1e825d6a3f4bb6a225caa7a321bf92b82b72fc75659"
+      },
+      "environment_file": {
+        "relative_path": "d2-s4-light/capture.json",
+        "bytes": 54256,
+        "sha256": "36fd6811beec11af984219d134df9698c7fac43110ca5a7fbb22c369abb2ec00"
+      },
+      "after_painter_png": {
+        "relative_path": "d2-s4-light/captures/capture-20261028-061105-799-d9d6ae5a-1092-4f20-a34c-d13b9933b074/stages/04-after-painter-color.png",
+        "bytes": 22078,
+        "sha256": "6b5230145815bd84f279cebe26d8bfa11e4edb1b6eec5d456a98e66d7f1f2dfc",
+        "width": 960,
+        "height": 854,
+        "bit_depth": 8,
+        "color_type": 6
+      },
+      "window_native_png": {
+        "relative_path": "d2-s4-light/window-native.png",
+        "bytes": 88911,
+        "sha256": "9bebbb24e1707785bff23c667b3376cf35dc30d1e87d87ae60a1d343e4b8a417",
+        "width": 1880,
+        "height": 1240,
+        "bit_depth": 8,
+        "color_type": 2
+      },
+      "rings": [
+        {
+          "handle_index": 0,
+          "axis_index": 1,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04085029368302563,
+          "p95": 0.08871166567992772,
+          "halo": 0,
+          "edge_pixels": 419,
+          "halo_pixels": 328,
+          "excluded_pixels": 32,
+          "physical_roi": [
+            781,
+            63,
+            48,
+            47
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 1,
+          "axis_index": 0,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.03685391822244268,
+          "p95": 0.08518427245766723,
+          "halo": 0,
+          "edge_pixels": 422,
+          "halo_pixels": 326,
+          "excluded_pixels": 34,
+          "physical_roi": [
+            881,
+            65,
+            47,
+            48
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        },
+        {
+          "handle_index": 2,
+          "axis_index": 2,
+          "passed": true,
+          "measured": true,
+          "rmse": 0.04129482037023129,
+          "p95": 0.09455248425350671,
+          "halo": 0,
+          "edge_pixels": 430,
+          "halo_pixels": 360,
+          "excluded_pixels": 0,
+          "physical_roi": [
+            828,
+            148,
+            48,
+            48
+          ],
+          "declared_backdrop": [
+            255,
+            255,
+            255
+          ],
+          "observed_halo_mean": [
+            255,
+            255,
+            255
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 20,
+    "passed": 6,
+    "failed": 14,
+    "rings": 60,
+    "passed_rings": 21,
+    "failed_rings": 39,
+    "rmse": {
+      "minimum": 0.030442822794143804,
+      "maximum": 0.12165669994071325
+    },
+    "p95": {
+      "minimum": 0.06700257529286782,
+      "maximum": 0.2924138748630567
+    },
+    "halo": {
+      "minimum": 0,
+      "maximum": 0.011764705882352941
+    },
+    "input_contract_errors": [],
+    "failed_validity_fields": [],
+    "stage_gl_error_fields": [],
+    "source_paths": [
+      ""
+    ],
+    "source_counts": [
+      0
+    ],
+    "first_minimized_case": "d1-s0-light",
+    "default_MSAA_fractional_failure_case": "d1.25-s4-light",
+    "passing_real_renderer_control": "d1.5-s4-light"
+  }
+}
+

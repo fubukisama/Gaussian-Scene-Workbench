@@ -17,6 +17,7 @@
 #include "ModelExport.h"
 #include "ResourceBudget.h"
 #include "ViewportGridSettings.h"
+#include "UiPaintObservation.h"
 #include <memory>
 
 #include <QImage>
@@ -226,6 +227,14 @@ public:
   [[nodiscard]] QRectF selectionHintBounds() const;
   [[nodiscard]] quint64 renderedFrameSerial() const {
     return mRenderedFrameSerial;
+  }
+  // Explicit remote QA only; does not request frames or change presentation.
+  void setUiPaintObservationEnabled(bool enabled) {
+    mUiPaintObservation = {};
+    mUiPaintObservation.enabled = enabled;
+  }
+  [[nodiscard]] const UiPaintObservation &uiPaintObservation() const {
+    return mUiPaintObservation;
   }
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
@@ -651,6 +660,7 @@ private:
   bool mProcessingReferenceCaptureQueued = false;
   quint64 mRenderedFrameSerial = 0;
   quint64 mPresentedFrameSerial = 0;
+  UiPaintObservation mUiPaintObservation;
   QSet<QString> mProcessingReferenceSelection;
   bool mProcessingReferenceSelected = false;
   bool mProcessingPreviewVisible = false;

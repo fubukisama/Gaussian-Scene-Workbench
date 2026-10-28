@@ -60,6 +60,9 @@ jobs:
           & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_clarity.py 2>&1 |
             Tee-Object -FilePath "$env:GSW_UI_ROOT/oracle-contracts.log"
           if ($LASTEXITCODE -ne 0) { throw 'Independent pixel oracle failed; preserve the red signal.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_performance.py 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_ROOT/performance-contracts.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Performance evaluator contracts failed; no local fallback.' }
       - uses: jurplel/install-qt-action@v4
         if: inputs.scope != 'oracle-only'
         with:
