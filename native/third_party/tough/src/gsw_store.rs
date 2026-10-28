@@ -90,6 +90,21 @@ pub fn sha256(bytes: &[u8]) -> String {
     digest(&SHA256, bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Validate an independent installation-level trust anchor, optionally creating
+/// it atomically for a genuinely fresh store. Keeping this outside the journal
+/// directory makes loss of that whole directory fail closed instead of reset.
+pub fn durable_anchor(path: &Path, expected: &[u8], create: bool) -> io::Result<()> {
+    if expected.is_empty() || expected.len() > 1024 { return Err(invalid()); }
+    match fs::symlink_metadata(path) {
+        Ok(_) => {
+            if read_bounded(path, 1024)? != expected { return Err(invalid()); }
+            Ok(())
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound && create => atomic_write(path, expected, "installation-anchor"),
+        Err(e) => Err(e),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {

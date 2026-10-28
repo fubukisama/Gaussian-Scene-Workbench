@@ -5,6 +5,25 @@
 
 namespace gsw {
 using namespace activation;
+namespace {
+Json immutableOffer(Json offer) {
+  for (const auto &key : {"channel", "releaseSequence", "metadataRevision", "releaseNotes", "revokedBuildIds"}) offer.erase(key);
+  return offer;
+}
+void pointToSlot(const QString &root, const QString &id, const QString &exeHash) {
+  const QString pointer = QDir(root).filePath(QStringLiteral("current.json"));
+  if (QFileInfo::exists(pointer)) {
+    // A malformed pointer is backed up as bytes, never parsed as a prerequisite
+    // to recovery. This operation cannot reset independent TUF state.
+    const auto previous = read(pointer, 16384);
+    const QString backups = QDir(root).filePath(QStringLiteral("updates/pointer-backups"));
+    ensureDirectory(backups);
+    durableWrite(QDir(backups).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json")), previous, false);
+  }
+  Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", exeHash.toStdString()}};
+  durableWrite(pointer, QByteArray::fromStdString(active.dump()), true);
+}
+}
 struct NativeInstallationLock::Impl {
   QString root, error;
 #ifdef Q_OS_WIN
@@ -38,9 +57,13 @@ QString NativeInstallationLock::error() const { return m->error; }
 QString NativeInstallationLock::installationRoot() const { return m->root; }
 NativeActivationResult NativeActivationCore::install(const QString &root, const QString &archive,
     const NativeVerifiedUpdate &update, const NativeInstallationLock &lock) {
-  if (QDir::cleanPath(root) != update.installationRoot || update.descriptorSha256.isEmpty())
+  if (QDir::cleanPath(root) != update.installationRoot || update.descriptorSha256.isEmpty() || update.historical)
     return {false, QStringLiteral("activation_admission_invalid"), {}};
   return publish(root, archive, update.offer, lock, false, update.descriptorSha256);
+}
+NativeActivationResult NativeActivationCore::rollback(const QString &, const NativeVerifiedUpdate &,
+    const NativeInstallationLock &) {
+  return {false, QStringLiteral("rollback_not_implemented"), {}};
 }
 NativeActivationResult NativeActivationCore::publish(const QString &root, const QString &archive,
     const QByteArray &offerBytes, const NativeInstallationLock &lock, bool developer, const QString &descriptorSha256) {
@@ -121,38 +144,36 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     const QString receipts = QDir(updates).filePath(QStringLiteral("receipts"));
     const QString versions = QDir(root).filePath(QStringLiteral("versions"));
     ensureDirectory(staging); ensureDirectory(receipts); ensureDirectory(versions);
-    const QString stage = QDir(staging).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
-    if (QFileInfo::exists(stage)) fail("activation_staging_collision");
-    ensureDirectory(stage);
-    for (const auto &entry : entries) {
-      const QString path = QDir(stage).filePath(entry.name);
-      ensureDirectory(QFileInfo(path).absolutePath());
-      QFile output(path);
-      if (!output.open(QIODevice::WriteOnly | QIODevice::NewOnly)) fail("activation_extract_write_failed");
-      Writer writer(&output, entry.size);
-      if (!mz_zip_reader_extract_to_callback(&zip.z, entry.index, zipWrite, &writer, 0) || writer.written != entry.size || !output.flush()) fail("activation_archive_corrupt");
-      if (!entry.sha256.isEmpty() && QString::fromLatin1(writer.hash.result().toHex()) != entry.sha256) fail("activation_payload_digest_mismatch");
-#ifdef Q_OS_WIN
-      if (!FlushFileBuffers(reinterpret_cast<HANDLE>(_get_osfhandle(output.handle())))) fail("activation_extract_write_failed");
-#endif
-      output.close();
-    }
-    verifySource(stage, entries, entries[exe].sha256, sourceHash);
     const QString slot = QDir(versions).filePath(id);
-    if (QFileInfo::exists(slot) || !ordinary(slot, true) || !QDir().rename(stage, slot)) fail("activation_slot_exists_or_occupied");
+    if (!QFileInfo::exists(slot)) {
+      const QString stage = QDir(staging).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
+      if (QFileInfo::exists(stage)) fail("activation_staging_collision");
+      ensureDirectory(stage);
+      for (const auto &entry : entries) {
+        const QString path = QDir(stage).filePath(entry.name);
+        ensureDirectory(QFileInfo(path).absolutePath());
+        QFile output;
+        secureOutputOpen(output, path);
+        Writer writer(&output, entry.size);
+        if (!mz_zip_reader_extract_to_callback(&zip.z, entry.index, zipWrite, &writer, 0) || writer.written != entry.size || !output.flush()) fail("activation_archive_corrupt");
+        if (!entry.sha256.isEmpty() && QString::fromLatin1(writer.hash.result().toHex()) != entry.sha256) fail("activation_payload_digest_mismatch");
+#ifdef Q_OS_WIN
+        if (!FlushFileBuffers(reinterpret_cast<HANDLE>(_get_osfhandle(output.handle())))) fail("activation_extract_write_failed");
+#endif
+        output.close();
+      }
+      verifySource(stage, entries, entries[exe].sha256, sourceHash);
+      if (!ordinary(slot, true) || !QDir().rename(stage, slot)) fail("activation_slot_exists_or_occupied");
+    }
+    // Re-entry after a process failure never overwrites a slot. The exact
+    // already-installed file set must independently match this admitted offer.
+    const auto installed = verifyInstalledSlot(slot, offer);
+    if (installed.executableSha256 != entries[exe].sha256) fail("activation_slot_digest_mismatch");
     Json receipt{{"schema", "gsw.native_activation_receipt/1"}, {"mode", developer ? "developer" : "online"},
       {"offer", offer}, {"manifestSha256", manifestHash.toStdString()}, {"executableSha256", entries[exe].sha256.toStdString()}};
     if (!developer) { sha(descriptorSha256); receipt["descriptorSha256"] = descriptorSha256.toStdString(); }
-    durableWrite(QDir(receipts).filePath(id + QStringLiteral(".json")), QByteArray::fromStdString(receipt.dump()), false);
-    const QString pointer = QDir(root).filePath(QStringLiteral("current.json"));
-    if (QFileInfo::exists(pointer)) {
-      const auto previous = read(pointer, 16384);
-      const QString backups = QDir(updates).filePath(QStringLiteral("pointer-backups"));
-      ensureDirectory(backups);
-      durableWrite(QDir(backups).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json")), previous, false);
-    }
-    Json active{{"schema", "gsw.native_active_version/1"}, {"version", id.toStdString()}, {"executableSha256", entries[exe].sha256.toStdString()}};
-    durableWrite(pointer, QByteArray::fromStdString(active.dump()), true);
+    durableWrite(QDir(receipts).filePath(id + QStringLiteral(".json")), QByteArray::fromStdString(receipt.dump()), true);
+    pointToSlot(root, id, installed.executableSha256);
     return {true, QStringLiteral("ACTIVATED"), id};
   } catch (const Failure &e) { return {false, e.code, id}; }
     catch (const Json::exception &) { return {false, QStringLiteral("activation_json_invalid"), id}; }

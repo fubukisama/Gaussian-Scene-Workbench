@@ -101,7 +101,7 @@ impl Profile {
 }
 
 pub fn safe_token(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 128 && value.as_bytes()[0].is_ascii_alphanumeric()
+    !value.is_empty() && value.len() <= 96 && value.as_bytes()[0].is_ascii_alphanumeric()
         && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
         && !value.ends_with('.') && !value.contains("..")
         && !matches!(value.split('.').next().unwrap_or("").to_ascii_uppercase().as_str(),

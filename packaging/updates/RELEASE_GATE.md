@@ -70,3 +70,11 @@ channel metadata. Public anonymous download, production TUF root custody and
 rotation, Authenticode and bootstrap migration remain separate acceptance gates.
 This repository's current update workflow is test-only and does not implement
 or authorize that publisher.
+
+Official API boundaries (read-only):
+
+- [Effective branch rules, including organization rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch)
+- [Classic branch protection](https://docs.github.com/en/rest/branches/branch-protection#get-branch-protection)
+- [Jobs for a specified run attempt](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
+- [Check-run identity](https://docs.github.com/en/rest/checks/runs#get-a-check-run)
+- [Immutable artifact identity and download](https://docs.github.com/en/rest/actions/artifacts)
