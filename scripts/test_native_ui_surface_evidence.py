@@ -39,6 +39,12 @@ def write_json(path, value):
     path.write_text(json.dumps(value, allow_nan=False), encoding="utf-8")
 
 
+def unqueried_font_fact(font):
+    font.update(exactMatch=None, exactMatchQuery="not_queried_qt683_multifamily_crash",
+                requestedFamily="Contract font", requestedFamilies=["Contract font", "Contract CJK fallback"],
+                requestedPointSize=10.0, requestedPixelSize=-1, weight=400, deviceLogicalDpi=[96, 96])
+
+
 class SurfaceEvidenceCliContracts(unittest.TestCase):
     def setUp(self):
         if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -207,6 +213,94 @@ class SurfaceEvidenceCliContracts(unittest.TestCase):
         code, result = self.evaluate()
         self.assertEqual((code, result["status"]), (3, "PARTIAL"), result)
         self.assertIn("bounded limit reached", "\n".join(result["missing"]))
+
+    def test_unqueried_exact_match_preserves_fallback_and_other_font_facts(self):
+        self.change_report(lambda report: [
+            unqueried_font_fact(font) for row in report["surfaces"] for font in row["visibleWidgetFontResolution"]])
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"]), (0, "EVIDENCE_COMPLETE"), result)
+        self.assertEqual(result["visualAcceptance"], "NOT_RUN")
+        self.assertEqual(result["nativeCaptureCount"], 30)
+
+    def test_null_exact_match_without_precise_reason_is_rejected(self):
+        def change(report):
+            font = report["surfaces"][0]["visibleWidgetFontResolution"][0]
+            unqueried_font_fact(font)
+            font.pop("exactMatchQuery")
+        self.change_report(change)
+        self.assert_failed("null exactMatch requires the precise unsafe-query reason")
+
+    def test_unknown_exact_match_query_reason_is_rejected(self):
+        def change(report):
+            font = report["surfaces"][0]["visibleWidgetFontResolution"][0]
+            unqueried_font_fact(font)
+            font["exactMatchQuery"] = "unknown_or_ignored"
+        self.change_report(change)
+        self.assert_failed("null exactMatch requires the precise unsafe-query reason")
+
+    def test_unqueried_exact_match_cannot_be_fabricated_true(self):
+        def change(report):
+            font = report["surfaces"][0]["visibleWidgetFontResolution"][0]
+            unqueried_font_fact(font)
+            font["exactMatch"] = True
+        self.change_report(change)
+        self.assert_failed("legacy exactMatch boolean cannot claim an unqueried predicate")
+
+    def test_unqueried_font_still_requires_requested_fallback_families(self):
+        def change(report):
+            font = report["surfaces"][0]["visibleWidgetFontResolution"][0]
+            unqueried_font_fact(font)
+            font.pop("requestedFamilies")
+        self.change_report(change)
+        self.assert_failed("unqueried exactMatch must preserve requested fallback families")
+
+    def test_unqueried_font_does_not_bypass_missing_glyph_failure(self):
+        def change(report):
+            font = report["surfaces"][0]["visibleWidgetFontResolution"][0]
+            unqueried_font_fact(font)
+            font["mixedScriptGlyphRuns"][0]["missingGlyphCount"] = 1
+        self.change_report(change)
+        self.assert_failed("fixed probe contains missing glyphs")
+
+    def test_behavior_failure_retains_all_images_and_sixteen_dialog_matrix(self):
+        self.forms(complete=True)
+        path = self.root / "style-contracts/ctest.xml"
+        tree = ET.parse(path)
+        ET.SubElement(next(tree.getroot().iter("testcase")), "skipped")
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"], result["behaviorStatus"]), (2, "FAIL", "FAIL"), result)
+        self.assertEqual(result["integrityStatus"], "VALID")
+        self.assertEqual(result["rawPngCount"], 402)
+        self.assertEqual(result["nativeCaptureCount"], 222)
+        self.assertEqual(len(result["originalTests"]), 33)
+        self.assertEqual(len(result["dialogCoverage"]), 16)
+        self.assertTrue(all(item["status"] == "EVIDENCE_COMPLETE" for item in result["dialogCoverage"]))
+        self.assertEqual(result["visualAcceptance"], "NOT_RUN")
+
+    def test_bad_native_row_does_not_suppress_later_valid_row_in_same_report(self):
+        self.change_report(lambda report: report["surfaces"][0]["visibleWidgetFontResolution"][0]["mixedScriptGlyphRuns"][0].update(missingGlyphCount=1))
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"]), (2, "FAIL"), result)
+        self.assertEqual(result["rawPngCount"], 210)
+        self.assertEqual(result["nativeCaptureCount"], 29)
+        self.assertEqual(len(result["dialogCoverage"]), 16)
+
+    def test_behavior_failure_does_not_hide_independent_bad_image_evidence(self):
+        path = self.root / "style-contracts/ctest.xml"
+        tree = ET.parse(path)
+        ET.SubElement(next(tree.getroot().iter("testcase")), "failure")
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+        self.change_report(lambda report: report["surfaces"][0].update(sha256="0" * 64))
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"], result["integrityStatus"], result["behaviorStatus"]),
+                         (2, "FAIL", "FAIL", "FAIL"), result)
+        messages = "\n".join(result["errors"])
+        self.assertIn("original CTest behavior failed/skipped", messages)
+        self.assertIn("native metadata/image SHA mismatch", messages)
+        self.assertEqual(result["rawPngCount"], 210)
+        self.assertEqual(result["nativeCaptureCount"], 29)
+        self.assertEqual(len(result["dialogCoverage"]), 16)
 
 
 if __name__ == "__main__":

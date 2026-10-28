@@ -15,6 +15,10 @@ $env:QT_OPENGL='software'
 $env:GSW_SWAP_INTERVAL='1'
 Remove-Item Env:GSW_RENDER_DIAGNOSTICS_DIR -ErrorAction SilentlyContinue
 Remove-Item Env:GSW_RENDER_DIAGNOSTICS_SMOKE -ErrorAction SilentlyContinue
+Remove-Item Env:GSW_UI_SURFACE_EVIDENCE -ErrorAction SilentlyContinue
+Remove-Item Env:GSW_UI_QA_TRACE -ErrorAction SilentlyContinue
+Remove-Item Env:GSW_UI_CRASH_DIR -ErrorAction SilentlyContinue
+Remove-Item Env:GSW_UI_QA_GRAYSCALE_TEXT -ErrorAction SilentlyContinue
 $processes=@()
 $watch=[Diagnostics.Stopwatch]::StartNew()
 $groups=@(@{id='empty-dpr1';scenario='empty';dpr=1},@{id='empty-dpr2';scenario='empty';dpr=2},

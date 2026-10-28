@@ -118,6 +118,7 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/TransformOverlayKey.h
   src/UiSurfaceEvidence.cpp
   src/UiSurfaceEvidence.h
+  src/FontResolutionEvidence.h
   src/GizmoViewportSmokeTest.cpp
   src/GizmoViewportSmokeTest.h
   src/UiCrashDiagnostics.cpp
@@ -2072,6 +2073,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME ui_visual_roles COMMAND gsw_ui_visual_role_tests)
     set_tests_properties(ui_visual_roles PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=windows"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
+
+    qt_add_executable(gsw_font_resolution_evidence_tests tests/FontResolutionEvidenceTests.cpp src/FontResolutionEvidence.h)
+    target_include_directories(gsw_font_resolution_evidence_tests PRIVATE src)
+    target_link_libraries(gsw_font_resolution_evidence_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_font_resolution_evidence_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME font_resolution_evidence COMMAND gsw_font_resolution_evidence_tests)
+    set_tests_properties(font_resolution_evidence PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=windows"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
 
     qt_add_executable(gsw_transform_overlay_key_tests tests/TransformOverlayKeyTests.cpp src/TransformOverlayKey.h)

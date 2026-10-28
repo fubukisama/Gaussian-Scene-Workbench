@@ -26,6 +26,7 @@ PROBE_GLYPHS = 17  # Adapter fixed probe: Latin 中文 日本語 0123.
 NARROW_MAXIMUM = 720
 PIXEL_LIMIT = 16 * 1024 * 1024
 MACHINE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_:.-]{0,95}$")
+UNQUERIED_EXACT_MATCH_REASON = "not_queried_qt683_multifamily_crash"
 
 
 class EvidenceError(ValueError):
@@ -128,7 +129,27 @@ def glyph_records(records: Any) -> tuple[int, set[str]]:
         require(item.get("fontRoleScope") == "QWidget-default-not-custom-painter", "font scope must remain explicit")
         require(isinstance(item.get("resolvedFamily"), str) and bool(item["resolvedFamily"]), "actual resolved font family missing")
         families.add(item["resolvedFamily"])
-        require(type(item.get("enabled")) is bool and type(item.get("exactMatch")) is bool, "font state facts missing")
+        require(type(item.get("enabled")) is bool and "exactMatch" in item, "font state facts missing")
+        if item["exactMatch"] is None:
+            require(item.get("exactMatchQuery") == UNQUERIED_EXACT_MATCH_REASON,
+                    "null exactMatch requires the precise unsafe-query reason")
+            requested = item.get("requestedFamilies")
+            require(isinstance(requested, list) and bool(requested) and
+                    all(isinstance(family, str) and bool(family) for family in requested) and
+                    isinstance(item.get("requestedFamily"), str) and bool(item["requestedFamily"]),
+                    "unqueried exactMatch must preserve requested fallback families")
+            requested_point, requested_pixel = item.get("requestedPointSize"), item.get("requestedPixelSize")
+            require((type(requested_point) in (int, float) and math.isfinite(requested_point) and requested_point > 0) or
+                    (type(requested_pixel) is int and requested_pixel > 0), "requested font size missing")
+            integer(item.get("weight"), "actual font weight", 1)
+        else:
+            require(type(item["exactMatch"]) is bool and "exactMatchQuery" not in item,
+                    "legacy exactMatch boolean cannot claim an unqueried predicate")
+        if "deviceLogicalDpi" in item:
+            dpi = item["deviceLogicalDpi"]
+            require(isinstance(dpi, list) and len(dpi) == 2 and
+                    all(type(value) in (int, float) and math.isfinite(value) and value > 0 for value in dpi),
+                    "actual font paint-device DPI missing")
         point_size, pixel_size = item.get("pointSize"), item.get("pixelSize")
         require((type(point_size) in (int, float) and math.isfinite(point_size) and point_size > 0) or
                 (type(pixel_size) is int and pixel_size > 0), "actual font size missing")
@@ -154,8 +175,65 @@ def width_bucket(record: dict[str, Any]) -> str | None:
     return None
 
 
+def validate_capture(row: dict[str, Any], path: Path, relative: str, indexed: dict) -> tuple[dict, bool]:
+    require(row.get("locale") in LOCALES and row.get("theme") in THEMES, "surface locale/theme missing")
+    logical = row.get("logicalSize")
+    require(isinstance(logical, list) and len(logical) == 2 and all(type(n) is int and n > 0 for n in logical),
+            "surface logical dimensions missing")
+    dpr = number(row.get("widgetDpr"), "actual widget DPR", .1)
+    require(dpr <= 8 and row.get("dimensionsMatchWidgetDpr") is True, "dimensions do not match actual DPR")
+    name = row.get("image")
+    require(isinstance(name, str) and re.fullmatch(r"surface-[0-9]{4}\.png", name), "owned surface image basename required")
+    image_path = path.parent / name
+    require(image_path in indexed, "native capture PNG missing from byte index")
+    bound = indexed[image_path]
+    require(row.get("sha256") == bound["sha256"], "native metadata/image SHA mismatch")
+    require(row.get("physicalImageSize") == bound["physicalSize"] and
+            all(abs(actual - expected * dpr) <= 1 for actual, expected in zip(bound["physicalSize"], logical)),
+            "native PNG dimensions mismatch metadata/widget DPR")
+    require(row.get("captureMethod") == "QScreen::grabWindow(owned existing native client id)" and
+            row.get("occlusionCheck") == "Win32-z-order-client-rect" and
+            isinstance(row.get("nativeWindowId"), str) and int(row["nativeWindowId"], 16) > 0,
+            "native client capture provenance missing")
+    for field in ("pixmapDpr", "nativeWindowDpr", "screenDpr", "screenLogicalDpi"):
+        number(row.get(field), field, .1)
+    integer(row.get("actualWindowsWindowDpi"), "actualWindowsWindowDpi", 1)
+    integer(row.get("uiScalePercent"), "uiScalePercent", 1)
+    font_count, families = glyph_records(row.get("visibleWidgetFontResolution"))
+    require(type(row.get("fontRecordsMayBeTruncated")) is bool, "font truncation fact missing")
+    actual_class = row["class"]
+    item = {"report": relative, "image": bound["path"], "class": actual_class.split("::")[-1],
+        "actualQtClass": actual_class, "typedRole": row.get("typedRole"), "locale": row["locale"], "theme": row["theme"],
+        "logicalSize": logical, "widgetDpr": dpr, "uiScalePercent": row["uiScalePercent"],
+        "widthBucket": width_bucket(row), "fontRecords": font_count, "resolvedFamilies": sorted(families)}
+    bound["provenance"] = "source-bound owned native client with fixed-probe font facts"
+    return item, row["fontRecordsMayBeTruncated"]
+
+
+def dialog_coverage(dialog: dict, captured: list[dict], skipped: list[dict]) -> dict:
+    rows = [item for item in captured if item["class"] == dialog["class"] and item["typedRole"] == "dialog"]
+    cells = []
+    for locale in LOCALES:
+        for theme in THEMES:
+            for width in WIDTHS:
+                found = [item for item in rows if item["locale"] == locale and item["theme"] == theme and
+                         item["widthBucket"] == width and item["widgetDpr"] == 1.0]
+                skip = [item for item in skipped if item["class"].split("::")[-1] == dialog["class"] and
+                        item.get("locale") == locale and item.get("theme") == theme and width_bucket(item) == width]
+                cells.append({"locale": locale, "theme": theme, "widthBucket": width, "widgetDpr": 1.0,
+                    "status": "CAPTURED" if found else "SKIP" if skip else "NOT_RUN",
+                    "images": [item["image"] for item in found], "skipReasons": sorted({str(item.get("reason")) for item in skip})})
+    missing_cells = [item for item in cells if item["status"] != "CAPTURED"]
+    return {**dialog, "status": "NOT_RUN" if not rows else "PARTIAL" if missing_cells else "EVIDENCE_COMPLETE",
+        "captureCount": len(rows), "locales": sorted({item["locale"] for item in rows}),
+        "themes": sorted({item["theme"] for item in rows}), "logicalWidths": sorted({item["logicalSize"][0] for item in rows}),
+        "actualDprs": sorted({item["widgetDpr"] for item in rows}), "uiScales": sorted({item["uiScalePercent"] for item in rows}),
+        "minimumMatrix": cells, "missingVariants": missing_cells, "visualReview": "NOT_RUN"}
+
+
 def evaluate(root: Path, source_commit: str, inventory_path: Path) -> dict[str, Any]:
     errors, missing, skipped, images, captured, dialog_results, original_tests = [], [], [], [], [], [], []
+    behavior_errors = []
     scope = "NOT_RUN"
     report_count = font_total = truncated_fonts = 0
     try:
@@ -187,39 +265,48 @@ def evaluate(root: Path, source_commit: str, inventory_path: Path) -> dict[str, 
             if not batch:
                 missing.append("original behavior batch NOT_RUN: " + intended["id"])
                 continue
-            require(batch.get("expectedTests") == intended["tests"] and batch.get("dpr") == intended["dpr"], "CTest expected set changed")
-            xml_path = owned_path(root, batch.get("junit"))
-            require(xml_path.is_file() and xml_path.stat().st_size <= 16 * 1024 * 1024, "CTest XML missing/unbounded")
-            tests = list(ET.parse(xml_path).getroot().iter("testcase"))
-            require(len(tests) == len(intended["tests"]) and sorted(t.get("name") for t in tests) == sorted(intended["tests"]),
-                    "missing/duplicate original CTest assertion boundary")
-            failed = []
-            for test in tests:
-                status = "FAIL" if test.find("failure") is not None or test.find("error") is not None else (
-                    "SKIP" if test.find("skipped") is not None or test.get("status") == "notrun" else "PASS")
-                original_tests.append({"batch": intended["id"], "name": test.get("name"), "status": status})
-                if status != "PASS":
-                    failed.append(test.get("name", "unknown") + ":" + status)
-            require(batch.get("exitCode") == 0 and not failed, "original CTest behavior failed/skipped: " + ",".join(failed))
+            try:
+                require(batch.get("expectedTests") == intended["tests"] and batch.get("dpr") == intended["dpr"], "CTest expected set changed")
+                xml_path = owned_path(root, batch.get("junit"))
+                require(xml_path.is_file() and xml_path.stat().st_size <= 16 * 1024 * 1024, "CTest XML missing/unbounded")
+                tests = list(ET.parse(xml_path).getroot().iter("testcase"))
+                require(len(tests) == len(intended["tests"]) and sorted(t.get("name") for t in tests) == sorted(intended["tests"]),
+                        "missing/duplicate original CTest assertion boundary")
+                failed = []
+                for test in tests:
+                    status = "FAIL" if test.find("failure") is not None or test.find("error") is not None or test.get("status") == "fail" else (
+                        "SKIP" if test.find("skipped") is not None or test.get("status") == "notrun" else "PASS")
+                    original_tests.append({"batch": intended["id"], "name": test.get("name"), "status": status})
+                    if status != "PASS":
+                        failed.append(test.get("name", "unknown") + ":" + status)
+                require(batch.get("exitCode") == 0 and not failed, "original CTest behavior failed/skipped: " + ",".join(failed))
+            except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, ET.ParseError) as error:
+                message = intended["id"] + ": " + str(error)
+                errors.append(message)
+                behavior_errors.append(message)
         index = read_json(root / "png-index.json")
         require(index.get("schema") == "gsw.ui_surface_png_index/1" and index.get("sourceCommit") == source_commit,
                 "PNG index source/schema mismatch")
         indexed = {}
         for item in index["images"]:
-            path = owned_path(root, item.get("path"))
-            require(path.suffix.lower() == ".png" and path.is_file() and path not in indexed, "missing/duplicate PNG index entry")
-            actual_hash = digest(path)
-            require(actual_hash == hash_value(item.get("sha256"), "PNG index SHA"), "indexed PNG byte hash mismatch")
-            with Image.open(path) as png:
-                require(png.format == "PNG", "indexed image is not PNG")
-                physical = list(png.size)
-                require(0 < physical[0] * physical[1] <= PIXEL_LIMIT, "PNG physical pixel bound exceeded")
-                png.verify()
-            entry = {"path": item["path"], "sha256": actual_hash, "physicalSize": physical,
-                     "provenance": "test-owned raw PNG; not a native capture unless bound below"}
-            indexed[path] = entry
-            images.append(entry)
-        require({path for path in root.rglob("*.png")} == set(indexed), "raw PNG inventory omitted/added files")
+            try:
+                path = owned_path(root, item.get("path"))
+                require(path.suffix.lower() == ".png" and path.is_file() and path not in indexed, "missing/duplicate PNG index entry")
+                actual_hash = digest(path)
+                require(actual_hash == hash_value(item.get("sha256"), "PNG index SHA"), "indexed PNG byte hash mismatch")
+                with Image.open(path) as png:
+                    require(png.format == "PNG", "indexed image is not PNG")
+                    physical = list(png.size)
+                    require(0 < physical[0] * physical[1] <= PIXEL_LIMIT, "PNG physical pixel bound exceeded")
+                    png.verify()
+                entry = {"path": item["path"], "sha256": actual_hash, "physicalSize": physical,
+                         "provenance": "test-owned raw PNG; not a native capture unless bound below"}
+                indexed[path] = entry
+                images.append(entry)
+            except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+                errors.append("PNG index entry: " + str(error))
+        if {path for path in root.rglob("*.png")} != set(indexed):
+            errors.append("raw PNG inventory omitted/added files")
         for path in sorted(root.rglob("ui-surfaces.json")):
             no_links(path, root)
             relative = path.relative_to(root).as_posix()
@@ -237,54 +324,30 @@ def evaluate(root: Path, source_commit: str, inventory_path: Path) -> dict[str, 
                         "evidence coverage limitations cannot be removed")
                 rows = report.get("surfaces")
                 require(isinstance(rows, list) and len(rows) <= 512, "bounded surface observations required")
-                count = sum(row.get("status") == "captured" for row in rows)
-                require(report.get("imageCount") == count and count <= 160, "capture count inconsistent")
+                count = sum(isinstance(row, dict) and row.get("status") == "captured" for row in rows)
+                if report.get("imageCount") != count or count > 160:
+                    errors.append(relative + ": capture count inconsistent")
                 if report.get("finished") is not True or report.get("stoppedByLimit") is not False:
                     missing.append(relative + ": capture unfinished or bounded limit reached")
-                for row in rows:
-                    require(row.get("status") in ("captured", "skipped", "failed"), "unknown evidence status")
-                    if row["status"] == "failed":
-                        raise EvidenceError("native capture failed: " + str(row.get("reason")))
-                    actual_class = row.get("class", "")
-                    require(isinstance(actual_class, str) and MACHINE_NAME.fullmatch(actual_class), "actual Qt class identity missing")
-                    if row["status"] == "skipped":
-                        skipped.append({"report": relative, **{key: row.get(key) for key in
-                            ("class", "typedRole", "locale", "theme", "logicalSize", "widgetDpr", "reason", "status")}})
-                        continue
-                    require(row.get("locale") in LOCALES and row.get("theme") in THEMES, "surface locale/theme missing")
-                    logical = row.get("logicalSize")
-                    require(isinstance(logical, list) and len(logical) == 2 and all(type(n) is int and n > 0 for n in logical),
-                            "surface logical dimensions missing")
-                    dpr = number(row.get("widgetDpr"), "actual widget DPR", .1)
-                    require(dpr <= 8 and row.get("dimensionsMatchWidgetDpr") is True, "dimensions do not match actual DPR")
-                    name = row.get("image")
-                    require(isinstance(name, str) and re.fullmatch(r"surface-[0-9]{4}\.png", name), "owned surface image basename required")
-                    image_path = path.parent / name
-                    require(image_path in indexed, "native capture PNG missing from byte index")
-                    bound = indexed[image_path]
-                    require(row.get("sha256") == bound["sha256"], "native metadata/image SHA mismatch")
-                    require(row.get("physicalImageSize") == bound["physicalSize"] and
-                            all(abs(actual - expected * dpr) <= 1 for actual, expected in zip(bound["physicalSize"], logical)),
-                            "native PNG dimensions mismatch metadata/widget DPR")
-                    require(row.get("captureMethod") == "QScreen::grabWindow(owned existing native client id)" and
-                            row.get("occlusionCheck") == "Win32-z-order-client-rect" and
-                            isinstance(row.get("nativeWindowId"), str) and int(row["nativeWindowId"], 16) > 0,
-                            "native client capture provenance missing")
-                    for field in ("pixmapDpr", "nativeWindowDpr", "screenDpr", "screenLogicalDpi"):
-                        number(row.get(field), field, .1)
-                    integer(row.get("actualWindowsWindowDpi"), "actualWindowsWindowDpi", 1)
-                    integer(row.get("uiScalePercent"), "uiScalePercent", 1)
-                    font_count, families = glyph_records(row.get("visibleWidgetFontResolution"))
-                    font_total += font_count
-                    require(type(row.get("fontRecordsMayBeTruncated")) is bool, "font truncation fact missing")
-                    truncated_fonts += row["fontRecordsMayBeTruncated"]
-                    if row["fontRecordsMayBeTruncated"]:
-                        missing.append(relative + "/" + name + ": widget font list reached cap")
-                    captured.append({"report": relative, "image": bound["path"], "class": actual_class.split("::")[-1],
-                        "actualQtClass": actual_class, "typedRole": row.get("typedRole"), "locale": row["locale"], "theme": row["theme"],
-                        "logicalSize": logical, "widgetDpr": dpr, "uiScalePercent": row["uiScalePercent"],
-                        "widthBucket": width_bucket(row), "fontRecords": font_count, "resolvedFamilies": sorted(families)})
-                    bound["provenance"] = "source-bound owned native client with fixed-probe font facts"
+                for row_index, row in enumerate(rows):
+                    try:
+                        require(row.get("status") in ("captured", "skipped", "failed"), "unknown evidence status")
+                        if row["status"] == "failed":
+                            raise EvidenceError("native capture failed: " + str(row.get("reason")))
+                        actual_class = row.get("class", "")
+                        require(isinstance(actual_class, str) and MACHINE_NAME.fullmatch(actual_class), "actual Qt class identity missing")
+                        if row["status"] == "skipped":
+                            skipped.append({"report": relative, **{key: row.get(key) for key in
+                                ("class", "typedRole", "locale", "theme", "logicalSize", "widgetDpr", "reason", "status")}})
+                            continue
+                        item, truncated = validate_capture(row, path, relative, indexed)
+                        font_total += item["fontRecords"]
+                        truncated_fonts += truncated
+                        if truncated:
+                            missing.append(relative + "/" + str(row.get("image")) + ": widget font list reached cap")
+                        captured.append(item)
+                    except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+                        errors.append(relative + f"/observation-{row_index}: " + str(error))
             except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
                 errors.append(relative + ": " + str(error))
         if not report_count:
@@ -304,43 +367,33 @@ def evaluate(root: Path, source_commit: str, inventory_path: Path) -> dict[str, 
                               item["theme"] == theme and item["widgetDpr"] == float(dpr)]
                     if not native:
                         missing.append(f"actual shell {locale}/{theme}/DPR{dpr}: NOT_RUN")
-        for dialog in inventory_dialogs(inventory_path):
-            rows = [item for item in captured if item["class"] == dialog["class"] and item["typedRole"] == "dialog"]
-            cells = []
-            for locale in LOCALES:
-                for theme in THEMES:
-                    for width in WIDTHS:
-                        found = [item for item in rows if item["locale"] == locale and item["theme"] == theme and
-                                 item["widthBucket"] == width and item["widgetDpr"] == 1.0]
-                        skip = [item for item in skipped if item["class"].split("::")[-1] == dialog["class"] and
-                                item.get("locale") == locale and item.get("theme") == theme and width_bucket(item) == width]
-                        cells.append({"locale": locale, "theme": theme, "widthBucket": width, "widgetDpr": 1.0,
-                            "status": "CAPTURED" if found else "SKIP" if skip else "NOT_RUN",
-                            "images": [item["image"] for item in found], "skipReasons": sorted({str(item.get("reason")) for item in skip})})
-            missing_cells = [item for item in cells if item["status"] != "CAPTURED"]
-            dialog_results.append({**dialog, "status": "NOT_RUN" if not rows else "PARTIAL" if missing_cells else "EVIDENCE_COMPLETE",
-                "captureCount": len(rows), "locales": sorted({item["locale"] for item in rows}),
-                "themes": sorted({item["theme"] for item in rows}), "logicalWidths": sorted({item["logicalSize"][0] for item in rows}),
-                "actualDprs": sorted({item["widgetDpr"] for item in rows}), "uiScales": sorted({item["uiScalePercent"] for item in rows}),
-                "minimumMatrix": cells, "missingVariants": missing_cells, "visualReview": "NOT_RUN"})
-            if scope == "forms" and missing_cells:
-                missing.append(dialog["class"] + f": {len(missing_cells)} locale/theme/width variants SKIP/NOT_RUN")
     except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, ET.ParseError) as error:
         errors.append(str(error))
+    # Inventory/missing combinations must remain visible even when an earlier
+    # behavior, metadata or byte-integrity check failed. They do not turn green.
+    try:
+        for dialog in inventory_dialogs(inventory_path):
+            coverage = dialog_coverage(dialog, captured, skipped)
+            dialog_results.append(coverage)
+            if scope == "forms" and coverage["missingVariants"]:
+                missing.append(dialog["class"] + f": {len(coverage['missingVariants'])} locale/theme/width variants SKIP/NOT_RUN")
+    except (EvidenceError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+        errors.append("dialog inventory: " + str(error))
     status = "FAIL" if errors else "PARTIAL" if missing else "EVIDENCE_COMPLETE"
     return {"schema": "gsw.ui_surface_evidence_result/1", "sourceCommit": source_commit, "scope": scope,
-        "status": status, "integrityStatus": "FAIL" if errors else "VALID",
-        "behaviorStatus": "FAIL" if any(item["status"] != "PASS" for item in original_tests) else
+        "status": status, "integrityStatus": "FAIL" if any(error not in behavior_errors for error in errors) else "VALID",
+        "behaviorStatus": "FAIL" if behavior_errors or any(item["status"] != "PASS" for item in original_tests) else
                           "PASS_SELECTED_CONTRACTS" if original_tests and not any("original" in item or "CTest phase" in item for item in missing) else "NOT_RUN_OR_PARTIAL",
         "fullSixteenDialogCoverage": "EVIDENCE_COMPLETE" if len(dialog_results) == 16 and
             all(item["status"] == "EVIDENCE_COMPLETE" for item in dialog_results) else "PARTIAL_OR_NOT_RUN",
-        "visualAcceptance": "NOT_RUN", "errors": errors, "missing": missing,
+        "visualAcceptance": "NOT_RUN", "errors": errors, "behaviorErrors": behavior_errors, "missing": missing,
         "nativeReportCount": report_count, "nativeCaptureCount": len(captured), "rawPngCount": len(images),
         "widgetFontRecordCount": font_total, "fontListsAtCap": truncated_fonts,
         "dialogCoverage": dialog_results, "capturedSurfaces": captured, "skippedSurfaces": skipped,
         "originalTests": original_tests, "pngBytes": images,
         "nativeOsProvider": {"status": "UNSUPPORTED", "reason": "OS-provider dialogs without an owned QWidget cannot be observed; this does not prove they were opened or visually checked"},
         "limitations": ["fixed probe is fallback glyph availability, not actual text legibility or clipping",
+            "exactMatch=null with its explicit unsafe-Qt-query reason means unqueried, not a fabricated true/false",
             "QWidget-default font facts do not measure custom QPainter roles or viewport shaders",
             "captured combinations do not establish an unobserved Cartesian product",
             "full a11y, geometry, lifecycle, performance and installation remain separate gates"],

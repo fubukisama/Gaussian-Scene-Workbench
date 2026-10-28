@@ -136,6 +136,9 @@ private:
   void createStatusBar();
   void connectServices();
   void restoreWindowState();
+  void updateEffectiveWindowMinimum();
+  void fitOversizedWindowToScreen();
+  bool mScreenFitPending = false;
   void saveWindowState();
   void resetDockLayout();
   void updateDockMetrics();

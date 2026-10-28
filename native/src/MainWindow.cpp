@@ -122,6 +122,8 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QUrl>
+#include <QStyle>
+#include <QWindow>
 #include <QtConcurrent>
 
 #include <algorithm>
@@ -136,6 +138,24 @@ namespace {
 constexpr int kDockLayoutStateVersion = 5;
 constexpr int kDefaultTaskDockHeight = 105;
 constexpr int kWorkbenchTreeIconRole = Qt::UserRole + 20;
+
+QMargins mainWindowFrameMargins(const QWidget &window) {
+  QMargins margins = window.windowHandle() ? window.windowHandle()->frameMargins() : QMargins();
+  if (margins.top() <= 0 && !window.isFullScreen())
+    margins.setTop(std::max(24, window.style()->pixelMetric(QStyle::PM_TitleBarHeight, nullptr, &window)));
+  return margins;
+}
+
+void centerWindowFrame(QWidget &window, const QRect &available) {
+  const auto margins = mainWindowFrameMargins(window);
+  const QSize decorated = window.size() + QSize(std::max(0, margins.left()) + std::max(0, margins.right()),
+                                                std::max(0, margins.top()) + std::max(0, margins.bottom()));
+  const QPoint desiredFrame = available.center() - QPoint(decorated.width() / 2, decorated.height() / 2);
+  // Top-level position/frame conventions differ between platforms. Preserve
+  // the actually observed offset rather than counting the title bar twice.
+  const QPoint positionToFrame = window.pos() - window.frameGeometry().topLeft();
+  window.move(desiredFrame + positionToFrame);
+}
 
 // Keep visibility clicks separate from selection, like Blender's Outliner.
 // The underlying check-state remains available to keyboard and accessibility
@@ -895,7 +915,7 @@ MainWindow::MainWindow(QWidget *parent)
   AppLanguage::bind(this, "windowTitle", AppLanguage::source("Native Preview"));
   setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks |
                  QMainWindow::AllowTabbedDocks);
-  setMinimumSize(940, 620);
+  updateEffectiveWindowMinimum();
 
   mViewport = new NativeViewport(this);
   setCentralWidget(mViewport);
@@ -989,6 +1009,15 @@ MainWindow::~MainWindow() {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (watched == this && (event->type() == QEvent::Show ||
+      event->type() == QEvent::ScreenChangeInternal || event->type() == QEvent::DevicePixelRatioChange) &&
+      !mScreenFitPending) {
+    mScreenFitPending = true;
+    QTimer::singleShot(0, this, [this] {
+      mScreenFitPending = false;
+      fitOversizedWindowToScreen();
+    });
+  }
   const bool dropSurface = watched == this || watched == mViewport ||
       (mProjectTree && watched == mProjectTree->viewport());
   if (watched == mViewport && event->type() == QEvent::Resize &&
@@ -3990,6 +4019,7 @@ void MainWindow::restoreWindowState() {
       settings.value(QStringLiteral("window/geometry")).toByteArray();
   const QByteArray state =
       settings.value(QStringLiteral("window/state")).toByteArray();
+  updateEffectiveWindowMinimum();
   if (!geometry.isEmpty()) {
     restoreGeometry(geometry);
   } else {
@@ -3997,12 +4027,36 @@ void MainWindow::restoreWindowState() {
         QGuiApplication::primaryScreen()->availableGeometry();
     const QSize size(std::min(available.width() * 92 / 100, 1600),
                      std::min(available.height() * 90 / 100, 1000));
-    resize(size);
-    move(available.center() - rect().center());
+    const QSize capacity = AppTheme::effectiveWindowMinimum(available.size(), available.size(), mainWindowFrameMargins(*this));
+    resize(AppTheme::fitWindowResolution(size, capacity, minimumSize()));
+    centerWindowFrame(*this, available);
   }
   if (state.isEmpty() || !restoreState(state, kDockLayoutStateVersion)) {
     resetDockLayout();
   }
+  fitOversizedWindowToScreen();
+}
+
+void MainWindow::updateEffectiveWindowMinimum() {
+  if (property("gswUiPerformancePrepared").toBool()) return;
+  QScreen *active = screen() ? screen() : QGuiApplication::primaryScreen();
+  setMinimumSize(active ? AppTheme::effectiveWindowMinimum(QSize(940, 620),
+      active->availableGeometry().size(), mainWindowFrameMargins(*this)) : QSize(940, 620));
+}
+
+void MainWindow::fitOversizedWindowToScreen() {
+  if (property("gswUiPerformancePrepared").toBool() || isMinimized()) return;
+  QScreen *active = screen() ? screen() : QGuiApplication::primaryScreen();
+  if (!active) return;
+  updateEffectiveWindowMinimum();
+  if (isMaximized() || isFullScreen()) return;
+  const QRect available = active->availableGeometry();
+  const QSize capacity = AppTheme::effectiveWindowMinimum(available.size(), available.size(), mainWindowFrameMargins(*this));
+  // Do not snap an intentionally spanning/dragged window just for moving
+  // between screens. Resize only when its client cannot fit the active screen.
+  if (width() <= capacity.width() && height() <= capacity.height()) return;
+  resize(AppTheme::fitWindowResolution(size(), capacity, minimumSize()));
+  centerWindowFrame(*this, available);
 }
 
 void MainWindow::saveWindowState() {
@@ -4290,13 +4344,13 @@ void MainWindow::applyWindowResolution(const QSize &requestedSize) {
   }
 
   const QRect available = activeScreen->availableGeometry();
+  updateEffectiveWindowMinimum();
+  const QSize capacity = AppTheme::effectiveWindowMinimum(available.size(), available.size(), mainWindowFrameMargins(*this));
   const QSize fitted = AppTheme::fitWindowResolution(
-      requestedSize, available.size(), minimumSize());
+      requestedSize, capacity, minimumSize());
   showNormal();
   resize(fitted);
-  move(available.topLeft() +
-       QPoint((available.width() - fitted.width()) / 2,
-              (available.height() - fitted.height()) / 2));
+  centerWindowFrame(*this, available);
   scheduleAutomaticUiScale();
   statusBar()->showMessage(QCoreApplication::translate("Workbench", "窗口已调整为 %1 × %2")
                                .arg(fitted.width())

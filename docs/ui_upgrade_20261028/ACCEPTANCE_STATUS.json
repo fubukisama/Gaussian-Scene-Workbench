@@ -1,0 +1,4550 @@
+{
+  "schema": "gsw.ui_upgrade_acceptance_status/1",
+  "snapshot_utc": "2026-10-28T08:52:28Z",
+  "snapshot_kind": "CURRENT_EVIDENCE_INDEX_NOT_COMPLETION_REPORT",
+  "status": "NOT_RUN",
+  "overall_interpretation": "Current-source whole-product acceptance remains incomplete. Known017f78c runtime/performance-contract failures remain open;scoped historical passes are not promoted to ffb8eb2.",
+  "classification_values": [
+    "PASS",
+    "FAIL",
+    "NOT_RUN",
+    "UNSUPPORTED",
+    "NOT_APPLICABLE"
+  ],
+  "classification_rule": "PASS only within the stated source/environment/seam. FAIL is an executed unmet gate and remains open until matching evidence closes it. NOT_RUN includes pending/unread runs. UNSUPPORTED is not waived or passed. NOT_APPLICABLE needs explicit impact analysis.",
+  "source": {
+    "workspace": "D:/CodexProjects/Ishida_Lab/Documents/git",
+    "named_branch": "main",
+    "last_locally_observed_head": "ffb8eb23679575ff55a3207b35c21e6f8225ceff",
+    "last_locally_observed_tree": "8d8ec309e578b7c5c9a43865abf4e62ac1ef137b",
+    "local_source_observation_utc": "2026-10-28T08:38:59Z",
+    "inventory_source": "5183926e09f5b568379bb1f89ee1667a9bd38121",
+    "pixel_baseline_source": "4f1dbb8f2ad086b3d855e112b835d6b641f81bf9",
+    "last_completed_pixel_runtime_candidate": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+    "pair_baseline_source": "b0e9fae5c53156b74e247e9c56ab3d0bd1e4a0ff",
+    "source_identity_status": "PASS",
+    "current_source_runtime_status": "NOT_RUN",
+    "note": "Identity is a local snapshot,not a claim that pending jobs passed or a fresh product EXE/Setup was delivered."
+  },
+  "dimensions": [
+    {
+      "id": "source_identity",
+      "status": "PASS",
+      "scope": "Recorded source/tree/main/inventory and immutable evidence identity only",
+      "evidence_refs": [
+        "E-BASE",
+        "E-INV"
+      ]
+    },
+    {
+      "id": "measured_environment",
+      "status": "PASS",
+      "scope": "Prior017f78c synthetic Windows/Mesa controlled-DPR environment metadata only",
+      "evidence_refs": [
+        "E-CPIX"
+      ],
+      "limits": [
+        "Not user's NVIDIA driver",
+        "Not five native OS-DPI settings",
+        "Not real cross-monitor migration"
+      ]
+    },
+    {
+      "id": "current_visual",
+      "status": "NOT_RUN",
+      "scope": "ffb8eb2 whole-product visual acceptance;prior Chinese edge subgate is separately PASS",
+      "evidence_refs": [
+        "E-CPIX",
+        "E-P1"
+      ]
+    },
+    {
+      "id": "interaction_and_lifecycle",
+      "status": "FAIL",
+      "scope": "Known017f78c native crashes remain open;current ffb8eb2 result not imported",
+      "evidence_refs": [
+        "E-NAVFAIL"
+      ]
+    },
+    {
+      "id": "performance_evidence_contract",
+      "status": "FAIL",
+      "scope": "40649923711 valid3-round comparison not produced",
+      "evidence_refs": [
+        "E-PERF",
+        "E-PERFPLAN"
+      ]
+    },
+    {
+      "id": "performance_regression_verdict",
+      "status": "NOT_RUN",
+      "scope": "No valid accepted timing delta/noise or full-resource conclusion",
+      "evidence_refs": [
+        "E-PERF"
+      ]
+    },
+    {
+      "id": "three_language_runtime",
+      "status": "FAIL",
+      "scope": "Known EN/JP native crashes,not a claim of missing glyph root cause",
+      "evidence_refs": [
+        "E-NAVFAIL"
+      ]
+    },
+    {
+      "id": "static_catalog_compilation",
+      "status": "PASS",
+      "scope": "Existing local compiler/catalog log says2245 UI messages/2344 entries,three catalogs finished;not real-language layout/runtime acceptance",
+      "evidence_refs": [
+        "E-COMPILE"
+      ]
+    },
+    {
+      "id": "installation_and_delivery",
+      "status": "NOT_RUN",
+      "scope": "No new product package or managed UI-upgrade delivery;old87a identity is historical and not re-read",
+      "evidence_refs": [
+        "E-BASE",
+        "E-P1"
+      ]
+    },
+    {
+      "id": "current_full_cloud",
+      "status": "NOT_RUN",
+      "scope": "No matching current-source completed full CI imported;pending short jobs do not count",
+      "evidence_refs": [
+        "E-PENDING"
+      ]
+    }
+  ],
+  "environment": {
+    "evidence_source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+    "platform": "Windows Server2022/Qt6.8.3/MSVC2022",
+    "qt_opengl_environment": "software",
+    "gl_vendor": "Mesa",
+    "gl_renderer": "llvmpipe (LLVM23.1.2,256bits)",
+    "gl_version": "4.6 Core/Mesa26.2.4 git-9a0169f2a7",
+    "controlled_qt_dpr": [
+      1,
+      1.25,
+      1.5,
+      1.75,
+      2
+    ],
+    "actual_windows_window_dpi": [
+      96
+    ],
+    "ui_scale_percent": [
+      90,
+      100
+    ],
+    "locales_in_20_pixel_cases": [
+      "zh_CN"
+    ],
+    "requested_samples": [
+      0,
+      4
+    ],
+    "font_scope": "97/99 visible QWidget-default mixed-script records per Chinese capture;not all dialogs/custom-painter roles",
+    "camera_and_transform_unchanged_in_20_captures": true,
+    "native_os_five_dpi_status": "NOT_RUN",
+    "real_cross_monitor_status": "NOT_RUN",
+    "user_nvidia_status": "NOT_RUN",
+    "custom_background_setting_status": "UNSUPPORTED",
+    "normal_backgrounds_preserved": "light white;dark actual clear near12/13/14,not declared12/15/17 field"
+  },
+  "completed_evidence": {
+    "baseline": {
+      "run_id": "40641681307",
+      "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40641681307",
+      "source": "4f1dbb8f2ad086b3d855e112b835d6b641f81bf9",
+      "status": "FAIL",
+      "cases": 20,
+      "passed_cases": 6,
+      "failed_cases": 14,
+      "rings": 60,
+      "failed_rings": 39,
+      "evidence_refs": [
+        "E-BPIX"
+      ]
+    },
+    "candidate_pixel": {
+      "run_id": "40649920338",
+      "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40649920338",
+      "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "status": "PASS",
+      "cases": 20,
+      "passed_cases": 20,
+      "rings": 60,
+      "passed_rings": 60,
+      "max_rgb_rmse": 0.026438927393213994,
+      "max_p95": 0.0621412327397675,
+      "max_outer_halo": 0.011764705882352941,
+      "frozen_limits": {
+        "rgb_rmse": 0.06,
+        "p95": 0.16,
+        "outer_halo": 0.04
+      },
+      "normal_size_review_scope": "one minimal d1-s0-light raw case perP0_CANDIDATE_RESULTS.md",
+      "evidence_refs": [
+        "E-CPIX",
+        "E-P0DOC"
+      ],
+      "prohibitions": [
+        "Does not make the overall workflow PASS",
+        "Does not cover EN/JP",
+        "Does not cover current ffb8eb2",
+        "Does not certify NVIDIA/OS-DPI/performance/full-model/P2"
+      ]
+    },
+    "candidate_runtime": {
+      "run_id": "40649920338",
+      "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "status": "FAIL",
+      "total_cases": 9,
+      "passed": 4,
+      "failed": 5,
+      "total_seconds": 28.1,
+      "failures": [
+        {
+          "name": "native_ui_overlay_lifecycle",
+          "seconds": 7.68,
+          "reason": "SegFault",
+          "declared_timeout_seconds": 30
+        },
+        {
+          "name": "native_upstream_navigation_en_US",
+          "seconds": 1.57,
+          "reason": "exit0xc000041d"
+        },
+        {
+          "name": "native_upstream_navigation_ja_JP",
+          "seconds": 1.32,
+          "reason": "exit0xc000041d"
+        },
+        {
+          "name": "native_blender_viewport_presentation_en_US",
+          "seconds": 1.06,
+          "reason": "SegFault"
+        },
+        {
+          "name": "native_blender_viewport_presentation_ja_JP",
+          "seconds": 1.09,
+          "reason": "SegFault"
+        }
+      ],
+      "passing_names": [
+        "native_upstream_navigation_zh_CN",
+        "native_blender_viewport_presentation_zh_CN",
+        "ui_overlay_raster",
+        "navigation_gizmo"
+      ],
+      "root_cause": "UNKNOWN;not a timeout and not proven font/driver/leak diagnosis",
+      "evidence_refs": [
+        "E-NAVFAIL"
+      ]
+    },
+    "performance": {
+      "run_id": "40649923711",
+      "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40649923711",
+      "status": "FAIL",
+      "status_scope": "evidence contract",
+      "regression_verdict_status": "NOT_RUN",
+      "baseline": "b0e9fae5c53156b74e247e9c56ab3d0bd1e4a0ff",
+      "candidate": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "process_receipts": 24,
+      "exit_zero": 18,
+      "exit_three": 6,
+      "timed_out": 0,
+      "comparison_count": 0,
+      "raw_contract_failure_count": 10,
+      "raw_inconclusive_count": 6,
+      "raw_inconclusive_classification": "Raw report says INCONCLUSIVE for DPR2 empty exposures;ledger gate maps these unaccepted measurements to NOT_RUN,not PASS.",
+      "technical_reasons": [
+        "fixed_viewport_not_fully_exposed for6DPR2 empty processes",
+        "actual idle settling <600ms in some processes",
+        "idle windows <1000ms or overlap in some processes"
+      ],
+      "raw_zero_idle_counts_do_not_close_gate": true,
+      "thresholds_relaxed": false,
+      "evidence_refs": [
+        "E-PERF",
+        "E-PERFPLAN"
+      ]
+    }
+  },
+  "protocol_binding": {
+    "baseline_raw_sha256": "c1d3f422abeac3cebb4d5e3bf2965c7989762e71a0ad45e9fb141b2bc287586e",
+    "candidate_raw_sha256": "f25fc6a5e624bc09b5f617127207d5bc183c27975397cb63d7fb261db0845681",
+    "json_semantically_equal_on_static_read": true,
+    "interpretation": "Raw bytes/hash differ;parsed protocol objects match and thresholds are unchanged. Do not claim byte-identical files.",
+    "performance_plan_sha256": "2e8046da5cfd68ad8a047bdee8ffac7501f6cf51d5058d4f976faafa7ae5bff6",
+    "performance_acceptance_sha256": "fd80215e7b0bcb48ed28b7c70d1bc7675ddb2e8b18d8cd034f25b5fa27f46376"
+  },
+  "pending_runs": [
+    {
+      "id": "40656943272",
+      "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40656943272",
+      "source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff",
+      "status": "NOT_RUN",
+      "external_state_at_parent_handoff": "RUNNING",
+      "purpose": "P0 diagnostics",
+      "not_polled_by_ledger_author": true
+    },
+    {
+      "id": "40656947039",
+      "url": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40656947039",
+      "source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff",
+      "status": "NOT_RUN",
+      "external_state_at_parent_handoff": "RUNNING",
+      "purpose": "Foundation contracts",
+      "not_polled_by_ledger_author": true
+    }
+  ],
+  "installation": {
+    "status": "NOT_RUN",
+    "source_bound_new_package_status": "NOT_RUN",
+    "managed_publication_status": "NOT_RUN",
+    "last_recorded_not_current": {
+      "observed_utc": "2026-10-28T05:13:28Z",
+      "source": "87a797bd2fe5072df1a72e5587414841f62ee494",
+      "managed_root": "D:/Apps/GSW",
+      "version": "v1-87a797bd2fe5-45e9cb901ee6",
+      "scope": "Historical CI_DELIVERY_BASELINE snapshot only;may have drifted;not rechecked by this task"
+    },
+    "new_product_package_delivered": false,
+    "active_installation_rechecked": false,
+    "users_sessions_changed": false
+  },
+  "not_applicable_claims": [
+    {
+      "status": "NOT_APPLICABLE",
+      "claim": "Training speed/PSNR/reconstruction geometry quality improvement",
+      "basis": "This UI candidate does not change training algorithm/defaults and the evidence uses synthetic display/CPU fixtures;no such quality claim is made."
+    },
+    {
+      "status": "NOT_APPLICABLE",
+      "claim": "New Blender5.2.3 GPU shader/source or new font/icon-library transplant",
+      "basis": "P0/P1 document an independent GSW Qt adapter and retained pinned assets.5.2.3 screenshot is reference only;existing notices and final package provenance still require PORT/PKG gates."
+    }
+  ],
+  "matrix_count": 29,
+  "matrix": [
+    {
+      "id": "BASE-01",
+      "status": "PASS",
+      "criterion": "开始时身份与并行修改保护",
+      "evidence_refs": [
+        "E-BASE",
+        "E-INV"
+      ],
+      "finding": "开始时源码/工作区/远端与旧安装快照已登记；此PASS仅指该历史身份记录，不宣称当前安装仍是旧快照。",
+      "remaining_gate": "新提交/包需各自重新绑定；本次不重读安装。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "AUDIT-01",
+      "status": "NOT_RUN",
+      "criterion": "全量表面最终审计",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-AUDIT"
+      ],
+      "finding": "66表面、16Dialog、147调用点已静态登记；没有以无需修改冒充已视觉检查。",
+      "remaining_gate": "逐项远端视觉/交互/限制签收；源码覆盖不是运行结果。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "DPI-01",
+      "status": "NOT_RUN",
+      "criterion": "五档Windows缩放/逻辑物理映射",
+      "evidence_refs": [
+        "E-BPIX",
+        "E-CPIX"
+      ],
+      "finding": "017f78c中文controlled Qt DPR五档映射已记录；Windows窗口DPI仍96。",
+      "remaining_gate": "真实OS 100/125/150/175/200%与跨屏迁移另测；不能用QT_SCALE_FACTOR替代。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "NAV-01",
+      "status": "NOT_RUN",
+      "criterion": "导航边缘与正常尺寸视觉",
+      "evidence_refs": [
+        "E-BPIX",
+        "E-CPIX",
+        "E-P0DOC"
+      ],
+      "finding": "017f78c中文20/20cases、60/60rings通过冻结oracle；d1-s0-light正常尺寸原图已有只读审阅。",
+      "remaining_gate": "当前ffb8eb2未导入匹配运行结果；其余正常尺寸/姿态/语言与整体稳定性不可外推。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "NAV-02",
+      "status": "FAIL",
+      "criterion": "真实导航/相机交互",
+      "evidence_refs": [
+        "E-NAVFAIL"
+      ],
+      "finding": "017f78c的zh_CN两族通过，en_US/ja_JP导航与presentation共4进程崩溃。",
+      "remaining_gate": "先取得并修复真实异常，再按三语真实输入验收；新运行尚未读取，FAIL尚未关闭。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "NAV-03",
+      "status": "FAIL",
+      "criterion": "显示变化与缓存/命中一致",
+      "evidence_refs": [
+        "E-NAVFAIL",
+        "E-P0DOC"
+      ],
+      "finding": "native_ui_overlay_lifecycle在7.68s SegFault，不是30秒timeout。",
+      "remaining_gate": "完整20次theme/resize+语言生命周期、DPR变化/拾取一致及真实跨屏尚待通过。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "THEME-01",
+      "status": "UNSUPPORTED",
+      "criterion": "浅深与用户自定义RGB/alpha背景",
+      "evidence_refs": [
+        "E-INV",
+        "E-BPIX",
+        "E-CPIX"
+      ],
+      "finding": "白/暗主题在中文像素fixture有记录；用户任意RGB/alpha的可达设置在基线缺失，P1未声称新增。",
+      "remaining_gate": "补能力或由Root明确记录需求决策；不得以换Blender灰遮缺陷，也不能计为通过。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "FONT-01",
+      "status": "NOT_RUN",
+      "criterion": "全部控件与自绘文字字体/回退",
+      "evidence_refs": [
+        "E-AUDIT",
+        "E-BPIX",
+        "E-P1"
+      ],
+      "finding": "基线中文主窗可见widget mixed-script probe为0missing；P1保留声明的三语字体族。",
+      "remaining_gate": "三语全部Dialog与自绘caption/轴/变换/图表/初始化预览的实际字体、基线和清晰度仍缺；glyph probe不是文字视觉判定。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "ICON-01",
+      "status": "NOT_RUN",
+      "criterion": "全部图标正常尺寸/状态",
+      "evidence_refs": [
+        "E-AUDIT",
+        "E-P1",
+        "E-COVER"
+      ],
+      "finding": "67语义ID/63 SVG的静态资源审计存在；新role/DPR/alpha contracts已实现。",
+      "remaining_gate": "当前候选真实contact sheet、focus/disabled/checked、五档DPR结果尚未导入。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "SHELL-01",
+      "status": "NOT_RUN",
+      "criterion": "主菜单/两层工具栏/dock/属性/任务/状态",
+      "evidence_refs": [
+        "E-P1",
+        "E-COVER",
+        "E-INV"
+      ],
+      "finding": "共享tokens和若干shell实现有源码记录，不代表全shell已验收。",
+      "remaining_gate": "三语明暗标准/窄窗关键动作、溢出、布局状态保护及截图。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "TREE-01",
+      "status": "NOT_RUN",
+      "criterion": "树/眼睛/空白区/滚动/分隔",
+      "evidence_refs": [
+        "E-COVER",
+        "E-INV",
+        "E-P1"
+      ],
+      "finding": "历史实现与可复用测试已映射，当前候选测试未取回。",
+      "remaining_gate": "真实多模型选择/可见性、无贯穿线、滚动与实际resize；不得用旧pass代替。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "GIZMO-01",
+      "status": "NOT_RUN",
+      "criterion": "四模式变换器外观",
+      "evidence_refs": [
+        "E-P1",
+        "E-COVER"
+      ],
+      "finding": "Move/Rotate/Scale/Combined共用有界coverage已实现；极端close-up有原向量回退。",
+      "remaining_gate": "单项/合并、多距离、边缘角、正交/透视真图；杆/帽/面遮挡与正常尺寸审阅。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "GIZMO-02",
+      "status": "NOT_RUN",
+      "criterion": "变换拾取/约束/数值/撤销",
+      "evidence_refs": [
+        "E-P1",
+        "E-COVER"
+      ],
+      "finding": "新实际视口输入测试已实现，静态QImage旧测试仅辅助。",
+      "remaining_gate": "匹配源码的真实手柄拖动、中心/轴/面、Cancel/Undo/Redo矩阵；相机edit-navigation不等于模型变换。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "MODEL-01",
+      "status": "NOT_RUN",
+      "criterion": "多模型选择/隐藏/坐标与相机保护",
+      "evidence_refs": [
+        "E-COVER",
+        "E-INV"
+      ],
+      "finding": "可复用visibility/coordinates合同存在；当前候选未运行本项验收。",
+      "remaining_gate": "原/非当前/全隐藏恢复的相机、变换、单位、文件hash和画面。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "MODEL-02",
+      "status": "NOT_RUN",
+      "criterion": "五类renderer正确性",
+      "evidence_refs": [
+        "E-COVER",
+        "E-PERF",
+        "E-P1"
+      ],
+      "finding": "性能原始文件含受控轻/中fixture，但性能合同无效，不是完整renderer验收。",
+      "remaining_gate": "点云/网格/3DGS/2DGS/任务预览分别核对实际renderer、画面、选择导航和保真。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "OVERLAY-01",
+      "status": "NOT_RUN",
+      "criterion": "选择/笔刷/裁剪/提示",
+      "evidence_refs": [
+        "E-COVER",
+        "E-INV",
+        "E-P1"
+      ],
+      "finding": "已有绘制/状态入口已静态登记。",
+      "remaining_gate": "多尺度/视角/主题真实图与selection/deletion/模型状态保护，不能仅检查SVG或标题。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "GRID-01",
+      "status": "NOT_RUN",
+      "criterion": "网格/单位/固定基准",
+      "evidence_refs": [
+        "E-COVER",
+        "E-NAVFAIL"
+      ],
+      "finding": "017f78c中文presentation流程通过部分网格/投影；英文/日文presentation崩溃。",
+      "remaining_gate": "当前候选自动/固定密度、mm/m/u、保存重开与模型切换不改数值；三语图/状态。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "FPS-01",
+      "status": "NOT_RUN",
+      "criterion": "真实新帧计数与空闲",
+      "evidence_refs": [
+        "E-COVER",
+        "E-PERF"
+      ],
+      "finding": "raw idle计数部分为0，但不满足冻结最短观测时长，不能接受为空闲PASS。",
+      "remaining_gate": "新rendered serial+fresh swap+metrics/idle调度的有效时窗；不以渲染耗时倒数冒充显示FPS。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "FORM-01",
+      "status": "NOT_RUN",
+      "criterion": "全部可达表单",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "finding": "16类Dialog+4 inline+4 progress和popup目的已映射；新远端form modes已接线。",
+      "remaining_gate": "每个真实入口/布局/错误/禁用、三语明暗窄窗图和公开request/options精确回读；现有源码不计运行PASS。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "STATE-01",
+      "status": "NOT_RUN",
+      "criterion": "空/忙/失败/取消/重试/不支持",
+      "evidence_refs": [
+        "E-COVER",
+        "E-INV",
+        "E-P1"
+      ],
+      "finding": "受控CPU/worker状态已有可复用合同；当前候选结果未导入。",
+      "remaining_gate": "真实操作触达各状态，保持安全默认与不自动训练/续训；不制造固定成功文本。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "LOCALE-01",
+      "status": "FAIL",
+      "criterion": "三语即时切换与状态保护",
+      "evidence_refs": [
+        "E-NAVFAIL",
+        "E-P1"
+      ],
+      "finding": "静态三语catalog编译记录通过，但017f78c英文/日文原生测试崩溃。",
+      "remaining_gate": "修复并通过匹配源码三语真实窗口/视口/长文本/混合文件名，worker/模型/参数保持；编译完整不能盖崩溃。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "A11Y-01",
+      "status": "NOT_RUN",
+      "criterion": "键盘焦点/tooltip/可访问名/禁用理由",
+      "evidence_refs": [
+        "E-P1",
+        "E-COVER"
+      ],
+      "finding": "新focus inset与公开palette/icon contracts在源码。",
+      "remaining_gate": "真实Tab/快捷键/focus像素与geometry、禁用理由可达、不仅以颜色区分状态。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "LIFE-01",
+      "status": "FAIL",
+      "criterion": "生命周期与持久任务边界",
+      "evidence_refs": [
+        "E-NAVFAIL",
+        "E-COVER",
+        "E-P1"
+      ],
+      "finding": "017f78c UI cache lifecycle进程崩溃；没有据此断言训练worker泄漏。",
+      "remaining_gate": "关闭/重开/取消/重连与持久队列合同、本候选窗口/缓存析构；嵌套MainWindow续训信任prompt仍单列未验。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "PERF-01",
+      "status": "FAIL",
+      "criterion": "三轮性能/延迟/资源包络",
+      "evidence_refs": [
+        "E-PERF",
+        "E-PERFPLAN"
+      ],
+      "finding": "40649923711结果为证据合同FAIL，comparisons=[]；不是已测得性能退化。",
+      "remaining_gate": "保留阈值，对两臂同一producer/observer修正采样，再获得有效3轮分布与噪声/预算判断。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "PERF-02",
+      "status": "FAIL",
+      "criterion": "空闲与重复操作资源",
+      "evidence_refs": [
+        "E-PERF",
+        "E-NAVFAIL",
+        "E-PERFPLAN"
+      ],
+      "finding": "idle时长不合格/曝光不足，且cache lifecycle崩溃；无有效泄漏或驱动VRAM结论。",
+      "remaining_gate": "有效idle两1s窗、600ms settle、反复切换/销毁资源记录；CPU/requested GPU不等于实际VRAM驻留。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "PORT-01",
+      "status": "NOT_RUN",
+      "criterion": "来源/许可/未移植边界",
+      "evidence_refs": [
+        "E-AUDIT",
+        "E-REF",
+        "E-P0IMPL",
+        "E-P1"
+      ],
+      "finding": "静态来源含Blender4.5/Lucide revision与NOTICE；coverage是GSW Qt适配器，不是照搬Blender GPU shader。",
+      "remaining_gate": "当前完整候选及最终包的URL/commit/path/hash/license/依赖/修改/NOTICE绑定签收；不能用Blender5.2.3参考图声称5.2源码移植。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "PKG-01",
+      "status": "NOT_RUN",
+      "criterion": "EXE/Setup/源码/资源/许可绑定",
+      "evidence_refs": [
+        "E-BASE",
+        "E-P1"
+      ],
+      "finding": "存在静态编译/链接记录与源码快照，不等于新产品包。",
+      "remaining_gate": "构建当前接受源码、候选EXE/Setup/清单/资源/许可/依赖与独立hash边界检查。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "DELIVER-01",
+      "status": "NOT_RUN",
+      "criterion": "托管发布与会话/快捷方式保护",
+      "evidence_refs": [
+        "E-BASE",
+        "E-P1"
+      ],
+      "finding": "旧87a797b安装只是2026-10-28T05:13:28Z历史快照，可能漂移；此台账未重查。",
+      "remaining_gate": "新candidate未交付；后续publisher/current.json/EXE/recognized shortcuts一致，保留会话与回滚。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    },
+    {
+      "id": "CLOUD-01",
+      "status": "NOT_RUN",
+      "criterion": "当前提交完整云端",
+      "evidence_refs": [
+        "E-NAVFAIL",
+        "E-PERF",
+        "E-PENDING",
+        "E-BASE"
+      ],
+      "finding": "最后已读candidate P0/performance失败；ffb8eb2诊断/foundation由其他agents跟进，此处不导入未完成结果。",
+      "remaining_gate": "精确当前source的完整Native Windows/安全/相关checks独立记录；短门/历史87a成功与本地交付分开。",
+      "current_source_runtime_status": "NOT_RUN",
+      "current_source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff"
+    }
+  ],
+  "surface_count": 66,
+  "surfaces": [
+    {
+      "id": "INF-01",
+      "required_remote_checks_from_inventory": [
+        "三语×明暗、100/150/200%布局组合",
+        "125/175%字体与图标高风险例"
+      ],
+      "group": "shared",
+      "name": "应用字体、密度与控件状态",
+      "entry_points": "应用启动、主题/语言/比例变化",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/AppTheme.cpp:300",
+        "native/src/AppTheme.cpp:326"
+      ],
+      "matrix_ids": [
+        "FONT-01",
+        "ICON-01",
+        "SHELL-01",
+        "FORM-01",
+        "LOCALE-01",
+        "A11Y-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "I",
+        "C",
+        "P0"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FONT-01",
+        "ICON-01",
+        "SHELL-01",
+        "FORM-01",
+        "LOCALE-01",
+        "A11Y-01"
+      ],
+      "remaining_surface_gate": "现有共享字体/比例/主题断言可复用；P0只采当前主窗可见控件。16类表单和自绘文字角色尚未被统一采集。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INF-02",
+      "required_remote_checks_from_inventory": [
+        "真实系统按钮、恢复目录/文件名/选择",
+        "语言变化时窗口状态保持"
+      ],
+      "group": "shared",
+      "name": "系统标题栏与窗口生命周期",
+      "entry_points": "主窗口、独立/浮动dock、全部QDialog与QFileDialog",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/WindowUi.cpp:34",
+        "native/src/WindowUi.cpp:359"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FORM-01",
+        "LIFE-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "W",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FORM-01",
+        "LIFE-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "共用系统按钮/浮动dock策略已有真实窗断言；每一表单的close/reject/helper释放仍按下表单独登记。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INF-03",
+      "required_remote_checks_from_inventory": [
+        "全部语义资产Normal/Disabled/Selected/On/hover",
+        "连续主题/DPR变化资源记录"
+      ],
+      "group": "shared",
+      "name": "语义SVG图标与状态",
+      "entry_points": "所有workbenchIcon/paintWorkbenchIcon入口",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/WorkbenchIcons.cpp:15",
+        "native/src/WorkbenchIcons.cpp:70",
+        "native/src/WorkbenchIcons.h:12"
+      ],
+      "matrix_ids": [
+        "ICON-01",
+        "DPI-01",
+        "A11Y-01",
+        "PORT-01",
+        "PERF-02"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "X",
+        "A"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "ICON-01",
+        "DPI-01",
+        "A11Y-01",
+        "PORT-01",
+        "PERF-02"
+      ],
+      "remaining_surface_gate": "共用资产接触表、正常/禁用/选中及窄窗断言可复用；不能外推为实际分数DPR或每个图标全部交互通过。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INF-04",
+      "required_remote_checks_from_inventory": [
+        "多选、右键、快捷键、部分移除失败、取消",
+        "真实记录保留"
+      ],
+      "group": "shared",
+      "name": "多项列表快捷键/工具条/批量移除",
+      "entry_points": "项目/任务及历史、质量、尺度、批量等表格的MultiItemList",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MultiItemList.cpp:1",
+        "native/src/MultiItemList.cpp:144",
+        "native/src/MultiItemList.h:13"
+      ],
+      "matrix_ids": [
+        "TREE-01",
+        "FORM-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C",
+        "T",
+        "H",
+        "Q",
+        "S",
+        "B"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "TREE-01",
+        "FORM-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "公共列表键盘/多选/移除原语及若干父窗有断言；新样式需验证每个实际父窗的选择与取消保护，不必重测每个图标。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INF-05",
+      "required_remote_checks_from_inventory": [
+        "打开/保存/目录、多选、Unicode、过滤/取消",
+        "重开/最小化/恢复保持选择"
+      ],
+      "group": "shared",
+      "name": "文件选择器与常用位置/历史",
+      "entry_points": "全部37个QFileDialog调用点，详见popup_call_sites",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/WindowUi.cpp:87",
+        "native/src/FileDialogHistory.cpp:180",
+        "native/src/FileDialogHistory.cpp:428"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "F",
+        "W",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "共用历史/过滤/无效路径/取消/重开和系统按钮已有覆盖；37个目的入口的过滤器、初始目录、覆盖默认值并未等价全跑。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INF-06",
+      "required_remote_checks_from_inventory": [
+        "Tab/快捷键/tooltip、禁用原因、长文案",
+        "菜单触发后原模型/任务状态保持"
+      ],
+      "group": "shared",
+      "name": "右键菜单、tooltip及键盘焦点",
+      "entry_points": "主菜单、项目树/任务表、MultiItemList、视口悬停提示",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2455",
+        "native/src/MainWindow.cpp:2639",
+        "native/src/MultiItemList.cpp:1",
+        "native/src/NativeViewport.cpp:2322",
+        "native/src/NativeViewport.cpp:7799"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "L",
+        "T",
+        "C",
+        "A"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "菜单/动作及部分tooltip被查验；未见全部可达右键菜单的逐入口截图、全键盘焦点/读屏合同。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-01",
+      "required_remote_checks_from_inventory": [
+        "宽/窄窗口菜单访问所有关键动作",
+        "三语、明暗、禁用原因与快捷键"
+      ],
+      "group": "shell",
+      "name": "主菜单及所有子菜单",
+      "entry_points": "文件/编辑/工作流/场景/视图/帮助；清理、语言、外观、资源、渲染/SH、基准、比例、窗口分辨率",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:1919"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "I",
+        "W",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "A11Y-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "remaining_surface_gate": "语言/主题/显示菜单与溢出断言可复用；未知/禁用的工作流菜单状态须按实际fixture补截，不宣称所有子菜单均视觉验收。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-02",
+      "required_remote_checks_from_inventory": [
+        "宽/窄窗口与busy状态",
+        "训练/取消/保存不被遮挡"
+      ],
+      "group": "shell",
+      "name": "第一行主工具栏",
+      "entry_points": "mainToolbar：新建/打开/保存/导出/媒体/模型导入/重建/训练/几何/暂停/续训/停止",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2234"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "L",
+        "T",
+        "P",
+        "M",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "真实顶层动作、busy/暂停/继续/停止状态由对应流程断言；公共图标矩阵可复用，业务动作状态不能只查SVG存在。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-03",
+      "required_remote_checks_from_inventory": [
+        "所有模型类型和任务预览切换",
+        "暂停预览不暂停训练"
+      ],
+      "group": "shell",
+      "name": "第二行渲染/预览工具栏",
+      "entry_points": "renderToolbar：高斯/网格/点云、SH菜单、相机轨迹、任务预览/暂停预览",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2261"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "MODEL-02",
+        "STATE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "L",
+        "V",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "ICON-01",
+        "MODEL-02",
+        "STATE-01"
+      ],
+      "remaining_surface_gate": "渲染模式/预览隔离状态及语义图标可复用；所有后端×预览暂停/恢复的全图像组合尚未形成清晰度矩阵。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-04",
+      "required_remote_checks_from_inventory": [
+        "三语窄窗口、spin焦点/数值",
+        "锁定/选择语义与模型数据保持"
+      ],
+      "group": "shell",
+      "name": "第二行选择工具栏",
+      "entry_points": "selectionToolbar：查看/锁定/轨迹球/查找、框选/套索/笔刷/仅可见、半径",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2289"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "GIZMO-02",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "L",
+        "A",
+        "V"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "ICON-01",
+        "A11Y-01",
+        "GIZMO-02",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "编辑/观察入口和相机导航已有断言；不把相机edit-navigation误记为模型变换正确性。笔刷/仅可见键盘与焦点尚缺完整真实窗回归。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-05",
+      "required_remote_checks_from_inventory": [
+        "禁用/选中、撤销/重做、取消"
+      ],
+      "group": "shell",
+      "name": "第二行编辑操作工具栏",
+      "entry_points": "editToolbar：清选/反选/删除/撤销/重做/裁剪导出",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2328"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "ICON-01",
+        "GIZMO-02",
+        "STATE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "L",
+        "V",
+        "X"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "ICON-01",
+        "GIZMO-02",
+        "STATE-01"
+      ],
+      "remaining_surface_gate": "选中、删除/撤销等部分流程和纯几何合同可复用；样式迁移后仍需真实视口数值/撤销/取消的窄链路。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-06",
+      "required_remote_checks_from_inventory": [
+        "三dock标题及浮动窗口三语/比例",
+        "拖分隔、浮动/还原、关闭与重开"
+      ],
+      "group": "shell",
+      "name": "Dock标题、浮动/关闭按钮和分隔拖动区",
+      "entry_points": "工程、属性、任务与日志3个dock",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:255",
+        "native/src/MainWindow.cpp:420",
+        "native/src/AppTheme.cpp:430"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "ICON-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "W",
+        "L",
+        "I"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FONT-01",
+        "ICON-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "实际dock/恢复布局/浮动按钮、标题语言与比例已有覆盖；窄窗/浮动时字体角色与所有拖动分隔器还未逐项截图。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-07",
+      "required_remote_checks_from_inventory": [
+        "Ctrl/Shift多选、眼睛/空格、全部隐藏再恢复",
+        "滚动/resize/空白区与相机不跳变"
+      ],
+      "group": "shell",
+      "name": "工程树及眼睛可见性列",
+      "entry_points": "projectTree/SceneTreeWidget/SceneVisibilityDelegate",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:143",
+        "native/src/MainWindow.cpp:195",
+        "native/src/MainWindow.cpp:2344",
+        "native/src/MainWindow.cpp:7724"
+      ],
+      "matrix_ids": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "可见性三语×两主题、集合选择与场景对象保护有明确family；树眼睛委托真实DPR/焦点图像需保留，不能仅用数据合同代替。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-08",
+      "required_remote_checks_from_inventory": [
+        "当前/非当前/隐藏行右键、显示/隐藏/隔离/移除"
+      ],
+      "group": "shell",
+      "name": "工程树右键菜单",
+      "entry_points": "dataset/reconstruction/scene/task树节点",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2440"
+      ],
+      "matrix_ids": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "TREE-01",
+        "MODEL-01",
+        "A11Y-01"
+      ],
+      "remaining_surface_gate": "部分右键动作的行为随集合/历史列表执行；未发现每类树节点右键菜单各状态的系统化截图。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-09",
+      "required_remote_checks_from_inventory": [
+        "窄属性栏、Unicode/长路径完整查看复制",
+        "值与单位及模型坐标保持"
+      ],
+      "group": "shell",
+      "name": "属性面板：工程/数据集",
+      "entry_points": "inspectorPanel：名称、路径、图像、相机/尺度记录",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2479",
+        "native/src/MainWindow.cpp:436",
+        "native/src/MainWindow.cpp:7957"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "FORM-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "S",
+        "N",
+        "BL"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FONT-01",
+        "FORM-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "项目/数据集文字与source identity随语言/初始化/尺度流程保护；路径极长、未知单位等属性版式的完整主题/窄窗证据尚缺。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-10",
+      "required_remote_checks_from_inventory": [
+        "长值/科学计数/未知u与已知单位",
+        "模型切换/重开数值不变"
+      ],
+      "group": "shell",
+      "name": "属性面板：场景几何/变换/单位",
+      "entry_points": "文件、数量、格式、相机、坐标关系、单位、中心/尺寸/范围、显示/模型变换、基准面",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2530",
+        "native/src/MainWindow.cpp:7957"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FORM-01",
+        "GRID-01",
+        "MODEL-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "V",
+        "A",
+        "S"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FORM-01",
+        "GRID-01",
+        "MODEL-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "共享坐标/单位/模型变换、选择稳定性有行为断言；属性面板实际编辑控件的全焦点、无效输入与字体角色图集尚缺。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-11",
+      "required_remote_checks_from_inventory": [
+        "空/运行/完成/失败/取消/移除状态",
+        "关闭详情不终止实际任务"
+      ],
+      "group": "shell",
+      "name": "任务表、工具条及右键菜单",
+      "entry_points": "taskDock → 任务页/双击详情/复制摘要/打开目录/移除记录",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2593",
+        "native/src/MainWindow.cpp:2639",
+        "native/src/MainWindow.cpp:2649"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "T",
+        "L",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "STATE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "实际任务表/详情/精确日志导出/失败启动和持久任务状态覆盖强；不能据此宣称每种状态×明暗截图均存在。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-12",
+      "required_remote_checks_from_inventory": [
+        "3DGS/2DGS owned遥测和7指标",
+        "320/520/900宽、短面板与三语"
+      ],
+      "group": "shell",
+      "name": "共享训练监控及曲线",
+      "entry_points": "任务区训练监控页；ExistingTrainingDialog内嵌监控",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/TrainingMonitorWidget.cpp:139",
+        "native/src/TrainingMonitorWidget.cpp:280"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "FPS-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "D",
+        "PC",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "FPS-01"
+      ],
+      "remaining_surface_gate": "主窗监控窄/宽/滚动和三语，observer CPU连接生命周期可复用；自绘曲线文字不在普通QWidget glyph列表中。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-13",
+      "required_remote_checks_from_inventory": [
+        "长行/多语文件名、跟随/滚动/导出",
+        "日志保留上限与真实来源"
+      ],
+      "group": "shell",
+      "name": "日志页及跟随/导出工具栏",
+      "entry_points": "taskDock → 日志页",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2670",
+        "native/src/MainWindow.cpp:8129",
+        "native/src/AppTheme.cpp:472"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "T",
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "FONT-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "保留原始日志、跟随与精确字节导出/任务语言切换保护已有；日志字号/等宽回退/截断提示实际像素仍需专门角色捕获。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-14",
+      "required_remote_checks_from_inventory": [
+        "空/测量/空闲/加载/选择/任务变化",
+        "三语切换不改变状态来源"
+      ],
+      "group": "shell",
+      "name": "系统状态栏与临时消息",
+      "entry_points": "project status、renderer status、edit status、ui scale status",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2706",
+        "native/src/MainWindow.cpp:2725",
+        "native/src/MainWindow.cpp:4265"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "I",
+        "C",
+        "G"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "label底色/主题及状态文本、帧计数和idle有合同；临时消息被刷新覆盖等状态须按稳定截图时点测试。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-15",
+      "required_remote_checks_from_inventory": [
+        "有效/无效/混合/忙/未保存、文字反馈",
+        "原始文件和已选模型保持"
+      ],
+      "group": "shell",
+      "name": "拖放反馈与导入摘要",
+      "entry_points": "主窗口/工程树/视口文件拖放",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:989",
+        "native/src/MainWindow.cpp:1089"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-01"
+      ],
+      "existing_test_family_refs": [
+        "DROP",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-01"
+      ],
+      "remaining_surface_gate": "实际媒体/模型/项目/视频/目录drop、混合无效/busy/未保存状态有行为断言；拖拽悬停中每个overlay像素未全登记。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "SH-16",
+      "required_remote_checks_from_inventory": [
+        "主题/比例/语言/布局保存重开",
+        "自动/手动与窗口迁移的实际元数据"
+      ],
+      "group": "shell",
+      "name": "界面设置/布局恢复入口",
+      "entry_points": "视图 → 外观、显示与适配、dock显示、恢复布局；F11/最大化",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2020",
+        "native/src/MainWindow.cpp:3982",
+        "native/src/MainWindow.cpp:4015",
+        "native/src/MainWindow.cpp:4168"
+      ],
+      "matrix_ids": [
+        "SHELL-01",
+        "DPI-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "W",
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "SHELL-01",
+        "DPI-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "自动/手动UI比例、恢复布局、最大化/全屏/最小化有现有入口；不代表所有显示器实际DPR切换已测。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-01",
+      "required_remote_checks_from_inventory": [
+        "每种真实renderer画面/选择/隐藏/导航",
+        "相同模型负载三轮帧时间"
+      ],
+      "group": "viewport",
+      "name": "真实模型渲染区域",
+      "entry_points": "点云/网格/3DGS/2DGS/训练预览",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:3835",
+        "native/src/NativeViewport.cpp:5887",
+        "native/src/NativeViewport.cpp:5965",
+        "native/src/NativeViewport.cpp:6096"
+      ],
+      "matrix_ids": [
+        "MODEL-02",
+        "PERF-01",
+        "PERF-02",
+        "THEME-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "R",
+        "PC",
+        "A"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "MODEL-02",
+        "PERF-01",
+        "PERF-02",
+        "THEME-01"
+      ],
+      "remaining_surface_gate": "点云/网格/纹理/高斯与分页、资源预算和处理预览有独立行为测试；不得把小样本显示升级成训练质量或压力性能结论。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-02",
+      "required_remote_checks_from_inventory": [
+        "五DPR真实窗口原图/元数据与独立边缘参考",
+        "全部轴向点击/拖动、hover/press"
+      ],
+      "group": "viewport",
+      "name": "导航朝向轴圆盘/圆环/标签",
+      "entry_points": "右上navigation gizmo轴端/轨道命中区",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NavigationGizmo.cpp:1",
+        "native/src/BlenderNavigationPresentation.h:87",
+        "native/src/NativeViewport.cpp:8930"
+      ],
+      "matrix_ids": [
+        "NAV-01",
+        "NAV-02",
+        "NAV-03",
+        "DPI-01",
+        "THEME-01",
+        "FONT-01",
+        "PERF-01"
+      ],
+      "existing_test_family_refs": [
+        "A",
+        "X",
+        "P0"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-CPIX",
+        "E-NAVFAIL",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [
+        {
+          "status": "PASS",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-CPIX"
+          ],
+          "scope": "zh_CN20 controlled-DPR/theme/sample edge cases;60rings only"
+        },
+        {
+          "status": "PASS",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-NAVFAIL"
+          ],
+          "scope": "native_upstream_navigation_zh_CN and native_blender_viewport_presentation_zh_CN only"
+        },
+        {
+          "status": "FAIL",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-NAVFAIL"
+          ],
+          "scope": "EN/JP navigation/presentation and new cache lifecycle processes crashed;not a proven font/memory root cause"
+        }
+      ],
+      "remaining_matrix_gates": [
+        "NAV-01",
+        "NAV-02",
+        "NAV-03",
+        "DPI-01",
+        "THEME-01",
+        "FONT-01",
+        "PERF-01"
+      ],
+      "remaining_surface_gate": "Current-source three-language click/drag/cache lifecycle, original-size image review, OS-DPI/cross-monitor limits and valid paired performance;prior Chinese pixel PASS does not clear the native crashes",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-03",
+      "required_remote_checks_from_inventory": [
+        "图标状态/三语tooltip、透视/正交",
+        "窗口/DPR变更后同一输入位置"
+      ],
+      "group": "viewport",
+      "name": "导航小按钮与投影提示",
+      "entry_points": "相机/投影、平移、缩放、projectionLabel",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/BlenderNavigationPresentation.h:169",
+        "native/src/NavigationGizmo.cpp:1",
+        "native/src/NativeViewport.cpp:6646"
+      ],
+      "matrix_ids": [
+        "NAV-02",
+        "NAV-03",
+        "ICON-01",
+        "A11Y-01"
+      ],
+      "existing_test_family_refs": [
+        "A",
+        "I",
+        "X"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-CPIX",
+        "E-NAVFAIL",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [
+        {
+          "status": "PASS",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-CPIX"
+          ],
+          "scope": "zh_CN20 controlled-DPR/theme/sample edge cases;60rings only"
+        },
+        {
+          "status": "PASS",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-NAVFAIL"
+          ],
+          "scope": "native_upstream_navigation_zh_CN and native_blender_viewport_presentation_zh_CN only"
+        },
+        {
+          "status": "FAIL",
+          "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+          "evidence_refs": [
+            "E-NAVFAIL"
+          ],
+          "scope": "EN/JP navigation/presentation and new cache lifecycle processes crashed;not a proven font/memory root cause"
+        }
+      ],
+      "remaining_matrix_gates": [
+        "NAV-02",
+        "NAV-03",
+        "ICON-01",
+        "A11Y-01"
+      ],
+      "remaining_surface_gate": "Current-source three-language click/drag/cache lifecycle, original-size image review, OS-DPI/cross-monitor limits and valid paired performance;prior Chinese pixel PASS does not clear the native crashes",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-04",
+      "required_remote_checks_from_inventory": [
+        "透视/正交/正反/边缘/近远、四模式",
+        "轴/面约束、数值、取消、撤销/重做"
+      ],
+      "group": "viewport",
+      "name": "模型变换器：全部四种模式",
+      "entry_points": "Move/Rotate/Scale/Combined；G/R/RR/S/轴与平面/数值输入",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/TransformGizmoRenderer.cpp:1",
+        "native/src/TransformGizmo.cpp:1",
+        "native/src/NativeViewport.cpp:8584",
+        "native/src/NativeViewport.cpp:7823"
+      ],
+      "matrix_ids": [
+        "GIZMO-01",
+        "GIZMO-02",
+        "MODEL-01",
+        "DPI-01",
+        "PERF-01"
+      ],
+      "existing_test_family_refs": [
+        "X",
+        "V",
+        "A"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "GIZMO-01",
+        "GIZMO-02",
+        "MODEL-01",
+        "DPI-01",
+        "PERF-01"
+      ],
+      "remaining_surface_gate": "四模式绘制端帽/杆/深度等QImage合同可复用；真正NativeViewport的四模式拖动/约束/数值/取消/undo并无完整矩阵。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-05",
+      "required_remote_checks_from_inventory": [
+        "全部按钮/hover/disabled、方向模式",
+        "缩放/主题不改变model selection"
+      ],
+      "group": "viewport",
+      "name": "视口内模型编辑工具条",
+      "entry_points": "左侧Move/Rotate/Scale/Transform及Global/Local/锁定提示",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8600"
+      ],
+      "matrix_ids": [
+        "GIZMO-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "I",
+        "X",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "GIZMO-01",
+        "ICON-01",
+        "A11Y-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "图标/模式文字和绘制入口可复用；自绘编辑条状态与全局/局部切换的实际视口截图/焦点还需专门小链路。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-06",
+      "required_remote_checks_from_inventory": [
+        "球内/球外视角导航、边缘视角",
+        "模型变换不变"
+      ],
+      "group": "viewport",
+      "name": "观察轨迹球",
+      "entry_points": "观察轨迹球开关与相机环绕",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:2337"
+      ],
+      "matrix_ids": [
+        "NAV-02",
+        "OVERLAY-01",
+        "THEME-01"
+      ],
+      "existing_test_family_refs": [
+        "A",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "NAV-02",
+        "OVERLAY-01",
+        "THEME-01"
+      ],
+      "remaining_surface_gate": "观察轨迹球相机交互及部分真实GL图像可复用；不等价于模型旋转器业务合同。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-07",
+      "required_remote_checks_from_inventory": [
+        "多对象、遮挡、隐藏/全隐藏再恢复",
+        "selected/deleted counters与相机/变换"
+      ],
+      "group": "viewport",
+      "name": "模型选择轮廓/包围框/轴线",
+      "entry_points": "已选/非当前/隐藏对象选择反馈",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8389",
+        "native/src/NativeViewport.cpp:8530"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "MODEL-01",
+        "GIZMO-02"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "A",
+        "X"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "MODEL-01",
+        "GIZMO-02"
+      ],
+      "remaining_surface_gate": "集合选择/隐藏、边界反馈和变换数据有断言；所有后端的高亮轮廓像素对照尚非现有完整矩阵。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-08",
+      "required_remote_checks_from_inventory": [
+        "五DPR中关键分数组合、selection/取消",
+        "未选/未删除原数据不变"
+      ],
+      "group": "viewport",
+      "name": "屏幕选择手势与笔刷半径",
+      "entry_points": "框选/套索/笔刷",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8693"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "GIZMO-02",
+        "DPI-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "I"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "GIZMO-02",
+        "DPI-01"
+      ],
+      "remaining_surface_gate": "选择与工具入口有片段覆盖；真实框选/套索/笔刷边界、可见点切换、半径各DPR不是现有图标测试保证。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-09",
+      "required_remote_checks_from_inventory": [
+        "多尺度/不同原点/相机角度",
+        "轨迹与模型相对位置"
+      ],
+      "group": "viewport",
+      "name": "相机轨迹/相机线框",
+      "entry_points": "显示相机开关、源相机与任务预览",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8477",
+        "native/src/CameraTrajectory.cpp:1"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "MODEL-02",
+        "GRID-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "V",
+        "A",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "MODEL-02",
+        "GRID-01"
+      ],
+      "remaining_surface_gate": "相机线框/相机来源/显示映射和trajectory数据合同可复用；原始图像尺寸/相机glyph等主题截图仍需按case辨认。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-10",
+      "required_remote_checks_from_inventory": [
+        "已知单位换算/未知u、保存重开",
+        "自然远处淡出与数值不变"
+      ],
+      "group": "viewport",
+      "name": "网格/基准轴/标尺",
+      "entry_points": "自动/固定网格与坐标基准",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:6163",
+        "native/src/ViewportPresentation.h:1",
+        "native/src/ViewportGridSettings.h:1"
+      ],
+      "matrix_ids": [
+        "GRID-01",
+        "THEME-01",
+        "MODEL-01",
+        "PERF-01"
+      ],
+      "existing_test_family_refs": [
+        "A",
+        "G",
+        "C",
+        "S"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "GRID-01",
+        "THEME-01",
+        "MODEL-01",
+        "PERF-01"
+      ],
+      "remaining_surface_gate": "真实基准网格/场景轴/单位及GridDialog接受取消重开有断言；customBG仍是缺少可达设置的baseline gap。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-11",
+      "required_remote_checks_from_inventory": [
+        "长Unicode名、场景各模式、加载/失败",
+        "与导航区不重叠"
+      ],
+      "group": "viewport",
+      "name": "常驻场景标题与计数/模式字幕",
+      "entry_points": "视口左上caption",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8746"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "FONT-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "V",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "FONT-01",
+        "LOCALE-01",
+        "STATE-01"
+      ],
+      "remaining_surface_gate": "三语计数/模式及纹理文字像素专用测试可复用；caption compact/strong等自绘字体不由主窗QWidget采集自动覆盖。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-12",
+      "required_remote_checks_from_inventory": [
+        "未知/确定进度、失败保留上一预览",
+        "任务停止/取消后反馈"
+      ],
+      "group": "viewport",
+      "name": "处理/训练预览阶段面板",
+      "entry_points": "重建、加载和训练结果过渡中的processing HUD",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:8906"
+      ],
+      "matrix_ids": [
+        "OVERLAY-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "PC",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "OVERLAY-01",
+        "STATE-01",
+        "FPS-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "处理/训练结果过渡、暂停预览不暂停任务和source隔离已有流程；阶段HUD自绘文字各字体角色/实时变化截图需冻结时点。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-13",
+      "required_remote_checks_from_inventory": [
+        "idle scheduling/frame serial/swap断言",
+        "打开详情/网格及取消不改相机"
+      ],
+      "group": "viewport",
+      "name": "底部简洁帧状态与详情按钮",
+      "entry_points": "viewportStatusLabel + viewportDetailsButton",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:541",
+        "native/src/NativeViewport.cpp:4660",
+        "native/src/FrameRateCounter.cpp:1"
+      ],
+      "matrix_ids": [
+        "FPS-01",
+        "SHELL-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "existing_test_family_refs": [
+        "G",
+        "C",
+        "R",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FPS-01",
+        "SHELL-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "remaining_surface_gate": "Details/Grid公共入口、idle帧策略/真实计数和资源HUD已覆盖；勿把renderer耗时当显示FPS。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "VP-14",
+      "required_remote_checks_from_inventory": [
+        "空与全隐藏/加载失败/上一结果回退",
+        "恢复显示不跳视角"
+      ],
+      "group": "viewport",
+      "name": "空/加载/失败/全部隐藏状态",
+      "entry_points": "NativeViewport drawOverlay/frame policy",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeViewport.cpp:3710",
+        "native/src/NativeViewport.cpp:8746"
+      ],
+      "matrix_ids": [
+        "MODEL-01",
+        "MODEL-02",
+        "STATE-01",
+        "FPS-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "PC",
+        "L",
+        "G"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "MODEL-01",
+        "MODEL-02",
+        "STATE-01",
+        "FPS-01"
+      ],
+      "remaining_surface_gate": "空/全隐藏/来源切换与处理失败有fixture；各后端失败画面的完整theme/glyph截图还未全列。",
+      "is_p2_static_only": false,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-01",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "DatasetImportDialog",
+      "entry_points": "文件/工作流 → 导入图像/视频/文件夹/已知相机数据集；拖放媒体",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:5855",
+        "native/src/DatasetImportDialog.cpp:193"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "F",
+        "DROP",
+        "N"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；共享布局循环已覆盖，初始化编辑器深度行为在offscreen。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-02",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ReconstructionDialog",
+      "entry_points": "工作流/主工具栏 → 重建",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6405",
+        "native/src/ReconstructionDialog.cpp:30"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "P"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；响应式/配置值已有，完整明暗错误状态与glyph未全捕获。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-03",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "TrainingDialog",
+      "entry_points": "工作流/主工具栏 → 训练；实验参数重开/续训入口的独立确认另列",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:7310",
+        "native/src/TrainingDialog.cpp:152"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "P",
+        "D",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；多backend配置强，嵌套initializer/guard需区分真实窗口与offscreen。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-04",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "MeshGenerationDialog",
+      "entry_points": "工作流/主工具栏 → 生成几何",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:7219",
+        "native/src/MeshGenerationDialog.cpp:29"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "M"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；五mode数据合同不等于五mode视觉完备。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-05",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ModelExportDialog",
+      "entry_points": "文件/场景/主工具栏 → 导出模型",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:5388",
+        "native/src/ModelExportDialog.cpp:21"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-02"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "E"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "MODEL-02"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；格式/字段文件保真与弹窗视觉必须分别验收。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-06",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "TaskDetailsDialog",
+      "entry_points": "任务表双击/详情动作/任务右键",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2909",
+        "native/src/TaskDetailsDialog.cpp:54"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "T"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；日语150%窄窗断言现成，完整PNG/glyph还未归档。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-07",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "GenerationHistoryDialog",
+      "entry_points": "工作流 → 实验历史；相应训练结果入口",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6904",
+        "native/src/GenerationHistoryDialog.cpp:47"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "H"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；三语/选择/保存重开已有，样式可借同一fixture加截图。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-08",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "QualityComparisonDialog",
+      "entry_points": "工作流 → 质量对照",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6537",
+        "native/src/QualityComparisonDialog.cpp:83"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "Q"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；CPU对照报告/取消已有，无完整明暗窄窗图集。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-09",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "QualityMeasurementDialog",
+      "entry_points": "质量对照 → 主动测量图像",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/QualityComparisonDialog.cpp:366",
+        "native/src/QualityMeasurementDialog.cpp:122"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "Q"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；真实子窗入口与可回读报告、条件截图已有。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-10",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ScaleConstraintsDialog",
+      "entry_points": "工作流 → 相机数据集定尺度与对齐；工作流 → 当前模型定尺度",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6543",
+        "native/src/ScaleConstraintsDialog.cpp:166"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "GRID-01"
+      ],
+      "existing_test_family_refs": [
+        "S"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "GRID-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；dataset/model双模式及源保护已有。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-11",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "InitializationDialog",
+      "entry_points": "工作流 → 相机数据集初始化与检查；训练窗口 → 初始化",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6696",
+        "native/src/TrainingDialog.cpp:1102",
+        "native/src/InitializationDialog.cpp:145"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "MODEL-02"
+      ],
+      "existing_test_family_refs": [
+        "N",
+        "BL",
+        "P"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01",
+        "MODEL-02"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；真实公共Action开关窗存在，但深入CPU生命周期在offscreen。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-12",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "TrainingBatchDialog",
+      "entry_points": "工作流 → 批量训练",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6728",
+        "native/src/TrainingBatchDialog.cpp:118"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "B",
+        "BL"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；同一smoke已可双adapter复用，不能只跑standalone就声称Windows视觉。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-13",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ExistingTrainingDialog",
+      "entry_points": "工作流 → 现有训练；批量计划 → 观察队列",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6828",
+        "native/src/MainWindow.cpp:6808",
+        "native/src/ExistingTrainingDialog.cpp:80"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "D",
+        "PC",
+        "B"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；Completion仅UI_OPEN_ONLY，不能当真实窗连接控制与视觉已验。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-14",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "RuntimeGuardDialog",
+      "entry_points": "继续训练信任确认 → 续训显存保护设置",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:7060",
+        "native/src/RuntimeGuardDialog.cpp:17"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "D",
+        "H",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；五字段/无效输入/三语在offscreen，未找到Windows嵌套guard编辑截图链路。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-15",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ResourceBudgetDialog",
+      "entry_points": "视图 → 资源预算",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2112",
+        "native/src/ResourceBudgetDialog.cpp:50"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "existing_test_family_refs": [
+        "R"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PERF-02"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；三语×明暗×150%窄窗已有，需确保截图env与上传选择真正覆盖此test。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "DLG-16",
+      "required_remote_checks_from_inventory": [
+        "每个入口与特殊模式一次真实窗口检查",
+        "三语/明暗/窄窗口/长值；公开配置回读",
+        "空/忙/错/取消/重试/不支持，按该窗职责覆盖"
+      ],
+      "group": "dialogs",
+      "name": "ViewportGridDialog",
+      "entry_points": "视图 → 网格设置；视口详情 → 网格设置",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2823",
+        "native/src/ViewportGridDialog.cpp:105"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "GRID-01"
+      ],
+      "existing_test_family_refs": [
+        "G"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "GRID-01"
+      ],
+      "remaining_surface_gate": "详见16Dialog合同；挂在viewport_scheduling两个theme test内，不新增虚构CTest名。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INL-01",
+      "required_remote_checks_from_inventory": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "group": "inline_dialogs",
+      "name": "视口详情",
+      "entry_points": "视图/视口信息按钮 → 视口详情",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:2755"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "G"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "Details真实Action、快速close/reopen与新实例检查已有；主题/语言截图须读对应输出。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INL-02",
+      "required_remote_checks_from_inventory": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "group": "inline_dialogs",
+      "name": "恢复中心",
+      "entry_points": "启动恢复提示；文件 → 恢复中心",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:4589"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "实际恢复中心列表/三语/多选/取消与确认移除可复用；恢复每种失败/进度图像未全覆盖。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INL-03",
+      "required_remote_checks_from_inventory": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "group": "inline_dialogs",
+      "name": "版本历史",
+      "entry_points": "文件 → 版本历史",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:4827"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "版本列表实际modal三语/选中保留已有；具体恢复/源修改错误状态各图像未全覆盖。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "INL-04",
+      "required_remote_checks_from_inventory": [
+        "入口/三语/明暗/窄窗口",
+        "取消/关闭/移除和原工程/来源保护"
+      ],
+      "group": "inline_dialogs",
+      "name": "外部备份历史",
+      "entry_points": "文件 → 外部备份；配置外部备份目录",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:5030"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "外部备份列表/选择/三语及store合同可复用；全恢复过程视觉与异步取消必须另标未证。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "PROG-01",
+      "required_remote_checks_from_inventory": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "group": "progress_dialogs",
+      "name": "恢复外部备份",
+      "entry_points": "外部备份历史 → 校验恢复",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:5116"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "外部备份store校验/操作合同存在；未找到此progress四阶段稳定截图的完整真实窗验收。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "PROG-02",
+      "required_remote_checks_from_inventory": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "group": "progress_dialogs",
+      "name": "导出模型",
+      "entry_points": "ModelExportDialog接受后",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:5401"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "E",
+        "L"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "真实导出/取消与文件保真流程可复用；瞬时progress是否实际出现不能仅由产物成功推断。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "PROG-03",
+      "required_remote_checks_from_inventory": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "group": "progress_dialogs",
+      "name": "导入场景",
+      "entry_points": "importSceneFile耗时导入",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:6107"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "V",
+        "DROP",
+        "R"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "实际导入/分页完整显示与取消流程可复用；不能保证每个模型后端均显示同一progress阶段截图。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "PROG-04",
+      "required_remote_checks_from_inventory": [
+        "真实owned小样本进度/取消/关闭/失败",
+        "不得固定假进度或泄漏UI临时进程"
+      ],
+      "group": "progress_dialogs",
+      "name": "批量移除记录",
+      "entry_points": "MultiItemList/installRecordRemoval",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MultiItemList.cpp:168"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "L",
+        "C",
+        "T"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "通用记录删除的取消/确认与若干父表格行为有断言；延迟/批量/部分失败的progress视觉还要独立冻结。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "MSG-01",
+      "required_remote_checks_from_inventory": [
+        "按索引owner覆盖对应触发条件",
+        "长诊断/Unicode/键盘默认按钮/取消与安全默认值"
+      ],
+      "group": "message_families",
+      "name": "所有信息/警告/错误/确认/关于",
+      "entry_points": "83个QMessageBox源码调用点（逐点索引，动态目的另按父窗覆盖）",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:8155",
+        "native/src/FileDialogHistory.cpp:221",
+        "native/src/MultiItemList.cpp:144"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "W",
+        "L",
+        "T",
+        "H",
+        "Q",
+        "S",
+        "D",
+        "B",
+        "PC",
+        "DROP",
+        "F"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "A11Y-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "共用系统窗/翻译与代表性错误、确认已执行；83调用点不是83个独立实现，也不是83条业务已全跑。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "MSG-02",
+      "required_remote_checks_from_inventory": [
+        "无修改/仅场景编辑/工程脏三种状态",
+        "默认安全按钮及保存失败保留会话"
+      ],
+      "group": "message_families",
+      "name": "未保存工程/场景编辑与退出确认",
+      "entry_points": "关闭/新建/打开/切换源时confirmDiscardChanges/SceneEdits/confirmExit",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:4390",
+        "native/src/MainWindow.cpp:4411",
+        "native/src/MainWindow.cpp:4440"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "W",
+        "L",
+        "PC",
+        "DROP"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "实际close/new/source-change防未保存丢失有多个fixture；不得在本机用户未保存工程上验收。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "MSG-03",
+      "required_remote_checks_from_inventory": [
+        "拒绝不启动、guard取消保持原值",
+        "owned完整checkpoint控制夹具；不加载用户检查点"
+      ],
+      "group": "message_families",
+      "name": "完整续训信任确认与嵌套资源设置",
+      "entry_points": "实验历史/暂停恢复 → resumeTrainingJob",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/MainWindow.cpp:7037",
+        "native/src/MainWindow.cpp:7060"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "H",
+        "D",
+        "PC"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "现有取消信任/完整续训声明和guard值合同可复用；缺真实Windows嵌套guard body截图/回读。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "MSG-04",
+      "required_remote_checks_from_inventory": [
+        "远端owned安装缺失/损坏/语言错误提示",
+        "系统原生样式、无训练启动；安装调查由其他owner负责"
+      ],
+      "group": "message_families",
+      "name": "固定启动器错误提示",
+      "entry_points": "启动解析失败时Win32 MessageBoxW；非Windowsstderr",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/NativeLauncher.cpp:71"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PKG-01",
+        "LIFE-01"
+      ],
+      "existing_test_family_refs": [
+        "C"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01",
+        "PKG-01",
+        "LIFE-01"
+      ],
+      "remaining_surface_gate": "属于launcher错误UI；有managed installation解析/文件验收基础，但未找到真实Win32 MessageBox三语截图。此轮不重复安装调查。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "EMB-01",
+      "required_remote_checks_from_inventory": [
+        "两个父窗口的配置roundtrip",
+        "无效/长值/切换frame后状态"
+      ],
+      "group": "embedded",
+      "name": "初始化声明编辑器",
+      "entry_points": "DatasetImportDialog及InitializationDialog",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/InitializationEditor.cpp:45"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "existing_test_family_refs": [
+        "N",
+        "L",
+        "BL"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "STATE-01",
+        "LOCALE-01"
+      ],
+      "remaining_surface_gate": "生产编辑器unknown provenance/精确数值/序列化/语言有offscreen深度断言，L露出部分表单；不可把parent打开当所有控件视觉已验。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    },
+    {
+      "id": "EMB-02",
+      "required_remote_checks_from_inventory": [
+        "point/camera/bounds与所选视图",
+        "三语/明暗/尺寸变更不改实际初始化"
+      ],
+      "group": "embedded",
+      "name": "初始化几何预览",
+      "entry_points": "InitializationDialog右侧预览",
+      "status": "NOT_RUN",
+      "status_scope": "Current ffb8eb2 per-surface runtime/visual acceptance;no matching completed surface run imported",
+      "source_owner_refs_at_inventory_5183926": [
+        "native/src/InitializationPreview.cpp:70"
+      ],
+      "matrix_ids": [
+        "FORM-01",
+        "FONT-01",
+        "MODEL-02",
+        "OVERLAY-01"
+      ],
+      "existing_test_family_refs": [
+        "N",
+        "BL"
+      ],
+      "existing_coverage_document": "EXISTING_TEST_COVERAGE.md",
+      "evidence_refs": [
+        "E-INV",
+        "E-COVER",
+        "E-P1"
+      ],
+      "dimensions": {
+        "visual": "NOT_RUN",
+        "interaction": "NOT_RUN",
+        "performance_resources": "NOT_RUN",
+        "three_language_runtime": "NOT_RUN",
+        "inventory_entry_registered": "PASS"
+      },
+      "prior_source_claims": [],
+      "remaining_matrix_gates": [
+        "FORM-01",
+        "FONT-01",
+        "MODEL-02",
+        "OVERLAY-01"
+      ],
+      "remaining_surface_gate": "CPU初始化预览数据/绘制由专用测试辅助；未形成实际Windows内嵌预览的三语/主题/DPR字体角色图集。",
+      "is_p2_static_only": true,
+      "no_change_visual_approval": false
+    }
+  ],
+  "popup_callsite_count": 147,
+  "remaining_gates": [
+    {
+      "id": "G-01",
+      "status": "FAIL",
+      "matrix_ids": [
+        "NAV-02",
+        "NAV-03",
+        "LOCALE-01",
+        "LIFE-01"
+      ],
+      "required": "Close five native-crash cases with actual current-source logs/first-fault evidence and full real input/lifecycle rerun;root cause still unknown."
+    },
+    {
+      "id": "G-02",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "DPI-01",
+        "NAV-03"
+      ],
+      "required": "Five controlled Qt DPR values were measured with native OS window DPI96;real OS scaling and cross-monitor transitions require distinct evidence."
+    },
+    {
+      "id": "G-03",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "NAV-01",
+        "FONT-01",
+        "ICON-01",
+        "GIZMO-01"
+      ],
+      "required": "Original-size visual review beyond one retained minimal Chinese case, all affected orientations/distances/themes and relevant states."
+    },
+    {
+      "id": "G-04",
+      "status": "UNSUPPORTED",
+      "matrix_ids": [
+        "THEME-01"
+      ],
+      "required": "Arbitrary user RGB/alpha background has no reachable baseline control/setter/key;Root decision/capability gate remains open."
+    },
+    {
+      "id": "G-05",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "FONT-01",
+        "FORM-01",
+        "LOCALE-01"
+      ],
+      "required": "All16Dialogs and all custom-painter font roles need actual three-language evidence;QWidget-default mixed-script probes do not cover them."
+    },
+    {
+      "id": "G-06",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "SHELL-01",
+        "TREE-01",
+        "ICON-01",
+        "A11Y-01"
+      ],
+      "required": "Real wide/narrow action reachability, overflow, keyboard focus/geometry, disabled reasons, tree eyes/selection/resize;new public contracts have no imported current result."
+    },
+    {
+      "id": "G-07",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "GIZMO-01",
+        "GIZMO-02",
+        "MODEL-01",
+        "MODEL-02",
+        "OVERLAY-01",
+        "GRID-01"
+      ],
+      "required": "Four real manipulation modes, numeric/constraint/cancel/undo, all five renderers, multi-object transforms/units/source files and overlays remain separate."
+    },
+    {
+      "id": "G-08",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "FORM-01",
+        "STATE-01",
+        "LIFE-01"
+      ],
+      "required": "P2 ordinary/inline/progress/message/file dialogs, public getters, actual cancellation/reconnect and persistent queue boundaries. MainWindow nested resume trust prompt and native OS providers are not covered by standalone guard captures."
+    },
+    {
+      "id": "G-09",
+      "status": "FAIL",
+      "matrix_ids": [
+        "PERF-01",
+        "PERF-02",
+        "FPS-01"
+      ],
+      "required": "Repair producer equally in A/B without relaxing budgets;obtain valid3-round timing/noise/idle/resource result. Existing FAIL is invalid evidence,not proof of slow performance or nonzero idle rendering."
+    },
+    {
+      "id": "G-10",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "PERF-01",
+        "PERF-02"
+      ],
+      "required": "Cache/resource lifetime after all toggles/destruction, actual driver VRAM/GPU timing and user's NVIDIA environment;requested bytes are not residency."
+    },
+    {
+      "id": "G-11",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "PORT-01",
+        "PKG-01"
+      ],
+      "required": "Current candidate's complete source/license/resource/EXE/Setup manifest binding and explicit modification/NOTICE review."
+    },
+    {
+      "id": "G-12",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "DELIVER-01"
+      ],
+      "required": "New source-bound managed publication and independent pointer/exe/shortcut/Unicode readback while retaining user sessions/rollback. Historical87a snapshot may have drifted."
+    },
+    {
+      "id": "G-13",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "CLOUD-01"
+      ],
+      "required": "Exact-current-source full cloud checks independently from focused diagnostics, foundation, old87a full CI and local delivery."
+    },
+    {
+      "id": "G-14",
+      "status": "NOT_RUN",
+      "matrix_ids": [
+        "AUDIT-01"
+      ],
+      "required": "66/66 final per-surface acceptance or explicit evidence-backed limitation;static entry registration alone does not close the task."
+    }
+  ],
+  "evidence_catalog": [
+    {
+      "id": "E-BASE",
+      "kind": "historical-source-cloud-install-audit",
+      "paths": [
+        "docs/ui_upgrade_20261028/CI_DELIVERY_BASELINE.md"
+      ],
+      "scope": "5183926 start identity and historical 87a797b cloud/install snapshot; not current installation freshness or current-source cloud acceptance"
+    },
+    {
+      "id": "E-INV",
+      "kind": "static-surface-inventory",
+      "paths": [
+        "docs/ui_upgrade_20261028/SURFACE_INVENTORY.md",
+        "docs/ui_upgrade_20261028/SURFACE_INVENTORY.json"
+      ],
+      "scope": "66 surfaces / 16 Dialog classes / 147 popup callsites at5183926; source owners/line numbers belong to that baseline"
+    },
+    {
+      "id": "E-COVER",
+      "kind": "static-existing-test-map",
+      "paths": [
+        "docs/ui_upgrade_20261028/EXISTING_TEST_COVERAGE.md"
+      ],
+      "scope": "Earlier4f1dbb8 source inspection of24 test families; no test was run by that audit. New opt-in form adapters are described by E-P1, not missing merely because this old map predates them."
+    },
+    {
+      "id": "E-AUDIT",
+      "kind": "static-render-font-icon-audit",
+      "paths": [
+        "docs/ui_upgrade_20261028/RENDER_FONT_ICON_AUDIT.md"
+      ],
+      "scope": "Rendering paths, font-role requests and67 semantic icon IDs/63 SVG files; not actual font resolution for every surface"
+    },
+    {
+      "id": "E-REF",
+      "kind": "source-license-reference-index",
+      "paths": [
+        "docs/ui_upgrade_20261028/RENDER_REFERENCES.json"
+      ],
+      "scope": "Pinned Blender4.5/Lucide references and notices; not a Blender5.2.3 source-port or final package-license signoff"
+    },
+    {
+      "id": "E-BPIX",
+      "kind": "completed-baseline-pixel-evidence",
+      "paths": [
+        "docs/ui_upgrade_20261028/P0_BASELINE_RESULTS.md",
+        "docs/ui_upgrade_20261028/P0_BASELINE_RESULTS.json",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/baseline-run40641681307"
+      ],
+      "run_id": "40641681307",
+      "source": "4f1dbb8f2ad086b3d855e112b835d6b641f81bf9",
+      "status": "FAIL",
+      "scope": "20 zh_CN controlled-Qt-DPR empty-window cases;14 case/39 ring failures"
+    },
+    {
+      "id": "E-CPIX",
+      "kind": "completed-candidate-pixel-subgate",
+      "paths": [
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/source-run.json",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/edge-results.json",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/protocol.json"
+      ],
+      "run_id": "40649920338",
+      "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "status": "PASS",
+      "scope": "Chinese20cases/60rings and frozen edge metrics only; not overall run, locale, interaction, performance or current ffb8eb2"
+    },
+    {
+      "id": "E-P0DOC",
+      "kind": "split-candidate-results-review",
+      "paths": [
+        "docs/ui_upgrade_20261028/P0_CANDIDATE_RESULTS.md"
+      ],
+      "scope": "Normal-size d1-s0-light review and explicit split between pixel PASS and runtime/performance FAIL"
+    },
+    {
+      "id": "E-P0IMPL",
+      "kind": "implementation-provenance",
+      "paths": [
+        "docs/ui_upgrade_20261028/P0_IMPLEMENTATION.md"
+      ],
+      "scope": "GSW-native Qt coverage adapter, not copied Blender GPU AA; source bounds/fallback are implementation facts, not measured driver residency"
+    },
+    {
+      "id": "E-NAVFAIL",
+      "kind": "completed-candidate-navigation-lifecycle-failure",
+      "paths": [
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/navigation.log",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338-failure.log"
+      ],
+      "run_id": "40649920338",
+      "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "status": "FAIL",
+      "scope": "9 CTest cases,5 native crashes. First lifecycle7.68s SegFault;EN/JP early crashes;not timeout;root cause unknown"
+    },
+    {
+      "id": "E-PERF",
+      "kind": "completed-paired-performance-evidence-contract-failure",
+      "paths": [
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/sources.json",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/manifest.json",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/results.json"
+      ],
+      "run_id": "40649923711",
+      "source": "017f78cfbf0c35873fccc7029a6a7a056707cacb",
+      "status": "FAIL",
+      "scope": "24 raw process receipts;18 exit0,6 exit3/exposure-ineligible;idle timing contract failures;comparisons empty. Not a measured performance-regression verdict"
+    },
+    {
+      "id": "E-PERFPLAN",
+      "kind": "frozen-performance-protocol",
+      "paths": [
+        "docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md",
+        "docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json"
+      ],
+      "scope": "Three fresh-process paired rounds, unchanged budgets;no timing/quality conclusion from plan existence"
+    },
+    {
+      "id": "E-P1",
+      "kind": "static-implementation-and-pending-gates",
+      "paths": [
+        "docs/ui_upgrade_20261028/P1_IMPLEMENTATION.md"
+      ],
+      "source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff",
+      "status": "NOT_RUN",
+      "scope": "Shared styles/icons, inspector, four gizmo modes, public contracts, evidence adapter and opt-in form modes implemented;runtime acceptance pending"
+    },
+    {
+      "id": "E-COMPILE",
+      "kind": "local-static-compile-catalog-record",
+      "paths": [
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/compile-v6-diagnostics.log",
+        "D:/Codex/validation/gsw-ui-upgrade-20261028/compile-v7-final-harness.log"
+      ],
+      "scope": "Compiler/linker and three-language catalog record only. No local tests/apps;not an exact source-bound product package or remote whole-product pass"
+    },
+    {
+      "id": "E-PENDING",
+      "kind": "delegated-runs-not-observed-here",
+      "paths": [],
+      "source": "ffb8eb23679575ff55a3207b35c21e6f8225ceff",
+      "status": "NOT_RUN",
+      "scope": "Run IDs40656943272/40656947039 were RUNNING in parent handoff;other agents own observation. No polling/download/current results imported into this ledger."
+    }
+  ],
+  "input_file_bindings": [
+    {
+      "path": "docs/ui_upgrade_20261028/SURFACE_INVENTORY.json",
+      "bytes": 163448,
+      "sha256": "c57a905eb343c43c9ffc8fac0620de52e140a4a65222e247d997b199ab347032"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/SURFACE_INVENTORY.md",
+      "bytes": 31793,
+      "sha256": "6f8bfca33d4aea19a5e710f0fe2d0fd2b164941ea1f6b9cc96a57b51fd67a1db"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/EXISTING_TEST_COVERAGE.md",
+      "bytes": 53904,
+      "sha256": "d39099643433a00c1f00ea46e19811a1e888a759e84047346c1136ca6991ed37"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/RENDER_FONT_ICON_AUDIT.md",
+      "bytes": 15209,
+      "sha256": "30a0d30b25fdff99709a70521985b4c9ba23078045c7eda1e8305a7fe820c747"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/RENDER_REFERENCES.json",
+      "bytes": 13501,
+      "sha256": "399eda595c25c0dcc387fe3dac64a571667b5b02887e4ce025846b8637053979"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/CI_DELIVERY_BASELINE.md",
+      "bytes": 17781,
+      "sha256": "be979d85bf04c13d11e12612d0e317e04e0447767b2f55326c063fa650d3924e"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P0_BASELINE_RESULTS.md",
+      "bytes": 10279,
+      "sha256": "ed58263a839419acb3b7cc7b24a6a2be65a24a6226440fcf846d1ce34795a8bf"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P0_BASELINE_RESULTS.json",
+      "bytes": 88294,
+      "sha256": "52b64fb49a367e13e61f80510581fb95cf3dfff6fccf7f6349ad63c255c3ca9e"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P0_CANDIDATE_RESULTS.md",
+      "bytes": 2596,
+      "sha256": "3a72434e3dcc49c05015a6b8bff29f40a1b705026b76198819bf3ac727e899a9"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P0_PROTOCOL.json",
+      "bytes": 1931,
+      "sha256": "f25fc6a5e624bc09b5f617127207d5bc183c27975397cb63d7fb261db0845681"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P1_IMPLEMENTATION.md",
+      "bytes": 3333,
+      "sha256": "c26328fbe04abd1703448d27cefdb41178a2ded0cfecb3b720d16370ea9380eb"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md",
+      "bytes": 19457,
+      "sha256": "2e8046da5cfd68ad8a047bdee8ffac7501f6cf51d5058d4f976faafa7ae5bff6"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json",
+      "bytes": 2338,
+      "sha256": "fd80215e7b0bcb48ed28b7c70d1bc7675ddb2e8b18d8cd034f25b5fa27f46376"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/source-run.json",
+      "bytes": 320,
+      "sha256": "3a6f76db2010841b465b62f6a0d88ad718899f9f5cb8b7d0be995d60db75a1a6"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/edge-results.json",
+      "bytes": 109798,
+      "sha256": "25ef4b71e7c5f8b62046aaf7db2ef24dde2fe442d17b0b8e4c701e948f28eed2"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/navigation.log",
+      "bytes": 22166,
+      "sha256": "350193b9870dc6dec31d6d4916400f0d5c55af3c9f586465026ca7c9c36ec591"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338-failure.log",
+      "bytes": 48703,
+      "sha256": "6df6e9cdc3823baac787db0c0c15b90a3cdf88a3c9c348992f4ba54f285a19da"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/sources.json",
+      "bytes": 1139,
+      "sha256": "be10f74eb5c94bc6089b299bc354c4ebc66916d967707cb230ea3ee9e4ab5a1e"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/manifest.json",
+      "bytes": 7794,
+      "sha256": "82ed8fea43cb3e082096c2fa0edd4d173d7821c4d9e4f2ee01c3e32d020f8f4d"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40649923711/results.json",
+      "bytes": 211092,
+      "sha256": "980832c13d977638d65c0737fb8040ecb980f1a0610a108003810ef8bc8d1d87"
+    },
+    {
+      "path": "docs/ui_upgrade_20261028/P0_IMPLEMENTATION.md",
+      "bytes": 2794,
+      "sha256": "f1d1faaf728f3c766ea006d89b510548866310e3151f3712d5409b40b1c5049b"
+    },
+    {
+      "path": "D:/Codex/deliveries/GSW_UI_Upgrade_Agent_20261028/ACCEPTANCE_MATRIX.md",
+      "bytes": 9145,
+      "sha256": "5b82a25495241edbe7cba8512e96d7f0ad0e3ea548ab5d3d47855960627076f8"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/baseline-run40641681307/protocol.json",
+      "bytes": 1962,
+      "sha256": "c1d3f422abeac3cebb4d5e3bf2965c7989762e71a0ad45e9fb141b2bc287586e"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/p0-candidate-run40649920338/protocol.json",
+      "bytes": 1931,
+      "sha256": "f25fc6a5e624bc09b5f617127207d5bc183c27975397cb63d7fb261db0845681"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/compile-v6-diagnostics.log",
+      "bytes": 2470,
+      "sha256": "f54ddd428beeb2c0f6d726055ba1bb64ec06e4301600e2a9629a0438766e12ca"
+    },
+    {
+      "path": "D:/Codex/validation/gsw-ui-upgrade-20261028/compile-v7-final-harness.log",
+      "bytes": 65,
+      "sha256": "7716162f3cd3b99cf3b8a8dd6decf324e08c7e941aae7e730baba5e4fc8c075b"
+    }
+  ],
+  "operations": {
+    "local_tests_run": false,
+    "local_app_or_gui_run": false,
+    "training_started": false,
+    "private_original_data_read_or_changed": false,
+    "artifact_downloads": false,
+    "pending_runs_polled": false,
+    "installation_state_read": false,
+    "code_thresholds_or_plans_modified": false,
+    "files_written": [
+      "docs/ui_upgrade_20261028/ACCEPTANCE_STATUS.md",
+      "docs/ui_upgrade_20261028/ACCEPTANCE_STATUS.json"
+    ]
+  },
+  "count_interpretation": "All66 current-source surfaces remain NOT_RUN. This does not erase source017f78c scoped pixel PASS or its open FAILs. One matrix PASS is the completed start-identity audit only."
+}
